@@ -305,9 +305,9 @@ Object.keys(camApp).forEach(key => {
 });
 
 // ==========================================
-// 3. 应用程序自启动装配与初始化
+// 3. 应用程序自启动装配与初始化 (Robust Bootstrap)
 // ==========================================
-window.addEventListener("DOMContentLoaded", async () => {
+async function bootstrapApp() {
     const savedTheme = localStorage.getItem("cam_theme") || "dark";
     setTheme(savedTheme);
 
@@ -324,4 +324,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     await onMotherRollChange();
     refreshShelfRemnantsList();
     renderToolpathUI();
-});
+}
+
+if (document.readyState === "loading") {
+    window.addEventListener("DOMContentLoaded", bootstrapApp);
+} else {
+    bootstrapApp();
+}

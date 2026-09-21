@@ -1,35 +1,53 @@
 /* 顶部工业状态导航栏 */
 header {
-    height: 44px;
+    height: 46px;
+    min-height: 46px;
     background: var(--panel-header);
     border-bottom: 1px solid var(--panel-border);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 16px;
+    padding: 0 14px;
     user-select: none;
+    overflow: hidden;
+    gap: 12px;
 }
 .header-title {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
     font-weight: 600;
-    font-size: 14px;
+    font-size: 13.5px;
     letter-spacing: 0.5px;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 .header-tag {
     background: #09090b;
     border: 1px solid var(--panel-border);
-    padding: 2px 8px;
+    padding: 2px 7px;
     border-radius: 3px;
     font-size: 11px;
     color: var(--accent-blue);
     font-family: var(--font-mono);
+    white-space: nowrap;
 }
 .header-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
+    flex-shrink: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    padding: 2px 0;
+}
+.header-actions::-webkit-scrollbar {
+    height: 3px;
+}
+.header-actions::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
 }
 
 [data-theme="light"] header {
@@ -50,7 +68,7 @@ header {
 main {
     flex: 1;
     display: flex;
-    height: calc(100vh - 72px);
+    min-height: 0;
     position: relative;
 }
 

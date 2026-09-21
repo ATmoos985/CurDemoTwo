@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>布料排版与断刀裁切 CAM 控制台 (Industrial CAD/CAM Viewer)</title>
     <!-- 本地加载成熟的 Konva.js 工业画布引擎 -->
     <script src="konva.min.js"></script>
@@ -19,25 +22,33 @@
     <!-- 顶部工业控制栏 -->
     <header>
         <div class="header-title">
-            <span>布料智能裁切与料头管理 CAM 控制台</span>
-            <span class="header-tag">工业直刀/断刀 2D-Guillotine</span>
-            <span class="header-tag" style="color: #10b981;">PackingSolver C++ / OR-Tools 9.15</span>
+            <span style="color: var(--text-main); font-weight: 700;">布料裁切 CAM</span>
+            <span class="header-tag">2D-Guillotine</span>
+            <span class="header-tag" style="color: #10b981;">C++ Solver</span>
         </div>
         <div class="header-actions">
-            <span style="font-size: 12px; color: var(--text-muted);">规范文档：<code>布料切割与料头管理方案 V1.1</code></span>
-            <button class="tool-btn active" style="background:#4f46e5; font-weight:600;" onclick="openMaterialModal('rolls')" title="母卷物料档案、纺织4分制疵点精准空间库与料头全生命周期管理">母卷与料头档案</button>
-            <button class="tool-btn" id="btn-measure-tool" onclick="toggleMeasureTool()" title="在画布上任意两点间精密测量尺寸标注与间隙">CAD 测量尺</button>
-            <button class="tool-btn" onclick="clearAllMeasurements()" title="清除画布上所有测距标注线">清空测距</button>
-            <button class="tool-btn active" style="background:#0284c7; font-weight:600;" onclick="openExportModal('gcode')" title="生成并导出数控机床 G-Code 代码与 AutoCAD DXF 图纸">导出机床代码 (CNC/DXF)</button>
-            <button class="tool-btn active" style="background:#d97706; font-weight:600;" onclick="openCutTicketModal()" title="生成并打印车间现场裁切任务卡与裁片贴标单">工单打印 (A4)</button>
-            <button class="tool-btn" id="btn-toggle-left-bar" onclick="toggleSidebar('left')" title="一键收起/展开左侧面板">收起左栏</button>
-            <button class="tool-btn" id="btn-toggle-right-bar" onclick="toggleSidebar('right')" title="一键收起/展开右侧面板">收起右栏</button>
-            <button class="tool-btn remnant-shelf-btn" onclick="openRemnantModal()" title="查看现场料头库存与扫码识别">现场料头库 (<span id="header-remnant-count">3</span>)</button>
-            <button class="tool-btn" onclick="toggleTheme()" id="btn-theme-toggle" title="快速切换深色/浅色高亮 CAD 主题">浅色模式</button>
+            <!-- 物料与料头中心 -->
+            <button class="tool-btn active" style="background:#4f46e5; font-weight:600;" onclick="openMaterialModal('rolls')" title="母卷物料档案、纺织4分制疵点精准空间库与料头管理">母卷档案</button>
+            <button class="tool-btn remnant-shelf-btn" onclick="openRemnantModal()" title="查看现场料头库存与扫码识别">料头库 (<span id="header-remnant-count">3</span>)</button>
+
+            <!-- CAD 测量工具 -->
+            <button class="tool-btn" id="btn-measure-tool" onclick="toggleMeasureTool()" title="在画布上任意两点间精密测量尺寸标注与间隙">CAD测量</button>
+            <button class="tool-btn" onclick="clearAllMeasurements()" title="清除画布上所有测距标注线">清空测量</button>
+
+            <!-- CAM 代码与工单导出 -->
+            <button class="tool-btn active" style="background:#0284c7; font-weight:600;" onclick="openExportModal('gcode')" title="生成并导出数控机床 G-Code 代码与 AutoCAD DXF 图纸">机床代码</button>
+            <button class="tool-btn active" style="background:#d97706; font-weight:600;" onclick="openCutTicketModal()" title="生成并打印车间现场裁切任务卡与裁片贴标单">工单打印</button>
+
+            <!-- 视口与栏目控制 -->
+            <button class="tool-btn" id="btn-toggle-left-bar" onclick="toggleSidebar('left')" title="一键收起/展开左侧面板">收左栏</button>
+            <button class="tool-btn" id="btn-toggle-right-bar" onclick="toggleSidebar('right')" title="一键收起/展开右侧面板">收右栏</button>
+            <button class="tool-btn" onclick="fitView()" title="全景缩放至完整适配视口">适合视口</button>
+            <button class="tool-btn" onclick="resetZoom()" title="缩放至 1:1 毫米实际物理比例">1:1</button>
+
+            <!-- 系统设置与求解执行 -->
+            <button class="tool-btn" onclick="toggleTheme()" id="btn-theme-toggle" title="快速切换深色/浅色高亮 CAD 主题">浅色</button>
             <button class="tool-btn" onclick="openSettingsModal()" id="btn-settings" title="系统参数与工艺配置中心">设置</button>
-            <button class="tool-btn" onclick="fitView()">适合视口</button>
-            <button class="tool-btn" onclick="resetZoom()">1:1 实际比例</button>
-            <button class="tool-btn active" style="background:#059669; font-weight:600;" onclick="triggerSolve()">执行 C++ 真实求解排料</button>
+            <button class="tool-btn active" style="background:#059669; font-weight:700; padding: 4px 14px; box-shadow: 0 0 10px rgba(5,150,105,0.4);" onclick="triggerSolve()" title="执行 C++ 真实排料求解">▶ 执行排料</button>
         </div>
     </header>
 
@@ -725,6 +736,6 @@
     </div>
 
     <!-- 模块化前端 ES6 主程序入口 (Modular ES6 Plugin Architecture) -->
-    <script type="module" src="js/app.js"></script>
+    <script type="module" src="js/app.js?v=20260921_2000"></script>
 </body>
 </html>
