@@ -1422,18 +1422,20 @@
                             <span class="collapse-arrow">▼</span>
                             <span>机台起准点与展开标定</span>
                         </div>
-                        <span class="header-tag" style="color:#f59e0b;">右下角基准</span>
+                        <span class="header-tag" id="tag-cut-origin-header" style="color:#10b981;">右上角基准</span>
                     </div>
                     <div class="section-content">
                         <div class="prop-row">
-                            <span class="prop-label">起刀起准点位置</span>
-                            <select class="prop-input" id="sel-cut-origin" onchange="onOriginParamChange()" style="width: 170px;">
-                                <option value="right-bottom" selected>右下角 (靠右导轨对齐)</option>
-                                <option value="left-bottom">左下角基准</option>
+                            <span class="prop-label">起刀基准点位置</span>
+                            <select class="prop-input" id="sel-cut-origin" onchange="onOriginParamChange()" style="width: 220px;">
+                                <option value="right-top" selected>右上角 (靠右导轨 · 顺流进给 · 工业标准)</option>
+                                <option value="left-top">左上角 (靠左布边 · 顺流进给 · 标准CAM)</option>
+                                <option value="right-bottom">右下角 (靠右导轨 · 落料口自下而上起切)</option>
+                                <option value="left-bottom">左下角 (靠左布边 · 落料口自下而上起切)</option>
                             </select>
                         </div>
-                        <div class="callout-amber-tip">
-                            行业标准：以右下角导轨为原点 (X向左量幅宽，Y向上进料展开)
+                        <div class="callout-amber-tip" id="lbl-origin-desc-tip">
+                            行业推荐：右上角原点 (靠右导轨量幅宽，顺流自上而下进料顺切，零间隙接刀)
                         </div>
                         <div class="prop-row">
                             <span class="prop-label">机台展开台面 (Bed L)</span>
@@ -1506,6 +1508,9 @@
                             下一工位 (+5m) ▶
                         </button>
                     </div>
+                    <button class="tool-btn" id="btn-smart-advance" style="width: 100%; height: 32px; margin-bottom: 6px; background: rgba(16, 185, 129, 0.12); color: #059669; border: 1px solid rgba(16, 185, 129, 0.35); font-weight: bold; font-size: 12px; cursor: pointer; transition: all 0.2s;" onclick="smartAdvanceBed()" title="自动计算当前已切末端，一键吸附接刀，实现 0 间隙连续搭切">
+                        接续下一工位 (智能 0 间隙衔接)
+                    </button>
                     <button class="big-solve-btn roll" onclick="triggerSolve()" title="在当前红框工位排料并保留其余工位已切成果">
                         在当前红框工位排料 (接续搭切 · 保留历史)
                     </button>
@@ -1900,7 +1905,7 @@
             4: {
                 name: "场景二：60米母卷大段连续排料与全局疵点雷达 (工业全貌)",
                 totalRollL: 60000, bedL: 5000, windowStartY: 0, rollW: 2000,
-                trimStart: 0, cutOrigin: "right-bottom", firstStageOrientation: "horizontal", allowRotation: false,
+                trimStart: 0, cutOrigin: "right-top", firstStageOrientation: "horizontal", allowRotation: false,
                 allowLongitudinal: true,
                 globalDefects: [
                     { id: 1, x: 500, y: 1400, w: 150, h: 150, margin: 30, desc: "台面第1疵点 (色斑)" },
@@ -2056,15 +2061,13 @@
                 const bedL = data.bedL || 5000;
                 const winStartY = data.windowStartY || 0;
                 const winEndY = winStartY + bedL;
-                const trim = data.trimStart || 0;
-                const isRight = (data.cutOrigin === "right-bottom");
-                const bedY = worldY - winStartY;
-                if (isRight) {
-                    const distRight = rollW - worldX;
-                    document.getElementById("sb-cursor-pos").innerText = `距右导轨 X: ${distRight} mm | 机台有效台面 Y: ${bedY} mm | 全卷展开 Y: ${worldY} mm (${(worldY/1000).toFixed(2)}m)`;
-                } else {
-                    document.getElementById("sb-cursor-pos").innerText = `距左布边 X: ${worldX} mm | 机台有效台面 Y: ${bedY} mm | 全卷展开 Y: ${worldY} mm (${(worldY/1000).toFixed(2)}m)`;
-                }
+                const originStr = (data.cutOrigin || "right-top").toLowerCase();
+                const isRight = originStr.startsWith("right");
+                const isBottom = originStr.endsWith("bottom");
+                const bedY = isBottom ? (winEndY - worldY) : (worldY - winStartY);
+                const xLabel = isRight ? `距右导轨 X: ${rollW - worldX} mm` : `距左布边 X: ${worldX} mm`;
+                const yLabel = isBottom ? `距落料起刀线 Y: ${bedY} mm` : `距进料接刀口 Y: ${bedY} mm`;
+                document.getElementById("sb-cursor-pos").innerText = `${xLabel} | ${yLabel} | 全卷展开 Y: ${worldY} mm (${(worldY/1000).toFixed(2)}m)`;
                 drawRulers(pointer.x, pointer.y);
             });
 
@@ -2588,9 +2591,17 @@
                 x: 0, y: 0, width: rollW, height: 38,
                 fill: "#ef4444"
             }));
+            // 3. 工位进料端顶部标牌
+            const originStr = (data.cutOrigin || "right-top").toLowerCase();
+            const isRight = originStr.startsWith("right");
+            const isBottom = originStr.endsWith("bottom");
+            
+            const topBadgeText = isBottom ?
+                `【数控裁床加工工位】进料口 Y=${winStartY}mm (${(winStartY/1000).toFixed(2)}m) | 机台长 ${(bedL/1000).toFixed(1)}m` :
+                `【数控裁床加工工位】顺流进料/接刀原点 Y=${winStartY}mm (${(winStartY/1000).toFixed(2)}m) | 机台长 ${(bedL/1000).toFixed(1)}m`;
             dynBedRangeBadge = new Konva.Text({
                 x: 16, y: 9,
-                text: `【数控裁床加工工位】当前裁切范围: ${winStartY} ~ ${winEndY} mm (${(winStartY/1000).toFixed(1)}m ~ ${(winEndY/1000).toFixed(1)}m) | 机台长 ${(bedL/1000).toFixed(1)}m`,
+                text: topBadgeText,
                 fontSize: 18, fill: "#ffffff", fontStyle: "bold", fontFamily: "sans-serif"
             });
             bedStationGroup.add(dynBedRangeBadge);
@@ -2601,64 +2612,74 @@
                 stroke: "#ef4444", strokeWidth: 4, dash: [12, 6]
             }));
             bedStationGroup.add(new Konva.Rect({
-                x: rollW / 2 - 190, y: bedL - 30, width: 380, height: 28,
+                x: rollW / 2 - 200, y: bedL - 30, width: 400, height: 28,
                 fill: "#ef4444", cornerRadius: 4
             }));
+            const bottomBadgeText = isBottom ?
+                `[工位起刀口/落料基准] 切断线 Y=${winEndY}mm (${(winEndY/1000).toFixed(2)}m)` :
+                `[工位落料端/下死点] 切断线 Y=${winEndY}mm (${(winEndY/1000).toFixed(2)}m)`;
             dynBedBottomBadge = new Konva.Text({
-                x: rollW / 2 - 180, y: bedL - 24,
-                text: `[工位切刀口/下死点基准] 切断线 Y=${winEndY}mm (${(winEndY/1000).toFixed(1)}m)`,
+                x: rollW / 2 - 190, y: bedL - 24,
+                text: bottomBadgeText,
                 fontSize: 15, fill: "#ffffff", fontStyle: "bold"
             });
             bedStationGroup.add(dynBedBottomBadge);
 
-            // 5. 机台起刀原点与工业坐标轴标定 (右下角基准)
+            // 5. 机台起刀基准原点与工业坐标轴标定 (全面统一四向基准)
             const trim = data.trimStart || 0;
-            const isRight = (data.cutOrigin === "right-bottom");
             const originX = isRight ? rollW : 0;
-            const originY = bedL - trim;
+            const originY = isBottom ? (bedL - trim) : trim;
 
             if (trim > 0) {
+                const trimBoxY = isBottom ? (bedL - trim) : 0;
                 bedStationGroup.add(new Konva.Rect({
-                    x: 0, y: originY, width: rollW, height: trim,
+                    x: 0, y: trimBoxY, width: rollW, height: trim,
                     fill: isDark ? "rgba(245, 158, 11, 0.2)" : "rgba(245, 158, 11, 0.25)",
                     stroke: "#f59e0b", strokeWidth: 1.5, dash: [8, 4]
                 }));
                 bedStationGroup.add(new Konva.Text({
-                    x: 14, y: originY + Math.max(4, trim / 2 - 9),
-                    text: `[修齐切断] 底边修齐区 [${originY} ~ ${bedL} mm]`,
+                    x: 14, y: trimBoxY + Math.max(4, trim / 2 - 9),
+                    text: `[修齐切断] 卷头修齐区 [${trimBoxY} ~ ${trimBoxY + trim} mm]`,
                     fontSize: 17, fill: isDark ? "#fbbf24" : "#b45309", fontStyle: "bold"
                 }));
             }
 
-            if (isRight) {
-                // 右下角准星
-                bedStationGroup.add(new Konva.Circle({ x: originX, y: originY, radius: 14, fill: "#ef4444", stroke: "#ffffff", strokeWidth: 2.5 }));
-                bedStationGroup.add(new Konva.Line({ points: [originX - 24, originY, originX + 24, originY], stroke: "#ffffff", strokeWidth: 2 }));
-                bedStationGroup.add(new Konva.Line({ points: [originX, originY - 24, originX, originY + 24], stroke: "#ffffff", strokeWidth: 2 }));
+            // 绘制工业原点准星
+            bedStationGroup.add(new Konva.Circle({ x: originX, y: originY, radius: 14, fill: "#ef4444", stroke: "#ffffff", strokeWidth: 2.5 }));
+            bedStationGroup.add(new Konva.Line({ points: [originX - 24, originY, originX + 24, originY], stroke: "#ffffff", strokeWidth: 2 }));
+            bedStationGroup.add(new Konva.Line({ points: [originX, originY - 24, originX, originY + 24], stroke: "#ffffff", strokeWidth: 2 }));
 
-                // +X 轴 (靠右导轨, 向左测宽)
-                bedStationGroup.add(new Konva.Line({ points: [originX, originY, originX - 240, originY], stroke: "#10b981", strokeWidth: 3.5 }));
-                bedStationGroup.add(new Konva.Line({ points: [originX - 215, originY - 10, originX - 240, originY, originX - 215, originY + 10], stroke: "#10b981", strokeWidth: 3.5 }));
-                bedStationGroup.add(new Konva.Text({ x: originX - 310, y: originY + 14, text: `+X 轴向 (靠右导轨, 向左量宽)`, fontSize: 16, fill: isDark ? "#34d399" : "#059669", fontStyle: "bold" }));
+            // +X 轴 (宽向量测)
+            const xDir = isRight ? -1 : 1;
+            const xEnd = originX + xDir * 240;
+            bedStationGroup.add(new Konva.Line({ points: [originX, originY, xEnd, originY], stroke: "#10b981", strokeWidth: 3.5 }));
+            bedStationGroup.add(new Konva.Line({ points: [originX + xDir * 215, originY - 10, xEnd, originY, originX + xDir * 215, originY + 10], stroke: "#10b981", strokeWidth: 3.5 }));
+            const xTextX = isRight ? (originX - 310) : (originX + 25);
+            const xTextY = isBottom ? (originY + 14) : (originY - 28);
+            const xTextDesc = isRight ? `+X 轴向 (靠右导轨, 向左量宽)` : `+X 轴向 (靠左布边, 向右量宽)`;
+            bedStationGroup.add(new Konva.Text({ x: xTextX, y: xTextY, text: xTextDesc, fontSize: 16, fill: isDark ? "#34d399" : "#059669", fontStyle: "bold" }));
 
-                // +Y 轴 (进料方向, 向上测长)
-                bedStationGroup.add(new Konva.Line({ points: [originX, originY, originX, originY - 240], stroke: "#38bdf8", strokeWidth: 3.5 }));
-                bedStationGroup.add(new Konva.Line({ points: [originX - 10, originY - 215, originX, originY - 240, originX + 10, originY - 215], stroke: "#38bdf8", strokeWidth: 3.5 }));
-                bedStationGroup.add(new Konva.Text({ x: originX - 195, y: originY - 120, text: `+Y 轴向 (进料送料方向)`, fontSize: 16, fill: isDark ? "#38bdf8" : "#0284c7", fontStyle: "bold" }));
+            // +Y 轴 (长向进给/排切推进)
+            const yDir = isBottom ? -1 : 1;
+            const yEnd = originY + yDir * 240;
+            bedStationGroup.add(new Konva.Line({ points: [originX, originY, originX, yEnd], stroke: "#38bdf8", strokeWidth: 3.5 }));
+            bedStationGroup.add(new Konva.Line({ points: [originX - 10, originY + yDir * 215, originX, yEnd, originX + 10, originY + yDir * 215], stroke: "#38bdf8", strokeWidth: 3.5 }));
+            const yTextX = isRight ? (originX - 260) : (originX + 25);
+            const yTextY = isBottom ? (originY - 120) : (originY + 100);
+            const yTextDesc = isBottom ? `+Y 轴向 (自下而上起刀逆切)` : `+Y 轴向 (顺流送料进给 · 自上而下顺切)`;
+            bedStationGroup.add(new Konva.Text({ x: yTextX, y: yTextY, text: yTextDesc, fontSize: 16, fill: isDark ? "#38bdf8" : "#0284c7", fontStyle: "bold" }));
 
-                // 基准徽标
-                bedStationGroup.add(new Konva.Rect({ x: originX - 340, y: originY - 35, width: 320, height: 26, fill: isDark ? "#1c1917" : "#fef2f2", stroke: "#ef4444", strokeWidth: 1.5, cornerRadius: 4 }));
-                bedStationGroup.add(new Konva.Text({ x: originX - 330, y: originY - 30, text: `[基准原点] 机台主基准点 [右下角 (X=0, Y=0)]`, fontSize: 15, fill: isDark ? "#fda4af" : "#dc2626", fontStyle: "bold", fontFamily: "monospace" }));
-            } else {
-                bedStationGroup.add(new Konva.Circle({ x: originX, y: originY, radius: 14, fill: "#ef4444", stroke: "#ffffff", strokeWidth: 2.5 }));
-                bedStationGroup.add(new Konva.Line({ points: [originX - 24, originY, originX + 24, originY], stroke: "#ffffff", strokeWidth: 2 }));
-                bedStationGroup.add(new Konva.Line({ points: [originX, originY - 24, originX, originY + 24], stroke: "#ffffff", strokeWidth: 2 }));
-                bedStationGroup.add(new Konva.Line({ points: [originX, originY, originX + 240, originY], stroke: "#10b981", strokeWidth: 3.5 }));
-                bedStationGroup.add(new Konva.Line({ points: [originX + 215, originY - 10, originX + 240, originY, originX + 215, originY + 10], stroke: "#10b981", strokeWidth: 3.5 }));
-                bedStationGroup.add(new Konva.Line({ points: [originX, originY, originX, originY - 240], stroke: "#38bdf8", strokeWidth: 3.5 }));
-                bedStationGroup.add(new Konva.Line({ points: [originX - 10, originY - 215, originX, originY - 240, originX + 10, originY - 215], stroke: "#38bdf8", strokeWidth: 3.5 }));
-                bedStationGroup.add(new Konva.Text({ x: originX + 16, y: originY - 30, text: `[基准原点] 机台起刀基准原点 (左下角 X=0, Y=0)`, fontSize: 15, fill: isDark ? "#fda4af" : "#dc2626", fontStyle: "bold" }));
-            }
+            // 基准徽标说明
+            let badgeTitle = "";
+            if (originStr === "right-top") badgeTitle = `[基准原点] 右上角 (靠右导轨 · 顺流进给 · 工业标准)`;
+            else if (originStr === "left-top") badgeTitle = `[基准原点] 左上角 (靠左布边 · 顺流进给 · 标准CAM)`;
+            else if (originStr === "right-bottom") badgeTitle = `[基准原点] 右下角 (靠右导轨 · 落料口自下而上起切)`;
+            else badgeTitle = `[基准原点] 左下角 (靠左布边 · 落料口自下而上起切)`;
+
+            const badgeX = isRight ? (originX - 350) : (originX + 20);
+            const badgeY = isBottom ? (originY - 35) : (originY + 15);
+            bedStationGroup.add(new Konva.Rect({ x: badgeX, y: badgeY, width: 340, height: 26, fill: isDark ? "#1c1917" : "#fef2f2", stroke: "#ef4444", strokeWidth: 1.5, cornerRadius: 4 }));
+            bedStationGroup.add(new Konva.Text({ x: badgeX + 8, y: badgeY + 5, text: badgeTitle, fontSize: 14, fill: isDark ? "#fda4af" : "#dc2626", fontStyle: "bold", fontFamily: "monospace" }));
 
             // 6. CAD 尺寸标注线 (贴合红框工位)
             const dimY = -65;
@@ -2975,13 +2996,22 @@
                 pendingTargetY = null;
 
                 // 工位智能磁吸 (Station Snapping)：
-                // 1. 若接近机台展开长整倍数 (如 0, 5000, 10000, 15000mm) 在 ±800mm 范围内，优先强力吸附至工位整点
-                const nearestStation = Math.round(finalY / bedL) * bedL;
-                if (Math.abs(finalY - nearestStation) <= 800) {
-                    finalY = nearestStation;
+                // 1. 优先吸附至上一工位有效裁切切断线 (实现零间隙接刀衔接)
+                let maxCutY = 0;
+                if (data && data.pieces && data.pieces.length > 0) {
+                    maxCutY = Math.max(...data.pieces.map(p => p.y + p.l));
+                }
+                if (maxCutY > 0 && Math.abs(finalY - maxCutY) <= 800) {
+                    finalY = Math.round(maxCutY);
                 } else {
-                    // 2. 否则按 500mm 工业网格栅格化对齐，彻底杜绝 5634mm 这类杂乱碎数导致跨工位误切
-                    finalY = Math.round(finalY / 500) * 500;
+                    // 2. 若接近机台展开长整倍数 (如 0, 5000, 10000, 15000mm) 在 ±800mm 范围内，吸附至整工位点
+                    const nearestStation = Math.round(finalY / bedL) * bedL;
+                    if (Math.abs(finalY - nearestStation) <= 800) {
+                        finalY = nearestStation;
+                    } else {
+                        // 3. 否则按 500mm 工业网格栅格化对齐，彻底杜绝杂乱碎数导致跨工位误切
+                        finalY = Math.round(finalY / 500) * 500;
+                    }
                 }
                 finalY = Math.max(0, Math.min(totalL - bedL, finalY));
                 updateFabricScrollPosition(finalY);
@@ -3092,6 +3122,43 @@
             nextY = Math.max(0, Math.min(totalL - bedL, nextY));
             updateFabricScrollPosition(nextY);
             // 原地平滑顺延推进，坚决不重置缩放比例与中心位置，保证视觉连续性
+        }
+
+        function smartAdvanceBed() {
+            const data = SCENARIOS[currentCaseId];
+            if (!data) return;
+            const totalL = data.totalRollL || 60000;
+            const bedL = data.bedL || 5000;
+            const curY = data.windowStartY || 0;
+
+            // 智能零间隙接刀核心：检测当前母卷上所有已裁切片与横切断刀的最大全局位置
+            let maxCutY = 0;
+            if (data.pieces && data.pieces.length > 0) {
+                maxCutY = Math.max(...data.pieces.map(p => p.y + p.l));
+            }
+            if (data.cuts && data.cuts.length > 0) {
+                data.cuts.filter(c => c.type === "横切").forEach(c => {
+                    if (c.pos > maxCutY) maxCutY = c.pos;
+                });
+            }
+
+            let nextY = 0;
+            if (maxCutY > 0) {
+                // 接刀起点精确等于上一工位的切断线，工位间隙严格为 0.0 mm！
+                nextY = Math.round(maxCutY);
+            } else {
+                nextY = curY + bedL;
+            }
+
+            nextY = Math.max(0, Math.min(totalL - bedL, nextY));
+            updateFabricScrollPosition(nextY);
+            updateDefectVisualStates();
+            updateDefectRadarActiveState();
+            updateUIInfo();
+
+            // 释放重排配额并刷新左侧需求完成状态
+            updateDemandCompletionFromPieces(data);
+            renderDemandsUI(data.demands);
         }
 
         // ==========================================
@@ -3222,20 +3289,25 @@
             document.getElementById("inp-roll-w").value = data.rollW || 2000;
 
             document.getElementById("inp-trim-start").value = data.trimStart || 0;
-            document.getElementById("sel-cut-origin").value = data.cutOrigin || "left-bottom";
+            document.getElementById("sel-cut-origin").value = data.cutOrigin || "right-top";
             document.getElementById("sel-first-stage").value = data.firstStageOrientation || "horizontal";
             document.getElementById("sel-allow-rotation").value = data.allowRotation ? "1" : "0";
 
             document.getElementById("sb-roll-id").innerText = document.getElementById("inp-roll-id").value;
             document.getElementById("sb-engine").innerText = data.engine;
 
-            const isRight = (data.cutOrigin === "right-bottom");
+            const originStr = (data.cutOrigin || "right-top").toLowerCase();
+            const isRight = originStr.startsWith("right");
+            const isBottom = originStr.endsWith("bottom");
             const trim = data.trimStart || 0;
-            const originX = isRight ? data.rollW : 0;
+            const originX = isRight ? (data.rollW || 2000) : 0;
             const winStartY = data.windowStartY || 0;
+            const originY = isBottom ? (winStartY + (data.bedL || 5000) - trim) : (winStartY + trim);
             const originLbl = document.getElementById("sb-origin-lbl");
             if (originLbl) {
-                originLbl.innerText = `${isRight ? '右布边' : '左布边'} (${originX}, ${winStartY + trim}) mm`;
+                let name = isRight ? "靠右导轨" : "靠左布边";
+                let pos = isBottom ? "落料口起切" : "顺流进料口";
+                originLbl.innerText = `${name}·${pos} (${originX}, ${originY}) mm`;
             }
 
             // 现场切刀表
@@ -3657,10 +3729,32 @@
         function onOriginParamChange() {
             const data = SCENARIOS[currentCaseId];
             data.trimStart = parseFloat(document.getElementById("inp-trim-start").value) || 0;
-            data.cutOrigin = document.getElementById("sel-cut-origin").value;
+            data.cutOrigin = document.getElementById("sel-cut-origin").value || "right-top";
             data.firstStageOrientation = document.getElementById("sel-first-stage").value;
             data.allowRotation = (document.getElementById("sel-allow-rotation").value === "1");
             data.globalDefects = getDefectsFromUI();
+
+            const headerTag = document.getElementById("tag-cut-origin-header");
+            const descTip = document.getElementById("lbl-origin-desc-tip");
+            const val = data.cutOrigin;
+            if (headerTag) {
+                if (val === "right-top") { headerTag.innerText = "右上角基准"; headerTag.style.color = "#10b981"; }
+                else if (val === "left-top") { headerTag.innerText = "左上角基准"; headerTag.style.color = "#10b981"; }
+                else if (val === "right-bottom") { headerTag.innerText = "右下角基准"; headerTag.style.color = "#f59e0b"; }
+                else { headerTag.innerText = "左下角基准"; headerTag.style.color = "#f59e0b"; }
+            }
+            if (descTip) {
+                if (val === "right-top") {
+                    descTip.innerText = "行业推荐：右上角原点 (靠右导轨量幅宽，顺流自上而下进料顺切，零间隙接刀)";
+                } else if (val === "left-top") {
+                    descTip.innerText = "标准CAM：左上角原点 (靠左量幅宽，顺流自上而下进料顺切，零间隙接刀)";
+                } else if (val === "right-bottom") {
+                    descTip.innerText = "落料口逆切：右下角原点 (靠右导轨量幅宽，落料口自下而上起切)";
+                } else {
+                    descTip.innerText = "落料口逆切：左下角原点 (靠左量幅宽，落料口自下而上起切)";
+                }
+            }
+
             renderScene();
         }
 
@@ -3717,7 +3811,15 @@
             document.getElementById("inp-roll-w").value = data.rollW || 2000;
 
             document.getElementById("inp-trim-start").value = data.trimStart || 0;
-            document.getElementById("sel-cut-origin").value = data.cutOrigin || "right-bottom";
+            document.getElementById("sel-cut-origin").value = data.cutOrigin || "right-top";
+            const headerTag = document.getElementById("tag-cut-origin-header");
+            if (headerTag) {
+                const val = data.cutOrigin || "right-top";
+                if (val === "right-top") { headerTag.innerText = "右上角基准"; headerTag.style.color = "#10b981"; }
+                else if (val === "left-top") { headerTag.innerText = "左上角基准"; headerTag.style.color = "#10b981"; }
+                else if (val === "right-bottom") { headerTag.innerText = "右下角基准"; headerTag.style.color = "#f59e0b"; }
+                else { headerTag.innerText = "左下角基准"; headerTag.style.color = "#f59e0b"; }
+            }
             document.getElementById("sel-first-stage").value = data.firstStageOrientation || "horizontal";
             document.getElementById("sel-allow-rotation").value = data.allowRotation ? "1" : "0";
 
@@ -3836,7 +3938,7 @@
 
             const winEndY = winStartY + bedL;
             const trimStart = parseFloat(document.getElementById("inp-trim-start").value) || 0;
-            const cutOrigin = document.getElementById("sel-cut-origin").value || "right-bottom";
+            const cutOrigin = document.getElementById("sel-cut-origin").value || "right-top";
             const firstStageOrientation = document.getElementById("sel-first-stage").value || "horizontal";
             const allowRotation = (document.getElementById("sel-allow-rotation").value === "1");
             const allowLongitudinal = (document.getElementById("sel-allow-longitudinal").value === "1");
@@ -4779,7 +4881,7 @@
 
         function loadSavedSettings() {
             const theme = localStorage.getItem("cam_theme") || "dark";
-            const origin = localStorage.getItem("cam_origin") || "right-bottom";
+            const origin = localStorage.getItem("cam_origin") || "right-top";
             const margin = localStorage.getItem("cam_margin") || "20";
             const trim = localStorage.getItem("cam_trim") || "0";
             const rot = localStorage.getItem("cam_rot") || "0";
@@ -4960,12 +5062,14 @@
                     <div class="prop-row">
                         <span class="prop-label">机台默认起准点基准 (Default Origin)</span>
                         <select class="prop-input" id="cfg-cut-origin" style="width: 220px;">
-                            <option value="right-bottom" selected>右下角 (靠右导轨对齐, 行业标准)</option>
-                            <option value="left-bottom">左下角基准</option>
+                            <option value="right-top" selected>右上角 (靠右导轨 · 顺流进给 · 工业推荐)</option>
+                            <option value="left-top">左上角 (靠左布边 · 顺流进给 · 标准CAM)</option>
+                            <option value="right-bottom">右下角 (靠右导轨 · 落料口自下而上起切)</option>
+                            <option value="left-bottom">左下角 (靠左布边 · 落料口自下而上起切)</option>
                         </select>
                     </div>
                     <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px; line-height: 1.5;">
-                        说明：服装纺织数控裁床行业标准采用右下角作为绝对坐标原点 (X=0 靠右导轨靠尺, Y=0 为底边横切线, X向左进幅, Y向上拉布)。
+                        说明：支持四大工业起刀基准原点，在母卷长卷连续开卷时自动保持进给零间隙衔接，杜绝工位交界断层浪费。
                     </div>
                 </div>
 

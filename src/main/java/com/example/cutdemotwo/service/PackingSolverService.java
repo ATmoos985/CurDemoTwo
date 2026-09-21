@@ -159,24 +159,32 @@ public class PackingSolverService {
         List<String[]> cutNodes = new ArrayList<>();
 
         int remIndex = 1;
-        boolean isRightOrigin = "right-bottom".equalsIgnoreCase(req.getCutOrigin());
+        String origin = req.getCutOrigin() != null ? req.getCutOrigin().trim().toLowerCase() : "right-top";
+        boolean isRightOrigin = origin.startsWith("right");
+        boolean isBottomOrigin = origin.endsWith("bottom");
+        boolean isRemnantFeed = "remnant".equalsIgnoreCase(req.getFeedPortType());
+        
+        // 关键统一：在母卷连续开卷长卷模式下，裁片排料必须顺着送料进给流向紧贴工位入口 (y + trim)，
+        // 余量留在当前工位末尾，彻底杜绝反转导致两工位交界处凭空留出 260mm 悬空死区！
+        // 仅在单板料头模式且指定底部原点时，才将料头裁片倒贴至料头下底边。
+        boolean mirrorY = isRemnantFeed && isBottomOrigin;
         double trim = req.getTrimStart();
 
         if (trim > 0) {
             double trimArea = (req.getRollW() * trim) / 1_000_000.0;
-            double trimY = isRightOrigin ? (req.getRollL() - trim) : 0;
+            double trimY = mirrorY ? (req.getRollL() - trim) : 0;
             remnants.add(new RemnantPiece(
                     String.format("REM-TRIM-%02d", remIndex++),
-                    "底边修齐料头",
+                    "卷头修齐料头",
                     0, trimY, req.getRollW(), trim, trimArea, false
             ));
             cutSteps.add(new CutStep(
                     1,
                     "横切",
-                    isRightOrigin ? (req.getRollL() - trim) : trim,
+                    mirrorY ? (req.getRollL() - trim) : trim,
                     0,
                     req.getRollW(),
-                    String.format("第 0 阶段：底边修齐横切断刀，切除底边 0~%.0f mm 不规则料头并确立绝对测量原点", trim)
+                    String.format("第 0 阶段：卷头修齐横切断刀，切除 0~%.0f mm 不规则料头并确立绝对测量原点", trim)
             ));
         }
 
@@ -197,7 +205,7 @@ public class PackingSolverService {
                 int cut = Integer.parseInt(parts[8].trim());
 
                 double physX = isRightOrigin ? (req.getRollW() - x - w) : x;
-                double physY = isRightOrigin ? (req.getRollL() - y - h - trim) : (y + trim);
+                double physY = mirrorY ? (req.getRollL() - y - h - trim) : (y + trim);
 
                 if (type >= 0 && cut > 0) {
                     String name = itemMap.getOrDefault(type, "裁片-" + type);
@@ -230,14 +238,14 @@ public class PackingSolverService {
             boolean isHoriz = (cutLvl % 2 == 1);
             String cutType = isHoriz ? "横切" : "纵切";
             double cutPos = isHoriz ?
-                    (isRightOrigin ? (req.getRollL() - cy - trim) : (cy + trim)) :
+                    (mirrorY ? (req.getRollL() - cy - trim) : (cy + trim)) :
                     (isRightOrigin ? (req.getRollW() - cx) : cx);
             double start = isHoriz ?
                     (isRightOrigin ? (req.getRollW() - cx - cw) : cx) :
-                    (isRightOrigin ? (req.getRollL() - cy - ch - trim) : (cy + trim));
+                    (mirrorY ? (req.getRollL() - cy - ch - trim) : (cy + trim));
             double end = isHoriz ?
                     (isRightOrigin ? (req.getRollW() - cx) : (cx + cw)) :
-                    (isRightOrigin ? (req.getRollL() - cy - trim) : (cy + ch + trim));
+                    (mirrorY ? (req.getRollL() - cy - trim) : (cy + ch + trim));
             String desc = String.format("第 %d 阶段%s，裁切范围 [%.0f × %.0f mm]", cutLvl, cutType, cw, ch);
 
             cutSteps.add(new CutStep(stepNo++, cutType, cutPos, Math.min(start, end), Math.max(start, end), desc));
@@ -254,8 +262,6 @@ public class PackingSolverService {
         double wasteArea = Math.max(0, rollArea - pieceArea - remArea);
 
         double maxY = pieces.stream().mapToDouble(p -> p.getY() + p.getL()).max().orElse(req.getRollL());
-
-        boolean isRemnantFeed = "remnant".equalsIgnoreCase(req.getFeedPortType());
         res.setFeedPortType(isRemnantFeed ? "remnant" : "roll");
         res.setSourceRemnantId(req.getSourceRemnantId());
         // 料头投料口: 严格保证母卷扣料为 0!

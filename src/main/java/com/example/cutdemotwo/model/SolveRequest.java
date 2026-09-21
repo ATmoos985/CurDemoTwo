@@ -13,7 +13,7 @@ public class SolveRequest {
     private List<PieceDemand> demands = new ArrayList<>();
     private String firstStageOrientation = "horizontal";
     private double trimStart = 0.0;
-    private String cutOrigin = "right-bottom";  // 默认右下角基准 (靠右导轨对齐)
+    private String cutOrigin = "right-top";  // 默认右上角基准 (靠右导轨对齐 · 顺流进给)
     private double totalRollL = 60000.0;
     private double windowStartY = 0.0;
     private String rollId = "ROLL-2026-0920";    // 母卷编号
