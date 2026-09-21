@@ -8,10 +8,15 @@ public class PlacedPiece {
     private double w;
     private double l;
     private boolean rotated;
+    private Integer demandId;
 
     public PlacedPiece() {}
 
     public PlacedPiece(int id, String name, double x, double y, double w, double l, boolean rotated) {
+        this(id, name, x, y, w, l, rotated, null);
+    }
+
+    public PlacedPiece(int id, String name, double x, double y, double w, double l, boolean rotated, Integer demandId) {
         this.id = id;
         this.name = name;
         this.x = x;
@@ -19,6 +24,7 @@ public class PlacedPiece {
         this.w = w;
         this.l = l;
         this.rotated = rotated;
+        this.demandId = demandId;
     }
 
     public int getId() { return id; }
@@ -41,4 +47,7 @@ public class PlacedPiece {
 
     public boolean isRotated() { return rotated; }
     public void setRotated(boolean rotated) { this.rotated = rotated; }
+
+    public Integer getDemandId() { return demandId; }
+    public void setDemandId(Integer demandId) { this.demandId = demandId; }
 }

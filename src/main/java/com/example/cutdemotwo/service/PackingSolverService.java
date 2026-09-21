@@ -53,27 +53,29 @@ public class PackingSolverService {
             }
 
             // 1. bins.csv
-            try (PrintWriter pw = new PrintWriter(new FileWriter(binsCsv))) {
+            try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(new FileOutputStream(binsCsv), java.nio.charset.StandardCharsets.UTF_8))) {
                 pw.println("ID,WIDTH,HEIGHT");
                 pw.println("0," + (int)req.getRollW() + "," + (int)activeL);
             }
 
             // 2. items.csv
             Map<Integer, String> itemMap = new HashMap<>();
-            try (PrintWriter pw = new PrintWriter(new FileWriter(itemsCsv))) {
+            Map<Integer, Integer> demandIdMap = new HashMap<>();
+            try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(new FileOutputStream(itemsCsv), java.nio.charset.StandardCharsets.UTF_8))) {
                 pw.println("ID,WIDTH,HEIGHT,STACK_ID");
                 int idx = 0;
                 for (PieceDemand it : req.getDemands()) {
                     for (int c = 0; c < it.getDemand(); c++) {
                         pw.println(idx + "," + (int)it.getWidth() + "," + (int)it.getLength() + ",0");
                         itemMap.put(idx, it.getName());
+                        demandIdMap.put(idx, it.getId());
                         idx++;
                     }
                 }
             }
 
             // 3. defects.csv (offset Y by trimStart)
-            try (PrintWriter pw = new PrintWriter(new FileWriter(defectsCsv))) {
+            try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(new FileOutputStream(defectsCsv), java.nio.charset.StandardCharsets.UTF_8))) {
                 pw.println("ID,BIN,X,Y,WIDTH,HEIGHT");
                 for (Defect d : req.getDefects()) {
                     double dy = d.getY() - req.getTrimStart();
@@ -131,7 +133,7 @@ public class PackingSolverService {
                 return err;
             }
 
-            return parseCertificate(certCsv, req, itemMap);
+            return parseCertificate(certCsv, req, itemMap, demandIdMap);
 
         } catch (Exception e) {
             log.error("Execution error", e);
@@ -142,7 +144,7 @@ public class PackingSolverService {
         }
     }
 
-    private SolveResponse parseCertificate(File certCsv, SolveRequest req, Map<Integer, String> itemMap) throws IOException {
+    private SolveResponse parseCertificate(File certCsv, SolveRequest req, Map<Integer, String> itemMap, Map<Integer, Integer> demandIdMap) throws IOException {
         SolveResponse res = new SolveResponse();
         res.setSuccess(true);
         res.setEngine("PackingSolver (C++ 2D-Guillotine & HiGHS)");
@@ -178,7 +180,7 @@ public class PackingSolverService {
             ));
         }
 
-        try (BufferedReader br = new BufferedReader(new FileReader(certCsv))) {
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(new FileInputStream(certCsv), java.nio.charset.StandardCharsets.UTF_8))) {
             String header = br.readLine();
             String line;
             while ((line = br.readLine()) != null) {
@@ -199,7 +201,8 @@ public class PackingSolverService {
 
                 if (type >= 0 && cut > 0) {
                     String name = itemMap.getOrDefault(type, "裁片-" + type);
-                    pieces.add(new PlacedPiece(type, name, physX, physY, w, h, false));
+                    Integer demId = demandIdMap != null ? demandIdMap.get(type) : null;
+                    pieces.add(new PlacedPiece(type, name, physX, physY, w, h, false, demId));
                 } else if (type == -1 || type == -3) {
                     // Remnant / waste
                     if (w >= 200 && h >= 300) {

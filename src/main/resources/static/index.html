@@ -1913,27 +1913,27 @@
                     { id: 8, x: 300, y: 53800, w: 120, h: 180, margin: 30, desc: "进料第8疵点 (未展开 53.8m 飞纱)" }
                 ],
                 demands: [
-                    { name: "西装前身-大片", w: 800, l: 1200, count: 12 },
-                    { name: "西装后身-通背", w: 850, l: 1300, count: 10 },
-                    { name: "西裤前身-主片", w: 700, l: 1100, count: 16 },
-                    { name: "西裤后身-主片", w: 750, l: 1150, count: 16 },
-                    { name: "上衣大袖-外片", w: 600, l: 1000, count: 20 },
-                    { name: "上衣小袖-内片", w: 450, l: 600, count: 20 },
-                    { name: "西服驳头-挂面", w: 350, l: 850, count: 18 },
-                    { name: "衬衫领衬-硬片", w: 250, l: 480, count: 24 },
-                    { name: "斜纹口袋布", w: 400, l: 400, count: 32 },
-                    { name: "裤腰衬条-横裁", w: 200, l: 900, count: 20 }
+                    { id: 1, name: "西装前身-大片", w: 800, l: 1200, count: 12 },
+                    { id: 2, name: "西装后身-通背", w: 850, l: 1300, count: 10 },
+                    { id: 3, name: "西裤前身-主片", w: 700, l: 1100, count: 16 },
+                    { id: 4, name: "西裤后身-主片", w: 750, l: 1150, count: 16 },
+                    { id: 5, name: "上衣大袖-外片", w: 600, l: 1000, count: 20 },
+                    { id: 6, name: "上衣小袖-内片", w: 450, l: 600, count: 20 },
+                    { id: 7, name: "西服驳头-挂面", w: 350, l: 850, count: 18 },
+                    { id: 8, name: "衬衫领衬-硬片", w: 250, l: 480, count: 24 },
+                    { id: 9, name: "斜纹口袋布", w: 400, l: 400, count: 32 },
+                    { id: 10, name: "裤腰衬条-横裁", w: 200, l: 900, count: 20 }
                 ],
                 cutIntervals: [{ start: 0, end: 5000 }],
                 pieces: [
-                    { id: 1, name: "西装前身-大片", x: 1200, y: 3800, w: 800, l: 1200 },
-                    { id: 2, name: "上衣大袖-外片", x: 600, y: 4000, w: 600, l: 1000 },
-                    { id: 3, name: "上衣大袖-外片", x: 0, y: 4000, w: 600, l: 1000 },
-                    { id: 4, name: "西裤前身-主片", x: 1000, y: 3000, w: 1000, l: 800 },
-                    { id: 5, name: "上衣大袖-外片", x: 400, y: 3000, w: 600, l: 1000 },
-                    { id: 6, name: "西装前身-大片", x: 1200, y: 1800, w: 800, l: 1200 },
-                    { id: 7, name: "西裤前身-主片", x: 200, y: 2200, w: 1000, l: 800 },
-                    { id: 8, name: "上衣大袖-外片", x: 1400, y: 800, w: 600, l: 1000 }
+                    { id: 1, demandId: 1, name: "西装前身-大片", x: 1200, y: 3800, w: 800, l: 1200 },
+                    { id: 2, demandId: 5, name: "上衣大袖-外片", x: 600, y: 4000, w: 600, l: 1000 },
+                    { id: 3, demandId: 5, name: "上衣大袖-外片", x: 0, y: 4000, w: 600, l: 1000 },
+                    { id: 4, demandId: 3, name: "西裤前身-主片", x: 1000, y: 3000, w: 1000, l: 800 },
+                    { id: 5, demandId: 5, name: "上衣大袖-外片", x: 400, y: 3000, w: 600, l: 1000 },
+                    { id: 6, demandId: 1, name: "西装前身-大片", x: 1200, y: 1800, w: 800, l: 1200 },
+                    { id: 7, demandId: 3, name: "西裤前身-主片", x: 200, y: 2200, w: 1000, l: 800 },
+                    { id: 8, demandId: 5, name: "上衣大袖-外片", x: 1400, y: 800, w: 600, l: 1000 }
                 ],
                 remnants: [
                     { id: "REM-01", status: "左上角余料料头", x: 0, y: 0, w: 1400, l: 2200, area: 3.08, hasDefect: false },
@@ -2948,10 +2948,24 @@
                     cancelAnimationFrame(radarRafId);
                     radarRafId = null;
                 }
-                if (pendingTargetY !== null) {
-                    updateFabricScrollPosition(pendingTargetY);
-                    pendingTargetY = null;
+
+                const data = SCENARIOS[currentCaseId];
+                const totalL = data ? (data.totalRollL || 60000) : 60000;
+                const bedL = data ? (data.bedL || 5000) : 5000;
+                let finalY = (pendingTargetY !== null) ? pendingTargetY : (data ? (data.windowStartY || 0) : 0);
+                pendingTargetY = null;
+
+                // 工位智能磁吸 (Station Snapping)：
+                // 1. 若接近机台展开长整倍数 (如 0, 5000, 10000, 15000mm) 在 ±800mm 范围内，优先强力吸附至工位整点
+                const nearestStation = Math.round(finalY / bedL) * bedL;
+                if (Math.abs(finalY - nearestStation) <= 800) {
+                    finalY = nearestStation;
+                } else {
+                    // 2. 否则按 500mm 工业网格栅格化对齐，彻底杜绝 5634mm 这类杂乱碎数导致跨工位误切
+                    finalY = Math.round(finalY / 500) * 500;
                 }
+                finalY = Math.max(0, Math.min(totalL - bedL, finalY));
+                updateFabricScrollPosition(finalY);
 
                 try {
                     if (winEl.releasePointerCapture) winEl.releasePointerCapture(e.pointerId);
@@ -3058,7 +3072,7 @@
             let nextY = currentY + delta * bedL;
             nextY = Math.max(0, Math.min(totalL - bedL, nextY));
             updateFabricScrollPosition(nextY);
-            resetToBedView();
+            // 原地平滑顺延推进，坚决不重置缩放比例与中心位置，保证视觉连续性
         }
 
         // ==========================================
@@ -3284,13 +3298,32 @@
         function updateDemandCompletionFromPieces(data) {
             if (!data || !data.demands) return;
             const pieces = data.pieces || [];
-            data.demands.forEach(d => {
+            data.demands.forEach((d, idx) => {
                 const dName = (d.name || "").trim().toLowerCase();
+                const dW = d.w || d.width || 0;
+                const dL = d.l || d.length || 0;
+                const dId = d.id || (idx + 1);
+
+                // 三重严密核销匹配逻辑：
+                // 1. 优先使用 demandId 强关联
+                // 2. 其次使用规格尺寸 (w, l) 精确判定 (考虑旋转)
+                // 3. 最后使用名称全字或前缀兼容判定
                 const matched = pieces.filter(p => {
+                    if (p.demandId && p.demandId === dId) return true;
+                    if (dW > 0 && dL > 0) {
+                        const sizeMatch = (Math.abs(p.w - dW) < 1.5 && Math.abs(p.l - dL) < 1.5) ||
+                                          (Math.abs(p.w - dL) < 1.5 && Math.abs(p.l - dW) < 1.5);
+                        if (sizeMatch) return true;
+                    }
                     const pName = (p.name || "").trim().toLowerCase();
-                    return pName === dName || pName.startsWith(dName + "-") || pName.startsWith(dName + "_");
+                    if (pName && dName) {
+                        return pName === dName || pName.startsWith(dName + "-") || pName.startsWith(dName + "_");
+                    }
+                    return false;
                 });
                 d.completed = matched.length;
+                const totalCount = (d.count !== undefined ? d.count : (d.demand !== undefined ? d.demand : 1));
+                d.remaining = Math.max(0, totalCount - d.completed);
             });
         }
 
@@ -3349,16 +3382,27 @@
             const bedL = parseFloat(document.getElementById("inp-bed-l").value) || data.bedL || 5000;
             const winEndY = winStartY + bedL;
 
+            const isPieceInCurrentStation = (p) => {
+                const pMid = p.y + p.l / 2;
+                return (pMid >= winStartY && pMid < winEndY);
+            };
             const oldCount = (data.pieces || []).length;
-            data.pieces = (data.pieces || []).filter(p => (p.y + p.l <= winStartY || p.y >= winEndY));
+            data.pieces = (data.pieces || []).filter(p => !isPieceInCurrentStation(p));
             const removedPieces = oldCount - data.pieces.length;
 
-            data.cuts = (data.cuts || []).filter(c => {
-                if (c.type === "横切") return (c.pos < winStartY || c.pos > winEndY);
-                return (c.end <= winStartY || c.start >= winEndY);
-            });
+            const isCutInCurrentStation = (c) => {
+                if (c.type === "横切") return (c.pos > winStartY && c.pos < winEndY);
+                const cutMidY = (c.start + c.end) / 2;
+                return (cutMidY >= winStartY && cutMidY <= winEndY);
+            };
+            data.cuts = (data.cuts || []).filter(c => !isCutInCurrentStation(c));
             data.cuts.forEach((c, idx) => { c.step = idx + 1; });
-            data.remnants = (data.remnants || []).filter(r => (r.y + r.l <= winStartY || r.y >= winEndY));
+
+            const isRemInCurrentStation = (r) => {
+                const rMid = r.y + r.l / 2;
+                return (rMid >= winStartY && rMid < winEndY);
+            };
+            data.remnants = (data.remnants || []).filter(r => !isRemInCurrentStation(r));
 
             if (data.cutIntervals) {
                 data.cutIntervals = data.cutIntervals.filter(inv => inv.end <= winStartY || inv.start >= winEndY);
@@ -3796,23 +3840,38 @@
                             data.wasteArea = result.wasteArea;
                             data.totalArea = result.totalArea;
                         } else {
-                            // 接续搭切核心：保留不在当前工位 [winStartY, winEndY] 内的历史裁片
-                            const retainedPieces = (data.pieces || []).filter(p => (p.y + p.l <= winStartY || p.y >= winEndY));
-                            const newPieces = (result.pieces || []).map((p, idx) => ({
-                                ...p,
-                                id: retainedPieces.length + idx + 1,
-                                y: p.y + winStartY
-                            }));
+                            // 接续搭切核心：保留不在当前工位 [winStartY, winEndY] 内的历史裁片 (中心点精确判定)
+                            const isPieceInCurrentStation = (p) => {
+                                const pMid = p.y + p.l / 2;
+                                return (pMid >= winStartY && pMid < winEndY);
+                            };
+                            const retainedPieces = (data.pieces || []).filter(p => !isPieceInCurrentStation(p));
+                            const newPieces = (result.pieces || []).map((p, idx) => {
+                                // 寻找匹配的 demand 确立 demandId 并回填未乱码的品类名称
+                                let matchedDemand = activeDemands.find(ad =>
+                                    (Math.abs(p.w - ad.w) < 1.5 && Math.abs(p.l - ad.l) < 1.5) ||
+                                    (Math.abs(p.w - ad.l) < 1.5 && Math.abs(p.l - ad.w) < 1.5)
+                                );
+                                if (!matchedDemand) {
+                                    matchedDemand = activeDemands.find(ad => (ad.name || "").trim() === (p.name || "").trim());
+                                }
+                                return {
+                                    ...p,
+                                    id: retainedPieces.length + idx + 1,
+                                    demandId: matchedDemand ? (matchedDemand.id || (activeDemands.indexOf(matchedDemand) + 1)) : p.demandId,
+                                    name: matchedDemand ? matchedDemand.name : p.name,
+                                    y: p.y + winStartY
+                                };
+                            });
                             data.pieces = [...retainedPieces, ...newPieces].sort((a, b) => a.y - b.y || a.x - b.x);
 
-                            // 保留不在当前工位内的历史切刀
-                            const retainedCuts = (data.cuts || []).filter(c => {
-                                if (c.type === "横切") {
-                                    return (c.pos < winStartY || c.pos > winEndY);
-                                } else {
-                                    return (c.end <= winStartY || c.start >= winEndY);
-                                }
-                            });
+                            // 保留不在当前工位内的历史切刀 (中心点与工位内判定)
+                            const isCutInCurrentStation = (c) => {
+                                if (c.type === "横切") return (c.pos > winStartY && c.pos < winEndY);
+                                const cutMidY = (c.start + c.end) / 2;
+                                return (cutMidY >= winStartY && cutMidY <= winEndY);
+                            };
+                            const retainedCuts = (data.cuts || []).filter(c => !isCutInCurrentStation(c));
                             const newCuts = (result.cuts || []).map((c, idx) => {
                                 const isHoriz = (c.type === "横切");
                                 return {
@@ -3825,8 +3884,12 @@
                             data.cuts = [...retainedCuts, ...newCuts];
                             data.cuts.forEach((c, idx) => { c.step = idx + 1; });
 
-                            // 保留不在当前工位内的历史料头
-                            const retainedRemnants = (data.remnants || []).filter(r => (r.y + r.l <= winStartY || r.y >= winEndY));
+                            // 保留不在当前工位内的历史料头 (中心点判定)
+                            const isRemInCurrentStation = (r) => {
+                                const rMid = r.y + r.l / 2;
+                                return (rMid >= winStartY && rMid < winEndY);
+                            };
+                            const retainedRemnants = (data.remnants || []).filter(r => !isRemInCurrentStation(r));
                             const newRemnants = (result.remnants || []).map(r => ({
                                 ...r,
                                 y: r.y + winStartY
@@ -3846,7 +3909,10 @@
 
                         currentCutStepLimit = 999;
                         renderScene();
-                        resetToBedView();
+                        if (isRemnantMode) {
+                            resetToBedView();
+                        }
+                        // 母卷连续接续搭切模式下，绝不重置视口与缩放，保持用户当前观察中心绝对不动！
                         updateUIInfo();
 
                         // 自动刷新料头在库货架与统计
