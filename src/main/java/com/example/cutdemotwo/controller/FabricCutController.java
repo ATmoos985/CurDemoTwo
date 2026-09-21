@@ -18,19 +18,29 @@ public class FabricCutController {
     private final com.example.cutdemotwo.service.solver.SolverFactory solverFactory;
     private final ScenarioOneService scenarioOneService;
     private final com.example.cutdemotwo.service.RemnantService remnantService;
+    private final com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService toolpathOptimizerService;
 
     @Autowired
     public FabricCutController(com.example.cutdemotwo.service.solver.SolverFactory solverFactory,
                                 ScenarioOneService scenarioOneService,
-                                com.example.cutdemotwo.service.RemnantService remnantService) {
+                                com.example.cutdemotwo.service.RemnantService remnantService,
+                                com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService toolpathOptimizerService) {
         this.solverFactory = solverFactory;
         this.scenarioOneService = scenarioOneService;
         this.remnantService = remnantService;
+        this.toolpathOptimizerService = toolpathOptimizerService;
     }
 
     @PostMapping("/solve")
     public SolveResponse solve(@RequestBody SolveRequest request) {
         return solverFactory.solve(request);
+    }
+
+    @PostMapping("/toolpath/optimize")
+    public com.example.cutdemotwo.model.ToolpathResult optimizeToolpath(@RequestBody com.example.cutdemotwo.model.ToolpathRequest req) {
+        double hx = req.getHomeX();
+        double hy = req.getHomeY();
+        return toolpathOptimizerService.optimizeToolpath(req.getCuts(), hx, hy, req.isRespectPrecedence());
     }
 
     @GetMapping("/scenario/{id}")

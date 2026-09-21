@@ -111,3 +111,20 @@
     background: #ffffff;
     border-color: #cbd5e1;
 }
+
+/* 刀路优化控制卡片 (Toolpath Optimization Card) */
+.toolpath-control-card {
+    padding: 8px;
+    background: rgba(2, 132, 199, 0.05);
+    border: 1px solid rgba(2, 132, 199, 0.25);
+    border-radius: 4px;
+    margin-bottom: 8px;
+    transition: all 0.2s ease;
+}
+.toolpath-control-card:hover {
+    border-color: rgba(2, 132, 199, 0.45);
+}
+[data-theme="light"] .toolpath-control-card {
+    background: #f0f9ff;
+    border-color: #bae6fd;
+}

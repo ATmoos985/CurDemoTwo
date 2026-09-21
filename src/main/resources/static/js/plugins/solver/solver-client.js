@@ -53,13 +53,18 @@ export function updateUIInfo() {
     const cutTbody = document.getElementById("cut-table-body");
     if (cutTbody) {
         const currentLimit = state.currentCutStepLimit;
+        const isOpt = state.isToolpathOptimized;
         cutTbody.innerHTML = (data.cuts || []).map(c => {
             const isActive = (c.step === currentLimit);
+            const dirStr = (c.startX !== undefined && c.endX !== undefined) ?
+                `<div style="font-size:10px; color:#0284c7; font-family:monospace; margin-top:2px;">(${Math.round(c.startX)},${Math.round(c.startY)}) ➔ (${Math.round(c.endX)},${Math.round(c.endY)})</div>` : "";
+            const airBadge = (isOpt && c.airDistance !== undefined) ?
+                `<span style="font-size:9px; background:rgba(2,132,199,0.12); color:#0284c7; padding:1px 4px; border-radius:3px; border:1px solid rgba(2,132,199,0.25); margin-left:4px; font-family:monospace;">空+${Math.round(c.airDistance)}</span>` : "";
             return `
             <tr class="${isActive ? 'active-row' : ''}">
                 <td><span class="badge-cut">${c.step}</span></td>
-                <td><b>${c.type}</b></td>
-                <td>${c.pos}mm</td>
+                <td><b>${c.type}</b>${airBadge}</td>
+                <td>${c.pos}mm${dirStr}</td>
                 <td>${c.desc}</td>
             </tr>
             `;
@@ -437,4 +442,10 @@ export async function registerCurrentRemnant(remId, w, l, hasDefect) {
     } catch (e) {
         alert("登记料头异常: " + e.message);
     }
+}
+
+export function renderCutTable(cuts) {
+    const data = state.getCurrentCaseData();
+    if (cuts) data.cuts = cuts;
+    recalculateRollStats(data);
 }

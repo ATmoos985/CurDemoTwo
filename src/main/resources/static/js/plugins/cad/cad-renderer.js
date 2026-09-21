@@ -9,6 +9,7 @@ import {
 import { drawRulers } from './cad-rulers.js';
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
+import { getHomeCoordinates } from '../toolpath/toolpath-optimizer.js';
 
 export function renderScene() {
     if (!stage || !mainLayer) return;
@@ -191,34 +192,127 @@ export function renderScene() {
     });
 
     // -------------------------------------------------------------
-    // E. 绘制切刀顺序与刀路轨迹 (Guillotine Cuts)
+    // E. 绘制切刀顺序与刀路轨迹 (Guillotine Cuts & Toolpath Traversal)
     // -------------------------------------------------------------
     const currentLimit = state.currentCutStepLimit;
+    const isOpt = state.isToolpathOptimized;
+    const home = getHomeCoordinates(data);
+    let lastX = home.x;
+    let lastY = home.y;
+
+    // 如果开启了刀路优化，先绘制右下角起始停靠原点
+    if (isOpt) {
+        cutGroup.add(new Konva.Circle({
+            x: home.x, y: home.y, radius: 14,
+            fill: "#0284c7", stroke: "#ffffff", strokeWidth: 3,
+            shadowColor: "#0284c7", shadowBlur: 10
+        }));
+        cutGroup.add(new Konva.Line({
+            points: [home.x - 22, home.y, home.x + 22, home.y],
+            stroke: "#ffffff", strokeWidth: 2
+        }));
+        cutGroup.add(new Konva.Line({
+            points: [home.x, home.y - 22, home.x, home.y + 22],
+            stroke: "#ffffff", strokeWidth: 2
+        }));
+        cutGroup.add(new Konva.Rect({
+            x: home.x - 260, y: home.y - 34,
+            width: 250, height: 26,
+            fill: isDark ? "rgba(15, 23, 42, 0.9)" : "rgba(255, 255, 255, 0.9)",
+            stroke: "#0284c7", strokeWidth: 1.5, cornerRadius: 4
+        }));
+        cutGroup.add(new Konva.Text({
+            x: home.x - 252, y: home.y - 28,
+            text: `[右下角起刀停靠点] (${home.x}, ${home.y})`,
+            fontSize: 13, fill: isDark ? "#38bdf8" : "#0284c7",
+            fontStyle: "bold", fontFamily: "monospace"
+        }));
+    }
+
     (data.cuts || []).forEach((c) => {
         if (c.step > currentLimit) return;
 
         const isHoriz = (c.type === "横切");
-        const line = isHoriz ?
-            new Konva.Line({
-                points: [c.start, c.pos, c.end, c.pos],
-                stroke: "#f43f5e", strokeWidth: 4, dash: [14, 8]
-            }) :
-            new Konva.Line({
-                points: [c.pos, c.start, c.pos, c.end],
-                stroke: "#f43f5e", strokeWidth: 4, dash: [14, 8]
-            });
+        let startX, startY, endX, endY;
 
-        cutGroup.add(line);
+        if (c.startX !== undefined && c.endX !== undefined) {
+            startX = c.startX; startY = c.startY;
+            endX = c.endX; endY = c.endY;
+        } else {
+            startX = isHoriz ? c.start : c.pos;
+            startY = isHoriz ? c.pos : c.start;
+            endX = isHoriz ? c.end : c.pos;
+            endY = isHoriz ? c.pos : c.end;
+        }
 
-        const badgeX = isHoriz ? c.start + 30 : c.pos;
-        const badgeY = isHoriz ? c.pos : c.start + 30;
+        // 绘制空刀快移路径 (Rapid Traverse Air Move)
+        if (isOpt) {
+            const airDist = Math.hypot(startX - lastX, startY - lastY);
+            if (airDist > 1) {
+                // 快移空刀线 (亮蓝色虚线)
+                cutGroup.add(new Konva.Line({
+                    points: [lastX, lastY, startX, startY],
+                    stroke: "#0284c7", strokeWidth: 2,
+                    dash: [6, 6]
+                }));
+
+                // 快移中点标注空走距离
+                if (airDist > 150) {
+                    const midAirX = (lastX + startX) / 2;
+                    const midAirY = (lastY + startY) / 2;
+                    cutGroup.add(new Konva.Rect({
+                        x: midAirX - 35, y: midAirY - 9,
+                        width: 70, height: 18,
+                        fill: isDark ? "rgba(15, 23, 42, 0.85)" : "rgba(240, 249, 255, 0.9)",
+                        stroke: "#38bdf8", strokeWidth: 1, cornerRadius: 3
+                    }));
+                    cutGroup.add(new Konva.Text({
+                        x: midAirX - 30, y: midAirY - 5,
+                        text: `空+${Math.round(airDist)}`,
+                        fontSize: 11, fill: isDark ? "#7dd3fc" : "#0284c7",
+                        fontFamily: "monospace"
+                    }));
+                }
+            }
+            lastX = endX;
+            lastY = endY;
+        }
+
+        // 绘制实际切线 (实线下刀)
+        cutGroup.add(new Konva.Line({
+            points: [startX, startY, endX, endY],
+            stroke: "#f43f5e", strokeWidth: 4,
+            dash: isOpt ? [] : [14, 8]
+        }));
+
+        // 切刀方向指示箭头 (Arrow on cut line)
+        if (isOpt) {
+            const midCutX = (startX + endX) / 2;
+            const midCutY = (startY + endY) / 2;
+            const angle = Math.atan2(endY - startY, endX - startX);
+            const arrowLen = 14;
+            const a1x = midCutX - arrowLen * Math.cos(angle - Math.PI / 6);
+            const a1y = midCutY - arrowLen * Math.sin(angle - Math.PI / 6);
+            const a2x = midCutX - arrowLen * Math.cos(angle + Math.PI / 6);
+            const a2y = midCutY - arrowLen * Math.sin(angle + Math.PI / 6);
+
+            cutGroup.add(new Konva.Line({
+                points: [a1x, a1y, midCutX, midCutY, a2x, a2y],
+                stroke: "#ffffff", strokeWidth: 3
+            }));
+        }
+
+        // 下刀起点徽章 (Numbered step badge at cut entry point)
+        const badgeX = isOpt ? startX : (isHoriz ? c.start + 30 : c.pos);
+        const badgeY = isOpt ? startY : (isHoriz ? c.pos : c.start + 30);
 
         cutGroup.add(new Konva.Circle({
-            x: badgeX, y: badgeY, radius: 16, fill: "#f43f5e"
+            x: badgeX, y: badgeY, radius: 15,
+            fill: "#f43f5e", stroke: "#ffffff", strokeWidth: 2
         }));
         cutGroup.add(new Konva.Text({
-            x: badgeX - 10, y: badgeY - 8, text: `${c.step}`,
-            fontSize: 16, fill: "#ffffff", fontStyle: "bold", fontFamily: "monospace"
+            x: badgeX - 9, y: badgeY - 7, text: `${c.step}`,
+            fontSize: 14, fill: "#ffffff", fontStyle: "bold", fontFamily: "monospace"
         }));
     });
 

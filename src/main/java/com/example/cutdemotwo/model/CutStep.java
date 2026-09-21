@@ -8,6 +8,12 @@ public class CutStep {
     private double end;
     private String desc;
 
+    private Double startX;
+    private Double startY;
+    private Double endX;
+    private Double endY;
+    private Double airDistance;
+
     public CutStep() {}
 
     public CutStep(int step, String type, double pos, double start, double end, String desc) {
@@ -17,6 +23,18 @@ public class CutStep {
         this.start = start;
         this.end = end;
         this.desc = desc;
+        // Default directional assignment
+        if ("横切".equals(type)) {
+            this.startX = Math.min(start, end);
+            this.startY = pos;
+            this.endX = Math.max(start, end);
+            this.endY = pos;
+        } else {
+            this.startX = pos;
+            this.startY = Math.min(start, end);
+            this.endX = pos;
+            this.endY = Math.max(start, end);
+        }
     }
 
     public int getStep() { return step; }
@@ -36,4 +54,19 @@ public class CutStep {
 
     public String getDesc() { return desc; }
     public void setDesc(String desc) { this.desc = desc; }
+
+    public Double getStartX() { return startX; }
+    public void setStartX(Double startX) { this.startX = startX; }
+
+    public Double getStartY() { return startY; }
+    public void setStartY(Double startY) { this.startY = startY; }
+
+    public Double getEndX() { return endX; }
+    public void setEndX(Double endX) { this.endX = endX; }
+
+    public Double getEndY() { return endY; }
+    public void setEndY(Double endY) { this.endY = endY; }
+
+    public Double getAirDistance() { return airDistance; }
+    public void setAirDistance(Double airDistance) { this.airDistance = airDistance; }
 }

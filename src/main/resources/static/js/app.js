@@ -62,6 +62,11 @@ import {
     executeBarcodeScan, quickScan, selectAndLoadRemnant
 } from './plugins/remnant/remnant-modal.js';
 
+import {
+    optimizeCurrentToolpath, restoreOriginalToolpath,
+    toggleToolpathOptimization, renderToolpathUI
+} from './plugins/toolpath/toolpath-optimizer.js';
+
 // ==========================================
 // 1. 注册核心事件总线监听 (Microkernel Event Wiring)
 // ==========================================
@@ -121,6 +126,27 @@ bus.on('remnant:registered', (payload) => {
 bus.on('solve:success', (payload) => {
     refreshShelfRemnantsList();
     updateMotherRollRemnantStats(payload.rollId);
+    state.isToolpathOptimized = false;
+    state.toolpathStats = null;
+    state.originalCutsBackup = null;
+    renderToolpathUI();
+});
+
+bus.on('case:changed', () => {
+    state.isToolpathOptimized = false;
+    state.toolpathStats = null;
+    state.originalCutsBackup = null;
+    renderToolpathUI();
+});
+
+bus.on('toolpath:optimized', () => {
+    renderScene();
+    renderToolpathUI();
+});
+
+bus.on('toolpath:restored', () => {
+    renderScene();
+    renderToolpathUI();
 });
 
 // ==========================================
@@ -180,7 +206,11 @@ const camApp = {
     chooseRemnantForDemand,
     dismissRemnantHint,
     checkAllDemandsRemnantMatch,
-    registerCurrentRemnant
+    registerCurrentRemnant,
+    optimizeCurrentToolpath,
+    restoreOriginalToolpath,
+    toggleToolpathOptimization,
+    renderToolpathUI
 };
 
 window.camApp = camApp;
@@ -208,4 +238,5 @@ window.addEventListener("DOMContentLoaded", async () => {
     loadCase(4); // 默认打开 60米母卷全局全景演示
     await onMotherRollChange();
     refreshShelfRemnantsList();
+    renderToolpathUI();
 });

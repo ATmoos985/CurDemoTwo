@@ -14,6 +14,9 @@ class StateStore {
         this.currentFeedPort = "roll";
         this.currentCutStepLimit = 999;
         this.loadedRemnant = null;
+        this.isToolpathOptimized = false;
+        this.toolpathStats = null;
+        this.originalCutsBackup = null;
     }
 
     /**
