@@ -79,16 +79,21 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                 }
             }
 
+            String origin = req.getCutOrigin() != null ? req.getCutOrigin().trim().toLowerCase() : "right-top";
+            boolean isRightOrigin = origin.startsWith("right");
+            boolean isBottomOrigin = origin.endsWith("bottom");
+            boolean isRemnantFeed = "remnant".equalsIgnoreCase(req.getFeedPortType());
+            boolean mirrorY = isRemnantFeed && isBottomOrigin;
+
             // 3. defects.csv (offset Y by trimStart)
             try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(new FileOutputStream(defectsCsv), java.nio.charset.StandardCharsets.UTF_8))) {
                 pw.println("ID,BIN,X,Y,WIDTH,HEIGHT");
                 for (Defect d : req.getDefects()) {
                     double dy = d.getY() - req.getTrimStart();
                     if (dy + d.getH() >= 0) {
-                        boolean isRightOrigin = "right-bottom".equalsIgnoreCase(req.getCutOrigin());
                         double safeX = isRightOrigin ?
                                 Math.max(0, req.getRollW() - d.getX() - d.getW() - d.getMargin()) : d.getSafeX();
-                        double safeY = isRightOrigin ?
+                        double safeY = mirrorY ?
                                 Math.max(0, req.getRollL() - dy - d.getH() - d.getMargin()) : Math.max(0, dy - d.getMargin());
                         pw.println(d.getId() + ",0," + (int)safeX + "," + (int)safeY + "," +
                                 (int)d.getSafeW() + "," + (int)d.getSafeH());

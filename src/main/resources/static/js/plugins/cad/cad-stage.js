@@ -36,9 +36,9 @@ export function initKonva() {
     cutGroup = new Konva.Group();
 
     fabricScrollGroup.add(fabricBgGroup);
-    fabricScrollGroup.add(defectGroup);
     fabricScrollGroup.add(remnantGroup);
     fabricScrollGroup.add(pieceGroup);
+    fabricScrollGroup.add(defectGroup);
     fabricScrollGroup.add(cutGroup);
 
     // 2. 绝对固定在视口中央的醒目大红框物理裁切工位 (Fixed Red Cutting Bed Station)

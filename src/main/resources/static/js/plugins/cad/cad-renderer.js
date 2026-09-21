@@ -90,6 +90,19 @@ export function renderScene() {
         });
         dGroup.add(boxRect);
 
+        if (inBed || inUpcoming) {
+            dGroup.add(new Konva.Line({
+                points: [d.x, d.y, d.x + d.w, d.y + d.h],
+                stroke: inBed ? "#ffffff" : (isDark ? "#fde68a" : "#78350f"),
+                strokeWidth: 1.5
+            }));
+            dGroup.add(new Konva.Line({
+                points: [d.x + d.w, d.y, d.x, d.y + d.h],
+                stroke: inBed ? "#ffffff" : (isDark ? "#fde68a" : "#78350f"),
+                strokeWidth: 1.5
+            }));
+        }
+
         // 瑕疵警示说明文字
         let txtStr = `[工位避让疵点] #${d.id} ${d.w}×${d.h}mm (工位Y: ${d.y - winStartY}mm | 全局: ${(d.y/1000).toFixed(2)}m)`;
         let txtColor = isDark ? "#fecaca" : "#991b1b";

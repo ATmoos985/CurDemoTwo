@@ -604,41 +604,35 @@
                     { id: 2, x: 1300, y: 3200, w: 200, h: 100, margin: 30 }
                 ],
                 demands: [
-                    { name: "裁片A", w: 800, l: 1200, count: 2 },
-                    { name: "裁片B", w: 600, l: 1000, count: 4 },
-                    { name: "裁片C", w: 1000, l: 800, count: 2 }
+                    { name: "西装前身-大片", w: 800, l: 1200, count: 6 }
                 ],
                 pieces: [
-                    { id: 1, name: "裁片A-1", x: 0, y: 0, w: 800, l: 1200 },
-                    { id: 2, name: "裁片B-1", x: 800, y: 0, w: 600, l: 1000 },
-                    { id: 3, name: "裁片B-2", x: 1400, y: 0, w: 600, l: 1000 },
-                    { id: 4, name: "裁片C-1", x: 0, y: 1600, w: 1000, l: 800 },
-                    { id: 5, name: "裁片B-3", x: 1000, y: 1600, w: 600, l: 1000 },
-                    { id: 6, name: "裁片A-2", x: 0, y: 2400, w: 800, l: 1200 },
-                    { id: 7, name: "裁片C-2", x: 800, y: 2600, w: 1000, l: 800 },
-                    { id: 8, name: "裁片B-4", x: 0, y: 3600, w: 600, l: 1000 }
+                    { id: 1, name: "西装前身-1", x: 400, y: 0, w: 800, l: 1200 },
+                    { id: 2, name: "西装前身-2", x: 1200, y: 0, w: 800, l: 1200 },
+                    { id: 3, name: "西装前身-3", x: 400, y: 1580, w: 800, l: 1200 },
+                    { id: 4, name: "西装前身-4", x: 1200, y: 1580, w: 800, l: 1200 },
+                    { id: 5, name: "西装前身-5", x: 400, y: 3330, w: 800, l: 1200 },
+                    { id: 6, name: "西装前身-6", x: 1200, y: 3330, w: 800, l: 1200 }
                 ],
                 remnants: [
-                    { id: "REM-01", status: "右侧余料料头", x: 1600, y: 1000, w: 400, l: 2600, area: 1.04, hasDefect: false },
-                    { id: "REM-02", status: "中部规避料头", x: 800, y: 1000, w: 800, l: 600, area: 0.48, hasDefect: false },
-                    { id: "REM-03", status: "卷尾整幅料头", x: 0, y: 4600, w: 2000, l: 400, area: 0.80, hasDefect: false }
+                    { id: "REM-DEF-01", status: "带疵料头 (避让#1色斑)", x: 400, y: 1200, w: 1600, l: 380, area: 0.608, hasDefect: true },
+                    { id: "REM-DEF-02", status: "带疵料头 (避让#2抽纱)", x: 400, y: 2780, w: 1600, l: 550, area: 0.880, hasDefect: true },
+                    { id: "REM-SIDE-01", status: "左侧可用料头", x: 0, y: 0, w: 400, l: 4530, area: 1.812, hasDefect: false },
+                    { id: "REM-TAIL-01", status: "卷尾修齐料头", x: 0, y: 4530, w: 2000, l: 470, area: 0.940, hasDefect: false }
                 ],
                 cuts: [
-                    { step: 1, type: "横切", pos: 1000, start: 800, end: 2000, desc: "第1横切：分离第1排裁片与中部余料" },
-                    { step: 2, type: "纵切", pos: 800, start: 0, end: 1200, desc: "纵切分离裁片A-1" },
-                    { step: 3, type: "纵切", pos: 1400, start: 0, end: 1000, desc: "纵切分离裁片B-1与B-2" },
-                    { step: 4, type: "横切", pos: 1600, start: 0, end: 2000, desc: "避让疵点1，横切开启第2加工区" },
-                    { step: 5, type: "纵切", pos: 1000, start: 1600, end: 2400, desc: "纵切出裁片C-1" },
-                    { step: 6, type: "横切", pos: 2400, start: 0, end: 1000, desc: "横切闭合裁片C-1" },
-                    { step: 7, type: "横切", pos: 2600, start: 0, end: 1800, desc: "横切开启第3加工区" },
-                    { step: 8, type: "纵切", pos: 800, start: 2400, end: 3600, desc: "纵切出裁片A-2" },
-                    { step: 9, type: "横切", pos: 3400, start: 800, end: 1800, desc: "横切闭合裁片C-2" },
-                    { step: 10, type: "横切", pos: 3600, start: 0, end: 800, desc: "横切闭合裁片A-2" },
-                    { step: 11, type: "纵切", pos: 600, start: 3600, end: 4600, desc: "纵切出裁片B-4" },
-                    { step: 12, type: "横切", pos: 4600, start: 0, end: 2000, desc: "横切分离成品区与母卷尾部整料料头" }
+                    { step: 1, type: "横切", pos: 4530, start: 0, end: 2000, desc: "第1阶段横切：截断工位有效加工区(4.53m)，切出卷尾0.47m完好料头" },
+                    { step: 2, type: "纵切", pos: 400, start: 0, end: 4530, desc: "第2阶段纵切：一刀切出左侧0.4m×4.53m通长可用料头" },
+                    { step: 3, type: "横切", pos: 1200, start: 400, end: 2000, desc: "第3阶段横切：避让#1瑕疵(色斑)，切断并闭合顶排2件大片成品" },
+                    { step: 4, type: "纵切", pos: 1200, start: 0, end: 1200, desc: "纵切分离顶排左/右两件西装大片" },
+                    { step: 5, type: "横切", pos: 1580, start: 400, end: 2000, desc: "第3阶段横切：隔离#1带疵料头(1.6m×0.38m)，开启中排加工区" },
+                    { step: 6, type: "横切", pos: 2780, start: 400, end: 2000, desc: "第3阶段横切：避让#2瑕疵(抽纱)，切断并闭合中排2件大片成品" },
+                    { step: 7, type: "纵切", pos: 1200, start: 1580, end: 2780, desc: "纵切分离中排左/右两件西装大片" },
+                    { step: 8, type: "横切", pos: 3330, start: 400, end: 2000, desc: "第3阶段横切：隔离#2带疵料头(1.6m×0.55m)，开启底排加工区" },
+                    { step: 9, type: "纵切", pos: 1200, start: 3330, end: 4530, desc: "纵切分离底排左/右两件西装大片" }
                 ],
-                deductLen: 4600, pieceArea: 5.64, remArea: 2.32, wasteArea: 1.24, totalArea: 9.20,
-                engine: "PackingSolver 2D (Tree Search & Highs)"
+                deductLen: 4530, pieceArea: 5.76, remArea: 4.24, wasteArea: 0.00, totalArea: 10.00,
+                engine: "PackingSolver (C++ 2D-Guillotine & HiGHS)"
             }
         };
 
