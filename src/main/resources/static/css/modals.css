@@ -127,3 +127,41 @@
     justify-content: space-between;
     align-items: center;
 }
+
+/* A4 车间现场工单专用打印样式规则 */
+@media print {
+    body * {
+        visibility: hidden !important;
+    }
+    #printable-cut-ticket-area, #printable-cut-ticket-area * {
+        visibility: visible !important;
+    }
+    #printable-cut-ticket-area {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 15mm !important;
+        box-shadow: none !important;
+        border: none !important;
+        background: #ffffff !important;
+        color: #000000 !important;
+    }
+    .settings-modal-overlay {
+        background: transparent !important;
+        position: static !important;
+        display: block !important;
+    }
+    .settings-modal-dialog {
+        border: none !important;
+        box-shadow: none !important;
+        background: transparent !important;
+        max-width: 100% !important;
+        width: 100% !important;
+        height: auto !important;
+    }
+    .settings-modal-header, .settings-footer {
+        display: none !important;
+    }
+}

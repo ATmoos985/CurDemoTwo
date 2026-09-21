@@ -64,8 +64,25 @@ import {
 
 import {
     optimizeCurrentToolpath, restoreOriginalToolpath,
-    toggleToolpathOptimization, renderToolpathUI
+    toggleToolpathOptimization, renderToolpathUI, calculateCycleTime
 } from './plugins/toolpath/toolpath-optimizer.js';
+
+import {
+    toggleMeasureTool, clearAllMeasurements
+} from './plugins/cad/cad-measure.js';
+
+import {
+    initNestingKeyboardShortcuts, getSelectedPieceId, setSelectedPieceId
+} from './plugins/cad/cad-interactive-nesting.js';
+
+import {
+    generateGCode, generateDXF, openExportModal, closeExportModal,
+    switchExportTab, copyExportPreview, openCutTicketModal, closeCutTicketModal
+} from './plugins/export/nc-dxf-exporter.js';
+
+import {
+    startContinuousSim, pauseContinuousSim, resetContinuousSim, toggleSimSpeed
+} from './plugins/cut-player/cut-animator.js';
 
 // ==========================================
 // 1. 注册核心事件总线监听 (Microkernel Event Wiring)
@@ -149,6 +166,17 @@ bus.on('toolpath:restored', () => {
     renderToolpathUI();
 });
 
+bus.on('piece:moved', (payload) => {
+    // 裁片在画布上手动微调后，动态重新计算切线、刀路与对账指标
+    state.isToolpathOptimized = false;
+    state.toolpathStats = null;
+    state.originalCutsBackup = null;
+    renderScene();
+    renderToolpathUI();
+    recalculateRollStats();
+    updateDemandCompletionFromPieces();
+});
+
 // ==========================================
 // 2. 导出面向全局 DOM 与 Inline Onclick 的统一命名空间
 // ==========================================
@@ -176,6 +204,10 @@ const camApp = {
     stepCut,
     playCuts,
     pauseCuts,
+    startContinuousSim,
+    pauseContinuousSim,
+    resetContinuousSim,
+    toggleSimSpeed,
     clearStationCuts,
     resetAllRollCuts,
     advanceBed,
@@ -210,10 +242,44 @@ const camApp = {
     optimizeCurrentToolpath,
     restoreOriginalToolpath,
     toggleToolpathOptimization,
-    renderToolpathUI
+    renderToolpathUI,
+    calculateCycleTime,
+    toggleMeasureTool,
+    clearAllMeasurements,
+    getSelectedPieceId,
+    setSelectedPieceId,
+    openExportModal,
+    closeExportModal,
+    switchExportTab,
+    copyExportPreview,
+    openCutTicketModal,
+    closeCutTicketModal,
+    generateGCode,
+    generateDXF
 };
 
 window.camApp = camApp;
+window.cutApp = window.cutApp || {};
+window.cutApp.plugins = {
+    export: {
+        openExportModal, closeExportModal, switchExportTab,
+        copyExportPreview, openCutTicketModal, closeCutTicketModal,
+        generateGCode, generateDXF
+    },
+    measure: {
+        toggleMeasureTool, clearAllMeasurements
+    },
+    nesting: {
+        getSelectedPieceId, setSelectedPieceId
+    },
+    toolpath: {
+        optimizeCurrentToolpath, restoreOriginalToolpath,
+        toggleToolpathOptimization, renderToolpathUI, calculateCycleTime
+    },
+    animator: {
+        stepCut, startContinuousSim, pauseContinuousSim, resetContinuousSim, toggleSimSpeed
+    }
+};
 
 // 直接映射到 window 顶级对象，确保原生 HTML 中的所有 onclick="fn()" 100% 正常运行
 Object.keys(camApp).forEach(key => {
@@ -235,6 +301,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     initKonva();
     setupRadarInteraction();
     initLayoutResizers();
+    initNestingKeyboardShortcuts();
     loadCase(4); // 默认打开 60米母卷全局全景演示
     await onMotherRollChange();
     refreshShelfRemnantsList();

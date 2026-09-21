@@ -10,6 +10,7 @@ import { drawRulers } from './cad-rulers.js';
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 import { getHomeCoordinates } from '../toolpath/toolpath-optimizer.js';
+import { makePieceInteractive } from './cad-interactive-nesting.js';
 
 export function renderScene() {
     if (!stage || !mainLayer) return;
@@ -158,10 +159,13 @@ export function renderScene() {
     });
 
     // -------------------------------------------------------------
-    // D. 绘制合格成品 (翡翠绿工程色)
+    // D. 绘制合格成品 (翡翠绿工程色，支持交互拖拽、精确微调与干涉碰撞检测)
     // -------------------------------------------------------------
     (data.pieces || []).forEach((p) => {
-        const pGroup = new Konva.Group();
+        const pGroup = new Konva.Group({
+            x: p.x,
+            y: p.y
+        });
         const pFill = isDark ? "#065f46" : "#ecfdf5";
         const pStroke = isDark ? "#10b981" : "#059669";
         const pTitleFill = isDark ? "#ecfdf5" : "#065f46";
@@ -169,25 +173,29 @@ export function renderScene() {
         const pGrainFill = isDark ? "#6ee7b7" : "#059669";
 
         pGroup.add(new Konva.Rect({
-            x: p.x, y: p.y, width: p.w, height: p.l,
+            x: 0, y: 0, width: p.w, height: p.l,
             fill: pFill, stroke: pStroke, strokeWidth: 3,
             shadowColor: isDark ? "#059669" : "#cbd5e1", shadowBlur: 4,
             shadowOpacity: isDark ? 0.6 : 0.25
         }));
         pGroup.add(new Konva.Text({
-            x: p.x + p.w / 2 - 120, y: p.y + p.l / 2 - 25,
+            x: p.w / 2 - 120, y: p.l / 2 - 25,
             text: p.name, width: 240, align: "center",
             fontSize: 26, fill: pTitleFill, fontStyle: "bold"
         }));
         pGroup.add(new Konva.Text({
-            x: p.x + p.w / 2 - 120, y: p.y + p.l / 2 + 8,
+            x: p.w / 2 - 120, y: p.l / 2 + 8,
             text: `${p.w} × ${p.l} mm`, width: 240, align: "center",
             fontSize: 20, fill: pSubFill, fontFamily: "monospace"
         }));
         pGroup.add(new Konva.Text({
-            x: p.x + 10, y: p.y + 10,
+            x: 10, y: 10,
             text: "经向 (Length)", fontSize: 16, fill: pGrainFill
         }));
+
+        // 注入工业级交互式排料微调与干涉检测
+        makePieceInteractive(pGroup, p, data);
+
         pieceGroup.add(pGroup);
     });
 

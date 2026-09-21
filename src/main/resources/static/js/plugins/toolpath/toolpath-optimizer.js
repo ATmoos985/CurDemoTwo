@@ -263,6 +263,44 @@ function solveLocalSegmentTSP(rawCuts, homeX, homeY, respectPrecedence) {
 }
 
 /**
+ * 计算加工节拍与工时生产成本预估
+ */
+export function calculateCycleTime(data, stats) {
+    const cuts = data.cuts || [];
+    const pieces = data.pieces || [];
+    const cutDist = stats ? stats.cutDistance : cuts.reduce((sum, c) => sum + (c.type === "横切" ? Math.abs((c.end || 0) - (c.start || 0)) : Math.abs((c.end || 0) - (c.start || 0))), 0);
+    const airDist = stats ? (state.isToolpathOptimized ? stats.optimizedAirDistance : stats.originalAirDistance) : 10000;
+    const cutCount = cuts.length;
+
+    // 工业加工动力学参数 (标定)
+    const cutFeedMmS = 4000 / 60;      // 66.7 mm/s (进给速度 4000 mm/min)
+    const rapidFeedMmS = 15000 / 60;  // 250 mm/s (快移速度 15000 mm/min)
+    const actionDelayS = 0.3;          // 提落刀延时 0.3s/次
+
+    const tCut = cutDist / cutFeedMmS;
+    const tRapid = airDist / rapidFeedMmS;
+    const tAction = cutCount * actionDelayS;
+    const totalSeconds = Math.round(tCut + tRapid + tAction + 2); // 包含 2 秒真空台吸附启动
+
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    const cycleTimeStr = mins > 0 ? `${mins}分${secs}秒` : `${secs}秒`;
+
+    const uph = totalSeconds > 0 ? Math.round((3600 / totalSeconds) * Math.max(1, pieces.length)) : 0;
+
+    return {
+        cutDistance: cutDist,
+        airDistance: airDist,
+        cutCount: cutCount,
+        tCut: Math.round(tCut),
+        tRapid: Math.round(tRapid),
+        totalSeconds: totalSeconds,
+        cycleTimeStr: cycleTimeStr,
+        uph: uph
+    };
+}
+
+/**
  * 渲染刀路优化统计与控制条
  */
 export function renderToolpathUI() {
@@ -282,15 +320,29 @@ export function renderToolpathUI() {
 
     const isOpt = state.isToolpathOptimized;
     const stats = state.toolpathStats;
+    const data = state.getCurrentCaseData();
+    const cycle = calculateCycleTime(data, stats);
 
     if (!isOpt || !stats) {
         container.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                 <div style="font-size: 11px; color: var(--text-muted);">
                     起刀停靠位: <b style="color: #f59e0b;">右下角原点</b> | 状态: <span style="color:#94a3b8;">原始刀序</span>
                 </div>
                 <button class="tool-btn active" style="font-size: 11px; padding: 3px 8px; background: #0284c7;" onclick="window.camApp.toggleToolpathOptimization()">
-                    ⚡ 一键右下角刀路优化
+                    一键右下角刀路优化
+                </button>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; background: rgba(2, 132, 199, 0.05); border: 1px dashed rgba(2, 132, 199, 0.25); border-radius: 4px; padding: 4px 8px;">
+                <span>预估节拍: <b>${cycle.cycleTimeStr}</b> (纯切${cycle.tCut}s | 空刀${cycle.tRapid}s)</span>
+                <span style="color: #0284c7;">产能: ~${cycle.uph} 件/小时</span>
+            </div>
+            <div style="display: flex; gap: 6px; margin-top: 6px;">
+                <button class="tool-btn" style="flex: 1; font-size: 10.5px; padding: 3px 0; background: #0284c7; color: #ffffff;" onclick="window.cutApp.plugins.export.openExportModal('gcode')">
+                    导出机床代码 (CNC/DXF)
+                </button>
+                <button class="tool-btn" style="flex: 1; font-size: 10.5px; padding: 3px 0; background: #d97706; color: #ffffff;" onclick="window.cutApp.plugins.export.openCutTicketModal()">
+                    生成现场工单 (Cut Ticket)
                 </button>
             </div>
         `;
@@ -309,7 +361,7 @@ export function renderToolpathUI() {
                     </button>
                 </div>
             </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 4px; padding: 6px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; font-size: 10.5px; background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 4px; padding: 6px;">
                 <div>
                     <span style="color: var(--text-muted);">空刀快移: </span>
                     <span style="text-decoration: line-through; color: #94a3b8;">${(stats.originalAirDistance/1000).toFixed(2)}m</span>
@@ -320,13 +372,21 @@ export function renderToolpathUI() {
                     <b style="color: #0284c7;">-${(stats.savedAirDistance/1000).toFixed(2)}m (${stats.savingRatio}%)</b>
                 </div>
                 <div>
-                    <span style="color: var(--text-muted);">起刀点: </span>
-                    <span style="font-family: monospace; color: var(--text-main); font-weight: 600;">(X:${stats.homeX}, Y:${stats.homeY})</span>
+                    <span style="color: var(--text-muted);">机床加工节拍: </span>
+                    <b style="color: #10b981;">${cycle.cycleTimeStr}</b>
                 </div>
                 <div>
-                    <span style="color: var(--text-muted);">有效切割: </span>
-                    <span style="font-family: monospace; color: var(--text-main);">${(stats.cutDistance/1000).toFixed(2)}m</span>
+                    <span style="color: var(--text-muted);">生产效率: </span>
+                    <b style="color: #0284c7;">~${cycle.uph} 件/小时</b>
                 </div>
+            </div>
+            <div style="display: flex; gap: 6px; margin-top: 6px;">
+                <button class="tool-btn" style="flex: 1; font-size: 10.5px; padding: 3px 0; background: #0284c7; color: #ffffff;" onclick="window.cutApp.plugins.export.openExportModal('gcode')">
+                    导出机床代码 (CNC/DXF)
+                </button>
+                <button class="tool-btn" style="flex: 1; font-size: 10.5px; padding: 3px 0; background: #d97706; color: #ffffff;" onclick="window.cutApp.plugins.export.openCutTicketModal()">
+                    生成现场工单 (Cut Ticket)
+                </button>
             </div>
         `;
     }

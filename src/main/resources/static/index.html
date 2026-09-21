@@ -25,6 +25,10 @@
         </div>
         <div class="header-actions">
             <span style="font-size: 12px; color: var(--text-muted);">规范文档：<code>布料切割与料头管理方案 V1.1</code></span>
+            <button class="tool-btn" id="btn-measure-tool" onclick="toggleMeasureTool()" title="在画布上任意两点间精密测量尺寸标注与间隙">CAD 测量尺</button>
+            <button class="tool-btn" onclick="clearAllMeasurements()" title="清除画布上所有测距标注线">清空测距</button>
+            <button class="tool-btn active" style="background:#0284c7; font-weight:600;" onclick="openExportModal('gcode')" title="生成并导出数控机床 G-Code 代码与 AutoCAD DXF 图纸">导出机床代码 (CNC/DXF)</button>
+            <button class="tool-btn active" style="background:#d97706; font-weight:600;" onclick="openCutTicketModal()" title="生成并打印车间现场裁切任务卡与裁片贴标单">工单打印 (A4)</button>
             <button class="tool-btn" id="btn-toggle-left-bar" onclick="toggleSidebar('left')" title="一键收起/展开左侧面板">收起左栏</button>
             <button class="tool-btn" id="btn-toggle-right-bar" onclick="toggleSidebar('right')" title="一键收起/展开右侧面板">收起右栏</button>
             <button class="tool-btn remnant-shelf-btn" onclick="openRemnantModal()" title="查看现场料头库存与扫码识别">现场料头库 (<span id="header-remnant-count">3</span>)</button>
@@ -32,7 +36,7 @@
             <button class="tool-btn" onclick="openSettingsModal()" id="btn-settings" title="系统参数与工艺配置中心">设置</button>
             <button class="tool-btn" onclick="fitView()">适合视口</button>
             <button class="tool-btn" onclick="resetZoom()">1:1 实际比例</button>
-            <button class="tool-btn active" style="background:#0284c7; font-weight:600;" onclick="triggerSolve()">执行 C++ 真实求解排料</button>
+            <button class="tool-btn active" style="background:#059669; font-weight:600;" onclick="triggerSolve()">执行 C++ 真实求解排料</button>
         </div>
     </header>
 
@@ -392,12 +396,17 @@
             </div>
 
             <!-- 切刀工艺演播条 (CAM Cut Player) -->
-            <div class="playback-bar">
-                <span class="step-indicator" id="cut-sim-status">刀序演播: 全部显示</span>
-                <button class="playback-btn" onclick="stepCut(-999)">|&lt; 重置</button>
-                <button class="playback-btn" onclick="stepCut(-1)">上一刀</button>
-                <button class="playback-btn" onclick="stepCut(1)">下一刀</button>
-                <button class="playback-btn" onclick="stepCut(999)">&gt;| 显示全刀</button>
+            <div class="playback-bar" style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                <span class="step-indicator" id="cut-sim-status" style="min-width: 200px;">刀序演播: 全部显示</span>
+                <button class="playback-btn" id="btn-sim-play-pause" style="background: #0284c7; color: #fff; font-weight: 700; border-color: #0369a1;" onclick="startContinuousSim()" title="开启 60fps 真机平滑切削动画仿真">▶ 连续仿真</button>
+                <button class="playback-btn" id="btn-sim-speed" style="background: rgba(2, 132, 199, 0.12); color: var(--accent-blue); font-weight: 600;" onclick="toggleSimSpeed()" title="切换仿真倍速 (1x / 2x / 5x / 10x)">2x 仿真</button>
+                <button class="playback-btn" onclick="resetContinuousSim()" title="复位到起始原料状态">|&lt; 重置</button>
+                <button class="playback-btn" onclick="stepCut(-1)" title="后退一刀">&lt; 上一刀</button>
+                <button class="playback-btn" onclick="stepCut(1)" title="单步推演下一刀">下一刀 &gt;</button>
+                <button class="playback-btn" onclick="stepCut(999)" title="一键展示全部刀序">&gt;| 显示全刀</button>
+                <span style="font-size: 11px; color: var(--text-muted); margin-left: auto;">
+                    CAD微调操作：鼠标拖拽移动裁片 | [←↑→↓] 微调 5mm (Shift 20mm) | [R] 旋转 90° | 触碰瑕疵/出界自动红框干涉报警
+                </span>
             </div>
         </section>
 
