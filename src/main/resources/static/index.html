@@ -2448,30 +2448,49 @@
             });
 
             // -------------------------------------------------------------
-            // C. 绘制回收料头 (Remnants)
+            // C. 绘制回收料头 (Remnants) - 工业高对比度增强
             // -------------------------------------------------------------
             (data.remnants || []).forEach((rem) => {
-                const fillCol = rem.hasDefect ?
-                    (isDark ? "rgba(245, 158, 11, 0.35)" : "rgba(245, 158, 11, 0.16)") :
-                    (isDark ? "rgba(2, 132, 199, 0.35)" : "rgba(2, 132, 199, 0.14)");
-                const strokeCol = rem.hasDefect ?
-                    (isDark ? "#d97706" : "#b45309") :
-                    (isDark ? "#0284c7" : "#0369a1");
+                const isDefect = rem.hasDefect;
+                const fillCol = isDefect ?
+                    (isDark ? "rgba(245, 158, 11, 0.40)" : "rgba(245, 158, 11, 0.22)") :
+                    (isDark ? "rgba(2, 132, 199, 0.40)" : "rgba(2, 132, 199, 0.20)");
+                const strokeCol = isDefect ?
+                    (isDark ? "#f59e0b" : "#b45309") :
+                    (isDark ? "#38bdf8" : "#0284c7");
+                const badgeBg = isDefect ? "#78350f" : "#0c4a6e";
+                const badgeTextCol = isDefect ? "#fef3c7" : "#e0f2fe";
+
                 const rGroup = new Konva.Group();
+                // 1. 底色矩形与加粗虚线框
                 rGroup.add(new Konva.Rect({
                     x: rem.x, y: rem.y, width: rem.w, height: rem.l,
-                    fill: fillCol, stroke: strokeCol, strokeWidth: 3, dash: [10, 6]
+                    fill: fillCol, stroke: strokeCol, strokeWidth: 3, dash: [12, 6]
                 }));
-                rGroup.add(new Konva.Text({
-                    x: rem.x + 10, y: rem.y + 12,
-                    text: `${rem.id}: ${rem.status}`,
-                    fontSize: 22, fill: strokeCol, fontStyle: "bold"
-                }));
-                rGroup.add(new Konva.Text({
-                    x: rem.x + 10, y: rem.y + 40,
-                    text: `规格: ${rem.w}×${rem.l}mm | 面积: ${rem.area.toFixed(2)}m²`,
-                    fontSize: 18, fill: strokeCol
-                }));
+
+                // 2. 标题徽标胶囊背景
+                const badgeW = Math.min(rem.w - 12, 380);
+                if (badgeW > 60) {
+                    rGroup.add(new Konva.Rect({
+                        x: rem.x + 6, y: rem.y + 6, width: badgeW, height: 32,
+                        fill: badgeBg, cornerRadius: 4, opacity: 0.92
+                    }));
+                    rGroup.add(new Konva.Text({
+                        x: rem.x + 12, y: rem.y + 12,
+                        text: `【在库料头】${rem.id}: ${rem.status}`,
+                        fontSize: 16, fill: badgeTextCol, fontStyle: "bold"
+                    }));
+                }
+
+                // 3. 规格与工艺原因清晰标注
+                let note = isDefect ? "避让瑕疵规整切出" : (rem.w <= 500 ? "主片超宽规整保留资产" : "订单满额结余在库资产");
+                if (rem.w > 120 && rem.l > 80) {
+                    rGroup.add(new Konva.Text({
+                        x: rem.x + 10, y: rem.y + (badgeW > 60 ? 44 : 12),
+                        text: `${rem.w}×${rem.l}mm (${rem.area.toFixed(2)}m²) | ${note}`,
+                        fontSize: 15, fill: strokeCol, fontStyle: "bold"
+                    }));
+                }
                 remnantGroup.add(rGroup);
             });
 
@@ -3727,7 +3746,7 @@
             const data = SCENARIOS[currentCaseId];
             const isRemnantMode = (currentCutMode === "remnant");
 
-            let rollW, bedL, totalL, winStartY, demands, sourceRemnantId, feedPortType, rollId, rollModel;
+            let rollW, bedL, totalL, winStartY, demands, sourceRemnantId, feedPortType, rollId, rollModel, activeDemands;
 
             if (isRemnantMode) {
                 if (!loadedRemnant) {
@@ -3739,6 +3758,7 @@
                     alert("【排料提示】请至少在左侧添加 1 项料头裁片套裁需求！");
                     return;
                 }
+                activeDemands = demands;
                 rollW = loadedRemnant.width;
                 bedL = loadedRemnant.length;
                 totalL = loadedRemnant.length;
@@ -3748,18 +3768,6 @@
                 rollId = loadedRemnant.sourceRollId || (document.getElementById("sel-mother-roll-id") ? document.getElementById("sel-mother-roll-id").value : "ROLL-2026-0920");
                 rollModel = loadedRemnant.materialBatch || "在库料头";
             } else {
-                demands = getDemandsFromUI();
-                if (demands.length === 0) {
-                    alert("【排料提示】请至少在左侧添加 1 项母卷开卷裁片需求！");
-                    return;
-                }
-                const activeDemands = demands.filter(d => d.demand > 0);
-                if (activeDemands.length === 0) {
-                    alert("【订单需求已全部完成】\n当前订单池中所有裁片均已完成排料！\n\n您可以：\n1. 点击【+ 增裁片】或在现有裁片上增加【计划件数】；\n2. 点击【清空整卷已排】从头开始新一轮接续排料模拟。");
-                    return;
-                }
-                demands = activeDemands;
-
                 rollW = parseFloat(document.getElementById("inp-roll-w").value) || data.rollW || 2000;
                 bedL = parseFloat(document.getElementById("inp-bed-l").value) || data.bedL || 5000;
                 winStartY = parseFloat(document.getElementById("inp-window-start-y").value) || data.windowStartY || 0;
@@ -3768,6 +3776,62 @@
                 feedPortType = "roll";
                 rollId = document.getElementById("sel-mother-roll-id") ? document.getElementById("sel-mother-roll-id").value : "ROLL-2026-0920";
                 rollModel = document.getElementById("lbl-roll-model-desc") ? document.getElementById("lbl-roll-model-desc").innerText : "标准面料";
+
+                const tempWinEndY = winStartY + bedL;
+
+                // 核心修复：统计【非当前工位且已锁定的外部裁片】对各需求的实际占用
+                // 当前工位内部即将被重排覆盖的旧裁片，绝不能当作“已完成”扣减，必须把配额释放给本次工位求解！
+                const isPieceInCurrentStation = (p) => {
+                    const pMid = p.y + p.l / 2;
+                    return (pMid >= winStartY && pMid < tempWinEndY);
+                };
+                const retainedPieces = (data.pieces || []).filter(p => !isPieceInCurrentStation(p));
+
+                const externalUsageMap = new Map();
+                (data.demands || []).forEach((d, idx) => {
+                    const dId = d.id || (idx + 1);
+                    const dName = (d.name || "").trim().toLowerCase();
+                    const dW = d.w || d.width || 0;
+                    const dL = d.l || d.length || 0;
+
+                    const usedCount = retainedPieces.filter(p => {
+                        if (p.demandId && p.demandId === dId) return true;
+                        if (dW > 0 && dL > 0) {
+                            const sizeMatch = (Math.abs(p.w - dW) < 1.5 && Math.abs(p.l - dL) < 1.5) ||
+                                              (Math.abs(p.w - dL) < 1.5 && Math.abs(p.l - dW) < 1.5);
+                            if (sizeMatch) return true;
+                        }
+                        const pName = (p.name || "").trim().toLowerCase();
+                        if (pName && dName) {
+                            return pName === dName || pName.startsWith(dName + "-") || pName.startsWith(dName + "_");
+                        }
+                        return false;
+                    }).length;
+                    externalUsageMap.set(dId, usedCount);
+                });
+
+                const rawDemands = getDemandsFromUI();
+                if (rawDemands.length === 0) {
+                    alert("【排料提示】请至少在左侧添加 1 项母卷开卷裁片需求！");
+                    return;
+                }
+
+                activeDemands = rawDemands.map((d, idx) => {
+                    const dId = d.id || (idx + 1);
+                    const extUsed = externalUsageMap.get(dId) || 0;
+                    const totalCount = (d.count !== undefined ? d.count : (d.demand !== undefined ? d.demand : 1));
+                    const availableQuota = Math.max(0, totalCount - extUsed);
+                    return {
+                        ...d,
+                        demand: availableQuota
+                    };
+                }).filter(d => d.demand > 0);
+
+                if (activeDemands.length === 0) {
+                    alert("【订单需求已全部完成】\n当前订单池中所有裁片均已在其他工位完成排料！\n\n您可以：\n1. 点击【+ 增裁片】或在现有裁片上增加【计划件数】；\n2. 点击【清空整卷已排】从头开始新一轮接续排料模拟。");
+                    return;
+                }
+                demands = activeDemands;
             }
 
             const winEndY = winStartY + bedL;
@@ -3848,12 +3912,18 @@
                             const retainedPieces = (data.pieces || []).filter(p => !isPieceInCurrentStation(p));
                             const newPieces = (result.pieces || []).map((p, idx) => {
                                 // 寻找匹配的 demand 确立 demandId 并回填未乱码的品类名称
-                                let matchedDemand = activeDemands.find(ad =>
-                                    (Math.abs(p.w - ad.w) < 1.5 && Math.abs(p.l - ad.l) < 1.5) ||
-                                    (Math.abs(p.w - ad.l) < 1.5 && Math.abs(p.l - ad.w) < 1.5)
-                                );
+                                let matchedDemand = (activeDemands || []).find(ad => ad.id === p.demandId);
                                 if (!matchedDemand) {
-                                    matchedDemand = activeDemands.find(ad => (ad.name || "").trim() === (p.name || "").trim());
+                                    matchedDemand = (activeDemands || []).find(ad =>
+                                        (Math.abs(p.w - ad.w) < 1.5 && Math.abs(p.l - ad.l) < 1.5) ||
+                                        (Math.abs(p.w - ad.l) < 1.5 && Math.abs(p.l - ad.w) < 1.5)
+                                    );
+                                }
+                                if (!matchedDemand) {
+                                    matchedDemand = (activeDemands || []).find(ad => (ad.name || "").trim() === (p.name || "").trim());
+                                }
+                                if (!matchedDemand && data.demands) {
+                                    matchedDemand = data.demands.find(d => d.id === p.demandId);
                                 }
                                 return {
                                     ...p,
