@@ -1480,11 +1480,14 @@
                 <!-- 4. 本次开卷裁切需求清单 (Demands) —— 弹性撑满可用空间！ -->
                 <div class="panel-section collapsible" id="card-demands" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 160px;">
                     <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开裁片需求清单">
-                        <div class="section-title-wrap">
+                        <div class="section-title-wrap" style="display: flex; align-items: center; gap: 6px;">
                             <span class="collapse-arrow">▼</span>
-                            <span>本次排产裁片需求清单 (Demands)</span>
+                            <span>本次排产裁片需求 (Demands)</span>
+                            <span id="demands-summary-badge" style="font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600; background: #eff6ff; color: #0284c7; border: 1px solid #38bdf8;">核销对账中</span>
                         </div>
-                        <button class="tool-btn btn-add-demand" onclick="event.stopPropagation(); addDemandRow()">+ 增裁片</button>
+                        <div style="display: flex; gap: 4px; align-items: center;">
+                            <button class="tool-btn btn-add-demand" onclick="event.stopPropagation(); addDemandRow()" title="添加新裁片需求">+ 增裁片</button>
+                        </div>
                     </div>
                     <div class="section-content" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;">
                         <div id="demands-container" style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 80px;">
@@ -1493,11 +1496,27 @@
                     </div>
                 </div>
 
-                <!-- 5. 底部执行母卷开卷排料大按钮 -->
+                <!-- 5. 底部执行母卷接续搭切排料与多工位控制 -->
                 <div class="panel-section action-footer-section">
-                    <button class="big-solve-btn roll" onclick="triggerSolve()">
-                        执行母卷开卷排料 (扣减母卷 ΔL，切出新料头入库)
+                    <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+                        <button class="tool-btn" style="flex: 1; height: 30px; background: var(--bg-hover); color: var(--text-main); border: 1px solid var(--border-color); font-weight: 500; font-size: 11px;" onclick="advanceBed(-1)" title="红框回退展开上一工位 (-5m)">
+                            ◀ 上一工位 (-5m)
+                        </button>
+                        <button class="tool-btn" style="flex: 1; height: 30px; background: var(--bg-hover); color: var(--text-main); border: 1px solid var(--border-color); font-weight: 500; font-size: 11px;" onclick="advanceBed(1)" title="红框前进展开下一工位 (+5m)">
+                            下一工位 (+5m) ▶
+                        </button>
+                    </div>
+                    <button class="big-solve-btn roll" onclick="triggerSolve()" title="在当前红框工位排料并保留其余工位已切成果">
+                        在当前红框工位排料 (接续搭切 · 保留历史)
                     </button>
+                    <div style="display: flex; gap: 6px; margin-top: 6px;">
+                        <button class="tool-btn" style="flex: 1; height: 26px; background: rgba(239, 68, 68, 0.08); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.25); font-size: 11px;" onclick="clearStationCuts()" title="仅清除当前红框范围内的裁片与切刀">
+                            清除本工位排料
+                        </button>
+                        <button class="tool-btn" style="flex: 1; height: 26px; background: rgba(239, 68, 68, 0.08); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.25); font-size: 11px;" onclick="resetAllRollCuts()" title="清空整卷已排裁片，从头开始">
+                            清空整卷已排
+                        </button>
+                    </div>
                 </div>
 
                 <!-- 6. Word 预设算例快速载入 (可折叠) -->
@@ -1894,19 +1913,27 @@
                     { id: 8, x: 300, y: 53800, w: 120, h: 180, margin: 30, desc: "进料第8疵点 (未展开 53.8m 飞纱)" }
                 ],
                 demands: [
-                    { name: "裁片A", w: 800, l: 1200, count: 2 },
-                    { name: "裁片B", w: 600, l: 1000, count: 4 },
-                    { name: "裁片C", w: 1000, l: 800, count: 2 }
+                    { name: "西装前身-大片", w: 800, l: 1200, count: 12 },
+                    { name: "西装后身-通背", w: 850, l: 1300, count: 10 },
+                    { name: "西裤前身-主片", w: 700, l: 1100, count: 16 },
+                    { name: "西裤后身-主片", w: 750, l: 1150, count: 16 },
+                    { name: "上衣大袖-外片", w: 600, l: 1000, count: 20 },
+                    { name: "上衣小袖-内片", w: 450, l: 600, count: 20 },
+                    { name: "西服驳头-挂面", w: 350, l: 850, count: 18 },
+                    { name: "衬衫领衬-硬片", w: 250, l: 480, count: 24 },
+                    { name: "斜纹口袋布", w: 400, l: 400, count: 32 },
+                    { name: "裤腰衬条-横裁", w: 200, l: 900, count: 20 }
                 ],
+                cutIntervals: [{ start: 0, end: 5000 }],
                 pieces: [
-                    { id: 1, name: "裁片A-1", x: 1200, y: 3800, w: 800, l: 1200 },
-                    { id: 2, name: "裁片B-1", x: 600, y: 4000, w: 600, l: 1000 },
-                    { id: 3, name: "裁片B-2", x: 0, y: 4000, w: 600, l: 1000 },
-                    { id: 4, name: "裁片C-1", x: 1000, y: 3000, w: 1000, l: 800 },
-                    { id: 5, name: "裁片B-3", x: 400, y: 3000, w: 600, l: 1000 },
-                    { id: 6, name: "裁片A-2", x: 1200, y: 1800, w: 800, l: 1200 },
-                    { id: 7, name: "裁片C-2", x: 200, y: 2200, w: 1000, l: 800 },
-                    { id: 8, name: "裁片B-4", x: 1400, y: 800, w: 600, l: 1000 }
+                    { id: 1, name: "西装前身-大片", x: 1200, y: 3800, w: 800, l: 1200 },
+                    { id: 2, name: "上衣大袖-外片", x: 600, y: 4000, w: 600, l: 1000 },
+                    { id: 3, name: "上衣大袖-外片", x: 0, y: 4000, w: 600, l: 1000 },
+                    { id: 4, name: "西裤前身-主片", x: 1000, y: 3000, w: 1000, l: 800 },
+                    { id: 5, name: "上衣大袖-外片", x: 400, y: 3000, w: 600, l: 1000 },
+                    { id: 6, name: "西装前身-大片", x: 1200, y: 1800, w: 800, l: 1200 },
+                    { id: 7, name: "西裤前身-主片", x: 200, y: 2200, w: 1000, l: 800 },
+                    { id: 8, name: "上衣大袖-外片", x: 1400, y: 800, w: 600, l: 1000 }
                 ],
                 remnants: [
                     { id: "REM-01", status: "左上角余料料头", x: 0, y: 0, w: 1400, l: 2200, area: 3.08, hasDefect: false },
@@ -1915,17 +1942,17 @@
                 ],
                 cuts: [
                     { step: 1, type: "横切", pos: 4000, start: 0, end: 1200, desc: "第1横切：分离底部裁片排" },
-                    { step: 2, type: "纵切", pos: 1200, start: 1800, end: 5000, desc: "纵切分离右侧裁片A-1与A-2" },
-                    { step: 3, type: "纵切", pos: 600, start: 4000, end: 5000, desc: "纵切分离底排裁片B-1与B-2" },
-                    { step: 4, type: "横切", pos: 3800, start: 1200, end: 2000, desc: "横切闭合右下角裁片A-1" },
+                    { step: 2, type: "纵切", pos: 1200, start: 1800, end: 5000, desc: "纵切分离右侧裁片西装前身" },
+                    { step: 3, type: "纵切", pos: 600, start: 4000, end: 5000, desc: "纵切分离底排大袖裁片" },
+                    { step: 4, type: "横切", pos: 3800, start: 1200, end: 2000, desc: "横切闭合右下角前身成品" },
                     { step: 5, type: "横切", pos: 3000, start: 200, end: 2000, desc: "横切开启中部加工区" },
-                    { step: 6, type: "纵切", pos: 1000, start: 3000, end: 3800, desc: "纵切出裁片C-1" },
-                    { step: 7, type: "纵切", pos: 400, start: 3000, end: 4000, desc: "纵切出裁片B-3" },
-                    { step: 8, type: "横切", pos: 1800, start: 1200, end: 2000, desc: "横切闭合裁片A-2" },
-                    { step: 9, type: "纵切", pos: 200, start: 2200, end: 3000, desc: "纵切出裁片C-2" },
+                    { step: 6, type: "纵切", pos: 1000, start: 3000, end: 3800, desc: "纵切出西裤前身主片" },
+                    { step: 7, type: "纵切", pos: 400, start: 3000, end: 4000, desc: "纵切出上衣大袖" },
+                    { step: 8, type: "横切", pos: 1800, start: 1200, end: 2000, desc: "横切闭合前身成品" },
+                    { step: 9, type: "纵切", pos: 200, start: 2200, end: 3000, desc: "纵切出西裤主片" },
                     { step: 10, type: "横切", pos: 2200, start: 0, end: 1200, desc: "避让疵点横切，切出左侧料头" },
-                    { step: 11, type: "纵切", pos: 1400, start: 0, end: 1800, desc: "纵切出裁片B-4" },
-                    { step: 12, type: "横切", pos: 800, start: 1400, end: 2000, desc: "横切闭合裁片B-4并切出末端料头" }
+                    { step: 11, type: "纵切", pos: 1400, start: 0, end: 1800, desc: "纵切出上衣大袖" },
+                    { step: 12, type: "横切", pos: 800, start: 1400, end: 2000, desc: "横切闭合大袖并切出末端料头" }
                 ],
                 deductLen: 5000, pieceArea: 5.64, remArea: 3.72, wasteArea: 0.64, totalArea: 10.00,
                 engine: "PackingSolver 2D (Tree Search & Highs)"
@@ -3031,6 +3058,7 @@
             let nextY = currentY + delta * bedL;
             nextY = Math.max(0, Math.min(totalL - bedL, nextY));
             updateFabricScrollPosition(nextY);
+            resetToBedView();
         }
 
         // ==========================================
@@ -3250,34 +3278,212 @@
             });
         }
 
+        // ==========================================
+        // 7.1 需求核销与全局排料状态计算函数
+        // ==========================================
+        function updateDemandCompletionFromPieces(data) {
+            if (!data || !data.demands) return;
+            const pieces = data.pieces || [];
+            data.demands.forEach(d => {
+                const dName = (d.name || "").trim().toLowerCase();
+                const matched = pieces.filter(p => {
+                    const pName = (p.name || "").trim().toLowerCase();
+                    return pName === dName || pName.startsWith(dName + "-") || pName.startsWith(dName + "_");
+                });
+                d.completed = matched.length;
+            });
+        }
+
+        function addOrMergeInterval(intervals, start, end) {
+            const list = [...(intervals || []), { start, end }];
+            list.sort((a, b) => a.start - b.start);
+            const merged = [];
+            for (const cur of list) {
+                if (merged.length === 0) {
+                    merged.push({ start: cur.start, end: cur.end });
+                } else {
+                    const prev = merged[merged.length - 1];
+                    if (cur.start <= prev.end) {
+                        prev.end = Math.max(prev.end, cur.end);
+                    } else {
+                        merged.push({ start: cur.start, end: cur.end });
+                    }
+                }
+            }
+            return merged;
+        }
+
+        function recalculateRollStats(data) {
+            if (!data) return;
+            const rollW = data.rollW || 2000;
+            const intervals = data.cutIntervals || [];
+            
+            let totalCutLength = 0;
+            if (intervals.length > 0) {
+                totalCutLength = intervals.reduce((acc, inv) => acc + (inv.end - inv.start), 0);
+            } else if (data.pieces && data.pieces.length > 0) {
+                const maxY = Math.max(...data.pieces.map(p => p.y + p.l));
+                totalCutLength = Math.max(maxY, data.bedL || 5000);
+            }
+
+            data.totalArea = (rollW * totalCutLength) / 1000000.0;
+            data.pieceArea = (data.pieces || []).reduce((acc, p) => acc + (p.w * p.l) / 1000000.0, 0);
+            data.remArea = (data.remnants || []).reduce((acc, r) => acc + (r.area !== undefined ? r.area : (r.w * r.l)/1000000.0), 0);
+            data.wasteArea = Math.max(0, data.totalArea - data.pieceArea - data.remArea);
+
+            if (data.pieces && data.pieces.length > 0) {
+                data.deductLen = Math.max(
+                    ...data.pieces.map(p => p.y + p.l),
+                    ...((data.remnants || []).map(r => r.y + r.l)),
+                    totalCutLength
+                );
+            } else {
+                data.deductLen = 0;
+            }
+        }
+
+        function clearStationCuts() {
+            const data = SCENARIOS[currentCaseId];
+            if (!data) return;
+            const winStartY = parseFloat(document.getElementById("inp-window-start-y").value) || data.windowStartY || 0;
+            const bedL = parseFloat(document.getElementById("inp-bed-l").value) || data.bedL || 5000;
+            const winEndY = winStartY + bedL;
+
+            const oldCount = (data.pieces || []).length;
+            data.pieces = (data.pieces || []).filter(p => (p.y + p.l <= winStartY || p.y >= winEndY));
+            const removedPieces = oldCount - data.pieces.length;
+
+            data.cuts = (data.cuts || []).filter(c => {
+                if (c.type === "横切") return (c.pos < winStartY || c.pos > winEndY);
+                return (c.end <= winStartY || c.start >= winEndY);
+            });
+            data.cuts.forEach((c, idx) => { c.step = idx + 1; });
+            data.remnants = (data.remnants || []).filter(r => (r.y + r.l <= winStartY || r.y >= winEndY));
+
+            if (data.cutIntervals) {
+                data.cutIntervals = data.cutIntervals.filter(inv => inv.end <= winStartY || inv.start >= winEndY);
+            }
+
+            recalculateRollStats(data);
+            updateDemandCompletionFromPieces(data);
+
+            renderDemandsUI(data.demands);
+            renderScene();
+            drawRulers();
+            updateUIInfo();
+            updateStatusBar();
+
+            alert(`【工位排料已清除】\n已移除当前红框工位 [${winStartY} ~ ${winEndY} mm] 内的 ${removedPieces} 件裁片与切刀。\n其余工位已切成果已完整保留！`);
+        }
+
+        function resetAllRollCuts() {
+            if (!confirm("确定要清空整卷所有工位的已排裁片与切刀记录吗？\n这将恢复为未开卷裁切的整料状态，所有需求件数核销将归零。")) {
+                return;
+            }
+            const data = SCENARIOS[currentCaseId];
+            if (!data) return;
+            data.pieces = [];
+            data.cuts = [];
+            data.remnants = [];
+            data.cutIntervals = [];
+            data.deductLen = 0;
+            data.pieceArea = 0;
+            data.remArea = 0;
+            data.wasteArea = 0;
+            data.totalArea = 0;
+            if (data.demands) {
+                data.demands.forEach(d => { d.completed = 0; });
+            }
+
+            renderDemandsUI(data.demands);
+            renderScene();
+            drawRulers();
+            updateUIInfo();
+            updateStatusBar();
+            alert("【整卷排料已重置】\n整卷母卷已清空排料，您可以从头开始在任意红框工位重新模拟接续排料！");
+        }
+
         function renderDemandsUI(demands) {
             const container = document.getElementById("demands-container");
             if (!container) return;
             container.innerHTML = "";
             if (!demands || demands.length === 0) {
                 container.innerHTML = "<div style='color:var(--text-muted);font-size:11px;padding:4px;'>暂无需求 (可点击上方+增裁片)</div>";
+                const badge = document.getElementById("demands-summary-badge");
+                if (badge) badge.innerText = "0 件";
                 return;
             }
+
+            let totalPlanAll = 0;
+            let totalCutAll = 0;
+
             demands.forEach((dem, idx) => {
                 const row = document.createElement("div");
                 row.className = "item-row";
                 const wVal = dem.w !== undefined ? dem.w : (dem.width !== undefined ? dem.width : 500);
                 const lVal = dem.l !== undefined ? dem.l : (dem.length !== undefined ? dem.length : 500);
-                const cVal = dem.count !== undefined ? dem.count : (dem.demand !== undefined ? dem.demand : 1);
+                const totalCount = dem.count !== undefined ? dem.count : (dem.demand !== undefined ? dem.demand : 1);
+                const completed = dem.completed !== undefined ? dem.completed : 0;
+                const remaining = Math.max(0, totalCount - completed);
+
+                totalPlanAll += totalCount;
+                totalCutAll += completed;
+
+                row.setAttribute("data-id", idx + 1);
+                row.setAttribute("data-completed", completed);
+                row.setAttribute("data-total", totalCount);
+
+                const isDone = (completed >= totalCount && totalCount > 0);
+                const isProgress = (!isDone && completed > 0);
+
+                let statusBadge = "";
+                let progressPct = Math.min(100, Math.round((completed / Math.max(1, totalCount)) * 100));
+                let progressColor = "#0284c7";
+
+                if (isDone) {
+                    statusBadge = `<span style="font-size:10px; font-weight:600; padding:1px 5px; border-radius:3px; background:#ecfdf5; color:#059669; border:1px solid #10b981;">已满额 (${completed}/${totalCount})</span>`;
+                    progressColor = "#10b981";
+                } else if (isProgress) {
+                    statusBadge = `<span style="font-size:10px; font-weight:600; padding:1px 5px; border-radius:3px; background:#eff6ff; color:#0284c7; border:1px solid #38bdf8;">已切 ${completed}/${totalCount}</span>`;
+                    progressColor = "#0284c7";
+                } else {
+                    statusBadge = `<span style="font-size:10px; padding:1px 5px; border-radius:3px; background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1;">待排 0/${totalCount}</span>`;
+                    progressColor = "#94a3b8";
+                }
+
                 row.innerHTML = `
-                    <div class="item-row-header">
-                        <input type="text" class="dem-name" value="${dem.name || ('裁片-' + (idx + 1))}">
-                        <button class="del-btn" onclick="this.closest('.item-row').remove(); onParamChange();">×</button>
+                    <div class="item-row-header" style="display:flex; justify-content:space-between; align-items:center;">
+                        <input type="text" class="dem-name" value="${dem.name || ('裁片-' + (idx + 1))}" style="font-weight:600; flex:1; margin-right:6px;" onchange="onParamChange()">
+                        ${statusBadge}
+                        <button class="del-btn" onclick="this.closest('.item-row').remove(); onParamChange();" title="删除此裁片需求" style="margin-left:6px;">×</button>
                     </div>
-                    <div class="mini-input-group">
-                        <span>宽:</span><input type="number" class="mini-input dem-w" value="${wVal}" onchange="onParamChange()">
-                        <span>长:</span><input type="number" class="mini-input dem-l" value="${lVal}" onchange="onParamChange()">
-                        <span>件数:</span><input type="number" class="mini-input dem-count" value="${cVal}" style="width:40px;" onchange="onParamChange()">
+                    <div class="mini-input-group" style="margin-top:4px;">
+                        <span>宽:</span><input type="number" class="mini-input dem-w" value="${wVal}" onchange="onParamChange()" style="width:52px;">
+                        <span>长:</span><input type="number" class="mini-input dem-l" value="${lVal}" onchange="onParamChange()" style="width:52px;">
+                        <span>计划:</span><input type="number" class="mini-input dem-count" value="${totalCount}" min="1" style="width:42px; font-weight:bold;" onchange="onParamChange()" title="总计划需求件数">
+                        <span style="font-size:10px; color:var(--text-muted); margin-left:auto;">待切: <b style="color:${remaining > 0 ? 'var(--accent-blue)' : 'var(--accent-green)'}; font-weight:700;">${remaining}</b> 件</span>
+                    </div>
+                    <div style="margin-top:5px; background:var(--border-color); height:4px; border-radius:2px; overflow:hidden;">
+                        <div style="background:${progressColor}; width:${progressPct}%; height:100%;"></div>
                     </div>
                     <div class="demand-remnant-box" id="rem-hint-${idx}" style="display: none;"></div>
                 `;
                 container.appendChild(row);
             });
+
+            const headerTitleBadge = document.getElementById("demands-summary-badge");
+            if (headerTitleBadge) {
+                headerTitleBadge.innerText = `已切 ${totalCutAll} / 总 ${totalPlanAll} 件`;
+                if (totalCutAll >= totalPlanAll && totalPlanAll > 0) {
+                    headerTitleBadge.style.background = "#ecfdf5";
+                    headerTitleBadge.style.color = "#059669";
+                    headerTitleBadge.style.borderColor = "#10b981";
+                } else {
+                    headerTitleBadge.style.background = "#eff6ff";
+                    headerTitleBadge.style.color = "#0284c7";
+                    headerTitleBadge.style.borderColor = "#38bdf8";
+                }
+            }
         }
 
         function addDefectRow() {
@@ -3310,15 +3516,23 @@
             const id = container.querySelectorAll(".item-row").length + 1;
             const row = document.createElement("div");
             row.className = "item-row";
+            row.setAttribute("data-id", id);
+            row.setAttribute("data-completed", 0);
+            row.setAttribute("data-total", 4);
             row.innerHTML = `
-                <div class="item-row-header">
-                    <input type="text" class="dem-name" value="新裁片-${id}">
-                    <button class="del-btn" onclick="this.closest('.item-row').remove(); onParamChange();">×</button>
+                <div class="item-row-header" style="display:flex; justify-content:space-between; align-items:center;">
+                    <input type="text" class="dem-name" value="新裁片-${id}" style="font-weight:600; flex:1; margin-right:6px;" onchange="onParamChange()">
+                    <span style="font-size:10px; padding:1px 5px; border-radius:3px; background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1;">待排 0/4</span>
+                    <button class="del-btn" onclick="this.closest('.item-row').remove(); onParamChange();" style="margin-left:6px;">×</button>
                 </div>
-                <div class="mini-input-group">
-                    <span>宽:</span><input type="number" class="mini-input dem-w" value="600" onchange="onParamChange()">
-                    <span>长:</span><input type="number" class="mini-input dem-l" value="800" onchange="onParamChange()">
-                    <span>件数:</span><input type="number" class="mini-input dem-count" value="1" style="width:40px;" onchange="onParamChange()">
+                <div class="mini-input-group" style="margin-top:4px;">
+                    <span>宽:</span><input type="number" class="mini-input dem-w" value="600" onchange="onParamChange()" style="width:52px;">
+                    <span>长:</span><input type="number" class="mini-input dem-l" value="800" onchange="onParamChange()" style="width:52px;">
+                    <span>计划:</span><input type="number" class="mini-input dem-count" value="4" min="1" style="width:42px; font-weight:bold;" onchange="onParamChange()">
+                    <span style="font-size:10px; color:var(--text-muted); margin-left:auto;">待切: <b style="color:var(--accent-blue); font-weight:700;">4</b> 件</span>
+                </div>
+                <div style="margin-top:5px; background:var(--border-color); height:4px; border-radius:2px; overflow:hidden;">
+                    <div style="background:#94a3b8; width:0%; height:100%;"></div>
                 </div>
             `;
             container.appendChild(row);
@@ -3345,11 +3559,24 @@
             const rows = document.querySelectorAll("#demands-container .item-row");
             rows.forEach((r, idx) => {
                 const id = idx + 1;
-                const name = r.querySelector(".dem-name").value.trim() || ("裁片-" + id);
-                const width = parseFloat(r.querySelector(".dem-w").value) || 500;
-                const length = parseFloat(r.querySelector(".dem-l").value) || 500;
-                const demand = parseInt(r.querySelector(".dem-count").value) || 1;
-                list.push({ id, name, width, length, demand, allowRotation: false });
+                const name = (r.querySelector(".dem-name") ? r.querySelector(".dem-name").value.trim() : "") || ("裁片-" + id);
+                const width = parseFloat(r.querySelector(".dem-w") ? r.querySelector(".dem-w").value : 500) || 500;
+                const length = parseFloat(r.querySelector(".dem-l") ? r.querySelector(".dem-l").value : 500) || 500;
+                const totalCount = parseInt(r.querySelector(".dem-count") ? r.querySelector(".dem-count").value : 1) || 1;
+                const completed = parseInt(r.getAttribute("data-completed")) || 0;
+                const remaining = Math.max(0, totalCount - completed);
+                list.push({
+                    id,
+                    name,
+                    w: width,
+                    l: length,
+                    width: width,
+                    length: length,
+                    count: totalCount,
+                    demand: remaining,
+                    completed: completed,
+                    allowRotation: false
+                });
             });
             return list;
         }
@@ -3376,6 +3603,11 @@
 
         function onParamChange() {
             onOriginParamChange();
+            const data = SCENARIOS[currentCaseId];
+            if (data) {
+                data.demands = getDemandsFromUI();
+                updateDemandCompletionFromPieces(data);
+            }
             checkAllDemandsRemnantMatch();
         }
 
@@ -3426,6 +3658,9 @@
             document.getElementById("sel-first-stage").value = data.firstStageOrientation || "horizontal";
             document.getElementById("sel-allow-rotation").value = data.allowRotation ? "1" : "0";
 
+            updateDemandCompletionFromPieces(data);
+            recalculateRollStats(data);
+
             renderDefectsUI(data.globalDefects || data.defects || []);
             renderDemandsUI(data.demands);
 
@@ -3474,6 +3709,13 @@
                     alert("【排料提示】请至少在左侧添加 1 项母卷开卷裁片需求！");
                     return;
                 }
+                const activeDemands = demands.filter(d => d.demand > 0);
+                if (activeDemands.length === 0) {
+                    alert("【订单需求已全部完成】\n当前订单池中所有裁片均已完成排料！\n\n您可以：\n1. 点击【+ 增裁片】或在现有裁片上增加【计划件数】；\n2. 点击【清空整卷已排】从头开始新一轮接续排料模拟。");
+                    return;
+                }
+                demands = activeDemands;
+
                 rollW = parseFloat(document.getElementById("inp-roll-w").value) || data.rollW || 2000;
                 bedL = parseFloat(document.getElementById("inp-bed-l").value) || data.bedL || 5000;
                 winStartY = parseFloat(document.getElementById("inp-window-start-y").value) || data.windowStartY || 0;
@@ -3543,39 +3785,69 @@
                         data.firstStageOrientation = firstStageOrientation;
                         data.allowRotation = allowRotation;
                         data.globalDefects = allDefects;
-                        data.demands = demands;
 
-                        // 将求解出的成品、切刀、料头映射回全局坐标
-                        data.pieces = (result.pieces || []).map(p => ({
-                            ...p,
-                            y: p.y + winStartY
-                        }));
+                        if (isRemnantMode) {
+                            data.pieces = (result.pieces || []).map(p => ({ ...p, y: p.y }));
+                            data.cuts = (result.cuts || []).map(c => ({ ...c }));
+                            data.remnants = (result.remnants || []).map(r => ({ ...r }));
+                            data.deductLen = 0.0;
+                            data.pieceArea = result.pieceArea;
+                            data.remArea = result.remArea;
+                            data.wasteArea = result.wasteArea;
+                            data.totalArea = result.totalArea;
+                        } else {
+                            // 接续搭切核心：保留不在当前工位 [winStartY, winEndY] 内的历史裁片
+                            const retainedPieces = (data.pieces || []).filter(p => (p.y + p.l <= winStartY || p.y >= winEndY));
+                            const newPieces = (result.pieces || []).map((p, idx) => ({
+                                ...p,
+                                id: retainedPieces.length + idx + 1,
+                                y: p.y + winStartY
+                            }));
+                            data.pieces = [...retainedPieces, ...newPieces].sort((a, b) => a.y - b.y || a.x - b.x);
 
-                        data.cuts = (result.cuts || []).map(c => {
-                            const isHoriz = (c.type === "横切");
-                            return {
-                                ...c,
-                                pos: isHoriz ? (c.pos + winStartY) : c.pos,
-                                start: !isHoriz ? (c.start + winStartY) : c.start,
-                                end: !isHoriz ? (c.end + winStartY) : c.end
-                            };
-                        });
+                            // 保留不在当前工位内的历史切刀
+                            const retainedCuts = (data.cuts || []).filter(c => {
+                                if (c.type === "横切") {
+                                    return (c.pos < winStartY || c.pos > winEndY);
+                                } else {
+                                    return (c.end <= winStartY || c.start >= winEndY);
+                                }
+                            });
+                            const newCuts = (result.cuts || []).map((c, idx) => {
+                                const isHoriz = (c.type === "横切");
+                                return {
+                                    ...c,
+                                    pos: isHoriz ? (c.pos + winStartY) : c.pos,
+                                    start: !isHoriz ? (c.start + winStartY) : c.start,
+                                    end: !isHoriz ? (c.end + winStartY) : c.end
+                                };
+                            });
+                            data.cuts = [...retainedCuts, ...newCuts];
+                            data.cuts.forEach((c, idx) => { c.step = idx + 1; });
 
-                        data.remnants = (result.remnants || []).map(r => ({
-                            ...r,
-                            y: r.y + winStartY
-                        }));
+                            // 保留不在当前工位内的历史料头
+                            const retainedRemnants = (data.remnants || []).filter(r => (r.y + r.l <= winStartY || r.y >= winEndY));
+                            const newRemnants = (result.remnants || []).map(r => ({
+                                ...r,
+                                y: r.y + winStartY
+                            }));
+                            data.remnants = [...retainedRemnants, ...newRemnants];
 
-                        data.deductLen = isRemnantMode ? 0.0 : ((result.deductLen || bedL) + winStartY);
-                        data.pieceArea = result.pieceArea;
-                        data.remArea = result.remArea;
-                        data.wasteArea = result.wasteArea;
-                        data.totalArea = result.totalArea;
+                            // 记录已切工位区间并重新核算全局面积与扣料
+                            if (!data.cutIntervals) data.cutIntervals = [];
+                            data.cutIntervals = addOrMergeInterval(data.cutIntervals, winStartY, winEndY);
+
+                            recalculateRollStats(data);
+                            updateDemandCompletionFromPieces(data);
+                            renderDemandsUI(data.demands);
+                        }
+
                         data.engine = `${result.engine} [${elapsed}ms]`;
 
                         currentCutStepLimit = 999;
                         renderScene();
                         resetToBedView();
+                        updateUIInfo();
 
                         // 自动刷新料头在库货架与统计
                         refreshShelfRemnantsList();
@@ -3587,16 +3859,21 @@
                                 result.derivedRemnants.map(d => `  · ${d.id} (${d.width}×${d.length}mm, ${d.location})`).join("\n");
                         }
 
+                        const stationCount = (data.cutIntervals || []).length;
+                        const totalCutPieces = (data.pieces || []).length;
+                        const thisBedPieces = (result.pieces || []).length;
+
                         alert(`【C++ 真实排料求解成功】\n` +
-                            `工位模式: ${isRemnantMode ? '模式二：料头复用精益切割 (母卷 0 消耗)' : '模式一：母卷连续开卷排产'}\n` +
+                            `工位模式: ${isRemnantMode ? '模式二：料头复用精益切割 (母卷 0 消耗)' : '模式一：母卷连续开卷接续搭切'}\n` +
                             `母卷批号: ${rollId} (${rollModel})\n` +
+                            `当前工位: ${winStartY} ~ ${winEndY} mm (${(winStartY/1000).toFixed(1)}m ~ ${(winEndY/1000).toFixed(1)}m)\n` +
                             `起刀基准: 右下角 (靠右导轨对齐, 经向送料)\n` +
                             `计算引擎: ${result.engine} [${elapsed}ms]\n` +
                             `避让疵点: ${activeBedDefects.length} 处\n` +
-                            `生成成品: ${result.pieces.length} 件\n` +
-                            `下刀切断: ${result.cuts.length} 步直刀\n` +
-                            `母卷消耗: ${data.deductLen} mm ${isRemnantMode ? '(0 消耗保护)' : '(实扣母卷)'}\n` +
-                            `面积守恒: ${result.totalArea.toFixed(3)} m² (100% 严密守恒)${derivedMsg}`);
+                            `本工位产出: ${thisBedPieces} 件 (整卷累计保留: ${totalCutPieces} 件)\n` +
+                            `切刀工步: 本次 ${result.cuts.length} 步 (整卷累计: ${(data.cuts||[]).length} 步直刀)\n` +
+                            `母卷加工: 累计 ${(data.deductLen/1000).toFixed(1)}m (${stationCount} 个工位接续)\n` +
+                            `面积守恒: ${data.totalArea.toFixed(3)} m² (100% 严密守恒)${derivedMsg}`);
                         return;
                     } else {
                         alert("【求解器返回错误】\n" + (result.message || "未知原因"));
