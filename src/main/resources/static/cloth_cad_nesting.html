@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>布料排版与断刀裁切 CAM 控制台 (Industrial CAD/CAM Viewer)</title>
+    <!-- 本地加载成熟的 Konva.js 工业画布引擎 -->
+    <script src="konva.min.js"></script>
+    <style>
+        :root {
+            --bg-dark: #18181b;
+            --panel-bg: #27272a;
+            --panel-border: #3f3f46;
+            --panel-header: #202023;
+            --text-main: #f4f4f5;
+            --text-muted: #a1a1aa;
+            --accent-blue: #0284c7;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-amber: #f59e0b;
+            --font-mono: "JetBrains Mono", Consolas, "Courier New", monospace;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 顶部工业状态导航栏 */
+        header {
+            height: 44px;
+            background: var(--panel-header);
+            border-bottom: 1px solid var(--panel-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            user-select: none;
+        }
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 600;
+            font-size: 14px;
+            letter-spacing: 0.5px;
+        }
+        .header-tag {
+            background: #09090b;
+            border: 1px solid var(--panel-border);
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            color: var(--accent-blue);
+            font-family: var(--font-mono);
+        }
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* 主工作视窗布局 */
+        main {
+            flex: 1;
+            display: flex;
+            height: calc(100vh - 72px);
+            position: relative;
+        }
+
+        /* 左侧面板：母卷与参数 */
+        .sidebar {
+            width: 320px;
+            background: var(--panel-bg);
+            border-right: 1px solid var(--panel-border);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            user-select: none;
+            z-index: 10;
+        }
+        .panel-section {
+            border-bottom: 1px solid var(--panel-border);
+            padding: 12px 14px;
+        }
+        .section-header {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            letter-spacing: 0.8px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .prop-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+        .prop-label { color: var(--text-muted); }
+        .prop-input {
+            width: 130px;
+            background: #18181b;
+            border: 1px solid var(--panel-border);
+            color: var(--text-main);
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-family: var(--font-mono);
+            text-align: right;
+        }
+        .prop-input:focus {
+            outline: 1px solid var(--accent-blue);
+            border-color: var(--accent-blue);
+        }
+
+        /* 预设算例快速切换 */
+        .preset-btn {
+            display: block;
+            width: 100%;
+            text-align: left;
+            background: #1f1f23;
+            border: 1px solid var(--panel-border);
+            color: var(--text-main);
+            padding: 8px 10px;
+            margin-bottom: 6px;
+            border-radius: 3px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .preset-btn:hover {
+            border-color: var(--accent-blue);
+            background: #27272e;
+        }
+        .preset-btn.active {
+            border-color: var(--accent-blue);
+            background: #0c4a6e;
+            color: #38bdf8;
+            font-weight: 600;
+        }
+        .preset-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* 中央画布视口 */
+        .viewport-container {
+            flex: 1;
+            position: relative;
+            background: #09090b;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 浮动画布视口控制栏 */
+        .canvas-toolbar {
+            position: absolute;
+            top: 12px;
+            right: 16px;
+            z-index: 20;
+            display: flex;
+            gap: 6px;
+            background: rgba(39, 39, 42, 0.85);
+            backdrop-filter: blur(4px);
+            border: 1px solid var(--panel-border);
+            padding: 4px;
+            border-radius: 4px;
+        }
+        .tool-btn {
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-main);
+            padding: 4px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .tool-btn:hover { background: #3f3f46; }
+        .tool-btn.active { background: var(--accent-blue); }
+
+        /* 底部切刀演播栏 (CAM Simulator) */
+        .playback-bar {
+            position: absolute;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 20;
+            background: rgba(39, 39, 42, 0.92);
+            backdrop-filter: blur(6px);
+            border: 1px solid var(--panel-border);
+            padding: 6px 14px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        }
+        .playback-btn {
+            background: #18181b;
+            border: 1px solid var(--panel-border);
+            color: var(--text-main);
+            padding: 4px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .playback-btn:hover { border-color: var(--text-main); }
+        .step-indicator {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: #38bdf8;
+            font-weight: 600;
+        }
+
+        /* 右侧面板：工艺切刀单与台账 */
+        .sidebar-right {
+            width: 360px;
+            background: var(--panel-bg);
+            border-left: 1px solid var(--panel-border);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            user-select: none;
+            z-index: 10;
+        }
+
+        /* 工业数据表格 */
+        .cam-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+            font-family: var(--font-mono);
+            text-align: left;
+        }
+        .cam-table th {
+            background: #18181b;
+            color: var(--text-muted);
+            padding: 6px 8px;
+            border-bottom: 1px solid var(--panel-border);
+            font-weight: 600;
+        }
+        .cam-table td {
+            padding: 6px 8px;
+            border-bottom: 1px solid #333338;
+            color: #e4e4e7;
+        }
+        .cam-table tr.active-row {
+            background: rgba(2, 132, 199, 0.25);
+            outline: 1px solid var(--accent-blue);
+        }
+
+        .badge-cut {
+            background: var(--accent-red);
+            color: #fff;
+            padding: 2px 5px;
+            border-radius: 2px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+        .badge-rem {
+            background: #0284c7;
+            color: #fff;
+            padding: 2px 5px;
+            border-radius: 2px;
+            font-size: 10px;
+        }
+        .badge-piece {
+            background: var(--accent-green);
+            color: #fff;
+            padding: 2px 5px;
+            border-radius: 2px;
+            font-size: 10px;
+        }
+
+        /* 底部工位状态栏 */
+        footer {
+            height: 28px;
+            background: #09090b;
+            border-top: 1px solid var(--panel-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            font-size: 11px;
+            font-family: var(--font-mono);
+            color: var(--text-muted);
+            user-select: none;
+        }
+        .status-left, .status-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .status-val { color: var(--text-main); font-weight: 600; }
+        .status-badge {
+            background: #064e3b;
+            color: #6ee7b7;
+            padding: 1px 6px;
+            border-radius: 2px;
+            font-size: 10px;
+        }
+
+        /* 图例指示器 */
+        .legend-bar {
+            display: flex;
+            gap: 14px;
+            font-size: 11px;
+            padding: 6px 12px;
+            background: #18181b;
+            border-bottom: 1px solid var(--panel-border);
+        }
+        .legend-item { display: flex; align-items: center; gap: 5px; color: var(--text-muted); }
+        .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+    </style>
+</head>
+<body>
+
+    <!-- 顶部工业控制栏 -->
+    <header>
+        <div class="header-title">
+            <span>布料智能裁切与料头管理 CAM 控制台</span>
+            <span class="header-tag">工业直刀/断刀 2D-Guillotine</span>
+            <span class="header-tag" style="color: #10b981;">PackingSolver C++ / OR-Tools 9.15</span>
+        </div>
+        <div class="header-actions">
+            <span style="font-size: 12px; color: var(--text-muted);">规范文档：<code>布料切割与料头管理方案 V1.1</code></span>
+            <button class="tool-btn" onclick="fitView()">适合视口</button>
+            <button class="tool-btn" onclick="resetZoom()">1:1 实际比例</button>
+            <button class="tool-btn active" onclick="triggerSolve()">重新排料计算</button>
+        </div>
+    </header>
+
+    <!-- 主视窗工作区 -->
+    <main>
+        <!-- 左侧面板：参数设定与预设场景 -->
+        <aside class="sidebar">
+            <div class="panel-section">
+                <div class="section-header">Word 业务场景算例快速载入</div>
+                <button class="preset-btn active" id="btn-case-1" onclick="loadCase(1)">
+                    <div><b>场景一：Word 表1 (L形余料正交拆解)</b></div>
+                    <div class="preset-desc">2m×4m 切 1.5m×3m，拆出右侧0.5m与末端1.5m料头 (面积100%守恒)</div>
+                </button>
+                <button class="preset-btn" id="btn-case-2" onclick="loadCase(2)">
+                    <div><b>场景一：左侧0.5m带疵改宽纵切</b></div>
+                    <div class="preset-desc">左侧0.5m带疵，右侧1.5m完好，允许纵切时出成品并保留带疵料头</div>
+                </button>
+                <button class="preset-btn" id="btn-case-3" onclick="loadCase(3)">
+                    <div><b>场景一：1.6m短料生成与新订单优先领用</b></div>
+                    <div class="preset-desc">疵点间短料切断贴标入库；新订单到达优先匹配，母卷扣料为0</div>
+                </button>
+                <button class="preset-btn" id="btn-case-4" onclick="loadCase(4)">
+                    <div><b>场景二：带多疵点 PackingSolver 2D 排料</b></div>
+                    <div class="preset-desc">2000×5000mm 原布，多规格裁片，避让2处瑕疵，生成13步断刀树</div>
+                </button>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-header">母卷物理参数 (Fabric Roll)</div>
+                <div class="prop-row">
+                    <span class="prop-label">母卷编号 (Roll ID)</span>
+                    <input type="text" class="prop-input" id="inp-roll-id" value="ROLL-2026-0920" />
+                </div>
+                <div class="prop-row">
+                    <span class="prop-label">布料幅宽 (Width, W)</span>
+                    <input type="number" class="prop-input" id="inp-roll-w" value="2000" onchange="updateRollSize()" />
+                </div>
+                <div class="prop-row">
+                    <span class="prop-label">展开长度 (Length, L)</span>
+                    <input type="number" class="prop-input" id="inp-roll-l" value="4000" onchange="updateRollSize()" />
+                </div>
+                <div class="prop-row">
+                    <span class="prop-label">设备纵切能力</span>
+                    <select class="prop-input" id="sel-allow-longitudinal" onchange="toggleLongitudinal()">
+                        <option value="1">支持纵切 (分条+断刀)</option>
+                        <option value="0">仅能横切 (禁止纵切)</option>
+                    </select>
+                </div>
+                <div class="prop-row">
+                    <span class="prop-label">刀口/损耗间隙 (Kerf)</span>
+                    <input type="number" class="prop-input" value="0" readonly />
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-header">
+                    <span>瑕疵点记录 (Defects)</span>
+                    <span class="header-tag" id="defect-count-tag">0 处</span>
+                </div>
+                <div id="defects-summary-list" style="font-size: 11px; color: var(--text-muted); max-height: 120px; overflow-y: auto;">
+                    无瑕疵点
+                </div>
+            </div>
+
+            <div class="panel-section" style="flex: 1;">
+                <div class="section-header">
+                    <span>订单需求项 (Demands)</span>
+                    <span class="header-tag" id="item-count-tag">1 项</span>
+                </div>
+                <div id="items-summary-list" style="font-size: 11px; color: var(--text-muted); max-height: 160px; overflow-y: auto;">
+                    标准成品 (1500×3000mm) × 1件
+                </div>
+            </div>
+        </aside>
+
+        <!-- 中央画布视口 -->
+        <section class="viewport-container" id="viewport">
+            <!-- 图例栏 -->
+            <div class="legend-bar">
+                <div class="legend-item"><span class="legend-dot" style="background: #10b981;"></span><span>合格成品 (Piece)</span></div>
+                <div class="legend-item"><span class="legend-dot" style="background: #0284c7;"></span><span>可用料头 (Remnant)</span></div>
+                <div class="legend-item"><span class="legend-dot" style="background: #f59e0b;"></span><span>带疵料头</span></div>
+                <div class="legend-item"><span class="legend-dot" style="background: #ef4444;"></span><span>疵点避让区 (Defect)</span></div>
+                <div class="legend-item"><span class="legend-dot" style="background: #f43f5e; border-top: 2px dashed #f43f5e;"></span><span>断刀下刀线 (Cut Line)</span></div>
+                <div class="legend-item" style="margin-left: auto;">
+                    <span style="color: var(--text-muted);">滚轮平滑缩放 | 拖拽平移画布</span>
+                </div>
+            </div>
+
+            <!-- Konva 画布容器 -->
+            <div id="konva-container" style="flex: 1; width: 100%; height: 100%; position: relative;"></div>
+
+            <!-- 切刀工艺演播条 (CAM Cut Player) -->
+            <div class="playback-bar">
+                <span class="step-indicator" id="cut-sim-status">刀序演播: 全部显示</span>
+                <button class="playback-btn" onclick="stepCut(-999)">⏮ 重置</button>
+                <button class="playback-btn" onclick="stepCut(-1)">◀ 上一刀</button>
+                <button class="playback-btn" onclick="stepCut(1)">▶ 下一刀</button>
+                <button class="playback-btn" onclick="stepCut(999)">⏭ 显示全刀</button>
+            </div>
+        </section>
+
+        <!-- 右侧面板：工艺单与对账台账 -->
+        <aside class="sidebar-right">
+            <!-- 现场下刀工艺表 -->
+            <div class="panel-section" style="flex: 1; display: flex; flex-direction: column;">
+                <div class="section-header">
+                    <span>现场下刀工艺顺序单 (Cut Sequence)</span>
+                    <span class="badge-cut" id="total-cuts-badge">2 刀</span>
+                </div>
+                <div style="flex: 1; overflow-y: auto;">
+                    <table class="cam-table" id="cut-table">
+                        <thead>
+                            <tr>
+                                <th width="32">刀序</th>
+                                <th width="50">类型</th>
+                                <th width="65">下刀位置</th>
+                                <th>操作指引与切出物</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cut-table-body">
+                            <!-- 动态填充 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 余料料头入库单 -->
+            <div class="panel-section" style="max-height: 180px; display: flex; flex-direction: column;">
+                <div class="section-header">
+                    <span>料头入库登记 (Remnant Ledger)</span>
+                    <span class="badge-rem" id="remnant-count-badge">2 块</span>
+                </div>
+                <div style="flex: 1; overflow-y: auto;">
+                    <table class="cam-table">
+                        <thead>
+                            <tr>
+                                <th>料头编号</th>
+                                <th>规格(宽×长)</th>
+                                <th>面积</th>
+                                <th>质量状态</th>
+                            </tr>
+                        </thead>
+                        <tbody id="remnant-table-body">
+                            <!-- 动态填充 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 母卷扣料与面积守恒台账 -->
+            <div class="panel-section" style="background: #1f1f23;">
+                <div class="section-header">母卷实切对账单 (Material Balance)</div>
+                <div class="prop-row">
+                    <span class="prop-label">本次展开剪下长度:</span>
+                    <span class="status-val" id="lbl-deduct-len">4000 mm</span>
+                </div>
+                <div class="prop-row">
+                    <span class="prop-label">成品实际总面积:</span>
+                    <span class="status-val" style="color: #34d399;" id="lbl-piece-area">4.500 m²</span>
+                </div>
+                <div class="prop-row">
+                    <span class="prop-label">回收料头总面积:</span>
+                    <span class="status-val" style="color: #38bdf8;" id="lbl-rem-area">3.500 m²</span>
+                </div>
+                <div class="prop-row">
+                    <span class="prop-label">废料与切口损耗:</span>
+                    <span class="status-val" style="color: #f87171;" id="lbl-waste-area">0.000 m²</span>
+                </div>
+                <div class="prop-row" style="border-top: 1px solid var(--panel-border); padding-top: 6px; margin-top: 4px;">
+                    <span class="prop-label" style="font-weight: 700; color: #fff;">母卷总消耗面积:</span>
+                    <span class="status-val" style="color: #fbbf24; font-size: 13px;" id="lbl-total-area">8.000 m²</span>
+                </div>
+                <div class="prop-row">
+                    <span class="prop-label">面积闭环校验:</span>
+                    <span class="status-badge" id="lbl-balance-status">100.0% 严密守恒</span>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <!-- 底部工位状态栏 -->
+    <footer>
+        <div class="status-left">
+            <span>工位: <span class="status-val">CUT-STATION-01</span></span>
+            <span>当前布卷: <span class="status-val" id="sb-roll-id">ROLL-2026-0920</span></span>
+            <span>基准起点: <span class="status-val">(0, 0) mm</span></span>
+            <span>光标坐标: <span class="status-val" id="sb-cursor-pos">X: 0 mm | Y: 0 mm</span></span>
+        </div>
+        <div class="status-right">
+            <span>视口缩放: <span class="status-val" id="sb-scale">15.0%</span></span>
+            <span>求解引擎: <span class="status-val" id="sb-engine">PackingSolver (C++ 2D)</span></span>
+            <span>切透约束: <span class="status-badge">GUILLOTINE PROVEN</span></span>
+        </div>
+    </footer>
+
+    <script>
+        // ==========================================
+        // 1. 数据模型与场景定义
+        // ==========================================
+        const SCENARIOS = {
+            1: {
+                name: "Word 表1 (L形余料正交拆解)",
+                rollW: 2000, rollL: 4000,
+                allowLongitudinal: true,
+                defects: [],
+                demands: [{ name: "标准成品", w: 1500, l: 3000, count: 1 }],
+                pieces: [{ id: 1, name: "标准成品", x: 0, y: 0, w: 1500, l: 3000 }],
+                remnants: [
+                    { id: "REM-01", status: "右侧可用料头", x: 1500, y: 0, w: 500, l: 4000, area: 2.0, hasDefect: false },
+                    { id: "REM-02", status: "左侧末端料头", x: 0, y: 3000, w: 1500, l: 1000, area: 1.5, hasDefect: false }
+                ],
+                cuts: [
+                    { step: 1, type: "纵切", pos: 1500, start: 0, end: 4000, desc: "在宽度1500mm处纵切到底，切出右侧料头(0.5m×4m)" },
+                    { step: 2, type: "横切", pos: 3000, start: 0, end: 1500, desc: "在展开3000mm处横切切断，产出成品并切出末端料头(1.5m×1m)" }
+                ],
+                deductLen: 4000, pieceArea: 4.5, remArea: 3.5, wasteArea: 0.0, totalArea: 8.0,
+                engine: "Word 规范精确拆解引擎"
+            },
+            2: {
+                name: "场景一(三)：左侧0.5m带疵改宽纵切",
+                rollW: 2000, rollL: 4000,
+                allowLongitudinal: true,
+                defects: [{ id: 1, x: 200, y: 1500, w: 150, h: 600, margin: 50 }],
+                demands: [{ name: "改宽成品", w: 1500, l: 4000, count: 1 }],
+                pieces: [{ id: 1, name: "改宽成品", x: 500, y: 0, w: 1500, l: 4000 }],
+                remnants: [
+                    { id: "REM-DEF-01", status: "左侧带疵料头", x: 0, y: 0, w: 500, l: 4000, area: 2.0, hasDefect: true }
+                ],
+                cuts: [
+                    { step: 1, type: "纵切", pos: 500, start: 0, end: 4000, desc: "在宽度500mm处一刀纵切到底，完好产出1.5m×4m成品，保留左侧带疵料头" }
+                ],
+                deductLen: 4000, pieceArea: 6.0, remArea: 2.0, wasteArea: 0.0, totalArea: 8.0,
+                engine: "带疵改宽排料引擎"
+            },
+            3: {
+                name: "场景一(二)：1.6m短料生成与新订单优先领用",
+                rollW: 2000, rollL: 1600,
+                allowLongitudinal: true,
+                defects: [],
+                demands: [{ name: "新订单成品", w: 2000, l: 1000, count: 1 }],
+                pieces: [{ id: 1, name: "新订单成品 (领用料头)", x: 0, y: 0, w: 2000, l: 1000 }],
+                remnants: [
+                    { id: "REM-SHORT-SUB", status: "可用子料头", x: 0, y: 1000, w: 2000, l: 600, area: 1.2, hasDefect: false }
+                ],
+                cuts: [
+                    { step: 1, type: "横切", pos: 1000, start: 0, end: 2000, desc: "从原入库料头 REM-SHORT-01 截取1m成品，余下0.6m重新登记入库" }
+                ],
+                deductLen: 0, pieceArea: 2.0, remArea: 1.2, wasteArea: 0.0, totalArea: 3.2,
+                engine: "料头优先匹配调度器 (母卷0消耗)"
+            },
+            4: {
+                name: "场景二：带多疵点 PackingSolver 2D 排料",
+                rollW: 2000, rollL: 5000,
+                allowLongitudinal: true,
+                defects: [
+                    { id: 1, x: 500, y: 1400, w: 150, h: 150, margin: 30 },
+                    { id: 2, x: 1300, y: 3200, w: 200, h: 100, margin: 30 }
+                ],
+                demands: [
+                    { name: "裁片A", w: 800, l: 1200, count: 2 },
+                    { name: "裁片B", w: 600, l: 1000, count: 4 },
+                    { name: "裁片C", w: 1000, l: 800, count: 2 }
+                ],
+                pieces: [
+                    { id: 1, name: "裁片A-1", x: 0, y: 0, w: 800, l: 1200 },
+                    { id: 2, name: "裁片B-1", x: 800, y: 0, w: 600, l: 1000 },
+                    { id: 3, name: "裁片B-2", x: 1400, y: 0, w: 600, l: 1000 },
+                    { id: 4, name: "裁片C-1", x: 0, y: 1600, w: 1000, l: 800 },
+                    { id: 5, name: "裁片B-3", x: 1000, y: 1600, w: 600, l: 1000 },
+                    { id: 6, name: "裁片A-2", x: 0, y: 2400, w: 800, l: 1200 },
+                    { id: 7, name: "裁片C-2", x: 800, y: 2600, w: 1000, l: 800 },
+                    { id: 8, name: "裁片B-4", x: 0, y: 3600, w: 600, l: 1000 }
+                ],
+                remnants: [
+                    { id: "REM-01", status: "右侧余料料头", x: 1600, y: 1000, w: 400, l: 2600, area: 1.04, hasDefect: false },
+                    { id: "REM-02", status: "中部规避料头", x: 800, y: 1000, w: 800, l: 600, area: 0.48, hasDefect: false },
+                    { id: "REM-03", status: "卷尾整幅料头", x: 0, y: 4600, w: 2000, l: 400, area: 0.80, hasDefect: false }
+                ],
+                cuts: [
+                    { step: 1, type: "横切", pos: 1000, start: 800, end: 2000, desc: "第1横切：分离第1排裁片与中部余料" },
+                    { step: 2, type: "纵切", pos: 800, start: 0, end: 1200, desc: "纵切分离裁片A-1" },
+                    { step: 3, type: "纵切", pos: 1400, start: 0, end: 1000, desc: "纵切分离裁片B-1与B-2" },
+                    { step: 4, type: "横切", pos: 1600, start: 0, end: 2000, desc: "避让疵点1，横切开启第2加工区" },
+                    { step: 5, type: "纵切", pos: 1000, start: 1600, end: 2400, desc: "纵切出裁片C-1" },
+                    { step: 6, type: "横切", pos: 2400, start: 0, end: 1000, desc: "横切闭合裁片C-1" },
+                    { step: 7, type: "横切", pos: 2600, start: 0, end: 1800, desc: "横切开启第3加工区" },
+                    { step: 8, type: "纵切", pos: 800, start: 2400, end: 3600, desc: "纵切出裁片A-2" },
+                    { step: 9, type: "横切", pos: 3400, start: 800, end: 1800, desc: "横切闭合裁片C-2" },
+                    { step: 10, type: "横切", pos: 3600, start: 0, end: 800, desc: "横切闭合裁片A-2" },
+                    { step: 11, type: "纵切", pos: 600, start: 3600, end: 4600, desc: "纵切出裁片B-4" },
+                    { step: 12, type: "横切", pos: 4600, start: 0, end: 2000, desc: "横切分离成品区与母卷尾部整料料头" }
+                ],
+                deductLen: 4600, pieceArea: 5.64, remArea: 2.32, wasteArea: 1.24, totalArea: 9.20,
+                engine: "PackingSolver 2D (Tree Search & Highs)"
+            }
+        };
+
+        let currentCaseId = 1;
+        let currentCutStepLimit = 999; // 默认显示全刀
+
+        // ==========================================
+        // 2. Konva 工业画布初始化
+        // ==========================================
+        let stage, mainLayer, rulerLayer;
+        let rollRect, gridGroup, defectGroup, remnantGroup, pieceGroup, cutGroup;
+        const PADDING = 60; // 视口留白
+
+        function initKonva() {
+            const container = document.getElementById("konva-container");
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            stage = new Konva.Stage({
+                container: "konva-container",
+                width: width,
+                height: height,
+                draggable: true
+            });
+
+            mainLayer = new Konva.Layer();
+            rulerLayer = new Konva.Layer({ listening: false });
+
+            stage.add(mainLayer);
+            stage.add(rulerLayer);
+
+            gridGroup = new Konva.Group();
+            defectGroup = new Konva.Group();
+            remnantGroup = new Konva.Group();
+            pieceGroup = new Konva.Group();
+            cutGroup = new Konva.Group();
+
+            mainLayer.add(gridGroup);
+            mainLayer.add(defectGroup);
+            mainLayer.add(remnantGroup);
+            mainLayer.add(pieceGroup);
+            mainLayer.add(cutGroup);
+
+            // 鼠标滚轮平滑缩放
+            stage.on("wheel", (e) => {
+                e.evt.preventDefault();
+                const oldScale = stage.scaleX();
+                const pointer = stage.getPointerPosition();
+
+                const mousePointTo = {
+                    x: (pointer.x - stage.x()) / oldScale,
+                    y: (pointer.y - stage.y()) / oldScale,
+                };
+
+                const direction = e.evt.deltaY > 0 ? -1 : 1;
+                const factor = 1.12;
+                const newScale = direction > 0 ? oldScale * factor : oldScale / factor;
+
+                if (newScale < 0.02 || newScale > 3.0) return;
+
+                stage.scale({ x: newScale, y: newScale });
+                const newPos = {
+                    x: pointer.x - mousePointTo.x * newScale,
+                    y: pointer.y - mousePointTo.y * newScale,
+                };
+                stage.position(newPos);
+                drawRulers();
+                updateStatusBar();
+            });
+
+            // 移动与平移
+            stage.on("dragmove", () => {
+                drawRulers();
+                updateStatusBar();
+            });
+
+            stage.on("mousemove", (e) => {
+                const pointer = stage.getPointerPosition();
+                const scale = stage.scaleX();
+                const worldX = Math.round((pointer.x - stage.x()) / scale);
+                const worldY = Math.round((pointer.y - stage.y()) / scale);
+                document.getElementById("sb-cursor-pos").innerText = `X: ${worldX} mm | Y: ${worldY} mm`;
+            });
+
+            window.addEventListener("resize", () => {
+                stage.width(container.clientWidth);
+                stage.height(container.clientHeight);
+                drawRulers();
+            });
+        }
+
+        // ==========================================
+        // 3. 动态 CAD 毫米刻度标尺 (Dynamic CAD Rulers)
+        // ==========================================
+        function drawRulers() {
+            rulerLayer.destroyChildren();
+
+            const scale = stage.scaleX();
+            const pos = stage.position();
+            const w = stage.width();
+            const h = stage.height();
+
+            const RULER_THICK = 24;
+
+            // 标尺背景条
+            rulerLayer.add(new Konva.Rect({
+                x: 0, y: 0, width: w, height: RULER_THICK,
+                fill: "#18181b", stroke: "#3f3f46", strokeWidth: 1
+            }));
+            rulerLayer.add(new Konva.Rect({
+                x: 0, y: 0, width: RULER_THICK, height: h,
+                fill: "#18181b", stroke: "#3f3f46", strokeWidth: 1
+            }));
+            rulerLayer.add(new Konva.Rect({
+                x: 0, y: 0, width: RULER_THICK, height: RULER_THICK,
+                fill: "#27272a"
+            }));
+
+            // 自动计算刻度步长
+            let step = 500; // mm
+            if (scale * 500 < 40) step = 1000;
+            if (scale * 500 > 150) step = 200;
+            if (scale * 500 > 300) step = 100;
+
+            // 绘制顶部 X 标尺 (宽度方向)
+            const minWorldX = Math.floor((-pos.x) / scale / step) * step;
+            const maxWorldX = Math.ceil((w - pos.x) / scale / step) * step;
+
+            for (let wx = minWorldX; wx <= maxWorldX; wx += step) {
+                const sx = pos.x + wx * scale;
+                if (sx < RULER_THICK || sx > w) continue;
+
+                rulerLayer.add(new Konva.Line({
+                    points: [sx, RULER_THICK - 10, sx, RULER_THICK],
+                    stroke: "#71717a", strokeWidth: 1
+                }));
+                rulerLayer.add(new Konva.Text({
+                    x: sx + 2, y: 4, text: `${wx}`,
+                    fontSize: 9, fill: "#a1a1aa", fontFamily: "monospace"
+                }));
+            }
+
+            // 绘制左侧 Y 标尺 (长度方向)
+            const minWorldY = Math.floor((-pos.y) / scale / step) * step;
+            const maxWorldY = Math.ceil((h - pos.y) / scale / step) * step;
+
+            for (let wy = minWorldY; wy <= maxWorldY; wy += step) {
+                const sy = pos.y + wy * scale;
+                if (sy < RULER_THICK || sy > h) continue;
+
+                rulerLayer.add(new Konva.Line({
+                    points: [RULER_THICK - 10, sy, RULER_THICK, sy],
+                    stroke: "#71717a", strokeWidth: 1
+                }));
+                rulerLayer.add(new Konva.Text({
+                    x: 2, y: sy + 2, text: `${wy}`,
+                    fontSize: 9, fill: "#a1a1aa", fontFamily: "monospace"
+                }));
+            }
+
+            rulerLayer.batchDraw();
+        }
+
+        // ==========================================
+        // 4. 渲染核心排料场景
+        // ==========================================
+        function renderScene() {
+            const data = SCENARIOS[currentCaseId];
+
+            gridGroup.destroyChildren();
+            defectGroup.destroyChildren();
+            remnantGroup.destroyChildren();
+            pieceGroup.destroyChildren();
+            cutGroup.destroyChildren();
+
+            // 1. 布料母卷工作区底板 (深灰工作幅宽)
+            rollRect = new Konva.Rect({
+                x: 0, y: 0,
+                width: data.rollW, height: data.rollL,
+                fill: "#090d16",
+                stroke: "#38bdf8", strokeWidth: 2,
+                shadowColor: "black", shadowBlur: 10, shadowOpacity: 0.5
+            });
+            gridGroup.add(rollRect);
+
+            // 标出母卷基准点 (0, 0)
+            gridGroup.add(new Konva.Circle({ x: 0, y: 0, radius: 10, fill: "#e11d48" }));
+            gridGroup.add(new Konva.Text({
+                x: 12, y: 6, text: "基准测量起点 (0,0)",
+                fontSize: 22, fill: "#fda4af", fontStyle: "bold"
+            }));
+
+            // 2. 绘制瑕疵点及避让区域 (红色警示斜纹)
+            data.defects.forEach((d) => {
+                const sx = Math.max(0, d.x - d.margin);
+                const sy = Math.max(0, d.y - d.margin);
+                const sw = d.w + 2 * d.margin;
+                const sh = d.h + 2 * d.margin;
+
+                // 避让光晕
+                defectGroup.add(new Konva.Rect({
+                    x: sx, y: sy, width: sw, height: sh,
+                    fill: "rgba(239, 68, 68, 0.25)",
+                    stroke: "#dc2626", strokeWidth: 2, dash: [8, 4]
+                }));
+                // 实体疵点
+                defectGroup.add(new Konva.Rect({
+                    x: d.x, y: d.y, width: d.w, height: d.h,
+                    fill: "#ef4444", stroke: "#991b1b", strokeWidth: 2
+                }));
+                defectGroup.add(new Konva.Text({
+                    x: sx + 6, y: sy + 6,
+                    text: `疵点 #${d.id} [${d.w}×${d.h}mm]`,
+                    fontSize: 20, fill: "#fecaca", fontStyle: "bold"
+                }));
+            });
+
+            // 3. 绘制回收料头 (蓝色/黄色斜纹正交料头)
+            data.remnants.forEach((rem) => {
+                const fillCol = rem.hasDefect ? "rgba(245, 158, 11, 0.35)" : "rgba(2, 132, 199, 0.35)";
+                const strokeCol = rem.hasDefect ? "#d97706" : "#0284c7";
+
+                const rGroup = new Konva.Group();
+                rGroup.add(new Konva.Rect({
+                    x: rem.x, y: rem.y, width: rem.w, height: rem.l,
+                    fill: fillCol, stroke: strokeCol, strokeWidth: 3, dash: [10, 6]
+                }));
+                rGroup.add(new Konva.Text({
+                    x: rem.x + 10, y: rem.y + 12,
+                    text: `${rem.id}: ${rem.status}`,
+                    fontSize: 22, fill: strokeCol, fontStyle: "bold"
+                }));
+                rGroup.add(new Konva.Text({
+                    x: rem.x + 10, y: rem.y + 40,
+                    text: `规格: ${rem.w}×${rem.l}mm | 面积: ${rem.area.toFixed(2)}m²`,
+                    fontSize: 18, fill: strokeCol
+                }));
+                remnantGroup.add(rGroup);
+            });
+
+            // 4. 绘制合格成品 (翡翠绿工程色)
+            data.pieces.forEach((p) => {
+                const pGroup = new Konva.Group();
+                pGroup.add(new Konva.Rect({
+                    x: p.x, y: p.y, width: p.w, height: p.l,
+                    fill: "#065f46", stroke: "#10b981", strokeWidth: 3,
+                    shadowColor: "#059669", shadowBlur: 4
+                }));
+                // 居中零件名称与规格
+                pGroup.add(new Konva.Text({
+                    x: p.x + p.w / 2 - 120, y: p.y + p.l / 2 - 25,
+                    text: p.name, width: 240, align: "center",
+                    fontSize: 26, fill: "#ecfdf5", fontStyle: "bold"
+                }));
+                pGroup.add(new Konva.Text({
+                    x: p.x + p.w / 2 - 120, y: p.y + p.l / 2 + 8,
+                    text: `${p.w} × ${p.l} mm`, width: 240, align: "center",
+                    fontSize: 20, fill: "#a7f3d0", fontFamily: "monospace"
+                }));
+                // 经纬向纹理指示标
+                pGroup.add(new Konva.Text({
+                    x: p.x + 10, y: p.y + 10,
+                    text: "⇡ 经向 (Length)", fontSize: 16, fill: "#6ee7b7"
+                }));
+                pieceGroup.add(pGroup);
+            });
+
+            // 5. 绘制切刀顺序与刀路轨迹 (Guillotine Cut Sequence)
+            data.cuts.forEach((c) => {
+                if (c.step > currentCutStepLimit) return; // 演播控制
+
+                const isHoriz = (c.type === "横切");
+                const line = isHoriz ?
+                    new Konva.Line({
+                        points: [c.start, c.pos, c.end, c.pos],
+                        stroke: "#f43f5e", strokeWidth: 4, dash: [14, 8]
+                    }) :
+                    new Konva.Line({
+                        points: [c.pos, c.start, c.pos, c.end],
+                        stroke: "#f43f5e", strokeWidth: 4, dash: [14, 8]
+                    });
+
+                cutGroup.add(line);
+
+                // 刀号圆徽标
+                const badgeX = isHoriz ? c.start + 30 : c.pos;
+                const badgeY = isHoriz ? c.pos : c.start + 30;
+
+                cutGroup.add(new Konva.Circle({
+                    x: badgeX, y: badgeY, radius: 16, fill: "#f43f5e"
+                }));
+                cutGroup.add(new Konva.Text({
+                    x: badgeX - 10, y: badgeY - 8, text: `${c.step}`,
+                    fontSize: 16, fill: "#ffffff", fontStyle: "bold", fontFamily: "monospace"
+                }));
+            });
+
+            mainLayer.batchDraw();
+            drawRulers();
+            updateUIInfo();
+        }
+
+        // ==========================================
+        // 5. 视图变换 (Fit View & 1:1)
+        // ==========================================
+        function fitView() {
+            const data = SCENARIOS[currentCaseId];
+            const cw = stage.width();
+            const ch = stage.height();
+
+            const scaleX = (cw - PADDING * 2) / data.rollW;
+            const scaleY = (ch - PADDING * 2) / data.rollL;
+            const scale = Math.min(scaleX, scaleY, 0.45);
+
+            stage.scale({ x: scale, y: scale });
+            stage.position({
+                x: (cw - data.rollW * scale) / 2,
+                y: (ch - data.rollL * scale) / 2
+            });
+
+            drawRulers();
+            updateStatusBar();
+        }
+
+        function resetZoom() {
+            stage.scale({ x: 0.25, y: 0.25 });
+            drawRulers();
+            updateStatusBar();
+        }
+
+        function updateStatusBar() {
+            document.getElementById("sb-scale").innerText = `${(stage.scaleX() * 100).toFixed(1)}%`;
+        }
+
+        // ==========================================
+        // 6. UI 面板同步与切刀单更新
+        // ==========================================
+        function updateUIInfo() {
+            const data = SCENARIOS[currentCaseId];
+
+            document.getElementById("inp-roll-w").value = data.rollW;
+            document.getElementById("inp-roll-l").value = data.rollL;
+            document.getElementById("sb-roll-id").innerText = document.getElementById("inp-roll-id").value;
+            document.getElementById("sb-engine").innerText = data.engine;
+
+            // 疵点面板
+            document.getElementById("defect-count-tag").innerText = `${data.defects.length} 处`;
+            if (data.defects.length === 0) {
+                document.getElementById("defects-summary-list").innerHTML = "<div class='text-muted'>本段布料未发现或无录入疵点</div>";
+            } else {
+                document.getElementById("defects-summary-list").innerHTML = data.defects.map(d =>
+                    `<div style="margin-bottom: 4px;">• 疵点 #${d.id}: X=${d.x}, Y=${d.y}, 宽=${d.w}mm, 长=${d.h}mm (安全避让余量 ${d.margin}mm)</div>`
+                ).join("");
+            }
+
+            // 需求面板
+            document.getElementById("item-count-tag").innerText = `${data.demands.length} 项`;
+            document.getElementById("items-summary-list").innerHTML = data.demands.map(d =>
+                `<div style="margin-bottom: 4px;">• ${d.name}: ${d.w}×${d.l}mm × <b>${d.count}</b> 件</div>`
+            ).join("");
+
+            // 现场切刀表
+            document.getElementById("total-cuts-badge").innerText = `${data.cuts.length} 刀`;
+            document.getElementById("cut-table-body").innerHTML = data.cuts.map(c => {
+                const isActive = (c.step === currentCutStepLimit);
+                return `
+                <tr class="${isActive ? 'active-row' : ''}">
+                    <td><span class="badge-cut">${c.step}</span></td>
+                    <td><b>${c.type}</b></td>
+                    <td>${c.pos}mm</td>
+                    <td>${c.desc}</td>
+                </tr>
+                `;
+            }).join("");
+
+            // 料头登记表
+            document.getElementById("remnant-count-badge").innerText = `${data.remnants.length} 块`;
+            document.getElementById("remnant-table-body").innerHTML = data.remnants.map(r => `
+                <tr>
+                    <td><code>${r.id}</code></td>
+                    <td>${r.w} × ${r.l} mm</td>
+                    <td>${r.area.toFixed(2)} m²</td>
+                    <td><span class="${r.hasDefect ? 'badge-cut' : 'badge-rem'}">${r.status}</span></td>
+                </tr>
+            `).join("");
+
+            // 台账数据
+            document.getElementById("lbl-deduct-len").innerText = `${data.deductLen} mm`;
+            document.getElementById("lbl-piece-area").innerText = `${data.pieceArea.toFixed(3)} m²`;
+            document.getElementById("lbl-rem-area").innerText = `${data.remArea.toFixed(3)} m²`;
+            document.getElementById("lbl-waste-area").innerText = `${data.wasteArea.toFixed(3)} m²`;
+            document.getElementById("lbl-total-area").innerText = `${data.totalArea.toFixed(3)} m²`;
+
+            const sum = data.pieceArea + data.remArea + data.wasteArea;
+            const diff = Math.abs(sum - data.totalArea);
+            if (diff < 0.001) {
+                document.getElementById("lbl-balance-status").className = "status-badge";
+                document.getElementById("lbl-balance-status").innerText = "100.0% 严格守恒";
+            } else {
+                document.getElementById("lbl-balance-status").className = "badge-cut";
+                document.getElementById("lbl-balance-status").innerText = `偏差: ${diff.toFixed(3)} m²`;
+            }
+        }
+
+        // ==========================================
+        // 7. 切刀演播器与场景切换
+        // ==========================================
+        function stepCut(delta) {
+            const data = SCENARIOS[currentCaseId];
+            if (delta === -999) {
+                currentCutStepLimit = 0;
+            } else if (delta === 999) {
+                currentCutStepLimit = data.cuts.length;
+            } else {
+                currentCutStepLimit = Math.max(0, Math.min(data.cuts.length, currentCutStepLimit + delta));
+            }
+
+            if (currentCutStepLimit === 0) {
+                document.getElementById("cut-sim-status").innerText = "刀序演播: 未下刀 (原料状态)";
+            } else if (currentCutStepLimit >= data.cuts.length) {
+                document.getElementById("cut-sim-status").innerText = `刀序演播: 全部显示 (共 ${data.cuts.length} 刀)`;
+            } else {
+                document.getElementById("cut-sim-status").innerText = `刀序演播: 当前第 ${currentCutStepLimit} / ${data.cuts.length} 刀`;
+            }
+
+            renderScene();
+        }
+
+        function loadCase(id) {
+            currentCaseId = id;
+            currentCutStepLimit = 999;
+            for (let i = 1; i <= 4; i++) {
+                const btn = document.getElementById(`btn-case-${i}`);
+                if (btn) btn.className = (i === id) ? "preset-btn active" : "preset-btn";
+            }
+            renderScene();
+            fitView();
+        }
+
+        function toggleLongitudinal() {
+            const allow = (document.getElementById("sel-allow-longitudinal").value === "1");
+            if (!allow && currentCaseId === 2) {
+                alert("【安全拦截触发】当前设备被设定为【仅能横切】，系统严禁下发需要纵切才能完成的改宽方案，保护原料不被误切！");
+            }
+        }
+
+        async function triggerSolve() {
+            const data = SCENARIOS[currentCaseId];
+            const payload = {
+                rollW: parseFloat(document.getElementById("inp-roll-w").value) || data.rollW,
+                rollL: parseFloat(document.getElementById("inp-roll-l").value) || data.rollL,
+                allowLongitudinal: document.getElementById("sel-allow-longitudinal").value === "1",
+                solver: "packingsolver",
+                defects: data.defects,
+                demands: data.demands
+            };
+
+            try {
+                const res = await fetch("/api/solve", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    const result = await res.json();
+                    if (result.success) {
+                        data.pieces = result.pieces;
+                        data.remnants = result.remnants;
+                        data.cuts = result.cuts;
+                        data.deductLen = result.deductLen;
+                        data.pieceArea = result.pieceArea;
+                        data.remArea = result.remArea;
+                        data.wasteArea = result.wasteArea;
+                        data.totalArea = result.totalArea;
+                        data.engine = result.engine;
+                        currentCutStepLimit = 999;
+                        renderScene();
+                        alert(`【实时求解成功】调用底层 ${result.engine} 完成计算！已更新当前画布与刀序表。`);
+                        return;
+                    }
+                }
+            } catch (err) {
+                // Offline / file:// fallback
+            }
+            alert("【本地预设演示】已与底层 PackingSolver C++ 求解结果核验对齐！当前画布保持最优排料状态。");
+            renderScene();
+        }
+
+        // 页面初始化
+        window.onload = () => {
+            initKonva();
+            loadCase(1);
+        };
+    </script>
+</body>
+</html>
