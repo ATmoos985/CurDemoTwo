@@ -92,6 +92,17 @@ export function pauseContinuousSim() {
 }
 
 /**
+ * 兼容旧接口别名
+ */
+export function playCuts() {
+    startContinuousSim();
+}
+
+export function pauseCuts() {
+    pauseContinuousSim();
+}
+
+/**
  * 重置仿真至起始状态
  */
 export function resetContinuousSim() {

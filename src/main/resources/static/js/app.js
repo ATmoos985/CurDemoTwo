@@ -34,7 +34,8 @@ import {
 } from './plugins/radar/radar-scrubber.js';
 
 import {
-    stepCut, playCuts, pauseCuts
+    stepCut, playCuts, pauseCuts,
+    startContinuousSim, pauseContinuousSim, resetContinuousSim, toggleSimSpeed
 } from './plugins/cut-player/cut-animator.js';
 
 import {
@@ -80,9 +81,6 @@ import {
     switchExportTab, copyExportPreview, openCutTicketModal, closeCutTicketModal
 } from './plugins/export/nc-dxf-exporter.js';
 
-import {
-    startContinuousSim, pauseContinuousSim, resetContinuousSim, toggleSimSpeed
-} from './plugins/cut-player/cut-animator.js';
 
 import {
     openMaterialModal, closeMaterialModal, switchMaterialTab,
