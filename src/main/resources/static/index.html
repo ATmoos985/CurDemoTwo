@@ -112,6 +112,16 @@
             overflow-y: auto;
             user-select: none;
             z-index: 10;
+            transition: width 0.12s ease;
+            position: relative;
+        }
+        .sidebar.collapsed {
+            width: 0 !important;
+            min-width: 0 !important;
+            padding: 0 !important;
+            border-right: none !important;
+            overflow: hidden !important;
+            visibility: hidden;
         }
 
         /* 顶部工业双模式分段切换器 */
@@ -279,6 +289,43 @@
             border-bottom: 1px solid var(--panel-border);
             padding: 12px 14px;
         }
+        .panel-section.collapsible {
+            transition: padding 0.15s ease;
+        }
+        .panel-section.collapsible .section-header {
+            cursor: pointer;
+            user-select: none;
+            padding: 4px 6px;
+            margin: -4px -6px 8px -6px;
+            border-radius: 4px;
+            transition: background 0.15s, color 0.15s;
+        }
+        .panel-section.collapsible .section-header:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-main);
+        }
+        .section-title-wrap {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .collapse-arrow {
+            display: inline-block;
+            font-size: 9px;
+            line-height: 1;
+            transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            color: var(--text-muted);
+        }
+        .panel-section.collapsed .collapse-arrow {
+            transform: rotate(-90deg);
+        }
+        .panel-section.collapsed .section-content {
+            display: none !important;
+        }
+        .panel-section.collapsed {
+            padding-bottom: 8px !important;
+            flex: 0 0 auto !important;
+        }
         .section-header {
             font-size: 12px;
             font-weight: 700;
@@ -429,7 +476,76 @@
             overflow-y: auto;
             user-select: none;
             z-index: 10;
+            transition: width 0.12s ease;
+            position: relative;
         }
+        .sidebar-right.collapsed {
+            width: 0 !important;
+            min-width: 0 !important;
+            padding: 0 !important;
+            border-left: none !important;
+            overflow: hidden !important;
+            visibility: hidden;
+        }
+
+        /* 左右分栏可拖拽调节分割条 (Resizable Splitters) */
+        .layout-resizer {
+            width: 6px;
+            background: var(--panel-border);
+            cursor: col-resize;
+            position: relative;
+            z-index: 25;
+            flex-shrink: 0;
+            transition: background 0.15s, box-shadow 0.15s;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .layout-resizer:hover, .layout-resizer.resizing {
+            background: var(--accent-blue);
+            box-shadow: 0 0 10px rgba(2, 132, 199, 0.45);
+        }
+        .resizer-handle {
+            width: 2px;
+            height: 36px;
+            background: #71717a;
+            border-radius: 1px;
+            transition: background 0.15s, height 0.15s;
+        }
+        .layout-resizer:hover .resizer-handle, .layout-resizer.resizing .resizer-handle {
+            background: #ffffff;
+            height: 52px;
+        }
+
+        /* 侧边栏边缘悬浮展开按钮 */
+        .sidebar-edge-toggle {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 26;
+            background: #27272a;
+            border: 1px solid var(--panel-border);
+            color: var(--text-muted);
+            width: 18px;
+            height: 52px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border-radius: 3px;
+            font-size: 11px;
+            padding: 0;
+            transition: all 0.15s;
+            user-select: none;
+        }
+        .sidebar-edge-toggle:hover {
+            background: #0284c7;
+            color: #ffffff;
+            border-color: #0284c7;
+        }
+        .edge-toggle-left { left: 0; }
+        .edge-toggle-right { right: 0; }
 
         /* 工业数据表格 */
         .cam-table {
@@ -1053,6 +1169,32 @@
             color: #065f46;
             font-weight: 600;
         }
+        [data-theme="light"] .layout-resizer {
+            background: #e2e8f0;
+        }
+        [data-theme="light"] .layout-resizer:hover, [data-theme="light"] .layout-resizer.resizing {
+            background: #0284c7;
+        }
+        [data-theme="light"] .resizer-handle {
+            background: #94a3b8;
+        }
+        [data-theme="light"] .layout-resizer:hover .resizer-handle, [data-theme="light"] .layout-resizer.resizing .resizer-handle {
+            background: #ffffff;
+        }
+        [data-theme="light"] .sidebar-edge-toggle {
+            background: #f8fafc;
+            border-color: #cbd5e1;
+            color: #64748b;
+        }
+        [data-theme="light"] .sidebar-edge-toggle:hover {
+            background: #0284c7;
+            color: #ffffff;
+            border-color: #0284c7;
+        }
+        [data-theme="light"] .panel-section.collapsible .section-header:hover {
+            background: rgba(0, 0, 0, 0.05);
+            color: #0f172a;
+        }
 
         /* 模态弹窗与通用对话框 */
         .settings-modal-overlay {
@@ -1201,6 +1343,8 @@
         </div>
         <div class="header-actions">
             <span style="font-size: 12px; color: var(--text-muted);">规范文档：<code>布料切割与料头管理方案 V1.1</code></span>
+            <button class="tool-btn" id="btn-toggle-left-bar" onclick="toggleSidebar('left')" title="一键收起/展开左侧面板">收起左栏</button>
+            <button class="tool-btn" id="btn-toggle-right-bar" onclick="toggleSidebar('right')" title="一键收起/展开右侧面板">收起右栏</button>
             <button class="tool-btn remnant-shelf-btn" onclick="openRemnantModal()" title="查看现场料头库存与扫码识别">现场料头库 (<span id="header-remnant-count">3</span>)</button>
             <button class="tool-btn" onclick="toggleTheme()" id="btn-theme-toggle" title="快速切换深色/浅色高亮 CAD 主题">浅色模式</button>
             <button class="tool-btn" onclick="openSettingsModal()" id="btn-settings" title="系统参数与工艺配置中心">设置</button>
@@ -1213,17 +1357,17 @@
     <!-- 主视窗工作区 -->
     <main>
         <!-- 左侧控制面板：清晰分离母卷排产与料头精益切割两大工位 -->
-        <aside class="sidebar">
+        <aside class="sidebar" id="sidebar-left">
             <!-- 顶部工位模式切换器 (Dual-Mode Switcher) -->
             <div class="sidebar-mode-switcher">
                 <button class="mode-tab-btn active roll-mode" id="tab-btn-roll" onclick="switchCutMode('roll')">
-                                        <div>
+                    <div>
                         <span class="mode-tab-title">模式一：母卷开卷</span>
                         <span class="mode-tab-desc">大卷连续送料 · 实扣母卷</span>
                     </div>
                 </button>
                 <button class="mode-tab-btn" id="tab-btn-remnant" onclick="switchCutMode('remnant')">
-                                        <div>
+                    <div>
                         <span class="mode-tab-title">模式二：料头复用</span>
                         <span class="mode-tab-desc">在库料头 · 0 母卷消耗</span>
                     </div>
@@ -1233,99 +1377,119 @@
             <!-- ======================================================== -->
             <!-- 模式一面板：母卷连续开卷排产 (Mother Roll Mode)             -->
             <!-- ======================================================== -->
-            <div id="panel-roll-mode" style="display: flex; flex-direction: column; flex: 1;">
-                <!-- 1. 母卷批号与料头统计卡片 -->
-                <div class="panel-section section-card-blue">
-                    <div class="section-header">
-                        <span>母卷型号与规格 (Mother Roll)</span>
+            <div id="panel-roll-mode" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
+                <!-- 1. 母卷批号与料头统计卡片 (可折叠) -->
+                <div class="panel-section section-card-blue collapsible" id="card-mother-roll">
+                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开母卷规格卡片">
+                        <div class="section-title-wrap">
+                            <span class="collapse-arrow">▼</span>
+                            <span>母卷型号与规格 (Mother Roll)</span>
+                        </div>
                         <span class="header-tag" style="color: #38bdf8;">当前母卷</span>
                     </div>
-                    <div class="prop-row">
-                        <span class="prop-label">选择母卷批号</span>
-                        <select class="prop-input" id="sel-mother-roll-id" onchange="onMotherRollChange()" style="width: 170px;">
-                            <option value="ROLL-2026-0920" selected>ROLL-2026-0920 (TC涤棉 2m)</option>
-                            <option value="ROLL-2026-0921">ROLL-2026-0921 (纯棉 1.8m)</option>
-                            <option value="ROLL-2026-0922">ROLL-2026-0922 (牛津布 2.2m)</option>
-                        </select>
-                    </div>
-                    <div class="prop-row">
-                        <span class="prop-label">材质与幅宽</span>
-                        <span style="color: var(--text-main); font-size: 11px;"><b id="lbl-roll-model-desc">TC涤棉-B2026</b> | 幅宽 <b id="lbl-roll-w-desc">2000</b>mm</span>
-                    </div>
-                    <div class="card-inner-box" style="margin-top: 4px; display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 11px; color: var(--text-muted);">
-                            本卷切下在库料头: <b id="lbl-roll-rem-count" style="color: var(--accent-blue); font-family: monospace;">3 块</b> (<span id="lbl-roll-rem-area">7.20m²</span>)
-                        </span>
-                        <button class="tool-btn active" style="font-size: 10px; padding: 2px 8px; background: #d97706; border-color: #b45309;" onclick="switchCutMode('remnant')">领用料头 &gt;&gt;</button>
-                    </div>
+                    <div class="section-content">
+                        <div class="prop-row">
+                            <span class="prop-label">选择母卷批号</span>
+                            <select class="prop-input" id="sel-mother-roll-id" onchange="onMotherRollChange()" style="width: 170px;">
+                                <option value="ROLL-2026-0920" selected>ROLL-2026-0920 (TC涤棉 2m)</option>
+                                <option value="ROLL-2026-0921">ROLL-2026-0921 (纯棉 1.8m)</option>
+                                <option value="ROLL-2026-0922">ROLL-2026-0922 (牛津布 2.2m)</option>
+                            </select>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label">材质与幅宽</span>
+                            <span style="color: var(--text-main); font-size: 11px;"><b id="lbl-roll-model-desc">TC涤棉-B2026</b> | 幅宽 <b id="lbl-roll-w-desc">2000</b>mm</span>
+                        </div>
+                        <div class="card-inner-box" style="margin-top: 4px; display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 11px; color: var(--text-muted);">
+                                本卷切下在库料头: <b id="lbl-roll-rem-count" style="color: var(--accent-blue); font-family: monospace;">3 块</b> (<span id="lbl-roll-rem-area">7.20m²</span>)
+                            </span>
+                            <button class="tool-btn active" style="font-size: 10px; padding: 2px 8px; background: #d97706; border-color: #b45309;" onclick="switchCutMode('remnant')">领用料头 &gt;&gt;</button>
+                        </div>
 
-                    <!-- 隐藏参数 (供高级调校) -->
-                    <input type="hidden" id="inp-roll-id" value="ROLL-2026-0920" />
-                    <input type="hidden" id="inp-roll-w" value="2000" />
-                    <input type="hidden" id="inp-total-roll-l" value="60000" />
-                    <input type="hidden" id="inp-window-start-y" value="0" />
+                        <!-- 隐藏参数 (供高级调校) -->
+                        <input type="hidden" id="inp-roll-id" value="ROLL-2026-0920" />
+                        <input type="hidden" id="inp-roll-w" value="2000" />
+                        <input type="hidden" id="inp-total-roll-l" value="60000" />
+                        <input type="hidden" id="inp-window-start-y" value="0" />
+                    </div>
                 </div>
 
-                <!-- 2. 机台展开长与起准点标定 (右下角基准) -->
-                <div class="panel-section">
-                    <div class="section-header">
-                        <span>机台起准点与展开标定</span>
+                <!-- 2. 机台展开长与起准点标定 (右下角基准，可折叠) -->
+                <div class="panel-section collapsible" id="card-bed-origin">
+                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开机台标定卡片">
+                        <div class="section-title-wrap">
+                            <span class="collapse-arrow">▼</span>
+                            <span>机台起准点与展开标定</span>
+                        </div>
                         <span class="header-tag" style="color:#f59e0b;">右下角基准</span>
                     </div>
-                    <div class="prop-row">
-                        <span class="prop-label">起刀起准点位置</span>
-                        <select class="prop-input" id="sel-cut-origin" onchange="onOriginParamChange()" style="width: 170px;">
-                            <option value="right-bottom" selected>右下角 (靠右导轨对齐)</option>
-                            <option value="left-bottom">左下角基准</option>
-                        </select>
-                    </div>
-                    <div class="callout-amber-tip">
-                        行业标准：以右下角导轨为原点 (X向左量幅宽，Y向上进料展开)
-                    </div>
-                    <div class="prop-row">
-                        <span class="prop-label">机台展开台面 (Bed L)</span>
-                        <input type="number" class="prop-input" id="inp-bed-l" value="5000" step="500" onchange="onRollConfigChange()" />
-                    </div>
-                    <div class="prop-row">
-                        <span class="prop-label">卷头修齐量 (Trim, mm)</span>
-                        <input type="number" class="prop-input" id="inp-trim-start" value="0" min="0" max="1000" step="50" onchange="onOriginParamChange()" />
-                    </div>
-                    <div class="prop-row">
-                        <span class="prop-label">设备纵切能力</span>
-                        <select class="prop-input" id="sel-allow-longitudinal" onchange="toggleLongitudinal()">
-                            <option value="1">支持纵切 (分条+断刀)</option>
-                            <option value="0">仅能横切 (禁止纵切)</option>
-                        </select>
-                    </div>
-                    <div class="prop-row">
-                        <span class="prop-label">裁片旋转 90° (Rotation)</span>
-                        <select class="prop-input" id="sel-allow-rotation" onchange="onOriginParamChange()">
-                            <option value="0">禁止旋转 (经向保纹理)</option>
-                            <option value="1">允许旋转 (提升利用率)</option>
-                        </select>
-                    </div>
-                    <input type="hidden" id="sel-first-stage" value="horizontal" />
-                </div>
-
-                <!-- 3. 验布疵点避让记录 -->
-                <div class="panel-section">
-                    <div class="section-header">
-                        <span>瑕疵避让记录 (Defects)</span>
-                        <button class="tool-btn btn-add-defect" onclick="addDefectRow()">+ 增疵点</button>
-                    </div>
-                    <div id="defects-container" style="display: flex; flex-direction: column; gap: 6px; max-height: 110px; overflow-y: auto;">
-                        <!-- 动态生成 -->
+                    <div class="section-content">
+                        <div class="prop-row">
+                            <span class="prop-label">起刀起准点位置</span>
+                            <select class="prop-input" id="sel-cut-origin" onchange="onOriginParamChange()" style="width: 170px;">
+                                <option value="right-bottom" selected>右下角 (靠右导轨对齐)</option>
+                                <option value="left-bottom">左下角基准</option>
+                            </select>
+                        </div>
+                        <div class="callout-amber-tip">
+                            行业标准：以右下角导轨为原点 (X向左量幅宽，Y向上进料展开)
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label">机台展开台面 (Bed L)</span>
+                            <input type="number" class="prop-input" id="inp-bed-l" value="5000" step="500" onchange="onRollConfigChange()" />
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label">卷头修齐量 (Trim, mm)</span>
+                            <input type="number" class="prop-input" id="inp-trim-start" value="0" min="0" max="1000" step="50" onchange="onOriginParamChange()" />
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label">设备纵切能力</span>
+                            <select class="prop-input" id="sel-allow-longitudinal" onchange="toggleLongitudinal()">
+                                <option value="1">支持纵切 (分条+断刀)</option>
+                                <option value="0">仅能横切 (禁止纵切)</option>
+                            </select>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label">裁片旋转 90° (Rotation)</span>
+                            <select class="prop-input" id="sel-allow-rotation" onchange="onOriginParamChange()">
+                                <option value="0">禁止旋转 (经向保纹理)</option>
+                                <option value="1">允许旋转 (提升利用率)</option>
+                            </select>
+                        </div>
+                        <input type="hidden" id="sel-first-stage" value="horizontal" />
                     </div>
                 </div>
 
-                <!-- 4. 本次开卷裁切需求清单 (Demands) —— 带智能料头检测与选择！ -->
-                <div class="panel-section" style="flex: 1;">
-                    <div class="section-header">
-                        <span>本次排产裁片需求清单 (Demands)</span>
-                        <button class="tool-btn btn-add-demand" onclick="addDemandRow()">+ 增裁片</button>
+                <!-- 3. 验布疵点避让记录 (可折叠) -->
+                <div class="panel-section collapsible" id="card-defects">
+                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开瑕疵避让卡片">
+                        <div class="section-title-wrap">
+                            <span class="collapse-arrow">▼</span>
+                            <span>瑕疵避让记录 (Defects)</span>
+                        </div>
+                        <button class="tool-btn btn-add-defect" onclick="event.stopPropagation(); addDefectRow()">+ 增疵点</button>
                     </div>
-                    <div id="demands-container" style="display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto;">
-                        <!-- 动态生成带有【在库料头提示与选择】的裁片项 -->
+                    <div class="section-content">
+                        <div id="defects-container" style="display: flex; flex-direction: column; gap: 6px; max-height: 140px; overflow-y: auto;">
+                            <!-- 动态生成 -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. 本次开卷裁切需求清单 (Demands) —— 弹性撑满可用空间！ -->
+                <div class="panel-section collapsible" id="card-demands" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 160px;">
+                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开裁片需求清单">
+                        <div class="section-title-wrap">
+                            <span class="collapse-arrow">▼</span>
+                            <span>本次排产裁片需求清单 (Demands)</span>
+                        </div>
+                        <button class="tool-btn btn-add-demand" onclick="event.stopPropagation(); addDemandRow()">+ 增裁片</button>
+                    </div>
+                    <div class="section-content" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;">
+                        <div id="demands-container" style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 80px;">
+                            <!-- 动态生成带有【在库料头提示与选择】的裁片项 -->
+                        </div>
                     </div>
                 </div>
 
@@ -1367,77 +1531,97 @@
             <!-- ======================================================== -->
             <!-- 模式二面板：料头复用精益切割 (Remnant Lean Cutting Mode)   -->
             <!-- ======================================================== -->
-            <div id="panel-remnant-mode" style="display: none; flex-direction: column; flex: 1;">
-                <!-- 1. 所属母卷型号与料头货架 -->
-                <div class="panel-section section-card-amber">
-                    <div class="section-header">
-                        <span>现场料头货架库 (Remnant Shelf)</span>
+            <div id="panel-remnant-mode" style="display: none; flex-direction: column; flex: 1; min-height: 0;">
+                <!-- 1. 所属母卷型号与料头货架 (可折叠) -->
+                <div class="panel-section section-card-amber collapsible" id="card-remnant-source">
+                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开料头筛选卡片">
+                        <div class="section-title-wrap">
+                            <span class="collapse-arrow">▼</span>
+                            <span>现场料头货架库 (Remnant Shelf)</span>
+                        </div>
                         <span class="header-tag" style="color: #fbbf24;">免开母卷</span>
                     </div>
-                    <div class="prop-row">
-                        <span class="prop-label">筛选来源母卷</span>
-                        <select class="prop-input" id="sel-remnant-filter-roll" onchange="onRemnantFilterRollChange()" style="width: 170px;">
-                            <option value="ALL">全部在库料头</option>
-                            <option value="ROLL-2026-0920" selected>ROLL-2026-0920 (TC涤棉)</option>
-                            <option value="ROLL-2026-0921">ROLL-2026-0921 (纯棉斜纹)</option>
-                            <option value="ROLL-2026-0922">ROLL-2026-0922 (弹力牛津)</option>
-                        </select>
-                    </div>
-                    <!-- 条码扫描快速识别 -->
-                    <div style="display: flex; gap: 6px; margin-top: 6px;">
-                        <input type="text" id="inp-shelf-scan-code" class="scan-input" placeholder="扫描条码/录入料号..." onkeydown="if(event.key==='Enter') executeShelfBarcodeScan()" />
-                        <button class="tool-btn active" style="background: #0284c7; padding: 4px 10px; font-size: 11px;" onclick="executeShelfBarcodeScan()">识别</button>
-                    </div>
-                    <!-- 快捷模拟测试标签 -->
-                    <div style="display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap;">
-                        <span style="font-size: 10px; color: var(--text-muted);">快速模拟:</span>
-                        <button class="tool-btn" style="font-size: 9px; padding: 1px 5px;" onclick="quickSelectRemnant('REM-202609-001')">001 (短料2×1.6m)</button>
-                        <button class="tool-btn" style="font-size: 9px; padding: 1px 5px;" onclick="quickSelectRemnant('REM-202609-002')">002 (长边0.5×4m)</button>
-                        <button class="tool-btn" style="font-size: 9px; padding: 1px 5px; color: var(--accent-amber);" onclick="quickSelectRemnant('REM-202609-003')">003 (带疵料头)</button>
+                    <div class="section-content">
+                        <div class="prop-row">
+                            <span class="prop-label">筛选来源母卷</span>
+                            <select class="prop-input" id="sel-remnant-filter-roll" onchange="onRemnantFilterRollChange()" style="width: 170px;">
+                                <option value="ALL">全部在库料头</option>
+                                <option value="ROLL-2026-0920" selected>ROLL-2026-0920 (TC涤棉)</option>
+                                <option value="ROLL-2026-0921">ROLL-2026-0921 (纯棉斜纹)</option>
+                                <option value="ROLL-2026-0922">ROLL-2026-0922 (弹力牛津)</option>
+                            </select>
+                        </div>
+                        <!-- 条码扫描快速识别 -->
+                        <div style="display: flex; gap: 6px; margin-top: 6px;">
+                            <input type="text" id="inp-shelf-scan-code" class="scan-input" placeholder="扫描条码/录入料号..." onkeydown="if(event.key==='Enter') executeShelfBarcodeScan()" />
+                            <button class="tool-btn active" style="background: #0284c7; padding: 4px 10px; font-size: 11px;" onclick="executeShelfBarcodeScan()">识别</button>
+                        </div>
+                        <!-- 快捷模拟测试标签 -->
+                        <div style="display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap;">
+                            <span style="font-size: 10px; color: var(--text-muted);">快速模拟:</span>
+                            <button class="tool-btn" style="font-size: 9px; padding: 1px 5px;" onclick="quickSelectRemnant('REM-202609-001')">001 (短料2×1.6m)</button>
+                            <button class="tool-btn" style="font-size: 9px; padding: 1px 5px;" onclick="quickSelectRemnant('REM-202609-002')">002 (长边0.5×4m)</button>
+                            <button class="tool-btn" style="font-size: 9px; padding: 1px 5px; color: var(--accent-amber);" onclick="quickSelectRemnant('REM-202609-003')">003 (带疵料头)</button>
+                        </div>
                     </div>
                 </div>
 
-                <!-- 2. 在库料头卡片货架 (可点击装载) -->
-                <div class="panel-section" style="max-height: 200px; overflow-y: auto;">
-                    <div class="section-header">
-                        <span>点击选择要装载的料头</span>
+                <!-- 2. 在库料头卡片货架 (可折叠，弹性自适应) -->
+                <div class="panel-section collapsible" id="card-remnant-shelf" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 140px;">
+                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开料头货架">
+                        <div class="section-title-wrap">
+                            <span class="collapse-arrow">▼</span>
+                            <span>点击选择要装载的料头</span>
+                        </div>
                         <span class="badge-rem" id="shelf-remnant-total-badge">3 块在库</span>
                     </div>
-                    <div id="shelf-remnant-cards-container" style="display: flex; flex-direction: column; gap: 6px;">
-                        <!-- 动态填充料头卡片 -->
+                    <div class="section-content" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;">
+                        <div id="shelf-remnant-cards-container" style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 6px; overflow-y: auto;">
+                            <!-- 动态填充料头卡片 -->
+                        </div>
                     </div>
                 </div>
 
-                <!-- 3. 当前已装载料头机台状态与 0 扣料保障 -->
-                <div class="panel-section card-active-remnant">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-weight: 700; color: var(--remnant-active-title); font-size: 12px;">机台当前装载料头</span>
+                <!-- 3. 当前已装载料头机台状态 (可折叠) -->
+                <div class="panel-section card-active-remnant collapsible" id="card-active-remnant">
+                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开当前料头信息">
+                        <div class="section-title-wrap">
+                            <span class="collapse-arrow">▼</span>
+                            <span style="font-weight: 700; color: var(--remnant-active-title); font-size: 12px;">机台当前装载料头</span>
+                        </div>
                         <span class="status-badge" style="font-size: 10px; padding: 1px 6px;">[母卷 0 消耗保证]</span>
                     </div>
-                    <div style="font-size: 12px; color: var(--accent-blue); font-family: monospace; font-weight: bold; margin-top: 4px;" id="lbl-shelf-active-id">
-                        REM-202609-001
-                    </div>
-                    <div style="font-size: 11px; color: var(--text-main); margin-top: 2px;">
-                        规格: <b id="lbl-shelf-active-size">2000 × 1600 mm</b> | 
-                        库位: <span id="lbl-shelf-active-loc" style="color: var(--accent-amber);">库位 A-01-03</span>
-                    </div>
-                    <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">
-                        基准: <b>右下角基准 (靠右导轨对齐)</b> | 
-                        状态: <span id="lbl-shelf-active-status" style="color: var(--accent-green);">完好可用短料</span>
+                    <div class="section-content">
+                        <div style="font-size: 12px; color: var(--accent-blue); font-family: monospace; font-weight: bold; margin-top: 4px;" id="lbl-shelf-active-id">
+                            REM-202609-001
+                        </div>
+                        <div style="font-size: 11px; color: var(--text-main); margin-top: 2px;">
+                            规格: <b id="lbl-shelf-active-size">2000 × 1600 mm</b> | 
+                            库位: <span id="lbl-shelf-active-loc" style="color: var(--accent-amber);">库位 A-01-03</span>
+                        </div>
+                        <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">
+                            基准: <b>右下角基准 (靠右导轨对齐)</b> | 
+                            状态: <span id="lbl-shelf-active-status" style="color: var(--accent-green);">完好可用短料</span>
+                        </div>
                     </div>
                 </div>
 
-                <!-- 4. 本料头套裁需求清单 -->
-                <div class="panel-section" style="flex: 1;">
-                    <div class="section-header">
-                        <span>本次料头套裁裁片清单</span>
-                        <button class="tool-btn btn-add-demand" onclick="addRemnantDemandRow()">+ 增裁片</button>
+                <!-- 4. 本料头套裁需求清单 (可折叠，弹性自适应) -->
+                <div class="panel-section collapsible" id="card-remnant-demands" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 140px;">
+                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开料头需求清单">
+                        <div class="section-title-wrap">
+                            <span class="collapse-arrow">▼</span>
+                            <span>本次料头套裁裁片清单</span>
+                        </div>
+                        <button class="tool-btn btn-add-demand" onclick="event.stopPropagation(); addRemnantDemandRow()">+ 增裁片</button>
                     </div>
-                    <div id="remnant-demands-container" style="display: flex; flex-direction: column; gap: 6px; max-height: 150px; overflow-y: auto;">
-                        <!-- 动态生成 -->
-                    </div>
-                    <div style="font-size: 10.5px; color: var(--text-muted); margin-top: 6px; line-height: 1.4;">
-                        提示：排料后未用尽的部分将自动派生为新子料头（如 <code>REM-xxx-SUB01</code>）存入本卷料头库；母卷实切扣料锁定为 0mm。
+                    <div class="section-content" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;">
+                        <div id="remnant-demands-container" style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 6px; overflow-y: auto;">
+                            <!-- 动态生成 -->
+                        </div>
+                        <div style="font-size: 10.5px; color: var(--text-muted); margin-top: 6px; line-height: 1.4;">
+                            提示：排料后未用尽的部分将自动派生为新子料头（如 <code>REM-xxx-SUB01</code>）存入本卷料头库；母卷实切扣料锁定为 0mm。
+                        </div>
                     </div>
                 </div>
 
@@ -1450,8 +1634,17 @@
             </div>
         </aside>
 
+        <!-- 左分割条 (可拖拽调节左侧面板宽度) -->
+        <div class="layout-resizer resizer-left" id="resizer-left" title="按住拖拽调节左侧栏宽度 (双击恢复默认 380px)">
+            <div class="resizer-handle"></div>
+        </div>
+
         <!-- 中央画布视口 -->
         <section class="viewport-container" id="viewport">
+            <!-- 侧栏折叠时在视口边缘显示的快速展开浮标 -->
+            <button class="sidebar-edge-toggle edge-toggle-left" id="edge-toggle-left" onclick="toggleSidebar('left')" title="展开左侧面板" style="display: none;">▶</button>
+            <button class="sidebar-edge-toggle edge-toggle-right" id="edge-toggle-right" onclick="toggleSidebar('right')" title="展开右侧面板" style="display: none;">◀</button>
+
             <!-- 图例栏 -->
             <div class="legend-bar">
                 <div class="legend-item"><span class="legend-dot" style="background: #10b981;"></span><span>合格成品 (Piece)</span></div>
@@ -1502,81 +1695,103 @@
             </div>
         </section>
 
+        <!-- 右分割条 (可拖拽调节右侧面板宽度) -->
+        <div class="layout-resizer resizer-right" id="resizer-right" title="按住拖拽调节右侧栏宽度 (双击恢复默认 360px)">
+            <div class="resizer-handle"></div>
+        </div>
+
         <!-- 右侧面板：工艺单与对账台账 -->
-        <aside class="sidebar-right">
-            <!-- 现场下刀工艺表 -->
-            <div class="panel-section" style="flex: 1; display: flex; flex-direction: column;">
-                <div class="section-header">
-                    <span>现场下刀工艺顺序单 (Cut Sequence)</span>
+        <aside class="sidebar-right" id="sidebar-right">
+            <!-- 现场下刀工艺表 (可折叠，弹性自适应) -->
+            <div class="panel-section collapsible" id="card-cut-sequence" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 160px;">
+                <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开现场下刀工艺单">
+                    <div class="section-title-wrap">
+                        <span class="collapse-arrow">▼</span>
+                        <span>现场下刀工艺顺序单 (Cut Sequence)</span>
+                    </div>
                     <span class="badge-cut" id="total-cuts-badge">2 刀</span>
                 </div>
-                <div style="flex: 1; overflow-y: auto;">
-                    <table class="cam-table" id="cut-table">
-                        <thead>
-                            <tr>
-                                <th width="32">刀序</th>
-                                <th width="50">类型</th>
-                                <th width="65">下刀位置</th>
-                                <th>操作指引与切出物</th>
-                            </tr>
-                        </thead>
-                        <tbody id="cut-table-body">
-                            <!-- 动态填充 -->
-                        </tbody>
-                    </table>
+                <div class="section-content" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;">
+                    <div style="flex: 1 1 auto; overflow-y: auto;">
+                        <table class="cam-table" id="cut-table">
+                            <thead>
+                                <tr>
+                                    <th width="32">刀序</th>
+                                    <th width="50">类型</th>
+                                    <th width="65">下刀位置</th>
+                                    <th>操作指引与切出物</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cut-table-body">
+                                <!-- 动态填充 -->
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
-            <!-- 余料料头入库单 -->
-            <div class="panel-section" style="max-height: 180px; display: flex; flex-direction: column;">
-                <div class="section-header">
-                    <span>料头入库登记 (Remnant Ledger)</span>
+            <!-- 余料料头入库单 (可折叠，弹性自适应，彻底告别狭小挤压！) -->
+            <div class="panel-section collapsible" id="card-remnant-ledger" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 140px;">
+                <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开料头入库登记">
+                    <div class="section-title-wrap">
+                        <span class="collapse-arrow">▼</span>
+                        <span>料头入库登记 (Remnant Ledger)</span>
+                    </div>
                     <span class="badge-rem" id="remnant-count-badge">2 块</span>
                 </div>
-                <div style="flex: 1; overflow-y: auto;">
-                    <table class="cam-table">
-                        <thead>
-                            <tr>
-                                <th>料头编号</th>
-                                <th>规格(宽×长)</th>
-                                <th>面积</th>
-                                <th>质量状态</th>
-                                <th width="45">操作</th>
-                            </tr>
-                        </thead>
-                        <tbody id="remnant-table-body">
-                            <!-- 动态填充 -->
-                        </tbody>
-                    </table>
+                <div class="section-content" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;">
+                    <div style="flex: 1 1 auto; overflow-y: auto;">
+                        <table class="cam-table">
+                            <thead>
+                                <tr>
+                                    <th>料头编号</th>
+                                    <th>规格(宽×长)</th>
+                                    <th>面积</th>
+                                    <th>质量状态</th>
+                                    <th width="45">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="remnant-table-body">
+                                <!-- 动态填充 -->
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
-            <!-- 母卷扣料与面积守恒台账 -->
-            <div class="panel-section balance-ledger-section">
-                <div class="section-header">母卷实切对账单 (Material Balance)</div>
-                <div class="prop-row">
-                    <span class="prop-label">本次展开剪下长度:</span>
-                    <span class="status-val" id="lbl-deduct-len">4000 mm</span>
+            <!-- 母卷扣料与面积守恒台账 (可折叠) -->
+            <div class="panel-section balance-ledger-section collapsible" id="card-material-balance">
+                <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开母卷实切对账单">
+                    <div class="section-title-wrap">
+                        <span class="collapse-arrow">▼</span>
+                        <span>母卷实切对账单 (Material Balance)</span>
+                    </div>
                 </div>
-                <div class="prop-row">
-                    <span class="prop-label">成品实际总面积:</span>
-                    <span class="status-val" style="color: var(--accent-green);" id="lbl-piece-area">4.500 m²</span>
-                </div>
-                <div class="prop-row">
-                    <span class="prop-label">回收料头总面积:</span>
-                    <span class="status-val" style="color: var(--accent-blue);" id="lbl-rem-area">3.500 m²</span>
-                </div>
-                <div class="prop-row">
-                    <span class="prop-label">废料与切口损耗:</span>
-                    <span class="status-val" style="color: var(--accent-red);" id="lbl-waste-area">0.000 m²</span>
-                </div>
-                <div class="prop-row" style="border-top: 1px solid var(--panel-border); padding-top: 6px; margin-top: 4px;">
-                    <span class="prop-label" style="font-weight: 700; color: var(--text-main);">母卷总消耗面积:</span>
-                    <span class="status-val" style="color: var(--accent-amber); font-size: 13px;" id="lbl-total-area">8.000 m²</span>
-                </div>
-                <div class="prop-row">
-                    <span class="prop-label">面积闭环校验:</span>
-                    <span class="status-badge" id="lbl-balance-status">100.0% 严密守恒</span>
+                <div class="section-content">
+                    <div class="prop-row">
+                        <span class="prop-label">本次展开剪下长度:</span>
+                        <span class="status-val" id="lbl-deduct-len">4000 mm</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">成品实际总面积:</span>
+                        <span class="status-val" style="color: var(--accent-green);" id="lbl-piece-area">4.500 m²</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">回收料头总面积:</span>
+                        <span class="status-val" style="color: var(--accent-blue);" id="lbl-rem-area">3.500 m²</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">废料与切口损耗:</span>
+                        <span class="status-val" style="color: var(--accent-red);" id="lbl-waste-area">0.000 m²</span>
+                    </div>
+                    <div class="prop-row" style="border-top: 1px solid var(--panel-border); padding-top: 6px; margin-top: 4px;">
+                        <span class="prop-label" style="font-weight: 700; color: var(--text-main);">母卷总消耗面积:</span>
+                        <span class="status-val" style="color: var(--accent-amber); font-size: 13px;" id="lbl-total-area">8.000 m²</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">面积闭环校验:</span>
+                        <span class="status-badge" id="lbl-balance-status">100.0% 严密守恒</span>
+                    </div>
                 </div>
             </div>
         </aside>
@@ -2149,15 +2364,18 @@
                 if (inBed) {
                     // 台面当前裁切工位内的活动疵点 (大红避让警戒)
                     defectGroup.add(new Konva.Rect({
+                        name: `defect-zone-${d.id}`,
                         x: sx, y: sy, width: sw, height: sh,
                         fill: isDark ? "rgba(239, 68, 68, 0.25)" : "rgba(239, 68, 68, 0.15)",
                         stroke: "#dc2626", strokeWidth: 2, dash: [8, 4]
                     }));
                     defectGroup.add(new Konva.Rect({
+                        name: `defect-box-${d.id}`,
                         x: d.x, y: d.y, width: d.w, height: d.h,
                         fill: "#ef4444", stroke: "#991b1b", strokeWidth: 2
                     }));
                     defectGroup.add(new Konva.Text({
+                        name: `defect-txt-${d.id}`,
                         x: sx + 6, y: sy + 6,
                         text: `[工位避让疵点] #${d.id} ${d.w}×${d.h}mm (工位Y: ${d.y - winStartY}mm | 全局: ${(d.y/1000).toFixed(2)}m)`,
                         fontSize: 17, fill: isDark ? "#fecaca" : "#991b1b", fontStyle: "bold"
@@ -2165,15 +2383,18 @@
                 } else if (inUpcoming) {
                     // 未展开进料区未来疵点 (琥珀色雷达预警)
                     defectGroup.add(new Konva.Rect({
+                        name: `defect-zone-${d.id}`,
                         x: sx, y: sy, width: sw, height: sh,
                         fill: isDark ? "rgba(245, 158, 11, 0.16)" : "rgba(245, 158, 11, 0.12)",
                         stroke: "#f59e0b", strokeWidth: 1.5, dash: [6, 4]
                     }));
                     defectGroup.add(new Konva.Rect({
+                        name: `defect-box-${d.id}`,
                         x: d.x, y: d.y, width: d.w, height: d.h,
                         fill: "#d97706", stroke: "#b45309", strokeWidth: 1.5
                     }));
                     defectGroup.add(new Konva.Text({
+                        name: `defect-txt-${d.id}`,
                         x: sx + 6, y: sy + 6,
                         text: `[进料预警] #${d.id} [${d.desc || '瑕疵'}] 全局 ${(d.y/1000).toFixed(2)}m (距工位 +${((d.y - winEndY)/1000).toFixed(2)}m)`,
                         fontSize: 17, fill: isDark ? "#fde68a" : "#92400e", fontStyle: "bold"
@@ -2181,10 +2402,17 @@
                 } else {
                     // 历史已过段疵点 (暗淡归档)
                     defectGroup.add(new Konva.Rect({
+                        name: `defect-zone-${d.id}`,
+                        x: sx, y: sy, width: sw, height: sh,
+                        fill: "transparent", stroke: "transparent", strokeWidth: 0, visible: false
+                    }));
+                    defectGroup.add(new Konva.Rect({
+                        name: `defect-box-${d.id}`,
                         x: d.x, y: d.y, width: d.w, height: d.h,
                         fill: isDark ? "#3f3f46" : "#cbd5e1", stroke: isDark ? "#52525b" : "#94a3b8", strokeWidth: 1
                     }));
                     defectGroup.add(new Konva.Text({
+                        name: `defect-txt-${d.id}`,
                         x: sx + 6, y: sy + 6,
                         text: `[已过段] #${d.id} ${(d.y/1000).toFixed(2)}m`,
                         fontSize: 15, fill: isDark ? "#71717a" : "#94a3b8"
@@ -2482,6 +2710,9 @@
         // ==========================================
         // 5. 母卷全局全景雷达条与平滑拖拽抓取交互 (Radar Scrubbing)
         // ==========================================
+        // ==========================================
+        // 5. 母卷全局全景雷达条与平滑拖拽抓取交互 (Radar Scrubbing)
+        // ==========================================
         function renderRadar() {
             const data = SCENARIOS[currentCaseId];
             const totalL = data.totalRollL || 60000;
@@ -2531,17 +2762,113 @@
                 track.appendChild(mark);
             }
 
-            // 绘制全局疵点标记
+            // 绘制全局疵点标记 (携带 Y 和 H 数据集属性供免重构更新)
             defects.forEach(d => {
                 const dPct = (d.y / totalL) * 100;
                 const marker = document.createElement("div");
                 const inBed = (d.y + d.h >= winStartY && d.y <= winStartY + bedL);
                 marker.className = inBed ? "radar-defect-marker" : "radar-defect-marker warning";
                 marker.style.left = `${dPct}%`;
+                marker.dataset.defectY = d.y;
+                marker.dataset.defectH = d.h;
                 marker.title = `疵点 #${d.id} [${d.desc || '疵点'}] 全局Y: ${d.y}mm (${(d.y/1000).toFixed(2)}m) 宽:${d.w}mm 长:${d.h}mm`;
                 track.appendChild(marker);
             });
         }
+
+        // 局部更新雷达疵点高亮状态 (0ms DOM 免重构)
+        function updateDefectRadarActiveState() {
+            const data = SCENARIOS[currentCaseId];
+            if (!data) return;
+            const winStartY = data.windowStartY || 0;
+            const bedL = data.bedL || 5000;
+            const track = document.getElementById("radar-track");
+            if (!track) return;
+            const markers = track.querySelectorAll(".radar-defect-marker");
+            markers.forEach(marker => {
+                const y = parseFloat(marker.dataset.defectY || 0);
+                const h = parseFloat(marker.dataset.defectH || 0);
+                const inBed = (y + h >= winStartY && y <= winStartY + bedL);
+                if (inBed) {
+                    marker.classList.remove("warning");
+                } else {
+                    marker.classList.add("warning");
+                }
+            });
+        }
+
+        // 局部更新画布上疵点层次视觉效果 (0ms Konva 免重构，告别白闪)
+        function updateDefectVisualStates() {
+            const data = SCENARIOS[currentCaseId];
+            if (!data) return;
+            const winStartY = data.windowStartY || 0;
+            const bedL = data.bedL || 5000;
+            const winEndY = winStartY + bedL;
+            const isDark = (document.documentElement.getAttribute("data-theme") !== "light");
+            const defects = data.globalDefects || data.defects || [];
+
+            defects.forEach(d => {
+                const inBed = (d.y + d.h >= winStartY && d.y <= winEndY);
+                const inUpcoming = (d.y > winEndY);
+                const zone = defectGroup.findOne(`.defect-zone-${d.id}`);
+                const box = defectGroup.findOne(`.defect-box-${d.id}`);
+                const txt = defectGroup.findOne(`.defect-txt-${d.id}`);
+
+                if (zone) {
+                    if (inBed) {
+                        zone.visible(true);
+                        zone.fill(isDark ? "rgba(239, 68, 68, 0.25)" : "rgba(239, 68, 68, 0.15)");
+                        zone.stroke("#dc2626");
+                        zone.strokeWidth(2);
+                        zone.dash([8, 4]);
+                    } else if (inUpcoming) {
+                        zone.visible(true);
+                        zone.fill(isDark ? "rgba(245, 158, 11, 0.16)" : "rgba(245, 158, 11, 0.12)");
+                        zone.stroke("#f59e0b");
+                        zone.strokeWidth(1.5);
+                        zone.dash([6, 4]);
+                    } else {
+                        zone.visible(false);
+                    }
+                }
+                if (box) {
+                    if (inBed) {
+                        box.fill("#ef4444");
+                        box.stroke("#991b1b");
+                        box.strokeWidth(2);
+                    } else if (inUpcoming) {
+                        box.fill("#d97706");
+                        box.stroke("#b45309");
+                        box.strokeWidth(1.5);
+                    } else {
+                        box.fill(isDark ? "#3f3f46" : "#cbd5e1");
+                        box.stroke(isDark ? "#52525b" : "#94a3b8");
+                        box.strokeWidth(1);
+                    }
+                }
+                if (txt) {
+                    if (inBed) {
+                        txt.text(`[工位避让疵点] #${d.id} ${d.w}×${d.h}mm (工位Y: ${d.y - winStartY}mm | 全局: ${(d.y/1000).toFixed(2)}m)`);
+                        txt.fill(isDark ? "#fecaca" : "#991b1b");
+                        txt.fontSize(17);
+                        txt.fontStyle("bold");
+                    } else if (inUpcoming) {
+                        txt.text(`[进料预警] #${d.id} [${d.desc || '瑕疵'}] 全局 ${(d.y/1000).toFixed(2)}m (距工位 +${((d.y - winEndY)/1000).toFixed(2)}m)`);
+                        txt.fill(isDark ? "#fde68a" : "#92400e");
+                        txt.fontSize(17);
+                        txt.fontStyle("bold");
+                    } else {
+                        txt.text(`[已过段] #${d.id} ${(d.y/1000).toFixed(2)}m`);
+                        txt.fill(isDark ? "#71717a" : "#94a3b8");
+                        txt.fontSize(15);
+                        txt.fontStyle("normal");
+                    }
+                }
+            });
+            mainLayer.batchDraw();
+        }
+
+        let radarRafId = null;
 
         function setupRadarInteraction() {
             const track = document.getElementById("radar-track");
@@ -2550,19 +2877,37 @@
             if (track.dataset.bound === "true") return;
             track.dataset.bound = "true";
 
-            let dragStartX = 0;
-            let dragStartWinY = 0;
+            let cachedTrackRect = null;
+            let grabOffsetX = 0; // 鼠标相对滑块左边缘的像素距离
+            let pendingTargetY = null;
+
+            const applyScroll = () => {
+                if (pendingTargetY !== null) {
+                    updateFabricScrollPosition(pendingTargetY);
+                    pendingTargetY = null;
+                }
+                radarRafId = null;
+            };
+
+            const scheduleScroll = (targetY) => {
+                pendingTargetY = targetY;
+                if (!radarRafId) {
+                    radarRafId = requestAnimationFrame(applyScroll);
+                }
+            };
 
             const onPointerMove = (e) => {
-                if (!isRadarDragging) return;
-                const trackRect = track.getBoundingClientRect();
-                if (trackRect.width <= 0) return;
-                const deltaX = e.clientX - dragStartX;
+                if (!isRadarDragging || !cachedTrackRect) return;
                 const data = SCENARIOS[currentCaseId];
                 if (!data) return;
                 const totalL = data.totalRollL || 60000;
-                const deltaY = (deltaX / trackRect.width) * totalL;
-                updateFabricScrollPosition(dragStartWinY + deltaY);
+                const trackW = cachedTrackRect.width;
+                if (trackW <= 0) return;
+
+                // 鼠标当前视口X坐标减去抓手偏移，得到滑块左边缘绝对像素位置 (1:1 跟随鼠标)
+                const handleLeftPx = e.clientX - cachedTrackRect.left - grabOffsetX;
+                const targetY = (handleLeftPx / trackW) * totalL;
+                scheduleScroll(targetY);
             };
 
             const onPointerUp = (e) => {
@@ -2571,60 +2916,110 @@
                 dragScreenBedY = null;
                 winEl.classList.remove("dragging");
                 document.body.style.cursor = "";
+
+                if (radarRafId) {
+                    cancelAnimationFrame(radarRafId);
+                    radarRafId = null;
+                }
+                if (pendingTargetY !== null) {
+                    updateFabricScrollPosition(pendingTargetY);
+                    pendingTargetY = null;
+                }
+
+                try {
+                    if (winEl.releasePointerCapture) winEl.releasePointerCapture(e.pointerId);
+                    if (track.releasePointerCapture) track.releasePointerCapture(e.pointerId);
+                } catch (err) {}
+
                 window.removeEventListener("pointermove", onPointerMove);
                 window.removeEventListener("pointerup", onPointerUp);
                 window.removeEventListener("pointercancel", onPointerUp);
 
-                // 拖拽停止后重新渲染疵点层次状态 (工位红避让/未展开进料预警)
-                renderScene();
-                renderRadar();
+                // 核心关键：绝不调用 renderScene() 避免销毁重构白闪！
+                // 仅就地更新文字与局部状态
+                updateDefectVisualStates();
+                updateDefectRadarActiveState();
+                updateUIInfo();
             };
 
-            // 1. 滑块自身 Pointer 拖拽刷动
+            // 1. 滑块自身 Pointer 拖拽刷动 (1:1 抓手精准吸附)
             winEl.addEventListener("pointerdown", (e) => {
                 e.stopPropagation();
                 e.preventDefault();
                 isRadarDragging = true;
-                dragStartX = e.clientX;
+                cachedTrackRect = track.getBoundingClientRect();
+                const winRect = winEl.getBoundingClientRect();
+                // 抓手偏移量：鼠标指针相对滑块左边缘的像素距离
+                grabOffsetX = e.clientX - winRect.left;
+
                 const data = SCENARIOS[currentCaseId];
-                dragStartWinY = data.windowStartY || 0;
+                const curWinY = data.windowStartY || 0;
                 const scale = stage.scaleY();
-                dragScreenBedY = stage.y() + dragStartWinY * scale;
+                dragScreenBedY = stage.y() + curWinY * scale;
+
                 winEl.classList.add("dragging");
                 document.body.style.cursor = "ew-resize";
+
+                try {
+                    winEl.setPointerCapture(e.pointerId);
+                } catch (err) {}
 
                 window.addEventListener("pointermove", onPointerMove, { passive: false });
                 window.addEventListener("pointerup", onPointerUp);
                 window.addEventListener("pointercancel", onPointerUp);
             });
 
-            // 2. 点击或在轨道上任意滑动
+            // 2. 点击或在轨道上任意滑动 (平滑吸附居中并无缝进入拖动)
             track.addEventListener("pointerdown", (e) => {
                 if (e.target === winEl || winEl.contains(e.target)) return;
                 e.preventDefault();
-                const trackRect = track.getBoundingClientRect();
-                const clickX = e.clientX - trackRect.left;
-                const pct = Math.max(0, Math.min(1, clickX / trackRect.width));
+                cachedTrackRect = track.getBoundingClientRect();
                 const data = SCENARIOS[currentCaseId];
+                if (!data) return;
                 const totalL = data.totalRollL || 60000;
                 const bedL = data.bedL || 5000;
-                const targetY = pct * totalL - bedL / 2;
+                const trackW = cachedTrackRect.width;
+                if (trackW <= 0) return;
+
+                const winWidthPx = Math.max(16, (bedL / totalL) * trackW);
+                // 使得点击点直接成为滑块中心
+                grabOffsetX = winWidthPx / 2;
+                const clickLeftPx = (e.clientX - cachedTrackRect.left) - grabOffsetX;
+                const targetY = (clickLeftPx / trackW) * totalL;
 
                 const scale = stage.scaleY();
                 dragScreenBedY = stage.y() + (data.windowStartY || 0) * scale;
                 updateFabricScrollPosition(targetY);
 
-                // 立即进入拖拽模式
+                // 立即进入拖拽模式，无缝跟随
                 isRadarDragging = true;
-                dragStartX = e.clientX;
-                dragStartWinY = data.windowStartY || 0;
                 winEl.classList.add("dragging");
                 document.body.style.cursor = "ew-resize";
+
+                try {
+                    track.setPointerCapture(e.pointerId);
+                } catch (err) {}
 
                 window.addEventListener("pointermove", onPointerMove, { passive: false });
                 window.addEventListener("pointerup", onPointerUp);
                 window.addEventListener("pointercancel", onPointerUp);
             });
+
+            // 3. 鼠标滚轮在雷达条上滚动时推进/回退布卷
+            track.addEventListener("wheel", (e) => {
+                e.preventDefault();
+                const data = SCENARIOS[currentCaseId];
+                if (!data) return;
+                const totalL = data.totalRollL || 60000;
+                const bedL = data.bedL || 5000;
+                const curY = data.windowStartY || 0;
+                const step = (e.deltaY > 0 ? 1 : -1) * (totalL > 40000 ? 1000 : 500);
+                const targetY = Math.max(0, Math.min(totalL - bedL, curY + step));
+                updateFabricScrollPosition(targetY);
+                updateDefectVisualStates();
+                updateDefectRadarActiveState();
+                updateUIInfo();
+            }, { passive: false });
         }
 
         function advanceBed(delta) {
@@ -3211,6 +3606,166 @@
             } catch (err) {
                 console.error(err);
                 alert("调用后端 /api/solve 异常: " + err.message);
+            }
+        }
+
+        // ==========================================
+        // 9.5 布局动态拖拽调节与卡片折叠系统 (Resizable Splitters & Collapsible Cards)
+        // ==========================================
+        function toggleSectionCollapse(headerEl) {
+            const section = headerEl.closest(".panel-section");
+            if (!section) return;
+            section.classList.toggle("collapsed");
+        }
+
+        function toggleSidebar(side) {
+            const container = document.getElementById("konva-container");
+            if (side === "left") {
+                const bar = document.getElementById("sidebar-left");
+                const resizer = document.getElementById("resizer-left");
+                const edgeBtn = document.getElementById("edge-toggle-left");
+                const topBtn = document.getElementById("btn-toggle-left-bar");
+                if (!bar) return;
+                const isCollapsed = bar.classList.toggle("collapsed");
+                if (resizer) resizer.style.display = isCollapsed ? "none" : "flex";
+                if (edgeBtn) edgeBtn.style.display = isCollapsed ? "flex" : "none";
+                if (topBtn) topBtn.innerText = isCollapsed ? "展开左栏" : "收起左栏";
+                if (!isCollapsed) {
+                    const savedW = localStorage.getItem("cutdemo_left_sidebar_w") || "380";
+                    bar.style.width = `${savedW}px`;
+                }
+            } else if (side === "right") {
+                const bar = document.getElementById("sidebar-right");
+                const resizer = document.getElementById("resizer-right");
+                const edgeBtn = document.getElementById("edge-toggle-right");
+                const topBtn = document.getElementById("btn-toggle-right-bar");
+                if (!bar) return;
+                const isCollapsed = bar.classList.toggle("collapsed");
+                if (resizer) resizer.style.display = isCollapsed ? "none" : "flex";
+                if (edgeBtn) edgeBtn.style.display = isCollapsed ? "flex" : "none";
+                if (topBtn) topBtn.innerText = isCollapsed ? "展开右栏" : "收起右栏";
+                if (!isCollapsed) {
+                    const savedW = localStorage.getItem("cutdemo_right_sidebar_w") || "360";
+                    bar.style.width = `${savedW}px`;
+                }
+            }
+            setTimeout(() => {
+                if (stage && container) {
+                    stage.width(container.clientWidth);
+                    stage.height(container.clientHeight);
+                    drawRulers();
+                    renderRadar();
+                }
+            }, 60);
+        }
+
+        function initLayoutResizers() {
+            const leftResizer = document.getElementById("resizer-left");
+            const rightResizer = document.getElementById("resizer-right");
+            const leftSidebar = document.getElementById("sidebar-left");
+            const rightSidebar = document.getElementById("sidebar-right");
+            const container = document.getElementById("konva-container");
+
+            const savedLeftW = localStorage.getItem("cutdemo_left_sidebar_w");
+            const savedRightW = localStorage.getItem("cutdemo_right_sidebar_w");
+            if (savedLeftW && leftSidebar) leftSidebar.style.width = `${Math.max(260, Math.min(650, parseInt(savedLeftW)))}px`;
+            if (savedRightW && rightSidebar) rightSidebar.style.width = `${Math.max(280, Math.min(700, parseInt(savedRightW)))}px`;
+
+            function onCanvasResize() {
+                if (stage && container) {
+                    stage.width(container.clientWidth);
+                    stage.height(container.clientHeight);
+                    drawRulers();
+                    renderRadar();
+                }
+            }
+
+            if (leftResizer && leftSidebar) {
+                let isDragging = false;
+                let startX = 0;
+                let startW = 0;
+
+                leftResizer.addEventListener("pointerdown", (e) => {
+                    e.preventDefault();
+                    isDragging = true;
+                    startX = e.clientX;
+                    startW = leftSidebar.getBoundingClientRect().width;
+                    leftResizer.classList.add("resizing");
+                    document.body.style.cursor = "col-resize";
+                    document.body.style.userSelect = "none";
+                    try { leftResizer.setPointerCapture(e.pointerId); } catch(err){}
+                });
+
+                leftResizer.addEventListener("pointermove", (e) => {
+                    if (!isDragging) return;
+                    const deltaX = e.clientX - startX;
+                    const newW = Math.max(260, Math.min(650, Math.round(startW + deltaX)));
+                    leftSidebar.style.width = `${newW}px`;
+                    onCanvasResize();
+                });
+
+                const stopLeftDrag = (e) => {
+                    if (!isDragging) return;
+                    isDragging = false;
+                    leftResizer.classList.remove("resizing");
+                    document.body.style.cursor = "";
+                    document.body.style.userSelect = "";
+                    try { leftResizer.releasePointerCapture(e.pointerId); } catch(err){}
+                    localStorage.setItem("cutdemo_left_sidebar_w", leftSidebar.getBoundingClientRect().width);
+                    onCanvasResize();
+                };
+                leftResizer.addEventListener("pointerup", stopLeftDrag);
+                leftResizer.addEventListener("pointercancel", stopLeftDrag);
+
+                leftResizer.addEventListener("dblclick", () => {
+                    leftSidebar.style.width = "380px";
+                    localStorage.setItem("cutdemo_left_sidebar_w", "380");
+                    onCanvasResize();
+                });
+            }
+
+            if (rightResizer && rightSidebar) {
+                let isDragging = false;
+                let startX = 0;
+                let startW = 0;
+
+                rightResizer.addEventListener("pointerdown", (e) => {
+                    e.preventDefault();
+                    isDragging = true;
+                    startX = e.clientX;
+                    startW = rightSidebar.getBoundingClientRect().width;
+                    rightResizer.classList.add("resizing");
+                    document.body.style.cursor = "col-resize";
+                    document.body.style.userSelect = "none";
+                    try { rightResizer.setPointerCapture(e.pointerId); } catch(err){}
+                });
+
+                rightResizer.addEventListener("pointermove", (e) => {
+                    if (!isDragging) return;
+                    const deltaX = e.clientX - startX;
+                    const newW = Math.max(280, Math.min(700, Math.round(startW - deltaX)));
+                    rightSidebar.style.width = `${newW}px`;
+                    onCanvasResize();
+                });
+
+                const stopRightDrag = (e) => {
+                    if (!isDragging) return;
+                    isDragging = false;
+                    rightResizer.classList.remove("resizing");
+                    document.body.style.cursor = "";
+                    document.body.style.userSelect = "";
+                    try { rightResizer.releasePointerCapture(e.pointerId); } catch(err){}
+                    localStorage.setItem("cutdemo_right_sidebar_w", rightSidebar.getBoundingClientRect().width);
+                    onCanvasResize();
+                };
+                rightResizer.addEventListener("pointerup", stopRightDrag);
+                rightResizer.addEventListener("pointercancel", stopRightDrag);
+
+                rightResizer.addEventListener("dblclick", () => {
+                    rightSidebar.style.width = "360px";
+                    localStorage.setItem("cutdemo_right_sidebar_w", "360");
+                    onCanvasResize();
+                });
             }
         }
 
@@ -3909,6 +4464,7 @@
             }
             initKonva();
             setupRadarInteraction();
+            initLayoutResizers();
             loadCase(4); // 默认打开 60米母卷全局全景演示
             await onMotherRollChange();
             refreshShelfRemnantsList();
