@@ -45,7 +45,11 @@ export function switchSettingsTab(tabName) {
 
 export function loadSavedSettings() {
     const theme = localStorage.getItem("cam_theme") || "dark";
-    const origin = localStorage.getItem("cam_origin") || "right-top";
+    let origin = localStorage.getItem("cam_origin");
+    if (!origin || origin === "right-top") {
+        origin = "right-bottom";
+        localStorage.setItem("cam_origin", "right-bottom");
+    }
     const margin = localStorage.getItem("cam_margin") || "20";
     const trim = localStorage.getItem("cam_trim") || "0";
     const rot = localStorage.getItem("cam_rot") || "0";

@@ -89,7 +89,7 @@ export function initKonva() {
         const bedL = data.bedL || 5000;
         const winStartY = data.windowStartY || 0;
         const winEndY = winStartY + bedL;
-        const originStr = (data.cutOrigin || "right-top").toLowerCase();
+        const originStr = (data.cutOrigin || "right-bottom").toLowerCase();
         const isRight = originStr.startsWith("right");
         const isBottom = originStr.endsWith("bottom");
         const bedY = isBottom ? (winEndY - worldY) : (worldY - winStartY);

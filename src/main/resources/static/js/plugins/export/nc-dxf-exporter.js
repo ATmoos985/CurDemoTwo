@@ -15,7 +15,7 @@ export function generateGCode(caseData = null, options = {}) {
     const rollW = data.rollW || 2000;
     const bedL = data.bedL || 5000;
     const winStartY = data.windowStartY || 0;
-    const originStr = (data.cutOrigin || "right-top").toLowerCase();
+    const originStr = (data.cutOrigin || "right-bottom").toLowerCase();
     const home = getHomeCoordinates(data);
 
     const cutFeed = options.cutFeed || 4000;      // 切削进给速度 4000 mm/min
@@ -31,7 +31,7 @@ export function generateGCode(caseData = null, options = {}) {
     gcode.push(`( DATE CREATED  : ${dateStr}                              )`);
     gcode.push(`( MOTHER ROLL   : ${rollId} (Width: ${rollW} mm)                 )`);
     gcode.push(`( BED STATION   : 0 ~ ${bedL} mm (Global Y: ${winStartY} ~ ${winStartY + bedL} mm) )`);
-    gcode.push(`( ORIGIN DATUM  : ${data.cutOrigin || 'right-top'}                                  )`);
+    gcode.push(`( ORIGIN DATUM  : ${data.cutOrigin || 'right-bottom'}                                  )`);
     gcode.push(`( TOTAL CUTS    : ${cuts.length} STEPS                                   )`);
     gcode.push(`( OPTIMIZED     : ${state.isToolpathOptimized ? 'YES (Segment-TSP 2-Opt)' : 'NO (Sequential)'}            )`);
     gcode.push("( CONTROL TYPE  : 2D-Guillotine Oscillating Knife / Laser Cutting  )");
@@ -377,7 +377,7 @@ function populateCutTicketData() {
     const elemRoll = document.getElementById("ticket-roll-val");
     if (elemRoll) elemRoll.innerText = `${rollId} (幅宽: ${rollW}mm)`;
     const elemStation = document.getElementById("ticket-station-val");
-    if (elemStation) elemStation.innerText = `CUT-STATION-01 | 起刀: ${data.cutOrigin || 'right-top'}`;
+    if (elemStation) elemStation.innerText = `CUT-STATION-01 | 起刀: ${data.cutOrigin || 'right-bottom'}`;
 
     // 填充裁片表
     const tbodyPieces = document.getElementById("ticket-pieces-tbody");

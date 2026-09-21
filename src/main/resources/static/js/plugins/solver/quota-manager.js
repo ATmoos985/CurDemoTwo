@@ -373,7 +373,7 @@ export function onRollConfigChange() {
 export function onOriginParamChange() {
     const data = state.getCurrentCaseData();
     data.trimStart = parseFloat(document.getElementById("inp-trim-start").value) || 0;
-    data.cutOrigin = document.getElementById("sel-cut-origin").value || "right-top";
+    data.cutOrigin = document.getElementById("sel-cut-origin").value || "right-bottom";
     data.firstStageOrientation = document.getElementById("sel-first-stage").value;
     data.allowRotation = (document.getElementById("sel-allow-rotation").value === "1");
     data.globalDefects = getDefectsFromUI();
@@ -382,20 +382,20 @@ export function onOriginParamChange() {
     const descTip = document.getElementById("lbl-origin-desc-tip");
     const val = data.cutOrigin;
     if (headerTag) {
-        if (val === "right-top") { headerTag.innerText = "右上角基准"; headerTag.style.color = "#10b981"; }
-        else if (val === "left-top") { headerTag.innerText = "左上角基准"; headerTag.style.color = "#10b981"; }
-        else if (val === "right-bottom") { headerTag.innerText = "右下角基准"; headerTag.style.color = "#f59e0b"; }
-        else { headerTag.innerText = "左下角基准"; headerTag.style.color = "#f59e0b"; }
+        if (val === "right-bottom") { headerTag.innerText = "右下角基准"; headerTag.style.color = "#10b981"; }
+        else if (val === "right-top") { headerTag.innerText = "右上角基准"; headerTag.style.color = "#38bdf8"; }
+        else if (val === "left-bottom") { headerTag.innerText = "左下角基准"; headerTag.style.color = "#f59e0b"; }
+        else { headerTag.innerText = "左上角基准"; headerTag.style.color = "#a855f7"; }
     }
     if (descTip) {
-        if (val === "right-top") {
-            descTip.innerText = "行业推荐：右上角原点 (靠右导轨量幅宽，顺流自上而下进料顺切，零间隙接刀)";
-        } else if (val === "left-top") {
-            descTip.innerText = "标准CAM：左上角原点 (靠左量幅宽，顺流自上而下进料顺切，零间隙接刀)";
-        } else if (val === "right-bottom") {
-            descTip.innerText = "落料口逆切：右下角原点 (靠右导轨量幅宽，落料口自下而上起切)";
+        if (val === "right-bottom") {
+            descTip.innerText = "工业推荐：右下角原点 (靠右导轨量幅宽，落料口自下而上起切，刀路最优距离起刀)";
+        } else if (val === "right-top") {
+            descTip.innerText = "右上角原点 (靠右导轨量幅宽，顺流进料顺切)";
+        } else if (val === "left-bottom") {
+            descTip.innerText = "左下角原点 (靠左布边量幅宽，落料口自下而上起切)";
         } else {
-            descTip.innerText = "落料口逆切：左下角原点 (靠左量幅宽，落料口自下而上起切)";
+            descTip.innerText = "标准CAM：左上角原点 (靠左量幅宽，顺流自上而下进料顺切)";
         }
     }
 

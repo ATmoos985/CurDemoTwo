@@ -72,7 +72,7 @@ export const INITIAL_SCENARIOS = {
     4: {
         name: "场景二：60米母卷大段连续排料与全局疵点雷达 (工业全貌)",
         totalRollL: 60000, bedL: 5000, windowStartY: 0, rollW: 2000,
-        trimStart: 0, cutOrigin: "right-top", firstStageOrientation: "horizontal", allowRotation: false,
+        trimStart: 0, cutOrigin: "right-bottom", firstStageOrientation: "horizontal", allowRotation: false,
         allowLongitudinal: true,
         globalDefects: [
             { id: 1, x: 500, y: 1400, w: 150, h: 150, margin: 30, desc: "台面第1疵点 (色斑)" },

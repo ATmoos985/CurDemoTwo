@@ -311,8 +311,12 @@ async function bootstrapApp() {
     const savedTheme = localStorage.getItem("cam_theme") || "dark";
     setTheme(savedTheme);
 
-    const savedOrigin = localStorage.getItem("cam_origin");
-    if (savedOrigin && document.getElementById("sel-cut-origin")) {
+    let savedOrigin = localStorage.getItem("cam_origin");
+    if (!savedOrigin || savedOrigin === "right-top") {
+        savedOrigin = "right-bottom";
+        localStorage.setItem("cam_origin", "right-bottom");
+    }
+    if (document.getElementById("sel-cut-origin")) {
         document.getElementById("sel-cut-origin").value = savedOrigin;
     }
 

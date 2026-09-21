@@ -21,7 +21,7 @@ export function updateUIInfo() {
     if (document.getElementById("inp-roll-w")) document.getElementById("inp-roll-w").value = data.rollW || 2000;
 
     if (document.getElementById("inp-trim-start")) document.getElementById("inp-trim-start").value = data.trimStart || 0;
-    if (document.getElementById("sel-cut-origin")) document.getElementById("sel-cut-origin").value = data.cutOrigin || "right-top";
+    if (document.getElementById("sel-cut-origin")) document.getElementById("sel-cut-origin").value = data.cutOrigin || "right-bottom";
     if (document.getElementById("sel-first-stage")) document.getElementById("sel-first-stage").value = data.firstStageOrientation || "horizontal";
     if (document.getElementById("sel-allow-rotation")) document.getElementById("sel-allow-rotation").value = data.allowRotation ? "1" : "0";
 
@@ -33,7 +33,7 @@ export function updateUIInfo() {
         document.getElementById("sb-engine").innerText = data.engine || "PackingSolver (C++ 2D)";
     }
 
-    const originStr = (data.cutOrigin || "right-top").toLowerCase();
+    const originStr = (data.cutOrigin || "right-bottom").toLowerCase();
     const isRight = originStr.startsWith("right");
     const isBottom = originStr.endsWith("bottom");
     const trim = data.trimStart || 0;
@@ -121,14 +121,14 @@ export function loadCase(id) {
     if (document.getElementById("inp-roll-w")) document.getElementById("inp-roll-w").value = data.rollW || 2000;
 
     if (document.getElementById("inp-trim-start")) document.getElementById("inp-trim-start").value = data.trimStart || 0;
-    if (document.getElementById("sel-cut-origin")) document.getElementById("sel-cut-origin").value = data.cutOrigin || "right-top";
+    if (document.getElementById("sel-cut-origin")) document.getElementById("sel-cut-origin").value = data.cutOrigin || "right-bottom";
     const headerTag = document.getElementById("tag-cut-origin-header");
     if (headerTag) {
-        const val = data.cutOrigin || "right-top";
-        if (val === "right-top") { headerTag.innerText = "右上角基准"; headerTag.style.color = "#10b981"; }
-        else if (val === "left-top") { headerTag.innerText = "左上角基准"; headerTag.style.color = "#10b981"; }
-        else if (val === "right-bottom") { headerTag.innerText = "右下角基准"; headerTag.style.color = "#f59e0b"; }
-        else { headerTag.innerText = "左下角基准"; headerTag.style.color = "#f59e0b"; }
+        const val = data.cutOrigin || "right-bottom";
+        if (val === "right-bottom") { headerTag.innerText = "右下角基准"; headerTag.style.color = "#10b981"; }
+        else if (val === "right-top") { headerTag.innerText = "右上角基准"; headerTag.style.color = "#38bdf8"; }
+        else if (val === "left-bottom") { headerTag.innerText = "左下角基准"; headerTag.style.color = "#f59e0b"; }
+        else { headerTag.innerText = "左上角基准"; headerTag.style.color = "#a855f7"; }
     }
     if (document.getElementById("sel-first-stage")) document.getElementById("sel-first-stage").value = data.firstStageOrientation || "horizontal";
     if (document.getElementById("sel-allow-rotation")) document.getElementById("sel-allow-rotation").value = data.allowRotation ? "1" : "0";
@@ -142,6 +142,7 @@ export function loadCase(id) {
     renderScene();
     resetToBedView();
     bus.emit('demands:changed');
+    updateUIInfo();
 }
 
 export async function triggerSolve() {
@@ -237,7 +238,7 @@ export async function triggerSolve() {
 
     const winEndY = winStartY + bedL;
     const trimStart = parseFloat(document.getElementById("inp-trim-start").value) || 0;
-    const cutOrigin = document.getElementById("sel-cut-origin").value || "right-top";
+    const cutOrigin = document.getElementById("sel-cut-origin").value || "right-bottom";
     const firstStageOrientation = document.getElementById("sel-first-stage").value || "horizontal";
     const allowRotation = (document.getElementById("sel-allow-rotation").value === "1");
     const allowLongitudinal = (document.getElementById("sel-allow-longitudinal").value === "1");

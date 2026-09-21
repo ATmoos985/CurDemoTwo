@@ -349,7 +349,7 @@ export function renderScene() {
         fill: "#ef4444"
     }));
 
-    const originStr = (data.cutOrigin || "right-top").toLowerCase();
+    const originStr = (data.cutOrigin || "right-bottom").toLowerCase();
     const isRight = originStr.startsWith("right");
     const isBottom = originStr.endsWith("bottom");
 
@@ -510,6 +510,7 @@ export function resetToBedView() {
 
     drawRulers();
     updateStatusBar();
+    if (mainLayer) mainLayer.batchDraw();
 }
 
 export function resetToFlowView() {
@@ -542,6 +543,7 @@ export function resetToFlowView() {
     });
     drawRulers();
     updateStatusBar();
+    if (mainLayer) mainLayer.batchDraw();
 }
 
 export function viewFullRoll() {
@@ -572,6 +574,7 @@ export function viewFullRoll() {
     });
     drawRulers();
     updateStatusBar();
+    if (mainLayer) mainLayer.batchDraw();
 }
 
 export function fitView() {

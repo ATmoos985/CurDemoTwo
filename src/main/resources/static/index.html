@@ -125,20 +125,20 @@
                             <span class="collapse-arrow">▼</span>
                             <span>机台起准点与展开标定</span>
                         </div>
-                        <span class="header-tag" id="tag-cut-origin-header" style="color:#10b981;">右上角基准</span>
+                        <span class="header-tag" id="tag-cut-origin-header" style="color:#10b981;">右下角基准</span>
                     </div>
                     <div class="section-content">
                         <div class="prop-row">
                             <span class="prop-label">起刀基准点位置</span>
                             <select class="prop-input" id="sel-cut-origin" onchange="onOriginParamChange()" style="width: 220px;">
-                                <option value="right-top" selected>右上角 (靠右导轨 · 顺流进给 · 工业标准)</option>
-                                <option value="left-top">左上角 (靠左布边 · 顺流进给 · 标准CAM)</option>
-                                <option value="right-bottom">右下角 (靠右导轨 · 落料口自下而上起切)</option>
+                                <option value="right-bottom" selected>右下角 (靠右导轨 · 落料口自下而上起切 · 推荐)</option>
+                                <option value="right-top">右上角 (靠右导轨 · 顺流进给)</option>
                                 <option value="left-bottom">左下角 (靠左布边 · 落料口自下而上起切)</option>
+                                <option value="left-top">左上角 (靠左布边 · 顺流进给 · 标准CAM)</option>
                             </select>
                         </div>
                         <div class="callout-amber-tip" id="lbl-origin-desc-tip">
-                            行业推荐：右上角原点 (靠右导轨量幅宽，顺流自上而下进料顺切，零间隙接刀)
+                            标准起刀：右下角原点 (靠右导轨量幅宽，落料口自下而上起切，刀路最优距离起刀)
                         </div>
                         <div class="prop-row">
                             <span class="prop-label">机台展开台面 (Bed L)</span>
@@ -535,7 +535,7 @@
         <div class="status-left">
             <span>工位: <span class="status-val">CUT-STATION-01</span></span>
             <span>当前布卷: <span class="status-val" id="sb-roll-id">ROLL-2026-0920</span></span>
-            <span>基准起点: <span class="status-val" id="sb-origin-lbl">左布边 (0, 0) mm</span></span>
+            <span>基准起点: <span class="status-val" id="sb-origin-lbl">靠右导轨·落料口起切 (2000, 5000) mm</span></span>
             <span>光标坐标: <span class="status-val" id="sb-cursor-pos">X: 0 mm | Y: 0 mm</span></span>
         </div>
         <div class="status-right">
@@ -621,10 +621,10 @@
                     <div class="prop-row">
                         <span class="prop-label">机台默认起准点基准 (Default Origin)</span>
                         <select class="prop-input" id="cfg-cut-origin" style="width: 220px;">
-                            <option value="right-top" selected>右上角 (靠右导轨 · 顺流进给 · 工业推荐)</option>
-                            <option value="left-top">左上角 (靠左布边 · 顺流进给 · 标准CAM)</option>
-                            <option value="right-bottom">右下角 (靠右导轨 · 落料口自下而上起切)</option>
+                            <option value="right-bottom" selected>右下角 (靠右导轨 · 落料口自下而上起切 · 推荐)</option>
+                            <option value="right-top">右上角 (靠右导轨 · 顺流进给)</option>
                             <option value="left-bottom">左下角 (靠左布边 · 落料口自下而上起切)</option>
+                            <option value="left-top">左上角 (靠左布边 · 顺流进给 · 标准CAM)</option>
                         </select>
                     </div>
                     <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px; line-height: 1.5;">
@@ -736,6 +736,6 @@
     </div>
 
     <!-- 模块化前端 ES6 主程序入口 (Modular ES6 Plugin Architecture) -->
-    <script type="module" src="js/app.js?v=20260921_2000"></script>
+    <script type="module" src="js/app.js?v=20260921_2038"></script>
 </body>
 </html>
