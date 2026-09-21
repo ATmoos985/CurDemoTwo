@@ -1,0 +1,129 @@
+/* 模态弹窗与通用对话框 */
+.settings-modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+}
+.settings-modal-dialog {
+    width: 720px;
+    max-width: 95vw;
+    max-height: 90vh;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.settings-modal-header {
+    padding: 12px 18px;
+    background: var(--panel-header);
+    border-bottom: 1px solid var(--panel-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.settings-nav-tabs {
+    display: flex;
+    background: var(--panel-header);
+    border-bottom: 1px solid var(--panel-border);
+    padding: 0 12px;
+    gap: 4px;
+}
+.settings-tab-btn {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-muted);
+    padding: 10px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.settings-tab-btn:hover {
+    color: var(--text-main);
+}
+.settings-tab-btn.active {
+    color: var(--accent-blue);
+    border-bottom-color: var(--accent-blue);
+}
+.settings-modal-body {
+    flex: 1;
+    padding: 16px 20px;
+    overflow-y: auto;
+}
+.settings-tab-pane {
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+}
+.settings-tab-pane.active {
+    display: flex;
+}
+.settings-footer {
+    padding: 12px 18px;
+    background: var(--panel-header);
+    border-top: 1px solid var(--panel-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* 现场料头库弹窗特殊结构 */
+.remnant-modal-dialog {
+    width: 820px;
+    max-width: 95vw;
+    height: 75vh;
+    max-height: 85vh;
+    background: var(--modal-dialog-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.remnant-modal-header {
+    padding: 12px 16px;
+    background: var(--modal-header-bg);
+    border-bottom: 1px solid var(--panel-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.remnant-modal-bar {
+    padding: 12px 16px;
+    background: var(--modal-header-bg);
+    border-bottom: 1px solid var(--panel-border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.remnant-modal-body {
+    flex: 1;
+    padding: 14px 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: var(--modal-content-bg);
+    min-height: 240px;
+}
+.remnant-modal-footer {
+    padding: 10px 16px;
+    background: var(--modal-footer-bg);
+    border-top: 1px solid var(--panel-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}

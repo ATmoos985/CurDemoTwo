@@ -1,0 +1,113 @@
+/* 中央画布视口 */
+.viewport-container {
+    flex: 1;
+    position: relative;
+    background: #09090b;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+[data-theme="light"] .viewport-container {
+    background: #f8fafc;
+}
+
+#konva-container {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+#cad-ruler-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    z-index: 10;
+}
+
+/* 浮动画布视口控制栏 */
+.canvas-toolbar {
+    position: absolute;
+    top: 12px;
+    right: 16px;
+    z-index: 20;
+    display: flex;
+    gap: 6px;
+    background: rgba(39, 39, 42, 0.85);
+    backdrop-filter: blur(4px);
+    border: 1px solid var(--panel-border);
+    padding: 4px;
+    border-radius: 4px;
+}
+
+/* 底部切刀演播栏 (CAM Simulator) */
+.playback-bar {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 20;
+    background: rgba(39, 39, 42, 0.92);
+    backdrop-filter: blur(6px);
+    border: 1px solid var(--panel-border);
+    padding: 6px 14px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+.playback-btn {
+    background: #18181b;
+    border: 1px solid var(--panel-border);
+    color: var(--text-main);
+    padding: 4px 10px;
+    border-radius: 3px;
+    font-size: 12px;
+    cursor: pointer;
+}
+.playback-btn:hover { border-color: var(--text-main); }
+.step-indicator {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: #38bdf8;
+    font-weight: 600;
+}
+
+[data-theme="light"] .playback-bar {
+    background: rgba(255, 255, 255, 0.96);
+    border-color: #cbd5e1;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+}
+[data-theme="light"] .playback-btn {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    color: #0f172a;
+}
+[data-theme="light"] .playback-btn:hover {
+    background: #e2e8f0;
+    border-color: #94a3b8;
+}
+[data-theme="light"] .step-indicator {
+    color: #0284c7;
+    font-weight: 700;
+}
+
+/* 图例指示器 */
+.legend-bar {
+    display: flex;
+    gap: 14px;
+    font-size: 11px;
+    padding: 6px 12px;
+    background: #18181b;
+    border-bottom: 1px solid var(--panel-border);
+}
+.legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+
+[data-theme="light"] .legend-bar {
+    background: #ffffff;
+    border-color: #cbd5e1;
+}

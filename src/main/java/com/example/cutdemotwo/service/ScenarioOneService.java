@@ -1,13 +1,29 @@
 package com.example.cutdemotwo.service;
 
 import com.example.cutdemotwo.model.*;
+import com.example.cutdemotwo.service.solver.ICutSolverEngine;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
 
 @Service
-public class ScenarioOneService {
+public class ScenarioOneService implements ICutSolverEngine {
+
+    @Override
+    public String getEngineType() {
+        return "preset";
+    }
+
+    @Override
+    public boolean isAvailable() {
+        return true;
+    }
+
+    @Override
+    public SolveResponse solve(SolveRequest request) {
+        return getTableOneLShape();
+    }
 
     public SolveResponse getScenario(int scenarioId) {
         switch (scenarioId) {

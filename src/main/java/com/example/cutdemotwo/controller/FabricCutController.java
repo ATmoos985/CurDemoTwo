@@ -15,22 +15,22 @@ import java.util.Map;
 @CrossOrigin(origins = "*")
 public class FabricCutController {
 
-    private final PackingSolverService packingSolverService;
+    private final com.example.cutdemotwo.service.solver.SolverFactory solverFactory;
     private final ScenarioOneService scenarioOneService;
     private final com.example.cutdemotwo.service.RemnantService remnantService;
 
     @Autowired
-    public FabricCutController(PackingSolverService packingSolverService,
+    public FabricCutController(com.example.cutdemotwo.service.solver.SolverFactory solverFactory,
                                 ScenarioOneService scenarioOneService,
                                 com.example.cutdemotwo.service.RemnantService remnantService) {
-        this.packingSolverService = packingSolverService;
+        this.solverFactory = solverFactory;
         this.scenarioOneService = scenarioOneService;
         this.remnantService = remnantService;
     }
 
     @PostMapping("/solve")
     public SolveResponse solve(@RequestBody SolveRequest request) {
-        return packingSolverService.solve(request);
+        return solverFactory.solve(request);
     }
 
     @GetMapping("/scenario/{id}")
@@ -72,7 +72,8 @@ public class FabricCutController {
     public Map<String, Object> health() {
         Map<String, Object> map = new HashMap<>();
         map.put("status", "UP");
-        map.put("packingsolverAvailable", packingSolverService.isAvailable());
+        com.example.cutdemotwo.service.solver.ICutSolverEngine packingEngine = solverFactory.getEngine("packingsolver");
+        map.put("packingsolverAvailable", packingEngine != null && packingEngine.isAvailable());
         map.put("remnantsInStock", remnantService.getAvailableRemnants().size());
         return map;
     }

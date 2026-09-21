@@ -1,0 +1,267 @@
+/* 顶部工业状态导航栏 */
+header {
+    height: 44px;
+    background: var(--panel-header);
+    border-bottom: 1px solid var(--panel-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    user-select: none;
+}
+.header-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: 0.5px;
+}
+.header-tag {
+    background: #09090b;
+    border: 1px solid var(--panel-border);
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    color: var(--accent-blue);
+    font-family: var(--font-mono);
+}
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+[data-theme="light"] header {
+    background: #ffffff;
+    border-bottom: 1px solid #cbd5e1;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+[data-theme="light"] .header-title {
+    color: #0f172a;
+}
+[data-theme="light"] .header-tag {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    color: #0284c7;
+}
+
+/* 主工作视窗布局 */
+main {
+    flex: 1;
+    display: flex;
+    height: calc(100vh - 72px);
+    position: relative;
+}
+
+/* 左侧面板：母卷与参数 */
+.sidebar {
+    width: 380px;
+    background: var(--panel-bg);
+    border-right: 1px solid var(--panel-border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    user-select: none;
+    z-index: 10;
+    transition: width 0.12s ease;
+    position: relative;
+}
+.sidebar.collapsed {
+    width: 0 !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    border-right: none !important;
+    overflow: hidden !important;
+    visibility: hidden;
+}
+
+/* 右侧面板：工艺切刀单与台账 */
+.sidebar-right {
+    width: 360px;
+    background: var(--panel-bg);
+    border-left: 1px solid var(--panel-border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    user-select: none;
+    z-index: 10;
+    transition: width 0.12s ease;
+    position: relative;
+}
+.sidebar-right.collapsed {
+    width: 0 !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    border-left: none !important;
+    overflow: hidden !important;
+    visibility: hidden;
+}
+
+/* 左右分栏可拖拽调节分割条 (Resizable Splitters) */
+.layout-resizer {
+    width: 6px;
+    background: var(--panel-border);
+    cursor: col-resize;
+    position: relative;
+    z-index: 25;
+    flex-shrink: 0;
+    transition: background 0.15s, box-shadow 0.15s;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.layout-resizer:hover, .layout-resizer.resizing {
+    background: var(--accent-blue);
+    box-shadow: 0 0 10px rgba(2, 132, 199, 0.45);
+}
+.resizer-handle {
+    width: 2px;
+    height: 36px;
+    background: #71717a;
+    border-radius: 1px;
+    transition: background 0.15s, height 0.15s;
+}
+.layout-resizer:hover .resizer-handle, .layout-resizer.resizing .resizer-handle {
+    background: #ffffff;
+    height: 52px;
+}
+
+[data-theme="light"] .layout-resizer {
+    background: #e2e8f0;
+}
+[data-theme="light"] .layout-resizer:hover, [data-theme="light"] .layout-resizer.resizing {
+    background: #0284c7;
+}
+[data-theme="light"] .resizer-handle {
+    background: #94a3b8;
+}
+[data-theme="light"] .layout-resizer:hover .resizer-handle, [data-theme="light"] .layout-resizer.resizing .resizer-handle {
+    background: #ffffff;
+}
+
+/* 侧边栏边缘悬浮展开按钮 */
+.sidebar-edge-toggle {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 26;
+    background: #27272a;
+    border: 1px solid var(--panel-border);
+    color: var(--text-muted);
+    width: 18px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 11px;
+    padding: 0;
+    transition: all 0.15s;
+    user-select: none;
+}
+.sidebar-edge-toggle:hover {
+    background: #0284c7;
+    color: #ffffff;
+    border-color: #0284c7;
+}
+.edge-toggle-left { left: 0; }
+.edge-toggle-right { right: 0; }
+
+[data-theme="light"] .sidebar-edge-toggle {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    color: #64748b;
+}
+[data-theme="light"] .sidebar-edge-toggle:hover {
+    background: #0284c7;
+    color: #ffffff;
+    border-color: #0284c7;
+}
+
+/* 面板分组与折叠面板 (Collapsible Sections) */
+.panel-section {
+    border-bottom: 1px solid var(--panel-border);
+    padding: 12px 14px;
+}
+.panel-section.collapsible {
+    transition: padding 0.15s ease;
+}
+.panel-section.collapsible .section-header {
+    cursor: pointer;
+    user-select: none;
+    padding: 4px 6px;
+    margin: -4px -6px 8px -6px;
+    border-radius: 4px;
+    transition: background 0.15s, color 0.15s;
+}
+.panel-section.collapsible .section-header:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-main);
+}
+[data-theme="light"] .panel-section.collapsible .section-header:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: #0f172a;
+}
+.section-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.collapse-arrow {
+    display: inline-block;
+    font-size: 9px;
+    line-height: 1;
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    color: var(--text-muted);
+}
+.panel-section.collapsed .collapse-arrow {
+    transform: rotate(-90deg);
+}
+.panel-section.collapsed .section-content {
+    display: none !important;
+}
+.panel-section.collapsed {
+    padding-bottom: 8px !important;
+    flex: 0 0 auto !important;
+}
+.section-header {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    letter-spacing: 0.8px;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* 底部工位状态栏 */
+footer {
+    height: 28px;
+    background: #09090b;
+    border-top: 1px solid var(--panel-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    user-select: none;
+}
+.status-left, .status-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+.status-val { color: var(--text-main); font-weight: 600; }
+
+[data-theme="light"] footer {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    color: #475569;
+}

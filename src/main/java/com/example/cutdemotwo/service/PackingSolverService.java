@@ -12,8 +12,13 @@ import java.nio.file.Path;
 import java.util.*;
 
 @Service
-public class PackingSolverService {
+public class PackingSolverService implements com.example.cutdemotwo.service.solver.ICutSolverEngine {
     private static final Logger log = LoggerFactory.getLogger(PackingSolverService.class);
+
+    @Override
+    public String getEngineType() {
+        return "packingsolver";
+    }
 
     @Value("${packingsolver.executable.path:d:/GitLab/packingsolver/build/src/rectangleguillotine/packingsolver_rectangleguillotine.exe}")
     private String solverPath;
