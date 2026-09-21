@@ -84,6 +84,12 @@ import {
     startContinuousSim, pauseContinuousSim, resetContinuousSim, toggleSimSpeed
 } from './plugins/cut-player/cut-animator.js';
 
+import {
+    openMaterialModal, closeMaterialModal, switchMaterialTab,
+    selectRollForDetail, submitNewDefect, mountRollToStation,
+    scrapRemnantById, toggleAddDefectForm, refreshRollsList
+} from './plugins/material/material-manager.js';
+
 // ==========================================
 // 1. 注册核心事件总线监听 (Microkernel Event Wiring)
 // ==========================================
@@ -255,7 +261,16 @@ const camApp = {
     openCutTicketModal,
     closeCutTicketModal,
     generateGCode,
-    generateDXF
+    generateDXF,
+    openMaterialModal,
+    closeMaterialModal,
+    switchMaterialTab,
+    selectRollForDetail,
+    submitNewDefect,
+    mountRollToStation,
+    scrapRemnantById,
+    toggleAddDefectForm,
+    refreshRollsList
 };
 
 window.camApp = camApp;
@@ -278,6 +293,11 @@ window.cutApp.plugins = {
     },
     animator: {
         stepCut, startContinuousSim, pauseContinuousSim, resetContinuousSim, toggleSimSpeed
+    },
+    material: {
+        openMaterialModal, closeMaterialModal, switchMaterialTab,
+        selectRollForDetail, submitNewDefect, mountRollToStation,
+        scrapRemnantById, toggleAddDefectForm, refreshRollsList
     }
 };
 

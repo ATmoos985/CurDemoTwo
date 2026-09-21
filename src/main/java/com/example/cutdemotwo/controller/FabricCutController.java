@@ -53,6 +53,31 @@ public class FabricCutController {
         return remnantService.getMotherRolls();
     }
 
+    @GetMapping("/rolls/{rollId}")
+    public com.example.cutdemotwo.model.MotherRollInfo getRollDetail(@PathVariable String rollId) {
+        return remnantService.getMotherRoll(rollId);
+    }
+
+    @PostMapping("/rolls")
+    public com.example.cutdemotwo.model.MotherRollInfo saveRoll(@RequestBody com.example.cutdemotwo.model.MotherRollInfo roll) {
+        return remnantService.saveOrUpdateMotherRoll(roll);
+    }
+
+    @PostMapping("/rolls/{rollId}/defects")
+    public com.example.cutdemotwo.model.Defect addDefect(@PathVariable String rollId, @RequestBody com.example.cutdemotwo.model.Defect defect) {
+        return remnantService.addDefectToRoll(rollId, defect);
+    }
+
+    @PostMapping("/remnants/{id}/scrap")
+    public Map<String, Object> scrapRemnant(@PathVariable String id, @RequestBody(required = false) Map<String, String> body) {
+        String reason = (body != null && body.containsKey("reason")) ? body.get("reason") : "现场破损报废";
+        boolean ok = remnantService.scrapRemnant(id, reason);
+        Map<String, Object> res = new HashMap<>();
+        res.put("success", ok);
+        res.put("id", id);
+        return res;
+    }
+
     @GetMapping("/remnants")
     public java.util.List<com.example.cutdemotwo.model.RemnantStock> listRemnants(@RequestParam(required = false) String rollId) {
         return remnantService.getRemnantsByRollId(rollId);
