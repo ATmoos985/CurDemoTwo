@@ -78,7 +78,8 @@ import {
 
 import {
     generateGCode, generateDXF, openExportModal, closeExportModal,
-    switchExportTab, copyExportPreview, openCutTicketModal, closeCutTicketModal
+    switchExportTab, copyExportPreview, openCutTicketModal, closeCutTicketModal,
+    printCutTicketDocument
 } from './plugins/export/nc-dxf-exporter.js';
 
 
@@ -259,6 +260,7 @@ const camApp = {
     copyExportPreview,
     openCutTicketModal,
     closeCutTicketModal,
+    printCutTicketDocument,
     generateGCode,
     generateDXF,
     openMaterialModal,
@@ -278,6 +280,7 @@ window.cutApp.plugins = {
     export: {
         openExportModal, closeExportModal, switchExportTab,
         copyExportPreview, openCutTicketModal, closeCutTicketModal,
+        printCutTicketDocument,
         generateGCode, generateDXF
     },
     measure: {

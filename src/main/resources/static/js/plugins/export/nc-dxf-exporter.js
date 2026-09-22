@@ -377,7 +377,14 @@ function populateCutTicketData() {
     const elemRoll = document.getElementById("ticket-roll-val");
     if (elemRoll) elemRoll.innerText = `${rollId} (幅宽: ${rollW}mm)`;
     const elemStation = document.getElementById("ticket-station-val");
-    if (elemStation) elemStation.innerText = `CUT-STATION-01 | 起刀: ${data.cutOrigin || 'right-bottom'}`;
+    const originMap = {
+        'right-bottom': '右下角基准 (原点)',
+        'right-top': '右上角基准',
+        'left-bottom': '左下角基准',
+        'left-top': '左上角基准'
+    };
+    const originLabel = originMap[data.cutOrigin] || '右下角基准 (原点)';
+    if (elemStation) elemStation.innerText = `CUT-STATION-01 | 起刀: ${originLabel}`;
 
     // 填充裁片表
     const tbodyPieces = document.getElementById("ticket-pieces-tbody");
@@ -450,7 +457,7 @@ function createCutTicketModalDOM() {
                     <!-- 工艺基本信息栏 -->
                     <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 10px 14px; border-radius: 4px; font-size: 12px; margin-bottom: 16px;">
                         <div>母卷批号: <b id="ticket-roll-val">ROLL-2026-0920 (幅宽: 2000mm)</b></div>
-                        <div>机台工位: <b id="ticket-station-val">CUT-STATION-01 | 起刀: 右上角基准</b></div>
+                        <div>机台工位: <b id="ticket-station-val">CUT-STATION-01 | 起刀: 右下角基准</b></div>
                         <div>操作机型: <b>数控直刀裁床 / 激光裁床</b></div>
                         <div>工艺指标: <b id="ticket-summary-metrics" style="color: #0284c7;">下刀: 13 刀 | 裁片: 6 件 | 料头: 2 块</b></div>
                     </div>
@@ -501,13 +508,92 @@ function createCutTicketModalDOM() {
             </div>
 
             <div class="settings-footer">
-                <span style="font-size: 11px; color: var(--text-muted);">点击“打印工单”将调用浏览器系统打印对话框，支持保存为 PDF 或直接输出至 A4 打印机。</span>
+                <span style="font-size: 11px; color: var(--text-muted);">点击“打印工单”将调用 A4 纯净单页打印，支持保存为 PDF 或直接输出至车间打印机。</span>
                 <div style="display: flex; gap: 8px;">
                     <button class="tool-btn" onclick="window.cutApp.plugins.export.closeCutTicketModal()">关闭</button>
-                    <button class="tool-btn active" style="background: #059669; padding: 6px 18px; font-weight: 700;" onclick="window.print()">打印工单 (Print)</button>
+                    <button class="tool-btn active" style="background: #059669; padding: 6px 18px; font-weight: 700;" onclick="window.cutApp.plugins.export.printCutTicketDocument()">打印工单 (Print)</button>
                 </div>
             </div>
         </div>
     `;
     document.body.appendChild(div);
+}
+
+/**
+ * 纯净 A4 隔离式工单打印引擎 (杜绝第一页空白占位)
+ */
+export function printCutTicketDocument() {
+    const printArea = document.getElementById("printable-cut-ticket-area");
+    if (!printArea) {
+        window.print();
+        return;
+    }
+
+    const iframe = document.createElement("iframe");
+    iframe.id = "pure-print-iframe";
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "none";
+    iframe.style.visibility = "hidden";
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>数控裁切车间工艺任务单 (CUT TICKET)</title>
+            <style>
+                @page {
+                    size: A4 portrait;
+                    margin: 12mm 15mm;
+                }
+                * {
+                    box-sizing: border-box;
+                }
+                html, body {
+                    margin: 0;
+                    padding: 0;
+                    background: #ffffff;
+                    color: #0f172a;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                    -webkit-print-color-adjust: exact;
+                    print-color-adjust: exact;
+                }
+                #printable-cut-ticket-area {
+                    width: 100% !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    border: none !important;
+                    box-shadow: none !important;
+                }
+                table {
+                    border-collapse: collapse;
+                    width: 100%;
+                }
+                th, td {
+                    border: 1px solid #cbd5e1;
+                    padding: 5px 8px;
+                }
+            </style>
+        </head>
+        <body>
+            ${printArea.outerHTML}
+        </body>
+        </html>
+    `);
+    doc.close();
+
+    setTimeout(() => {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+        setTimeout(() => {
+            if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
+        }, 3000);
+    }, 200);
 }
