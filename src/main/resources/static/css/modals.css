@@ -199,6 +199,18 @@
         break-before: avoid !important;
     }
 
+    #ticket-blueprint-container {
+        width: 100% !important;
+        margin-bottom: 8px !important;
+    }
+
+    #ticket-blueprint-container svg {
+        width: 100% !important;
+        max-height: 180px !important;
+        height: auto !important;
+        display: block !important;
+    }
+
     @page {
         size: A4 portrait;
         margin: 12mm 15mm;
