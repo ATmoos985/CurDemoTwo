@@ -30,7 +30,7 @@ export function updateUIInfo() {
         document.getElementById("sb-roll-id").innerText = rollIdInp.value;
     }
     if (document.getElementById("sb-engine")) {
-        document.getElementById("sb-engine").innerText = data.engine || "PackingSolver (C++ 2D)";
+        document.getElementById("sb-engine").innerText = data.engine || "智能几何排料内核";
     }
 
     const originStr = (data.cutOrigin || "right-bottom").toLowerCase();
@@ -413,7 +413,7 @@ export async function triggerSolve() {
                 const totalCutPieces = (data.pieces || []).length;
                 const thisBedPieces = (result.pieces || []).length;
 
-                alert(`【C++ 真实排料求解成功】\n` +
+                alert(`【智能几何排料计算成功】\n` +
                     `工位模式: ${isRemnantMode ? '模式二：料头复用精益切割 (母卷 0 消耗)' : '模式一：母卷连续开卷接续搭切'}\n` +
                     `母卷批号: ${rollId} (${rollModel})\n` +
                     `当前工位: ${winStartY} ~ ${winEndY} mm (${(winStartY/1000).toFixed(1)}m ~ ${(winEndY/1000).toFixed(1)}m)\n` +
@@ -426,7 +426,7 @@ export async function triggerSolve() {
                     `面积守恒: ${data.totalArea.toFixed(3)} m² (100% 严密守恒)${derivedMsg}`);
                 return;
             } else {
-                alert("【求解器返回错误】\n" + (result.message || "未知原因"));
+                alert("【智能排料计算失败】\n" + (result.message || "未知原因"));
                 return;
             }
         }

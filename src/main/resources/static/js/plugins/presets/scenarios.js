@@ -123,7 +123,7 @@ export const INITIAL_SCENARIOS = {
             { step: 9, type: "纵切", pos: 1200, start: 3330, end: 4530, desc: "纵切分离底排左/右两件西装大片" }
         ],
         deductLen: 4530, pieceArea: 5.76, remArea: 4.24, wasteArea: 0.00, totalArea: 10.00,
-        engine: "PackingSolver (C++ 2D-Guillotine & HiGHS)"
+        engine: "智能几何排料内核"
     }
 };
 

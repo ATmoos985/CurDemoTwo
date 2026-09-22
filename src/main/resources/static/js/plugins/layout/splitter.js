@@ -18,7 +18,11 @@ export function toggleSidebar(side) {
         if (!bar) return;
         const isCollapsed = bar.classList.toggle("collapsed");
         if (resizer) resizer.style.display = isCollapsed ? "none" : "flex";
-        if (edgeBtn) edgeBtn.style.display = isCollapsed ? "flex" : "none";
+        if (edgeBtn) {
+            edgeBtn.style.display = "flex";
+            edgeBtn.innerText = isCollapsed ? "▶" : "◀";
+            edgeBtn.title = isCollapsed ? "点击展开左侧面板" : "点击收起左侧面板";
+        }
         if (topBtn) topBtn.innerText = isCollapsed ? "展开左栏" : "收起左栏";
         if (!isCollapsed) {
             const savedW = localStorage.getItem("cutdemo_left_sidebar_w") || "380";
@@ -32,7 +36,11 @@ export function toggleSidebar(side) {
         if (!bar) return;
         const isCollapsed = bar.classList.toggle("collapsed");
         if (resizer) resizer.style.display = isCollapsed ? "none" : "flex";
-        if (edgeBtn) edgeBtn.style.display = isCollapsed ? "flex" : "none";
+        if (edgeBtn) {
+            edgeBtn.style.display = "flex";
+            edgeBtn.innerText = isCollapsed ? "◀" : "▶";
+            edgeBtn.title = isCollapsed ? "点击展开右侧面板" : "点击收起右侧面板";
+        }
         if (topBtn) topBtn.innerText = isCollapsed ? "展开右栏" : "收起右栏";
         if (!isCollapsed) {
             const savedW = localStorage.getItem("cutdemo_right_sidebar_w") || "360";

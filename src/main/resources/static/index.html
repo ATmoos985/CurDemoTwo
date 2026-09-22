@@ -23,8 +23,6 @@
     <header>
         <div class="header-title">
             <span style="color: var(--text-main); font-weight: 700;">布料裁切 CAM</span>
-            <span class="header-tag">2D-Guillotine</span>
-            <span class="header-tag" style="color: #10b981;">C++ Solver</span>
         </div>
         <div class="header-actions">
             <!-- 物料与料头中心 -->
@@ -39,16 +37,14 @@
             <button class="tool-btn active" style="background:#0284c7; font-weight:600;" onclick="openExportModal('gcode')" title="生成并导出数控机床 G-Code 代码与 AutoCAD DXF 图纸">机床代码</button>
             <button class="tool-btn active" style="background:#d97706; font-weight:600;" onclick="openCutTicketModal()" title="生成并打印车间现场裁切任务卡与裁片贴标单">工单打印</button>
 
-            <!-- 视口与栏目控制 -->
-            <button class="tool-btn" id="btn-toggle-left-bar" onclick="toggleSidebar('left')" title="一键收起/展开左侧面板">收左栏</button>
-            <button class="tool-btn" id="btn-toggle-right-bar" onclick="toggleSidebar('right')" title="一键收起/展开右侧面板">收右栏</button>
+            <!-- 视口缩放控制 (侧栏收折移至左右边缘常驻把手) -->
             <button class="tool-btn" onclick="fitView()" title="全景缩放至完整适配视口">适合视口</button>
             <button class="tool-btn" onclick="resetZoom()" title="缩放至 1:1 毫米实际物理比例">1:1</button>
 
             <!-- 系统设置与求解执行 -->
             <button class="tool-btn" onclick="toggleTheme()" id="btn-theme-toggle" title="快速切换深色/浅色高亮 CAD 主题">浅色</button>
             <button class="tool-btn" onclick="openSettingsModal()" id="btn-settings" title="系统参数与工艺配置中心">设置</button>
-            <button class="tool-btn active" style="background:#059669; font-weight:700; padding: 4px 14px; box-shadow: 0 0 10px rgba(5,150,105,0.4);" onclick="triggerSolve()" title="执行 C++ 真实排料求解">▶ 执行排料</button>
+            <button class="tool-btn active" style="background:#059669; font-weight:700; padding: 4px 14px; box-shadow: 0 0 10px rgba(5,150,105,0.4);" onclick="triggerSolve()" title="执行智能几何排料计算">▶ 执行排料</button>
         </div>
     </header>
 
@@ -246,7 +242,7 @@
                             <b>算例3: 短料优先</b>
                             <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">母卷0扣料领用</div>
                         </button>
-                        <button class="preset-grid-btn active" id="btn-case-4" onclick="loadCase(4)" title="工业全貌：60米大卷带全局疵点 PackingSolver 2D 排料">
+                        <button class="preset-grid-btn active" id="btn-case-4" onclick="loadCase(4)" title="工业全貌：60米大卷带全局疵点智能几何排料">
                             <b>算例4: 工业全貌</b>
                             <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">60m母卷多疵点排料</div>
                         </button>
@@ -369,9 +365,9 @@
 
         <!-- 中央画布视口 -->
         <section class="viewport-container" id="viewport">
-            <!-- 侧栏折叠时在视口边缘显示的快速展开浮标 -->
-            <button class="sidebar-edge-toggle edge-toggle-left" id="edge-toggle-left" onclick="toggleSidebar('left')" title="展开左侧面板" style="display: none;">▶</button>
-            <button class="sidebar-edge-toggle edge-toggle-right" id="edge-toggle-right" onclick="toggleSidebar('right')" title="展开右侧面板" style="display: none;">◀</button>
+            <!-- 侧栏边缘常驻收缩/展开把手 (左右边缘交互收折) -->
+            <button class="sidebar-edge-toggle edge-toggle-left" id="edge-toggle-left" onclick="toggleSidebar('left')" title="点击收起左侧面板">◀</button>
+            <button class="sidebar-edge-toggle edge-toggle-right" id="edge-toggle-right" onclick="toggleSidebar('right')" title="点击收起右侧面板">▶</button>
 
             <!-- 图例栏 -->
             <div class="legend-bar">
@@ -575,8 +571,8 @@
         </div>
         <div class="status-right">
             <span>视口缩放: <span class="status-val" id="sb-scale">15.0%</span></span>
-            <span>求解引擎: <span class="status-val" id="sb-engine">PackingSolver (C++ 2D)</span></span>
-            <span>切透约束: <span class="status-badge">GUILLOTINE PROVEN</span></span>
+            <span>排料引擎: <span class="status-val" id="sb-engine">智能几何排料内核</span></span>
+            <span>工艺约束: <span class="status-badge ok" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3);">直刀工艺校验通过</span></span>
         </div>
     </footer>
 
@@ -731,11 +727,11 @@
 
                 <!-- Tab 4: 求解器内核 -->
                 <div class="settings-tab-pane" id="pane-solver-cfg">
-                    <div class="settings-group-title">PackingSolver C++ 工业排产内核配置</div>
+                    <div class="settings-group-title">智能排料算法与直刀工艺参数配置</div>
                     <div class="prop-row">
                         <span class="prop-label">排料求解引擎</span>
                         <span style="font-family: monospace; font-size: 12px; color: #10b981; font-weight: 700;">
-                            PackingSolver C++ (2D-Guillotine & HiGHS LP)
+                            智能几何排料内核 (直刀切透约束)
                         </span>
                     </div>
                     <div class="prop-row">
@@ -754,7 +750,7 @@
                     </div>
                     <div class="prop-row">
                         <span class="prop-label">直刀切透级数 (Cut Stages)</span>
-                        <span style="font-family: monospace; font-size: 12px; color: var(--text-main);">3-Stage Guillotine (ROADEF 2018 工业级)</span>
+                        <span style="font-family: monospace; font-size: 12px; color: var(--text-main);">工业标准三阶段直切工艺 (全刀直切)</span>
                     </div>
                 </div>
             </div>
