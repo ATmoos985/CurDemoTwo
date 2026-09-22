@@ -133,7 +133,7 @@ export function loadCase(id) {
     state.setCaseId(id);
     for (let i = 1; i <= 4; i++) {
         const btn = document.getElementById(`btn-case-${i}`);
-        if (btn) btn.className = (i === id) ? "preset-grid-btn active" : "preset-grid-btn";
+        if (btn) btn.classList.toggle("active", i === id);
     }
     const data = state.getCurrentCaseData();
     if (document.getElementById("inp-total-roll-l")) document.getElementById("inp-total-roll-l").value = data.totalRollL || 60000;

@@ -23,6 +23,51 @@
     <header>
         <div class="header-title">
             <span style="color: var(--text-main); font-weight: 700;">布料裁切 CAM</span>
+
+            <!-- 演示工况快捷下拉 (从左侧底座迁入，释放生产操控空间) -->
+            <div class="preset-dropdown-container" id="preset-dropdown-container">
+                <button class="preset-dropdown-trigger" id="btn-preset-trigger" onclick="togglePresetDropdown(event)" title="快速载入预设工业工况示例">
+                    <span class="preset-trigger-badge">示例</span>
+                    <span id="preset-current-label">算例4: 工业全貌</span>
+                    <span class="preset-dropdown-arrow">▾</span>
+                </button>
+                <div class="preset-dropdown-menu" id="preset-dropdown-menu">
+                    <div class="preset-dropdown-header">
+                        <span>预设工业工况快速载入</span>
+                        <span class="preset-dropdown-sub">4 组典型排料场景</span>
+                    </div>
+                    <div class="preset-menu-list">
+                        <button class="preset-menu-item" id="btn-case-1" onclick="selectPresetCase(1)">
+                            <div class="preset-item-head">
+                                <span class="preset-item-name">算例1: L形拆解</span>
+                                <span class="preset-item-tag">正交裁切</span>
+                            </div>
+                            <div class="preset-item-desc">Word 表1：L形余料正交直接裁切拆解</div>
+                        </button>
+                        <button class="preset-menu-item" id="btn-case-2" onclick="selectPresetCase(2)">
+                            <div class="preset-item-head">
+                                <span class="preset-item-name">算例2: 改宽避疵</span>
+                                <span class="preset-item-tag">分幅避障</span>
+                            </div>
+                            <div class="preset-item-desc">带疵改宽：左侧0.5m带疵纵切，右完好</div>
+                        </button>
+                        <button class="preset-menu-item" id="btn-case-3" onclick="selectPresetCase(3)">
+                            <div class="preset-item-head">
+                                <span class="preset-item-name">算例3: 短料优先</span>
+                                <span class="preset-item-tag">0扣料</span>
+                            </div>
+                            <div class="preset-item-desc">短料复用：1.6m短料优先领用 (0母卷扣料)</div>
+                        </button>
+                        <button class="preset-menu-item active" id="btn-case-4" onclick="selectPresetCase(4)">
+                            <div class="preset-item-head">
+                                <span class="preset-item-name">算例4: 工业全貌</span>
+                                <span class="preset-item-tag">60m大卷</span>
+                            </div>
+                            <div class="preset-item-desc">工业全貌：60米大卷带全局疵点智能几何排料</div>
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
         <div class="header-actions">
             <!-- 物料与料头中心 -->
@@ -200,9 +245,9 @@
                     </div>
                 </div>
 
-                <!-- 5~6 常驻底部操作栏 (工位排料搭切控制 + 工业预设算例，折叠卡片时位置绝不上跳) -->
+                <!-- 5. 常驻底部操作栏 (工位排料搭切控制，折叠卡片时位置绝不上跳) -->
                 <div class="sidebar-pinned-footer">
-                    <div class="panel-section action-footer-section" style="border-top: 1px solid var(--panel-border); padding: 10px 14px 8px 14px;">
+                    <div class="panel-section action-footer-section" style="border-top: 1px solid var(--panel-border); padding: 10px 14px 12px 14px;">
                         <div style="display: flex; gap: 6px; margin-bottom: 6px;">
                             <button class="tool-btn" style="flex: 1; height: 30px; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--panel-border); font-weight: 500; font-size: 11px;" onclick="advanceBed(-1)" title="红框回退展开上一工位 (-5m)">
                                 ◀ 上一工位 (-5m)
@@ -223,32 +268,6 @@
                             </button>
                             <button class="tool-btn" style="flex: 1; height: 26px; background: rgba(239, 68, 68, 0.08); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.25); font-size: 11px;" onclick="resetAllRollCuts()" title="清空整卷已排裁片，从头开始">
                                 清空整卷已排
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- 6. 工业预设算例快速载入 (紧凑网格) -->
-                    <div class="panel-section" style="border-top: 1px solid var(--panel-border); padding: 8px 14px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                            <span style="font-size: 11px; font-weight: 600; color: var(--text-muted);">预设工业工况快速载入:</span>
-                            <span style="font-size: 10px; color: #0284c7;">点击秒切工况</span>
-                        </div>
-                        <div class="preset-grid">
-                            <button class="preset-grid-btn" id="btn-case-1" onclick="loadCase(1)" title="Word 表1：L形余料正交拆解">
-                                <b>算例1: L形拆解</b>
-                                <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">母卷正交直接裁切</div>
-                            </button>
-                            <button class="preset-grid-btn" id="btn-case-2" onclick="loadCase(2)" title="带疵改宽：左侧0.5m带疵纵切">
-                                <b>算例2: 改宽避疵</b>
-                                <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">左带疵右完好纵切</div>
-                            </button>
-                            <button class="preset-grid-btn" id="btn-case-3" onclick="loadCase(3)" title="短料复用：1.6m短料优先领用 (0母卷扣料)">
-                                <b>算例3: 短料优先</b>
-                                <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">母卷0扣料领用</div>
-                            </button>
-                            <button class="preset-grid-btn active" id="btn-case-4" onclick="loadCase(4)" title="工业全貌：60米大卷带全局疵点智能几何排料">
-                                <b>算例4: 工业全貌</b>
-                                <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">60m母卷多疵点排料</div>
                             </button>
                         </div>
                     </div>

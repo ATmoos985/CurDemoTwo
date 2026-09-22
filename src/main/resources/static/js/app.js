@@ -154,12 +154,60 @@ bus.on('solve:success', (payload) => {
     renderToolpathUI();
 });
 
-bus.on('case:changed', () => {
+bus.on('case:changed', (payload) => {
     state.isToolpathOptimized = false;
     state.toolpathStats = null;
     state.originalCutsBackup = null;
     renderToolpathUI();
+    if (payload && payload.caseId) {
+        updatePresetTriggerLabel(payload.caseId);
+    }
 });
+
+/**
+ * 顶部 Header 预设工业工况下拉浮层控制
+ */
+export function togglePresetDropdown(e) {
+    if (e) e.stopPropagation();
+    const menu = document.getElementById('preset-dropdown-menu');
+    const trigger = document.getElementById('btn-preset-trigger');
+    if (!menu) return;
+    const isOpen = menu.classList.contains('show');
+    if (isOpen) {
+        menu.classList.remove('show');
+        if (trigger) trigger.classList.remove('active');
+    } else {
+        menu.classList.add('show');
+        if (trigger) trigger.classList.add('active');
+    }
+}
+
+export function closePresetDropdown() {
+    const menu = document.getElementById('preset-dropdown-menu');
+    const trigger = document.getElementById('btn-preset-trigger');
+    if (menu) menu.classList.remove('show');
+    if (trigger) trigger.classList.remove('active');
+}
+
+export function selectPresetCase(caseId) {
+    if (typeof loadCase === 'function') {
+        loadCase(caseId);
+    }
+    updatePresetTriggerLabel(caseId);
+    closePresetDropdown();
+}
+
+export function updatePresetTriggerLabel(caseId) {
+    const label = document.getElementById('preset-current-label');
+    if (!label) return;
+    const names = {
+        1: '算例1: L形拆解',
+        2: '算例2: 改宽避疵',
+        3: '算例3: 短料优先',
+        4: '算例4: 工业全貌'
+    };
+    label.textContent = names[caseId] || `算例${caseId}`;
+}
 
 bus.on('toolpath:optimized', () => {
     renderScene();
@@ -271,7 +319,11 @@ const camApp = {
     mountRollToStation,
     scrapRemnantById,
     toggleAddDefectForm,
-    refreshRollsList
+    refreshRollsList,
+    togglePresetDropdown,
+    closePresetDropdown,
+    selectPresetCase,
+    updatePresetTriggerLabel
 };
 
 window.camApp = camApp;
@@ -339,3 +391,16 @@ if (document.readyState === "loading") {
 } else {
     bootstrapApp();
 }
+
+// 全局监听：点击外部区域或按下 ESC 键自动收起演示工况浮层
+document.addEventListener("click", (e) => {
+    const container = document.getElementById("preset-dropdown-container");
+    if (container && !container.contains(e.target)) {
+        closePresetDropdown();
+    }
+});
+document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+        closePresetDropdown();
+    }
+});

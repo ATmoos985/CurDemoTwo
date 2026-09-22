@@ -9,7 +9,8 @@ header {
     justify-content: space-between;
     padding: 0 14px;
     user-select: none;
-    overflow: hidden;
+    position: relative;
+    z-index: 100;
     gap: 12px;
 }
 .header-title {
@@ -384,34 +385,184 @@ footer {
     min-height: 0;
 }
 
-/* 预设案例紧凑网格 */
-.preset-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 5px;
+/* 顶部 Header 演示工况快捷下拉菜单 */
+.preset-dropdown-container {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    margin-left: 10px;
 }
-.preset-grid-btn {
-    padding: 6px 8px;
-    background: var(--panel-bg);
+.preset-dropdown-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 10px;
+    background: rgba(255, 255, 255, 0.05);
     border: 1px solid var(--panel-border);
     border-radius: 4px;
     color: var(--text-main);
-    font-size: 11px;
+    font-size: 11.5px;
     cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    user-select: none;
+}
+.preset-dropdown-trigger:hover,
+.preset-dropdown-trigger.active {
+    background: rgba(2, 132, 199, 0.15);
+    border-color: #0284c7;
+    color: #38bdf8;
+}
+.preset-trigger-badge {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 4px;
+    border-radius: 2px;
+    background: rgba(2, 132, 199, 0.2);
+    color: #38bdf8;
+    border: 1px solid rgba(2, 132, 199, 0.4);
+    letter-spacing: 0.5px;
+    line-height: 1.1;
+}
+.preset-dropdown-arrow {
+    font-size: 10px;
+    color: var(--text-muted);
+    transition: transform 0.2s;
+}
+.preset-dropdown-trigger.active .preset-dropdown-arrow {
+    transform: rotate(180deg);
+}
+
+.preset-dropdown-menu {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    width: 285px;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.45);
+    z-index: 1000;
+    overflow: hidden;
+    animation: fadeInDown 0.15s ease-out;
+}
+.preset-dropdown-menu.show {
+    display: block;
+}
+
+@keyframes fadeInDown {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.preset-dropdown-header {
+    padding: 8px 12px;
+    background: var(--panel-header);
+    border-bottom: 1px solid var(--panel-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-main);
+}
+.preset-dropdown-sub {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-weight: normal;
+}
+.preset-menu-list {
+    padding: 5px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.preset-menu-item {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding: 7px 9px;
     text-align: left;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    cursor: pointer;
     transition: all 0.15s ease;
     user-select: none;
 }
-.preset-grid-btn:hover {
-    background: rgba(2, 132, 199, 0.08);
-    border-color: var(--accent-blue);
+.preset-menu-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.1);
 }
-.preset-grid-btn.active {
-    background: rgba(2, 132, 199, 0.15);
-    border-color: var(--accent-blue);
-    color: #38bdf8;
+.preset-menu-item.active {
+    background: rgba(2, 132, 199, 0.12);
+    border-color: rgba(2, 132, 199, 0.45);
+}
+.preset-item-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 3px;
+}
+.preset-item-name {
+    font-size: 11.5px;
     font-weight: 600;
+    color: var(--text-main);
 }
-[data-theme="light"] .preset-grid-btn.active {
-    color: #0284c7;
+.preset-menu-item.active .preset-item-name {
+    color: #38bdf8;
+}
+.preset-item-tag {
+    font-size: 9.5px;
+    padding: 1px 5px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-muted);
+    border: 1px solid var(--panel-border);
+}
+.preset-menu-item.active .preset-item-tag {
+    background: rgba(2, 132, 199, 0.25);
+    color: #7dd3fc;
+    border-color: rgba(2, 132, 199, 0.5);
+}
+.preset-item-desc {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    line-height: 1.3;
+}
+
+/* 浅色主题适配 */
+[data-theme="light"] .preset-dropdown-trigger {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    color: #1e293b;
+}
+[data-theme="light"] .preset-dropdown-trigger:hover,
+[data-theme="light"] .preset-dropdown-trigger.active {
+    background: #e0f2fe;
+    border-color: #0284c7;
+    color: #0369a1;
+}
+[data-theme="light"] .preset-dropdown-menu {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+[data-theme="light"] .preset-dropdown-header {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    color: #0f172a;
+}
+[data-theme="light"] .preset-menu-item:hover {
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+}
+[data-theme="light"] .preset-menu-item.active {
+    background: #e0f2fe;
+    border-color: #7dd3fc;
+}
+[data-theme="light"] .preset-menu-item.active .preset-item-name {
+    color: #0369a1;
 }
