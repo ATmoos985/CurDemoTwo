@@ -79,7 +79,7 @@ main {
     border-right: 1px solid var(--panel-border);
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
+    overflow: hidden;
     user-select: none;
     z-index: 10;
     transition: width 0.12s ease;
@@ -101,7 +101,7 @@ main {
     border-left: 1px solid var(--panel-border);
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
+    overflow: hidden;
     user-select: none;
     z-index: 10;
     transition: width 0.12s ease;
@@ -209,6 +209,41 @@ main {
     background: #0284c7;
     color: #ffffff;
     border-color: #0284c7;
+}
+
+/* 侧边栏可滚动主体与常驻底栏 (Scroll Body & Pinned Footer) */
+.sidebar-scroll-body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    min-height: 0;
+    overscroll-behavior: contain;
+}
+.sidebar-scroll-body::-webkit-scrollbar {
+    width: 5px;
+}
+.sidebar-scroll-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+.sidebar-scroll-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 3px;
+}
+.sidebar-scroll-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.35);
+}
+[data-theme="light"] .sidebar-scroll-body::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.18);
+}
+[data-theme="light"] .sidebar-scroll-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.35);
+}
+
+.sidebar-pinned-footer {
+    flex-shrink: 0;
+    margin-top: auto;
+    background: var(--panel-bg);
+    z-index: 5;
+    position: relative;
 }
 
 /* 面板分组与折叠面板 (Collapsible Sections) */

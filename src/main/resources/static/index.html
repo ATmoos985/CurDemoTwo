@@ -72,180 +72,185 @@
             <!-- 模式一面板：母卷连续开卷排产 (Mother Roll Mode)             -->
             <!-- ======================================================== -->
             <div id="panel-roll-mode" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
-                <!-- 1. 母卷批号与料头统计卡片 (紧凑收折，直通二级管理) -->
-                <div class="panel-section section-card-blue collapsible" id="card-mother-roll">
-                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开母卷规格卡片">
-                        <div class="section-title-wrap">
-                            <span class="collapse-arrow">▼</span>
-                            <span>母卷型号与规格 (Mother Roll)</span>
+                <!-- 1~4 可滚动卡片主体 (默认展开，全量呈现，支持鼠标上下自如滑动) -->
+                <div class="sidebar-scroll-body">
+                    <!-- 1. 母卷批号与料头统计卡片 (紧凑收折，直通二级管理) -->
+                    <div class="panel-section section-card-blue collapsible" id="card-mother-roll">
+                        <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开母卷规格卡片">
+                            <div class="section-title-wrap">
+                                <span class="collapse-arrow">▼</span>
+                                <span>母卷型号与规格 (Mother Roll)</span>
+                            </div>
+                            <button class="tool-btn" style="font-size: 10px; padding: 2px 7px; color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.08);" onclick="event.stopPropagation(); openMaterialModal('rolls')" title="进入母卷档案与瑕疵库管理二级页面">
+                                母卷档案 ↗
+                            </button>
                         </div>
-                        <button class="tool-btn" style="font-size: 10px; padding: 2px 7px; color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.08);" onclick="event.stopPropagation(); openMaterialModal('rolls')" title="进入母卷档案与瑕疵库管理二级页面">
-                            母卷档案 ↗
-                        </button>
-                    </div>
-                    <div class="section-content">
-                        <div class="prop-row">
-                            <span class="prop-label">生产母卷批号</span>
-                            <select class="prop-input" id="sel-mother-roll-id" onchange="onMotherRollChange()" style="width: 170px;">
-                                <option value="ROLL-2026-0920" selected>ROLL-2026-0920 (TC涤棉 2m)</option>
-                                <option value="ROLL-2026-0921">ROLL-2026-0921 (纯棉 1.8m)</option>
-                                <option value="ROLL-2026-0922">ROLL-2026-0922 (牛津布 2.2m)</option>
-                            </select>
-                        </div>
-                        <div class="prop-row" style="margin-top: 4px;">
-                            <span class="prop-label">材质与净幅宽</span>
-                            <span style="color: var(--text-main); font-size: 11px;"><b id="lbl-roll-model-desc">TC涤棉-B2026</b> | 幅宽 <b id="lbl-roll-w-desc">2000</b>mm</span>
-                        </div>
-                        <div class="card-inner-box" style="margin-top: 6px; padding: 4px 8px; display: flex; justify-content: space-between; align-items: center;">
-                            <span style="font-size: 10.5px; color: var(--text-muted);">
-                                在库可用料头: <b id="lbl-roll-rem-count" style="color: var(--accent-blue); font-family: monospace;">3 块</b> (<span id="lbl-roll-rem-area">7.20m²</span>)
-                            </span>
-                            <a href="javascript:void(0)" onclick="switchCutMode('remnant')" style="font-size: 10.5px; color: var(--accent-amber); font-weight: 600; text-decoration: none;">切换料头模式 →</a>
-                        </div>
+                        <div class="section-content">
+                            <div class="prop-row">
+                                <span class="prop-label">生产母卷批号</span>
+                                <select class="prop-input" id="sel-mother-roll-id" onchange="onMotherRollChange()" style="width: 170px;">
+                                    <option value="ROLL-2026-0920" selected>ROLL-2026-0920 (TC涤棉 2m)</option>
+                                    <option value="ROLL-2026-0921">ROLL-2026-0921 (纯棉 1.8m)</option>
+                                    <option value="ROLL-2026-0922">ROLL-2026-0922 (牛津布 2.2m)</option>
+                                </select>
+                            </div>
+                            <div class="prop-row" style="margin-top: 4px;">
+                                <span class="prop-label">材质与净幅宽</span>
+                                <span style="color: var(--text-main); font-size: 11px;"><b id="lbl-roll-model-desc">TC涤棉-B2026</b> | 幅宽 <b id="lbl-roll-w-desc">2000</b>mm</span>
+                            </div>
+                            <div class="card-inner-box" style="margin-top: 6px; padding: 4px 8px; display: flex; justify-content: space-between; align-items: center;">
+                                <span style="font-size: 10.5px; color: var(--text-muted);">
+                                    在库可用料头: <b id="lbl-roll-rem-count" style="color: var(--accent-blue); font-family: monospace;">3 块</b> (<span id="lbl-roll-rem-area">7.20m²</span>)
+                                </span>
+                                <a href="javascript:void(0)" onclick="switchCutMode('remnant')" style="font-size: 10.5px; color: var(--accent-amber); font-weight: 600; text-decoration: none;">切换料头模式 →</a>
+                            </div>
 
-                        <!-- 隐藏参数 (供高级调校) -->
-                        <input type="hidden" id="inp-roll-id" value="ROLL-2026-0920" />
-                        <input type="hidden" id="inp-roll-w" value="2000" />
-                        <input type="hidden" id="inp-total-roll-l" value="60000" />
-                        <input type="hidden" id="inp-window-start-y" value="0" />
+                            <!-- 隐藏参数 (供高级调校) -->
+                            <input type="hidden" id="inp-roll-id" value="ROLL-2026-0920" />
+                            <input type="hidden" id="inp-roll-w" value="2000" />
+                            <input type="hidden" id="inp-total-roll-l" value="60000" />
+                            <input type="hidden" id="inp-window-start-y" value="0" />
+                        </div>
+                    </div>
+
+                    <!-- 2. 机台展开长与起准点标定 (默认展开呈现完整参数) -->
+                    <div class="panel-section collapsible" id="card-bed-origin">
+                        <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开机台标定卡片">
+                            <div class="section-title-wrap">
+                                <span class="collapse-arrow">▼</span>
+                                <span>机台起准点与展开标定</span>
+                            </div>
+                            <span class="header-tag" id="tag-cut-origin-header" style="color:#10b981;">右下角 · 5000mm</span>
+                        </div>
+                        <div class="section-content">
+                            <div class="prop-row">
+                                <span class="prop-label">起刀基准点位置</span>
+                                <select class="prop-input" id="sel-cut-origin" onchange="onOriginParamChange()" style="width: 220px;">
+                                    <option value="right-bottom" selected>右下角 (靠右导轨 · 落料口自下而上起切 · 推荐)</option>
+                                    <option value="right-top">右上角 (靠右导轨 · 顺流进给)</option>
+                                    <option value="left-bottom">左下角 (靠左布边 · 落料口自下而上起切)</option>
+                                    <option value="left-top">左上角 (靠左布边 · 顺流进给 · 标准CAM)</option>
+                                </select>
+                            </div>
+                            <div class="callout-amber-tip" id="lbl-origin-desc-tip">
+                                标准起刀：右下角原点 (靠右导轨量幅宽，落料口自下而上起切，刀路最优距离起刀)
+                            </div>
+                            <div class="prop-row">
+                                <span class="prop-label">机台展开台面 (Bed L)</span>
+                                <input type="number" class="prop-input" id="inp-bed-l" value="5000" step="500" onchange="onRollConfigChange()" />
+                            </div>
+                            <div class="prop-row">
+                                <span class="prop-label">卷头修齐量 (Trim, mm)</span>
+                                <input type="number" class="prop-input" id="inp-trim-start" value="0" min="0" max="1000" step="50" onchange="onOriginParamChange()" />
+                            </div>
+                            <div class="prop-row">
+                                <span class="prop-label">设备纵切能力</span>
+                                <select class="prop-input" id="sel-allow-longitudinal" onchange="toggleLongitudinal()">
+                                    <option value="1">支持纵切 (分条+断刀)</option>
+                                    <option value="0">仅能横切 (禁止纵切)</option>
+                                </select>
+                            </div>
+                            <div class="prop-row">
+                                <span class="prop-label">裁片旋转 90° (Rotation)</span>
+                                <select class="prop-input" id="sel-allow-rotation" onchange="onOriginParamChange()">
+                                    <option value="0">禁止旋转 (经向保纹理)</option>
+                                    <option value="1">允许旋转 (提升利用率)</option>
+                                </select>
+                            </div>
+                            <input type="hidden" id="sel-first-stage" value="horizontal" />
+                        </div>
+                    </div>
+
+                    <!-- 3. 验布疵点避让记录 (默认展开呈现完整疵点，解除内嵌高度限制) -->
+                    <div class="panel-section collapsible" id="card-defects">
+                        <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开瑕疵避让卡片">
+                            <div class="section-title-wrap">
+                                <span class="collapse-arrow">▼</span>
+                                <span>瑕疵避让记录 (Defects)</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span class="header-tag" id="tag-defects-summary" style="color:#f59e0b;">共 8 处瑕疵</span>
+                                <button class="tool-btn btn-add-defect" onclick="event.stopPropagation(); addDefectRow()">+ 增疵点</button>
+                            </div>
+                        </div>
+                        <div class="section-content">
+                            <div id="defects-container" style="display: flex; flex-direction: column; gap: 6px;">
+                                <!-- 动态生成 -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. 本次开卷裁切需求清单 (Demands) —— 默认展开，自然平铺，上下滑动 -->
+                    <div class="panel-section collapsible" id="card-demands">
+                        <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开裁片需求清单">
+                            <div class="section-title-wrap" style="display: flex; align-items: center; gap: 6px;">
+                                <span class="collapse-arrow">▼</span>
+                                <span>本次排产裁片需求 (Demands)</span>
+                                <span id="demands-summary-badge" style="font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600; background: #eff6ff; color: #0284c7; border: 1px solid #38bdf8;">核销对账中</span>
+                            </div>
+                            <div style="display: flex; gap: 4px; align-items: center;">
+                                <button class="tool-btn btn-add-demand" onclick="event.stopPropagation(); addDemandRow()" title="添加新裁片需求">+ 增裁片</button>
+                            </div>
+                        </div>
+                        <div class="section-content">
+                            <div id="demands-container" style="display: flex; flex-direction: column; gap: 8px;">
+                                <!-- 动态生成带有【在库料头提示与选择】的裁片项 -->
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <!-- 2. 机台展开长与起准点标定 (默认收折，点击展开) -->
-                <div class="panel-section collapsible collapsed" id="card-bed-origin">
-                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开机台标定卡片">
-                        <div class="section-title-wrap">
-                            <span class="collapse-arrow">▼</span>
-                            <span>机台起准点与展开标定</span>
+                <!-- 5~6 常驻底部操作栏 (工位排料搭切控制 + 工业预设算例，折叠卡片时位置绝不上跳) -->
+                <div class="sidebar-pinned-footer">
+                    <div class="panel-section action-footer-section" style="border-top: 1px solid var(--panel-border); padding: 10px 14px 8px 14px;">
+                        <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+                            <button class="tool-btn" style="flex: 1; height: 30px; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--panel-border); font-weight: 500; font-size: 11px;" onclick="advanceBed(-1)" title="红框回退展开上一工位 (-5m)">
+                                ◀ 上一工位 (-5m)
+                            </button>
+                            <button class="tool-btn" style="flex: 1; height: 30px; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--panel-border); font-weight: 500; font-size: 11px;" onclick="advanceBed(1)" title="红框前进展开下一工位 (+5m)">
+                                下一工位 (+5m) ▶
+                            </button>
                         </div>
-                        <span class="header-tag" id="tag-cut-origin-header" style="color:#10b981;">右下角 · 5000mm</span>
+                        <button class="tool-btn" id="btn-smart-advance" style="width: 100%; height: 32px; margin-bottom: 6px; background: rgba(16, 185, 129, 0.12); color: #059669; border: 1px solid rgba(16, 185, 129, 0.35); font-weight: bold; font-size: 12px; cursor: pointer; transition: all 0.2s;" onclick="smartAdvanceBed()" title="自动计算当前已切末端，一键吸附接刀，实现 0 间隙连续搭切">
+                            接续下一工位 (智能 0 间隙衔接)
+                        </button>
+                        <button class="big-solve-btn roll" onclick="triggerSolve()" title="在当前红框工位排料并保留其余工位已切成果">
+                            在当前红框工位排料 (接续搭切 · 保留历史)
+                        </button>
+                        <div style="display: flex; gap: 6px; margin-top: 6px;">
+                            <button class="tool-btn" style="flex: 1; height: 26px; background: rgba(239, 68, 68, 0.08); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.25); font-size: 11px;" onclick="clearStationCuts()" title="仅清除当前红框范围内的裁片与切刀">
+                                清除本工位排料
+                            </button>
+                            <button class="tool-btn" style="flex: 1; height: 26px; background: rgba(239, 68, 68, 0.08); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.25); font-size: 11px;" onclick="resetAllRollCuts()" title="清空整卷已排裁片，从头开始">
+                                清空整卷已排
+                            </button>
+                        </div>
                     </div>
-                    <div class="section-content">
-                        <div class="prop-row">
-                            <span class="prop-label">起刀基准点位置</span>
-                            <select class="prop-input" id="sel-cut-origin" onchange="onOriginParamChange()" style="width: 220px;">
-                                <option value="right-bottom" selected>右下角 (靠右导轨 · 落料口自下而上起切 · 推荐)</option>
-                                <option value="right-top">右上角 (靠右导轨 · 顺流进给)</option>
-                                <option value="left-bottom">左下角 (靠左布边 · 落料口自下而上起切)</option>
-                                <option value="left-top">左上角 (靠左布边 · 顺流进给 · 标准CAM)</option>
-                            </select>
-                        </div>
-                        <div class="callout-amber-tip" id="lbl-origin-desc-tip">
-                            标准起刀：右下角原点 (靠右导轨量幅宽，落料口自下而上起切，刀路最优距离起刀)
-                        </div>
-                        <div class="prop-row">
-                            <span class="prop-label">机台展开台面 (Bed L)</span>
-                            <input type="number" class="prop-input" id="inp-bed-l" value="5000" step="500" onchange="onRollConfigChange()" />
-                        </div>
-                        <div class="prop-row">
-                            <span class="prop-label">卷头修齐量 (Trim, mm)</span>
-                            <input type="number" class="prop-input" id="inp-trim-start" value="0" min="0" max="1000" step="50" onchange="onOriginParamChange()" />
-                        </div>
-                        <div class="prop-row">
-                            <span class="prop-label">设备纵切能力</span>
-                            <select class="prop-input" id="sel-allow-longitudinal" onchange="toggleLongitudinal()">
-                                <option value="1">支持纵切 (分条+断刀)</option>
-                                <option value="0">仅能横切 (禁止纵切)</option>
-                            </select>
-                        </div>
-                        <div class="prop-row">
-                            <span class="prop-label">裁片旋转 90° (Rotation)</span>
-                            <select class="prop-input" id="sel-allow-rotation" onchange="onOriginParamChange()">
-                                <option value="0">禁止旋转 (经向保纹理)</option>
-                                <option value="1">允许旋转 (提升利用率)</option>
-                            </select>
-                        </div>
-                        <input type="hidden" id="sel-first-stage" value="horizontal" />
-                    </div>
-                </div>
 
-                <!-- 3. 验布疵点避让记录 (默认收折，点击展开) -->
-                <div class="panel-section collapsible collapsed" id="card-defects">
-                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开瑕疵避让卡片">
-                        <div class="section-title-wrap">
-                            <span class="collapse-arrow">▼</span>
-                            <span>瑕疵避让记录 (Defects)</span>
+                    <!-- 6. 工业预设算例快速载入 (紧凑网格) -->
+                    <div class="panel-section" style="border-top: 1px solid var(--panel-border); padding: 8px 14px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                            <span style="font-size: 11px; font-weight: 600; color: var(--text-muted);">预设工业工况快速载入:</span>
+                            <span style="font-size: 10px; color: #0284c7;">点击秒切工况</span>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 6px;">
-                            <span class="header-tag" id="tag-defects-summary" style="color:#f59e0b;">共 8 处瑕疵</span>
-                            <button class="tool-btn btn-add-defect" onclick="event.stopPropagation(); addDefectRow()">+ 增疵点</button>
+                        <div class="preset-grid">
+                            <button class="preset-grid-btn" id="btn-case-1" onclick="loadCase(1)" title="Word 表1：L形余料正交拆解">
+                                <b>算例1: L形拆解</b>
+                                <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">母卷正交直接裁切</div>
+                            </button>
+                            <button class="preset-grid-btn" id="btn-case-2" onclick="loadCase(2)" title="带疵改宽：左侧0.5m带疵纵切">
+                                <b>算例2: 改宽避疵</b>
+                                <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">左带疵右完好纵切</div>
+                            </button>
+                            <button class="preset-grid-btn" id="btn-case-3" onclick="loadCase(3)" title="短料复用：1.6m短料优先领用 (0母卷扣料)">
+                                <b>算例3: 短料优先</b>
+                                <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">母卷0扣料领用</div>
+                            </button>
+                            <button class="preset-grid-btn active" id="btn-case-4" onclick="loadCase(4)" title="工业全貌：60米大卷带全局疵点智能几何排料">
+                                <b>算例4: 工业全貌</b>
+                                <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">60m母卷多疵点排料</div>
+                            </button>
                         </div>
-                    </div>
-                    <div class="section-content">
-                        <div id="defects-container" style="display: flex; flex-direction: column; gap: 6px; max-height: 140px; overflow-y: auto;">
-                            <!-- 动态生成 -->
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 4. 本次开卷裁切需求清单 (Demands) —— 弹性撑满可用空间 -->
-                <div class="panel-section collapsible" id="card-demands" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 160px;">
-                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开裁片需求清单">
-                        <div class="section-title-wrap" style="display: flex; align-items: center; gap: 6px;">
-                            <span class="collapse-arrow">▼</span>
-                            <span>本次排产裁片需求 (Demands)</span>
-                            <span id="demands-summary-badge" style="font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600; background: #eff6ff; color: #0284c7; border: 1px solid #38bdf8;">核销对账中</span>
-                        </div>
-                        <div style="display: flex; gap: 4px; align-items: center;">
-                            <button class="tool-btn btn-add-demand" onclick="event.stopPropagation(); addDemandRow()" title="添加新裁片需求">+ 增裁片</button>
-                        </div>
-                    </div>
-                    <div class="section-content" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;">
-                        <div id="demands-container" style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 80px;">
-                            <!-- 动态生成带有【在库料头提示与选择】的裁片项 -->
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 5. 底部执行母卷接续搭切排料与多工位控制 -->
-                <div class="panel-section action-footer-section">
-                    <div style="display: flex; gap: 6px; margin-bottom: 6px;">
-                        <button class="tool-btn" style="flex: 1; height: 30px; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--panel-border); font-weight: 500; font-size: 11px;" onclick="advanceBed(-1)" title="红框回退展开上一工位 (-5m)">
-                            ◀ 上一工位 (-5m)
-                        </button>
-                        <button class="tool-btn" style="flex: 1; height: 30px; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--panel-border); font-weight: 500; font-size: 11px;" onclick="advanceBed(1)" title="红框前进展开下一工位 (+5m)">
-                            下一工位 (+5m) ▶
-                        </button>
-                    </div>
-                    <button class="tool-btn" id="btn-smart-advance" style="width: 100%; height: 32px; margin-bottom: 6px; background: rgba(16, 185, 129, 0.12); color: #059669; border: 1px solid rgba(16, 185, 129, 0.35); font-weight: bold; font-size: 12px; cursor: pointer; transition: all 0.2s;" onclick="smartAdvanceBed()" title="自动计算当前已切末端，一键吸附接刀，实现 0 间隙连续搭切">
-                        接续下一工位 (智能 0 间隙衔接)
-                    </button>
-                    <button class="big-solve-btn roll" onclick="triggerSolve()" title="在当前红框工位排料并保留其余工位已切成果">
-                        在当前红框工位排料 (接续搭切 · 保留历史)
-                    </button>
-                    <div style="display: flex; gap: 6px; margin-top: 6px;">
-                        <button class="tool-btn" style="flex: 1; height: 26px; background: rgba(239, 68, 68, 0.08); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.25); font-size: 11px;" onclick="clearStationCuts()" title="仅清除当前红框范围内的裁片与切刀">
-                            清除本工位排料
-                        </button>
-                        <button class="tool-btn" style="flex: 1; height: 26px; background: rgba(239, 68, 68, 0.08); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.25); font-size: 11px;" onclick="resetAllRollCuts()" title="清空整卷已排裁片，从头开始">
-                            清空整卷已排
-                        </button>
-                    </div>
-                </div>
-
-                <!-- 6. 工业预设算例快速载入 (紧凑网格) -->
-                <div class="panel-section" style="border-top: 1px solid var(--panel-border); padding: 8px 14px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                        <span style="font-size: 11px; font-weight: 600; color: var(--text-muted);">预设工业工况快速载入:</span>
-                        <span style="font-size: 10px; color: #0284c7;">点击秒切工况</span>
-                    </div>
-                    <div class="preset-grid">
-                        <button class="preset-grid-btn" id="btn-case-1" onclick="loadCase(1)" title="Word 表1：L形余料正交拆解">
-                            <b>算例1: L形拆解</b>
-                            <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">母卷正交直接裁切</div>
-                        </button>
-                        <button class="preset-grid-btn" id="btn-case-2" onclick="loadCase(2)" title="带疵改宽：左侧0.5m带疵纵切">
-                            <b>算例2: 改宽避疵</b>
-                            <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">左带疵右完好纵切</div>
-                        </button>
-                        <button class="preset-grid-btn" id="btn-case-3" onclick="loadCase(3)" title="短料复用：1.6m短料优先领用 (0母卷扣料)">
-                            <b>算例3: 短料优先</b>
-                            <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">母卷0扣料领用</div>
-                        </button>
-                        <button class="preset-grid-btn active" id="btn-case-4" onclick="loadCase(4)" title="工业全貌：60米大卷带全局疵点智能几何排料">
-                            <b>算例4: 工业全貌</b>
-                            <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">60m母卷多疵点排料</div>
-                        </button>
                     </div>
                 </div>
             </div>
@@ -254,103 +259,106 @@
             <!-- 模式二面板：料头复用精益切割 (Remnant Lean Cutting Mode)   -->
             <!-- ======================================================== -->
             <div id="panel-remnant-mode" style="display: none; flex-direction: column; flex: 1; min-height: 0;">
-                <!-- 1. 所属母卷型号与料头货架 (可折叠) -->
-                <div class="panel-section section-card-amber collapsible" id="card-remnant-source">
-                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开料头筛选卡片">
-                        <div class="section-title-wrap">
-                            <span class="collapse-arrow">▼</span>
-                            <span>现场料头货架库 (Remnant Shelf)</span>
+                <!-- 1~4 可滚动卡片主体 (支持鼠标上下自如滑动) -->
+                <div class="sidebar-scroll-body">
+                    <!-- 1. 所属母卷型号与料头货架 (可折叠) -->
+                    <div class="panel-section section-card-amber collapsible" id="card-remnant-source">
+                        <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开料头筛选卡片">
+                            <div class="section-title-wrap">
+                                <span class="collapse-arrow">▼</span>
+                                <span>现场料头货架库 (Remnant Shelf)</span>
+                            </div>
+                            <button class="tool-btn" style="font-size: 10px; padding: 2px 7px; color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.35); background: rgba(251, 191, 36, 0.08);" onclick="event.stopPropagation(); openMaterialModal('remnants')" title="进入料头立体货架与代际追溯二级页面">
+                                料头档案 ↗
+                            </button>
                         </div>
-                        <button class="tool-btn" style="font-size: 10px; padding: 2px 7px; color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.35); background: rgba(251, 191, 36, 0.08);" onclick="event.stopPropagation(); openMaterialModal('remnants')" title="进入料头立体货架与代际追溯二级页面">
-                            料头档案 ↗
-                        </button>
+                        <div class="section-content">
+                            <div class="prop-row">
+                                <span class="prop-label">筛选来源母卷</span>
+                                <select class="prop-input" id="sel-remnant-filter-roll" onchange="onRemnantFilterRollChange()" style="width: 170px;">
+                                    <option value="ALL">全部在库料头</option>
+                                    <option value="ROLL-2026-0920" selected>ROLL-2026-0920 (TC涤棉)</option>
+                                    <option value="ROLL-2026-0921">ROLL-2026-0921 (纯棉斜纹)</option>
+                                    <option value="ROLL-2026-0922">ROLL-2026-0922 (弹力牛津)</option>
+                                </select>
+                            </div>
+                            <!-- 条码扫描快速识别 -->
+                            <div style="display: flex; gap: 6px; margin-top: 6px;">
+                                <input type="text" id="inp-shelf-scan-code" class="scan-input" placeholder="扫描条码/录入料号..." onkeydown="if(event.key==='Enter') executeShelfBarcodeScan()" />
+                                <button class="tool-btn active" style="background: #0284c7; padding: 4px 10px; font-size: 11px;" onclick="executeShelfBarcodeScan()">识别</button>
+                            </div>
+                            <!-- 快捷模拟测试标签 -->
+                            <div style="display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap;">
+                                <span style="font-size: 10px; color: var(--text-muted);">快速模拟:</span>
+                                <button class="tool-btn" style="font-size: 9px; padding: 1px 5px;" onclick="quickSelectRemnant('REM-202609-001')">001 (短料2×1.6m)</button>
+                                <button class="tool-btn" style="font-size: 9px; padding: 1px 5px;" onclick="quickSelectRemnant('REM-202609-002')">002 (长边0.5×4m)</button>
+                                <button class="tool-btn" style="font-size: 9px; padding: 1px 5px; color: var(--accent-amber);" onclick="quickSelectRemnant('REM-202609-003')">003 (带疵料头)</button>
+                            </div>
+                        </div>
                     </div>
-                    <div class="section-content">
-                        <div class="prop-row">
-                            <span class="prop-label">筛选来源母卷</span>
-                            <select class="prop-input" id="sel-remnant-filter-roll" onchange="onRemnantFilterRollChange()" style="width: 170px;">
-                                <option value="ALL">全部在库料头</option>
-                                <option value="ROLL-2026-0920" selected>ROLL-2026-0920 (TC涤棉)</option>
-                                <option value="ROLL-2026-0921">ROLL-2026-0921 (纯棉斜纹)</option>
-                                <option value="ROLL-2026-0922">ROLL-2026-0922 (弹力牛津)</option>
-                            </select>
+
+                    <!-- 2. 在库料头卡片货架 (自然平铺，上下滑动) -->
+                    <div class="panel-section collapsible" id="card-remnant-shelf">
+                        <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开料头货架">
+                            <div class="section-title-wrap">
+                                <span class="collapse-arrow">▼</span>
+                                <span>点击选择要装载的料头</span>
+                            </div>
+                            <span class="badge-rem" id="shelf-remnant-total-badge">3 块在库</span>
                         </div>
-                        <!-- 条码扫描快速识别 -->
-                        <div style="display: flex; gap: 6px; margin-top: 6px;">
-                            <input type="text" id="inp-shelf-scan-code" class="scan-input" placeholder="扫描条码/录入料号..." onkeydown="if(event.key==='Enter') executeShelfBarcodeScan()" />
-                            <button class="tool-btn active" style="background: #0284c7; padding: 4px 10px; font-size: 11px;" onclick="executeShelfBarcodeScan()">识别</button>
+                        <div class="section-content">
+                            <div id="shelf-remnant-cards-container" style="display: flex; flex-direction: column; gap: 6px;">
+                                <!-- 动态填充料头卡片 -->
+                            </div>
                         </div>
-                        <!-- 快捷模拟测试标签 -->
-                        <div style="display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap;">
-                            <span style="font-size: 10px; color: var(--text-muted);">快速模拟:</span>
-                            <button class="tool-btn" style="font-size: 9px; padding: 1px 5px;" onclick="quickSelectRemnant('REM-202609-001')">001 (短料2×1.6m)</button>
-                            <button class="tool-btn" style="font-size: 9px; padding: 1px 5px;" onclick="quickSelectRemnant('REM-202609-002')">002 (长边0.5×4m)</button>
-                            <button class="tool-btn" style="font-size: 9px; padding: 1px 5px; color: var(--accent-amber);" onclick="quickSelectRemnant('REM-202609-003')">003 (带疵料头)</button>
+                    </div>
+
+                    <!-- 3. 当前已装载料头机台状态 (可折叠) -->
+                    <div class="panel-section card-active-remnant collapsible" id="card-active-remnant">
+                        <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开当前料头信息">
+                            <div class="section-title-wrap">
+                                <span class="collapse-arrow">▼</span>
+                                <span style="font-weight: 700; color: var(--remnant-active-title); font-size: 12px;">机台当前装载料头</span>
+                            </div>
+                            <span class="status-badge" style="font-size: 10px; padding: 1px 6px;">[母卷 0 消耗保证]</span>
+                        </div>
+                        <div class="section-content">
+                            <div style="font-size: 12px; color: var(--accent-blue); font-family: monospace; font-weight: bold; margin-top: 4px;" id="lbl-shelf-active-id">
+                                REM-202609-001
+                            </div>
+                            <div style="font-size: 11px; color: var(--text-main); margin-top: 2px;">
+                                规格: <b id="lbl-shelf-active-size">2000 × 1600 mm</b> | 
+                                库位: <span id="lbl-shelf-active-loc" style="color: var(--accent-amber);">库位 A-01-03</span>
+                            </div>
+                            <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">
+                                基准: <b>右下角基准 (靠右导轨对齐)</b> | 
+                                状态: <span id="lbl-shelf-active-status" style="color: var(--accent-green);">完好可用短料</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. 本料头套裁需求清单 (自然平铺，上下滑动) -->
+                    <div class="panel-section collapsible" id="card-remnant-demands">
+                        <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开料头需求清单">
+                            <div class="section-title-wrap">
+                                <span class="collapse-arrow">▼</span>
+                                <span>本次料头套裁裁片清单</span>
+                            </div>
+                            <button class="tool-btn btn-add-demand" onclick="event.stopPropagation(); addRemnantDemandRow()">+ 增裁片</button>
+                        </div>
+                        <div class="section-content">
+                            <div id="remnant-demands-container" style="display: flex; flex-direction: column; gap: 6px;">
+                                <!-- 动态生成 -->
+                            </div>
+                            <div style="font-size: 10.5px; color: var(--text-muted); margin-top: 6px; line-height: 1.4;">
+                                提示：排料后未用尽的部分将自动派生为新子料头（如 <code>REM-xxx-SUB01</code>）存入本卷料头库；母卷实切扣料锁定为 0mm。
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- 2. 在库料头卡片货架 (可折叠，弹性自适应) -->
-                <div class="panel-section collapsible" id="card-remnant-shelf" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 140px;">
-                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开料头货架">
-                        <div class="section-title-wrap">
-                            <span class="collapse-arrow">▼</span>
-                            <span>点击选择要装载的料头</span>
-                        </div>
-                        <span class="badge-rem" id="shelf-remnant-total-badge">3 块在库</span>
-                    </div>
-                    <div class="section-content" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;">
-                        <div id="shelf-remnant-cards-container" style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 6px; overflow-y: auto;">
-                            <!-- 动态填充料头卡片 -->
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 3. 当前已装载料头机台状态 (可折叠) -->
-                <div class="panel-section card-active-remnant collapsible" id="card-active-remnant">
-                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开当前料头信息">
-                        <div class="section-title-wrap">
-                            <span class="collapse-arrow">▼</span>
-                            <span style="font-weight: 700; color: var(--remnant-active-title); font-size: 12px;">机台当前装载料头</span>
-                        </div>
-                        <span class="status-badge" style="font-size: 10px; padding: 1px 6px;">[母卷 0 消耗保证]</span>
-                    </div>
-                    <div class="section-content">
-                        <div style="font-size: 12px; color: var(--accent-blue); font-family: monospace; font-weight: bold; margin-top: 4px;" id="lbl-shelf-active-id">
-                            REM-202609-001
-                        </div>
-                        <div style="font-size: 11px; color: var(--text-main); margin-top: 2px;">
-                            规格: <b id="lbl-shelf-active-size">2000 × 1600 mm</b> | 
-                            库位: <span id="lbl-shelf-active-loc" style="color: var(--accent-amber);">库位 A-01-03</span>
-                        </div>
-                        <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">
-                            基准: <b>右下角基准 (靠右导轨对齐)</b> | 
-                            状态: <span id="lbl-shelf-active-status" style="color: var(--accent-green);">完好可用短料</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 4. 本料头套裁需求清单 (可折叠，弹性自适应) -->
-                <div class="panel-section collapsible" id="card-remnant-demands" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 140px;">
-                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开料头需求清单">
-                        <div class="section-title-wrap">
-                            <span class="collapse-arrow">▼</span>
-                            <span>本次料头套裁裁片清单</span>
-                        </div>
-                        <button class="tool-btn btn-add-demand" onclick="event.stopPropagation(); addRemnantDemandRow()">+ 增裁片</button>
-                    </div>
-                    <div class="section-content" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;">
-                        <div id="remnant-demands-container" style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 6px; overflow-y: auto;">
-                            <!-- 动态生成 -->
-                        </div>
-                        <div style="font-size: 10.5px; color: var(--text-muted); margin-top: 6px; line-height: 1.4;">
-                            提示：排料后未用尽的部分将自动派生为新子料头（如 <code>REM-xxx-SUB01</code>）存入本卷料头库；母卷实切扣料锁定为 0mm。
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 5. 底部执行料头精益切割大按钮 -->
-                <div class="panel-section action-footer-section">
+                <!-- 5. 常驻底部执行料头精益切割大按钮 (折叠卡片时位置绝不上跳) -->
+                <div class="sidebar-pinned-footer action-footer-section" style="border-top: 1px solid var(--panel-border); padding: 12px 14px;">
                     <button class="big-solve-btn remnant" onclick="triggerSolve()">
                         执行料头精益切割 (母卷 0 扣料，派生子料头入库)
                     </button>
@@ -444,18 +452,18 @@
             </div>
 
             <!-- Tab 1: 刀序与刀路优化 -->
-            <div class="sidebar-tab-pane" id="tab-pane-cut" style="display: flex;">
-                <div class="panel-section collapsible" id="card-cut-sequence" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 200px;">
-                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开现场下刀工艺单">
-                        <div class="section-title-wrap">
-                            <span class="collapse-arrow">▼</span>
-                            <span>现场下刀工艺顺序单 (Cut Sequence)</span>
+            <div class="sidebar-tab-pane" id="tab-pane-cut" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
+                <div class="sidebar-scroll-body">
+                    <div class="panel-section collapsible" id="card-cut-sequence">
+                        <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开现场下刀工艺单">
+                            <div class="section-title-wrap">
+                                <span class="collapse-arrow">▼</span>
+                                <span>现场下刀工艺顺序单 (Cut Sequence)</span>
+                            </div>
+                            <span class="badge-cut" id="total-cuts-badge">2 刀</span>
                         </div>
-                        <span class="badge-cut" id="total-cuts-badge">2 刀</span>
-                    </div>
-                    <div class="section-content" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;">
-                        <div id="toolpath-stats-box" class="toolpath-control-card"></div>
-                        <div style="flex: 1 1 auto; overflow-y: auto;">
+                        <div class="section-content">
+                            <div id="toolpath-stats-box" class="toolpath-control-card"></div>
                             <table class="cam-table" id="cut-table">
                                 <thead>
                                     <tr>
@@ -473,8 +481,8 @@
                     </div>
                 </div>
 
-                <!-- 刀路工艺快捷操作 -->
-                <div class="panel-section action-footer-section" style="border-top: 1px solid var(--panel-border);">
+                <!-- 刀路工艺快捷操作 (常驻右侧底部，折叠上方工艺单时位置绝不上移) -->
+                <div class="sidebar-pinned-footer action-footer-section" style="border-top: 1px solid var(--panel-border); padding: 12px 14px;">
                     <div style="display: flex; gap: 6px;">
                         <button class="tool-btn active" style="flex: 1; height: 30px; background: #0284c7; font-weight: 600; font-size: 11px;" onclick="openExportModal('gcode')">
                             机床代码 (G-Code/DXF)
@@ -487,23 +495,23 @@
             </div>
 
             <!-- Tab 2: 料头入库与实切对账 -->
-            <div class="sidebar-tab-pane" id="tab-pane-balance" style="display: none;">
-                <!-- 余料料头入库单 -->
-                <div class="panel-section collapsible" id="card-remnant-ledger" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 180px;">
-                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开料头入库登记">
-                        <div class="section-title-wrap">
-                            <span class="collapse-arrow">▼</span>
-                            <span>料头入库登记 (Remnant Ledger)</span>
+            <div class="sidebar-tab-pane" id="tab-pane-balance" style="display: none; flex-direction: column; flex: 1; min-height: 0;">
+                <div class="sidebar-scroll-body">
+                    <!-- 余料料头入库单 -->
+                    <div class="panel-section collapsible" id="card-remnant-ledger">
+                        <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开料头入库登记">
+                            <div class="section-title-wrap">
+                                <span class="collapse-arrow">▼</span>
+                                <span>料头入库登记 (Remnant Ledger)</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span class="badge-rem" id="remnant-count-badge">2 块</span>
+                                <button class="tool-btn" style="font-size: 10px; padding: 2px 7px; color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.35); background: rgba(251, 191, 36, 0.08);" onclick="event.stopPropagation(); openMaterialModal('remnants')" title="进入料头立体货架二级页面">
+                                    货架档案 ↗
+                                </button>
+                            </div>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 6px;">
-                            <span class="badge-rem" id="remnant-count-badge">2 块</span>
-                            <button class="tool-btn" style="font-size: 10px; padding: 2px 7px; color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.35); background: rgba(251, 191, 36, 0.08);" onclick="event.stopPropagation(); openMaterialModal('remnants')" title="进入料头立体货架二级页面">
-                                货架档案 ↗
-                            </button>
-                        </div>
-                    </div>
-                    <div class="section-content" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;">
-                        <div style="flex: 1 1 auto; overflow-y: auto;">
+                        <div class="section-content">
                             <table class="cam-table">
                                 <thead>
                                     <tr>
@@ -520,7 +528,6 @@
                             </table>
                         </div>
                     </div>
-                </div>
 
                 <!-- 母卷扣料与面积守恒台账 -->
                 <div class="panel-section balance-ledger-section collapsible" id="card-material-balance" style="flex-shrink: 0;">
@@ -558,7 +565,8 @@
                     </div>
                 </div>
             </div>
-        </aside>
+        </div>
+    </aside>
     </main>
 
     <!-- 底部工位状态栏 -->
