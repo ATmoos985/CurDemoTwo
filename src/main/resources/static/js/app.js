@@ -12,7 +12,7 @@ import {
 } from './plugins/settings/settings.js';
 
 import {
-    toggleSectionCollapse, toggleSidebar, initLayoutResizers
+    toggleSectionCollapse, toggleSidebar, initLayoutResizers, switchRightPanelTab
 } from './plugins/layout/splitter.js';
 
 import {
@@ -198,6 +198,7 @@ const camApp = {
     toggleSectionCollapse,
     toggleSidebar,
     initLayoutResizers,
+    switchRightPanelTab,
     fitView,
     resetZoom,
     resetToBedView,

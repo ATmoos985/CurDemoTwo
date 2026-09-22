@@ -6,7 +6,7 @@ import { bus } from '../../core/event-bus.js';
 import { renderScene, resetToBedView, updateStatusBar } from '../cad/cad-renderer.js';
 import { renderDefectsUI } from '../solver/quota-manager.js';
 
-export function switchCutMode(mode, targetRemnant) {
+export async function switchCutMode(mode, targetRemnant) {
     state.setCutMode(mode);
 
     const btnRoll = document.getElementById("tab-btn-roll");
@@ -24,7 +24,12 @@ export function switchCutMode(mode, targetRemnant) {
             radarBar.style.opacity = "1";
             radarBar.style.pointerEvents = "auto";
         }
-        onMotherRollChange();
+        // 关键修复：从料头切回母卷时，彻底恢复母卷工况 (Bed L = 5000mm)，杜绝料头尺寸残留
+        if (window.camApp && typeof window.camApp.loadCase === 'function') {
+            window.camApp.loadCase(state.currentCaseId);
+        } else {
+            await onMotherRollChange(true);
+        }
     } else {
         if (btnRoll) btnRoll.className = "mode-tab-btn";
         if (btnRem) btnRem.className = "mode-tab-btn active remnant-mode";
@@ -53,14 +58,31 @@ export function switchCutMode(mode, targetRemnant) {
     }
 }
 
-export async function onMotherRollChange() {
+export async function onMotherRollChange(forceResetBed = false) {
     const sel = document.getElementById("sel-mother-roll-id");
     const rollId = sel ? sel.value : "ROLL-2026-0920";
-    const spec = state.motherRollSpecs[rollId] || { model: "标准面料", rollW: 2000, totalRollL: 60000 };
+    const spec = state.motherRollSpecs[rollId] || { model: "TC涤棉-B2026", rollW: 2000, totalRollL: 60000, bedL: 5000 };
 
     if (document.getElementById("inp-roll-id")) document.getElementById("inp-roll-id").value = rollId;
     if (document.getElementById("inp-roll-w")) document.getElementById("inp-roll-w").value = spec.rollW;
     if (document.getElementById("inp-total-roll-l")) document.getElementById("inp-total-roll-l").value = spec.totalRollL;
+
+    const targetBedL = spec.bedL || 5000;
+    const data = state.getCurrentCaseData();
+    data.rollW = spec.rollW;
+    data.totalRollL = spec.totalRollL;
+
+    // 关键修复：母卷开卷必须保证台面长度为标准机台床台（5000mm），不能沿用料头短料长度
+    if (forceResetBed || !data.bedL || data.bedL < 3000) {
+        data.bedL = targetBedL;
+    }
+    if (document.getElementById("inp-bed-l")) {
+        document.getElementById("inp-bed-l").value = data.bedL || targetBedL;
+    }
+    data.windowStartY = data.windowStartY || 0;
+    if (document.getElementById("inp-window-start-y")) {
+        document.getElementById("inp-window-start-y").value = data.windowStartY;
+    }
 
     const modelLbl = document.getElementById("lbl-roll-model-desc");
     if (modelLbl) modelLbl.innerText = spec.model;
@@ -69,15 +91,21 @@ export async function onMotherRollChange() {
     const sbRoll = document.getElementById("sb-roll-id");
     if (sbRoll) sbRoll.innerText = rollId;
 
-    const data = state.getCurrentCaseData();
-    data.rollW = spec.rollW;
-    data.totalRollL = spec.totalRollL;
+    // 更新折叠卡片摘要
+    const originTag = document.getElementById("tag-cut-origin-header");
+    if (originTag) {
+        const origVal = data.cutOrigin || "right-bottom";
+        const origName = origVal.startsWith("right") ? "右" : "左";
+        const origPos = origVal.endsWith("bottom") ? "下角" : "上角";
+        originTag.innerText = `${origName}${origPos} · ${data.bedL}mm`;
+    }
 
     await updateMotherRollRemnantStats(rollId);
 
     renderScene();
     resetToBedView();
     checkAllDemandsRemnantMatch();
+    updateStatusBar();
 }
 
 export async function updateMotherRollRemnantStats(rollId) {

@@ -76,38 +76,35 @@
             <!-- 模式一面板：母卷连续开卷排产 (Mother Roll Mode)             -->
             <!-- ======================================================== -->
             <div id="panel-roll-mode" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
-                <!-- 1. 母卷批号与料头统计卡片 (可折叠) -->
+                <!-- 1. 母卷批号与料头统计卡片 (紧凑收折，直通二级管理) -->
                 <div class="panel-section section-card-blue collapsible" id="card-mother-roll">
                     <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开母卷规格卡片">
                         <div class="section-title-wrap">
                             <span class="collapse-arrow">▼</span>
                             <span>母卷型号与规格 (Mother Roll)</span>
                         </div>
-                        <span class="header-tag" style="color: #38bdf8;">当前母卷</span>
+                        <button class="tool-btn" style="font-size: 10px; padding: 2px 7px; color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.08);" onclick="event.stopPropagation(); openMaterialModal('rolls')" title="进入母卷档案与瑕疵库管理二级页面">
+                            母卷档案 ↗
+                        </button>
                     </div>
                     <div class="section-content">
                         <div class="prop-row">
-                            <span class="prop-label">选择母卷批号</span>
+                            <span class="prop-label">生产母卷批号</span>
                             <select class="prop-input" id="sel-mother-roll-id" onchange="onMotherRollChange()" style="width: 170px;">
                                 <option value="ROLL-2026-0920" selected>ROLL-2026-0920 (TC涤棉 2m)</option>
                                 <option value="ROLL-2026-0921">ROLL-2026-0921 (纯棉 1.8m)</option>
                                 <option value="ROLL-2026-0922">ROLL-2026-0922 (牛津布 2.2m)</option>
                             </select>
                         </div>
-                        <div class="prop-row">
-                            <span class="prop-label">材质与幅宽</span>
+                        <div class="prop-row" style="margin-top: 4px;">
+                            <span class="prop-label">材质与净幅宽</span>
                             <span style="color: var(--text-main); font-size: 11px;"><b id="lbl-roll-model-desc">TC涤棉-B2026</b> | 幅宽 <b id="lbl-roll-w-desc">2000</b>mm</span>
                         </div>
-                        <div class="card-inner-box" style="margin-top: 4px; display: flex; justify-content: space-between; align-items: center;">
-                            <span style="font-size: 11px; color: var(--text-muted);">
-                                本卷切下在库料头: <b id="lbl-roll-rem-count" style="color: var(--accent-blue); font-family: monospace;">3 块</b> (<span id="lbl-roll-rem-area">7.20m²</span>)
+                        <div class="card-inner-box" style="margin-top: 6px; padding: 4px 8px; display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 10.5px; color: var(--text-muted);">
+                                在库可用料头: <b id="lbl-roll-rem-count" style="color: var(--accent-blue); font-family: monospace;">3 块</b> (<span id="lbl-roll-rem-area">7.20m²</span>)
                             </span>
-                            <button class="tool-btn active" style="font-size: 10px; padding: 2px 8px; background: #d97706; border-color: #b45309;" onclick="switchCutMode('remnant')">领用料头 &gt;&gt;</button>
-                        </div>
-                        <div style="display: flex; gap: 6px; margin-top: 6px;">
-                            <button class="tool-btn" style="flex: 1; font-size: 10.5px; padding: 3px 0; background: rgba(79, 70, 229, 0.12); color: #818cf8; border-color: rgba(79, 70, 229, 0.35); font-weight: 600;" onclick="openMaterialModal('rolls')">
-                                母卷档案与瑕疵库管理 &gt;&gt;
-                            </button>
+                            <a href="javascript:void(0)" onclick="switchCutMode('remnant')" style="font-size: 10.5px; color: var(--accent-amber); font-weight: 600; text-decoration: none;">切换料头模式 →</a>
                         </div>
 
                         <!-- 隐藏参数 (供高级调校) -->
@@ -118,14 +115,14 @@
                     </div>
                 </div>
 
-                <!-- 2. 机台展开长与起准点标定 (右下角基准，可折叠) -->
-                <div class="panel-section collapsible" id="card-bed-origin">
+                <!-- 2. 机台展开长与起准点标定 (默认收折，点击展开) -->
+                <div class="panel-section collapsible collapsed" id="card-bed-origin">
                     <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开机台标定卡片">
                         <div class="section-title-wrap">
                             <span class="collapse-arrow">▼</span>
                             <span>机台起准点与展开标定</span>
                         </div>
-                        <span class="header-tag" id="tag-cut-origin-header" style="color:#10b981;">右下角基准</span>
+                        <span class="header-tag" id="tag-cut-origin-header" style="color:#10b981;">右下角 · 5000mm</span>
                     </div>
                     <div class="section-content">
                         <div class="prop-row">
@@ -166,14 +163,17 @@
                     </div>
                 </div>
 
-                <!-- 3. 验布疵点避让记录 (可折叠) -->
-                <div class="panel-section collapsible" id="card-defects">
+                <!-- 3. 验布疵点避让记录 (默认收折，点击展开) -->
+                <div class="panel-section collapsible collapsed" id="card-defects">
                     <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开瑕疵避让卡片">
                         <div class="section-title-wrap">
                             <span class="collapse-arrow">▼</span>
                             <span>瑕疵避让记录 (Defects)</span>
                         </div>
-                        <button class="tool-btn btn-add-defect" onclick="event.stopPropagation(); addDefectRow()">+ 增疵点</button>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span class="header-tag" id="tag-defects-summary" style="color:#f59e0b;">共 8 处瑕疵</span>
+                            <button class="tool-btn btn-add-defect" onclick="event.stopPropagation(); addDefectRow()">+ 增疵点</button>
+                        </div>
                     </div>
                     <div class="section-content">
                         <div id="defects-container" style="display: flex; flex-direction: column; gap: 6px; max-height: 140px; overflow-y: auto;">
@@ -227,31 +227,30 @@
                     </div>
                 </div>
 
-                <!-- 6. Word 预设算例快速载入 (可折叠) -->
-                <div class="panel-section" style="border-top: 1px solid var(--panel-border); padding-top: 8px;">
-                    <details>
-                        <summary style="font-size: 11px; color: var(--text-muted); cursor: pointer; user-select: none;">
-                            点击展开：Word 4大经典业务算例快速载入
-                        </summary>
-                        <div style="margin-top: 6px;">
-                            <button class="preset-btn active" id="btn-case-1" onclick="loadCase(1)">
-                                <div><b>场景一：Word 表1 (L形余料正交拆解)</b></div>
-                                <div class="preset-desc">2m×4m 切 1.5m×3m，拆出右侧0.5m与末端1.5m料头 (面积100%守恒)</div>
-                            </button>
-                            <button class="preset-btn" id="btn-case-2" onclick="loadCase(2)">
-                                <div><b>场景一：左侧0.5m带疵改宽纵切</b></div>
-                                <div class="preset-desc">左侧0.5m带疵，右侧1.5m完好，允许纵切时出成品并保留带疵料头</div>
-                            </button>
-                            <button class="preset-btn" id="btn-case-3" onclick="loadCase(3)">
-                                <div><b>场景一：1.6m短料生成与新订单优先领用</b></div>
-                                <div class="preset-desc">疵点间短料切断贴标入库；新订单到达优先匹配，母卷扣料为0</div>
-                            </button>
-                            <button class="preset-btn" id="btn-case-4" onclick="loadCase(4)">
-                                <div><b>场景二：带多疵点 PackingSolver 2D 排料</b></div>
-                                <div class="preset-desc">2000×5000mm 原布，多规格裁片，避让2处瑕疵，生成13步断刀树</div>
-                            </button>
-                        </div>
-                    </details>
+                <!-- 6. 工业预设算例快速载入 (紧凑网格) -->
+                <div class="panel-section" style="border-top: 1px solid var(--panel-border); padding: 8px 14px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="font-size: 11px; font-weight: 600; color: var(--text-muted);">预设工业工况快速载入:</span>
+                        <span style="font-size: 10px; color: #0284c7;">点击秒切工况</span>
+                    </div>
+                    <div class="preset-grid">
+                        <button class="preset-grid-btn" id="btn-case-1" onclick="loadCase(1)" title="Word 表1：L形余料正交拆解">
+                            <b>算例1: L形拆解</b>
+                            <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">母卷正交直接裁切</div>
+                        </button>
+                        <button class="preset-grid-btn" id="btn-case-2" onclick="loadCase(2)" title="带疵改宽：左侧0.5m带疵纵切">
+                            <b>算例2: 改宽避疵</b>
+                            <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">左带疵右完好纵切</div>
+                        </button>
+                        <button class="preset-grid-btn" id="btn-case-3" onclick="loadCase(3)" title="短料复用：1.6m短料优先领用 (0母卷扣料)">
+                            <b>算例3: 短料优先</b>
+                            <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">母卷0扣料领用</div>
+                        </button>
+                        <button class="preset-grid-btn active" id="btn-case-4" onclick="loadCase(4)" title="工业全貌：60米大卷带全局疵点 PackingSolver 2D 排料">
+                            <b>算例4: 工业全貌</b>
+                            <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">60m母卷多疵点排料</div>
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -266,7 +265,9 @@
                             <span class="collapse-arrow">▼</span>
                             <span>现场料头货架库 (Remnant Shelf)</span>
                         </div>
-                        <span class="header-tag" style="color: #fbbf24;">免开母卷</span>
+                        <button class="tool-btn" style="font-size: 10px; padding: 2px 7px; color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.35); background: rgba(251, 191, 36, 0.08);" onclick="event.stopPropagation(); openMaterialModal('remnants')" title="进入料头立体货架与代际追溯二级页面">
+                            料头档案 ↗
+                        </button>
                     </div>
                     <div class="section-content">
                         <div class="prop-row">
@@ -432,98 +433,132 @@
             <div class="resizer-handle"></div>
         </div>
 
-        <!-- 右侧面板：工艺单与对账台账 -->
+        <!-- 右侧面板：工艺单与对账台账 (Tab 选项卡化收拢) -->
         <aside class="sidebar-right" id="sidebar-right">
-            <!-- 现场下刀工艺表 (可折叠，弹性自适应) -->
-            <div class="panel-section collapsible" id="card-cut-sequence" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 160px;">
-                <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开现场下刀工艺单">
-                    <div class="section-title-wrap">
-                        <span class="collapse-arrow">▼</span>
-                        <span>现场下刀工艺顺序单 (Cut Sequence)</span>
+            <!-- 顶部 Tab 选项卡切换器 -->
+            <div class="sidebar-tabs-header">
+                <button class="sidebar-tab-btn active" id="tab-right-cut" onclick="switchRightPanelTab('cut')">
+                    <span>刀序与优化 (Cut Path)</span>
+                    <span class="badge-cut" id="right-tab-cut-badge">2 刀</span>
+                </button>
+                <button class="sidebar-tab-btn" id="tab-right-balance" onclick="switchRightPanelTab('balance')">
+                    <span>料头与对账 (Balance)</span>
+                    <span class="badge-rem" id="right-tab-rem-badge">2 块</span>
+                </button>
+            </div>
+
+            <!-- Tab 1: 刀序与刀路优化 -->
+            <div class="sidebar-tab-pane" id="tab-pane-cut" style="display: flex;">
+                <div class="panel-section collapsible" id="card-cut-sequence" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 200px;">
+                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开现场下刀工艺单">
+                        <div class="section-title-wrap">
+                            <span class="collapse-arrow">▼</span>
+                            <span>现场下刀工艺顺序单 (Cut Sequence)</span>
+                        </div>
+                        <span class="badge-cut" id="total-cuts-badge">2 刀</span>
                     </div>
-                    <span class="badge-cut" id="total-cuts-badge">2 刀</span>
+                    <div class="section-content" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;">
+                        <div id="toolpath-stats-box" class="toolpath-control-card"></div>
+                        <div style="flex: 1 1 auto; overflow-y: auto;">
+                            <table class="cam-table" id="cut-table">
+                                <thead>
+                                    <tr>
+                                        <th width="32">刀序</th>
+                                        <th width="50">类型</th>
+                                        <th width="65">下刀位置</th>
+                                        <th>操作指引与切出物</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="cut-table-body">
+                                    <!-- 动态填充 -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
-                <div class="section-content" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;">
-                    <div id="toolpath-stats-box" class="toolpath-control-card"></div>
-                    <div style="flex: 1 1 auto; overflow-y: auto;">
-                        <table class="cam-table" id="cut-table">
-                            <thead>
-                                <tr>
-                                    <th width="32">刀序</th>
-                                    <th width="50">类型</th>
-                                    <th width="65">下刀位置</th>
-                                    <th>操作指引与切出物</th>
-                                </tr>
-                            </thead>
-                            <tbody id="cut-table-body">
-                                <!-- 动态填充 -->
-                            </tbody>
-                        </table>
+
+                <!-- 刀路工艺快捷操作 -->
+                <div class="panel-section action-footer-section" style="border-top: 1px solid var(--panel-border);">
+                    <div style="display: flex; gap: 6px;">
+                        <button class="tool-btn active" style="flex: 1; height: 30px; background: #0284c7; font-weight: 600; font-size: 11px;" onclick="openExportModal('gcode')">
+                            机床代码 (G-Code/DXF)
+                        </button>
+                        <button class="tool-btn active" style="flex: 1; height: 30px; background: #d97706; font-weight: 600; font-size: 11px;" onclick="openCutTicketModal()">
+                            车间工单 (A4打印)
+                        </button>
                     </div>
                 </div>
             </div>
 
-            <!-- 余料料头入库单 (可折叠，弹性自适应) -->
-            <div class="panel-section collapsible" id="card-remnant-ledger" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 140px;">
-                <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开料头入库登记">
-                    <div class="section-title-wrap">
-                        <span class="collapse-arrow">▼</span>
-                        <span>料头入库登记 (Remnant Ledger)</span>
+            <!-- Tab 2: 料头入库与实切对账 -->
+            <div class="sidebar-tab-pane" id="tab-pane-balance" style="display: none;">
+                <!-- 余料料头入库单 -->
+                <div class="panel-section collapsible" id="card-remnant-ledger" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 180px;">
+                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开料头入库登记">
+                        <div class="section-title-wrap">
+                            <span class="collapse-arrow">▼</span>
+                            <span>料头入库登记 (Remnant Ledger)</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span class="badge-rem" id="remnant-count-badge">2 块</span>
+                            <button class="tool-btn" style="font-size: 10px; padding: 2px 7px; color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.35); background: rgba(251, 191, 36, 0.08);" onclick="event.stopPropagation(); openMaterialModal('remnants')" title="进入料头立体货架二级页面">
+                                货架档案 ↗
+                            </button>
+                        </div>
                     </div>
-                    <span class="badge-rem" id="remnant-count-badge">2 块</span>
-                </div>
-                <div class="section-content" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;">
-                    <div style="flex: 1 1 auto; overflow-y: auto;">
-                        <table class="cam-table">
-                            <thead>
-                                <tr>
-                                    <th>料头编号</th>
-                                    <th>规格(宽×长)</th>
-                                    <th>面积</th>
-                                    <th>质量状态</th>
-                                    <th width="45">操作</th>
-                                </tr>
-                            </thead>
-                            <tbody id="remnant-table-body">
-                                <!-- 动态填充 -->
-                            </tbody>
-                        </table>
+                    <div class="section-content" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;">
+                        <div style="flex: 1 1 auto; overflow-y: auto;">
+                            <table class="cam-table">
+                                <thead>
+                                    <tr>
+                                        <th>料头编号</th>
+                                        <th>规格(宽×长)</th>
+                                        <th>面积</th>
+                                        <th>质量状态</th>
+                                        <th width="45">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="remnant-table-body">
+                                    <!-- 动态填充 -->
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- 母卷扣料与面积守恒台账 (可折叠) -->
-            <div class="panel-section balance-ledger-section collapsible" id="card-material-balance">
-                <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开母卷实切对账单">
-                    <div class="section-title-wrap">
-                        <span class="collapse-arrow">▼</span>
-                        <span>母卷实切对账单 (Material Balance)</span>
+                <!-- 母卷扣料与面积守恒台账 -->
+                <div class="panel-section balance-ledger-section collapsible" id="card-material-balance" style="flex-shrink: 0;">
+                    <div class="section-header" onclick="toggleSectionCollapse(this)" title="点击折叠/展开母卷实切对账单">
+                        <div class="section-title-wrap">
+                            <span class="collapse-arrow">▼</span>
+                            <span>母卷实切对账单 (Material Balance)</span>
+                        </div>
                     </div>
-                </div>
-                <div class="section-content">
-                    <div class="prop-row">
-                        <span class="prop-label">本次展开剪下长度:</span>
-                        <span class="status-val" id="lbl-deduct-len">4000 mm</span>
-                    </div>
-                    <div class="prop-row">
-                        <span class="prop-label">成品实际总面积:</span>
-                        <span class="status-val" style="color: var(--accent-green);" id="lbl-piece-area">4.500 m²</span>
-                    </div>
-                    <div class="prop-row">
-                        <span class="prop-label">回收料头总面积:</span>
-                        <span class="status-val" style="color: var(--accent-blue);" id="lbl-rem-area">3.500 m²</span>
-                    </div>
-                    <div class="prop-row">
-                        <span class="prop-label">废料与切口损耗:</span>
-                        <span class="status-val" style="color: var(--accent-red);" id="lbl-waste-area">0.000 m²</span>
-                    </div>
-                    <div class="prop-row" style="border-top: 1px solid var(--panel-border); padding-top: 6px; margin-top: 4px;">
-                        <span class="prop-label" style="font-weight: 700; color: var(--text-main);">母卷总消耗面积:</span>
-                        <span class="status-val" style="color: var(--accent-amber); font-size: 13px;" id="lbl-total-area">8.000 m²</span>
-                    </div>
-                    <div class="prop-row">
-                        <span class="prop-label">面积闭环校验:</span>
-                        <span class="status-badge" id="lbl-balance-status">100.0% 严密守恒</span>
+                    <div class="section-content">
+                        <div class="prop-row">
+                            <span class="prop-label">本次展开剪下长度:</span>
+                            <span class="status-val" id="lbl-deduct-len">4000 mm</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label">成品实际总面积:</span>
+                            <span class="status-val" style="color: var(--accent-green);" id="lbl-piece-area">4.500 m²</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label">回收料头总面积:</span>
+                            <span class="status-val" style="color: var(--accent-blue);" id="lbl-rem-area">3.500 m²</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label">废料与切口损耗:</span>
+                            <span class="status-val" style="color: var(--accent-red);" id="lbl-waste-area">0.000 m²</span>
+                        </div>
+                        <div class="prop-row" style="border-top: 1px solid var(--panel-border); padding-top: 6px; margin-top: 4px;">
+                            <span class="prop-label" style="font-weight: 700; color: var(--text-main);">母卷总消耗面积:</span>
+                            <span class="status-val" style="color: var(--accent-amber); font-size: 13px;" id="lbl-total-area">8.000 m²</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label">面积闭环校验:</span>
+                            <span class="status-badge" id="lbl-balance-status">100.0% 严密守恒</span>
+                        </div>
                     </div>
                 </div>
             </div>

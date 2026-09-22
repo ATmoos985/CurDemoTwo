@@ -50,6 +50,9 @@ export function updateUIInfo() {
     // 现场切刀表
     const totalCutsBadge = document.getElementById("total-cuts-badge");
     if (totalCutsBadge) totalCutsBadge.innerText = `${(data.cuts || []).length} 刀`;
+    const rightTabCutBadge = document.getElementById("right-tab-cut-badge");
+    if (rightTabCutBadge) rightTabCutBadge.innerText = `${(data.cuts || []).length} 刀`;
+
     const cutTbody = document.getElementById("cut-table-body");
     if (cutTbody) {
         const currentLimit = state.currentCutStepLimit;
@@ -74,6 +77,8 @@ export function updateUIInfo() {
     // 料头登记表
     const remBadge = document.getElementById("remnant-count-badge");
     if (remBadge) remBadge.innerText = `${(data.remnants || []).length} 块`;
+    const rightTabRemBadge = document.getElementById("right-tab-rem-badge");
+    if (rightTabRemBadge) rightTabRemBadge.innerText = `${(data.remnants || []).length} 块`;
     const remTbody = document.getElementById("remnant-table-body");
     if (remTbody) {
         remTbody.innerHTML = (data.remnants || []).map(r => `
@@ -109,10 +114,26 @@ export function updateUIInfo() {
 }
 
 export function loadCase(id) {
+    if (state.currentCutMode !== "roll") {
+        state.setCutMode("roll");
+        const btnRoll = document.getElementById("tab-btn-roll");
+        const btnRem = document.getElementById("tab-btn-remnant");
+        const panelRoll = document.getElementById("panel-roll-mode");
+        const panelRem = document.getElementById("panel-remnant-mode");
+        const radarBar = document.getElementById("roll-radar-bar");
+        if (btnRoll) btnRoll.className = "mode-tab-btn active roll-mode";
+        if (btnRem) btnRem.className = "mode-tab-btn";
+        if (panelRoll) panelRoll.style.display = "flex";
+        if (panelRem) panelRem.style.display = "none";
+        if (radarBar) {
+            radarBar.style.opacity = "1";
+            radarBar.style.pointerEvents = "auto";
+        }
+    }
     state.setCaseId(id);
     for (let i = 1; i <= 4; i++) {
         const btn = document.getElementById(`btn-case-${i}`);
-        if (btn) btn.className = (i === id) ? "preset-btn active" : "preset-btn";
+        if (btn) btn.className = (i === id) ? "preset-grid-btn active" : "preset-grid-btn";
     }
     const data = state.getCurrentCaseData();
     if (document.getElementById("inp-total-roll-l")) document.getElementById("inp-total-roll-l").value = data.totalRollL || 60000;
@@ -125,10 +146,11 @@ export function loadCase(id) {
     const headerTag = document.getElementById("tag-cut-origin-header");
     if (headerTag) {
         const val = data.cutOrigin || "right-bottom";
-        if (val === "right-bottom") { headerTag.innerText = "右下角基准"; headerTag.style.color = "#10b981"; }
-        else if (val === "right-top") { headerTag.innerText = "右上角基准"; headerTag.style.color = "#38bdf8"; }
-        else if (val === "left-bottom") { headerTag.innerText = "左下角基准"; headerTag.style.color = "#f59e0b"; }
-        else { headerTag.innerText = "左上角基准"; headerTag.style.color = "#a855f7"; }
+        const bedL = data.bedL || 5000;
+        if (val === "right-bottom") { headerTag.innerText = `右下角 · ${bedL}mm`; headerTag.style.color = "#10b981"; }
+        else if (val === "right-top") { headerTag.innerText = `右上角 · ${bedL}mm`; headerTag.style.color = "#38bdf8"; }
+        else if (val === "left-bottom") { headerTag.innerText = `左下角 · ${bedL}mm`; headerTag.style.color = "#f59e0b"; }
+        else { headerTag.innerText = `左上角 · ${bedL}mm`; headerTag.style.color = "#a855f7"; }
     }
     if (document.getElementById("sel-first-stage")) document.getElementById("sel-first-stage").value = data.firstStageOrientation || "horizontal";
     if (document.getElementById("sel-allow-rotation")) document.getElementById("sel-allow-rotation").value = data.allowRotation ? "1" : "0";

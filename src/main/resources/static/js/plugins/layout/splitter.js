@@ -147,3 +147,15 @@ export function initLayoutResizers() {
         });
     }
 }
+
+export function switchRightPanelTab(tabName) {
+    const btnCut = document.getElementById("tab-right-cut");
+    const btnBal = document.getElementById("tab-right-balance");
+    const paneCut = document.getElementById("tab-pane-cut");
+    const paneBal = document.getElementById("tab-pane-balance");
+
+    if (btnCut) btnCut.classList.toggle("active", tabName === "cut");
+    if (btnBal) btnBal.classList.toggle("active", tabName === "balance");
+    if (paneCut) paneCut.style.display = (tabName === "cut") ? "flex" : "none";
+    if (paneBal) paneBal.style.display = (tabName === "balance") ? "flex" : "none";
+}

@@ -17,12 +17,40 @@ class StateStore {
         this.isToolpathOptimized = false;
         this.toolpathStats = null;
         this.originalCutsBackup = null;
+
+        // 料头工况专用独立运行态，彻底杜绝料头尺寸与数据污染母卷案例
+        this.remnantWorkspaceData = {
+            rollId: "REMNANT-STATION",
+            totalRollL: 1600,
+            bedL: 1600,
+            windowStartY: 0,
+            rollW: 2000,
+            trimStart: 0,
+            cutOrigin: "right-bottom",
+            firstStageOrientation: "horizontal",
+            allowRotation: false,
+            allowLongitudinal: true,
+            globalDefects: [],
+            demands: [],
+            pieces: [],
+            remnants: [],
+            cuts: [],
+            deductLen: 0,
+            pieceArea: 0,
+            remArea: 0,
+            wasteArea: 0,
+            totalArea: 0,
+            engine: "料头精益复用排料引擎"
+        };
     }
 
     /**
-     * 获取当前案例数据引用
+     * 获取当前工况数据引用 (母卷模式与料头模式严格环境隔离)
      */
     getCurrentCaseData() {
+        if (this.currentCutMode === "remnant") {
+            return this.remnantWorkspaceData;
+        }
         if (!this.scenarios[this.currentCaseId]) {
             this.scenarios[this.currentCaseId] = {};
         }

@@ -283,3 +283,88 @@ footer {
     border-color: #cbd5e1;
     color: #475569;
 }
+
+/* 右侧面板选项卡导航 (Right Sidebar Segmented Tabs) */
+.sidebar-tabs-header {
+    display: flex;
+    background: #18181b;
+    border-bottom: 1px solid var(--panel-border);
+    padding: 6px 8px;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.sidebar-tab-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 8px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+}
+.sidebar-tab-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-main);
+}
+.sidebar-tab-btn.active {
+    background: #27272a;
+    border-color: var(--panel-border);
+    color: #38bdf8;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+}
+[data-theme="light"] .sidebar-tabs-header {
+    background: #f1f5f9;
+}
+[data-theme="light"] .sidebar-tab-btn.active {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #0284c7;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+.sidebar-tab-pane {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+
+/* 预设案例紧凑网格 */
+.preset-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 5px;
+}
+.preset-grid-btn {
+    padding: 6px 8px;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    color: var(--text-main);
+    font-size: 11px;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.15s ease;
+    user-select: none;
+}
+.preset-grid-btn:hover {
+    background: rgba(2, 132, 199, 0.08);
+    border-color: var(--accent-blue);
+}
+.preset-grid-btn.active {
+    background: rgba(2, 132, 199, 0.15);
+    border-color: var(--accent-blue);
+    color: #38bdf8;
+    font-weight: 600;
+}
+[data-theme="light"] .preset-grid-btn.active {
+    color: #0284c7;
+}

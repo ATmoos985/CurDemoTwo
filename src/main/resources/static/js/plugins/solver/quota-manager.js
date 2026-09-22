@@ -263,6 +263,13 @@ export function renderDefectsUI(defects) {
         `;
         container.appendChild(row);
     });
+
+    const tagDefects = document.getElementById("tag-defects-summary");
+    if (tagDefects) {
+        const count = (defects || []).length;
+        tagDefects.innerText = count > 0 ? `共 ${count} 处瑕疵` : "无瑕疵";
+        tagDefects.style.color = count > 0 ? "#f59e0b" : "var(--text-muted)";
+    }
 }
 
 export function addDefectRow() {
@@ -286,6 +293,12 @@ export function addDefectRow() {
         </div>
     `;
     container.appendChild(row);
+    const tagDefects = document.getElementById("tag-defects-summary");
+    if (tagDefects) {
+        const count = container.querySelectorAll(".item-row").length;
+        tagDefects.innerText = `共 ${count} 处瑕疵`;
+        tagDefects.style.color = "#f59e0b";
+    }
     onParamChange();
 }
 
@@ -360,12 +373,29 @@ export function getDemandsFromUI() {
     return list;
 }
 
+export function updateOriginHeaderSummary() {
+    const data = state.getCurrentCaseData();
+    const headerTag = document.getElementById("tag-cut-origin-header");
+    if (!headerTag || !data) return;
+    const val = data.cutOrigin || "right-bottom";
+    const bedL = data.bedL || 5000;
+    let name = "右下角";
+    let color = "#10b981";
+    if (val === "right-bottom") { name = "右下角"; color = "#10b981"; }
+    else if (val === "right-top") { name = "右上角"; color = "#38bdf8"; }
+    else if (val === "left-bottom") { name = "左下角"; color = "#f59e0b"; }
+    else { name = "左上角"; color = "#a855f7"; }
+    headerTag.innerText = `${name} · ${bedL}mm`;
+    headerTag.style.color = color;
+}
+
 export function onRollConfigChange() {
     const data = state.getCurrentCaseData();
     data.totalRollL = parseFloat(document.getElementById("inp-total-roll-l").value) || 60000;
     data.bedL = parseFloat(document.getElementById("inp-bed-l").value) || 5000;
     data.windowStartY = parseFloat(document.getElementById("inp-window-start-y").value) || 0;
     data.rollW = parseFloat(document.getElementById("inp-roll-w").value) || 2000;
+    updateOriginHeaderSummary();
     renderScene();
     resetToBedView();
 }
@@ -378,15 +408,10 @@ export function onOriginParamChange() {
     data.allowRotation = (document.getElementById("sel-allow-rotation").value === "1");
     data.globalDefects = getDefectsFromUI();
 
-    const headerTag = document.getElementById("tag-cut-origin-header");
+    updateOriginHeaderSummary();
+
     const descTip = document.getElementById("lbl-origin-desc-tip");
     const val = data.cutOrigin;
-    if (headerTag) {
-        if (val === "right-bottom") { headerTag.innerText = "右下角基准"; headerTag.style.color = "#10b981"; }
-        else if (val === "right-top") { headerTag.innerText = "右上角基准"; headerTag.style.color = "#38bdf8"; }
-        else if (val === "left-bottom") { headerTag.innerText = "左下角基准"; headerTag.style.color = "#f59e0b"; }
-        else { headerTag.innerText = "左上角基准"; headerTag.style.color = "#a855f7"; }
-    }
     if (descTip) {
         if (val === "right-bottom") {
             descTip.innerText = "工业推荐：右下角原点 (靠右导轨量幅宽，落料口自下而上起切，刀路最优距离起刀)";
