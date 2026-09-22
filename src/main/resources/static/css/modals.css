@@ -199,14 +199,21 @@
         break-before: avoid !important;
     }
 
+    #ticket-grid-layout {
+        display: grid !important;
+        grid-template-columns: 200px 1fr !important;
+        gap: 12px !important;
+        align-items: stretch !important;
+    }
+
     #ticket-blueprint-container {
         width: 100% !important;
-        margin-bottom: 8px !important;
+        margin: 0 !important;
     }
 
     #ticket-blueprint-container svg {
         width: 100% !important;
-        max-height: 180px !important;
+        max-height: 440px !important;
         height: auto !important;
         display: block !important;
     }

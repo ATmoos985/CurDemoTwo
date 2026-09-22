@@ -432,7 +432,7 @@ function populateCutTicketData() {
 }
 
 /**
- * 动态生成 A4 工单专用的高保真排样搭切与起刀走刀工程矢量图 (SVG Blueprint)
+ * 动态生成 A4 工单专用的高保真排样搭切与起刀走刀工程矢量图 (立式视角，与屏幕视口 100% 绝对一致)
  */
 function generateCutTicketBlueprintSVG(data) {
     const rollW = data.rollW || 2000;
@@ -442,152 +442,170 @@ function generateCutTicketBlueprintSVG(data) {
     const cuts = data.cuts || [];
     const defects = data.globalDefects || [];
 
-    const padLeft = 45;
-    const padRight = 55;
+    // 立式坐标系：宽 rollW 为水平 X 轴，长 bedL 为垂直 Y 轴 (与机台屏幕红框视口 100% 绝对镜像同向)
+    const padLeft = 30;
+    const padRight = 30;
     const padTop = 22;
     const padBottom = 26;
-    const mapW = 940 - padLeft - padRight; // 840
-    const mapH = 240 - padTop - padBottom; // 192
+    const mapW = 160;
+    const mapH = 400;
+    const totalW = padLeft + mapW + padRight; // 220
+    const totalH = padTop + mapH + padBottom; // 448
 
-    const scaleX = mapW / bedL;
-    const scaleY = mapH / rollW;
+    const scaleX = mapW / rollW; // 幅宽缩放比例
+    const scaleY = mapH / bedL;  // 进料长度缩放比例
 
-    // 1. 母卷物理基底与米数标尺
+    // 1. 米数标尺 (垂直方向，从上往下标示 1m, 2m, 3m, 4m)
     let gridLines = '';
     const meterStep = bedL <= 2000 ? 500 : 1000;
     for (let m = meterStep; m < bedL; m += meterStep) {
-        const gx = padLeft + m * scaleX;
+        const gy = padTop + m * scaleY;
         gridLines += `
-            <line x1="${gx}" y1="${padTop}" x2="${gx}" y2="${padTop + mapH}" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3,3" />
-            <text x="${gx}" y="${padTop - 5}" text-anchor="middle" font-size="9" fill="#94a3b8">${(m/1000).toFixed(1)}m</text>
+            <line x1="${padLeft}" y1="${gy}" x2="${padLeft + mapW}" y2="${gy}" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3,3" />
+            <text x="${padLeft - 4}" y="${gy + 3}" text-anchor="end" font-size="8" fill="#94a3b8">${(m/1000).toFixed(1)}m</text>
         `;
     }
 
-    // 2. 料头区域 (浅绿完好 / 浅橙带疵)
+    // 2. 料头区域 (立式映射：r.x 为水平，r.y 为垂直，r.w 为水平宽度，r.l 为垂直长度)
     let remnantSVGs = remnants.map(r => {
-        const rx = padLeft + r.y * scaleX;
-        const ry = padTop + r.x * scaleY;
-        const rw = r.l * scaleX;
-        const rh = r.w * scaleY;
+        const rx = padLeft + r.x * scaleX;
+        const ry = padTop + r.y * scaleY;
+        const rw = r.w * scaleX;
+        const rh = r.l * scaleY;
         const isDef = r.hasDefect;
         const fill = isDef ? '#fef3c7' : '#dcfce7';
         const stroke = isDef ? '#d97706' : '#16a34a';
         const textColor = isDef ? '#b45309' : '#15803d';
         const label = `${isDef ? '[疵]' : '[料]'} ${r.id}`;
+
+        const isTall = rh > rw * 1.8;
+        let textContent = '';
+        if (isTall) {
+            textContent = `
+                <text x="${rx + rw/2}" y="${ry + rh/2 - 8}" text-anchor="middle" font-size="8" font-weight="bold" fill="${textColor}">${isDef ? '[疵]' : '[料]'}</text>
+                <text x="${rx + rw/2}" y="${ry + rh/2 + 3}" text-anchor="middle" font-size="7.5" font-weight="bold" fill="${textColor}">${r.id}</text>
+                <text x="${rx + rw/2}" y="${ry + rh/2 + 13}" text-anchor="middle" font-size="7" fill="${textColor}">${r.w}×${r.l}</text>
+            `;
+        } else {
+            textContent = `
+                <text x="${rx + rw/2}" y="${ry + rh/2 - 2}" text-anchor="middle" font-size="8" font-weight="bold" fill="${textColor}">${label}</text>
+                <text x="${rx + rw/2}" y="${ry + rh/2 + 8}" text-anchor="middle" font-size="7" fill="${textColor}">${r.w}×${r.l}</text>
+            `;
+        }
+
         return `
             <g>
                 <rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" fill="${fill}" stroke="${stroke}" stroke-width="1.2" stroke-dasharray="${isDef ? '4,2' : 'none'}" rx="2" />
-                <text x="${rx + rw/2}" y="${ry + rh/2 - 2}" text-anchor="middle" font-size="9.5" font-weight="bold" fill="${textColor}">${label}</text>
-                <text x="${rx + rw/2}" y="${ry + rh/2 + 10}" text-anchor="middle" font-size="8" fill="${textColor}">${r.w}×${r.l}</text>
+                ${textContent}
             </g>
         `;
     }).join('');
 
-    // 3. 成品裁片 (浅蓝高对比度)
+    // 3. 成品裁片 (立式映射：p.x 为水平，p.y 为垂直，p.w 为水平宽度，p.l 为垂直长度)
     let pieceSVGs = pieces.map((p, idx) => {
-        const px = padLeft + p.y * scaleX;
-        const py = padTop + p.x * scaleY;
-        const pw = p.l * scaleX;
-        const ph = p.w * scaleY;
+        const px = padLeft + p.x * scaleX;
+        const py = padTop + p.y * scaleY;
+        const pw = p.w * scaleX;
+        const ph = p.l * scaleY;
         return `
             <g>
-                <rect x="${px}" y="${py}" width="${pw}" height="${ph}" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.5" rx="2" />
-                <text x="${px + pw/2}" y="${py + ph/2 - 3}" text-anchor="middle" font-size="10" font-weight="bold" fill="#0369a1">${p.name || '裁片'} #${idx + 1}</text>
-                <text x="${px + pw/2}" y="${py + ph/2 + 9}" text-anchor="middle" font-size="8.5" fill="#0284c7">${p.w}×${p.l}mm</text>
+                <rect x="${px}" y="${py}" width="${pw}" height="${ph}" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.2" rx="2" />
+                <text x="${px + pw/2}" y="${py + ph/2 - 3}" text-anchor="middle" font-size="8" font-weight="bold" fill="#0369a1">${p.name || '裁片'} #${idx + 1}</text>
+                <text x="${px + pw/2}" y="${py + ph/2 + 7}" text-anchor="middle" font-size="7" fill="#0284c7">${p.w}×${p.l}mm</text>
             </g>
         `;
     }).join('');
 
     // 4. 疵点标记
     let defectSVGs = defects.map((d, idx) => {
-        const dx = padLeft + d.y * scaleX;
-        const dy = padTop + d.x * scaleY;
+        const dx = padLeft + d.x * scaleX;
+        const dy = padTop + d.y * scaleY;
         return `
             <g>
-                <circle cx="${dx}" cy="${dy}" r="6" fill="#ef4444" opacity="0.85" />
-                <text x="${dx}" y="${dy + 3}" text-anchor="middle" font-size="8" font-weight="bold" fill="#ffffff">!</text>
-                <text x="${dx}" y="${dy - 8}" text-anchor="middle" font-size="8" font-weight="bold" fill="#ef4444">DEF-${idx+1}</text>
+                <circle cx="${dx}" cy="${dy}" r="5" fill="#ef4444" opacity="0.9" />
+                <text x="${dx}" y="${dy + 3}" text-anchor="middle" font-size="7" font-weight="bold" fill="#ffffff">!</text>
+                <text x="${dx + 12}" y="${dy + 3}" font-size="7.5" font-weight="bold" fill="#ef4444">DEF-${idx+1}</text>
             </g>
         `;
     }).join('');
 
-    // 5. 走刀线段与工步标注
+    // 5. 走刀线段与工步标注 (立式映射：横切为水平红虚线，纵切为垂直红虚线)
     let cutSVGs = cuts.map((c, idx) => {
         const stepNum = c.step || (idx + 1);
         if (c.type === "横切") {
-            const cx = padLeft + c.pos * scaleX;
-            const cy1 = padTop + c.start * scaleY;
-            const cy2 = padTop + c.end * scaleY;
-            return `
-                <g>
-                    <line x1="${cx}" y1="${cy1}" x2="${cx}" y2="${cy2}" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="5,2" />
-                    <circle cx="${cx}" cy="${(cy1 + cy2)/2}" r="6" fill="#ffffff" stroke="#dc2626" stroke-width="1" />
-                    <text x="${cx}" y="${(cy1 + cy2)/2 + 3}" text-anchor="middle" font-size="8" font-weight="bold" fill="#dc2626">${stepNum}</text>
-                </g>
-            `;
-        } else {
             const cy = padTop + c.pos * scaleY;
             const cx1 = padLeft + c.start * scaleX;
             const cx2 = padLeft + c.end * scaleX;
             return `
                 <g>
-                    <line x1="${cx1}" y1="${cy}" x2="${cx2}" y2="${cy}" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="5,2" />
-                    <circle cx="${(cx1 + cx2)/2}" cy="${cy}" r="6" fill="#ffffff" stroke="#dc2626" stroke-width="1" />
-                    <text x="${(cx1 + cx2)/2}" y="${cy + 3}" text-anchor="middle" font-size="8" font-weight="bold" fill="#dc2626">${stepNum}</text>
+                    <line x1="${cx1}" y1="${cy}" x2="${cx2}" y2="${cy}" stroke="#dc2626" stroke-width="1.2" stroke-dasharray="4,2" />
+                    <circle cx="${(cx1 + cx2)/2}" cy="${cy}" r="4.5" fill="#ffffff" stroke="#dc2626" stroke-width="1" />
+                    <text x="${(cx1 + cx2)/2}" y="${cy + 2.5}" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#dc2626">${stepNum}</text>
+                </g>
+            `;
+        } else {
+            const cx = padLeft + c.pos * scaleX;
+            const cy1 = padTop + c.start * scaleY;
+            const cy2 = padTop + c.end * scaleY;
+            return `
+                <g>
+                    <line x1="${cx}" y1="${cy1}" x2="${cx}" y2="${cy2}" stroke="#dc2626" stroke-width="1.2" stroke-dasharray="4,2" />
+                    <circle cx="${cx}" cy="${(cy1 + cy2)/2}" r="4.5" fill="#ffffff" stroke="#dc2626" stroke-width="1" />
+                    <text x="${cx}" y="${(cy1 + cy2)/2 + 2.5}" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#dc2626">${stepNum}</text>
                 </g>
             `;
         }
     }).join('');
 
-    // 6. 右下角起刀原点 (0,0) 标注
+    // 6. 右下角起刀原点 (0,0) 标注 (绝对位于图纸物理右下角)
     const originX = padLeft + mapW;
     const originY = padTop + mapH;
     const originSVG = `
         <g>
             <!-- 原点同心圆与准星 -->
-            <circle cx="${originX}" cy="${originY}" r="7" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5" />
-            <circle cx="${originX}" cy="${originY}" r="3" fill="#dc2626" />
-            <line x1="${originX - 10}" y1="${originY}" x2="${originX + 10}" y2="${originY}" stroke="#dc2626" stroke-width="1" />
-            <line x1="${originX}" y1="${originY - 10}" x2="${originX}" y2="${originY + 10}" stroke="#dc2626" stroke-width="1" />
+            <circle cx="${originX}" cy="${originY}" r="5.5" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5" />
+            <circle cx="${originX}" cy="${originY}" r="2" fill="#dc2626" />
+            <line x1="${originX - 7}" y1="${originY}" x2="${originX + 7}" y2="${originY}" stroke="#dc2626" stroke-width="1" />
+            <line x1="${originX}" y1="${originY - 7}" x2="${originX}" y2="${originY + 7}" stroke="#dc2626" stroke-width="1" />
             
             <!-- 原点文字 -->
-            <text x="${originX}" y="${originY + 16}" text-anchor="end" font-size="10" font-weight="bold" fill="#dc2626">★ 起刀基准原点 (0,0)</text>
+            <text x="${originX}" y="${originY + 14}" text-anchor="end" font-size="8" font-weight="bold" fill="#dc2626">★ 起刀基准原点 (0,0)</text>
 
-            <!-- 坐标轴指示箭头 -->
-            <!-- 向上 X+ -->
-            <line x1="${originX + 14}" y1="${originY}" x2="${originX + 14}" y2="${originY - 26}" stroke="#0284c7" stroke-width="1.5" marker-end="url(#arrow-x)" />
-            <text x="${originX + 18}" y="${originY - 12}" font-size="8" font-weight="bold" fill="#0284c7">X+ 导轨</text>
+            <!-- 坐标指示 -->
+            <!-- 向上 Y 进料 -->
+            <line x1="${originX + 6}" y1="${originY}" x2="${originX + 6}" y2="${originY - 18}" stroke="#0284c7" stroke-width="1.2" marker-end="url(#arrow-y)" />
+            <text x="${originX + 8}" y="${originY - 8}" font-size="6.5" font-weight="bold" fill="#0284c7">Y进料</text>
 
-            <!-- 向左 Y+ -->
-            <line x1="${originX}" y1="${originY + 8}" x2="${originX - 30}" y2="${originY + 8}" stroke="#0284c7" stroke-width="1.5" marker-end="url(#arrow-y)" />
-            <text x="${originX - 15}" y="${originY + 6}" text-anchor="middle" font-size="8" font-weight="bold" fill="#0284c7">Y+ 进料</text>
+            <!-- 向左 X 导轨 -->
+            <line x1="${originX}" y1="${originY + 5}" x2="${originX - 18}" y2="${originY + 5}" stroke="#0284c7" stroke-width="1.2" marker-end="url(#arrow-x)" />
+            <text x="${originX - 9}" y="${originY + 4}" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#0284c7">X幅宽</text>
         </g>
     `;
 
     return `
-        <svg viewBox="0 0 940 240" style="width: 100%; height: auto; display: block; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+        <svg viewBox="0 0 ${totalW} ${totalH}" style="width: 100%; max-height: 420px; height: auto; display: block; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
             <defs>
-                <marker id="arrow-x" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
-                    <path d="M0,0 L6,3 L0,6 Z" fill="#0284c7" />
+                <marker id="arrow-x" markerWidth="4" markerHeight="4" refX="2" refY="2" orient="auto">
+                    <path d="M0,0 L4,2 L0,4 Z" fill="#0284c7" />
                 </marker>
-                <marker id="arrow-y" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
-                    <path d="M0,0 L6,3 L0,6 Z" fill="#0284c7" />
+                <marker id="arrow-y" markerWidth="4" markerHeight="4" refX="2" refY="2" orient="auto">
+                    <path d="M0,0 L4,2 L0,4 Z" fill="#0284c7" />
                 </marker>
             </defs>
 
             <!-- 顶端/底端/左右工程标注 -->
-            <text x="${padLeft + mapW/2}" y="${padTop - 8}" text-anchor="middle" font-size="9" font-weight="bold" fill="#64748b">左导轨 (Left Rail · X: 0mm)</text>
-            <text x="${padLeft + mapW/2}" y="${padTop + mapH + 16}" text-anchor="middle" font-size="9" font-weight="bold" fill="#64748b">右导轨 (Right Rail · X: ${rollW}mm)</text>
-            <text x="${padLeft - 8}" y="${padTop + mapH/2}" text-anchor="end" font-size="9" font-weight="bold" fill="#64748b" transform="rotate(-90, ${padLeft - 8}, ${padTop + mapH/2})">进料接刀端 (Y: 0)</text>
-            <text x="${padLeft + mapW + 28}" y="${padTop + mapH/2}" text-anchor="middle" font-size="9" font-weight="bold" fill="#64748b" transform="rotate(90, ${padLeft + mapW + 28}, ${padTop + mapH/2})">落料输出端 (${(bedL/1000).toFixed(1)}m)</text>
+            <text x="${padLeft + mapW/2}" y="${padTop - 7}" text-anchor="middle" font-size="8" font-weight="bold" fill="#475569">进料接刀端 (Y: 0)</text>
+            <text x="${padLeft + mapW/2}" y="${padTop + mapH + 14}" text-anchor="middle" font-size="8" font-weight="bold" fill="#475569">落料输出端 (${(bedL/1000).toFixed(1)}m)</text>
+            <text x="${padLeft - 6}" y="${padTop + mapH/2}" text-anchor="end" font-size="8" font-weight="bold" fill="#64748b" transform="rotate(-90, ${padLeft - 6}, ${padTop + mapH/2})">左导轨 (X: 0)</text>
+            <text x="${padLeft + mapW + 16}" y="${padTop + mapH/2}" text-anchor="middle" font-size="8" font-weight="bold" fill="#64748b" transform="rotate(90, ${padLeft + mapW + 16}, ${padTop + mapH/2})">右导轨 (X: ${rollW}mm)</text>
 
-            <!-- 物理台面轮廓 -->
-            <rect x="${padLeft}" y="${padTop}" width="${mapW}" height="${mapH}" fill="#f8fafc" stroke="#475569" stroke-width="1.5" rx="3" />
+            <!-- 物理台面红框轮廓 (与机台屏幕红框 100% 一致) -->
+            <rect x="${padLeft}" y="${padTop}" width="${mapW}" height="${mapH}" fill="#f8fafc" stroke="#dc2626" stroke-width="1.5" rx="2" />
             
             <!-- 米数标尺网格 -->
             ${gridLines}
 
-            <!-- 料头 -->
+            <!-- 料头 (左侧边料、避疵料头、卷尾料头) -->
             ${remnantSVGs}
 
             <!-- 裁片 -->
@@ -611,7 +629,7 @@ function createCutTicketModalDOM() {
     div.className = "settings-modal-overlay";
     div.style.display = "none";
     div.innerHTML = `
-        <div class="settings-modal-dialog" style="width: 860px; max-width: 96vw; height: 680px; display: flex; flex-direction: column;">
+        <div class="settings-modal-dialog" style="width: 890px; max-width: 96vw; height: 720px; display: flex; flex-direction: column;">
             <div class="settings-modal-header">
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <span style="font-weight: 700; font-size: 15px; color: var(--accent-amber);">车间现场裁切任务单与裁片贴标卡 (Cut Ticket)</span>
@@ -621,76 +639,86 @@ function createCutTicketModalDOM() {
             </div>
             
             <div style="flex: 1; overflow-y: auto; padding: 16px;">
-                <div id="printable-cut-ticket-area" style="background: #ffffff; color: #0f172a; padding: 20px 24px; border: 1px solid #cbd5e1; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+                <div id="printable-cut-ticket-area" style="background: #ffffff; color: #0f172a; padding: 18px 20px; border: 1px solid #cbd5e1; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
                     <!-- 抬头与条码 -->
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 12px;">
                         <div>
-                            <h2 style="margin: 0; font-size: 19px; font-weight: 800; letter-spacing: 0.5px; color: #0f172a;">数控裁切车间工艺任务单 (CUT TICKET)</h2>
-                            <div style="font-size: 11.5px; color: #475569; margin-top: 3px;">柔性材料自动化排料与直刀/断刀工艺生产指示</div>
+                            <h2 style="margin: 0; font-size: 18px; font-weight: 800; letter-spacing: 0.5px; color: #0f172a;">数控裁切车间工艺任务单 (CUT TICKET)</h2>
+                            <div style="font-size: 11px; color: #475569; margin-top: 2px;">柔性材料自动化排料与直刀/断刀工艺生产指示</div>
                         </div>
                         <div style="text-align: right;">
-                            <div style="font-family: monospace; font-size: 17px; font-weight: 700; letter-spacing: 2px; color: #0284c7;" id="ticket-no-val">WO-20260920-8842</div>
-                            <div style="font-size: 11px; color: #64748b; margin-top: 2px;">开单日期: <span id="ticket-date-val">2026-09-21</span></div>
+                            <div style="font-family: monospace; font-size: 16px; font-weight: 700; letter-spacing: 1.5px; color: #0284c7;" id="ticket-no-val">WO-20260920-8842</div>
+                            <div style="font-size: 10.5px; color: #64748b; margin-top: 1px;">开单日期: <span id="ticket-date-val">2026-09-22</span></div>
                         </div>
                     </div>
 
-                    <!-- 工艺基本信息栏 -->
-                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 8px 12px; border-radius: 4px; font-size: 11.5px; margin-bottom: 12px;">
-                        <div>母卷批号: <b id="ticket-roll-val">ROLL-2026-0920 (幅宽: 2000mm)</b></div>
-                        <div>机台工位: <b id="ticket-station-val">CUT-STATION-01 | 起刀: 右下角基准 (原点)</b></div>
-                        <div>操作机型: <b>数控直刀裁床 / 激光裁床</b></div>
-                        <div>工艺指标: <b id="ticket-summary-metrics" style="color: #0284c7;">下刀: 9 刀 | 裁片: 6 件 | 料头: 4 块</b></div>
-                    </div>
-
-                    <!-- 一、排样搭切与起刀走刀示意图 -->
-                    <div style="margin-bottom: 12px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                            <h3 style="font-size: 12.5px; font-weight: 700; margin: 0; color: #0f172a; border-left: 4px solid #0284c7; padding-left: 8px;">一、排样搭切与起刀走刀工程图 (Cutting Layout & Toolpath Blueprint)</h3>
-                            <span style="font-size: 10.5px; color: #64748b;">基准: 右下角原点 (0,0) · 矢量等比全景缩略</span>
+                    <!-- 核心区域：左右双栏布局 (左: 与机台屏幕 100% 视觉一致的立式排样图; 右: 工艺信息与双清单) -->
+                    <div id="ticket-grid-layout" style="display: grid; grid-template-columns: 210px 1fr; gap: 14px; align-items: stretch; margin-bottom: 12px;">
+                        <!-- 左栏：立式机台工位搭切蓝图 -->
+                        <div style="border: 1px solid #cbd5e1; border-radius: 4px; background: #ffffff; padding: 8px 6px; display: flex; flex-direction: column;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin-bottom: 6px;">
+                                <span style="font-size: 11.5px; font-weight: 700; color: #0f172a; border-left: 3px solid #0284c7; padding-left: 6px;">机台工位排样图 (立式)</span>
+                                <span style="font-size: 9.5px; color: #64748b;">与视口同向</span>
+                            </div>
+                            <div id="ticket-blueprint-container" style="flex: 1; display: flex; align-items: center; justify-content: center; min-height: 380px;">
+                                <!-- 动态注入立式矢量排样图 -->
+                            </div>
                         </div>
-                        <div id="ticket-blueprint-container" style="width: 100%; border: 1px solid #cbd5e1; border-radius: 4px; background: #ffffff; padding: 2px; box-sizing: border-box;">
-                            <!-- 动态注入的矢量排样图 -->
+
+                        <!-- 右栏：工艺信息 + 裁片清单 + 料头清单 -->
+                        <div style="display: flex; flex-direction: column; justify-content: space-between;">
+                            <!-- 工艺基本信息栏 -->
+                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 6px 10px; border-radius: 4px; font-size: 11px; margin-bottom: 10px;">
+                                <div>母卷批号: <b id="ticket-roll-val">ROLL-2026-0920 (幅宽: 2000mm)</b></div>
+                                <div>机台工位: <b id="ticket-station-val">CUT-STATION-01 | 起刀: 右下角基准 (原点)</b></div>
+                                <div>操作机型: <b>数控直刀裁床 / 激光裁床</b></div>
+                                <div>工艺指标: <b id="ticket-summary-metrics" style="color: #0284c7;">下刀: 9 刀 | 裁片: 6 件 | 料头: 4 块</b></div>
+                            </div>
+
+                            <!-- 一、合格成品裁片拣选清单 -->
+                            <div style="margin-bottom: 8px;">
+                                <h3 style="font-size: 11.5px; font-weight: 700; margin: 0 0 4px; color: #0f172a; border-left: 3px solid #10b981; padding-left: 6px;">一、合格成品裁片拣选清单 (Finished Pieces Checklist)</h3>
+                                <table style="width: 100%; border-collapse: collapse; font-size: 10.5px;">
+                                    <thead>
+                                        <tr style="background: #f1f5f9; border-bottom: 1px solid #cbd5e1; text-align: left;">
+                                            <th style="padding: 4px 5px; width: 28px; text-align: center;">#</th>
+                                            <th style="padding: 4px 5px;">裁片名称</th>
+                                            <th style="padding: 4px 5px;">规格尺寸 (宽×长)</th>
+                                            <th style="padding: 4px 5px;">净面积</th>
+                                            <th style="padding: 4px 5px;">工艺要求</th>
+                                            <th style="padding: 4px 5px; text-align: center; width: 85px;">现场核验</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="ticket-pieces-tbody">
+                                        <!-- 动态填充 -->
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- 二、回收料头贴标清单 -->
+                            <div>
+                                <h3 style="font-size: 11.5px; font-weight: 700; margin: 0 0 4px; color: #0f172a; border-left: 3px solid #f59e0b; padding-left: 6px;">二、回收料头入库贴标清单 (Remnant Inventory)</h3>
+                                <table style="width: 100%; border-collapse: collapse; font-size: 10.5px;">
+                                    <thead>
+                                        <tr style="background: #f1f5f9; border-bottom: 1px solid #cbd5e1; text-align: left;">
+                                            <th style="padding: 4px 5px; width: 28px; text-align: center;">#</th>
+                                            <th style="padding: 4px 5px;">料头编号</th>
+                                            <th style="padding: 4px 5px;">规格尺寸 (宽×长)</th>
+                                            <th style="padding: 4px 5px;">面积</th>
+                                            <th style="padding: 4px 5px;">质量等级</th>
+                                            <th style="padding: 4px 5px; text-align: center; width: 85px;">入库签名</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="ticket-remnants-tbody">
+                                        <!-- 动态填充 -->
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
-
-                    <!-- 二、裁片加工与拣选清单 -->
-                    <h3 style="font-size: 12.5px; font-weight: 700; margin: 10px 0 5px; color: #0f172a; border-left: 4px solid #10b981; padding-left: 8px;">二、合格成品裁片拣选清单 (Finished Pieces Checklist)</h3>
-                    <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 12px;">
-                        <thead>
-                            <tr style="background: #f1f5f9; border-bottom: 1px solid #cbd5e1; text-align: left;">
-                                <th style="padding: 5px; width: 32px; text-align: center;">#</th>
-                                <th style="padding: 5px;">裁片名称</th>
-                                <th style="padding: 5px;">规格尺寸 (宽×长)</th>
-                                <th style="padding: 5px;">净面积</th>
-                                <th style="padding: 5px;">工艺要求</th>
-                                <th style="padding: 5px; text-align: center; width: 100px;">现场核验</th>
-                            </tr>
-                        </thead>
-                        <tbody id="ticket-pieces-tbody">
-                            <!-- 动态填充 -->
-                        </tbody>
-                    </table>
-
-                    <!-- 三、回收料头贴标清单 -->
-                    <h3 style="font-size: 12.5px; font-weight: 700; margin: 10px 0 5px; color: #0f172a; border-left: 4px solid #f59e0b; padding-left: 8px;">三、回收料头入库贴标清单 (Remnant Inventory)</h3>
-                    <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 14px;">
-                        <thead>
-                            <tr style="background: #f1f5f9; border-bottom: 1px solid #cbd5e1; text-align: left;">
-                                <th style="padding: 5px; width: 32px; text-align: center;">#</th>
-                                <th style="padding: 5px;">料头编号</th>
-                                <th style="padding: 5px;">规格尺寸 (宽×长)</th>
-                                <th style="padding: 5px;">面积</th>
-                                <th style="padding: 5px;">质量等级</th>
-                                <th style="padding: 5px; text-align: center; width: 100px;">入库签名</th>
-                            </tr>
-                        </thead>
-                        <tbody id="ticket-remnants-tbody">
-                            <!-- 动态填充 -->
-                        </tbody>
-                    </table>
 
                     <!-- 现场签字栏 -->
-                    <div style="display: flex; justify-content: space-between; border-top: 1px dashed #cbd5e1; padding-top: 10px; font-size: 11.5px; color: #334155;">
+                    <div style="display: flex; justify-content: space-between; border-top: 1px dashed #cbd5e1; padding-top: 8px; font-size: 11px; color: #334155;">
                         <div>主裁操作工签名: ____________________</div>
                         <div>品检质检员签名: ____________________</div>
                         <div>仓库料头接收人: ____________________</div>
@@ -763,14 +791,20 @@ export function printCutTicketDocument() {
                     border: none !important;
                     box-shadow: none !important;
                 }
+                #ticket-grid-layout {
+                    display: grid !important;
+                    grid-template-columns: 200px 1fr !important;
+                    gap: 12px !important;
+                    align-items: stretch !important;
+                }
                 #ticket-blueprint-container {
                     width: 100% !important;
-                    margin-bottom: 8px !important;
+                    margin: 0 !important;
                 }
                 svg {
                     width: 100% !important;
                     height: auto !important;
-                    max-height: 180px !important;
+                    max-height: 440px !important;
                     display: block !important;
                 }
                 table {
