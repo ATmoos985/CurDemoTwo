@@ -3,8 +3,18 @@ package com.example.cutdemotwo.service;
 import com.example.cutdemotwo.model.Defect;
 import com.example.cutdemotwo.model.MotherRollInfo;
 import com.example.cutdemotwo.model.RemnantStock;
+import com.example.cutdemotwo.model.SolveRequest;
+import com.example.cutdemotwo.model.SolveResponse;
+import com.example.cutdemotwo.model.CutReport;
+import com.example.cutdemotwo.model.RemnantPiece;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.ObjectMapper;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -23,10 +33,182 @@ public class RemnantService {
     private final Map<String, MotherRollInfo> motherRolls = new LinkedHashMap<>();
     private final AtomicInteger remnantSeq = new AtomicInteger(10);
     private final AtomicInteger defectSeq = new AtomicInteger(20);
+    private final Map<String, Map<String, Object>> receipts = new LinkedHashMap<>();
+    private final ObjectMapper json = new ObjectMapper();
+    private final Path stateFile;
 
-    public RemnantService() {
+    public RemnantService(@Value("${cutdemo.state.path:data/cutdemo-state.json}") String statePath) {
+        stateFile = Path.of(statePath);
+        if (Files.exists(stateFile)) {
+            try {
+                Snapshot snapshot = json.readValue(stateFile.toFile(), Snapshot.class);
+                for (MotherRollInfo roll : snapshot.rolls()) motherRolls.put(roll.getRollId(), roll);
+                for (RemnantStock item : snapshot.remnants()) remnantPool.put(item.getId(), item);
+                receipts.putAll(snapshot.receipts());
+                remnantSeq.set(snapshot.remnantSeq());
+                defectSeq.set(snapshot.defectSeq());
+                return;
+            } catch (Exception e) {
+                throw new IllegalStateException("库存文件读取失败，请检查后恢复: " + stateFile, e);
+            }
+        }
         initMotherRolls();
         initSampleRemnants();
+    }
+
+    private record Snapshot(List<MotherRollInfo> rolls, List<RemnantStock> remnants,
+                            Map<String, Map<String, Object>> receipts, int remnantSeq, int defectSeq) {}
+
+    private void save() {
+        try {
+            Path parent = stateFile.toAbsolutePath().getParent();
+            Files.createDirectories(parent);
+            Path temp = Files.createTempFile(parent, "cutdemo-", ".json");
+            try {
+                json.writeValue(temp.toFile(), new Snapshot(new ArrayList<>(motherRolls.values()),
+                        new ArrayList<>(remnantPool.values()), receipts, remnantSeq.get(), defectSeq.get()));
+                try {
+                    Files.move(temp, stateFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+                    Files.move(temp, stateFile, StandardCopyOption.REPLACE_EXISTING);
+                }
+            } finally {
+                Files.deleteIfExists(temp);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("库存保存失败: " + stateFile, e);
+        }
+    }
+
+    public synchronized Map<String, Object> getReceipt(String planId) { return receipts.get(planId); }
+
+    public synchronized Map<String, Object> confirm(SolveRequest request, SolveResponse plan, CutReport report) {
+        Map<String, Object> old = receipts.get(report.planId());
+        if (old != null) return old;
+        boolean remnantFeed = "remnant".equalsIgnoreCase(request.getFeedPortType());
+        MotherRollInfo roll = motherRolls.get(request.getRollId());
+        RemnantStock parent = remnantFeed ? remnantPool.get(request.getSourceRemnantId()) : null;
+        if (remnantFeed && (parent == null || !"AVAILABLE".equals(parent.getStatus()))) {
+            throw new IllegalArgumentException("原料头已不可用，请重新装载");
+        }
+        if (!remnantFeed && roll == null) throw new IllegalArgumentException("母卷不存在，请先从母卷档案装载");
+        if (remnantFeed ? (Math.abs(parent.getWidth() - request.getRollW()) > 0.001 ||
+                Math.abs(parent.getLength() - request.getRollL()) > 0.001) :
+                Math.abs(roll.getWidth() - request.getRollW()) > 0.001) {
+            throw new IllegalArgumentException("母料尺寸与库存档案不一致，请重新装载");
+        }
+        if (report.finishedPieceCount() != plan.getPieces().size() || report.finishedPieceCount() <= 0) {
+            throw new IllegalArgumentException("本版请完成方案中的全部裁片后再确认实切");
+        }
+        double len = report.actualCutLen();
+        if (remnantFeed ? len != 0 : (!Double.isFinite(len) || len <= 0 || len > request.getRollL() || len > roll.getCurrentRemainingLength())) {
+            throw new IllegalArgumentException("实切长度无效或超过母卷剩余长度");
+        }
+        if (!remnantFeed) {
+            double start = request.getWindowStartY();
+            if (!Double.isFinite(start) || start < 0 || start + len > roll.getTotalLength()) {
+                throw new IllegalArgumentException("红框实切区间超出母卷范围");
+            }
+            for (Map<String, Object> receipt : receipts.values()) {
+                if (!request.getRollId().equals(receipt.get("rollId")) || !"roll".equals(receipt.get("feedPortType"))) continue;
+                double oldStart = ((Number) receipt.get("windowStartY")).doubleValue();
+                double oldEnd = oldStart + ((Number) receipt.get("actualCutLen")).doubleValue();
+                if (start < oldEnd && start + len > oldStart) throw new IllegalArgumentException("红框区域已实切确认，请移动到未切区间");
+            }
+        }
+        double maxPieceY = plan.getPieces().stream().mapToDouble(p -> p.getY() + p.getL()).max().orElse(0);
+        if (!remnantFeed && len + 0.001 < maxPieceY) throw new IllegalArgumentException("实切长度短于已完成裁片的末端");
+        List<RemnantPiece> actual = report.actualRemnants() == null ? List.of() : report.actualRemnants();
+        double remArea = 0;
+        Set<String> seen = new HashSet<>();
+        for (RemnantPiece item : actual) {
+            if (item == null || item.getId() == null || !seen.add(item.getId())) throw new IllegalArgumentException("料头编号重复或为空");
+            RemnantPiece proposed = plan.getRemnants().stream().filter(p -> p.getId().equals(item.getId())).findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("料头不属于当前排料方案: " + item.getId()));
+            if (!Double.isFinite(item.getW()) || !Double.isFinite(item.getL()) || item.getW() <= 0 || item.getL() <= 0 ||
+                    item.getW() > proposed.getW() + 0.001 || item.getL() > proposed.getL() + 0.001 ||
+                    (proposed.isHasDefect() && !item.isHasDefect()) ||
+                    (!remnantFeed && proposed.getY() + item.getL() > len + 0.001)) {
+                throw new IllegalArgumentException("实测料头超出排料范围: " + item.getId());
+            }
+            remArea += item.getW() * item.getL() / 1_000_000.0;
+        }
+        double sourceArea = (remnantFeed ? parent.getArea() : request.getRollW() * len / 1_000_000.0);
+        if (plan.getPieceArea() + remArea > sourceArea + 0.001) throw new IllegalArgumentException("裁片与料头面积超过实切用料面积");
+
+        int previousSeq = remnantSeq.get();
+        double previousRemaining = roll == null ? 0 : roll.getCurrentRemainingLength();
+        double previousUsed = roll == null ? 0 : roll.getUsedLength();
+        String previousParentStatus = parent == null ? null : parent.getStatus();
+        String previousParentConsumedAt = parent == null ? null : parent.getConsumedAt();
+        if (remnantFeed) {
+            parent.setStatus("CONSUMED");
+            parent.setConsumedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+        } else {
+            roll.setCurrentRemainingLength(roll.getCurrentRemainingLength() - len);
+            roll.setUsedLength(roll.getUsedLength() + len);
+        }
+        List<RemnantStock> children = new ArrayList<>();
+        for (RemnantPiece item : actual) {
+            if (item.getW() < 200 || item.getL() < 300) continue;
+            RemnantPiece proposed = plan.getRemnants().stream().filter(p -> p.getId().equals(item.getId())).findFirst().orElseThrow();
+            List<Defect> childDefects = new ArrayList<>();
+            for (Defect defect : request.getDefects()) {
+                double left = Math.max(proposed.getX(), defect.getSafeX());
+                double top = Math.max(proposed.getY(), defect.getSafeY());
+                double right = Math.min(proposed.getX() + item.getW(), defect.getSafeX() + defect.getSafeW());
+                double bottom = Math.min(proposed.getY() + item.getL(), defect.getSafeY() + defect.getSafeH());
+                if (right > left && bottom > top) {
+                    childDefects.add(new Defect(defect.getId(), left - proposed.getX(), top - proposed.getY(),
+                            right - left, bottom - top, 0, defect.getDefectType(), defect.getTypeName(),
+                            defect.getSeverity(), defect.getPoints(), defect.getDetectionSource(),
+                            defect.getAvoidanceStrategy(), defect.getDescription()));
+                }
+            }
+            String id = "REM-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMM")) + "-" +
+                    String.format("%03d", remnantSeq.incrementAndGet());
+            RemnantStock child = new RemnantStock(id, item.getW(), item.getL(),
+                    report.location() == null || report.location().isBlank() ? "现场料头架" : report.location(),
+                    request.getRollModel(), item.isHasDefect() && childDefects.isEmpty() ? "QUARANTINED" : "AVAILABLE",
+                    request.getRollId(), item.isHasDefect() || !childDefects.isEmpty(), item.getStatus());
+            child.setDefects(childDefects);
+            child.setParentRemnantId(remnantFeed ? parent.getId() : null);
+            child.setGeneration(remnantFeed ? parent.getGeneration() + 1 : 1);
+            child.setCreatedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+            remnantPool.put(id, child);
+            children.add(child);
+        }
+        Map<String, Object> receipt = new LinkedHashMap<>();
+        receipt.put("planId", report.planId());
+        receipt.put("rollId", request.getRollId());
+        receipt.put("windowStartY", request.getWindowStartY());
+        receipt.put("feedPortType", remnantFeed ? "remnant" : "roll");
+        receipt.put("actualCutLen", len);
+        receipt.put("remainingLength", roll == null ? null : roll.getCurrentRemainingLength());
+        receipt.put("finishedPieceCount", report.finishedPieceCount());
+        receipt.put("pieceArea", plan.getPieceArea());
+        receipt.put("remArea", remArea);
+        receipt.put("utilization", sourceArea == 0 ? 0 : plan.getPieceArea() / sourceArea * 100);
+        receipt.put("derivedRemnants", children);
+        receipt.put("confirmedAt", LocalDateTime.now().toString());
+        receipts.put(report.planId(), receipt);
+        try {
+            save();
+        } catch (RuntimeException error) {
+            receipts.remove(report.planId());
+            for (RemnantStock child : children) remnantPool.remove(child.getId());
+            remnantSeq.set(previousSeq);
+            if (roll != null) {
+                roll.setCurrentRemainingLength(previousRemaining);
+                roll.setUsedLength(previousUsed);
+            }
+            if (parent != null) {
+                parent.setStatus(previousParentStatus);
+                parent.setConsumedAt(previousParentConsumedAt);
+            }
+            throw error;
+        }
+        return receipt;
     }
 
     private void initMotherRolls() {
@@ -84,6 +266,13 @@ public class RemnantService {
         defs3.add(new Defect(12, 1000, 12000, 250, 180, 20, "WEFT_DEFECT", "氨纶断丝", 3, 3, "AI_VISION_SCANNER", "MUST_AVOID", "弹力氨纶丝断"));
         roll3.setDefects(defs3);
         motherRolls.put(roll3.getRollId(), roll3);
+
+        MotherRollInfo curtain2d = new MotherRollInfo("ROLL-DEMO-2D", "窗帘样布-2D", "DEMO-2D",
+                "演示样布", "窗帘矩形样布", "米白色", 220, "演示面料", 2000, 30000, "演示库位");
+        curtain2d.setInspectionStatus("PASSED");
+        curtain2d.setDefects(new ArrayList<>(List.of(new Defect(21, 200, 1500, 150, 600, 50,
+                "HOLE", "带疵改宽区域", 4, 4, "MANUAL_INSPECT", "MUST_AVOID", "二维带疵点演示"))));
+        motherRolls.put(curtain2d.getRollId(), curtain2d);
     }
 
     private void initSampleRemnants() {
@@ -151,12 +340,20 @@ public class RemnantService {
         return info;
     }
 
-    public MotherRollInfo saveOrUpdateMotherRoll(MotherRollInfo roll) {
+    public synchronized MotherRollInfo saveOrUpdateMotherRoll(MotherRollInfo roll) {
         if (roll == null || roll.getRollId() == null || roll.getRollId().trim().isEmpty()) {
             throw new IllegalArgumentException("母卷编号 (rollId) 不能为空！");
         }
+        if (!Double.isFinite(roll.getWidth()) || !Double.isFinite(roll.getTotalLength()) ||
+                roll.getWidth() <= 0 || roll.getTotalLength() <= 0) {
+            throw new IllegalArgumentException("母卷幅宽和总长度必须大于零");
+        }
         MotherRollInfo existing = motherRolls.get(roll.getRollId());
         if (existing != null) {
+            if (Math.abs(existing.getWidth() - roll.getWidth()) > 0.001 ||
+                    Math.abs(existing.getTotalLength() - roll.getTotalLength()) > 0.001) {
+                throw new IllegalArgumentException("已登记母卷的物理尺寸不可直接覆盖");
+            }
             existing.setRollModel(roll.getRollModel());
             existing.setBatchNo(roll.getBatchNo());
             existing.setSupplier(roll.getSupplier());
@@ -167,12 +364,12 @@ public class RemnantService {
             existing.setWidth(roll.getWidth());
             existing.setRawWidth(roll.getRawWidth());
             existing.setTotalLength(roll.getTotalLength());
-            existing.setCurrentRemainingLength(roll.getCurrentRemainingLength());
             existing.setStorageLocation(roll.getStorageLocation());
             existing.setInspectionStatus(roll.getInspectionStatus());
             if (roll.getDefects() != null && !roll.getDefects().isEmpty()) {
                 existing.setDefects(roll.getDefects());
             }
+            save();
             return existing;
         } else {
             if (roll.getCreatedAt() == null) {
@@ -182,27 +379,37 @@ public class RemnantService {
                 roll.setCurrentRemainingLength(roll.getTotalLength());
             }
             motherRolls.put(roll.getRollId(), roll);
+            save();
             return roll;
         }
     }
 
-    public Defect addDefectToRoll(String rollId, Defect defect) {
+    public synchronized Defect addDefectToRoll(String rollId, Defect defect) {
         MotherRollInfo roll = getMotherRoll(rollId);
         if (roll == null) {
             throw new IllegalArgumentException("未找到母卷: " + rollId);
+        }
+        if (defect == null || !Double.isFinite(defect.getX()) || !Double.isFinite(defect.getY()) ||
+                !Double.isFinite(defect.getW()) || !Double.isFinite(defect.getH()) ||
+                defect.getX() < 0 || defect.getY() < 0 || defect.getW() <= 0 || defect.getH() <= 0 ||
+                defect.getX() + defect.getW() > roll.getWidth() ||
+                defect.getY() + defect.getH() > roll.getTotalLength()) {
+            throw new IllegalArgumentException("疵点坐标或尺寸超出母卷范围");
         }
         if (defect.getId() == 0) {
             defect.setId(defectSeq.incrementAndGet());
         }
         roll.getDefects().add(defect);
+        save();
         return defect;
     }
 
-    public boolean scrapRemnant(String id, String reason) {
+    public synchronized boolean scrapRemnant(String id, String reason) {
         RemnantStock item = remnantPool.get(id);
         if (item == null) return false;
         item.setStatus("SCRAPPED");
         item.setDefectDesc((item.getDefectDesc() != null ? item.getDefectDesc() + " | " : "") + "已报废: " + reason);
+        save();
         return true;
     }
 
@@ -249,6 +456,7 @@ public class RemnantService {
         List<RemnantStock> candidates = getRemnantsByRollId(rollId);
         List<RemnantStock> matched = new ArrayList<>();
         for (RemnantStock r : candidates) {
+            if (r.isHasDefect()) continue;
             boolean fitsNormal = (r.getWidth() >= pieceW && r.getLength() >= pieceL);
             boolean fitsRotated = allowRotation && (r.getWidth() >= pieceL && r.getLength() >= pieceW);
             if (fitsNormal || fitsRotated) {
@@ -259,11 +467,14 @@ public class RemnantService {
         return matched;
     }
 
-    public RemnantStock registerRemnant(RemnantStock item) {
+    public synchronized RemnantStock registerRemnant(RemnantStock item) {
+        if (item == null || !Double.isFinite(item.getWidth()) || !Double.isFinite(item.getLength()) ||
+                item.getWidth() <= 0 || item.getLength() <= 0) throw new IllegalArgumentException("料头宽长必须大于零");
         if (item.getId() == null || item.getId().trim().isEmpty()) {
             String dateStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMM"));
             item.setId("REM-" + dateStr + "-" + String.format("%03d", remnantSeq.incrementAndGet()));
         }
+        if (remnantPool.containsKey(item.getId())) throw new IllegalArgumentException("料头编号已存在: " + item.getId());
         if (item.getCreatedAt() == null) {
             item.setCreatedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
         }
@@ -271,14 +482,15 @@ public class RemnantService {
             item.setStatus("AVAILABLE");
         }
         remnantPool.put(item.getId(), item);
+        save();
         return item;
     }
 
-    public RemnantStock autoRegisterCutRemnant(String rollId, String parentRemnantId, double w, double l, boolean hasDefect, String desc) {
+    public synchronized RemnantStock autoRegisterCutRemnant(String rollId, String parentRemnantId, double w, double l, boolean hasDefect, String desc) {
         String dateStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMM"));
         String newId = "REM-" + dateStr + "-" + String.format("%03d", remnantSeq.incrementAndGet());
         if (parentRemnantId != null && !parentRemnantId.isEmpty()) {
-            newId = parentRemnantId + "-SUB" + String.format("%02d", (int)(Math.random() * 90 + 10));
+            newId = parentRemnantId + "-SUB" + remnantSeq.get();
         }
         RemnantStock rs = new RemnantStock(newId, w, l, "现场料头架", rollId, "AVAILABLE", rollId, hasDefect, desc);
         rs.setParentRemnantId(parentRemnantId);
@@ -286,25 +498,28 @@ public class RemnantService {
         rs.setQualityGrade(hasDefect ? "GRADE_DEFECT" : "GRADE_A");
         rs.setCreatedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
         remnantPool.put(rs.getId(), rs);
+        save();
         return rs;
     }
 
-    public boolean consumeRemnant(String id) {
+    public synchronized boolean consumeRemnant(String id) {
         if (id == null) return false;
         RemnantStock item = remnantPool.get(id);
         if (item != null) {
             item.setStatus("CONSUMED");
             item.setConsumedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+            save();
             return true;
         }
         return false;
     }
 
-    public boolean updateStatus(String id, String status) {
+    public synchronized boolean updateStatus(String id, String status) {
         if (id == null) return false;
         RemnantStock item = remnantPool.get(id);
         if (item != null) {
             item.setStatus(status);
+            save();
             return true;
         }
         return false;

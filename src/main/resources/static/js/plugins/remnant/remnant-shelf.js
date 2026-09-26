@@ -5,6 +5,8 @@ import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 import { renderScene, resetToBedView, updateStatusBar } from '../cad/cad-renderer.js';
 import { renderDefectsUI } from '../solver/quota-manager.js';
+import { renderRadar } from '../radar/radar-scrubber.js';
+import { updateUIInfo } from '../solver/solver-client.js';
 
 export async function switchCutMode(mode, targetRemnant) {
     state.setCutMode(mode);
@@ -40,7 +42,8 @@ export async function switchCutMode(mode, targetRemnant) {
             radarBar.style.pointerEvents = "none";
         }
 
-        const curRollId = document.getElementById("sel-mother-roll-id") ? document.getElementById("sel-mother-roll-id").value : "ROLL-2026-0920";
+        const curRollId = targetRemnant?.sourceRollId ||
+            (document.getElementById("sel-mother-roll-id") ? document.getElementById("sel-mother-roll-id").value : "ROLL-2026-0920");
         const selFilter = document.getElementById("sel-remnant-filter-roll");
         if (selFilter && curRollId) {
             selFilter.value = curRollId;
@@ -61,7 +64,23 @@ export async function switchCutMode(mode, targetRemnant) {
 export async function onMotherRollChange(forceResetBed = false) {
     const sel = document.getElementById("sel-mother-roll-id");
     const rollId = sel ? sel.value : "ROLL-2026-0920";
-    const spec = state.motherRollSpecs[rollId] || { model: "TC涤棉-B2026", rollW: 2000, totalRollL: 60000, bedL: 5000 };
+    let spec = state.motherRollSpecs[rollId] || { model: "TC涤棉-B2026", rollW: 2000, totalRollL: 60000, bedL: 5000 };
+    try {
+        const response = await fetch(`/api/rolls/${encodeURIComponent(rollId)}`, { cache: "no-store" });
+        if (response.ok) {
+            const roll = await response.json();
+            if (roll && roll.rollId) {
+                spec = { model: roll.rollModel, rollW: roll.width, totalRollL: roll.totalLength,
+                    bedL: Math.min(5000, roll.currentRemainingLength) };
+                const current = state.getCurrentCaseData();
+                current.rollId = rollId;
+                current.globalDefects = roll.defects || [];
+                const remaining = document.getElementById("lbl-roll-remaining");
+                if (remaining) remaining.innerText = `${roll.currentRemainingLength} mm`;
+                renderDefectsUI(current.globalDefects);
+            }
+        }
+    } catch (error) { console.error("读取母卷疵点失败", error); }
 
     if (document.getElementById("inp-roll-id")) document.getElementById("inp-roll-id").value = rollId;
     if (document.getElementById("inp-roll-w")) document.getElementById("inp-roll-w").value = spec.rollW;
@@ -69,11 +88,12 @@ export async function onMotherRollChange(forceResetBed = false) {
 
     const targetBedL = spec.bedL || 5000;
     const data = state.getCurrentCaseData();
+    data.rollId = rollId;
     data.rollW = spec.rollW;
     data.totalRollL = spec.totalRollL;
 
     // 关键修复：母卷开卷必须保证台面长度为标准机台床台（5000mm），不能沿用料头短料长度
-    if (forceResetBed || !data.bedL || data.bedL < 3000) {
+    if (forceResetBed || !data.bedL || data.bedL < 3000 || data.bedL > targetBedL) {
         data.bedL = targetBedL;
     }
     if (document.getElementById("inp-bed-l")) {
@@ -103,6 +123,7 @@ export async function onMotherRollChange(forceResetBed = false) {
     await updateMotherRollRemnantStats(rollId);
 
     renderScene();
+    renderRadar();
     resetToBedView();
     checkAllDemandsRemnantMatch();
     updateStatusBar();
@@ -110,7 +131,7 @@ export async function onMotherRollChange(forceResetBed = false) {
 
 export async function updateMotherRollRemnantStats(rollId) {
     try {
-        const res = await fetch("/api/rolls");
+        const res = await fetch("/api/rolls", { cache: "no-store" });
         if (res.ok) {
             const rolls = await res.json();
             const rollInfo = rolls.find(r => r.rollId === rollId);
@@ -331,6 +352,8 @@ export function mountRemnantToBed(rem) {
     document.getElementById("inp-window-start-y").value = 0;
 
     const data = state.getCurrentCaseData();
+    state.pendingPlan = null;
+    data.rollId = rem.sourceRollId;
     data.rollW = rem.width;
     data.bedL = rem.length;
     data.totalRollL = rem.length;
@@ -340,10 +363,17 @@ export function mountRemnantToBed(rem) {
     data.pieces = [];
     data.cuts = [];
     data.remnants = [];
+    data.pieceArea = 0;
+    data.remArea = 0;
+    data.wasteArea = 0;
+    data.totalArea = 0;
+    data.lastReceipt = null;
+    data.allowLongitudinal = document.getElementById("sel-allow-longitudinal")?.value !== "0";
 
     const currentRemDemands = getRemnantDemandsFromUI();
     if (currentRemDemands.length === 0) {
-        const fitW = rem.width >= 1000 ? Math.round(rem.width * 0.7) : rem.width;
+        const onlyCrosscut = document.getElementById("sel-allow-longitudinal")?.value === "0";
+        const fitW = onlyCrosscut ? rem.width : (rem.width >= 1000 ? Math.round(rem.width * 0.7) : rem.width);
         const fitL = rem.length >= 800 ? Math.round(rem.length * 0.6) : rem.length;
         renderRemnantDemandsUI([{ name: "料头裁片-1", width: fitW, length: fitL, count: 1 }]);
     }
@@ -351,6 +381,8 @@ export function mountRemnantToBed(rem) {
     renderDefectsUI(data.globalDefects);
     renderScene();
     resetToBedView();
+    if (document.getElementById("inp-roll-id")) document.getElementById("inp-roll-id").value = rem.sourceRollId;
+    updateUIInfo();
     updateStatusBar();
 }
 

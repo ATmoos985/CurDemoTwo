@@ -7,6 +7,7 @@ import { bus } from '../../core/event-bus.js';
 import { onMotherRollChange, refreshShelfRemnantsList } from '../remnant/remnant-shelf.js';
 import { renderScene } from '../cad/cad-renderer.js';
 import { renderRadar } from '../radar/radar-scrubber.js';
+import { renderDefectsUI } from '../solver/quota-manager.js';
 
 let cachedRolls = [];
 let activeRollId = "ROLL-2026-0920";
@@ -59,13 +60,51 @@ export function switchMaterialTab(tabName) {
  */
 export async function refreshRollsList() {
     try {
-        const res = await fetch("/api/rolls");
+        const res = await fetch("/api/rolls", { cache: "no-store" });
         if (res.ok) {
             cachedRolls = await res.json();
+            for (const roll of cachedRolls) {
+                const selector = document.getElementById("sel-mother-roll-id");
+                if (selector && ![...selector.options].some(option => option.value === roll.rollId)) {
+                    selector.add(new Option(`${roll.rollId} (${roll.rollModel})`, roll.rollId));
+                }
+                const filter = document.getElementById("sel-remnant-filter-roll");
+                if (filter && ![...filter.options].some(option => option.value === roll.rollId)) {
+                    filter.add(new Option(roll.rollId, roll.rollId));
+                }
+            }
         }
     } catch (e) {
         console.warn("读取母卷失败，使用本地状态", e);
     }
+}
+
+export async function submitNewRoll() {
+    const read = id => document.getElementById(id).value.trim();
+    const roll = {
+        rollId: read("new-roll-id"), rollModel: read("new-roll-model"),
+        materialName: read("new-roll-model"), width: Number(read("new-roll-width")),
+        totalLength: Number(read("new-roll-length")), storageLocation: read("new-roll-location"),
+        inspectionStatus: "PENDING", defects: []
+    };
+    const error = document.getElementById("new-roll-error");
+    if (!roll.rollId || !roll.rollModel || roll.width <= 0 || roll.totalLength <= 0) {
+        error.textContent = "请填写母卷编号、面料、幅宽与长度";
+        return;
+    }
+    if (cachedRolls.some(item => item.rollId === roll.rollId)) {
+        error.textContent = "母卷编号已存在，请使用新编号";
+        return;
+    }
+    try {
+        const response = await fetch("/api/rolls", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(roll) });
+        if (!response.ok) throw new Error("母卷录入失败");
+        await refreshRollsList();
+        renderRollsList();
+        await mountRollToStation(roll.rollId);
+        error.textContent = "";
+    } catch (e) { error.textContent = e.message; }
 }
 
 /**
@@ -81,8 +120,8 @@ function renderRollsList() {
     }
 
     container.innerHTML = cachedRolls.map(r => {
-        const remLen = r.currentRemainingLength || r.totalLength;
-        const usedLen = r.usedLength || (r.totalLength - remLen);
+        const remLen = r.currentRemainingLength ?? r.totalLength;
+        const usedLen = r.usedLength ?? (r.totalLength - remLen);
         const percent = Math.round((remLen / r.totalLength) * 100);
         const isCurrent = (r.rollId === (state.getCurrentCaseData().rollId || activeRollId));
 
@@ -327,17 +366,21 @@ export async function submitNewDefect(rollId) {
             body: JSON.stringify(newDef)
         });
         if (res.ok) {
+            const savedDefect = await res.json();
             await refreshRollsList();
             selectRollForDetail(rollId);
             // 如果正是当前主 CAM 台面生产的母卷，同步至主画布
             const curData = state.getCurrentCaseData();
             if (curData.rollId === rollId) {
                 curData.globalDefects = curData.globalDefects || [];
-                curData.globalDefects.push(newDef);
+                curData.globalDefects.push(savedDefect);
+                renderDefectsUI(curData.globalDefects);
                 renderScene();
                 renderRadar();
             }
             alert("疵点标定成功并已持久化至母卷档案！");
+        } else {
+            alert("疵点标定失败：坐标需落在母卷范围内");
         }
     } catch (e) {
         alert("提交疵点失败，请检查服务状态");
@@ -471,6 +514,16 @@ function createMaterialModalDOM() {
             <div style="flex: 1; overflow-y: auto; padding: 16px;">
                 <!-- Tab 1: 母卷档案 -->
                 <div id="pane-mat-rolls" style="display: flex; flex-direction: column; gap: 12px;">
+                    <details style="border:1px solid var(--panel-border);padding:8px;border-radius:4px;"><summary style="cursor:pointer;">＋ 录入母卷</summary>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                            <input id="new-roll-id" class="prop-input" placeholder="母卷编号">
+                            <input id="new-roll-model" class="prop-input" placeholder="面料名称 / 型号">
+                            <input id="new-roll-width" class="prop-input" type="number" min="1" placeholder="净幅宽 mm">
+                            <input id="new-roll-length" class="prop-input" type="number" min="1" placeholder="总长度 mm">
+                            <input id="new-roll-location" class="prop-input" placeholder="库位">
+                            <button class="tool-btn active" onclick="window.cutApp.plugins.material.submitNewRoll()">保存并装载</button>
+                        </div><div id="new-roll-error" style="color:var(--accent-red);"></div>
+                    </details>
                     <div style="display: grid; grid-template-columns: 360px 1fr; gap: 14px;">
                         <!-- 左侧母卷卡片列表 -->
                         <div style="display: flex; flex-direction: column;">

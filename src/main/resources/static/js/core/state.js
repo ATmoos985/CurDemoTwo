@@ -9,7 +9,7 @@ class StateStore {
     constructor() {
         this.scenarios = getInitialScenarios();
         this.motherRollSpecs = { ...MOTHER_ROLL_SPECS };
-        this.currentCaseId = 4;
+        this.currentCaseId = 5;
         this.currentCutMode = "roll"; // "roll" | "remnant"
         this.currentFeedPort = "roll";
         this.currentCutStepLimit = 999;
@@ -17,6 +17,7 @@ class StateStore {
         this.isToolpathOptimized = false;
         this.toolpathStats = null;
         this.originalCutsBackup = null;
+        this.pendingPlan = null;
 
         // 料头工况专用独立运行态，彻底杜绝料头尺寸与数据污染母卷案例
         this.remnantWorkspaceData = {
@@ -73,6 +74,7 @@ class StateStore {
      * 切换工位模式 (roll / remnant)
      */
     setCutMode(mode, remnant = null) {
+        this.pendingPlan = null;
         this.currentCutMode = mode;
         this.currentFeedPort = mode;
         if (remnant) {

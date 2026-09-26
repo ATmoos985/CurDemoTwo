@@ -4,7 +4,8 @@
 export const MOTHER_ROLL_SPECS = {
     "ROLL-2026-0920": { model: "TC涤棉-B2026", rollW: 2000, totalRollL: 60000, bedL: 5000 },
     "ROLL-2026-0921": { model: "纯棉斜纹-C1800", rollW: 1800, totalRollL: 50000, bedL: 5000 },
-    "ROLL-2026-0922": { model: "弹力牛津-O2200", rollW: 2200, totalRollL: 80000, bedL: 5000 }
+    "ROLL-2026-0922": { model: "弹力牛津-O2200", rollW: 2200, totalRollL: 80000, bedL: 5000 },
+    "ROLL-DEMO-2D": { model: "窗帘样布-2D", rollW: 2000, totalRollL: 30000, bedL: 4000 }
 };
 
 export const INITIAL_SCENARIOS = {
@@ -32,25 +33,16 @@ export const INITIAL_SCENARIOS = {
         engine: "Word 规范精确拆解引擎"
     },
     2: {
-        name: "场景一(三)：左侧0.5m带疵改宽纵切出成品",
+        name: "窗帘矩形二维带疵点：左侧避疵改宽",
+        rollId: "ROLL-DEMO-2D",
         totalRollL: 30000, bedL: 4000, windowStartY: 0, rollW: 2000,
         trimStart: 0, cutOrigin: "right-bottom", firstStageOrientation: "vertical", allowRotation: false,
         allowLongitudinal: true,
-        globalDefects: [
-            { id: 1, x: 200, y: 1500, w: 150, h: 600, margin: 50, desc: "台面左侧0.5m带疵(改宽纵切)" },
-            { id: 2, x: 900, y: 11000, w: 100, h: 150, margin: 30, desc: "未展开 11.0m 处污渍" },
-            { id: 3, x: 500, y: 22000, w: 180, h: 180, margin: 30, desc: "未展开 22.0m 处稀密路" }
-        ],
-        demands: [{ id: 1, name: "改宽成品", w: 1500, l: 4000, count: 1 }],
-        pieces: [{ id: 1, demandId: 1, name: "改宽成品", x: 500, y: 0, w: 1500, l: 4000 }],
-        remnants: [
-            { id: "REM-DEF-01", status: "左侧带疵料头", x: 0, y: 0, w: 500, l: 4000, area: 2.0, hasDefect: true }
-        ],
-        cuts: [
-            { step: 1, type: "纵切", pos: 500, start: 0, end: 4000, desc: "在宽度500mm处一刀纵切到底，靠右下角完好产出1.5m×4m成品，保留左侧带疵料头" }
-        ],
-        deductLen: 4000, pieceArea: 6.0, remArea: 2.0, wasteArea: 0.0, totalArea: 8.0,
-        engine: "带疵改宽排料引擎"
+        globalDefects: [],
+        demands: [{ id: 1, name: "窗帘矩形偏幅裁片", w: 1500, l: 4000, count: 1 }],
+        pieces: [], remnants: [], cuts: [],
+        deductLen: 0, pieceArea: 0, remArea: 0, wasteArea: 0, totalArea: 0,
+        engine: "二维带疵点排料（待计算）"
     },
     3: {
         name: "场景一(二)：1.6m短料生成与新订单优先领用 (0扣料)",
@@ -124,6 +116,17 @@ export const INITIAL_SCENARIOS = {
         ],
         deductLen: 4530, pieceArea: 5.76, remArea: 4.24, wasteArea: 0.00, totalArea: 10.00,
         engine: "智能几何排料内核"
+    },
+    5: {
+        name: "窗帘矩形示例：整幅横切避疵",
+        rollId: "ROLL-2026-0920", totalRollL: 60000, bedL: 5000, windowStartY: 0, rollW: 2000,
+        trimStart: 0, cutOrigin: "right-top", firstStageOrientation: "horizontal",
+        allowRotation: false, allowLongitudinal: false,
+        globalDefects: [],
+        demands: [{ id: 1, name: "窗帘矩形裁片", w: 2000, l: 1200, count: 2 }],
+        pieces: [], remnants: [], cuts: [],
+        deductLen: 0, pieceArea: 0, remArea: 0, wasteArea: 0, totalArea: 0,
+        engine: "仅横切顺序排料（示例）"
     }
 };
 

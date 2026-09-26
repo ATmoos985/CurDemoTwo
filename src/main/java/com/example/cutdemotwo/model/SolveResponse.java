@@ -20,9 +20,13 @@ public class SolveResponse {
     private double totalArea;
     private String feedPortType = "roll";
     private String sourceRemnantId;
+    private String planId;
     private List<RemnantStock> derivedRemnants = new ArrayList<>();
 
     public SolveResponse() {}
+
+    public String getPlanId() { return planId; }
+    public void setPlanId(String planId) { this.planId = planId; }
 
     public String getFeedPortType() { return feedPortType; }
     public void setFeedPortType(String feedPortType) { this.feedPortType = feedPortType; }

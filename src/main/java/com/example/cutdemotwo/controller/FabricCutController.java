@@ -6,6 +6,7 @@ import com.example.cutdemotwo.service.PackingSolverService;
 import com.example.cutdemotwo.service.ScenarioOneService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.http.HttpStatus;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -19,21 +20,35 @@ public class FabricCutController {
     private final ScenarioOneService scenarioOneService;
     private final com.example.cutdemotwo.service.RemnantService remnantService;
     private final com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService toolpathOptimizerService;
+    private final com.example.cutdemotwo.service.CuttingWorkflowService workflowService;
 
     @Autowired
     public FabricCutController(com.example.cutdemotwo.service.solver.SolverFactory solverFactory,
                                 ScenarioOneService scenarioOneService,
                                 com.example.cutdemotwo.service.RemnantService remnantService,
-                                com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService toolpathOptimizerService) {
+                                com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService toolpathOptimizerService,
+                                com.example.cutdemotwo.service.CuttingWorkflowService workflowService) {
         this.solverFactory = solverFactory;
         this.scenarioOneService = scenarioOneService;
         this.remnantService = remnantService;
         this.toolpathOptimizerService = toolpathOptimizerService;
+        this.workflowService = workflowService;
     }
 
     @PostMapping("/solve")
     public SolveResponse solve(@RequestBody SolveRequest request) {
-        return solverFactory.solve(request);
+        return workflowService.solve(request);
+    }
+
+    @PostMapping("/cutting/report-confirm")
+    public Map<String, Object> confirmCut(@RequestBody com.example.cutdemotwo.model.CutReport report) {
+        return workflowService.confirm(report);
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Map<String, String> invalidInput(IllegalArgumentException error) {
+        return Map.of("message", error.getMessage());
     }
 
     @PostMapping("/toolpath/optimize")

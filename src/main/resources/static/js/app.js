@@ -47,7 +47,8 @@ import {
 } from './plugins/solver/quota-manager.js';
 
 import {
-    updateUIInfo, loadCase, triggerSolve, registerCurrentRemnant
+    updateUIInfo, loadCase, triggerSolve,
+    openCutReport, closeCutReport, confirmCutReport, exportCutResult
 } from './plugins/solver/solver-client.js';
 
 import {
@@ -85,7 +86,7 @@ import {
 
 import {
     openMaterialModal, closeMaterialModal, switchMaterialTab,
-    selectRollForDetail, submitNewDefect, mountRollToStation,
+    selectRollForDetail, submitNewDefect, submitNewRoll, mountRollToStation,
     scrapRemnantById, toggleAddDefectForm, refreshRollsList
 } from './plugins/material/material-manager.js';
 
@@ -189,9 +190,23 @@ export function closePresetDropdown() {
     if (trigger) trigger.classList.remove('active');
 }
 
-export function selectPresetCase(caseId) {
+export async function selectPresetCase(caseId) {
     if (typeof loadCase === 'function') {
         loadCase(caseId);
+    }
+    if (caseId === 3) {
+        const response = await fetch('/api/remnants/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: 'REM-202609-001' }) });
+        const remnant = await response.json();
+        if (remnant && remnant.id) {
+            await switchCutMode('remnant', remnant);
+            renderRemnantDemandsUI([{ name: '窗帘矩形补单', width: 2000, length: 1000, count: 1 }]);
+        } else alert('示例料头已用完，请从料头库装载其他料头。');
+    } else {
+        const selectedRoll = state.getCurrentCaseData().rollId || 'ROLL-2026-0920';
+        const selector = document.getElementById('sel-mother-roll-id');
+        if (selector) selector.value = selectedRoll;
+        await onMotherRollChange();
     }
     updatePresetTriggerLabel(caseId);
     closePresetDropdown();
@@ -202,9 +217,10 @@ export function updatePresetTriggerLabel(caseId) {
     if (!label) return;
     const names = {
         1: '算例1: L形拆解',
-        2: '算例2: 改宽避疵',
+        2: '窗帘二维避疵',
         3: '算例3: 短料优先',
-        4: '算例4: 工业全貌'
+        4: '旧西装全貌',
+        5: '窗帘矩形横切'
     };
     label.textContent = names[caseId] || `算例${caseId}`;
 }
@@ -254,6 +270,7 @@ const camApp = {
     resetToFlowView,
     viewFullRoll,
     triggerSolve,
+    openCutReport, closeCutReport, confirmCutReport, exportCutResult,
     loadCase,
     stepCut,
     playCuts,
@@ -292,7 +309,6 @@ const camApp = {
     chooseRemnantForDemand,
     dismissRemnantHint,
     checkAllDemandsRemnantMatch,
-    registerCurrentRemnant,
     optimizeCurrentToolpath,
     restoreOriginalToolpath,
     toggleToolpathOptimization,
@@ -315,7 +331,7 @@ const camApp = {
     closeMaterialModal,
     switchMaterialTab,
     selectRollForDetail,
-    submitNewDefect,
+    submitNewDefect, submitNewRoll,
     mountRollToStation,
     scrapRemnantById,
     toggleAddDefectForm,
@@ -350,7 +366,7 @@ window.cutApp.plugins = {
     },
     material: {
         openMaterialModal, closeMaterialModal, switchMaterialTab,
-        selectRollForDetail, submitNewDefect, mountRollToStation,
+        selectRollForDetail, submitNewDefect, submitNewRoll, mountRollToStation,
         scrapRemnantById, toggleAddDefectForm, refreshRollsList
     }
 };
@@ -380,7 +396,7 @@ async function bootstrapApp() {
     setupRadarInteraction();
     initLayoutResizers();
     initNestingKeyboardShortcuts();
-    loadCase(4); // 默认打开 60米母卷全局全景演示
+    loadCase(5); // 默认打开窗帘矩形横切示例
     await onMotherRollChange();
     refreshShelfRemnantsList();
     renderToolpathUI();

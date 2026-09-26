@@ -37,7 +37,7 @@ public class SolverFactory {
     }
 
     public SolveResponse solve(SolveRequest request) {
-        ICutSolverEngine engine = getEngine(request.getSolver());
+        ICutSolverEngine engine = request.isAllowLongitudinal() ? getEngine(request.getSolver()) : engineMap.get("crosscut");
         if (engine == null) {
             SolveResponse err = new SolveResponse();
             err.setSuccess(false);

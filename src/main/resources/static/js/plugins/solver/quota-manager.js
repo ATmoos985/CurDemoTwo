@@ -443,6 +443,7 @@ export function updateRollSize() {
 
 export function toggleLongitudinal() {
     const allow = (document.getElementById("sel-allow-longitudinal").value === "1");
+    state.getCurrentCaseData().allowLongitudinal = allow;
     if (!allow && state.currentCaseId === 2) {
         alert("【安全拦截触发】当前设备被设定为【仅能横切】，系统严禁下发需要纵切才能完成的改宽方案，保护原料不被误切！");
     }

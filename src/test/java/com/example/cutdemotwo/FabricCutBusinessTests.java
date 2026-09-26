@@ -107,7 +107,6 @@ class FabricCutBusinessTests {
 
     @Test
     void testRemnantServiceScanAndMatching() {
-        remnantService.updateStatus("REM-202609-001", "AVAILABLE");
         // 1. 条码精确识别
         RemnantStock r1 = remnantService.scanOrGetById("REM-202609-001");
         assertNotNull(r1);
@@ -138,8 +137,8 @@ class FabricCutBusinessTests {
         assertEquals("remnant", res.getFeedPortType());
         assertEquals(0.0, res.getDeductLen(), 0.001); // 严格核算母卷0扣料!
         assertEquals("REM-202609-001", res.getSourceRemnantId());
-        assertFalse(res.getDerivedRemnants().isEmpty());
-        assertEquals("REM-202609-001", res.getDerivedRemnants().get(0).getParentRemnantId());
+        assertTrue(res.getDerivedRemnants().isEmpty());
+        assertNotNull(remnantService.scanOrGetById("REM-202609-001"), "仅求解不能核销原料头");
     }
 
     @Test
@@ -167,10 +166,40 @@ class FabricCutBusinessTests {
         SolveResponse res = packingSolverService.solve(req);
         assertTrue(res.isSuccess());
         assertEquals("roll", res.getFeedPortType());
-        assertFalse(res.getDerivedRemnants().isEmpty());
+        assertTrue(res.getDerivedRemnants().isEmpty());
 
         // 验证切出的新料头自动归档至母卷 ROLL-2026-0920
         List<RemnantStock> updatedRemnants = remnantService.getRemnantsByRollId("ROLL-2026-0920");
-        assertTrue(updatedRemnants.size() > initialCount, "新切出的料头应自动纳入该母卷料头库");
+        assertEquals(initialCount, updatedRemnants.size(), "仅求解不能生成库存料头");
+    }
+
+    @Test
+    void testRightOriginCutCoordinatesUseFarCertificateEdge() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(packingSolverService.isAvailable());
+        SolveRequest req = new SolveRequest();
+        req.setRollW(2000);
+        req.setRollL(4000);
+        req.setCutOrigin("right-bottom");
+        req.setFirstStageOrientation("vertical");
+        req.setDemands(List.of(new PieceDemand(1, "窗帘偏幅", 1500, 4000, 1, false)));
+        req.setDefects(List.of(new Defect(21, 200, 1500, 150, 600, 50)));
+        SolveResponse result = packingSolverService.solve(req);
+        assertTrue(result.isSuccess());
+        assertTrue(result.getCuts().stream().anyMatch(c -> "纵切".equals(c.getType()) && Math.abs(c.getPos() - 500) < 1));
+        assertTrue(result.getCuts().stream().anyMatch(c -> "横切".equals(c.getType()) && Math.abs(c.getPos() - 4000) < 1));
+    }
+
+    @Test
+    void testFullWidthRemnantDoesNotCutAlongMaterialEdge() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(packingSolverService.isAvailable());
+        SolveRequest req = new SolveRequest();
+        req.setRollW(2000);
+        req.setRollL(1600);
+        req.setCutOrigin("right-bottom");
+        req.setFeedPortType("remnant");
+        req.setDemands(List.of(new PieceDemand(1, "窗帘补单", 2000, 1000, 1, false)));
+        SolveResponse result = packingSolverService.solve(req);
+        assertTrue(result.isSuccess());
+        assertTrue(result.getCuts().stream().noneMatch(c -> "纵切".equals(c.getType())));
     }
 }

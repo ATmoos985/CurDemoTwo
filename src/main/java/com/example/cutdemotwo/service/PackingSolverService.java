@@ -23,12 +23,6 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
     @Value("${packingsolver.executable.path:d:/GitLab/packingsolver/build/src/rectangleguillotine/packingsolver_rectangleguillotine.exe}")
     private String solverPath;
 
-    private final RemnantService remnantService;
-
-    public PackingSolverService(RemnantService remnantService) {
-        this.remnantService = remnantService;
-    }
-
     public boolean isAvailable() {
         File f = new File(solverPath);
         return f.exists() && f.canExecute();
@@ -248,8 +242,11 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
             boolean isHoriz = (cutLvl % 2 == 1);
             String cutType = isHoriz ? "横切" : "纵切";
             double cutPos = isHoriz ?
-                    (mirrorY ? (req.getRollL() - cy - trim) : (cy + trim)) :
-                    (isRightOrigin ? (req.getRollW() - cx) : cx);
+                    (mirrorY ? (req.getRollL() - cy - ch - trim) : (cy + ch + trim)) :
+                    (isRightOrigin ? (req.getRollW() - cx - cw) : (cx + cw));
+            if (!isHoriz && (cutPos <= 0 || cutPos >= req.getRollW())) {
+                continue;
+            }
             double start = isHoriz ?
                     (isRightOrigin ? (req.getRollW() - cx - cw) : cx) :
                     (mirrorY ? (req.getRollL() - cy - ch - trim) : (cy + trim));
@@ -280,32 +277,6 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
         res.setRemArea(remArea);
         res.setWasteArea(wasteArea);
         res.setTotalArea(rollArea);
-
-        // 业务闭环：无论母卷开卷切还是料头切，切出的余料自动归档并关联所属母卷
-        List<RemnantStock> derived = new ArrayList<>();
-        if (isRemnantFeed) {
-            // 料头投料口：核销原料头，派生子料头入库 (Parent-Child Lineage)
-            String parentId = (req.getSourceRemnantId() != null && !req.getSourceRemnantId().isEmpty()) ?
-                    req.getSourceRemnantId() : "REM-MANUAL";
-            remnantService.consumeRemnant(parentId);
-            for (RemnantPiece rp : remnants) {
-                RemnantStock rs = remnantService.autoRegisterCutRemnant(
-                        req.getRollId(), parentId, rp.getW(), rp.getL(), rp.isHasDefect(),
-                        "自料头 " + parentId + " 裁切派生" + (rp.isHasDefect() ? "(带疵)" : "完好子料头")
-                );
-                derived.add(rs);
-            }
-        } else {
-            // 母卷开卷模式：每次裁切产生的料头自动进入该母卷的料头库
-            for (RemnantPiece rp : remnants) {
-                RemnantStock rs = remnantService.autoRegisterCutRemnant(
-                        req.getRollId(), null, rp.getW(), rp.getL(), rp.isHasDefect(),
-                        "自母卷 " + req.getRollId() + " 裁切生成" + (rp.isHasDefect() ? "(带疵)" : "完好料头")
-                );
-                derived.add(rs);
-            }
-        }
-        res.setDerivedRemnants(derived);
 
         return res;
     }

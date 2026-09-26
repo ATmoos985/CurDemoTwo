@@ -1,6 +1,8 @@
 # Cloth Cutting CAD/CAM Simulation & Optimization Platform
 # 布料智能排料与数控切割仿真系统 (CutDemoTwo)
 
+当前演示版的业务流程、示例口径和库存写入时点见 [裁切演示路线](DEMO_GUIDE.md)。下文保留原项目介绍，涉及“自动入库”的旧描述以演示路线为准。
+
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.1-brightgreen.svg)](https://spring.io/projects/spring-boot)
 [![Java](https://img.shields.io/badge/Java-17-orange.svg)](https://www.oracle.com/java/)
 [![Konva.js](https://img.shields.io/badge/Canvas-Konva.js-blue.svg)](https://konvajs.org/)

@@ -24,6 +24,7 @@ export function updateUIInfo() {
     if (document.getElementById("sel-cut-origin")) document.getElementById("sel-cut-origin").value = data.cutOrigin || "right-bottom";
     if (document.getElementById("sel-first-stage")) document.getElementById("sel-first-stage").value = data.firstStageOrientation || "horizontal";
     if (document.getElementById("sel-allow-rotation")) document.getElementById("sel-allow-rotation").value = data.allowRotation ? "1" : "0";
+    if (document.getElementById("sel-allow-longitudinal")) document.getElementById("sel-allow-longitudinal").value = data.allowLongitudinal === false ? "0" : "1";
 
     const rollIdInp = document.getElementById("inp-roll-id");
     if (rollIdInp && document.getElementById("sb-roll-id")) {
@@ -87,17 +88,24 @@ export function updateUIInfo() {
                 <td>${r.w} × ${r.l} mm</td>
                 <td>${r.area.toFixed(2)} m²</td>
                 <td><span class="${r.hasDefect ? 'badge-cut' : 'badge-rem'}">${r.status}</span></td>
-                <td><button class="tool-btn" style="padding: 1px 4px; font-size: 10px; background: var(--badge-green-bg); color: var(--badge-green-color); border: 1px solid var(--accent-green); font-weight: 600;" onclick="window.camApp.registerCurrentRemnant('${r.id}', ${r.w}, ${r.l}, ${r.hasDefect || false})">入库</button></td>
+                <td>实切后入库</td>
             </tr>
         `).join("");
     }
 
     // 台账数据
-    if (document.getElementById("lbl-deduct-len")) document.getElementById("lbl-deduct-len").innerText = `${data.deductLen || data.bedL} mm`;
+    if (document.getElementById("lbl-deduct-len")) document.getElementById("lbl-deduct-len").innerText = `${data.deductLen ?? data.bedL ?? 0} mm`;
     if (document.getElementById("lbl-piece-area")) document.getElementById("lbl-piece-area").innerText = `${(data.pieceArea || 0).toFixed(3)} m²`;
     if (document.getElementById("lbl-rem-area")) document.getElementById("lbl-rem-area").innerText = `${(data.remArea || 0).toFixed(3)} m²`;
     if (document.getElementById("lbl-waste-area")) document.getElementById("lbl-waste-area").innerText = `${(data.wasteArea || 0).toFixed(3)} m²`;
     if (document.getElementById("lbl-total-area")) document.getElementById("lbl-total-area").innerText = `${(data.totalArea || 0).toFixed(3)} m²`;
+    const utilization = data.lastReceipt ? data.lastReceipt.utilization :
+        ((data.totalArea || 0) > 0 ? (data.pieceArea || 0) / data.totalArea * 100 : 0);
+    const utilEl = document.getElementById("lbl-utilization");
+    if (utilEl) utilEl.innerText = `${utilization.toFixed(1)}% ${data.lastReceipt ? '实切' : '方案'}`;
+    const reportEl = document.getElementById("lbl-report-status");
+    if (reportEl) reportEl.innerText = data.lastReceipt ? `已确认 ${data.lastReceipt.planId.slice(0, 8)}` :
+        (state.pendingPlan ? '方案待实切确认' : '示例 / 待实切确认');
 
     const sum = (data.pieceArea || 0) + (data.remArea || 0) + (data.wasteArea || 0);
     const diff = Math.abs(sum - (data.totalArea || 0));
@@ -105,7 +113,7 @@ export function updateUIInfo() {
     if (statusEl) {
         if (diff < 0.001) {
             statusEl.className = "status-badge";
-            statusEl.innerText = "100.0% 严格守恒";
+            statusEl.innerText = "面积平衡";
         } else {
             statusEl.className = "badge-cut";
             statusEl.innerText = `偏差: ${diff.toFixed(3)} m²`;
@@ -114,6 +122,7 @@ export function updateUIInfo() {
 }
 
 export function loadCase(id) {
+    state.pendingPlan = null;
     if (state.currentCutMode !== "roll") {
         state.setCutMode("roll");
         const btnRoll = document.getElementById("tab-btn-roll");
@@ -131,7 +140,8 @@ export function loadCase(id) {
         }
     }
     state.setCaseId(id);
-    for (let i = 1; i <= 4; i++) {
+    state.scenarios[id].lastReceipt = null;
+    for (let i = 1; i <= 5; i++) {
         const btn = document.getElementById(`btn-case-${i}`);
         if (btn) btn.classList.toggle("active", i === id);
     }
@@ -154,6 +164,7 @@ export function loadCase(id) {
     }
     if (document.getElementById("sel-first-stage")) document.getElementById("sel-first-stage").value = data.firstStageOrientation || "horizontal";
     if (document.getElementById("sel-allow-rotation")) document.getElementById("sel-allow-rotation").value = data.allowRotation ? "1" : "0";
+    if (document.getElementById("sel-allow-longitudinal")) document.getElementById("sel-allow-longitudinal").value = data.allowLongitudinal === false ? "0" : "1";
 
     updateDemandCompletionFromPieces(data);
     recalculateRollStats(data);
@@ -308,6 +319,8 @@ export async function triggerSolve() {
             const result = await res.json();
             const elapsed = Math.round(performance.now() - t0);
             if (result.success) {
+                state.pendingPlan = { result, rollId, rollModel, bedL, feedPortType };
+                data.lastReceipt = null;
                 data.rollW = rollW;
                 data.bedL = bedL;
                 data.windowStartY = winStartY;
@@ -315,6 +328,7 @@ export async function triggerSolve() {
                 data.cutOrigin = cutOrigin;
                 data.firstStageOrientation = firstStageOrientation;
                 data.allowRotation = allowRotation;
+                data.allowLongitudinal = allowLongitudinal;
                 data.globalDefects = allDefects;
 
                 if (isRemnantMode) {
@@ -403,12 +417,6 @@ export async function triggerSolve() {
 
                 bus.emit('solve:success', { result, elapsed, rollId });
 
-                let derivedMsg = "";
-                if (result.derivedRemnants && result.derivedRemnants.length > 0) {
-                    derivedMsg = `\n自动归档新料头至 [${rollId}] 货架:\n` +
-                        result.derivedRemnants.map(d => `  · ${d.id} (${d.width}×${d.length}mm, ${d.location})`).join("\n");
-                }
-
                 const stationCount = (data.cutIntervals || []).length;
                 const totalCutPieces = (data.pieces || []).length;
                 const thisBedPieces = (result.pieces || []).length;
@@ -417,13 +425,14 @@ export async function triggerSolve() {
                     `工位模式: ${isRemnantMode ? '模式二：料头复用精益切割 (母卷 0 消耗)' : '模式一：母卷连续开卷接续搭切'}\n` +
                     `母卷批号: ${rollId} (${rollModel})\n` +
                     `当前工位: ${winStartY} ~ ${winEndY} mm (${(winStartY/1000).toFixed(1)}m ~ ${(winEndY/1000).toFixed(1)}m)\n` +
-                    `起刀基准: 右下角 (靠右导轨对齐, 经向送料)\n` +
+                    `起刀基准: ${cutOrigin}\n` +
                     `计算引擎: ${result.engine} [${elapsed}ms]\n` +
                     `避让疵点: ${activeBedDefects.length} 处\n` +
                     `本工位产出: ${thisBedPieces} 件 (整卷累计保留: ${totalCutPieces} 件)\n` +
                     `切刀工步: 本次 ${result.cuts.length} 步 (整卷累计: ${(data.cuts||[]).length} 步直刀)\n` +
-                    `母卷加工: 累计 ${(data.deductLen/1000).toFixed(1)}m (${stationCount} 个工位接续)\n` +
-                    `面积守恒: ${data.totalArea.toFixed(3)} m² (100% 严密守恒)${derivedMsg}`);
+                    `${isRemnantMode ? '母卷扣料: 0mm；确认后核销原料头' : `方案用料: 累计 ${(data.deductLen/1000).toFixed(1)}m (${stationCount} 个工位接续)`}\n` +
+                    `方案利用率: ${(result.totalArea ? result.pieceArea / result.totalArea * 100 : 0).toFixed(1)}%\n` +
+                    `这是排料预览；实切完成后点击【实切确认】更新库存。`);
                 return;
             } else {
                 alert("【智能排料计算失败】\n" + (result.message || "未知原因"));
@@ -436,35 +445,85 @@ export async function triggerSolve() {
     }
 }
 
-export async function registerCurrentRemnant(remId, w, l, hasDefect) {
-    const loc = prompt("请输入此料头的存放库位 (如 A-02-05):", "库位 A-02-05");
-    if (!loc) return;
-    const curRollId = document.getElementById("sel-mother-roll-id") ? document.getElementById("sel-mother-roll-id").value : "ROLL-2026-0920";
-    const newRem = {
-        id: remId + "-" + Math.floor(Math.random() * 900 + 100),
-        width: w,
-        length: l,
-        location: loc,
-        materialBatch: "现场已开卷批次",
-        status: "AVAILABLE",
-        sourceRollId: curRollId,
-        hasDefect: hasDefect,
-        defectDesc: hasDefect ? "裁切分离出的带疵余料" : "现场裁切合格矩形余料"
+export function openCutReport() {
+    const pending = state.pendingPlan;
+    if (!pending || !pending.result.planId) {
+        alert("请先执行排料，取得待确认方案。");
+        return;
+    }
+    const { result, bedL, feedPortType } = pending;
+    document.getElementById("report-actual-len").value = feedPortType === "remnant" ? 0 : bedL;
+    document.getElementById("report-actual-len").disabled = feedPortType === "remnant";
+    document.getElementById("report-piece-count").value = result.pieces.length;
+    document.getElementById("report-remnants").innerHTML = "";
+    for (const remnant of result.remnants || []) {
+        const row = document.createElement("div");
+        row.className = "report-remnant-row";
+        row.style.cssText = "display:flex;gap:8px;align-items:center;margin:6px 0;flex-wrap:wrap";
+        const check = document.createElement("input"); check.type = "checkbox"; check.checked = true;
+        const label = document.createElement("span"); label.textContent = `${remnant.status} ${remnant.id}`;
+        const width = document.createElement("input"); width.type = "number"; width.min = "1"; width.value = remnant.w; width.className = "prop-input report-w"; width.style.width = "80px";
+        const length = document.createElement("input"); length.type = "number"; length.min = "1"; length.value = remnant.l; length.className = "prop-input report-l"; length.style.width = "80px";
+        row.dataset.remnantId = remnant.id;
+        row.append(check, label, width, document.createTextNode("×"), length, document.createTextNode("mm"));
+        document.getElementById("report-remnants").append(row);
+    }
+    document.getElementById("report-error").textContent = "可取消勾选未回收的料头，并填写实测宽长。";
+    document.getElementById("cut-report-modal").style.display = "flex";
+}
+
+export function closeCutReport() { document.getElementById("cut-report-modal").style.display = "none"; }
+
+export async function confirmCutReport() {
+    const pending = state.pendingPlan;
+    if (!pending) return;
+    const report = {
+        planId: pending.result.planId,
+        actualCutLen: Number(document.getElementById("report-actual-len").value),
+        finishedPieceCount: Number(document.getElementById("report-piece-count").value),
+        location: document.getElementById("report-location").value.trim(),
+        actualRemnants: [...document.querySelectorAll(".report-remnant-row")].filter(row => row.querySelector('input[type="checkbox"]').checked)
+            .map(row => ({ ...pending.result.remnants.find(r => r.id === row.dataset.remnantId),
+                w: Number(row.querySelector(".report-w").value), l: Number(row.querySelector(".report-l").value) }))
     };
     try {
-        const res = await fetch("/api/remnants/register", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(newRem)
+        const response = await fetch("/api/cutting/report-confirm", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(report)
         });
-        if (res.ok) {
-            const saved = await res.json();
-            alert(`料头 [${saved.id}] 登记入库成功！\n尺寸: ${saved.width} × ${saved.length} mm\n所属母卷: ${saved.sourceRollId}\n库位: ${saved.location}\n已加入现场料头池，随时支持扫码识别与 0 扣料领用！`);
-            bus.emit('remnant:registered', { saved, curRollId });
+        const receipt = await response.json();
+        if (!response.ok) throw new Error(receipt.message || "实切确认失败");
+        const data = state.getCurrentCaseData();
+        data.lastReceipt = receipt;
+        state.lastCutReceipt = receipt;
+        state.pendingPlan = null;
+        const remaining = document.getElementById("lbl-roll-remaining");
+        if (remaining && receipt.remainingLength != null) remaining.innerText = `${receipt.remainingLength} mm`;
+        updateUIInfo();
+        closeCutReport();
+        if (window.camApp) {
+            window.camApp.updateMotherRollRemnantStats(pending.rollId);
+            window.camApp.refreshShelfRemnantsList();
         }
-    } catch (e) {
-        alert("登记料头异常: " + e.message);
+        const rollResponse = await fetch(`/api/rolls/${encodeURIComponent(pending.rollId)}`, { cache: "no-store" });
+        if (rollResponse.ok) {
+            const roll = await rollResponse.json();
+            if (remaining) remaining.innerText = `${roll.currentRemainingLength} mm`;
+        }
+        alert(`实切确认成功：${receipt.finishedPieceCount} 件，利用率 ${receipt.utilization.toFixed(1)}%，新料头 ${receipt.derivedRemnants.length} 块。`);
+    } catch (error) {
+        document.getElementById("report-error").textContent = error.message;
     }
+}
+
+export function exportCutResult() {
+    const data = state.getCurrentCaseData();
+    const exportData = { status: data.lastReceipt ? "已实切确认" : "示例或方案预览", receipt: data.lastReceipt || null,
+        rollId: data.rollId || null, demands: data.demands || [], pieces: data.pieces || [], cuts: data.cuts || [],
+        remnants: data.remnants || [], pieceArea: data.pieceArea || 0,
+        utilization: data.lastReceipt ? data.lastReceipt.utilization : ((data.totalArea || 0) ? data.pieceArea / data.totalArea * 100 : 0) };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json;charset=utf-8" }));
+    const link = document.createElement("a"); link.href = url; link.download = `cut-result-${Date.now()}.json`; link.click();
+    URL.revokeObjectURL(url);
 }
 
 export function renderCutTable(cuts) {
