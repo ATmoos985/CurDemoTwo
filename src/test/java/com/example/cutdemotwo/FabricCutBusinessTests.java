@@ -202,4 +202,23 @@ class FabricCutBusinessTests {
         assertTrue(result.isSuccess());
         assertTrue(result.getCuts().stream().noneMatch(c -> "纵切".equals(c.getType())));
     }
+
+    @Test
+    void testTwoDimensionalPlanCanBeReportedWithoutOverlappingStock(@org.junit.jupiter.api.io.TempDir java.nio.file.Path temp) {
+        org.junit.jupiter.api.Assumptions.assumeTrue(packingSolverService.isAvailable());
+        SolveRequest req = new SolveRequest();
+        req.setRollId("ROLL-DEMO-2D");
+        req.setRollW(2000);
+        req.setRollL(4000);
+        req.setCutOrigin("right-bottom");
+        req.setFirstStageOrientation("vertical");
+        req.setDemands(List.of(new PieceDemand(1, "窗帘偏幅", 1500, 4000, 1, false)));
+        req.setDefects(List.of(new Defect(21, 200, 1500, 150, 600, 50)));
+        SolveResponse plan = packingSolverService.solve(req);
+        assertTrue(plan.isSuccess());
+        var inventory = new com.example.cutdemotwo.service.RemnantService(temp.resolve("two-dimensional.json").toString());
+        var receipt = inventory.confirm(req, plan,
+                new CutReport("two-dimensional", 4000, plan.getPieces().size(), plan.getRemnants(), "测试库位"));
+        assertEquals(plan.getRemnants().size(), ((List<?>) receipt.get("derivedRemnants")).size());
+    }
 }

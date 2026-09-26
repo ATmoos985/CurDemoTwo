@@ -36,6 +36,8 @@ public class RemnantService {
     private final Map<String, Map<String, Object>> receipts = new LinkedHashMap<>();
     private final ObjectMapper json = new ObjectMapper();
     private final Path stateFile;
+    @Value("${cutdemo.measurement.tolerance-mm:5}")
+    private double measurementToleranceMm = 5;
 
     public RemnantService(@Value("${cutdemo.state.path:data/cutdemo-state.json}") String statePath) {
         stateFile = Path.of(statePath);
@@ -121,16 +123,31 @@ public class RemnantService {
         List<RemnantPiece> actual = report.actualRemnants() == null ? List.of() : report.actualRemnants();
         double remArea = 0;
         Set<String> seen = new HashSet<>();
+        List<double[]> recoveredBounds = new ArrayList<>();
+        double sourceLength = remnantFeed ? parent.getLength() : len;
+        double tolerance = Double.isFinite(measurementToleranceMm) ? Math.max(0, measurementToleranceMm) : 0;
         for (RemnantPiece item : actual) {
             if (item == null || item.getId() == null || !seen.add(item.getId())) throw new IllegalArgumentException("料头编号重复或为空");
             RemnantPiece proposed = plan.getRemnants().stream().filter(p -> p.getId().equals(item.getId())).findFirst()
                     .orElseThrow(() -> new IllegalArgumentException("料头不属于当前排料方案: " + item.getId()));
             if (!Double.isFinite(item.getW()) || !Double.isFinite(item.getL()) || item.getW() <= 0 || item.getL() <= 0 ||
-                    item.getW() > proposed.getW() + 0.001 || item.getL() > proposed.getL() + 0.001 ||
+                    item.getW() > proposed.getW() + tolerance + 0.001 || item.getL() > proposed.getL() + tolerance + 0.001 ||
                     (proposed.isHasDefect() && !item.isHasDefect()) ||
-                    (!remnantFeed && proposed.getY() + item.getL() > len + 0.001)) {
+                    proposed.getX() < 0 || proposed.getY() < 0 ||
+                    proposed.getX() + item.getW() > request.getRollW() + 0.001 ||
+                    proposed.getY() + item.getL() > sourceLength + 0.001) {
                 throw new IllegalArgumentException("实测料头超出排料范围: " + item.getId());
             }
+            boolean intersectsPiece = plan.getPieces().stream().anyMatch(piece -> overlaps(
+                    proposed.getX(), proposed.getY(), item.getW(), item.getL(),
+                    piece.getX(), piece.getY(), piece.getW(), piece.getL()));
+            boolean intersectsRemnant = recoveredBounds.stream().anyMatch(bounds -> overlaps(
+                    proposed.getX(), proposed.getY(), item.getW(), item.getL(),
+                    bounds[0], bounds[1], bounds[2], bounds[3]));
+            if (intersectsPiece || intersectsRemnant) {
+                throw new IllegalArgumentException("实测料头与成品或其他料头重叠: " + item.getId());
+            }
+            recoveredBounds.add(new double[]{proposed.getX(), proposed.getY(), item.getW(), item.getL()});
             remArea += item.getW() * item.getL() / 1_000_000.0;
         }
         double sourceArea = (remnantFeed ? parent.getArea() : request.getRollW() * len / 1_000_000.0);
@@ -209,6 +226,11 @@ public class RemnantService {
             throw error;
         }
         return receipt;
+    }
+
+    private static boolean overlaps(double x, double y, double w, double l,
+                                    double otherX, double otherY, double otherW, double otherL) {
+        return x < otherX + otherW && x + w > otherX && y < otherY + otherL && y + l > otherY;
     }
 
     private void initMotherRolls() {

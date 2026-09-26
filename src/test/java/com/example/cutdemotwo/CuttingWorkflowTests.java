@@ -93,4 +93,49 @@ class CuttingWorkflowTests {
         }
         assertEquals(before, inventory.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength());
     }
+
+    @Test
+    void repeatedPreviewKeepsOnlyRecentPlans() {
+        RemnantService inventory = new RemnantService(temp.resolve("bounded.json").toString());
+        CuttingWorkflowService workflow = new CuttingWorkflowService(
+                new SolverFactory(List.of(new CrossCutSolverService())), inventory);
+        SolveRequest request = new SolveRequest();
+        request.setAllowLongitudinal(false);
+        request.setRollW(2000);
+        request.setRollL(1600);
+        request.setDemands(List.of(new PieceDemand(1, "窗帘", 2000, 1000, 1, false)));
+        SolveResponse first = workflow.solve(request);
+        SolveResponse latest = first;
+        for (int i = 0; i < 100; i++) latest = workflow.solve(request);
+        CutReport expired = new CutReport(first.getPlanId(), 1600, 1, first.getRemnants(), "测试库位");
+        assertThrows(IllegalArgumentException.class, () -> workflow.confirm(expired));
+        assertEquals(1, workflow.confirm(new CutReport(latest.getPlanId(), 1600, 1,
+                latest.getRemnants(), "测试库位")).get("finishedPieceCount"));
+    }
+
+    @Test
+    void measuredRemnantMayGrowFiveMillimetersOnlyWhenGeometryIsFree() {
+        SolveRequest request = new SolveRequest();
+        request.setRollW(2000);
+        request.setRollL(500);
+        SolveResponse plan = new SolveResponse();
+        plan.setPieces(List.of(new PlacedPiece(1, "成品", 1000, 0, 500, 500, false)));
+        plan.setPieceArea(0.25);
+        plan.setRemnants(List.of(new RemnantPiece("R", "可用料头", 0, 0, 400, 500, 0.2, false)));
+        RemnantService inventory = new RemnantService(temp.resolve("measured.json").toString());
+        RemnantPiece tooLarge = new RemnantPiece("R", "可用料头", 0, 0, 406, 490, 0, false);
+        assertThrows(IllegalArgumentException.class, () -> inventory.confirm(request, plan,
+                new CutReport("too-large", 500, 1, List.of(tooLarge), "测试库位")));
+        RemnantPiece measured = new RemnantPiece("R", "可用料头", 0, 0, 405, 490, 0, false);
+        Map<String, Object> receipt = inventory.confirm(request, plan,
+                new CutReport("allowed", 500, 1, List.of(measured), "测试库位"));
+        RemnantStock child = ((List<RemnantStock>) receipt.get("derivedRemnants")).get(0);
+        assertEquals(405, child.getWidth());
+        assertEquals(490, child.getLength());
+
+        RemnantService crowded = new RemnantService(temp.resolve("crowded.json").toString());
+        plan.setPieces(List.of(new PlacedPiece(1, "成品", 404, 0, 500, 500, false)));
+        assertThrows(IllegalArgumentException.class, () -> crowded.confirm(request, plan,
+                new CutReport("overlap", 500, 1, List.of(measured), "测试库位")));
+    }
 }

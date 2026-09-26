@@ -4,16 +4,19 @@ import com.example.cutdemotwo.model.*;
 import com.example.cutdemotwo.service.solver.SolverFactory;
 import org.springframework.stereotype.Service;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class CuttingWorkflowService {
     private final SolverFactory solverFactory;
     private final RemnantService inventory;
-    // ponytail: demo plans live in one process; persist them when confirmations must survive restarts.
-    private final Map<String, Plan> plans = new ConcurrentHashMap<>();
+    // ponytail: retain at most 100 recent drafts in one process; persist them if restart recovery becomes necessary.
+    private final Map<String, Plan> plans = Collections.synchronizedMap(new LinkedHashMap<>(16, 0.75f, true) {
+        @Override protected boolean removeEldestEntry(Map.Entry<String, Plan> eldest) { return size() > 100; }
+    });
 
     public CuttingWorkflowService(SolverFactory solverFactory, RemnantService inventory) {
         this.solverFactory = solverFactory;
