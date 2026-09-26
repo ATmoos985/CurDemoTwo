@@ -468,7 +468,7 @@ export function openCutReport() {
         row.append(check, label, width, document.createTextNode("×"), length, document.createTextNode("mm"));
         document.getElementById("report-remnants").append(row);
     }
-    document.getElementById("report-error").textContent = "可取消勾选未回收的料头，并填写实测宽长。";
+    document.getElementById("report-error").textContent = "可取消未回收料头；实测宽、长均须 ≤ 对应预估值。超出时请先核实现场尺寸，不要改小实测值来通过确认。";
     document.getElementById("cut-report-modal").style.display = "flex";
 }
 
