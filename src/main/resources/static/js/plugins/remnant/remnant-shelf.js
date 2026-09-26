@@ -7,8 +7,9 @@ import { renderScene, resetToBedView, updateStatusBar } from '../cad/cad-rendere
 import { renderDefectsUI } from '../solver/quota-manager.js';
 import { renderRadar } from '../radar/radar-scrubber.js';
 import { updateUIInfo } from '../solver/solver-client.js';
+import { showToast } from '../../core/toast.js';
 
-export async function switchCutMode(mode, targetRemnant) {
+export async function switchCutMode(mode, targetRemnant, presetData = null) {
     state.setCutMode(mode);
 
     const btnRoll = document.getElementById("tab-btn-roll");
@@ -52,11 +53,11 @@ export async function switchCutMode(mode, targetRemnant) {
         refreshShelfRemnantsList();
 
         if (targetRemnant) {
-            mountRemnantToBed(targetRemnant);
+            mountRemnantToBed(targetRemnant, presetData);
         } else if (!state.loadedRemnant) {
             selectAndMountFromShelf("REM-202609-001");
         } else {
-            mountRemnantToBed(state.loadedRemnant);
+            mountRemnantToBed(state.loadedRemnant, presetData);
         }
     }
 }
@@ -228,14 +229,11 @@ export async function chooseRemnantForDemand(remId, demIdx) {
                     renderRemnantDemandsUI([demItem]);
                 }
 
-                alert(`决策生效：已自动切换至【模式二：料头复用精益切割】！\n` +
-                    `装载料头: [${rem.id}] (${rem.width}×${rem.length}mm, ${rem.location})\n` +
-                    `母卷扣料已锁定为 0mm！\n` +
-                    `请点击底部【执行料头精益切割】直接计算刀路。`);
+                showToast(`已切换至【模式二：料头复用】\n装载料头: [${rem.id}] (${rem.width}×${rem.length}mm)\n母卷 0 消耗保证。`, "success");
             }
         }
     } catch (e) {
-        alert("装载料头异常: " + e.message);
+        showToast("装载料头异常: " + e.message, "error");
     }
 }
 
@@ -319,14 +317,14 @@ export async function selectAndMountFromShelf(remId) {
             }
         }
     } catch (e) {
-        alert("装载料头异常: " + e.message);
+        showToast("装载料头异常: " + e.message, "error");
     }
 }
 
 export async function executeShelfBarcodeScan() {
     const code = document.getElementById("inp-shelf-scan-code").value.trim();
     if (!code) {
-        alert("请输入或扫描料头条码！");
+        showToast("请输入或扫描料头条码！", "warning");
         return;
     }
     selectAndMountFromShelf(code);
@@ -337,7 +335,7 @@ export function quickSelectRemnant(id) {
     selectAndMountFromShelf(id);
 }
 
-export function mountRemnantToBed(rem) {
+export function mountRemnantToBed(rem, presetData = null) {
     state.setLoadedRemnant(rem);
 
     document.getElementById("lbl-shelf-active-id").innerText = rem.id;
@@ -359,16 +357,29 @@ export function mountRemnantToBed(rem) {
     data.totalRollL = rem.length;
     data.windowStartY = 0;
     data.globalDefects = rem.defects || [];
-    data.deductLen = 0;
-    data.pieces = [];
-    data.cuts = [];
-    data.remnants = [];
-    data.pieceArea = 0;
-    data.remArea = 0;
-    data.wasteArea = 0;
-    data.totalArea = 0;
     data.lastReceipt = null;
     data.allowLongitudinal = document.getElementById("sel-allow-longitudinal")?.value !== "0";
+
+    if (presetData && presetData.pieces && presetData.pieces.length > 0) {
+        data.pieces = JSON.parse(JSON.stringify(presetData.pieces));
+        data.cuts = JSON.parse(JSON.stringify(presetData.cuts || []));
+        data.remnants = JSON.parse(JSON.stringify(presetData.remnants || []));
+        data.deductLen = presetData.deductLen || 0;
+        data.pieceArea = presetData.pieceArea || 0;
+        data.remArea = presetData.remArea || 0;
+        data.wasteArea = presetData.wasteArea || 0;
+        data.totalArea = presetData.totalArea || 0;
+        data.engine = presetData.engine || "料头精益复用排料引擎";
+    } else {
+        data.deductLen = 0;
+        data.pieces = [];
+        data.cuts = [];
+        data.remnants = [];
+        data.pieceArea = 0;
+        data.remArea = 0;
+        data.wasteArea = 0;
+        data.totalArea = 0;
+    }
 
     const currentRemDemands = getRemnantDemandsFromUI();
     if (currentRemDemands.length === 0) {

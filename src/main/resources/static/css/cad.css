@@ -2,7 +2,7 @@
 .viewport-container {
     flex: 1;
     position: relative;
-    background: #09090b;
+    background: #0b1120;
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -102,7 +102,7 @@
     gap: 14px;
     font-size: 11px;
     padding: 6px 12px;
-    background: #18181b;
+    background: #111e38;
     border-bottom: 1px solid var(--panel-border);
 }
 .legend-dot { width: 10px; height: 10px; border-radius: 2px; }

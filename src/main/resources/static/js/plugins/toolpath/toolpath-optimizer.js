@@ -323,26 +323,23 @@ export function renderToolpathUI() {
     const data = state.getCurrentCaseData();
     const cycle = calculateCycleTime(data, stats);
 
+    if (data.cuts == null || data.cuts.length === 0) {
+        container.innerHTML = `
+            <div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 6px; background: rgba(148, 163, 184, 0.05); border-radius: 4px;">
+                机台就绪 · 待生成排料切序
+            </div>
+        `;
+        return;
+    }
+
     if (!isOpt || !stats) {
         container.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div style="font-size: 11px; color: var(--text-muted);">
-                    起刀停靠位: <b style="color: #f59e0b;">右下角原点</b> | 状态: <span style="color:#94a3b8;">原始刀序</span>
+                    起刀点: <b style="color: #f59e0b;">右下角原点</b> | 状态: <span style="color:#94a3b8;">标准直刀切序</span>
                 </div>
-                <button class="tool-btn active" style="font-size: 11px; padding: 3px 8px; background: #0284c7;" onclick="window.camApp.toggleToolpathOptimization()">
-                    一键右下角刀路优化
-                </button>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; background: rgba(2, 132, 199, 0.05); border: 1px dashed rgba(2, 132, 199, 0.25); border-radius: 4px; padding: 4px 8px;">
-                <span>预估节拍: <b>${cycle.cycleTimeStr}</b> (纯切${cycle.tCut}s | 空刀${cycle.tRapid}s)</span>
-                <span style="color: #0284c7;">产能: ~${cycle.uph} 件/小时</span>
-            </div>
-            <div style="display: flex; gap: 6px; margin-top: 6px;">
-                <button class="tool-btn" style="flex: 1; font-size: 10.5px; padding: 3px 0; background: #0284c7; color: #ffffff;" onclick="window.cutApp.plugins.export.openExportModal('gcode')">
-                    导出机床代码 (CNC/DXF)
-                </button>
-                <button class="tool-btn" style="flex: 1; font-size: 10.5px; padding: 3px 0; background: #d97706; color: #ffffff;" onclick="window.cutApp.plugins.export.openCutTicketModal()">
-                    生成现场工单 (Cut Ticket)
+                <button class="tool-btn active" style="font-size: 10.5px; padding: 2px 8px; background: #0284c7;" onclick="window.camApp.toggleToolpathOptimization()">
+                    优化空走刀
                 </button>
             </div>
         `;
@@ -350,18 +347,15 @@ export function renderToolpathUI() {
         container.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                 <div style="font-size: 11px; font-weight: bold; color: #10b981;">
-                    ✓ 右下角刀路已优化 (空走路线最短)
+                    ✓ 刀路已优化 (空程已压缩)
                 </div>
                 <div style="display: flex; gap: 6px;">
                     <button class="tool-btn" style="font-size: 10px; padding: 2px 6px; background: rgba(239, 68, 68, 0.12); color: #dc2626; border-color: rgba(239, 68, 68, 0.3);" onclick="window.camApp.toggleToolpathOptimization()">
-                        恢复原始切序
-                    </button>
-                    <button class="tool-btn active" style="font-size: 10px; padding: 2px 6px; background: #059669;" onclick="window.camApp.toggleToolpathOptimization()">
-                        重新寻优
+                        恢复标准
                     </button>
                 </div>
             </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; font-size: 10.5px; background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 4px; padding: 6px;">
+            <div style="display: flex; justify-content: space-between; font-size: 10.5px; background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 4px; padding: 4px 8px;">
                 <div>
                     <span style="color: var(--text-muted);">空刀快移: </span>
                     <span style="text-decoration: line-through; color: #94a3b8;">${(stats.originalAirDistance/1000).toFixed(2)}m</span>
@@ -371,22 +365,6 @@ export function renderToolpathUI() {
                     <span style="color: var(--text-muted);">节省空程: </span>
                     <b style="color: #0284c7;">-${(stats.savedAirDistance/1000).toFixed(2)}m (${stats.savingRatio}%)</b>
                 </div>
-                <div>
-                    <span style="color: var(--text-muted);">机床加工节拍: </span>
-                    <b style="color: #10b981;">${cycle.cycleTimeStr}</b>
-                </div>
-                <div>
-                    <span style="color: var(--text-muted);">生产效率: </span>
-                    <b style="color: #0284c7;">~${cycle.uph} 件/小时</b>
-                </div>
-            </div>
-            <div style="display: flex; gap: 6px; margin-top: 6px;">
-                <button class="tool-btn" style="flex: 1; font-size: 10.5px; padding: 3px 0; background: #0284c7; color: #ffffff;" onclick="window.cutApp.plugins.export.openExportModal('gcode')">
-                    导出机床代码 (CNC/DXF)
-                </button>
-                <button class="tool-btn" style="flex: 1; font-size: 10.5px; padding: 3px 0; background: #d97706; color: #ffffff;" onclick="window.cutApp.plugins.export.openCutTicketModal()">
-                    生成现场工单 (Cut Ticket)
-                </button>
             </div>
         `;
     }

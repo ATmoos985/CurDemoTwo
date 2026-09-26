@@ -10,6 +10,7 @@ import {
     addOrMergeInterval, renderDemandsUI, renderDefectsUI,
     getDemandsFromUI, getDefectsFromUI
 } from './quota-manager.js';
+import { showToast } from '../../core/toast.js';
 
 export function updateUIInfo() {
     const data = state.getCurrentCaseData();
@@ -141,7 +142,7 @@ export function loadCase(id) {
     }
     state.setCaseId(id);
     state.scenarios[id].lastReceipt = null;
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 6; i++) {
         const btn = document.getElementById(`btn-case-${i}`);
         if (btn) btn.classList.toggle("active", i === id);
     }
@@ -187,12 +188,12 @@ export async function triggerSolve() {
     if (isRemnantMode) {
         const loadedRemnant = state.loadedRemnant;
         if (!loadedRemnant) {
-            alert("【料头切割提示】请先在左侧料头货架中选择或扫描一块料头装载至机台！");
+            showToast("请先在左侧料头货架中选择或扫描一块料头装载至机台！", "warning");
             return;
         }
         demands = window.camApp ? window.camApp.getRemnantDemandsFromUI() : [];
         if (!demands || demands.length === 0) {
-            alert("【排料提示】请至少在左侧添加 1 项料头裁片套裁需求！");
+            showToast("请至少在左侧添加 1 项料头裁片套裁需求！", "warning");
             return;
         }
         activeDemands = demands;
@@ -247,7 +248,7 @@ export async function triggerSolve() {
 
         const rawDemands = getDemandsFromUI();
         if (rawDemands.length === 0) {
-            alert("【排料提示】请至少在左侧添加 1 项母卷开卷裁片需求！");
+            showToast("请至少在左侧添加 1 项母卷开卷裁片需求！", "warning");
             return;
         }
 
@@ -263,7 +264,7 @@ export async function triggerSolve() {
         }).filter(d => d.demand > 0);
 
         if (activeDemands.length === 0) {
-            alert("【订单需求已全部完成】\n当前订单池中所有裁片均已在其他工位完成排料！\n\n您可以：\n1. 点击【+ 增裁片】或在现有裁片上增加【计划件数】；\n2. 点击【清空整卷已排】从头开始新一轮接续排料模拟。");
+            showToast("【需求已就绪】当前订单池裁片已完成排布，若需加料可增加计划件数。", "info");
             return;
         }
         demands = activeDemands;
@@ -421,40 +422,35 @@ export async function triggerSolve() {
                 const totalCutPieces = (data.pieces || []).length;
                 const thisBedPieces = (result.pieces || []).length;
 
-                alert(`【智能几何排料计算成功】\n` +
-                    `工位模式: ${isRemnantMode ? '模式二：料头复用精益切割 (母卷 0 消耗)' : '模式一：母卷连续开卷接续搭切'}\n` +
-                    `母卷批号: ${rollId} (${rollModel})\n` +
-                    `当前工位: ${winStartY} ~ ${winEndY} mm (${(winStartY/1000).toFixed(1)}m ~ ${(winEndY/1000).toFixed(1)}m)\n` +
-                    `起刀基准: ${cutOrigin}\n` +
-                    `计算引擎: ${result.engine} [${elapsed}ms]\n` +
-                    `避让疵点: ${activeBedDefects.length} 处\n` +
-                    `本工位产出: ${thisBedPieces} 件 (整卷累计保留: ${totalCutPieces} 件)\n` +
-                    `切刀工步: 本次 ${result.cuts.length} 步 (整卷累计: ${(data.cuts||[]).length} 步直刀)\n` +
-                    `${isRemnantMode ? '母卷扣料: 0mm；确认后核销原料头' : `方案用料: 累计 ${(data.deductLen/1000).toFixed(1)}m (${stationCount} 个工位接续)`}\n` +
-                    `方案利用率: ${(result.totalArea ? result.pieceArea / result.totalArea * 100 : 0).toFixed(1)}%\n` +
-                    `这是排料预览；实切完成后点击【实切确认】更新库存。`);
+                showToast(`直刀排料计算成功：产出 ${thisBedPieces} 件，利用率 ${(result.totalArea ? result.pieceArea / result.totalArea * 100 : 0).toFixed(1)}%`, 'success');
                 return;
             } else {
-                alert("【智能排料计算失败】\n" + (result.message || "未知原因"));
+                showToast("排料求解未能找到有效方案: " + (result.message || "未知原因"), "warning");
                 return;
             }
         }
     } catch (err) {
         console.error(err);
-        alert("调用后端 /api/solve 异常: " + err.message);
+        showToast("调用排料引擎接口异常: " + err.message, "error");
     }
 }
 
-export function openCutReport() {
-    const pending = state.pendingPlan;
-    if (!pending || !pending.result.planId) {
-        alert("请先执行排料，取得待确认方案。");
+export async function openCutReport() {
+    let pending = state.pendingPlan;
+    if (!pending || !pending.result || !pending.result.planId) {
+        // 若当前未执行排料，自动触发一次后端试算建立草稿方案
+        await triggerSolve();
+        pending = state.pendingPlan;
+    }
+    if (!pending || !pending.result || !pending.result.planId) {
+        showToast("当前方案暂无可确认的有效排料结果，请先检查需求并执行排料。", "warning");
         return;
     }
     const { result, bedL, feedPortType } = pending;
-    document.getElementById("report-actual-len").value = feedPortType === "remnant" ? 0 : bedL;
+    const defaultCutLen = (result.deductLen && result.deductLen > 0) ? result.deductLen : bedL;
+    document.getElementById("report-actual-len").value = feedPortType === "remnant" ? 0 : defaultCutLen;
     document.getElementById("report-actual-len").disabled = feedPortType === "remnant";
-    document.getElementById("report-piece-count").value = result.pieces.length;
+    document.getElementById("report-piece-count").value = result.pieces ? result.pieces.length : 0;
     document.getElementById("report-remnants").innerHTML = "";
     for (const remnant of result.remnants || []) {
         const row = document.createElement("div");
@@ -509,7 +505,7 @@ export async function confirmCutReport() {
             const roll = await rollResponse.json();
             if (remaining) remaining.innerText = `${roll.currentRemainingLength} mm`;
         }
-        alert(`实切确认成功：${receipt.finishedPieceCount} 件，利用率 ${receipt.utilization.toFixed(1)}%，新料头 ${receipt.derivedRemnants.length} 块。`);
+        showToast(`实切确认成功：${receipt.finishedPieceCount} 件，利用率 ${receipt.utilization.toFixed(1)}%，新料头 ${receipt.derivedRemnants.length} 块已建档。`, "success");
     } catch (error) {
         document.getElementById("report-error").textContent = error.message;
     }

@@ -9,7 +9,7 @@ class StateStore {
     constructor() {
         this.scenarios = getInitialScenarios();
         this.motherRollSpecs = { ...MOTHER_ROLL_SPECS };
-        this.currentCaseId = 5;
+        this.currentCaseId = 1;
         this.currentCutMode = "roll"; // "roll" | "remnant"
         this.currentFeedPort = "roll";
         this.currentCutStepLimit = 999;

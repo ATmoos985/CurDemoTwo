@@ -14,6 +14,7 @@ import {
 import {
     toggleSectionCollapse, toggleSidebar, initLayoutResizers, switchRightPanelTab
 } from './plugins/layout/splitter.js';
+import { showToast } from './core/toast.js';
 
 import {
     initKonva, stage
@@ -195,13 +196,24 @@ export async function selectPresetCase(caseId) {
         loadCase(caseId);
     }
     if (caseId === 3) {
-        const response = await fetch('/api/remnants/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: 'REM-202609-001' }) });
-        const remnant = await response.json();
-        if (remnant && remnant.id) {
-            await switchCutMode('remnant', remnant);
-            renderRemnantDemandsUI([{ name: '窗帘矩形补单', width: 2000, length: 1000, count: 1 }]);
-        } else alert('示例料头已用完，请从料头库装载其他料头。');
+        const case3 = state.scenarios[3];
+        try {
+            const response = await fetch('/api/remnants/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: 'REM-202609-001' }) });
+            const remnant = await response.json();
+            if (remnant && remnant.id) {
+                await switchCutMode('remnant', remnant, case3);
+                renderRemnantDemandsUI([{ name: '飘窗短帘成品', width: 2000, length: 1000, count: 1 }]);
+                renderScene();
+                resetToBedView();
+                updateUIInfo();
+                renderToolpathUI();
+            } else {
+                showToast('示例料头已用完，请从料头库装载其他料头。', 'warning');
+            }
+        } catch (e) {
+            console.error("Case 3 load error:", e);
+        }
     } else {
         const selectedRoll = state.getCurrentCaseData().rollId || 'ROLL-2026-0920';
         const selector = document.getElementById('sel-mother-roll-id');
@@ -216,13 +228,14 @@ export function updatePresetTriggerLabel(caseId) {
     const label = document.getElementById('preset-current-label');
     if (!label) return;
     const names = {
-        1: '算例1: L形拆解',
-        2: '窗帘二维避疵',
-        3: '算例3: 短料优先',
-        4: '旧西装全貌',
-        5: '窗帘矩形横切'
+        1: '案例1: 窗帘定高整幅横切',
+        2: '案例2: 偏幅单开帘纵切改宽',
+        3: '案例3: 短料料头套裁 (0扣料)',
+        4: '案例4: 窗幔帘头辅件套裁',
+        5: '案例5: Word表1 L形拆解',
+        6: '案例6: 60m大卷多工位搭切'
     };
-    label.textContent = names[caseId] || `算例${caseId}`;
+    label.textContent = names[caseId] || `案例${caseId}`;
 }
 
 bus.on('toolpath:optimized', () => {
@@ -339,7 +352,11 @@ const camApp = {
     togglePresetDropdown,
     closePresetDropdown,
     selectPresetCase,
-    updatePresetTriggerLabel
+    updatePresetTriggerLabel,
+    toggleSectionCollapse,
+    toggleSidebar,
+    switchRightPanelTab,
+    showToast
 };
 
 window.camApp = camApp;
@@ -396,7 +413,8 @@ async function bootstrapApp() {
     setupRadarInteraction();
     initLayoutResizers();
     initNestingKeyboardShortcuts();
-    loadCase(5); // 默认打开窗帘矩形横切示例
+    loadCase(1); // 默认打开案例1：窗帘定高整幅横切
+    updatePresetTriggerLabel(1);
     await onMotherRollChange();
     refreshShelfRemnantsList();
     renderToolpathUI();

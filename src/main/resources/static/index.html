@@ -28,46 +28,56 @@
             <div class="preset-dropdown-container" id="preset-dropdown-container">
                 <button class="preset-dropdown-trigger" id="btn-preset-trigger" onclick="togglePresetDropdown(event)" title="快速载入预设工业工况示例">
                     <span class="preset-trigger-badge">示例</span>
-                    <span id="preset-current-label">窗帘矩形横切</span>
+                    <span id="preset-current-label">案例1: 窗帘定高整幅横切</span>
                     <span class="preset-dropdown-arrow">▾</span>
                 </button>
                 <div class="preset-dropdown-menu" id="preset-dropdown-menu">
                     <div class="preset-dropdown-header">
                         <span>预设工业工况快速载入</span>
-                        <span class="preset-dropdown-sub">3 条路线 · 5 个示例</span>
+                        <span class="preset-dropdown-sub">窗帘工业典型工况 · 6 组标准案例</span>
                     </div>
                     <div class="preset-menu-list">
-                        <button class="preset-menu-item" id="btn-case-1" onclick="selectPresetCase(1)">
+                        <button class="preset-menu-item active" id="btn-case-1" onclick="selectPresetCase(1)">
                             <div class="preset-item-head">
-                                <span class="preset-item-name">算例1: L形拆解</span>
-                                <span class="preset-item-tag">正交裁切</span>
+                                <span class="preset-item-name">案例1: 窗帘定高整幅横切</span>
+                                <span class="preset-item-tag">仅横切避疵</span>
                             </div>
-                            <div class="preset-item-desc">Word 表1：L形余料正交直接裁切拆解</div>
+                            <div class="preset-item-desc">2m×1.2m 落地帘主片，整幅横切避让 1.4m 经向破洞并隔离料头</div>
                         </button>
                         <button class="preset-menu-item" id="btn-case-2" onclick="selectPresetCase(2)">
                             <div class="preset-item-head">
-                                <span class="preset-item-name">窗帘二维避疵</span>
+                                <span class="preset-item-name">案例2: 偏幅单开帘纵切改宽</span>
                                 <span class="preset-item-tag">分幅避障</span>
                             </div>
-                            <div class="preset-item-desc">窗帘矩形偏幅裁片，左侧带疵纵切隔离</div>
+                            <div class="preset-item-desc">1.5m×4m 偏幅单开帘，左侧 0.5m 带疵料头全长纵向分幅隔离</div>
                         </button>
                         <button class="preset-menu-item" id="btn-case-3" onclick="selectPresetCase(3)">
                             <div class="preset-item-head">
-                                <span class="preset-item-name">算例3: 短料优先</span>
-                                <span class="preset-item-tag">0扣料</span>
+                                <span class="preset-item-name">案例3: 短料料头套裁</span>
+                                <span class="preset-item-tag">0扣料复用</span>
                             </div>
-                            <div class="preset-item-desc">短料复用：1.6m短料优先领用 (0母卷扣料)</div>
+                            <div class="preset-item-desc">在库 2m×1.6m 完好料头套裁 2m×1m 飘窗短帘，母卷 0 消耗</div>
                         </button>
-                        <button class="preset-menu-item active" id="btn-case-4" onclick="selectPresetCase(4)">
+                        <button class="preset-menu-item" id="btn-case-4" onclick="selectPresetCase(4)">
                             <div class="preset-item-head">
-                                <span class="preset-item-name">旧西装全貌</span>
-                                <span class="preset-item-tag">60m大卷</span>
+                                <span class="preset-item-name">案例4: 窗幔帘头辅件套裁</span>
+                                <span class="preset-item-tag">二维断刀</span>
                             </div>
-                            <div class="preset-item-desc">保留的西装教学图，展示 60m 全卷与红框接续</div>
+                            <div class="preset-item-desc">大幔/小幔/绑带多规格辅件高利用率两阶段正交断刀套裁</div>
                         </button>
                         <button class="preset-menu-item" id="btn-case-5" onclick="selectPresetCase(5)">
-                            <div class="preset-item-head"><span class="preset-item-name">窗帘矩形横切</span><span class="preset-item-tag">仅横切</span></div>
-                            <div class="preset-item-desc">整幅裁片避疵；褶皱、拼幅、花型规则待定</div>
+                            <div class="preset-item-head">
+                                <span class="preset-item-name">案例5: Word 表1 经典 L形拆解</span>
+                                <span class="preset-item-tag">正交拆解</span>
+                            </div>
+                            <div class="preset-item-desc">Word 规范表1：两刀正交拆解，4.5+3.5=8.0m² 严密面积守恒</div>
+                        </button>
+                        <button class="preset-menu-item" id="btn-case-6" onclick="selectPresetCase(6)">
+                            <div class="preset-item-head">
+                                <span class="preset-item-name">案例6: 60m大卷多工位搭切</span>
+                                <span class="preset-item-tag">工业全貌</span>
+                            </div>
+                            <div class="preset-item-desc">60m 超长大卷多处疵点分布，结合红框交互与推进拉布全流程</div>
                         </button>
                     </div>
                 </div>
@@ -450,9 +460,9 @@
                 <button class="playback-btn" onclick="stepCut(-1)" title="后退一刀">&lt; 上一刀</button>
                 <button class="playback-btn" onclick="stepCut(1)" title="单步推演下一刀">下一刀 &gt;</button>
                 <button class="playback-btn" onclick="stepCut(999)" title="一键展示全部刀序">&gt;| 显示全刀</button>
-                <span style="font-size: 11px; color: var(--text-muted); margin-left: auto;">
-                    CAD微调操作：鼠标拖拽移动裁片 | [←↑→↓] 微调 5mm (Shift 20mm) | [R] 旋转 90° | 触碰瑕疵/出界自动红框干涉报警
-                </span>
+                <div class="cad-hint-badge" title="鼠标拖拽移动裁片&#10;方向键 [←↑→↓] 微调 5mm (按住Shift 20mm)&#10;快捷键 [R] 旋转 90°&#10;碰撞瑕疵或越界触发红框干涉报警" style="margin-left: auto; font-size: 11px; color: var(--text-muted); cursor: help; background: rgba(255,255,255,0.05); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--panel-border);">
+                    <span>⌨ CAD 交互快捷键 ⓘ</span>
+                </div>
             </div>
         </section>
 
@@ -592,6 +602,12 @@
                     </div>
                 </div>
             </div>
+            <!-- 现场实切确认与料头回库大按钮 (常驻右侧对账页底部) -->
+            <div class="sidebar-pinned-footer action-footer-section" style="border-top: 1px solid var(--panel-border); padding: 12px 14px;">
+                <button class="tool-btn active" style="width: 100%; height: 32px; background: #059669; font-weight: 700; font-size: 12px;" onclick="openCutReport()">
+                    ✂ 现场实切确认与料头回库
+                </button>
+            </div>
         </div>
     </aside>
     </main>
@@ -612,17 +628,42 @@
     </footer>
 
     <div id="cut-report-modal" class="settings-modal-overlay">
-        <div class="settings-modal-dialog" style="max-width:640px;">
-            <div class="settings-modal-header"><b>实切确认与料头回库</b><button class="tool-btn" onclick="closeCutReport()">关闭</button></div>
-            <div style="padding:16px;overflow-y:auto;flex:1;display:grid;gap:12px;">
-                <p style="margin:0;color:var(--text-muted);">按现场实测填写。确认后才扣减母卷或核销原料头，并登记新料头。</p>
-                <label>实切母卷长度 (mm) <input id="report-actual-len" type="number" min="0" step="1" class="prop-input"></label>
-                <label>完成裁片件数 <input id="report-piece-count" type="number" min="1" step="1" class="prop-input"></label>
-                <label>料头库位 <input id="report-location" type="text" value="现场料头架" class="prop-input"></label>
-                <div id="report-remnants"></div>
-                <div id="report-error" style="color:var(--accent-red);"></div>
+        <div class="settings-modal-dialog" style="max-width: 600px;">
+            <div class="settings-modal-header">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-weight: 700; font-size: 14px; color: var(--accent-green);">✂ 现场实切确认与料头回库</span>
+                    <span class="header-tag" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3);">闭环核销</span>
+                </div>
+                <button class="tool-btn" onclick="closeCutReport()">关闭</button>
             </div>
-            <div class="settings-footer"><button class="tool-btn" onclick="closeCutReport()">取消</button><button class="tool-btn active" onclick="confirmCutReport()">确认实切并更新库存</button></div>
+            <div style="padding: 18px 22px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 14px;">
+                <div style="font-size: 11.5px; color: var(--text-muted); background: var(--card-box-bg); padding: 8px 12px; border-radius: 4px; border: 1px solid var(--panel-border);">
+                    请核对车间机台实测用料与产出。点击确认后系统将正式扣减母卷库存（或核销原料头），并将符合规格的料头登记入库。
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-main);">
+                        <span>实切母卷进料长度 (mm)</span>
+                        <input id="report-actual-len" type="number" min="0" step="1" class="prop-input" style="width: 100%;">
+                    </label>
+                    <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-main);">
+                        <span>实切合格裁片件数 (件)</span>
+                        <input id="report-piece-count" type="number" min="1" step="1" class="prop-input" style="width: 100%;">
+                    </label>
+                </div>
+                <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-main);">
+                    <span>料头目标入库货架 / 库位</span>
+                    <input id="report-location" type="text" value="现场料头立体货架 A-01" class="prop-input" style="width: 100%;">
+                </label>
+                <div>
+                    <div style="font-size: 12px; font-weight: 600; color: var(--accent-amber); margin-bottom: 6px;">预计派生/回收料头清单:</div>
+                    <div id="report-remnants" style="font-size: 11.5px;"></div>
+                </div>
+                <div id="report-error" style="color: var(--accent-red); font-size: 11.5px; font-weight: 600;"></div>
+            </div>
+            <div class="settings-footer">
+                <button class="tool-btn" onclick="closeCutReport()">取消</button>
+                <button class="tool-btn active" style="background: #059669; padding: 6px 16px; font-weight: 700;" onclick="confirmCutReport()">确认实切并完成核销回库</button>
+            </div>
         </div>
     </div>
 
