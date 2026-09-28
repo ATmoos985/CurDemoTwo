@@ -104,8 +104,8 @@ export async function onMotherRollChange(forceResetBed = false) {
                 if (baseOriginEl) baseOriginEl.innerText = `Y = ${used.toLocaleString()} mm (${(used/1000).toFixed(2)}m)`;
 
                 // 生产现场防呆：若重新载入或拿出该母卷且已有实切用料，自动将开卷工位定位到已切布头
-                if (used > 0 && (!data.windowStartY || data.windowStartY < used)) {
-                    data.windowStartY = used;
+                if (used > 0 && (!current.windowStartY || current.windowStartY < used)) {
+                    current.windowStartY = used;
                 }
             }
         }

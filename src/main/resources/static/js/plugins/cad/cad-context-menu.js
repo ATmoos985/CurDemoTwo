@@ -17,6 +17,7 @@ import {
     updateFabricScrollPosition, updateDefectVisualStates,
     updateDefectRadarActiveState, smartAdvanceBed
 } from '../radar/radar-scrubber.js';
+import { selectRemnant, clearRemnantSelection } from './cad-remnant-highlight.js';
 
 let activeMenu = null;
 let currentTarget = null;
@@ -94,15 +95,19 @@ function showMenuAt(clientX, clientY, htmlContent) {
 export function makeRemnantInteractive(rGroup, remnant, caseData) {
     rGroup.name(`remnant-entity-${remnant.id}`);
 
-    // 鼠标悬停高亮
+    // 鼠标悬停高亮与右侧表格行高亮联动
     rGroup.on("mouseenter", () => {
         const container = document.getElementById("konva-container");
-        if (container) container.style.cursor = "context-menu";
+        if (container) container.style.cursor = "pointer";
         const mainRect = rGroup.findOne("Rect");
         if (mainRect) {
             mainRect.strokeWidth(3.5);
             mainRect.dash([6, 3]);
             mainLayer.batchDraw();
+        }
+        const row = document.getElementById(`remnant-row-${remnant.id}`);
+        if (row && !row.classList.contains("remnant-selected-row")) {
+            row.classList.add("remnant-hover-row");
         }
     });
 
@@ -115,19 +120,24 @@ export function makeRemnantInteractive(rGroup, remnant, caseData) {
             mainRect.dash([8, 4]);
             mainLayer.batchDraw();
         }
+        const row = document.getElementById(`remnant-row-${remnant.id}`);
+        if (row) {
+            row.classList.remove("remnant-hover-row");
+        }
     });
 
     // 右键打开料头上下文菜单
     rGroup.on("contextmenu", (e) => {
         e.evt.preventDefault();
         e.cancelBubble = true;
+        selectRemnant(remnant.id, { fromCanvas: true, showToastMsg: false, switchTab: false });
         openRemnantContextMenu(remnant, e.evt.clientX, e.evt.clientY);
     });
 
-    // 左键点击气泡提示
+    // 左键点击：在 CAD 画布上高亮选中此料头，自动切换至右侧【料头与对账】Tab 并定位滚动到对应表格行
     rGroup.on("click", (e) => {
         e.cancelBubble = true;
-        showToast(`[料头 ${remnant.id}] ${remnant.w}×${remnant.l}mm (${remnant.area.toFixed(2)}m²)，可右键此图形块将其抛弃并归还母卷`, 'info');
+        selectRemnant(remnant.id, { fromCanvas: true, showToastMsg: true, switchTab: true });
     });
 }
 
@@ -366,6 +376,10 @@ export function discardRemnant(remnantId) {
         showToast(`已抛弃料头 ${remnant.id} (面积 ${remnant.area.toFixed(2)}m²)，不入库登记。`, 'info');
     }
 
+    if (state.selectedRemnantId === remnantId) {
+        clearRemnantSelection();
+    }
+
     updateUIInfo();
     renderScene();
 }
@@ -601,11 +615,7 @@ window.cadMenuActions = {
     },
     locateRemnant: (remnantId) => {
         closeCADContextMenu();
-        const data = state.getCurrentCaseData();
-        const rem = (data.remnants || []).find(r => r.id === remnantId);
-        if (rem) {
-            showToast(`[料头定位] #${rem.id}: X=${rem.x}mm, Y=${rem.y}mm, 宽=${rem.w}mm, 长=${rem.l}mm`, 'info');
-        }
+        selectRemnant(remnantId, { smoothPan: true, showToastMsg: true, switchTab: true });
     },
     discardPiece: (pieceId) => {
         closeCADContextMenu();

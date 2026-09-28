@@ -84,6 +84,10 @@ import {
 } from './plugins/cad/cad-context-menu.js';
 
 import {
+    selectRemnant, clearRemnantSelection, hoverRemnant
+} from './plugins/cad/cad-remnant-highlight.js';
+
+import {
     generateGCode, generateDXF, openExportModal, closeExportModal,
     switchExportTab, copyExportPreview, openCutTicketModal, closeCutTicketModal,
     printCutTicketDocument
@@ -389,10 +393,16 @@ const camApp = {
     toggleSidebar,
     switchRightPanelTab,
     showToast,
-    loadCurtainOrderTemplate
+    loadCurtainOrderTemplate,
+    selectRemnant,
+    clearRemnantSelection,
+    hoverRemnant
 };
 
 window.camApp = camApp;
+window.selectRemnant = selectRemnant;
+window.clearRemnantSelection = clearRemnantSelection;
+window.hoverRemnant = hoverRemnant;
 window.cutApp = window.cutApp || {};
 window.cutApp.plugins = {
     export: {

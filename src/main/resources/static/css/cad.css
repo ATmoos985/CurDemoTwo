@@ -251,3 +251,54 @@
 [data-theme="light"] .cad-menu-divider {
     background: #e2e8f0;
 }
+
+/* 料头与对账表格双向联动高亮样式 */
+.cam-table tr.interactive-row {
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cam-table tr.interactive-row:hover,
+.cam-table tr.remnant-hover-row {
+    background: rgba(2, 132, 199, 0.18) !important;
+}
+
+[data-theme="light"] .cam-table tr.interactive-row:hover,
+[data-theme="light"] .cam-table tr.remnant-hover-row {
+    background: #e0f2fe !important;
+}
+
+.cam-table tr.remnant-selected-row {
+    background: rgba(2, 132, 199, 0.32) !important;
+    outline: 2px solid #38bdf8 !important;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.5) !important;
+    position: relative;
+    z-index: 2;
+    animation: remnantRowPulse 1.8s ease-in-out infinite alternate;
+}
+
+[data-theme="light"] .cam-table tr.remnant-selected-row {
+    background: #bae6fd !important;
+    outline: 2px solid #0284c7 !important;
+    box-shadow: 0 0 10px rgba(2, 132, 199, 0.4) !important;
+}
+
+@keyframes remnantRowPulse {
+    0% {
+        box-shadow: 0 0 4px rgba(56, 189, 248, 0.3);
+    }
+    100% {
+        box-shadow: 0 0 16px rgba(56, 189, 248, 0.7);
+    }
+}
+
+.rem-locate-btn {
+    transition: all 0.15s ease;
+}
+.rem-locate-btn:hover {
+    background: rgba(56, 189, 248, 0.25) !important;
+    border-color: #38bdf8 !important;
+    color: #ffffff !important;
+    transform: scale(1.05);
+}
+

@@ -5,7 +5,7 @@ import { bus } from '../../core/event-bus.js';
 import { state } from '../../core/state.js';
 
 export let stage, mainLayer;
-export let fabricScrollGroup, fabricBgGroup, gridGroup, defectGroup, remnantGroup, pieceGroup, cutGroup;
+export let fabricScrollGroup, fabricBgGroup, gridGroup, defectGroup, remnantGroup, pieceGroup, cutGroup, remnantHighlightGroup;
 export let bedStationGroup, dynBedRangeBadge, dynBedBottomBadge;
 
 export function initKonva() {
@@ -34,12 +34,14 @@ export function initKonva() {
     remnantGroup = new Konva.Group();
     pieceGroup = new Konva.Group();
     cutGroup = new Konva.Group();
+    remnantHighlightGroup = new Konva.Group({ name: "remnant-highlight-group" });
 
     fabricScrollGroup.add(fabricBgGroup);
     fabricScrollGroup.add(remnantGroup);
     fabricScrollGroup.add(pieceGroup);
     fabricScrollGroup.add(defectGroup);
     fabricScrollGroup.add(cutGroup);
+    fabricScrollGroup.add(remnantHighlightGroup);
 
     // 2. 绝对固定在视口中央的醒目大红框物理裁切工位 (Fixed Red Cutting Bed Station)
     bedStationGroup = new Konva.Group();
@@ -76,6 +78,13 @@ export function initKonva() {
     stage.on("dragmove", () => {
         const pointer = stage.getPointerPosition();
         bus.emit('stage:transformed', pointer ? { pointerX: pointer.x, pointerY: pointer.y } : {});
+    });
+
+    // 点击空白处通知去选
+    stage.on("click", (e) => {
+        if (e.target === stage || e.target.parent === stage || e.target.parent === fabricBgGroup) {
+            bus.emit('stage:empty-clicked');
+        }
     });
 
     stage.on("mousemove", (e) => {

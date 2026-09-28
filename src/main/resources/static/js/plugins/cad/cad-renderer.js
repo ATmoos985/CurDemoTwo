@@ -12,6 +12,7 @@ import { bus } from '../../core/event-bus.js';
 import { getHomeCoordinates } from '../toolpath/toolpath-optimizer.js';
 import { makePieceInteractive } from './cad-interactive-nesting.js';
 import { makeRemnantInteractive } from './cad-context-menu.js';
+import { renderRemnantHighlight } from './cad-remnant-highlight.js';
 
 export function renderScene() {
     if (!stage || !mainLayer) return;
@@ -573,6 +574,7 @@ export function renderScene() {
     bedStationGroup.position({ x: 0, y: winStartY });
     bedStationGroup.listening(false);
 
+    renderRemnantHighlight();
     mainLayer.batchDraw();
     drawRulers();
     updateStatusBar();

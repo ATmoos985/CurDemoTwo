@@ -12,6 +12,7 @@ import {
     getDemandsFromUI, getDefectsFromUI
 } from './quota-manager.js';
 import { showToast } from '../../core/toast.js';
+import { selectRemnant, clearRemnantSelection, hoverRemnant } from '../cad/cad-remnant-highlight.js';
 
 export function updateUIInfo() {
     const data = state.getCurrentCaseData();
@@ -84,15 +85,30 @@ export function updateUIInfo() {
     if (rightTabRemBadge) rightTabRemBadge.innerText = `${(data.remnants || []).length} 块`;
     const remTbody = document.getElementById("remnant-table-body");
     if (remTbody) {
-        remTbody.innerHTML = (data.remnants || []).map(r => `
-            <tr>
-                <td><code>${r.id}</code></td>
+        remTbody.innerHTML = (data.remnants || []).map(r => {
+            const isSelected = (state.selectedRemnantId === r.id);
+            return `
+            <tr id="remnant-row-${r.id}" data-remnant-id="${r.id}"
+                class="interactive-row ${isSelected ? 'remnant-selected-row active-row' : ''}"
+                onclick="window.selectRemnant('${r.id}', { fromTable: true, smoothPan: true, showToastMsg: true })"
+                onmouseenter="window.hoverRemnant('${r.id}', true)"
+                onmouseleave="window.hoverRemnant('${r.id}', false)"
+                title="点击在 CAD 画布中居中定位并高亮此料头 #${r.id}">
+                <td><code style="color: #38bdf8; font-weight: 700; font-size: 11.5px;">${r.id}</code></td>
                 <td>${r.w} × ${r.l} mm</td>
                 <td>${r.area.toFixed(2)} m²</td>
-                <td><span class="${r.hasDefect ? 'badge-cut' : 'badge-rem'}">${r.status}</span></td>
-                <td>实切后入库</td>
+                <td><span class="${r.hasDefect ? 'badge-cut' : 'badge-rem'}">${r.status || (r.hasDefect ? '带疵料头' : '完好可用')}</span></td>
+                <td>
+                    <button class="tool-btn rem-locate-btn"
+                        style="font-size: 10px; padding: 2px 6px; color: #38bdf8; border: 1px solid rgba(56,189,248,0.4); background: rgba(56,189,248,0.1); cursor: pointer;"
+                        onclick="event.stopPropagation(); window.selectRemnant('${r.id}', { fromTable: true, smoothPan: true, showToastMsg: true })"
+                        title="在 CAD 画布中居中定位此料头">
+                        🎯 定位
+                    </button>
+                </td>
             </tr>
-        `).join("");
+            `;
+        }).join("");
     }
 
     // 台账数据
@@ -125,6 +141,7 @@ export function updateUIInfo() {
 
 export function loadCase(id) {
     state.pendingPlan = null;
+    clearRemnantSelection();
     if (state.currentCutMode !== "roll") {
         state.setCutMode("roll");
         const btnRoll = document.getElementById("tab-btn-roll");
