@@ -384,7 +384,7 @@ export const INITIAL_SCENARIOS = {
         ],
         "remnants": [
             {
-                "id": "REM-PS-01",
+                "id": "REM-S1-01",
                 "status": "可用料头",
                 "x": 150,
                 "y": 0,
@@ -394,7 +394,7 @@ export const INITIAL_SCENARIOS = {
                 "hasDefect": false
             },
             {
-                "id": "REM-PS-02",
+                "id": "REM-S1-02",
                 "status": "带疵料头",
                 "x": 150,
                 "y": 800,
@@ -404,7 +404,7 @@ export const INITIAL_SCENARIOS = {
                 "hasDefect": true
             },
             {
-                "id": "REM-PS-03",
+                "id": "REM-S1-03",
                 "status": "可用料头",
                 "x": 150,
                 "y": 3300,
@@ -499,7 +499,7 @@ export const INITIAL_SCENARIOS = {
                 "pos": 800,
                 "start": 150,
                 "end": 450,
-                "desc": "第 3 阶段横切，切断可用料头 REM-PS-01 与带疵料头 REM-PS-02",
+                "desc": "第 3 阶段横切，切断可用料头 REM-S1-01 与带疵料头 REM-S1-02",
                 "airDistance": 150,
                 "startX": 450,
                 "startY": 800,
@@ -525,7 +525,7 @@ export const INITIAL_SCENARIOS = {
                 "pos": 3300,
                 "start": 150,
                 "end": 600,
-                "desc": "第 3 阶段横切，切断抱枕 2 与底部可用料头 REM-PS-03",
+                "desc": "第 3 阶段横切，切断抱枕 2 与底部可用料头 REM-S1-03",
                 "airDistance": 700,
                 "startX": 150,
                 "startY": 3300,
@@ -669,7 +669,7 @@ export const INITIAL_SCENARIOS = {
         ],
         "remnants": [
             {
-                "id": "REM-PS-01",
+                "id": "REM-S1-01",
                 "status": "可用料头",
                 "x": 50,
                 "y": 600,
@@ -679,7 +679,7 @@ export const INITIAL_SCENARIOS = {
                 "hasDefect": false
             },
             {
-                "id": "REM-PS-02",
+                "id": "REM-S1-02",
                 "status": "可用料头",
                 "x": 0,
                 "y": 0,
@@ -709,7 +709,7 @@ export const INITIAL_SCENARIOS = {
                 "pos": 600,
                 "start": 800,
                 "end": 2000,
-                "desc": "第 1 阶段横切，截断短帘顶边并分离上部可用料头 REM-PS-02",
+                "desc": "第 1 阶段横切，截断短帘顶边并分离上部可用料头 REM-S1-02",
                 "airDistance": 0,
                 "startX": 800,
                 "startY": 600,
@@ -787,7 +787,7 @@ export const INITIAL_SCENARIOS = {
                 "pos": 950,
                 "start": 50,
                 "end": 350,
-                "desc": "第 3 阶段横切，切断绑带 1、2 顶边与可用料头 REM-PS-01",
+                "desc": "第 3 阶段横切，切断绑带 1、2 顶边与可用料头 REM-S1-01",
                 "airDistance": 650,
                 "startX": 50,
                 "startY": 950,
@@ -979,7 +979,7 @@ export const INITIAL_SCENARIOS = {
         ],
         "remnants": [
             {
-                "id": "REM-PS-01",
+                "id": "REM-S1-01",
                 "status": "可用料头",
                 "x": 0,
                 "y": 0,
@@ -989,7 +989,7 @@ export const INITIAL_SCENARIOS = {
                 "hasDefect": false
             },
             {
-                "id": "REM-PS-02",
+                "id": "REM-S1-02",
                 "status": "带疵料头",
                 "x": 470,
                 "y": 1200,
@@ -999,7 +999,7 @@ export const INITIAL_SCENARIOS = {
                 "hasDefect": true
             },
             {
-                "id": "REM-PS-03",
+                "id": "REM-S1-03",
                 "status": "可用料头",
                 "x": 700,
                 "y": 2650,
@@ -1009,7 +1009,7 @@ export const INITIAL_SCENARIOS = {
                 "hasDefect": false
             },
             {
-                "id": "REM-PS-04",
+                "id": "REM-S1-04",
                 "status": "可用料头",
                 "x": 0,
                 "y": 2200,
@@ -1019,7 +1019,7 @@ export const INITIAL_SCENARIOS = {
                 "hasDefect": false
             },
             {
-                "id": "REM-PS-05",
+                "id": "REM-S1-05",
                 "status": "可用料头",
                 "x": 0,
                 "y": 3000,
@@ -1036,7 +1036,7 @@ export const INITIAL_SCENARIOS = {
                 "pos": 3000,
                 "start": 0,
                 "end": 2000,
-                "desc": "第 1 阶段全幅横切，分离 3.0m 上部裁切区与下部可用料头 REM-PS-05",
+                "desc": "第 1 阶段全幅横切，分离 3.0m 上部裁切区与下部可用料头 REM-S1-05",
                 "airDistance": 1500,
                 "startX": 2000,
                 "startY": 3000,
@@ -1075,7 +1075,7 @@ export const INITIAL_SCENARIOS = {
                 "pos": 400,
                 "start": 0,
                 "end": 1200,
-                "desc": "第 2 阶段纵切，切开左侧可用料头 REM-PS-01",
+                "desc": "第 2 阶段纵切，切开左侧可用料头 REM-S1-01",
                 "airDistance": 400,
                 "startX": 400,
                 "startY": 0,
@@ -1114,7 +1114,7 @@ export const INITIAL_SCENARIOS = {
                 "pos": 800,
                 "start": 1200,
                 "end": 2200,
-                "desc": "第 2 阶段纵切，切断平幔 2 与带疵料头 REM-PS-02",
+                "desc": "第 2 阶段纵切，切断平幔 2 与带疵料头 REM-S1-02",
                 "airDistance": 600,
                 "startX": 800,
                 "startY": 2200,
@@ -1218,7 +1218,7 @@ export const INITIAL_SCENARIOS = {
                 "pos": 700,
                 "start": 2200,
                 "end": 2650,
-                "desc": "第 3 阶段纵切，切断抱枕 2 与左料头 REM-PS-04",
+                "desc": "第 3 阶段纵切，切断抱枕 2 与左料头 REM-S1-04",
                 "airDistance": 450,
                 "startX": 700,
                 "startY": 2650,
@@ -1231,7 +1231,7 @@ export const INITIAL_SCENARIOS = {
                 "pos": 2650,
                 "start": 700,
                 "end": 1600,
-                "desc": "第 3 阶段横切，切断抱枕底边与下料头 REM-PS-03",
+                "desc": "第 3 阶段横切，切断抱枕底边与下料头 REM-S1-03",
                 "airDistance": 450,
                 "startX": 700,
                 "startY": 2650,
@@ -1570,7 +1570,7 @@ export const INITIAL_SCENARIOS = {
         ],
         "remnants": [
             {
-                "id": "REM-PS-01",
+                "id": "REM-S1-01",
                 "status": "带疵料头",
                 "x": 400,
                 "y": 1200,
@@ -1580,7 +1580,7 @@ export const INITIAL_SCENARIOS = {
                 "hasDefect": true
             },
             {
-                "id": "REM-PS-02",
+                "id": "REM-S1-02",
                 "status": "可用料头",
                 "x": 0,
                 "y": 0,
@@ -1590,7 +1590,7 @@ export const INITIAL_SCENARIOS = {
                 "hasDefect": false
             },
             {
-                "id": "REM-PS-03",
+                "id": "REM-S1-03",
                 "status": "带疵料头",
                 "x": 800,
                 "y": 2780,
@@ -1600,7 +1600,7 @@ export const INITIAL_SCENARIOS = {
                 "hasDefect": true
             },
             {
-                "id": "REM-PS-04",
+                "id": "REM-S1-04",
                 "status": "可用料头",
                 "x": 800,
                 "y": 4330,
@@ -1610,7 +1610,7 @@ export const INITIAL_SCENARIOS = {
                 "hasDefect": false
             },
             {
-                "id": "REM-PS-05",
+                "id": "REM-S1-05",
                 "status": "可用料头",
                 "x": 0,
                 "y": 4380,
@@ -1653,7 +1653,7 @@ export const INITIAL_SCENARIOS = {
                 "pos": 400,
                 "start": 0,
                 "end": 2780,
-                "desc": "第 2 阶段纵切，分离左侧可用料头 REM-PS-02 与主帘区",
+                "desc": "第 2 阶段纵切，分离左侧可用料头 REM-S1-02 与主帘区",
                 "airDistance": 1600,
                 "startX": 400,
                 "startY": 2780,
@@ -1666,7 +1666,7 @@ export const INITIAL_SCENARIOS = {
                 "pos": 1200,
                 "start": 400,
                 "end": 2000,
-                "desc": "第 3 阶段横切，切断主帘 1、2 顶边与带疵料头 REM-PS-01",
+                "desc": "第 3 阶段横切，切断主帘 1、2 顶边与带疵料头 REM-S1-01",
                 "airDistance": 1200,
                 "startX": 400,
                 "startY": 1200,
@@ -1679,7 +1679,7 @@ export const INITIAL_SCENARIOS = {
                 "pos": 1580,
                 "start": 400,
                 "end": 2000,
-                "desc": "第 3 阶段横切 (S型反向接刀)，切断主帘 3、4 顶边与料头 REM-PS-01",
+                "desc": "第 3 阶段横切 (S型反向接刀)，切断主帘 3、4 顶边与料头 REM-S1-01",
                 "airDistance": 380,
                 "startX": 2000,
                 "startY": 1580,
@@ -1744,7 +1744,7 @@ export const INITIAL_SCENARIOS = {
                 "pos": 3330,
                 "start": 800,
                 "end": 2000,
-                "desc": "第 3 阶段横切，切断侧帘 1、2 顶边与带疵料头 REM-PS-03",
+                "desc": "第 3 阶段横切，切断侧帘 1、2 顶边与带疵料头 REM-S1-03",
                 "airDistance": 600,
                 "startX": 1400,
                 "startY": 3330,
@@ -1757,7 +1757,7 @@ export const INITIAL_SCENARIOS = {
                 "pos": 4330,
                 "start": 800,
                 "end": 2000,
-                "desc": "第 3 阶段横切 (S型反向接刀)，切断侧帘 1、2 底边与可用料头 REM-PS-04",
+                "desc": "第 3 阶段横切 (S型反向接刀)，切断侧帘 1、2 底边与可用料头 REM-S1-04",
                 "airDistance": 1000,
                 "startX": 2000,
                 "startY": 4330,
@@ -1809,7 +1809,7 @@ export const INITIAL_SCENARIOS = {
                 "pos": 4380,
                 "start": 0,
                 "end": 200,
-                "desc": "第 3 阶段横切，切断绑带 2 底边与可用料头 REM-PS-05",
+                "desc": "第 3 阶段横切，切断绑带 2 底边与可用料头 REM-S1-05",
                 "airDistance": 800,
                 "startX": 0,
                 "startY": 4380,

@@ -411,15 +411,44 @@ export async function triggerSolve() {
                     data.cuts = [...retainedCuts, ...newCuts];
                     data.cuts.forEach((c, idx) => { c.step = idx + 1; });
 
-                    const isRemInCurrentStation = (r) => {
-                        const rMid = r.y + r.l / 2;
-                        return (rMid >= winStartY && rMid < winEndY);
-                    };
-                    const retainedRemnants = (data.remnants || []).filter(r => !isRemInCurrentStation(r));
-                    const newRemnants = (result.remnants || []).map(r => ({
-                        ...r,
-                        y: r.y + winStartY
-                    }));
+                    const currentStationIdx = Math.round(winStartY / Math.max(100, bedL || 5000)) + 1;
+                    
+                    // 1. 过滤与修复历史料头：
+                    // A. 凡是起始坐标已在当前待切工位内（r.y >= winStartY - 1）的旧料头彻底清除；
+                    // B. 凡是跨过当前工位起始线 winStartY 的旧料头，物理截断至 winStartY，绝不允许刺入当前工位；
+                    const retainedRemnants = (data.remnants || [])
+                        .filter(r => r.y < winStartY - 1)
+                        .map(r => {
+                            if (r.y + r.l > winStartY) {
+                                const newL = Math.max(0, winStartY - r.y);
+                                return {
+                                    ...r,
+                                    l: newL,
+                                    area: Number(((r.w * newL) / 1000000.0).toFixed(3))
+                                };
+                            }
+                            return r;
+                        })
+                        .filter(r => r.l >= 100);
+
+                    // 2. 注入新工位料头，保证全局 ID 唯一性与工位溯源性
+                    const existingIds = new Set(retainedRemnants.map(r => r.id));
+                    let nextRemSeq = 1;
+                    const newRemnants = (result.remnants || []).map((r, idx) => {
+                        let finalId = r.id;
+                        // 若 ID 重复或包含旧格式 REM-PS-，重构为 REM-S{工位}-{序号} 全局唯一编号
+                        if (!finalId || existingIds.has(finalId) || finalId.startsWith("REM-PS-")) {
+                            do {
+                                finalId = `REM-S${currentStationIdx}-${String(nextRemSeq++).padStart(2, '0')}`;
+                            } while (existingIds.has(finalId));
+                        }
+                        existingIds.add(finalId);
+                        return {
+                            ...r,
+                            id: finalId,
+                            y: r.y + winStartY
+                        };
+                    });
                     data.remnants = [...retainedRemnants, ...newRemnants];
 
                     if (!data.cutIntervals) data.cutIntervals = [];
@@ -611,6 +640,19 @@ export async function confirmCutReport() {
                 p.confirmed = true;
             }
         });
+
+        // 1.1 固化与截断当前工位料头，彻底消除越过实切截断线的假料头
+        (data.remnants || []).forEach(r => {
+            if (r.y >= winStartY && r.y + r.l <= winEndY + 5) {
+                r.confirmed = true;
+            } else if (r.y < winEndY && r.y + r.l > winEndY) {
+                const newL = Math.max(0, winEndY - r.y);
+                r.l = newL;
+                r.area = Number(((r.w * newL) / 1000000.0).toFixed(3));
+                r.confirmed = true;
+            }
+        });
+        data.remnants = (data.remnants || []).filter(r => r.y < winEndY - 5 && r.l >= 100);
 
         // 2. 扣减与核销订单需求
         updateDemandCompletionFromPieces(data);

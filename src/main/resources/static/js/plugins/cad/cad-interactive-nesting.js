@@ -29,6 +29,7 @@ export function makePieceInteractive(pGroup, piece, caseData) {
         pGroup.name(`piece-entity-${piece.id}`);
         pGroup.on("click", (e) => {
             e.cancelBubble = true;
+            bus.emit('piece:selected', { pieceId: piece.id });
             import('../../core/toast.js').then(m => m.showToast(`裁片 ${piece.name || piece.id} 已完成实切确认核销，已锁定。`, 'info'));
         });
         pGroup.on("contextmenu", (e) => {
@@ -341,3 +342,23 @@ export function initNestingKeyboardShortcuts() {
         }
     });
 }
+
+// 监听料头选中或画布空白处点击，清除裁片选中与微调手柄，保证排料与料头互斥交互
+bus.on('remnant:selected', () => {
+    selectedPieceId = null;
+    hideCollisionBadge();
+    if (mainLayer) {
+        mainLayer.find(".selection-handle").forEach(node => node.destroy());
+        mainLayer.batchDraw();
+    }
+});
+
+bus.on('stage:empty-clicked', () => {
+    selectedPieceId = null;
+    hideCollisionBadge();
+    if (mainLayer) {
+        mainLayer.find(".selection-handle").forEach(node => node.destroy());
+        mainLayer.batchDraw();
+    }
+});
+

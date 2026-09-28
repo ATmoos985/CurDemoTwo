@@ -191,6 +191,10 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
         boolean isBottomOrigin = origin.endsWith("bottom");
         boolean isRemnantFeed = "remnant".equalsIgnoreCase(req.getFeedPortType());
         
+        int stationIdx = (int) Math.round(req.getWindowStartY() / Math.max(100.0, req.getRollL())) + 1;
+        if (stationIdx <= 0) stationIdx = 1;
+        String remPrefix = isRemnantFeed ? "REM-RM" : ("REM-S" + stationIdx);
+        
         // 关键统一：在母卷连续开卷长卷模式下，裁片排料必须顺着送料进给流向紧贴工位入口 (y + trim)，
         // 余量留在当前工位末尾，彻底杜绝反转导致两工位交界处凭空留出 260mm 悬空死区！
         // 仅在单板料头模式且指定底部原点时，才将料头裁片倒贴至料头下底边。
@@ -201,7 +205,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
             double trimArea = (req.getRollW() * trim) / 1_000_000.0;
             double trimY = mirrorY ? (req.getRollL() - trim) : 0;
             remnants.add(new RemnantPiece(
-                    String.format("REM-TRIM-%02d", remIndex++),
+                    String.format("REM-TRIM-S%d-%02d", stationIdx, remIndex++),
                     "卷头修齐料头",
                     0, trimY, req.getRollW(), trim, trimArea, false
             ));
@@ -252,11 +256,16 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                     pieces.add(new PlacedPiece(n.type, name, physX, physY, n.w, n.h, false, demId));
                 } else if (n.type == -1 || n.type == -3) {
                     // Remnant / waste
-                    if (n.w >= 200 && n.h >= 300) {
+                    // 关键过滤：在母卷长卷连续开卷模式下，若母卷尚未开完，位于工位尾部全幅贯通的未排空区属于连续母卷自然顺延，并非被切断废弃的边料料头！
+                    boolean isContinuousMotherRollTail = !isRemnantFeed &&
+                            (req.getWindowStartY() + req.getRollL() < req.getTotalRollL() - 100) &&
+                            (n.w >= req.getRollW() - 30) &&
+                            (physY + n.h >= req.getRollL() - 30 || n.y + n.h >= req.getRollL() - 30);
+                    if (!isContinuousMotherRollTail && n.w >= 200 && n.h >= 300) {
                         double area = (n.w * n.h) / 1_000_000.0;
                         boolean hasDefect = checkDefectOverlap(physX, physY, n.w, n.h, req.getDefects());
                         String status = hasDefect ? "带疵料头" : "可用料头";
-                        remnants.add(new RemnantPiece(String.format("REM-PS-%02d", remIndex++), status, physX, physY, n.w, n.h, area, hasDefect));
+                        remnants.add(new RemnantPiece(String.format("%s-%02d", remPrefix, remIndex++), status, physX, physY, n.w, n.h, area, hasDefect));
                     }
                 }
             }

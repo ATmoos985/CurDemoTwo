@@ -261,9 +261,9 @@ export function renderScene() {
                 x: 10, y: 10,
                 text: "经向 (Length)", fontSize: 16, fill: pGrainFill
             }));
-            // 仅对当前待排新裁片注入交互微调与干涉碰撞检测
-            makePieceInteractive(pGroup, p, data);
         }
+        // 统一注入交互与点击拦截，防止事件穿透至底层或误触发其他图元
+        makePieceInteractive(pGroup, p, data);
 
         pieceGroup.add(pGroup);
     });

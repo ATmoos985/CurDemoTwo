@@ -465,6 +465,13 @@ bus.on('stage:empty-clicked', () => {
     }
 });
 
+// 监听裁片选中事件，确保排料裁片与料头互斥高亮
+bus.on('piece:selected', () => {
+    if (state.selectedRemnantId) {
+        clearRemnantSelection();
+    }
+});
+
 // ESC 键去选
 window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && state.selectedRemnantId) {
