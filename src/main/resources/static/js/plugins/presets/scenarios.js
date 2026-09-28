@@ -18,41 +18,41 @@ export const MOTHER_ROLL_SPECS = {
 
 export const CURTAIN_ORDER_TEMPLATES = {
     "whole_house": {
-        name: "三室两厅全屋整套窗帘单 (10件套)",
-        desc: "涵盖客厅落地主帘、主卧双开帘、造型绑带及同款沙发抱枕套",
+        name: "全屋整套窗帘工程批量单 (32件套 · 支持跨工位接续搭切)",
+        desc: "涵盖多房间落地主帘、飘窗双开帘、造型绑带及同款沙发抱枕套，充足配额供连续搭切",
         demands: [
-            { name: "客厅2.6m落地主帘 (左片)", width: 800, length: 1200, count: 2 },
-            { name: "主卧双开飘窗帘 (右片)", width: 600, length: 1000, count: 2 },
-            { name: "窗帘造型定型绑带", width: 200, length: 800, count: 4 },
-            { name: "同款面料沙发抱枕套", width: 450, length: 450, count: 2 }
+            { name: "客厅2.6m落地主帘 (左片)", width: 800, length: 1200, count: 6 },
+            { name: "主卧双开飘窗帘 (右片)", width: 600, length: 1000, count: 8 },
+            { name: "窗帘造型定型绑带", width: 200, length: 800, count: 12 },
+            { name: "同款面料沙发抱枕套", width: 450, length: 450, count: 6 }
         ]
     },
     "hotel_batch": {
-        name: "星级酒店标准客房批量单 (10件套)",
-        desc: "大门幅连续排布，包含标房落地主帘、套房侧帘拼片及客房定型绑带",
+        name: "星级酒店标准客房工程批量单 (50件套 · 支持多工位连续搭切)",
+        desc: "大门幅连续工程排布，包含标房落地主帘、套房侧帘拼片及客房定型绑带，支持全卷推进",
         demands: [
-            { name: "标房落地主帘", width: 800, length: 1200, count: 4 },
-            { name: "套房侧帘拼片", width: 600, length: 1000, count: 4 },
-            { name: "客房装饰绑带", width: 200, length: 800, count: 2 }
+            { name: "标房落地主帘", width: 800, length: 1200, count: 16 },
+            { name: "套房侧帘拼片", width: 600, length: 1000, count: 16 },
+            { name: "客房装饰绑带", width: 200, length: 800, count: 18 }
         ]
     },
     "edge_nesting": {
-        name: "偏幅单开大帘+边角辅料吃净单 (6件套)",
-        desc: "单开大帘改宽，550mm边料空间见缝插针套裁绑带与抱枕，零废料",
+        name: "偏幅落地大帘+边角辅件连续单 (24件套 · 支持多工位搭切)",
+        desc: "单开大帘改宽，边料空间见缝插针套裁长绑带与抱枕，充足件数支持多工位连续下料",
         demands: [
-            { name: "单开偏幅落地大帘", width: 1400, length: 3800, count: 1 },
-            { name: "窗帘造型边饰绑带", width: 150, length: 800, count: 3 },
-            { name: "配套同色抱枕套片", width: 450, length: 450, count: 2 }
+            { name: "单开偏幅落地大帘", width: 1400, length: 3800, count: 4 },
+            { name: "窗帘造型边饰绑带", width: 150, length: 800, count: 12 },
+            { name: "配套同色抱枕套片", width: 450, length: 450, count: 8 }
         ]
     },
     "valance_suite": {
-        name: "豪华窗幔与全屋辅配件组合 (10件套)",
-        desc: "大水波造型幔、小垂花平幔、边饰挂带、帘头压条与抱枕套高密度直刀套裁",
+        name: "豪华窗幔与全屋辅配件工程单 (40件套 · 支持连续搭切)",
+        desc: "大水波造型幔、小垂花平幔、边饰挂带与抱枕套高密度直刀套裁，满足连续多机台工位",
         demands: [
-            { name: "客厅大水波造型幔", width: 800, length: 1200, count: 2 },
-            { name: "次卧小垂花平幔", width: 600, length: 1000, count: 2 },
-            { name: "窗帘立体造型绑带", width: 200, length: 800, count: 4 },
-            { name: "同款沙发布抱枕套", width: 450, length: 450, count: 2 }
+            { name: "客厅大水波造型幔", width: 800, length: 1200, count: 8 },
+            { name: "次卧小垂花平幔", width: 600, length: 1000, count: 8 },
+            { name: "窗帘立体造型绑带", width: 200, length: 800, count: 16 },
+            { name: "同款沙发布抱枕套", width: 450, length: 450, count: 8 }
         ]
     },
     "remnant_reuse": {
@@ -68,7 +68,7 @@ export const CURTAIN_ORDER_TEMPLATES = {
 
 export const INITIAL_SCENARIOS = {
     "1": {
-        "name": "案例1: 窗帘定高整幅横切 (经典工程套排)",
+        "name": "案例1: 窗帘定高整幅横切 (连续工程套排 · 30件大单)",
         "rollId": "ROLL-2026-0920",
         "totalRollL": 60000,
         "bedL": 5000,
@@ -105,21 +105,28 @@ export const INITIAL_SCENARIOS = {
                 "name": "客厅2.6m落地大主帘 (定高)",
                 "w": 2000,
                 "l": 1200,
-                "count": 1
+                "count": 8
             },
             {
                 "id": 2,
                 "name": "主卧双开主帘左片 (定高)",
                 "w": 2000,
                 "l": 1200,
-                "count": 1
+                "count": 8
             },
             {
                 "id": 3,
                 "name": "主卧双开主帘右片 (定高)",
                 "w": 2000,
                 "l": 1200,
-                "count": 1
+                "count": 8
+            },
+            {
+                "id": 4,
+                "name": "次卧单开飘窗帘 (定高)",
+                "w": 2000,
+                "l": 1000,
+                "count": 6
             }
         ],
         "pieces": [
@@ -261,7 +268,7 @@ export const INITIAL_SCENARIOS = {
         "engine": "仅横切顺序排料"
     },
     "2": {
-        "name": "案例2: 偏幅单开帘与边角套裁 (边角吃净)",
+        "name": "案例2: 偏幅单开帘与边角套裁 (43件套 · 边角料吃净连续单)",
         "rollId": "ROLL-DEMO-2D",
         "totalRollL": 30000,
         "bedL": 4000,
@@ -289,21 +296,28 @@ export const INITIAL_SCENARIOS = {
                 "name": "单开偏幅落地大帘",
                 "w": 1400,
                 "l": 3800,
-                "count": 1
+                "count": 5
             },
             {
                 "id": 2,
                 "name": "窗帘造型边饰绑带",
                 "w": 150,
                 "l": 800,
-                "count": 3
+                "count": 18
             },
             {
                 "id": 3,
                 "name": "配套同色抱枕套片",
                 "w": 450,
                 "l": 450,
-                "count": 2
+                "count": 14
+            },
+            {
+                "id": 4,
+                "name": "门幅边角飘窗挂帘",
+                "w": 600,
+                "l": 1200,
+                "count": 6
             }
         ],
         "pieces": [
@@ -802,7 +816,7 @@ export const INITIAL_SCENARIOS = {
         "engine": "料头精益复用调度器 (母卷0消耗)"
     },
     "4": {
-        "name": "案例4: 窗幔帘头辅件套裁 (多规格二维断刀)",
+        "name": "案例4: 窗幔帘头辅件套裁 (74件套 · 多工位连续套裁大单)",
         "rollId": "ROLL-2026-0920",
         "totalRollL": 60000,
         "bedL": 4500,
@@ -830,28 +844,35 @@ export const INITIAL_SCENARIOS = {
                 "name": "客厅大水波造型幔",
                 "w": 800,
                 "l": 1200,
-                "count": 2
+                "count": 12
             },
             {
                 "id": 2,
                 "name": "次卧小垂花平幔",
                 "w": 600,
                 "l": 1000,
-                "count": 2
+                "count": 12
             },
             {
                 "id": 3,
                 "name": "窗帘立体造型绑带",
                 "w": 200,
                 "l": 800,
-                "count": 4
+                "count": 24
             },
             {
                 "id": 4,
                 "name": "同款沙发布抱枕套",
                 "w": 450,
                 "l": 450,
-                "count": 2
+                "count": 16
+            },
+            {
+                "id": 5,
+                "name": "欧式窗幔压边挂条",
+                "w": 300,
+                "l": 800,
+                "count": 10
             }
         ],
         "pieces": [
@@ -1226,7 +1247,7 @@ export const INITIAL_SCENARIOS = {
         "engine": "智能几何排料内核 (C++ 2D-Guillotine)"
     },
     "5": {
-        "name": "案例5: Word 经典 L形拆解 (工程主帘与面积守恒)",
+        "name": "案例5: Word 经典 L形拆解 (12件工程单 · 面积严密守恒)",
         "rollId": "ROLL-2026-0920",
         "totalRollL": 30000,
         "bedL": 4000,
@@ -1244,7 +1265,14 @@ export const INITIAL_SCENARIOS = {
                 "name": "工程落地主帘大板 (Word标准件)",
                 "w": 1500,
                 "l": 3000,
-                "count": 1
+                "count": 6
+            },
+            {
+                "id": 2,
+                "name": "边角同色定型挂带 (Word辅件)",
+                "w": 450,
+                "l": 1000,
+                "count": 6
             }
         ],
         "pieces": [
@@ -1316,7 +1344,7 @@ export const INITIAL_SCENARIOS = {
         "engine": "Word 规范精确拆解引擎"
     },
     "6": {
-        "name": "案例6: 60m大卷多工位搭切 (10件套客房全貌)",
+        "name": "案例6: 60m大卷多工位搭切 (108件套客房工程全貌 · 支持全卷连续搭切)",
         "rollId": "ROLL-2026-0920",
         "totalRollL": 60000,
         "bedL": 5000,
@@ -1407,21 +1435,35 @@ export const INITIAL_SCENARIOS = {
                 "name": "标房落地主帘",
                 "w": 800,
                 "l": 1200,
-                "count": 4
+                "count": 24
             },
             {
                 "id": 2,
                 "name": "套房侧帘拼片",
                 "w": 600,
                 "l": 1000,
-                "count": 4
+                "count": 24
             },
             {
                 "id": 3,
                 "name": "客房装饰绑带",
                 "w": 200,
                 "l": 800,
-                "count": 2
+                "count": 32
+            },
+            {
+                "id": 4,
+                "name": "客房飘窗短帘",
+                "w": 1000,
+                "l": 800,
+                "count": 12
+            },
+            {
+                "id": 5,
+                "name": "同色阻燃抱枕套",
+                "w": 450,
+                "l": 450,
+                "count": 16
             }
         ],
         "pieces": [

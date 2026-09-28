@@ -39,17 +39,17 @@
                     <div class="preset-menu-list">
                         <button class="preset-menu-item active" id="btn-case-1" onclick="selectPresetCase(1)">
                             <div class="preset-item-head">
-                                <span class="preset-item-name">案例1: 窗帘定高整幅横切 (套排)</span>
-                                <span class="preset-item-tag">仅横切避疵</span>
+                                <span class="preset-item-name">案例1: 窗帘定高整幅横切 (连续工程套排)</span>
+                                <span class="preset-item-tag">30件工程单</span>
                             </div>
-                            <div class="preset-item-desc">客厅落地大主帘+主卧双开双片，整幅横切避让1.4m与3.2m疵点，规整料头</div>
+                            <div class="preset-item-desc">落地主帘+双开主帘+飘窗帘(30件大单)，整幅连续横切避瑕，充足件数支持跨工位连续搭切</div>
                         </button>
                         <button class="preset-menu-item" id="btn-case-2" onclick="selectPresetCase(2)">
                             <div class="preset-item-head">
                                 <span class="preset-item-name">案例2: 偏幅单帘与边角套裁 (吃净)</span>
-                                <span class="preset-item-tag">边角吃净</span>
+                                <span class="preset-item-tag">43件套连续</span>
                             </div>
-                            <div class="preset-item-desc">1.4m落地单开帘+3条造型长绑带+2个抱枕(6件套)，边角余料吃净零浪费</div>
+                            <div class="preset-item-desc">落地单开帘+造型长绑带+同色抱枕+挂帘(43件套)，边角余料吃净，支持多工位连续下料</div>
                         </button>
                         <button class="preset-menu-item" id="btn-case-3" onclick="selectPresetCase(3)">
                             <div class="preset-item-head">
@@ -60,24 +60,24 @@
                         </button>
                         <button class="preset-menu-item" id="btn-case-4" onclick="selectPresetCase(4)">
                             <div class="preset-item-head">
-                                <span class="preset-item-name">案例4: 窗幔帘头辅件套裁 (10件套)</span>
-                                <span class="preset-item-tag">二维断刀</span>
+                                <span class="preset-item-name">案例4: 窗幔帘头辅件套裁 (多维套裁)</span>
+                                <span class="preset-item-tag">74件套大单</span>
                             </div>
-                            <div class="preset-item-desc">大水波幔+小垂花幔+4条立体绑带+2个抱枕(10件套)，高密度正交断刀套裁</div>
+                            <div class="preset-item-desc">大水波幔+小垂花幔+立体绑带+抱枕+挂条(74件套)，正交高密度套裁，满足全卷多工位搭切</div>
                         </button>
                         <button class="preset-menu-item" id="btn-case-5" onclick="selectPresetCase(5)">
                             <div class="preset-item-head">
                                 <span class="preset-item-name">案例5: Word 表1 L形拆解 (守恒)</span>
-                                <span class="preset-item-tag">面积守恒</span>
+                                <span class="preset-item-tag">12件面积守恒</span>
                             </div>
-                            <div class="preset-item-desc">工程落地大板(1500×3000)：两刀正交拆解，4.5+3.5=8.0m² 严密面积守恒</div>
+                            <div class="preset-item-desc">落地大板(1500×3000)+定型挂带(12件单)：两刀正交拆解，4.5+3.5=8.0m² 严密面积守恒连续单</div>
                         </button>
                         <button class="preset-menu-item" id="btn-case-6" onclick="selectPresetCase(6)">
                             <div class="preset-item-head">
-                                <span class="preset-item-name">案例6: 60m大卷多工位搭切 (10件套)</span>
-                                <span class="preset-item-tag">工业全貌</span>
+                                <span class="preset-item-name">案例6: 60m大卷多工位搭切 (客房全貌)</span>
+                                <span class="preset-item-tag">108件工程全貌</span>
                             </div>
-                            <div class="preset-item-desc">标房主帘4件+套房侧帘4件+绑带2件(10件套)，全卷8处疵点雷达连续搭切</div>
+                            <div class="preset-item-desc">标房主帘+套房侧帘+绑带+飘窗帘+抱枕(108件套)，全卷8处疵点雷达连续搭切开卷</div>
                         </button>
                     </div>
                 </div>
@@ -278,10 +278,10 @@
                                 <span style="font-size: 11px; color: var(--accent-blue); font-weight: 600; white-space: nowrap;">📋 订单模板:</span>
                                 <select class="prop-input" id="sel-curtain-order-template" onchange="loadCurtainOrderTemplate(this.value)" style="flex: 1; height: 26px; font-size: 11px; padding: 2px 6px;">
                                     <option value="">-- 选择典型窗帘整单模板 --</option>
-                                    <option value="whole_house">🛋 三室两厅全屋整单 (10件套: 主帘+侧帘+绑带+抱枕)</option>
-                                    <option value="hotel_batch">🏨 星级酒店客房批量单 (10件套: 标房大帘+套房侧帘+定型绑带)</option>
-                                    <option value="edge_nesting">✂ 偏幅单开帘+边角料吃净 (6件套: 落地单帘+长绑带+同色抱枕)</option>
-                                    <option value="valance_suite">🪟 豪华窗幔与全屋辅配件 (10件套: 大水波幔+小垂花幔+挂带+抱枕)</option>
+                                    <option value="whole_house">🛋 全屋整套窗帘工程批量单 (32件套 · 支持跨工位连续搭切)</option>
+                                    <option value="hotel_batch">🏨 星级酒店客房工程批量单 (50件套 · 支持多工位连续搭切)</option>
+                                    <option value="edge_nesting">✂ 偏幅落地大帘+边角辅料连续单 (24件套 · 支持多工位搭切)</option>
+                                    <option value="valance_suite">🪟 豪华窗幔与全屋辅配件工程单 (40件套 · 支持连续搭切)</option>
                                     <option value="remnant_reuse">♻ 飘窗短帘料头精益复用 (5件套: 飘窗短帘+抱枕套+挂带)</option>
                                 </select>
                             </div>
