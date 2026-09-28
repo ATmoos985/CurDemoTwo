@@ -203,9 +203,35 @@ export async function selectPresetCase(caseId) {
     if (caseId === 3) {
         const case3 = state.scenarios[3];
         try {
-            const response = await fetch('/api/remnants/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: 'REM-202609-001' }) });
-            const remnant = await response.json();
+            let remnant = null;
+            try {
+                const response = await fetch('/api/remnants/scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: 'REM-202609-001' })
+                });
+                if (response.ok) {
+                    const text = await response.text();
+                    if (text && text.trim().length > 0 && text.trim() !== 'null') {
+                        const r = JSON.parse(text);
+                        if (r && r.id) remnant = r;
+                    }
+                }
+            } catch (scanErr) {
+                console.warn("Scan default remnant error, falling back to shelf:", scanErr);
+            }
+
+            if (!remnant) {
+                const listRes = await fetch('/api/remnants');
+                if (listRes.ok) {
+                    const list = await listRes.json();
+                    if (Array.isArray(list) && list.length > 0) {
+                        // 优先选用完好的大料头
+                        remnant = list.find(r => !r.hasDefect && r.area >= 1.0) || list[0];
+                    }
+                }
+            }
+
             if (remnant && remnant.id) {
                 await switchCutMode('remnant', remnant, case3);
                 renderRemnantDemandsUI(case3.demands || [{ name: '次卧飘窗短帘主片', width: 1200, length: 1000, count: 1 }]);
@@ -214,7 +240,7 @@ export async function selectPresetCase(caseId) {
                 updateUIInfo();
                 renderToolpathUI();
             } else {
-                showToast('示例料头已用完，请从料头库装载其他料头。', 'warning');
+                showToast('在库料头已耗尽，请从母卷排料生成料头或在料头库新增。', 'warning');
             }
         } catch (e) {
             console.error("Case 3 load error:", e);

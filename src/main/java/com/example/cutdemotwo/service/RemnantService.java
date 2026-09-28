@@ -234,7 +234,32 @@ public class RemnantService {
         roll.setCurrentRemainingLength(roll.getTotalLength());
         roll.setUsedLength(0.0);
         receipts.entrySet().removeIf(e -> rollId.equals(e.getValue().get("rollId")));
-        remnantPool.entrySet().removeIf(e -> rollId.equals(e.getValue().getSourceRollId()) && e.getValue().getId().matches("REM-\\d{6}-\\d+"));
+        remnantPool.entrySet().removeIf(e -> rollId.equals(e.getValue().getSourceRollId()));
+        if ("ROLL-2026-0920".equals(rollId)) {
+            RemnantStock r1 = new RemnantStock("REM-202609-001", 2000, 1600, "库位 A-01-03", "TC涤棉-B2026",
+                    "AVAILABLE", "ROLL-2026-0920", false, "完好可用短料 (Word 表1算例)");
+            r1.setGeneration(1);
+            r1.setQualityGrade("GRADE_A");
+            r1.setCreatedAt("2026-09-20 14:30");
+            remnantPool.put(r1.getId(), r1);
+
+            RemnantStock r2 = new RemnantStock("REM-202609-002", 500, 4000, "库位 B-02-08", "TC涤棉-B2026",
+                    "AVAILABLE", "ROLL-2026-0920", false, "右侧纵切可用长料头");
+            r2.setGeneration(1);
+            r2.setQualityGrade("GRADE_A");
+            r2.setCreatedAt("2026-09-20 16:15");
+            remnantPool.put(r2.getId(), r2);
+
+            RemnantStock r3 = new RemnantStock("REM-202609-003", 500, 4000, "库位 D-DEF-01", "TC涤棉-B2026",
+                    "AVAILABLE", "ROLL-2026-0920", true, "左侧带疵料头 (内部含瑕疵需避让)");
+            r3.setGeneration(1);
+            r3.setQualityGrade("GRADE_DEFECT");
+            r3.setCreatedAt("2026-09-20 17:40");
+            List<Defect> defs = new ArrayList<>();
+            defs.add(new Defect(1, 200, 1500, 150, 600, 30, "HOLE", "破洞残留", 4, 4, "MANUAL_INSPECT", "MUST_AVOID", "料头内局部破洞"));
+            r3.setDefects(defs);
+            remnantPool.put(r3.getId(), r3);
+        }
         save();
         return true;
     }

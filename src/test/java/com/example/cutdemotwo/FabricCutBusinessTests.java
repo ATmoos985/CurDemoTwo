@@ -107,6 +107,7 @@ class FabricCutBusinessTests {
 
     @Test
     void testRemnantServiceScanAndMatching() {
+        remnantService.resetRoll("ROLL-2026-0920");
         // 1. 条码精确识别
         RemnantStock r1 = remnantService.scanOrGetById("REM-202609-001");
         assertNotNull(r1);
@@ -122,6 +123,7 @@ class FabricCutBusinessTests {
 
     @Test
     void testRemnantFeedPortZeroRollDeduction() {
+        remnantService.resetRoll("ROLL-2026-0920");
         SolveRequest req = new SolveRequest();
         req.setFeedPortType("remnant");
         req.setSourceRemnantId("REM-202609-001");
