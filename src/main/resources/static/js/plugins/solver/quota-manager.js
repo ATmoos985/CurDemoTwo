@@ -6,6 +6,8 @@ import { bus } from '../../core/event-bus.js';
 import { renderScene, resetToBedView } from '../cad/cad-renderer.js';
 import { drawRulers } from '../cad/cad-rulers.js';
 import { updateUIInfo } from './solver-client.js';
+import { showToast } from '../../core/toast.js';
+import { CURTAIN_ORDER_TEMPLATES } from '../presets/scenarios.js';
 
 export function updateDemandCompletionFromPieces(data) {
     if (!data || !data.demands) return;
@@ -124,7 +126,7 @@ export function clearStationCuts() {
     drawRulers();
     updateUIInfo();
 
-    alert(`【工位排料已清除】\n已移除当前红框工位 [${winStartY} ~ ${winEndY} mm] 内的 ${removedPieces} 件裁片与切刀。\n其余工位已切成果已完整保留！`);
+    showToast(`工位排料已清除：已移除工位 [${winStartY}~${winEndY}mm] 内的 ${removedPieces} 件裁片与切刀`, "info");
 }
 
 export function resetAllRollCuts() {
@@ -150,7 +152,7 @@ export function resetAllRollCuts() {
     renderScene();
     drawRulers();
     updateUIInfo();
-    alert("【整卷排料已重置】\n整卷母卷已清空排料，您可以从头开始在任意红框工位重新模拟接续排料！");
+    showToast("整卷排料已重置：母卷已清空排料，可从头开始在任意红框工位排料", "info");
 }
 
 export function renderDemandsUI(demands) {
@@ -445,6 +447,55 @@ export function toggleLongitudinal() {
     const allow = (document.getElementById("sel-allow-longitudinal").value === "1");
     state.getCurrentCaseData().allowLongitudinal = allow;
     if (!allow && state.currentCaseId === 2) {
-        alert("【安全拦截触发】当前设备被设定为【仅能横切】，系统严禁下发需要纵切才能完成的改宽方案，保护原料不被误切！");
+        showToast("【安全拦截触发】当前设备被设定为【仅能横切】，系统严禁下发需要纵切才能完成的改宽方案，保护原料不被误切！", "warning");
     }
 }
+
+/**
+ * 一键载入真实窗帘整单订单模板 (Quick Order Templates)
+ */
+export async function loadCurtainOrderTemplate(templateKey) {
+    if (!templateKey) return;
+    const tpl = CURTAIN_ORDER_TEMPLATES[templateKey];
+    if (!tpl) return;
+    const isRemnant = (state.currentCutMode === "remnant");
+
+    const newDemands = tpl.demands.map((d, idx) => ({
+        id: idx + 1,
+        name: d.name,
+        width: d.width,
+        w: d.width,
+        length: d.length,
+        l: d.length,
+        count: d.count || 1,
+        demand: d.count || 1,
+        completed: 0
+    }));
+
+    if (isRemnant) {
+        if (window.camApp && typeof window.camApp.renderRemnantDemandsUI === 'function') {
+            window.camApp.renderRemnantDemandsUI(newDemands);
+        }
+    } else {
+        const data = state.getCurrentCaseData();
+        if (data) {
+            data.demands = JSON.parse(JSON.stringify(newDemands));
+            renderDemandsUI(data.demands);
+        }
+    }
+
+    showToast(`已成功载入窗帘订单模板: ${tpl.name} (${newDemands.length} 项规格)，正在排料...`, "info");
+
+    const sel = document.getElementById("sel-curtain-order-template");
+    if (sel) sel.value = "";
+    const selRem = document.getElementById("sel-remnant-order-template");
+    if (selRem) selRem.value = "";
+
+    // 自动触发排料计算，直接在画布展示最优排料与刀序
+    if (window.camApp && typeof window.camApp.triggerSolve === 'function') {
+        setTimeout(() => {
+            window.camApp.triggerSolve();
+        }, 150);
+    }
+}
+

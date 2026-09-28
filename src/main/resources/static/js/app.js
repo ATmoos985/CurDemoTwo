@@ -44,7 +44,7 @@ import {
     clearStationCuts, resetAllRollCuts, renderDemandsUI, renderDefectsUI,
     addDefectRow, addDemandRow, getDefectsFromUI, getDemandsFromUI,
     onRollConfigChange, onOriginParamChange, onParamChange,
-    updateRollSize, toggleLongitudinal
+    updateRollSize, toggleLongitudinal, loadCurtainOrderTemplate
 } from './plugins/solver/quota-manager.js';
 
 import {
@@ -203,7 +203,7 @@ export async function selectPresetCase(caseId) {
             const remnant = await response.json();
             if (remnant && remnant.id) {
                 await switchCutMode('remnant', remnant, case3);
-                renderRemnantDemandsUI([{ name: '飘窗短帘成品', width: 2000, length: 1000, count: 1 }]);
+                renderRemnantDemandsUI(case3.demands || [{ name: '次卧飘窗短帘主片', width: 1200, length: 1000, count: 1 }]);
                 renderScene();
                 resetToBedView();
                 updateUIInfo();
@@ -228,12 +228,12 @@ export function updatePresetTriggerLabel(caseId) {
     const label = document.getElementById('preset-current-label');
     if (!label) return;
     const names = {
-        1: '案例1: 窗帘定高整幅横切',
-        2: '案例2: 偏幅单开帘纵切改宽',
+        1: '案例1: 窗帘定高整幅横切 (套排)',
+        2: '案例2: 偏幅单帘与边角套裁 (吃净)',
         3: '案例3: 短料料头套裁 (0扣料)',
-        4: '案例4: 窗幔帘头辅件套裁',
-        5: '案例5: Word表1 L形拆解',
-        6: '案例6: 60m大卷多工位搭切'
+        4: '案例4: 窗幔帘头辅件套裁 (10件套)',
+        5: '案例5: Word 表1 L形拆解 (守恒)',
+        6: '案例6: 60m大卷多工位搭切 (10件套)'
     };
     label.textContent = names[caseId] || `案例${caseId}`;
 }
@@ -356,7 +356,8 @@ const camApp = {
     toggleSectionCollapse,
     toggleSidebar,
     switchRightPanelTab,
-    showToast
+    showToast,
+    loadCurtainOrderTemplate
 };
 
 window.camApp = camApp;
