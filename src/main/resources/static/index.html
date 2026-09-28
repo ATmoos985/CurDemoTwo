@@ -632,15 +632,23 @@
                     </div>
                 </div>
 
-                <!-- 料头复用精益切割执行控制 -->
+                <!-- 料头复用精益切割执行控制 (与母卷工位操作完全统一对齐) -->
                 <div id="right-remnant-actions" class="panel-section action-footer-section" style="display: none; padding: 10px 14px 12px 14px;">
-                    <button class="big-solve-btn remnant" onclick="triggerSolve()" style="margin-bottom: 6px; width: 100%; height: 34px;">
-                        预览料头排料 (母卷 0 扣料)
+                    <button class="big-solve-btn remnant" id="btn-trigger-solve-remnant" onclick="triggerSolve()" style="margin-bottom: 6px; width: 100%; height: 34px;" title="在当前在台料头上执行二维直刀智能排料 (母卷 0 扣料)">
+                        在当前料头执行排料 (母卷 0 扣料)
                     </button>
-                    <button class="tool-btn active" id="btn-confirm-remnant-cut" style="width: 100%; height: 34px; background: #059669; color: #ffffff; border: 1px solid #047857; font-weight: 700; font-size: 12px; border-radius: 4px; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer;" onclick="openStationLapConfirmModal()" title="确认实切：核销原在库料头，产出成品并入库派生子料头">
-                        <span>✂</span>
+                    <button class="tool-btn active" id="btn-confirm-remnant-cut" style="width: 100%; height: 34px; margin-bottom: 6px; background: linear-gradient(135deg, #059669 0%, #047857 100%); color: #ffffff; border: 1px solid #065f46; font-weight: 700; font-size: 12px; border-radius: 4px; box-shadow: 0 2px 5px rgba(5,150,105,0.3); display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; transition: all 0.2s;" onclick="openStationLapConfirmModal()" title="确认料头实切：核销原在库料头，产出成品并入库派生子料头">
+                        <span style="font-size: 14px;">✂</span>
                         <span>确认料头实切 (核销原料头 · 入库子料头)</span>
                     </button>
+                    <div style="display: flex; gap: 6px; margin-top: 6px;">
+                        <button class="tool-btn" id="btn-clear-remnant-cuts" style="flex: 1; height: 26px; background: rgba(239, 68, 68, 0.08); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.25); font-size: 11px;" onclick="clearStationCuts()" title="清除当前料头上的所有排料裁片与下刀路径">
+                            清除本料头排料
+                        </button>
+                        <button class="tool-btn" id="btn-reload-remnant" style="flex: 1; height: 26px; background: rgba(251, 191, 36, 0.08); color: #d97706; border: 1px solid rgba(251, 191, 36, 0.25); font-size: 11px;" onclick="reloadCurrentRemnant()" title="重置当前在台料头至初始未排状态">
+                            重置在台料头
+                        </button>
+                    </div>
                 </div>
             </div>
         </aside>

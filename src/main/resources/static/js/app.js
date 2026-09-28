@@ -58,7 +58,8 @@ import {
     checkAllDemandsRemnantMatch, chooseRemnantForDemand, dismissRemnantHint,
     onRemnantFilterRollChange, refreshShelfRemnantsList, selectAndMountFromShelf,
     executeShelfBarcodeScan, quickSelectRemnant, mountRemnantToBed,
-    renderRemnantDemandsUI, addRemnantDemandRow, getRemnantDemandsFromUI
+    renderRemnantDemandsUI, addRemnantDemandRow, getRemnantDemandsFromUI,
+    reloadCurrentRemnant
 } from './plugins/remnant/remnant-shelf.js';
 
 import {
@@ -348,6 +349,7 @@ const camApp = {
     executeBarcodeScan,
     quickScan,
     selectAndLoadRemnant,
+    reloadCurrentRemnant,
     onParamChange,
     onOriginParamChange,
     onRollConfigChange,

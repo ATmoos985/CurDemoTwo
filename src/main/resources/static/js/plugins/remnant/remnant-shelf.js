@@ -4,7 +4,7 @@
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 import { renderScene, resetToBedView, updateStatusBar } from '../cad/cad-renderer.js';
-import { renderDefectsUI } from '../solver/quota-manager.js';
+import { renderDefectsUI, updateDemandCompletionFromPieces } from '../solver/quota-manager.js';
 import { renderRadar } from '../radar/radar-scrubber.js';
 import { updateUIInfo } from '../solver/solver-client.js';
 import { showToast } from '../../core/toast.js';
@@ -499,3 +499,29 @@ export function getRemnantDemandsFromUI() {
     });
     return list;
 }
+
+/**
+ * 重置在台料头至初始未排状态
+ */
+export function reloadCurrentRemnant() {
+    if (state.loadedRemnant) {
+        mountRemnantToBed(state.loadedRemnant, null);
+        const data = state.getCurrentCaseData();
+        if (data) {
+            data.demands = getRemnantDemandsFromUI();
+            updateDemandCompletionFromPieces(data);
+        }
+        if (window.clearRemnantSelection) {
+            window.clearRemnantSelection();
+        }
+        if (window.camApp && typeof window.camApp.renderToolpathUI === 'function') {
+            window.camApp.renderToolpathUI();
+        }
+        showToast(`已重置在台料头 [${state.loadedRemnant.id}] 为初始未排状态`, 'info');
+    } else {
+        if (typeof window.clearStationCuts === 'function') {
+            window.clearStationCuts();
+        }
+    }
+}
+

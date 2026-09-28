@@ -89,6 +89,42 @@ export function recalculateRollStats(data) {
 export function clearStationCuts() {
     const data = state.getCurrentCaseData();
     if (!data) return;
+    const isRemnantMode = (state.currentCutMode === "remnant");
+
+    if (isRemnantMode) {
+        const removedPieces = (data.pieces || []).length;
+        data.pieces = [];
+        data.cuts = [];
+        data.remnants = [];
+        data.cutIntervals = [];
+        data.deductLen = 0;
+        data.pieceArea = 0;
+        data.remArea = 0;
+        data.wasteArea = 0;
+        data.totalArea = ((data.rollW || 2000) * (data.bedL || 1000)) / 1000000.0;
+        data.lastReceipt = null;
+        state.pendingPlan = null;
+
+        if (!data.demands || data.demands.length === 0) {
+            if (window.camApp && typeof window.camApp.getRemnantDemandsFromUI === 'function') {
+                data.demands = window.camApp.getRemnantDemandsFromUI();
+            }
+        }
+        updateDemandCompletionFromPieces(data);
+        if (window.clearRemnantSelection) {
+            window.clearRemnantSelection();
+        }
+        renderScene();
+        drawRulers();
+        updateUIInfo();
+        if (window.camApp && typeof window.camApp.renderToolpathUI === 'function') {
+            window.camApp.renderToolpathUI();
+        }
+
+        showToast(`料头排料已清空：已清除当前在台料头上的 ${removedPieces} 件裁片与切刀`, "info");
+        return;
+    }
+
     const winStartY = parseFloat(document.getElementById("inp-window-start-y").value) || data.windowStartY || 0;
     const bedL = parseFloat(document.getElementById("inp-bed-l").value) || data.bedL || 5000;
     const winEndY = winStartY + bedL;
@@ -123,6 +159,9 @@ export function clearStationCuts() {
     updateDemandCompletionFromPieces(data);
 
     renderDemandsUI(data.demands);
+    if (window.clearRemnantSelection) {
+        window.clearRemnantSelection();
+    }
     renderScene();
     drawRulers();
     updateUIInfo();

@@ -157,6 +157,10 @@ export function loadCase(id) {
             radarBar.style.opacity = "1";
             radarBar.style.pointerEvents = "auto";
         }
+        const rightRollActions = document.getElementById("right-roll-actions");
+        const rightRemnantActions = document.getElementById("right-remnant-actions");
+        if (rightRollActions) rightRollActions.style.display = "block";
+        if (rightRemnantActions) rightRemnantActions.style.display = "none";
     }
     state.setCaseId(id);
     state.scenarios[id].lastReceipt = null;

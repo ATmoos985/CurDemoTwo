@@ -69,6 +69,8 @@ export function closeCADContextMenu() {
         currentTarget = null;
     }
 }
+window.openStationContextMenu = openStationContextMenu;
+window.closeCADContextMenu = closeCADContextMenu;
 
 function showMenuAt(clientX, clientY, htmlContent) {
     if (!activeMenu) return;
@@ -252,6 +254,54 @@ export function openPieceContextMenu(piece, clientX, clientY) {
  * 打开【数控机台工位 / 空白母卷】右键菜单
  */
 export function openStationContextMenu(clientX, clientY) {
+    if (state.currentCutMode === 'remnant') {
+        const rem = state.loadedRemnant;
+        const data = state.getCurrentCaseData();
+        const code = rem ? (rem.id || rem.code || '当前在台料头') : '当前在台料头';
+        const w = rem ? rem.width : (data.rollW || 2000);
+        const l = rem ? rem.length : (data.bedL || 1500);
+        const pieceCount = (data.pieces || []).length;
+        const cutCount = (data.cuts || []).length;
+
+        currentTarget = { type: 'remnant-station' };
+        const html = `
+            <div class="cad-menu-header">
+                <span style="display:flex; align-items:center; gap:6px;">
+                    <span style="color:#d97706;">🧩</span>
+                    <span>在台料头 [${code}]</span>
+                </span>
+                <span style="font-size:10px; color:#94a3b8;">${w}×${l}mm</span>
+            </div>
+            <div class="cad-menu-item highlight" onclick="window.cadMenuActions.solveRemnant()">
+                <div class="cad-menu-item-title">
+                    <span>⚡ 执行料头智能排料 (母卷 0 扣料)</span>
+                </div>
+                <div class="cad-menu-item-desc">
+                    在当前在台料头上执行直刀优化排料，自动避开瑕疵
+                </div>
+            </div>
+            <div class="cad-menu-divider"></div>
+            <div class="cad-menu-item danger" onclick="window.cadMenuActions.clearRemnantCuts()">
+                <div class="cad-menu-item-title">
+                    <span>🧹 清除本料头排料 (${pieceCount}片 / ${cutCount}刀)</span>
+                </div>
+                <div class="cad-menu-item-desc">
+                    清空料头上的所有排料裁片与切刀路径，恢复空白
+                </div>
+            </div>
+            <div class="cad-menu-item warning" onclick="window.cadMenuActions.reloadRemnant()">
+                <div class="cad-menu-item-title">
+                    <span>🔄 重置在台料头至初始状态</span>
+                </div>
+                <div class="cad-menu-item-desc">
+                    重新从料头库装载干净料头，重设规格基准
+                </div>
+            </div>
+        `;
+        showMenuAt(clientX, clientY, html);
+        return;
+    }
+
     currentTarget = { type: 'station' };
     const data = state.getCurrentCaseData();
     const winStartY = data.windowStartY || 0;
@@ -640,5 +690,17 @@ window.cadMenuActions = {
     clearStation: () => {
         closeCADContextMenu();
         import('../solver/quota-manager.js').then(m => m.clearStationCuts());
+    },
+    clearRemnantCuts: () => {
+        closeCADContextMenu();
+        import('../solver/quota-manager.js').then(m => m.clearStationCuts());
+    },
+    reloadRemnant: () => {
+        closeCADContextMenu();
+        import('../remnant/remnant-shelf.js').then(m => m.reloadCurrentRemnant());
+    },
+    solveRemnant: () => {
+        closeCADContextMenu();
+        import('../solver/solver-client.js').then(m => m.triggerSolve());
     }
 };
