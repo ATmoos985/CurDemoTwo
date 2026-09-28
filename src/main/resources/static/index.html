@@ -86,7 +86,8 @@
         <div class="header-actions">
             <!-- 物料与料头中心 -->
             <button class="tool-btn" onclick="openMaterialModal('rolls')">物料管理</button>
-            <button class="tool-btn" onclick="openCutReport()">实切确认</button>
+            <button class="tool-btn" onclick="openExportModal('gcode')" style="font-weight: 600; color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.08);" title="导出/查看机床数控代码 (G-Code / DXF 刀路)">机床代码</button>
+            <button class="tool-btn" onclick="openCutTicketModal()" style="font-weight: 600; color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.35); background: rgba(251, 191, 36, 0.08);" title="打印车间生产工艺流转单 (A4排版打印)">打印工单</button>
             <details class="header-more">
                 <summary class="tool-btn">更多工具 ▾</summary>
                 <div class="header-more-menu">
@@ -561,16 +562,12 @@
                     </div>
                 </div>
 
-                <!-- 刀路工艺快捷操作 (常驻右侧底部，折叠上方工艺单时位置绝不上移) -->
+                <!-- 现场实切确认与料头回库大按钮 (常驻右侧底部) -->
                 <div class="sidebar-pinned-footer action-footer-section" style="border-top: 1px solid var(--panel-border); padding: 12px 14px;">
-                    <div style="display: flex; gap: 6px;">
-                        <button class="tool-btn active" style="flex: 1; height: 30px; background: #0284c7; font-weight: 600; font-size: 11px;" onclick="openExportModal('gcode')">
-                            机床代码 (G-Code/DXF)
-                        </button>
-                        <button class="tool-btn active" style="flex: 1; height: 30px; background: #d97706; font-weight: 600; font-size: 11px;" onclick="openCutTicketModal()">
-                            车间工单 (A4打印)
-                        </button>
-                    </div>
+                    <button class="tool-btn active" id="btn-right-confirm-station-cut" style="width: 100%; height: 34px; background: linear-gradient(135deg, #059669 0%, #047857 100%); color: #ffffff; border: 1px solid #065f46; font-weight: 700; font-size: 12px; border-radius: 4px; box-shadow: 0 2px 5px rgba(5,150,105,0.3); display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; transition: all 0.2s;" onclick="openStationLapConfirmModal()" title="确认当前工位裁切：扣减母卷长度、核销订单需求、将派生料头登记入库">
+                        <span style="font-size: 14px;">✂</span>
+                        <span>确认本次工位搭切 (扣料 · 核销 · 入库)</span>
+                    </button>
                 </div>
             </div>
 
@@ -650,8 +647,9 @@
             </div>
             <!-- 现场实切确认与料头回库大按钮 (常驻右侧对账页底部) -->
             <div class="sidebar-pinned-footer action-footer-section" style="border-top: 1px solid var(--panel-border); padding: 12px 14px;">
-                <button class="tool-btn active" style="width: 100%; height: 32px; background: #059669; font-weight: 700; font-size: 12px;" onclick="openCutReport()">
-                    ✂ 现场实切确认与料头回库
+                <button class="tool-btn active" style="width: 100%; height: 34px; background: linear-gradient(135deg, #059669 0%, #047857 100%); color: #ffffff; border: 1px solid #065f46; font-weight: 700; font-size: 12px; border-radius: 4px; box-shadow: 0 2px 5px rgba(5,150,105,0.3); display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; transition: all 0.2s;" onclick="openStationLapConfirmModal()" title="确认当前工位裁切：扣减母卷长度、核销订单需求、将派生料头登记入库">
+                    <span style="font-size: 14px;">✂</span>
+                    <span>确认本次工位搭切 (扣料 · 核销 · 入库)</span>
                 </button>
             </div>
         </div>
