@@ -448,30 +448,68 @@ export function renderScene() {
     bedStationGroup.add(new Konva.Rect({ x: badgeX, y: badgeY, width: 340, height: 26, fill: isDark ? "#1c1917" : "#fef2f2", stroke: "#ef4444", strokeWidth: 1.5, cornerRadius: 4 }));
     bedStationGroup.add(new Konva.Text({ x: badgeX + 8, y: badgeY + 5, text: badgeTitle, fontSize: 14, fill: isDark ? "#fda4af" : "#dc2626", fontStyle: "bold", fontFamily: "monospace" }));
 
-    // CAD 尺寸标注线
-    const dimY = -65;
+    // CAD 尺寸标注线 (工业制图规范：充足安全外延，横向清晰胶囊卡片，杜绝元素贴身挤压)
+    const dimY = -130;
     const dimLineColor = "#ef4444";
     const dimBgColor = isDark ? "#450a0a" : "#fee2e2";
     const dimTextColor = isDark ? "#fecaca" : "#991b1b";
 
-    // 顶部幅宽标注线
-    bedStationGroup.add(new Konva.Line({ points: [0, 0, 0, dimY - 18], stroke: dimLineColor, strokeWidth: 1.5, dash: [4, 4] }));
-    bedStationGroup.add(new Konva.Line({ points: [rollW, 0, rollW, dimY - 18], stroke: dimLineColor, strokeWidth: 1.5, dash: [4, 4] }));
-    bedStationGroup.add(new Konva.Line({ points: [0, dimY, rollW, dimY], stroke: dimLineColor, strokeWidth: 2 }));
-    bedStationGroup.add(new Konva.Line({ points: [-10, dimY + 10, 10, dimY - 10], stroke: dimLineColor, strokeWidth: 2.5 }));
-    bedStationGroup.add(new Konva.Line({ points: [rollW - 10, dimY + 10, rollW + 10, dimY - 10], stroke: dimLineColor, strokeWidth: 2.5 }));
-    bedStationGroup.add(new Konva.Rect({ x: rollW / 2 - 185, y: dimY - 15, width: 370, height: 28, fill: dimBgColor, stroke: dimLineColor, strokeWidth: 1.5, cornerRadius: 4 }));
-    bedStationGroup.add(new Konva.Text({ x: rollW / 2 - 175, y: dimY - 8, text: `[有效幅宽] W: ${rollW} mm (${(rollW/1000).toFixed(2)}m)`, fontSize: 15, fill: dimTextColor, fontStyle: "bold", fontFamily: "monospace" }));
+    // 顶部幅宽标注线 (水平横向胶囊卡片，匹配母卷工程尺度)
+    bedStationGroup.add(new Konva.Line({ points: [0, 0, 0, dimY - 40], stroke: dimLineColor, strokeWidth: 2, dash: [6, 6] }));
+    bedStationGroup.add(new Konva.Line({ points: [rollW, 0, rollW, dimY - 40], stroke: dimLineColor, strokeWidth: 2, dash: [6, 6] }));
+    bedStationGroup.add(new Konva.Line({ points: [0, dimY, rollW, dimY], stroke: dimLineColor, strokeWidth: 2.5 }));
+    bedStationGroup.add(new Konva.Line({ points: [-18, dimY + 18, 18, dimY - 18], stroke: dimLineColor, strokeWidth: 3 }));
+    bedStationGroup.add(new Konva.Line({ points: [rollW - 18, dimY + 18, rollW + 18, dimY - 18], stroke: dimLineColor, strokeWidth: 3 }));
+    
+    const topCapW = 560;
+    const topCapH = 120;
+    bedStationGroup.add(new Konva.Rect({
+        x: rollW / 2 - topCapW / 2, y: dimY - topCapH / 2,
+        width: topCapW, height: topCapH,
+        fill: dimBgColor, stroke: dimLineColor, strokeWidth: 2, cornerRadius: 10,
+        shadowColor: "rgba(239, 68, 68, 0.25)", shadowBlur: 10
+    }));
+    bedStationGroup.add(new Konva.Text({
+        x: rollW / 2 - topCapW / 2, y: dimY - 46,
+        width: topCapW, align: "center",
+        text: `有效加工幅宽 (Fabric Width)`,
+        fontSize: 26, fill: dimTextColor, fontStyle: "bold"
+    }));
+    bedStationGroup.add(new Konva.Text({
+        x: rollW / 2 - topCapW / 2, y: dimY + 6,
+        width: topCapW, align: "center",
+        text: `W: ${rollW} mm (${(rollW/1000).toFixed(2)}m)`,
+        fontSize: 34, fill: dimTextColor, fontStyle: "bold", fontFamily: "monospace"
+    }));
 
-    // 左侧工位展开长标注线
-    const dimX = -85;
-    bedStationGroup.add(new Konva.Line({ points: [0, 0, dimX - 18, 0], stroke: dimLineColor, strokeWidth: 1.5, dash: [4, 4] }));
-    bedStationGroup.add(new Konva.Line({ points: [0, bedL, dimX - 18, bedL], stroke: dimLineColor, strokeWidth: 1.5, dash: [4, 4] }));
-    bedStationGroup.add(new Konva.Line({ points: [dimX, 0, dimX, bedL], stroke: dimLineColor, strokeWidth: 2 }));
-    bedStationGroup.add(new Konva.Line({ points: [dimX - 10, 10, dimX + 10, -10], stroke: dimLineColor, strokeWidth: 2.5 }));
-    bedStationGroup.add(new Konva.Line({ points: [dimX - 10, bedL + 10, dimX + 10, bedL - 10], stroke: dimLineColor, strokeWidth: 2.5 }));
-    bedStationGroup.add(new Konva.Rect({ x: dimX - 28, y: bedL / 2 - 120, width: 26, height: 240, fill: dimBgColor, stroke: dimLineColor, strokeWidth: 1.5, cornerRadius: 4 }));
-    bedStationGroup.add(new Konva.Text({ x: dimX - 9, y: bedL / 2 + 100, text: `机台展开长 L: ${bedL} mm (${(bedL/1000).toFixed(2)}m)`, rotation: -90, fontSize: 15, fill: dimTextColor, fontStyle: "bold", fontFamily: "monospace" }));
+    // 左侧工位展开长标注线 (向外拓展至 -260mm，彻底拉开与母卷粗红线的距离；采用大比例横向工业卡片，解决文字-90°旋转挤压糊字)
+    const dimX = -260;
+    bedStationGroup.add(new Konva.Line({ points: [0, 0, dimX - 40, 0], stroke: dimLineColor, strokeWidth: 2, dash: [6, 6] }));
+    bedStationGroup.add(new Konva.Line({ points: [0, bedL, dimX - 40, bedL], stroke: dimLineColor, strokeWidth: 2, dash: [6, 6] }));
+    bedStationGroup.add(new Konva.Line({ points: [dimX, 0, dimX, bedL], stroke: dimLineColor, strokeWidth: 2.5 }));
+    bedStationGroup.add(new Konva.Line({ points: [dimX - 18, 18, dimX + 18, -18], stroke: dimLineColor, strokeWidth: 3 }));
+    bedStationGroup.add(new Konva.Line({ points: [dimX - 18, bedL + 18, dimX + 18, bedL - 18], stroke: dimLineColor, strokeWidth: 3 }));
+    
+    const leftCapW = 540;
+    const leftCapH = 120;
+    bedStationGroup.add(new Konva.Rect({
+        x: dimX - leftCapW / 2, y: bedL / 2 - leftCapH / 2,
+        width: leftCapW, height: leftCapH,
+        fill: dimBgColor, stroke: dimLineColor, strokeWidth: 2, cornerRadius: 10,
+        shadowColor: "rgba(239, 68, 68, 0.25)", shadowBlur: 10
+    }));
+    bedStationGroup.add(new Konva.Text({
+        x: dimX - leftCapW / 2, y: bedL / 2 - 46,
+        width: leftCapW, align: "center",
+        text: `机台展开长 (Bed Length)`,
+        fontSize: 26, fill: dimTextColor, fontStyle: "bold"
+    }));
+    bedStationGroup.add(new Konva.Text({
+        x: dimX - leftCapW / 2, y: bedL / 2 + 6,
+        width: leftCapW, align: "center",
+        text: `L: ${bedL} mm (${(bedL/1000).toFixed(2)}m)`,
+        fontSize: 34, fill: dimTextColor, fontStyle: "bold", fontFamily: "monospace"
+    }));
 
     bedStationGroup.position({ x: 0, y: winStartY });
     bedStationGroup.listening(false);
@@ -491,9 +529,9 @@ export function resetToBedView() {
     const ch = stage.height();
 
     const RULER_T = 24;
-    const marginL = 130;
+    const marginL = 230; // 充分留出左侧 -260mm 尺寸线与大胶囊卡片的呼吸留白空间
     const marginR = 60;
-    const marginT = 100;
+    const marginT = 120; // 充分留出顶部 -130mm 幅宽尺寸线的呼吸空间
     const marginB = 70;
 
     const availW = cw - RULER_T - marginL - marginR;
@@ -533,9 +571,9 @@ export function resetToFlowView() {
     const ch = stage.height();
 
     const RULER_T = 24;
-    const marginL = 130;
+    const marginL = 200;
     const marginR = 60;
-    const marginT = 90;
+    const marginT = 100;
     const marginB = 50;
 
     const availW = cw - RULER_T - marginL - marginR;
