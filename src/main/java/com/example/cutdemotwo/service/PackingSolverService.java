@@ -23,6 +23,22 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
     @Value("${packingsolver.executable.path:d:/GitLab/packingsolver/build/src/rectangleguillotine/packingsolver_rectangleguillotine.exe}")
     private String solverPath;
 
+    private final com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService toolpathOptimizerService;
+    private final com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService cutBoundaryCompletionService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public PackingSolverService(
+            com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService toolpathOptimizerService,
+            com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService cutBoundaryCompletionService) {
+        this.toolpathOptimizerService = toolpathOptimizerService;
+        this.cutBoundaryCompletionService = cutBoundaryCompletionService;
+    }
+
+    public PackingSolverService() {
+        this.toolpathOptimizerService = new com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService();
+        this.cutBoundaryCompletionService = new com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService();
+    }
+
     public boolean isAvailable() {
         File f = new File(solverPath);
         return f.exists() && f.canExecute();
@@ -148,6 +164,15 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
         }
     }
 
+    private static class CertNode {
+        int nodeId;
+        double x, y, w, h;
+        int type;
+        int cut;
+        Integer parent;
+        List<CertNode> children = new ArrayList<>();
+    }
+
     private SolveResponse parseCertificate(File certCsv, SolveRequest req, Map<Integer, String> itemMap, Map<Integer, Integer> demandIdMap) throws IOException {
         SolveResponse res = new SolveResponse();
         res.setSuccess(true);
@@ -158,9 +183,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
 
         List<PlacedPiece> pieces = new ArrayList<>();
         List<RemnantPiece> remnants = new ArrayList<>();
-        List<CutStep> cutSteps = new ArrayList<>();
-
-        List<String[]> cutNodes = new ArrayList<>();
+        List<CutStep> rawCutSteps = new ArrayList<>();
 
         int remIndex = 1;
         String origin = req.getCutOrigin() != null ? req.getCutOrigin().trim().toLowerCase() : "right-top";
@@ -182,7 +205,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                     "卷头修齐料头",
                     0, trimY, req.getRollW(), trim, trimArea, false
             ));
-            cutSteps.add(new CutStep(
+            rawCutSteps.add(new CutStep(
                     1,
                     "横切",
                     mirrorY ? (req.getRollL() - trim) : trim,
@@ -192,6 +215,9 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
             ));
         }
 
+        Map<Integer, CertNode> nodeMap = new LinkedHashMap<>();
+        List<CertNode> allNodes = new ArrayList<>();
+
         try (BufferedReader br = new BufferedReader(new InputStreamReader(new FileInputStream(certCsv), java.nio.charset.StandardCharsets.UTF_8))) {
             String header = br.readLine();
             String line;
@@ -200,67 +226,121 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                 String[] parts = line.split(",");
                 if (parts.length < 9) continue;
 
-                int nodeId = Integer.parseInt(parts[2].trim());
-                double x = Double.parseDouble(parts[3].trim());
-                double y = Double.parseDouble(parts[4].trim());
-                double w = Double.parseDouble(parts[5].trim());
-                double h = Double.parseDouble(parts[6].trim());
-                int type = Integer.parseInt(parts[7].trim());
-                int cut = Integer.parseInt(parts[8].trim());
+                CertNode n = new CertNode();
+                n.nodeId = Integer.parseInt(parts[2].trim());
+                n.x = Double.parseDouble(parts[3].trim());
+                n.y = Double.parseDouble(parts[4].trim());
+                n.w = Double.parseDouble(parts[5].trim());
+                n.h = Double.parseDouble(parts[6].trim());
+                n.type = Integer.parseInt(parts[7].trim());
+                n.cut = Integer.parseInt(parts[8].trim());
+                if (parts.length >= 10 && !parts[9].trim().isEmpty()) {
+                    try {
+                        n.parent = Integer.parseInt(parts[9].trim());
+                    } catch (Exception ignored) {}
+                }
 
-                double physX = isRightOrigin ? (req.getRollW() - x - w) : x;
-                double physY = mirrorY ? (req.getRollL() - y - h - trim) : (y + trim);
+                nodeMap.put(n.nodeId, n);
+                allNodes.add(n);
 
-                if (type >= 0 && cut > 0) {
-                    String name = itemMap.getOrDefault(type, "裁片-" + type);
-                    Integer demId = demandIdMap != null ? demandIdMap.get(type) : null;
-                    pieces.add(new PlacedPiece(type, name, physX, physY, w, h, false, demId));
-                } else if (type == -1 || type == -3) {
+                double physX = isRightOrigin ? (req.getRollW() - n.x - n.w) : n.x;
+                double physY = mirrorY ? (req.getRollL() - n.y - n.h - trim) : (n.y + trim);
+
+                if (n.type >= 0 && n.cut > 0) {
+                    String name = itemMap.getOrDefault(n.type, "裁片-" + n.type);
+                    Integer demId = demandIdMap != null ? demandIdMap.get(n.type) : null;
+                    pieces.add(new PlacedPiece(n.type, name, physX, physY, n.w, n.h, false, demId));
+                } else if (n.type == -1 || n.type == -3) {
                     // Remnant / waste
-                    if (w >= 200 && h >= 300) {
-                        double area = (w * h) / 1_000_000.0;
-                        boolean hasDefect = checkDefectOverlap(physX, physY, w, h, req.getDefects());
+                    if (n.w >= 200 && n.h >= 300) {
+                        double area = (n.w * n.h) / 1_000_000.0;
+                        boolean hasDefect = checkDefectOverlap(physX, physY, n.w, n.h, req.getDefects());
                         String status = hasDefect ? "带疵料头" : "可用料头";
-                        remnants.add(new RemnantPiece(String.format("REM-PS-%02d", remIndex++), status, physX, physY, w, h, area, hasDefect));
+                        remnants.add(new RemnantPiece(String.format("REM-PS-%02d", remIndex++), status, physX, physY, n.w, n.h, area, hasDefect));
                     }
-                } else if (type == -2) {
-                    cutNodes.add(new String[]{String.valueOf(cut), String.valueOf(x), String.valueOf(y), String.valueOf(w), String.valueOf(h)});
                 }
             }
         }
 
-        // Build cut steps
-        cutNodes.sort(Comparator.comparingInt(a -> Integer.parseInt(a[0])));
-        int stepNo = (trim > 0) ? 2 : 1;
-        for (String[] cn : cutNodes) {
-            int cutLvl = Integer.parseInt(cn[0]);
-            double cx = Double.parseDouble(cn[1]);
-            double cy = Double.parseDouble(cn[2]);
-            double cw = Double.parseDouble(cn[3]);
-            double ch = Double.parseDouble(cn[4]);
-
-            boolean isHoriz = (cutLvl % 2 == 1);
-            String cutType = isHoriz ? "横切" : "纵切";
-            double cutPos = isHoriz ?
-                    (mirrorY ? (req.getRollL() - cy - ch - trim) : (cy + ch + trim)) :
-                    (isRightOrigin ? (req.getRollW() - cx - cw) : (cx + cw));
-            if (!isHoriz && (cutPos <= 0 || cutPos >= req.getRollW())) {
-                continue;
+        // 构建父子树
+        for (CertNode n : allNodes) {
+            if (n.parent != null && nodeMap.containsKey(n.parent)) {
+                nodeMap.get(n.parent).children.add(n);
             }
-            double start = isHoriz ?
-                    (isRightOrigin ? (req.getRollW() - cx - cw) : cx) :
-                    (mirrorY ? (req.getRollL() - cy - ch - trim) : (cy + trim));
-            double end = isHoriz ?
-                    (isRightOrigin ? (req.getRollW() - cx) : (cx + cw)) :
-                    (mirrorY ? (req.getRollL() - cy - trim) : (cy + ch + trim));
-            String desc = String.format("第 %d 阶段%s，裁切范围 [%.0f × %.0f mm]", cutLvl, cutType, cw, ch);
-
-            cutSteps.add(new CutStep(stepNo++, cutType, cutPos, Math.min(start, end), Math.max(start, end), desc));
         }
+
+        // 提取兄弟子节点之间的 Guillotine 切割线
+        for (CertNode p : allNodes) {
+            if (p.children.size() <= 1) continue;
+            List<CertNode> chList = p.children;
+
+            Set<Double> distinctX = new TreeSet<>(Comparator.comparingDouble(d -> Math.round(d * 10.0)));
+            Set<Double> distinctY = new TreeSet<>(Comparator.comparingDouble(d -> Math.round(d * 10.0)));
+            for (CertNode c : chList) {
+                distinctX.add(c.x);
+                distinctY.add(c.y);
+            }
+
+            if (distinctY.size() > 1) {
+                // 水平横切
+                chList.sort(Comparator.comparingDouble(c -> c.y));
+                for (int i = 0; i < chList.size() - 1; i++) {
+                    CertNode c1 = chList.get(i);
+                    CertNode c2 = chList.get(i + 1);
+                    double cutY = c1.y + c1.h;
+                    if (cutY <= p.y + 0.1 || cutY >= p.y + p.h - 0.1) continue;
+
+                    double minX = chList.stream().mapToDouble(c -> c.x).min().orElse(p.x);
+                    double maxX = chList.stream().mapToDouble(c -> c.x + c.w).max().orElse(p.x + p.w);
+
+                    double physPos = mirrorY ? (req.getRollL() - cutY - trim) : (cutY + trim);
+                    double physStart = isRightOrigin ? (req.getRollW() - maxX) : minX;
+                    double physEnd = isRightOrigin ? (req.getRollW() - minX) : maxX;
+                    int cutLvl = Math.max(1, c2.cut);
+
+                    rawCutSteps.add(new CutStep(
+                            rawCutSteps.size() + 1, "横切", physPos, Math.min(physStart, physEnd), Math.max(physStart, physEnd),
+                            String.format("第 %d 阶段横切，裁切范围 [%.0f × %.0f mm]", cutLvl, maxX - minX, p.h)
+                    ));
+                }
+            } else if (distinctX.size() > 1) {
+                // 垂直纵切
+                chList.sort(Comparator.comparingDouble(c -> c.x));
+                for (int i = 0; i < chList.size() - 1; i++) {
+                    CertNode c1 = chList.get(i);
+                    CertNode c2 = chList.get(i + 1);
+                    double cutX = c1.x + c1.w;
+                    if (cutX <= p.x + 0.1 || cutX >= p.x + p.w - 0.1) continue;
+
+                    double minY = chList.stream().mapToDouble(c -> c.y).min().orElse(p.y);
+                    double maxY = chList.stream().mapToDouble(c -> c.y + c.h).max().orElse(p.y + p.h);
+
+                    double physPos = isRightOrigin ? (req.getRollW() - cutX) : cutX;
+                    double physStart = mirrorY ? (req.getRollL() - maxY - trim) : (minY + trim);
+                    double physEnd = mirrorY ? (req.getRollL() - minY - trim) : (maxY + trim);
+                    int cutLvl = Math.max(1, c2.cut);
+
+                    rawCutSteps.add(new CutStep(
+                            rawCutSteps.size() + 1, "纵切", physPos, Math.min(physStart, physEnd), Math.max(physStart, physEnd),
+                            String.format("第 %d 阶段纵切，裁切范围 [%.0f × %.0f mm]", cutLvl, p.w, maxY - minY)
+                    ));
+                }
+            }
+        }
+
+        // 100% 完整切断自愈检查 (确保无粘连)
+        List<CutStep> fullySeparatedCuts = cutBoundaryCompletionService.ensureCompleteSeparation(
+                pieces, remnants, rawCutSteps, req.getRollW(), req.getRollL(), isRemnantFeed
+        );
+
+        // 刀路连续平滑优化 (赋予 startX, startY, endX, endY, airDistance，消除乱跳)
+        double homeX = isRightOrigin ? req.getRollW() : 0.0;
+        double homeY = isBottomOrigin ? req.getRollL() : 0.0;
+        List<CutStep> continuousCuts = toolpathOptimizerService.optimizeAndChain(fullySeparatedCuts, homeX, homeY, true);
 
         res.setPieces(pieces);
         res.setRemnants(remnants);
-        res.setCuts(cutSteps);
+        res.setCuts(continuousCuts);
 
         // Area balance
         double rollArea = (req.getRollW() * req.getRollL()) / 1_000_000.0;

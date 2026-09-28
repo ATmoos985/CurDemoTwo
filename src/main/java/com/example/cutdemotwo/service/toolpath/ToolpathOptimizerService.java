@@ -18,6 +18,11 @@ public class ToolpathOptimizerService {
 
     private static final Pattern STAGE_PATTERN = Pattern.compile("第\\s*(\\d+)\\s*阶段");
 
+    public List<CutStep> optimizeAndChain(List<CutStep> rawCuts, double homeX, double homeY, boolean respectPrecedence) {
+        ToolpathResult res = optimizeToolpath(rawCuts, homeX, homeY, respectPrecedence);
+        return res.getOptimizedCuts() != null ? res.getOptimizedCuts() : Collections.emptyList();
+    }
+
     public ToolpathResult optimizeToolpath(List<CutStep> rawCuts, double homeX, double homeY, boolean respectPrecedence) {
         ToolpathResult result = new ToolpathResult();
         result.setStartX(homeX);
@@ -258,7 +263,12 @@ public class ToolpathOptimizerService {
 
         CutSegment(CutStep cs) {
             this.original = cs;
-            if ("横切".equals(cs.getType())) {
+            if (cs.getStartX() != null && cs.getEndX() != null && cs.getStartY() != null && cs.getEndY() != null) {
+                p1x = cs.getStartX();
+                p1y = cs.getStartY();
+                p2x = cs.getEndX();
+                p2y = cs.getEndY();
+            } else if ("横切".equals(cs.getType())) {
                 p1x = cs.getStart();
                 p1y = cs.getPos();
                 p2x = cs.getEnd();

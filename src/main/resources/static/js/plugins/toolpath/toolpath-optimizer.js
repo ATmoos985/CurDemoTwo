@@ -122,7 +122,10 @@ export function toggleToolpathOptimization() {
 function solveLocalSegmentTSP(rawCuts, homeX, homeY, respectPrecedence) {
     const segments = rawCuts.map((c) => {
         let p1x, p1y, p2x, p2y;
-        if (c.type === "横切") {
+        if (c.startX !== undefined && c.endX !== undefined && c.startY !== undefined && c.endY !== undefined) {
+            p1x = c.startX; p1y = c.startY;
+            p2x = c.endX; p2y = c.endY;
+        } else if (c.type === "横切") {
             p1x = c.start; p1y = c.pos;
             p2x = c.end; p2y = c.pos;
         } else {

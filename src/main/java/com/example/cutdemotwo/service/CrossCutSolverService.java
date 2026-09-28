@@ -2,6 +2,8 @@ package com.example.cutdemotwo.service;
 
 import com.example.cutdemotwo.model.*;
 import com.example.cutdemotwo.service.solver.ICutSolverEngine;
+import com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -11,6 +13,16 @@ import java.util.List;
 /** 仅横切机台：每件裁片必须占满幅宽，按送料方向避开疵点区间。 */
 @Service
 public class CrossCutSolverService implements ICutSolverEngine {
+    private final ToolpathOptimizerService toolpathOptimizerService;
+
+    @Autowired
+    public CrossCutSolverService(ToolpathOptimizerService toolpathOptimizerService) {
+        this.toolpathOptimizerService = toolpathOptimizerService;
+    }
+
+    public CrossCutSolverService() {
+        this.toolpathOptimizerService = new ToolpathOptimizerService();
+    }
     @Override public String getEngineType() { return "crosscut"; }
     @Override public boolean isAvailable() { return true; }
 
@@ -75,9 +87,12 @@ public class CrossCutSolverService implements ICutSolverEngine {
         double totalArea = req.getRollW() * req.getRollL() / 1_000_000.0;
         double pieceArea = pieces.stream().mapToDouble(p -> p.getW() * p.getL()).sum() / 1_000_000.0;
         double remArea = remnants.stream().mapToDouble(RemnantPiece::getArea).sum();
+        double homeX = "right-bottom".equalsIgnoreCase(req.getCutOrigin()) ? req.getRollW() : 0.0;
+        double homeY = "right-bottom".equalsIgnoreCase(req.getCutOrigin()) ? req.getRollL() : 0.0;
+        List<CutStep> continuousCuts = toolpathOptimizerService.optimizeAndChain(cuts, homeX, homeY, false);
         res.setPieces(pieces);
         res.setRemnants(remnants);
-        res.setCuts(cuts);
+        res.setCuts(continuousCuts);
         res.setDeductLen("remnant".equalsIgnoreCase(req.getFeedPortType()) ? 0 : cursor);
         res.setTotalArea(totalArea);
         res.setPieceArea(pieceArea);
