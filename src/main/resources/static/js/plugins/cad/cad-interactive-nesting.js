@@ -23,6 +23,15 @@ export function setSelectedPieceId(id) {
  * 为单个裁片 Konva 节点注入交互行为与干涉检测
  */
 export function makePieceInteractive(pGroup, piece, caseData) {
+    if (piece.confirmed) {
+        pGroup.draggable(false);
+        pGroup.name(`piece-entity-${piece.id}`);
+        pGroup.on("click", (e) => {
+            e.cancelBubble = true;
+            import('../../core/toast.js').then(m => m.showToast(`裁片 ${piece.name || piece.id} 已完成实切确认核销，已锁定。`, 'info'));
+        });
+        return;
+    }
     pGroup.draggable(true);
     pGroup.name(`piece-entity-${piece.id}`);
 

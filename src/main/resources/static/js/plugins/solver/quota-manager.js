@@ -129,12 +129,17 @@ export function clearStationCuts() {
     showToast(`工位排料已清除：已移除工位 [${winStartY}~${winEndY}mm] 内的 ${removedPieces} 件裁片与切刀`, "info");
 }
 
-export function resetAllRollCuts() {
+export async function resetAllRollCuts() {
     if (!confirm("确定要清空整卷所有工位的已排裁片与切刀记录吗？\n这将恢复为未开卷裁切的整料状态，所有需求件数核销将归零。")) {
         return;
     }
     const data = state.getCurrentCaseData();
     if (!data) return;
+    const rollId = data.rollId || "ROLL-2026-0920";
+    try {
+        await fetch(`/api/rolls/${encodeURIComponent(rollId)}/reset`, { method: "POST" });
+    } catch (_) {}
+
     data.pieces = [];
     data.cuts = [];
     data.remnants = [];
@@ -144,15 +149,25 @@ export function resetAllRollCuts() {
     data.remArea = 0;
     data.wasteArea = 0;
     data.totalArea = 0;
+    data.lastReceipt = null;
+    state.lastCutReceipt = null;
+    state.pendingPlan = null;
     if (data.demands) {
         data.demands.forEach(d => { d.completed = 0; });
+    }
+
+    if (window.camApp && window.camApp.updateMotherRollRemnantStats) {
+        await window.camApp.updateMotherRollRemnantStats(rollId);
+    }
+    if (window.camApp && window.camApp.refreshShelfRemnantsList) {
+        await window.camApp.refreshShelfRemnantsList();
     }
 
     renderDemandsUI(data.demands);
     renderScene();
     drawRulers();
     updateUIInfo();
-    showToast("整卷排料已重置：母卷已清空排料，可从头开始在任意红框工位排料", "info");
+    showToast("整卷排料已重置：母卷已恢复初始全长，历史实切记录已清空，可从头开始在任意红框工位排料", "info");
 }
 
 export function renderDemandsUI(demands) {

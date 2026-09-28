@@ -49,7 +49,8 @@ import {
 
 import {
     updateUIInfo, loadCase, triggerSolve,
-    openCutReport, closeCutReport, confirmCutReport, exportCutResult
+    openCutReport, closeCutReport, confirmCutReport, exportCutResult,
+    openStationLapConfirmModal, updateReportPreview
 } from './plugins/solver/solver-client.js';
 
 import {
@@ -284,6 +285,7 @@ const camApp = {
     viewFullRoll,
     triggerSolve,
     openCutReport, closeCutReport, confirmCutReport, exportCutResult,
+    openStationLapConfirmModal, updateReportPreview,
     loadCase,
     stepCut,
     playCuts,

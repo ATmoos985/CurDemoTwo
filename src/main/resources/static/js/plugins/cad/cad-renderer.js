@@ -188,10 +188,17 @@ export function renderScene() {
             text: `${p.w} × ${p.l} mm`, width: 240, align: "center",
             fontSize: 20, fill: pSubFill, fontFamily: "monospace"
         }));
-        pGroup.add(new Konva.Text({
-            x: 10, y: 10,
-            text: "经向 (Length)", fontSize: 16, fill: pGrainFill
-        }));
+        if (p.confirmed) {
+            pGroup.add(new Konva.Text({
+                x: 10, y: 10,
+                text: "✓ 已实切核销", fontSize: 16, fill: isDark ? "#34d399" : "#059669", fontStyle: "bold"
+            }));
+        } else {
+            pGroup.add(new Konva.Text({
+                x: 10, y: 10,
+                text: "经向 (Length)", fontSize: 16, fill: pGrainFill
+            }));
+        }
 
         // 注入工业级交互式排料微调与干涉检测
         makePieceInteractive(pGroup, p, data);

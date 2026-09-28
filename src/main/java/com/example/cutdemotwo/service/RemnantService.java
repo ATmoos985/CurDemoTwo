@@ -228,6 +228,17 @@ public class RemnantService {
         return receipt;
     }
 
+    public synchronized boolean resetRoll(String rollId) {
+        MotherRollInfo roll = motherRolls.get(rollId);
+        if (roll == null) return false;
+        roll.setCurrentRemainingLength(roll.getTotalLength());
+        roll.setUsedLength(0.0);
+        receipts.entrySet().removeIf(e -> rollId.equals(e.getValue().get("rollId")));
+        remnantPool.entrySet().removeIf(e -> rollId.equals(e.getValue().getSourceRollId()) && e.getValue().getId().matches("REM-\\d{6}-\\d+"));
+        save();
+        return true;
+    }
+
     private static boolean overlaps(double x, double y, double w, double l,
                                     double otherX, double otherY, double otherW, double otherL) {
         return x < otherX + otherW && x + w > otherX && y < otherY + otherL && y + l > otherY;

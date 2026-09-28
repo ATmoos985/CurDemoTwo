@@ -79,6 +79,18 @@ export async function onMotherRollChange(forceResetBed = false) {
                 const remaining = document.getElementById("lbl-roll-remaining");
                 if (remaining) remaining.innerText = `${roll.currentRemainingLength} mm`;
                 renderDefectsUI(current.globalDefects);
+
+                const remLenEl = document.getElementById("lbl-roll-remaining-len");
+                if (remLenEl) remLenEl.innerText = `${(roll.currentRemainingLength || 0).toLocaleString()} mm`;
+                const usedLenEl = document.getElementById("lbl-roll-used-len");
+                if (usedLenEl) usedLenEl.innerText = `${(roll.usedLength || 0).toLocaleString()} mm`;
+                const totalLenEl = document.getElementById("lbl-roll-total-len");
+                if (totalLenEl) totalLenEl.innerText = `${(roll.totalLength || 0).toLocaleString()}`;
+                const progressEl = document.getElementById("roll-len-progress");
+                if (progressEl && roll.totalLength > 0) {
+                    const pct = Math.min(100, Math.max(0, (roll.usedLength / roll.totalLength) * 100));
+                    progressEl.style.width = `${pct.toFixed(1)}%`;
+                }
             }
         }
     } catch (error) { console.error("读取母卷疵点失败", error); }
@@ -141,6 +153,18 @@ export async function updateMotherRollRemnantStats(rollId) {
                 if (countEl) countEl.innerText = `${rollInfo.remnantCount} 块`;
                 const areaEl = document.getElementById("lbl-roll-rem-area");
                 if (areaEl) areaEl.innerText = `${rollInfo.remnantTotalArea.toFixed(2)}m²`;
+
+                const remLenEl = document.getElementById("lbl-roll-remaining-len");
+                if (remLenEl) remLenEl.innerText = `${(rollInfo.currentRemainingLength || 0).toLocaleString()} mm`;
+                const usedLenEl = document.getElementById("lbl-roll-used-len");
+                if (usedLenEl) usedLenEl.innerText = `${(rollInfo.usedLength || 0).toLocaleString()} mm`;
+                const totalLenEl = document.getElementById("lbl-roll-total-len");
+                if (totalLenEl) totalLenEl.innerText = `${(rollInfo.totalLength || 0).toLocaleString()}`;
+                const progressEl = document.getElementById("roll-len-progress");
+                if (progressEl && rollInfo.totalLength > 0) {
+                    const pct = Math.min(100, Math.max(0, (rollInfo.usedLength / rollInfo.totalLength) * 100));
+                    progressEl.style.width = `${pct.toFixed(1)}%`;
+                }
             }
             const totalRemCount = rolls.reduce((acc, r) => acc + (r.remnantCount || 0), 0);
             const headCount = document.getElementById("header-remnant-count");

@@ -157,7 +157,23 @@
                                 <span class="prop-label">材质与净幅宽</span>
                                 <span style="color: var(--text-main); font-size: 11px;"><b id="lbl-roll-model-desc">TC涤棉-B2026</b> | 幅宽 <b id="lbl-roll-w-desc">2000</b>mm</span>
                             </div>
-                            <div class="card-inner-box" style="margin-top: 6px; padding: 4px 8px; display: flex; justify-content: space-between; align-items: center;">
+                            <div class="card-inner-box" style="margin-top: 6px; padding: 6px 8px; background: rgba(15, 23, 42, 0.4); border: 1px solid var(--panel-border); border-radius: 4px;">
+                                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                                    <span style="color: var(--text-muted);">母卷总长 / 余量:</span>
+                                    <span>
+                                        <b id="lbl-roll-total-len" style="color: var(--text-main); font-family: monospace;">60,000</b> mm / 
+                                        余 <b id="lbl-roll-remaining-len" style="color: #10b981; font-family: monospace;">55,000 mm</b>
+                                    </span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; font-size: 10.5px; color: var(--text-muted); margin-bottom: 4px;">
+                                    <span>累计实切用料:</span>
+                                    <span>已扣 <b id="lbl-roll-used-len" style="color: #f59e0b; font-family: monospace;">5,000 mm</b></span>
+                                </div>
+                                <div style="background: rgba(255,255,255,0.08); height: 5px; border-radius: 3px; overflow: hidden; position: relative;">
+                                    <div id="roll-len-progress" style="background: linear-gradient(90deg, #10b981, #059669); width: 8.3%; height: 100%; transition: width 0.3s ease;"></div>
+                                </div>
+                            </div>
+                            <div class="card-inner-box" style="margin-top: 4px; padding: 4px 8px; display: flex; justify-content: space-between; align-items: center;">
                                 <span style="font-size: 10.5px; color: var(--text-muted);">
                                     在库可用料头: <b id="lbl-roll-rem-count" style="color: var(--accent-blue); font-family: monospace;">3 块</b> (<span id="lbl-roll-rem-area">7.20m²</span>)
                                 </span>
@@ -282,11 +298,15 @@
                                 下一工位 (+5m) ▶
                             </button>
                         </div>
-                        <button class="tool-btn" id="btn-smart-advance" style="width: 100%; height: 32px; margin-bottom: 6px; background: rgba(16, 185, 129, 0.12); color: #059669; border: 1px solid rgba(16, 185, 129, 0.35); font-weight: bold; font-size: 12px; cursor: pointer; transition: all 0.2s;" onclick="smartAdvanceBed()" title="自动计算当前已切末端，一键吸附接刀，实现 0 间隙连续搭切">
-                            接续下一工位 (智能 0 间隙衔接)
-                        </button>
-                        <button class="big-solve-btn roll" onclick="triggerSolve()" title="在当前红框工位排料并保留其余工位已切成果">
+                        <button class="big-solve-btn roll" onclick="triggerSolve()" title="在当前红框工位排料并保留其余工位已切成果" style="margin-bottom: 6px;">
                             在当前红框工位排料 (接续搭切 · 保留历史)
+                        </button>
+                        <button class="tool-btn active" id="btn-confirm-station-cut" style="width: 100%; height: 34px; margin-bottom: 6px; background: linear-gradient(135deg, #059669 0%, #047857 100%); color: #ffffff; border: 1px solid #065f46; font-weight: 700; font-size: 12px; border-radius: 4px; box-shadow: 0 2px 5px rgba(5,150,105,0.3); display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; transition: all 0.2s;" onclick="openStationLapConfirmModal()" title="确认当前工位裁切：扣减母卷长度、核销订单需求、将派生料头登记入库">
+                            <span style="font-size: 14px;">✂</span>
+                            <span>确认本次工位搭切 (扣料 · 核销 · 入库)</span>
+                        </button>
+                        <button class="tool-btn" id="btn-smart-advance" style="width: 100%; height: 32px; margin-bottom: 6px; background: rgba(16, 185, 129, 0.12); color: #059669; border: 1px solid rgba(16, 185, 129, 0.35); font-weight: bold; font-size: 12px; cursor: pointer; transition: all 0.2s;" onclick="smartAdvanceBed()" title="自动计算当前已切末端，一键吸附接刀，实现 0 间隙连续搭切">
+                            接续下一工位 (智能 0 间隙衔接) ▶
                         </button>
                         <div style="display: flex; gap: 6px; margin-top: 6px;">
                             <button class="tool-btn" style="flex: 1; height: 26px; background: rgba(239, 68, 68, 0.08); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.25); font-size: 11px;" onclick="clearStationCuts()" title="仅清除当前红框范围内的裁片与切刀">
@@ -415,8 +435,12 @@
 
                 <!-- 5. 常驻底部执行料头精益切割大按钮 (折叠卡片时位置绝不上跳) -->
                 <div class="sidebar-pinned-footer action-footer-section" style="border-top: 1px solid var(--panel-border); padding: 12px 14px;">
-                    <button class="big-solve-btn remnant" onclick="triggerSolve()">
+                    <button class="big-solve-btn remnant" onclick="triggerSolve()" style="margin-bottom: 6px;">
                         预览料头排料 (母卷 0 扣料)
+                    </button>
+                    <button class="tool-btn active" id="btn-confirm-remnant-cut" style="width: 100%; height: 32px; background: #059669; color: #ffffff; border: 1px solid #047857; font-weight: 700; font-size: 12px; border-radius: 4px; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer;" onclick="openStationLapConfirmModal()" title="确认实切：核销原在库料头，产出成品并入库派生子料头">
+                        <span>✂</span>
+                        <span>确认料头实切 (核销原料头 · 入库子料头)</span>
                     </button>
                 </div>
             </div>
@@ -662,10 +686,34 @@
                 <div style="font-size: 11.5px; color: var(--text-muted); background: var(--card-box-bg); padding: 8px 12px; border-radius: 4px; border: 1px solid var(--panel-border);">
                     请核对车间机台实测用料与产出。点击确认后系统将正式扣减母卷库存（或核销原料头），并将符合规格的料头登记入库。
                 </div>
+                <!-- 三维闭环核销与联动扣减实时看板 -->
+                <div class="card-inner-box" style="padding: 10px 12px; background: rgba(2, 132, 199, 0.06); border: 1px solid rgba(2, 132, 199, 0.25); border-radius: 6px; display: flex; flex-direction: column; gap: 8px;">
+                    <!-- 1. 母卷库存扣减 -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11.5px;">
+                        <span style="font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 6px;">
+                            <span>📦 母卷扣减:</span>
+                            <span id="report-preview-roll-id" style="font-family: monospace; color: var(--accent-blue);">ROLL-2026-0920</span>
+                        </span>
+                        <span>
+                            当前余量: <span id="report-preview-cur-len">60,000</span> mm
+                            ➔ 扣后余: <b id="report-preview-after-len" style="color: #10b981; font-family: monospace;">55,000 mm</b>
+                        </span>
+                    </div>
+                    <!-- 2. 需求核销明细 -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11.5px;">
+                        <span style="font-weight: 600; color: var(--text-main);">📋 需求核销:</span>
+                        <span id="report-preview-demand-text" style="color: var(--accent-amber); font-weight: 500;">本次排产 3 件裁片，确认后正式计入订单达成</span>
+                    </div>
+                    <!-- 3. 派生料头入库 -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11.5px;">
+                        <span style="font-weight: 600; color: var(--text-main);">♻ 料头建档:</span>
+                        <span id="report-preview-remnant-text" style="color: #10b981; font-weight: 500;">派生合格余料将即时入库并上架</span>
+                    </div>
+                </div>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                     <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-main);">
                         <span>实切母卷进料长度 (mm)</span>
-                        <input id="report-actual-len" type="number" min="0" step="1" class="prop-input" style="width: 100%;">
+                        <input id="report-actual-len" type="number" min="0" step="1" class="prop-input" style="width: 100%;" oninput="window.camApp && window.camApp.updateReportPreview && window.camApp.updateReportPreview()">
                     </label>
                     <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-main);">
                         <span>实切合格裁片件数 (件)</span>

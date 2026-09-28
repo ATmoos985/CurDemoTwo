@@ -83,6 +83,15 @@ public class FabricCutController {
         return remnantService.addDefectToRoll(rollId, defect);
     }
 
+    @PostMapping("/rolls/{rollId}/reset")
+    public Map<String, Object> resetRoll(@PathVariable String rollId) {
+        boolean ok = remnantService.resetRoll(rollId);
+        Map<String, Object> res = new HashMap<>();
+        res.put("success", ok);
+        res.put("rollId", rollId);
+        return res;
+    }
+
     @PostMapping("/remnants/{id}/scrap")
     public Map<String, Object> scrapRemnant(@PathVariable String id, @RequestBody(required = false) Map<String, String> body) {
         String reason = (body != null && body.containsKey("reason")) ? body.get("reason") : "现场破损报废";
