@@ -287,38 +287,6 @@
                         </div>
                     </div>
                 </div>
-
-                <!-- 5. 常驻底部操作栏 (工位排料搭切控制，折叠卡片时位置绝不上跳) -->
-                <div class="sidebar-pinned-footer">
-                    <div class="panel-section action-footer-section" style="border-top: 1px solid var(--panel-border); padding: 10px 14px 12px 14px;">
-                        <div style="display: flex; gap: 6px; margin-bottom: 6px;">
-                            <button class="tool-btn" style="flex: 1; height: 30px; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--panel-border); font-weight: 500; font-size: 11px;" onclick="advanceBed(-1)" title="红框回退展开上一工位 (-5m)">
-                                ◀ 上一工位 (-5m)
-                            </button>
-                            <button class="tool-btn" style="flex: 1; height: 30px; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--panel-border); font-weight: 500; font-size: 11px;" onclick="advanceBed(1)" title="红框前进展开下一工位 (+5m)">
-                                下一工位 (+5m) ▶
-                            </button>
-                        </div>
-                        <button class="big-solve-btn roll" onclick="triggerSolve()" title="在当前红框工位排料并保留其余工位已切成果" style="margin-bottom: 6px;">
-                            在当前红框工位排料 (接续搭切 · 保留历史)
-                        </button>
-                        <button class="tool-btn active" id="btn-confirm-station-cut" style="width: 100%; height: 34px; margin-bottom: 6px; background: linear-gradient(135deg, #059669 0%, #047857 100%); color: #ffffff; border: 1px solid #065f46; font-weight: 700; font-size: 12px; border-radius: 4px; box-shadow: 0 2px 5px rgba(5,150,105,0.3); display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; transition: all 0.2s;" onclick="openStationLapConfirmModal()" title="确认当前工位裁切：扣减母卷长度、核销订单需求、将派生料头登记入库">
-                            <span style="font-size: 14px;">✂</span>
-                            <span>确认本次工位搭切 (扣料 · 核销 · 入库)</span>
-                        </button>
-                        <button class="tool-btn" id="btn-smart-advance" style="width: 100%; height: 32px; margin-bottom: 6px; background: rgba(16, 185, 129, 0.12); color: #059669; border: 1px solid rgba(16, 185, 129, 0.35); font-weight: bold; font-size: 12px; cursor: pointer; transition: all 0.2s;" onclick="smartAdvanceBed()" title="自动计算当前已切末端，一键吸附接刀，实现 0 间隙连续搭切">
-                            接续下一工位 (智能 0 间隙衔接) ▶
-                        </button>
-                        <div style="display: flex; gap: 6px; margin-top: 6px;">
-                            <button class="tool-btn" style="flex: 1; height: 26px; background: rgba(239, 68, 68, 0.08); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.25); font-size: 11px;" onclick="clearStationCuts()" title="仅清除当前红框范围内的裁片与切刀">
-                                清除本工位排料
-                            </button>
-                            <button class="tool-btn" style="flex: 1; height: 26px; background: rgba(239, 68, 68, 0.08); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.25); font-size: 11px;" onclick="resetAllRollCuts()" title="清空整卷已排裁片，从头开始">
-                                清空整卷已排
-                            </button>
-                        </div>
-                    </div>
-                </div>
             </div>
 
             <!-- ======================================================== -->
@@ -432,17 +400,6 @@
                             </div>
                         </div>
                     </div>
-                </div>
-
-                <!-- 5. 常驻底部执行料头精益切割大按钮 (折叠卡片时位置绝不上跳) -->
-                <div class="sidebar-pinned-footer action-footer-section" style="border-top: 1px solid var(--panel-border); padding: 12px 14px;">
-                    <button class="big-solve-btn remnant" onclick="triggerSolve()" style="margin-bottom: 6px;">
-                        预览料头排料 (母卷 0 扣料)
-                    </button>
-                    <button class="tool-btn active" id="btn-confirm-remnant-cut" style="width: 100%; height: 32px; background: #059669; color: #ffffff; border: 1px solid #047857; font-weight: 700; font-size: 12px; border-radius: 4px; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer;" onclick="openStationLapConfirmModal()" title="确认实切：核销原在库料头，产出成品并入库派生子料头">
-                        <span>✂</span>
-                        <span>确认料头实切 (核销原料头 · 入库子料头)</span>
-                    </button>
                 </div>
             </div>
         </aside>
@@ -561,14 +518,6 @@
                         </div>
                     </div>
                 </div>
-
-                <!-- 现场实切确认与料头回库大按钮 (常驻右侧底部) -->
-                <div class="sidebar-pinned-footer action-footer-section" style="border-top: 1px solid var(--panel-border); padding: 12px 14px;">
-                    <button class="tool-btn active" id="btn-right-confirm-station-cut" style="width: 100%; height: 34px; background: linear-gradient(135deg, #059669 0%, #047857 100%); color: #ffffff; border: 1px solid #065f46; font-weight: 700; font-size: 12px; border-radius: 4px; box-shadow: 0 2px 5px rgba(5,150,105,0.3); display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; transition: all 0.2s;" onclick="openStationLapConfirmModal()" title="确认当前工位裁切：扣减母卷长度、核销订单需求、将派生料头登记入库">
-                        <span style="font-size: 14px;">✂</span>
-                        <span>确认本次工位搭切 (扣料 · 核销 · 入库)</span>
-                    </button>
-                </div>
             </div>
 
             <!-- Tab 2: 料头入库与实切对账 -->
@@ -645,15 +594,52 @@
                     </div>
                 </div>
             </div>
-            <!-- 现场实切确认与料头回库大按钮 (常驻右侧对账页底部) -->
-            <div class="sidebar-pinned-footer action-footer-section" style="border-top: 1px solid var(--panel-border); padding: 12px 14px;">
-                <button class="tool-btn active" style="width: 100%; height: 34px; background: linear-gradient(135deg, #059669 0%, #047857 100%); color: #ffffff; border: 1px solid #065f46; font-weight: 700; font-size: 12px; border-radius: 4px; box-shadow: 0 2px 5px rgba(5,150,105,0.3); display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; transition: all 0.2s;" onclick="openStationLapConfirmModal()" title="确认当前工位裁切：扣减母卷长度、核销订单需求、将派生料头登记入库">
-                    <span style="font-size: 14px;">✂</span>
-                    <span>确认本次工位搭切 (扣料 · 核销 · 入库)</span>
-                </button>
-            </div>
         </div>
-    </aside>
+
+        <!-- 工位排料搭切控制台 (常驻右侧栏底部，绝不随参数或刀序滚动而淹没) -->
+            <div class="sidebar-pinned-footer" id="right-sidebar-actions-footer" style="border-top: 1px solid var(--panel-border); background: var(--panel-bg); flex-shrink: 0;">
+                <!-- 母卷开卷工位排料搭切执行控制 -->
+                <div id="right-roll-actions" class="panel-section action-footer-section" style="padding: 10px 14px 12px 14px;">
+                    <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+                        <button class="tool-btn" style="flex: 1; height: 30px; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--panel-border); font-weight: 500; font-size: 11px;" onclick="advanceBed(-1)" title="红框回退展开上一工位 (-5m)">
+                            ◀ 上一工位 (-5m)
+                        </button>
+                        <button class="tool-btn" style="flex: 1; height: 30px; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--panel-border); font-weight: 500; font-size: 11px;" onclick="advanceBed(1)" title="红框前进展开下一工位 (+5m)">
+                            下一工位 (+5m) ▶
+                        </button>
+                    </div>
+                    <button class="big-solve-btn roll" id="btn-trigger-solve-station" onclick="triggerSolve()" title="在当前红框工位排料并保留其余工位已切成果" style="margin-bottom: 6px; width: 100%; height: 34px;">
+                        在当前红框工位排料 (接续搭切 · 保留历史)
+                    </button>
+                    <button class="tool-btn active" id="btn-confirm-station-cut" style="width: 100%; height: 34px; margin-bottom: 6px; background: linear-gradient(135deg, #059669 0%, #047857 100%); color: #ffffff; border: 1px solid #065f46; font-weight: 700; font-size: 12px; border-radius: 4px; box-shadow: 0 2px 5px rgba(5,150,105,0.3); display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; transition: all 0.2s;" onclick="openStationLapConfirmModal()" title="确认当前工位裁切：扣减母卷长度、核销订单需求、将派生料头登记入库">
+                        <span style="font-size: 14px;">✂</span>
+                        <span>确认本次工位搭切 (扣料 · 核销 · 入库)</span>
+                    </button>
+                    <button class="tool-btn" id="btn-smart-advance" style="width: 100%; height: 32px; margin-bottom: 6px; background: rgba(16, 185, 129, 0.12); color: #059669; border: 1px solid rgba(16, 185, 129, 0.35); font-weight: bold; font-size: 12px; cursor: pointer; transition: all 0.2s;" onclick="smartAdvanceBed()" title="自动计算当前已切末端，一键吸附接刀，实现 0 间隙连续搭切">
+                        接续下一工位 (智能 0 间隙衔接) ▶
+                    </button>
+                    <div style="display: flex; gap: 6px; margin-top: 6px;">
+                        <button class="tool-btn" style="flex: 1; height: 26px; background: rgba(239, 68, 68, 0.08); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.25); font-size: 11px;" onclick="clearStationCuts()" title="仅清除当前红框范围内的裁片与切刀">
+                            清除本工位排料
+                        </button>
+                        <button class="tool-btn" style="flex: 1; height: 26px; background: rgba(239, 68, 68, 0.08); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.25); font-size: 11px;" onclick="resetAllRollCuts()" title="清空整卷已排裁片，从头开始">
+                            清空整卷已排
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 料头复用精益切割执行控制 -->
+                <div id="right-remnant-actions" class="panel-section action-footer-section" style="display: none; padding: 10px 14px 12px 14px;">
+                    <button class="big-solve-btn remnant" onclick="triggerSolve()" style="margin-bottom: 6px; width: 100%; height: 34px;">
+                        预览料头排料 (母卷 0 扣料)
+                    </button>
+                    <button class="tool-btn active" id="btn-confirm-remnant-cut" style="width: 100%; height: 34px; background: #059669; color: #ffffff; border: 1px solid #047857; font-weight: 700; font-size: 12px; border-radius: 4px; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer;" onclick="openStationLapConfirmModal()" title="确认实切：核销原在库料头，产出成品并入库派生子料头">
+                        <span>✂</span>
+                        <span>确认料头实切 (核销原料头 · 入库子料头)</span>
+                    </button>
+                </div>
+            </div>
+        </aside>
     </main>
 
     <!-- 底部工位状态栏 -->

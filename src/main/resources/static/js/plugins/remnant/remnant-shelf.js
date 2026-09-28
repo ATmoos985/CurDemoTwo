@@ -18,11 +18,16 @@ export async function switchCutMode(mode, targetRemnant, presetData = null) {
     const panelRem = document.getElementById("panel-remnant-mode");
     const radarBar = document.getElementById("roll-radar-bar");
 
+    const rightRollActions = document.getElementById("right-roll-actions");
+    const rightRemnantActions = document.getElementById("right-remnant-actions");
+
     if (mode === "roll") {
         if (btnRoll) btnRoll.className = "mode-tab-btn active roll-mode";
         if (btnRem) btnRem.className = "mode-tab-btn";
         if (panelRoll) panelRoll.style.display = "flex";
         if (panelRem) panelRem.style.display = "none";
+        if (rightRollActions) rightRollActions.style.display = "block";
+        if (rightRemnantActions) rightRemnantActions.style.display = "none";
         if (radarBar) {
             radarBar.style.opacity = "1";
             radarBar.style.pointerEvents = "auto";
@@ -38,6 +43,8 @@ export async function switchCutMode(mode, targetRemnant, presetData = null) {
         if (btnRem) btnRem.className = "mode-tab-btn active remnant-mode";
         if (panelRoll) panelRoll.style.display = "none";
         if (panelRem) panelRem.style.display = "flex";
+        if (rightRollActions) rightRollActions.style.display = "none";
+        if (rightRemnantActions) rightRemnantActions.style.display = "block";
         if (radarBar) {
             radarBar.style.opacity = "0.35";
             radarBar.style.pointerEvents = "none";
