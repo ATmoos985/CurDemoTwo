@@ -128,3 +128,126 @@
     background: #f0f9ff;
     border-color: #bae6fd;
 }
+
+/* ==========================================================================
+   CAD 工业级右键上下文快捷菜单 (Context Menu)
+   ========================================================================== */
+.cad-context-menu {
+    position: fixed;
+    z-index: 100000;
+    min-width: 250px;
+    max-width: 320px;
+    background: rgba(15, 23, 42, 0.94);
+    border: 1px solid #334155;
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(12px);
+    padding: 6px;
+    font-size: 13px;
+    color: #e2e8f0;
+    display: none;
+    user-select: none;
+    animation: menuFadeIn 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[data-theme="light"] .cad-context-menu {
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid #cbd5e1;
+    color: #0f172a;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+@keyframes menuFadeIn {
+    from { opacity: 0; transform: scale(0.96) translateY(-4px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.cad-menu-header {
+    padding: 6px 10px 8px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid #1e293b;
+    margin-bottom: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+[data-theme="light"] .cad-menu-header {
+    color: #64748b;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.cad-menu-item {
+    display: flex;
+    flex-direction: column;
+    padding: 7px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    gap: 2px;
+}
+
+.cad-menu-item:hover {
+    background: #1e293b;
+}
+
+[data-theme="light"] .cad-menu-item:hover {
+    background: #f1f5f9;
+}
+
+.cad-menu-item-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 12.5px;
+}
+
+.cad-menu-item-desc {
+    font-size: 11px;
+    color: #94a3b8;
+    padding-left: 20px;
+    line-height: 1.35;
+}
+
+[data-theme="light"] .cad-menu-item-desc {
+    color: #64748b;
+}
+
+.cad-menu-item.danger .cad-menu-item-title {
+    color: #f87171;
+}
+
+.cad-menu-item.danger:hover {
+    background: rgba(239, 68, 68, 0.15);
+}
+
+.cad-menu-item.highlight .cad-menu-item-title {
+    color: #38bdf8;
+}
+
+.cad-menu-item.highlight:hover {
+    background: rgba(56, 189, 248, 0.12);
+}
+
+.cad-menu-item.success .cad-menu-item-title {
+    color: #34d399;
+}
+
+.cad-menu-item.success:hover {
+    background: rgba(16, 185, 129, 0.12);
+}
+
+.cad-menu-divider {
+    height: 1px;
+    background: #1e293b;
+    margin: 4px 6px;
+}
+
+[data-theme="light"] .cad-menu-divider {
+    background: #e2e8f0;
+}

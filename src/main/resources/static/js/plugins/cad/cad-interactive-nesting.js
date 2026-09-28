@@ -5,6 +5,7 @@
 import { stage, mainLayer } from './cad-stage.js';
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
+import { openPieceContextMenu, discardPiece } from './cad-context-menu.js';
 
 let selectedPieceId = null;
 let dragInitialPos = { x: 0, y: 0 };
@@ -30,10 +31,24 @@ export function makePieceInteractive(pGroup, piece, caseData) {
             e.cancelBubble = true;
             import('../../core/toast.js').then(m => m.showToast(`裁片 ${piece.name || piece.id} 已完成实切确认核销，已锁定。`, 'info'));
         });
+        pGroup.on("contextmenu", (e) => {
+            e.evt.preventDefault();
+            e.cancelBubble = true;
+            openPieceContextMenu(piece, e.evt.clientX, e.evt.clientY);
+        });
         return;
     }
     pGroup.draggable(true);
     pGroup.name(`piece-entity-${piece.id}`);
+
+    // 右键打开裁片快捷操作菜单
+    pGroup.on("contextmenu", (e) => {
+        e.evt.preventDefault();
+        e.cancelBubble = true;
+        setSelectedPieceId(piece.id);
+        highlightSelectedPiece(pGroup);
+        openPieceContextMenu(piece, e.evt.clientX, e.evt.clientY);
+    });
 
     const rollW = caseData.rollW || 2000;
     const bedL = caseData.bedL || 5000;
@@ -301,6 +316,14 @@ export function initNestingKeyboardShortcuts() {
             setSelectedPieceId(null);
             mainLayer.find(".selection-handle").forEach(node => node.destroy());
             mainLayer.batchDraw();
+            return;
+        } else if (e.key === "Delete" || e.key === "Backspace") {
+            const pieceToDiscard = selectedPieceId;
+            setSelectedPieceId(null);
+            mainLayer.find(".selection-handle").forEach(node => node.destroy());
+            mainLayer.batchDraw();
+            discardPiece(pieceToDiscard);
+            e.preventDefault();
             return;
         }
 

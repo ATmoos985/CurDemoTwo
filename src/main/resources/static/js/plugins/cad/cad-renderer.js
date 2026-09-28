@@ -11,6 +11,7 @@ import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 import { getHomeCoordinates } from '../toolpath/toolpath-optimizer.js';
 import { makePieceInteractive } from './cad-interactive-nesting.js';
+import { makeRemnantInteractive } from './cad-context-menu.js';
 
 export function renderScene() {
     if (!stage || !mainLayer) return;
@@ -155,6 +156,7 @@ export function renderScene() {
             text: `${r.w} × ${r.l} mm (${r.area.toFixed(2)} m²)`,
             fontSize: 18, fill: rSubFill, fontFamily: "monospace"
         }));
+        makeRemnantInteractive(rGroup, r, data);
         remnantGroup.add(rGroup);
     });
 

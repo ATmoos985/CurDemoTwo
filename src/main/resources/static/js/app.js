@@ -80,6 +80,10 @@ import {
 } from './plugins/cad/cad-interactive-nesting.js';
 
 import {
+    initCADContextMenu
+} from './plugins/cad/cad-context-menu.js';
+
+import {
     generateGCode, generateDXF, openExportModal, closeExportModal,
     switchExportTab, copyExportPreview, openCutTicketModal, closeCutTicketModal,
     printCutTicketDocument
@@ -395,6 +399,7 @@ window.cutApp.plugins = {
 Object.keys(camApp).forEach(key => {
     window[key] = camApp[key];
 });
+window.camApp = camApp;
 
 // ==========================================
 // 3. 应用程序自启动装配与初始化 (Robust Bootstrap)
@@ -413,6 +418,7 @@ async function bootstrapApp() {
     }
 
     initKonva();
+    initCADContextMenu();
     setupRadarInteraction();
     initLayoutResizers();
     initNestingKeyboardShortcuts();

@@ -65,8 +65,9 @@ export function recalculateRollStats(data) {
     if (intervals.length > 0) {
         totalCutLength = intervals.reduce((acc, inv) => acc + (inv.end - inv.start), 0);
     } else if (data.pieces && data.pieces.length > 0) {
-        const maxY = Math.max(...data.pieces.map(p => p.y + p.l));
-        totalCutLength = Math.max(maxY, data.bedL || 5000);
+        const maxPieceY = Math.max(...data.pieces.map(p => p.y + p.l));
+        const maxRemY = (data.remnants && data.remnants.length > 0) ? Math.max(...data.remnants.map(r => r.y + r.l)) : 0;
+        totalCutLength = Math.max(maxPieceY, maxRemY);
     }
 
     data.totalArea = (rollW * totalCutLength) / 1000000.0;
@@ -74,12 +75,12 @@ export function recalculateRollStats(data) {
     data.remArea = (data.remnants || []).reduce((acc, r) => acc + (r.area !== undefined ? r.area : (r.w * r.l)/1000000.0), 0);
     data.wasteArea = Math.max(0, data.totalArea - data.pieceArea - data.remArea);
 
-    if (data.pieces && data.pieces.length > 0) {
-        data.deductLen = Math.max(
-            ...data.pieces.map(p => p.y + p.l),
-            ...((data.remnants || []).map(r => r.y + r.l)),
-            totalCutLength
-        );
+    if (intervals.length > 0) {
+        data.deductLen = Math.max(...intervals.map(inv => inv.end));
+    } else if (data.pieces && data.pieces.length > 0) {
+        const maxPieceY = Math.max(...data.pieces.map(p => p.y + p.l));
+        const maxRemY = (data.remnants && data.remnants.length > 0) ? Math.max(...data.remnants.map(r => r.y + r.l)) : 0;
+        data.deductLen = Math.max(maxPieceY, maxRemY);
     } else {
         data.deductLen = 0;
     }
