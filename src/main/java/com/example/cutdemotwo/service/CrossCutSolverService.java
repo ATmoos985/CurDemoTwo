@@ -93,7 +93,8 @@ public class CrossCutSolverService implements ICutSolverEngine {
         res.setPieces(pieces);
         res.setRemnants(remnants);
         res.setCuts(continuousCuts);
-        res.setDeductLen("remnant".equalsIgnoreCase(req.getFeedPortType()) ? 0 : cursor);
+        double maxBoundaryY = Math.max(cursor, remnants.stream().mapToDouble(r -> r.getY() + r.getL()).max().orElse(0));
+        res.setDeductLen("remnant".equalsIgnoreCase(req.getFeedPortType()) ? 0 : maxBoundaryY);
         res.setTotalArea(totalArea);
         res.setPieceArea(pieceArea);
         res.setRemArea(remArea);

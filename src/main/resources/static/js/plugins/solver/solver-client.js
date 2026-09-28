@@ -5,7 +5,7 @@ import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 import { renderScene, resetToBedView } from '../cad/cad-renderer.js';
 import { drawRulers } from '../cad/cad-rulers.js';
-import { renderRadar } from '../radar/radar-scrubber.js';
+import { renderRadar, smartAdvanceBed } from '../radar/radar-scrubber.js';
 import {
     updateDemandCompletionFromPieces, recalculateRollStats,
     addOrMergeInterval, renderDemandsUI, renderDefectsUI,
@@ -631,25 +631,25 @@ export async function confirmCutReport() {
         renderRadar();
         closeCutReport();
 
-        // 6. 成功提示与引导接续下一工位
+        // 6. 成功提示并自动平滑转入下一待切工位
         const remCount = receipt.derivedRemnants ? receipt.derivedRemnants.length : 0;
         if (pending.feedPortType === "remnant") {
             showToast(`✅ 料头精益实切确认成功！原料头已核销，产出合格品 ${receipt.finishedPieceCount} 件，母卷 0 消耗，派生新料头 ${remCount} 块已建档入库！`, "success");
         } else {
             showToast(`✅ 工位搭切确认成功！母卷扣减 ${receipt.actualCutLen} mm (余 ${receipt.remainingLength != null ? receipt.remainingLength.toLocaleString() : '--'} mm)，核销需求 ${receipt.finishedPieceCount} 件，派生料头 ${remCount} 块已建档入库！`, "success");
-        }
 
-        // 高亮“接续下一工位”按钮
-        const btnSmart = document.getElementById("btn-smart-advance");
-        if (btnSmart) {
-            btnSmart.style.boxShadow = "0 0 16px rgba(16, 185, 129, 0.9)";
-            btnSmart.style.borderColor = "#10b981";
-            btnSmart.style.transform = "scale(1.02)";
+            // 自动化现场核心交互：自动推进至下一待切工位，已切区域固化为历史，并更新当前拉布基准
             setTimeout(() => {
-                btnSmart.style.boxShadow = "";
-                btnSmart.style.borderColor = "rgba(16, 185, 129, 0.35)";
-                btnSmart.style.transform = "";
-            }, 4500);
+                data.cuts = [];
+                smartAdvanceBed();
+                const curY = state.getCurrentCaseData().windowStartY || 0;
+                const baseOriginEl = document.getElementById("lbl-roll-base-origin");
+                if (baseOriginEl) baseOriginEl.innerText = `Y = ${curY.toLocaleString()} mm (${(curY/1000).toFixed(2)}m)`;
+                if (window.camApp && window.camApp.updateToolpathStatsUI) {
+                    window.camApp.updateToolpathStatsUI();
+                }
+                showToast(`🚀 已自动为您推进至下一待切工位 (开卷物理进给基准 Y=${curY}mm)，已切区域已归档为历史！`, "info");
+            }, 350);
         }
     } catch (error) {
         document.getElementById("report-error").textContent = error.message;

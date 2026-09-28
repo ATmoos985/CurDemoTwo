@@ -71,17 +71,58 @@ export function renderRadar() {
     const winStartY = data.windowStartY || 0;
     const defects = data.globalDefects || data.defects || [];
 
-    const infoEl = document.getElementById("radar-roll-info");
-    if (infoEl) {
-        infoEl.innerText = `全长: ${(totalL/1000).toFixed(0)}m (${totalL}mm) | 全局疵点: ${defects.length} 处`;
-    }
-
     const track = document.getElementById("radar-track");
     if (!track) return;
 
-    // 清理旧刻度与旧疵点标，保留 #radar-window
-    const oldScales = track.querySelectorAll(".radar-scale-line, .radar-scale-mark, .radar-defect-marker");
+    // 清理旧刻度与旧疵点标及历史实切块，保留 #radar-window
+    const oldScales = track.querySelectorAll(".radar-scale-line, .radar-scale-mark, .radar-defect-marker, .radar-consumed-history, .radar-datum-pin");
     oldScales.forEach(el => el.remove());
+
+    // 计算当前母卷已实切末端与布头基准 (0 ~ maxConfirmedY)
+    let maxConfirmedY = 0;
+    (data.pieces || []).filter(p => p.confirmed).forEach(p => {
+        if (p.y + p.l > maxConfirmedY) maxConfirmedY = p.y + p.l;
+    });
+    if (data.lastReceipt && data.lastReceipt.windowStartY !== undefined && data.lastReceipt.actualCutLen) {
+        const rEnd = data.lastReceipt.windowStartY + data.lastReceipt.actualCutLen;
+        if (rEnd > maxConfirmedY) maxConfirmedY = Math.round(rEnd);
+    }
+
+    const infoEl = document.getElementById("radar-roll-info");
+    if (infoEl) {
+        infoEl.innerText = `全长: ${(totalL/1000).toFixed(0)}m | 已实切: ${(maxConfirmedY/1000).toFixed(2)}m | 当前开卷基准: Y=${maxConfirmedY}mm | 疵点: ${defects.length} 处`;
+    }
+
+    if (maxConfirmedY > 0) {
+        const historyPct = Math.min(100, (maxConfirmedY / totalL) * 100);
+        const histEl = document.createElement("div");
+        histEl.className = "radar-consumed-history";
+        histEl.style.position = "absolute";
+        histEl.style.left = "0%";
+        histEl.style.width = `${historyPct}%`;
+        histEl.style.top = "0";
+        histEl.style.bottom = "0";
+        histEl.style.background = "repeating-linear-gradient(45deg, rgba(100,116,139,0.35), rgba(100,116,139,0.35) 4px, rgba(51,65,85,0.45) 4px, rgba(51,65,85,0.45) 8px)";
+        histEl.style.borderRight = "2px solid #f59e0b";
+        histEl.style.pointerEvents = "none";
+        histEl.title = `已实切下料出库历史: 0 ~ ${maxConfirmedY} mm (${(maxConfirmedY/1000).toFixed(2)}m)`;
+        track.appendChild(histEl);
+
+        const pinEl = document.createElement("div");
+        pinEl.className = "radar-datum-pin";
+        pinEl.style.position = "absolute";
+        pinEl.style.left = `${historyPct}%`;
+        pinEl.style.top = "-5px";
+        pinEl.style.width = "0";
+        pinEl.style.height = "0";
+        pinEl.style.borderLeft = "4px solid transparent";
+        pinEl.style.borderRight = "4px solid transparent";
+        pinEl.style.borderTop = "6px solid #f59e0b";
+        pinEl.style.transform = "translateX(-50%)";
+        pinEl.style.pointerEvents = "none";
+        pinEl.title = `当前有效布头基准点 Y=${maxConfirmedY}mm`;
+        track.appendChild(pinEl);
+    }
 
     const winEl = document.getElementById("radar-window");
     const leftPct = (winStartY / totalL) * 100;

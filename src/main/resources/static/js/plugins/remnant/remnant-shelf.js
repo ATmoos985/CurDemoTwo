@@ -98,6 +98,15 @@ export async function onMotherRollChange(forceResetBed = false) {
                     const pct = Math.min(100, Math.max(0, (roll.usedLength / roll.totalLength) * 100));
                     progressEl.style.width = `${pct.toFixed(1)}%`;
                 }
+
+                const baseOriginEl = document.getElementById("lbl-roll-base-origin");
+                const used = roll.usedLength || 0;
+                if (baseOriginEl) baseOriginEl.innerText = `Y = ${used.toLocaleString()} mm (${(used/1000).toFixed(2)}m)`;
+
+                // 生产现场防呆：若重新载入或拿出该母卷且已有实切用料，自动将开卷工位定位到已切布头
+                if (used > 0 && (!data.windowStartY || data.windowStartY < used)) {
+                    data.windowStartY = used;
+                }
             }
         }
     } catch (error) { console.error("读取母卷疵点失败", error); }

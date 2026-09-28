@@ -59,6 +59,53 @@ export function renderScene() {
         }));
     }
 
+    // 绘制已实切历史区覆盖层与醒目金黄色开卷物理基准线 (Current Cutting Datum)
+    let maxConfirmedY = 0;
+    (data.pieces || []).filter(p => p.confirmed).forEach(p => {
+        if (p.y + p.l > maxConfirmedY) maxConfirmedY = p.y + p.l;
+    });
+    if (data.lastReceipt && data.lastReceipt.windowStartY !== undefined && data.lastReceipt.actualCutLen) {
+        const rEnd = data.lastReceipt.windowStartY + data.lastReceipt.actualCutLen;
+        if (rEnd > maxConfirmedY) maxConfirmedY = Math.round(rEnd);
+    }
+
+    if (maxConfirmedY > 0) {
+        // 1. 已切历史区间半透明灰色沉浸遮罩 (0 ~ maxConfirmedY)
+        fabricBgGroup.add(new Konva.Rect({
+            x: 0, y: 0, width: rollW, height: maxConfirmedY,
+            fill: isDark ? "rgba(30, 41, 59, 0.45)" : "rgba(148, 163, 184, 0.30)",
+            stroke: isDark ? "#475569" : "#94a3b8", strokeWidth: 1.5, dash: [8, 4]
+        }));
+        fabricBgGroup.add(new Konva.Text({
+            x: 20, y: 16,
+            text: `[已实切下料出库历史区间 0 ~ ${(maxConfirmedY/1000).toFixed(2)}m (已扣 ${maxConfirmedY}mm)]`,
+            fontSize: 18, fill: isDark ? "#94a3b8" : "#475569", fontStyle: "bold", fontFamily: "monospace"
+        }));
+
+        // 2. 醒目金黄色基准分割线 (当前开卷布头接刀基准)
+        fabricBgGroup.add(new Konva.Line({
+            points: [-120, maxConfirmedY, rollW + 120, maxConfirmedY],
+            stroke: "#f59e0b", strokeWidth: 3.5,
+            dash: [12, 6]
+        }));
+        
+        const datumBadgeW = 560;
+        const datumBadgeH = 40;
+        fabricBgGroup.add(new Konva.Rect({
+            x: rollW / 2 - datumBadgeW / 2, y: maxConfirmedY - datumBadgeH / 2,
+            width: datumBadgeW, height: datumBadgeH,
+            fill: isDark ? "#451a03" : "#fef3c7",
+            stroke: "#d97706", strokeWidth: 2, cornerRadius: 6,
+            shadowColor: "rgba(245, 158, 11, 0.45)", shadowBlur: 12
+        }));
+        fabricBgGroup.add(new Konva.Text({
+            x: rollW / 2 - datumBadgeW / 2, y: maxConfirmedY - 9,
+            width: datumBadgeW, align: "center",
+            text: `⚓ [母卷开卷物理基准] Y = ${maxConfirmedY} mm (${(maxConfirmedY/1000).toFixed(2)}m) ➔ 本卷由此起刀拉布`,
+            fontSize: 15, fill: isDark ? "#fde68a" : "#b45309", fontStyle: "bold", fontFamily: "monospace"
+        }));
+    }
+
     // -------------------------------------------------------------
     // B. 瑕疵区与安全避让外扩区 (Defects & Safety Margins)
     // -------------------------------------------------------------
@@ -168,42 +215,54 @@ export function renderScene() {
             x: p.x,
             y: p.y
         });
-        const pFill = isDark ? "#065f46" : "#ecfdf5";
-        const pStroke = isDark ? "#10b981" : "#059669";
-        const pTitleFill = isDark ? "#ecfdf5" : "#065f46";
-        const pSubFill = isDark ? "#a7f3d0" : "#047857";
+        const isHistory = !!p.confirmed;
+        const pFill = isHistory ? (isDark ? "rgba(30, 41, 59, 0.75)" : "rgba(241, 245, 249, 0.9)") :
+                                  (isDark ? "#065f46" : "#ecfdf5");
+        const pStroke = isHistory ? (isDark ? "#475569" : "#94a3b8") :
+                                    (isDark ? "#10b981" : "#059669");
+        const pTitleFill = isHistory ? (isDark ? "#94a3b8" : "#475569") :
+                                      (isDark ? "#ecfdf5" : "#065f46");
+        const pSubFill = isHistory ? (isDark ? "#64748b" : "#64748b") :
+                                    (isDark ? "#a7f3d0" : "#047857");
         const pGrainFill = isDark ? "#6ee7b7" : "#059669";
 
         pGroup.add(new Konva.Rect({
             x: 0, y: 0, width: p.w, height: p.l,
-            fill: pFill, stroke: pStroke, strokeWidth: 3,
-            shadowColor: isDark ? "#059669" : "#cbd5e1", shadowBlur: 4,
-            shadowOpacity: isDark ? 0.6 : 0.25
+            fill: pFill, stroke: pStroke, strokeWidth: isHistory ? 2 : 3,
+            dash: isHistory ? [8, 4] : [],
+            shadowColor: isHistory ? "transparent" : (isDark ? "#059669" : "#cbd5e1"),
+            shadowBlur: 4, shadowOpacity: isDark ? 0.6 : 0.25
         }));
         pGroup.add(new Konva.Text({
-            x: p.w / 2 - 120, y: p.l / 2 - 25,
-            text: p.name, width: 240, align: "center",
-            fontSize: 26, fill: pTitleFill, fontStyle: "bold"
+            x: p.w / 2 - 140, y: p.l / 2 - 25,
+            text: p.name + (isHistory ? " [历史已切]" : ""), width: 280, align: "center",
+            fontSize: 24, fill: pTitleFill, fontStyle: "bold"
         }));
         pGroup.add(new Konva.Text({
-            x: p.w / 2 - 120, y: p.l / 2 + 8,
-            text: `${p.w} × ${p.l} mm`, width: 240, align: "center",
-            fontSize: 20, fill: pSubFill, fontFamily: "monospace"
+            x: p.w / 2 - 140, y: p.l / 2 + 8,
+            text: `${p.w} × ${p.l} mm`, width: 280, align: "center",
+            fontSize: 18, fill: pSubFill, fontFamily: "monospace"
         }));
-        if (p.confirmed) {
-            pGroup.add(new Konva.Text({
-                x: 10, y: 10,
-                text: "✓ 已实切核销", fontSize: 16, fill: isDark ? "#34d399" : "#059669", fontStyle: "bold"
+        if (isHistory) {
+            pGroup.add(new Konva.Rect({
+                x: 10, y: 10, width: 145, height: 26,
+                fill: isDark ? "rgba(16, 185, 129, 0.2)" : "rgba(16, 185, 129, 0.15)",
+                stroke: "#10b981", strokeWidth: 1.5, cornerRadius: 4
             }));
+            pGroup.add(new Konva.Text({
+                x: 16, y: 15,
+                text: "✓ 已实切下料出库", fontSize: 13,
+                fill: isDark ? "#34d399" : "#059669", fontStyle: "bold"
+            }));
+            pGroup.draggable(false);
         } else {
             pGroup.add(new Konva.Text({
                 x: 10, y: 10,
                 text: "经向 (Length)", fontSize: 16, fill: pGrainFill
             }));
+            // 仅对当前待排新裁片注入交互微调与干涉碰撞检测
+            makePieceInteractive(pGroup, p, data);
         }
-
-        // 注入工业级交互式排料微调与干涉检测
-        makePieceInteractive(pGroup, p, data);
 
         pieceGroup.add(pGroup);
     });
@@ -640,5 +699,18 @@ export function updateStatusBar() {
     const el = document.getElementById("sb-scale");
     if (el) {
         el.innerText = `${(stage.scaleX() * 100).toFixed(1)}%`;
+    }
+    const data = state.getCurrentCaseData();
+    if (!data) return;
+    const originLbl = document.getElementById("sb-origin-lbl");
+    if (originLbl) {
+        let maxConfirmedY = 0;
+        (data.pieces || []).filter(p => p.confirmed).forEach(p => {
+            if (p.y + p.l > maxConfirmedY) maxConfirmedY = p.y + p.l;
+        });
+        const winY = data.windowStartY || 0;
+        const bedL = data.bedL || 5000;
+        const originDesc = (data.cutOrigin || "right-bottom").includes("right") ? "靠右导轨" : "靠左布边";
+        originLbl.innerText = `${originDesc} · 当前工位 [Y=${winY} ~ ${winY+bedL}mm] | 母卷未切布头基准 Y=${maxConfirmedY > 0 ? maxConfirmedY + 'mm (' + (maxConfirmedY/1000).toFixed(2) + 'm)' : '0mm (整卷全新)'}`;
     }
 }
