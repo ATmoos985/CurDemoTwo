@@ -446,10 +446,25 @@ export function advanceFromRemnantStart(remnantId) {
     const targetY = Math.round(remnant.y);
     discardRemnant(remnantId);
 
+    const curY = data.windowStartY || 0;
+    if (targetY !== curY) {
+        data.cuts = [];
+        state.setCutStepLimit(999);
+        state.pendingPlan = null;
+        if (state.selectedRemnantId) clearRemnantSelection();
+    }
+
     // 顺流吸附红框工位至该料头起点
     updateFabricScrollPosition(targetY);
     updateDefectVisualStates();
     updateDefectRadarActiveState();
+    recalculateRollStats(data);
+    renderScene();
+    drawRulers();
+    updateUIInfo();
+    if (window.camApp && typeof window.camApp.renderToolpathUI === 'function') {
+        window.camApp.renderToolpathUI();
+    }
     bus.emit('bed:smart-advanced', { nextY: targetY });
 
     showToast(`机台工位红框已顺流吸附至 Y=${targetY}mm，已就绪开切下一工位！`, 'success');

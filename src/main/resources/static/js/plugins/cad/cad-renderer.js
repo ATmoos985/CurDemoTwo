@@ -309,6 +309,13 @@ export function renderScene() {
     (data.cuts || []).forEach((c) => {
         if (c.step > currentLimit) return;
 
+        // 仅渲染当前工位内的切削刀路，严禁旧刀路或越界刀路污染历史区域与画布
+        const winStartY = data.windowStartY || 0;
+        const bedL = data.bedL || 5000;
+        const winEndY = winStartY + bedL;
+        const cutY = (c.type === "横切") ? c.pos : (c.start + c.end) / 2;
+        if (cutY < winStartY - 10 || cutY > winEndY + 10) return;
+
         const isHoriz = (c.type === "横切");
         let startX, startY, endX, endY;
 

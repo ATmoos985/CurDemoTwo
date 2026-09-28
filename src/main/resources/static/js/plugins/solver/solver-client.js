@@ -111,31 +111,65 @@ export function updateUIInfo() {
         }).join("");
     }
 
-    // 台账数据
-    if (document.getElementById("lbl-deduct-len")) document.getElementById("lbl-deduct-len").innerText = `${data.deductLen ?? data.bedL ?? 0} mm`;
+    // 台账数据：当前工位实切对账
+    const winStartYVal = data.windowStartY || 0;
+    const bedLVal = data.bedL || 5000;
+    const winEndYVal = winStartYVal + bedLVal;
+    const hasStationPlan = ((data.totalArea || 0) > 0 || (data.pieces || []).some(p => {
+        const pMid = p.y + p.l / 2;
+        return pMid >= winStartYVal && pMid < winEndYVal;
+    }));
+
+    if (document.getElementById("lbl-deduct-len")) {
+        document.getElementById("lbl-deduct-len").innerText = (data.deductLen && data.deductLen > 0) ? `${data.deductLen} mm` : "0 mm (待排料)";
+    }
     if (document.getElementById("lbl-piece-area")) document.getElementById("lbl-piece-area").innerText = `${(data.pieceArea || 0).toFixed(3)} m²`;
     if (document.getElementById("lbl-rem-area")) document.getElementById("lbl-rem-area").innerText = `${(data.remArea || 0).toFixed(3)} m²`;
     if (document.getElementById("lbl-waste-area")) document.getElementById("lbl-waste-area").innerText = `${(data.wasteArea || 0).toFixed(3)} m²`;
     if (document.getElementById("lbl-total-area")) document.getElementById("lbl-total-area").innerText = `${(data.totalArea || 0).toFixed(3)} m²`;
+
     const utilization = data.lastReceipt ? data.lastReceipt.utilization :
         ((data.totalArea || 0) > 0 ? (data.pieceArea || 0) / data.totalArea * 100 : 0);
     const utilEl = document.getElementById("lbl-utilization");
-    if (utilEl) utilEl.innerText = `${utilization.toFixed(1)}% ${data.lastReceipt ? '实切' : '方案'}`;
+    if (utilEl) {
+        utilEl.innerText = hasStationPlan && (data.totalArea || 0) > 0 ? `${utilization.toFixed(1)}% ${data.lastReceipt ? '实切' : '方案'}` : "—";
+    }
     const reportEl = document.getElementById("lbl-report-status");
-    if (reportEl) reportEl.innerText = data.lastReceipt ? `已确认 ${data.lastReceipt.planId.slice(0, 8)}` :
-        (state.pendingPlan ? '方案待实切确认' : '示例 / 待实切确认');
+    if (reportEl) {
+        reportEl.innerText = data.lastReceipt ? `已确认 ${data.lastReceipt.planId.slice(0, 8)}` :
+            (state.pendingPlan ? '方案待实切确认' : (hasStationPlan ? '方案待实切确认' : '工位就绪 / 待排料'));
+    }
 
     const sum = (data.pieceArea || 0) + (data.remArea || 0) + (data.wasteArea || 0);
     const diff = Math.abs(sum - (data.totalArea || 0));
     const statusEl = document.getElementById("lbl-balance-status");
     if (statusEl) {
-        if (diff < 0.001) {
+        if (!hasStationPlan || (data.totalArea || 0) === 0) {
             statusEl.className = "status-badge";
-            statusEl.innerText = "面积平衡";
+            statusEl.innerText = "工位就绪 (待排料)";
+        } else if (diff < 0.001) {
+            statusEl.className = "status-badge";
+            statusEl.innerText = "100.0% 严密守恒";
         } else {
             statusEl.className = "badge-cut";
             statusEl.innerText = `偏差: ${diff.toFixed(3)} m²`;
         }
+    }
+
+    // 母卷剩余米数实时对齐
+    const rollRemainingEl = document.getElementById("lbl-roll-remaining");
+    if (rollRemainingEl) {
+        const totalRollL = data.totalRollL || 60000;
+        let maxConfirmedY = 0;
+        (data.pieces || []).filter(p => p.confirmed).forEach(p => {
+            if (p.y + p.l > maxConfirmedY) maxConfirmedY = p.y + p.l;
+        });
+        if (data.lastReceipt && data.lastReceipt.windowStartY !== undefined && data.lastReceipt.actualCutLen) {
+            const rEnd = data.lastReceipt.windowStartY + data.lastReceipt.actualCutLen;
+            if (rEnd > maxConfirmedY) maxConfirmedY = Math.round(rEnd);
+        }
+        const remainingLen = Math.max(0, totalRollL - maxConfirmedY);
+        rollRemainingEl.innerText = `${remainingLen.toLocaleString()} mm`;
     }
 }
 
@@ -393,23 +427,18 @@ export async function triggerSolve() {
                     });
                     data.pieces = [...retainedPieces, ...newPieces].sort((a, b) => a.y - b.y || a.x - b.x);
 
-                    const isCutInCurrentStation = (c) => {
-                        if (c.type === "横切") return (c.pos > winStartY && c.pos < winEndY);
-                        const cutMidY = (c.start + c.end) / 2;
-                        return (cutMidY >= winStartY && cutMidY <= winEndY);
-                    };
-                    const retainedCuts = (data.cuts || []).filter(c => !isCutInCurrentStation(c));
+                    // CNC 数控切刀严格归属于当前工位切削循环，严禁拼接或保留历史工位切刀
                     const newCuts = (result.cuts || []).map((c, idx) => {
                         const isHoriz = (c.type === "横切");
                         return {
                             ...c,
+                            step: idx + 1,
                             pos: isHoriz ? (c.pos + winStartY) : c.pos,
                             start: !isHoriz ? (c.start + winStartY) : c.start,
                             end: !isHoriz ? (c.end + winStartY) : c.end
                         };
                     });
-                    data.cuts = [...retainedCuts, ...newCuts];
-                    data.cuts.forEach((c, idx) => { c.step = idx + 1; });
+                    data.cuts = newCuts;
 
                     const currentStationIdx = Math.round(winStartY / Math.max(100, bedL || 5000)) + 1;
                     

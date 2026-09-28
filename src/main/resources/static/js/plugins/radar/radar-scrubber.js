@@ -3,7 +3,10 @@
  */
 import { stage, mainLayer, bedStationGroup, dynBedRangeBadge, dynBedBottomBadge, defectGroup } from '../cad/cad-stage.js';
 import { drawRulers } from '../cad/cad-rulers.js';
-import { updateStatusBar } from '../cad/cad-renderer.js';
+import { updateStatusBar, renderScene } from '../cad/cad-renderer.js';
+import { clearRemnantSelection } from '../cad/cad-remnant-highlight.js';
+import { recalculateRollStats } from '../solver/quota-manager.js';
+import { updateUIInfo } from '../solver/solver-client.js';
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 
@@ -312,7 +315,8 @@ export function setupRadarInteraction() {
         const data = state.getCurrentCaseData();
         const totalL = data ? (data.totalRollL || 60000) : 60000;
         const bedL = data ? (data.bedL || 5000) : 5000;
-        let finalY = (pendingTargetY !== null) ? pendingTargetY : (data ? (data.windowStartY || 0) : 0);
+        const prevY = data ? (data.windowStartY || 0) : 0;
+        let finalY = (pendingTargetY !== null) ? pendingTargetY : prevY;
         pendingTargetY = null;
 
         // 工位智能磁吸 (Station Snapping)
@@ -331,6 +335,14 @@ export function setupRadarInteraction() {
             }
         }
         finalY = Math.max(0, Math.min(totalL - bedL, finalY));
+
+        if (Math.abs(finalY - prevY) > 50) {
+            if (data) data.cuts = [];
+            state.setCutStepLimit(999);
+            state.pendingPlan = null;
+            if (state.selectedRemnantId) clearRemnantSelection();
+        }
+
         updateFabricScrollPosition(finalY);
 
         try {
@@ -344,6 +356,13 @@ export function setupRadarInteraction() {
 
         updateDefectVisualStates();
         updateDefectRadarActiveState();
+        if (data) recalculateRollStats(data);
+        renderScene();
+        drawRulers();
+        updateUIInfo();
+        if (window.camApp && typeof window.camApp.renderToolpathUI === 'function') {
+            window.camApp.renderToolpathUI();
+        }
         bus.emit('radar:dragend', { finalY });
     };
 
@@ -433,7 +452,24 @@ export function advanceBed(delta) {
 
     let nextY = currentY + delta * bedL;
     nextY = Math.max(0, Math.min(totalL - bedL, nextY));
+
+    if (nextY !== currentY) {
+        data.cuts = [];
+        state.setCutStepLimit(999);
+        state.pendingPlan = null;
+        if (state.selectedRemnantId) clearRemnantSelection();
+    }
+
     updateFabricScrollPosition(nextY);
+    updateDefectVisualStates();
+    updateDefectRadarActiveState();
+    recalculateRollStats(data);
+    renderScene();
+    drawRulers();
+    updateUIInfo();
+    if (window.camApp && typeof window.camApp.renderToolpathUI === 'function') {
+        window.camApp.renderToolpathUI();
+    }
 }
 
 export function smartAdvanceBed() {
@@ -461,8 +497,23 @@ export function smartAdvanceBed() {
     }
 
     nextY = Math.max(0, Math.min(totalL - bedL, nextY));
+
+    if (nextY !== curY) {
+        data.cuts = [];
+        state.setCutStepLimit(999);
+        state.pendingPlan = null;
+        if (state.selectedRemnantId) clearRemnantSelection();
+    }
+
     updateFabricScrollPosition(nextY);
     updateDefectVisualStates();
     updateDefectRadarActiveState();
+    recalculateRollStats(data);
+    renderScene();
+    drawRulers();
+    updateUIInfo();
+    if (window.camApp && typeof window.camApp.renderToolpathUI === 'function') {
+        window.camApp.renderToolpathUI();
+    }
     bus.emit('bed:smart-advanced', { nextY });
 }
