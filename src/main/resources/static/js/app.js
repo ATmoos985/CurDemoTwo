@@ -251,9 +251,18 @@ export async function selectPresetCase(caseId) {
             console.error("Case 3 load error:", e);
         }
     } else {
-        const selectedRoll = state.getCurrentCaseData().rollId || 'ROLL-2026-0920';
+        const currentData = state.getCurrentCaseData();
+        const selectedRoll = currentData.rollId || 'ROLL-2026-0920';
         const selector = document.getElementById('sel-mother-roll-id');
-        if (selector) selector.value = selectedRoll;
+        if (selector) {
+            if (![...selector.options].some(o => o.value === selectedRoll)) {
+                const opt = document.createElement("option");
+                opt.value = selectedRoll;
+                opt.textContent = `${selectedRoll} (${currentData.rollModel || ''} ${currentData.rollW ? (currentData.rollW/1000).toFixed(1) + 'm' : ''})`;
+                selector.appendChild(opt);
+            }
+            selector.value = selectedRoll;
+        }
         await onMotherRollChange();
     }
     updatePresetTriggerLabel(caseId);

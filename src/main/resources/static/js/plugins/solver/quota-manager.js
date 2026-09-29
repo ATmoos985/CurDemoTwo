@@ -5,6 +5,7 @@ import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 import { renderScene, resetToBedView } from '../cad/cad-renderer.js';
 import { drawRulers } from '../cad/cad-rulers.js';
+import { renderRadar } from '../radar/radar-scrubber.js';
 import { updateUIInfo } from './solver-client.js';
 import { showToast } from '../../core/toast.js';
 import { CURTAIN_ORDER_TEMPLATES } from '../presets/scenarios.js';
@@ -500,8 +501,15 @@ export function onRollConfigChange() {
     data.bedL = parseFloat(document.getElementById("inp-bed-l").value) || 5000;
     data.windowStartY = parseFloat(document.getElementById("inp-window-start-y").value) || 0;
     data.rollW = parseFloat(document.getElementById("inp-roll-w").value) || 2000;
+
+    const wLbl = document.getElementById("lbl-roll-w-desc");
+    if (wLbl) wLbl.innerText = data.rollW;
+    const totalLenEl = document.getElementById("lbl-roll-total-len");
+    if (totalLenEl) totalLenEl.innerText = data.totalRollL.toLocaleString();
+
     updateOriginHeaderSummary();
     renderScene();
+    renderRadar();
     resetToBedView();
 }
 

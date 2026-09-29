@@ -203,10 +203,58 @@ export function loadCase(id) {
         if (btn) btn.classList.toggle("active", i === id);
     }
     const data = state.getCurrentCaseData();
-    if (document.getElementById("inp-total-roll-l")) document.getElementById("inp-total-roll-l").value = data.totalRollL || 60000;
+    const rollId = data.rollId || "ROLL-2026-0920";
+
+    // 1. 同步母卷下拉选框选项与当前值
+    const selMother = document.getElementById("sel-mother-roll-id");
+    if (selMother) {
+        if (![...selMother.options].some(o => o.value === rollId)) {
+            const opt = document.createElement("option");
+            opt.value = rollId;
+            opt.textContent = `${rollId} (${data.rollModel || ''} ${data.rollW ? (data.rollW/1000).toFixed(1) + 'm' : ''})`;
+            selMother.appendChild(opt);
+        }
+        selMother.value = rollId;
+    }
+
+    // 2. 规范母卷规格与状态
+    const spec = state.motherRollSpecs[rollId] || {
+        model: data.rollModel || "标准面料",
+        rollW: data.rollW || 2000,
+        totalRollL: data.totalRollL || 60000,
+        bedL: data.bedL || 5000
+    };
+    if (data.rollW) spec.rollW = data.rollW;
+    if (data.totalRollL) spec.totalRollL = data.totalRollL;
+    if (data.bedL) spec.bedL = data.bedL;
+    if (data.rollModel) spec.model = data.rollModel;
+    state.motherRollSpecs[rollId] = spec;
+    data.rollW = spec.rollW;
+    data.totalRollL = spec.totalRollL;
+
+    if (document.getElementById("inp-roll-id")) document.getElementById("inp-roll-id").value = rollId;
+    if (document.getElementById("inp-roll-w")) document.getElementById("inp-roll-w").value = data.rollW;
+    if (document.getElementById("inp-total-roll-l")) document.getElementById("inp-total-roll-l").value = data.totalRollL;
     if (document.getElementById("inp-bed-l")) document.getElementById("inp-bed-l").value = data.bedL || 5000;
     if (document.getElementById("inp-window-start-y")) document.getElementById("inp-window-start-y").value = data.windowStartY || 0;
-    if (document.getElementById("inp-roll-w")) document.getElementById("inp-roll-w").value = data.rollW || 2000;
+
+    // 3. 同步左侧母卷规格卡片文字标签
+    const modelLbl = document.getElementById("lbl-roll-model-desc");
+    if (modelLbl) modelLbl.innerText = spec.model || data.rollModel || "标准布卷";
+    const wLbl = document.getElementById("lbl-roll-w-desc");
+    if (wLbl) wLbl.innerText = spec.rollW;
+    const sbRoll = document.getElementById("sb-roll-id");
+    if (sbRoll) sbRoll.innerText = rollId;
+    const totalLenEl = document.getElementById("lbl-roll-total-len");
+    if (totalLenEl) totalLenEl.innerText = spec.totalRollL.toLocaleString();
+    const remLenEl = document.getElementById("lbl-roll-remaining-len");
+    if (remLenEl) remLenEl.innerText = `${spec.totalRollL.toLocaleString()} mm`;
+    const usedLenEl = document.getElementById("lbl-roll-used-len");
+    if (usedLenEl) usedLenEl.innerText = `0 mm`;
+    const progressEl = document.getElementById("roll-len-progress");
+    if (progressEl) progressEl.style.width = `0%`;
+    const baseOriginEl = document.getElementById("lbl-roll-base-origin");
+    if (baseOriginEl) baseOriginEl.innerText = `Y = ${(data.windowStartY || 0).toLocaleString()} mm (${((data.windowStartY || 0)/1000).toFixed(2)}m)`;
 
     if (document.getElementById("inp-trim-start")) document.getElementById("inp-trim-start").value = data.trimStart || 0;
     if (document.getElementById("sel-cut-origin")) document.getElementById("sel-cut-origin").value = data.cutOrigin || "right-bottom";
@@ -230,6 +278,7 @@ export function loadCase(id) {
     renderDemandsUI(data.demands);
 
     renderScene();
+    renderRadar();
     resetToBedView();
     bus.emit('demands:changed');
     updateUIInfo();

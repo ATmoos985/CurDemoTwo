@@ -159,6 +159,7 @@
                                     <option value="ROLL-2026-0921">ROLL-2026-0921 (纯棉 1.8m)</option>
                                     <option value="ROLL-2026-0922">ROLL-2026-0922 (牛津布 2.2m)</option>
                                     <option value="ROLL-DEMO-2D">ROLL-DEMO-2D (窗帘二维样布 2m)</option>
+                                    <option value="ROLL-REAL-893292">ROLL-REAL-893292 (2#A3A-Cream 2.8m)</option>
                                 </select>
                             </div>
                             <div class="prop-row" style="margin-top: 4px;">
@@ -194,7 +195,6 @@
 
                             <!-- 隐藏参数 (供高级调校) -->
                             <input type="hidden" id="inp-roll-id" value="ROLL-2026-0920" />
-                            <input type="hidden" id="inp-roll-w" value="2000" />
                             <input type="hidden" id="inp-total-roll-l" value="60000" />
                             <input type="hidden" id="inp-window-start-y" value="0" />
                         </div>
@@ -221,6 +221,10 @@
                             </div>
                             <div class="callout-amber-tip" id="lbl-origin-desc-tip">
                                 当前起刀基准以上方选项为准；母卷连续开卷按进给方向接续。
+                            </div>
+                            <div class="prop-row">
+                                <span class="prop-label">机台加工幅宽 (Roll W)</span>
+                                <input type="number" class="prop-input" id="inp-roll-w" value="2000" min="500" max="5000" step="100" onchange="onRollConfigChange()" />
                             </div>
                             <div class="prop-row">
                                 <span class="prop-label">机台展开台面 (Bed L)</span>

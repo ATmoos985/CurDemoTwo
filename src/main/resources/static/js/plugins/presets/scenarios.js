@@ -1828,6 +1828,7 @@ export const INITIAL_SCENARIOS = {
     "7": {
         "name": "案例7: 真实布艺生产订单 (100m母卷 · 15处随机疵点 · 2#A3A Cream 23件套连续搭切与排料仿真)",
         "rollId": "ROLL-REAL-893292",
+        "rollModel": "2#A3A-Cream",
         "totalRollL": 100000,
         "bedL": 5000,
         "windowStartY": 0,
