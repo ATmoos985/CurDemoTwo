@@ -198,7 +198,7 @@ export function loadCase(id) {
     }
     state.setCaseId(id);
     state.scenarios[id].lastReceipt = null;
-    for (let i = 1; i <= 7; i++) {
+    for (let i = 1; i <= 8; i++) {
         const btn = document.getElementById(`btn-case-${i}`);
         if (btn) btn.classList.toggle("active", i === id);
     }
@@ -276,6 +276,19 @@ export function loadCase(id) {
 
     renderDefectsUI(data.globalDefects || data.defects || []);
     renderDemandsUI(data.demands);
+
+    const demandsRollLbl = document.getElementById("demands-roll-label");
+    if (demandsRollLbl) demandsRollLbl.innerText = `${rollId} (${spec.rollW}mm · ${spec.model || data.rollModel || ''})`;
+    const craftHint = document.getElementById("demands-craft-hint");
+    if (craftHint) {
+        if (rollId === "ROLL-REAL-893292" || id === 7) {
+            craftHint.innerHTML = "🏆 <b>893292 窗帘整单</b>: 11项主帘定高横裁(幅宽2170~2715mm) · 门幅剩余630mm边料竖切套排窗幔/绑带/抱枕(37件套)";
+        } else if (rollId === "ROLL-REAL-893153" || id === 8) {
+            craftHint.innerHTML = "🏆 <b>893153 工程整单</b>: 4大超长工程主帘(5.4m~9m横裁) · 门幅剩余边料竖切套排长绑带/抱枕(18件套)";
+        } else {
+            craftHint.innerText = "工艺规则：窗帘定高横裁为主要落料，门幅剩余窄边料顺流纵切套排辅件吃净";
+        }
+    }
 
     renderScene();
     renderRadar();

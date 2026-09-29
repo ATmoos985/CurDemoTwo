@@ -34,7 +34,7 @@
                 <div class="preset-dropdown-menu" id="preset-dropdown-menu">
                     <div class="preset-dropdown-header">
                         <span>预设工业工况快速载入</span>
-                        <span class="preset-dropdown-sub">窗帘工业典型工况 · 7 组标准案例 (含真实生产数据)</span>
+                        <span class="preset-dropdown-sub">窗帘工业典型工况 · 8 组标准案例 (含真实生产数据)</span>
                     </div>
                     <div class="preset-menu-list">
                         <button class="preset-menu-item active" id="btn-case-1" onclick="selectPresetCase(1)">
@@ -81,10 +81,17 @@
                         </button>
                         <button class="preset-menu-item" id="btn-case-7" onclick="selectPresetCase(7)">
                             <div class="preset-item-head">
-                                <span class="preset-item-name" style="color:#38bdf8;">案例7: 真实布艺订单导入 (100m母卷 · 15处疵点)</span>
+                                <span class="preset-item-name" style="color:#38bdf8;">案例7: 真实布艺订单整单 (100m母卷 · 893292 37件套)</span>
                                 <span class="preset-item-tag" style="background:rgba(56,189,248,0.2);color:#38bdf8;border-color:rgba(56,189,248,0.4);">真实生产数据</span>
                             </div>
-                            <div class="preset-item-desc">导入真实布艺订单(2#A3A-Cream 23件大单)，幅宽2.8m×100m卷长，每100m随机15处疵点全避让搭切</div>
+                            <div class="preset-item-desc">面料 893292 2#A3A-Cream：门幅2.8m横切大帘(2170/2220mm)，余幅630mm边料竖切套排窗幔与绑带抱枕，吃净门幅</div>
+                        </button>
+                        <button class="preset-menu-item" id="btn-case-8" onclick="selectPresetCase(8)">
+                            <div class="preset-item-head">
+                                <span class="preset-item-name" style="color:#38bdf8;">案例8: 真实工程大单导入 (100m母卷 · 893153 18件套)</span>
+                                <span class="preset-item-tag" style="background:rgba(56,189,248,0.2);color:#38bdf8;border-color:rgba(56,189,248,0.4);">工程超长单</span>
+                            </div>
+                            <div class="preset-item-desc">面料 893153 2#1A-Off White：4大工程超长主帘(5.4m~9m)，余幅边料竖切套排长绑带与抱枕</div>
                         </button>
                     </div>
                 </div>
@@ -160,6 +167,7 @@
                                     <option value="ROLL-2026-0922">ROLL-2026-0922 (牛津布 2.2m)</option>
                                     <option value="ROLL-DEMO-2D">ROLL-DEMO-2D (窗帘二维样布 2m)</option>
                                     <option value="ROLL-REAL-893292">ROLL-REAL-893292 (2#A3A-Cream 2.8m)</option>
+                                    <option value="ROLL-REAL-893153">ROLL-REAL-893153 (2#1A-Off White 2.8m)</option>
                                 </select>
                             </div>
                             <div class="prop-row" style="margin-top: 4px;">
@@ -289,12 +297,24 @@
                                 <span style="font-size: 11px; color: var(--accent-blue); font-weight: 600; white-space: nowrap;">📋 订单模板:</span>
                                 <select class="prop-input" id="sel-curtain-order-template" onchange="loadCurtainOrderTemplate(this.value)" style="flex: 1; height: 26px; font-size: 11px; padding: 2px 6px;">
                                     <option value="">-- 选择典型窗帘整单模板 --</option>
+                                    <option value="real_893292_cream">🏆 真实面料 893292 (2#A3A-Cream) 窗帘整单 (11主帘+3辅件 · 37件套)</option>
+                                    <option value="real_893153_white">🏆 真实面料 893153 (2#1A-Off White) 窗帘整单 (4大主帘+2辅件 · 18件套)</option>
                                     <option value="whole_house">🛋 全屋整套窗帘工程批量单 (32件套 · 支持跨工位连续搭切)</option>
                                     <option value="hotel_batch">🏨 星级酒店客房工程批量单 (50件套 · 支持多工位连续搭切)</option>
                                     <option value="edge_nesting">✂ 偏幅落地大帘+边角辅料连续单 (24件套 · 支持多工位搭切)</option>
                                     <option value="valance_suite">🪟 豪华窗幔与全屋辅配件工程单 (40件套 · 支持连续搭切)</option>
                                     <option value="remnant_reuse">♻ 飘窗短帘料头精益复用 (5件套: 飘窗短帘+抱枕套+挂带)</option>
                                 </select>
+                            </div>
+                            <!-- 归属母卷与工艺指引提示条 -->
+                            <div id="demands-affiliation-bar" style="margin-bottom: 8px; padding: 6px 8px; background: rgba(15, 23, 42, 0.4); border: 1px solid var(--panel-border); border-radius: 4px; font-size: 11px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                                    <span style="color: var(--text-muted);">需求归属母卷:</span>
+                                    <b id="demands-roll-label" style="color: #38bdf8; font-family: monospace;">ROLL-2026-0920 (2000mm)</b>
+                                </div>
+                                <div id="demands-craft-hint" style="color: var(--text-muted); font-size: 10px; line-height: 1.3;">
+                                    工艺规则：窗帘定高横裁为主要落料，门幅剩余窄边料顺流纵切套排辅件吃净
+                                </div>
                             </div>
                             <div id="demands-container" style="display: flex; flex-direction: column; gap: 8px;">
                                 <!-- 动态生成带有【在库料头提示与选择】的裁片项 -->

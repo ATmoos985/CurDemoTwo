@@ -81,7 +81,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                 int idx = 0;
                 for (PieceDemand it : req.getDemands()) {
                     for (int c = 0; c < it.getDemand(); c++) {
-                        pw.println(idx + "," + (int)it.getWidth() + "," + (int)it.getLength() + ",0");
+                        pw.println(idx + "," + (int)it.getWidth() + "," + (int)it.getLength() + "," + idx);
                         itemMap.put(idx, it.getName());
                         demandIdMap.put(idx, it.getId());
                         idx++;

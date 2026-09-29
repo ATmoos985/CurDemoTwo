@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 工业窗帘案例预设数据集 (Curtain Manufacturing Scenarios & Specs)
  * 涵盖：
  * 1. 窗帘定高整幅横切 (经典工程套排 · 多房间整幅连续横切)
@@ -14,10 +14,43 @@ export const MOTHER_ROLL_SPECS = {
     "ROLL-2026-0921": { model: "纯棉斜纹-C1800", rollW: 1800, totalRollL: 50000, bedL: 5000 },
     "ROLL-2026-0922": { model: "弹力牛津-O2200", rollW: 2200, totalRollL: 80000, bedL: 5000 },
     "ROLL-DEMO-2D": { model: "窗帘样布-2D", rollW: 2000, totalRollL: 30000, bedL: 4000 },
-    "ROLL-REAL-893292": { model: "2#A3A-Cream", rollW: 2800, totalRollL: 100000, bedL: 5000 }
+    "ROLL-REAL-893292": { model: "2#A3A-Cream", rollW: 2800, totalRollL: 100000, bedL: 5000 },
+    "ROLL-REAL-893153": { model: "2#1A-Off White", rollW: 2800, totalRollL: 100000, bedL: 5000 }
 };
 
 export const CURTAIN_ORDER_TEMPLATES = {
+    "real_893292_cream": {
+        name: "🏆 真实面料 893292 (2#A3A-Cream) 窗帘整单 (11主帘+3辅件 · 37件套)",
+        desc: "归属母卷 ROLL-REAL-893292 · 涵盖 11 项落地与飘窗主帘 (定高横裁) + 3 项窗幔绑带抱枕 (边料竖切套排)",
+        demands: [
+            { id: 1, name: "订单5_客餐厅双开大主帘", width: 2170, length: 3250, count: 2 },
+            { id: 2, name: "订单6_次卧双开大主帘", width: 2170, length: 3570, count: 2 },
+            { id: 3, name: "订单7_书房单开主帘", width: 2220, length: 1620, count: 1 },
+            { id: 4, name: "订单8_挑空大厅超高主帘", width: 2715, length: 2930, count: 4 },
+            { id: 5, name: "订单9_主卧双开主帘", width: 2220, length: 2260, count: 2 },
+            { id: 6, name: "订单10_客卧单开主帘", width: 2220, length: 2260, count: 1 },
+            { id: 7, name: "订单11_衣帽间单开主帘", width: 2220, length: 2930, count: 1 },
+            { id: 8, name: "订单12_儿童房飘窗短帘", width: 1603, length: 2260, count: 4 },
+            { id: 9, name: "订单13_书房小窗短帘", width: 1500, length: 3250, count: 2 },
+            { id: 10, name: "订单14_会客大厅超宽主帘", width: 2640, length: 4470, count: 2 },
+            { id: 11, name: "订单15_主卫采光主帘", width: 2660, length: 2355, count: 2 },
+            { id: 12, name: "配套提花定型窗幔", width: 400, length: 1600, count: 4 },
+            { id: 13, name: "同色窗帘立体造型绑带", width: 180, length: 800, count: 6 },
+            { id: 14, name: "同款面料沙发抱枕套", width: 450, length: 450, count: 4 }
+        ]
+    },
+    "real_893153_white": {
+        name: "🏆 真实面料 893153 (2#1A-Off White) 窗帘整单 (4大工程主帘+2辅件 · 18件套)",
+        desc: "归属母卷 ROLL-REAL-893153 · 涵盖 4 大工程落地大帘 (定高横裁) + 边料长绑带与抱枕 (边料竖切套排)",
+        demands: [
+            { id: 1, name: "订单1_客房整幅大帘", width: 2413, length: 5490, count: 1 },
+            { id: 2, name: "订单2_宴会厅超长大帘", width: 2417, length: 9070, count: 1 },
+            { id: 3, name: "订单3_标房双开落地帘", width: 2230, length: 6800, count: 1 },
+            { id: 4, name: "订单4_景观套房大帘", width: 2403, length: 7440, count: 1 },
+            { id: 5, name: "边饰定型长绑带", width: 200, length: 800, count: 8 },
+            { id: 6, name: "配套同色抱枕套片", width: 450, length: 450, count: 6 }
+        ]
+    },
     "whole_house": {
         name: "全屋整套窗帘工程批量单 (32件套 · 支持跨工位接续搭切)",
         desc: "涵盖多房间落地主帘、飘窗双开帘、造型绑带及同款沙发抱枕套，充足配额供连续搭切",
@@ -1826,7 +1859,7 @@ export const INITIAL_SCENARIOS = {
         "engine": "智能几何排料内核 (多工位搭切)"
     },
     "7": {
-        "name": "案例7: 真实布艺生产订单 (100m母卷 · 15处随机疵点 · 2#A3A Cream 23件套连续搭切与排料仿真)",
+        "name": "案例7: 真实布艺连续排料 (100m母卷 · 15处随机疵点 · 893292 Cream 37件套横切+边料竖切连续搭切)",
         "rollId": "ROLL-REAL-893292",
         "rollModel": "2#A3A-Cream",
         "totalRollL": 100000,
@@ -1976,202 +2009,75 @@ export const INITIAL_SCENARIOS = {
                 }
         ],
         "demands": [
-                {
-                        "id": 1,
-                        "name": "D5_双开_高217.0cm",
-                        "w": 2170,
-                        "l": 3250,
-                        "count": 2
-                },
-                {
-                        "id": 2,
-                        "name": "D6_双开_高217.0cm",
-                        "w": 2170,
-                        "l": 3570,
-                        "count": 2
-                },
-                {
-                        "id": 3,
-                        "name": "D7_单开_高222.0cm",
-                        "w": 2220,
-                        "l": 1620,
-                        "count": 1
-                },
-                {
-                        "id": 4,
-                        "name": "D8_双开_高271.5cm",
-                        "w": 2715,
-                        "l": 2930,
-                        "count": 4
-                },
-                {
-                        "id": 5,
-                        "name": "D9_双开_高222.0cm",
-                        "w": 2220,
-                        "l": 2260,
-                        "count": 2
-                },
-                {
-                        "id": 6,
-                        "name": "D10_单开_高222.0cm",
-                        "w": 2220,
-                        "l": 2260,
-                        "count": 1
-                },
-                {
-                        "id": 7,
-                        "name": "D11_单开_高222.0cm",
-                        "w": 2220,
-                        "l": 2930,
-                        "count": 1
-                },
-                {
-                        "id": 8,
-                        "name": "D12_双开_高160.3cm",
-                        "w": 1603,
-                        "l": 2260,
-                        "count": 4
-                },
-                {
-                        "id": 9,
-                        "name": "D13_双开_高150.0cm",
-                        "w": 1500,
-                        "l": 3250,
-                        "count": 2
-                },
-                {
-                        "id": 10,
-                        "name": "D14_双开_高264.0cm",
-                        "w": 2640,
-                        "l": 4470,
-                        "count": 2
-                },
-                {
-                        "id": 11,
-                        "name": "D15_双开_高266.0cm",
-                        "w": 2660,
-                        "l": 2355,
-                        "count": 2
-                }
+            { "id": 1, "name": "订单5_客餐厅双开大主帘", "w": 2170, "l": 3250, "count": 2 },
+            { "id": 2, "name": "订单6_次卧双开大主帘", "w": 2170, "l": 3570, "count": 2 },
+            { "id": 3, "name": "订单7_书房单开主帘", "w": 2220, "l": 1620, "count": 1 },
+            { "id": 4, "name": "订单8_挑空大厅超高主帘", "w": 2715, "l": 2930, "count": 4 },
+            { "id": 5, "name": "订单9_主卧双开主帘", "w": 2220, "l": 2260, "count": 2 },
+            { "id": 6, "name": "订单10_客卧单开主帘", "w": 2220, "l": 2260, "count": 1 },
+            { "id": 7, "name": "订单11_衣帽间单开主帘", "w": 2220, "l": 2930, "count": 1 },
+            { "id": 8, "name": "订单12_儿童房飘窗短帘", "w": 1603, "l": 2260, "count": 4 },
+            { "id": 9, "name": "订单13_书房小窗短帘", "w": 1500, "l": 3250, "count": 2 },
+            { "id": 10, "name": "订单14_会客大厅超宽主帘", "w": 2640, "l": 4470, "count": 2 },
+            { "id": 11, "name": "订单15_主卫采光主帘", "w": 2660, "l": 2355, "count": 2 },
+            { "id": 12, "name": "配套提花定型窗幔", "w": 400, "l": 1600, "count": 4 },
+            { "id": 13, "name": "同色窗帘立体造型绑带", "w": 180, "l": 800, "count": 6 },
+            { "id": 14, "name": "同款面料沙发抱枕套", "w": 450, "l": 450, "count": 4 }
         ],
-        "pieces": [
-                {
-                        "id": 1,
-                        "name": "D5_双开_高217.0cm (左片)",
-                        "x": 0,
-                        "y": 0,
-                        "w": 2170,
-                        "l": 3250,
-                        "rotated": false,
-                        "demandId": 1
-                }
-        ],
-        "remnants": [
-                {
-                        "id": "REM-REAL-01",
-                        "name": "门幅纵切可用长料头 (630×3250mm)",
-                        "x": 2170,
-                        "y": 0,
-                        "w": 630,
-                        "l": 3250,
-                        "area": 2.047,
-                        "hasDefect": false,
-                        "status": "AVAILABLE"
-                },
-                {
-                        "id": "REM-REAL-02",
-                        "name": "工位1末端避瑕可用料头 (2800×360mm)",
-                        "x": 0,
-                        "y": 3250,
-                        "w": 2800,
-                        "l": 360,
-                        "area": 1.008,
-                        "hasDefect": false,
-                        "status": "AVAILABLE"
-                },
-                {
-                        "id": "REM-DEF-01",
-                        "name": "断纬跳纱隔离带料头 (2800×221mm)",
-                        "x": 0,
-                        "y": 3610,
-                        "w": 2800,
-                        "l": 221,
-                        "area": 0.619,
-                        "hasDefect": true,
-                        "status": "QUARANTINED"
-                },
-                {
-                        "id": "REM-REAL-03",
-                        "name": "工位1接续待排可用料段 (2800×1169mm)",
-                        "x": 0,
-                        "y": 3831,
-                        "w": 2800,
-                        "l": 1169,
-                        "area": 3.273,
-                        "hasDefect": false,
-                        "status": "AVAILABLE"
-                }
-        ],
-        "cuts": [
-                {
-                        "step": 1,
-                        "type": "纵切",
-                        "pos": 2170,
-                        "start": 0,
-                        "end": 3250,
-                        "desc": "第 1 刀纵切：在宽度 2170mm 处纵切，切离落地大帘主片与右侧长条料头 REM-REAL-01",
-                        "airDistance": 0,
-                        "startX": 2170,
-                        "startY": 0,
-                        "endX": 2170,
-                        "endY": 3250
-                },
-                {
-                        "step": 2,
-                        "type": "横切",
-                        "pos": 3250,
-                        "start": 0,
-                        "end": 2800,
-                        "desc": "第 2 刀整幅横切：在展开 3250mm 处横向贯穿切断，完好产出落地主帘成品并切下料头",
-                        "airDistance": 630,
-                        "startX": 2170,
-                        "startY": 3250,
-                        "endX": 2800,
-                        "endY": 3250
-                },
-                {
-                        "step": 3,
-                        "type": "横切",
-                        "pos": 3610,
-                        "start": 0,
-                        "end": 2800,
-                        "desc": "第 3 刀整幅横切：在展开 3610mm 处下刀，切出避瑕料头 REM-REAL-02 并进入断纬疵点隔离区",
-                        "airDistance": 360,
-                        "startX": 0,
-                        "startY": 3610,
-                        "endX": 2800,
-                        "endY": 3610
-                },
-                {
-                        "step": 4,
-                        "type": "横切",
-                        "pos": 3831,
-                        "start": 0,
-                        "end": 2800,
-                        "desc": "第 4 刀整幅横切：在展开 3831mm 处切断，剥离断纬带疵废料段 REM-DEF-01，无瑕恢复后续排产",
-                        "airDistance": 221,
-                        "startX": 2800,
-                        "startY": 3831,
-                        "endX": 0,
-                        "endY": 3831
-                }
-        ],
-        "deductLen": 5000,
-        "pieceArea": 7.053,
-        "remArea": 6.947,
-        "wasteArea": 0.0,
+        "pieces": [],
+        "remnants": [],
+        "cuts": [],
+        "deductLen": 0,
+        "pieceArea": 0,
+        "remArea": 0,
+        "wasteArea": 0,
         "totalArea": 14.0,
-        "engine": "工业布艺真实排产内核 (100m母卷 · 15处随机疵点规避)"
+        "engine": "真实布艺连续排料 (定高横裁主帘 + 窄幅边料竖切套排)"
+    },
+    "8": {
+        "name": "案例8: 真实工程大单排料 (100m母卷 · 12处疵点 · 893153 Off White 18件套超长主帘+边料辅件)",
+        "rollId": "ROLL-REAL-893153",
+        "rollModel": "2#1A-Off White",
+        "totalRollL": 100000,
+        "bedL": 5000,
+        "windowStartY": 0,
+        "rollW": 2800,
+        "trimStart": 0,
+        "cutOrigin": "right-bottom",
+        "firstStageOrientation": "horizontal",
+        "allowRotation": false,
+        "allowLongitudinal": true,
+        "globalDefects": [
+            { "id": 1, "x": 1200.0, "y": 4200.0, "w": 180.0, "h": 150.0, "margin": 20.0, "desc": "断纬跳纱 (断纬跳纱避让)" },
+            { "id": 2, "x": 600.0, "y": 11500.0, "w": 200.0, "h": 120.0, "margin": 20.0, "desc": "经向破洞 (切断隔离破洞)" },
+            { "id": 3, "x": 1800.0, "y": 18200.0, "w": 150.0, "h": 220.0, "margin": 20.0, "desc": "油污渍斑 (印染油污避开)" },
+            { "id": 4, "x": 900.0, "y": 27800.0, "w": 160.0, "h": 140.0, "margin": 20.0, "desc": "纬向抽纱 (抽纱瑕疵)" },
+            { "id": 5, "x": 2100.0, "y": 35400.0, "w": 220.0, "h": 180.0, "margin": 20.0, "desc": "边中色差 (色差瑕疵)" },
+            { "id": 6, "x": 400.0, "y": 44200.0, "w": 130.0, "h": 160.0, "margin": 20.0, "desc": "经向破洞 (破损点隔离)" },
+            { "id": 7, "x": 1500.0, "y": 52000.0, "w": 190.0, "h": 130.0, "margin": 20.0, "desc": "油污渍斑 (油污斑块)" },
+            { "id": 8, "x": 800.0, "y": 61500.0, "w": 240.0, "h": 170.0, "margin": 20.0, "desc": "纬向抽纱 (抽纱疵点)" },
+            { "id": 9, "x": 1700.0, "y": 71200.0, "w": 150.0, "h": 190.0, "margin": 20.0, "desc": "边中色差 (色差条斑)" },
+            { "id": 10, "x": 500.0, "y": 80400.0, "w": 180.0, "h": 140.0, "margin": 20.0, "desc": "经向破洞 (织造破洞)" },
+            { "id": 11, "x": 1300.0, "y": 88900.0, "w": 210.0, "h": 160.0, "margin": 20.0, "desc": "断纬跳纱 (跳纱瑕疵)" },
+            { "id": 12, "x": 1900.0, "y": 96500.0, "w": 160.0, "h": 200.0, "margin": 20.0, "desc": "油污渍斑 (印染油污)" }
+        ],
+        "demands": [
+            { "id": 1, "name": "订单1_客房整幅大帘", "w": 2413, "l": 5490, "count": 1 },
+            { "id": 2, "name": "订单2_宴会厅超长大帘", "w": 2417, "l": 9070, "count": 1 },
+            { "id": 3, "name": "订单3_标房双开落地帘", "w": 2230, "l": 6800, "count": 1 },
+            { "id": 4, "name": "订单4_景观套房大帘", "w": 2403, "l": 7440, "count": 1 },
+            { "id": 5, "name": "边饰定型长绑带", "w": 200, "l": 800, "count": 8 },
+            { "id": 6, "name": "配套同色抱枕套片", "w": 450, "l": 450, "count": 6 }
+        ],
+        "pieces": [],
+        "remnants": [],
+        "cuts": [],
+        "deductLen": 0,
+        "pieceArea": 0,
+        "remArea": 0,
+        "wasteArea": 0,
+        "totalArea": 14.0,
+        "engine": "工程超长主帘连续搭切 (定高横裁 + 边料辅件竖切)"
 }
 };
 

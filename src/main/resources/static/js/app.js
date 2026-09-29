@@ -264,6 +264,13 @@ export async function selectPresetCase(caseId) {
             selector.value = selectedRoll;
         }
         await onMotherRollChange();
+        if (caseId === 7 || caseId === 8) {
+            setTimeout(() => {
+                if (window.camApp && typeof window.camApp.triggerSolve === 'function') {
+                    window.camApp.triggerSolve();
+                }
+            }, 300);
+        }
     }
     updatePresetTriggerLabel(caseId);
     closePresetDropdown();
@@ -279,7 +286,8 @@ export function updatePresetTriggerLabel(caseId) {
         4: '案例4: 窗幔帘头辅件套裁 (10件套)',
         5: '案例5: Word 表1 L形拆解 (守恒)',
         6: '案例6: 60m大卷多工位搭切 (10件套)',
-        7: '案例7: 真实布艺生产订单 (100m母卷 · 23件套)'
+        7: '案例7: 真实布艺订单 (100m母卷 · 893292 37件套)',
+        8: '案例8: 真实工程大单 (100m母卷 · 893153 18件套)'
     };
     label.textContent = names[caseId] || `案例${caseId}`;
 }
