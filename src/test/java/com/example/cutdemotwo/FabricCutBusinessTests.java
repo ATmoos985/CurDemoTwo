@@ -59,6 +59,19 @@ class FabricCutBusinessTests {
     }
 
     @Test
+    void testRealFabricScenario7AreaBalance() {
+        SolveResponse res = scenarioOneService.getRealFabricScenario();
+        assertTrue(res.isSuccess());
+        assertEquals(1, res.getPieces().size());
+        assertEquals(4, res.getRemnants().size());
+        assertEquals(7.053, res.getPieceArea(), 0.001);
+        assertEquals(6.947, res.getRemArea(), 0.001);
+        assertEquals(14.0, res.getTotalArea(), 0.001);
+        // 100% Strict area conservation: Piece (7.053) + Remnant (6.947) = 14.000 m2
+        assertEquals(res.getTotalArea(), res.getPieceArea() + res.getRemArea() + res.getWasteArea(), 0.001);
+    }
+
+    @Test
     void testPackingSolverRealExecutionWithDefects() {
         if (!packingSolverService.isAvailable()) {
             System.out.println("PackingSolver executable not found, skipping real solver test.");

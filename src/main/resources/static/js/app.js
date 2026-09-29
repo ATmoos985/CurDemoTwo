@@ -269,7 +269,8 @@ export function updatePresetTriggerLabel(caseId) {
         3: '案例3: 短料料头套裁 (0扣料)',
         4: '案例4: 窗幔帘头辅件套裁 (10件套)',
         5: '案例5: Word 表1 L形拆解 (守恒)',
-        6: '案例6: 60m大卷多工位搭切 (10件套)'
+        6: '案例6: 60m大卷多工位搭切 (10件套)',
+        7: '案例7: 真实布艺生产订单 (100m母卷 · 23件套)'
     };
     label.textContent = names[caseId] || `案例${caseId}`;
 }

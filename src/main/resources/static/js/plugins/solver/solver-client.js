@@ -198,7 +198,7 @@ export function loadCase(id) {
     }
     state.setCaseId(id);
     state.scenarios[id].lastReceipt = null;
-    for (let i = 1; i <= 6; i++) {
+    for (let i = 1; i <= 7; i++) {
         const btn = document.getElementById(`btn-case-${i}`);
         if (btn) btn.classList.toggle("active", i === id);
     }
