@@ -60,11 +60,6 @@ class FabricCutBusinessTests {
 
     @Test
     void testPackingSolverRealExecutionWithDefects() {
-        if (!packingSolverService.isAvailable()) {
-            System.out.println("PackingSolver executable not found, skipping real solver test.");
-            return;
-        }
-
         SolveRequest req = new SolveRequest();
         req.setRollW(2000.0);
         req.setRollL(5000.0);

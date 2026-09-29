@@ -20,36 +20,60 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
         return "packingsolver";
     }
 
-    @Value("${packingsolver.executable.path:d:/GitLab/packingsolver/build/src/rectangleguillotine/packingsolver_rectangleguillotine.exe}")
+    @Value("${packingsolver.executable.path:}")
     private String solverPath;
 
     private final com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService toolpathOptimizerService;
     private final com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService cutBoundaryCompletionService;
+    private final com.example.cutdemotwo.service.solver.JavaGuillotineSolverEngine fallbackEngine;
 
     @org.springframework.beans.factory.annotation.Autowired
     public PackingSolverService(
             com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService toolpathOptimizerService,
-            com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService cutBoundaryCompletionService) {
+            com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService cutBoundaryCompletionService,
+            com.example.cutdemotwo.service.solver.JavaGuillotineSolverEngine fallbackEngine) {
         this.toolpathOptimizerService = toolpathOptimizerService;
         this.cutBoundaryCompletionService = cutBoundaryCompletionService;
+        this.fallbackEngine = fallbackEngine;
     }
 
     public PackingSolverService() {
         this.toolpathOptimizerService = new com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService();
         this.cutBoundaryCompletionService = new com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService();
+        this.fallbackEngine = new com.example.cutdemotwo.service.solver.JavaGuillotineSolverEngine(
+                this.toolpathOptimizerService, this.cutBoundaryCompletionService
+        );
+    }
+
+    public boolean isNativeAvailable() {
+        if (solverPath != null && !solverPath.trim().isEmpty()) {
+            File f = new File(solverPath);
+            if (f.exists() && f.canExecute()) return true;
+        }
+        // 自动探测本地常见可执行文件路径
+        String[] probePaths = {
+            "/usr/local/bin/packingsolver_rectangleguillotine",
+            "/opt/homebrew/bin/packingsolver_rectangleguillotine",
+            "/Users/atmoos/Documents/GitHub/packingsolver/build/src/rectangleguillotine/packingsolver_rectangleguillotine"
+        };
+        for (String p : probePaths) {
+            File pf = new File(p);
+            if (pf.exists() && pf.canExecute()) {
+                this.solverPath = p;
+                return true;
+            }
+        }
+        return false;
     }
 
     public boolean isAvailable() {
-        File f = new File(solverPath);
-        return f.exists() && f.canExecute();
+        return true;
     }
 
     public SolveResponse solve(SolveRequest req) {
-        if (!isAvailable()) {
-            SolveResponse err = new SolveResponse();
-            err.setSuccess(false);
-            err.setMessage("PackingSolver 可执行文件不存在或不可执行: " + solverPath);
-            return err;
+        if (!isNativeAvailable()) {
+            log.info("未检测到外部 C++ PackingSolver 可执行文件，自动平滑切换至内置 Java 原生直刀排料内核。");
+            return fallbackEngine.solve(req);
         }
 
         try {
