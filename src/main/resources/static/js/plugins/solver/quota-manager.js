@@ -280,7 +280,6 @@ export function renderDemandsUI(demands) {
         const lVal = dem.l !== undefined ? dem.l : (dem.length !== undefined ? dem.length : 500);
         const totalCount = dem.count !== undefined ? dem.count : (dem.demand !== undefined ? dem.demand : 1);
         const completed = dem.completed !== undefined ? dem.completed : 0;
-        const remaining = Math.max(0, totalCount - completed);
 
         totalPlanAll += totalCount;
         totalCutAll += completed;
@@ -293,35 +292,26 @@ export function renderDemandsUI(demands) {
         const isProgress = (!isDone && completed > 0);
 
         let statusBadge = "";
-        let progressPct = Math.min(100, Math.round((completed / Math.max(1, totalCount)) * 100));
-        let progressColor = "#0284c7";
 
         if (isDone) {
-            statusBadge = `<span style="font-size:10px; font-weight:600; padding:1px 5px; border-radius:3px; background:#ecfdf5; color:#059669; border:1px solid #10b981;">已满额 (${completed}/${totalCount})</span>`;
-            progressColor = "#10b981";
+            statusBadge = `<span class="demand-status done">已满额 ${completed}/${totalCount}</span>`;
         } else if (isProgress) {
-            statusBadge = `<span style="font-size:10px; font-weight:600; padding:1px 5px; border-radius:3px; background:#eff6ff; color:#0284c7; border:1px solid #38bdf8;">已切 ${completed}/${totalCount}</span>`;
-            progressColor = "#0284c7";
+            statusBadge = `<span class="demand-status">已切 ${completed}/${totalCount}</span>`;
         } else {
-            statusBadge = `<span style="font-size:10px; padding:1px 5px; border-radius:3px; background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1;">待排 0/${totalCount}</span>`;
-            progressColor = "#94a3b8";
+            statusBadge = `<span class="demand-status">待排 ${totalCount} 件</span>`;
         }
 
         row.innerHTML = `
             <div class="item-row-header" style="display:flex; justify-content:space-between; align-items:center;">
-                <input type="text" class="dem-name" value="${dem.name || ('裁片-' + (idx + 1))}" style="font-weight:600; flex:1; margin-right:6px;" onchange="window.camApp.onParamChange()">
-                ${statusBadge}
+                <input type="text" class="dem-name" aria-label="裁片名称" value="${dem.name || ('裁片-' + (idx + 1))}" style="font-weight:600; flex:1; margin-right:6px;" onchange="window.camApp.onParamChange()">
                 <button class="del-btn" onclick="this.closest('.item-row').remove(); window.camApp.onParamChange();" title="删除此裁片需求" style="margin-left:6px;">×</button>
             </div>
             <div class="mini-input-group" style="margin-top:4px;">
-                <span>宽:</span><input type="number" class="mini-input dem-w" value="${wVal}" onchange="window.camApp.onParamChange()" style="width:52px;">
-                <span>长:</span><input type="number" class="mini-input dem-l" value="${lVal}" onchange="window.camApp.onParamChange()" style="width:52px;">
-                <span>计划:</span><input type="number" class="mini-input dem-count" value="${totalCount}" min="1" style="width:42px; font-weight:bold;" onchange="window.camApp.onParamChange()" title="总计划需求件数">
-                <span style="font-size:10px; color:var(--text-muted); margin-left:auto;">待切: <b style="color:${remaining > 0 ? 'var(--accent-blue)' : 'var(--accent-green)'}; font-weight:700;">${remaining}</b> 件</span>
+                <label>宽 <input type="number" class="mini-input dem-w" aria-label="裁片宽度 (mm)" value="${wVal}" onchange="window.camApp.onParamChange()" style="width:58px;"></label>
+                <label>长 <input type="number" class="mini-input dem-l" aria-label="裁片长度 (mm)" value="${lVal}" onchange="window.camApp.onParamChange()" style="width:58px;"></label>
+                <label>件数 <input type="number" class="mini-input dem-count" value="${totalCount}" min="1" style="width:48px;" onchange="window.camApp.onParamChange()" title="总计划需求件数"></label>
             </div>
-            <div style="margin-top:5px; background:var(--panel-border); height:4px; border-radius:2px; overflow:hidden;">
-                <div style="background:${progressColor}; width:${progressPct}%; height:100%;"></div>
-            </div>
+            ${statusBadge}
             <div class="demand-remnant-box" id="rem-hint-${idx}" style="display: none;"></div>
         `;
         container.appendChild(row);

@@ -44,7 +44,7 @@ export function switchSettingsTab(tabName) {
 }
 
 export function loadSavedSettings() {
-    const theme = localStorage.getItem("cam_theme") || "dark";
+    const theme = localStorage.getItem("cam_theme") || "light";
     let origin = localStorage.getItem("cam_origin");
     if (!origin || origin === "right-top") {
         origin = "right-bottom";
@@ -132,6 +132,6 @@ export function restoreDefaultSettings() {
     localStorage.removeItem("cam_timeout");
     localStorage.removeItem("cam_first_stage");
     loadSavedSettings();
-    setTheme("dark");
+    setTheme("light");
     alert("已恢复默认设置。");
 }

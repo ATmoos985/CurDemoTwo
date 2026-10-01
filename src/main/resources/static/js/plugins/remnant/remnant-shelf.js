@@ -245,21 +245,19 @@ export async function checkAllDemandsRemnantMatch() {
                     const best = matches[0];
                     hintEl.style.display = "block";
                     hintEl.innerHTML = `
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                            <span style="font-weight: 700; color: var(--accent-amber); font-size: 10.5px;">发现本卷可用在库料头</span>
-                            <span style="background: var(--badge-green-bg); color: var(--badge-green-color); font-size: 9px; padding: 1px 4px; border-radius: 2px; font-weight: 600;">0 扣母卷</span>
-                        </div>
+                        <details><summary>有可用料头 · 查看并选择</summary>
                         <div style="font-size: 10px; color: var(--text-main); line-height: 1.3;">
                             料号: <b style="color: var(--accent-blue);">${best.id}</b> (${best.width}×${best.length}mm, ${best.location})
                         </div>
                         <div style="display: flex; gap: 6px; margin-top: 5px;">
                             <button class="btn-action-use-rem" onclick="window.camApp.chooseRemnantForDemand('${best.id}', ${idx})">
-                                改用料头切 (0扣料)
+                                改用料头切
                             </button>
                             <button class="btn-action-keep-roll" onclick="window.camApp.dismissRemnantHint(${idx})">
-                                坚持母卷切
+                                继续使用母卷
                             </button>
                         </div>
+                        </details>
                     `;
                 } else {
                     hintEl.style.display = "none";

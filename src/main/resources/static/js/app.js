@@ -185,6 +185,7 @@ export function togglePresetDropdown(e) {
     const trigger = document.getElementById('btn-preset-trigger');
     if (!menu) return;
     const isOpen = menu.classList.contains('show');
+    if (trigger) trigger.setAttribute('aria-expanded', String(!isOpen));
     if (isOpen) {
         menu.classList.remove('show');
         if (trigger) trigger.classList.remove('active');
@@ -199,6 +200,7 @@ export function closePresetDropdown() {
     const trigger = document.getElementById('btn-preset-trigger');
     if (menu) menu.classList.remove('show');
     if (trigger) trigger.classList.remove('active');
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
 }
 
 export async function selectPresetCase(caseId) {
@@ -279,17 +281,8 @@ export async function selectPresetCase(caseId) {
 export function updatePresetTriggerLabel(caseId) {
     const label = document.getElementById('preset-current-label');
     if (!label) return;
-    const names = {
-        1: '案例1: 窗帘定高整幅横切 (套排)',
-        2: '案例2: 偏幅单帘与边角套裁 (吃净)',
-        3: '案例3: 短料料头套裁 (0扣料)',
-        4: '案例4: 窗幔帘头辅件套裁 (10件套)',
-        5: '案例5: Word 表1 L形拆解 (守恒)',
-        6: '案例6: 60m大卷多工位搭切 (10件套)',
-        7: '案例7: 真实布艺订单 (100m母卷 · 893292 37件套)',
-        8: '案例8: 真实工程大单 (100m母卷 · 893153 18件套)'
-    };
-    label.textContent = names[caseId] || `案例${caseId}`;
+    const name = document.querySelector(`#btn-case-${caseId} .preset-item-name`);
+    label.textContent = name ? name.textContent : `案例${caseId}`;
 }
 
 bus.on('toolpath:optimized', () => {
@@ -461,7 +454,7 @@ window.camApp = camApp;
 // 3. 应用程序自启动装配与初始化 (Robust Bootstrap)
 // ==========================================
 async function bootstrapApp() {
-    const savedTheme = localStorage.getItem("cam_theme") || "dark";
+    const savedTheme = localStorage.getItem("cam_theme") || "light";
     setTheme(savedTheme);
 
     let savedOrigin = localStorage.getItem("cam_origin");
@@ -497,9 +490,16 @@ document.addEventListener("click", (e) => {
     if (container && !container.contains(e.target)) {
         closePresetDropdown();
     }
+    document.querySelectorAll('.header-more[open], .canvas-help[open], .status-details[open]').forEach(menu => {
+        if (!menu.contains(e.target) || e.target.closest('button')) menu.open = false;
+    });
 });
 document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
         closePresetDropdown();
+        document.querySelectorAll('.header-more[open], .canvas-help[open], .status-details[open]').forEach(menu => {
+            menu.open = false;
+            menu.querySelector('summary').focus();
+        });
     }
 });

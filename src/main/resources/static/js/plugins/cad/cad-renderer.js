@@ -597,13 +597,14 @@ export function resetToBedView() {
     const ch = stage.height();
 
     const RULER_T = 24;
-    const marginL = 230; // 充分留出左侧 -260mm 尺寸线与大胶囊卡片的呼吸留白空间
-    const marginR = 60;
-    const marginT = 120; // 充分留出顶部 -130mm 幅宽尺寸线的呼吸空间
-    const marginB = 70;
+    // 留出标尺、尺寸标注与底部演示栏；窄视口不再被固定的大留白挤占。
+    const marginL = Math.min(70, cw * 0.12);
+    const marginR = Math.min(50, cw * 0.08);
+    const marginT = Math.min(40, ch * 0.08);
+    const marginB = Math.min(85, ch * 0.18);
 
-    const availW = cw - RULER_T - marginL - marginR;
-    const availH = ch - RULER_T - marginT - marginB;
+    const availW = Math.max(1, cw - RULER_T - marginL - marginR);
+    const availH = Math.max(1, ch - RULER_T - marginT - marginB);
 
     const scaleX = availW / rollW;
     const scaleY = availH / bedL;

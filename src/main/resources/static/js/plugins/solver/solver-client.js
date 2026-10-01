@@ -121,7 +121,7 @@ export function updateUIInfo() {
     }));
 
     if (document.getElementById("lbl-deduct-len")) {
-        document.getElementById("lbl-deduct-len").innerText = (data.deductLen && data.deductLen > 0) ? `${data.deductLen} mm` : "0 mm (待排料)";
+        document.getElementById("lbl-deduct-len").innerText = hasStationPlan ? `${data.deductLen || 0} mm` : "—";
     }
     if (document.getElementById("lbl-piece-area")) document.getElementById("lbl-piece-area").innerText = `${(data.pieceArea || 0).toFixed(3)} m²`;
     if (document.getElementById("lbl-rem-area")) document.getElementById("lbl-rem-area").innerText = `${(data.remArea || 0).toFixed(3)} m²`;

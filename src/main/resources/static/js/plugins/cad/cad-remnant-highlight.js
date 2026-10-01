@@ -16,7 +16,7 @@ import { drawRulers } from './cad-rulers.js';
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 import { showToast } from '../../core/toast.js';
-import { switchRightPanelTab } from '../layout/splitter.js';
+import { switchRightPanelTab, toggleSectionCollapse } from '../layout/splitter.js';
 
 let activePulseAnim = null;
 let animTimer = null;
@@ -136,6 +136,10 @@ export function selectRemnant(remnantId, options = {}) {
     // 3. 联动右侧【料头与对账】Tab 面板与表格行
     if (options.switchTab !== false) {
         switchRightPanelTab('balance');
+        const ledger = document.getElementById('card-remnant-ledger');
+        if (ledger && ledger.classList.contains('collapsed')) {
+            toggleSectionCollapse(ledger.querySelector('.section-toggle'));
+        }
     }
 
     // 选中对应表格行并平滑滚动
