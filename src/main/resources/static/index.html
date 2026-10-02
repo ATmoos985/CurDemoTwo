@@ -52,7 +52,6 @@
                     <button class="tool-btn" onclick="openExportModal('gcode')">机床代码 / DXF</button>
                     <button class="tool-btn" onclick="exportCutResult()">导出排料结果</button>
                     <span class="menu-label">画布</span>
-                    <button class="tool-btn" id="btn-measure-tool" onclick="toggleMeasureTool()">CAD 测量</button>
                     <button class="tool-btn" onclick="clearAllMeasurements()">清空测量</button>
                     <button class="tool-btn" onclick="fitView()">适合视口</button>
                     <button class="tool-btn" onclick="resetZoom()">重置缩放</button>
@@ -404,9 +403,21 @@
 
             </div>
 
-            <!-- Konva 画布容器与独立固定 CAD 标尺层 -->
-            <div id="konva-container" style="flex: 1; width: 100%; height: 100%; position: relative; overflow: hidden;">
-                <canvas id="cad-ruler-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10;"></canvas>
+            <div class="cad-tools" role="toolbar" aria-label="画布工具">
+                <button class="tool-btn" id="btn-measure-tool" aria-pressed="false" onclick="toggleMeasureTool()">测量</button>
+                <details class="canvas-help"><summary class="tool-btn">显示</summary><div class="canvas-help-body cad-layer-options">
+                    <label><input type="checkbox" checked onchange="setCanvasLayer('dimensions', this.checked)"> 工位尺寸</label>
+                    <label><input type="checkbox" checked onchange="setCanvasLayer('paths', this.checked)"> 刀路与刀序</label>
+                    <button class="tool-btn" onclick="clearAllMeasurements()">清空测量</button>
+                </div></details>
+                <span class="cad-tool-hint" id="cad-tool-hint" hidden>依次点击两点 · Esc 取消</span>
+                <span class="cad-view-caption" id="cad-view-caption" title="滚轮缩放，拖动空白处平移">工位坐标 · mm</span>
+                <div class="cad-zoom"><button class="tool-btn" aria-label="缩小画布" onclick="zoomCanvas(1 / 1.25)">−</button><output id="cad-scale" aria-label="视图缩放">—</output><button class="tool-btn" aria-label="放大画布" onclick="zoomCanvas(1.25)">＋</button></div>
+            </div>
+            <!-- 标尺必须与 Konva 宿主并列，避免 Stage 初始化时被清空。 -->
+            <div class="cad-surface">
+                <div id="konva-container" aria-label="毫米排料画布"></div>
+                <canvas id="cad-ruler-canvas" aria-hidden="true"></canvas>
             </div>
 
             <!-- 切刀工艺演播条 (CAM Cut Player) -->
@@ -430,6 +441,10 @@
         <!-- 右侧面板：工艺单与对账台账 (Tab 选项卡化收拢) -->
         <aside class="sidebar-right" id="sidebar-right" aria-label="排料结果与实切">
             <div class="workspace-heading"><span class="workflow-number">3</span><h2>核对与实切</h2></div>
+            <section class="cad-selection" id="cad-selection" hidden aria-label="选中裁片">
+                <span class="cad-selection-label">选中裁片</span><strong id="cad-selection-name"></strong>
+                <div id="cad-selection-size"></div><div id="cad-selection-position"></div><small id="cad-selection-state"></small>
+            </section>
             <!-- 顶部 Tab 选项卡切换器 -->
             <div class="sidebar-tabs-header">
                 <button class="sidebar-tab-btn" id="tab-right-cut" aria-pressed="false" onclick="switchRightPanelTab('cut')">

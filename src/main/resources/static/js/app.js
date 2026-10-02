@@ -26,7 +26,7 @@ import {
 
 import {
     renderScene, resetToBedView, resetToFlowView, viewFullRoll,
-    fitView, resetZoom, updateStatusBar
+    fitView, resetZoom, updateStatusBar, zoomCanvas, setCanvasLayer
 } from './plugins/cad/cad-renderer.js';
 
 import {
@@ -329,6 +329,7 @@ const camApp = {
     resetToBedView,
     resetToFlowView,
     viewFullRoll,
+    zoomCanvas, setCanvasLayer,
     triggerSolve,
     openCutReport, closeCutReport, confirmCutReport, exportCutResult,
     openStationLapConfirmModal, updateReportPreview,

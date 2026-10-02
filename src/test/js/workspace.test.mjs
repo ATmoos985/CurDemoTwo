@@ -65,33 +65,17 @@ test('selecting a remnant from the drawing opens its otherwise collapsed ledger'
     } finally { data.remnants = before; }
 });
 
-test('current-station framing stays positive and inside both narrow and wide viewports', async () => {
-    elements.clear();
-    class DrawingNode {
-        constructor(options = {}) { this.options = options; this.offset = { x: 0, y: 0 }; }
-        add() {}
-        on() {}
-        batchDraw() {}
-        width() { return this.options.width; }
-        height() { return this.options.height; }
-        scale(value) { this.zoom = value; }
-        scaleX() { return this.zoom.x; }
-        position(value) { if (value) this.offset = value; return this.offset; }
-    }
-    globalThis.Konva = { Stage: DrawingNode, Layer: DrawingNode, Group: DrawingNode };
-    const cad = await import('../../main/resources/static/js/plugins/cad/cad-stage.js');
-    const { resetToBedView } = await import('../../main/resources/static/js/plugins/cad/cad-renderer.js');
+test('current-station framing stays centered in both narrow and wide viewports', async () => {
+    const { fitBounds } = await import('../../main/resources/static/js/plugins/cad/cad-view.js');
     const data = state.getCurrentCaseData();
     for (const [width, height] of [[280, 320], [620, 490], [1100, 720]]) {
-        elements.set('konva-container', { clientWidth: width, clientHeight: height });
-        cad.initKonva();
-        resetToBedView();
-        const scale = cad.stage.scaleX();
-        const { x, y } = cad.stage.position();
+        const { scale, x, y } = fitBounds(width, height, {
+            x: 0, y: data.windowStartY || 0, width: data.rollW, height: data.bedL
+        });
         const top = y + (data.windowStartY || 0) * scale;
         assert.ok(scale > 0);
-        assert.ok(x >= 24 && x + data.rollW * scale <= width);
-        assert.ok(top >= 24 && top + data.bedL * scale <= height);
+        assert.ok(x >= 28 && x + data.rollW * scale <= width);
+        assert.ok(top >= 28 && top + data.bedL * scale <= height);
         assert.ok(Math.abs(x + data.rollW * scale / 2 - width / 2) < width * .12);
     }
 });

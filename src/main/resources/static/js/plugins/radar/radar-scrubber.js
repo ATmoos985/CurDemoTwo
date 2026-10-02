@@ -1,7 +1,7 @@
 /**
  * 全景雷达条与 60FPS 平滑穿梭交互插件 (Radar Scrubber Plugin)
  */
-import { stage, mainLayer, bedStationGroup, dynBedRangeBadge, dynBedBottomBadge, defectGroup } from '../cad/cad-stage.js';
+import { stage, mainLayer, bedStationGroup, defectGroup } from '../cad/cad-stage.js';
 import { drawRulers } from '../cad/cad-rulers.js';
 import { updateStatusBar, renderScene } from '../cad/cad-renderer.js';
 import { clearRemnantSelection } from '../cad/cad-remnant-highlight.js';
@@ -35,14 +35,6 @@ export function updateFabricScrollPosition(targetY) {
         const scale = stage.scaleY();
         const anchorScreenY = (dragScreenBedY !== null) ? dragScreenBedY : (stage.y() + prevY * scale);
         stage.y(anchorScreenY - targetY * scale);
-    }
-
-    // 3. 更新工位顶部标牌与底部切断线下死点数值
-    if (dynBedRangeBadge) {
-        dynBedRangeBadge.text(`【数控裁床加工工位】当前裁切范围: ${targetY} ~ ${targetY + bedL} mm (${(targetY/1000).toFixed(1)}m ~ ${((targetY+bedL)/1000).toFixed(1)}m) | 机台长 ${(bedL/1000).toFixed(1)}m`);
-    }
-    if (dynBedBottomBadge) {
-        dynBedBottomBadge.text(`[工位切刀口/下死点基准] 切断线 Y=${targetY + bedL}mm (${((targetY+bedL)/1000).toFixed(1)}m)`);
     }
 
     // 4. 同步侧边栏输入框
