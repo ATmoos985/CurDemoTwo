@@ -140,11 +140,11 @@ select.prop-input { font-family: inherit; text-align: left; }
 .legend-item:nth-child(3) .legend-dot { background: #faf2e4; border: 1px solid #b68d48; }
 .legend-item:nth-child(4) .legend-dot { background: #c45e5e; }
 .legend-item:nth-child(5) .legend-dot { background: #b96070; height: 2px; }
-[data-theme] .roll-radar-bar { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 12px 18px; background: var(--panel-bg); }
+[data-theme] .roll-radar-bar { display: flex; flex-direction: column; align-items: stretch; gap: 7px; padding: 12px 18px; background: var(--panel-bg); }
 .radar-label-group { flex-direction: row; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .radar-title { font-size: 12px; color: var(--text-muted); }
-.radar-info { font-size: 11px; overflow-wrap: anywhere; }
-.radar-strip-container { flex: auto; min-height: 30px; }
+.radar-info { font-size: 11px; overflow-wrap: anywhere; font-family: inherit; }
+.radar-strip-container { flex: none; min-height: 54px; }
 .radar-window, .radar-defect-marker { box-shadow: none; }
 #konva-container { min-height: 0; }
 .playback-disclosure { position: absolute; bottom: 18px; left: 24px; right: 24px; z-index: 20; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 5px; box-shadow: 0 3px 12px #0001; }
@@ -223,3 +223,45 @@ footer { height: 32px; min-height: 32px; font-size: 11px; gap: 18px; }
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* One restrained palette across controls, tables, and secondary dialogs. */
+[data-theme] { --accent-green: #477564; --accent-red: #ac4d55; --accent-amber: #a77b36; --font-mono: Consolas, 'Microsoft YaHei', monospace; }
+[data-theme="dark"] { --accent-blue: #81abc2; --panel-header: #27343f; }
+[data-theme] .tool-btn.active { background: var(--accent-blue); border-color: var(--accent-blue); color: var(--panel-bg); }
+[data-theme] .badge-cut, [data-theme] .badge-rem { background: var(--panel-header); color: var(--text-muted); border: 1px solid var(--panel-border); font-weight: 500; }
+.cam-table { font-family: inherit; font-variant-numeric: tabular-nums; }
+.remnant-code { font-family: var(--font-mono); color: var(--text-main); font-size: 11px; }
+.quality-badge { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+.quality-badge.has-defect { color: var(--accent-amber); }
+.quality-badge::before { content: ''; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: currentColor; margin-right: 5px; vertical-align: 2px; }
+[data-theme] .playback-btn { background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--panel-border); }
+[data-theme] .playback-btn.is-playing { color: var(--accent-blue); border-color: var(--accent-blue); }
+#tag-cut-origin-header, #tag-defects-summary { color: var(--text-muted) !important; }
+#card-remnant-ledger .cam-table { min-width: 0; }
+#card-remnant-ledger .cam-table td:nth-child(2) { font-variant-numeric: tabular-nums; }
+.station-action-hint { font-size: 12px; line-height: 1.6; color: var(--text-muted); margin: 0 0 10px; }
+[data-theme] #btn-confirm-station-cut.report-ready { background: var(--accent-blue); color: white; }
+[data-theme] #btn-trigger-solve-station.plan-ready { background: var(--panel-bg); color: var(--text-muted); border-color: var(--panel-border); font-weight: 400; }
+.report-dialog .settings-modal-footer { flex-direction: column; align-items: stretch; }
+.report-footer-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.report-dialog #report-error { margin: 0 0 8px; }
+
+#cad-toast-container { position: fixed; bottom: 42px; right: 24px; z-index: 100000; display: grid; gap: 8px; pointer-events: none; max-width: min(440px, calc(100vw - 48px)); }
+.workbench-toast { position: relative; background: var(--panel-bg); border: 1px solid var(--panel-border); border-left: 3px solid var(--accent-blue); color: var(--text-main); padding: 12px 36px 12px 14px; border-radius: 4px; font-size: 13px; box-shadow: 0 4px 14px #0001; white-space: pre-line; pointer-events: auto; }
+.workbench-toast[data-type="error"] { border-left-color: var(--accent-red); }
+.workbench-toast[data-type="warning"] { border-left-color: var(--accent-amber); }
+.workbench-toast[data-type="success"] { border-left-color: var(--accent-green); }
+.workbench-toast button { position: absolute; right: 8px; top: 7px; border: 0; background: transparent; color: var(--text-muted); padding: 3px; cursor: pointer; }
+
+[data-theme] { --modal-header-bg: var(--panel-header); --modal-footer-bg: var(--panel-header); --modal-content-bg: var(--panel-bg); --modal-dialog-bg: var(--panel-bg); --card-blue-border: var(--panel-border); --card-amber-border: var(--panel-border); --remnant-active-border: var(--panel-border); --remnant-active-title: var(--text-main); }
+.settings-modal-dialog, .remnant-modal-dialog { border-radius: 6px; box-shadow: 0 12px 36px #0002; }
+[data-theme] .cad-context-menu { background: var(--panel-bg); color: var(--text-main); border-color: var(--panel-border); box-shadow: 0 6px 20px #0002; }
+[data-theme] .cad-menu-header { background: var(--panel-header); color: var(--text-main); }
+[data-theme] .cad-menu-item-title { color: var(--text-main); }
+[data-theme] .cad-menu-item-desc { color: var(--text-muted); }
+[data-theme] .cad-menu-item:hover, [data-theme] .cad-menu-item.highlight { background: var(--panel-header); }
+[data-theme] .cad-menu-item.danger .cad-menu-item-title { color: var(--accent-red); }
+
+[data-theme] .cad-context-menu { backdrop-filter: none; animation: none; border-radius: 5px; }
+.cad-menu-item-desc { padding-left: 0; }
+[data-theme] .toolpath-control-card { background: var(--panel-header); border-color: var(--panel-border); }

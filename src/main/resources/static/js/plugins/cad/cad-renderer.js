@@ -113,7 +113,6 @@ export function renderScene() {
     }
     bedStationGroup.position({ x: 0, y: start });
     bedStationGroup.listening(false);
-    renderRemnantHighlight();
     updateCanvasAnnotations();
     mainLayer.batchDraw();
     drawRulers();
@@ -233,6 +232,7 @@ export function updateCanvasAnnotations() {
     }
     const caption = document.getElementById('cad-view-caption');
     if (caption) caption.textContent = view.overview ? '全卷坐标 · mm' : `${origin.label}起刀原点 · mm${data.trimStart ? ` · 修齐 ${data.trimStart}` : ''}`;
+    renderRemnantHighlight();
     annotationLayer.batchDraw();
 }
 

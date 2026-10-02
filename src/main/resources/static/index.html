@@ -100,13 +100,13 @@
                                 <span>订单模板</span>
                                 <select class="prop-input" id="sel-curtain-order-template" onchange="loadCurtainOrderTemplate(this.value)">
                                     <option value="">-- 选择典型窗帘整单模板 --</option>
-                                    <option value="real_893292_cream">🏆 真实面料 893292 (2#A3A-Cream) 窗帘整单 (11主帘+3辅件 · 37件套)</option>
-                                    <option value="real_893153_white">🏆 真实面料 893153 (2#1A-Off White) 窗帘整单 (4大主帘+2辅件 · 18件套)</option>
-                                    <option value="whole_house">🛋 全屋整套窗帘工程批量单 (32件套 · 支持跨工位连续搭切)</option>
-                                    <option value="hotel_batch">🏨 星级酒店客房工程批量单 (50件套 · 支持多工位连续搭切)</option>
-                                    <option value="edge_nesting">✂ 偏幅落地大帘+边角辅料连续单 (24件套 · 支持多工位搭切)</option>
-                                    <option value="valance_suite">🪟 豪华窗幔与全屋辅配件工程单 (40件套 · 支持连续搭切)</option>
-                                    <option value="remnant_reuse">♻ 飘窗短帘料头精益复用 (5件套: 飘窗短帘+抱枕套+挂带)</option>
+                                    <option value="real_893292_cream"> 真实面料 893292 (2#A3A-Cream) 窗帘整单 (11主帘+3辅件 · 37件套)</option>
+                                    <option value="real_893153_white"> 真实面料 893153 (2#1A-Off White) 窗帘整单 (4大主帘+2辅件 · 18件套)</option>
+                                    <option value="whole_house"> 全屋整套窗帘工程批量单 (32件套 · 支持跨工位连续搭切)</option>
+                                    <option value="hotel_batch"> 星级酒店客房工程批量单 (50件套 · 支持多工位连续搭切)</option>
+                                    <option value="edge_nesting"> 偏幅落地大帘+边角辅料连续单 (24件套 · 支持多工位搭切)</option>
+                                    <option value="valance_suite"> 豪华窗幔与全屋辅配件工程单 (40件套 · 支持连续搭切)</option>
+                                    <option value="remnant_reuse"> 飘窗短帘料头精益复用 (5件套: 飘窗短帘+抱枕套+挂带)</option>
                                 </select>
                             </div><div id="demands-affiliation-bar" style="margin-bottom: 8px; padding: 6px 8px; background: rgba(15, 23, 42, 0.4); border: 1px solid var(--panel-border); border-radius: 4px; font-size: 11px;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
@@ -274,17 +274,16 @@
             <div class="roll-radar-bar" id="roll-radar-bar">
                 <div class="radar-label-group">
                     <span class="radar-title">母卷导航</span>
-                    <span class="radar-info" id="radar-roll-info">全长: 60,000 mm | 疵点: 8 处</span>
+                    <span class="radar-info" id="radar-roll-info"></span>
                 </div>
                 <div class="radar-strip-container" id="radar-strip-container">
                     <div class="radar-track" id="radar-track">
                         <!-- 动态生成刻度与疵点针 -->
-                        <div class="radar-window" id="radar-window" title="拖拽或滑动展开视窗">
-                            <span class="radar-window-text" id="radar-window-text">0~5m (当前机台)</span>
-                        </div>
+                        <div class="radar-window" id="radar-window" aria-hidden="true"></div>
                     </div>
                 </div>
-
+                <input id="radar-position" type="range" min="0" max="55000" step="1" value="0" aria-label="母卷工位位置" aria-describedby="radar-window-text">
+                <div class="radar-caption"><span id="radar-window-text">当前工位 0–5 m</span><span class="radar-legend"><i class="consumed-key"></i>已报工 <i class="defect-key"></i>疵点 <span>单位 m</span></span></div>
             </div>
 
             <div class="cad-tools" role="toolbar" aria-label="画布工具">
@@ -305,7 +304,7 @@
             </div>
 
             <!-- 切刀工艺演播条 (CAM Cut Player) -->
-            <details class="playback-disclosure"><summary>走刀演示 <span class="step-indicator" id="cut-sim-status">全部显示</span></summary>
+            <details class="playback-disclosure"><summary>走刀预览 <span class="step-indicator" id="cut-sim-status">仅演示 · 不保存报工</span></summary>
                 <div class="playback-controls">
                     <button class="playback-btn" id="btn-sim-play-pause" onclick="startContinuousSim()">▶ 连续仿真</button>
                     <button class="playback-btn" id="btn-sim-speed" onclick="toggleSimSpeed()">2x 仿真</button>
@@ -433,6 +432,7 @@
             <div class="sidebar-pinned-footer" id="right-sidebar-actions-footer" style="border-top: 1px solid var(--panel-border); background: var(--panel-bg); flex-shrink: 0;">
                 <!-- 母卷开卷工位排料搭切执行控制 -->
                 <div id="right-roll-actions" class="panel-section action-footer-section" style="padding: 10px 14px 12px 14px;">
+                    <p id="station-action-hint" class="station-action-hint" role="status">先生成方案，再核对实切并报工保存。</p>
                     <div class="station-navigation" style="display: flex; gap: 6px; margin-bottom: 6px;">
                         <button class="tool-btn" onclick="advanceBed(-1)" title="按当前台面长度回退一个工位">
                             ← 上一工位
@@ -446,10 +446,10 @@
                     </button>
                     <button class="tool-btn active" id="btn-confirm-station-cut" onclick="openStationLapConfirmModal()" title="确认当前工位裁切：扣减母卷长度、核销订单需求、将派生料头登记入库">
 
-                        <span>报工与回收</span>
+                        报工保存
                     </button>
                     <button class="tool-btn" id="btn-smart-advance" onclick="smartAdvanceBed()" title="自动计算当前已切末端，一键吸附接刀，实现 0 间隙连续搭切">
-                        接续下一工位 →
+                        下一待切工位 →
                     </button>
                     <details class="detail-disclosure reset-actions"><summary>清理排料</summary><div style="display: flex; gap: 6px; margin-top: 6px;">
                         <button class="tool-btn" onclick="clearStationCuts()" title="仅清除当前红框范围内的裁片与切刀">
@@ -486,9 +486,8 @@
                 <div class="report-fields"><label><span id="report-length-label">实切长度（mm）</span><input id="report-actual-len" type="number" min="0" step="1" class="prop-input" oninput="updateReportPreview()"></label><label>合格产出（件）<input id="report-piece-count" type="number" min="1" class="prop-input" readonly></label></div></section>
                 <section><h3>02 · 需求完成</h3><div id="report-preview-demand-text"></div><p class="muted">本次按整份方案报工；未实切前请勿确认。</p></section>
                 <section><h3>03 · 余料回收 <small id="report-preview-remnant-text"></small></h3><label class="report-location">入库库位<input id="report-location" class="prop-input" value="现场料头架 A-01"></label><div id="report-remnants"></div><details class="detail-disclosure"><summary>实测与回收规则</summary><p>仅勾选实际回收的料头。实测尺寸不得越过母料或与成品、其他料头重叠；小于 200 × 300 mm 的余料不入库。</p></details></section>
-                <p id="report-error" role="alert"></p>
             </div>
-            <div class="settings-modal-footer"><button class="tool-btn" onclick="closeCutReport()">取消</button><button id="report-confirm-button" class="tool-btn active" onclick="confirmCutReport()">确认报工并回收</button></div>
+            <div class="settings-modal-footer"><p id="report-error" role="alert"></p><div class="report-footer-actions"><button class="tool-btn" onclick="closeCutReport()">暂不报工</button><button id="report-confirm-button" class="tool-btn active" onclick="confirmCutReport()">确认报工并保存</button></div></div>
         </div>
     </dialog>
 

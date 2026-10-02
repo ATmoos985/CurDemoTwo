@@ -123,6 +123,7 @@ bus.on('stage:resized', () => {
     renderRadar();
 });
 
+bus.on('report:requested', () => { openCutReport(); });
 bus.on('station:moved', () => {
     updateUIInfo();
 });

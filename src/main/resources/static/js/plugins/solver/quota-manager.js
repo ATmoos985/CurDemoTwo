@@ -5,7 +5,7 @@ import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 import { renderScene, resetToBedView } from '../cad/cad-renderer.js';
 import { drawRulers } from '../cad/cad-rulers.js';
-import { renderRadar } from '../radar/radar-scrubber.js';
+import { renderRadar, requireStationReport } from '../radar/radar-scrubber.js';
 import { updateUIInfo } from './solver-client.js';
 import { showToast } from '../../core/toast.js';
 import { escapeText, taskInputChanged, startTaskDraft } from './task-workspace.js';
@@ -439,6 +439,11 @@ export function updateOriginHeaderSummary() {
 }
 
 export function onRollConfigChange() {
+    if (state.pendingPlan) {
+        updateUIInfo();
+        requireStationReport();
+        return;
+    }
     state.pendingPlan = null;
     const data = state.getCurrentCaseData();
     data.totalRollL = parseFloat(document.getElementById("inp-total-roll-l").value) || 60000;

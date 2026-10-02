@@ -1,5 +1,5 @@
 /** 料头与台账双向定位，使用克制的固定像素选中标记。 */
-import { stage, mainLayer, remnantGroup, remnantHighlightGroup } from './cad-stage.js';
+import { stage, mainLayer, annotationLayer, remnantGroup, remnantHighlightGroup } from './cad-stage.js';
 import { updateStatusBar } from './cad-renderer.js';
 import { drawRulers } from './cad-rulers.js';
 import { state } from '../../core/state.js';
@@ -151,7 +151,7 @@ export function selectRemnant(remnantId, options = {}) {
 
     // 4. 浮动 Toast 气泡提醒
     if (options.showToastMsg !== false) {
-        const statusText = rem.hasDefect ? '⚠ 带疵待处置' : '✓ 完好入库';
+        const statusText = rem.hasDefect ? '带疵' : '无疵';
         showToast(`[已定位料头 #${rem.id}] 规格: ${rem.w}×${rem.l}mm (${rem.area.toFixed(2)}m²)，状态: ${statusText}`, 'info');
     }
 
@@ -163,6 +163,8 @@ export function selectRemnant(remnantId, options = {}) {
  */
 export function clearRemnantSelection() {
     state.selectedRemnantId = null;
+    annotationLayer?.findOne('.remnant-tooltip')?.destroy();
+    annotationLayer?.batchDraw();
 
     if (remnantHighlightGroup) {
         remnantHighlightGroup.destroyChildren();
@@ -210,8 +212,8 @@ export function hoverRemnant(remnantId, isHovering) {
                 y: rem.y,
                 width: rem.w,
                 height: rem.l,
-                fill: rem.hasDefect ? "rgba(245, 158, 11, 0.14)" : "rgba(56, 189, 248, 0.14)",
-                stroke: rem.hasDefect ? "#f59e0b" : "#38bdf8",
+                fill: rem.hasDefect ? "rgba(167, 123, 54, 0.10)" : "rgba(39, 92, 123, 0.10)",
+                stroke: rem.hasDefect ? "#a77b36" : "#275c7b",
                 strokeWidth: 2.5 * inv,
                 dash: [6 * inv, 4 * inv],
                 listening: false
@@ -226,27 +228,28 @@ export function hoverRemnant(remnantId, isHovering) {
 
 export function renderRemnantHighlight() {
     if (!remnantHighlightGroup || !stage) return;
+    annotationLayer?.findOne('.remnant-tooltip')?.destroy();
     remnantHighlightGroup.destroyChildren();
     hoverHighlightNode = null;
     const rem = (state.getCurrentCaseData().remnants || []).find(r => r.id === state.selectedRemnantId);
     if (!rem) { if (mainLayer) mainLayer.batchDraw(); return; }
     const inv = 1 / stage.scaleX();
     const dark = document.documentElement.getAttribute('data-theme') !== 'light';
-    const color = rem.hasDefect ? '#b68d48' : '#2d7899';
+    const color = dark ? '#81abc2' : '#275c7b';
     remnantHighlightGroup.add(new Konva.Rect({ x: rem.x, y: rem.y, width: rem.w, height: rem.l,
         stroke: color, strokeWidth: 2, strokeScaleEnabled: false, listening: false }));
     const width = Math.min(310, Math.max(100, stage.width() - 64));
     const screenX = Math.max(36, Math.min(stage.x() + rem.x / inv, stage.width() - width - 8));
     const screenY = Math.max(34, Math.min(stage.y() + rem.y / inv - 58, stage.height() - 64));
-    const badge = new Konva.Group({ x: (screenX - stage.x()) * inv, y: (screenY - stage.y()) * inv,
-        scaleX: inv, scaleY: inv, listening: false });
+    const badge = new Konva.Group({ name: 'remnant-tooltip', x: screenX, y: screenY, listening: false });
     badge.add(new Konva.Rect({ width, height: 48, fill: dark ? '#242f3b' : '#ffffff', stroke: color, strokeWidth: 1, cornerRadius: 3 }));
-    badge.add(new Konva.Text({ x: 10, y: 8, width: width - 20, text: `料头 ${rem.id}`, fontSize: 12,
-        fontStyle: 'bold', fill: color, wrap: 'none', ellipsis: true }));
+    badge.add(new Konva.Text({ x: 10, y: 8, width: width - 20, text: `余料 ${rem.id} · ${rem.confirmed ? '已报工' : '待回收确认'}`, fontSize: 12,
+        fontFamily: 'Segoe UI, Microsoft YaHei, sans-serif', fill: color, wrap: 'none', ellipsis: true }));
     badge.add(new Konva.Text({ x: 10, y: 28, width: width - 20,
-        text: `${rem.w} × ${rem.l} mm · ${rem.hasDefect ? '带疵待处置' : '可用料头'}`, fontSize: 11,
+        text: `${rem.w} × ${rem.l} mm · ${rem.hasDefect ? '带疵' : '无疵'}`, fontSize: 11,
         fontFamily: 'Consolas, Microsoft YaHei, sans-serif', fill: dark ? '#becbd5' : '#607484', wrap: 'none', ellipsis: true }));
-    remnantHighlightGroup.add(badge);
+    annotationLayer.add(badge);
+    annotationLayer.batchDraw();
     mainLayer.batchDraw();
 }
 

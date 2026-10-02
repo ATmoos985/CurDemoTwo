@@ -14,7 +14,7 @@ import { renderScene } from './cad-renderer.js';
 import { updateDemandCompletionFromPieces, recalculateRollStats, renderDemandsUI } from '../solver/quota-manager.js';
 import { updateUIInfo } from '../solver/solver-client.js';
 import {
-    updateFabricScrollPosition, updateDefectVisualStates,
+    updateFabricScrollPosition, updateDefectVisualStates, requireStationReport,
     updateDefectRadarActiveState, smartAdvanceBed
 } from '../radar/radar-scrubber.js';
 import { selectRemnant, clearRemnantSelection } from './cad-remnant-highlight.js';
@@ -158,14 +158,14 @@ export function openRemnantContextMenu(remnant, clientX, clientY) {
     const html = `
         <div class="cad-menu-header">
             <span style="display:flex; align-items:center; gap:6px;">
-                <span style="color:#38bdf8;">🧩</span>
+                <span style="color:#38bdf8;"></span>
                 <span>${remnant.status || '料头块'} · ${remnant.id}</span>
             </span>
             <span style="font-size:10px; color:#94a3b8; font-family:monospace;">${remnant.w}×${remnant.l}mm</span>
         </div>
         <div class="cad-menu-item danger" onclick="window.cadMenuActions.discardRemnant('${remnant.id}')">
             <div class="cad-menu-item-title">
-                <span>🗑 抛弃此料头 · 保持母卷不切断</span>
+                <span> 抛弃此料头 · 保持母卷不切断</span>
             </div>
             <div class="cad-menu-item-desc">
                 取消此料头切刀，${isTail ? '母卷该区域恢复未切断状态，自动收缩工位切断线' : '从入库清单中移除'}
@@ -174,7 +174,7 @@ export function openRemnantContextMenu(remnant, clientX, clientY) {
         ${isTail ? `
         <div class="cad-menu-item highlight" onclick="window.cadMenuActions.advanceFromRemnant('${remnant.id}')">
             <div class="cad-menu-item-title">
-                <span>✂ 从此料头起点接刀开启下一工位 ▶</span>
+                <span> 从此料头起点接刀开启下一工位 ▶</span>
             </div>
             <div class="cad-menu-item-desc">
                 机台工位红框吸附至 Y=${Math.round(remnant.y)}mm，从该处接续排料
@@ -184,7 +184,7 @@ export function openRemnantContextMenu(remnant, clientX, clientY) {
         <div class="cad-menu-divider"></div>
         <div class="cad-menu-item" onclick="window.cadMenuActions.locateRemnant('${remnant.id}')">
             <div class="cad-menu-item-title">
-                <span>🔍 查看详细参数与坐标</span>
+                <span> 查看详细参数与坐标</span>
             </div>
             <div class="cad-menu-item-desc">
                 起点: (${remnant.x}, ${remnant.y}) | 面积: ${remnant.area.toFixed(2)}m² | ${remnant.hasDefect ? '带疵' : '无疵'}
@@ -223,7 +223,7 @@ export function openPieceContextMenu(piece, clientX, clientY) {
         </div>
         <div class="cad-menu-item danger" onclick="window.cadMenuActions.discardPiece(${piece.id})">
             <div class="cad-menu-item-title">
-                <span>🗑 抛弃此裁片 · 退回需求池</span>
+                <span> 抛弃此裁片 · 退回需求池</span>
             </div>
             <div class="cad-menu-item-desc">
                 从工位中移除，订单需求数自动返还，母卷该区域恢复未切
@@ -240,7 +240,7 @@ export function openPieceContextMenu(piece, clientX, clientY) {
         <div class="cad-menu-divider"></div>
         <div class="cad-menu-item success" onclick="window.cadMenuActions.setAsStationCutEnd(${piece.id})">
             <div class="cad-menu-item-title">
-                <span>✂ 设为本工位收尾截断线</span>
+                <span> 设为本工位收尾截断线</span>
             </div>
             <div class="cad-menu-item-desc">
                 以此裁片底边 (Y=${piece.y + piece.l}mm) 截断，下方余料全部归还母卷
@@ -267,14 +267,14 @@ export function openStationContextMenu(clientX, clientY) {
         const html = `
             <div class="cad-menu-header">
                 <span style="display:flex; align-items:center; gap:6px;">
-                    <span style="color:#d97706;">🧩</span>
+                    <span style="color:#d97706;"></span>
                     <span>在台料头 [${code}]</span>
                 </span>
                 <span style="font-size:10px; color:#94a3b8;">${w}×${l}mm</span>
             </div>
             <div class="cad-menu-item highlight" onclick="window.cadMenuActions.solveRemnant()">
                 <div class="cad-menu-item-title">
-                    <span>⚡ 执行料头智能排料 (母卷 0 扣料)</span>
+                    <span> 执行料头智能排料 (母卷 0 扣料)</span>
                 </div>
                 <div class="cad-menu-item-desc">
                     在当前在台料头上执行直刀优化排料，自动避开瑕疵
@@ -318,7 +318,7 @@ export function openStationContextMenu(clientX, clientY) {
         </div>
         <div class="cad-menu-item success" onclick="window.cadMenuActions.autoTrimTail()">
             <div class="cad-menu-item-title">
-                <span>✂ 一键去除尾部料头 (收缩切线归还母卷)</span>
+                <span> 一键去除尾部料头 (收缩切线归还母卷)</span>
             </div>
             <div class="cad-menu-item-desc">
                 自动清除工位末端零散料头，切断线下移对齐至最后一块裁片底边
@@ -438,6 +438,7 @@ export function discardRemnant(remnantId) {
  * 从料头起点开启下一工位
  */
 export function advanceFromRemnantStart(remnantId) {
+    if (requireStationReport()) return;
     const data = state.getCurrentCaseData();
     if (!data) return;
     const remnant = (data.remnants || []).find(r => r.id === remnantId);

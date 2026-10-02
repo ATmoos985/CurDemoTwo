@@ -1,5 +1,5 @@
 /**
- * 全景雷达条与 60FPS 平滑穿梭交互插件 (Radar Scrubber Plugin)
+ * 母卷导航与工位接续。待报工方案在移动前必须处理。
  */
 import { stage, mainLayer, bedStationGroup, defectGroup } from '../cad/cad-stage.js';
 import { drawRulers } from '../cad/cad-rulers.js';
@@ -10,9 +10,11 @@ import { updateUIInfo } from '../solver/solver-client.js';
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 
-let isRadarDragging = false;
-let dragScreenBedY = null;
-let radarRafId = null;
+export function requireStationReport() {
+    if (!state.pendingPlan) return false;
+    bus.emit('report:requested');
+    return true;
+}
 
 export function updateFabricScrollPosition(targetY) {
     const data = state.getCurrentCaseData();
@@ -22,6 +24,7 @@ export function updateFabricScrollPosition(targetY) {
     targetY = Math.max(0, Math.min(totalL - bedL, Math.round(targetY)));
 
     const prevY = data.windowStartY || 0;
+    if (targetY !== prevY && requireStationReport()) return false;
     data.windowStartY = targetY;
 
     // 1. 红框工位在世界坐标系内对齐到新的 targetY
@@ -33,7 +36,7 @@ export function updateFabricScrollPosition(targetY) {
     // stage.y() 随着 targetY 相应偏移，长卷布料自然在固定红框内上下贯穿滚动
     if (stage) {
         const scale = stage.scaleY();
-        const anchorScreenY = (dragScreenBedY !== null) ? dragScreenBedY : (stage.y() + prevY * scale);
+        const anchorScreenY = (stage.y() + prevY * scale);
         stage.y(anchorScreenY - targetY * scale);
     }
 
@@ -48,14 +51,17 @@ export function updateFabricScrollPosition(targetY) {
         winEl.style.left = `${leftPct}%`;
         const textEl = document.getElementById("radar-window-text");
         if (textEl) {
-            textEl.innerText = `${(targetY/1000).toFixed(1)}~${((targetY+bedL)/1000).toFixed(1)}m`;
+            textEl.innerText = stationRange(targetY, bedL);
         }
     }
 
+    const range = document.getElementById('radar-position');
+    if (range) { range.value = targetY; range.setAttribute('aria-valuetext', stationRange(targetY, bedL)); }
     if (mainLayer) mainLayer.batchDraw();
     drawRulers();
     updateStatusBar();
     bus.emit('station:moved', { targetY, bedL, winStartY: targetY, winEndY: targetY + bedL });
+    return true;
 }
 
 export function renderRadar() {
@@ -85,7 +91,7 @@ export function renderRadar() {
 
     const infoEl = document.getElementById("radar-roll-info");
     if (infoEl) {
-        infoEl.innerText = `全长: ${(totalL/1000).toFixed(0)}m | 已实切: ${(maxConfirmedY/1000).toFixed(2)}m | 当前开卷基准: Y=${maxConfirmedY}mm | 疵点: ${defects.length} 处`;
+        infoEl.innerText = `全长 ${totalL / 1000} m · 已报工 ${(maxConfirmedY / 1000).toFixed(2)} m · 疵点 ${defects.length} 处`;
     }
 
     if (maxConfirmedY > 0) {
@@ -95,10 +101,7 @@ export function renderRadar() {
         histEl.style.position = "absolute";
         histEl.style.left = "0%";
         histEl.style.width = `${historyPct}%`;
-        histEl.style.top = "0";
-        histEl.style.bottom = "0";
-        histEl.style.background = "repeating-linear-gradient(45deg, rgba(100,116,139,0.35), rgba(100,116,139,0.35) 4px, rgba(51,65,85,0.45) 4px, rgba(51,65,85,0.45) 8px)";
-        histEl.style.borderRight = "2px solid #f59e0b";
+
         histEl.style.pointerEvents = "none";
         histEl.title = `已实切下料出库历史: 0 ~ ${maxConfirmedY} mm (${(maxConfirmedY/1000).toFixed(2)}m)`;
         track.appendChild(histEl);
@@ -107,14 +110,6 @@ export function renderRadar() {
         pinEl.className = "radar-datum-pin";
         pinEl.style.position = "absolute";
         pinEl.style.left = `${historyPct}%`;
-        pinEl.style.top = "-5px";
-        pinEl.style.width = "0";
-        pinEl.style.height = "0";
-        pinEl.style.borderLeft = "4px solid transparent";
-        pinEl.style.borderRight = "4px solid transparent";
-        pinEl.style.borderTop = "6px solid #f59e0b";
-        pinEl.style.transform = "translateX(-50%)";
-        pinEl.style.pointerEvents = "none";
         pinEl.title = `当前有效布头基准点 Y=${maxConfirmedY}mm`;
         track.appendChild(pinEl);
     }
@@ -124,16 +119,21 @@ export function renderRadar() {
     const widthPct = Math.min(100 - leftPct, (bedL / totalL) * 100);
     if (winEl) {
         winEl.style.left = `${leftPct}%`;
-        winEl.style.width = `${Math.max(2.5, widthPct)}%`;
+        winEl.style.width = `${widthPct}%`;
         const textEl = document.getElementById("radar-window-text");
         if (textEl) {
-            textEl.innerText = `${(winStartY/1000).toFixed(1)}~${((winStartY+bedL)/1000).toFixed(1)}m`;
+            textEl.innerText = stationRange(winStartY, bedL);
         }
     }
 
-    // 绘制米数刻度
-    const stepM = totalL > 40000 ? 10 : 5;
-    const stepMm = stepM * 1000;
+    const range = document.getElementById('radar-position');
+    if (range) {
+        range.max = Math.max(0, totalL - bedL);
+        range.value = winStartY;
+        range.setAttribute('aria-valuetext', stationRange(winStartY, bedL));
+    }
+    // Keep meter labels readable even for a short remnant or a long mother roll.
+    const stepMm = radarTickStep(totalL, track.clientWidth);
     for (let posMm = 0; posMm <= totalL; posMm += stepMm) {
         const pct = (posMm / totalL) * 100;
 
@@ -145,7 +145,9 @@ export function renderRadar() {
         const mark = document.createElement("div");
         mark.className = "radar-scale-mark";
         mark.style.left = `${pct}%`;
-        mark.innerText = `${(posMm/1000).toFixed(0)}m`;
+        mark.innerText = `${posMm/1000}`;
+        if (posMm === 0) mark.classList.add('first');
+        if (posMm === totalL) mark.classList.add('last');
         track.appendChild(mark);
     }
 
@@ -156,6 +158,7 @@ export function renderRadar() {
         const inBed = (d.y + d.h >= winStartY && d.y <= winStartY + bedL);
         marker.className = inBed ? "radar-defect-marker" : "radar-defect-marker warning";
         marker.style.left = `${dPct}%`;
+        marker.style.width = `${Math.max(0, d.h / totalL * 100)}%`;
         marker.dataset.defectY = d.y;
         marker.dataset.defectH = d.h;
         marker.title = `疵点 #${d.id} [${d.desc || '疵点'}] 全局Y: ${d.y}mm (${(d.y/1000).toFixed(2)}m) 宽:${d.w}mm 长:${d.h}mm`;
@@ -253,215 +256,45 @@ export function updateDefectVisualStates() {
     if (mainLayer) mainLayer.batchDraw();
 }
 
-export function setupRadarInteraction() {
-    const track = document.getElementById("radar-track");
-    const winEl = document.getElementById("radar-window");
-    if (!track || !winEl) return;
-    if (track.dataset.bound === "true") return;
-    track.dataset.bound = "true";
-
-    let cachedTrackRect = null;
-    let grabOffsetX = 0;
-    let pendingTargetY = null;
-
-    const applyScroll = () => {
-        if (pendingTargetY !== null) {
-            updateFabricScrollPosition(pendingTargetY);
-            pendingTargetY = null;
-        }
-        radarRafId = null;
-    };
-
-    const scheduleScroll = (targetY) => {
-        pendingTargetY = targetY;
-        if (!radarRafId) {
-            radarRafId = requestAnimationFrame(applyScroll);
-        }
-    };
-
-    const onPointerMove = (e) => {
-        if (!isRadarDragging || !cachedTrackRect) return;
-        const data = state.getCurrentCaseData();
-        if (!data) return;
-        const totalL = data.totalRollL || 60000;
-        const trackW = cachedTrackRect.width;
-        if (trackW <= 0) return;
-
-        const handleLeftPx = e.clientX - cachedTrackRect.left - grabOffsetX;
-        const targetY = (handleLeftPx / trackW) * totalL;
-        scheduleScroll(targetY);
-    };
-
-    const onPointerUp = (e) => {
-        if (!isRadarDragging) return;
-        isRadarDragging = false;
-        dragScreenBedY = null;
-        winEl.classList.remove("dragging");
-        document.body.style.cursor = "";
-
-        if (radarRafId) {
-            cancelAnimationFrame(radarRafId);
-            radarRafId = null;
-        }
-
-        const data = state.getCurrentCaseData();
-        const totalL = data ? (data.totalRollL || 60000) : 60000;
-        const bedL = data ? (data.bedL || 5000) : 5000;
-        const prevY = data ? (data.windowStartY || 0) : 0;
-        let finalY = (pendingTargetY !== null) ? pendingTargetY : prevY;
-        pendingTargetY = null;
-
-        // 工位智能磁吸 (Station Snapping)
-        let maxCutY = 0;
-        if (data && data.pieces && data.pieces.length > 0) {
-            maxCutY = Math.max(...data.pieces.map(p => p.y + p.l));
-        }
-        if (maxCutY > 0 && Math.abs(finalY - maxCutY) <= 800) {
-            finalY = Math.round(maxCutY);
-        } else {
-            const nearestStation = Math.round(finalY / bedL) * bedL;
-            if (Math.abs(finalY - nearestStation) <= 800) {
-                finalY = nearestStation;
-            } else {
-                finalY = Math.round(finalY / 500) * 500;
-            }
-        }
-        finalY = Math.max(0, Math.min(totalL - bedL, finalY));
-
-        if (Math.abs(finalY - prevY) > 50) {
-            if (data) data.cuts = [];
-            state.setCutStepLimit(999);
-            state.pendingPlan = null;
-            if (state.selectedRemnantId) clearRemnantSelection();
-        }
-
-        updateFabricScrollPosition(finalY);
-
-        try {
-            if (winEl.releasePointerCapture) winEl.releasePointerCapture(e.pointerId);
-            if (track.releasePointerCapture) track.releasePointerCapture(e.pointerId);
-        } catch (err) {}
-
-        window.removeEventListener("pointermove", onPointerMove);
-        window.removeEventListener("pointerup", onPointerUp);
-        window.removeEventListener("pointercancel", onPointerUp);
-
-        updateDefectVisualStates();
-        updateDefectRadarActiveState();
-        if (data) recalculateRollStats(data);
-        renderScene();
-        drawRulers();
-        updateUIInfo();
-        if (window.camApp && typeof window.camApp.renderToolpathUI === 'function') {
-            window.camApp.renderToolpathUI();
-        }
-        bus.emit('radar:dragend', { finalY });
-    };
-
-    // 1. 滑块自身 Pointer 拖拽刷动
-    winEl.addEventListener("pointerdown", (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        isRadarDragging = true;
-        cachedTrackRect = track.getBoundingClientRect();
-        const winRect = winEl.getBoundingClientRect();
-        grabOffsetX = e.clientX - winRect.left;
-
-        const data = state.getCurrentCaseData();
-        const curWinY = data.windowStartY || 0;
-        const scale = stage ? stage.scaleY() : 1;
-        dragScreenBedY = stage ? (stage.y() + curWinY * scale) : 0;
-
-        winEl.classList.add("dragging");
-        document.body.style.cursor = "ew-resize";
-
-        try {
-            winEl.setPointerCapture(e.pointerId);
-        } catch (err) {}
-
-        window.addEventListener("pointermove", onPointerMove, { passive: false });
-        window.addEventListener("pointerup", onPointerUp);
-        window.addEventListener("pointercancel", onPointerUp);
-    });
-
-    // 2. 点击或在轨道上任意滑动
-    track.addEventListener("pointerdown", (e) => {
-        if (e.target === winEl || winEl.contains(e.target)) return;
-        e.preventDefault();
-        cachedTrackRect = track.getBoundingClientRect();
-        const data = state.getCurrentCaseData();
-        if (!data) return;
-        const totalL = data.totalRollL || 60000;
-        const bedL = data.bedL || 5000;
-        const trackW = cachedTrackRect.width;
-        if (trackW <= 0) return;
-
-        const winWidthPx = Math.max(16, (bedL / totalL) * trackW);
-        grabOffsetX = winWidthPx / 2;
-        const clickLeftPx = (e.clientX - cachedTrackRect.left) - grabOffsetX;
-        const targetY = (clickLeftPx / trackW) * totalL;
-
-        const scale = stage ? stage.scaleY() : 1;
-        dragScreenBedY = stage ? (stage.y() + (data.windowStartY || 0) * scale) : 0;
-        updateFabricScrollPosition(targetY);
-
-        isRadarDragging = true;
-        winEl.classList.add("dragging");
-        document.body.style.cursor = "ew-resize";
-
-        try {
-            track.setPointerCapture(e.pointerId);
-        } catch (err) {}
-
-        window.addEventListener("pointermove", onPointerMove, { passive: false });
-        window.addEventListener("pointerup", onPointerUp);
-        window.addEventListener("pointercancel", onPointerUp);
-    });
-
-    // 3. 鼠标滚轮在雷达条上滚动
-    track.addEventListener("wheel", (e) => {
-        e.preventDefault();
-        const data = state.getCurrentCaseData();
-        if (!data) return;
-        const totalL = data.totalRollL || 60000;
-        const bedL = data.bedL || 5000;
-        const curY = data.windowStartY || 0;
-        const step = (e.deltaY > 0 ? 1 : -1) * (totalL > 40000 ? 1000 : 500);
-        const targetY = Math.max(0, Math.min(totalL - bedL, curY + step));
-        updateFabricScrollPosition(targetY);
-        updateDefectVisualStates();
-        updateDefectRadarActiveState();
-        bus.emit('radar:wheel', { targetY });
-    }, { passive: false });
+export function radarTickStep(totalL, width = 600) {
+    const rough = totalL / Math.max(1, Math.floor((width || 600) / 72));
+    const power = 10 ** Math.floor(Math.log10(Math.max(1, rough)));
+    return [1, 2, 5, 10].map(n => n * power).find(n => n >= rough);
 }
-
-export function advanceBed(delta) {
+function stationRange(start, length) {
+    return `当前工位 ${(start / 1000).toFixed(2)}–${((start + length) / 1000).toFixed(2)} m`;
+}
+export function setupRadarInteraction() {
+    const range = document.getElementById('radar-position');
+    if (!range || range.dataset.bound) return;
+    range.dataset.bound = 'true';
+    range.addEventListener('input', () => {
+        const target = Number(range.value);
+        if (!moveStation(target)) range.value = state.getCurrentCaseData().windowStartY || 0;
+    });
+}
+function moveStation(targetY) {
     const data = state.getCurrentCaseData();
-    if (!data) return;
-    const totalL = data.totalRollL || 60000;
-    const bedL = data.bedL || 5000;
-    const currentY = data.windowStartY || 0;
-
-    let nextY = currentY + delta * bedL;
-    nextY = Math.max(0, Math.min(totalL - bedL, nextY));
-
-    if (nextY !== currentY) {
-        data.cuts = [];
-        state.setCutStepLimit(999);
-        state.pendingPlan = null;
-        if (state.selectedRemnantId) clearRemnantSelection();
-    }
-
-    updateFabricScrollPosition(nextY);
+    if (!data) return false;
+    const previous = data.windowStartY || 0;
+    if (!updateFabricScrollPosition(targetY)) return false;
+    if (data.windowStartY === previous) return true;
+    data.cuts = [];
+    state.setCutStepLimit(999);
+    if (state.selectedRemnantId) clearRemnantSelection();
     updateDefectVisualStates();
     updateDefectRadarActiveState();
     recalculateRollStats(data);
     renderScene();
     drawRulers();
     updateUIInfo();
-    if (window.camApp && typeof window.camApp.renderToolpathUI === 'function') {
-        window.camApp.renderToolpathUI();
-    }
+    window.camApp?.renderToolpathUI?.();
+    return true;
+}
+
+export function advanceBed(delta) {
+    const data = state.getCurrentCaseData();
+    if (data) moveStation((data.windowStartY || 0) + delta * (data.bedL || 5000));
 }
 
 export function nextCutPosition(data) {
@@ -475,7 +308,7 @@ export function smartAdvanceBed() {
     const bedL = data.bedL || 5000;
     const curY = data.windowStartY || 0;
 
-    if (state.currentCutMode === 'remnant') return;
+    if (state.currentCutMode === 'remnant' || requireStationReport()) return;
     const nextY = Math.min(totalL, nextCutPosition(data) || curY + bedL);
     if (nextY >= totalL) return;
     data.bedL = Math.min(bedL, totalL - nextY);
@@ -499,5 +332,6 @@ export function smartAdvanceBed() {
     if (window.camApp && typeof window.camApp.renderToolpathUI === 'function') {
         window.camApp.renderToolpathUI();
     }
+    renderRadar();
     bus.emit('bed:smart-advanced', { nextY });
 }

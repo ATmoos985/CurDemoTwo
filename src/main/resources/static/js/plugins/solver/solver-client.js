@@ -1,4 +1,4 @@
-import { saveCurrentTask, refreshTaskProgress } from './task-workspace.js';
+import { saveCurrentTask, refreshTaskProgress, escapeText } from './task-workspace.js';
 /**
  * 求解器通信与排料控制插件 (Solver Client Plugin)
  */
@@ -83,7 +83,7 @@ export function updateUIInfo() {
     const remBadge = document.getElementById("remnant-count-badge");
     if (remBadge) remBadge.innerText = `${(data.remnants || []).length} 块`;
     const rightTabRemBadge = document.getElementById("right-tab-rem-badge");
-    if (rightTabRemBadge) rightTabRemBadge.innerText = `${(data.remnants || []).length} 块`;
+    if (rightTabRemBadge) rightTabRemBadge.innerText = `${(data.pieces || []).filter(p => !p.confirmed).length} 件`;
     const remTbody = document.getElementById("remnant-table-body");
     if (remTbody) {
         remTbody.innerHTML = (data.remnants || []).map(r => {
@@ -95,16 +95,15 @@ export function updateUIInfo() {
                 onmouseenter="window.hoverRemnant('${r.id}', true)"
                 onmouseleave="window.hoverRemnant('${r.id}', false)"
                 title="点击在 CAD 画布中居中定位并高亮此料头 #${r.id}">
-                <td><code style="color: #38bdf8; font-weight: 700; font-size: 11.5px;">${r.id}</code></td>
+                <td><code class="remnant-code">${escapeText(r.id)}</code></td>
                 <td>${r.w} × ${r.l} mm</td>
                 <td>${r.area.toFixed(2)} m²</td>
-                <td><span class="${r.hasDefect ? 'badge-cut' : 'badge-rem'}">${r.status || (r.hasDefect ? '带疵料头' : '完好可用')}</span></td>
+                <td><span class="quality-badge ${r.hasDefect ? 'has-defect' : ''}">${r.hasDefect ? '带疵' : '无疵'}</span></td>
                 <td>
                     <button class="tool-btn rem-locate-btn"
-                        style="font-size: 10px; padding: 2px 6px; color: #38bdf8; border: 1px solid rgba(56,189,248,0.4); background: rgba(56,189,248,0.1); cursor: pointer;"
                         onclick="event.stopPropagation(); window.selectRemnant('${r.id}', { fromTable: true, smoothPan: true, showToastMsg: true })"
                         title="在 CAD 画布中居中定位此料头">
-                        🎯 定位
+                        定位
                     </button>
                 </td>
             </tr>
@@ -135,10 +134,22 @@ export function updateUIInfo() {
     if (utilEl) {
         utilEl.innerText = hasStationPlan && (data.totalArea || 0) > 0 ? `${utilization.toFixed(1)}% ${data.lastReceipt ? '实切' : '方案'}` : "—";
     }
+    const ready = !!state.pendingPlan?.result?.planId && state.pendingPlan.context === solveContext();
+    const reportButton = document.getElementById('btn-confirm-station-cut');
+    if (reportButton) {
+        reportButton.disabled = !ready;
+        reportButton.classList.toggle('report-ready', ready);
+        reportButton.textContent = ready ? `报工保存 · ${state.pendingPlan.result.pieces.length} 件` : '报工保存';
+    }
+    const solveButton = document.getElementById('btn-trigger-solve-station');
+    if (solveButton) { solveButton.classList.toggle('plan-ready', ready); solveButton.textContent = ready ? '重新排料' : '生成排料方案'; }
+    const hint = document.getElementById('station-action-hint');
+    if (hint) hint.textContent = ready ? '本工位尚未报工。实切后点击“报工保存”，确认后自动接续。' :
+        data.lastReceipt ? '上一工位已报工保存。可继续生成本工位方案。' : '先生成方案，再核对实切并报工保存。';
     const reportEl = document.getElementById("lbl-report-status");
     if (reportEl) {
-        reportEl.innerText = data.lastReceipt ? `已确认 ${data.lastReceipt.planId.slice(0, 8)}` :
-            (state.pendingPlan ? '方案待实切确认' : (hasStationPlan ? '方案待实切确认' : '工位就绪 / 待排料'));
+        reportEl.innerText = data.lastReceipt ? `已报工保存 · ${data.lastReceipt.finishedPieceCount} 件` :
+            (ready ? '待报工 · 尚未保存产出' : (hasStationPlan ? '预览已变化 · 请重新排料' : '当前工位待排料'));
     }
 
     const sum = (data.pieceArea || 0) + (data.remArea || 0) + (data.wasteArea || 0);
@@ -161,7 +172,7 @@ export function updateUIInfo() {
     const rollRemainingEl = document.getElementById("lbl-roll-remaining");
     if (rollRemainingEl) {
         const totalRollL = data.totalRollL || 60000;
-        let maxConfirmedY = 0;
+        let maxConfirmedY = data.stockUsedLength || 0;
         (data.pieces || []).filter(p => p.confirmed).forEach(p => {
             if (p.y + p.l > maxConfirmedY) maxConfirmedY = p.y + p.l;
         });
@@ -247,10 +258,10 @@ export function loadCase(id) {
     if (headerTag) {
         const val = data.cutOrigin || "right-bottom";
         const bedL = data.bedL || 5000;
-        if (val === "right-bottom") { headerTag.innerText = `右下角 · ${bedL}mm`; headerTag.style.color = "#10b981"; }
-        else if (val === "right-top") { headerTag.innerText = `右上角 · ${bedL}mm`; headerTag.style.color = "#38bdf8"; }
-        else if (val === "left-bottom") { headerTag.innerText = `左下角 · ${bedL}mm`; headerTag.style.color = "#f59e0b"; }
-        else { headerTag.innerText = `左上角 · ${bedL}mm`; headerTag.style.color = "#a855f7"; }
+        if (val === "right-bottom") { headerTag.innerText = `右下角 · ${bedL}mm`; headerTag.style.color = "var(--text-muted)"; }
+        else if (val === "right-top") { headerTag.innerText = `右上角 · ${bedL}mm`; headerTag.style.color = "var(--text-muted)"; }
+        else if (val === "left-bottom") { headerTag.innerText = `左下角 · ${bedL}mm`; headerTag.style.color = "var(--text-muted)"; }
+        else { headerTag.innerText = `左上角 · ${bedL}mm`; headerTag.style.color = "var(--text-muted)"; }
     }
     if (document.getElementById("sel-first-stage")) document.getElementById("sel-first-stage").value = data.firstStageOrientation || "horizontal";
     if (document.getElementById("sel-allow-rotation")) document.getElementById("sel-allow-rotation").value = data.allowRotation ? "1" : "0";
@@ -267,9 +278,9 @@ export function loadCase(id) {
     const craftHint = document.getElementById("demands-craft-hint");
     if (craftHint) {
         if (rollId === "ROLL-REAL-893292" || id === 7) {
-            craftHint.innerHTML = "🏆 <b>893292 窗帘整单</b>: 11项主帘定高横裁(幅宽2170~2715mm) · 门幅剩余630mm边料竖切套排窗幔/绑带/抱枕(37件套)";
+            craftHint.innerHTML = "<b>893292 窗帘整单</b>: 11项主帘定高横裁(幅宽2170~2715mm) · 门幅剩余630mm边料竖切套排窗幔/绑带/抱枕(37件套)";
         } else if (rollId === "ROLL-REAL-893153" || id === 8) {
-            craftHint.innerHTML = "🏆 <b>893153 工程整单</b>: 4大超长工程主帘(5.4m~9m横裁) · 门幅剩余边料竖切套排长绑带/抱枕(18件套)";
+            craftHint.innerHTML = "<b>893153 工程整单</b>: 4大超长工程主帘(5.4m~9m横裁) · 门幅剩余边料竖切套排长绑带/抱枕(18件套)";
         } else {
             craftHint.innerText = "工艺规则：窗帘定高横裁为主要落料，门幅剩余窄边料顺流纵切套排辅件吃净";
         }
@@ -539,7 +550,16 @@ async function runSolve() {
     }
 }
 
+export function requiredReportLength(pieces = [], remnants = []) {
+    return Math.max(0, ...pieces.map(p => p.y + p.l), ...remnants.map(r => r.y + r.l));
+}
+let openingReport = false;
 export async function openCutReport() {
+    if (openingReport || document.getElementById('cut-report-modal').open) return;
+    openingReport = true;
+    try { await prepareCutReport(); } finally { openingReport = false; }
+}
+async function prepareCutReport() {
     let pending = state.pendingPlan;
     if (!pending?.result?.planId || (pending.context !== solveContext() || pending.geometry !== planGeometry())) {
         state.pendingPlan = null;
@@ -547,7 +567,8 @@ export async function openCutReport() {
         return;
     }
     const { result, bedL, feedPortType } = pending;
-    const defaultCutLen = (result.deductLen && result.deductLen > 0) ? result.deductLen : bedL;
+    const recoverable = (result.remnants || []).filter(r => r.w >= 200 && r.l >= 300);
+    const defaultCutLen = Math.max(result.deductLen || 0, requiredReportLength(result.pieces, recoverable)) || bedL;
     const actualLenInput = document.getElementById("report-actual-len");
     if (actualLenInput) {
         actualLenInput.value = feedPortType === "remnant" ? 0 : defaultCutLen;
@@ -584,7 +605,8 @@ export async function openCutReport() {
         catch { showToast("读取库存失败，请重试", "error"); return; }
     }
 
-    // 填充三维闭环扣减预览看板
+    if (state.pendingPlan !== pending || pending.context !== solveContext()) return;
+    // 当前方案的报工预览
     await updateReportPreview();
 
     document.getElementById("cut-report-modal").showModal();
