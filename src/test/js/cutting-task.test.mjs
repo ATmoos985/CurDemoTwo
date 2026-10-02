@@ -5,7 +5,7 @@ let rows = [];
 globalThis.document = { getElementById: () => null, querySelectorAll: () => rows };
 const { state } = await import('../../main/resources/static/js/core/state.js');
 const { updateDemandCompletionFromPieces, getDemandsFromUI } = await import('../../main/resources/static/js/plugins/solver/quota-manager.js');
-const { nextCutPosition, updateFabricScrollPosition, advanceBed, smartAdvanceBed, radarTickStep } = await import('../../main/resources/static/js/plugins/radar/radar-scrubber.js');
+const { nextCutPosition, updateFabricScrollPosition, advanceBed, smartAdvanceBed, radarTickStep, setupRadarInteraction } = await import('../../main/resources/static/js/plugins/radar/radar-scrubber.js');
 const { requiredReportLength } = await import('../../main/resources/static/js/plugins/solver/solver-client.js');
 const { bus } = await import('../../main/resources/static/js/core/event-bus.js');
 
@@ -60,5 +60,57 @@ test('report length includes selected recovered tail and radar ticks remain read
         const step = radarTickStep(length, width);
         assert.ok(step / length * width >= 70, 'major ticks must not overlap');
         assert.ok(Number.isFinite(step) && step > 0);
+    }
+});
+
+test('the overview handle supports direct drag, track clicks, wheel and keyboard without discarding a pending report', () => {
+    const data = state.getCurrentCaseData();
+    Object.assign(data, {windowStartY:0, totalRollL:100000, bedL:5000, pieces:[], remnants:[], cuts:[{type:'横切',pos:5000}]});
+    const events = {}, attributes = {};
+    let captured = false;
+    const handle = {style:{}, classList:{add(){},remove(){}}, contains:el=>el===handle, focus(){},
+        getBoundingClientRect:()=>({left:100+data.windowStartY/100,width:50}),
+        setAttribute:(key,value)=>attributes[key]=value, addEventListener:(name,fn)=>events[name]=fn};
+    const track = {dataset:{}, querySelectorAll:()=>[], getBoundingClientRect:()=>({left:100,width:1000}),
+        setPointerCapture:()=>captured=true, hasPointerCapture:()=>captured, releasePointerCapture:()=>captured=false,
+        addEventListener:(name,fn)=>events[name]=fn};
+    const originalGet = document.getElementById;
+    document.getElementById = id => ({'radar-track':track,'radar-window':handle})[id] || null;
+    const fire = (name, args={}) => events[name]({button:0,pointerId:1,target:handle,preventDefault(){},...args});
+    let requested = 0;
+    const unsubscribe = bus.on('report:requested', () => requested++);
+    try {
+        setupRadarInteraction();
+        fire('pointerdown', {clientX:110});
+        assert.equal(data.windowStartY, 0, 'grabbing the handle must not jump');
+        fire('pointermove', {clientX:214});
+        assert.equal(data.windowStartY, 10400, 'drag preserves the grab offset');
+        fire('pointerup');
+        assert.equal(data.windowStartY, 10000, 'release snaps to the station');
+        assert.equal(data.cuts.length, 0, 'old cuts clear even after a live drag update');
+        assert.equal(captured, false);
+        fire('pointerdown', {target:track,clientX:625});
+        fire('pointerup');
+        assert.equal(data.windowStartY, 50000, 'track click centers the handle');
+        fire('wheel', {deltaY:1});
+        assert.equal(data.windowStartY, 51000);
+        fire('keydown', {key:'ArrowLeft'});
+        assert.equal(data.windowStartY, 50500);
+        fire('keydown', {key:'End'});
+        fire('wheel', {deltaY:1});
+        assert.equal(data.windowStartY, 95000, 'navigation stays within the mother roll');
+        assert.equal(attributes['aria-valuenow'], 95000);
+        const pending = state.pendingPlan = {result:{planId:'pending'}};
+        fire('pointerdown', {clientX:1060});
+        fire('wheel', {deltaY:-1});
+        fire('keydown', {key:'Home'});
+        assert.equal(requested, 3);
+        assert.equal(data.windowStartY, 95000);
+        assert.equal(state.pendingPlan, pending);
+        assert.equal(captured, false);
+    } finally {
+        document.getElementById = originalGet;
+        state.pendingPlan = null;
+        unsubscribe();
     }
 });

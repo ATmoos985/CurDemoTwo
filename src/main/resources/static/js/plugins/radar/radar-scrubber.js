@@ -49,14 +49,14 @@ export function updateFabricScrollPosition(targetY) {
     if (winEl) {
         const leftPct = (targetY / totalL) * 100;
         winEl.style.left = `${leftPct}%`;
+        winEl.setAttribute('aria-valuenow', targetY);
+        winEl.setAttribute('aria-valuetext', stationRange(targetY, bedL));
         const textEl = document.getElementById("radar-window-text");
         if (textEl) {
             textEl.innerText = stationRange(targetY, bedL);
         }
     }
 
-    const range = document.getElementById('radar-position');
-    if (range) { range.value = targetY; range.setAttribute('aria-valuetext', stationRange(targetY, bedL)); }
     if (mainLayer) mainLayer.batchDraw();
     drawRulers();
     updateStatusBar();
@@ -120,18 +120,15 @@ export function renderRadar() {
     if (winEl) {
         winEl.style.left = `${leftPct}%`;
         winEl.style.width = `${widthPct}%`;
+        winEl.setAttribute('aria-valuemax', Math.max(0, totalL - bedL));
+        winEl.setAttribute('aria-valuenow', winStartY);
+        winEl.setAttribute('aria-valuetext', stationRange(winStartY, bedL));
         const textEl = document.getElementById("radar-window-text");
         if (textEl) {
             textEl.innerText = stationRange(winStartY, bedL);
         }
     }
 
-    const range = document.getElementById('radar-position');
-    if (range) {
-        range.max = Math.max(0, totalL - bedL);
-        range.value = winStartY;
-        range.setAttribute('aria-valuetext', stationRange(winStartY, bedL));
-    }
     // Keep meter labels readable even for a short remnant or a long mother roll.
     const stepMm = radarTickStep(totalL, track.clientWidth);
     for (let posMm = 0; posMm <= totalL; posMm += stepMm) {
@@ -265,18 +262,76 @@ function stationRange(start, length) {
     return `当前工位 ${(start / 1000).toFixed(2)}–${((start + length) / 1000).toFixed(2)} m`;
 }
 export function setupRadarInteraction() {
-    const range = document.getElementById('radar-position');
-    if (!range || range.dataset.bound) return;
-    range.dataset.bound = 'true';
-    range.addEventListener('input', () => {
-        const target = Number(range.value);
-        if (!moveStation(target)) range.value = state.getCurrentCaseData().windowStartY || 0;
+    const track = document.getElementById('radar-track');
+    const winEl = document.getElementById('radar-window');
+    if (!track || !winEl || track.dataset.bound) return;
+    track.dataset.bound = 'true';
+    let drag = null;
+
+    track.addEventListener('pointerdown', e => {
+        if (e.button !== 0 || drag) return;
+        e.preventDefault();
+        const data = state.getCurrentCaseData();
+        const rect = track.getBoundingClientRect();
+        if (!data || !rect.width || requireStationReport()) return;
+        const handle = winEl.getBoundingClientRect();
+        const onHandle = winEl.contains(e.target);
+        drag = { pointerId: e.pointerId, startY: data.windowStartY || 0, rect,
+            offset: onHandle ? e.clientX - handle.left : handle.width / 2 };
+        track.setPointerCapture(e.pointerId);
+        winEl.focus({ preventScroll: true });
+        winEl.classList.add('dragging');
+        if (!onHandle) updateFabricScrollPosition((e.clientX - rect.left - drag.offset) / rect.width * (data.totalRollL || 60000));
+    });
+    track.addEventListener('pointermove', e => {
+        if (!drag || e.pointerId !== drag.pointerId) return;
+        const totalL = state.getCurrentCaseData().totalRollL || 60000;
+        updateFabricScrollPosition((e.clientX - drag.rect.left - drag.offset) / drag.rect.width * totalL);
+    });
+    const finishDrag = e => {
+        if (!drag || e.pointerId !== drag.pointerId) return;
+        const { startY } = drag;
+        drag = null;
+        winEl.classList.remove('dragging');
+        if (track.hasPointerCapture(e.pointerId)) track.releasePointerCapture(e.pointerId);
+        const data = state.getCurrentCaseData();
+        let finalY = data.windowStartY || 0;
+        if (finalY === startY) return;
+        // 保留原来的工位 / 裁片末端磁吸，其他位置按 500 mm 对齐。
+        const bedL = data.bedL || 5000;
+        const maxCutY = Math.max(0, ...(data.pieces || []).map(p => p.y + p.l));
+        const nearestStation = Math.round(finalY / bedL) * bedL;
+        if (maxCutY > 0 && Math.abs(finalY - maxCutY) <= 800) finalY = Math.round(maxCutY);
+        else if (Math.abs(finalY - nearestStation) <= 800) finalY = nearestStation;
+        else finalY = Math.round(finalY / 500) * 500;
+        moveStation(finalY, startY);
+        bus.emit('radar:dragend', { finalY: data.windowStartY });
+    };
+    for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) track.addEventListener(event, finishDrag);
+    track.addEventListener('wheel', e => {
+        e.preventDefault();
+        if (drag || !e.deltaY) return;
+        const data = state.getCurrentCaseData();
+        const step = (data.totalRollL || 60000) > 40000 ? 1000 : 500;
+        if (moveStation((data.windowStartY || 0) + Math.sign(e.deltaY) * step)) {
+            bus.emit('radar:wheel', { targetY: data.windowStartY });
+        }
+    }, { passive: false });
+    winEl.addEventListener('keydown', e => {
+        if (drag) return;
+        const data = state.getCurrentCaseData();
+        const current = data.windowStartY || 0, bedL = data.bedL || 5000;
+        const positions = { ArrowLeft: current - 500, ArrowDown: current - 500,
+            ArrowRight: current + 500, ArrowUp: current + 500, PageDown: current - bedL,
+            PageUp: current + bedL, Home: 0, End: (data.totalRollL || 60000) - bedL };
+        if (!(e.key in positions)) return;
+        e.preventDefault();
+        moveStation(positions[e.key]);
     });
 }
-function moveStation(targetY) {
+function moveStation(targetY, previous = state.getCurrentCaseData()?.windowStartY || 0) {
     const data = state.getCurrentCaseData();
     if (!data) return false;
-    const previous = data.windowStartY || 0;
     if (!updateFabricScrollPosition(targetY)) return false;
     if (data.windowStartY === previous) return true;
     data.cuts = [];

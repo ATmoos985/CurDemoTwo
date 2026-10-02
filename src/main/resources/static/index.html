@@ -279,10 +279,9 @@
                 <div class="radar-strip-container" id="radar-strip-container">
                     <div class="radar-track" id="radar-track">
                         <!-- 动态生成刻度与疵点针 -->
-                        <div class="radar-window" id="radar-window" aria-hidden="true"></div>
+                        <div class="radar-window" id="radar-window" role="slider" tabindex="0" aria-label="母卷工位位置" aria-valuemin="0" aria-valuemax="55000" aria-valuenow="0" aria-describedby="radar-window-text" title="拖动工位滑块，或在轨道上点击、滚动"></div>
                     </div>
                 </div>
-                <input id="radar-position" type="range" min="0" max="55000" step="1" value="0" aria-label="母卷工位位置" aria-describedby="radar-window-text">
                 <div class="radar-caption"><span id="radar-window-text">当前工位 0–5 m</span><span class="radar-legend"><i class="consumed-key"></i>已报工 <i class="defect-key"></i>疵点 <span>单位 m</span></span></div>
             </div>
 

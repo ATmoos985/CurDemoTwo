@@ -1,12 +1,15 @@
-/* Mother-roll overview: physical coverage above, native position control below. */
+/* 母卷总览：直接拖动工位范围，刻度与疵点分层显示。 */
 .roll-radar-bar { background: var(--panel-bg); border-bottom: 1px solid var(--panel-border); user-select: none; z-index: 15; }
 .radar-label-group, .radar-caption { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .radar-title { color: var(--text-main); font-size: 12px; font-weight: 600; }
 .radar-info, .radar-caption { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .radar-strip-container { position: relative; height: 54px; flex: none; }
-.radar-track { position: relative; height: 100%; background: linear-gradient(to bottom, var(--panel-header) 32px, transparent 32px); border-top: 1px solid var(--panel-border); }
-.radar-window { position: absolute; top: 15px; height: 17px; background: color-mix(in srgb, var(--accent-blue) 15%, transparent); border: 1px solid var(--accent-blue); border-radius: 2px; z-index: 3; pointer-events: none; }
+.radar-track { position: relative; height: 100%; background: linear-gradient(to bottom, var(--panel-header) 32px, transparent 32px); border-top: 1px solid var(--panel-border); cursor: pointer; touch-action: none; }
+.radar-window { position: absolute; top: 11px; height: 24px; background: color-mix(in srgb, var(--accent-blue) 15%, var(--panel-bg)); border: 1px solid var(--accent-blue); border-radius: 2px; z-index: 3; cursor: grab; }
+.radar-window::before { content: ''; position: absolute; inset: -4px; }
 .radar-window::after { content: ''; position: absolute; inset: 3px 0; margin: auto; width: 1px; background: var(--accent-blue); }
+.radar-window.dragging, .radar-track:has(.dragging) { cursor: grabbing; }
+.radar-window:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; }
 .radar-defect-marker { position: absolute; top: 3px; height: 8px; min-width: 2px; background: var(--accent-red); z-index: 2; }
 .radar-defect-marker.warning { background: var(--accent-amber); }
 .radar-consumed-history { position: absolute; top: 15px; height: 17px; background: color-mix(in srgb, var(--text-muted) 25%, transparent); border-right: 1px solid var(--text-muted); }
@@ -15,7 +18,6 @@
 .radar-scale-mark { position: absolute; top: 39px; transform: translateX(-50%); font-size: 10px; line-height: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .radar-scale-mark.first { transform: none; }
 .radar-scale-mark.last { transform: translateX(-100%); }
-#radar-position { display: block; width: 100%; height: 12px; margin: 0; accent-color: var(--accent-blue); cursor: ew-resize; }
 .radar-legend { display: flex; gap: 6px; align-items: center; }
 .radar-legend i { width: 7px; height: 7px; display: inline-block; }
 .radar-legend .consumed-key { background: var(--text-muted); }
