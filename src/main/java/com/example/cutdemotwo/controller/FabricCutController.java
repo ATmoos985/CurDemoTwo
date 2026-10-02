@@ -35,6 +35,23 @@ public class FabricCutController {
         this.workflowService = workflowService;
     }
 
+    @GetMapping("/cutting/tasks")
+    public java.util.List<com.example.cutdemotwo.model.CuttingTask> tasks() { return remnantService.listTasks(); }
+
+    @GetMapping("/cutting/tasks/{id}")
+    public Map<String, Object> task(@PathVariable String id) { return remnantService.taskDetail(id); }
+
+    @PostMapping("/cutting/tasks")
+    public com.example.cutdemotwo.model.CuttingTask saveTask(@RequestBody com.example.cutdemotwo.model.CuttingTask task) {
+        return remnantService.saveTask(task);
+    }
+
+    @PostMapping("/cutting/material-candidates")
+    public java.util.List<Map<String, Object>> candidates(@RequestBody SolveRequest request) { return remnantService.materialCandidates(request); }
+
+    @GetMapping("/cutting/plans/{id}")
+    public Map<String, Object> plan(@PathVariable String id) { return workflowService.getPlan(id); }
+
     @PostMapping("/solve")
     public SolveResponse solve(@RequestBody SolveRequest request) {
         return workflowService.solve(request);

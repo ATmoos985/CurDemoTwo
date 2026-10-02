@@ -21,6 +21,13 @@ public class SolveRequest {
     private String feedPortType = "roll"; // "roll"(母卷连续料口) 或 "remnant"(手工料头投料口)
     private String sourceRemnantId;      // 若为料头投料，记录原料头编号
 
+    private String taskId;
+    private long taskRevision;
+    public String getTaskId() { return taskId; }
+    public void setTaskId(String taskId) { this.taskId = taskId; }
+    public long getTaskRevision() { return taskRevision; }
+    public void setTaskRevision(long taskRevision) { this.taskRevision = taskRevision; }
+
     public SolveRequest() {}
 
     public String getRollId() { return rollId; }

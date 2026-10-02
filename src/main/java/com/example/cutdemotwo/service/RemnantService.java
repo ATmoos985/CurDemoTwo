@@ -1,6 +1,7 @@
 package com.example.cutdemotwo.service;
 
 import com.example.cutdemotwo.model.Defect;
+import com.example.cutdemotwo.model.CuttingTask;
 import com.example.cutdemotwo.model.MotherRollInfo;
 import com.example.cutdemotwo.model.RemnantStock;
 import com.example.cutdemotwo.model.SolveRequest;
@@ -34,6 +35,7 @@ public class RemnantService {
     private final AtomicInteger remnantSeq = new AtomicInteger(10);
     private final AtomicInteger defectSeq = new AtomicInteger(20);
     private final Map<String, Map<String, Object>> receipts = new LinkedHashMap<>();
+    private final Map<String, CuttingTask> tasks = new LinkedHashMap<>();
     private final ObjectMapper json = new ObjectMapper();
     private final Path stateFile;
     @Value("${cutdemo.measurement.tolerance-mm:5}")
@@ -47,6 +49,7 @@ public class RemnantService {
                 for (MotherRollInfo roll : snapshot.rolls()) motherRolls.put(roll.getRollId(), roll);
                 for (RemnantStock item : snapshot.remnants()) remnantPool.put(item.getId(), item);
                 receipts.putAll(snapshot.receipts());
+                if (snapshot.tasks() != null) tasks.putAll(snapshot.tasks());
                 remnantSeq.set(snapshot.remnantSeq());
                 defectSeq.set(snapshot.defectSeq());
                 return;
@@ -59,7 +62,7 @@ public class RemnantService {
     }
 
     private record Snapshot(List<MotherRollInfo> rolls, List<RemnantStock> remnants,
-                            Map<String, Map<String, Object>> receipts, int remnantSeq, int defectSeq) {}
+                            Map<String, Map<String, Object>> receipts, int remnantSeq, int defectSeq, Map<String, CuttingTask> tasks) {}
 
     private void save() {
         try {
@@ -68,7 +71,7 @@ public class RemnantService {
             Path temp = Files.createTempFile(parent, "cutdemo-", ".json");
             try {
                 json.writeValue(temp.toFile(), new Snapshot(new ArrayList<>(motherRolls.values()),
-                        new ArrayList<>(remnantPool.values()), receipts, remnantSeq.get(), defectSeq.get()));
+                        new ArrayList<>(remnantPool.values()), receipts, remnantSeq.get(), defectSeq.get(), tasks));
                 try {
                     Files.move(temp, stateFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
                 } catch (java.nio.file.AtomicMoveNotSupportedException e) {
@@ -84,9 +87,156 @@ public class RemnantService {
 
     public synchronized Map<String, Object> getReceipt(String planId) { return receipts.get(planId); }
 
+    public synchronized List<Map<String, Object>> taskReports(String taskId) {
+        return receipts.values().stream().filter(r -> Objects.equals(taskId, r.get("taskId"))).toList();
+    }
+
+    public synchronized Map<String, Integer> completedQuantities(String taskId) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (Map<String, Object> receipt : taskReports(taskId)) {
+            if (receipt.get("demandQuantities") instanceof Map<?, ?> output)
+                output.forEach((id, n) -> counts.merge(id.toString(), ((Number) n).intValue(), Integer::sum));
+        }
+        return counts;
+    }
+
+    public synchronized List<CuttingTask> listTasks() { return new ArrayList<>(tasks.values()); }
+
+    public synchronized Map<String, Object> taskDetail(String id) {
+        CuttingTask task = tasks.get(id);
+        if (task == null) throw new IllegalArgumentException("切割任务不存在");
+        return Map.of("task", task, "completed", completedQuantities(id), "reports", taskReports(id));
+    }
+
+    public synchronized CuttingTask saveTask(CuttingTask input) {
+        if (input == null || input.name() == null || input.name().isBlank() || input.materialModel() == null ||
+                input.materialModel().isBlank() || input.demands() == null || input.demands().isEmpty() || input.demands().size() > 200)
+            throw new IllegalArgumentException("请填写任务名称、材料型号和 1 至 200 项需求");
+        String id = input.id() == null || input.id().isBlank() ? UUID.randomUUID().toString() : input.id();
+        CuttingTask previous = tasks.get(id);
+        if (previous == null && input.id() != null && !input.id().isBlank()) throw new IllegalArgumentException("切割任务不存在");
+        if (previous != null && previous.revision() != input.revision()) throw new IllegalArgumentException("任务已更新，请重新打开后编辑");
+        Set<Integer> ids = new HashSet<>();
+        CuttingTask.Process process = input.process();
+        if (process != null && (!Double.isFinite(process.bedLength()) || process.bedLength() <= 0 ||
+                !Double.isFinite(process.trimStart()) || process.trimStart() < 0 ||
+                !Set.of("left-top", "right-top", "left-bottom", "right-bottom").contains(String.valueOf(process.cutOrigin())) ||
+                !Set.of("horizontal", "vertical").contains(String.valueOf(process.firstStageOrientation()))))
+            throw new IllegalArgumentException("机台工艺参数无效");
+        for (CuttingTask.Line line : input.demands()) {
+            if (line == null || line.id() <= 0 || !ids.add(line.id()) || line.name() == null || line.name().isBlank() ||
+                    !Double.isFinite(line.width()) || !Double.isFinite(line.length()) || line.width() <= 0 || line.length() <= 0 ||
+                    line.quantity() <= 0 || line.quantity() > 10000)
+                throw new IllegalArgumentException("需求编号应唯一，尺寸和件数必须为正数，单项最多 10000 件");
+        }
+        if (previous != null) {
+            Map<String, Integer> completed = completedQuantities(id);
+            if (!completed.isEmpty() && !previous.materialModel().equals(input.materialModel()))
+                throw new IllegalArgumentException("已有报工的任务不能更改材料型号");
+            for (CuttingTask.Line old : previous.demands()) {
+                int count = completed.getOrDefault(String.valueOf(old.id()), 0);
+                if (count == 0) continue;
+                CuttingTask.Line line = input.demands().stream().filter(d -> d.id() == old.id()).findFirst()
+                        .orElseThrow(() -> new IllegalArgumentException("已报工需求不能删除"));
+                if (line.width() != old.width() || line.length() != old.length() || !line.name().equals(old.name()) || line.quantity() < count)
+                    throw new IllegalArgumentException("已报工需求的名称和尺寸不能修改，总件数不得小于已报工件数");
+            }
+            if (Objects.equals(previous.name(), input.name()) && Objects.equals(previous.materialModel(), input.materialModel()) &&
+                    Objects.equals(previous.externalRef(), input.externalRef()) && Objects.equals(previous.process(), process) &&
+                    previous.demands().equals(input.demands())) return previous;
+        }
+        CuttingTask task = new CuttingTask(id, input.name().trim(), input.materialModel().trim(), input.externalRef(),
+                previous == null ? 1 : previous.revision() + 1, List.copyOf(input.demands()), process);
+        tasks.put(id, task);
+        try { save(); } catch (RuntimeException error) {
+            if (previous == null) tasks.remove(id); else tasks.put(id, previous);
+            throw error;
+        }
+        return task;
+    }
+
+    public synchronized void prepareTaskSolve(SolveRequest request) {
+        if (request == null) throw new IllegalArgumentException("排料请求不能为空");
+        if (request.getTaskId() == null) return; // Existing standalone solver API remains usable.
+        CuttingTask task = tasks.get(request.getTaskId());
+        if (task == null || task.revision() != request.getTaskRevision()) throw new IllegalArgumentException("任务已更新，请重新载入需求");
+        boolean remnant = "remnant".equals(request.getFeedPortType());
+        if (!remnant && !"roll".equals(request.getFeedPortType())) throw new IllegalArgumentException("无效的材料来源");
+        MotherRollInfo roll = motherRolls.get(request.getRollId());
+        RemnantStock stock = remnant ? remnantPool.get(request.getSourceRemnantId()) : null;
+        if (remnant ? stock == null || !"AVAILABLE".equals(stock.getStatus()) : roll == null)
+            throw new IllegalArgumentException("所选材料已不可用，请重新选料");
+        String model = remnant ? stock.getMaterialBatch() : roll.getRollModel();
+        if (!task.materialModel().equals(model)) throw new IllegalArgumentException("材料型号与任务需求不一致");
+        double width = remnant ? stock.getWidth() : roll.getWidth();
+        if (!Double.isFinite(request.getRollW()) || Math.abs(request.getRollW() - width) > .001 ||
+                !Double.isFinite(request.getRollL()) || request.getRollL() <= 0 ||
+                (remnant ? Math.abs(request.getRollL() - stock.getLength()) > .001 : request.getRollL() > roll.getCurrentRemainingLength()))
+            throw new IllegalArgumentException("加工尺寸与所选材料库存不一致");
+        double start = request.getWindowStartY();
+        if (!Double.isFinite(start) || (remnant ? start != 0 : start < roll.getUsedLength() || start + request.getRollL() > roll.getTotalLength()))
+            throw new IllegalArgumentException("工位超出母料可用范围，请重新装载");
+        if (remnant && !Objects.equals(stock.getSourceRollId(), request.getRollId())) throw new IllegalArgumentException("料头来源母卷不一致");
+        request.setRollModel(model);
+        if (request.getDemands() == null || request.getDemands().isEmpty()) throw new IllegalArgumentException("没有待切需求");
+        Map<String, Integer> counts = completedQuantities(task.id());
+        Set<Integer> seen = new HashSet<>();
+        for (var demand : request.getDemands()) {
+            if (demand == null || !seen.add(demand.getId())) throw new IllegalArgumentException("排料需求编号重复或为空");
+            CuttingTask.Line line = task.demands().stream().filter(d -> d.id() == demand.getId()).findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("需求不属于当前任务"));
+            if (demand.getWidth() != line.width() || demand.getLength() != line.length() ||
+                    demand.getDemand() <= 0 || demand.getDemand() > line.quantity() - counts.getOrDefault(String.valueOf(line.id()), 0))
+                throw new IllegalArgumentException("需求尺寸或剩余数量已变化，请刷新任务后重新排料");
+            demand.setName(line.name());
+            demand.setAllowRotation(line.allowRotation());
+        }
+    }
+
+    private void validateTaskPlan(SolveRequest request, SolveResponse plan) {
+        if (request.getTaskId() == null) return;
+        prepareTaskSolve(request);
+        Map<Integer, Long> output = plan.getPieces().stream().collect(Collectors.groupingBy(p -> p.getDemandId(), Collectors.counting()));
+        for (var entry : output.entrySet()) {
+            var demand = request.getDemands().stream().filter(d -> d.getId() == entry.getKey()).findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("裁片缺少需求归属"));
+            if (entry.getValue() > demand.getDemand()) throw new IllegalArgumentException("裁片数量超过需求");
+        }
+    }
+
+    public synchronized List<Map<String, Object>> materialCandidates(SolveRequest request) {
+        if (request == null || request.getRollModel() == null || request.getDemands() == null)
+            throw new IllegalArgumentException("请先填写材料型号和需求");
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (RemnantStock stock : getAvailableRemnants()) {
+            if (!request.getRollModel().equals(stock.getMaterialBatch())) continue;
+            addCandidate(result, request, "remnant", stock.getId(), stock.getSourceRollId(), stock.getWidth(), stock.getLength(), stock.getLocation(), stock.isHasDefect());
+        }
+        result.sort(Comparator.comparingDouble(c -> ((Number)c.get("width")).doubleValue() * ((Number)c.get("length")).doubleValue()));
+        for (MotherRollInfo roll : motherRolls.values()) {
+            if (!request.getRollModel().equals(roll.getRollModel()) || roll.getCurrentRemainingLength() <= 0) continue;
+            addCandidate(result, request, "roll", roll.getRollId(), roll.getRollId(), roll.getWidth(), roll.getCurrentRemainingLength(), roll.getStorageLocation(), !roll.getDefects().isEmpty());
+        }
+        return result;
+    }
+
+    private void addCandidate(List<Map<String, Object>> result, SolveRequest request, String type, String id, String rollId,
+                              double width, double length, String location, boolean defects) {
+        long fit = request.getDemands().stream().filter(d -> d != null && d.getDemand() > 0 && d.getWidth() > 0 && d.getLength() > 0 &&
+                ((d.getWidth() <= width && d.getLength() <= length && (request.isAllowLongitudinal() || Math.abs(d.getWidth()-width) < .001)) ||
+                 ((request.isAllowRotation() || d.isAllowRotation()) && d.getLength() <= width && d.getWidth() <= length &&
+                  (request.isAllowLongitudinal() || Math.abs(d.getLength()-width) < .001)))).count();
+        if (fit == 0) return;
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("type", type); row.put("id", id); row.put("rollId", rollId); row.put("width", width); row.put("length", length);
+        row.put("location", location); row.put("hasDefect", defects); row.put("fittingLines", fit);
+        result.add(row);
+    }
+
     public synchronized Map<String, Object> confirm(SolveRequest request, SolveResponse plan, CutReport report) {
         Map<String, Object> old = receipts.get(report.planId());
         if (old != null) return old;
+        validateTaskPlan(request, plan);
         boolean remnantFeed = "remnant".equalsIgnoreCase(request.getFeedPortType());
         MotherRollInfo roll = motherRolls.get(request.getRollId());
         RemnantStock parent = remnantFeed ? remnantPool.get(request.getSourceRemnantId()) : null;
@@ -197,6 +347,11 @@ public class RemnantService {
         }
         Map<String, Object> receipt = new LinkedHashMap<>();
         receipt.put("planId", report.planId());
+        receipt.put("taskId", request.getTaskId());
+        receipt.put("sourceRemnantId", request.getSourceRemnantId());
+        Map<String, Integer> output = new LinkedHashMap<>();
+        plan.getPieces().forEach(p -> output.merge(String.valueOf(p.getDemandId()), 1, Integer::sum));
+        receipt.put("demandQuantities", output);
         receipt.put("rollId", request.getRollId());
         receipt.put("windowStartY", request.getWindowStartY());
         receipt.put("feedPortType", remnantFeed ? "remnant" : "roll");
@@ -231,6 +386,8 @@ public class RemnantService {
     public synchronized boolean resetRoll(String rollId) {
         MotherRollInfo roll = motherRolls.get(rollId);
         if (roll == null) return false;
+        if (receipts.values().stream().anyMatch(r -> rollId.equals(r.get("rollId")) && r.get("taskId") != null))
+            throw new IllegalArgumentException("该母卷已有任务报工记录，不能通过演示重置清除");
         roll.setCurrentRemainingLength(roll.getTotalLength());
         roll.setUsedLength(0.0);
         receipts.entrySet().removeIf(e -> rollId.equals(e.getValue().get("rollId")));

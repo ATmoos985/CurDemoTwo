@@ -74,7 +74,7 @@ export function renderRadar() {
     oldScales.forEach(el => el.remove());
 
     // 计算当前母卷已实切末端与布头基准 (0 ~ maxConfirmedY)
-    let maxConfirmedY = 0;
+    let maxConfirmedY = data.stockUsedLength || 0;
     (data.pieces || []).filter(p => p.confirmed).forEach(p => {
         if (p.y + p.l > maxConfirmedY) maxConfirmedY = p.y + p.l;
     });
@@ -464,6 +464,10 @@ export function advanceBed(delta) {
     }
 }
 
+export function nextCutPosition(data) {
+    const receiptEnd = data.lastReceipt?.feedPortType === 'roll' ? data.lastReceipt.windowStartY + data.lastReceipt.actualCutLen : 0;
+    return Math.max(data.stockUsedLength || 0, receiptEnd, 0, ...(data.pieces || []).map(p => p.y + p.l), ...(data.cuts || []).filter(c => c.type === '横切').map(c => c.pos));
+}
 export function smartAdvanceBed() {
     const data = state.getCurrentCaseData();
     if (!data) return;
@@ -471,24 +475,12 @@ export function smartAdvanceBed() {
     const bedL = data.bedL || 5000;
     const curY = data.windowStartY || 0;
 
-    let maxCutY = 0;
-    if (data.pieces && data.pieces.length > 0) {
-        maxCutY = Math.max(...data.pieces.map(p => p.y + p.l));
-    }
-    if (data.cuts && data.cuts.length > 0) {
-        data.cuts.filter(c => c.type === "横切").forEach(c => {
-            if (c.pos > maxCutY) maxCutY = c.pos;
-        });
-    }
-
-    let nextY = 0;
-    if (maxCutY > 0) {
-        nextY = Math.round(maxCutY);
-    } else {
-        nextY = curY + bedL;
-    }
-
-    nextY = Math.max(0, Math.min(totalL - bedL, nextY));
+    if (state.currentCutMode === 'remnant') return;
+    const nextY = Math.min(totalL, nextCutPosition(data) || curY + bedL);
+    if (nextY >= totalL) return;
+    data.bedL = Math.min(bedL, totalL - nextY);
+    const lengthInput = document.getElementById('inp-bed-l');
+    if (lengthInput) lengthInput.value = data.bedL;
 
     if (nextY !== curY) {
         data.cuts = [];

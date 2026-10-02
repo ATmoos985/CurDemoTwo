@@ -1,6 +1,6 @@
 /** 物料库存：清单选料，详情核对；写入沿用现有库存接口。 */
 import { state } from '../../core/state.js';
-import { onMotherRollChange, refreshShelfRemnantsList } from '../remnant/remnant-shelf.js';
+import { switchCutMode, onMotherRollChange, refreshShelfRemnantsList } from '../remnant/remnant-shelf.js';
 import { renderScene } from '../cad/cad-renderer.js';
 import { renderRadar } from '../radar/radar-scrubber.js';
 import { renderDefectsUI } from '../solver/quota-manager.js';
@@ -377,7 +377,7 @@ export async function mountRollToStation(rollId) {
     const sel = document.getElementById("sel-mother-roll-id");
     if (sel) {
         sel.value = rollId;
-        await onMotherRollChange();
+        await switchCutMode("roll");
         closeMaterialModal();
         alert(`已成功装载母卷 [${rollId}] 至主 CAM 裁切工位！`);
     }

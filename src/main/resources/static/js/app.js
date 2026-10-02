@@ -1,3 +1,4 @@
+import { initTaskWorkspace, newCuttingTask, startTaskDraft, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, taskInputChanged } from './plugins/solver/task-workspace.js';
 /**
  * 【主装配器】CAM 前端应用主入口 (Application Orchestrator)
  * 挂载微内核与所有独立插件，完成全局事件编排与向后兼容性绑定
@@ -204,6 +205,11 @@ export function closePresetDropdown() {
 }
 
 export async function selectPresetCase(caseId) {
+    const alreadyInert = document.body.inert;
+    document.body.inert = true;
+    try {
+    startTaskDraft(document.querySelector(`#btn-case-${caseId} .preset-item-name`)?.textContent || "示例切割任务");
+    state.scenarios = (await import("./plugins/presets/scenarios.js")).getInitialScenarios();
     if (typeof loadCase === 'function') {
         loadCase(caseId);
     }
@@ -266,16 +272,11 @@ export async function selectPresetCase(caseId) {
             selector.value = selectedRoll;
         }
         await onMotherRollChange();
-        if (caseId === 7 || caseId === 8) {
-            setTimeout(() => {
-                if (window.camApp && typeof window.camApp.triggerSolve === 'function') {
-                    window.camApp.triggerSolve();
-                }
-            }, 300);
-        }
     }
+    document.getElementById("task-material").value = document.getElementById("lbl-roll-model-desc").textContent;
     updatePresetTriggerLabel(caseId);
     closePresetDropdown();
+    } finally { document.body.inert = alreadyInert; }
 }
 
 export function updatePresetTriggerLabel(caseId) {
@@ -310,6 +311,7 @@ bus.on('piece:moved', (payload) => {
 // 2. 导出面向全局 DOM 与 Inline Onclick 的统一命名空间
 // ==========================================
 const camApp = {
+    newCuttingTask, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, taskInputChanged,
     bus,
     state,
     toggleTheme,
@@ -455,6 +457,8 @@ window.camApp = camApp;
 // 3. 应用程序自启动装配与初始化 (Robust Bootstrap)
 // ==========================================
 async function bootstrapApp() {
+    document.body.inert = true;
+    try {
     const savedTheme = localStorage.getItem("cam_theme") || "light";
     setTheme(savedTheme);
 
@@ -475,8 +479,10 @@ async function bootstrapApp() {
     loadCase(1); // 默认打开案例1：窗帘定高整幅横切
     updatePresetTriggerLabel(1);
     await onMotherRollChange();
-    refreshShelfRemnantsList();
+    await initTaskWorkspace();
     renderToolpathUI();
+    } catch (error) { showToast("工作台初始化失败：" + error.message, "error"); }
+    finally { document.body.inert = false; }
 }
 
 if (document.readyState === "loading") {

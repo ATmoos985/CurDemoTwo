@@ -24,6 +24,7 @@ public class CuttingWorkflowService {
     }
 
     public SolveResponse solve(SolveRequest request) {
+        inventory.prepareTaskSolve(request);
         SolveResponse result = solverFactory.solve(request);
         if (result.isSuccess() && !result.getPieces().isEmpty()) {
             String id = UUID.randomUUID().toString();
@@ -42,6 +43,12 @@ public class CuttingWorkflowService {
         Map<String, Object> receipt = inventory.confirm(plan.request(), plan.response(), report);
         plans.remove(report.planId());
         return receipt;
+    }
+
+    public Map<String, Object> getPlan(String id) {
+        Plan plan = plans.get(id);
+        if (plan == null) throw new IllegalArgumentException("方案已失效，请重新排料");
+        return Map.of("unit", "mm", "coordinateSystem", "source-local-top-left", "request", plan.request(), "result", plan.response());
     }
 
     private record Plan(SolveRequest request, SolveResponse response) {}
