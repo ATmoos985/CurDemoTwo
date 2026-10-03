@@ -64,6 +64,45 @@ public class RemnantService {
     private record Snapshot(List<MotherRollInfo> rolls, List<RemnantStock> remnants,
                             Map<String, Map<String, Object>> receipts, int remnantSeq, int defectSeq, Map<String, CuttingTask> tasks) {}
 
+    private Snapshot snapshot() {
+        return new Snapshot(new ArrayList<>(motherRolls.values()), new ArrayList<>(remnantPool.values()),
+                receipts, remnantSeq.get(), defectSeq.get(), tasks);
+    }
+
+    private void restore(Snapshot snapshot) {
+        motherRolls.clear(); snapshot.rolls().forEach(r -> motherRolls.put(r.getRollId(), r));
+        remnantPool.clear(); snapshot.remnants().forEach(r -> remnantPool.put(r.getId(), r));
+        receipts.clear(); receipts.putAll(snapshot.receipts());
+        tasks.clear(); if (snapshot.tasks() != null) tasks.putAll(snapshot.tasks());
+        remnantSeq.set(snapshot.remnantSeq()); defectSeq.set(snapshot.defectSeq());
+    }
+
+    /** One business command either persists every change or restores its entire before-image. */
+    private <T> T mutate(java.util.function.Supplier<T> command) {
+        byte[] before = json.writeValueAsBytes(snapshot());
+        try {
+            T result = command.get();
+            save();
+            return result;
+        } catch (RuntimeException error) {
+            restore(json.readValue(before, Snapshot.class));
+            throw error;
+        }
+    }
+
+    public synchronized String materialFingerprint(SolveRequest request) {
+        if ("remnant".equalsIgnoreCase(request.getFeedPortType())) {
+            RemnantStock item = remnantPool.get(request.getSourceRemnantId());
+            if (item == null) throw new IllegalArgumentException("料头不存在，请重新选料");
+            return json.writeValueAsString(Arrays.asList(item.getId(), item.getWidth(), item.getLength(),
+                    item.getMaterialBatch(), item.getSourceRollId(), item.isHasDefect(), item.getDefects()));
+        }
+        MotherRollInfo roll = motherRolls.get(request.getRollId());
+        if (roll == null) throw new IllegalArgumentException("母卷不存在，请重新选料");
+        return json.writeValueAsString(Arrays.asList(roll.getRollId(), roll.getWidth(), roll.getTotalLength(),
+                roll.getRollModel(), roll.getBatchNo(), roll.getColor(), roll.getInspectionStatus(), roll.getDefects()));
+    }
+
     private void save() {
         try {
             Path parent = stateFile.toAbsolutePath().getParent();
@@ -109,6 +148,10 @@ public class RemnantService {
     }
 
     public synchronized CuttingTask saveTask(CuttingTask input) {
+        return mutate(() -> saveTaskInternal(input));
+    }
+
+    private CuttingTask saveTaskInternal(CuttingTask input) {
         if (input == null || input.name() == null || input.name().isBlank() || input.materialModel() == null ||
                 input.materialModel().isBlank() || input.demands() == null || input.demands().isEmpty() || input.demands().size() > 200)
             throw new IllegalArgumentException("请填写任务名称、材料型号和 1 至 200 项需求");
@@ -148,10 +191,6 @@ public class RemnantService {
         CuttingTask task = new CuttingTask(id, input.name().trim(), input.materialModel().trim(), input.externalRef(),
                 previous == null ? 1 : previous.revision() + 1, List.copyOf(input.demands()), process);
         tasks.put(id, task);
-        try { save(); } catch (RuntimeException error) {
-            if (previous == null) tasks.remove(id); else tasks.put(id, previous);
-            throw error;
-        }
         return task;
     }
 
@@ -234,6 +273,16 @@ public class RemnantService {
     }
 
     public synchronized Map<String, Object> confirm(SolveRequest request, SolveResponse plan, CutReport report) {
+        return mutate(() -> confirmInternal(request, plan, report));
+    }
+
+    public synchronized Map<String, Object> confirm(SolveRequest request, SolveResponse plan, CutReport report, String baseline) {
+        if (!Objects.equals(baseline, materialFingerprint(request)))
+            throw new IllegalArgumentException("材料或疵点已更新，请重新装载并排料");
+        return confirm(request, plan, report);
+    }
+
+    private Map<String, Object> confirmInternal(SolveRequest request, SolveResponse plan, CutReport report) {
         Map<String, Object> old = receipts.get(report.planId());
         if (old != null) return old;
         validateTaskPlan(request, plan);
@@ -303,11 +352,6 @@ public class RemnantService {
         double sourceArea = (remnantFeed ? parent.getArea() : request.getRollW() * len / 1_000_000.0);
         if (plan.getPieceArea() + remArea > sourceArea + 0.001) throw new IllegalArgumentException("裁片与料头面积超过实切用料面积");
 
-        int previousSeq = remnantSeq.get();
-        double previousRemaining = roll == null ? 0 : roll.getCurrentRemainingLength();
-        double previousUsed = roll == null ? 0 : roll.getUsedLength();
-        String previousParentStatus = parent == null ? null : parent.getStatus();
-        String previousParentConsumedAt = parent == null ? null : parent.getConsumedAt();
         if (remnantFeed) {
             parent.setStatus("CONSUMED");
             parent.setConsumedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
@@ -359,31 +403,21 @@ public class RemnantService {
         receipt.put("remainingLength", roll == null ? null : roll.getCurrentRemainingLength());
         receipt.put("finishedPieceCount", report.finishedPieceCount());
         receipt.put("pieceArea", plan.getPieceArea());
-        receipt.put("remArea", remArea);
+        double recoveredArea = children.stream().mapToDouble(RemnantStock::getArea).sum();
+        receipt.put("remArea", recoveredArea);
+        receipt.put("wasteArea", Math.max(0, sourceArea - plan.getPieceArea() - recoveredArea));
         receipt.put("utilization", sourceArea == 0 ? 0 : plan.getPieceArea() / sourceArea * 100);
         receipt.put("derivedRemnants", children);
         receipt.put("confirmedAt", LocalDateTime.now().toString());
         receipts.put(report.planId(), receipt);
-        try {
-            save();
-        } catch (RuntimeException error) {
-            receipts.remove(report.planId());
-            for (RemnantStock child : children) remnantPool.remove(child.getId());
-            remnantSeq.set(previousSeq);
-            if (roll != null) {
-                roll.setCurrentRemainingLength(previousRemaining);
-                roll.setUsedLength(previousUsed);
-            }
-            if (parent != null) {
-                parent.setStatus(previousParentStatus);
-                parent.setConsumedAt(previousParentConsumedAt);
-            }
-            throw error;
-        }
         return receipt;
     }
 
     public synchronized boolean resetRoll(String rollId) {
+        return mutate(() -> resetRollInternal(rollId));
+    }
+
+    private boolean resetRollInternal(String rollId) {
         MotherRollInfo roll = motherRolls.get(rollId);
         if (roll == null) return false;
         if (receipts.values().stream().anyMatch(r -> rollId.equals(r.get("rollId")) && r.get("taskId") != null))
@@ -417,7 +451,6 @@ public class RemnantService {
             r3.setDefects(defs);
             remnantPool.put(r3.getId(), r3);
         }
-        save();
         return true;
     }
 
@@ -611,6 +644,10 @@ public class RemnantService {
     }
 
     public synchronized MotherRollInfo saveOrUpdateMotherRoll(MotherRollInfo roll) {
+        return mutate(() -> saveOrUpdateMotherRollInternal(roll));
+    }
+
+    private MotherRollInfo saveOrUpdateMotherRollInternal(MotherRollInfo roll) {
         if (roll == null || roll.getRollId() == null || roll.getRollId().trim().isEmpty()) {
             throw new IllegalArgumentException("母卷编号 (rollId) 不能为空！");
         }
@@ -639,7 +676,6 @@ public class RemnantService {
             if (roll.getDefects() != null && !roll.getDefects().isEmpty()) {
                 existing.setDefects(roll.getDefects());
             }
-            save();
             return existing;
         } else {
             if (roll.getCreatedAt() == null) {
@@ -649,12 +685,15 @@ public class RemnantService {
                 roll.setCurrentRemainingLength(roll.getTotalLength());
             }
             motherRolls.put(roll.getRollId(), roll);
-            save();
             return roll;
         }
     }
 
     public synchronized Defect addDefectToRoll(String rollId, Defect defect) {
+        return mutate(() -> addDefectToRollInternal(rollId, defect));
+    }
+
+    private Defect addDefectToRollInternal(String rollId, Defect defect) {
         MotherRollInfo roll = getMotherRoll(rollId);
         if (roll == null) {
             throw new IllegalArgumentException("未找到母卷: " + rollId);
@@ -670,16 +709,18 @@ public class RemnantService {
             defect.setId(defectSeq.incrementAndGet());
         }
         roll.getDefects().add(defect);
-        save();
         return defect;
     }
 
     public synchronized boolean scrapRemnant(String id, String reason) {
+        return mutate(() -> scrapRemnantInternal(id, reason));
+    }
+
+    private boolean scrapRemnantInternal(String id, String reason) {
         RemnantStock item = remnantPool.get(id);
         if (item == null) return false;
         item.setStatus("SCRAPPED");
         item.setDefectDesc((item.getDefectDesc() != null ? item.getDefectDesc() + " | " : "") + "已报废: " + reason);
-        save();
         return true;
     }
 
@@ -738,6 +779,10 @@ public class RemnantService {
     }
 
     public synchronized RemnantStock registerRemnant(RemnantStock item) {
+        return mutate(() -> registerRemnantInternal(item));
+    }
+
+    private RemnantStock registerRemnantInternal(RemnantStock item) {
         if (item == null || !Double.isFinite(item.getWidth()) || !Double.isFinite(item.getLength()) ||
                 item.getWidth() <= 0 || item.getLength() <= 0) throw new IllegalArgumentException("料头宽长必须大于零");
         if (item.getId() == null || item.getId().trim().isEmpty()) {
@@ -752,11 +797,14 @@ public class RemnantService {
             item.setStatus("AVAILABLE");
         }
         remnantPool.put(item.getId(), item);
-        save();
         return item;
     }
 
     public synchronized RemnantStock autoRegisterCutRemnant(String rollId, String parentRemnantId, double w, double l, boolean hasDefect, String desc) {
+        return mutate(() -> autoRegisterCutRemnantInternal(rollId, parentRemnantId, w, l, hasDefect, desc));
+    }
+
+    private RemnantStock autoRegisterCutRemnantInternal(String rollId, String parentRemnantId, double w, double l, boolean hasDefect, String desc) {
         String dateStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMM"));
         String newId = "REM-" + dateStr + "-" + String.format("%03d", remnantSeq.incrementAndGet());
         if (parentRemnantId != null && !parentRemnantId.isEmpty()) {
@@ -768,28 +816,33 @@ public class RemnantService {
         rs.setQualityGrade(hasDefect ? "GRADE_DEFECT" : "GRADE_A");
         rs.setCreatedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
         remnantPool.put(rs.getId(), rs);
-        save();
         return rs;
     }
 
     public synchronized boolean consumeRemnant(String id) {
+        return mutate(() -> consumeRemnantInternal(id));
+    }
+
+    private boolean consumeRemnantInternal(String id) {
         if (id == null) return false;
         RemnantStock item = remnantPool.get(id);
         if (item != null) {
             item.setStatus("CONSUMED");
             item.setConsumedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
-            save();
             return true;
         }
         return false;
     }
 
     public synchronized boolean updateStatus(String id, String status) {
+        return mutate(() -> updateStatusInternal(id, status));
+    }
+
+    private boolean updateStatusInternal(String id, String status) {
         if (id == null) return false;
         RemnantStock item = remnantPool.get(id);
         if (item != null) {
             item.setStatus(status);
-            save();
             return true;
         }
         return false;
