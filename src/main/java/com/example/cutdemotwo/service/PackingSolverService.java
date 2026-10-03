@@ -20,7 +20,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
         return "packingsolver";
     }
 
-    @Value("${packingsolver.executable.path:d:/GitLab/packingsolver/build/src/rectangleguillotine/packingsolver_rectangleguillotine.exe}")
+    @Value("${packingsolver.executable.path:data/solver/packingsolver_rectangleguillotine.exe}")
     private String solverPath;
 
     private final com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService toolpathOptimizerService;
@@ -40,6 +40,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
     }
 
     public boolean isAvailable() {
+        if (solverPath == null || solverPath.isBlank()) return false;
         File f = new File(solverPath);
         return f.exists() && f.canExecute();
     }
@@ -52,8 +53,11 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
             return err;
         }
 
+        Path tmpDir = null;
+        Process process = null;
         try {
-            Path tmpDir = Files.createTempDirectory("ps_cut_");
+            req.validateSettings();
+            tmpDir = Files.createTempDirectory("ps_cut_");
             File binsCsv = tmpDir.resolve("bins.csv").toFile();
             File itemsCsv = tmpDir.resolve("items.csv").toFile();
             File defectsCsv = tmpDir.resolve("defects.csv").toFile();
@@ -124,7 +128,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
             cmd.add("--first-stage-orientation"); cmd.add(firstStage);
             cmd.add("--linear-programming-solver"); cmd.add("highs");
             cmd.add("--certificate"); cmd.add(certCsv.getAbsolutePath());
-            cmd.add("--time-limit"); cmd.add("2");
+            cmd.add("--time-limit"); cmd.add(Integer.toString(req.getTimeLimitSeconds()));
 
             if (!req.isAllowRotation()) {
                 cmd.add("--no-item-rotation");
@@ -132,35 +136,45 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
-            Process process = pb.start();
-
-            // Read output
-            StringBuilder logOut = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    logOut.append(line).append("\n");
-                }
-            }
-
-            int exitCode = process.waitFor();
+            Path output = tmpDir.resolve("solver.log");
+            pb.redirectOutput(output.toFile());
+            process = pb.start();
+            if (!process.waitFor(req.getTimeLimitSeconds() + 5L, java.util.concurrent.TimeUnit.SECONDS))
+                throw new IOException("求解超过时限，已终止；库存未变更");
+            int exitCode = process.exitValue();
             log.info("PackingSolver finished with code {}", exitCode);
 
-            if (!certCsv.exists() || certCsv.length() == 0) {
+            if (exitCode != 0 || !certCsv.exists() || certCsv.length() == 0) {
                 SolveResponse err = new SolveResponse();
                 err.setSuccess(false);
-                err.setMessage("求解失败或无证书输出:\n" + logOut);
+                log.warn("Solver failure code {} (0x{})", exitCode, Integer.toHexString(exitCode));
+                err.setMessage(exitCode == -1073741515 ? "求解器缺少运行库（0xC0000135），请检查服务器的 C++ 运行环境；库存未变更" :
+                        "求解器退出码 " + exitCode + "，未生成有效方案；请检查求解器运行环境和输入");
                 return err;
             }
 
             return parseCertificate(certCsv, req, itemMap, demandIdMap);
 
         } catch (Exception e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             log.error("Execution error", e);
             SolveResponse err = new SolveResponse();
             err.setSuccess(false);
             err.setMessage("求解执行异常: " + e.getMessage());
             return err;
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.descendants().forEach(ProcessHandle::destroyForcibly);
+                process.destroyForcibly();
+                try { process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS); }
+                catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            }
+            // Only delete files created in this invocation's fresh temporary directory; never follow links.
+            if (tmpDir != null) {
+                try (var files = Files.walk(tmpDir)) {
+                    for (Path file : files.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(file);
+                } catch (IOException cleanup) { log.warn("Unable to clean solver temporary directory", cleanup); }
+            }
         }
     }
 
@@ -261,7 +275,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                             (req.getWindowStartY() + req.getRollL() < req.getTotalRollL() - 100) &&
                             (n.w >= req.getRollW() - 30) &&
                             (physY + n.h >= req.getRollL() - 30 || n.y + n.h >= req.getRollL() - 30);
-                    if (!isContinuousMotherRollTail && n.w >= 200 && n.h >= 300) {
+                    if (!isContinuousMotherRollTail && n.w >= req.getMinRemnantWidth() && n.h >= req.getMinRemnantLength()) {
                         double area = (n.w * n.h) / 1_000_000.0;
                         boolean hasDefect = checkDefectOverlap(physX, physY, n.w, n.h, req.getDefects());
                         String status = hasDefect ? "带疵料头" : "可用料头";

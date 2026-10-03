@@ -25,7 +25,10 @@ export async function switchCutMode(mode, targetRemnant, presetData = null) {
     document.body.dataset.source = mode;
     document.getElementById('source-kind').textContent = mode === 'remnant' ? '在库料头' : '母卷';
     document.getElementById('source-remnant-summary').hidden = mode !== 'remnant';
-    if (mode === 'remnant') mountRemnantToBed(targetRemnant, presetData);
+    if (mode === 'remnant') {
+        data.materialAvailable = true; document.body.dataset.material = 'ready';
+        mountRemnantToBed(targetRemnant, presetData);
+    }
     else { data.windowStartY = 0; await onMotherRollChange(true); }
     updateDemandCompletionFromPieces(data);
     renderDemandsUI(data.demands);
@@ -37,15 +40,34 @@ export async function onMotherRollChange(forceResetBed = false) {
     const sel = document.getElementById("sel-mother-roll-id");
     state.pendingPlan = null;
     const rollId = sel ? sel.value : "ROLL-2026-0920";
+    const unavailable = () => {
+        const current = state.getCurrentCaseData();
+        Object.assign(current, {materialAvailable:false, rollId:'', stockUsedLength:0, stockRemainingLength:0,
+            pieces:[], cuts:[], remnants:[], cutIntervals:[], globalDefects:[], lastReceipt:null});
+        document.body.dataset.material = 'empty';
+        for (const id of ['lbl-roll-model-desc','lbl-roll-remaining-len','sb-roll-id']) {
+            const label = document.getElementById(id); if (label) label.textContent = '未装载';
+        }
+        for (const id of ['lbl-roll-w-desc','lbl-roll-used-len','lbl-roll-total-len','lbl-roll-base-origin','lbl-roll-rem-count','lbl-roll-rem-area']) {
+            const label = document.getElementById(id); if (label) label.textContent = '—';
+        }
+        document.getElementById('inp-roll-id').value = '';
+        document.getElementById('roll-len-progress').style.width = '0%';
+        renderDefectsUI([]); updateUIInfo();
+    };
+    if (!rollId) { unavailable(); return; }
     let spec = state.motherRollSpecs[rollId] || { model: "TC涤棉-B2026", rollW: 2000, totalRollL: 60000, bedL: 5000 };
     try {
         const response = await fetch(`/api/rolls/${encodeURIComponent(rollId)}`, { cache: "no-store" });
+        if (!response.ok) throw new Error('读取母卷失败，请刷新库存后重试');
         if (response.ok) {
             const roll = await response.json();
+            if (!roll?.rollId) { unavailable(); return; }
             if (roll && roll.rollId) {
                 spec = { model: roll.rollModel, rollW: roll.width, totalRollL: roll.totalLength,
                     bedL: Math.min(5000, roll.currentRemainingLength) };
                 const current = state.getCurrentCaseData();
+                current.materialAvailable = true; document.body.dataset.material = 'ready';
                 current.rollId = rollId;
                 current.stockUsedLength = roll.usedLength || 0;
                 current.stockRemainingLength = roll.currentRemainingLength;
@@ -76,7 +98,7 @@ export async function onMotherRollChange(forceResetBed = false) {
                 }
             }
         }
-    } catch (error) { console.error("读取母卷疵点失败", error); }
+    } catch (error) { unavailable(); throw error; }
 
     if (document.getElementById("inp-roll-id")) document.getElementById("inp-roll-id").value = rollId;
     if (document.getElementById("inp-roll-w")) document.getElementById("inp-roll-w").value = spec.rollW;

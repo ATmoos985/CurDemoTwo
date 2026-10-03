@@ -18,6 +18,7 @@ public class CuttingWorkflowService {
     }
 
     public SolveResponse solve(SolveRequest request) {
+        request.validateSettings();
         inventory.prepareTaskSolve(request);
         String baseline = inventory.materialFingerprint(request);
         SolveResponse result = solverFactory.solve(request);

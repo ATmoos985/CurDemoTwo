@@ -3,6 +3,7 @@
  */
 import { bus } from '../../core/event-bus.js';
 import { switchCutMode } from './remnant-shelf.js';
+import { showToast } from '../../core/toast.js';
 
 export async function openRemnantModal() {
     const modal = document.getElementById("remnant-modal");
@@ -64,7 +65,7 @@ export async function refreshRemnantsList() {
 export async function executeBarcodeScan() {
     const code = document.getElementById("inp-scan-barcode").value.trim();
     if (!code) {
-        alert("请输入或扫描料头条码！");
+        showToast('请输入或扫描料头条码', 'warning');
         return;
     }
     try {
@@ -76,13 +77,13 @@ export async function executeBarcodeScan() {
         if (res.ok) {
             const rem = await res.json();
             if (rem && rem.id) {
-                selectAndLoadRemnant(rem.id);
+                await selectAndLoadRemnant(rem.id);
             } else {
-                alert(`【未识别到料头】条码 [${code}] 在现场库存中不存在！`);
+                showToast(`料头 ${code} 不存在或不可用`, 'warning');
             }
         }
     } catch (e) {
-        alert("扫码识别异常: " + e.message);
+        showToast('扫码失败：' + e.message, 'error');
     }
 }
 
@@ -103,11 +104,11 @@ export async function selectAndLoadRemnant(remId) {
             const rem = await res.json();
             if (rem && rem.id) {
                 closeRemnantModal();
-                switchCutMode("remnant", rem);
-                alert(`成功识别并装载料头 [${rem.id}]！\n规格: ${rem.width}×${rem.length} mm\n库位: ${rem.location}\n模式: 模式二：料头复用精益切割\n母卷实切扣减已锁定为 0mm，点击执行料头排料即可！`);
+                await switchCutMode('remnant', rem);
+                showToast(`已装载料头 ${rem.id}，母卷扣料为 0 mm`, 'success');
             }
         }
     } catch (e) {
-        alert("装载料头失败: " + e.message);
+        showToast('装载料头失败：' + e.message, 'error');
     }
 }

@@ -4,6 +4,7 @@ import { switchCutMode, onMotherRollChange, refreshShelfRemnantsList } from '../
 import { renderScene } from '../cad/cad-renderer.js';
 import { renderRadar } from '../radar/radar-scrubber.js';
 import { renderDefectsUI } from '../solver/quota-manager.js';
+import { showToast, confirmAction } from '../../core/toast.js';
 
 let cachedRolls = [], cachedRemnants = [];
 let activeRollId = null, activeRemnantId = null, activeTab = 'rolls';
@@ -65,6 +66,9 @@ export async function refreshRollsList() {
         if (!response.ok) throw new Error('读取失败');
         cachedRolls = await response.json();
         for (const roll of cachedRolls) {
+            const materials = document.getElementById('task-material');
+            if (materials && ![...materials.options].some(option => option.value === roll.rollModel))
+                materials.add(new Option(roll.rollModel, roll.rollModel));
             const selector = document.getElementById('sel-mother-roll-id');
             if (selector && ![...selector.options].some(option => option.value === roll.rollId)) {
                 selector.add(new Option(`${roll.rollId} (${roll.rollModel})`, roll.rollId));
@@ -363,12 +367,13 @@ export async function submitNewDefect(rollId) {
                 renderScene();
                 renderRadar();
             }
-            alert("疵点标定成功并已持久化至母卷档案！");
+            state.pendingPlan = null;
+            showToast('疵点已保存，请重新排料后报工', 'success');
         } else {
-            alert("疵点标定失败：坐标需落在母卷范围内");
+            showToast((await res.json()).message || '疵点标定失败', 'error');
         }
     } catch (e) {
-        alert("提交疵点失败，请检查服务状态");
+        showToast('提交疵点失败，请检查服务状态', 'error');
     }
 }
 
@@ -376,28 +381,31 @@ export async function submitNewDefect(rollId) {
 export async function mountRollToStation(rollId) {
     const sel = document.getElementById("sel-mother-roll-id");
     if (sel) {
+        if (![...sel.options].some(option => option.value === rollId)) sel.add(new Option(rollId, rollId));
         sel.value = rollId;
-        await switchCutMode("roll");
+        try { await switchCutMode("roll"); } catch (error) { return showToast(error.message, 'error'); }
         closeMaterialModal();
-        alert(`已成功装载母卷 [${rollId}] 至主 CAM 裁切工位！`);
+        showToast(`已装载母卷 ${rollId}`, 'success');
     }
 }
 
 
 export async function scrapRemnantById(id) {
-    if (!confirm(`确定对料头 [${id}] 执行报废处置吗？报废后将移出可用货架库。`)) return;
+    if (!await confirmAction(`料头 ${id} 将移出可用货架，请确认实物已判定报废。`, {title:'报废料头', action:'确认报废'})) return;
     try {
-        const res = await fetch(`/api/remnants/${id}/scrap`, {
+        const res = await fetch(`/api/remnants/${encodeURIComponent(id)}/scrap`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ reason: "车间质检判定破损报废" })
         });
+        const result = await res.json();
+        if (!res.ok || !result.success) throw new Error(result.message || '报废失败，料头可能已变化');
         if (res.ok) {
             renderRemnantsLineage();
             refreshShelfRemnantsList();
-            alert(`料头 [${id}] 已成功核销报废！`);
+            showToast(`料头 ${id} 已报废`, 'success');
         }
     } catch (e) {
-        alert("操作失败");
+        showToast(e.message, 'error');
     }
 }

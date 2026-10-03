@@ -477,9 +477,7 @@ async function bootstrapApp() {
     setupRadarInteraction();
     initLayoutResizers();
     initNestingKeyboardShortcuts();
-    loadCase(1); // 默认打开案例1：窗帘定高整幅横切
-    updatePresetTriggerLabel(1);
-    await onMotherRollChange();
+    // Load real inventory before selecting material; empty databases have no demo rolls.
     await initTaskWorkspace();
     renderToolpathUI();
     } catch (error) { showToast("工作台初始化失败：" + error.message, "error"); }

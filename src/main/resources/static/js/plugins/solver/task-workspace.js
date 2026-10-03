@@ -3,6 +3,7 @@ import { getInitialScenarios } from '../presets/scenarios.js';
 import { renderDemandsUI, getDemandsFromUI, updateDemandCompletionFromPieces } from './quota-manager.js';
 import { switchCutMode } from '../remnant/remnant-shelf.js';
 import { renderScene, resetToBedView } from '../cad/cad-renderer.js';
+import { renderRadar } from '../radar/radar-scrubber.js';
 import { updateUIInfo, restoreSavedPlan } from './solver-client.js';
 import { showToast, confirmAction } from '../../core/toast.js';
 
@@ -144,7 +145,7 @@ export async function loadTask(id) {
             const p = task.process;
             Object.assign(data, {bedL: Math.min(p.bedLength, data.stockRemainingLength), trimStart:p.trimStart, cutOrigin:p.cutOrigin,
                 firstStageOrientation:p.firstStageOrientation, allowRotation:p.allowRotation, allowLongitudinal:p.allowLongitudinal});
-            updateUIInfo(); renderScene(); resetToBedView();
+            updateUIInfo(); renderScene(); renderRadar(); resetToBedView();
         }
         updateDemandCompletionFromPieces(data);
         renderDemandsUI(data.demands);
@@ -155,7 +156,8 @@ export async function loadTask(id) {
         el('task-details').open = false;
         el('task-details-title').textContent = task.name;
         el('preset-current-label').textContent = '载入示例需求';
-    } catch (error) { showToast(error.message, 'error'); }
+        return true;
+    } catch (error) { showToast(error.message, 'error'); return false; }
 }
 
 export async function matchTaskMaterials() {
@@ -260,8 +262,7 @@ export async function initTaskWorkspace() {
     el('task-material').replaceChildren(...[...new Set(rolls.map(r => r.rollModel))].map(model => new Option(model, model)));
     el('sel-mother-roll-id').replaceChildren(...rolls.map(r => new Option(`${r.rollId} (${r.width} mm)`, r.rollId)));
     const saved = localStorage.getItem('cutting-task-id');
-    if (saved) await loadTask(saved);
-    else {
+    if (!saved || !await loadTask(saved)) {
         state.getCurrentCaseData().demands = [];
         state.getCurrentCaseData().pieces = [];
         await newCuttingTask();

@@ -498,7 +498,7 @@ public class RemnantService {
         }
         List<RemnantStock> children = new ArrayList<>();
         for (RemnantPiece item : actual) {
-            if (item.getW() < 200 || item.getL() < 300) continue;
+            if (item.getW() < request.getMinRemnantWidth() || item.getL() < request.getMinRemnantLength()) continue;
             RemnantPiece proposed = plan.getRemnants().stream().filter(p -> p.getId().equals(item.getId())).findFirst().orElseThrow();
             List<Defect> childDefects = new ArrayList<>();
             for (Defect defect : request.getDefects()) {

@@ -532,15 +532,14 @@
     </div>
 
     <!-- 全局工艺参数与显示配置中心弹窗 (Settings Modal) -->
-    <div id="settings-modal" class="settings-modal-overlay">
+    <dialog id="settings-modal" class="settings-native-dialog" aria-labelledby="settings-title">
         <div class="settings-modal-dialog">
             <!-- 弹窗标题栏 -->
             <div class="settings-modal-header">
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-weight: 700; font-size: 14px; color: var(--accent-blue);">CAM 系统与全局工艺配置中心</span>
-                    <span class="header-tag">Industrial Config V1.1</span>
+                    <h2 id="settings-title">工艺与显示设置</h2>
                 </div>
-                <button onclick="closeSettingsModal()" style="background: transparent; border: none; color: var(--text-muted); font-size: 18px; cursor: pointer; font-weight: bold;">关闭</button>
+                <button class="tool-btn" onclick="closeSettingsModal()">关闭</button>
             </div>
 
             <!-- 分组选项卡导航 -->
@@ -628,14 +627,11 @@
                         </div>
                     </div>
                     <div class="prop-row">
-                        <span class="prop-label">裁片排产时提示匹配在库料头</span>
-                        <select class="prop-input" id="cfg-rem-hint" style="width: 220px;">
-                            <option value="1" selected>开启提示 (推荐可用在库料头)</option>
-                            <option value="0">关闭提示 (仅排母卷)</option>
-                        </select>
+                        <span class="prop-label">在库料头匹配</span>
+                        <span class="muted">通过“匹配材料”统一选择，料头优先列出</span>
                     </div>
                     <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px; line-height: 1.5;">
-                        小于最小回收尺寸的余料计入损耗；符合尺寸的实测料头在实切确认后入库。
+                        设置仅保存在本机浏览器，随新方案发送并固化。小于最小回收尺寸的余料计入损耗；符合尺寸的实测料头在报工确认后入库。
                     </div>
                 </div>
 
@@ -649,7 +645,7 @@
                         </span>
                     </div>
                     <div class="prop-row">
-                        <span class="prop-label">求解超时限制 (Timeout Seconds)</span>
+                        <span class="prop-label">求解时间预算（另留 5 秒退出时间）</span>
                         <div style="display: flex; align-items: center; gap: 6px;">
                             <input type="number" class="prop-input" id="cfg-timeout" value="3" min="1" max="60" style="width: 100px;">
                             <span style="font-size: 12px; color: var(--text-muted);">秒</span>
@@ -671,14 +667,14 @@
 
             <!-- 弹窗底部操作栏 -->
             <div class="settings-footer">
-                <button class="tool-btn" style="color: #ef4444; border-color: #ef4444;" onclick="restoreDefaultSettings()">恢复默认值</button>
+                <button class="tool-btn" onclick="restoreDefaultSettings()">填入默认值</button>
                 <div style="display: flex; gap: 8px;">
                     <button class="tool-btn" onclick="closeSettingsModal()">取消</button>
-                    <button class="tool-btn active" style="background: #0284c7; padding: 6px 16px; font-weight: 700;" onclick="saveSettings()">保存并应用</button>
+                    <button class="tool-btn active" onclick="saveSettings()">保存并应用</button>
                 </div>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- 模块化前端 ES6 主程序入口 (Modular ES6 Plugin Architecture) -->
     <script type="module" src="js/app.js?v=20261001_workspace"></script>

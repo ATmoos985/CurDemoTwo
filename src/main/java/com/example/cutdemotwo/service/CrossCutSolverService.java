@@ -50,7 +50,7 @@ public class CrossCutSolverService implements ICutSolverEngine {
         List<RemnantPiece> remnants = new ArrayList<>();
         List<CutStep> cuts = new ArrayList<>();
         double cursor = req.getTrimStart();
-        if (cursor >= 300) addRemnant(remnants, req.getRollW(), 0, cursor, overlaps(blocked, 0, cursor));
+        if (req.getRollW() >= req.getMinRemnantWidth() && cursor >= req.getMinRemnantLength()) addRemnant(remnants, req.getRollW(), 0, cursor, overlaps(blocked, 0, cursor));
         int unmet = 0;
         for (PieceDemand demand : req.getDemands()) {
             double length = demand.getLength();
@@ -68,7 +68,7 @@ public class CrossCutSolverService implements ICutSolverEngine {
                     continue;
                 }
                 if (start > cursor) {
-                    if (start - cursor >= 300) addRemnant(remnants, req.getRollW(), cursor, start - cursor, overlaps(blocked, cursor, start));
+                    if (req.getRollW() >= req.getMinRemnantWidth() && start - cursor >= req.getMinRemnantLength()) addRemnant(remnants, req.getRollW(), cursor, start - cursor, overlaps(blocked, cursor, start));
                     cuts.add(new CutStep(cuts.size() + 1, "横切", start, 0, req.getRollW(), "隔离疵点区后起切"));
                 }
                 pieces.add(new PlacedPiece(pieces.size() + 1, demand.getName(), 0, start,
@@ -82,7 +82,7 @@ public class CrossCutSolverService implements ICutSolverEngine {
             res.setMessage("当前窗口无法排入整幅裁片，请检查尺寸、疵点或扩大窗口");
             return res;
         }
-        if (req.getRollL() - cursor >= 300) addRemnant(remnants, req.getRollW(), cursor, req.getRollL() - cursor,
+        if (req.getRollW() >= req.getMinRemnantWidth() && req.getRollL() - cursor >= req.getMinRemnantLength()) addRemnant(remnants, req.getRollW(), cursor, req.getRollL() - cursor,
                 overlaps(blocked, cursor, req.getRollL()));
         double totalArea = req.getRollW() * req.getRollL() / 1_000_000.0;
         double pieceArea = pieces.stream().mapToDouble(p -> p.getW() * p.getL()).sum() / 1_000_000.0;

@@ -338,7 +338,7 @@ export function addDefectRow() {
             <span>Y:</span><input type="number" class="mini-input d-y" value="1000" onchange="window.camApp.onParamChange()">
             <span>宽:</span><input type="number" class="mini-input d-w" value="150" onchange="window.camApp.onParamChange()">
             <span>长:</span><input type="number" class="mini-input d-h" value="200" onchange="window.camApp.onParamChange()">
-            <span>余:</span><input type="number" class="mini-input d-margin" value="20" title="安全避让余量" onchange="window.camApp.onParamChange()">
+            <span>余:</span><input type="number" class="mini-input d-margin" value="${Number(localStorage.getItem('cam_margin') ?? 20)}" title="安全避让余量" onchange="window.camApp.onParamChange()">
         </div>
     `;
     container.appendChild(row);
@@ -389,7 +389,8 @@ export function getDefectsFromUI() {
         const y = parseFloat(r.querySelector(".d-y").value) || 0;
         const w = parseFloat(r.querySelector(".d-w").value) || 100;
         const h = parseFloat(r.querySelector(".d-h").value) || 100;
-        const margin = parseFloat(r.querySelector(".d-margin").value) || 20;
+        const marginValue = Number(r.querySelector(".d-margin").value);
+        const margin = Number.isFinite(marginValue) ? marginValue : 20;
         list.push({ id, x, y, w, h, margin });
     });
     return list;

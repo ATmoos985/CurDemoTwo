@@ -273,3 +273,9 @@ footer { height: 32px; min-height: 32px; font-size: 11px; gap: 18px; }
 .action-dialog label { display: grid; gap: 8px; font-size: 13px; }
 .action-dialog textarea { box-sizing: border-box; width: 100%; resize: vertical; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.settings-native-dialog { padding: 0; border: 0; background: transparent; color: var(--text-main); max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }
+.settings-native-dialog::backdrop { background: #0005; }
+.settings-native-dialog h2 { margin: 0; font-size: 16px; font-weight: 600; }
+
+[data-material="empty"] #konva-container, [data-material="empty"] #roll-radar-bar { visibility: hidden; }
+[data-material="empty"] #viewport::after { content: '暂无已装载材料，请从“物料与库存”录入或选择母卷'; position: absolute; left: 24px; right: 24px; top: 45%; text-align: center; padding: 24px; background: var(--panel-bg); color: var(--text-muted); border: 1px solid var(--panel-border); font-size: 14px; pointer-events: none; }

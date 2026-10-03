@@ -13,7 +13,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api")
-@CrossOrigin(origins = "*")
 public class FabricCutController {
 
     private final com.example.cutdemotwo.service.solver.SolverFactory solverFactory;
@@ -105,7 +104,9 @@ public class FabricCutController {
 
     @GetMapping("/rolls/{rollId}")
     public com.example.cutdemotwo.model.MotherRollInfo getRollDetail(@PathVariable String rollId) {
-        return remnantService.getMotherRoll(rollId);
+        var roll = remnantService.getMotherRoll(rollId);
+        if (roll == null) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.NOT_FOUND, "母卷不存在");
+        return roll;
     }
 
     @PostMapping("/rolls")

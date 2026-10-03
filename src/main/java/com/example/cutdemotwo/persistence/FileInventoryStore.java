@@ -11,7 +11,11 @@ public class FileInventoryStore implements InventoryStore {
     public FileInventoryStore(String path) { file = Path.of(path); }
     @Override public InventorySnapshot load() {
         if (!Files.exists(file)) return null;
-        try { return json.readValue(file.toFile(), InventorySnapshot.class); }
+        try {
+            var document = (tools.jackson.databind.node.ObjectNode) json.readTree(file.toFile());
+            if (!document.has("revision")) document.put("revision", 0L);
+            return json.treeToValue(document, InventorySnapshot.class);
+        }
         catch (Exception e) { throw new IllegalStateException("库存文件读取失败，请检查后恢复: " + file, e); }
     }
     @Override public long save(InventorySnapshot snapshot) {

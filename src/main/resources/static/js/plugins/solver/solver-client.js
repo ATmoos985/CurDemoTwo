@@ -8,11 +8,12 @@ import { renderScene, resetToBedView } from '../cad/cad-renderer.js';
 import { drawRulers } from '../cad/cad-rulers.js';
 import { renderRadar, smartAdvanceBed } from '../radar/radar-scrubber.js';
 import {
-    updateDemandCompletionFromPieces, recalculateRollStats,
+    updateDemandCompletionFromPieces, recalculateRollStats, updateOriginHeaderSummary,
     addOrMergeInterval, renderDemandsUI, renderDefectsUI,
     getDemandsFromUI, getDefectsFromUI
 } from './quota-manager.js';
 import { showToast } from '../../core/toast.js';
+import { solverSettings } from '../settings/settings.js';
 import { selectRemnant, clearRemnantSelection, hoverRemnant } from '../cad/cad-remnant-highlight.js';
 
 export function updateUIInfo() {
@@ -29,10 +30,11 @@ export function updateUIInfo() {
     if (document.getElementById("sel-first-stage")) document.getElementById("sel-first-stage").value = data.firstStageOrientation || "horizontal";
     if (document.getElementById("sel-allow-rotation")) document.getElementById("sel-allow-rotation").value = data.allowRotation ? "1" : "0";
     if (document.getElementById("sel-allow-longitudinal")) document.getElementById("sel-allow-longitudinal").value = data.allowLongitudinal === false ? "0" : "1";
+    updateOriginHeaderSummary();
 
     const rollIdInp = document.getElementById("inp-roll-id");
     if (rollIdInp && document.getElementById("sb-roll-id")) {
-        document.getElementById("sb-roll-id").innerText = rollIdInp.value;
+        document.getElementById("sb-roll-id").innerText = data.materialAvailable === false ? '未装载' : rollIdInp.value;
     }
     if (document.getElementById("sb-engine")) {
         document.getElementById("sb-engine").innerText = data.engine || "智能几何排料内核";
@@ -142,7 +144,7 @@ export function updateUIInfo() {
         reportButton.textContent = ready ? `报工保存 · ${state.pendingPlan.result.pieces.length} 件` : '报工保存';
     }
     const solveButton = document.getElementById('btn-trigger-solve-station');
-    if (solveButton) { solveButton.classList.toggle('plan-ready', ready); solveButton.textContent = ready ? '重新排料' : '生成排料方案'; }
+    if (solveButton) { solveButton.disabled = data.materialAvailable === false; solveButton.classList.toggle('plan-ready', ready); solveButton.textContent = ready ? '重新排料' : '生成排料方案'; }
     const hint = document.getElementById('station-action-hint');
     if (hint) hint.textContent = ready ? '本工位尚未报工。实切后点击“报工保存”，确认后自动接续。' :
         data.lastReceipt ? '上一工位已报工保存。可继续生成本工位方案。' : '先生成方案，再核对实切并报工保存。';
@@ -313,9 +315,12 @@ export function restoreSavedPlan(saved) {
     data.pieces = (result.pieces || []).map(p => ({...p, y:p.y + offset}));
     data.remnants = (result.remnants || []).map(r => ({...r, y:r.y + offset}));
     data.cuts = (result.cuts || []).map(c => ({...c, pos:c.type === '横切' ? c.pos + offset : c.pos,
-        start:c.type === '横切' ? c.start : c.start + offset, end:c.type === '横切' ? c.end : c.end + offset}));
+        start:c.type === '横切' ? c.start : c.start + offset, end:c.type === '横切' ? c.end : c.end + offset,
+        ...(c.startY === undefined ? {} : {startY:c.startY + offset}),
+        ...(c.endY === undefined ? {} : {endY:c.endY + offset})}));
     data.cutIntervals = [{start:offset, end:offset + request.rollL}];
     data.engine = result.engine;
+    recalculateRollStats(data);
     updateUIInfo(); renderScene(); renderRadar(); resetToBedView();
     state.pendingPlan = {result, request, rollId:request.rollId, rollModel:request.rollModel, bedL:request.rollL,
         feedPortType:request.feedPortType, sourceRemnantId:request.sourceRemnantId,
@@ -392,10 +397,11 @@ async function runSolve() {
             y: Math.max(0, d.y - winStartY),
             w: d.w,
             h: d.h,
-            margin: d.margin || 20
+            margin: d.margin ?? 20
         }));
 
     const payload = {
+        ...solverSettings(),
         taskId: task.id, taskRevision: task.revision,
         rollId: rollId,
         rollModel: rollModel,
@@ -429,7 +435,7 @@ async function runSolve() {
         if (res.ok) {
             const elapsed = Math.round(performance.now() - t0);
             if (result.success && result.planId && result.pieces?.length) {
-                state.pendingPlan = { result, rollId, rollModel, bedL, feedPortType, sourceRemnantId, context, taskId:task.id, windowStartY: winStartY };
+                state.pendingPlan = { result, request:payload, rollId, rollModel, bedL, feedPortType, sourceRemnantId, context, taskId:task.id, windowStartY: winStartY };
                 data.lastReceipt = null;
                 data.rollW = rollW;
                 data.bedL = bedL;
@@ -488,7 +494,9 @@ async function runSolve() {
                             step: idx + 1,
                             pos: isHoriz ? (c.pos + winStartY) : c.pos,
                             start: !isHoriz ? (c.start + winStartY) : c.start,
-                            end: !isHoriz ? (c.end + winStartY) : c.end
+                            end: !isHoriz ? (c.end + winStartY) : c.end,
+                            ...(c.startY === undefined ? {} : {startY:c.startY + winStartY}),
+                            ...(c.endY === undefined ? {} : {endY:c.endY + winStartY})
                         };
                     });
                     data.cuts = newCuts;
@@ -588,7 +596,8 @@ async function prepareCutReport() {
         return;
     }
     const { result, bedL, feedPortType } = pending;
-    const recoverable = (result.remnants || []).filter(r => r.w >= 200 && r.l >= 300);
+    const minW = pending.request?.minRemnantWidth ?? 200, minL = pending.request?.minRemnantLength ?? 300;
+    const recoverable = (result.remnants || []).filter(r => r.w >= minW && r.l >= minL);
     const defaultCutLen = Math.max(result.deductLen || 0, requiredReportLength(result.pieces, recoverable)) || bedL;
     const actualLenInput = document.getElementById("report-actual-len");
     if (actualLenInput) {
@@ -606,7 +615,7 @@ async function prepareCutReport() {
             const row = document.createElement("div");
             row.className = "report-remnant-row";
 
-            const check = document.createElement("input"); check.type = "checkbox"; check.checked = remnant.w >= 200 && remnant.l >= 300; check.setAttribute("aria-label", "回收 " + remnant.id);
+            const check = document.createElement("input"); check.type = "checkbox"; check.checked = remnant.w >= minW && remnant.l >= minL; check.setAttribute("aria-label", "回收 " + remnant.id);
             check.onchange = () => updateReportPreview();
             const label = document.createElement("span"); label.textContent = `${remnant.status || '派生料头'} ${remnant.id}`;
             const width = document.createElement("input"); width.type = "number"; width.min = "1"; width.value = remnant.w; width.className = "prop-input report-w"; width.setAttribute("aria-label", remnant.id + " 实测宽度");
@@ -665,14 +674,17 @@ export async function updateReportPreview() {
     }
 
     // 料头建档预览
-    const remRows = [...document.querySelectorAll(".report-remnant-row")].filter(row => row.querySelector('input[type="checkbox"]').checked);
+    const selectedRows = [...document.querySelectorAll(".report-remnant-row")].filter(row => row.querySelector('input[type="checkbox"]').checked);
+    const remRows = selectedRows.filter(row => Number(row.querySelector('.report-w').value) >= (pending.request?.minRemnantWidth ?? 200)
+        && Number(row.querySelector('.report-l').value) >= (pending.request?.minRemnantLength ?? 300));
     const remTextEl = document.getElementById("report-preview-remnant-text");
     if (remTextEl) {
         if (remRows.length === 0) {
             remTextEl.innerText = "无派生料头回库";
         } else {
-            remTextEl.innerText = `${remRows.length} 块已勾选`;
+            remTextEl.innerText = `${remRows.length} 块满足回收尺寸`;
         }
+        if (selectedRows.length > remRows.length) remTextEl.innerText += `，${selectedRows.length - remRows.length} 块尺寸不足，计入损耗`;
     }
 }
 
