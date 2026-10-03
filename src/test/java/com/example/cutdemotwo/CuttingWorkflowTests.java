@@ -95,7 +95,7 @@ class CuttingWorkflowTests {
     }
 
     @Test
-    void repeatedPreviewKeepsOnlyRecentPlans() {
+    void unreportedPlansRemainRecoverableAfterMoreThanOneHundredPreviewsAndRestart() {
         RemnantService inventory = new RemnantService(temp.resolve("bounded.json").toString());
         CuttingWorkflowService workflow = new CuttingWorkflowService(
                 new SolverFactory(List.of(new CrossCutSolverService())), inventory);
@@ -107,10 +107,12 @@ class CuttingWorkflowTests {
         SolveResponse first = workflow.solve(request);
         SolveResponse latest = first;
         for (int i = 0; i < 100; i++) latest = workflow.solve(request);
-        CutReport expired = new CutReport(first.getPlanId(), 1600, 1, first.getRemnants(), "测试库位");
-        assertThrows(IllegalArgumentException.class, () -> workflow.confirm(expired));
-        assertEquals(1, workflow.confirm(new CutReport(latest.getPlanId(), 1600, 1,
-                latest.getRemnants(), "测试库位")).get("finishedPieceCount"));
+        CuttingWorkflowService reopened = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),
+                new RemnantService(temp.resolve("bounded.json").toString()));
+        assertNotNull(reopened.getPlan(first.getPlanId()));
+        assertNotNull(reopened.getPlan(latest.getPlanId()));
+        assertEquals(1, reopened.confirm(new CutReport(first.getPlanId(), 1600, 1,
+                first.getRemnants(), "测试库位")).get("finishedPieceCount"));
     }
 
     @Test

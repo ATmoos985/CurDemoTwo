@@ -52,6 +52,19 @@ public class FabricCutController {
     @GetMapping("/cutting/plans/{id}")
     public Map<String, Object> plan(@PathVariable String id) { return workflowService.getPlan(id); }
 
+    @GetMapping("/cutting/tasks/{id}/plans")
+    public java.util.List<com.example.cutdemotwo.model.CuttingPlan> taskPlans(@PathVariable String id) { return remnantService.taskPlans(id); }
+
+    @PostMapping("/cutting/plans/{id}/cancel")
+    public Object cancelPlan(@PathVariable String id) { return remnantService.changePlanStatus(id, false); }
+
+    @PostMapping("/cutting/plans/{id}/restore")
+    public Object restorePlan(@PathVariable String id) { return remnantService.changePlanStatus(id, true); }
+
+    @ExceptionHandler(com.example.cutdemotwo.persistence.InventoryConflictException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public Map<String, String> conflict(RuntimeException error) { return Map.of("message", error.getMessage()); }
+
     @PostMapping("/solve")
     public SolveResponse solve(@RequestBody SolveRequest request) {
         return workflowService.solve(request);
