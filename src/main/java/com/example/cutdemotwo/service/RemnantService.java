@@ -183,6 +183,54 @@ public class RemnantService {
 
     public synchronized Map<String, Object> getReceipt(String planId) { return read(() -> receipts.get(planId)); }
 
+    public synchronized Map<String, Object> reverseReport(String planId, String reason) {
+        if (reason == null || reason.isBlank() || reason.length() > 500)
+            throw new IllegalArgumentException("请填写 1 至 500 字的撤回原因");
+        return mutate(() -> {
+            Map<String, Object> receipt = receipts.get(planId);
+            if (receipt == null) throw new IllegalArgumentException("报工记录不存在");
+            if ("REVERSED".equals(receipt.get("status"))) return receipt;
+            if (!(receipt.get("undo") instanceof Map<?, ?> undo))
+                throw new IllegalArgumentException("历史报工没有撤回快照，请人工核对库存后处理");
+            List<RemnantStock> children = new ArrayList<>();
+            for (Object item : (List<?>) receipt.get("derivedRemnants")) {
+                RemnantStock original = json.convertValue(item, RemnantStock.class);
+                RemnantStock current = remnantPool.get(original.getId());
+                if (current == null || !json.writeValueAsString(original).equals(json.writeValueAsString(current)))
+                    throw new IllegalArgumentException("派生料头 " + original.getId() + " 已流转或修改，请先撤回后续操作");
+                children.add(current);
+            }
+            boolean remnant = "remnant".equals(receipt.get("feedPortType"));
+            if (remnant) {
+                RemnantStock parent = remnantPool.get(receipt.get("sourceRemnantId"));
+                if (parent == null || !json.writeValueAsString(parent).equals(undo.get("parentAfter")))
+                    throw new IllegalArgumentException("原料头状态已变化，不能撤回此报工");
+                RemnantStock original = json.readValue(undo.get("parentBefore").toString(), RemnantStock.class);
+                remnantPool.put(original.getId(), original);
+            } else {
+                // Unwind the latest operation on this roll; independent rolls remain unaffected.
+                Map<String, Object> latest = null;
+                for (var candidate : receipts.values())
+                    if (!"REVERSED".equals(candidate.get("status")) && "roll".equals(candidate.get("feedPortType"))
+                            && Objects.equals(receipt.get("rollId"), candidate.get("rollId"))) latest = candidate;
+                MotherRollInfo roll = motherRolls.get(receipt.get("rollId"));
+                if (latest != receipt || roll == null ||
+                        Math.abs(roll.getUsedLength() - ((Number) undo.get("usedAfter")).doubleValue()) > .001 ||
+                        Math.abs(roll.getCurrentRemainingLength() - ((Number) undo.get("remainingAfter")).doubleValue()) > .001)
+                    throw new IllegalArgumentException("母卷已有后续报工或库存变更，请从最近一次报工开始撤回");
+                roll.setUsedLength(((Number) undo.get("usedBefore")).doubleValue());
+                roll.setCurrentRemainingLength(((Number) undo.get("remainingBefore")).doubleValue());
+            }
+            children.forEach(child -> child.setStatus("REVERSED"));
+            receipt.put("status", "REVERSED");
+            receipt.put("reversedAt", LocalDateTime.now().toString());
+            receipt.put("reversalReason", reason.trim());
+            CuttingPlan plan = plans.get(planId);
+            if (plan != null) plans.put(planId, plan.withStatus("REVERSED"));
+            return receipt;
+        });
+    }
+
     public synchronized List<Map<String, Object>> taskReports(String taskId) {
         return read(() -> taskReportsInternal(taskId));
     }
@@ -198,6 +246,7 @@ public class RemnantService {
     private Map<String, Integer> completedQuantitiesInternal(String taskId) {
         Map<String, Integer> counts = new LinkedHashMap<>();
         for (Map<String, Object> receipt : taskReports(taskId)) {
+            if ("REVERSED".equals(receipt.get("status"))) continue;
             if (receipt.get("demandQuantities") instanceof Map<?, ?> output)
                 output.forEach((id, n) -> counts.merge(id.toString(), ((Number) n).intValue(), Integer::sum));
         }
@@ -361,7 +410,10 @@ public class RemnantService {
 
     private Map<String, Object> confirmInternal(SolveRequest request, SolveResponse plan, CutReport report) {
         Map<String, Object> old = receipts.get(report.planId());
-        if (old != null) return old;
+        if (old != null) {
+            if ("REVERSED".equals(old.get("status"))) throw new IllegalArgumentException("该报工已撤回，请重新排料");
+            return old;
+        }
         validateTaskPlan(request, plan);
         boolean remnantFeed = "remnant".equalsIgnoreCase(request.getFeedPortType());
         MotherRollInfo roll = motherRolls.get(request.getRollId());
@@ -388,6 +440,7 @@ public class RemnantService {
                 throw new IllegalArgumentException("红框实切区间超出母卷范围");
             }
             for (Map<String, Object> receipt : receipts.values()) {
+                if ("REVERSED".equals(receipt.get("status"))) continue;
                 if (!request.getRollId().equals(receipt.get("rollId")) || !"roll".equals(receipt.get("feedPortType"))) continue;
                 double oldStart = ((Number) receipt.get("windowStartY")).doubleValue();
                 double oldEnd = oldStart + ((Number) receipt.get("actualCutLen")).doubleValue();
@@ -429,12 +482,19 @@ public class RemnantService {
         double sourceArea = (remnantFeed ? parent.getArea() : request.getRollW() * len / 1_000_000.0);
         if (plan.getPieceArea() + remArea > sourceArea + 0.001) throw new IllegalArgumentException("裁片与料头面积超过实切用料面积");
 
+        Map<String, Object> undo = new LinkedHashMap<>();
         if (remnantFeed) {
+            undo.put("parentBefore", json.writeValueAsString(parent));
             parent.setStatus("CONSUMED");
             parent.setConsumedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+            undo.put("parentAfter", json.writeValueAsString(parent));
         } else {
+            undo.put("remainingBefore", roll.getCurrentRemainingLength());
+            undo.put("usedBefore", roll.getUsedLength());
             roll.setCurrentRemainingLength(roll.getCurrentRemainingLength() - len);
             roll.setUsedLength(roll.getUsedLength() + len);
+            undo.put("remainingAfter", roll.getCurrentRemainingLength());
+            undo.put("usedAfter", roll.getUsedLength());
         }
         List<RemnantStock> children = new ArrayList<>();
         for (RemnantPiece item : actual) {
@@ -468,6 +528,8 @@ public class RemnantService {
         }
         Map<String, Object> receipt = new LinkedHashMap<>();
         receipt.put("planId", report.planId());
+        receipt.put("status", "CONFIRMED");
+        receipt.put("undo", undo);
         receipt.put("taskId", request.getTaskId());
         receipt.put("sourceRemnantId", request.getSourceRemnantId());
         Map<String, Integer> output = new LinkedHashMap<>();

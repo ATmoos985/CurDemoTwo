@@ -338,7 +338,7 @@ export function openStationContextMenu(clientX, clientY) {
                 <span>🧹 清空当前工位排料结果</span>
             </div>
             <div class="cad-menu-item-desc">
-                撤销本工位所有裁片与刀路，母卷整段恢复初始未切
+                清除本工位未报工预览；库存与报工保留，可从方案记录恢复
             </div>
         </div>
     `;
@@ -353,6 +353,7 @@ export function discardRemnant(remnantId) {
     if (!data) return;
     const remnant = (data.remnants || []).find(r => r.id === remnantId);
     if (!remnant) return;
+    if (remnant.confirmed) return showToast('已报工料头请从报工记录撤回', 'warning');
 
     const winStartY = data.windowStartY || 0;
     const bedL = data.bedL || 5000;

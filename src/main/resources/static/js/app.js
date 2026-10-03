@@ -1,4 +1,4 @@
-import { initTaskWorkspace, newCuttingTask, startTaskDraft, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, taskInputChanged } from './plugins/solver/task-workspace.js';
+import { initTaskWorkspace, newCuttingTask, startTaskDraft, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, taskInputChanged } from './plugins/solver/task-workspace.js';
 /**
  * 【主装配器】CAM 前端应用主入口 (Application Orchestrator)
  * 挂载微内核与所有独立插件，完成全局事件编排与向后兼容性绑定
@@ -312,7 +312,7 @@ bus.on('piece:moved', (payload) => {
 // 2. 导出面向全局 DOM 与 Inline Onclick 的统一命名空间
 // ==========================================
 const camApp = {
-    newCuttingTask, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, taskInputChanged,
+    newCuttingTask, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, taskInputChanged,
     bus,
     state,
     toggleTheme,

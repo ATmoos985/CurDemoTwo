@@ -302,6 +302,27 @@ function solveContext() {
     return JSON.stringify([state.activeTask?.id, state.currentCaseId, state.currentCutMode, state.loadedRemnant?.id,
         getDemandsFromUI(), ...['sel-mother-roll-id','inp-roll-w','inp-bed-l','inp-window-start-y','inp-trim-start','sel-cut-origin','sel-first-stage','sel-allow-rotation','sel-allow-longitudinal'].map(id => document.getElementById(id)?.value)]);
 }
+export function restoreSavedPlan(saved) {
+    const {request, result} = saved;
+    const data = state.getCurrentCaseData();
+    const offset = request.feedPortType === 'remnant' ? 0 : request.windowStartY;
+    Object.assign(data, {rollId:request.rollId, rollW:request.rollW, bedL:request.rollL,
+        windowStartY:offset, trimStart:request.trimStart, cutOrigin:request.cutOrigin,
+        firstStageOrientation:request.firstStageOrientation, allowRotation:request.allowRotation,
+        allowLongitudinal:request.allowLongitudinal, lastReceipt:null});
+    data.pieces = (result.pieces || []).map(p => ({...p, y:p.y + offset}));
+    data.remnants = (result.remnants || []).map(r => ({...r, y:r.y + offset}));
+    data.cuts = (result.cuts || []).map(c => ({...c, pos:c.type === '横切' ? c.pos + offset : c.pos,
+        start:c.type === '横切' ? c.start : c.start + offset, end:c.type === '横切' ? c.end : c.end + offset}));
+    data.cutIntervals = [{start:offset, end:offset + request.rollL}];
+    data.engine = result.engine;
+    updateUIInfo(); renderScene(); renderRadar(); resetToBedView();
+    state.pendingPlan = {result, request, rollId:request.rollId, rollModel:request.rollModel, bedL:request.rollL,
+        feedPortType:request.feedPortType, sourceRemnantId:request.sourceRemnantId,
+        taskId:request.taskId, windowStartY:offset, context:solveContext(), geometry:planGeometry()};
+    updateUIInfo();
+    bus.emit('solve:success', {result, elapsed:0, rollId:request.rollId});
+}
 export async function triggerSolve() {
     if (solving) return;
     solving = true;

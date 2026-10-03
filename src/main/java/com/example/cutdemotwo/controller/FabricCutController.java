@@ -75,6 +75,11 @@ public class FabricCutController {
         return workflowService.confirm(report);
     }
 
+    @PostMapping("/cutting/reports/{id}/reverse")
+    public Map<String, Object> reverseReport(@PathVariable String id, @RequestBody Map<String, String> body) {
+        return remnantService.reverseReport(id, body.get("reason"));
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Map<String, String> invalidInput(IllegalArgumentException error) {

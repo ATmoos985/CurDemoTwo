@@ -265,3 +265,11 @@ footer { height: 32px; min-height: 32px; font-size: 11px; gap: 18px; }
 [data-theme] .cad-context-menu { backdrop-filter: none; animation: none; border-radius: 5px; }
 .cad-menu-item-desc { padding-left: 0; }
 [data-theme] .toolpath-control-card { background: var(--panel-header); border-color: var(--panel-border); }
+
+.action-dialog { width: min(480px, calc(100vw - 48px)); border: 1px solid var(--panel-border); border-radius: 6px; padding: 24px; background: var(--panel-bg); color: var(--text-main); box-shadow: 0 12px 36px #0003; }
+.action-dialog::backdrop { background: #0005; }
+.action-dialog h2 { margin: 0 0 14px; font-size: 18px; }
+.action-dialog p { color: var(--text-muted); font-size: 13px; line-height: 1.8; white-space: pre-line; }
+.action-dialog label { display: grid; gap: 8px; font-size: 13px; }
+.action-dialog textarea { box-sizing: border-box; width: 100%; resize: vertical; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }

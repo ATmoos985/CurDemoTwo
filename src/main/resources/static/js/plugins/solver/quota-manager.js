@@ -124,9 +124,9 @@ export function clearStationCuts() {
 
     if (isRemnantMode) {
         const removedPieces = (data.pieces || []).length;
-        data.pieces = [];
+        data.pieces = (data.pieces || []).filter(p => p.confirmed);
         data.cuts = [];
-        data.remnants = [];
+        data.remnants = (data.remnants || []).filter(r => r.confirmed);
         data.cutIntervals = [];
         data.deductLen = 0;
         data.pieceArea = 0;
@@ -152,7 +152,7 @@ export function clearStationCuts() {
             window.camApp.renderToolpathUI();
         }
 
-        showToast(`料头排料已清空：已清除当前在台料头上的 ${removedPieces} 件裁片与切刀`, "info");
+        showToast('已清除未报工预览，可从方案记录恢复；库存与报工保留', 'info');
         return;
     }
 
@@ -165,7 +165,7 @@ export function clearStationCuts() {
         return (pMid >= winStartY && pMid < winEndY);
     };
     const oldCount = (data.pieces || []).length;
-    data.pieces = (data.pieces || []).filter(p => !isPieceInCurrentStation(p));
+    data.pieces = (data.pieces || []).filter(p => p.confirmed || !isPieceInCurrentStation(p));
     const removedPieces = oldCount - data.pieces.length;
 
     // 清空切刀：CNC 数控切刀严格属于当前工位
@@ -177,7 +177,7 @@ export function clearStationCuts() {
         const rMid = r.y + r.l / 2;
         return (rMid >= winStartY && rMid < winEndY);
     };
-    data.remnants = (data.remnants || []).filter(r => !isRemInCurrentStation(r));
+    data.remnants = (data.remnants || []).filter(r => r.confirmed || !isRemInCurrentStation(r));
 
     if (data.cutIntervals) {
         data.cutIntervals = data.cutIntervals.filter(inv => inv.end <= winStartY || inv.start >= winEndY);
@@ -197,7 +197,7 @@ export function clearStationCuts() {
         window.camApp.renderToolpathUI();
     }
 
-    showToast(`工位排料已清除：已移除工位 [${winStartY}~${winEndY}mm] 内的 ${removedPieces} 件裁片与切刀`, "info");
+    showToast('已清除本工位未报工预览，可从方案记录恢复；库存与报工保留', 'info');
 }
 
 export function resetAllRollCuts() {

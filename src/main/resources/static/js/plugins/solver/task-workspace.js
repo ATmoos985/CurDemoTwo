@@ -3,8 +3,8 @@ import { getInitialScenarios } from '../presets/scenarios.js';
 import { renderDemandsUI, getDemandsFromUI, updateDemandCompletionFromPieces } from './quota-manager.js';
 import { switchCutMode } from '../remnant/remnant-shelf.js';
 import { renderScene, resetToBedView } from '../cad/cad-renderer.js';
-import { updateUIInfo } from './solver-client.js';
-import { showToast } from '../../core/toast.js';
+import { updateUIInfo, restoreSavedPlan } from './solver-client.js';
+import { showToast, confirmAction } from '../../core/toast.js';
 
 export const escapeText = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const el = id => document.getElementById(id);
@@ -187,8 +187,72 @@ export async function matchTaskMaterials() {
     } catch (error) { picker('选择本次用料', `<p role="alert">${escapeText(error.message)}</p>`); }
 }
 
-export function openTaskReports() {
+export async function openTaskReports() {
+    try { await refreshTaskProgress(); } catch (error) { return showToast(error.message, 'error'); }
     picker('报工记录与需求汇总', `<div class="report-progress">${state.getCurrentCaseData().demands.map(d => `<p><strong>${escapeText(d.name)}</strong><span>${state.taskCompleted[d.id] || 0} / ${d.count ?? d.demand} 件</span></p>`).join('')}</div>` + (state.taskReports.slice().reverse().map(r => `<article class="task-list-item"><strong>${escapeText(r.sourceRemnantId || r.rollId)}</strong><span>合格 ${r.finishedPieceCount} 件 · ${r.feedPortType === 'remnant' ? '料头核销' : `用料 ${r.actualCutLen} mm`} · 回收 ${r.derivedRemnants.length} 块</span><small>${escapeText(new Date(r.confirmedAt).toLocaleString("zh-CN", {hour12:false}))}</small><details class="detail-disclosure"><summary>回收清单与凭证</summary>${r.derivedRemnants.map(rem => `<p>${escapeText(rem.id)} · ${rem.width} × ${rem.length} mm · ${escapeText(rem.location)}</p>`).join("")}<small>报工编号 ${escapeText(r.planId)}</small></details></article>`).join('') || '<p class="muted">暂无报工。排料预览不会扣减需求或库存。</p>'));
+    el('task-picker-body').querySelectorAll('article').forEach((article, index) => {
+        const report = state.taskReports.slice().reverse()[index];
+        const status = document.createElement('p'); status.className = 'muted';
+        if (report.status === 'REVERSED') {
+            status.textContent = '已撤回 · ' + report.reversalReason; article.append(status); return;
+        }
+        const button = document.createElement('button'); button.className = 'tool-btn'; button.textContent = '撤回报工';
+        button.disabled = !report.undo;
+        button.title = report.undo ? '退回本次需求数量和库存，并保留原记录' : '历史记录没有撤回快照';
+        button.onclick = async () => {
+            const reason = await confirmAction('仅用于纠正误报。请确认现场实物与退回后的库存一致；已实际裁切的布料无法物理复原。派生料头已有后续流转时，需先撤回后续记录。', {title:'撤回本次报工', action:'确认撤回', reason:true});
+            if (!reason) return;
+            button.disabled = true;
+            try {
+                await api('/api/cutting/reports/' + encodeURIComponent(report.planId) + '/reverse', {reason});
+                state.pendingPlan = null;
+                await loadTask(state.activeTask.id);
+                await openTaskReports();
+                showToast('报工已撤回，库存和任务完成量已更新', 'success');
+            } catch (error) { showToast(error.message, 'error'); button.disabled = false; }
+        };
+        article.append(button);
+    });
+}
+
+export async function openTaskPlans() {
+    if (!state.activeTask) return showToast('请先保存或打开任务', 'info');
+    picker('方案记录', '<p class="muted">读取中…</p>');
+    try {
+        const plans = await api('/api/cutting/tasks/' + encodeURIComponent(state.activeTask.id) + '/plans');
+        picker('方案记录', '<p class="muted">预览不扣库存。取消后仍可恢复；恢复时会校验需求、材料和疵点是否变化。</p>' +
+            (plans.slice().reverse().map(p => `<article class="task-list-item"><strong>${escapeText(p.request.sourceRemnantId || p.request.rollId)} · ${p.result.pieces.length} 件</strong><span>${p.status === 'CANCELLED' ? '已取消' : '待报工'} · ${escapeText(new Date(p.createdAt).toLocaleString('zh-CN', {hour12:false}))}</span><div class="dialog-actions"><button class="tool-btn" data-restore="${escapeText(p.id)}">恢复预览</button>${p.status === 'PENDING' ? `<button class="tool-btn" data-cancel="${escapeText(p.id)}">取消方案</button>` : ''}</div></article>`).join('') || '<p class="muted">暂无未报工方案</p>'));
+        el('task-picker-body').querySelectorAll('[data-cancel]').forEach(button => button.onclick = async () => {
+            button.disabled = true;
+            try {
+                await api('/api/cutting/plans/' + encodeURIComponent(button.dataset.cancel) + '/cancel', {});
+                if (state.pendingPlan?.result?.planId === button.dataset.cancel) {
+                    state.pendingPlan = null;
+                    await loadTask(state.activeTask.id);
+                }
+                await openTaskPlans();
+            } catch (error) { showToast(error.message, 'error'); button.disabled = false; }
+        });
+        el('task-picker-body').querySelectorAll('[data-restore]').forEach(button => button.onclick = async () => {
+            button.disabled = true;
+            try {
+                const saved = await api('/api/cutting/plans/' + encodeURIComponent(button.dataset.restore) + '/restore', {});
+                await loadTask(saved.request.taskId);
+                if (saved.request.feedPortType === 'remnant') {
+                    const stock = await api('/api/remnants/scan', {id:saved.request.sourceRemnantId});
+                    if (!stock) throw new Error('料头已不可用');
+                    await switchCutMode('remnant', stock);
+                } else {
+                    const id = saved.request.rollId;
+                    if (![...el('sel-mother-roll-id').options].some(o => o.value === id)) el('sel-mother-roll-id').add(new Option(id,id));
+                    el('sel-mother-roll-id').value = id;
+                    await switchCutMode('roll');
+                }
+                restoreSavedPlan(saved); el('task-picker').close();
+                showToast('已恢复原方案，请核对后报工', 'success');
+            } catch (error) { showToast(error.message, 'error'); button.disabled = false; }
+        });
+    } catch (error) { picker('方案记录', `<p role="alert">${escapeText(error.message)}</p>`); }
 }
 
 export async function initTaskWorkspace() {
