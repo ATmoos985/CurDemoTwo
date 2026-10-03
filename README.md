@@ -3,6 +3,8 @@
 
 当前演示版的业务流程、示例口径和库存写入时点见 [裁切演示路线](DEMO_GUIDE.md)。下文保留原项目介绍，涉及“自动入库”的旧描述以演示路线为准。
 
+MySQL 初始化、文件导入、服务器部署、原生求解器配置和撤回边界见 [部署与数据存储](DEPLOYMENT.md)。方案现在支持持久保存、取消和恢复；报工可在依赖校验通过后撤回。
+
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.1-brightgreen.svg)](https://spring.io/projects/spring-boot)
 [![Java](https://img.shields.io/badge/Java-17-orange.svg)](https://www.oracle.com/java/)
 [![Konva.js](https://img.shields.io/badge/Canvas-Konva.js-blue.svg)](https://konvajs.org/)
@@ -144,7 +146,7 @@ CutDemoTwo/
 
 ## 四、 核心接口定义 (RESTful API)
 
-所有接口均支持跨域访问，数据交互统一采用 JSON 格式。
+接口默认与工作台同源访问，数据交互统一采用 JSON 格式。服务默认监听本机地址，对外开放方式见部署说明。
 
 ### 1. 智能排料求解 `POST /api/solve`
 - **功能**：接收母卷/料头尺寸、订单裁片需求清单及瑕疵坐标列表，调用求解引擎生成排样方案。
@@ -191,7 +193,7 @@ CutDemoTwo/
   ```properties
   packingsolver.executable.path=d:/GitLab/packingsolver/build/src/rectangleguillotine/packingsolver_rectangleguillotine.exe
   ```
-  *(注：若未配置 C++ 求解器路径，系统将自动降级运行内置 Word 预设场景一与演练算例，Web 界面与仿真功能完全可用)*
+  *(注：二维排料需要可运行的 C++ 求解器，不会自动切换算法；仅横切工艺使用内置横切引擎。Windows 运行库准备及服务器配置见 [部署说明](DEPLOYMENT.md)。)*
 
 ### 2. 编译与单元测试
 在项目根目录下执行 Maven 自动化构建与测试：
