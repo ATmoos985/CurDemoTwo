@@ -28,7 +28,9 @@ if ! "${compose[@]}" up -d --wait --wait-timeout 180; then
   printf 'Deployment failed. Current/previous image records and database backups are retained. Check migration compatibility before rollback.\n' >&2
   exit 4
 fi
-if [[ -f .current-image ]]; then cp .current-image .previous-image; fi
+if [[ -s .current-image && "$(cat .current-image)" != "$image" ]]; then
+  cp .current-image .previous-image
+fi
 printf '%s\n' "$image" > .current-image.tmp
 mv .current-image.tmp .current-image
 printf 'Deployment healthy: %s\n' "$image"
