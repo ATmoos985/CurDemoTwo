@@ -1,7 +1,8 @@
 import { saveCurrentTask, refreshTaskProgress, escapeText } from './task-workspace.js';
 import { createPlanHistory, planScene } from './plan-editing.js';
 import { layoutMetrics, materialSummary } from './material-accounting.js';
-import { renderWorkflowGuide } from './workflow-guide.js';
+import { renderWorkflowGuide, navigateWorkflowStage } from './workflow-guide.js';
+import { requestJSON, ApiError, failurePresentation } from '../../core/api-request.js';
 import { updateDemandProgress } from './demand-progress.js';
 import { classifyReport, applyReportReceipt } from './report-outcomes.js';
 import { renderReportPieces, readReportPieces, syncReportRemnants, readReportRemnants, reportPieceError } from './report-editor.js';
@@ -288,7 +289,7 @@ export function loadCase(id) {
 
 export function updateWorkflowControls() {
     const ready = canUseCurrentPlan();
-    const editable = !!state.pendingPlan?.result?.planId && state.pendingPlan.context === solveContext();
+    const editable = currentPlanContext();
     const edited = editable && !ready;
     const editPanel = document.getElementById('plan-edit-controls');
     if (editPanel) { editPanel.hidden = !editable; editPanel.dataset.edited = String(edited); editPanel.querySelector('.plan-edit-actions').hidden = !state.pendingPlan?.history?.canUndo && !state.pendingPlan?.history?.canRedo; }
@@ -303,20 +304,35 @@ export function updateWorkflowControls() {
     const data = state.getCurrentCaseData(), reportEl = document.getElementById('lbl-report-status');
     if (reportEl) reportEl.textContent = materialSummary(data, state.currentCutMode === 'remnant').actual ? '已报工保存 · ' + data.lastReceipt.finishedPieceCount + ' 件' :
         edited ? '手动调整 · 待校验' : ready ? '待报工 · 尚未保存产出' : flow.done || flow.stage < 2 ? flow.title : '当前工位待排料';
-    updateDemandProgress({pending:editable ? state.pendingPlan : null, edited, attempt:latestSolveAttempt?.context === solveContext() ? latestSolveAttempt : null});
+    updateDemandProgress({pending:editable ? state.pendingPlan : null, edited, attempt:latestSolveAttempt && latestSolveAttempt.context === solveContext() ? latestSolveAttempt : null});
+    renderSolveFeedback(flow);
     return {...flow, ready, edited};
 }
 
 let latestSolveAttempt = null;
 export function resetSolveFeedback() { latestSolveAttempt = null; }
+function renderSolveFeedback(flow) {
+    const panel=document.getElementById('solve-feedback');if(!panel)return;
+    const attempt=latestSolveAttempt && latestSolveAttempt.context===solveContext()?latestSolveAttempt:null;
+    panel.hidden=!attempt;if(!attempt)return;
+    const feedback=failurePresentation(attempt.result);
+    panel.querySelector('strong').textContent=feedback.title;
+    panel.querySelector('[data-error-message]').textContent=feedback.message;
+    const preserved=state.pendingPlan ? (currentPlanContext()?'原方案与手调预览已保留，新结果未应用；需求进度仍按原方案显示。':'旧图形保留供核对，版本或材料需重新核实，不能报工。') : '';
+    panel.querySelector('[data-error-hint]').textContent=feedback.hint+(preserved?' '+preserved:'');
+    const retry=panel.querySelector('[data-retry]');retry.disabled=solving || !flow.canSolve;retry.onclick=triggerSolve;
+    panel.querySelector('[data-review-input]').onclick=()=>navigateWorkflowStage(feedback.code==='UNSUPPORTED'?2:0,flow.target || (feedback.code==='UNSUPPORTED'?'#card-bed-origin':'#card-demands'));
+}
 let solving = false;
 function planGeometry() {
     const {pieces, remnants, cuts} = state.getCurrentCaseData();
     return JSON.stringify({pieces, remnants, cuts});
 }
 export function canUseCurrentPlan() {
-    return !!state.pendingPlan?.result?.planId && state.pendingPlan.context === solveContext() && state.pendingPlan.geometry === planGeometry();
+    return currentPlanContext() && state.pendingPlan.geometry === planGeometry();
 }
+function currentPlanContext() {return !!state.pendingPlan?.result?.planId && !state.pendingPlan.blockedError && state.pendingPlan.context===solveContext()
+    && (!state.activeTask || state.pendingPlan.request?.taskRevision===state.activeTask.revision);}
 export function recordPlanEdit() {
     const pending = state.pendingPlan;
     if (!pending?.history) return;
@@ -346,7 +362,7 @@ function applyPlanHistory(direction) {
 let validatingAdjustment = false;
 export async function validatePlanAdjustment() {
     const pending = state.pendingPlan;
-    if (validatingAdjustment || !pending || pending.context !== solveContext()) return;
+    if (validatingAdjustment || !pending || !currentPlanContext()) return;
     if (canUseCurrentPlan()) return;
     const geometry = planGeometry();
     pending.adjustmentId ||= crypto.randomUUID();
@@ -369,8 +385,8 @@ export async function validatePlanAdjustment() {
     } finally { validatingAdjustment = false; document.body.inert = wasInert; updateUIInfo(); }
 }
 function solveContext() {
-    return JSON.stringify([state.activeTask?.id, state.currentCaseId, state.currentCutMode, state.loadedRemnant?.id,
-        getDemandsFromUI(), ...['sel-mother-roll-id','inp-roll-w','inp-bed-l','inp-window-start-y','inp-trim-start','sel-cut-origin','sel-first-stage','sel-allow-rotation','sel-allow-longitudinal'].map(id => document.getElementById(id)?.value)]);
+    return JSON.stringify([state.activeTask?.id, state.activeTask?.revision, state.currentCaseId, state.currentCutMode, state.loadedRemnant?.id,
+        getDemandsFromUI(), getDefectsFromUI(), solverSettings(), ...['task-name','task-material','sel-mother-roll-id','inp-roll-w','inp-bed-l','inp-window-start-y','inp-trim-start','sel-cut-origin','sel-first-stage','sel-allow-rotation','sel-allow-longitudinal'].map(id => document.getElementById(id)?.value)]);
 }
 export function restoreSavedPlan(saved) {
     const {request, result} = saved;
@@ -401,16 +417,21 @@ export function restoreSavedPlan(saved) {
 export async function triggerSolve() {
     if (solving) return;
     const flow = updateWorkflowControls();
-    if (!flow.canSolve) { showToast(flow.hint, 'warning'); return; }
+    if (!flow.canSolve) { showToast(flow.hint, 'warning');navigateWorkflowStage(flow.stage,flow.target);return; }
     solving = true; latestSolveAttempt = null;
-    state.pendingPlan = null;
+    const operation={context:solveContext()};
     updateWorkflowControls();
-    try { await runSolve(); }
-    catch (error) { showToast(error.message, 'error'); }
+    try { await runSolve(operation); }
+    catch (error) {
+        if(operation.context!==solveContext())return;
+        latestSolveAttempt={context:solveContext(),result:{status:error.code || 'SERVICE',message:error.message}};
+        if(state.pendingPlan && ['CONFLICT','INVALID_INPUT'].includes(error.code))state.pendingPlan.blockedError=error.message;
+    }
     finally { solving = false; updateWorkflowControls(); }
 }
-async function runSolve() {
+async function runSolve(operation) {
     const task = await saveCurrentTask();
+    operation.context=solveContext();
     const data = state.getCurrentCaseData();
     const isRemnantMode = (state.currentCutMode === "remnant");
 
@@ -493,18 +514,17 @@ async function runSolve() {
     };
 
     const context = solveContext();
+    const geometry=planGeometry();
     const t0 = performance.now();
-    try {
-        const res = await fetch("/api/solve", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-        });
-        const result = await res.json();
-        if (!res.ok) throw new Error(result.message || "排料失败");
-        if (context !== solveContext()) return showToast("需求或材料已变化，请重新排料", "warning");
-        latestSolveAttempt = result.success ? null : {context, result};
-        if (res.ok) {
+        const result = await requestJSON('/api/solve',payload);
+        if (context !== solveContext()) {
+            if(state.activeTask?.id===task.id)latestSolveAttempt={context:solveContext(),result:{status:'STALE_INPUT',message:'需求或材料已变化，未应用返回方案，请重新排料。'}};
+            return;
+        }
+        if(geometry!==planGeometry())throw new ApiError('等待期间预览已调整，当前手调位置保留。','STALE_INPUT');
+        if(result.success && (!result.planId || !Array.isArray(result.pieces) || !result.pieces.length || !Array.isArray(result.cuts) || !Array.isArray(result.remnants)))throw new ApiError('求解响应缺少完整方案，原预览保留。','INVALID_RESULT');
+        latestSolveAttempt = result.success && result.planId && result.pieces?.length ? null : {context, result:{...result,status:result.status || 'INVALID_RESULT'}};
+        {
             const elapsed = Math.round(performance.now() - t0);
             if (result.success && result.planId && result.pieces?.length) {
                 state.pendingPlan = { result, request:payload, rollId, rollModel, bedL, feedPortType, sourceRemnantId, context, taskId:task.id, windowStartY: winStartY };
@@ -635,14 +655,9 @@ async function runSolve() {
                 showToast(`直刀排料计算成功：产出 ${thisBedPieces} 件，预计利用率 ${materialSummary(data, isRemnantMode).utilization.toFixed(1)}%`, 'success');
                 return;
             } else {
-                showToast("排料求解未能找到有效方案: " + (result.message || "未知原因"), "warning");
                 return;
             }
         }
-    } catch (err) {
-        console.error(err);
-        showToast("调用排料引擎接口异常: " + err.message, "error");
-    }
 }
 
 export function requiredReportLength(pieces = [], remnants = []) {
@@ -657,7 +672,7 @@ export async function openCutReport() {
 async function prepareCutReport() {
     let pending = state.pendingPlan;
     if (!canUseCurrentPlan()) {
-        showToast(pending?.result?.planId ? '调整尚未校验，请先校验并保存调整版' : '请先生成并核对当前排料方案，再进行报工', 'warning');
+        showToast(pending?.blockedError ? '方案的任务或材料已变化，请重新核对并排料' : pending?.result?.planId ? '调整尚未校验，请先校验并保存调整版' : '请先生成并核对当前排料方案，再进行报工', 'warning');
         return;
     }
     const { result, bedL, feedPortType } = pending;
@@ -739,7 +754,7 @@ let reporting = false;
 export async function confirmCutReport() {
     if (reporting) return;
     const pending = state.pendingPlan;
-    if (!pending || pending.context !== solveContext() || pending.geometry !== planGeometry()) { document.getElementById("report-error").textContent = "方案或需求已变化，请重新排料"; return; }
+    if (!canUseCurrentPlan()) { document.getElementById("report-error").textContent = "方案、需求或材料需重新核实，请重新排料"; return; }
     const actualCutLen = Number(document.getElementById("report-actual-len").value);
     const finishedPieceCount = Number(document.getElementById("report-piece-count").value);
     const location = document.getElementById("report-location").value.trim();

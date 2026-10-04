@@ -8,6 +8,8 @@ import { updateUIInfo, updateWorkflowControls, resetSolveFeedback, restoreSavedP
 import { showToast, confirmAction } from '../../core/toast.js';
 import { syncMaterialOptions } from '../material/material-options.js';
 import { createDraftStore } from './task-drafts.js';
+import {requestJSON, failurePresentation} from '../../core/api-request.js';
+import {readWorkflowState, navigateWorkflowStage} from './workflow-guide.js';
 
 export const escapeText = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const el = id => document.getElementById(id);
@@ -42,6 +44,7 @@ function clearActiveDraft() {
 }
 
 function resetDraftTracking() {
+    if(el('task-save-error'))el('task-save-error').hidden=true;
     draftId = null; draftDirty = false; draftStored = false;
     draftBaseline = JSON.stringify(draftSnapshot().task); draftReady = true;
     try { localStorage.removeItem(DRAFT_ACTIVE); } catch { /* No draft exists yet. */ }
@@ -167,17 +170,13 @@ async function restoreTaskDraft(id, initial = false) {
     finally { draftReady = true; document.body.inert = wasInert; }
 }
 async function api(url, body) {
-    const response = await fetch(url, body === undefined ? { cache: 'no-store' } : {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.message || '请求失败，请重试');
-    return result;
+    return requestJSON(url,body);
 }
 
 export function taskInputChanged() {
     state.pendingPlan = null;
     resetSolveFeedback();
+    if(el('task-save-error'))el('task-save-error').hidden=true;
     el('task-state').textContent = '需求已修改 · 待保存';
     el('task-details-title').textContent = el('task-name').value || '任务信息';
     persistTaskDraft();
@@ -242,6 +241,8 @@ export async function saveCurrentTask() {
     savingTask = saveTaskSnapshot().catch(error => {
         persistTaskDraft();
         el('task-state').textContent = draftStored ? '服务器保存失败 · 本机草稿已保留' : '保存失败 · 请保留当前页面';
+        const panel=el('task-save-error');if(panel){const feedback=failurePresentation(error);panel.hidden=false;panel.querySelector('p').textContent=feedback.title+'：'+feedback.message+(error.code==='NETWORK'?' 保存结果可能已在服务器生效，请先打开任务核对。':'');
+            panel.querySelector('[data-task-repair]').onclick=()=>{const flow=readWorkflowState();navigateWorkflowStage(0,flow.stage===0?flow.target:'#task-name');};}
         throw error;
     });
     try { return await savingTask; } finally { savingTask = null; document.body.inert = wasInert; }
@@ -259,6 +260,7 @@ async function saveTaskSnapshot() {
     catch { showToast('需求已保存，报工进度暂时无法刷新，请稍后重试', 'warning'); }
     resetDraftTracking();
     el('task-state').textContent = '已保存 · ' + task.id.slice(0, 8);
+    if(el('task-save-error'))el('task-save-error').hidden=true;
     el('task-details').open = false;
     el('task-details-title').textContent = task.name;
     return task;
@@ -266,7 +268,7 @@ async function saveTaskSnapshot() {
 
 export async function saveTaskFromUI() {
     try { await saveCurrentTask(); showToast('需求已保存，可跨材料继续裁切', 'success'); }
-    catch (error) { showToast(error.message, 'error'); }
+    catch (error) { showToast(error.message, 'error');navigateWorkflowStage(0,'#task-save-error'); }
 }
 
 export async function refreshTaskProgress() {

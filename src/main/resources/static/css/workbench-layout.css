@@ -40,6 +40,10 @@
 .material-picker-footer { margin-top: 10px; }
 #material-replace-warning { display: block; font-size: 12px; line-height: 1.8; }
 #material-replace-warning[hidden] { display: none; }
+.operation-feedback { padding: 10px; margin: 8px 0 14px; border: 1px solid var(--panel-border); border-left: 3px solid var(--accent-amber); background: var(--panel-header); font-size: 12px; }
+.operation-feedback[hidden] { display: none; }
+.operation-feedback p { margin: 6px 0; line-height: 1.6; overflow-wrap: anywhere; }
+.operation-feedback > div { display: flex; gap: 5px; flex-wrap: wrap; }
 .selection-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; }
 .selection-summary strong { font-size: 13px; }
 .selection-summary #cad-selection-size { margin-left: auto; font-size: 11px; }

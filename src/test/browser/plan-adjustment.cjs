@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../../main/resources/static');
-let tasks, failSave, requests, failAdjustment, adjustmentBodies, reportBodies, savedPlanRequest, solveResult, acceptReport, receipts, stock, solveWait, candidateItems, candidateBodies, failCandidates, failMaterialRead, candidateWait, extraRolls, failInventory;
+let tasks, failSave, requests, failAdjustment, adjustmentBodies, reportBodies, savedPlanRequest, solveResult, acceptReport, receipts, stock, solveWait, candidateItems, candidateBodies, failCandidates, failMaterialRead, candidateWait, extraRolls, failInventory, solveHttpStatus, solveRawResponse;
 const planRequest={taskId:"task-a", taskRevision:1, rollId:"ROLL-2026-0920",rollModel:"TC涤棉-B2026",rollW:2000,rollL:5000,totalRollL:60000,windowStartY:0,feedPortType:"roll",trimStart:0,cutOrigin:"right-bottom",firstStageOrientation:"horizontal",allowRotation:false,allowLongitudinal:false,demands:[{id:7,name:"主帘",width:2000,length:1200,demand:2}],minRemnantWidth:200,minRemnantLength:300};
 const planResult={success:true,planId:"original-plan",pieces:[{id:1,demandId:7,name:"主帘",x:0,y:0,w:2000,l:1200,rotated:false},{id:2,demandId:7,name:"主帘",x:0,y:1500,w:2000,l:1200,rotated:false}],remnants:[],cuts:[{step:1,type:"横切",pos:1200,start:0,end:2000,desc:"横切"},{step:2,type:"横切",pos:2700,start:0,end:2000,desc:"横切"}],deductLen:2700,engine:"crosscut"};
 const roll = {rollId:'ROLL-2026-0920', rollModel:'TC涤棉-B2026', width:2000, totalLength:60000, usedLength:0, currentRemainingLength:60000, defects:[]};
@@ -36,9 +36,10 @@ const server = createServer(async (req,res) => {
             let raw = ''; for await (const chunk of req) raw += chunk;
             if (failSave) return json({message:'测试保存失败'}, 503);
             const body = JSON.parse(raw), id = body.id || 'task-new';
-            const task = {...body, id, revision:(tasks.get(id)?.revision || 0)+1}; tasks.set(id,task); return json(task);
+            const previous=tasks.get(id),unchanged=previous && ['name','materialModel','externalRef','process','demands'].every(k=>JSON.stringify(previous[k])===JSON.stringify(body[k]));
+            const task = {...body, id, revision:unchanged?previous.revision:(previous?.revision || 0)+1}; tasks.set(id,task); return json(task);
         }
-        if(url.pathname==='/api/solve'){let raw='';for await(const chunk of req)raw+=chunk;savedPlanRequest=JSON.parse(raw);await solveWait;return json(solveResult);}
+        if(url.pathname==='/api/solve'){let raw='';for await(const chunk of req)raw+=chunk;savedPlanRequest=JSON.parse(raw);await solveWait;if(solveRawResponse){res.writeHead(solveHttpStatus);return res.end(solveRawResponse);}return json(solveResult,solveHttpStatus);}
         if (url.pathname.endsWith('/adjust')) {
             let raw=''; for await(const chunk of req) raw+=chunk; const body=JSON.parse(raw); adjustmentBodies.push(body);
             if(failAdjustment)return json({message:'当前调整不能完成贯通切割'},400);
@@ -78,7 +79,7 @@ const server = createServer(async (req,res) => {
     const browser = await chromium.launch({headless:true, ...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {})});
     let passed=0, failed=0;
     async function run(name, verify) {
-        tasks = new Map([['task-a',initialTask()]]); failSave=false; requests=[]; failAdjustment=false; adjustmentBodies=[];reportBodies=[];savedPlanRequest=planRequest;solveResult=planResult;acceptReport=false;receipts=[];stock={...roll};solveWait=undefined;candidateItems=[];candidateBodies=[];failCandidates=false;failMaterialRead=false;candidateWait=undefined;extraRolls=[];failInventory=false;
+        tasks = new Map([['task-a',initialTask()]]); failSave=false; requests=[]; failAdjustment=false; adjustmentBodies=[];reportBodies=[];savedPlanRequest=planRequest;solveResult=planResult;acceptReport=false;receipts=[];stock={...roll};solveWait=undefined;candidateItems=[];candidateBodies=[];failCandidates=false;failMaterialRead=false;candidateWait=undefined;extraRolls=[];failInventory=false;solveHttpStatus=200;solveRawResponse=null;
         const context = await browser.newContext({viewport:{width:1366,height:768}}), page = await context.newPage(), errors=[];
         page.on('pageerror',error => errors.push(error.message));
         try {
@@ -475,6 +476,44 @@ const server = createServer(async (req,res) => {
             failInventory=false;await page.locator('#pane-mat-rolls [data-refresh]').click();await expect(page.locator('#inventory-rolls-count')).toContainText('1 / 1');
             assert.ok(requests.slice(before).filter(r=>r.startsWith('GET /api/')).every(r=>r.includes('/api/rolls')));
         });
+        await run('a failed re-solve preserves the validated plan and retry replaces it only on success',async page=>{
+            await loadPlan(page);solveHttpStatus=503;solveResult={message:'引擎服务暂不可用'};
+            await page.locator('#btn-trigger-solve-station').click();await expect(page.locator('#solve-feedback')).toContainText('服务暂不可用');await expect(page.locator('#solve-feedback')).toContainText('原方案与手调预览已保留');
+            await expect(page.locator('#btn-confirm-station-cut')).toBeEnabled();assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');
+            assert.equal(tasks.get('task-a').revision,1);
+            solveHttpStatus=200;solveResult={...planResult,planId:'retry-plan'};await page.locator('#solve-feedback [data-retry]').click();await expect(page.locator('#solve-feedback')).toBeHidden();
+            await expect.poll(()=>page.evaluate(()=>window.camApp.state.pendingPlan.result.planId)).toBe('retry-plan');
+        });
+        await run('network and empty-search failures retain manual positions and undo history',async page=>{
+            await loadPlan(page);await page.keyboard.press('ArrowDown');const before=await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces));
+            await page.route('**/api/solve',route=>route.abort());await page.locator('#btn-trigger-solve-station').click();await expect(page.locator('#solve-feedback')).toContainText('连接中断');
+            assert.equal(await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces)),before);await expect(page.locator('#btn-undo-plan')).toBeEnabled();await expect(page.locator('#btn-confirm-station-cut')).toBeDisabled();
+            await page.unroute('**/api/solve');solveResult={success:false,status:'NO_SOLUTION_FOUND',message:'本次搜索未排入'};await page.locator('#solve-feedback [data-retry]').click();await expect(page.locator('#solve-feedback')).toContainText('本次未找到方案');
+            assert.equal(await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces)),before);await page.locator('#btn-undo-plan').click();await expect(page.locator('#btn-confirm-station-cut')).toBeEnabled();
+            fs.mkdirSync('target/error-recovery',{recursive:true});await page.screenshot({path:'target/error-recovery/preserved-1366.png'});
+        });
+        await run('version conflicts retain old geometry but block reporting and saving adjustments',async page=>{
+            await loadPlan(page);solveHttpStatus=409;solveResult={message:'库存版本已变化'};const before=await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces));
+            await page.locator('#btn-trigger-solve-station').click();await expect(page.locator('#solve-feedback')).toContainText('数据版本冲突');await expect(page.locator('#solve-feedback')).toContainText('不能报工');
+            await expect(page.locator('#btn-confirm-station-cut')).not.toBeVisible();assert.equal(await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces)),before);
+            await page.evaluate(async()=>{const {canUseCurrentPlan,validatePlanAdjustment}=await import('/js/plugins/solver/solver-client.js');if(canUseCurrentPlan())throw new Error('stale plan ready');await validatePlanAdjustment();});assert.equal(adjustmentBodies.length,0);
+        });
+        await run('new manual edits during a solve are not overwritten by the arriving result',async page=>{
+            await loadPlan(page);let finish;solveWait=new Promise(resolve=>finish=resolve);await page.locator('#btn-trigger-solve-station').click();await expect.poll(()=>requests.filter(r=>r==='POST /api/solve').length).toBe(1);
+            await page.keyboard.press('ArrowDown');const y=await page.evaluate(()=>window.camApp.state.getCurrentCaseData().pieces[1].y);finish();solveWait=undefined;
+            await expect(page.locator('#solve-feedback')).toContainText('结果已过期');assert.equal(await page.evaluate(()=>window.camApp.state.getCurrentCaseData().pieces[1].y),y);assert.equal(y,1505);
+        });
+        await run('task save errors persist with repair and retry while input changes clear old errors',async page=>{
+            await loadPlan(page);await page.locator('#task-details').evaluate(el=>el.open=true);await page.locator('#task-name').fill('需要保留的需求');await page.locator('#task-name').press('Tab');failSave=true;
+            await page.getByRole('button',{name:'保存需求',exact:true}).click();await expect(page.locator('#task-save-error')).toContainText('测试保存失败');await expect(page.locator('#task-name')).toHaveValue('需要保留的需求');
+            failSave=false;await page.locator('#task-save-error').getByRole('button',{name:'重试保存'}).click();await expect(page.locator('#task-save-error')).toBeHidden();await expect(page.locator('#task-state')).toContainText('已保存');
+            await page.locator('.dem-count').fill('');await page.evaluate(()=>window.camApp.triggerSolve());await expect(page.locator('.dem-count')).toBeFocused();
+        });
+        await run('unsupported geometry and malformed server replies give different persistent recovery',async page=>{
+            await loadPlan(page);solveResult={success:false,status:'UNSUPPORTED',message:'坐标精度超出能力'};await page.locator('#btn-trigger-solve-station').click();await expect(page.locator('#solve-feedback')).toContainText('当前能力不支持');
+            await page.locator('#solve-feedback [data-review-input]').click();await expect(page.locator('#card-bed-origin')).not.toHaveClass(/collapsed/);
+            solveHttpStatus=502;solveRawResponse='<html>Gateway failed</html>';await page.locator('#solve-feedback [data-retry]').click();await expect(page.locator('#solve-feedback')).toContainText('服务器响应异常');await expect(page.locator('#solve-feedback')).not.toContainText('html');
+        });
     } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
-    console.log(JSON.stringify({discovered:29,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
+    console.log(JSON.stringify({discovered:35,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
 })().catch(error=>{console.error(error);server.close();process.exitCode=1;});
