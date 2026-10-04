@@ -53,7 +53,7 @@ java -jar target/CutDemoTwo-0.0.1-SNAPSHOT.jar
 - 阿里云服务器：当前应用镜像 `cutdemo:git-97ddb257a03d4bf64a82a8b9ff31fb6792dd17fa` 启动健康；真实 MySQL 已初始化 7 张表，母卷、料头和任务均为空，未导入本机库存。初始部署时服务器容器中的原生求解器实际排出 2 个测试裁片，该检查未写入业务库存。
 - 公网入口：Caddy 配置通过 validate；IP 证书受信任。登录后的 HTML、健康、母卷、料头和任务接口均返回 200，未登录的页面及 API 返回 401，原 HTTP 管理入口仍返回 307。此项为 HTTP/API 验证，不替代用户浏览器与现场业务验收。
 - 部署前 SQL 备份生成并通过 gzip 完整性检查；已将服务器初始备份恢复到本机独立临时 MySQL，确认 7 张表、版本计数及 Flyway 记录一致。验证的是初始空业务库，不能等同于生产数据规模下的完整灾备演练。
-- GitHub 工作流已完成本地配置与静态校验，尚未推送、配置仓库 Secrets 或在 GitHub 实际运行；生产业务验收仍待用户执行。
+- 初始检查阶段仅完成工作流本地配置与静态校验；后续已补齐 GitHub 环境配置并完成真实部署，见本文「GitHub Actions」章节。生产业务验收仍待用户执行。
 - 空库示例流程：浏览器使用独立临时数据文件验证取消时仅加载需求、确认后创建 6 卷示例母卷与 5 块示例料头、母卷加载并实际排出 14 件裁片、料头装载以及新建任务恢复。该验证没有向服务器业务库写入示例库存。
 - 更新后公网浏览器：实际点击示例，确认出现创建示例材料提示；取消后成功载入 43 件需求，无失效母卷选项。已恢复新任务页面，未保存测试任务或创建服务器示例材料。HTTPS 健康、母卷、料头、任务接口均返回 200，部署前后数据一致；匿名健康接口仍为 401。
 - 本次部署前备份为 `/opt/cutdemo/backups/20261004T040236Z-before-deploy.sql.gz`，gzip 完整性校验通过；`.previous-image` 保留初始应用镜像 `cutdemo:git-4c3002ba986acd7b31080226dfe46e4cb93e6c67`。
@@ -64,7 +64,7 @@ java -jar target/CutDemoTwo-0.0.1-SNAPSHOT.jar
 
 空库点击“演示案例”时，会提示创建示例材料；确认后通过 `/api/demo/inventory` 一次性保存 6 卷母卷与 5 块料头，并标注“示例材料（非实物）”。取消则只载入示例需求，等待匹配材料。只要库中已有母卷、料头、任务、方案或报工，后台就拒绝整套初始化；写入失败会回滚，重复调用不会覆盖库存。正式使用真实库存时，建议使用独立数据库进行演示。
 
-有业务写入的验证使用隔离库存或临时数据库，不写入现有演示库存文件。服务器仍为空业务库；正式投入生产前需完成现场业务验收及实际数据规模下的灾备演练。
+有业务写入的验证使用隔离库存或临时数据库，不写入现有演示库存文件。上述空业务库是初始部署时的记录，后续库存随实际操作变化；正式投入生产前需完成现场业务验收及实际数据规模下的灾备演练。
 
 ## Docker Compose 本机验证
 
@@ -99,7 +99,7 @@ Dockerfile 从固定的 PackingSolver 提交 `3f4faae1a4bc42e2276c5729878933010d
 
 `.github/workflows/image.yml` 在 `master` 推送、PR 和手动触发时构建 Linux 镜像，并执行镜像中的 Java、JavaScript 测试。非 PR 构建成功后发布到本仓库的 GHCR 包，以提交号标记并输出不可变摘要。推送 `master` 或 `v*` 标签时，构建通过后自动调用部署；PR 不发布、不部署。后续推送不会取消正在执行的部署。也可手动运行 `Deploy` 工作流，指定本仓库镜像摘要。
 
-启用前，在 GitHub 仓库创建 `production` Environment，并配置：
+部署使用 GitHub 仓库的 `production` Environment。需要在该环境配置以下内容，仅有工作流文件不足以启动部署：
 
 | 类型 | 名称 | 内容 |
 | --- | --- | --- |
@@ -111,7 +111,25 @@ Dockerfile 从固定的 PackingSolver 提交 `3f4faae1a4bc42e2276c5729878933010d
 
 根据发布要求配置 Environment 审批及分支/标签限制。应用数据库密码只保存在服务器 `.env`，不由 CI 输出。私有 GHCR 镜像还需在服务器提前用仅读取包权限的令牌完成 `docker login ghcr.io`；构建工作流的 `GITHUB_TOKEN` 不会传给服务器。SSH 防火墙规则需允许选定 Actions runner 的出口地址。
 
+2026-10-04 补齐了以上 3 个 Variables 和 2 个 Secrets。此前部署失败的原因是环境与仓库层均未配置这些值，工作流在 SSH 连接前退出。部署步骤现在会明确列出缺少的配置名称，不输出密钥内容。
+
+Actions 使用独立的 Ed25519 密钥。服务器将 `scripts/actions-ssh-command.sh` 安装为 `/opt/cutdemo/actions-ssh-command.sh`（权限 `700`），在部署账号的 `authorized_keys` 中为该公钥添加以下前缀：
+
+```text
+restrict,command="/opt/cutdemo/actions-ssh-command.sh" ssh-ed25519 <Actions公钥> <注释>
+```
+
+该入口只接受本仓库 `ghcr.io/atmoos985/curdemotwo@sha256:完整摘要` 的固定部署命令，不执行客户端传入的任意 Shell 文本；SSH 端口转发和交互终端也受限。普通管理密钥独立保留。初始化时先备份 `authorized_keys`，追加专用公钥，不覆盖已有密钥。主机指纹仍需通过服务器控制台核验后配置 `DEPLOY_KNOWN_HOSTS`。可用 `bash src/test/deploy/actions-ssh-command.test.sh` 运行允许命令与拒绝命令检查，CI 在镜像构建前也执行这些检查。
+
 部署工作流调用服务器已安装的部署脚本；修改 Compose 或部署脚本后，需先同步并核验这些文件，再发布新版本。本地工作流文件存在不代表 GitHub 已启用；只有推送代码、配置权限与 Secrets，并完成一次真实运行后，才能认定自动部署可用。
+
+2026-10-04 实际闭环验证：
+
+- [异形排料版本流水线](https://github.com/ATmoos985/CurDemoTwo/actions/runs/37184967717) 的 Linux 镜像构建、测试和发布成功。补齐环境配置后重跑失败的部署任务，结果成功。
+- 服务器运行镜像的提交标识为 `fd0b7cf2fb25febf0c4cf6fb4f95d40af5c745f7`，容器健康。镜像摘要为 `sha256:9d0176354d039eca2edd6b465718addecf3f3c0a7d4a585473d48893b5843a5d`。
+- 部署前数据库备份 `/opt/cutdemo/backups/20261004T072449Z-before-deploy.sql.gz` 通过 gzip 完整性检查；`.previous-image` 保留上一版本。
+- 部署前后母卷、料头、任务接口内容的摘要完全一致，当时分别为 6 卷、5 块、1 个任务。该记录只表示部署时核验结果，不是固定库存。
+- 公网 HTTPS 验证 5 项通过：匿名接口返回 401、认证后健康接口返回 200、异形试验台页面可用、原生异形引擎就绪、标准异形输入实际排入 14 件。此次求解只调用无状态接口，没有报工或修改业务库存。
 
 ## Windows 原生求解器
 
