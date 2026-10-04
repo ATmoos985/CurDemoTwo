@@ -66,7 +66,7 @@
         </div>
     </header>
 
-    <nav class="task-bar" aria-label="切割任务流程"><div class="task-toolbar"><button class="tool-btn" onclick="newCuttingTask()">新建任务</button><button class="tool-btn" onclick="openTaskList()">打开任务</button><button class="tool-btn" onclick="saveTaskFromUI()">保存需求</button><span id="task-state">未保存</span></div><ol><li>收集需求</li><li>匹配材料</li><li>排料预览</li><li>报工回收</li></ol><div class="task-toolbar"><button class="tool-btn" onclick="openTaskPlans()">方案记录</button><button class="tool-btn" onclick="openTaskReports()">报工记录 <span id="task-report-count">0</span></button></div></nav>
+    <nav class="task-bar" aria-label="切割任务流程"><div class="task-toolbar"><button class="tool-btn" onclick="newCuttingTask()">新建任务</button><button class="tool-btn" onclick="openTaskList()">打开任务</button><button class="tool-btn" onclick="saveTaskFromUI()">保存需求</button><span id="task-state" role="status">未保存</span><button class="tool-btn" id="btn-local-drafts" onclick="openLocalDrafts()">本机草稿 0</button></div><ol><li>收集需求</li><li>匹配材料</li><li>排料预览</li><li>报工回收</li></ol><div class="task-toolbar"><button class="tool-btn" onclick="openTaskPlans()">方案记录</button><button class="tool-btn" onclick="openTaskReports()">报工记录 <span id="task-report-count">0</span></button></div></nav>
     <!-- 主视窗工作区 -->
     <main>
         <!-- 左侧控制面板：清晰分离母卷排产与料头精益切割两大工位 -->

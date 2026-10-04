@@ -8,7 +8,7 @@ import { drawRulers } from '../cad/cad-rulers.js';
 import { renderRadar, requireStationReport } from '../radar/radar-scrubber.js';
 import { updateUIInfo } from './solver-client.js';
 import { showToast } from '../../core/toast.js';
-import { escapeText, taskInputChanged, startTaskDraft } from './task-workspace.js';
+import { escapeText, taskInputChanged, startTaskDraft, finishTaskDraft, prepareTaskSwitch } from './task-workspace.js';
 import { CURTAIN_ORDER_TEMPLATES } from '../presets/scenarios.js';
 
 export function updateDemandCompletionFromPieces(data) {
@@ -256,7 +256,7 @@ export function renderDemandsUI(demands) {
         row.innerHTML = `
             <div class="item-row-header" style="display:flex; justify-content:space-between; align-items:center;">
                 <input type="text" class="dem-name" aria-label="裁片名称" value="${escapeText(dem.name || ('裁片-' + (idx + 1)))}" style="font-weight:600; flex:1; margin-right:6px;" onchange="window.camApp.onParamChange()">
-                <button class="del-btn" onclick="this.closest('.item-row').remove(); window.camApp.onParamChange();" title="删除此裁片需求" style="margin-left:6px;">×</button>
+                <button class="del-btn" onclick="window.camApp.removeDemandRow(this)" title="删除此裁片需求" style="margin-left:6px;">×</button>
             </div>
             <div class="mini-input-group" style="margin-top:4px;">
                 <label>宽 <input type="number" class="mini-input dem-w" aria-label="裁片宽度 (mm)" value="${wVal}" onchange="window.camApp.onParamChange()" style="width:58px;"></label>
@@ -351,10 +351,30 @@ export function addDefectRow() {
     onParamChange();
 }
 
+export function removeDemandRow(button) {
+    const row = button.closest('.item-row');
+    const container = document.getElementById('demands-container');
+    const index = [...container.children].indexOf(row), removed = row.cloneNode(true);
+    document.getElementById('demand-undo')?.remove();
+    row.remove(); onParamChange();
+    const notice = document.createElement('div'); notice.id = 'demand-undo'; notice.setAttribute('role', 'status');
+    const label = document.createElement('span'); label.textContent = '已移除需求';
+    const undo = document.createElement('button'); undo.className = 'tool-btn'; undo.textContent = '撤销删除';
+    undo.onclick = () => {
+        if (!container.querySelector(`.item-row[data-id="${Number(removed.dataset.id)}"]`)) {
+            if (!container.querySelector('.item-row')) container.replaceChildren();
+            container.insertBefore(removed, container.children[index] || null); onParamChange();
+        }
+        notice.remove();
+    };
+    notice.append(label, undo); container.before(notice);
+}
+
 export function addDemandRow() {
     const container = document.getElementById("demands-container");
-    if (container.querySelector("div[style*='暂无']")) container.innerHTML = "";
-    const id = container.querySelectorAll(".item-row").length + 1;
+    if (!container.querySelector('.item-row')) container.replaceChildren();
+    const id = Math.max(state.nextDemandId, 1, ...[...container.querySelectorAll('.item-row')].map(row => Number(row.dataset.id) + 1));
+    state.nextDemandId = id + 1;
     const row = document.createElement("div");
     row.className = "item-row";
     row.setAttribute("data-id", id);
@@ -364,7 +384,7 @@ export function addDemandRow() {
         <div class="item-row-header" style="display:flex; justify-content:space-between; align-items:center;">
             <input type="text" class="dem-name" value="新裁片-${id}" style="font-weight:600; flex:1; margin-right:6px;" onchange="window.camApp.onParamChange()">
             <span style="font-size:10px; padding:1px 5px; border-radius:3px; background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1;">待排 0/4</span>
-            <button class="del-btn" onclick="this.closest('.item-row').remove(); window.camApp.onParamChange();" style="margin-left:6px;">×</button>
+            <button class="del-btn" onclick="window.camApp.removeDemandRow(this)" style="margin-left:6px;">×</button>
         </div>
         <div class="mini-input-group" style="margin-top:4px;">
             <span>宽:</span><input type="number" class="mini-input dem-w" value="600" onchange="window.camApp.onParamChange()" style="width:52px;">
@@ -522,6 +542,7 @@ export async function loadCurtainOrderTemplate(templateKey) {
     if (!templateKey) return;
     const tpl = CURTAIN_ORDER_TEMPLATES[templateKey];
     if (!tpl) return;
+    if (!await prepareTaskSwitch()) return;
     startTaskDraft(tpl.name);
     const isRemnant = (state.currentCutMode === "remnant");
 
@@ -556,12 +577,6 @@ export async function loadCurtainOrderTemplate(templateKey) {
     const selRem = document.getElementById("sel-remnant-order-template");
     if (selRem) selRem.value = "";
 
-    taskInputChanged();
-    // User starts solving after choosing a material.
-    if (window.camApp && typeof window.camApp.triggerSolve === 'function') {
-        setTimeout(() => {
-            window.camApp.triggerSolve();
-        }, 150);
-    }
+    finishTaskDraft();
 }
 

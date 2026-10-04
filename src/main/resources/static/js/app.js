@@ -1,4 +1,4 @@
-import { initTaskWorkspace, newCuttingTask, startTaskDraft, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, taskInputChanged } from './plugins/solver/task-workspace.js';
+import { initTaskWorkspace, newCuttingTask, startTaskDraft, finishTaskDraft, prepareTaskSwitch, openLocalDrafts, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, taskInputChanged } from './plugins/solver/task-workspace.js';
 /**
  * 【主装配器】CAM 前端应用主入口 (Application Orchestrator)
  * 挂载微内核与所有独立插件，完成全局事件编排与向后兼容性绑定
@@ -45,7 +45,7 @@ import {
 import {
     updateDemandCompletionFromPieces, recalculateRollStats,
     clearStationCuts, resetAllRollCuts, renderDemandsUI, renderDefectsUI,
-    addDefectRow, addDemandRow, getDefectsFromUI, getDemandsFromUI,
+    addDefectRow, addDemandRow, removeDemandRow, getDefectsFromUI, getDemandsFromUI,
     onRollConfigChange, onOriginParamChange, onParamChange,
     updateRollSize, toggleLongitudinal, loadCurtainOrderTemplate
 } from './plugins/solver/quota-manager.js';
@@ -211,7 +211,9 @@ let loadingPreset = false;
 export async function selectPresetCase(caseId) {
     if (loadingPreset) return;
     loadingPreset = true;
+    if (!await prepareTaskSwitch()) { loadingPreset = false; return; }
     const alreadyInert = document.body.inert;
+    let replaced = false;
     document.body.inert = true;
     try {
     const readRolls = async () => {
@@ -237,6 +239,7 @@ export async function selectPresetCase(caseId) {
     const model = preset.rollModel || MOTHER_ROLL_SPECS[preset.rollId]?.model || '';
     syncMaterialOptions(rolls, {rollId:preset.rollId, model, fallback:false});
     startTaskDraft(document.querySelector(`#btn-case-${caseId} .preset-item-name`)?.textContent || "示例切割任务");
+    replaced = true;
     state.scenarios = scenarios;
     if (typeof loadCase === 'function') {
         loadCase(caseId);
@@ -296,7 +299,7 @@ export async function selectPresetCase(caseId) {
     updatePresetTriggerLabel(caseId);
     closePresetDropdown();
     } catch (error) { showToast(error.message, 'error'); }
-    finally { document.body.inert = alreadyInert; loadingPreset = false; }
+    finally { if (replaced) finishTaskDraft(); document.body.inert = alreadyInert; loadingPreset = false; }
 }
 
 export function updatePresetTriggerLabel(caseId) {
@@ -331,7 +334,7 @@ bus.on('piece:moved', (payload) => {
 // 2. 导出面向全局 DOM 与 Inline Onclick 的统一命名空间
 // ==========================================
 const camApp = {
-    newCuttingTask, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, taskInputChanged,
+    newCuttingTask, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, openLocalDrafts, taskInputChanged,
     bus,
     state,
     toggleTheme,
@@ -390,7 +393,7 @@ const camApp = {
     updateRollSize,
     toggleLongitudinal,
     addDefectRow,
-    addDemandRow,
+    addDemandRow, removeDemandRow,
     chooseRemnantForDemand,
     dismissRemnantHint,
     checkAllDemandsRemnantMatch,
