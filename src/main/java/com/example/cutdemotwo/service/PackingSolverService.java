@@ -18,6 +18,8 @@ import java.util.*;
 @Service
 public class PackingSolverService implements com.example.cutdemotwo.service.solver.ICutSolverEngine {
     private static final Logger log = LoggerFactory.getLogger(PackingSolverService.class);
+    // Native rectangle coordinates are integers; one native unit represents 0.1 mm.
+    private static final int UNITS_PER_MM = 10;
 
     @Override
     public String getEngineType() {
@@ -45,7 +47,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
 
     @Override
     public EngineCapabilities capabilities() {
-        return new EngineCapabilities(getEngineType(), "1", List.of("RECTANGLE"), List.of("GUILLOTINE"), List.of("MAXIMIZE_PIECE_AREA"), 1, isAvailable());
+        return new EngineCapabilities(getEngineType(), "2", List.of("RECTANGLE"), List.of("GUILLOTINE"), List.of("MAXIMIZE_PIECE_AREA"), 1.0 / UNITS_PER_MM, isAvailable());
     }
 
     public boolean isAvailable() {
@@ -83,7 +85,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
             // 1. bins.csv
             try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(new FileOutputStream(binsCsv), java.nio.charset.StandardCharsets.UTF_8))) {
                 pw.println("ID,WIDTH,HEIGHT");
-                pw.println("0," + (int)req.width() + "," + (int)activeL);
+                pw.println("0," + nativeUnits(req.width()) + "," + nativeUnits(activeL));
             }
 
             // 2. items.csv
@@ -94,7 +96,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                 int idx = 0;
                 for (NestingProblem.Part it : req.parts()) {
                     for (int c = 0; c < it.quantity(); c++) {
-                        pw.println(idx + "," + (int)it.shape().width() + "," + (int)it.shape().height() + "," + idx + "," + (it.allowRotation() ? 0 : 1));
+                        pw.println(idx + "," + nativeUnits(it.shape().width()) + "," + nativeUnits(it.shape().height()) + "," + idx + "," + (it.allowRotation() ? 0 : 1));
                         itemMap.put(idx, it.name());
                         demandIdMap.put(idx, it.id());
                         idx++;
@@ -118,8 +120,8 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                                 Math.max(0, req.width() - d.getX() - d.getW() - d.getMargin()) : d.getSafeX();
                         double safeY = mirrorY ?
                                 Math.max(0, req.height() - dy - d.getH() - d.getMargin()) : Math.max(0, dy - d.getMargin());
-                        pw.println(d.getId() + ",0," + (int)safeX + "," + (int)safeY + "," +
-                                (int)d.getSafeW() + "," + (int)d.getSafeH());
+                        pw.println(d.getId() + ",0," + nativeUnits(safeX) + "," + nativeUnits(safeY) + "," +
+                                nativeUnits(d.getSafeW()) + "," + nativeUnits(d.getSafeH()));
                     }
                 }
             }
@@ -187,6 +189,14 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
         }
     }
 
+    private static long nativeUnits(double millimeters) {
+        double scaled = millimeters * UNITS_PER_MM;
+        long units = Math.round(scaled);
+        if (!Double.isFinite(scaled) || Math.abs(scaled - units) > .000001)
+            throw new IllegalArgumentException("尺寸必须是 0.1 mm 的整数倍");
+        return units;
+    }
+
     private static class CertNode {
         int nodeId;
         double x, y, w, h;
@@ -247,10 +257,10 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
 
                 CertNode n = new CertNode();
                 n.nodeId = Integer.parseInt(parts[2].trim());
-                n.x = Double.parseDouble(parts[3].trim());
-                n.y = Double.parseDouble(parts[4].trim());
-                n.w = Double.parseDouble(parts[5].trim());
-                n.h = Double.parseDouble(parts[6].trim());
+                n.x = Double.parseDouble(parts[3].trim()) / UNITS_PER_MM;
+                n.y = Double.parseDouble(parts[4].trim()) / UNITS_PER_MM;
+                n.w = Double.parseDouble(parts[5].trim()) / UNITS_PER_MM;
+                n.h = Double.parseDouble(parts[6].trim()) / UNITS_PER_MM;
                 n.type = Integer.parseInt(parts[7].trim());
                 n.cut = Integer.parseInt(parts[8].trim());
                 if (parts.length >= 10 && !parts[9].trim().isEmpty()) {
