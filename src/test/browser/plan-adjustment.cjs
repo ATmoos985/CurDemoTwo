@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../../main/resources/static');
+let recommendationBodies, recommendationWait, recommendationFailure, recommendationData, materialReadOverride;
 let storedPlans, failTicketRead, tasks, failSave, requests, failAdjustment, adjustmentBodies, reportBodies, savedPlanRequest, solveResult, acceptReport, receipts, stock, solveWait, candidateItems, candidateBodies, failCandidates, failMaterialRead, candidateWait, extraRolls, failInventory, solveHttpStatus, solveRawResponse;
 const planRequest={taskId:"task-a", taskRevision:1, rollId:"ROLL-2026-0920",rollModel:"TC涤棉-B2026",rollW:2000,rollL:5000,totalRollL:60000,windowStartY:0,feedPortType:"roll",trimStart:0,cutOrigin:"right-bottom",firstStageOrientation:"horizontal",allowRotation:false,allowLongitudinal:false,demands:[{id:7,name:"主帘",width:2000,length:1200,demand:2}],minRemnantWidth:200,minRemnantLength:300};
 const planResult={success:true,planId:"original-plan",pieces:[{id:1,demandId:7,name:"主帘",x:0,y:0,w:2000,l:1200,rotated:false},{id:2,demandId:7,name:"主帘",x:0,y:1500,w:2000,l:1200,rotated:false}],remnants:[],cuts:[{step:1,type:"横切",pos:1200,start:0,end:2000,desc:"横切"},{step:2,type:"横切",pos:2700,start:0,end:2000,desc:"横切"}],deductLen:2700,engine:"crosscut"};
@@ -27,7 +28,8 @@ const server = createServer(async (req,res) => {
         if(url.pathname==='/api/v1/nesting/engines')return json([{id:'crosscut',modes:['CROSSCUT'],coordinateResolutionMm:.1,available:true},{id:'packingsolver',modes:['GUILLOTINE'],coordinateResolutionMm:.1,available:true},{id:'packingsolver-irregular',modes:['CONTOUR'],coordinateResolutionMm:.1,available:false}]);
         if (url.pathname === '/api/rolls' && req.method === 'POST') {let raw='';for await(const chunk of req)raw+=chunk;const r=JSON.parse(raw);extraRolls.push({...r,usedLength:0,currentRemainingLength:r.totalLength});return json(r);}
         if(url.pathname==='/api/cutting/material-candidates'){let raw='';for await(const chunk of req)raw+=chunk;candidateBodies.push(JSON.parse(raw));await candidateWait;return json(failCandidates?{message:'测试库存读取失败'}:candidateItems,failCandidates?503:200);}
-        if(url.pathname==='/api/remnants/scan'){let raw='';for await(const chunk of req)raw+=chunk;const id=JSON.parse(raw).id;return json(failMaterialRead?{message:'测试材料读取失败'}:remnantStock,failMaterialRead?503:200);}
+        if(url.pathname==='/api/cutting/remnant-recommendations'){let raw='';for await(const chunk of req)raw+=chunk;recommendationBodies.push(JSON.parse(raw));await recommendationWait;return json(recommendationFailure?{message:'库存已变化，请重新匹配'}:recommendationData,recommendationFailure?409:200);}
+        if(url.pathname==='/api/remnants/scan'){let raw='';for await(const chunk of req)raw+=chunk;const id=JSON.parse(raw).id;return json(failMaterialRead?{message:'测试材料读取失败'}:(materialReadOverride || remnantStock),failMaterialRead?503:200);}
         if(extraRolls.some(r=>url.pathname==='/api/rolls/'+r.rollId))return json(failMaterialRead?{message:'测试材料读取失败'}:extraRolls.find(r=>url.pathname.endsWith('/'+r.rollId)),failMaterialRead?503:200);
         if (url.pathname === '/api/rolls/' + roll.rollId) return json(stock);
         if (url.pathname === '/api/remnants') return json([]);
@@ -82,6 +84,8 @@ const server = createServer(async (req,res) => {
     const browser = await chromium.launch({headless:true, ...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {})});
     let passed=0, failed=0;
     async function run(name, verify) {
+        recommendationBodies=[];recommendationWait=undefined;recommendationFailure=false;materialReadOverride=null;
+        recommendationData={candidateCount:1,evaluatedCount:1,deferredCount:0,inventoryVersion:10,unavailable:[],recommendations:[{stock:{...structuredClone(remnantStock),status:'AVAILABLE'},pieceCount:1,pieceArea:2.4,utilization:40,cutCount:1,lines:[{demandId:7,name:'主帘',width:2000,length:1200,requested:2,placed:1,remaining:1}]}]};
         storedPlans=new Map([['original-plan',{id:'original-plan',version:1,request:structuredClone(planRequest),result:structuredClone(planResult),status:'PENDING',createdAt:'2026-10-04T12:00:00'}]]);failTicketRead=false;tasks = new Map([['task-a',initialTask()]]); failSave=false; requests=[]; failAdjustment=false; adjustmentBodies=[];reportBodies=[];savedPlanRequest=planRequest;solveResult=planResult;acceptReport=false;receipts=[];stock={...roll};solveWait=undefined;candidateItems=[];candidateBodies=[];failCandidates=false;failMaterialRead=false;candidateWait=undefined;extraRolls=[];failInventory=false;solveHttpStatus=200;solveRawResponse=null;
         const context = await browser.newContext({viewport:{width:1366,height:768}}), page = await context.newPage(), errors=[];
         page.on('pageerror',error => errors.push(error.message));
@@ -90,7 +94,7 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('body')).not.toHaveAttribute('inert','');
             await verify(page);
             assert.deepEqual(errors, []);
-            assert.ok(requests.every(r => !r.startsWith('POST') || ['/adjust','/report-confirm','/solve','/tasks','/reverse','/material-candidates','/scan','/rolls'].some(route=>r.endsWith(route))), 'only isolated fixture task, solve, adjustment and report requests');
+            assert.ok(requests.every(r => !r.startsWith('POST') || ['/adjust','/report-confirm','/solve','/tasks','/reverse','/material-candidates','/remnant-recommendations','/scan','/rolls'].some(route=>r.endsWith(route))), 'only isolated fixture task, solve, adjustment and report requests');
             passed++; console.log('PASS ' + name);
         } catch(error) {failed++; console.error('FAIL ' + name + '\n' + error.stack); console.error(JSON.stringify({requests,adjustmentBodies,savedPlanRequest,errors,debug:await page.evaluate(()=>{const s=window.camApp?.state;if(!s)return {page:location.pathname};return {pending:s.pendingPlan?.result?.planId,version:s.pendingPlan?.version,geometry:s.pendingPlan?.geometry,pieces:s.getCurrentCaseData().pieces,cuts:s.getCurrentCaseData().cuts,remnants:s.getCurrentCaseData().remnants};})}));}
         finally {await context.close();}
@@ -393,6 +397,53 @@ const server = createServer(async (req,res) => {
             await expect(row.locator('.demand-locate')).toBeDisabled();await expect(page.locator('#btn-confirm-station-cut')).toBeDisabled();
             await page.locator('.dem-l').fill('1200');await expect(row.locator('.demand-unplaced')).toBeHidden();await expect(page.locator('#demand-progress-summary')).not.toContainText('求解反馈');
         });
+        await run('remnant recommendation uses remaining demand and selecting preserves demand until confirmed',async page=>{
+            await loadPlan(page);candidateItems=candidateList();extraRolls=[secondRoll];
+            const before=await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces));
+            const saves=requests.filter(r=>r==='POST /api/cutting/tasks').length;
+            await page.getByRole('button',{name:'选择用料',exact:true}).click();await expect(page.locator('#material-recommend')).toBeEnabled();
+            await page.locator('#material-recommend').click();await expect(page.locator('#material-recommend-results')).toContainText('可先切 1 件');
+            assert.equal(recommendationBodies[0].input.demands[0].demand,2);assert.deepEqual(recommendationBodies[0].completedBaseline,{'7':1});
+            assert.equal(recommendationBodies[0].input.allowLongitudinal,false);assert.equal(recommendationBodies[0].input.cutOrigin,'right-bottom');
+            assert.equal(await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces)),before);
+            assert.equal(requests.filter(r=>r==='POST /api/cutting/tasks').length,saves);assert.equal(reportBodies.length,0);
+            fs.mkdirSync('target/remnant-recommendation',{recursive:true});await page.screenshot({path:'target/remnant-recommendation/1366.png'});
+            await page.setViewportSize({width:1920,height:1080});await page.screenshot({path:'target/remnant-recommendation/1920.png'});
+            await page.locator('[data-recommend-stock]').click();await expect(page.locator('#material-selected-summary')).toContainText('REM-CHOICE');
+            await expect(page.locator('#material-load')).toBeDisabled();await page.locator('#material-replace-confirm').check();await page.locator('#material-load').click();
+            await expect(page.locator('#material-picker')).not.toBeVisible();await expect(page.locator('#material-context-id')).toHaveText('REM-CHOICE');
+            assert.equal(await page.locator('.dem-count').first().inputValue(),'3');assert.equal(await page.evaluate(()=>window.camApp.state.taskCompleted[7]),1);
+            assert.equal(reportBodies.length,0);assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan),null);
+        });
+        await run('stale recommended geometry cannot replace the active material and preview',async page=>{
+            await loadPlan(page);candidateItems=candidateList();await page.getByRole('button',{name:'选择用料',exact:true}).click();await expect(page.locator('#material-recommend')).toBeEnabled();
+            await page.locator('#material-recommend').click();await expect(page.locator('[data-recommend-stock]')).toBeVisible();await page.locator('[data-recommend-stock]').click();
+            await page.locator('#material-replace-confirm').check();materialReadOverride={...remnantStock,length:2500};await page.locator('#material-load').click();
+            await expect(page.locator('#material-match-error')).toContainText('推荐已过期');assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');
+            await page.locator('#material-refresh').click();await expect(page.locator('#material-recommend-results')).not.toBeVisible();
+        });
+        await run('recommendation conflict is retryable and closing ignores late results',async page=>{
+            await loadPlan(page);candidateItems=candidateList();await page.getByRole('button',{name:'选择用料',exact:true}).click();await expect(page.locator('#material-recommend')).toBeEnabled();
+            recommendationFailure=true;await page.locator('#material-recommend').click();await expect(page.locator('#material-match-error')).toContainText('库存已变化');
+            await expect(page.locator('#material-recommend')).toBeEnabled();assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');
+            recommendationFailure=false;let finish;recommendationWait=new Promise(resolve=>finish=resolve);await page.locator('#material-recommend').click();await expect(page.locator('#material-recommend-status')).toContainText('正在逐块');
+            await page.locator('#material-picker [data-close]').click();finish();recommendationWait=undefined;await page.waitForTimeout(80);await expect(page.locator('#material-picker')).not.toBeVisible();
+            await page.getByRole('button',{name:'选择用料',exact:true}).click();await expect(page.locator('#material-recommend-results')).not.toBeVisible();
+            await expect(page.locator('#material-recommend')).toBeEnabled();await page.locator('#material-recommend').click();await expect(page.locator('#material-recommend-results')).toContainText('建议先用');
+        });
+        await run('late recommendation cannot overwrite changed craft settings',async page=>{
+            await loadPlan(page);candidateItems=candidateList();await page.getByRole('button',{name:'选择用料',exact:true}).click();await expect(page.locator('#material-recommend')).toBeEnabled();
+            let finish;recommendationWait=new Promise(resolve=>finish=resolve);await page.locator('#material-recommend').click();await expect(page.locator('#material-recommend-status')).toContainText('正在逐块');
+            await page.evaluate(()=>document.getElementById('inp-trim-start').value='20');finish();recommendationWait=undefined;
+            await expect(page.locator('#material-match-error')).toContainText('工艺已变化');await expect(page.locator('#material-recommend-results')).not.toBeVisible();
+        });
+        await run('empty recommendation shows explicit search limits and unavailable reasons',async page=>{
+            await loadPlan(page);candidateItems=candidateList();recommendationData={candidateCount:10,evaluatedCount:8,deferredCount:2,recommendations:[],unavailable:[{id:'REM-CHOICE',status:'UNAVAILABLE',message:'引擎暂不可用'}]};
+            await page.getByRole('button',{name:'选择用料',exact:true}).click();await expect(page.locator('#material-recommend')).toBeEnabled();await page.locator('#material-recommend').click();
+            await expect(page.locator('#material-recommend-results')).toContainText('2 块尚未评估');await expect(page.locator('#material-recommend-results')).toContainText('不表示已证明无解');
+            await page.locator('#material-recommend-results summary').click();await expect(page.locator('#material-recommend-results')).toContainText('引擎暂不可用');await expect(page.locator('[data-recommend-stock]')).toHaveCount(0);
+            await page.locator('#material-source-filter').selectOption('roll');await expect(page.locator('.material-candidate')).toHaveCount(2);
+        });
         await run('material selection explains all remaining demand and browsing preserves the current plan',async page=>{
             await loadPlan(page);candidateItems=candidateList();extraRolls=[secondRoll];
             const before=await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData()));
@@ -586,5 +637,5 @@ const server = createServer(async (req,res) => {
             assert.ok(fs.statSync('target/visual-consistency/long-ticket.pdf').size>10000);
         });
     } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
-    console.log(JSON.stringify({discovered:45,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
+    console.log(JSON.stringify({discovered:50,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
 })().catch(error=>{console.error(error);server.close();process.exitCode=1;});

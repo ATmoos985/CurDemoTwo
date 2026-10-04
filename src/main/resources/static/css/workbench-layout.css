@@ -21,6 +21,9 @@
 .demand-unplaced[hidden] { display: none; }
 #demand-progress-summary { line-height: 1.6; }
 .material-picker { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 18px; margin: auto; }
+.material-picker[open] { display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; }
+.material-picker-body { min-height: 0; overflow: auto; }
+.material-picker-heading, .material-picker-footer { flex: none; }
 .material-picker-heading, .material-picker-filters { display: flex; align-items: center; gap: 12px; }
 .material-picker-heading { justify-content: space-between; }
 .material-picker-heading h2 { margin: 0; font-size: 18px; }
@@ -37,7 +40,18 @@
 .material-candidate:has(input:checked) { background: var(--panel-header); box-shadow: inset 3px 0 var(--accent-blue); }
 .material-current strong { color: var(--accent-blue); }
 #material-match-error { border-left: 3px solid var(--accent-amber); padding-left: 10px; line-height: 1.6; }
-.material-picker-footer { margin-top: 10px; }
+.material-picker-footer { margin-top: 10px; border-top: 1px solid var(--panel-border); padding-top: 6px; }
+.remnant-recommendations { border: 1px solid var(--panel-border); border-radius: 5px; padding: 10px; margin-top: 10px; font-size: 12px; }
+.recommendation-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.remnant-recommendations p { line-height: 1.6; margin: 6px 0; }
+#material-recommend-results { max-height: 38vh; overflow: auto; }
+.remnant-recommendation { border-top: 1px solid var(--panel-border); padding: 10px 2px; }
+.remnant-recommendation strong { color: var(--accent-blue); }
+.remnant-recommendation summary { cursor: pointer; margin: 6px 0; }
+.remnant-recommendation table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.remnant-recommendation th, .remnant-recommendation td { text-align: right; border-bottom: 1px solid var(--panel-border); padding: 6px; }
+.remnant-recommendation th:first-child, .remnant-recommendation td:first-child { text-align: left; }
+.remnant-recommendation small { color: var(--text-muted); }
 #material-replace-warning { display: block; font-size: 12px; line-height: 1.8; }
 #material-replace-warning[hidden] { display: none; }
 .operation-feedback { padding: 10px; margin: 8px 0 14px; border: 1px solid var(--panel-border); border-left: 3px solid var(--accent-amber); background: var(--panel-header); font-size: 12px; }

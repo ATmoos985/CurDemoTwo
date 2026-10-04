@@ -459,6 +459,32 @@ public class RemnantService {
         return result;
     }
 
+    /** Detached read snapshot: trial nesting never holds the inventory lock or persists a plan. */
+    public record RecommendationSnapshot(long revision, List<RemnantStock> stocks) {}
+
+    public synchronized RecommendationSnapshot recommendationSnapshot(SolveRequest request, Map<String, Integer> completedBaseline) {
+        return read(() -> {
+            if (request.getTaskId() != null) {
+                var task = tasks.get(request.getTaskId());
+                if (task == null || task.revision() != request.getTaskRevision()
+                        || !completedQuantities(task.id()).equals(completedBaseline))
+                    throw new InventoryConflictException("任务版本或已报工数量已变化，请重新打开任务后匹配料头");
+            }
+            var stocks = materialCandidatesInternal(request).stream().filter(c -> "remnant".equals(c.get("type")))
+                    .map(c -> remnantPool.get(c.get("id")))
+                    .sorted(Comparator.comparingDouble(RemnantStock::getArea).thenComparing(RemnantStock::getId))
+                    .map(stock -> json.readValue(json.writeValueAsBytes(stock), RemnantStock.class)).toList();
+            return new RecommendationSnapshot(revision, stocks);
+        });
+    }
+
+    public synchronized void verifyRecommendationRevision(long expected) {
+        read(() -> {
+            if (revision != expected) throw new InventoryConflictException("试排期间库存或任务已变化，请刷新库存后重新计算推荐");
+            return null;
+        });
+    }
+
     private void addCandidate(List<Map<String, Object>> result, SolveRequest request, String type, String id, String rollId,
                               double width, double length, String location, boolean defects) {
         long fit = request.getDemands().stream().filter(d -> d != null && d.getDemand() > 0 && d.getWidth() > 0 && d.getLength() > 0 &&

@@ -1,4 +1,5 @@
 const explanations = {
+    CROSSCUT_WIDTH_MISMATCH:'仅横切需要裁片宽度等于料头幅宽，此项留待其他材料或允许纵切后再排。',
     EXCEEDS_MATERIAL_WIDTH:'裁片幅宽超出本次材料，当前允许的摆放方向均放不下；请选择更宽材料或核对旋转设置。',
     EXCEEDS_PROCESSING_LENGTH:'裁片长度超出本次加工区的有效长度（已扣切头量）；请核对机台允许长度或选择其他材料。',
     EXCEEDS_PROCESSING_REGION:'当前允许的摆放方向均超出加工区；请核对材料尺寸、工位长度及旋转设置。',

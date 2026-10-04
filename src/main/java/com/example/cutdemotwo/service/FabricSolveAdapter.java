@@ -17,10 +17,22 @@ public final class FabricSolveAdapter {
     public static NestingProblem toProblem(SolveRequest r) {
         r.validateSettings();
         boolean sheet = "remnant".equalsIgnoreCase(r.getFeedPortType());
+        if (sheet && !r.isAllowLongitudinal() && r.getDemands() != null) {
+            var ids = new java.util.HashSet<Integer>();
+            long count = 0;
+            for (var d : r.getDemands()) {
+                if (d == null || !ids.add(d.getId()) || !Double.isFinite(d.getWidth()) || d.getWidth() <= 0
+                        || !Double.isFinite(d.getLength()) || d.getLength() <= 0 || d.getDemand() <= 0)
+                    throw new IllegalArgumentException("需求编号须唯一，尺寸和件数须有效");
+                count += d.getDemand();
+            }
+            if (count > 10000) throw new IllegalArgumentException("单次排料最多 10000 件");
+        }
         var defects = r.getDefects() == null ? List.<NestingProblem.Exclusion>of() : r.getDefects().stream()
                 .map(d -> new NestingProblem.Exclusion(d.getId(), d.getX(), d.getY(),
                         NestingProblem.Shape.rectangle(d.getW(), d.getH()), d.getMargin())).toList();
         var parts = r.getDemands() == null ? List.<NestingProblem.Part>of() : r.getDemands().stream()
+                .filter(d -> !sheet || r.isAllowLongitudinal() || Math.abs(d.getWidth() - r.getRollW()) < .001)
                 .map(d -> new NestingProblem.Part(d.getId(), d.getName(), NestingProblem.Shape.rectangle(d.getWidth(), d.getLength()),
                         d.getDemand(), r.isAllowRotation() || d.isAllowRotation())).toList();
         String source = sheet ? r.getSourceRemnantId() : r.getRollId();
@@ -41,7 +53,18 @@ public final class FabricSolveAdapter {
         response.setSuccess(result.feasible());
         response.setMessage(result.message());
         response.setStatus(result.status());
+        // A remnant crosscut may satisfy only the full-width lines of a mixed order.
+        // Keep the other lines in the workflow and explicitly explain their unplaced quantities.
         response.setFulfillment(result.fulfillment());
+        if ("remnant".equalsIgnoreCase(request.getFeedPortType()) && !request.isAllowLongitudinal()
+                && request.getDemands() != null) {
+            var fulfillment = new java.util.HashMap<Integer, NestingResult.Fulfillment>();
+            result.fulfillment().forEach(line -> fulfillment.put(line.demandId(), line));
+            response.setFulfillment(request.getDemands().stream().map(d -> fulfillment.getOrDefault(d.getId(),
+                    new NestingResult.Fulfillment(d.getId(), d.getDemand(), 0, d.getDemand(),
+                            Math.abs(d.getWidth() - request.getRollW()) >= .001 ? "CROSSCUT_WIDTH_MISMATCH"
+                                    : "NOT_PLACED_IN_THIS_SOLUTION"))).toList());
+        }
         response.setEngine(result.engine());
         response.setRollW(request.getRollW());
         response.setRollL(request.getRollL());

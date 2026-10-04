@@ -5,6 +5,8 @@
 
 MySQL 初始化、文件导入、服务器部署、原生求解器配置和撤回边界见 [部署与数据存储](DEPLOYMENT.md)。方案现在支持持久保存、取消和恢复；报工可在依赖校验通过后撤回。
 
+料头复用可从“选择用料 → 计算料头推荐”开始，查看每块料头可先切的需求及数量，详见[料头优先推荐](docs/料头优先推荐.md)。
+
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.1-brightgreen.svg)](https://spring.io/projects/spring-boot)
 [![Java](https://img.shields.io/badge/Java-17-orange.svg)](https://www.oracle.com/java/)
 [![Konva.js](https://img.shields.io/badge/Canvas-Konva.js-blue.svg)](https://konvajs.org/)
