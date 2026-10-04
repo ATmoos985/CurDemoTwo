@@ -88,7 +88,7 @@ Dockerfile 从固定的 PackingSolver 提交 `3f4faae1a4bc42e2276c5729878933010d
 
 ## GitHub Actions
 
-`.github/workflows/image.yml` 在 `master` 推送、PR 和手动触发时构建 Linux 镜像，并执行镜像中的 Java、JavaScript 测试。非 PR 构建成功后发布到本仓库的 GHCR 包，以提交号标记并输出不可变摘要。推送 `v*` 标签时，构建通过后自动调用部署；普通 `master` 推送只发布镜像。也可手动运行 `Deploy` 工作流，指定本仓库镜像摘要。
+`.github/workflows/image.yml` 在 `master` 推送、PR 和手动触发时构建 Linux 镜像，并执行镜像中的 Java、JavaScript 测试。非 PR 构建成功后发布到本仓库的 GHCR 包，以提交号标记并输出不可变摘要。推送 `master` 或 `v*` 标签时，构建通过后自动调用部署；PR 不发布、不部署。后续推送不会取消正在执行的部署。也可手动运行 `Deploy` 工作流，指定本仓库镜像摘要。
 
 启用前，在 GitHub 仓库创建 `production` Environment，并配置：
 
