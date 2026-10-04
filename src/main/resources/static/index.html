@@ -20,6 +20,7 @@
     <link rel="stylesheet" href="css/inventory.css">
     <link rel="stylesheet" href="css/workflow.css">
     <link rel="stylesheet" href="css/workbench-layout.css">
+    <link rel="stylesheet" href="css/product-navigation.css">
 </head>
 <body inert>
 
@@ -44,8 +45,8 @@
       </div></div>
             </div>
         </div>
+        <div data-product-nav="workbench"></div>
         <div class="header-actions">
-            <button class="tool-btn" onclick="openMaterialModal('rolls')">物料与库存</button>
             <button class="tool-btn" onclick="openCutTicketModal()">打印工单</button>
             <details class="header-more">
                 <summary class="tool-btn">工具与设置</summary>
@@ -58,7 +59,6 @@
                     <button class="tool-btn" onclick="fitView()">适合视口</button>
                     <button class="tool-btn" onclick="resetZoom()">重置缩放</button>
                     <span class="menu-label">工作台</span>
-                    <a class="tool-btn" href="nesting.html" target="_blank" rel="noopener">裁切试验台 ↗</a>
                     <button class="tool-btn remnant-shelf-btn" onclick="openRemnantModal()">料头库（<span id="header-remnant-count">—</span>）</button>
                     <button class="tool-btn" onclick="toggleTheme()" id="btn-theme-toggle">切换主题</button>
                     <button class="tool-btn" onclick="openSettingsModal()" id="btn-settings">工艺与显示设置</button>
@@ -675,5 +675,6 @@
 
     <!-- 模块化前端 ES6 主程序入口 (Modular ES6 Plugin Architecture) -->
     <script type="module" src="js/app.js?v=20261004_station"></script>
+    <script type="module" src="js/product-navigation.js"></script>
 </body>
 </html>

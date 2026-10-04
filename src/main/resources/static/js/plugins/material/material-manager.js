@@ -10,6 +10,7 @@ import { syncMaterialOptions } from './material-options.js';
 let cachedRolls = [], cachedRemnants = [];
 let activeRollId = null, activeRemnantId = null, activeTab = 'rolls';
 let rollError = '', remnantError = '', detailRequest = 0;
+let standalone = false;
 const inspectionNames = { PASSED: '已验合格', PENDING: '待验', QUARANTINED: '隔离' };
 const qualityNames = { GRADE_A: '完好', GRADE_DEFECT: '带疵', GRADE_B: '边角料' };
 const escapeHtml = value => String(value ?? '未登记').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -36,6 +37,12 @@ export async function openMaterialModal(tab = 'rolls') {
     const modal = document.getElementById('material-manager-modal');
     activeRollId = state.getCurrentCaseData().rollId || activeRollId;
     if (!modal.open) modal.showModal();
+    await switchMaterialTab(tab);
+}
+
+export async function initInventoryPage(tab = 'rolls') {
+    standalone = true;
+    createMaterialModalDOM();
     await switchMaterialTab(tab);
 }
 
@@ -66,7 +73,7 @@ export async function refreshRollsList() {
         const response = await fetch('/api/rolls', { cache: 'no-store' });
         if (!response.ok) throw new Error('读取失败');
         cachedRolls = await response.json();
-        syncMaterialOptions(cachedRolls);
+        if (!standalone) syncMaterialOptions(cachedRolls);
         for (const roll of cachedRolls) {
             const filter = document.getElementById('sel-remnant-filter-roll');
             if (filter && ![...filter.options].some(option => option.value === roll.rollId)) filter.add(new Option(roll.rollId, roll.rollId));
@@ -92,7 +99,7 @@ function renderRollsList() {
         return;
     }
     if (!rows.some(r => r.rollId === activeRollId)) activeRollId = rows[0].rollId;
-    const mounted = state.getCurrentCaseData().rollId;
+    const mounted = standalone ? null : state.getCurrentCaseData().rollId;
     container.innerHTML = `<table class="inventory-table"><thead><tr><th>母卷 / 面料</th><th>余量</th><th>库位 / 状态</th></tr></thead><tbody>${rows.map(r => `
         <tr data-roll-row="${escapeHtml(r.rollId)}" class="${r.rollId === activeRollId ? 'selected' : ''}">
             <td><button class="inventory-item-link" data-roll="${escapeHtml(r.rollId)}" aria-pressed="${r.rollId === activeRollId}">${escapeHtml(r.rollId)}</button>
@@ -120,7 +127,7 @@ export async function selectRollForDetail(rollId) {
         const pct = roll.totalLength > 0 ? Math.min(100, Math.max(0, rem / roll.totalLength * 100)) : 0;
         detail.innerHTML = `
             <div class="inventory-detail-heading"><h3>${escapeHtml(roll.rollId)}</h3><p>${escapeHtml(roll.materialName || roll.rollModel)}</p></div>
-            <button class="tool-btn inventory-primary" data-mount="${escapeHtml(roll.rollId)}">为当前任务选用…</button>
+            ${standalone ? '<p class="inventory-secondary">为作业选用此材料，请回到裁切作业的“选择用料”。</p>' : `<button class="tool-btn inventory-primary" data-mount="${escapeHtml(roll.rollId)}">为当前任务选用…</button>`}
             <div class="inventory-length"><div><span>账面剩余</span><strong>${meters(rem)} <small>m</small></strong></div><span>${escapeHtml(inspectionNames[roll.inspectionStatus] || roll.inspectionStatus || '未登记')}</span></div>
             <div class="inventory-length-track" role="img" aria-label="剩余长度占原卷 ${Math.round(pct)}%"><span style="width:${pct}%"></span></div>
             <p class="inventory-secondary">原卷 ${meters(roll.totalLength)} m · 已用 ${meters(used)} m</p>
@@ -233,12 +240,12 @@ function inventoryPane(kind, label, placeholder, options, detailId) {
 }
 
 function createMaterialModalDOM() {
-    const modal = document.createElement('dialog');
+    const modal = document.createElement(standalone ? 'main' : 'dialog');
     modal.id = 'material-manager-modal';
     modal.className = 'inventory-dialog';
     modal.setAttribute('aria-labelledby', 'inventory-title');
     modal.innerHTML = `
-        <div class="inventory-header"><h2 id="inventory-title">物料与库存</h2><button class="tool-btn" data-close autofocus>返回工作台</button></div>
+        <div class="inventory-header"><h2 id="inventory-title">物料与库存</h2>${standalone?'<p>母卷、料头与疵点档案；选料与报工在裁切作业中完成。</p>':'<button class="tool-btn" data-close autofocus>返回工作台</button>'}</div>
         <nav class="inventory-tabs" aria-label="库存分类"><button id="tab-mat-rolls" data-tab="rolls" aria-pressed="true" aria-controls="pane-mat-rolls">母卷库存</button><button id="tab-mat-remnants" data-tab="remnants" aria-pressed="false" aria-controls="pane-mat-remnants">料头库存</button><button id="tab-mat-dict" data-tab="dict" aria-pressed="false" aria-controls="pane-mat-dict">疵点参考</button></nav>
         <div class="inventory-body">
             ${inventoryPane('rolls', '母卷', '搜索编号、面料或库位', '<option value="PASSED">已验合格</option><option value="PENDING">待验</option><option value="QUARANTINED">隔离</option>', 'material-roll-detail-panel')}
@@ -356,14 +363,14 @@ export async function submitNewDefect(rollId) {
             selectRollForDetail(rollId);
             // 如果正是当前主 CAM 台面生产的母卷，同步至主画布
             const curData = state.getCurrentCaseData();
-            if (curData.rollId === rollId) {
+            if (!standalone && curData.rollId === rollId) {
                 curData.globalDefects = curData.globalDefects || [];
                 curData.globalDefects.push(savedDefect);
                 renderDefectsUI(curData.globalDefects);
                 renderScene();
                 renderRadar();
             }
-            state.pendingPlan = null;
+            if (!standalone) state.pendingPlan = null;
             showToast('疵点已保存，请重新排料后报工', 'success');
         } else {
             showToast((await res.json()).message || '疵点标定失败', 'error');

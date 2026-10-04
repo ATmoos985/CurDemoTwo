@@ -7,10 +7,11 @@
     <link rel="stylesheet" href="css/base.css">
     <link rel="stylesheet" href="css/workspace.css">
     <link rel="stylesheet" href="css/nesting.css">
+    <link rel="stylesheet" href="css/product-navigation.css">
     <script src="konva.min.js"></script>
 </head>
 <body class="nesting-lab">
-    <header class="lab-header"><div><span class="app-mark">▥</span><strong>裁切试验台</strong><span class="lab-subtitle">材料、需求与排料</span></div><a class="tool-btn" href="/" target="_blank" rel="noopener">业务工作台 ↗</a></header>
+    <header class="lab-header"><div><span class="app-mark">▥</span><strong>裁切试验台</strong><span class="lab-subtitle">材料、需求与排料</span></div><div data-product-nav="lab"></div></header>
     <main class="lab-layout">
         <form id="problem-form" class="lab-input">
             <div class="lab-heading"><h1>裁切输入</h1><span>单位 mm</span></div>
@@ -57,5 +58,6 @@
     </main>
     <dialog id="json-dialog"><form method="dialog"><div class="lab-heading"><h2>标准输入 JSON</h2><button class="tool-btn">关闭</button></div></form><label for="json-input">表单未列出的约束也会提交；不支持的内容将明确提示。</label><textarea id="json-input" spellcheck="false"></textarea><p id="json-error" role="alert"></p><button id="apply-json" class="tool-btn active">应用输入</button></dialog>
     <script type="module" src="js/nesting/nesting-lab.js"></script>
+    <script type="module" src="js/product-navigation.js"></script>
 </body>
 </html>

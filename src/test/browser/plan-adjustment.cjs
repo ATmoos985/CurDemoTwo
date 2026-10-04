@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../../main/resources/static');
-let tasks, failSave, requests, failAdjustment, adjustmentBodies, reportBodies, savedPlanRequest, solveResult, acceptReport, receipts, stock, solveWait, candidateItems, candidateBodies, failCandidates, failMaterialRead, candidateWait, extraRolls;
+let tasks, failSave, requests, failAdjustment, adjustmentBodies, reportBodies, savedPlanRequest, solveResult, acceptReport, receipts, stock, solveWait, candidateItems, candidateBodies, failCandidates, failMaterialRead, candidateWait, extraRolls, failInventory;
 const planRequest={taskId:"task-a", taskRevision:1, rollId:"ROLL-2026-0920",rollModel:"TC涤棉-B2026",rollW:2000,rollL:5000,totalRollL:60000,windowStartY:0,feedPortType:"roll",trimStart:0,cutOrigin:"right-bottom",firstStageOrientation:"horizontal",allowRotation:false,allowLongitudinal:false,demands:[{id:7,name:"主帘",width:2000,length:1200,demand:2}],minRemnantWidth:200,minRemnantLength:300};
 const planResult={success:true,planId:"original-plan",pieces:[{id:1,demandId:7,name:"主帘",x:0,y:0,w:2000,l:1200,rotated:false},{id:2,demandId:7,name:"主帘",x:0,y:1500,w:2000,l:1200,rotated:false}],remnants:[],cuts:[{step:1,type:"横切",pos:1200,start:0,end:2000,desc:"横切"},{step:2,type:"横切",pos:2700,start:0,end:2000,desc:"横切"}],deductLen:2700,engine:"crosscut"};
 const roll = {rollId:'ROLL-2026-0920', rollModel:'TC涤棉-B2026', width:2000, totalLength:60000, usedLength:0, currentRemainingLength:60000, defects:[]};
@@ -23,7 +23,8 @@ const server = createServer(async (req,res) => {
     const json = (value, status=200) => {res.writeHead(status, {'Content-Type':'application/json'});res.end(JSON.stringify(value));};
     if (url.pathname.startsWith('/api/')) {
         requests.push(req.method + ' ' + url.pathname);
-        if (url.pathname === '/api/rolls' && req.method === 'GET') return json([stock,...extraRolls]);
+        if (url.pathname === '/api/rolls' && req.method === 'GET') return json(failInventory?{message:'测试库存暂不可用'}:[stock,...extraRolls],failInventory?503:200);
+        if(url.pathname==='/api/v1/nesting/engines')return json([{id:'crosscut',modes:['CROSSCUT'],coordinateResolutionMm:.1,available:true},{id:'packingsolver',modes:['GUILLOTINE'],coordinateResolutionMm:.1,available:true},{id:'packingsolver-irregular',modes:['CONTOUR'],coordinateResolutionMm:.1,available:false}]);
         if (url.pathname === '/api/rolls' && req.method === 'POST') {let raw='';for await(const chunk of req)raw+=chunk;const r=JSON.parse(raw);extraRolls.push({...r,usedLength:0,currentRemainingLength:r.totalLength});return json(r);}
         if(url.pathname==='/api/cutting/material-candidates'){let raw='';for await(const chunk of req)raw+=chunk;candidateBodies.push(JSON.parse(raw));await candidateWait;return json(failCandidates?{message:'测试库存读取失败'}:candidateItems,failCandidates?503:200);}
         if(url.pathname==='/api/remnants/scan'){let raw='';for await(const chunk of req)raw+=chunk;const id=JSON.parse(raw).id;return json(failMaterialRead?{message:'测试材料读取失败'}:remnantStock,failMaterialRead?503:200);}
@@ -77,7 +78,7 @@ const server = createServer(async (req,res) => {
     const browser = await chromium.launch({headless:true, ...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {})});
     let passed=0, failed=0;
     async function run(name, verify) {
-        tasks = new Map([['task-a',initialTask()]]); failSave=false; requests=[]; failAdjustment=false; adjustmentBodies=[];reportBodies=[];savedPlanRequest=planRequest;solveResult=planResult;acceptReport=false;receipts=[];stock={...roll};solveWait=undefined;candidateItems=[];candidateBodies=[];failCandidates=false;failMaterialRead=false;candidateWait=undefined;extraRolls=[];
+        tasks = new Map([['task-a',initialTask()]]); failSave=false; requests=[]; failAdjustment=false; adjustmentBodies=[];reportBodies=[];savedPlanRequest=planRequest;solveResult=planResult;acceptReport=false;receipts=[];stock={...roll};solveWait=undefined;candidateItems=[];candidateBodies=[];failCandidates=false;failMaterialRead=false;candidateWait=undefined;extraRolls=[];failInventory=false;
         const context = await browser.newContext({viewport:{width:1366,height:768}}), page = await context.newPage(), errors=[];
         page.on('pageerror',error => errors.push(error.message));
         try {
@@ -87,7 +88,7 @@ const server = createServer(async (req,res) => {
             assert.deepEqual(errors, []);
             assert.ok(requests.every(r => !r.startsWith('POST') || ['/adjust','/report-confirm','/solve','/tasks','/reverse','/material-candidates','/scan','/rolls'].some(route=>r.endsWith(route))), 'only isolated fixture task, solve, adjustment and report requests');
             passed++; console.log('PASS ' + name);
-        } catch(error) {failed++; console.error('FAIL ' + name + '\n' + error.stack); console.error(JSON.stringify({requests,adjustmentBodies,savedPlanRequest,errors,debug:await page.evaluate(()=>{const s=window.camApp.state;return {pending:s.pendingPlan?.result?.planId,version:s.pendingPlan?.version,geometry:s.pendingPlan?.geometry,pieces:s.getCurrentCaseData().pieces,cuts:s.getCurrentCaseData().cuts,remnants:s.getCurrentCaseData().remnants};})}));}
+        } catch(error) {failed++; console.error('FAIL ' + name + '\n' + error.stack); console.error(JSON.stringify({requests,adjustmentBodies,savedPlanRequest,errors,debug:await page.evaluate(()=>{const s=window.camApp?.state;if(!s)return {page:location.pathname};return {pending:s.pendingPlan?.result?.planId,version:s.pendingPlan?.version,geometry:s.pendingPlan?.geometry,pieces:s.getCurrentCaseData().pieces,cuts:s.getCurrentCaseData().cuts,remnants:s.getCurrentCaseData().remnants};})}));}
         finally {await context.close();}
     }
     const loadPlan = async page => {
@@ -442,6 +443,38 @@ const server = createServer(async (req,res) => {
             await page.getByRole('button',{name:'保存母卷档案',exact:true}).click();await expect(page.locator('#material-roll-detail-panel')).toContainText('NEW-INVENTORY');
             await expect(page.locator('#material-context-id')).toHaveText(roll.rollId);assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');
         });
+        await run('peer navigation opens a standalone inventory page while the active job stays intact',async page=>{
+            await loadPlan(page);const before=await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData()));
+            await expect(page.locator('.product-nav [aria-current]')).toHaveText('裁切作业');
+            await page.locator('.product-nav [aria-current]').click();assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');
+            const popup=page.waitForEvent('popup');await page.getByRole('link',{name:'库存档案',exact:true}).click();const inventory=await popup,errors=[];inventory.on('pageerror',e=>errors.push(e.message));
+            await expect(inventory.locator('main#material-manager-modal')).toBeVisible();await expect(inventory.locator('.inventory-number').first()).toContainText('60');
+            assert.equal(await inventory.locator('dialog.inventory-dialog').count(),0);assert.equal(await inventory.locator('#konva-container').count(),0);
+            await expect(inventory.locator('.product-nav [aria-current]')).toHaveText('库存档案');
+            fs.mkdirSync('target/product-navigation',{recursive:true});
+            for(const size of [{width:1366,height:768},{width:1920,height:1080}]){await inventory.setViewportSize(size);assert.equal(await inventory.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await inventory.screenshot({path:'target/product-navigation/inventory-'+size.width+'.png'});}
+            await inventory.getByRole('button',{name:'料头库存',exact:true}).click();await expect(inventory.locator('#pane-mat-remnants')).toBeVisible();
+            await inventory.getByRole('button',{name:'母卷库存',exact:true}).click();await inventory.locator('.inventory-new-roll summary').click();
+            for(const [id,value]of [['new-roll-id','INDEPENDENT-ROLL'],['new-roll-model',roll.rollModel],['new-roll-width','2000'],['new-roll-length','9000']])await inventory.locator('#'+id).fill(value);
+            await inventory.getByRole('button',{name:'保存母卷档案'}).click();await expect(inventory.locator('#material-roll-detail-panel')).toContainText('INDEPENDENT-ROLL');
+            assert.equal(await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData())),before);assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');
+            assert.deepEqual(errors,[]);await inventory.close();await page.screenshot({path:'target/product-navigation/workbench-1366.png'});
+        });
+        await run('capability guide distinguishes production from contour experiments and exposes standard IO',async page=>{
+            await loadPlan(page);await page.getByRole('button',{name:'能力说明',exact:true}).click();await expect(page.locator('#capability-dialog')).toContainText('尚无可执行轮廓刀路');
+            await page.locator('#capability-dialog details').last().locator('summary').click();await expect(page.locator('#capability-engine-status')).toContainText('未就绪');
+            await page.locator('#capability-dialog details').first().locator('summary').click();
+            const popup=page.waitForEvent('popup');await page.getByRole('link',{name:'打开标准输入 / 输出 ↗'}).click();const lab=await popup,errors=[];lab.on('pageerror',e=>errors.push(e.message));
+            await expect(lab.locator('#protocol-details')).toHaveAttribute('open','');await expect(lab.locator('.product-nav [aria-current]')).toHaveText('裁切试验');
+            await lab.locator('#example-contour').click();await expect(lab.locator('#engine-hint')).toContainText('引擎未就绪');await lab.locator('#open-json').click();
+            await expect(lab.locator('#json-dialog')).toBeVisible();assert.equal(JSON.parse(await lab.locator('#json-input').inputValue()).process.mode,'CONTOUR');
+            assert.equal(requests.filter(r=>r==='POST /api/cutting/tasks' || r==='POST /api/solve').length,0);assert.deepEqual(errors,[]);await lab.close();await page.screenshot({path:'target/product-navigation/capabilities-1366.png'});
+        });
+        await run('standalone inventory read failure can refresh without loading a cutting task',async page=>{
+            failInventory=true;const before=requests.length;await page.goto(page.url()+'inventory.html');await expect(page.locator('#inventory-rolls-summary')).toContainText('读取失败');
+            failInventory=false;await page.locator('#pane-mat-rolls [data-refresh]').click();await expect(page.locator('#inventory-rolls-count')).toContainText('1 / 1');
+            assert.ok(requests.slice(before).filter(r=>r.startsWith('GET /api/')).every(r=>r.includes('/api/rolls')));
+        });
     } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
-    console.log(JSON.stringify({discovered:26,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
+    console.log(JSON.stringify({discovered:29,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
 })().catch(error=>{console.error(error);server.close();process.exitCode=1;});
