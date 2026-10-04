@@ -2,6 +2,7 @@ import { saveCurrentTask, refreshTaskProgress, escapeText } from './task-workspa
 import { createPlanHistory, planScene } from './plan-editing.js';
 import { layoutMetrics, materialSummary } from './material-accounting.js';
 import { renderWorkflowGuide } from './workflow-guide.js';
+import { updateDemandProgress } from './demand-progress.js';
 import { classifyReport, applyReportReceipt } from './report-outcomes.js';
 import { renderReportPieces, readReportPieces, syncReportRemnants, readReportRemnants, reportPieceError } from './report-editor.js';
 /**
@@ -302,9 +303,12 @@ export function updateWorkflowControls() {
     const data = state.getCurrentCaseData(), reportEl = document.getElementById('lbl-report-status');
     if (reportEl) reportEl.textContent = materialSummary(data, state.currentCutMode === 'remnant').actual ? '已报工保存 · ' + data.lastReceipt.finishedPieceCount + ' 件' :
         edited ? '手动调整 · 待校验' : ready ? '待报工 · 尚未保存产出' : flow.done || flow.stage < 2 ? flow.title : '当前工位待排料';
+    updateDemandProgress({pending:editable ? state.pendingPlan : null, edited, attempt:latestSolveAttempt?.context === solveContext() ? latestSolveAttempt : null});
     return {...flow, ready, edited};
 }
 
+let latestSolveAttempt = null;
+export function resetSolveFeedback() { latestSolveAttempt = null; }
 let solving = false;
 function planGeometry() {
     const {pieces, remnants, cuts} = state.getCurrentCaseData();
@@ -370,6 +374,7 @@ function solveContext() {
 }
 export function restoreSavedPlan(saved) {
     const {request, result} = saved;
+    latestSolveAttempt = null;
     const data = state.getCurrentCaseData();
     const offset = request.feedPortType === 'remnant' ? 0 : request.windowStartY;
     Object.assign(data, {rollId:request.rollId, rollW:request.rollW, bedL:request.rollL,
@@ -397,7 +402,7 @@ export async function triggerSolve() {
     if (solving) return;
     const flow = updateWorkflowControls();
     if (!flow.canSolve) { showToast(flow.hint, 'warning'); return; }
-    solving = true;
+    solving = true; latestSolveAttempt = null;
     state.pendingPlan = null;
     updateWorkflowControls();
     try { await runSolve(); }
@@ -498,6 +503,7 @@ async function runSolve() {
         const result = await res.json();
         if (!res.ok) throw new Error(result.message || "排料失败");
         if (context !== solveContext()) return showToast("需求或材料已变化，请重新排料", "warning");
+        latestSolveAttempt = result.success ? null : {context, result};
         if (res.ok) {
             const elapsed = Math.round(performance.now() - t0);
             if (result.success && result.planId && result.pieces?.length) {
@@ -529,19 +535,7 @@ async function runSolve() {
                     };
                     const retainedPieces = (data.pieces || []).filter(p => !isPieceInCurrentStation(p));
                     const newPieces = (result.pieces || []).map((p, idx) => {
-                        let matchedDemand = (activeDemands || []).find(ad => ad.id === p.demandId);
-                        if (!matchedDemand) {
-                            matchedDemand = (activeDemands || []).find(ad =>
-                                (Math.abs(p.w - ad.w) < 1.5 && Math.abs(p.l - ad.l) < 1.5) ||
-                                (Math.abs(p.w - ad.l) < 1.5 && Math.abs(p.l - ad.w) < 1.5)
-                            );
-                        }
-                        if (!matchedDemand) {
-                            matchedDemand = (activeDemands || []).find(ad => (ad.name || "").trim() === (p.name || "").trim());
-                        }
-                        if (!matchedDemand && data.demands) {
-                            matchedDemand = data.demands.find(d => d.id === p.demandId);
-                        }
+                        const matchedDemand = (activeDemands || []).find(ad => ad.id === p.demandId);
                         return {
                             ...p,
                             id: Math.max(0, ...retainedPieces.map(p => p.id)) + idx + 1,

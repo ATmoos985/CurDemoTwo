@@ -4,7 +4,7 @@ import { renderDemandsUI, getDemandsFromUI, updateDemandCompletionFromPieces } f
 import { switchCutMode } from '../remnant/remnant-shelf.js';
 import { renderScene, resetToBedView } from '../cad/cad-renderer.js';
 import { renderRadar } from '../radar/radar-scrubber.js';
-import { updateUIInfo, updateWorkflowControls, restoreSavedPlan } from './solver-client.js';
+import { updateUIInfo, updateWorkflowControls, resetSolveFeedback, restoreSavedPlan } from './solver-client.js';
 import { showToast, confirmAction } from '../../core/toast.js';
 import { syncMaterialOptions } from '../material/material-options.js';
 import { createDraftStore } from './task-drafts.js';
@@ -177,6 +177,7 @@ async function api(url, body) {
 
 export function taskInputChanged() {
     state.pendingPlan = null;
+    resetSolveFeedback();
     el('task-state').textContent = '需求已修改 · 待保存';
     el('task-details-title').textContent = el('task-name').value || '任务信息';
     persistTaskDraft();

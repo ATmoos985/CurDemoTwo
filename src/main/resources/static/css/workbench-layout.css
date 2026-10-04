@@ -11,6 +11,15 @@
 #demands-container .mini-input { width: 100% !important; min-width: 0; }
 #demands-container .demand-status { margin-top: 4px; font-size: 11px; }
 #demands-container .demand-remnant-box:empty { display: none; }
+#demands-container .demand-selected { background: var(--panel-header); box-shadow: inset 3px 0 var(--accent-blue); padding-left: 7px; }
+.demand-progress-tools { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; margin-top: 3px; }
+[data-theme] .demand-progress-tools .tool-btn { min-height: 24px; padding: 1px 5px; font-size: 11px; border-color: transparent; }
+.demand-unplaced { font-size: 11px; color: var(--text-muted); }
+.demand-unplaced summary { cursor: pointer; }
+.demand-unplaced[open] { flex-basis: 100%; }
+.demand-unplaced p { margin: 6px 0; line-height: 1.6; }
+.demand-unplaced[hidden] { display: none; }
+#demand-progress-summary { line-height: 1.6; }
 .selection-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; }
 .selection-summary strong { font-size: 13px; }
 .selection-summary #cad-selection-size { margin-left: auto; font-size: 11px; }

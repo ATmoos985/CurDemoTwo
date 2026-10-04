@@ -130,7 +130,7 @@ public class SolverFactory {
         var fulfillment = problem.parts().stream().map(p -> {
             int placed = counts.getOrDefault(p.id(), 0);
             return new NestingResult.Fulfillment(p.id(), p.quantity(), placed, p.quantity() - placed,
-                    placed == p.quantity() ? null : "NOT_PLACED_IN_THIS_SOLUTION");
+                    placed == p.quantity() ? null : FulfillmentReason.unplaced(problem, p, "manual-guillotine".equals(engine)));
         }).toList();
         double area = PolygonGeometry.area(problem.material().shape());
         double pieces = placements.stream().mapToDouble(p -> PolygonGeometry.area(p.shape())).sum();

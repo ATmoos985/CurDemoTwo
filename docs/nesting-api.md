@@ -76,7 +76,7 @@ Windows PowerShell 中使用 `curl.exe`。其他可调用示例为 `docs/example
 | `leftovers` | 候选回收余料的局部位置、形状、是否带疵；不是已入库料头 |
 | `cuts` | 刀序、水平/垂直类型、明确起止点、空行程距离和说明 |
 | `contours` | 轮廓排料返回的闭合裁片边界，包含 `placementId`、材料局部坐标 `vertices`、`closed=true`；无走刀顺序、进退刀或刀具补偿 |
-| `fulfillment` | 每项需求的请求数、排入数、未排数；未排原因 `NOT_PLACED_IN_THIS_SOLUTION` 不表示已证明无解 |
+| `fulfillment` | 每项需求的请求数、排入数、未排数及原因；搜索未排入不表示已证明无解 |
 | `metrics.processingAreaMm2` | 提交的加工区面积 |
 | `metrics.pieceAreaMm2` | 排入零件的面积 |
 | `metrics.reusableAreaMm2` | 候选回收余料面积，可能包含带疵余料 |
@@ -84,6 +84,19 @@ Windows PowerShell 中使用 `curl.exe`。其他可调用示例为 `docs/example
 | `metrics.suggestedFeedLengthMm` | 引擎建议的进给范围提示；不是实际扣库存长度，业务报工仍需实测确认 |
 
 所有面积统一使用 **mm²**。旧工作台仍通过适配层转换为 m²，避免新旧口径混用。
+
+`fulfillment[].reason` 在全部排入时为 `null`。矩形尺寸检查包含入口修边，并按当前允许的方向判断：
+
+| 原因 | 含义 |
+| --- | --- |
+| `EXCEEDS_MATERIAL_WIDTH` | 当前允许方向均超出材料幅宽 |
+| `EXCEEDS_PROCESSING_LENGTH` | 当前允许方向均超出扣除入口修边后的长度 |
+| `EXCEEDS_PROCESSING_REGION` | 当前允许方向均无法容纳于加工区 |
+| `ROTATION_REQUIRED` | 原方向无法容纳，旋转后外形尺寸可容纳，但当前禁止旋转；仍须核对工艺、疵点并重新求解 |
+| `NOT_INCLUDED_IN_MANUAL_LAYOUT` | 未包含在当前手调方案内 |
+| `NOT_PLACED_IN_THIS_SOLUTION` | 本次搜索未排入，不推断无解或最优；轮廓排样也采用此原因，不能用外接框证明异形无法排入 |
+
+原业务接口 `/api/solve` 同步返回 `status` 与 `fulfillment`，包括没有排入裁片的结果。数量仅针对本次提交的剩余需求；合格完成量仍从任务报工读取。
 
 `placements[].shape` 已是放置后的形状，`x/y` 是其左上角。矩形发生 90° 旋转时输出宽高已交换，`rotationDegrees` 记录相对原需求的旋转，画布不要再次旋转输出形状。标识仅在本次问题/结果内有效。
 

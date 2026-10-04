@@ -100,6 +100,7 @@ export function updateCanvasAnnotations() {
         label('Y', ox - 6, oy + origin.dy * 47 - 6, 12, { fill: color, fontSize: 11 });
     }
     const selectedId = getSelectedPieceId();
+    const selectedDemand = (data.pieces || []).find(p => p.id === selectedId)?.demandId;
     for (const p of data.pieces || []) {
         const entity = pieceGroup.findOne(`.piece-entity-${p.id}`);
         const x = sx(entity ? entity.x() : p.x), y = sy(entity ? entity.y() : p.y);
@@ -108,6 +109,9 @@ export function updateCanvasAnnotations() {
         if (x + w < RULER_SIZE || x > stage.width() || y + h < RULER_SIZE || y > stage.height()) continue;
         if (level) label(level === 2 ? (p.name || `#${p.id}`) : `#${p.id}`, x + 6, y + h / 2 - (level === 2 ? 16 : 6), w - 12, { fontStyle: 'bold' });
         if (level === 2) label(`${p.w} × ${p.l} mm${p.outcome === 'REJECTED' ? ' · 异常' : p.confirmed ? ' · 合格' : ''}`, x + 6, y + h / 2 + 4, w - 12, { fontSize: 11, fill: muted });
+        if (selectedDemand != null && p.demandId === selectedDemand && p.id !== selectedId) {
+            annotationLayer.add(new Konva.Rect({name:'demand-related',x,y,width:w,height:h,stroke:'#2d7899',strokeWidth:1.5,dash:[5,3],listening:false}));
+        }
         if (p.id === selectedId) {
             annotationLayer.add(new Konva.Rect({ x, y, width: w, height: h, stroke: '#2d7899', strokeWidth: 2 }));
             for (const [cx, cy] of [[x,y], [x+w,y], [x,y+h], [x+w,y+h]]) annotationLayer.add(new Konva.Rect({ x: cx-3, y: cy-3, width: 6, height: 6, fill: paper, stroke: '#2d7899', strokeWidth: 1 }));
@@ -172,6 +176,10 @@ function frameBounds(bounds, mode = 'station') {
     drawRulers();
     updateStatusBar();
     if (mainLayer) mainLayer.batchDraw();
+}
+export function focusPiece(id) {
+    const piece = (state.getCurrentCaseData().pieces || []).find(p => p.id === id);
+    if (piece) frameBounds({x:piece.x-120,y:piece.y-120,width:piece.w+240,height:piece.l+240}, 'piece');
 }
 export function resetToBedView() {
     const data = state.getCurrentCaseData();

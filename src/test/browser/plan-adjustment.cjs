@@ -219,6 +219,7 @@ const server = createServer(async (req,res) => {
             await page.getByRole('checkbox',{name:'回收 UNCUT-1',exact:true}).check();
             await page.locator('#report-confirm-button').click();await expect(page.locator('#cut-report-modal')).not.toBeVisible();
             assert.equal(receipts[0].finishedPieceCount,0);assert.equal(receipts[0].derivedRemnants.length,1);
+            await expect(page.locator('#demands-container .demand-status')).toHaveText('本方案 0 · 已报工 1 · 剩余 2');
             await expect(page.locator('#material-context-info')).toContainText('59,000 mm');
             assert.equal(await page.evaluate(()=>window.camApp.state.taskCompleted[7]),1);
         });
@@ -335,6 +336,49 @@ const server = createServer(async (req,res) => {
             assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');
             assert.equal(reportBodies.length,0);
         });
+        await run('demand progress separates preview and completion, links both ways and preserves cutting position',async page=>{
+            tasks.get('task-a').demands[0].quantity=4;await loadPlan(page);
+            const row=page.locator('#demands-container [data-id="7"]');await expect(row.locator('.demand-status')).toHaveText('本方案 2 · 已报工 1 · 剩余 3');
+            await row.locator('.demand-unplaced summary').click();await expect(row.locator('.demand-unplaced p')).toContainText('不能据此判定无法裁切');
+            const geometry=await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces));
+            await row.locator('.demand-locate').click();assert.equal(await page.evaluate(()=>window.camApp.getSelectedPieceId()),1);
+            await row.locator('.demand-locate').click();assert.equal(await page.evaluate(()=>window.camApp.getSelectedPieceId()),2);
+            assert.equal(await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces)),geometry);
+            assert.equal(await page.evaluate(()=>window.camApp.state.getCurrentCaseData().windowStartY),0);
+            await page.getByRole('button',{name:'当前工位',exact:true}).click();
+            await page.evaluate(()=>{document.getElementById('card-demands').classList.add('collapsed');});
+            const point=await page.evaluate(async()=>{const {stage}=await import('/js/plugins/cad/cad-stage.js');const b=stage.findOne('.piece-entity-1').getClientRect(),r=document.getElementById('konva-container').getBoundingClientRect();return {x:r.x+b.x+b.width/2,y:r.y+b.y+b.height/2};});
+            await page.mouse.click(point.x,point.y);
+            await expect(row).toHaveClass(/demand-selected/);await expect(page.locator('#card-demands')).not.toHaveClass(/collapsed/);
+            await expect(row.locator('.dem-name')).not.toBeFocused();assert.equal(await page.evaluate(()=>window.camApp.getSelectedPieceId()),1);
+            await page.keyboard.press('ArrowDown');await expect(page.locator('#demand-progress-summary')).toContainText('手调待校验');
+            await page.evaluate(()=>{const data=window.camApp.state.getCurrentCaseData();data.pieces=data.pieces.filter(p=>p.id!==2);window.camApp.bus.emit('plan:edited');});
+            await expect(row.locator('.demand-status')).toHaveText('本方案 1 · 已报工 1 · 剩余 3');
+            await expect(row.locator('.demand-unplaced p')).toContainText('移除了 1 件');
+            await page.locator('#btn-undo-plan').click();await expect(row.locator('.demand-status')).toContainText('本方案 2');
+            fs.mkdirSync('target/demand-progress',{recursive:true});await page.screenshot({path:'target/demand-progress/linked-1366.png'});
+        });
+        await run('equal names and dimensions retain distinct demand identities when locating the drawing',async page=>{
+            tasks.get('task-a').demands.push({...tasks.get('task-a').demands[0],id:8,quantity:2});await loadPlan(page);
+            await page.evaluate(async saved=>{const {restoreSavedPlan}=await import('/js/plugins/solver/solver-client.js');restoreSavedPlan(saved);},
+                {request:{...planRequest,demands:[...planRequest.demands,{...planRequest.demands[0],id:8}]},result:{...planResult,pieces:[planResult.pieces[0],{...planResult.pieces[1],demandId:8}]}});
+            const first=page.locator('#demands-container [data-id="7"]'),second=page.locator('#demands-container [data-id="8"]');
+            await expect(first.locator('.demand-status')).toHaveText('本方案 1 · 已报工 1 · 剩余 2');
+            await expect(second.locator('.demand-status')).toHaveText('本方案 1 · 已报工 0 · 剩余 2');
+            await second.locator('.demand-locate').click();assert.equal(await page.evaluate(()=>window.camApp.getSelectedPieceId()),2);
+            await expect(second).toHaveClass(/demand-selected/);await expect(first).not.toHaveClass(/demand-selected/);
+            await first.locator('.demand-locate').click();assert.equal(await page.evaluate(()=>window.camApp.getSelectedPieceId()),1);
+        });
+        await run('an empty solution retains per-demand diagnostics until inputs change',async page=>{
+            await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();await expect(page.locator('#task-picker')).not.toBeVisible();await expect(page.locator('body')).not.toHaveAttribute('inert','');
+            await page.locator('.dem-l').fill('6000');await page.locator('.dem-l').press('Tab');
+            solveResult={success:false,status:'NO_SOLUTION_FOUND',message:'本次没有排入裁片',pieces:[],fulfillment:[{demandId:7,requested:2,placed:0,unplaced:2,reason:'EXCEEDS_PROCESSING_LENGTH'}]};
+            await page.locator('#btn-trigger-solve-station').click();await expect(page.locator('#demand-progress-summary')).toContainText('求解反馈');
+            const row=page.locator('#demands-container [data-id="7"]');await row.locator('.demand-unplaced summary').click();
+            await expect(row.locator('.demand-unplaced p')).toContainText('有效长度');await expect(row.locator('.demand-status')).toHaveText('本方案 0 · 已报工 1 · 剩余 2');
+            await expect(row.locator('.demand-locate')).toBeDisabled();await expect(page.locator('#btn-confirm-station-cut')).toBeDisabled();
+            await page.locator('.dem-l').fill('1200');await expect(row.locator('.demand-unplaced')).toBeHidden();await expect(page.locator('#demand-progress-summary')).not.toContainText('求解反馈');
+        });
     } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
-    console.log(JSON.stringify({discovered:18,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
+    console.log(JSON.stringify({discovered:21,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
 })().catch(error=>{console.error(error);server.close();process.exitCode=1;});

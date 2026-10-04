@@ -6,7 +6,7 @@ import { bus } from '../../core/event-bus.js';
 import { renderScene, resetToBedView } from '../cad/cad-renderer.js';
 import { drawRulers } from '../cad/cad-rulers.js';
 import { renderRadar, requireStationReport } from '../radar/radar-scrubber.js';
-import { updateUIInfo } from './solver-client.js';
+import { updateUIInfo, updateWorkflowControls } from './solver-client.js';
 import { showToast } from '../../core/toast.js';
 import { escapeText, taskInputChanged, startTaskDraft, finishTaskDraft, prepareTaskSwitch } from './task-workspace.js';
 import { layoutMetrics } from './material-accounting.js';
@@ -150,9 +150,6 @@ export function renderDemandsUI(demands) {
         return;
     }
 
-    let totalPlanAll = 0;
-    let totalCutAll = 0;
-
     demands.forEach((dem, idx) => {
         const row = document.createElement("div");
         row.className = "item-row";
@@ -161,26 +158,10 @@ export function renderDemandsUI(demands) {
         const totalCount = dem.count !== undefined ? dem.count : (dem.demand !== undefined ? dem.demand : 1);
         const completed = dem.completed !== undefined ? dem.completed : 0;
 
-        totalPlanAll += totalCount;
-        totalCutAll += completed;
-
         row.setAttribute("data-id", dem.id || idx + 1);
         row.dataset.rotation = String(Boolean(dem.allowRotation));
         row.setAttribute("data-completed", completed);
         row.setAttribute("data-total", totalCount);
-
-        const isDone = (completed >= totalCount && totalCount > 0);
-        const isProgress = (!isDone && completed > 0);
-
-        let statusBadge = "";
-
-        if (isDone) {
-            statusBadge = `<span class="demand-status done">已满额 ${completed}/${totalCount}</span>`;
-        } else if (isProgress) {
-            statusBadge = `<span class="demand-status">已切 ${completed}/${totalCount}</span>`;
-        } else {
-            statusBadge = `<span class="demand-status">待排 ${totalCount} 件</span>`;
-        }
 
         row.innerHTML = `
             <div class="item-row-header" style="display:flex; justify-content:space-between; align-items:center;">
@@ -192,25 +173,13 @@ export function renderDemandsUI(demands) {
                 <label>长 <input type="number" class="mini-input dem-l" aria-label="裁片长度 (mm)" value="${lVal}" onchange="window.camApp.onParamChange()" style="width:58px;"></label>
                 <label>件数 <input type="number" class="mini-input dem-count" value="${totalCount}" min="1" style="width:48px;" onchange="window.camApp.onParamChange()" title="总计划需求件数"></label>
             </div>
-            ${statusBadge}
+            <div class="demand-status"></div>
             <div class="demand-remnant-box" id="rem-hint-${idx}" style="display: none;"></div>
         `;
         container.appendChild(row);
     });
 
-    const headerTitleBadge = document.getElementById("demands-summary-badge");
-    if (headerTitleBadge) {
-        headerTitleBadge.innerText = `已切 ${totalCutAll} / 总 ${totalPlanAll} 件`;
-        if (totalCutAll >= totalPlanAll && totalPlanAll > 0) {
-            headerTitleBadge.style.background = "#ecfdf5";
-            headerTitleBadge.style.color = "#059669";
-            headerTitleBadge.style.borderColor = "#10b981";
-        } else {
-            headerTitleBadge.style.background = "#eff6ff";
-            headerTitleBadge.style.color = "#0284c7";
-            headerTitleBadge.style.borderColor = "#38bdf8";
-        }
-    }
+    updateWorkflowControls();
 }
 
 export function renderDefectsUI(defects) {

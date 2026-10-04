@@ -40,6 +40,8 @@ public final class FabricSolveAdapter {
         SolveResponse response = new SolveResponse();
         response.setSuccess(result.feasible());
         response.setMessage(result.message());
+        response.setStatus(result.status());
+        response.setFulfillment(result.fulfillment());
         response.setEngine(result.engine());
         response.setRollW(request.getRollW());
         response.setRollL(request.getRollL());

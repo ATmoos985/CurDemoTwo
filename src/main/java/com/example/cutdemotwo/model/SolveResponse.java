@@ -6,6 +6,12 @@ import java.util.List;
 public class SolveResponse {
     private boolean success;
     private String message;
+    private String status;
+    private List<com.example.cutdemotwo.model.nesting.NestingResult.Fulfillment> fulfillment = new ArrayList<>();
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+    public List<com.example.cutdemotwo.model.nesting.NestingResult.Fulfillment> getFulfillment() { return fulfillment; }
+    public void setFulfillment(List<com.example.cutdemotwo.model.nesting.NestingResult.Fulfillment> fulfillment) { this.fulfillment = fulfillment; }
     private String engine;
     private double rollW;
     private double rollL;
