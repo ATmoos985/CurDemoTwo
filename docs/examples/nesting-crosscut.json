@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "1",
+  "unit": "mm",
+  "material": {
+    "id": "board-A",
+    "shape": { "type": "RECTANGLE", "width": 2000, "height": 3000 },
+    "exclusions": [],
+    "continuesAfterRegion": false
+  },
+  "parts": [
+    { "id": 42, "name": "零件A", "shape": { "type": "RECTANGLE", "width": 2000, "height": 1200 }, "quantity": 3, "allowRotation": false }
+  ],
+  "process": {
+    "mode": "CROSSCUT", "feedMode": "SHEET", "startCorner": "left-top", "firstStageOrientation": "horizontal",
+    "trimStart": 0, "minReusableWidth": 200, "minReusableHeight": 300, "kerf": 0, "objective": "INPUT_ORDER"
+  },
+  "engine": "auto",
+  "timeLimitSeconds": 3
+}

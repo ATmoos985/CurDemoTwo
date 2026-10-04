@@ -1,7 +1,6 @@
 package com.example.cutdemotwo.service.solver;
 
-import com.example.cutdemotwo.model.SolveRequest;
-import com.example.cutdemotwo.model.SolveResponse;
+import com.example.cutdemotwo.model.nesting.NestingProblem;
 
 /**
  * 排料求解引擎可插拔 SPI 统一接口
@@ -9,7 +8,7 @@ import com.example.cutdemotwo.model.SolveResponse;
  */
 public interface ICutSolverEngine {
     /**
-     * 引擎唯一标识，如 "packingsolver", "scenario_one", "heuristic"
+     * 引擎唯一标识，如 "packingsolver", "crosscut"。
      */
     String getEngineType();
 
@@ -21,5 +20,7 @@ public interface ICutSolverEngine {
     /**
      * 执行排料求解
      */
-    SolveResponse solve(SolveRequest request);
+    EngineCapabilities capabilities();
+
+    EngineResult solve(NestingProblem problem);
 }

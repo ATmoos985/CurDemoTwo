@@ -25,7 +25,7 @@ class CuttingWorkflowTests {
         request.setRollL(4000);
         request.setDemands(List.of(new PieceDemand(1, "窗帘矩形", 2000, 1000, 2, false)));
         request.setDefects(List.of(new Defect(1, 200, 1200, 200, 200, 20)));
-        SolveResponse result = new SolverFactory(List.of(new CrossCutSolverService())).solve(request);
+        SolveResponse result = com.example.cutdemotwo.service.FabricSolveAdapter.solve(new SolverFactory(List.of(new CrossCutSolverService())), request);
         assertTrue(result.isSuccess());
         assertEquals(2, result.getPieces().size());
         assertTrue(result.getCuts().stream().allMatch(c -> "横切".equals(c.getType())));

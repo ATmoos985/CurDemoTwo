@@ -21,7 +21,7 @@ public class CuttingWorkflowService {
         request.validateSettings();
         inventory.prepareTaskSolve(request);
         String baseline = inventory.materialFingerprint(request);
-        SolveResponse result = solverFactory.solve(request);
+        SolveResponse result = FabricSolveAdapter.solve(solverFactory, request);
         if (result.isSuccess() && !result.getPieces().isEmpty()) {
             String id = UUID.randomUUID().toString();
             result.setPlanId(id);
