@@ -559,6 +559,32 @@ const server = createServer(async (req,res) => {
         await run('an old receipt cannot authorize printing unvalidated new geometry',async page=>{
             await loadPlan(page);await page.evaluate(()=>window.camApp.state.getCurrentCaseData().lastReceipt={planId:'old-receipt'});await page.keyboard.press('ArrowDown');await page.getByRole('button',{name:'打印工单',exact:true}).click();await expect(page.locator('#cam-cut-ticket-modal')).toHaveCount(0);assert.equal(requests.filter(r=>r==='GET /api/cutting/plans/original-plan').length,0);
         });
+        await run('settings share dialog controls and preserve inputs on keyboard dismissal',async page=>{
+            await loadPlan(page);await page.locator('summary').filter({hasText:'工具与设置'}).click();await page.locator('#btn-settings').click();await expect(page.locator('#settings-modal')).toBeVisible();
+            const before=JSON.stringify(savedPlanRequest);await page.locator('#tab-btn-craft').click();await page.locator('#cfg-defect-margin').fill('35');await expect(page.locator('#tab-btn-craft')).toHaveClass(/active/);await expect(page.getByLabel('疵点避让间距',{exact:true})).toHaveValue('35');
+            fs.mkdirSync('target/visual-consistency',{recursive:true});await page.screenshot({path:'target/visual-consistency/settings-1366.png',animations:'disabled'});await page.keyboard.press('Escape');await expect(page.locator('#settings-modal')).not.toBeVisible();
+            assert.equal(JSON.stringify(savedPlanRequest),before);assert.equal(reportBodies.length,0);
+            await page.evaluate(()=>window.camApp.setTheme('dark'));if(!await page.locator('#btn-settings').isVisible())await page.locator('summary').filter({hasText:'工具与设置'}).click();await page.locator('#btn-settings').click();await expect(page.locator('#settings-modal')).toBeVisible();await page.screenshot({path:'target/visual-consistency/settings-dark-1366.png'});await page.keyboard.press('Escape');await page.evaluate(()=>window.camApp.setTheme('light'));
+        });
+        await run('code export is a keyboard modal with truthful copy failure and no canvas key leakage',async page=>{
+            await loadPlan(page);const geometry=await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces));
+            await page.locator('summary').filter({hasText:'工具与设置'}).click();await page.getByRole('button',{name:'机床代码 / DXF',exact:true}).click();await expect(page.locator('#cam-export-modal')).toHaveAttribute('open','');
+            await expect(page.locator('#export-title')).toHaveText('机床代码 / DXF 预览');await expect(page.locator('#cam-export-modal')).toContainText('需按实际机台检查');
+            await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{value:{writeText:()=>Promise.reject(new Error('denied'))},configurable:true}));await page.locator('#btn-copy-export-code').click();await expect(page.locator('#export-file-stats')).toContainText('Ctrl+C');await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{value:undefined,configurable:true}));await page.locator('#btn-copy-export-code').click();await expect(page.locator('#export-file-stats')).toContainText('无法访问剪贴板');
+            await page.keyboard.press('ArrowDown');await page.screenshot({path:'target/visual-consistency/export-1366.png'});await page.keyboard.press('Escape');await expect(page.locator('#cam-export-modal')).not.toBeVisible();assert.equal(await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces)),geometry);
+        });
+        await run('laboratory and inventory use the same form language and explicit units',async page=>{
+            const context=page.context();const lab=await context.newPage();await lab.goto(`http://127.0.0.1:${server.address().port}/nesting.html`);await expect(lab.locator('.lab-output')).toContainText('需求排入情况');await expect(lab.locator('.lab-input .lab-heading')).toContainText('尺寸 mm · 面积 m²');
+            const labStyle=await lab.locator('#material-width').evaluate(el=>({radius:getComputedStyle(el).borderRadius,font:getComputedStyle(el).fontSize}));await lab.screenshot({path:'target/visual-consistency/lab-1366.png'});
+            const stockPage=await context.newPage();await stockPage.goto(`http://127.0.0.1:${server.address().port}/inventory.html`);await expect(stockPage.locator('#inventory-rolls-search')).toBeVisible();const stockStyle=await stockPage.locator('#inventory-rolls-search').evaluate(el=>({radius:getComputedStyle(el).borderRadius,font:getComputedStyle(el).fontSize}));assert.deepEqual(stockStyle,labStyle);
+            await stockPage.screenshot({path:'target/visual-consistency/inventory-1366.png'});await lab.close();await stockPage.close();
+        });
+        await run('browser printing excludes application chrome and paginates long item lists with ticket identity',async page=>{
+            await loadPlan(page);const saved=structuredClone(storedPlans.get('original-plan'));saved.id='long-plan';saved.result.planId='long-plan';saved.result.pieces=Array.from({length:80},(_,i)=>({id:i+1,demandId:7,name:'打印裁片 '+(i+1),x:0,y:i*50,w:2000,l:50}));storedPlans.set(saved.id,saved);
+            await page.evaluate(async()=>{const {openCutTicketModal}=await import('/js/plugins/export/cut-ticket.js');await openCutTicketModal({planId:'long-plan',historical:true});});await expect(page.locator('#cam-cut-ticket-modal')).toBeVisible();
+            await page.pdf({path:'target/visual-consistency/long-ticket.pdf',format:'A4',printBackground:true,preferCSSPageSize:true});await page.emulateMedia({media:'print'});await expect(page.locator('body > header')).not.toBeVisible();await expect(page.locator('#printable-cut-ticket-area h1')).toBeVisible();await expect(page.locator('#cam-cut-ticket-modal [data-print]')).not.toBeVisible();await page.emulateMedia({media:'screen'});
+            assert.ok(fs.statSync('target/visual-consistency/long-ticket.pdf').size>10000);
+        });
     } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
-    console.log(JSON.stringify({discovered:41,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
+    console.log(JSON.stringify({discovered:45,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
 })().catch(error=>{console.error(error);server.close();process.exitCode=1;});

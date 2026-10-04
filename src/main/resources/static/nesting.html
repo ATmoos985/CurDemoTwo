@@ -9,12 +9,13 @@
     <link rel="stylesheet" href="css/nesting.css">
     <link rel="stylesheet" href="css/product-navigation.css">
     <script src="konva.min.js"></script>
+    <link rel="stylesheet" href="css/ui-consistency.css">
 </head>
 <body class="nesting-lab">
     <header class="lab-header"><div><span class="app-mark">▥</span><strong>裁切试验台</strong><span class="lab-subtitle">材料、需求与排料</span></div><div data-product-nav="lab"></div></header>
     <main class="lab-layout">
         <form id="problem-form" class="lab-input">
-            <div class="lab-heading"><h1>裁切输入</h1><span>单位 mm</span></div>
+            <div class="lab-heading"><h1>裁切输入</h1><span>尺寸 mm · 面积 m²</span></div>
             <div class="lab-form-body">
                 <div class="lab-examples"><button type="button" class="tool-btn" id="example-crosscut">横切示例</button><button type="button" class="tool-btn" id="example-guillotine">避疵示例</button><button type="button" class="tool-btn" id="example-contour">异形示例</button></div>
                 <fieldset><legend>在什么材料上切</legend><label>材料标识<input id="material-id" required maxlength="120" value="MATERIAL-1"></label>
@@ -49,14 +50,14 @@
                 <dl class="lab-metrics"><div><dt>加工区面积</dt><dd id="area-processing">—</dd></div><div><dt>裁片面积 / 占比</dt><dd id="area-pieces">—</dd></div><div><dt>候选回收面积</dt><dd id="area-leftovers">—</dd></div><div><dt>未分配面积</dt><dd id="area-unassigned">—</dd></div></dl>
                 <p class="lab-muted">未分配面积可能包含连续尾料，不代表报废。</p>
                 <p id="contour-note" class="lab-muted" hidden>轮廓表示裁片边界，尚未生成机床走刀顺序与刀具补偿；剩余区域未划分为可回收料头。</p>
-                <h3>需求完成情况</h3><div id="fulfillment">生成方案后显示排入与未排数量。</div>
+                <h3>需求排入情况</h3><div id="fulfillment">生成方案后显示排入与未排数量。</div>
                 <div id="selected-piece" hidden><h3>选中裁片</h3><p id="piece-description"></p></div>
                 <details class="lab-details"><summary>裁片位置</summary><div id="placement-list"></div></details>
                 <details class="lab-details"><summary>刀序 / 轮廓明细</summary><div id="cut-list"></div></details>
             </div>
         </aside>
     </main>
-    <dialog id="json-dialog"><form method="dialog"><div class="lab-heading"><h2>标准输入 JSON</h2><button class="tool-btn">关闭</button></div></form><label for="json-input">表单未列出的约束也会提交；不支持的内容将明确提示。</label><textarea id="json-input" spellcheck="false"></textarea><p id="json-error" role="alert"></p><button id="apply-json" class="tool-btn active">应用输入</button></dialog>
+    <dialog id="json-dialog" aria-labelledby="json-dialog-title"><form method="dialog"><div class="lab-heading"><h2 id="json-dialog-title">标准输入 JSON</h2><button class="tool-btn">关闭</button></div></form><label for="json-input">表单未列出的约束也会提交；不支持的内容将明确提示。</label><textarea id="json-input" spellcheck="false"></textarea><p id="json-error" role="alert"></p><button id="apply-json" class="tool-btn active">应用输入</button></dialog>
     <script type="module" src="js/nesting/nesting-lab.js"></script>
     <script type="module" src="js/product-navigation.js"></script>
 </body>

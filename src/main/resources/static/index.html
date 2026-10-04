@@ -22,6 +22,7 @@
     <link rel="stylesheet" href="css/workbench-layout.css">
     <link rel="stylesheet" href="css/product-navigation.css">
     <link rel="stylesheet" href="css/cut-ticket.css">
+    <link rel="stylesheet" href="css/ui-consistency.css">
 </head>
 <body inert>
 
@@ -474,7 +475,7 @@
     <!-- CAD 工业级右键上下文快捷操作菜单 (Context Menu) -->
     <div id="cad-context-menu" class="cad-context-menu" style="display: none;"></div>
 
-    <dialog id="task-picker" class="workflow-dialog"><div class="workflow-dialog-heading"><h2 id="task-picker-title">切割任务</h2><button class="tool-btn" onclick="document.getElementById('task-picker').close()">关闭</button></div><div id="task-picker-body" class="workflow-dialog-body"></div></dialog>
+    <dialog id="task-picker" class="workflow-dialog" aria-labelledby="task-picker-title"><div class="workflow-dialog-heading"><h2 id="task-picker-title">切割任务</h2><button class="tool-btn" onclick="document.getElementById('task-picker').close()">关闭</button></div><div id="task-picker-body" class="workflow-dialog-body"></div></dialog>
     <dialog id="cut-report-modal" class="report-modal" aria-labelledby="report-title">
         <div class="settings-modal-dialog report-dialog">
             <div class="settings-modal-header"><h2 id="report-title">报工与余料回收</h2><button class="tool-btn" onclick="closeCutReport()">关闭</button></div>
@@ -550,19 +551,19 @@
             </div>
 
             <!-- 选项卡内容区 -->
-            <div style="flex: 1; overflow-y: auto;">
+            <div class="settings-modal-body">
                 <!-- Tab 1: 显示与常规 -->
                 <div class="settings-tab-pane active" id="pane-general">
                     <div class="settings-group-title">视窗主题与视觉环境</div>
                     <div class="prop-row">
-                        <span class="prop-label">主题黑白切换 (Theme Mode)</span>
+                        <label class="prop-label" for="cfg-theme-select">工作台主题（立即生效）</label>
                         <select class="prop-input" id="cfg-theme-select" style="width: 220px;" onchange="setTheme(this.value)">
-                            <option value="dark">深色工业 CAD (Dark CAD)</option>
-                            <option value="light">浅色高亮 CAD (Light CAD)</option>
+                            <option value="dark">深色</option>
+                            <option value="light">浅色</option>
                         </select>
                     </div>
                     <div class="prop-row">
-                        <span class="prop-label">机台默认起准点基准 (Default Origin)</span>
+                        <label class="prop-label" for="cfg-cut-origin">默认起刀位置</label>
                         <select class="prop-input" id="cfg-cut-origin" style="width: 220px;">
                             <option value="right-bottom" selected>右下角 (靠右导轨 · 落料口自下而上起切 · 推荐)</option>
                             <option value="right-top">右上角 (靠右导轨 · 顺流进给)</option>
@@ -571,7 +572,7 @@
                         </select>
                     </div>
                     <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px; line-height: 1.5;">
-                        说明：支持四大工业起刀基准原点，在母卷长卷连续开卷时自动保持进给零间隙衔接，杜绝工位交界断层浪费。
+                        起刀位置用于坐标转换与刀序展示；报工后按实际用料长度接续工位。
                     </div>
                 </div>
 
@@ -579,28 +580,28 @@
                 <div class="settings-tab-pane" id="pane-craft">
                     <div class="settings-group-title">下刀裁切与瑕疵安全隔离</div>
                     <div class="prop-row">
-                        <span class="prop-label">瑕疵安全外扩间隙 (Safety Margin)</span>
+                        <label class="prop-label" for="cfg-defect-margin">疵点避让间距</label>
                         <div style="display: flex; align-items: center; gap: 6px;">
                             <input type="number" class="prop-input" id="cfg-defect-margin" value="20" min="0" max="100" style="width: 100px;">
                             <span style="font-size: 12px; color: var(--text-muted);">mm</span>
                         </div>
                     </div>
                     <div class="prop-row">
-                        <span class="prop-label">开卷默认卷头切齐量 (Trim Start)</span>
+                        <label class="prop-label" for="cfg-trim-start">卷头修边长度</label>
                         <div style="display: flex; align-items: center; gap: 6px;">
                             <input type="number" class="prop-input" id="cfg-trim-start" value="0" min="0" max="1000" step="50" style="width: 100px;">
                             <span style="font-size: 12px; color: var(--text-muted);">mm</span>
                         </div>
                     </div>
                     <div class="prop-row">
-                        <span class="prop-label">裁片允许 90° 旋转 (Item Rotation)</span>
+                        <label class="prop-label" for="cfg-allow-rot">允许裁片旋转</label>
                         <select class="prop-input" id="cfg-allow-rot" style="width: 220px;">
                             <option value="0" selected>禁止旋转 (严格经向保纹理)</option>
                             <option value="1">允许旋转 90° (提升排版利用率)</option>
                         </select>
                     </div>
                     <div class="prop-row">
-                        <span class="prop-label">机台默认支持纵切 (Longitudinal Cut)</span>
+                        <label class="prop-label" for="cfg-allow-longi">机台纵切能力</label>
                         <select class="prop-input" id="cfg-allow-longi" style="width: 220px;">
                             <option value="1" selected>支持纵切 (分条直刀 + 断刀)</option>
                             <option value="0">仅能横切 (禁止纵切分条)</option>
@@ -612,14 +613,14 @@
                 <div class="settings-tab-pane" id="pane-remnant-cfg">
                     <div class="settings-group-title">料头自动归档与领用策略</div>
                     <div class="prop-row">
-                        <span class="prop-label">料头最小入库宽度 (Min Remnant W)</span>
+                        <label class="prop-label" for="cfg-min-rem-w">候选料头最小宽度</label>
                         <div style="display: flex; align-items: center; gap: 6px;">
                             <input type="number" class="prop-input" id="cfg-min-rem-w" value="200" min="50" max="1000" step="50" style="width: 100px;">
                             <span style="font-size: 12px; color: var(--text-muted);">mm</span>
                         </div>
                     </div>
                     <div class="prop-row">
-                        <span class="prop-label">料头最小入库长度 (Min Remnant L)</span>
+                        <label class="prop-label" for="cfg-min-rem-l">候选料头最小长度</label>
                         <div style="display: flex; align-items: center; gap: 6px;">
                             <input type="number" class="prop-input" id="cfg-min-rem-l" value="300" min="50" max="2000" step="50" style="width: 100px;">
                             <span style="font-size: 12px; color: var(--text-muted);">mm</span>
@@ -627,10 +628,10 @@
                     </div>
                     <div class="prop-row">
                         <span class="prop-label">在库料头匹配</span>
-                        <span class="muted">通过“匹配材料”统一选择，料头优先列出</span>
+                        <span class="muted">通过“选择本次用料”统一选择，料头优先列出</span>
                     </div>
                     <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px; line-height: 1.5;">
-                        设置仅保存在本机浏览器，随新方案发送并固化。小于最小回收尺寸的余料计入损耗；符合尺寸的实测料头在报工确认后入库。
+                        设置保存在本机浏览器，随新方案发送并固化。最小尺寸用于生成候选料头；实际回收以报工确认与校验为准。
                     </div>
                 </div>
 
@@ -639,12 +640,12 @@
                     <div class="settings-group-title">智能排料算法与直刀工艺参数配置</div>
                     <div class="prop-row">
                         <span class="prop-label">排料求解引擎</span>
-                        <span style="font-family: monospace; font-size: 12px; color: #10b981; font-weight: 700;">
-                            智能几何排料内核 (直刀切透约束)
+                        <span style="font-family: monospace; font-size: 12px; color: var(--text-main); font-weight: 600;">
+                            矩形业务排料（按工艺选择引擎）
                         </span>
                     </div>
                     <div class="prop-row">
-                        <span class="prop-label">求解时间预算（另留 5 秒退出时间）</span>
+                        <label class="prop-label" for="cfg-timeout">求解时限（另留 5 秒退出）</label>
                         <div style="display: flex; align-items: center; gap: 6px;">
                             <input type="number" class="prop-input" id="cfg-timeout" value="3" min="1" max="60" style="width: 100px;">
                             <span style="font-size: 12px; color: var(--text-muted);">秒</span>

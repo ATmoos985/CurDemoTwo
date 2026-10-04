@@ -132,7 +132,7 @@ export function generateDXF(caseData = null) {
     // DXF TABLES (LAYERS)
     dxf.push("0\nSECTION\n2\nTABLES");
     dxf.push("0\nTABLE\n2\nLAYER\n70\n6");
-    
+
     // 图层定义: 0_BORDER (7: 白/黑), 1_PIECES (3: 绿), 2_REMNANTS (4: 青蓝), 3_DEFECTS (1: 红), 4_CUT_LINES (6: 洋红), 5_RAPID_TRAVERSE (5: 蓝)
     const layers = [
         { name: "0_FABRIC_BORDER", color: 7 },
@@ -246,13 +246,13 @@ export function openExportModal(defaultTab = 'gcode') {
         createExportModalDOM();
         modal = document.getElementById("cam-export-modal");
     }
-    modal.style.display = "flex";
+    if (!modal.open) modal.showModal();
     switchExportTab(defaultTab);
 }
 
 export function closeExportModal() {
     const modal = document.getElementById("cam-export-modal");
-    if (modal) modal.style.display = "none";
+    if (modal) modal.close();
 }
 
 export function switchExportTab(tabName) {
@@ -268,9 +268,9 @@ export function switchExportTab(tabName) {
         if (btnDxf) btnDxf.classList.remove("active");
         const gcodeText = generateGCode();
         if (preview) preview.value = gcodeText;
-        if (lblStats) lblStats.innerText = `格式: Fanuc/ISO 工业标准 G-Code | 行数: ${gcodeText.split('\n').length} 行 | 大小: ${(gcodeText.length / 1024).toFixed(1)} KB`;
+        if (lblStats) lblStats.innerText = `格式: Fanuc/ISO 风格代码 | 行数: ${gcodeText.split('\n').length} 行 | 大小: ${(gcodeText.length / 1024).toFixed(1)} KB`;
         if (btnDownload) {
-            btnDownload.innerText = "下载标准 G-Code (.nc)";
+            btnDownload.innerText = "下载 G-Code (.nc)";
             btnDownload.onclick = () => {
                 if (!requireValidatedPlan()) return;
                 const rollId = state.getCurrentCaseData().rollId || "ROLL-01";
@@ -299,7 +299,7 @@ export function copyExportPreview() {
     const preview = document.getElementById("export-preview-content");
     if (!preview) return;
     preview.select();
-    navigator.clipboard.writeText(preview.value).then(() => {
+    Promise.resolve().then(() => navigator.clipboard.writeText(preview.value)).then(() => {
         const btn = document.getElementById("btn-copy-export-code");
         if (btn) {
             const oldText = btn.innerText;
@@ -311,28 +311,27 @@ export function copyExportPreview() {
             }, 1800);
         }
     }).catch(() => {
-        document.execCommand('copy');
-        alert("已复制到剪贴板！");
+        document.getElementById('export-file-stats').textContent='无法访问剪贴板，代码已选中，可按 Ctrl+C 手动复制。';
     });
 }
 
 function createExportModalDOM() {
-    const div = document.createElement("div");
+    const div = document.createElement("dialog");
     div.id = "cam-export-modal";
-    div.className = "settings-modal-overlay";
-    div.style.display = "none";
+    div.className = "settings-native-dialog";
+    div.setAttribute("aria-labelledby","export-title");
     div.innerHTML = `
         <div class="settings-modal-dialog" style="width: 820px; max-width: 95vw; height: 600px; display: flex; flex-direction: column;">
             <div class="settings-modal-header">
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-weight: 700; font-size: 15px; color: var(--accent-blue);">数控机床代码与工业 CAD 图纸导出中心</span>
-                    <span class="header-tag" style="color: #10b981;">ISO CNC / AutoCAD DXF</span>
+                    <h2 id="export-title">机床代码 / DXF 预览</h2>
+
                 </div>
-                <button onclick="window.cutApp.plugins.export.closeExportModal()" style="background: transparent; border: none; color: var(--text-muted); font-size: 18px; cursor: pointer; font-weight: bold;">关闭</button>
+                <button class="tool-btn" onclick="window.cutApp.plugins.export.closeExportModal()">关闭</button>
             </div>
             <div class="settings-nav-tabs" style="padding: 0 16px; margin-top: 8px;">
-                <button class="settings-tab-btn active" id="tab-export-gcode" onclick="window.cutApp.plugins.export.switchExportTab('gcode')">标准数控 G-Code (.nc)</button>
-                <button class="settings-tab-btn" id="tab-export-dxf" onclick="window.cutApp.plugins.export.switchExportTab('dxf')">AutoCAD 工业 DXF (.dxf)</button>
+                <button class="settings-tab-btn active" id="tab-export-gcode" onclick="window.cutApp.plugins.export.switchExportTab('gcode')">数控代码 (.nc)</button>
+                <button class="settings-tab-btn" id="tab-export-dxf" onclick="window.cutApp.plugins.export.switchExportTab('dxf')">图纸 (.dxf)</button>
             </div>
             <div style="padding: 6px 16px; font-size: 11px; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center;">
                 <span id="export-file-stats">正在准备数据...</span>
@@ -342,10 +341,10 @@ function createExportModalDOM() {
                 <textarea id="export-preview-content" readonly style="width: 100%; height: 100%; font-family: 'Consolas', 'Courier New', monospace; font-size: 11.5px; background: var(--bg-main); color: var(--text-main); border: 1px solid var(--panel-border); border-radius: 4px; padding: 10px; resize: none; outline: none; line-height: 1.45;"></textarea>
             </div>
             <div class="settings-footer">
-                <span style="font-size: 11px; color: var(--text-muted);">工业适配：格柏(Gerber)、力克(Lectra)、爱科(IECHO)、拓卡奔马(Bullmer)等各品牌裁床与激光机。</span>
+                <span style="font-size: 11px; color: var(--text-muted);">示例导出格式。使用前需按实际机台检查坐标、进给和刀具参数。</span>
                 <div style="display: flex; gap: 8px;">
                     <button class="tool-btn" onclick="window.cutApp.plugins.export.closeExportModal()">取消</button>
-                    <button class="tool-btn active" id="btn-download-export-file" style="background: #0284c7; padding: 6px 16px; font-weight: 700;">下载物理文件</button>
+                    <button class="tool-btn active" id="btn-download-export-file">下载文件</button>
                 </div>
             </div>
         </div>

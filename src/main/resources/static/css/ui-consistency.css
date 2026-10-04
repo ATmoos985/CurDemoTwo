@@ -1,0 +1,24 @@
+/* Shared controls and feedback across production, laboratory and inventory. */
+:root{--control-radius:4px;--dialog-radius:8px;--dialog-shade:#18273366;--status-ok:#276749;--status-warn:#855e20;--status-error:#a23f36}
+[data-theme="dark"]{--status-ok:#8fd1ae;--status-warn:#ecc57d;--status-error:#ffa59d}
+button,input,select,textarea,summary{font-family:inherit}textarea:focus-visible{outline:2px solid var(--accent-blue);outline-offset:2px}
+:is(.prop-input,.inventory-dialog input,.inventory-dialog select,.lab-input input:not([type=checkbox]),.lab-input select,#task-list-search,#task-list-filter,#json-input){border:1px solid var(--panel-border);border-radius:var(--control-radius);color:var(--text-main);background:var(--panel-bg);font-size:13px}
+:is(.inventory-dialog input,.inventory-dialog select,.lab-input input:not([type=checkbox]),.lab-input select){min-height:34px;height:34px}
+input[type=checkbox],input[type=radio]{accent-color:var(--accent-blue)}:is(input,textarea)::placeholder{color:var(--text-muted)}
+input:read-only:not([type=checkbox]){background:var(--panel-header)}
+dialog{margin:auto}:is(.workflow-dialog,.inventory-dialog,.settings-native-dialog,.action-dialog,#json-dialog,.report-modal),.settings-modal-dialog{border-radius:var(--dialog-radius)}:is(.workflow-dialog,.inventory-dialog,.settings-native-dialog,.action-dialog,#json-dialog,.report-modal)::backdrop{background:var(--dialog-shade)}
+.settings-modal-overlay{background:var(--dialog-shade);backdrop-filter:none}
+:is(.workflow-dialog-heading,.settings-modal-header,.inventory-header,.ticket-dialog .dialog-heading){padding:14px 18px;gap:12px;background:var(--panel-bg);border-bottom:1px solid var(--panel-border)}
+:is(.workflow-dialog-heading,.settings-modal-header,.inventory-header,.ticket-dialog .dialog-heading) h2{font-size:17px;font-weight:600;line-height:1.5}
+.settings-modal-dialog{box-shadow:0 12px 36px #152b3d22}.settings-footer,.ticket-dialog>.dialog-actions{background:var(--panel-bg);border-top:1px solid var(--panel-border);padding:12px 18px;gap:12px}
+.settings-footer{flex-wrap:wrap}.settings-footer>span{flex:1;min-width:240px;line-height:1.6}.settings-nav-tabs{background:var(--panel-bg)}
+.settings-nav-tabs .settings-tab-btn{font-size:13px;font-weight:500}.settings-nav-tabs .active{font-weight:600}
+[data-theme] :is(.settings-footer,.dialog-actions) .tool-btn.active{background:var(--accent-blue);border-color:var(--accent-blue);color:#fff}
+.ui-status{display:inline-block;width:fit-content;padding:2px 7px;border:1px solid var(--panel-border);border-radius:4px;font-size:12px;line-height:1.5;color:var(--text-muted);background:var(--panel-header)}
+.ui-status[data-state=PENDING]{color:var(--accent-blue)}.ui-status[data-state=CONFIRMED]{color:var(--status-ok)}.ui-status[data-state=REVERSED],.ui-status[data-state=CANCELLED]{color:var(--text-muted)}
+:is(#solve-error,#json-error,#report-error,#plan-edit-message[role=alert]):not(:empty){padding:10px 12px;border-left:3px solid var(--status-error);background:var(--panel-header);color:var(--status-error);line-height:1.6;overflow-wrap:anywhere}
+.operation-feedback{border-left-color:var(--status-warn)}.workbench-toast[data-type=error]{border-left-color:var(--status-error)}.workbench-toast[data-type=success]{border-left-color:var(--status-ok)}
+.settings-native-dialog#cam-export-modal{padding:0;border:0;margin:auto;max-width:calc(100vw - 32px);max-height:calc(100dvh - 32px);background:transparent;color:var(--text-main)}
+#export-preview-content{background:var(--panel-header)!important;outline-offset:2px}#export-preview-content:focus-visible{outline:2px solid var(--accent-blue)!important}
+.lab-input input:read-only{background:var(--panel-header)}#json-dialog{background:var(--panel-bg)}
+@media(prefers-reduced-motion:reduce){button,input,select,summary{transition:none!important}}
