@@ -107,7 +107,7 @@ export function updateCanvasAnnotations() {
         const level = labelDetail(p.w, p.l, scale, view.overview);
         if (x + w < RULER_SIZE || x > stage.width() || y + h < RULER_SIZE || y > stage.height()) continue;
         if (level) label(level === 2 ? (p.name || `#${p.id}`) : `#${p.id}`, x + 6, y + h / 2 - (level === 2 ? 16 : 6), w - 12, { fontStyle: 'bold' });
-        if (level === 2) label(`${p.w} × ${p.l} mm${p.confirmed ? ' · 已切' : ''}`, x + 6, y + h / 2 + 4, w - 12, { fontSize: 11, fill: muted });
+        if (level === 2) label(`${p.w} × ${p.l} mm${p.outcome === 'REJECTED' ? ' · 异常' : p.confirmed ? ' · 合格' : ''}`, x + 6, y + h / 2 + 4, w - 12, { fontSize: 11, fill: muted });
         if (p.id === selectedId) {
             annotationLayer.add(new Konva.Rect({ x, y, width: w, height: h, stroke: '#2d7899', strokeWidth: 2 }));
             for (const [cx, cy] of [[x,y], [x+w,y], [x,y+h], [x+w,y+h]]) annotationLayer.add(new Konva.Rect({ x: cx-3, y: cy-3, width: 6, height: 6, fill: paper, stroke: '#2d7899', strokeWidth: 1 }));

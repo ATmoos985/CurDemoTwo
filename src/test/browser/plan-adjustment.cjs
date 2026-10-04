@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../../main/resources/static');
-let tasks, failSave, requests, failAdjustment, adjustmentBodies, reportBodies, savedPlanRequest, solveResult;
+let tasks, failSave, requests, failAdjustment, adjustmentBodies, reportBodies, savedPlanRequest, solveResult, acceptReport, receipts, stock;
 const planRequest={taskId:"task-a", taskRevision:1, rollId:"ROLL-2026-0920",rollModel:"TC涤棉-B2026",rollW:2000,rollL:5000,totalRollL:60000,windowStartY:0,feedPortType:"roll",trimStart:0,cutOrigin:"right-bottom",firstStageOrientation:"horizontal",allowRotation:false,allowLongitudinal:false,demands:[{id:7,name:"主帘",width:2000,length:1200,demand:2}],minRemnantWidth:200,minRemnantLength:300};
 const planResult={success:true,planId:"original-plan",pieces:[{id:1,demandId:7,name:"主帘",x:0,y:0,w:2000,l:1200,rotated:false},{id:2,demandId:7,name:"主帘",x:0,y:1500,w:2000,l:1200,rotated:false}],remnants:[],cuts:[{step:1,type:"横切",pos:1200,start:0,end:2000,desc:"横切"},{step:2,type:"横切",pos:2700,start:0,end:2000,desc:"横切"}],deductLen:2700,engine:"crosscut"};
 const roll = {rollId:'ROLL-2026-0920', rollModel:'TC涤棉-B2026', width:2000, totalLength:60000, usedLength:0, currentRemainingLength:60000, defects:[]};
@@ -18,8 +18,8 @@ const server = createServer(async (req,res) => {
     const json = (value, status=200) => {res.writeHead(status, {'Content-Type':'application/json'});res.end(JSON.stringify(value));};
     if (url.pathname.startsWith('/api/')) {
         requests.push(req.method + ' ' + url.pathname);
-        if (url.pathname === '/api/rolls') return json([roll]);
-        if (url.pathname === '/api/rolls/' + roll.rollId) return json(roll);
+        if (url.pathname === '/api/rolls') return json([stock]);
+        if (url.pathname === '/api/rolls/' + roll.rollId) return json(stock);
         if (url.pathname === '/api/remnants') return json([]);
         if (url.pathname === '/api/cutting/tasks' && req.method === 'GET') return json([...tasks.values()]);
         if (url.pathname === '/api/cutting/tasks' && req.method === 'POST') {
@@ -35,9 +35,24 @@ const server = createServer(async (req,res) => {
             const pieces=body.pieces.map(p=>({...planResult.pieces.find(s=>s.id===p.id),...p}));
             return json({id:body.adjustmentId,version:2,parentPlanId:planResult.planId,request:savedPlanRequest,result:{...planResult,planId:body.adjustmentId,pieces,remnants:[],cuts:pieces.map((p,i)=>({step:i+1,type:'横切',pos:p.y+p.l,start:0,end:2000,desc:'调整版'})),deductLen:Math.max(...pieces.map(p=>p.y+p.l))}});
         }
-        if(url.pathname==='/api/cutting/report-confirm'){let raw='';for await(const chunk of req)raw+=chunk;reportBodies.push(JSON.parse(raw));return json({message:'测试仅检查报工绑定，不写库存'},400);}
+        if(url.pathname==='/api/cutting/report-confirm'){
+            let raw='';for await(const chunk of req)raw+=chunk;const body=JSON.parse(raw);reportBodies.push(body);
+            if(!acceptReport)return json({message:'测试仅检查报工绑定，不写库存'},400);
+            const pieceResults=body.pieceResults.map(r=>({...planResult.pieces.find(p=>p.id===r.pieceId),...r}));
+            const good=pieceResults.filter(r=>r.outcome==='QUALIFIED'),bad=pieceResults.filter(r=>r.outcome==='REJECTED'),uncut=pieceResults.filter(r=>r.outcome==='UNCUT');
+            const pieceArea=good.reduce((a,p)=>a+p.w*p.l/1e6,0),remArea=body.actualRemnants.reduce((a,r)=>a+r.w*r.l/1e6,0),usedArea=stock.width*body.actualCutLen/1e6;
+            stock.usedLength+=body.actualCutLen;stock.currentRemainingLength-=body.actualCutLen;
+            const derivedRemnants=body.actualRemnants.map((r,i)=>({id:'TEST-REC-'+i,width:r.w,length:r.l,location:body.location}));
+            const recoveredGeometry=body.actualRemnants.map((r,i)=>({...r,id:derivedRemnants[i].id}));
+            const receipt={...body,taskId:'task-a',status:'CONFIRMED',undo:{},rollId:stock.rollId,feedPortType:'roll',windowStartY:0,pieceResults,
+                rejectedPieceCount:bad.length,uncutPieceCount:uncut.length,demandQuantities:{7:good.length},pieceArea,remArea,usedArea,wasteArea:usedArea-pieceArea-remArea,
+                utilization:pieceArea/usedArea*100,derivedRemnants,recoveredGeometry,remainingLength:stock.currentRemainingLength,confirmedAt:new Date().toISOString()};
+            receipts.push(receipt);return json(receipt);
+        }
+        if(url.pathname.endsWith('/reverse')){const receipt=receipts.find(r=>r.planId===url.pathname.split('/').at(-2));let raw='';for await(const chunk of req)raw+=chunk;
+            receipt.status='REVERSED';receipt.reversalReason=JSON.parse(raw).reason;stock.usedLength-=receipt.actualCutLen;stock.currentRemainingLength+=receipt.actualCutLen;return json(receipt);}
         const task = tasks.get(decodeURIComponent(url.pathname.split('/').at(-1)));
-        if (task) return json({task,completed:{7:1},reports:[]});
+        if (task) return json({task,completed:{7:1+receipts.filter(r=>r.status!=='REVERSED').reduce((n,r)=>n+r.finishedPieceCount,0)},reports:receipts});
         return json({message:'unexpected fixture route'},404);
     }
     const file = path.resolve(root, '.' + (url.pathname === '/' ? '/index.html' : url.pathname));
@@ -53,7 +68,7 @@ const server = createServer(async (req,res) => {
     const browser = await chromium.launch({headless:true, ...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {})});
     let passed=0, failed=0;
     async function run(name, verify) {
-        tasks = new Map([['task-a',initialTask()]]); failSave=false; requests=[]; failAdjustment=false; adjustmentBodies=[];reportBodies=[];savedPlanRequest=planRequest;solveResult=planResult;
+        tasks = new Map([['task-a',initialTask()]]); failSave=false; requests=[]; failAdjustment=false; adjustmentBodies=[];reportBodies=[];savedPlanRequest=planRequest;solveResult=planResult;acceptReport=false;receipts=[];stock={...roll};
         const context = await browser.newContext({viewport:{width:1366,height:768}}), page = await context.newPage(), errors=[];
         page.on('pageerror',error => errors.push(error.message));
         try {
@@ -61,7 +76,7 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('body')).not.toHaveAttribute('inert','');
             await verify(page);
             assert.deepEqual(errors, []);
-            assert.ok(requests.every(r => !r.startsWith('POST') || ['/adjust','/report-confirm','/solve','/tasks'].some(route=>r.endsWith(route))), 'only isolated fixture task, solve, adjustment and report requests');
+            assert.ok(requests.every(r => !r.startsWith('POST') || ['/adjust','/report-confirm','/solve','/tasks','/reverse'].some(route=>r.endsWith(route))), 'only isolated fixture task, solve, adjustment and report requests');
             passed++; console.log('PASS ' + name);
         } catch(error) {failed++; console.error('FAIL ' + name + '\n' + error.stack); console.error(JSON.stringify({requests,adjustmentBodies,savedPlanRequest,errors,debug:await page.evaluate(()=>{const s=window.camApp.state;return {pending:s.pendingPlan?.result?.planId,version:s.pendingPlan?.version,geometry:s.pendingPlan?.geometry,pieces:s.getCurrentCaseData().pieces,cuts:s.getCurrentCaseData().cuts,remnants:s.getCurrentCaseData().remnants};})}));}
         finally {await context.close();}
@@ -154,6 +169,56 @@ const server = createServer(async (req,res) => {
             assert.equal(reportBodies[0].actualCutLen,4970.1);
             await page.screenshot({path:'target/plan-adjustment/accounting-1366.png'});
         });
+        await run('mixed qualified and rejected results require a reason, persist to history and reverse together',async page=>{
+            await loadPlan(page);acceptReport=true;await page.locator('#btn-confirm-station-cut').click();
+            await page.locator('#report-piece-2').selectOption('REJECTED');await page.locator('#report-confirm-button').click();
+            await expect(page.locator('#report-error')).toContainText('异常原因');assert.equal(reportBodies.length,0);
+            await page.getByRole('textbox',{name:'裁片 2 原因',exact:true}).fill('右边破损');
+            await expect(page.locator('#report-piece-count')).toHaveValue('1');
+            await page.locator('#report-confirm-button').click();await expect(page.locator('#cut-report-modal')).not.toBeVisible();
+            assert.equal(receipts[0].rejectedPieceCount,1);assert.equal(receipts[0].finishedPieceCount,1);
+            assert.equal(await page.evaluate(()=>window.camApp.state.getCurrentCaseData().pieces.find(p=>p.sourcePieceId===2).outcome),'REJECTED');
+            await page.getByRole('button',{name:/报工记录/}).click();await expect(page.locator('#task-picker-body')).toContainText('异常 1 件');
+            await page.getByText('逐件结果与异常原因',{exact:true}).click();await expect(page.locator('#task-picker-body')).toContainText('右边破损');
+            await page.getByRole('button',{name:'撤回报工',exact:true}).click();
+            await page.locator('.action-dialog textarea').fill('测试误报');await page.getByRole('button',{name:'确认撤回',exact:true}).click();
+            await expect(page.locator('#task-picker-body')).toContainText('已撤回');assert.equal(stock.currentRemainingLength,60000);
+            assert.equal(await page.evaluate(()=>window.camApp.state.taskCompleted[7]),1);
+        });
+        await run('uncut partial rectangle is recovered explicitly and next station starts at actual cut end',async page=>{
+            await loadPlan(page);acceptReport=true;await page.locator('#btn-confirm-station-cut').click();
+            await page.locator('#report-actual-len').fill('1800.5');await page.locator('#report-mark-tail').click();
+            await expect(page.locator('#report-piece-2')).toHaveValue('UNCUT');
+            const recover=page.getByRole('checkbox',{name:'回收 UNCUT-2',exact:true});await expect(recover).not.toBeChecked();await recover.check();
+            await expect(page.getByRole('spinbutton',{name:'UNCUT-2 实测长度',exact:true})).toHaveValue('300.5');
+            await page.screenshot({path:'target/plan-adjustment/partial-report-1366.png'});
+            await page.locator('#report-confirm-button').click();await expect(page.locator('#cut-report-modal')).not.toBeVisible();
+            assert.equal(reportBodies[0].pieceResults[1].outcome,'UNCUT');assert.equal(reportBodies[0].actualRemnants[0].l,300.5);
+            assert.equal(await page.evaluate(()=>window.camApp.state.getCurrentCaseData().pieces.length),1);
+            assert.equal(await page.evaluate(()=>window.camApp.state.getCurrentCaseData().windowStartY),1800.5);
+            assert.equal(await page.evaluate(()=>window.camApp.state.getCurrentCaseData().remnants[0].id),'TEST-REC-0');
+        });
+        await run('closing and reopening preserves partial outcome and measured recovery fields',async page=>{
+            await loadPlan(page);await page.locator('#btn-confirm-station-cut').click();
+            await page.locator('#report-actual-len').fill('1800.5');await page.locator('#report-piece-2').selectOption('UNCUT');
+            await page.getByRole('checkbox',{name:'回收 UNCUT-2',exact:true}).check();
+            await page.getByRole('spinbutton',{name:'UNCUT-2 实测宽度',exact:true}).fill('1999.5');
+            await page.getByRole('button',{name:'暂不报工',exact:true}).click();await page.locator('#btn-confirm-station-cut').click();
+            await expect(page.locator('#report-actual-len')).toHaveValue('1800.5');await expect(page.locator('#report-piece-2')).toHaveValue('UNCUT');
+            await expect(page.getByRole('checkbox',{name:'回收 UNCUT-2',exact:true})).toBeChecked();
+            await expect(page.getByRole('spinbutton',{name:'UNCUT-2 实测宽度',exact:true})).toHaveValue('1999.5');
+            await page.locator('#report-confirm-button').click();await expect(page.locator('#report-error')).toContainText('测试仅检查报工绑定');
+            await expect(page.locator('#report-piece-2')).toHaveValue('UNCUT');assert.equal(stock.currentRemainingLength,60000);
+        });
+        await run('all uncut can record separated raw stock without fabricating qualified demand',async page=>{
+            await loadPlan(page);acceptReport=true;await page.locator('#btn-confirm-station-cut').click();
+            await page.locator('#report-all-uncut').click();await page.locator('#report-actual-len').fill('1000');
+            await expect(page.locator('#report-piece-count')).toHaveValue('0');
+            await page.getByRole('checkbox',{name:'回收 UNCUT-1',exact:true}).check();
+            await page.locator('#report-confirm-button').click();await expect(page.locator('#cut-report-modal')).not.toBeVisible();
+            assert.equal(receipts[0].finishedPieceCount,0);assert.equal(receipts[0].derivedRemnants.length,1);
+            assert.equal(await page.evaluate(()=>window.camApp.state.taskCompleted[7]),1);
+        });
     } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
-    console.log(JSON.stringify({discovered:6,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
+    console.log(JSON.stringify({discovered:10,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
 })().catch(error=>{console.error(error);server.close();process.exitCode=1;});

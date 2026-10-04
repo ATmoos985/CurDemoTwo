@@ -375,9 +375,16 @@ export async function matchTaskMaterials() {
 
 export async function openTaskReports() {
     try { await refreshTaskProgress(); } catch (error) { return showToast(error.message, 'error'); }
-    picker('报工记录与需求汇总', `<div class="report-progress">${state.getCurrentCaseData().demands.map(d => `<p><strong>${escapeText(d.name)}</strong><span>${state.taskCompleted[d.id] || 0} / ${d.count ?? d.demand} 件</span></p>`).join('')}</div>` + (state.taskReports.slice().reverse().map(r => `<article class="task-list-item"><strong>${escapeText(r.sourceRemnantId || r.rollId)}</strong><span>合格 ${r.finishedPieceCount} 件 · ${r.feedPortType === 'remnant' ? '料头核销' : `用料 ${r.actualCutLen} mm`} · 回收 ${r.derivedRemnants.length} 块</span><small>${escapeText(new Date(r.confirmedAt).toLocaleString("zh-CN", {hour12:false}))}</small><details class="detail-disclosure"><summary>回收清单与凭证</summary>${r.derivedRemnants.map(rem => `<p>${escapeText(rem.id)} · ${rem.width} × ${rem.length} mm · ${escapeText(rem.location)}</p>`).join("")}<small>报工编号 ${escapeText(r.planId)}</small></details></article>`).join('') || '<p class="muted">暂无报工。排料预览不会扣减需求或库存。</p>'));
+    picker('报工记录与需求汇总', `<div class="report-progress">${state.getCurrentCaseData().demands.map(d => `<p><strong>${escapeText(d.name)}</strong><span>${state.taskCompleted[d.id] || 0} / ${d.count ?? d.demand} 件</span></p>`).join('')}</div>` + (state.taskReports.slice().reverse().map(r => `<article class="task-list-item"><strong>${escapeText(r.sourceRemnantId || r.rollId)}</strong><span>合格 ${r.finishedPieceCount} 件 · 异常 ${r.rejectedPieceCount || 0} 件 · 未切 ${r.uncutPieceCount || 0} 件 · ${r.feedPortType === 'remnant' ? '料头核销' : `用料 ${r.actualCutLen} mm`} · 回收 ${r.derivedRemnants.length} 块</span><small>${escapeText(new Date(r.confirmedAt).toLocaleString("zh-CN", {hour12:false}))}</small><details class="detail-disclosure"><summary>回收清单与凭证</summary>${r.derivedRemnants.map(rem => `<p>${escapeText(rem.id)} · ${rem.width} × ${rem.length} mm · ${escapeText(rem.location)}</p>`).join("")}<small>报工编号 ${escapeText(r.planId)}</small></details></article>`).join('') || '<p class="muted">暂无报工。排料预览不会扣减需求或库存。</p>'));
     el('task-picker-body').querySelectorAll('article').forEach((article, index) => {
         const report = state.taskReports.slice().reverse()[index];
+        if (report.pieceResults?.length) {
+            const detail=document.createElement('details');detail.className='detail-disclosure';
+            const summary=document.createElement('summary');summary.textContent='逐件结果与异常原因';detail.append(summary);
+            for(const piece of report.pieceResults){const row=document.createElement('p');
+                row.textContent='#'+piece.pieceId+' · 需求 '+piece.demandId+' '+piece.name+' · '+({QUALIFIED:'合格',REJECTED:'异常',UNCUT:'未切'}[piece.outcome] || piece.outcome)+(piece.reason?' · '+piece.reason:'');detail.append(row);}
+            article.append(detail);
+        }
         const status = document.createElement('p'); status.className = 'muted';
         if (report.status === 'REVERSED') {
             status.textContent = '已撤回 · ' + report.reversalReason; article.append(status); return;

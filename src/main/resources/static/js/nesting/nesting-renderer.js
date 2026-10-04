@@ -50,10 +50,11 @@ export function renderNestingGeometry(Konva, groups, scene, options = {}) {
     }
     for (const p of scene.placements) {
         const completed = overlay.completedIds?.has(p.id);
+        const rejected = overlay.rejectedIds?.has(p.id);
         const group = new Konva.Group({ x: p.x, y: p.y, name: `piece-entity-${p.id}` });
         group.add(shapeNode(Konva, p.shape, {
-            fill: completed ? (dark ? '#293442' : '#e9edf0') : (dark ? '#304d5a' : '#e2edf2'),
-            stroke: completed ? '#94a3b8' : '#62899b', strokeWidth: 1, strokeScaleEnabled: false, dash: completed ? [5, 4] : [] }));
+            fill: rejected ? (dark ? '#542f33' : '#f9e8e8') : completed ? (dark ? '#293442' : '#e9edf0') : (dark ? '#304d5a' : '#e2edf2'),
+            stroke: rejected ? '#b94e4e' : completed ? '#94a3b8' : '#62899b', strokeWidth: 1, strokeScaleEnabled: false, dash: completed ? [5, 4] : [] }));
         options.onPlacement?.(group, p);
         placements.add(group);
     }

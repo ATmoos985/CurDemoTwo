@@ -1,6 +1,8 @@
 import { saveCurrentTask, refreshTaskProgress, escapeText } from './task-workspace.js';
 import { createPlanHistory, planScene } from './plan-editing.js';
 import { layoutMetrics, materialSummary } from './material-accounting.js';
+import { classifyReport, applyReportReceipt } from './report-outcomes.js';
+import { renderReportPieces, readReportPieces, syncReportRemnants, readReportRemnants, reportPieceError } from './report-editor.js';
 /**
  * 求解器通信与排料控制插件 (Solver Client Plugin)
  */
@@ -675,32 +677,11 @@ async function prepareCutReport() {
     const defaultCutLen = Math.max(result.deductLen || 0, layoutMetrics({rollW:pending.request.rollW, bedL, pieces:result.pieces, remnants:recoverable, cuts:result.cuts}).deductLen) || bedL;
     const actualLenInput = document.getElementById("report-actual-len");
     if (actualLenInput) {
-        actualLenInput.value = feedPortType === "remnant" ? 0 : defaultCutLen;
+        actualLenInput.value = feedPortType === "remnant" ? 0 : (pending.reportActualCutLen ?? defaultCutLen);
         actualLenInput.disabled = feedPortType === "remnant";
     }
-    const pieceCountInput = document.getElementById("report-piece-count");
-    if (pieceCountInput) {
-        pieceCountInput.value = result.pieces ? result.pieces.length : 0;
-    }
-    const remContainer = document.getElementById("report-remnants");
-    if (remContainer) {
-        remContainer.innerHTML = "";
-        for (const remnant of result.remnants || []) {
-            const row = document.createElement("div");
-            row.className = "report-remnant-row";
-
-            const check = document.createElement("input"); check.type = "checkbox"; check.checked = remnant.w >= minW && remnant.l >= minL; check.setAttribute("aria-label", "回收 " + remnant.id);
-            check.onchange = () => updateReportPreview();
-            const label = document.createElement("span"); label.textContent = `${remnant.status || '派生料头'} ${remnant.id}`;
-            const width = document.createElement("input"); width.type = "number"; width.min = "0.1"; width.step = "0.1"; width.value = remnant.w; width.className = "prop-input report-w"; width.setAttribute("aria-label", remnant.id + " 实测宽度");
-            width.oninput = () => updateReportPreview();
-            const length = document.createElement("input"); length.type = "number"; length.min = "0.1"; length.step = "0.1"; length.value = remnant.l; length.className = "prop-input report-l"; length.setAttribute("aria-label", remnant.id + " 实测长度");
-            length.oninput = () => updateReportPreview();
-            row.dataset.remnantId = remnant.id;
-            row.append(check, label, width, document.createTextNode("×"), length, document.createTextNode("mm"));
-            remContainer.append(row);
-        }
-    }
+    renderReportPieces(pending, updateReportPreview);
+    document.getElementById('report-remnants').replaceChildren();
     document.getElementById("report-error").textContent = "";
     document.getElementById("report-length-label").textContent = feedPortType === "remnant" ? "母卷扣料（mm）" : "实切长度（mm）";
     pending.currentRemaining = null;
@@ -730,44 +711,33 @@ export async function updateReportPreview() {
     const cutLen = Number(document.getElementById('report-actual-len').value);
     document.getElementById('report-preview-after-len').textContent = curRemaining == null ? '—' : (curRemaining - cutLen).toLocaleString() + ' mm';
 
-    // 需求核销明细
-    const pieces = result.pieces || [];
-    const demandTextEl = document.getElementById("report-preview-demand-text");
-    if (demandTextEl) {
-        if (pieces.length === 0) {
-            demandTextEl.innerText = "本工位暂无合格成品";
-        } else {
-            const counts = {};
-            pieces.forEach(p => {
-                const name = p.name || `${p.w}×${p.l}`;
-                counts[name] = (counts[name] || 0) + 1;
-            });
-            const summary = Object.entries(counts).map(([name, c]) => `${name}×${c}`).join("、");
-            demandTextEl.innerText = `${summary} · 共 ${pieces.length} 件`;
-        }
+    const results=readReportPieces();pending.reportPieceResults=results;pending.reportActualCutLen=cutLen;
+    const groups=classifyReport(result.pieces || [],results);
+    document.getElementById('report-piece-count').value=groups.QUALIFIED.length;
+    const counts = new Map();
+    for(const p of result.pieces || []) {
+        if(!counts.has(p.demandId))counts.set(p.demandId,{name:p.name,QUALIFIED:0,REJECTED:0,UNCUT:0});
+        const outcome=results.find(r=>r.pieceId===p.id)?.outcome;
+        if(outcome)counts.get(p.demandId)[outcome]++;
     }
-
-    // 料头建档预览
-    const selectedRows = [...document.querySelectorAll(".report-remnant-row")].filter(row => row.querySelector('input[type="checkbox"]').checked);
-    const remRows = selectedRows.filter(row => Number(row.querySelector('.report-w').value) >= (pending.request?.minRemnantWidth ?? 200)
-        && Number(row.querySelector('.report-l').value) >= (pending.request?.minRemnantLength ?? 300));
-    const remTextEl = document.getElementById("report-preview-remnant-text");
-    if (remTextEl) {
-        if (remRows.length === 0) {
-            remTextEl.innerText = "无派生料头回库";
-        } else {
-            remTextEl.innerText = `${remRows.length} 块满足回收尺寸`;
-        }
-        if (selectedRows.length > remRows.length) remTextEl.innerText += `，${selectedRows.length - remRows.length} 块尺寸不足，计入损耗`;
-    }
-    const recovered = remRows.map(row => ({...result.remnants.find(r => r.id === row.dataset.remnantId),
-        w:Number(row.querySelector('.report-w').value), l:Number(row.querySelector('.report-l').value)}));
-    const measured = layoutMetrics({rollW:pending.request.rollW, bedL:pending.bedL, pieces, remnants:recovered},
-        {sheet:feedPortType === 'remnant', actualCutLen:cutLen});
-    const preview = document.getElementById('report-area-preview');
-    if (preview) preview.textContent = measured.totalArea > 0 && Number.isFinite(measured.totalArea)
-        ? `待保存利用率 ${(measured.pieceArea / measured.totalArea * 100).toFixed(1)}% · 裁片 ${measured.pieceArea.toFixed(3)} ÷ 用料 ${measured.totalArea.toFixed(3)} m²；回收 ${measured.remArea.toFixed(3)} m² 另计`
+    document.getElementById('report-preview-demand-text').textContent=[...counts].map(([id,c])=>
+        '需求 '+id+' '+c.name+'：合格 '+c.QUALIFIED+' / 异常 '+c.REJECTED+' / 未切 '+c.UNCUT).join('；');
+    syncReportRemnants(pending,results,updateReportPreview);
+    const selected=readReportRemnants(pending);
+    const recovered=selected.filter(r=>r.w>=(pending.request.minRemnantWidth ?? 200)&&r.l>=(pending.request.minRemnantLength ?? 300));
+    document.getElementById('report-preview-remnant-text').textContent=recovered.length+' 块回库'+(selected.length>recovered.length ? '，尺寸不足 '+(selected.length-recovered.length)+' 块计入损耗' : '');
+    const usedArea=pending.request.rollW*(feedPortType==='remnant'?pending.bedL:cutLen)/1_000_000;
+    const pieceArea=groups.QUALIFIED.reduce((sum,p)=>sum+p.w*p.l/1_000_000,0);
+    const rejectedArea=groups.REJECTED.reduce((sum,p)=>sum+p.w*p.l/1_000_000,0);
+    const remArea=recovered.reduce((sum,r)=>sum+r.w*r.l/1_000_000,0);
+    document.getElementById('report-area-preview').textContent=usedArea>0&&Number.isFinite(usedArea)
+        ? '待保存利用率 '+(pieceArea/usedArea*100).toFixed(1)+'% · 合格 '+pieceArea.toFixed(3)+' ÷ 用料 '+usedArea.toFixed(3)+' m²；回收 '+remArea.toFixed(3)+' m² 另计'
         : '请填写有效的实切长度，报工成功后才记录实际利用率。';
+    document.getElementById('report-outcome-summary').textContent='合格 '+groups.QUALIFIED.length+' 件 · 异常 '+groups.REJECTED.length+' 件 · 未切 '+groups.UNCUT.length+' 件。预计损耗 '+Math.max(0,usedArea-pieceArea-remArea).toFixed(3)+' m²（含异常 '+rejectedArea.toFixed(3)+' m²）。';
+    const uncutLost=Math.max(0,[...pending.reportCandidates.values()].filter(r=>r.uncut).reduce((sum,r)=>sum+r.w*r.l/1_000_000,0)
+        -recovered.filter(r=>r.uncut).reduce((sum,r)=>sum+r.w*r.l/1_000_000,0));
+    if(uncutLost>.000001)document.getElementById('report-outcome-summary').textContent+=' 未切区域有 '+uncutLost.toFixed(3)+' m² 已计入用料但未回收，将计入损耗。';
+
 }
 
 export function closeCutReport() { document.getElementById("cut-report-modal").close(); document.getElementById("btn-confirm-station-cut")?.focus(); }
@@ -784,20 +754,18 @@ export async function confirmCutReport() {
     const actualCutLen = Number(document.getElementById("report-actual-len").value);
     const finishedPieceCount = Number(document.getElementById("report-piece-count").value);
     const location = document.getElementById("report-location").value.trim();
-    const actualRemnants = [...document.querySelectorAll(".report-remnant-row")]
-        .filter(row => row.querySelector('input[type="checkbox"]').checked)
-        .map(row => ({
-            ...((pending.result.remnants || []).find(r => r.id === row.dataset.remnantId) || {}),
-            w: Number(row.querySelector(".report-w").value),
-            l: Number(row.querySelector(".report-l").value)
-        }));
+    const pieceResults=readReportPieces();
+    const inputError=reportPieceError(pending,pieceResults);
+    if(inputError){document.getElementById('report-error').textContent=inputError.message;document.querySelector(inputError.selector)?.focus();return;}
+    const actualRemnants=readReportRemnants(pending);
 
     const report = {
         planId: pending.result.planId,
         actualCutLen: actualCutLen,
         finishedPieceCount: finishedPieceCount,
         location: location,
-        actualRemnants: actualRemnants
+        actualRemnants: actualRemnants,
+        pieceResults
     };
 
     reporting = true;
@@ -822,29 +790,7 @@ export async function confirmCutReport() {
         state.lastCutReceipt = receipt;
         state.pendingPlan = null;
 
-        // 1. 标记当前工位内的裁片为已实切确认
-        const winStartY = pending.windowStartY;
-        const bedL = pending.bedL || 5000;
-        const winEndY = winStartY + (receipt.actualCutLen || bedL);
-        (data.pieces || []).forEach(p => {
-            const pMid = p.y + p.l / 2;
-            if (pMid >= winStartY && pMid <= winEndY) {
-                p.confirmed = true;
-            }
-        });
-
-        // 1.1 固化与截断当前工位料头，彻底消除越过实切截断线的假料头
-        (data.remnants || []).forEach(r => {
-            if (r.y >= winStartY && r.y + r.l <= winEndY + 5) {
-                r.confirmed = true;
-            } else if (r.y < winEndY && r.y + r.l > winEndY) {
-                const newL = Math.max(0, winEndY - r.y);
-                r.l = newL;
-                r.area = Number(((r.w * newL) / 1000000.0).toFixed(3));
-                r.confirmed = true;
-            }
-        });
-        data.remnants = (data.remnants || []).filter(r => r.y < winEndY - 5 && r.l >= 100);
+        applyReportReceipt(data, pending, receipt);
 
         await refreshTaskProgress();
         updateDemandCompletionFromPieces(data);
@@ -889,9 +835,9 @@ export async function confirmCutReport() {
         // 6. 成功提示并自动平滑转入下一待切工位
         const remCount = receipt.derivedRemnants ? receipt.derivedRemnants.length : 0;
         if (pending.feedPortType === "remnant") {
-            showToast(`报工成功：产出 ${receipt.finishedPieceCount} 件，回收 ${remCount} 块料头`, "success");
+            showToast(`报工成功：合格 ${receipt.finishedPieceCount} 件，异常 ${receipt.rejectedPieceCount || 0} 件，未切 ${receipt.uncutPieceCount || 0} 件，回收 ${remCount} 块料头`, "success");
         } else {
-            showToast(`报工成功：产出 ${receipt.finishedPieceCount} 件，用料 ${receipt.actualCutLen} mm，回收 ${remCount} 块`, "success");
+            showToast(`报工成功：合格 ${receipt.finishedPieceCount} 件，异常 ${receipt.rejectedPieceCount || 0} 件，未切 ${receipt.uncutPieceCount || 0} 件，用料 ${receipt.actualCutLen} mm，回收 ${remCount} 块`, "success");
 
             // 自动化现场核心交互：自动推进至下一待切工位，已切区域固化为历史，并更新当前拉布基准
             {

@@ -14,6 +14,10 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api")
 public class FabricCutController {
+    private final tools.jackson.databind.json.JsonMapper reportJson = tools.jackson.databind.json.JsonMapper.builder()
+            .enable(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .disable(tools.jackson.databind.DeserializationFeature.ACCEPT_FLOAT_AS_INT,
+                    tools.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
 
     private final com.example.cutdemotwo.service.solver.SolverFactory solverFactory;
     private final ScenarioOneService scenarioOneService;
@@ -74,8 +78,11 @@ public class FabricCutController {
         return workflowService.solve(request);
     }
 
-    @PostMapping("/cutting/report-confirm")
-    public Map<String, Object> confirmCut(@RequestBody com.example.cutdemotwo.model.CutReport report) {
+    @PostMapping(value = "/cutting/report-confirm", consumes = "application/json")
+    public Map<String, Object> confirmCut(@RequestBody String body) {
+        com.example.cutdemotwo.model.CutReport report;
+        try { report = reportJson.readValue(body, com.example.cutdemotwo.model.CutReport.class); }
+        catch (RuntimeException invalid) { throw new IllegalArgumentException("报工格式无效：裁片编号和件数必须为整数，请核对输入"); }
         return workflowService.confirm(report);
     }
 

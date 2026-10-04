@@ -389,14 +389,26 @@ public class RemnantService {
         }
     }
 
-    private void validateTaskPlan(SolveRequest request, SolveResponse plan) {
+    private void validateTaskReport(SolveRequest request, SolveResponse plan, ReportOutput result) {
         if (request.getTaskId() == null) return;
-        prepareTaskSolve(request);
-        Map<Integer, Long> output = plan.getPieces().stream().collect(Collectors.groupingBy(p -> p.getDemandId(), Collectors.counting()));
-        for (var entry : output.entrySet()) {
-            var demand = request.getDemands().stream().filter(d -> d.getId() == entry.getKey()).findFirst()
+        CuttingTask task = tasks.get(request.getTaskId());
+        if (task == null || task.revision() != request.getTaskRevision()) throw new IllegalArgumentException("任务已更新，请重新载入需求");
+        boolean remnant = "remnant".equals(request.getFeedPortType());
+        var roll = motherRolls.get(request.getRollId()); var stock = remnantPool.get(request.getSourceRemnantId() == null ? "" : request.getSourceRemnantId());
+        String model = remnant ? (stock == null ? null : stock.getMaterialBatch()) : (roll == null ? null : roll.getRollModel());
+        if (!Objects.equals(task.materialModel(), model)) throw new IllegalArgumentException("材料型号与任务需求不一致");
+        if (remnant && !Objects.equals(stock.getSourceRollId(), request.getRollId())) throw new IllegalArgumentException("料头来源母卷不一致");
+        if (plan.getPieces().stream().anyMatch(p -> p.getDemandId() == null)) throw new IllegalArgumentException("裁片缺少需求归属");
+        Map<Integer, Long> good = result.qualified().stream().collect(Collectors.groupingBy(p -> p.getDemandId(), Collectors.counting()));
+        Map<String, Integer> completed = completedQuantities(task.id());
+        for (var piece : plan.getPieces()) {
+            var line = task.demands().stream().filter(d -> d.id() == piece.getDemandId()).findFirst()
                     .orElseThrow(() -> new IllegalArgumentException("裁片缺少需求归属"));
-            if (entry.getValue() > demand.getDemand()) throw new IllegalArgumentException("裁片数量超过需求");
+            double w = piece.isRotated() ? line.length() : line.width(), l = piece.isRotated() ? line.width() : line.length();
+            if (Math.abs(piece.getW()-w) > .001 || Math.abs(piece.getL()-l) > .001)
+                throw new IllegalArgumentException("裁片尺寸与当前需求不一致");
+            if (good.getOrDefault(line.id(), 0L) > line.quantity() - completed.getOrDefault(String.valueOf(line.id()), 0))
+                throw new IllegalArgumentException("合格裁片超过当前剩余需求，请刷新任务后核对");
         }
     }
 
@@ -449,7 +461,8 @@ public class RemnantService {
             if ("REVERSED".equals(old.get("status"))) throw new IllegalArgumentException("该报工已撤回，请重新排料");
             return old;
         }
-        validateTaskPlan(request, plan);
+        ReportOutput output = ReportOutput.resolve(plan, report);
+        validateTaskReport(request, plan, output);
         boolean remnantFeed = "remnant".equalsIgnoreCase(request.getFeedPortType());
         MotherRollInfo roll = motherRolls.get(request.getRollId());
         RemnantStock parent = remnantFeed ? remnantPool.get(request.getSourceRemnantId()) : null;
@@ -462,9 +475,7 @@ public class RemnantService {
                 Math.abs(roll.getWidth() - request.getRollW()) > 0.001) {
             throw new IllegalArgumentException("母料尺寸与库存档案不一致，请重新装载");
         }
-        if (report.finishedPieceCount() != plan.getPieces().size() || report.finishedPieceCount() <= 0) {
-            throw new IllegalArgumentException("本版请完成方案中的全部裁片后再确认实切");
-        }
+
         double len = report.actualCutLen();
         if (remnantFeed ? len != 0 : (!Double.isFinite(len) || len <= 0 || len > request.getRollL() || len > roll.getCurrentRemainingLength())) {
             throw new IllegalArgumentException("实切长度无效或超过母卷剩余长度");
@@ -482,18 +493,19 @@ public class RemnantService {
                 if (start < oldEnd && start + len > oldStart) throw new IllegalArgumentException("红框区域已实切确认，请移动到未切区间");
             }
         }
-        double maxPieceY = plan.getPieces().stream().mapToDouble(p -> p.getY() + p.getL()).max().orElse(0);
-        if (!remnantFeed && len + 0.001 < maxPieceY) throw new IllegalArgumentException("实切长度短于已完成裁片的末端");
+        double maxPieceY = output.cutPieces().stream().mapToDouble(p -> p.getY() + p.getL()).max().orElse(0);
+        if (!remnantFeed && len + 0.001 < maxPieceY) throw new IllegalArgumentException("实切长度短于合格或异常裁片的末端");
         List<RemnantPiece> actual = report.actualRemnants() == null ? List.of() : report.actualRemnants();
         double remArea = 0;
         Set<String> seen = new HashSet<>();
         List<double[]> recoveredBounds = new ArrayList<>();
         double sourceLength = remnantFeed ? parent.getLength() : len;
+        var recoveryCandidates = output.recoveryCandidates(plan, sourceLength);
         double tolerance = Double.isFinite(measurementToleranceMm) ? Math.max(0, measurementToleranceMm) : 0;
         for (RemnantPiece item : actual) {
             if (item == null || item.getId() == null || !seen.add(item.getId())) throw new IllegalArgumentException("料头编号重复或为空");
-            RemnantPiece proposed = plan.getRemnants().stream().filter(p -> p.getId().equals(item.getId())).findFirst()
-                    .orElseThrow(() -> new IllegalArgumentException("料头不属于当前排料方案: " + item.getId()));
+            RemnantPiece proposed = recoveryCandidates.get(item.getId());
+            if (proposed == null) throw new IllegalArgumentException("料头不属于当前排料或未切区域: " + item.getId());
             if (!Double.isFinite(item.getW()) || !Double.isFinite(item.getL()) || item.getW() <= 0 || item.getL() <= 0 ||
                     item.getW() > proposed.getW() + tolerance + 0.001 || item.getL() > proposed.getL() + tolerance + 0.001 ||
                     (proposed.isHasDefect() && !item.isHasDefect()) ||
@@ -502,7 +514,7 @@ public class RemnantService {
                     proposed.getY() + item.getL() > sourceLength + 0.001) {
                 throw new IllegalArgumentException("实测料头超出排料范围: " + item.getId());
             }
-            boolean intersectsPiece = plan.getPieces().stream().anyMatch(piece -> overlaps(
+            boolean intersectsPiece = output.cutPieces().stream().anyMatch(piece -> overlaps(
                     proposed.getX(), proposed.getY(), item.getW(), item.getL(),
                     piece.getX(), piece.getY(), piece.getW(), piece.getL()));
             boolean intersectsRemnant = recoveredBounds.stream().anyMatch(bounds -> overlaps(
@@ -515,7 +527,7 @@ public class RemnantService {
             remArea += item.getW() * item.getL() / 1_000_000.0;
         }
         double sourceArea = (remnantFeed ? parent.getArea() : request.getRollW() * len / 1_000_000.0);
-        if (plan.getPieceArea() + remArea > sourceArea + 0.001) throw new IllegalArgumentException("裁片与料头面积超过实切用料面积");
+        if (output.qualifiedArea() + output.rejectedArea() + remArea > sourceArea + 0.001) throw new IllegalArgumentException("合格、异常裁片与料头面积超过实切用料面积");
 
         Map<String, Object> undo = new LinkedHashMap<>();
         if (remnantFeed) {
@@ -532,9 +544,10 @@ public class RemnantService {
             undo.put("usedAfter", roll.getUsedLength());
         }
         List<RemnantStock> children = new ArrayList<>();
+        List<Map<String, Object>> recoveredGeometry = new ArrayList<>();
         for (RemnantPiece item : actual) {
             if (item.getW() < request.getMinRemnantWidth() || item.getL() < request.getMinRemnantLength()) continue;
-            RemnantPiece proposed = plan.getRemnants().stream().filter(p -> p.getId().equals(item.getId())).findFirst().orElseThrow();
+            RemnantPiece proposed = recoveryCandidates.get(item.getId());
             List<Defect> childDefects = new ArrayList<>();
             for (Defect defect : request.getDefects()) {
                 double left = Math.max(proposed.getX(), defect.getSafeX());
@@ -560,6 +573,8 @@ public class RemnantService {
             child.setCreatedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
             remnantPool.put(id, child);
             children.add(child);
+            recoveredGeometry.add(Map.of("id", id, "sourceCandidateId", proposed.getId(), "x", proposed.getX(), "y", proposed.getY(),
+                    "w", item.getW(), "l", item.getL(), "area", child.getArea(), "hasDefect", child.isHasDefect()));
         }
         Map<String, Object> receipt = new LinkedHashMap<>();
         receipt.put("planId", report.planId());
@@ -567,23 +582,28 @@ public class RemnantService {
         receipt.put("undo", undo);
         receipt.put("taskId", request.getTaskId());
         receipt.put("sourceRemnantId", request.getSourceRemnantId());
-        Map<String, Integer> output = new LinkedHashMap<>();
-        plan.getPieces().forEach(p -> output.merge(String.valueOf(p.getDemandId()), 1, Integer::sum));
-        receipt.put("demandQuantities", output);
+        Map<String, Integer> quantities = new LinkedHashMap<>();
+        output.qualified().forEach(p -> quantities.merge(String.valueOf(p.getDemandId()), 1, Integer::sum));
+        receipt.put("demandQuantities", quantities);
+        receipt.put("pieceResults", output.details());
+        receipt.put("rejectedPieceCount", output.rejected().size());
+        receipt.put("uncutPieceCount", output.uncut().size());
+        receipt.put("rejectedArea", output.rejectedArea());
         receipt.put("rollId", request.getRollId());
         receipt.put("windowStartY", request.getWindowStartY());
         receipt.put("feedPortType", remnantFeed ? "remnant" : "roll");
         receipt.put("actualCutLen", len);
         receipt.put("remainingLength", roll == null ? null : roll.getCurrentRemainingLength());
         receipt.put("finishedPieceCount", report.finishedPieceCount());
-        receipt.put("pieceArea", plan.getPieceArea());
+        receipt.put("pieceArea", output.qualifiedArea());
         receipt.put("usedArea", sourceArea);
         receipt.put("processingArea", request.getRollW() * request.getRollL() / 1_000_000.0);
         double recoveredArea = children.stream().mapToDouble(RemnantStock::getArea).sum();
         receipt.put("remArea", recoveredArea);
-        receipt.put("wasteArea", Math.max(0, sourceArea - plan.getPieceArea() - recoveredArea));
-        receipt.put("utilization", sourceArea == 0 ? 0 : plan.getPieceArea() / sourceArea * 100);
+        receipt.put("wasteArea", Math.max(0, sourceArea - output.qualifiedArea() - recoveredArea));
+        receipt.put("utilization", sourceArea == 0 ? 0 : output.qualifiedArea() / sourceArea * 100);
         receipt.put("derivedRemnants", children);
+        receipt.put("recoveredGeometry", recoveredGeometry);
         receipt.put("confirmedAt", LocalDateTime.now().toString());
         receipts.put(report.planId(), receipt);
         return receipt;

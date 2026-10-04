@@ -4,7 +4,7 @@ import { rectangle } from '../../nesting/nesting-scene.js';
 export function workspaceCompletedLength(data) {
     const receipt = data.lastReceipt;
     return Math.max(0, ...(data.pieces || []).filter(p => p.confirmed).map(p => p.y + p.l),
-        receipt?.actualCutLen ? Math.round((receipt.windowStartY || 0) + receipt.actualCutLen) : 0);
+        receipt?.actualCutLen ? (receipt.windowStartY || 0) + receipt.actualCutLen : 0);
 }
 
 export function createWorkspaceScene(data) {
@@ -31,6 +31,7 @@ export function createWorkspaceScene(data) {
                 shape: rectangle(r.w, r.l), hasDefect: r.hasDefect })), cuts },
         overlay: {
             completedIds: new Set((data.pieces || []).filter(p => p.confirmed).map(p => p.id)),
+            rejectedIds: new Set((data.pieces || []).filter(p => p.outcome === 'REJECTED').map(p => p.id)),
             completedLength: workspaceCompletedLength(data)
         }
     };

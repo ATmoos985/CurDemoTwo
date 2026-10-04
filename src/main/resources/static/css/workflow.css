@@ -39,6 +39,13 @@ button.task-list-item:hover { background: var(--panel-header); }
 .report-location { grid-template-columns: 72px 1fr; align-items: center; margin-bottom: 15px; }
 .report-remnant-row { display: grid; grid-template-columns: 18px minmax(110px, 1fr) 78px 12px 78px 20px; gap: 8px; align-items: center; padding: 8px 0; font-size: 12px; }
 .report-remnant-row .prop-input { width: 100%; }
+.report-batch-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.report-piece-row { display: grid; grid-template-columns: minmax(0,1fr) 90px; align-items: center; gap: 6px 12px; padding: 8px 0; border-bottom: 1px solid var(--panel-border); font-size: 12px; }
+.report-piece-row label { overflow-wrap: anywhere; }
+.report-piece-row input { grid-column: 1 / -1; width: 100%; }
+.report-piece-row input[hidden] { display: none; }
+#report-pieces { max-height: 230px; overflow-y: auto; margin-bottom: 10px; }
+#report-outcome-summary { font-size: 12px; line-height: 1.6; }
 .report-remnant-row span { overflow-wrap: anywhere; }
 #report-error:empty { display: none; }
 #report-error { color: #b42318; font-size: 13px; margin: 16px 0 0; }
