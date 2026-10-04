@@ -11,6 +11,8 @@ import { getHomeCoordinates } from '../toolpath/toolpath-optimizer.js';
 import { makePieceInteractive, getSelectedPieceId } from './cad-interactive-nesting.js';
 import { makeRemnantInteractive } from './cad-context-menu.js';
 import { renderRemnantHighlight } from './cad-remnant-highlight.js';
+import { createWorkspaceScene, workspaceCompletedLength } from './workspace-scene.js';
+import { renderNestingGeometry } from '../../nesting/nesting-renderer.js';
 
 let cutBadges = [];
 let fitMode = 'station';
@@ -19,100 +21,18 @@ const isDark = () => document.documentElement.getAttribute('data-theme') !== 'li
 export function renderScene() {
     if (!stage || !mainLayer) return;
     const data = state.getCurrentCaseData();
-    const rollW = data.rollW || 2000, totalL = data.totalRollL || 60000;
-    const bedL = data.bedL || 5000, start = data.windowStartY || 0, end = start + bedL;
-    const dark = isDark();
-    for (const group of [fabricBgGroup, defectGroup, remnantGroup, pieceGroup, cutGroup, bedStationGroup]) group.destroyChildren();
-    cutBadges = [];
-
-    fabricBgGroup.add(new Konva.Rect({
-        width: rollW, height: totalL, fill: dark ? '#19232e' : '#ffffff',
-        stroke: dark ? '#607183' : '#a8b5c1', strokeWidth: 1, strokeScaleEnabled: false
-    }));
-    for (let y = 1000; y < totalL; y += 1000) {
-        fabricBgGroup.add(new Konva.Line({
-            points: [0, y, rollW, y], stroke: dark ? '#2c3947' : '#e7edf1',
-            strokeWidth: 1, strokeScaleEnabled: false, listening: false
-        }));
-    }
-    const confirmedY = confirmedEnd(data);
-    if (confirmedY > 0) {
-        fabricBgGroup.add(new Konva.Rect({ width: rollW, height: confirmedY,
-            fill: dark ? '#293442' : '#e9edf0', opacity: .65, listening: false }));
-        fabricBgGroup.add(new Konva.Line({ points: [0, confirmedY, rollW, confirmedY],
-            stroke: '#bc8b39', strokeWidth: 1.5, strokeScaleEnabled: false, dash: [8, 5], listening: false }));
-    }
-
-    for (const d of data.globalDefects || data.defects || []) {
-        const group = new Konva.Group();
-        const margin = d.margin ?? 20;
-        const inBed = d.y + d.h >= start && d.y <= end;
-        const upcoming = d.y > end;
-        group.add(new Konva.Rect({
-            name: `defect-zone-${d.id}`, x: d.x - margin, y: d.y - margin,
-            width: d.w + 2 * margin, height: d.h + 2 * margin,
-            fill: inBed ? '#dc26261a' : '#d977061a', stroke: inBed ? '#b94e4e' : '#bd873a',
-            strokeWidth: 1, strokeScaleEnabled: false, dash: [6, 4], visible: inBed || upcoming
-        }));
-        group.add(new Konva.Rect({ name: `defect-box-${d.id}`, x: d.x, y: d.y, width: d.w, height: d.h,
-            fill: inBed ? '#c45e5e' : (upcoming ? '#c79750' : '#94a3b8'), stroke: '#9f4848', strokeWidth: 1, strokeScaleEnabled: false }));
-        for (const points of [[d.x, d.y, d.x + d.w, d.y + d.h], [d.x + d.w, d.y, d.x, d.y + d.h]]) {
-            group.add(new Konva.Line({ points, stroke: '#ffffff', strokeWidth: 1, strokeScaleEnabled: false, listening: false }));
-        }
-        defectGroup.add(group);
-    }
-
-    for (const r of data.remnants || []) {
-        const group = new Konva.Group();
-        group.add(new Konva.Rect({ x: r.x, y: r.y, width: r.w, height: r.l,
-            fill: r.hasDefect ? (dark ? '#453c2d' : '#faf2e4') : (dark ? '#303b45' : '#f0f3f5'),
-            stroke: r.hasDefect ? '#b68d48' : '#8b9ba7', strokeWidth: 1, strokeScaleEnabled: false, dash: [6, 4] }));
-        makeRemnantInteractive(group, r, data);
-        remnantGroup.add(group);
-    }
-
-    for (const p of data.pieces || []) {
-        const group = new Konva.Group({ x: p.x, y: p.y });
-        group.add(new Konva.Rect({ width: p.w, height: p.l,
-            fill: p.confirmed ? (dark ? '#293442' : '#e9edf0') : (dark ? '#304d5a' : '#e2edf2'),
-            stroke: p.confirmed ? '#94a3b8' : '#62899b', strokeWidth: 1, strokeScaleEnabled: false,
-            dash: p.confirmed ? [5, 4] : [] }));
-        makePieceInteractive(group, p, data);
-        pieceGroup.add(group);
-    }
-
-    const home = getHomeCoordinates(data);
-    let lastX = home.x, lastY = home.y;
-    for (const c of data.cuts || []) {
-        if (c.step > state.currentCutStepLimit) continue;
-        const horizontal = c.type === '横切';
-        const cutY = horizontal ? c.pos : (c.start + c.end) / 2;
-        if (cutY < start - 10 || cutY > end + 10) continue;
-        const x1 = c.startX ?? (horizontal ? c.start : c.pos);
-        const y1 = c.startY ?? (horizontal ? c.pos : c.start);
-        const x2 = c.endX ?? (horizontal ? c.end : c.pos);
-        const y2 = c.endY ?? (horizontal ? c.pos : c.end);
-        if (state.isToolpathOptimized && Math.hypot(x1 - lastX, y1 - lastY) > 1) {
-            cutGroup.add(new Konva.Line({ points: [lastX, lastY, x1, y1], stroke: '#739eaf',
-                strokeWidth: 1, strokeScaleEnabled: false, dash: [5, 5], listening: false }));
-        }
-        cutGroup.add(new Konva.Line({ points: [x1, y1, x2, y2], stroke: '#b96070',
-            strokeWidth: 1.5, strokeScaleEnabled: false, dash: state.isToolpathOptimized ? [] : [7, 5], listening: false }));
-        cutBadges.push({ x: x1, y: y1, x2, y2, step: c.step });
-        lastX = x2; lastY = y2;
-    }
-    cutGroup.visible(view.paths);
-
-    bedStationGroup.add(new Konva.Rect({ width: rollW, height: bedL,
-        stroke: '#c45656', strokeWidth: 1.5, strokeScaleEnabled: false }));
-    if (data.trimStart > 0) {
-        const bottom = (data.cutOrigin || 'right-bottom').endsWith('bottom');
-        bedStationGroup.add(new Konva.Rect({ y: bottom ? bedL - data.trimStart : 0,
-            width: rollW, height: data.trimStart, fill: '#d5ac6130',
-            stroke: '#b68d48', strokeWidth: 1, strokeScaleEnabled: false, dash: [6, 4] }));
-    }
-    bedStationGroup.position({ x: 0, y: start });
-    bedStationGroup.listening(false);
+    const { scene, overlay } = createWorkspaceScene(data);
+    const pieces = new Map((data.pieces || []).map(p => [p.id, p]));
+    const remnants = new Map((data.remnants || []).map(r => [r.id, r]));
+    cutBadges = renderNestingGeometry(Konva, {
+        background: fabricBgGroup, exclusions: defectGroup, leftovers: remnantGroup,
+        placements: pieceGroup, cuts: cutGroup, boundary: bedStationGroup
+    }, scene, {
+        dark: isDark(), overlay, stepLimit: state.currentCutStepLimit,
+        optimized: state.isToolpathOptimized, showPaths: view.paths, home: getHomeCoordinates(data),
+        onPlacement: (group, p) => makePieceInteractive(group, pieces.get(p.id), data),
+        onLeftover: (group, r) => makeRemnantInteractive(group, remnants.get(r.id), data)
+    });
     updateCanvasAnnotations();
     mainLayer.batchDraw();
     drawRulers();
@@ -120,9 +40,7 @@ export function renderScene() {
 }
 
 function confirmedEnd(data) {
-    const receipt = data.lastReceipt;
-    return Math.max(0, ...(data.pieces || []).filter(p => p.confirmed).map(p => p.y + p.l),
-        receipt?.actualCutLen ? Math.round((receipt.windowStartY || 0) + receipt.actualCutLen) : 0);
+    return workspaceCompletedLength(data);
 }
 
 export function updateCanvasAnnotations() {
