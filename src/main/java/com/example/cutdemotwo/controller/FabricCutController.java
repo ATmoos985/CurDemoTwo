@@ -41,6 +41,9 @@ public class FabricCutController {
     @GetMapping("/cutting/tasks")
     public java.util.List<com.example.cutdemotwo.model.CuttingTask> tasks() { return remnantService.listTasks(); }
 
+    @GetMapping("/cutting/task-summaries")
+    public java.util.List<Map<String, Object>> taskSummaries() { return remnantService.taskSummaries(); }
+
     @GetMapping("/cutting/tasks/{id}")
     public Map<String, Object> task(@PathVariable String id) { return remnantService.taskDetail(id); }
 

@@ -58,10 +58,7 @@ public class CuttingWorkflowService {
     }
 
     public Map<String, Object> getPlan(String id) {
-        CuttingPlan plan = inventory.getPlan(id);
-        return Map.of("unit", "mm", "coordinateSystem", "source-local-top-left", "request", plan.request(),
-                "result", plan.result(), "status", plan.status(), "createdAt", plan.createdAt(), "version", plan.version(),
-                "parentPlanId", plan.parentPlanId() == null ? "" : plan.parentPlanId());
+        return inventory.planDetail(id);
     }
 
 }

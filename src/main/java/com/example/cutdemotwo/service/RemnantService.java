@@ -174,8 +174,7 @@ public class RemnantService {
     }
 
     public synchronized List<CuttingPlan> taskPlans(String taskId) {
-        return read(() -> plans.values().stream().filter(p -> Objects.equals(taskId, p.request().getTaskId())
-                && Set.of("PENDING", "CANCELLED").contains(p.status())).toList());
+        return read(() -> plans.values().stream().filter(p -> Objects.equals(taskId, p.request().getTaskId())).toList());
     }
 
     public synchronized CuttingPlan changePlanStatus(String id, boolean restore) {
@@ -289,6 +288,34 @@ public class RemnantService {
     }
 
     public synchronized List<CuttingTask> listTasks() { return read(() -> new ArrayList<>(tasks.values())); }
+
+    /** Summaries and print snapshots are read from one inventory revision. */
+    public synchronized List<Map<String, Object>> taskSummaries() {
+        return read(() -> tasks.values().stream().map(task -> {
+            Map<String, Integer> counts = completedQuantities(task.id());
+            int total = task.demands().stream().mapToInt(CuttingTask.Line::quantity).sum();
+            int completed = task.demands().stream().mapToInt(line -> counts.getOrDefault(String.valueOf(line.id()), 0)).sum();
+            long pending = plans.values().stream().filter(plan -> Objects.equals(task.id(), plan.request().getTaskId())
+                    && task.revision() == plan.request().getTaskRevision() && "PENDING".equals(plan.status())).count();
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("task", task); item.put("total", total); item.put("completed", completed);
+            item.put("remaining", Math.max(0, total - completed)); item.put("pendingCount", pending);
+            item.put("reportCount", taskReports(task.id()).stream().filter(r -> !"REVERSED".equals(r.get("status"))).count());
+            return item;
+        }).toList());
+    }
+
+    public synchronized Map<String, Object> planDetail(String id) {
+        return read(() -> {
+            CuttingPlan plan = getPlan(id);
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("id", plan.id()); detail.put("unit", "mm"); detail.put("coordinateSystem", "source-local-top-left");
+            detail.put("request", plan.request()); detail.put("result", plan.result()); detail.put("status", plan.status());
+            detail.put("createdAt", plan.createdAt()); detail.put("version", plan.version()); detail.put("parentPlanId", plan.parentPlanId());
+            detail.put("receipt", receipts.get(id));
+            return detail;
+        });
+    }
 
     public synchronized Map<String, Object> taskDetail(String id) {
         return read(() -> taskDetailInternal(id));

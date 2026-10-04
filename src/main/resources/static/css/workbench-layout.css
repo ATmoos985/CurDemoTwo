@@ -79,3 +79,4 @@
     /* Track units, colors and navigation help are available in the title disclosure. */
     .playback-disclosure { bottom: 12px; left: 16px; right: 16px; }
 }
+.task-list-filters{display:flex;gap:12px;align-items:end;margin-bottom:12px}.task-list-filters label{display:grid;gap:5px;font-size:12px}.task-list-filters label:first-child{flex:1}.task-list-filters input,.task-list-filters select{height:34px;min-width:0;width:100%;padding:6px 8px;border:1px solid var(--panel-border);border-radius:4px;background:var(--panel-bg);color:var(--text-main)}

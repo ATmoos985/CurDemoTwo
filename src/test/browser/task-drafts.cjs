@@ -19,6 +19,7 @@ const server = createServer(async (req,res) => {
         if (url.pathname === '/api/rolls') return json([roll]);
         if (url.pathname === '/api/rolls/' + roll.rollId) return json(roll);
         if (url.pathname === '/api/remnants') return json([]);
+        if(url.pathname==='/api/cutting/task-summaries')return json([...tasks.values()].map(task=>({task,total:task.demands.reduce((n,d)=>n+d.quantity,0),completed:1,remaining:task.demands.reduce((n,d)=>n+d.quantity,0)-1,pendingCount:0,reportCount:0})));
         if (url.pathname === '/api/cutting/tasks' && req.method === 'GET') return json([...tasks.values()]);
         if (url.pathname === '/api/cutting/tasks' && req.method === 'POST') {
             let raw = ''; for await (const chunk of req) raw += chunk;
