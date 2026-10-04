@@ -21,7 +21,8 @@ export function updateFabricScrollPosition(targetY) {
     if (!data) return;
     const totalL = data.totalRollL || 60000;
     const bedL = data.bedL || 5000;
-    targetY = Math.max(0, Math.min(totalL - bedL, Math.round(targetY)));
+    const firstAvailableY = state.currentCutMode === 'remnant' ? 0 : (data.stockUsedLength || 0);
+    targetY = Math.max(firstAvailableY, Math.min(totalL - bedL, Math.round(targetY)));
 
     const prevY = data.windowStartY || 0;
     if (targetY !== prevY && requireStationReport()) return false;
@@ -120,7 +121,9 @@ export function renderRadar() {
     if (winEl) {
         winEl.style.left = `${leftPct}%`;
         winEl.style.width = `${widthPct}%`;
-        winEl.setAttribute('aria-valuemax', Math.max(0, totalL - bedL));
+        const firstAvailableY = state.currentCutMode === 'remnant' ? 0 : (data.stockUsedLength || 0);
+        winEl.setAttribute('aria-valuemin', firstAvailableY);
+        winEl.setAttribute('aria-valuemax', Math.max(firstAvailableY, totalL - bedL));
         winEl.setAttribute('aria-valuenow', winStartY);
         winEl.setAttribute('aria-valuetext', stationRange(winStartY, bedL));
         const textEl = document.getElementById("radar-window-text");

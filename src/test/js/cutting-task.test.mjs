@@ -108,9 +108,49 @@ test('the overview handle supports direct drag, track clicks, wheel and keyboard
         assert.equal(data.windowStartY, 95000);
         assert.equal(state.pendingPlan, pending);
         assert.equal(captured, false);
+
+        state.pendingPlan = null;
+        data.stockUsedLength = 5000;
+        fire('keydown', {key:'Home'});
+        assert.equal(data.windowStartY, 5000, 'Home starts at the unconsumed stock boundary');
+        fire('wheel', {deltaY:-1});
+        fire('keydown', {key:'PageDown'});
+        assert.equal(data.windowStartY, 5000, 'wheel and keyboard cannot return to consumed material');
+        fire('pointerdown', {clientX:160});
+        fire('pointermove', {clientX:100});
+        fire('pointerup');
+        assert.equal(data.windowStartY, 5000, 'dragging cannot cross the stock boundary');
+        fire('pointerdown', {target:track,clientX:100});
+        fire('pointerup');
+        assert.equal(data.windowStartY, 5000, 'clicking the consumed portion cannot select it for cutting');
     } finally {
         document.getElementById = originalGet;
         state.pendingPlan = null;
+        data.stockUsedLength = 0;
         unsubscribe();
     }
+});
+
+test('previous station stops at the exact stock boundary including a short roll tail', () => {
+    const data = state.getCurrentCaseData();
+    Object.assign(data, {windowStartY:5370, stockUsedLength:5370, totalRollL:60000, bedL:5000, pieces:[], cuts:[]});
+    state.setCutMode('roll');
+    advanceBed(-1);
+    assert.equal(data.windowStartY, 5370, 'reported stock length is not rounded back to a machine station');
+    updateFabricScrollPosition(100000);
+    assert.equal(data.windowStartY, 55000);
+    Object.assign(data, {windowStartY:59000, stockUsedLength:59000, bedL:1000});
+    advanceBed(-1);
+    assert.equal(data.windowStartY, 59000, 'the last partial station remains within the available tail');
+    assert.equal(data.stockUsedLength, 59000, 'navigation does not change inventory');
+});
+
+test('remnant navigation uses its own zero origin even when its source roll was consumed', () => {
+    const data = state.getCurrentCaseData();
+    Object.assign(data, {windowStartY:5000, stockUsedLength:5000, totalRollL:1600, bedL:1600, pieces:[], cuts:[]});
+    state.setCutMode('remnant');
+    updateFabricScrollPosition(0);
+    assert.equal(data.windowStartY, 0);
+    state.setCutMode('roll');
+    data.stockUsedLength = 0;
 });
