@@ -345,7 +345,8 @@ export async function validatePlanAdjustment() {
     if (canUseCurrentPlan()) return;
     const geometry = planGeometry();
     pending.adjustmentId ||= crypto.randomUUID();
-    const pieces = state.getCurrentCaseData().pieces.filter(p => !p.confirmed).map(p => ({id:p.id, x:p.x, y:p.y-pending.windowStartY, rotated:!!p.rotated}));
+    const pieces = state.getCurrentCaseData().pieces.filter(p => !p.confirmed && p.planId === pending.result.planId)
+        .map(p => ({id:p.sourcePieceId, x:p.x, y:p.y-pending.windowStartY, rotated:!!p.rotated}));
     validatingAdjustment = true;
     const wasInert = document.body.inert; document.body.inert = true;
     try {
@@ -374,7 +375,7 @@ export function restoreSavedPlan(saved) {
         windowStartY:offset, trimStart:request.trimStart, cutOrigin:request.cutOrigin,
         firstStageOrientation:request.firstStageOrientation, allowRotation:request.allowRotation,
         allowLongitudinal:request.allowLongitudinal, lastReceipt:null});
-    data.pieces = (result.pieces || []).map(p => ({...p, y:p.y + offset}));
+    data.pieces = (result.pieces || []).map(p => ({...p, sourcePieceId:p.id, planId:result.planId, y:p.y + offset}));
     data.remnants = (result.remnants || []).map(r => ({...r, y:r.y + offset}));
     data.cuts = (result.cuts || []).map(c => ({...c, pos:c.type === '横切' ? c.pos + offset : c.pos,
         start:c.type === '横切' ? c.start : c.start + offset, end:c.type === '横切' ? c.end : c.end + offset,
@@ -511,7 +512,7 @@ async function runSolve() {
                 data.globalDefects = allDefects;
 
                 if (isRemnantMode) {
-                    data.pieces = (result.pieces || []).map(p => ({ ...p, y: p.y }));
+                    data.pieces = (result.pieces || []).map(p => ({ ...p, sourcePieceId:p.id, planId:result.planId, y: p.y }));
                     data.cuts = (result.cuts || []).map(c => ({ ...c }));
                     data.remnants = (result.remnants || []).map(r => ({ ...r }));
                     data.deductLen = 0.0;
@@ -541,7 +542,9 @@ async function runSolve() {
                         }
                         return {
                             ...p,
-                            id: retainedPieces.length + idx + 1,
+                            id: Math.max(0, ...retainedPieces.map(p => p.id)) + idx + 1,
+                            sourcePieceId: p.id,
+                            planId: result.planId,
                             demandId: matchedDemand ? (matchedDemand.id || (activeDemands.indexOf(matchedDemand) + 1)) : p.demandId,
                             name: matchedDemand ? matchedDemand.name : p.name,
                             y: p.y + winStartY
@@ -625,6 +628,7 @@ async function runSolve() {
                 state.pendingPlan.geometry = planGeometry();
                 state.pendingPlan.history = createPlanHistory(planScene(data));
                 state.pendingPlan.version = 1;
+                updateUIInfo();
                 bus.emit('solve:success', { result, elapsed, rollId });
 
                 const stationCount = (data.cutIntervals || []).length;
