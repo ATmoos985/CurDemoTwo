@@ -3,10 +3,11 @@ package com.example.cutdemotwo.service.solver;
 import com.example.cutdemotwo.model.CutStep;
 import com.example.cutdemotwo.model.PlacedPiece;
 import com.example.cutdemotwo.model.RemnantPiece;
+import com.example.cutdemotwo.model.nesting.NestingResult;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Internal rectangular-engine geometry, converted to the versioned public result by SolverFactory. */
+/** Internal candidates. Rectangle engines retain their cut-tree data; contour engines return actual shapes. */
 public class EngineResult {
     private boolean success;
     private String message;
@@ -15,6 +16,10 @@ public class EngineResult {
     private List<RemnantPiece> remnants = new ArrayList<>();
     private List<CutStep> cuts = new ArrayList<>();
     private double suggestedFeedLength;
+    private List<NestingResult.Placement> placements = new ArrayList<>();
+
+    public List<NestingResult.Placement> getPlacements() { return placements; }
+    public void setPlacements(List<NestingResult.Placement> value) { placements = value; }
 
     public boolean isSuccess() { return success; }
     public void setSuccess(boolean value) { success = value; }

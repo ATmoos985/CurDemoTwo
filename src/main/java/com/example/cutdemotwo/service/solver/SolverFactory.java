@@ -48,12 +48,20 @@ public class SolverFactory {
         try {
             validate(problem);
             if (selected == null || selected.isBlank() || "auto".equals(selected))
-                selected = "CROSSCUT".equals(problem.process().mode()) ? "crosscut" : "packingsolver";
+                selected = switch (problem.process().mode()) {
+                    case "CROSSCUT" -> "crosscut";
+                    case "CONTOUR" -> "packingsolver-irregular";
+                    default -> "packingsolver";
+                };
             ICutSolverEngine engine = engineMap.get(selected);
             supported(engine != null, "系统未找到排料引擎: " + selected);
             var capabilities = engine.capabilities();
             supported(capabilities.modes().contains(problem.process().mode()), "所选引擎不支持请求的切割工艺");
             supported(capabilities.objectives().contains(String.valueOf(problem.process().objective())), "所选引擎不支持请求的优化目标");
+            supported(capabilities.shapes().contains(problem.material().shape().type())
+                    && problem.parts().stream().allMatch(p -> capabilities.shapes().contains(p.shape().type()))
+                    && problem.material().exclusions().stream().allMatch(d -> capabilities.shapes().contains(d.shape().type())),
+                    "所选引擎不支持请求的几何类型");
             validatePrecision(problem, capabilities.coordinateResolutionMm());
             if ("CROSSCUT".equals(problem.process().mode())) {
                 supported("horizontal".equals(problem.process().firstStageOrientation()), "横切策略仅支持水平首刀");
@@ -64,7 +72,8 @@ public class SolverFactory {
             EngineResult result = engine.solve(problem);
             if (!result.isSuccess() && !"NO_SOLUTION_FOUND".equals(result.getFailureStatus()))
                 return NestingResult.failure(result.getFailureStatus(), result.getMessage(), selected, elapsed(start));
-            String error = RectangularResultValidator.validate(problem, result);
+            String error = "CONTOUR".equals(problem.process().mode()) ? PolygonResultValidator.validate(problem, result)
+                    : !result.getPlacements().isEmpty() ? "矩形工艺不能混入轮廓候选结果" : RectangularResultValidator.validate(problem, result);
             if (error != null) return NestingResult.failure("INVALID_RESULT", error, selected, elapsed(start));
             return toResult(problem, result, selected, capabilities.version(), elapsed(start));
         } catch (Rejected error) {
@@ -82,16 +91,22 @@ public class SolverFactory {
                 "当前引擎的坐标分辨率为 " + resolution + " mm，不能静默舍入尺寸");
     }
     private static void validatePrecision(NestingProblem p, double resolution) {
-        precision(p.width(), resolution); precision(p.height(), resolution); precision(p.process().trimStart(), resolution);
-        for (var part : p.parts()) { precision(part.shape().width(), resolution); precision(part.shape().height(), resolution); }
+        shapePrecision(p.material().shape(), resolution);
+        precision(p.process().trimStart(), resolution);
+        for (var part : p.parts()) shapePrecision(part.shape(), resolution);
         for (var d : p.material().exclusions()) {
-            precision(d.x(), resolution); precision(d.y(), resolution); precision(d.shape().width(), resolution);
-            precision(d.shape().height(), resolution); precision(d.clearance(), resolution);
+            precision(d.x(), resolution); precision(d.y(), resolution); precision(d.clearance(), resolution);
+            shapePrecision(d.shape(), resolution);
         }
+    }
+    private static void shapePrecision(NestingProblem.Shape shape, double resolution) {
+        precision(shape.width(), resolution); precision(shape.height(), resolution);
+        for (var point : shape.vertices()) { precision(point.x(), resolution); precision(point.y(), resolution); }
     }
 
     private static NestingResult toResult(NestingProblem problem, EngineResult result, String engine, String version, long elapsed) {
-        var placements = result.getPieces().stream().map(p -> new NestingResult.Placement(p.getId(), p.getDemandId(),
+        boolean contour = "CONTOUR".equals(problem.process().mode());
+        var placements = contour ? List.copyOf(result.getPlacements()) : result.getPieces().stream().map(p -> new NestingResult.Placement(p.getId(), p.getDemandId(),
                 p.getName(), p.getX(), p.getY(), NestingProblem.Shape.rectangle(p.getW(), p.getL()), p.isRotated() ? 90 : 0)).toList();
         var leftovers = result.getRemnants().stream().map(r -> new NestingResult.Leftover(r.getId(), r.getX(), r.getY(),
                 NestingProblem.Shape.rectangle(r.getW(), r.getL()), r.isHasDefect())).toList();
@@ -111,11 +126,13 @@ public class SolverFactory {
             return new NestingResult.Fulfillment(p.id(), p.quantity(), placed, p.quantity() - placed,
                     placed == p.quantity() ? null : "NOT_PLACED_IN_THIS_SOLUTION");
         }).toList();
-        double area = problem.width() * problem.height();
-        double pieces = placements.stream().mapToDouble(p -> p.shape().width() * p.shape().height()).sum();
+        double area = PolygonGeometry.area(problem.material().shape());
+        double pieces = placements.stream().mapToDouble(p -> PolygonGeometry.area(p.shape())).sum();
         double reusable = leftovers.stream().mapToDouble(p -> p.shape().width() * p.shape().height()).sum();
         return new NestingResult("1", "mm", "source-local-top-left", placements.isEmpty() ? "NO_SOLUTION_FOUND" : "FEASIBLE", result.getMessage(), engine, version, elapsed,
                 problem.material().id(), problem.material().shape(), placements, leftovers, cuts, fulfillment,
-                new NestingResult.Metrics(area, pieces, reusable, Math.max(0, area - pieces - reusable), result.getSuggestedFeedLength()));
+                new NestingResult.Metrics(area, pieces, reusable, Math.max(0, area - pieces - reusable), contour ? 0 : result.getSuggestedFeedLength()),
+                contour ? placements.stream().map(p -> new NestingResult.Contour(p.id(), PolygonGeometry.vertices(p.shape()).stream()
+                        .map(v -> new NestingProblem.Point(v.x() + p.x(), v.y() + p.y())).toList(), true)).toList() : List.of());
     }
 }

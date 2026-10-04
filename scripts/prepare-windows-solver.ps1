@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$SolverExecutable,
     [Parameter(Mandatory=$true)][string]$RuntimeDirectory,
-    [string]$Destination = (Join-Path $PSScriptRoot '../data/solver')
+    [string]$Destination = (Join-Path $PSScriptRoot '../data/solver'),
+    [ValidateSet('rectangle', 'irregular')][string]$Engine = 'rectangle'
 )
 $ErrorActionPreference = 'Stop'
 $sources = @((Resolve-Path -LiteralPath $SolverExecutable).Path)
@@ -18,6 +19,8 @@ foreach ($source in $sources) {
         }
     } else { Copy-Item -LiteralPath $source -Destination $target }
 }
-$env:PACKINGSOLVER_PATH = Join-Path $destinationPath (Split-Path -Leaf $sources[0])
-Write-Output "Solver bundle prepared: $env:PACKINGSOLVER_PATH"
-Write-Output 'PACKINGSOLVER_PATH is set for this PowerShell session. Start the application from this session.'
+$solverBundlePath = Join-Path $destinationPath (Split-Path -Leaf $sources[0])
+$variable = if ($Engine -eq 'irregular') { 'PACKINGSOLVER_IRREGULAR_PATH' } else { 'PACKINGSOLVER_PATH' }
+[Environment]::SetEnvironmentVariable($variable, $solverBundlePath, 'Process')
+Write-Output "Solver bundle prepared: $solverBundlePath"
+Write-Output "$variable is set for this PowerShell session. Start the application from this session."

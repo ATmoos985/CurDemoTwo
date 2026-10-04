@@ -1,4 +1,4 @@
-import { renderNestingGeometry } from './nesting-renderer.js';
+import { renderNestingGeometry, shapeNode } from './nesting-renderer.js';
 import { fitBounds, labelDetail } from '../plugins/cad/cad-view.js';
 
 /** Reusable read-only canvas; hosts own input editing and business actions. */
@@ -28,10 +28,12 @@ export function mountNestingViewer(container, { Konva = globalThis.Konva, onSele
         for (const p of scene.placements) {
             const x = pos.x + p.x * scale, y = pos.y + p.y * scale;
             const w = p.shape.width * scale, h = p.shape.height * scale;
-            const detail = labelDetail(p.shape.width, p.shape.height, scale);
+            // A concave part's bounding-box center can be outside the part. Details remain in the selection panel.
+            const detail = p.shape.type === 'POLYGON' ? 0 : labelDetail(p.shape.width, p.shape.height, scale);
             if (detail) text(p.name || `#${p.id}`, x + 4, y + h / 2 - (detail === 2 ? 15 : 6), w - 8);
             if (detail === 2 && showDimensions) text(`${p.shape.width} × ${p.shape.height}`, x + 4, y + h / 2 + 4, w - 8, { fill: '#6b7e8d', fontSize: 11 });
-            if (selected === p.id) labels.add(new Konva.Rect({ x, y, width: w, height: h, stroke: '#275c7b', strokeWidth: 2 }));
+            if (selected === p.id) labels.add(shapeNode(Konva, p.shape, { x, y, scaleX: scale, scaleY: scale,
+                stroke: '#275c7b', strokeWidth: 2, strokeScaleEnabled: false }));
         }
         onZoom(scale);
         labels.batchDraw();

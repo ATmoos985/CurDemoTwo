@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createNestingScene, rectangle, sceneOrigin } from '../../main/resources/static/js/nesting/nesting-scene.js';
+import { createNestingScene, rectangle, polygon, shapeArea, sceneOrigin } from '../../main/resources/static/js/nesting/nesting-scene.js';
 import { createWorkspaceScene } from '../../main/resources/static/js/plugins/cad/workspace-scene.js';
 import { NestingSession } from '../../main/resources/static/js/nesting/nesting-client.js';
 import { renderNestingGeometry } from '../../main/resources/static/js/nesting/nesting-renderer.js';
@@ -124,4 +124,35 @@ test('invalidating an edited input clears the exportable result', async () => {
     const session = new NestingSession(async () => ({ ok: true, json: async () => result() }));
     session.setProblem(input); await session.solve(); assert.ok(session.result);
     session.invalidate(); assert.equal(session.result, null);
+});
+
+const lShape = () => polygon([{x:0,y:0},{x:200,y:0},{x:200,y:100},{x:100,y:100},{x:100,y:200},{x:0,y:200}]);
+test('polygon scene retains actual area and independently clones every boundary', () => {
+    const p = structuredClone(input); p.material.shape = lShape(); p.parts[0].shape = lShape();
+    const output = result(p); output.placements[0].shape = lShape(); output.contours = [{ placementId: 1, closed: true, vertices: lShape().vertices }];
+    const scene = createNestingScene(p, output);
+    assert.equal(shapeArea(scene.region.shape), 30000);
+    assert.equal(shapeArea(rectangle(200,200)), 40000);
+    assert.equal(scene.placements[0].rotationDegrees, 90);
+    assert.deepEqual(scene.placements[0].shape.vertices, output.placements[0].shape.vertices, 'no second rotation');
+    scene.region.shape.vertices[0].x = 9; scene.placements[0].shape.vertices[0].x = 9; scene.contours[0].vertices[0].x = 9;
+    assert.equal(p.material.shape.vertices[0].x, 0); assert.equal(output.placements[0].shape.vertices[0].x, 0); assert.equal(output.contours[0].vertices[0].x, 0);
+});
+test('same bounding box does not make a foreign material outline acceptable', () => {
+    const p = structuredClone(input); p.material.shape = lShape();
+    const output = result(p); output.processingRegion = rectangle(200,200);
+    assert.throws(() => createNestingScene(p,output), /不匹配/);
+    output.processingRegion = polygon([{x:0,y:0},{x:200,y:0},{x:0,y:200}]);
+    assert.throws(() => createNestingScene(p,output), /不匹配/);
+});
+test('shared renderer draws actual closed polygon boundaries without a bounding-box cut or cut-order badge', () => {
+    const p = structuredClone(input); p.material.shape = lShape(); p.material.exclusions = [{ id: 9,x:0,y:0,shape:lShape(),clearance:0 }];
+    const output = result(p); output.placements[0].shape = lShape(); output.cuts = []; output.contours = [{placementId:1,closed:true,vertices:lShape().vertices}];
+    const groups = Object.fromEntries(['background','exclusions','leftovers','placements','cuts','boundary'].map(k=>[k,new Node()]));
+    const badges = renderNestingGeometry({Rect:Node,Line:Node,Group:Node}, groups, createNestingScene(p,output));
+    const points = [0,0,200,0,200,100,100,100,100,200,0,200];
+    for (const node of [groups.background.children[0], groups.boundary.children[0], groups.placements.children[0].children[0], groups.exclusions.children[0].children[0],groups.cuts.children[0]]) {
+        assert.equal(node.attrs.closed,true); assert.deepEqual(node.attrs.points,points); assert.equal(node.attrs.width,undefined);
+    }
+    assert.deepEqual(badges,[]); assert.equal(groups.exclusions.children[0].children.length,2);
 });
