@@ -66,7 +66,7 @@ const server = createServer(async (req,res) => {
             receipts.push(receipt);return json(receipt);
         }
         if(url.pathname.endsWith('/reverse')){const receipt=receipts.find(r=>r.planId===url.pathname.split('/').at(-2));let raw='';for await(const chunk of req)raw+=chunk;
-            receipt.status='REVERSED';receipt.reversalReason=JSON.parse(raw).reason;stock.usedLength-=receipt.actualCutLen;stock.currentRemainingLength+=receipt.actualCutLen;return json(receipt);}
+            receipt.status='REVERSED';receipt.reversedAt=new Date().toISOString();receipt.reversalReason=JSON.parse(raw).reason;stock.usedLength-=receipt.actualCutLen;stock.currentRemainingLength+=receipt.actualCutLen;return json(receipt);}
         const task = tasks.get(decodeURIComponent(url.pathname.split('/').at(-1)));
         if (task) return json({task,completed:{7:1+receipts.filter(r=>r.status!=='REVERSED').reduce((n,r)=>n+r.finishedPieceCount,0)},reports:receipts});
         return json({message:'unexpected fixture route'},404);
@@ -237,7 +237,7 @@ const server = createServer(async (req,res) => {
             await page.getByRole('checkbox',{name:'回收 UNCUT-1',exact:true}).check();
             await page.locator('#report-confirm-button').click();await expect(page.locator('#cut-report-modal')).not.toBeVisible();
             assert.equal(receipts[0].finishedPieceCount,0);assert.equal(receipts[0].derivedRemnants.length,1);
-            await expect(page.locator('#demands-container .demand-status')).toHaveText('本方案 0 · 已报工 1 · 剩余 2');
+            await expect(page.locator('#demands-container .demand-status')).toHaveText('合格完成 1 / 3 件 · 还差 2 件');
             await expect(page.locator('#material-context-info')).toContainText('59,000 mm');
             assert.equal(await page.evaluate(()=>window.camApp.state.taskCompleted[7]),1);
         });
@@ -356,7 +356,7 @@ const server = createServer(async (req,res) => {
         });
         await run('demand progress separates preview and completion, links both ways and preserves cutting position',async page=>{
             tasks.get('task-a').demands[0].quantity=4;await loadPlan(page);
-            const row=page.locator('#demands-container [data-id="7"]');await expect(row.locator('.demand-status')).toHaveText('本方案 2 · 已报工 1 · 剩余 3');
+            const row=page.locator('#demands-container [data-id="7"]');await expect(row.locator('.demand-status')).toHaveText('合格完成 1 / 4 件 · 还差 3 件');
             await row.locator('.demand-unplaced summary').click();await expect(row.locator('.demand-unplaced p')).toContainText('不能据此判定无法裁切');
             const geometry=await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces));
             await row.locator('.demand-locate').click();assert.equal(await page.evaluate(()=>window.camApp.getSelectedPieceId()),1);
@@ -371,9 +371,9 @@ const server = createServer(async (req,res) => {
             await expect(row.locator('.dem-name')).not.toBeFocused();assert.equal(await page.evaluate(()=>window.camApp.getSelectedPieceId()),1);
             await page.keyboard.press('ArrowDown');await expect(page.locator('#demand-progress-summary')).toContainText('手调待校验');
             await page.evaluate(()=>{const data=window.camApp.state.getCurrentCaseData();data.pieces=data.pieces.filter(p=>p.id!==2);window.camApp.bus.emit('plan:edited');});
-            await expect(row.locator('.demand-status')).toHaveText('本方案 1 · 已报工 1 · 剩余 3');
+            await expect(row.locator('.demand-status')).toHaveText('合格完成 1 / 4 件 · 还差 3 件');
             await expect(row.locator('.demand-unplaced p')).toContainText('移除了 1 件');
-            await page.locator('#btn-undo-plan').click();await expect(row.locator('.demand-status')).toContainText('本方案 2');
+            await page.locator('#btn-undo-plan').click();await expect(row.locator('.demand-preview-label')).toContainText('本方案 2');
             fs.mkdirSync('target/demand-progress',{recursive:true});await page.screenshot({path:'target/demand-progress/linked-1366.png'});
         });
         await run('equal names and dimensions retain distinct demand identities when locating the drawing',async page=>{
@@ -381,8 +381,8 @@ const server = createServer(async (req,res) => {
             await page.evaluate(async saved=>{const {restoreSavedPlan}=await import('/js/plugins/solver/solver-client.js');restoreSavedPlan(saved);},
                 {request:{...planRequest,demands:[...planRequest.demands,{...planRequest.demands[0],id:8}]},result:{...planResult,pieces:[planResult.pieces[0],{...planResult.pieces[1],demandId:8}]}});
             const first=page.locator('#demands-container [data-id="7"]'),second=page.locator('#demands-container [data-id="8"]');
-            await expect(first.locator('.demand-status')).toHaveText('本方案 1 · 已报工 1 · 剩余 2');
-            await expect(second.locator('.demand-status')).toHaveText('本方案 1 · 已报工 0 · 剩余 2');
+            await expect(first.locator('.demand-status')).toHaveText('合格完成 1 / 3 件 · 还差 2 件');
+            await expect(second.locator('.demand-status')).toHaveText('合格完成 0 / 2 件 · 还差 2 件');
             await second.locator('.demand-locate').click();assert.equal(await page.evaluate(()=>window.camApp.getSelectedPieceId()),2);
             await expect(second).toHaveClass(/demand-selected/);await expect(first).not.toHaveClass(/demand-selected/);
             await first.locator('.demand-locate').click();assert.equal(await page.evaluate(()=>window.camApp.getSelectedPieceId()),1);
@@ -393,9 +393,58 @@ const server = createServer(async (req,res) => {
             solveResult={success:false,status:'NO_SOLUTION_FOUND',message:'本次没有排入裁片',pieces:[],fulfillment:[{demandId:7,requested:2,placed:0,unplaced:2,reason:'EXCEEDS_PROCESSING_LENGTH'}]};
             await page.locator('#btn-trigger-solve-station').click();await expect(page.locator('#demand-progress-summary')).toContainText('求解反馈');
             const row=page.locator('#demands-container [data-id="7"]');await row.locator('.demand-unplaced summary').click();
-            await expect(row.locator('.demand-unplaced p')).toContainText('有效长度');await expect(row.locator('.demand-status')).toHaveText('本方案 0 · 已报工 1 · 剩余 2');
+            await expect(row.locator('.demand-unplaced p')).toContainText('有效长度');await expect(row.locator('.demand-status')).toHaveText('合格完成 1 / 3 件 · 还差 2 件');
             await expect(row.locator('.demand-locate')).toBeDisabled();await expect(page.locator('#btn-confirm-station-cut')).toBeDisabled();
             await page.locator('.dem-l').fill('1200');await expect(row.locator('.demand-unplaced')).toBeHidden();await expect(page.locator('#demand-progress-summary')).not.toContainText('求解反馈');
+        });
+        await run('five demand segments show three satisfied lines and locate their exact remaining rows',async page=>{
+            const names=['客厅主帘','主卧主帘','次卧主帘','抱枕套','绑带'];
+            tasks.get('task-a').demands=[2,4,1,10,3].map((quantity,i)=>({id:7+i,name:names[i],width:500,length:500,quantity,allowRotation:false}));
+            await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();
+            await expect(page.locator('#task-picker')).not.toBeVisible();
+            await page.evaluate(async()=>{
+                window.camApp.state.taskCompleted={7:2,8:4,9:1,10:6};
+                window.camApp.state.taskReports=[{taskId:'task-a',planId:'RECENT',status:'CONFIRMED',confirmedAt:'2026-10-05T09:30:00',demandQuantities:{8:2,9:1,10:2}}];
+                const {updateWorkflowControls}=await import('/js/plugins/solver/solver-client.js');updateWorkflowControls();
+            });
+            await expect(page.locator('#demand-lines-progress')).toHaveText('已满足 3 / 5 项');await expect(page.locator('#demand-pieces-progress')).toHaveText('合格 13 / 20 件');
+            await expect(page.locator('.demand-segment[data-complete="true"]')).toHaveCount(3);
+            const partial=page.locator('#demands-container [data-id="10"]');await expect(partial.locator('.demand-meter')).toHaveAttribute('aria-valuenow','6');await expect(partial.locator('.demand-meter')).toHaveAttribute('aria-valuemax','10');
+            await expect(partial.locator('.demand-change')).toHaveText('最近报工 +2 件');await expect(partial.locator('.demand-status')).toContainText('还差 4 件');
+            fs.mkdirSync('target/demand-bars',{recursive:true});await page.screenshot({path:'target/demand-bars/overview-1366.png'});
+            await page.locator('#demand-recent-change summary').click();await expect(page.locator('#demand-recent-change')).toContainText('抱枕套：+2 件');
+            await page.locator('#card-demands .section-toggle').click();await expect(page.locator('#demand-overview')).toBeVisible();
+            await page.locator('.demand-segment').nth(3).click();await expect(page.locator('#card-demands')).not.toHaveClass(/collapsed/);await expect(partial).toBeFocused();
+            await page.screenshot({path:'target/demand-bars/change-1366.png'});await page.setViewportSize({width:1920,height:1080});await page.screenshot({path:'target/demand-bars/change-1920.png'});
+            assert.equal(requests.filter(r=>r.startsWith('POST')).length,0);
+        });
+        await run('only qualified report fills progress and reversal restores the bar with a visible delta',async page=>{
+            await loadPlan(page);const row=page.locator('#demands-container [data-id="7"]');
+            await expect(row.locator('.demand-meter')).toHaveAttribute('aria-valuenow','1');await expect(row.locator('.demand-preview-label')).toContainText('本方案 2 件');await expect(page.locator('#demand-recent-change')).toBeHidden();
+            const geometry=await page.evaluate(()=>{window.camApp.setSelectedPieceId(1);return JSON.stringify(window.camApp.state.getCurrentCaseData().pieces);});
+            await page.locator('.demand-segment').focus();await page.keyboard.press('ArrowRight');await page.locator('.demand-segment').click();await page.keyboard.press('r');
+            assert.equal(await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces)),geometry);
+            acceptReport=true;await page.locator('#btn-confirm-station-cut').click();await page.locator('#report-piece-2').selectOption('REJECTED');await page.getByRole('textbox',{name:'裁片 2 原因',exact:true}).fill('复检异常');await page.locator('#report-confirm-button').click();
+            await expect(page.locator('#cut-report-modal')).not.toBeVisible();await expect(row.locator('.demand-meter')).toHaveAttribute('aria-valuenow','2');await expect(row.locator('.demand-change')).toHaveText('最近报工 +1 件');
+            await expect(page.locator('#demand-lines-progress')).toHaveText('已满足 0 / 1 项');await expect(page.locator('#demand-pieces-progress')).toHaveText('合格 2 / 3 件');
+            await page.locator('#demand-recent-change summary').click();await expect(page.locator('#demand-recent-change')).toContainText('异常 1、未切 0 件未计入完成');
+            await page.getByRole('button',{name:/报工记录/}).click();await page.getByRole('button',{name:'撤回报工',exact:true}).click();await page.locator('.action-dialog textarea').fill('测试纠错');await page.getByRole('button',{name:'确认撤回',exact:true}).click();await expect(page.locator('#task-picker-body')).toContainText('已撤回');
+            await expect(row.locator('.demand-meter')).toHaveAttribute('aria-valuenow','1');await expect(row.locator('.demand-change')).toHaveText('最近撤回 · 恢复待切 1 件');
+            await expect(page.locator('#demand-recent-change summary')).toHaveText('最近撤回 · 恢复待切 1 件');
+        });
+        await run('report history restores progress explanation after reopening and new drafts clear it',async page=>{
+            await loadPlan(page);acceptReport=true;await page.locator('#btn-confirm-station-cut').click();await page.locator('#report-confirm-button').click();await expect(page.locator('#cut-report-modal')).not.toBeVisible();
+            await expect(page.locator('#demand-lines-progress')).toHaveText('已满足 1 / 1 项');await expect(page.locator('#demands-container .demand-meter')).toHaveAttribute('data-complete','true');
+            await page.reload();await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();await expect(page.locator('#task-picker')).not.toBeVisible();
+            await expect(page.locator('#demand-recent-change summary')).toContainText('最近报工 +2 件');await expect(page.locator('#demand-lines-progress')).toHaveText('已满足 1 / 1 项');
+            await page.getByRole('button',{name:'新建任务',exact:true}).click();await expect(page.locator('#demand-overview')).toBeHidden();await expect(page.locator('#demand-recent-change')).toBeHidden();
+        });
+        await run('many demand rows use a bounded overview and invalid totals never show false completion',async page=>{
+            tasks.get('task-a').demands=Array.from({length:20},(_,i)=>({id:7+i,name:'需求'+i,width:500,length:500,quantity:3,allowRotation:false}));
+            await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();await expect(page.locator('#task-picker')).not.toBeVisible();
+            await expect(page.locator('#demand-progress-segments')).toBeHidden();await expect(page.locator('#demand-overall-meter')).toBeVisible();await expect(page.locator('#demand-overall-meter')).toHaveAttribute('aria-valuemax','20');
+            await page.locator('.dem-count').first().fill('');await expect(page.locator('#demands-container .demand-meter').first()).not.toHaveAttribute('aria-valuenow');await expect(page.locator('#demand-pieces-progress')).toContainText('/ — 件');
+            assert.equal(await page.locator('#demand-overview').evaluate(el=>el.getBoundingClientRect().height<100),true);
         });
         await run('remnant recommendation uses remaining demand and selecting preserves demand until confirmed',async page=>{
             await loadPlan(page);candidateItems=candidateList();extraRolls=[secondRoll];
@@ -469,7 +518,7 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('#material-match-error')).toContainText('测试材料读取失败');
             assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');await expect(page.locator('#material-context-id')).toHaveText(roll.rollId);
             failMaterialRead=false;await page.locator('#material-load').click();await expect(page.locator('#material-picker')).not.toBeVisible();await expect(page.locator('#material-context-id')).toHaveText(secondRoll.rollId);
-            await expect(page.locator('.demand-status')).toHaveText('本方案 0 · 已报工 1 · 剩余 2');assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan),null);
+            await expect(page.locator('.demand-status')).toHaveText('合格完成 1 / 3 件 · 还差 2 件');assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan),null);
             assert.equal(await page.evaluate(()=>window.camApp.state.activeTask.id),'task-a');assert.equal(reportBodies.length,0);
         });
         await run('matching failures retry in place and late responses cannot reopen a closed selector',async page=>{
@@ -637,5 +686,5 @@ const server = createServer(async (req,res) => {
             assert.ok(fs.statSync('target/visual-consistency/long-ticket.pdf').size>10000);
         });
     } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
-    console.log(JSON.stringify({discovered:50,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
+    console.log(JSON.stringify({discovered:54,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
 })().catch(error=>{console.error(error);server.close();process.exitCode=1;});

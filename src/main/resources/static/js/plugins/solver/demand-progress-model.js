@@ -27,3 +27,35 @@ export function demandProgress(demands, completed, {pending, pieces = [], edited
         return {id:d.id, total:d.quantity, completed:good, planned, remaining, unplaced, reason, edited};
     });
 }
+
+/** Whole lines and total pieces answer different questions; neither includes preview output. */
+export function summarizeDemandProgress(progress) {
+    const valid=progress.every(d=>d.remaining !== null);
+    const satisfied=progress.filter(d=>d.remaining === 0).length;
+    return {lines:progress.length,satisfied,partial:progress.filter(d=>d.completed>0 && d.remaining>0).length,
+        completed:progress.reduce((n,d)=>n+d.completed,0),
+        total:valid?progress.reduce((n,d)=>n+d.total,0):null,
+        remaining:valid?progress.reduce((n,d)=>n+d.remaining,0):null};
+}
+
+/** Use persisted receipts so reopening a task retains the explanation, without treating it as a new report. */
+export function latestDemandChange(reports, taskId) {
+    if(!taskId)return null;
+    const candidates=(reports || []).filter(r=>r.taskId===taskId);
+    const eventTime=r=>r.status==='REVERSED'?(r.reversedAt || r.confirmedAt):r.confirmedAt;
+    const report=candidates.reduce((latest,r)=>!latest || String(eventTime(r) || '')>=String(eventTime(latest) || '')?r:latest,null);
+    if(!report)return null;
+    let quantities=report.demandQuantities;
+    if(!quantities && Array.isArray(report.pieceResults) && (report.pieceResults.length || report.finishedPieceCount===0)) {
+        quantities={};
+        report.pieceResults.filter(p=>p.outcome==='QUALIFIED' && p.demandId!=null)
+            .forEach(p=>quantities[p.demandId]=(quantities[p.demandId] || 0)+1);
+    }
+    const known=quantities!=null;
+    const reversed=report.status==='REVERSED';
+    const deltas=Object.fromEntries(Object.entries(quantities || {}).filter(([,n])=>Number.isSafeInteger(n) && n>0)
+        .map(([id,n])=>[id,reversed?-n:n]));
+    return {planId:report.planId,reversed,known,deltas,time:eventTime(report) || '',
+        pieces:Object.values(deltas).reduce((n,x)=>n+Math.abs(x),0),
+        rejected:report.rejectedPieceCount || 0,uncut:report.uncutPieceCount || 0};
+}

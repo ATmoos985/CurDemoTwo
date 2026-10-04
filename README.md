@@ -7,6 +7,8 @@ MySQL 初始化、文件导入、服务器部署、原生求解器配置和撤�
 
 料头复用可从“选择用料 → 计算料头推荐”开始，查看每块料头可先切的需求及数量，详见[料头优先推荐](docs/料头优先推荐.md)。
 
+左侧需求区提供完成进度条与最近报工变化，直接查看哪些需求已满足、各项还差多少，详见[需求完成进度](docs/需求完成进度.md)。
+
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.1-brightgreen.svg)](https://spring.io/projects/spring-boot)
 [![Java](https://img.shields.io/badge/Java-17-orange.svg)](https://www.oracle.com/java/)
 [![Konva.js](https://img.shields.io/badge/Canvas-Konva.js-blue.svg)](https://konvajs.org/)

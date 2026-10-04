@@ -147,6 +147,7 @@ export function renderDemandsUI(demands) {
         container.innerHTML = "<div style='color:var(--text-muted);font-size:11px;padding:4px;'>暂无需求 (可点击上方+增裁片)</div>";
         const badge = document.getElementById("demands-summary-badge");
         if (badge) badge.innerText = "0 件";
+        updateWorkflowControls();
         return;
     }
 

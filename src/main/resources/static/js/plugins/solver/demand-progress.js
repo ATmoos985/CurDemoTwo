@@ -1,6 +1,6 @@
 import {state} from '../../core/state.js';
 import {bus} from '../../core/event-bus.js';
-import {demandProgress} from './demand-progress-model.js';
+import {demandProgress, summarizeDemandProgress, latestDemandChange} from './demand-progress-model.js';
 import {getSelectedPieceId, setSelectedPieceId} from '../cad/cad-interactive-nesting.js';
 import {focusPiece} from '../cad/cad-renderer.js';
 import {toggleSidebar} from '../layout/splitter.js';
@@ -15,12 +15,28 @@ export function updateDemandProgress(options = {}) {
     currentPieces = options.pending ? pieces.filter(p => p.planId === options.pending.result.planId && !p.confirmed) : [];
     const progress = demandProgress(list.map(row => ({id:Number(row.dataset.id),quantity:row.querySelector('.dem-count').value.trim() === '' ? NaN : Number(row.querySelector('.dem-count').value)})),
         state.taskCompleted, {...options,pieces});
+    const change=latestDemandChange(state.taskReports,state.activeTask?.id);
     list.forEach((row,index) => {
         const item = progress[index];row.dataset.completed = item.completed;
+        row.onkeydown=event=>{if(event.target===row)event.stopPropagation();};
         let status = row.querySelector('.demand-status');
         if (!status) {status=document.createElement('div');status.className='demand-status';row.append(status);}
-        status.textContent = `本方案 ${item.planned} · 已报工 ${item.completed} · 剩余 ${display(item.remaining)}`;
+        status.textContent = `合格完成 ${item.completed} / ${display(Number.isSafeInteger(item.total) && item.total>0?item.total:null)} 件 · ${item.remaining===0?'已满足':`还差 ${display(item.remaining)} 件`}`;
         status.classList.toggle('done',item.remaining === 0);
+        let meter=row.querySelector('.demand-meter');
+        if(!meter){meter=document.createElement('div');meter.className='demand-meter';meter.append(document.createElement('span'));status.after(meter);}
+        renderMeter(meter,item.completed,item.remaining===null?null:item.total,row.querySelector('.dem-name').value+' 合格完成');
+        row.dataset.fulfilled=String(item.remaining===0);
+        let delta=row.querySelector('.demand-change');
+        if(!delta){delta=document.createElement('p');delta.className='demand-change';meter.after(delta);}
+        const difference=change?.deltas[item.id] || 0;
+        delta.hidden=!difference;delta.dataset.reversed=String(difference<0);
+        delta.textContent=difference>0?`最近报工 +${difference} 件`:`最近撤回 · 恢复待切 ${-difference} 件`;
+        delta.title=change?.time?`记录时间 ${change.time.replace('T',' ')} · ${change.planId}`:'';
+        row.dataset.recentChange=difference>0?'reported':difference<0?'reversed':'';
+        let preview=row.querySelector('.demand-preview-label');
+        if(!preview){preview=document.createElement('p');preview.className='demand-preview-label';delta.after(preview);}
+        preview.hidden=!item.planned;preview.textContent=`本方案 ${item.planned} 件 · ${options.edited?'待校验':'待报工'}，未计入完成`;
         let tools = row.querySelector('.demand-progress-tools');
         if (!tools) {
             tools=document.createElement('div');tools.className='demand-progress-tools';
@@ -34,12 +50,68 @@ export function updateDemandProgress(options = {}) {
         detail.querySelector('summary').textContent=`未排入 ${display(item.unplaced)} 件 · 查看原因`;
         detail.querySelector('p').textContent=item.reason;
     });
+    renderOverview(progress,list,change);
     const badge=document.getElementById('demands-summary-badge');
-    if (badge) badge.textContent=`已报工 ${progress.reduce((n,d)=>n+d.completed,0)} / 总 ${progress.every(d=>Number.isSafeInteger(d.total) && d.total > 0)?progress.reduce((n,d)=>n+d.total,0):'—'} 件`;
+    if (badge) badge.textContent=progress.length+' 项';
     const feedback=document.getElementById('demand-progress-summary');
     if (feedback) feedback.textContent=options.attempt ? '求解反馈：'+(options.attempt.result.message || '本次没有生成方案，请核对未排入原因。')
         : options.pending ? `本方案 ${currentPieces.length} 件${options.edited?' · 手调待校验':''}；剩余数量含本方案尚未报工的裁片。` : '尺寸：mm · 剩余按合格报工计算，预览不扣数量。';
     syncDemandSelection(false);
+}
+
+function renderMeter(element,completed,total,label) {
+    element.setAttribute('role','progressbar');element.setAttribute('aria-label',label);element.setAttribute('aria-valuemin','0');
+    if(total==null){element.removeAttribute('aria-valuenow');element.removeAttribute('aria-valuemax');element.setAttribute('aria-valuetext','请核对需求数量');}
+    else{element.setAttribute('aria-valuenow',String(Math.min(total,completed)));element.setAttribute('aria-valuemax',String(total));element.setAttribute('aria-valuetext',`${completed} / ${total}`);}
+    element.firstElementChild.style.width=total>0?`${Math.min(100,Math.max(0,completed/total*100))}%`:'0%';
+    element.dataset.complete=String(total>0 && completed===total);
+}
+
+function renderOverview(progress,list,change) {
+    const overview=document.getElementById('demand-overview');if(!overview)return;
+    overview.hidden=!progress.length;if(!progress.length)return;
+    overview.onkeydown=event=>event.stopPropagation();
+    const summary=summarizeDemandProgress(progress);
+    document.getElementById('demand-lines-progress').textContent=`已满足 ${summary.satisfied} / ${summary.lines} 项`;
+    document.getElementById('demand-pieces-progress').textContent=`合格 ${summary.completed} / ${display(summary.total)} 件`;
+    const segments=document.getElementById('demand-progress-segments'),overall=document.getElementById('demand-overall-meter');
+    segments.hidden=progress.length>12;overall.hidden=progress.length<=12;
+    // Reuse segment buttons while typing or moving pieces so keyboard focus is retained.
+    const ids=progress.map(d=>d.id).join(',');
+    if(segments.dataset.ids!==ids){segments.replaceChildren(...progress.slice(0,12).map(()=>{
+        const button=document.createElement('button');button.type='button';button.className='demand-segment';
+        button.append(document.createElement('span'),document.createElement('b'));return button;
+    }));segments.dataset.ids=ids;}
+    [...segments.children].forEach((button,index)=>{
+        const item=progress[index],name=list[index].querySelector('.dem-name').value;
+        button.firstElementChild.style.width=item.remaining!==null?`${Math.min(100,item.completed/item.total*100)}%`:'0%';
+        button.lastElementChild.textContent=`${index+1}${item.remaining===0?'✓':''}`;
+        button.dataset.complete=String(item.remaining===0);
+        button.title=button.ariaLabel=`第 ${index+1} 项 ${name} · 合格 ${item.completed} / ${display(item.remaining===null?null:item.total)} 件 · ${item.remaining===0?'已满足':`还差 ${display(item.remaining)} 件`}，点击定位需求`;
+        button.onclick=()=>revealDemand(item.id);
+    });
+    if(progress.length>12)renderMeter(overall,summary.satisfied,summary.lines,'已满足需求项');
+    const recent=document.getElementById('demand-recent-change');recent.hidden=!change;
+    if(!change)return;
+    const changeKey=change.planId+':'+change.reversed;
+    if(recent.dataset.change!==changeKey){recent.open=false;recent.dataset.change=changeKey;}
+    recent.querySelector('summary').textContent=!change.known?(change.reversed?'最近撤回 · 逐项明细未登记':'最近报工 · 逐项明细未登记')
+        :change.reversed?`最近撤回 · 恢复待切 ${change.pieces} 件`:`最近报工 +${change.pieces} 件 · 查看变化`;
+    recent.querySelector('p').textContent=`${change.time.replace('T',' ')}${!change.reversed && (change.rejected || change.uncut)?` · 异常 ${change.rejected}、未切 ${change.uncut} 件未计入完成`:''}`;
+    const changes=recent.querySelector('div');changes.replaceChildren();
+    for(const item of progress){const delta=change.deltas[item.id];if(!delta)continue;
+        const button=document.createElement('button');button.type='button';button.className='demand-change-link';
+        button.textContent=`${list.find(r=>Number(r.dataset.id)===item.id).querySelector('.dem-name').value}：${delta>0?`+${delta}`:`恢复待切 ${-delta}`} 件${item.remaining===0?' · 已满足':''}`;
+        button.onclick=()=>revealDemand(item.id);changes.append(button);
+    }
+}
+
+function revealDemand(id) {
+    const row=rows().find(r=>Number(r.dataset.id)===id);if(!row)return;
+    const sidebar=document.getElementById('sidebar-left');if(sidebar.classList.contains('collapsed'))toggleSidebar('left');
+    const card=document.getElementById('card-demands');card.classList.remove('collapsed');card.querySelector('.section-toggle').setAttribute('aria-expanded','true');
+    rows().forEach(r=>r.classList.toggle('demand-progress-target',r===row));
+    row.scrollIntoView({block:'nearest'});row.tabIndex=-1;row.focus({preventScroll:true});
 }
 
 function locateDemand(id) {

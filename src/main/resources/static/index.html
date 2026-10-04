@@ -94,6 +94,12 @@
                                 <button class="tool-btn btn-add-demand" onclick="event.stopPropagation(); addDemandRow()" title="添加新裁片需求">+ 增裁片</button>
                             </div>
                         </div>
+                        <section id="demand-overview" class="demand-overview" aria-label="需求完成进度" hidden>
+                            <div class="demand-overview-heading"><strong id="demand-lines-progress"></strong><span id="demand-pieces-progress"></span></div>
+                            <div id="demand-progress-segments" class="demand-progress-segments" aria-label="各项需求完成情况"></div>
+                            <div id="demand-overall-meter" class="demand-meter" role="progressbar" aria-label="已满足需求项" hidden><span></span></div>
+                            <details id="demand-recent-change" class="demand-recent-change" hidden><summary></summary><p></p><div></div></details>
+                        </section>
                         <div class="section-content">
                             <!-- 窗帘整单模板快速载入栏 -->
 
