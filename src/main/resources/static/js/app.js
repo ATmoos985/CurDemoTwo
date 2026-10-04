@@ -15,7 +15,9 @@ import {
 import {
     toggleSectionCollapse, toggleSidebar, initLayoutResizers, switchRightPanelTab
 } from './plugins/layout/splitter.js';
-import { showToast } from './core/toast.js';
+import { showToast, confirmAction } from './core/toast.js';
+import { syncMaterialOptions } from './plugins/material/material-options.js';
+import { getInitialScenarios, MOTHER_ROLL_SPECS } from './plugins/presets/scenarios.js';
 
 import {
     initKonva, stage
@@ -205,12 +207,37 @@ export function closePresetDropdown() {
     if (trigger) trigger.setAttribute('aria-expanded', 'false');
 }
 
+let loadingPreset = false;
 export async function selectPresetCase(caseId) {
+    if (loadingPreset) return;
+    loadingPreset = true;
     const alreadyInert = document.body.inert;
     document.body.inert = true;
     try {
+    const readRolls = async () => {
+        const response = await fetch('/api/rolls', {cache:'no-store'});
+        if (!response.ok) throw new Error('无法读取库存，请稍后重试');
+        return response.json();
+    };
+    let rolls = await readRolls();
+    if (!rolls.length) {
+        document.body.inert = alreadyInert;
+        const create = await confirmAction('当前没有母卷。确认后会在空库创建 6 卷示例母卷和 5 块示例料头，用于演示完整流程；这些数据不是实物库存。取消则仅载入示例需求。已有业务数据时不会创建或覆盖。', {title:'准备示例材料', action:'创建示例材料并载入'});
+        document.body.inert = true;
+        if (create) {
+            const response = await fetch('/api/demo/inventory', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({confirmed:true})});
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.message || '创建示例材料失败');
+            rolls = await readRolls();
+        }
+    }
+    const scenarios = getInitialScenarios();
+    const preset = scenarios[caseId];
+    if (!preset) throw new Error('示例不存在');
+    const model = preset.rollModel || MOTHER_ROLL_SPECS[preset.rollId]?.model || '';
+    syncMaterialOptions(rolls, {rollId:preset.rollId, model, fallback:false});
     startTaskDraft(document.querySelector(`#btn-case-${caseId} .preset-item-name`)?.textContent || "示例切割任务");
-    state.scenarios = (await import("./plugins/presets/scenarios.js")).getInitialScenarios();
+    state.scenarios = scenarios;
     if (typeof loadCase === 'function') {
         loadCase(caseId);
     }
@@ -238,7 +265,7 @@ export async function selectPresetCase(caseId) {
             if (!remnant) {
                 const listRes = await fetch('/api/remnants');
                 if (listRes.ok) {
-                    const list = await listRes.json();
+                    const list = (await listRes.json()).filter(item => item.status === 'AVAILABLE' && item.materialBatch === model);
                     if (Array.isArray(list) && list.length > 0) {
                         // 优先选用完好的大料头
                         remnant = list.find(r => !r.hasDefect && r.area >= 1.0) || list[0];
@@ -254,30 +281,22 @@ export async function selectPresetCase(caseId) {
                 updateUIInfo();
                 renderToolpathUI();
             } else {
-                showToast('在库料头已耗尽，请从母卷排料生成料头或在料头库新增。', 'warning');
+                document.getElementById('sel-mother-roll-id').value = '';
+                await onMotherRollChange();
+                showToast('已载入示例需求；暂无同型号可用料头，请录入材料或选择其他示例。', 'warning');
             }
         } catch (e) {
-            console.error("Case 3 load error:", e);
+            throw e;
         }
     } else {
-        const currentData = state.getCurrentCaseData();
-        const selectedRoll = currentData.rollId || 'ROLL-2026-0920';
-        const selector = document.getElementById('sel-mother-roll-id');
-        if (selector) {
-            if (![...selector.options].some(o => o.value === selectedRoll)) {
-                const opt = document.createElement("option");
-                opt.value = selectedRoll;
-                opt.textContent = `${selectedRoll} (${currentData.rollModel || ''} ${currentData.rollW ? (currentData.rollW/1000).toFixed(1) + 'm' : ''})`;
-                selector.appendChild(opt);
-            }
-            selector.value = selectedRoll;
-        }
         await onMotherRollChange();
+        if (!state.getCurrentCaseData().materialAvailable) showToast('示例需求已载入；当前库存没有对应示例母卷，请录入材料或匹配同型号库存。', 'info', 7000);
     }
-    document.getElementById("task-material").value = document.getElementById("lbl-roll-model-desc").textContent;
+    document.getElementById("task-material").value = model;
     updatePresetTriggerLabel(caseId);
     closePresetDropdown();
-    } finally { document.body.inert = alreadyInert; }
+    } catch (error) { showToast(error.message, 'error'); }
+    finally { document.body.inert = alreadyInert; loadingPreset = false; }
 }
 
 export function updatePresetTriggerLabel(caseId) {

@@ -97,6 +97,12 @@ public class FabricCutController {
         return scenarioOneService.getScenario(id);
     }
 
+    @PostMapping("/demo/inventory")
+    public Map<String, Integer> initializeDemoInventory(@RequestBody Map<String, Boolean> body) {
+        if (!Boolean.TRUE.equals(body.get("confirmed"))) throw new IllegalArgumentException("请先确认创建示例材料");
+        return remnantService.initializeDemoInventory();
+    }
+
     @GetMapping("/rolls")
     public java.util.List<com.example.cutdemotwo.model.MotherRollInfo> listRolls() {
         return remnantService.getMotherRolls();

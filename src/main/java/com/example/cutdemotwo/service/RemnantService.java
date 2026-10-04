@@ -56,6 +56,19 @@ public class RemnantService {
         else if (seedDemo) { initMotherRolls(); initSampleRemnants(); }
     }
 
+    public synchronized Map<String, Integer> initializeDemoInventory() {
+        return mutate(() -> {
+            if (!motherRolls.isEmpty() || !remnantPool.isEmpty() || !tasks.isEmpty() || !plans.isEmpty() || !receipts.isEmpty()) {
+                throw new IllegalArgumentException("当前库已有业务数据，不能创建整套示例材料；请使用已有库存或单独准备演示库");
+            }
+            initMotherRolls();
+            initSampleRemnants();
+            motherRolls.values().forEach(roll -> roll.setStorageLocation("示例材料（非实物）"));
+            remnantPool.values().forEach(remnant -> remnant.setLocation("示例料头（非实物）"));
+            return Map.of("rolls", motherRolls.size(), "remnants", remnantPool.size());
+        });
+    }
+
     private InventorySnapshot snapshot() {
         return new InventorySnapshot(new ArrayList<>(motherRolls.values()), new ArrayList<>(remnantPool.values()),
                 receipts, remnantSeq.get(), defectSeq.get(), tasks, plans, revision);

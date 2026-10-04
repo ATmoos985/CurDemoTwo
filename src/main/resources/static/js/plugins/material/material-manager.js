@@ -5,6 +5,7 @@ import { renderScene } from '../cad/cad-renderer.js';
 import { renderRadar } from '../radar/radar-scrubber.js';
 import { renderDefectsUI } from '../solver/quota-manager.js';
 import { showToast, confirmAction } from '../../core/toast.js';
+import { syncMaterialOptions } from './material-options.js';
 
 let cachedRolls = [], cachedRemnants = [];
 let activeRollId = null, activeRemnantId = null, activeTab = 'rolls';
@@ -65,14 +66,8 @@ export async function refreshRollsList() {
         const response = await fetch('/api/rolls', { cache: 'no-store' });
         if (!response.ok) throw new Error('读取失败');
         cachedRolls = await response.json();
+        syncMaterialOptions(cachedRolls);
         for (const roll of cachedRolls) {
-            const materials = document.getElementById('task-material');
-            if (materials && ![...materials.options].some(option => option.value === roll.rollModel))
-                materials.add(new Option(roll.rollModel, roll.rollModel));
-            const selector = document.getElementById('sel-mother-roll-id');
-            if (selector && ![...selector.options].some(option => option.value === roll.rollId)) {
-                selector.add(new Option(`${roll.rollId} (${roll.rollModel})`, roll.rollId));
-            }
             const filter = document.getElementById('sel-remnant-filter-roll');
             if (filter && ![...filter.options].some(option => option.value === roll.rollId)) filter.add(new Option(roll.rollId, roll.rollId));
         }

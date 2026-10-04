@@ -202,17 +202,13 @@ export function loadCase(id) {
     }
     const data = state.getCurrentCaseData();
     const rollId = data.rollId || "ROLL-2026-0920";
+    data.materialAvailable = false;
+    document.body.dataset.material = 'empty';
 
     // 1. 同步母卷下拉选框选项与当前值
     const selMother = document.getElementById("sel-mother-roll-id");
     if (selMother) {
-        if (![...selMother.options].some(o => o.value === rollId)) {
-            const opt = document.createElement("option");
-            opt.value = rollId;
-            opt.textContent = `${rollId} (${data.rollModel || ''} ${data.rollW ? (data.rollW/1000).toFixed(1) + 'm' : ''})`;
-            selMother.appendChild(opt);
-        }
-        selMother.value = rollId;
+        selMother.value = [...selMother.options].some(option => option.value === rollId) ? rollId : '';
     }
 
     // 2. 规范母卷规格与状态

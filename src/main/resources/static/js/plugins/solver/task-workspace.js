@@ -6,6 +6,7 @@ import { renderScene, resetToBedView } from '../cad/cad-renderer.js';
 import { renderRadar } from '../radar/radar-scrubber.js';
 import { updateUIInfo, restoreSavedPlan } from './solver-client.js';
 import { showToast, confirmAction } from '../../core/toast.js';
+import { syncMaterialOptions } from '../material/material-options.js';
 
 export const escapeText = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const el = id => document.getElementById(id);
@@ -39,7 +40,10 @@ export function startTaskDraft(name = '本次切割') {
     el('preset-current-label').textContent = '载入示例需求';
 }
 
-export async function newCuttingTask() {
+export async function newCuttingTask(rolls) {
+    try {
+    rolls = rolls || await api('/api/rolls');
+    syncMaterialOptions(rolls, {model:''});
     startTaskDraft();
     state.scenarios = getInitialScenarios();
     state.currentCaseId = 1;
@@ -47,6 +51,7 @@ export async function newCuttingTask() {
     renderDemandsUI([]);
     await switchCutMode('roll');
     el('task-name').focus();
+    } catch (error) { showToast(error.message, 'error'); }
 }
 
 function taskPayload() {
@@ -259,12 +264,11 @@ export async function openTaskPlans() {
 
 export async function initTaskWorkspace() {
     const rolls = await api('/api/rolls');
-    el('task-material').replaceChildren(...[...new Set(rolls.map(r => r.rollModel))].map(model => new Option(model, model)));
-    el('sel-mother-roll-id').replaceChildren(...rolls.map(r => new Option(`${r.rollId} (${r.width} mm)`, r.rollId)));
+    syncMaterialOptions(rolls, {model:''});
     const saved = localStorage.getItem('cutting-task-id');
     if (!saved || !await loadTask(saved)) {
         state.getCurrentCaseData().demands = [];
         state.getCurrentCaseData().pieces = [];
-        await newCuttingTask();
+        await newCuttingTask(rolls);
     }
 }

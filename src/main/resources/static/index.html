@@ -133,18 +133,13 @@
                             <div id="source-remnant-summary" hidden><b id="lbl-shelf-active-id"></b><p id="lbl-shelf-active-size"></p><p id="lbl-shelf-active-loc"></p><span id="lbl-shelf-active-status"></span><button class="tool-btn" onclick="switchCutMode('roll')">改用母卷</button></div>
                             <div id="source-roll-summary"><div class="prop-row">
                                 <span class="prop-label">母卷批号</span>
-                                <select class="prop-input" id="sel-mother-roll-id" onchange="onMotherRollChange()">
-                                    <option value="ROLL-2026-0920" selected>ROLL-2026-0920 (TC涤棉 2m)</option>
-                                    <option value="ROLL-2026-0921">ROLL-2026-0921 (纯棉 1.8m)</option>
-                                    <option value="ROLL-2026-0922">ROLL-2026-0922 (牛津布 2.2m)</option>
-                                    <option value="ROLL-DEMO-2D">ROLL-DEMO-2D (窗帘二维样布 2m)</option>
-                                    <option value="ROLL-REAL-893292">ROLL-REAL-893292 (2#A3A-Cream 2.8m)</option>
-                                    <option value="ROLL-REAL-893153">ROLL-REAL-893153 (2#1A-Off White 2.8m)</option>
+                                <select class="prop-input" id="sel-mother-roll-id" disabled onchange="onMotherRollChange().catch(error => showToast(error.message, 'error'))">
+                                    <option value="">正在读取库存…</option>
                                 </select>
                             </div>
                             <div class="prop-row" style="margin-top: 4px;">
                                 <span class="prop-label">面料 / 幅宽</span>
-                                <span><b id="lbl-roll-model-desc">TC涤棉-B2026</b> | 幅宽 <b id="lbl-roll-w-desc">2000</b>mm</span>
+                                <span><b id="lbl-roll-model-desc">未装载</b> | 幅宽 <b id="lbl-roll-w-desc">—</b>mm</span>
                             </div>
                             <div class="stock-remaining"><span>剩余可用</span><b id="lbl-roll-remaining-len">—</b></div>
                             <details class="detail-disclosure"><summary>用料与库存详情</summary>
@@ -677,6 +672,6 @@
     </dialog>
 
     <!-- 模块化前端 ES6 主程序入口 (Modular ES6 Plugin Architecture) -->
-    <script type="module" src="js/app.js?v=20261001_workspace"></script>
+    <script type="module" src="js/app.js?v=20261004_inventory"></script>
 </body>
 </html>

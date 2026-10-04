@@ -39,7 +39,7 @@ export async function switchCutMode(mode, targetRemnant, presetData = null) {
 export async function onMotherRollChange(forceResetBed = false) {
     const sel = document.getElementById("sel-mother-roll-id");
     state.pendingPlan = null;
-    const rollId = sel ? sel.value : "ROLL-2026-0920";
+    const rollId = sel?.value || '';
     const unavailable = () => {
         const current = state.getCurrentCaseData();
         Object.assign(current, {materialAvailable:false, rollId:'', stockUsedLength:0, stockRemainingLength:0,
@@ -53,12 +53,18 @@ export async function onMotherRollChange(forceResetBed = false) {
         }
         document.getElementById('inp-roll-id').value = '';
         document.getElementById('roll-len-progress').style.width = '0%';
-        renderDefectsUI([]); updateUIInfo();
+        renderDefectsUI([]); updateUIInfo(); renderScene(); renderRadar();
     };
     if (!rollId) { unavailable(); return; }
     let spec = state.motherRollSpecs[rollId] || { model: "TC涤棉-B2026", rollW: 2000, totalRollL: 60000, bedL: 5000 };
     try {
         const response = await fetch(`/api/rolls/${encodeURIComponent(rollId)}`, { cache: "no-store" });
+        if (response.status === 404) {
+            const option = [...sel.options].find(item => item.value === rollId);
+            if (option) option.remove();
+            sel.value = '';
+            throw new Error('所选母卷不在当前库存中，请重新选择或录入材料');
+        }
         if (!response.ok) throw new Error('读取母卷失败，请刷新库存后重试');
         if (response.ok) {
             const roll = await response.json();
@@ -128,6 +134,13 @@ export async function onMotherRollChange(forceResetBed = false) {
     if (wLbl) wLbl.innerText = spec.rollW;
     const sbRoll = document.getElementById("sb-roll-id");
     if (sbRoll) sbRoll.innerText = rollId;
+    if (!state.activeTask) {
+        const materials = document.getElementById('task-material');
+        if (materials) {
+            if (![...materials.options].some(option => option.value === spec.model)) materials.add(new Option(spec.model, spec.model));
+            materials.value = spec.model;
+        }
+    }
 
     // 更新折叠卡片摘要
     const originTag = document.getElementById("tag-cut-origin-header");
@@ -159,6 +172,7 @@ export async function onMotherRollChange(forceResetBed = false) {
     resetToBedView();
     checkAllDemandsRemnantMatch();
     updateStatusBar();
+    updateUIInfo();
 }
 
 export async function updateMotherRollRemnantStats(rollId) {
