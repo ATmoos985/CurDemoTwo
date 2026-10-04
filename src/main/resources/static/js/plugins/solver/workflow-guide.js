@@ -4,6 +4,8 @@ import {workflowState} from './workflow-state.js';
 
 const el = id => document.getElementById(id);
 const value = id => el(id)?.value;
+const remnantConsumed = data => !!state.loadedRemnant?.id && data.lastReceipt?.feedPortType === 'remnant'
+    && data.lastReceipt.sourceRemnantId === state.loadedRemnant.id && data.lastReceipt.status !== 'REVERSED';
 export function readWorkflowState(plan = {}) {
     const data = state.getCurrentCaseData(), sheet = state.currentCutMode === 'remnant';
     return workflowState({name:value('task-name'), model:value('task-material'), ...plan,
@@ -12,7 +14,7 @@ export function readWorkflowState(plan = {}) {
             width:Number(row.querySelector('.dem-w').value), length:Number(row.querySelector('.dem-l').value),
             quantity:Number(row.querySelector('.dem-count').value), completed:state.taskCompleted[row.dataset.id] || 0
         })),
-        material:{available:data.materialAvailable && (!sheet || !!state.loadedRemnant), sheet,
+        material:{available:data.materialAvailable && (!sheet || (!!state.loadedRemnant && !remnantConsumed(data))), sheet,
             model:sheet ? state.loadedRemnant?.materialBatch : el('lbl-roll-model-desc')?.textContent,
             length:sheet ? state.loadedRemnant?.length : data.stockRemainingLength,
             used:data.stockUsedLength || 0, total:data.totalRollL},
@@ -32,7 +34,7 @@ export function navigateWorkflowStage(stage, target) {
         if (parent.tagName === 'DETAILS') parent.open = true;
     }
     const focus = target ? node : node.querySelector('input,select,button') || node;
-    if (!focus.matches('input,select,button,a')) focus.tabIndex = -1;
+    if (!focus.matches('input,select,button,a,[tabindex]')) focus.tabIndex = -1;
     focus.focus({preventScroll:true}); node.scrollIntoView({block:'nearest'});
 }
 
@@ -70,6 +72,13 @@ export function renderWorkflowGuide(plan = {}) {
     const report = el(actions.report);report.disabled = !!busy || flow.action !== 'report';report.hidden = !plan.ready && !plan.edited;
     report.textContent = '核对实切并报工';
     el('btn-validate-adjustment').hidden = !plan.edited;
-    el('station-navigation-group').hidden = !state.getCurrentCaseData().materialAvailable;
+    const data = state.getCurrentCaseData(), sheet = state.currentCutMode === 'remnant';
+    el('station-navigation-group').hidden = !data.materialAvailable;
+    el('material-context-id').textContent = data.materialAvailable ? (sheet ? state.loadedRemnant?.id : data.rollId) : '未装载材料';
+    const stock = sheet ? state.loadedRemnant : null;
+    el('material-context-info').textContent = sheet && remnantConsumed(data) ? '本块料头已报工核销；继续裁切请重新选料。' : !data.materialAvailable ? '先完善需求，再匹配可用材料。' : sheet
+        ? (stock?.materialBatch || '') + ' · ' + stock?.width + ' × ' + stock?.length + ' mm'
+        : (el('lbl-roll-model-desc')?.textContent || '') + ' · 幅宽 ' + data.rollW + ' mm · 余量 ' + (data.stockRemainingLength || 0).toLocaleString() + ' mm';
+    el('btn-material-details').onclick = () => navigateWorkflowStage(1);
     return flow;
 }

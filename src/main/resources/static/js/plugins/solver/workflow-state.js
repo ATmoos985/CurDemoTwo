@@ -24,7 +24,7 @@ export function workflowState(input) {
     if (!Number.isFinite(process.length) || process.length <= 0 || process.length > material.length + .001)
         return step(2, '核对加工区', '加工区长度须大于 0，且不超过材料剩余长度。', 'focus', '修改加工区长度', '#inp-bed-l');
     if (!Number.isFinite(process.start) || process.start < 0 || (!material.sheet && process.start+process.length > material.total+.001))
-        return step(2, '核对加工区', '当前工位超出材料范围，请调整起点或加工区长度。', 'focus', '修改工位起点', '#inp-window-start-y');
+        return step(2, '核对加工区', '当前工位超出材料范围，请在母卷导航中调整位置。', 'focus', '定位母卷导航', '#radar-window');
     if (!Number.isFinite(process.trim) || process.trim < 0 || process.trim >= process.length)
         return step(2, '核对切头量', '切头量须不小于 0，且小于加工区长度。', 'focus', '修改切头量', '#inp-trim-start');
     if (ready) return step(3, '核对实切并报工', '方案已校验。现场实切后逐件核对；确认报工才扣库存并记录产出。', 'report', '核对实切并报工', null, {canSolve:true});

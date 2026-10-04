@@ -290,7 +290,7 @@ export function updateWorkflowControls() {
     const editable = !!state.pendingPlan?.result?.planId && state.pendingPlan.context === solveContext();
     const edited = editable && !ready;
     const editPanel = document.getElementById('plan-edit-controls');
-    if (editPanel) editPanel.hidden = !editable;
+    if (editPanel) { editPanel.hidden = !editable; editPanel.dataset.edited = String(edited); editPanel.querySelector('.plan-edit-actions').hidden = !state.pendingPlan?.history?.canUndo && !state.pendingPlan?.history?.canRedo; }
     const validateButton = document.getElementById('btn-validate-adjustment');
     if (validateButton) { validateButton.disabled = !edited || validatingAdjustment; validateButton.textContent = validatingAdjustment ? '正在校验…' : '校验并保存调整版'; }
     for (const [id, enabled] of [['btn-undo-plan',state.pendingPlan?.history?.canUndo],['btn-redo-plan',state.pendingPlan?.history?.canRedo]]) {
@@ -781,7 +781,10 @@ export async function confirmCutReport() {
 
         const data = state.getCurrentCaseData();
         data.lastReceipt = receipt;
-        if (receipt.feedPortType === "roll") data.stockUsedLength = (data.stockUsedLength || 0) + receipt.actualCutLen;
+        if (receipt.feedPortType === "roll") {
+            data.stockUsedLength = (data.stockUsedLength || 0) + receipt.actualCutLen;
+            data.stockRemainingLength = receipt.remainingLength;
+        }
         state.lastCutReceipt = receipt;
         state.pendingPlan = null;
 
@@ -798,6 +801,7 @@ export async function confirmCutReport() {
         const rollResponse = await fetch(`/api/rolls/${encodeURIComponent(pending.rollId)}`, { cache: "no-store" });
         if (rollResponse.ok) {
             const roll = await rollResponse.json();
+            data.stockUsedLength = roll.usedLength; data.stockRemainingLength = roll.currentRemainingLength;
             const remLenEl = document.getElementById("lbl-roll-remaining-len");
             if (remLenEl) remLenEl.innerText = `${(roll.currentRemainingLength || 0).toLocaleString()} mm`;
             const usedLenEl = document.getElementById("lbl-roll-used-len");

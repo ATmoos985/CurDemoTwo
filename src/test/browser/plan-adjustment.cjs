@@ -83,6 +83,8 @@ const server = createServer(async (req,res) => {
     }
     const loadPlan = async page => {
         await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();
+        await expect(page.locator('#task-picker')).not.toBeVisible();
+        await expect(page.locator('body')).not.toHaveAttribute('inert','');
         await expect(page.locator('#task-state')).toContainText('已保存');
         await page.evaluate(async saved => {
             const {restoreSavedPlan}=await import('/js/plugins/solver/solver-client.js');restoreSavedPlan(saved);
@@ -217,6 +219,7 @@ const server = createServer(async (req,res) => {
             await page.getByRole('checkbox',{name:'回收 UNCUT-1',exact:true}).check();
             await page.locator('#report-confirm-button').click();await expect(page.locator('#cut-report-modal')).not.toBeVisible();
             assert.equal(receipts[0].finishedPieceCount,0);assert.equal(receipts[0].derivedRemnants.length,1);
+            await expect(page.locator('#material-context-info')).toContainText('59,000 mm');
             assert.equal(await page.evaluate(()=>window.camApp.state.taskCompleted[7]),1);
         });
         await run('empty requirements guide to the missing field, then to adding a demand',async page=>{
@@ -269,6 +272,7 @@ const server = createServer(async (req,res) => {
             await loadPlan(page);let release;solveWait=new Promise(resolve=>release=resolve);
             await page.locator('#btn-trigger-solve-station').click();
             try {await expect(page.locator('#workflow-current')).toHaveText('正在生成方案…');await expect(page.locator('#btn-trigger-solve-station')).toBeDisabled();
+                await expect.poll(()=>requests.filter(r=>r==='POST /api/solve').length).toBe(1);
                 await page.evaluate(()=>window.camApp.triggerSolve());assert.equal(requests.filter(r=>r==='POST /api/solve').length,1);
             }finally{release();}
             await expect(page.locator('#btn-confirm-station-cut')).toBeEnabled();acceptReport=true;
@@ -278,6 +282,59 @@ const server = createServer(async (req,res) => {
             const writes=requests.filter(r=>r.startsWith('POST')).length;await page.locator('#btn-workflow-next').click();
             await expect(page.locator('#task-picker-title')).toContainText('报工记录');assert.equal(requests.filter(r=>r.startsWith('POST')).length,writes);
         });
+        await run('dense demand lists keep material, results and main action visible at both desktop sizes',async page=>{
+            const task=tasks.get('task-a');task.demands=Array.from({length:30},(_,i)=>({id:7+i,name:'批量裁片 '+(i+1),width:2000,length:1200,quantity:3,allowRotation:false}));
+            await loadPlan(page);await expect(page.locator('#demands-container .item-row')).toHaveCount(30);
+            fs.mkdirSync('target/workbench-layout',{recursive:true});
+            for(const width of [1366,1920]){
+                await page.setViewportSize({width,height:width===1366?768:1080});
+                const before=await page.locator('.material-context').boundingBox();
+                await page.locator('#sidebar-left .sidebar-scroll-body').evaluate(e=>e.scrollTop=e.scrollHeight);
+                await expect(page.locator('#material-context-id')).toBeInViewport();
+                const after=await page.locator('.material-context').boundingBox();assert.equal(before.y,after.y);
+                await expect(page.locator('#lbl-utilization')).toBeInViewport();await expect(page.locator('#btn-confirm-station-cut')).toBeInViewport();
+                const canvas=await page.locator('.cad-surface').boundingBox();assert.ok(canvas.height>=440);assert.ok(canvas.width>=730);
+                assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);
+                await page.screenshot({path:'target/workbench-layout/long-list-'+width+'.png'});
+            }
+            await page.locator('#btn-material-details').click();await expect(page.locator('#card-mother-roll')).not.toHaveClass(/collapsed/);
+            await expect(page.locator('#sel-mother-roll-id')).toBeInViewport();
+            assert.equal(requests.filter(r=>r.startsWith('POST')).length,0);
+        });
+        await run('consumed remnant remains visible as history and requires selecting new stock',async page=>{
+            await loadPlan(page);
+            await page.evaluate(async()=>{
+                const stock={id:'REM-LAYOUT',sourceRollId:'ROLL-2026-0920',materialBatch:'TC涤棉-B2026',width:2000,length:3000,defects:[],hasDefect:false,location:'A-01'};
+                await window.camApp.switchCutMode('remnant',stock);
+                const data=window.camApp.state.getCurrentCaseData();
+                data.lastReceipt={feedPortType:'remnant',sourceRemnantId:stock.id,status:'CONFIRMED',finishedPieceCount:1,actualCutLen:0,windowStartY:0};
+                const {updateWorkflowControls}=await import('/js/plugins/solver/solver-client.js');updateWorkflowControls();
+            });
+            await expect(page.locator('#material-context-id')).toHaveText('REM-LAYOUT');
+            await expect(page.locator('#material-context-info')).toContainText('已报工核销');
+            await expect(page.locator('#btn-trigger-solve-station')).toBeDisabled();await expect(page.locator('#btn-workflow-next')).toHaveText('匹配料头与母卷');
+        });
+        await run('compact radar still supports mouse, wheel and keyboard and protects pending work',async page=>{
+            await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();
+            await expect(page.locator('#task-state')).toContainText('已保存');
+            await expect(page.locator('#task-picker')).not.toBeVisible();
+            await expect(page.locator('body')).not.toHaveAttribute('inert','');
+            await page.evaluate(async()=>{window.camApp.state.getCurrentCaseData().windowStartY=70000;const {updateUIInfo}=await import('/js/plugins/solver/solver-client.js');updateUIInfo();});
+            await expect(page.locator('#btn-workflow-next')).toHaveText('定位母卷导航');await page.locator('#btn-workflow-next').click();
+            await expect(page.locator('#radar-window')).toBeFocused();await expect(page.locator('#radar-window')).toHaveAttribute('tabindex','0');await page.keyboard.press('Home');
+            const track=await page.locator('#radar-track').boundingBox();
+            const start=()=>page.evaluate(()=>window.camApp.state.getCurrentCaseData().windowStartY);
+            await page.mouse.click(track.x+track.width*.5,track.y+18);assert.ok(await start()>20000);
+            await page.locator('#radar-window').focus();await page.keyboard.press('Home');assert.equal(await start(),0);
+            await page.keyboard.press('ArrowRight');assert.ok(await start()>0);
+            const handle=await page.locator('#radar-window').boundingBox();await page.mouse.move(handle.x+handle.width/2,handle.y+12);await page.mouse.down();await page.mouse.move(track.x+track.width*.65,handle.y+12,{steps:8});await page.mouse.up();assert.ok(await start()>30000);
+            const previous=await start();await page.mouse.move(track.x+track.width*.8,track.y+16);await page.mouse.wheel(0,-100);
+            await expect.poll(start).toBeLessThan(previous);
+            await loadPlan(page);await page.locator('#radar-window').focus();await page.keyboard.press('ArrowRight');
+            await expect(page.locator('#cut-report-modal')).toBeVisible();assert.equal(await start(),0);
+            assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');
+            assert.equal(reportBodies.length,0);
+        });
     } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
-    console.log(JSON.stringify({discovered:15,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
+    console.log(JSON.stringify({discovered:18,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
 })().catch(error=>{console.error(error);server.close();process.exitCode=1;});

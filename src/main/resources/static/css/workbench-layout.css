@@ -1,0 +1,48 @@
+/* Keep the active material and main action visible while long lists scroll. */
+.material-context { flex: none; padding: 10px 14px; border-bottom: 1px solid var(--panel-border); background: var(--panel-header); }
+.material-context > div { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; }
+.material-context > strong { display: block; font-size: 13px; margin-top: 3px; overflow-wrap: anywhere; }
+.material-context > p { margin: 3px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+[data-theme] .material-context .tool-btn { min-height: 26px; font-size: 12px; padding: 2px 7px; background: var(--panel-bg); }
+#demands-container .item-row { padding: 8px 0; }
+#demands-container .dem-name { padding: 2px 0; font-weight: 600; }
+#demands-container .mini-input-group { display: grid; grid-template-columns: 1fr 1fr .9fr; gap: 8px; margin-top: 4px; }
+#demands-container .mini-input-group label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+#demands-container .mini-input { width: 100% !important; min-width: 0; }
+#demands-container .demand-status { margin-top: 4px; font-size: 11px; }
+#demands-container .demand-remnant-box:empty { display: none; }
+.selection-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; }
+.selection-summary strong { font-size: 13px; }
+.selection-summary #cad-selection-size { margin-left: auto; font-size: 11px; }
+.cad-selection .detail-disclosure { margin-top: 0; }
+.cad-selection .detail-disclosure > summary { padding: 3px 0; font-size: 11px; }
+.plan-edit-controls[data-edited="false"] { border: 0; padding: 0; margin-bottom: 6px; }
+.plan-edit-controls[data-edited="false"] p { font-size: 11px; margin: 0; color: var(--text-muted); }
+.secondary-workflow-tools { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 16px; }
+.secondary-workflow-tools details { font-size: 12px; margin-top: 0; }
+.secondary-workflow-tools details[open] { flex-basis: 100%; }
+.radar-help .canvas-help-body { top: 28px; left: 0; right: auto; width: 270px; }
+.radar-help summary { cursor: pointer; white-space: nowrap; }
+
+@media screen and (min-width: 961px) {
+    header { height: 56px; min-height: 56px; }
+    .sidebar { width: 320px; }
+    .sidebar-right { width: 300px; }
+    .workspace-heading { min-height: 48px; padding: 9px 14px; }
+    .panel-section { padding: 14px; }
+    .section-header { margin-bottom: 10px; }
+    .panel-section.collapsed { padding: 10px 14px !important; }
+    .cad-selection { padding: 8px 14px; }
+    .result-state { margin-bottom: 12px; }
+    .muted-note { margin: 12px 0 6px; }
+    [data-theme] .sidebar-tabs-header { padding: 6px 10px; }
+    .sidebar-pinned-footer .panel-section { padding: 12px 14px !important; }
+    .action-footer-section > .workflow-secondary { min-height: 30px; font-size: 12px; margin-bottom: 6px; }
+    [data-theme] .roll-radar-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 6px 14px; }
+    .radar-label-group { grid-row: 1; grid-column: 1; gap: 4px 10px; }
+    .radar-caption { grid-row: 1; grid-column: 2; justify-content: flex-end; gap: 4px 10px; }
+    .radar-strip-container { grid-column: 1 / -1; grid-row: 2; }
+    .radar-caption .radar-legend { display: none; }
+    /* Track units, colors and navigation help are available in the title disclosure. */
+    .playback-disclosure { bottom: 12px; left: 16px; right: 16px; }
+}

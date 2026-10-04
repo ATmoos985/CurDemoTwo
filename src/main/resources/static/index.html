@@ -19,6 +19,7 @@
     <link rel="stylesheet" href="css/workspace.css">
     <link rel="stylesheet" href="css/inventory.css">
     <link rel="stylesheet" href="css/workflow.css">
+    <link rel="stylesheet" href="css/workbench-layout.css">
 </head>
 <body inert>
 
@@ -72,6 +73,7 @@
         <!-- 左侧控制面板：清晰分离母卷排产与料头精益切割两大工位 -->
         <aside class="sidebar" id="sidebar-left" aria-label="材料与需求">
             <div class="workspace-heading"><span class="workflow-number">1</span><h1>裁切准备</h1><span>材料与需求</span></div>
+            <section class="material-context" aria-label="当前用料摘要"><div><span>本次用料</span><button class="tool-btn" id="btn-material-details">选择与详情</button></div><strong id="material-context-id">未装载</strong><p id="material-context-info"></p></section>
             <!-- 顶部工位模式切换器 (Dual-Mode Switcher) -->
             <!-- ======================================================== -->
             <!-- 模式一面板：母卷连续开卷排产 (Mother Roll Mode)             -->
@@ -120,10 +122,10 @@
                             </div></details>
                         </div>
                     </div>
-                    <div class="panel-section section-card-blue collapsible" id="card-mother-roll">
-                        <div class="section-header" title="点击折叠/展开母卷规格卡片"><button class="section-title-wrap section-toggle" onclick="toggleSectionCollapse(this)" aria-expanded="true">
+                    <div class="panel-section section-card-blue collapsible collapsed" id="card-mother-roll">
+                        <div class="section-header" title="点击折叠/展开用料选择与详情"><button class="section-title-wrap section-toggle" onclick="toggleSectionCollapse(this)" aria-expanded="false">
                                 <span class="collapse-arrow">▼</span>
-                                <span>本次用料</span>
+                                <span>用料选择与详情</span>
                             </button>
                             <button class="tool-btn" onclick="event.stopPropagation(); openMaterialModal('rolls')" title="进入母卷档案与瑕疵库管理二级页面">
                                 母卷档案 ↗
@@ -269,7 +271,7 @@
             <!-- 母卷全局疵点雷达与展开视窗导航条 (Global Roll Panorama & Defect Radar) -->
             <div class="roll-radar-bar" id="roll-radar-bar">
                 <div class="radar-label-group">
-                    <span class="radar-title">母卷导航</span>
+                    <details class="canvas-help radar-help"><summary class="radar-title">母卷导航 ⓘ</summary><div class="canvas-help-body"><p>横轴单位：米。灰色区域为已报工，红色疵点在当前工位内，黄色疵点在其他位置。</p><p>拖动蓝框、点击轨道、滚轮或方向键可切换查看位置。待报工方案须先处理。</p></div></details>
                     <span class="radar-info" id="radar-roll-info"></span>
                 </div>
                 <div class="radar-strip-container" id="radar-strip-container">
@@ -319,10 +321,6 @@
         <!-- 右侧面板：工艺单与对账台账 (Tab 选项卡化收拢) -->
         <aside class="sidebar-right" id="sidebar-right" aria-label="排料结果与实切">
             <div class="workspace-heading"><span class="workflow-number">3</span><h2>核对与报工</h2></div>
-            <section class="cad-selection" id="cad-selection" hidden aria-label="选中裁片">
-                <span class="cad-selection-label">选中裁片</span><strong id="cad-selection-name"></strong>
-                <div id="cad-selection-size"></div><div id="cad-selection-position"></div><small id="cad-selection-state"></small>
-            </section>
             <!-- 顶部 Tab 选项卡切换器 -->
             <div class="sidebar-tabs-header">
                 <button class="sidebar-tab-btn" id="tab-right-cut" aria-pressed="false" onclick="switchRightPanelTab('cut')">
@@ -368,6 +366,7 @@
             <!-- Tab 2: 料头入库与实切对账 -->
             <div class="sidebar-tab-pane" id="tab-pane-balance" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
                 <div class="sidebar-scroll-body">
+                    <section class="cad-selection" id="cad-selection" hidden aria-label="选中裁片"><div class="selection-summary"><span class="cad-selection-label">选中</span><strong id="cad-selection-name"></strong><span id="cad-selection-size"></span></div><details class="detail-disclosure"><summary>位置与手调</summary><div id="cad-selection-position"></div><small id="cad-selection-state"></small></details></section>
                     <!-- 余料料头入库单 -->
                     <div class="panel-section balance-ledger-section" id="card-material-balance">
                     <div class="section-header"><span class="section-title-wrap">当前工位结果</span></div>
@@ -445,6 +444,7 @@
 
                         报工保存
                     </button>
+                    <div class="secondary-workflow-tools">
                     <details id="station-navigation-group" class="detail-disclosure station-navigation"><summary>浏览工位</summary><p class="muted">只移动查看位置；待报工方案须先处理。</p><div class="station-browse-actions"><button class="tool-btn" onclick="advanceBed(-1)">← 查看上一工位</button><button class="tool-btn" onclick="advanceBed(1)">查看下一工位 →</button><button class="tool-btn" id="btn-smart-advance" onclick="smartAdvanceBed()">回到待切位置</button></div></details>
                     <details class="detail-disclosure reset-actions"><summary>清理排料</summary><div style="display: flex; gap: 6px; margin-top: 6px;">
                         <button class="tool-btn" onclick="clearStationCuts()" title="仅清除当前红框范围内的裁片与切刀">
@@ -454,6 +454,7 @@
                             清空整卷已排
                         </button>
                     </div></details>
+                    </div>
                 </div>
 
                 <!-- 料头复用精益切割执行控制 (与母卷工位操作完全统一对齐) -->

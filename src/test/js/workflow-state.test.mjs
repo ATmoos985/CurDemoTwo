@@ -20,7 +20,7 @@ test('missing stock and wrong model require explicit material selection', () => 
 test('viewing consumed stock and invalid process lengths cannot become solve-ready', () => {
     const input=source();input.process.start=0;assert.equal(workflowState(input).action,'advance');
     input.process.start=5000;input.process.length=6000;assert.equal(workflowState(input).target,'#inp-bed-l');
-    input.process.length=4000;input.process.start=7000;assert.equal(workflowState(input).target,'#inp-window-start-y');
+    input.process.length=4000;input.process.start=7000;assert.equal(workflowState(input).target,'#radar-window');
     input.process.start=5000;input.process.trim=4000;assert.equal(workflowState(input).target,'#inp-trim-start');
 });
 test('validated output, manual edits and an empty preview have distinct next actions', () => {

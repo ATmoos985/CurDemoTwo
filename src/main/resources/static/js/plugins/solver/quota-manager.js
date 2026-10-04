@@ -309,21 +309,18 @@ export function addDemandRow() {
     row.setAttribute("data-id", id);
     row.setAttribute("data-completed", 0);
     row.setAttribute("data-total", 4);
+    row.dataset.rotation = 'false';
     row.innerHTML = `
         <div class="item-row-header" style="display:flex; justify-content:space-between; align-items:center;">
-            <input type="text" class="dem-name" value="新裁片-${id}" style="font-weight:600; flex:1; margin-right:6px;" onchange="window.camApp.onParamChange()">
-            <span style="font-size:10px; padding:1px 5px; border-radius:3px; background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1;">待排 0/4</span>
-            <button class="del-btn" onclick="window.camApp.removeDemandRow(this)" style="margin-left:6px;">×</button>
+            <input type="text" class="dem-name" aria-label="裁片名称" value="新裁片-${id}" onchange="window.camApp.onParamChange()">
+            <button class="del-btn" onclick="window.camApp.removeDemandRow(this)" title="删除此裁片需求">×</button>
         </div>
-        <div class="mini-input-group" style="margin-top:4px;">
-            <span>宽:</span><input type="number" class="mini-input dem-w" value="600" onchange="window.camApp.onParamChange()" style="width:52px;">
-            <span>长:</span><input type="number" class="mini-input dem-l" value="800" onchange="window.camApp.onParamChange()" style="width:52px;">
-            <span>计划:</span><input type="number" class="mini-input dem-count" value="4" min="1" style="width:42px; font-weight:bold;" onchange="window.camApp.onParamChange()">
-            <span style="font-size:10px; color:var(--text-muted); margin-left:auto;">待切: <b style="color:var(--accent-blue); font-weight:700;">4</b> 件</span>
+        <div class="mini-input-group">
+            <label>宽 <input type="number" class="mini-input dem-w" aria-label="裁片宽度 (mm)" value="600" onchange="window.camApp.onParamChange()"></label>
+            <label>长 <input type="number" class="mini-input dem-l" aria-label="裁片长度 (mm)" value="800" onchange="window.camApp.onParamChange()"></label>
+            <label>件数 <input type="number" class="mini-input dem-count" value="4" min="1" onchange="window.camApp.onParamChange()" title="总计划需求件数"></label>
         </div>
-        <div style="margin-top:5px; background:var(--panel-border); height:4px; border-radius:2px; overflow:hidden;">
-            <div style="background:#94a3b8; width:0%; height:100%;"></div>
-        </div>
+        <span class="demand-status">待排 4 件</span><div class="demand-remnant-box" id="rem-hint-new-${id}" style="display:none;"></div>
     `;
     container.appendChild(row);
     onParamChange();
