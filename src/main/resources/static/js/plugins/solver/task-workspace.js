@@ -347,34 +347,7 @@ export async function loadTask(id, {skipDraftGuard = false, detail:loadedDetail}
     finally { document.body.inert = wasInert; }
 }
 
-export async function matchTaskMaterials() {
-    const demands = getDemandsFromUI().filter(d => d.demand > 0).map(({ count, ...d }) => d);
-    if (!demands.length) return showToast('请先填写待切需求', 'warning');
-    picker('选择本次用料', '<p class="muted">正在匹配库存…</p>');
-    try {
-        const candidates = await api('/api/cutting/material-candidates', {
-            rollModel: el('task-material').value, demands,
-            allowRotation: el('sel-allow-rotation').value === '1', allowLongitudinal: el('sel-allow-longitudinal').value === '1'
-        });
-        picker('选择本次用料', `<p class="muted">同型号料头优先列出。尺寸可容纳部分需求，具体产出与避疵结果以排料方案为准。</p>` + ['remnant', 'roll'].map(type => `<h3>${type === 'remnant' ? '可用料头' : '可用母卷'}</h3>` + (candidates.filter(c => c.type === type).map(c => `<button class="task-list-item" data-source="${escapeText(c.id)}"><strong>${escapeText(c.id)} <small>${c.fittingLines} 项尺寸可容纳</small></strong><span>${c.width} × ${c.length} mm · ${escapeText(c.location)}${c.hasDefect ? ' · 需避疵' : ''}</span><small>选择${type === 'remnant' ? '此料头' : '此母卷'}</small></button>`).join('') || '<p class="muted">暂无匹配材料</p>')).join(''));
-        el('task-picker-body').querySelectorAll('[data-source]').forEach(button => button.onclick = async () => {
-            button.disabled = true;
-            try {
-                const selected = candidates.find(c => c.id === button.dataset.source);
-                if (selected.type === 'remnant') {
-                    const remnant = await api('/api/remnants/scan', {id:selected.id});
-                    if (!remnant) throw new Error('料头已不可用，请重新匹配');
-                    await switchCutMode('remnant', remnant);
-                } else {
-                    if (![...el('sel-mother-roll-id').options].some(o => o.value === selected.id)) el('sel-mother-roll-id').add(new Option(selected.id, selected.id));
-                    el('sel-mother-roll-id').value = selected.id;
-                    await switchCutMode('roll');
-                }
-                el('task-picker').close();
-            } catch (error) { showToast(error.message, 'error'); button.disabled = false; }
-        });
-    } catch (error) { picker('选择本次用料', `<p role="alert">${escapeText(error.message)}</p>`); }
-}
+export {openMaterialSelection as matchTaskMaterials} from '../material/material-selection.js';
 
 export async function openTaskReports() {
     try { await refreshTaskProgress(); } catch (error) { return showToast(error.message, 'error'); }

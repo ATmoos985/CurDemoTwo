@@ -2,7 +2,6 @@
  * 现场料头库存池与扫码识别弹窗插件 (Remnant Modal Plugin)
  */
 import { bus } from '../../core/event-bus.js';
-import { switchCutMode } from './remnant-shelf.js';
 import { showToast } from '../../core/toast.js';
 
 export async function openRemnantModal() {
@@ -51,7 +50,7 @@ export async function refreshRemnantsList() {
                     </div>
                     <div>
                         <button class="tool-btn active" style="font-size: 11px; padding: 6px 14px;" onclick="window.camApp.selectAndLoadRemnant('${r.id}')">
-                            装载至机台切割
+                            为当前任务选用…
                         </button>
                     </div>
                 </div>
@@ -94,21 +93,6 @@ export function quickScan(id) {
 }
 
 export async function selectAndLoadRemnant(remId) {
-    try {
-        const res = await fetch("/api/remnants/scan", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: remId })
-        });
-        if (res.ok) {
-            const rem = await res.json();
-            if (rem && rem.id) {
-                closeRemnantModal();
-                await switchCutMode('remnant', rem);
-                showToast(`已装载料头 ${rem.id}，母卷扣料为 0 mm`, 'success');
-            }
-        }
-    } catch (e) {
-        showToast('装载料头失败：' + e.message, 'error');
-    }
+    closeRemnantModal();
+    return window.camApp.matchTaskMaterials({type:'remnant',id:remId});
 }

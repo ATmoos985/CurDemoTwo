@@ -6,10 +6,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../../main/resources/static');
-let tasks, failSave, requests, failAdjustment, adjustmentBodies, reportBodies, savedPlanRequest, solveResult, acceptReport, receipts, stock, solveWait;
+let tasks, failSave, requests, failAdjustment, adjustmentBodies, reportBodies, savedPlanRequest, solveResult, acceptReport, receipts, stock, solveWait, candidateItems, candidateBodies, failCandidates, failMaterialRead, candidateWait, extraRolls;
 const planRequest={taskId:"task-a", taskRevision:1, rollId:"ROLL-2026-0920",rollModel:"TC涤棉-B2026",rollW:2000,rollL:5000,totalRollL:60000,windowStartY:0,feedPortType:"roll",trimStart:0,cutOrigin:"right-bottom",firstStageOrientation:"horizontal",allowRotation:false,allowLongitudinal:false,demands:[{id:7,name:"主帘",width:2000,length:1200,demand:2}],minRemnantWidth:200,minRemnantLength:300};
 const planResult={success:true,planId:"original-plan",pieces:[{id:1,demandId:7,name:"主帘",x:0,y:0,w:2000,l:1200,rotated:false},{id:2,demandId:7,name:"主帘",x:0,y:1500,w:2000,l:1200,rotated:false}],remnants:[],cuts:[{step:1,type:"横切",pos:1200,start:0,end:2000,desc:"横切"},{step:2,type:"横切",pos:2700,start:0,end:2000,desc:"横切"}],deductLen:2700,engine:"crosscut"};
 const roll = {rollId:'ROLL-2026-0920', rollModel:'TC涤棉-B2026', width:2000, totalLength:60000, usedLength:0, currentRemainingLength:60000, defects:[]};
+const secondRoll={...roll,rollId:'ROLL-SECOND',storageLocation:'B-02'};
+const remnantStock={id:'REM-CHOICE',sourceRollId:roll.rollId,materialBatch:roll.rollModel,width:2000,length:3000,location:'A-01',defects:[],area:6};
+const candidateList=()=>[{type:'remnant',id:remnantStock.id,rollId:roll.rollId,width:2000,length:3000,location:'A-01',fittingLines:1},
+{type:'roll',id:secondRoll.rollId,rollId:secondRoll.rollId,width:2000,length:60000,location:'B-02',fittingLines:1},
+{type:'roll',id:roll.rollId,rollId:roll.rollId,width:2000,length:60000,location:'B-01',fittingLines:1}];
 const initialTask = () => ({id:'task-a', revision:1, name:'已保存需求', materialModel:roll.rollModel, externalRef:'ORDER-A',
     process:{bedLength:5000,trimStart:0,cutOrigin:'right-bottom',firstStageOrientation:'horizontal',allowRotation:false,allowLongitudinal:false},
     demands:[{id:7,name:'主帘',width:2000,length:1200,quantity:3,allowRotation:false}]});
@@ -18,7 +23,11 @@ const server = createServer(async (req,res) => {
     const json = (value, status=200) => {res.writeHead(status, {'Content-Type':'application/json'});res.end(JSON.stringify(value));};
     if (url.pathname.startsWith('/api/')) {
         requests.push(req.method + ' ' + url.pathname);
-        if (url.pathname === '/api/rolls') return json([stock]);
+        if (url.pathname === '/api/rolls' && req.method === 'GET') return json([stock,...extraRolls]);
+        if (url.pathname === '/api/rolls' && req.method === 'POST') {let raw='';for await(const chunk of req)raw+=chunk;const r=JSON.parse(raw);extraRolls.push({...r,usedLength:0,currentRemainingLength:r.totalLength});return json(r);}
+        if(url.pathname==='/api/cutting/material-candidates'){let raw='';for await(const chunk of req)raw+=chunk;candidateBodies.push(JSON.parse(raw));await candidateWait;return json(failCandidates?{message:'测试库存读取失败'}:candidateItems,failCandidates?503:200);}
+        if(url.pathname==='/api/remnants/scan'){let raw='';for await(const chunk of req)raw+=chunk;const id=JSON.parse(raw).id;return json(failMaterialRead?{message:'测试材料读取失败'}:remnantStock,failMaterialRead?503:200);}
+        if(extraRolls.some(r=>url.pathname==='/api/rolls/'+r.rollId))return json(failMaterialRead?{message:'测试材料读取失败'}:extraRolls.find(r=>url.pathname.endsWith('/'+r.rollId)),failMaterialRead?503:200);
         if (url.pathname === '/api/rolls/' + roll.rollId) return json(stock);
         if (url.pathname === '/api/remnants') return json([]);
         if (url.pathname === '/api/cutting/tasks' && req.method === 'GET') return json([...tasks.values()]);
@@ -68,7 +77,7 @@ const server = createServer(async (req,res) => {
     const browser = await chromium.launch({headless:true, ...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {})});
     let passed=0, failed=0;
     async function run(name, verify) {
-        tasks = new Map([['task-a',initialTask()]]); failSave=false; requests=[]; failAdjustment=false; adjustmentBodies=[];reportBodies=[];savedPlanRequest=planRequest;solveResult=planResult;acceptReport=false;receipts=[];stock={...roll};solveWait=undefined;
+        tasks = new Map([['task-a',initialTask()]]); failSave=false; requests=[]; failAdjustment=false; adjustmentBodies=[];reportBodies=[];savedPlanRequest=planRequest;solveResult=planResult;acceptReport=false;receipts=[];stock={...roll};solveWait=undefined;candidateItems=[];candidateBodies=[];failCandidates=false;failMaterialRead=false;candidateWait=undefined;extraRolls=[];
         const context = await browser.newContext({viewport:{width:1366,height:768}}), page = await context.newPage(), errors=[];
         page.on('pageerror',error => errors.push(error.message));
         try {
@@ -76,7 +85,7 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('body')).not.toHaveAttribute('inert','');
             await verify(page);
             assert.deepEqual(errors, []);
-            assert.ok(requests.every(r => !r.startsWith('POST') || ['/adjust','/report-confirm','/solve','/tasks','/reverse'].some(route=>r.endsWith(route))), 'only isolated fixture task, solve, adjustment and report requests');
+            assert.ok(requests.every(r => !r.startsWith('POST') || ['/adjust','/report-confirm','/solve','/tasks','/reverse','/material-candidates','/scan','/rolls'].some(route=>r.endsWith(route))), 'only isolated fixture task, solve, adjustment and report requests');
             passed++; console.log('PASS ' + name);
         } catch(error) {failed++; console.error('FAIL ' + name + '\n' + error.stack); console.error(JSON.stringify({requests,adjustmentBodies,savedPlanRequest,errors,debug:await page.evaluate(()=>{const s=window.camApp.state;return {pending:s.pendingPlan?.result?.planId,version:s.pendingPlan?.version,geometry:s.pendingPlan?.geometry,pieces:s.getCurrentCaseData().pieces,cuts:s.getCurrentCaseData().cuts,remnants:s.getCurrentCaseData().remnants};})}));}
         finally {await context.close();}
@@ -299,7 +308,7 @@ const server = createServer(async (req,res) => {
                 await page.screenshot({path:'target/workbench-layout/long-list-'+width+'.png'});
             }
             await page.locator('#btn-material-details').click();await expect(page.locator('#card-mother-roll')).not.toHaveClass(/collapsed/);
-            await expect(page.locator('#sel-mother-roll-id')).toBeInViewport();
+            await expect(page.locator('#lbl-current-roll-id')).toBeInViewport();
             assert.equal(requests.filter(r=>r.startsWith('POST')).length,0);
         });
         await run('consumed remnant remains visible as history and requires selecting new stock',async page=>{
@@ -379,6 +388,60 @@ const server = createServer(async (req,res) => {
             await expect(row.locator('.demand-locate')).toBeDisabled();await expect(page.locator('#btn-confirm-station-cut')).toBeDisabled();
             await page.locator('.dem-l').fill('1200');await expect(row.locator('.demand-unplaced')).toBeHidden();await expect(page.locator('#demand-progress-summary')).not.toContainText('求解反馈');
         });
+        await run('material selection explains all remaining demand and browsing preserves the current plan',async page=>{
+            await loadPlan(page);candidateItems=candidateList();extraRolls=[secondRoll];
+            const before=await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData()));
+            await page.getByRole('button',{name:'选择用料',exact:true}).click();await expect(page.locator('#material-match-count')).toContainText('3 / 3');
+            await expect(page.locator('.material-match-scope')).toContainText('1 项 / 2 件');assert.equal(candidateBodies[0].demands[0].demand,2);assert.equal(candidateBodies[0].demands[0].id,7);
+            await expect(page.locator('.material-candidate').first()).toContainText('单件尺寸可容纳');
+            await page.locator('#material-source-filter').selectOption('roll');await expect(page.locator('.material-candidate')).toHaveCount(2);
+            await page.locator('#material-search').fill('B-02');await expect(page.locator('.material-candidate')).toHaveCount(1);
+            await page.locator('[name="job-material"]').check();await expect(page.locator('#material-load')).toBeDisabled();
+            const bounds=await page.locator('#material-picker').boundingBox();assert.ok(Math.abs(bounds.x-(1366-bounds.width)/2)<2);assert.ok(bounds.y>0);
+            await page.keyboard.press('ArrowDown');assert.equal(await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData())),before);
+            fs.mkdirSync('target/material-selection',{recursive:true});await page.screenshot({path:'target/material-selection/choose-1366.png'});
+            await page.setViewportSize({width:1920,height:1080});await page.locator('#material-search').fill('');await page.locator('#material-source-filter').selectOption('all');await page.screenshot({path:'target/material-selection/choose-1920.png'});
+            await page.locator('#material-picker [data-close]').click();
+            assert.equal(await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData())),before);
+            assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');
+            assert.equal(requests.filter(r=>r==='POST /api/cutting/tasks').length,0);assert.equal(reportBodies.length,0);
+        });
+        await run('failed material load preserves preview and confirmed retry switches only the source',async page=>{
+            await loadPlan(page);candidateItems=candidateList();extraRolls=[secondRoll];failMaterialRead=true;
+            await page.evaluate(()=>window.camApp.matchTaskMaterials({type:'roll',id:'ROLL-SECOND'}));
+            await expect(page.locator('#material-load')).toBeDisabled();await page.locator('#material-replace-confirm').check();await page.locator('#material-load').click();
+            await expect(page.locator('#material-match-error')).toContainText('测试材料读取失败');
+            assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');await expect(page.locator('#material-context-id')).toHaveText(roll.rollId);
+            failMaterialRead=false;await page.locator('#material-load').click();await expect(page.locator('#material-picker')).not.toBeVisible();await expect(page.locator('#material-context-id')).toHaveText(secondRoll.rollId);
+            await expect(page.locator('.demand-status')).toHaveText('本方案 0 · 已报工 1 · 剩余 2');assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan),null);
+            assert.equal(await page.evaluate(()=>window.camApp.state.activeTask.id),'task-a');assert.equal(reportBodies.length,0);
+        });
+        await run('matching failures retry in place and late responses cannot reopen a closed selector',async page=>{
+            await loadPlan(page);failCandidates=true;await page.getByRole('button',{name:'选择用料',exact:true}).click();await expect(page.locator('#material-match-error')).toContainText('测试库存读取失败');
+            failCandidates=false;candidateItems=candidateList();await page.locator('#material-refresh').click();await expect(page.locator('.material-candidate')).toHaveCount(3);
+            await page.locator('#material-picker [data-close]').click();
+            let finish;candidateWait=new Promise(resolve=>finish=resolve);await page.getByRole('button',{name:'选择用料',exact:true}).click();await expect(page.locator('#material-match-count')).toContainText('正在匹配');
+            await page.locator('#material-picker [data-close]').click();finish();candidateWait=undefined;await page.waitForTimeout(50);await expect(page.locator('#material-picker')).not.toBeVisible();
+            assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');
+        });
+        await run('legacy remnant entries use the same selector and switching preserves unsaved demand',async page=>{
+            await loadPlan(page);candidateItems=candidateList();extraRolls=[secondRoll];
+            await page.locator('#task-details').evaluate(el=>el.open=true);await page.locator('#task-name').fill('未保存的现场需求');await page.locator('#task-name').press('Tab');
+            await page.evaluate(()=>window.camApp.selectAndMountFromShelf('REM-CHOICE'));await expect(page.locator('#material-picker')).toBeVisible();
+            await page.locator('#material-replace-confirm').check();await page.locator('#material-load').click();await expect(page.locator('#material-picker')).not.toBeVisible();await expect(page.locator('#material-context-id')).toHaveText('REM-CHOICE');
+            await expect(page.locator('#task-name')).toHaveValue('未保存的现场需求');assert.equal(await page.evaluate(()=>window.camApp.state.currentCutMode),'remnant');
+            await page.evaluate(()=>window.camApp.mountRollToStation('ROLL-SECOND'));await expect(page.locator('#material-picker')).toBeVisible();await page.locator('#material-load').click();await expect(page.locator('#material-context-id')).toHaveText('ROLL-SECOND');
+            await expect(page.locator('#task-name')).toHaveValue('未保存的现场需求');assert.equal(requests.filter(r=>r==='POST /api/cutting/tasks').length,0);
+        });
+        await run('expired candidates cannot replace the plan and inventory creation never mounts implicitly',async page=>{
+            await loadPlan(page);candidateItems=candidateList();extraRolls=[secondRoll];await page.evaluate(()=>window.camApp.matchTaskMaterials({type:'roll',id:'ROLL-SECOND'}));
+            await page.locator('#material-replace-confirm').check();candidateItems=[];await page.locator('#material-load').click();await expect(page.locator('#material-match-error')).toContainText('不再匹配');
+            await page.locator('#material-open-inventory').click();await expect(page.locator('#material-manager-modal')).toBeVisible();
+            await page.locator('#pane-mat-rolls details').filter({has:page.locator('#new-roll-id')}).evaluate(el=>el.open=true);
+            for(const [id,value]of [['new-roll-id','NEW-INVENTORY'],['new-roll-model',roll.rollModel],['new-roll-width','2000'],['new-roll-length','8000'],['new-roll-location','C-01']])await page.locator('#'+id).fill(value);
+            await page.getByRole('button',{name:'保存母卷档案',exact:true}).click();await expect(page.locator('#material-roll-detail-panel')).toContainText('NEW-INVENTORY');
+            await expect(page.locator('#material-context-id')).toHaveText(roll.rollId);assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');
+        });
     } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
-    console.log(JSON.stringify({discovered:21,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
+    console.log(JSON.stringify({discovered:26,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
 })().catch(error=>{console.error(error);server.close();process.exitCode=1;});

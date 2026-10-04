@@ -80,5 +80,6 @@ export function renderWorkflowGuide(plan = {}) {
         ? (stock?.materialBatch || '') + ' · ' + stock?.width + ' × ' + stock?.length + ' mm'
         : (el('lbl-roll-model-desc')?.textContent || '') + ' · 幅宽 ' + data.rollW + ' mm · 余量 ' + (data.stockRemainingLength || 0).toLocaleString() + ' mm';
     el('btn-material-details').onclick = () => navigateWorkflowStage(1);
+    if(el('lbl-current-roll-id'))el('lbl-current-roll-id').textContent=data.materialAvailable?data.rollId:'未装载';
     return flow;
 }

@@ -20,6 +20,26 @@
 .demand-unplaced p { margin: 6px 0; line-height: 1.6; }
 .demand-unplaced[hidden] { display: none; }
 #demand-progress-summary { line-height: 1.6; }
+.material-picker { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 18px; margin: auto; }
+.material-picker-heading, .material-picker-filters { display: flex; align-items: center; gap: 12px; }
+.material-picker-heading { justify-content: space-between; }
+.material-picker-heading h2 { margin: 0; font-size: 18px; }
+.material-match-scope { margin: 12px 0 8px; }
+.material-picker .detail-disclosure p, .material-picker .detail-disclosure li { line-height: 1.7; font-size: 12px; }
+.material-picker-filters { margin: 12px 0; flex-wrap: wrap; }
+.material-picker-filters label { display: flex; align-items: center; gap: 6px; }
+.material-picker-filters input { width: 225px; }
+#material-candidates { max-height: 32vh; overflow-y: auto; border-block: 1px solid var(--panel-border); }
+.material-picker .material-candidate { display: flex; gap: 12px; padding: 12px 8px; border-bottom: 1px solid var(--panel-border); cursor: pointer; }
+.material-candidate input { width: 16px; flex: 0 0 auto; align-self: center; }
+.material-candidate > span { display: grid; gap: 5px; }
+.material-candidate small { color: var(--text-muted); }
+.material-candidate:has(input:checked) { background: var(--panel-header); box-shadow: inset 3px 0 var(--accent-blue); }
+.material-current strong { color: var(--accent-blue); }
+#material-match-error { border-left: 3px solid var(--accent-amber); padding-left: 10px; line-height: 1.6; }
+.material-picker-footer { margin-top: 10px; }
+#material-replace-warning { display: block; font-size: 12px; line-height: 1.8; }
+#material-replace-warning[hidden] { display: none; }
 .selection-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; }
 .selection-summary strong { font-size: 13px; }
 .selection-summary #cad-selection-size { margin-left: auto; font-size: 11px; }

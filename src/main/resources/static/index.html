@@ -73,7 +73,7 @@
         <!-- 左侧控制面板：清晰分离母卷排产与料头精益切割两大工位 -->
         <aside class="sidebar" id="sidebar-left" aria-label="材料与需求">
             <div class="workspace-heading"><span class="workflow-number">1</span><h1>裁切准备</h1><span>材料与需求</span></div>
-            <section class="material-context" aria-label="当前用料摘要"><div><span>本次用料</span><button class="tool-btn" id="btn-material-details">选择与详情</button></div><strong id="material-context-id">未装载</strong><p id="material-context-info"></p></section>
+            <section class="material-context" aria-label="当前用料摘要"><div><span>本次用料</span><span><button class="tool-btn" onclick="matchTaskMaterials()">选择用料</button> <button class="tool-btn" id="btn-material-details">详情</button></span></div><strong id="material-context-id">未装载</strong><p id="material-context-info"></p></section>
             <!-- 顶部工位模式切换器 (Dual-Mode Switcher) -->
             <!-- ======================================================== -->
             <!-- 模式一面板：母卷连续开卷排产 (Mother Roll Mode)             -->
@@ -132,11 +132,11 @@
                             </button>
                         </div>
                         <div class="section-content">
-                            <div class="material-selection"><button class="tool-btn active" onclick="matchTaskMaterials()">匹配料头与母卷</button><span id="source-kind">母卷</span></div>
-                            <div id="source-remnant-summary" hidden><b id="lbl-shelf-active-id"></b><p id="lbl-shelf-active-size"></p><p id="lbl-shelf-active-loc"></p><span id="lbl-shelf-active-status"></span><button class="tool-btn" onclick="switchCutMode('roll')">改用母卷</button></div>
+                            <div class="material-selection"><button class="tool-btn active" onclick="matchTaskMaterials()">选择本次用料</button><span id="source-kind">母卷</span></div>
+                            <div id="source-remnant-summary" hidden><b id="lbl-shelf-active-id"></b><p id="lbl-shelf-active-size"></p><p id="lbl-shelf-active-loc"></p><span id="lbl-shelf-active-status"></span><button class="tool-btn" onclick="matchTaskMaterials({type:'roll'})">选择母卷</button></div>
                             <div id="source-roll-summary"><div class="prop-row">
                                 <span class="prop-label">母卷批号</span>
-                                <select class="prop-input" id="sel-mother-roll-id" disabled onchange="onMotherRollChange().catch(error => showToast(error.message, 'error'))">
+                                <b id="lbl-current-roll-id">未装载</b><select id="sel-mother-roll-id" hidden disabled>
                                     <option value="">正在读取库存…</option>
                                 </select>
                             </div>
@@ -151,7 +151,7 @@
                                 <div class="prop-row"><span>布头基准</span><b id="lbl-roll-base-origin">—</b></div>
                                 <div class="stock-track"><div id="roll-len-progress"></div></div>
                                 <div class="prop-row"><span>可用料头</span><b id="lbl-roll-rem-count">—</b><span id="lbl-roll-rem-area">—</span></div>
-                                <button class="tool-btn" onclick="matchTaskMaterials()">使用料头 →</button>
+                                <button class="tool-btn" onclick="matchTaskMaterials({type:'remnant'})">选择料头 →</button>
                             </details>
                             </div>
                             <!-- 隐藏参数 (供高级调校) -->

@@ -1,6 +1,6 @@
 /** 物料库存：清单选料，详情核对；写入沿用现有库存接口。 */
 import { state } from '../../core/state.js';
-import { switchCutMode, onMotherRollChange, refreshShelfRemnantsList } from '../remnant/remnant-shelf.js';
+import { refreshShelfRemnantsList } from '../remnant/remnant-shelf.js';
 import { renderScene } from '../cad/cad-renderer.js';
 import { renderRadar } from '../radar/radar-scrubber.js';
 import { renderDefectsUI } from '../solver/quota-manager.js';
@@ -120,7 +120,7 @@ export async function selectRollForDetail(rollId) {
         const pct = roll.totalLength > 0 ? Math.min(100, Math.max(0, rem / roll.totalLength * 100)) : 0;
         detail.innerHTML = `
             <div class="inventory-detail-heading"><h3>${escapeHtml(roll.rollId)}</h3><p>${escapeHtml(roll.materialName || roll.rollModel)}</p></div>
-            <button class="tool-btn inventory-primary" data-mount="${escapeHtml(roll.rollId)}">装载到裁切台面</button>
+            <button class="tool-btn inventory-primary" data-mount="${escapeHtml(roll.rollId)}">为当前任务选用…</button>
             <div class="inventory-length"><div><span>账面剩余</span><strong>${meters(rem)} <small>m</small></strong></div><span>${escapeHtml(inspectionNames[roll.inspectionStatus] || roll.inspectionStatus || '未登记')}</span></div>
             <div class="inventory-length-track" role="img" aria-label="剩余长度占原卷 ${Math.round(pct)}%"><span style="width:${pct}%"></span></div>
             <p class="inventory-secondary">原卷 ${meters(roll.totalLength)} m · 已用 ${meters(used)} m</p>
@@ -224,7 +224,7 @@ function inventoryPane(kind, label, placeholder, options, detailId) {
                 <label>母卷编号<input id="new-roll-id" required></label><label>面料名称 / 型号<input id="new-roll-model" required></label>
                 <label>净幅宽 (mm)<input id="new-roll-width" type="number" min="0.001" step="any" required></label>
                 <label>总长度 (mm)<input id="new-roll-length" type="number" min="0.001" step="any" required></label>
-                <label>库位<input id="new-roll-location"></label><button class="tool-btn inventory-primary" type="submit">保存并装载</button>
+                <label>库位<input id="new-roll-location"></label><button class="tool-btn inventory-primary" type="submit">保存母卷档案</button>
                 <p id="new-roll-error" class="inventory-form-wide inventory-error" role="alert"></p>
             </form></details>` : ''}
         <div class="inventory-browser"><div class="inventory-list"><p id="inventory-${kind}-count" class="inventory-list-caption"></p><div id="material-${kind}-container" class="inventory-table-scroll"></div></div>
@@ -248,7 +248,7 @@ function createMaterialModalDOM() {
                 ${[['HOLE', '破洞', '经纬向断裂形成孔洞。'], ['WEFT_DEFECT', '断纬 / 抽纱', '纱线缺失或排列异常。'], ['STAIN', '油污 / 色渍', '布面油污、黄斑或印染污染。'], ['SLUB', '粗节 / 结头', '纱线局部增粗或形成结头。'], ['SHADING', '色差', '布面不同区域颜色不一致。']].map(([code, name, description]) => `<details class="inventory-disclosure"><summary>${name}<span>${code}</span></summary><p>${description}</p></details>`).join('')}
             </section>
         </div>
-        <div class="inventory-footer">查看和装载不扣库存；现场裁切后，在工作台确认实切。</div>`;
+        <div class="inventory-footer">此处管理库存档案。为任务选料请进入“选择本次用料”，确认报工才扣库存。</div>`;
     modal.addEventListener('keydown', event => event.stopPropagation());
     modal.addEventListener('close', () => { detailRequest++; });
     modal.addEventListener('click', async event => {
@@ -309,7 +309,8 @@ export async function submitNewRoll() {
         if (!response.ok) throw new Error("母卷录入失败");
         await refreshRollsList();
         renderRollsList();
-        await mountRollToStation(roll.rollId);
+        await selectRollForDetail(roll.rollId);
+        showToast('母卷档案已保存，当前任务用料保持不变', 'success');
         error.textContent = "";
     } catch (e) { error.textContent = e.message; }
 }
@@ -374,14 +375,8 @@ export async function submitNewDefect(rollId) {
 
 
 export async function mountRollToStation(rollId) {
-    const sel = document.getElementById("sel-mother-roll-id");
-    if (sel) {
-        if (![...sel.options].some(option => option.value === rollId)) sel.add(new Option(rollId, rollId));
-        sel.value = rollId;
-        try { await switchCutMode("roll"); } catch (error) { return showToast(error.message, 'error'); }
-        closeMaterialModal();
-        showToast(`已装载母卷 ${rollId}`, 'success');
-    }
+    closeMaterialModal();
+    return window.camApp.matchTaskMaterials({type:'roll',id:rollId});
 }
 
 

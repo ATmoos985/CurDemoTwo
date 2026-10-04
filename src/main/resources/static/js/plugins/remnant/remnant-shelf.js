@@ -9,7 +9,7 @@ import { renderRadar } from '../radar/radar-scrubber.js';
 import { updateUIInfo } from '../solver/solver-client.js';
 import { showToast } from '../../core/toast.js';
 
-export async function switchCutMode(mode, targetRemnant, presetData = null) {
+export async function switchCutMode(mode, targetRemnant, presetData = null, loadedRoll = null) {
     const alreadyInert = document.body.inert;
     document.body.inert = true;
     try {
@@ -29,14 +29,14 @@ export async function switchCutMode(mode, targetRemnant, presetData = null) {
         data.materialAvailable = true; document.body.dataset.material = 'ready';
         mountRemnantToBed(targetRemnant, presetData);
     }
-    else { data.windowStartY = 0; await onMotherRollChange(true); }
+    else { data.windowStartY = 0; await onMotherRollChange(true, loadedRoll); }
     updateDemandCompletionFromPieces(data);
     renderDemandsUI(data.demands);
     renderScene(); renderRadar(); resetToBedView(); updateUIInfo();
     } finally { document.body.inert = alreadyInert; }
 }
 
-export async function onMotherRollChange(forceResetBed = false) {
+export async function onMotherRollChange(forceResetBed = false, loadedRoll = null) {
     const sel = document.getElementById("sel-mother-roll-id");
     state.pendingPlan = null;
     const rollId = sel?.value || '';
@@ -58,7 +58,7 @@ export async function onMotherRollChange(forceResetBed = false) {
     if (!rollId) { unavailable(); return; }
     let spec = state.motherRollSpecs[rollId] || { model: "TC涤棉-B2026", rollW: 2000, totalRollL: 60000, bedL: 5000 };
     try {
-        const response = await fetch(`/api/rolls/${encodeURIComponent(rollId)}`, { cache: "no-store" });
+        const response = loadedRoll ? {ok:true,json:async()=>loadedRoll} : await fetch(`/api/rolls/${encodeURIComponent(rollId)}`, { cache: "no-store" });
         if (response.status === 404) {
             const option = [...sel.options].find(item => item.value === rollId);
             if (option) option.remove();
@@ -210,23 +210,8 @@ export async function updateMotherRollRemnantStats(rollId) {
 
 export async function checkAllDemandsRemnantMatch() { /* Replaced by task-wide material matching. */ }
 
-export async function chooseRemnantForDemand(remId, demIdx) {
-    try {
-        const res = await fetch("/api/remnants/scan", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: remId })
-        });
-        if (res.ok) {
-            const rem = await res.json();
-            if (rem && rem.id) {
-                await switchCutMode('remnant', rem);
-                showToast('已选用料头 ' + rem.id + '，本次需求保持不变', 'success');
-            }
-        }
-    } catch (e) {
-        showToast("装载料头异常: " + e.message, "error");
-    }
+export async function chooseRemnantForDemand(remId) {
+    return window.camApp.matchTaskMaterials({type:'remnant',id:remId});
 }
 
 export function dismissRemnantHint(demIdx) {
@@ -285,7 +270,7 @@ export async function refreshShelfRemnantsList() {
                         </div>
                     </div>
                     <button class="tool-btn active" style="font-size: 10.5px; padding: 4px 8px;" onclick="window.camApp.selectAndMountFromShelf('${r.id}')">
-                        装载机台
+                        为当前任务选用…
                     </button>
                 </div>
             `).join("");
@@ -296,21 +281,7 @@ export async function refreshShelfRemnantsList() {
 }
 
 export async function selectAndMountFromShelf(remId) {
-    try {
-        const res = await fetch("/api/remnants/scan", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: remId })
-        });
-        if (res.ok) {
-            const rem = await res.json();
-            if (rem && rem.id) {
-                mountRemnantToBed(rem);
-            }
-        }
-    } catch (e) {
-        showToast("装载料头异常: " + e.message, "error");
-    }
+    return window.camApp.matchTaskMaterials({type:'remnant',id:remId});
 }
 
 export async function executeShelfBarcodeScan() {
