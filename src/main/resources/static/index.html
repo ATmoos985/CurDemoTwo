@@ -374,16 +374,19 @@
                     <div class="section-content">
                         <p class="result-state" id="lbl-report-status" role="status">待排料</p>
                         <div class="result-metrics">
-                            <div><span>裁片利用率</span><strong id="lbl-utilization">—</strong></div>
-                            <div><span>本次用料</span><strong id="lbl-deduct-len">—</strong></div>
+                            <div><span id="lbl-utilization-title">预计利用率</span><strong id="lbl-utilization">—</strong></div>
+                            <div><span id="lbl-usage-title">预计用料</span><strong id="lbl-deduct-len">—</strong></div>
                         </div>
-                        <p class="muted-note">预览不扣库存，现场裁切后再确认。</p>
+                        <p class="muted-note" id="metrics-note">裁片面积 ÷ 预计用料面积；预览不扣库存。</p>
                         <details class="detail-disclosure"><summary>面积对账与剩余用料</summary>
                             <div class="prop-row"><span>成品面积</span><b id="lbl-piece-area">—</b></div>
-                            <div class="prop-row"><span>回收料头</span><b id="lbl-rem-area">—</b></div>
-                            <div class="prop-row"><span>废料与切口</span><b id="lbl-waste-area">—</b></div>
-                            <div class="prop-row"><span>用料总面积</span><b id="lbl-total-area">—</b></div>
+                            <div class="prop-row"><span id="lbl-rem-area-title">候选回收料头</span><b id="lbl-rem-area">—</b></div>
+                            <div class="prop-row"><span id="lbl-waste-area-title">预计损耗</span><b id="lbl-waste-area">—</b></div>
+                            <div class="prop-row"><span id="lbl-total-area-title">预计用料面积</span><b id="lbl-total-area">—</b></div>
                             <div class="prop-row"><span>面积校验</span><span id="lbl-balance-status">—</span></div>
+                            <div class="prop-row"><span>加工区面积</span><b id="lbl-processing-area">—</b></div>
+                            <div class="prop-row"><span>加工区占用率</span><b id="lbl-processing-utilization">—</b></div>
+                            <p class="muted-note">加工区占用率 = 裁片面积 ÷ 整个加工区面积。回收料头不计入裁片利用率。</p>
                             <div class="prop-row"><span>原料剩余</span><b id="lbl-roll-remaining">—</b></div>
                         </details>
                     </div>
@@ -483,7 +486,7 @@
             <div class="report-body">
                 <p class="muted">确认后记录产出、扣减本次用料，并将勾选的余料入库。</p>
                 <section><h3>01 · 本次用料</h3><div class="report-source"><b id="report-preview-roll-id">—</b><span id="report-stock-preview">余量 <span id="report-preview-cur-len">—</span> → <b id="report-preview-after-len">—</b></span></div>
-                <div class="report-fields"><label><span id="report-length-label">实切长度（mm）</span><input id="report-actual-len" type="number" min="0" step="1" class="prop-input" oninput="updateReportPreview()"></label><label>合格产出（件）<input id="report-piece-count" type="number" min="1" class="prop-input" readonly></label></div></section>
+                <div class="report-fields"><label><span id="report-length-label">实切长度（mm）</span><input id="report-actual-len" type="number" min="0" step="0.1" class="prop-input" oninput="updateReportPreview()"></label><label>合格产出（件）<input id="report-piece-count" type="number" min="1" class="prop-input" readonly></label></div><p id="report-area-preview" class="muted" role="status"></p></section>
                 <section><h3>02 · 需求完成</h3><div id="report-preview-demand-text"></div><p class="muted">本次按整份方案报工；未实切前请勿确认。</p></section>
                 <section><h3>03 · 余料回收 <small id="report-preview-remnant-text"></small></h3><label class="report-location">入库库位<input id="report-location" class="prop-input" value="现场料头架 A-01"></label><div id="report-remnants"></div><details class="detail-disclosure"><summary>实测与回收规则</summary><p>仅勾选实际回收的料头。实测尺寸不得越过母料或与成品、其他料头重叠；小于 200 × 300 mm 的余料不入库。</p></details></section>
             </div>

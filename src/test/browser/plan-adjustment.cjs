@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../../main/resources/static');
-let tasks, failSave, requests, failAdjustment, adjustmentBodies, reportBodies, savedPlanRequest;
+let tasks, failSave, requests, failAdjustment, adjustmentBodies, reportBodies, savedPlanRequest, solveResult;
 const planRequest={taskId:"task-a", taskRevision:1, rollId:"ROLL-2026-0920",rollModel:"TC涤棉-B2026",rollW:2000,rollL:5000,totalRollL:60000,windowStartY:0,feedPortType:"roll",trimStart:0,cutOrigin:"right-bottom",firstStageOrientation:"horizontal",allowRotation:false,allowLongitudinal:false,demands:[{id:7,name:"主帘",width:2000,length:1200,demand:2}],minRemnantWidth:200,minRemnantLength:300};
 const planResult={success:true,planId:"original-plan",pieces:[{id:1,demandId:7,name:"主帘",x:0,y:0,w:2000,l:1200,rotated:false},{id:2,demandId:7,name:"主帘",x:0,y:1500,w:2000,l:1200,rotated:false}],remnants:[],cuts:[{step:1,type:"横切",pos:1200,start:0,end:2000,desc:"横切"},{step:2,type:"横切",pos:2700,start:0,end:2000,desc:"横切"}],deductLen:2700,engine:"crosscut"};
 const roll = {rollId:'ROLL-2026-0920', rollModel:'TC涤棉-B2026', width:2000, totalLength:60000, usedLength:0, currentRemainingLength:60000, defects:[]};
@@ -28,7 +28,7 @@ const server = createServer(async (req,res) => {
             const body = JSON.parse(raw), id = body.id || 'task-new';
             const task = {...body, id, revision:(tasks.get(id)?.revision || 0)+1}; tasks.set(id,task); return json(task);
         }
-        if(url.pathname==='/api/solve'){let raw='';for await(const chunk of req)raw+=chunk;savedPlanRequest=JSON.parse(raw);return json(planResult);}
+        if(url.pathname==='/api/solve'){let raw='';for await(const chunk of req)raw+=chunk;savedPlanRequest=JSON.parse(raw);return json(solveResult);}
         if (url.pathname.endsWith('/adjust')) {
             let raw=''; for await(const chunk of req) raw+=chunk; const body=JSON.parse(raw); adjustmentBodies.push(body);
             if(failAdjustment)return json({message:'当前调整不能完成贯通切割'},400);
@@ -53,7 +53,7 @@ const server = createServer(async (req,res) => {
     const browser = await chromium.launch({headless:true, ...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {})});
     let passed=0, failed=0;
     async function run(name, verify) {
-        tasks = new Map([['task-a',initialTask()]]); failSave=false; requests=[]; failAdjustment=false; adjustmentBodies=[];reportBodies=[];savedPlanRequest=planRequest;
+        tasks = new Map([['task-a',initialTask()]]); failSave=false; requests=[]; failAdjustment=false; adjustmentBodies=[];reportBodies=[];savedPlanRequest=planRequest;solveResult=planResult;
         const context = await browser.newContext({viewport:{width:1366,height:768}}), page = await context.newPage(), errors=[];
         page.on('pageerror',error => errors.push(error.message));
         try {
@@ -136,6 +136,24 @@ const server = createServer(async (req,res) => {
             assert.equal(adjustmentBodies[0].pieces[1].y,1505);
             assert.equal(await page.evaluate(()=>window.camApp.state.getCurrentCaseData().pieces[1].y),6505);
         });
+        await run('toast and ledger use the same denominator, while report input preserves tenths of a millimetre',async page=>{
+            await loadPlan(page);
+            solveResult={...planResult,pieces:[{...planResult.pieces[0],y:330,l:4540}],cuts:[{type:'横切',pos:4870,start:0,end:2000,step:1}],deductLen:4870,pieceArea:9.08,totalArea:10};
+            await page.locator('#btn-trigger-solve-station').click();
+            await expect.poll(()=>page.evaluate(()=>window.camApp.state.pendingPlan?.result.pieceArea)).toBe(9.08);
+            await expect(page.locator('#lbl-utilization')).toHaveText('93.2%');
+            await expect(page.locator('#lbl-utilization-title')).toHaveText('预计利用率');
+            await expect(page.locator('#lbl-processing-utilization')).toHaveText('90.8%');
+            await expect(page.locator('.workbench-toast').filter({hasText:'直刀排料计算成功'})).toContainText('产出 1 件，预计利用率 93.2%');
+            await page.locator('#btn-confirm-station-cut').click();
+            await expect(page.locator('#report-actual-len')).toHaveValue('4870');
+            await page.locator('#report-actual-len').fill('4970.1');
+            await expect(page.locator('#report-area-preview')).toContainText('91.3%');
+            assert.equal(await page.locator('#report-actual-len').evaluate(el=>el.validity.valid),true);
+            await page.locator('#report-confirm-button').click();await expect(page.locator('#report-error')).toContainText('测试仅检查报工绑定');
+            assert.equal(reportBodies[0].actualCutLen,4970.1);
+            await page.screenshot({path:'target/plan-adjustment/accounting-1366.png'});
+        });
     } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
-    console.log(JSON.stringify({discovered:5,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
+    console.log(JSON.stringify({discovered:6,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
 })().catch(error=>{console.error(error);server.close();process.exitCode=1;});

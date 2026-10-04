@@ -9,6 +9,7 @@ import { renderRadar, requireStationReport } from '../radar/radar-scrubber.js';
 import { updateUIInfo } from './solver-client.js';
 import { showToast } from '../../core/toast.js';
 import { escapeText, taskInputChanged, startTaskDraft, finishTaskDraft, prepareTaskSwitch } from './task-workspace.js';
+import { layoutMetrics } from './material-accounting.js';
 import { CURTAIN_ORDER_TEMPLATES } from '../presets/scenarios.js';
 
 export function updateDemandCompletionFromPieces(data) {
@@ -41,80 +42,8 @@ export function addOrMergeInterval(intervals, start, end) {
 
 export function recalculateRollStats(data) {
     if (!data) return;
-    const rollW = data.rollW || 2000;
-    const isRemnantMode = (state.currentCutMode === "remnant");
-
-    if (isRemnantMode) {
-        const bedL = data.bedL || 1000;
-        data.deductLen = 0;
-        data.pieceArea = (data.pieces || []).reduce((acc, p) => acc + (p.w * p.l) / 1000000.0, 0);
-        data.remArea = (data.remnants || []).reduce((acc, r) => acc + (r.area !== undefined ? r.area : (r.w * r.l)/1000000.0), 0);
-        data.totalArea = (rollW * bedL) / 1000000.0;
-        data.wasteArea = Math.max(0, data.totalArea - data.pieceArea - data.remArea);
-        return;
-    }
-
-    const winStartY = data.windowStartY || 0;
-    const bedL = data.bedL || 5000;
-    const winEndY = winStartY + bedL;
-
-    // 1. 过滤属于当前工位 [winStartY, winEndY) 的裁片与料头
-    const isPieceInCurrentStation = (p) => {
-        const pMid = p.y + p.l / 2;
-        return (pMid >= winStartY && pMid < winEndY);
-    };
-    const stationPieces = (data.pieces || []).filter(isPieceInCurrentStation);
-
-    const isRemInCurrentStation = (r) => {
-        const rMid = r.y + r.l / 2;
-        return (rMid >= winStartY && rMid < winEndY);
-    };
-    const stationRemnants = (data.remnants || []).filter(isRemInCurrentStation);
-
-    // 2. 当前工位进给/落料跨度（本次用料长度）
-    let maxStationY = 0;
-    if (stationPieces.length > 0) {
-        maxStationY = Math.max(...stationPieces.map(p => p.y + p.l));
-    }
-    if (stationRemnants.length > 0) {
-        maxStationY = Math.max(maxStationY, ...stationRemnants.map(r => r.y + r.l));
-    }
-    if (data.cuts && data.cuts.length > 0) {
-        data.cuts.filter(c => c.type === "横切" && c.pos >= winStartY && c.pos <= winEndY).forEach(c => {
-            if (c.pos > maxStationY) maxStationY = c.pos;
-        });
-    }
-
-    let stationSpan = 0;
-    if (maxStationY > winStartY) {
-        stationSpan = Math.round(maxStationY - winStartY);
-    } else if (state.pendingPlan && state.pendingPlan.result && state.pendingPlan.result.deductLen && state.pendingPlan.result.windowStartY === winStartY) {
-        stationSpan = Math.round(state.pendingPlan.result.deductLen);
-    }
-
-    // 3. 计算“本次用料与实切对账”台账
-    if (stationSpan === 0 && stationPieces.length === 0 && stationRemnants.length === 0) {
-        // 当前工位尚未排料或已清空
-        data.deductLen = 0;
-        data.pieceArea = 0;
-        data.remArea = 0;
-        data.wasteArea = 0;
-        data.totalArea = 0;
-    } else {
-        data.deductLen = stationSpan;
-        const effectiveBedL = (stationSpan > 0 ? stationSpan : bedL);
-        data.totalArea = (rollW * effectiveBedL) / 1000000.0;
-        data.pieceArea = stationPieces.reduce((acc, p) => acc + (p.w * p.l) / 1000000.0, 0);
-        data.remArea = stationRemnants.reduce((acc, r) => acc + (r.area !== undefined ? r.area : (r.w * r.l)/1000000.0), 0);
-        data.wasteArea = Math.max(0, data.totalArea - data.pieceArea - data.remArea);
-    }
-
-    // 4. 全局累计已下料长度
-    let maxGlobalY = 0;
-    (data.pieces || []).forEach(p => {
-        if (p.y + p.l > maxGlobalY) maxGlobalY = p.y + p.l;
-    });
-    data.globalMaxCutY = maxGlobalY;
+    Object.assign(data, layoutMetrics(data, {sheet:state.currentCutMode === 'remnant'}));
+    data.globalMaxCutY = Math.max(0, ...(data.pieces || []).map(p => p.y + p.l));
 }
 
 export function clearStationCuts() {

@@ -577,6 +577,8 @@ public class RemnantService {
         receipt.put("remainingLength", roll == null ? null : roll.getCurrentRemainingLength());
         receipt.put("finishedPieceCount", report.finishedPieceCount());
         receipt.put("pieceArea", plan.getPieceArea());
+        receipt.put("usedArea", sourceArea);
+        receipt.put("processingArea", request.getRollW() * request.getRollL() / 1_000_000.0);
         double recoveredArea = children.stream().mapToDouble(RemnantStock::getArea).sum();
         receipt.put("remArea", recoveredArea);
         receipt.put("wasteArea", Math.max(0, sourceArea - plan.getPieceArea() - recoveredArea));

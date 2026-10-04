@@ -22,7 +22,7 @@ export function updateFabricScrollPosition(targetY) {
     const totalL = data.totalRollL || 60000;
     const bedL = data.bedL || 5000;
     const firstAvailableY = state.currentCutMode === 'remnant' ? 0 : (data.stockUsedLength || 0);
-    targetY = Math.max(firstAvailableY, Math.min(totalL - bedL, Math.round(targetY)));
+    targetY = Math.max(firstAvailableY, Math.min(totalL - bedL, Number(targetY.toFixed(6))));
 
     const prevY = data.windowStartY || 0;
     if (targetY !== prevY && requireStationReport()) return false;
@@ -87,7 +87,7 @@ export function renderRadar() {
     });
     if (data.lastReceipt && data.lastReceipt.windowStartY !== undefined && data.lastReceipt.actualCutLen) {
         const rEnd = data.lastReceipt.windowStartY + data.lastReceipt.actualCutLen;
-        if (rEnd > maxConfirmedY) maxConfirmedY = Math.round(rEnd);
+        if (rEnd > maxConfirmedY) maxConfirmedY = rEnd;
     }
 
     const infoEl = document.getElementById("radar-roll-info");
@@ -304,7 +304,7 @@ export function setupRadarInteraction() {
         const bedL = data.bedL || 5000;
         const maxCutY = Math.max(0, ...(data.pieces || []).map(p => p.y + p.l));
         const nearestStation = Math.round(finalY / bedL) * bedL;
-        if (maxCutY > 0 && Math.abs(finalY - maxCutY) <= 800) finalY = Math.round(maxCutY);
+        if (maxCutY > 0 && Math.abs(finalY - maxCutY) <= 800) finalY = maxCutY;
         else if (Math.abs(finalY - nearestStation) <= 800) finalY = nearestStation;
         else finalY = Math.round(finalY / 500) * 500;
         moveStation(finalY, startY);

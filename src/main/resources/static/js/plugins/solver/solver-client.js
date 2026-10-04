@@ -1,5 +1,6 @@
 import { saveCurrentTask, refreshTaskProgress, escapeText } from './task-workspace.js';
 import { createPlanHistory, planScene } from './plan-editing.js';
+import { layoutMetrics, materialSummary } from './material-accounting.js';
 /**
  * 求解器通信与排料控制插件 (Solver Client Plugin)
  */
@@ -124,20 +125,24 @@ export function updateUIInfo() {
         return pMid >= winStartYVal && pMid < winEndYVal;
     }));
 
-    if (document.getElementById("lbl-deduct-len")) {
-        document.getElementById("lbl-deduct-len").innerText = hasStationPlan ? `${data.deductLen || 0} mm` : "—";
+    const sheet = state.currentCutMode === 'remnant';
+    const metrics = materialSummary(data, sheet);
+    if (document.getElementById('lbl-deduct-len')) document.getElementById('lbl-deduct-len').innerText = hasStationPlan ? metrics.deductLen + ' mm' : '—';
+    for (const [id,value] of [['lbl-piece-area',metrics.pieceArea],['lbl-rem-area',metrics.remArea],['lbl-waste-area',metrics.wasteArea],['lbl-total-area',metrics.totalArea],['lbl-processing-area',metrics.processingArea]]) {
+        const element = document.getElementById(id); if (element) element.innerText = hasStationPlan ? (value || 0).toFixed(3) + ' m²' : '—';
     }
-    if (document.getElementById("lbl-piece-area")) document.getElementById("lbl-piece-area").innerText = `${(data.pieceArea || 0).toFixed(3)} m²`;
-    if (document.getElementById("lbl-rem-area")) document.getElementById("lbl-rem-area").innerText = `${(data.remArea || 0).toFixed(3)} m²`;
-    if (document.getElementById("lbl-waste-area")) document.getElementById("lbl-waste-area").innerText = `${(data.wasteArea || 0).toFixed(3)} m²`;
-    if (document.getElementById("lbl-total-area")) document.getElementById("lbl-total-area").innerText = `${(data.totalArea || 0).toFixed(3)} m²`;
-
-    const utilization = data.lastReceipt ? data.lastReceipt.utilization :
-        ((data.totalArea || 0) > 0 ? (data.pieceArea || 0) / data.totalArea * 100 : 0);
-    const utilEl = document.getElementById("lbl-utilization");
-    if (utilEl) {
-        utilEl.innerText = hasStationPlan && (data.totalArea || 0) > 0 ? `${utilization.toFixed(1)}% ${data.lastReceipt ? '实切' : '方案'}` : "—";
-    }
+    const utilEl = document.getElementById('lbl-utilization');
+    if (utilEl) utilEl.innerText = hasStationPlan && metrics.totalArea > 0 ? metrics.utilization.toFixed(1) + '%' : '—';
+    const processingUtilEl = document.getElementById('lbl-processing-utilization');
+    if (processingUtilEl) processingUtilEl.innerText = hasStationPlan ? metrics.processingUtilization.toFixed(1) + '%' : '—';
+    for (const [id,text] of [
+        ['lbl-utilization-title',metrics.actual ? '实际利用率' : '预计利用率'],
+        ['lbl-usage-title',sheet ? '母卷扣料' : metrics.actual ? '实切用料' : '预计用料'],
+        ['lbl-rem-area-title',metrics.actual ? '已回收料头' : '候选回收料头'],
+        ['lbl-waste-area-title',metrics.actual ? '实切损耗' : '预计损耗'],
+        ['lbl-total-area-title',metrics.actual ? '实切用料面积' : '预计用料面积'],
+        ['metrics-note',metrics.actual ? '按报工回执计算；回收料头单独记账。' : sheet ? '裁片面积 ÷ 整块料头面积；报工才核销。' : '裁片面积 ÷ 预计用料面积；预览不扣库存。']
+    ]) { const element = document.getElementById(id); if (element) element.textContent = text; }
     const ready = canUseCurrentPlan();
     const editable = !!state.pendingPlan?.result?.planId && state.pendingPlan.context === solveContext();
     const edited = editable && !ready;
@@ -167,8 +172,8 @@ export function updateUIInfo() {
             (edited ? '手动调整 · 待校验' : ready ? '待报工 · 尚未保存产出' : (hasStationPlan ? '预览已变化 · 请重新排料' : '当前工位待排料'));
     }
 
-    const sum = (data.pieceArea || 0) + (data.remArea || 0) + (data.wasteArea || 0);
-    const diff = Math.abs(sum - (data.totalArea || 0));
+    const sum = (metrics.pieceArea || 0) + (metrics.remArea || 0) + (metrics.wasteArea || 0);
+    const diff = Math.abs(sum - (metrics.totalArea || 0));
     const statusEl = document.getElementById("lbl-balance-status");
     if (statusEl) {
         if (!hasStationPlan || (data.totalArea || 0) === 0) {
@@ -176,7 +181,7 @@ export function updateUIInfo() {
             statusEl.innerText = "工位就绪 (待排料)";
         } else if (diff < 0.001) {
             statusEl.className = "status-badge";
-            statusEl.innerText = "100.0% 严密守恒";
+            statusEl.innerText = metrics.actual ? "回执面积一致" : "预计面积一致";
         } else {
             statusEl.className = "badge-cut";
             statusEl.innerText = `偏差: ${diff.toFixed(3)} m²`;
@@ -193,7 +198,7 @@ export function updateUIInfo() {
         });
         if (data.lastReceipt && data.lastReceipt.windowStartY !== undefined && data.lastReceipt.actualCutLen) {
             const rEnd = data.lastReceipt.windowStartY + data.lastReceipt.actualCutLen;
-            if (rEnd > maxConfirmedY) maxConfirmedY = Math.round(rEnd);
+            if (rEnd > maxConfirmedY) maxConfirmedY = rEnd;
         }
         const remainingLen = Math.max(0, totalRollL - maxConfirmedY);
         rollRemainingEl.innerText = `${remainingLen.toLocaleString()} mm`;
@@ -615,6 +620,7 @@ async function runSolve() {
                     renderDemandsUI(data.demands);
                 }
 
+                recalculateRollStats(data);
                 updateDemandCompletionFromPieces(data);
                 renderDemandsUI(data.demands);
                 data.engine = `${result.engine} [${elapsed}ms]`;
@@ -635,7 +641,7 @@ async function runSolve() {
                 const totalCutPieces = (data.pieces || []).length;
                 const thisBedPieces = (result.pieces || []).length;
 
-                showToast(`直刀排料计算成功：产出 ${thisBedPieces} 件，利用率 ${(result.totalArea ? result.pieceArea / result.totalArea * 100 : 0).toFixed(1)}%`, 'success');
+                showToast(`直刀排料计算成功：产出 ${thisBedPieces} 件，预计利用率 ${materialSummary(data, isRemnantMode).utilization.toFixed(1)}%`, 'success');
                 return;
             } else {
                 showToast("排料求解未能找到有效方案: " + (result.message || "未知原因"), "warning");
@@ -666,7 +672,7 @@ async function prepareCutReport() {
     const { result, bedL, feedPortType } = pending;
     const minW = pending.request?.minRemnantWidth ?? 200, minL = pending.request?.minRemnantLength ?? 300;
     const recoverable = (result.remnants || []).filter(r => r.w >= minW && r.l >= minL);
-    const defaultCutLen = Math.max(result.deductLen || 0, requiredReportLength(result.pieces, recoverable)) || bedL;
+    const defaultCutLen = Math.max(result.deductLen || 0, layoutMetrics({rollW:pending.request.rollW, bedL, pieces:result.pieces, remnants:recoverable, cuts:result.cuts}).deductLen) || bedL;
     const actualLenInput = document.getElementById("report-actual-len");
     if (actualLenInput) {
         actualLenInput.value = feedPortType === "remnant" ? 0 : defaultCutLen;
@@ -686,9 +692,9 @@ async function prepareCutReport() {
             const check = document.createElement("input"); check.type = "checkbox"; check.checked = remnant.w >= minW && remnant.l >= minL; check.setAttribute("aria-label", "回收 " + remnant.id);
             check.onchange = () => updateReportPreview();
             const label = document.createElement("span"); label.textContent = `${remnant.status || '派生料头'} ${remnant.id}`;
-            const width = document.createElement("input"); width.type = "number"; width.min = "1"; width.value = remnant.w; width.className = "prop-input report-w"; width.setAttribute("aria-label", remnant.id + " 实测宽度");
+            const width = document.createElement("input"); width.type = "number"; width.min = "0.1"; width.step = "0.1"; width.value = remnant.w; width.className = "prop-input report-w"; width.setAttribute("aria-label", remnant.id + " 实测宽度");
             width.oninput = () => updateReportPreview();
-            const length = document.createElement("input"); length.type = "number"; length.min = "1"; length.value = remnant.l; length.className = "prop-input report-l"; length.setAttribute("aria-label", remnant.id + " 实测长度");
+            const length = document.createElement("input"); length.type = "number"; length.min = "0.1"; length.step = "0.1"; length.value = remnant.l; length.className = "prop-input report-l"; length.setAttribute("aria-label", remnant.id + " 实测长度");
             length.oninput = () => updateReportPreview();
             row.dataset.remnantId = remnant.id;
             row.append(check, label, width, document.createTextNode("×"), length, document.createTextNode("mm"));
@@ -754,6 +760,14 @@ export async function updateReportPreview() {
         }
         if (selectedRows.length > remRows.length) remTextEl.innerText += `，${selectedRows.length - remRows.length} 块尺寸不足，计入损耗`;
     }
+    const recovered = remRows.map(row => ({...result.remnants.find(r => r.id === row.dataset.remnantId),
+        w:Number(row.querySelector('.report-w').value), l:Number(row.querySelector('.report-l').value)}));
+    const measured = layoutMetrics({rollW:pending.request.rollW, bedL:pending.bedL, pieces, remnants:recovered},
+        {sheet:feedPortType === 'remnant', actualCutLen:cutLen});
+    const preview = document.getElementById('report-area-preview');
+    if (preview) preview.textContent = measured.totalArea > 0 && Number.isFinite(measured.totalArea)
+        ? `待保存利用率 ${(measured.pieceArea / measured.totalArea * 100).toFixed(1)}% · 裁片 ${measured.pieceArea.toFixed(3)} ÷ 用料 ${measured.totalArea.toFixed(3)} m²；回收 ${measured.remArea.toFixed(3)} m² 另计`
+        : '请填写有效的实切长度，报工成功后才记录实际利用率。';
 }
 
 export function closeCutReport() { document.getElementById("cut-report-modal").close(); document.getElementById("btn-confirm-station-cut")?.focus(); }
@@ -899,10 +913,12 @@ export async function confirmCutReport() {
 
 export function exportCutResult() {
     const data = state.getCurrentCaseData();
-    const exportData = { status: data.lastReceipt ? "已实切确认" : "示例或方案预览", receipt: data.lastReceipt || null,
+    const metrics = materialSummary(data, state.currentCutMode === 'remnant');
+    const exportData = { status: metrics.actual ? "已实切确认" : "示例或方案预览", receipt: metrics.actual ? data.lastReceipt : null,
         rollId: data.rollId || null, demands: data.demands || [], pieces: data.pieces || [], cuts: data.cuts || [],
-        remnants: data.remnants || [], pieceArea: data.pieceArea || 0,
-        utilization: data.lastReceipt ? data.lastReceipt.utilization : ((data.totalArea || 0) ? data.pieceArea / data.totalArea * 100 : 0) };
+        remnants: data.remnants || [], pieceArea: metrics.pieceArea || 0, usedArea:metrics.totalArea || 0,
+        utilization:metrics.utilization, utilizationBasis:metrics.actual ? 'actual-used-area' : 'estimated-used-area',
+        processingArea:metrics.processingArea || 0, processingUtilization:metrics.processingUtilization };
     const url = URL.createObjectURL(new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = `cut-result-${Date.now()}.json`; link.click();
     URL.revokeObjectURL(url);
