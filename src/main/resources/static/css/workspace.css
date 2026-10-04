@@ -275,6 +275,10 @@ footer { height: 32px; min-height: 32px; font-size: 11px; gap: 18px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .draft-switch-dialog { width: min(580px, calc(100vw - 48px)); margin: auto; }
 .draft-switch-dialog .dialog-actions { flex-wrap: wrap; }
+.plan-edit-controls { border: 1px solid var(--panel-border); padding: 8px; margin-bottom: 8px; }
+.plan-edit-controls p { margin: 0 0 8px; font-size: 12px; line-height: 1.5; }
+.plan-edit-actions { display: flex; gap: 6px; margin-bottom: 6px; }
+#btn-validate-adjustment { width: 100%; }
 #demand-undo { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px; background: var(--panel-header); font-size: 12px; }
 .settings-native-dialog { padding: 0; border: 0; background: transparent; color: var(--text-main); max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }
 .settings-native-dialog::backdrop { background: #0005; }

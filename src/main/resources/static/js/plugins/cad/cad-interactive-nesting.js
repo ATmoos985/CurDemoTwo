@@ -150,8 +150,8 @@ export function makePieceInteractive(pGroup, piece, caseData) {
             });
         } else {
             // 合法移动：固化新物理坐标
-            piece.x = Math.round(curX);
-            piece.y = Math.round(curY);
+            piece.x = Math.round(curX * 10) / 10;
+            piece.y = Math.round(curY * 10) / 10;
             bus.emit('piece:moved', { pieceId: piece.id, x: piece.x, y: piece.y });
         }
     });
@@ -292,6 +292,7 @@ export function initNestingKeyboardShortcuts() {
                 showCollisionBadge(piece.x, piece.y, `[旋转干涉] ${collision.reason}`);
                 setTimeout(hideCollisionBadge, 1500);
             } else {
+                piece.rotated = !piece.rotated;
                 bus.emit('piece:moved', { pieceId: piece.id, x: piece.x, y: piece.y });
             }
             e.preventDefault();

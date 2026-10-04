@@ -361,9 +361,6 @@ export function discardRemnant(remnantId) {
 
     // 1. 从已排料头列表中移除
     data.remnants = (data.remnants || []).filter(r => r.id !== remnantId);
-    if (state.pendingPlan && state.pendingPlan.result && state.pendingPlan.result.remnants) {
-        state.pendingPlan.result.remnants = state.pendingPlan.result.remnants.filter(r => r.id !== remnantId);
-    }
 
     // 2. 判断是否属于工位尾部/落料端料头
     const maxPieceY = Math.max(winStartY, ...((data.pieces || []).map(p => p.y + p.l)));
@@ -416,11 +413,8 @@ export function discardRemnant(remnantId) {
         }
 
         recalculateRollStats(data);
-        if (state.pendingPlan && state.pendingPlan.result) {
-            state.pendingPlan.result.deductLen = data.deductLen;
-        }
 
-        showToast(`已抛弃料头 ${remnant.id}，恢复 ${(remnant.l/1000).toFixed(2)}m 布料至母卷未切状态！工位落料点收缩至 Y=${newStationCutEnd}mm。`, 'success');
+        showToast(`已从预览移除料头 ${remnant.id}，请校验后核对用料与回收；库存尚未变化`, 'info');
     } else {
         // B. 侧边料头或疵点料头
         recalculateRollStats(data);
@@ -431,6 +425,7 @@ export function discardRemnant(remnantId) {
         clearRemnantSelection();
     }
 
+    bus.emit('plan:edited');
     updateUIInfo();
     renderScene();
 }
@@ -488,9 +483,6 @@ export function discardPiece(pieceId) {
 
     // 1. 从裁片列表中移除
     data.pieces = (data.pieces || []).filter(p => p.id !== pieceId);
-    if (state.pendingPlan && state.pendingPlan.result && state.pendingPlan.result.pieces) {
-        state.pendingPlan.result.pieces = state.pendingPlan.result.pieces.filter(p => p.id !== pieceId);
-    }
 
     // 2. 自动重新核销与返还需求池配额
     updateDemandCompletionFromPieces(data);
@@ -528,13 +520,11 @@ export function discardPiece(pieceId) {
     }
 
     recalculateRollStats(data);
-    if (state.pendingPlan && state.pendingPlan.result) {
-        state.pendingPlan.result.deductLen = data.deductLen;
-    }
 
+    bus.emit('plan:edited');
     updateUIInfo();
     renderScene();
-    showToast(`已抛弃裁片 "${piece.name || piece.id}"，已退回 1 件需求至订单池，母卷恢复未切断。`, 'success');
+    showToast(`已从预览移除裁片 "${piece.name || piece.id}"，需求完成量与库存尚未变化；请校验调整版`, 'info');
 }
 
 /**
@@ -544,7 +534,7 @@ export function setPieceAsCutEnd(pieceId) {
     const data = state.getCurrentCaseData();
     if (!data) return;
     const piece = (data.pieces || []).find(p => p.id === pieceId);
-    if (!piece) return;
+    if (!piece || piece.confirmed) return;
 
     const cutEndY = piece.y + piece.l;
     const winStartY = data.windowStartY || 0;
@@ -578,14 +568,11 @@ export function setPieceAsCutEnd(pieceId) {
     data.cutIntervals.push({ start: winStartY, end: cutEndY });
 
     recalculateRollStats(data);
-    if (state.pendingPlan && state.pendingPlan.result) {
-        state.pendingPlan.result.deductLen = data.deductLen;
-        state.pendingPlan.result.remnants = (data.remnants || []).map(r => ({ ...r }));
-    }
 
     updateUIInfo();
     renderScene();
-    showToast(`已以此裁片底边 (Y=${cutEndY}mm) 截断工位，下方布料全部归还母卷！`, 'success');
+    bus.emit('plan:edited');
+    showToast('已调整预览截断线，请校验后核对实际用料；库存尚未变化', 'info');
 }
 
 /**
@@ -612,9 +599,6 @@ export function autoTrimStationTailWaste() {
 
     // 抛弃所有在 maxPieceY 之后的尾部料头
     data.remnants = (data.remnants || []).filter(r => r.y < maxPieceY - 5);
-    if (state.pendingPlan && state.pendingPlan.result) {
-        state.pendingPlan.result.remnants = (data.remnants || []).map(r => ({ ...r }));
-    }
 
     // 移除位于 maxPieceY 之后的所有切刀
     data.cuts = (data.cuts || []).filter(c => {
@@ -641,14 +625,12 @@ export function autoTrimStationTailWaste() {
     data.cutIntervals.push({ start: winStartY, end: maxPieceY });
 
     recalculateRollStats(data);
-    if (state.pendingPlan && state.pendingPlan.result) {
-        state.pendingPlan.result.deductLen = data.deductLen;
-    }
 
     const savedMm = Math.round(winEndY - maxPieceY);
     updateUIInfo();
     renderScene();
-    showToast(`已一键去除尾部料头，切断线收缩至 Y=${maxPieceY}mm，恢复 ${savedMm}mm (${(savedMm/1000).toFixed(2)}m) 布料至母卷未切状态！`, 'success');
+    bus.emit('plan:edited');
+    showToast(`已调整尾料预览 ${savedMm}mm，请校验后核对实际用料；库存尚未变化`, 'info');
 }
 
 /**
@@ -658,11 +640,12 @@ export function rotatePieceById(pieceId) {
     const data = state.getCurrentCaseData();
     if (!data) return;
     const piece = (data.pieces || []).find(p => p.id === pieceId);
-    if (!piece) return;
+    if (!piece || piece.confirmed) return;
 
     const oldW = piece.w;
     piece.w = piece.l;
     piece.l = oldW;
+    piece.rotated = !piece.rotated;
 
     updateUIInfo();
     renderScene();

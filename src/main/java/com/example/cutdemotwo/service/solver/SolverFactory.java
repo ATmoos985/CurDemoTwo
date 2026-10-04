@@ -86,6 +86,12 @@ public class SolverFactory {
 
     private static long elapsed(long start) { return (System.nanoTime() - start) / 1_000_000; }
 
+    public NestingResult validateAdjustment(NestingProblem problem, List<com.example.cutdemotwo.model.PlacedPiece> pieces) {
+        long start = System.nanoTime();
+        var result = ManualLayoutValidator.validate(problem, pieces);
+        return toResult(problem, result, "manual-guillotine", "1", elapsed(start));
+    }
+
     private static void precision(double value, double resolution) {
         supported(Math.abs(value / resolution - Math.rint(value / resolution)) < .000001,
                 "当前引擎的坐标分辨率为 " + resolution + " mm，不能静默舍入尺寸");

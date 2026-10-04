@@ -151,6 +151,28 @@ public class RemnantService {
         });
     }
 
+    public synchronized CuttingPlan rememberAdjustment(String parentId, String id, SolveResponse result) {
+        return mutate(() -> {
+            CuttingPlan existing = plans.get(id);
+            if (existing != null) {
+                if (!Objects.equals(existing.parentPlanId(), parentId) || !json.writeValueAsString(existing.result()).equals(json.writeValueAsString(result)))
+                    throw new IllegalArgumentException("调整操作编号已用于其他内容，请重新校验");
+                return existing;
+            }
+            CuttingPlan parent = plans.get(parentId);
+            if (parent == null || !"PENDING".equals(parent.status())) throw new IllegalArgumentException("原方案已报工或取消，不能保存调整版");
+            prepareTaskSolveInternal(parent.request());
+            if (!Objects.equals(parent.baseline(), materialFingerprintInternal(parent.request())))
+                throw new IllegalArgumentException("材料或疵点已变化，请重新装载并排料");
+            CuttingPlan adjusted = new CuttingPlan(id, parent.request(), result, parent.baseline(), "PENDING",
+                    java.time.LocalDateTime.now().toString(), parentId, parent.version()+1);
+            adjusted = json.readValue(json.writeValueAsBytes(adjusted), CuttingPlan.class);
+            plans.put(parentId, parent.withStatus("CANCELLED"));
+            plans.put(id, adjusted);
+            return adjusted;
+        });
+    }
+
     public synchronized List<CuttingPlan> taskPlans(String taskId) {
         return read(() -> plans.values().stream().filter(p -> Objects.equals(taskId, p.request().getTaskId())
                 && Set.of("PENDING", "CANCELLED").contains(p.status())).toList());

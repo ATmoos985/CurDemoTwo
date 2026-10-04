@@ -1,4 +1,5 @@
 import { saveCurrentTask, refreshTaskProgress, escapeText } from './task-workspace.js';
+import { createPlanHistory, planScene } from './plan-editing.js';
 /**
  * 求解器通信与排料控制插件 (Solver Client Plugin)
  */
@@ -14,6 +15,7 @@ import {
 } from './quota-manager.js';
 import { showToast } from '../../core/toast.js';
 import { solverSettings } from '../settings/settings.js';
+import { renderToolpathUI } from '../toolpath/toolpath-optimizer.js';
 import { selectRemnant, clearRemnantSelection, hoverRemnant } from '../cad/cad-remnant-highlight.js';
 
 export function updateUIInfo() {
@@ -136,7 +138,18 @@ export function updateUIInfo() {
     if (utilEl) {
         utilEl.innerText = hasStationPlan && (data.totalArea || 0) > 0 ? `${utilization.toFixed(1)}% ${data.lastReceipt ? '实切' : '方案'}` : "—";
     }
-    const ready = !!state.pendingPlan?.result?.planId && state.pendingPlan.context === solveContext();
+    const ready = canUseCurrentPlan();
+    const editable = !!state.pendingPlan?.result?.planId && state.pendingPlan.context === solveContext();
+    const edited = editable && !ready;
+    const editPanel = document.getElementById('plan-edit-controls');
+    if (editPanel) editPanel.hidden = !editable;
+    const validateButton = document.getElementById('btn-validate-adjustment');
+    if (validateButton) { validateButton.disabled = !edited || validatingAdjustment; validateButton.textContent = validatingAdjustment ? '正在校验…' : '校验并保存调整版'; }
+    for (const [id, enabled] of [['btn-undo-plan',state.pendingPlan?.history?.canUndo],['btn-redo-plan',state.pendingPlan?.history?.canRedo]]) {
+        const button = document.getElementById(id); if (button) button.disabled = !enabled || validatingAdjustment;
+    }
+    const editMessage = document.getElementById('plan-edit-message');
+    if (editMessage) editMessage.textContent = editable ? state.pendingPlan.adjustmentError || (edited ? '手动调整待校验；刀序与候选余料将重新计算。' : `方案版本 ${state.pendingPlan.version || 1} · 已校验`) : '';
     const reportButton = document.getElementById('btn-confirm-station-cut');
     if (reportButton) {
         reportButton.disabled = !ready;
@@ -146,12 +159,12 @@ export function updateUIInfo() {
     const solveButton = document.getElementById('btn-trigger-solve-station');
     if (solveButton) { solveButton.disabled = data.materialAvailable === false; solveButton.classList.toggle('plan-ready', ready); solveButton.textContent = ready ? '重新排料' : '生成排料方案'; }
     const hint = document.getElementById('station-action-hint');
-    if (hint) hint.textContent = ready ? '本工位尚未报工。实切后点击“报工保存”，确认后自动接续。' :
+    if (hint) hint.textContent = edited ? '请先校验调整版，成功后再打印和报工。' : ready ? '本工位尚未报工。实切后点击“报工保存”，确认后自动接续。' :
         data.lastReceipt ? '上一工位已报工保存。可继续生成本工位方案。' : '先生成方案，再核对实切并报工保存。';
     const reportEl = document.getElementById("lbl-report-status");
     if (reportEl) {
         reportEl.innerText = data.lastReceipt ? `已报工保存 · ${data.lastReceipt.finishedPieceCount} 件` :
-            (ready ? '待报工 · 尚未保存产出' : (hasStationPlan ? '预览已变化 · 请重新排料' : '当前工位待排料'));
+            (edited ? '手动调整 · 待校验' : ready ? '待报工 · 尚未保存产出' : (hasStationPlan ? '预览已变化 · 请重新排料' : '当前工位待排料'));
     }
 
     const sum = (data.pieceArea || 0) + (data.remArea || 0) + (data.wasteArea || 0);
@@ -293,8 +306,61 @@ export function loadCase(id) {
 
 let solving = false;
 function planGeometry() {
-    const {pieces, remnants} = state.getCurrentCaseData();
-    return JSON.stringify({pieces, remnants});
+    const {pieces, remnants, cuts} = state.getCurrentCaseData();
+    return JSON.stringify({pieces, remnants, cuts});
+}
+export function canUseCurrentPlan() {
+    return !!state.pendingPlan?.result?.planId && state.pendingPlan.context === solveContext() && state.pendingPlan.geometry === planGeometry();
+}
+export function recordPlanEdit() {
+    const pending = state.pendingPlan;
+    if (!pending?.history) return;
+    const data = state.getCurrentCaseData();
+    // The old cut tree and leftover partition cease to describe a moved or removed piece.
+    if (JSON.stringify(data.pieces) !== JSON.stringify(pending.history.current.pieces)) {
+        data.cuts = []; data.remnants = []; data.cutIntervals = [];
+    }
+    if (pending.history.record(planScene(data))) {
+        pending.adjustmentError = ''; pending.adjustmentId = null;
+        state.isToolpathOptimized = false; state.toolpathStats = null; state.originalCutsBackup = null;
+    }
+    recalculateRollStats(data); updateUIInfo(); renderScene(); renderToolpathUI();
+}
+export function undoPlanEdit() { applyPlanHistory('undo'); }
+export function redoPlanEdit() { applyPlanHistory('redo'); }
+function applyPlanHistory(direction) {
+    const pending = state.pendingPlan;
+    if (validatingAdjustment || !pending?.history || pending.context !== solveContext()) return;
+    const scene = pending.history[direction]();
+    if (!scene) return;
+    Object.assign(state.getCurrentCaseData(), scene);
+    pending.adjustmentError = ''; pending.adjustmentId = null;
+    state.isToolpathOptimized = false; state.toolpathStats = null; state.originalCutsBackup = null;
+    recalculateRollStats(state.getCurrentCaseData()); updateUIInfo(); renderScene(); renderToolpathUI();
+}
+let validatingAdjustment = false;
+export async function validatePlanAdjustment() {
+    const pending = state.pendingPlan;
+    if (validatingAdjustment || !pending || pending.context !== solveContext()) return;
+    if (canUseCurrentPlan()) return;
+    const geometry = planGeometry();
+    pending.adjustmentId ||= crypto.randomUUID();
+    const pieces = state.getCurrentCaseData().pieces.filter(p => !p.confirmed).map(p => ({id:p.id, x:p.x, y:p.y-pending.windowStartY, rotated:!!p.rotated}));
+    validatingAdjustment = true;
+    const wasInert = document.body.inert; document.body.inert = true;
+    try {
+        pending.adjustmentError = ''; updateUIInfo();
+        const response = await fetch('/api/cutting/plans/' + encodeURIComponent(pending.result.planId) + '/adjust', {
+            method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({adjustmentId:pending.adjustmentId, pieces})
+        });
+        const saved = await response.json();
+        if (state.pendingPlan !== pending || pending.context !== solveContext() || geometry !== planGeometry()) return;
+        if (!response.ok) throw new Error(saved.message || '调整校验失败，请检查布局后重试');
+        restoreSavedPlan(saved);
+        showToast(`调整版 ${saved.version} 已保存，原方案已取消；请核对后实切报工`, 'success');
+    } catch (error) {
+        if (state.pendingPlan === pending) { pending.adjustmentError = error.message; showToast(error.message, 'error'); }
+    } finally { validatingAdjustment = false; document.body.inert = wasInert; updateUIInfo(); }
 }
 function solveContext() {
     return JSON.stringify([state.activeTask?.id, state.currentCaseId, state.currentCutMode, state.loadedRemnant?.id,
@@ -320,7 +386,8 @@ export function restoreSavedPlan(saved) {
     updateUIInfo(); renderScene(); renderRadar(); resetToBedView();
     state.pendingPlan = {result, request, rollId:request.rollId, rollModel:request.rollModel, bedL:request.rollL,
         feedPortType:request.feedPortType, sourceRemnantId:request.sourceRemnantId,
-        taskId:request.taskId, windowStartY:offset, context:solveContext(), geometry:planGeometry()};
+        taskId:request.taskId, windowStartY:offset, context:solveContext(), geometry:planGeometry(), version:saved.version || 1,
+        history:createPlanHistory(planScene(data))};
     updateUIInfo();
     bus.emit('solve:success', {result, elapsed:0, rollId:request.rollId});
 }
@@ -556,6 +623,8 @@ async function runSolve() {
                 updateUIInfo();
 
                 state.pendingPlan.geometry = planGeometry();
+                state.pendingPlan.history = createPlanHistory(planScene(data));
+                state.pendingPlan.version = 1;
                 bus.emit('solve:success', { result, elapsed, rollId });
 
                 const stationCount = (data.cutIntervals || []).length;
@@ -586,9 +655,8 @@ export async function openCutReport() {
 }
 async function prepareCutReport() {
     let pending = state.pendingPlan;
-    if (!pending?.result?.planId || (pending.context !== solveContext() || pending.geometry !== planGeometry())) {
-        state.pendingPlan = null;
-        showToast('请先生成并核对当前排料方案，再进行报工', 'warning');
+    if (!canUseCurrentPlan()) {
+        showToast(pending?.result?.planId ? '调整尚未校验，请先校验并保存调整版' : '请先生成并核对当前排料方案，再进行报工', 'warning');
         return;
     }
     const { result, bedL, feedPortType } = pending;

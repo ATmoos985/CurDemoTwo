@@ -60,6 +60,11 @@ public class FabricCutController {
     @PostMapping("/cutting/plans/{id}/restore")
     public Object restorePlan(@PathVariable String id) { return remnantService.changePlanStatus(id, true); }
 
+    @PostMapping("/cutting/plans/{id}/adjust")
+    public Object adjustPlan(@PathVariable String id, @RequestBody com.example.cutdemotwo.model.PlanAdjustment adjustment) {
+        return workflowService.adjust(id, adjustment);
+    }
+
     @ExceptionHandler(com.example.cutdemotwo.persistence.InventoryConflictException.class)
     @ResponseStatus(HttpStatus.CONFLICT)
     public Map<String, String> conflict(RuntimeException error) { return Map.of("message", error.getMessage()); }

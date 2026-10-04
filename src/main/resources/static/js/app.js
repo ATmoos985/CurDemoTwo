@@ -53,7 +53,7 @@ import {
 import {
     updateUIInfo, loadCase, triggerSolve,
     openCutReport, closeCutReport, confirmCutReport, exportCutResult,
-    openStationLapConfirmModal, updateReportPreview
+    openStationLapConfirmModal, updateReportPreview, recordPlanEdit, undoPlanEdit, redoPlanEdit, validatePlanAdjustment
 } from './plugins/solver/solver-client.js';
 
 import {
@@ -310,30 +310,33 @@ export function updatePresetTriggerLabel(caseId) {
 }
 
 bus.on('toolpath:optimized', () => {
+    recordPlanEdit();
     renderScene();
     renderToolpathUI();
 });
 
 bus.on('toolpath:restored', () => {
+    recordPlanEdit();
     renderScene();
     renderToolpathUI();
 });
 
 bus.on('piece:moved', (payload) => {
-    // 裁片在画布上手动微调后，动态重新计算切线、刀路与对账指标
-    state.isToolpathOptimized = false;
-    state.toolpathStats = null;
-    state.originalCutsBackup = null;
-    renderScene();
-    renderToolpathUI();
-    recalculateRollStats();
-    updateDemandCompletionFromPieces();
+    // Preserve the saved version; only a validated adjustment can supply new cuts and leftovers.
+    recordPlanEdit();
+});
+bus.on('plan:edited', recordPlanEdit);
+window.addEventListener('keydown', event => {
+    if (event.target?.closest?.('input, textarea, select, [contenteditable=true]') || !(event.ctrlKey || event.metaKey)) return;
+    if (event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redoPlanEdit() : undoPlanEdit(); }
+    if (event.key.toLowerCase() === 'y') { event.preventDefault(); redoPlanEdit(); }
 });
 
 // ==========================================
 // 2. 导出面向全局 DOM 与 Inline Onclick 的统一命名空间
 // ==========================================
 const camApp = {
+    undoPlanEdit, redoPlanEdit, validatePlanAdjustment,
     newCuttingTask, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, openLocalDrafts, taskInputChanged,
     bus,
     state,

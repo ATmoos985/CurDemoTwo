@@ -4,6 +4,14 @@
  */
 import { state } from '../../core/state.js';
 import { getHomeCoordinates } from '../toolpath/toolpath-optimizer.js';
+import { canUseCurrentPlan } from '../solver/solver-client.js';
+import { showToast } from '../../core/toast.js';
+
+function requireValidatedPlan() {
+    if (canUseCurrentPlan() || state.getCurrentCaseData().lastReceipt) return true;
+    showToast('请先生成方案或校验调整版，再打印或导出', 'warning');
+    return false;
+}
 
 /**
  * 生成标准 Fanuc / ISO 格式工业数控 G-Code (.nc)
@@ -232,6 +240,7 @@ export function downloadFile(filename, content, mimeType = "text/plain;charset=u
  * 模态窗口：导出数控机床代码 (CNC G-Code / AutoCAD DXF)
  */
 export function openExportModal(defaultTab = 'gcode') {
+    if (!requireValidatedPlan()) return;
     let modal = document.getElementById("cam-export-modal");
     if (!modal) {
         createExportModalDOM();
@@ -247,6 +256,7 @@ export function closeExportModal() {
 }
 
 export function switchExportTab(tabName) {
+    if (!requireValidatedPlan()) return;
     const btnGcode = document.getElementById("tab-export-gcode");
     const btnDxf = document.getElementById("tab-export-dxf");
     const preview = document.getElementById("export-preview-content");
@@ -262,6 +272,7 @@ export function switchExportTab(tabName) {
         if (btnDownload) {
             btnDownload.innerText = "下载标准 G-Code (.nc)";
             btnDownload.onclick = () => {
+                if (!requireValidatedPlan()) return;
                 const rollId = state.getCurrentCaseData().rollId || "ROLL-01";
                 downloadFile(`CUT_${rollId}_STATION_01.nc`, preview.value);
             };
@@ -275,6 +286,7 @@ export function switchExportTab(tabName) {
         if (btnDownload) {
             btnDownload.innerText = "下载 AutoCAD DXF (.dxf)";
             btnDownload.onclick = () => {
+                if (!requireValidatedPlan()) return;
                 const rollId = state.getCurrentCaseData().rollId || "ROLL-01";
                 downloadFile(`CUT_${rollId}_STATION_01.dxf`, preview.value);
             };
@@ -283,6 +295,7 @@ export function switchExportTab(tabName) {
 }
 
 export function copyExportPreview() {
+    if (!requireValidatedPlan()) return;
     const preview = document.getElementById("export-preview-content");
     if (!preview) return;
     preview.select();
@@ -344,6 +357,7 @@ function createExportModalDOM() {
  * 现场裁切工艺任务单 (Cut Ticket & Part Label Sheet) 模态与打印
  */
 export function openCutTicketModal() {
+    if (!requireValidatedPlan()) return;
     let modal = document.getElementById("cam-cut-ticket-modal");
     if (!modal) {
         createCutTicketModalDOM();
@@ -742,6 +756,7 @@ function createCutTicketModalDOM() {
  * 纯净 A4 隔离式工单打印引擎 (杜绝第一页空白占位)
  */
 export function printCutTicketDocument() {
+    if (!requireValidatedPlan()) return;
     const printArea = document.getElementById("printable-cut-ticket-area");
     if (!printArea) {
         window.print();

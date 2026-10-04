@@ -428,6 +428,11 @@
                 <!-- 母卷开卷工位排料搭切执行控制 -->
                 <div id="right-roll-actions" class="panel-section action-footer-section" style="padding: 10px 14px 12px 14px;">
                     <p id="station-action-hint" class="station-action-hint" role="status">先生成方案，再核对实切并报工保存。</p>
+                    <div id="plan-edit-controls" class="plan-edit-controls" hidden>
+                        <p id="plan-edit-message" role="status"></p>
+                        <div class="plan-edit-actions"><button id="btn-undo-plan" class="tool-btn" onclick="undoPlanEdit()" title="撤销本次方案的上一步调整 (Ctrl+Z)">撤销调整</button><button id="btn-redo-plan" class="tool-btn" onclick="redoPlanEdit()" title="重做调整 (Ctrl+Y)">重做</button></div>
+                        <button id="btn-validate-adjustment" class="tool-btn active" onclick="validatePlanAdjustment()">校验并保存调整版</button>
+                    </div>
                     <div class="station-navigation" style="display: flex; gap: 6px; margin-bottom: 6px;">
                         <button class="tool-btn" onclick="advanceBed(-1)" title="按当前台面长度回退一个工位">
                             ← 上一工位
