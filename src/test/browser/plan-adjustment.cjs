@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../../main/resources/static');
-let tasks, failSave, requests, failAdjustment, adjustmentBodies, reportBodies, savedPlanRequest, solveResult, acceptReport, receipts, stock;
+let tasks, failSave, requests, failAdjustment, adjustmentBodies, reportBodies, savedPlanRequest, solveResult, acceptReport, receipts, stock, solveWait;
 const planRequest={taskId:"task-a", taskRevision:1, rollId:"ROLL-2026-0920",rollModel:"TC涤棉-B2026",rollW:2000,rollL:5000,totalRollL:60000,windowStartY:0,feedPortType:"roll",trimStart:0,cutOrigin:"right-bottom",firstStageOrientation:"horizontal",allowRotation:false,allowLongitudinal:false,demands:[{id:7,name:"主帘",width:2000,length:1200,demand:2}],minRemnantWidth:200,minRemnantLength:300};
 const planResult={success:true,planId:"original-plan",pieces:[{id:1,demandId:7,name:"主帘",x:0,y:0,w:2000,l:1200,rotated:false},{id:2,demandId:7,name:"主帘",x:0,y:1500,w:2000,l:1200,rotated:false}],remnants:[],cuts:[{step:1,type:"横切",pos:1200,start:0,end:2000,desc:"横切"},{step:2,type:"横切",pos:2700,start:0,end:2000,desc:"横切"}],deductLen:2700,engine:"crosscut"};
 const roll = {rollId:'ROLL-2026-0920', rollModel:'TC涤棉-B2026', width:2000, totalLength:60000, usedLength:0, currentRemainingLength:60000, defects:[]};
@@ -28,7 +28,7 @@ const server = createServer(async (req,res) => {
             const body = JSON.parse(raw), id = body.id || 'task-new';
             const task = {...body, id, revision:(tasks.get(id)?.revision || 0)+1}; tasks.set(id,task); return json(task);
         }
-        if(url.pathname==='/api/solve'){let raw='';for await(const chunk of req)raw+=chunk;savedPlanRequest=JSON.parse(raw);return json(solveResult);}
+        if(url.pathname==='/api/solve'){let raw='';for await(const chunk of req)raw+=chunk;savedPlanRequest=JSON.parse(raw);await solveWait;return json(solveResult);}
         if (url.pathname.endsWith('/adjust')) {
             let raw=''; for await(const chunk of req) raw+=chunk; const body=JSON.parse(raw); adjustmentBodies.push(body);
             if(failAdjustment)return json({message:'当前调整不能完成贯通切割'},400);
@@ -68,7 +68,7 @@ const server = createServer(async (req,res) => {
     const browser = await chromium.launch({headless:true, ...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {})});
     let passed=0, failed=0;
     async function run(name, verify) {
-        tasks = new Map([['task-a',initialTask()]]); failSave=false; requests=[]; failAdjustment=false; adjustmentBodies=[];reportBodies=[];savedPlanRequest=planRequest;solveResult=planResult;acceptReport=false;receipts=[];stock={...roll};
+        tasks = new Map([['task-a',initialTask()]]); failSave=false; requests=[]; failAdjustment=false; adjustmentBodies=[];reportBodies=[];savedPlanRequest=planRequest;solveResult=planResult;acceptReport=false;receipts=[];stock={...roll};solveWait=undefined;
         const context = await browser.newContext({viewport:{width:1366,height:768}}), page = await context.newPage(), errors=[];
         page.on('pageerror',error => errors.push(error.message));
         try {
@@ -219,6 +219,65 @@ const server = createServer(async (req,res) => {
             assert.equal(receipts[0].finishedPieceCount,0);assert.equal(receipts[0].derivedRemnants.length,1);
             assert.equal(await page.evaluate(()=>window.camApp.state.taskCompleted[7]),1);
         });
+        await run('empty requirements guide to the missing field, then to adding a demand',async page=>{
+            await expect(page.locator('[data-workflow-stage="0"]')).toHaveAttribute('aria-current','step');
+            await page.locator('#task-name').fill('');
+            await page.locator('#btn-workflow-next').click();await expect(page.locator('#task-name')).toBeFocused();
+            await page.locator('#task-name').fill('新切割任务');
+            await page.locator('#task-material').selectOption(roll.rollModel);
+            await expect(page.locator('#btn-workflow-next')).toHaveText('添加裁片需求');
+            await page.locator('#btn-workflow-next').click();await expect(page.locator('#demands-container .item-row')).toHaveCount(1);
+            assert.equal(requests.filter(r=>r.startsWith('POST')).length,0);
+        });
+        await run('stage navigation reveals panels without saving, solving, reporting or moving the window',async page=>{
+            await loadPlan(page);const writes=requests.filter(r=>r.startsWith('POST')).length;
+            await page.evaluate(()=>{window.camApp.toggleSidebar('left');document.getElementById('card-demands').classList.add('collapsed');});
+            await page.locator('[data-workflow-stage="0"]').click();
+            await expect(page.locator('#sidebar-left')).not.toHaveClass(/collapsed/);await expect(page.locator('#card-demands')).not.toHaveClass(/collapsed/);
+            for(const i of [1,2,3])await page.locator('[data-workflow-stage="'+i+'"]').click();
+            await expect(page.locator('#cut-report-modal')).not.toBeVisible();assert.equal(requests.filter(r=>r.startsWith('POST')).length,writes);
+            assert.equal(await page.evaluate(()=>window.camApp.state.getCurrentCaseData().windowStartY),0);
+            await expect(page.locator('#right-roll-actions .workflow-primary:visible')).toHaveCount(1);
+            await expect(page.locator('#btn-confirm-station-cut')).toHaveClass(/workflow-primary/);
+            await expect(page.locator('[data-workflow-stage="3"]')).toHaveAttribute('aria-current','step');
+            fs.mkdirSync('target/workflow-guide',{recursive:true});
+            for(const width of [1366,1920]){await page.setViewportSize({width,height:width===1366?768:1080});
+                assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);
+                await expect(page.locator('#btn-confirm-station-cut')).toBeInViewport();
+                await page.screenshot({path:'target/workflow-guide/ready-'+width+'.png'});}
+        });
+        await run('incomplete input immediately changes readiness and blocks direct solve without saving',async page=>{
+            await loadPlan(page);await page.locator('[data-workflow-stage="0"]').click();
+            await page.locator('.dem-count').fill('1.5');
+            await expect(page.locator('#station-action-hint')).toContainText('正整数');
+            await expect(page.locator('#btn-trigger-solve-station')).toBeDisabled();await expect(page.locator('#btn-confirm-station-cut')).toBeDisabled();
+            const writes=requests.filter(r=>r.startsWith('POST')).length;
+            await page.evaluate(()=>window.camApp.triggerSolve());assert.equal(requests.filter(r=>r.startsWith('POST')).length,writes);
+            await page.locator('#btn-workflow-next').click();await expect(page.locator('.dem-count')).toBeFocused();
+            await page.locator('.dem-count').fill('3');await page.locator('.dem-count').press('Tab');
+            await expect(page.locator('#btn-trigger-solve-station')).toBeEnabled();
+            await expect(page.locator('#right-roll-actions .workflow-primary:visible')).toHaveCount(1);
+        });
+        await run('manual changes move the primary action to validation and back to reporting',async page=>{
+            await loadPlan(page);await page.keyboard.press('ArrowDown');
+            await expect(page.locator('#btn-validate-adjustment')).toHaveClass(/workflow-primary/);
+            await expect(page.locator('[data-workflow-stage="2"]')).toHaveAttribute('aria-current','step');
+            await expect(page.locator('#right-roll-actions .workflow-primary:visible')).toHaveCount(1);
+            await page.locator('#btn-undo-plan').click();await expect(page.locator('#btn-confirm-station-cut')).toHaveClass(/workflow-primary/);
+        });
+        await run('busy solve disables duplicate actions and completion offers report history',async page=>{
+            await loadPlan(page);let release;solveWait=new Promise(resolve=>release=resolve);
+            await page.locator('#btn-trigger-solve-station').click();
+            try {await expect(page.locator('#workflow-current')).toHaveText('正在生成方案…');await expect(page.locator('#btn-trigger-solve-station')).toBeDisabled();
+                await page.evaluate(()=>window.camApp.triggerSolve());assert.equal(requests.filter(r=>r==='POST /api/solve').length,1);
+            }finally{release();}
+            await expect(page.locator('#btn-confirm-station-cut')).toBeEnabled();acceptReport=true;
+            await page.locator('#btn-confirm-station-cut').click();await page.locator('#report-confirm-button').click();
+            await expect(page.locator('#cut-report-modal')).not.toBeVisible();await expect(page.locator('#workflow-current')).toHaveText('本次需求已完成');
+            await expect(page.locator('#btn-trigger-solve-station')).toBeHidden();await expect(page.locator('#btn-workflow-next')).toHaveText('查看报工记录');
+            const writes=requests.filter(r=>r.startsWith('POST')).length;await page.locator('#btn-workflow-next').click();
+            await expect(page.locator('#task-picker-title')).toContainText('报工记录');assert.equal(requests.filter(r=>r.startsWith('POST')).length,writes);
+        });
     } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
-    console.log(JSON.stringify({discovered:10,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
+    console.log(JSON.stringify({discovered:15,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
 })().catch(error=>{console.error(error);server.close();process.exitCode=1;});

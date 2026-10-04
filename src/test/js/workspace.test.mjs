@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 
 globalThis.window = { addEventListener() {} };
 const elements = new Map();
-globalThis.document = { getElementById: id => elements.get(id) || null };
+globalThis.document = { getElementById: id => elements.get(id) || null, querySelectorAll: () => [] };
 const { toggleSectionCollapse, switchRightPanelTab } = await import('../../main/resources/static/js/plugins/layout/splitter.js');
 const { selectRemnant } = await import('../../main/resources/static/js/plugins/cad/cad-remnant-highlight.js');
 const { state } = await import('../../main/resources/static/js/core/state.js');

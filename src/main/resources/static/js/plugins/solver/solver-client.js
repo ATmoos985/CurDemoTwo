@@ -1,6 +1,7 @@
 import { saveCurrentTask, refreshTaskProgress, escapeText } from './task-workspace.js';
 import { createPlanHistory, planScene } from './plan-editing.js';
 import { layoutMetrics, materialSummary } from './material-accounting.js';
+import { renderWorkflowGuide } from './workflow-guide.js';
 import { classifyReport, applyReportReceipt } from './report-outcomes.js';
 import { renderReportPieces, readReportPieces, syncReportRemnants, readReportRemnants, reportPieceError } from './report-editor.js';
 /**
@@ -145,34 +146,7 @@ export function updateUIInfo() {
         ['lbl-total-area-title',metrics.actual ? '实切用料面积' : '预计用料面积'],
         ['metrics-note',metrics.actual ? '按报工回执计算；回收料头单独记账。' : sheet ? '裁片面积 ÷ 整块料头面积；报工才核销。' : '裁片面积 ÷ 预计用料面积；预览不扣库存。']
     ]) { const element = document.getElementById(id); if (element) element.textContent = text; }
-    const ready = canUseCurrentPlan();
-    const editable = !!state.pendingPlan?.result?.planId && state.pendingPlan.context === solveContext();
-    const edited = editable && !ready;
-    const editPanel = document.getElementById('plan-edit-controls');
-    if (editPanel) editPanel.hidden = !editable;
-    const validateButton = document.getElementById('btn-validate-adjustment');
-    if (validateButton) { validateButton.disabled = !edited || validatingAdjustment; validateButton.textContent = validatingAdjustment ? '正在校验…' : '校验并保存调整版'; }
-    for (const [id, enabled] of [['btn-undo-plan',state.pendingPlan?.history?.canUndo],['btn-redo-plan',state.pendingPlan?.history?.canRedo]]) {
-        const button = document.getElementById(id); if (button) button.disabled = !enabled || validatingAdjustment;
-    }
-    const editMessage = document.getElementById('plan-edit-message');
-    if (editMessage) editMessage.textContent = editable ? state.pendingPlan.adjustmentError || (edited ? '手动调整待校验；刀序与候选余料将重新计算。' : `方案版本 ${state.pendingPlan.version || 1} · 已校验`) : '';
-    const reportButton = document.getElementById('btn-confirm-station-cut');
-    if (reportButton) {
-        reportButton.disabled = !ready;
-        reportButton.classList.toggle('report-ready', ready);
-        reportButton.textContent = ready ? `报工保存 · ${state.pendingPlan.result.pieces.length} 件` : '报工保存';
-    }
-    const solveButton = document.getElementById('btn-trigger-solve-station');
-    if (solveButton) { solveButton.disabled = data.materialAvailable === false; solveButton.classList.toggle('plan-ready', ready); solveButton.textContent = ready ? '重新排料' : '生成排料方案'; }
-    const hint = document.getElementById('station-action-hint');
-    if (hint) hint.textContent = edited ? '请先校验调整版，成功后再打印和报工。' : ready ? '本工位尚未报工。实切后点击“报工保存”，确认后自动接续。' :
-        data.lastReceipt ? '上一工位已报工保存。可继续生成本工位方案。' : '先生成方案，再核对实切并报工保存。';
-    const reportEl = document.getElementById("lbl-report-status");
-    if (reportEl) {
-        reportEl.innerText = data.lastReceipt ? `已报工保存 · ${data.lastReceipt.finishedPieceCount} 件` :
-            (edited ? '手动调整 · 待校验' : ready ? '待报工 · 尚未保存产出' : (hasStationPlan ? '预览已变化 · 请重新排料' : '当前工位待排料'));
-    }
+    updateWorkflowControls();
 
     const sum = (metrics.pieceArea || 0) + (metrics.remArea || 0) + (metrics.wasteArea || 0);
     const diff = Math.abs(sum - (metrics.totalArea || 0));
@@ -311,6 +285,26 @@ export function loadCase(id) {
     updateUIInfo();
 }
 
+export function updateWorkflowControls() {
+    const ready = canUseCurrentPlan();
+    const editable = !!state.pendingPlan?.result?.planId && state.pendingPlan.context === solveContext();
+    const edited = editable && !ready;
+    const editPanel = document.getElementById('plan-edit-controls');
+    if (editPanel) editPanel.hidden = !editable;
+    const validateButton = document.getElementById('btn-validate-adjustment');
+    if (validateButton) { validateButton.disabled = !edited || validatingAdjustment; validateButton.textContent = validatingAdjustment ? '正在校验…' : '校验并保存调整版'; }
+    for (const [id, enabled] of [['btn-undo-plan',state.pendingPlan?.history?.canUndo],['btn-redo-plan',state.pendingPlan?.history?.canRedo]]) {
+        const button = document.getElementById(id); if (button) button.disabled = !enabled || validatingAdjustment;
+    }
+    const editMessage = document.getElementById('plan-edit-message');
+    if (editMessage) editMessage.textContent = editable ? state.pendingPlan.adjustmentError || (edited ? '手动调整待校验；刀序与候选余料将重新计算。' : `方案版本 ${state.pendingPlan.version || 1} · 已校验`) : '';
+    const flow = renderWorkflowGuide({ready, edited, busy:solving ? '正在生成方案…' : validatingAdjustment ? '正在校验调整…' : reporting ? '正在保存报工…' : ''});
+    const data = state.getCurrentCaseData(), reportEl = document.getElementById('lbl-report-status');
+    if (reportEl) reportEl.textContent = materialSummary(data, state.currentCutMode === 'remnant').actual ? '已报工保存 · ' + data.lastReceipt.finishedPieceCount + ' 件' :
+        edited ? '手动调整 · 待校验' : ready ? '待报工 · 尚未保存产出' : flow.done || flow.stage < 2 ? flow.title : '当前工位待排料';
+    return {...flow, ready, edited};
+}
+
 let solving = false;
 function planGeometry() {
     const {pieces, remnants, cuts} = state.getCurrentCaseData();
@@ -401,13 +395,14 @@ export function restoreSavedPlan(saved) {
 }
 export async function triggerSolve() {
     if (solving) return;
+    const flow = updateWorkflowControls();
+    if (!flow.canSolve) { showToast(flow.hint, 'warning'); return; }
     solving = true;
-    const button = document.getElementById('btn-trigger-solve-station');
-    button.disabled = true;
     state.pendingPlan = null;
+    updateWorkflowControls();
     try { await runSolve(); }
     catch (error) { showToast(error.message, 'error'); }
-    finally { solving = false; button.disabled = false; }
+    finally { solving = false; updateWorkflowControls(); }
 }
 async function runSolve() {
     const task = await saveCurrentTask();
@@ -854,7 +849,7 @@ export async function confirmCutReport() {
         }
     } catch (error) {
         document.getElementById("report-error").textContent = reported ? "报工已完成，页面刷新失败，请重新打开该任务查看结果" : error.message;
-    } finally { reporting = false; document.getElementById("report-confirm-button").disabled = false; }
+    } finally { reporting = false; document.getElementById("report-confirm-button").disabled = false; updateWorkflowControls(); }
 }
 
 export function exportCutResult() {

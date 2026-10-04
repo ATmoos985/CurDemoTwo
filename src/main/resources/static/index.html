@@ -66,7 +66,7 @@
         </div>
     </header>
 
-    <nav class="task-bar" aria-label="切割任务流程"><div class="task-toolbar"><button class="tool-btn" onclick="newCuttingTask()">新建任务</button><button class="tool-btn" onclick="openTaskList()">打开任务</button><button class="tool-btn" onclick="saveTaskFromUI()">保存需求</button><span id="task-state" role="status">未保存</span><button class="tool-btn" id="btn-local-drafts" onclick="openLocalDrafts()">本机草稿 0</button></div><ol><li>收集需求</li><li>匹配材料</li><li>排料预览</li><li>报工回收</li></ol><div class="task-toolbar"><button class="tool-btn" onclick="openTaskPlans()">方案记录</button><button class="tool-btn" onclick="openTaskReports()">报工记录 <span id="task-report-count">0</span></button></div></nav>
+    <nav class="task-bar" aria-label="切割任务流程"><div class="task-toolbar"><button class="tool-btn" onclick="newCuttingTask()">新建任务</button><button class="tool-btn" onclick="openTaskList()">打开任务</button><button class="tool-btn" onclick="saveTaskFromUI()">保存需求</button><span id="task-state" role="status">未保存</span><button class="tool-btn" id="btn-local-drafts" onclick="openLocalDrafts()">本机草稿 0</button></div><ol class="workflow-stages" aria-label="查看作业阶段"><li><button type="button" data-workflow-stage="0"><span class="stage-marker">1</span>需求</button></li><li><button type="button" data-workflow-stage="1"><span class="stage-marker">2</span>材料</button></li><li><button type="button" data-workflow-stage="2"><span class="stage-marker">3</span>排料</button></li><li><button type="button" data-workflow-stage="3"><span class="stage-marker">4</span>报工</button></li></ol><div class="task-toolbar"><button class="tool-btn" onclick="openTaskPlans()">方案记录</button><button class="tool-btn" onclick="openTaskReports()">报工记录 <span id="task-report-count">0</span></button></div></nav>
     <!-- 主视窗工作区 -->
     <main>
         <!-- 左侧控制面板：清晰分离母卷排产与料头精益切割两大工位 -->
@@ -430,19 +430,13 @@
             <div class="sidebar-pinned-footer" id="right-sidebar-actions-footer" style="border-top: 1px solid var(--panel-border); background: var(--panel-bg); flex-shrink: 0;">
                 <!-- 母卷开卷工位排料搭切执行控制 -->
                 <div id="right-roll-actions" class="panel-section action-footer-section" style="padding: 10px 14px 12px 14px;">
+                    <strong id="workflow-current" role="status">完善需求</strong>
                     <p id="station-action-hint" class="station-action-hint" role="status">先生成方案，再核对实切并报工保存。</p>
+                    <button id="btn-workflow-next" class="tool-btn" type="button">完善需求信息</button>
                     <div id="plan-edit-controls" class="plan-edit-controls" hidden>
                         <p id="plan-edit-message" role="status"></p>
                         <div class="plan-edit-actions"><button id="btn-undo-plan" class="tool-btn" onclick="undoPlanEdit()" title="撤销本次方案的上一步调整 (Ctrl+Z)">撤销调整</button><button id="btn-redo-plan" class="tool-btn" onclick="redoPlanEdit()" title="重做调整 (Ctrl+Y)">重做</button></div>
                         <button id="btn-validate-adjustment" class="tool-btn active" onclick="validatePlanAdjustment()">校验并保存调整版</button>
-                    </div>
-                    <div class="station-navigation" style="display: flex; gap: 6px; margin-bottom: 6px;">
-                        <button class="tool-btn" onclick="advanceBed(-1)" title="按当前台面长度回退一个工位">
-                            ← 上一工位
-                        </button>
-                        <button class="tool-btn" onclick="advanceBed(1)" title="按当前台面长度前进一个工位">
-                            下一工位 →
-                        </button>
                     </div>
                     <button class="big-solve-btn roll" id="btn-trigger-solve-station" onclick="triggerSolve()" title="在当前红框工位排料并保留其余工位已切成果">
                         生成排料方案
@@ -451,9 +445,7 @@
 
                         报工保存
                     </button>
-                    <button class="tool-btn" id="btn-smart-advance" onclick="smartAdvanceBed()" title="自动计算当前已切末端，一键吸附接刀，实现 0 间隙连续搭切">
-                        下一待切工位 →
-                    </button>
+                    <details id="station-navigation-group" class="detail-disclosure station-navigation"><summary>浏览工位</summary><p class="muted">只移动查看位置；待报工方案须先处理。</p><div class="station-browse-actions"><button class="tool-btn" onclick="advanceBed(-1)">← 查看上一工位</button><button class="tool-btn" onclick="advanceBed(1)">查看下一工位 →</button><button class="tool-btn" id="btn-smart-advance" onclick="smartAdvanceBed()">回到待切位置</button></div></details>
                     <details class="detail-disclosure reset-actions"><summary>清理排料</summary><div style="display: flex; gap: 6px; margin-top: 6px;">
                         <button class="tool-btn" onclick="clearStationCuts()" title="仅清除当前红框范围内的裁片与切刀">
                             清除本工位排料

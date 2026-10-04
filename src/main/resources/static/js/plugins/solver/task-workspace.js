@@ -4,7 +4,7 @@ import { renderDemandsUI, getDemandsFromUI, updateDemandCompletionFromPieces } f
 import { switchCutMode } from '../remnant/remnant-shelf.js';
 import { renderScene, resetToBedView } from '../cad/cad-renderer.js';
 import { renderRadar } from '../radar/radar-scrubber.js';
-import { updateUIInfo, restoreSavedPlan } from './solver-client.js';
+import { updateUIInfo, updateWorkflowControls, restoreSavedPlan } from './solver-client.js';
 import { showToast, confirmAction } from '../../core/toast.js';
 import { syncMaterialOptions } from '../material/material-options.js';
 import { createDraftStore } from './task-drafts.js';
@@ -180,6 +180,7 @@ export function taskInputChanged() {
     el('task-state').textContent = '需求已修改 · 待保存';
     el('task-details-title').textContent = el('task-name').value || '任务信息';
     persistTaskDraft();
+    updateWorkflowControls();
 }
 
 export function startTaskDraft(name = '本次切割') {
@@ -278,6 +279,7 @@ export async function refreshTaskProgress() {
     updateDemandCompletionFromPieces(data);
     renderDemandsUI(data.demands);
     el('task-report-count').textContent = detail.reports.length;
+    updateWorkflowControls();
 }
 
 function picker(title, content) {
@@ -465,6 +467,7 @@ export async function initTaskWorkspace() {
     }
     const selector = '#task-name, #task-material, #task-external-ref, #demands-container input, ' + processFields.map(id => '#' + id).join(', ');
     document.addEventListener('input', event => { if (event.target.matches(selector)) taskInputChanged(); });
+    document.addEventListener('change', event => { if (event.target.closest('#sidebar-left')) updateWorkflowControls(); });
     window.addEventListener('beforeunload', event => {
         if (draftDirty && !persistTaskDraft()) { event.preventDefault(); event.returnValue = ''; }
     });
