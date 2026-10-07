@@ -16,6 +16,7 @@ import java.util.*;
  */
 @Service
 public class CutBoundaryCompletionService {
+    private static final double EPS = .000001;
 
     public List<CutStep> ensureCompleteSeparation(
             List<PlacedPiece> pieces,
@@ -34,6 +35,7 @@ public class CutBoundaryCompletionService {
                 result.add(cs);
             }
         }
+        int patchStage = result.stream().map(CutStep::getStage).filter(Objects::nonNull).max(Integer::compareTo).orElse(0) + 1;
 
         // 1. 收集所有矩形 (裁片与料头)
         List<double[]> rects = new ArrayList<>(); // [x, y, w, h]
@@ -61,20 +63,20 @@ public class CutBoundaryCompletionService {
             double rh = r[3];
 
             // 顶边 Y = ry (若在母卷内部)
-            if (ry > 0.5 && ry < rollL - 0.5) {
+            if (ry > EPS && ry < rollL - EPS) {
                 addNeededSegment(neededHoriz, ry, rx, rx + rw);
             }
             // 底边 Y = ry + rh
             // 在母卷长卷模式下，若底边到达 rollL，则是工位下料横切截断刀；在料头模式下，到达 rollL 是单板物理尽头无需下刀
-            if (ry + rh > 0.5 && (ry + rh < rollL - 0.5 || (!isRemnantFeed && Math.abs(ry + rh - rollL) <= 0.5))) {
+            if (ry + rh > EPS && (ry + rh < rollL - EPS || (!isRemnantFeed && Math.abs(ry + rh - rollL) <= EPS))) {
                 addNeededSegment(neededHoriz, ry + rh, rx, rx + rw);
             }
             // 左边 X = rx (若在母卷内部)
-            if (rx > 0.5 && rx < rollW - 0.5) {
+            if (rx > EPS && rx < rollW - EPS) {
                 addNeededSegment(neededVert, rx, ry, ry + rh);
             }
             // 右边 X = rx + rw (若在母卷内部)
-            if (rx + rw > 0.5 && rx + rw < rollW - 0.5) {
+            if (rx + rw > EPS && rx + rw < rollW - EPS) {
                 addNeededSegment(neededVert, rx + rw, ry, ry + rh);
             }
         }
@@ -99,9 +101,10 @@ public class CutBoundaryCompletionService {
 
             List<double[]> missing = subtractIntervals(mergedNeeded, covered);
             for (double[] interval : missing) {
-                if (interval[1] - interval[0] >= 5.0) { // 忽略微小余量
-                    String desc = String.format("第 2 阶段横切补刀，切断物理边界 [Y=%.0f mm, X=%.0f~%.0f mm]", y, interval[0], interval[1]);
+                if (interval[1] - interval[0] > EPS) {
+                    String desc = String.format("横切补刀，切断物理边界 [Y=%.1f mm, X=%.1f~%.1f mm]", y, interval[0], interval[1]);
                     CutStep cutPatch = new CutStep(result.size() + 1, "横切", y, interval[0], interval[1], desc);
+                    cutPatch.setStage(patchStage);
                     result.add(cutPatch);
                     addSegment(existingHoriz, y, interval[0], interval[1]);
                 }
@@ -116,9 +119,10 @@ public class CutBoundaryCompletionService {
 
             List<double[]> missing = subtractIntervals(mergedNeeded, covered);
             for (double[] interval : missing) {
-                if (interval[1] - interval[0] >= 5.0) {
-                    String desc = String.format("第 3 阶段纵切补刀，切断物理边界 [X=%.0f mm, Y=%.0f~%.0f mm]", x, interval[0], interval[1]);
+                if (interval[1] - interval[0] > EPS) {
+                    String desc = String.format("纵切补刀，切断物理边界 [X=%.1f mm, Y=%.1f~%.1f mm]", x, interval[0], interval[1]);
                     CutStep cutPatch = new CutStep(result.size() + 1, "纵切", x, interval[0], interval[1], desc);
+                    cutPatch.setStage(patchStage + 1);
                     result.add(cutPatch);
                     addSegment(existingVert, x, interval[0], interval[1]);
                 }
@@ -131,16 +135,16 @@ public class CutBoundaryCompletionService {
 
     private boolean isOuterBoundaryCut(CutStep cs, double rollW, double rollL, boolean isRemnantFeed) {
         if ("横切".equals(cs.getType())) {
-            if (cs.getPos() <= 0.5) return true;
-            if (isRemnantFeed && Math.abs(cs.getPos() - rollL) <= 0.5) return true;
+            if (cs.getPos() <= EPS) return true;
+            if (isRemnantFeed && Math.abs(cs.getPos() - rollL) <= EPS) return true;
             return false;
         } else {
-            return cs.getPos() <= 0.5 || Math.abs(cs.getPos() - rollW) <= 0.5;
+            return cs.getPos() <= EPS || Math.abs(cs.getPos() - rollW) <= EPS;
         }
     }
 
     private void addNeededSegment(Map<Long, List<double[]>> map, double pos, double start, double end) {
-        if (end - start < 1.0) return;
+        if (end - start <= EPS) return;
         addSegment(map, pos, start, end);
     }
 
@@ -159,7 +163,7 @@ public class CutBoundaryCompletionService {
 
         for (int i = 1; i < list.size(); i++) {
             double[] next = list.get(i);
-            if (next[0] <= cur[1] + 1.0) { // 容许 1mm 邻接合并
+            if (next[0] <= cur[1] + EPS) {
                 cur[1] = Math.max(cur[1], next[1]);
             } else {
                 merged.add(cur);
@@ -182,16 +186,16 @@ public class CutBoundaryCompletionService {
             double curEnd = n[1];
 
             for (double[] c : covMerged) {
-                if (c[1] <= curStart + 0.5) continue;
-                if (c[0] >= curEnd - 0.5) break;
+                if (c[1] <= curStart + EPS) continue;
+                if (c[0] >= curEnd - EPS) break;
 
-                if (c[0] > curStart + 0.5) {
+                if (c[0] > curStart + EPS) {
                     result.add(new double[]{curStart, Math.min(curEnd, c[0])});
                 }
                 curStart = Math.max(curStart, c[1]);
-                if (curStart >= curEnd - 0.5) break;
+                if (curStart >= curEnd - EPS) break;
             }
-            if (curStart < curEnd - 0.5) {
+            if (curStart < curEnd - EPS) {
                 result.add(new double[]{curStart, curEnd});
             }
         }
@@ -203,8 +207,11 @@ public class CutBoundaryCompletionService {
      */
     private List<CutStep> consolidateAndReorder(List<CutStep> cuts) {
         Map<String, List<CutStep>> grouped = new LinkedHashMap<>();
+        int legacyOrder = 0;
         for (CutStep cs : cuts) {
-            String key = cs.getType() + "_" + Math.round(cs.getPos() * 10.0);
+            // Co-linear cuts at different stages can depend on different parent regions.
+            String key = cs.getType() + "_" + Math.round(cs.getPos() * 10.0) + "_"
+                    + (cs.getStage() == null ? "legacy" + legacyOrder++ : cs.getStage());
             grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(cs);
         }
 
@@ -232,18 +239,14 @@ public class CutBoundaryCompletionService {
                         m[1],
                         template.getDesc()
                 );
+                cs.setStage(template.getStage());
                 consolidated.add(cs);
             }
         }
 
-        // 阶段排序：贯穿整幅的大刀在前，小刀在后
-        consolidated.sort((a, b) -> {
-            boolean aIsFull = "横切".equals(a.getType()) && (Math.abs(a.getEnd() - a.getStart()) > 1500);
-            boolean bIsFull = "横切".equals(b.getType()) && (Math.abs(b.getEnd() - b.getStart()) > 1500);
-            if (aIsFull != bIsFull) return aIsFull ? -1 : 1;
-            // 阶段排序
-            return Double.compare(a.getPos(), b.getPos());
-        });
+        // Untagged legacy cuts retain their supplied order; known stages keep parent cuts first.
+        if (consolidated.stream().allMatch(c -> c.getStage() != null))
+            consolidated.sort(Comparator.comparingInt(CutStep::getStage));
 
         for (int i = 0; i < consolidated.size(); i++) {
             consolidated.get(i).setStep(i + 1);

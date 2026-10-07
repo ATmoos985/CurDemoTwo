@@ -107,4 +107,32 @@ class ManualPlanAdjustmentTests {
         assertThrows(IllegalArgumentException.class,()->workflow.adjust(original.getPlanId(),adjustment(original)));
         assertEquals("PENDING",inventory.getPlan(original.getPlanId()).status());
     }
+
+    @Test void toolpathOnlyVersionSurvivesReloadAndRestoreWithoutChangingLayoutOrStock() {
+        Path file=temp.resolve("toolpaths.json");var inventory=new RemnantService(file.toString());
+        var workflow=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),inventory);
+        var original=workflow.solve(request());
+        var json=tools.jackson.databind.json.JsonMapper.builder().build();
+        String baseline=json.writeValueAsString(original);
+        double stock=inventory.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength();
+        var reversed=original.getCuts().stream().map(c->{
+            var copy=json.convertValue(c,CutStep.class);copy.setStartX(c.getEndX());copy.setStartY(c.getEndY());
+            copy.setEndX(c.getStartX());copy.setEndY(c.getStartY());return copy;
+        }).toList();
+        var input=new PlanAdjustment(UUID.randomUUID().toString(),null,reversed);
+        var changed=workflow.adjust(original.getPlanId(),input);
+        assertEquals(2,changed.version());assertEquals(baseline,json.writeValueAsString(original));
+        assertEquals(json.writeValueAsString(original.getPieces()),json.writeValueAsString(changed.result().getPieces()));
+        assertEquals(json.writeValueAsString(original.getRemnants()),json.writeValueAsString(changed.result().getRemnants()));
+        assertEquals(stock,inventory.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength());
+        assertEquals(changed.id(),workflow.adjust(original.getPlanId(),input).id());
+        var reopened=new RemnantService(file.toString());
+        assertEquals(json.writeValueAsString(changed.result().getCuts()),json.writeValueAsString(reopened.getPlan(changed.id()).result().getCuts()));
+        var restored=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),reopened)
+                .adjust(changed.id(),new PlanAdjustment(UUID.randomUUID().toString(),null,original.getCuts()));
+        assertEquals(3,restored.version());assertEquals(original.getCuts().get(0).getStartX(),restored.result().getCuts().get(0).getStartX());
+        var receipt=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),reopened)
+                .confirm(new CutReport(restored.id(),original.getDeductLen(),2,restored.result().getRemnants(),"A"));
+        assertEquals(2,receipt.get("finishedPieceCount"));
+    }
 }

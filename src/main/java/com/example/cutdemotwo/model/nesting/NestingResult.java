@@ -13,7 +13,12 @@ public record NestingResult(
                             NestingProblem.Shape shape, int rotationDegrees) {}
     public record Leftover(String id, double x, double y, NestingProblem.Shape shape, boolean hasDefect) {}
     public record Cut(int sequence, String kind, double startX, double startY, double endX, double endY,
-                      double airDistanceMm, String description) {}
+                      double airDistanceMm, String description, Integer stage) {
+        public Cut(int sequence, String kind, double startX, double startY, double endX, double endY,
+                   double airDistanceMm, String description) {
+            this(sequence, kind, startX, startY, endX, endY, airDistanceMm, description, null);
+        }
+    }
     /** Closed part boundaries in source coordinates; not an executable or ordered machine toolpath. */
     public record Contour(int placementId, List<NestingProblem.Point> vertices, boolean closed) {}
     public record Fulfillment(int demandId, int requested, int placed, int unplaced, String reason) {}

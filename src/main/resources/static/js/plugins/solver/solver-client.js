@@ -360,6 +360,40 @@ function applyPlanHistory(direction) {
     recalculateRollStats(state.getCurrentCaseData()); updateUIInfo(); renderScene(); renderToolpathUI();
 }
 let validatingAdjustment = false;
+function offsetCuts(cuts, offset) {
+    return (cuts || []).map(c => ({...c,
+        pos:c.type === '横切' ? c.pos + offset : c.pos,
+        start:c.type === '横切' ? c.start : c.start + offset,
+        end:c.type === '横切' ? c.end : c.end + offset,
+        ...(c.startY == null ? {} : {startY:c.startY + offset}),
+        ...(c.endY == null ? {} : {endY:c.endY + offset})}));
+}
+
+export async function saveToolpathAdjustment(cuts) {
+    if (validatingAdjustment || !canUseCurrentPlan()) throw new Error('请先生成方案或校验裁片调整，再调整刀路');
+    const pending = state.pendingPlan, geometry = planGeometry();
+    const localCuts = offsetCuts(cuts, -pending.windowStartY);
+    const signature = JSON.stringify(localCuts);
+    if (pending.toolpathOperation?.signature !== signature)
+        pending.toolpathOperation = {id:crypto.randomUUID(), signature};
+    validatingAdjustment = true;
+    const wasInert = document.body.inert; document.body.inert = true;
+    try {
+        const saved = await requestJSON('/api/cutting/plans/' + encodeURIComponent(pending.result.planId) + '/adjust',
+            {adjustmentId:pending.toolpathOperation.id, cuts:localCuts});
+        if (state.pendingPlan !== pending || pending.context !== solveContext() || geometry !== planGeometry()) return false;
+        if (saved.result?.planId !== pending.toolpathOperation.id || !Array.isArray(saved.result.cuts))
+            throw new Error('刀路保存响应不完整，请重试');
+        const data = state.getCurrentCaseData();
+        data.cuts = offsetCuts(saved.result.cuts, pending.windowStartY);
+        data.pieces = data.pieces.map(p => p.planId === pending.result.planId ? {...p, planId:saved.id} : p);
+        state.pendingPlan = {...pending, result:saved.result, version:saved.version,
+            geometry:planGeometry(), history:createPlanHistory(planScene(data)), toolpathOperation:null,
+            adjustmentId:null, adjustmentError:''};
+        return true;
+    } finally { validatingAdjustment = false; document.body.inert = wasInert; updateUIInfo(); }
+}
+
 export async function validatePlanAdjustment() {
     const pending = state.pendingPlan;
     if (validatingAdjustment || !pending || !currentPlanContext()) return;
@@ -399,10 +433,7 @@ export function restoreSavedPlan(saved) {
         allowLongitudinal:request.allowLongitudinal, lastReceipt:null});
     data.pieces = (result.pieces || []).map(p => ({...p, sourcePieceId:p.id, planId:result.planId, y:p.y + offset}));
     data.remnants = (result.remnants || []).map(r => ({...r, y:r.y + offset}));
-    data.cuts = (result.cuts || []).map(c => ({...c, pos:c.type === '横切' ? c.pos + offset : c.pos,
-        start:c.type === '横切' ? c.start : c.start + offset, end:c.type === '横切' ? c.end : c.end + offset,
-        ...(c.startY === undefined ? {} : {startY:c.startY + offset}),
-        ...(c.endY === undefined ? {} : {endY:c.endY + offset})}));
+    data.cuts = offsetCuts(result.cuts, offset);
     data.cutIntervals = [{start:offset, end:offset + request.rollL}];
     data.engine = result.engine;
     recalculateRollStats(data);
@@ -569,18 +600,7 @@ async function runSolve(operation) {
                     data.pieces = [...retainedPieces, ...newPieces].sort((a, b) => a.y - b.y || a.x - b.x);
 
                     // CNC 数控切刀严格归属于当前工位切削循环，严禁拼接或保留历史工位切刀
-                    const newCuts = (result.cuts || []).map((c, idx) => {
-                        const isHoriz = (c.type === "横切");
-                        return {
-                            ...c,
-                            step: idx + 1,
-                            pos: isHoriz ? (c.pos + winStartY) : c.pos,
-                            start: !isHoriz ? (c.start + winStartY) : c.start,
-                            end: !isHoriz ? (c.end + winStartY) : c.end,
-                            ...(c.startY === undefined ? {} : {startY:c.startY + winStartY}),
-                            ...(c.endY === undefined ? {} : {endY:c.endY + winStartY})
-                        };
-                    });
+                    const newCuts = offsetCuts(result.cuts, winStartY);
                     data.cuts = newCuts;
 
                     const currentStationIdx = Math.round(winStartY / Math.max(100, bedL || 5000)) + 1;

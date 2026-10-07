@@ -39,8 +39,21 @@ public class CuttingWorkflowService {
 
     public CuttingPlan adjust(String id, PlanAdjustment adjustment) {
         if (adjustment == null || adjustment.adjustmentId() == null || !adjustment.adjustmentId().matches("[a-zA-Z0-9-]{16,80}")
-                || adjustment.pieces() == null) throw new IllegalArgumentException("调整请求缺少有效操作编号或裁片位置");
+                || (adjustment.pieces() == null) == (adjustment.cuts() == null))
+            throw new IllegalArgumentException("调整请求须提供有效操作编号，以及裁片位置或刀路其中一项");
         CuttingPlan original = inventory.getPlan(id);
+        if (adjustment.cuts() != null) {
+            var request = original.request();
+            double homeX = request.getCutOrigin().startsWith("right") ? request.getRollW() : 0;
+            double homeY = request.getCutOrigin().endsWith("bottom") ? request.getRollL() : 0;
+            var cuts = new com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService().validateReorderedCuts(
+                    original.result().getCuts(), adjustment.cuts(), homeX, homeY, request.isAllowLongitudinal());
+            // Copy before changing a saved result: rejected persistence must leave the original intact.
+            var result = tools.jackson.databind.json.JsonMapper.builder().build().convertValue(original.result(), SolveResponse.class);
+            result.setCuts(cuts);
+            result.setPlanId(adjustment.adjustmentId());
+            return inventory.rememberAdjustment(id, adjustment.adjustmentId(), result);
+        }
         var pieces = new ArrayList<PlacedPiece>();
         Set<Integer> seen = new HashSet<>();
         for (var position : adjustment.pieces()) {

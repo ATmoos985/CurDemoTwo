@@ -83,6 +83,7 @@ public final class FabricSolveAdapter {
                     horizontal ? Math.max(c.startX(), c.endX()) : Math.max(c.startY(), c.endY()), c.description());
             step.setStartX(c.startX()); step.setStartY(c.startY()); step.setEndX(c.endX()); step.setEndY(c.endY());
             step.setAirDistance(c.airDistanceMm());
+            step.setStage(c.stage());
             return step;
         }).toList());
         response.setDeductLen("remnant".equalsIgnoreCase(request.getFeedPortType()) ? 0 : result.metrics().suggestedFeedLengthMm());

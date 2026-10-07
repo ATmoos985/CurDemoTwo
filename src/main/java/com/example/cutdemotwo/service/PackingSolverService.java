@@ -338,6 +338,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                             rawCutSteps.size() + 1, "横切", physPos, Math.min(physStart, physEnd), Math.max(physStart, physEnd),
                             String.format("第 %d 阶段横切，裁切范围 [%.0f × %.0f mm]", cutLvl, maxX - minX, p.h)
                     ));
+                    rawCutSteps.get(rawCutSteps.size() - 1).setStage(cutLvl);
                 }
             } else if (distinctX.size() > 1) {
                 // 垂直纵切
@@ -360,6 +361,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                             rawCutSteps.size() + 1, "纵切", physPos, Math.min(physStart, physEnd), Math.max(physStart, physEnd),
                             String.format("第 %d 阶段纵切，裁切范围 [%.0f × %.0f mm]", cutLvl, p.w, maxY - minY)
                     ));
+                    rawCutSteps.get(rawCutSteps.size() - 1).setStage(cutLvl);
                 }
             }
         }

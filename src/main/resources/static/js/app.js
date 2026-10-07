@@ -310,13 +310,13 @@ export function updatePresetTriggerLabel(caseId) {
 }
 
 bus.on('toolpath:optimized', () => {
-    recordPlanEdit();
+    resetContinuousSim();
     renderScene();
     renderToolpathUI();
 });
 
 bus.on('toolpath:restored', () => {
-    recordPlanEdit();
+    resetContinuousSim();
     renderScene();
     renderToolpathUI();
 });

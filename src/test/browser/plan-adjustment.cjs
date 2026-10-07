@@ -48,6 +48,11 @@ const server = createServer(async (req,res) => {
         if (url.pathname.endsWith('/adjust')) {
             let raw=''; for await(const chunk of req) raw+=chunk; const body=JSON.parse(raw); adjustmentBodies.push(body);
             if(failAdjustment)return json({message:'当前调整不能完成贯通切割'},400);
+            if(body.cuts){
+                const source=storedPlans.get(url.pathname.split('/').at(-2));
+                const adjusted={...structuredClone(source),id:body.adjustmentId,parentPlanId:source.id,version:source.version+1,result:{...structuredClone(source.result),planId:body.adjustmentId,cuts:body.cuts}};
+                source.status='CANCELLED';storedPlans.set(adjusted.id,adjusted);return json(adjusted);
+            }
             const pieces=body.pieces.map(p=>({...planResult.pieces.find(s=>s.id===p.id),...p}));
             const adjusted={id:body.adjustmentId,status:'PENDING',createdAt:'2026-10-04T12:00:00',version:2,parentPlanId:planResult.planId,request:savedPlanRequest,result:{...planResult,planId:body.adjustmentId,pieces,remnants:[],cuts:pieces.map((p,i)=>({step:i+1,type:'横切',pos:p.y+p.l,start:0,end:2000,desc:'调整版'})),deductLen:Math.max(...pieces.map(p=>p.y+p.l))}};storedPlans.set(adjusted.id,adjusted);return json(adjusted);
         }
@@ -94,7 +99,7 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('body')).not.toHaveAttribute('inert','');
             await verify(page);
             assert.deepEqual(errors, []);
-            assert.ok(requests.every(r => !r.startsWith('POST') || ['/adjust','/report-confirm','/solve','/tasks','/reverse','/material-candidates','/remnant-recommendations','/scan','/rolls'].some(route=>r.endsWith(route))), 'only isolated fixture task, solve, adjustment and report requests');
+            assert.ok(requests.every(r => !r.startsWith('POST') || ['/adjust','/report-confirm','/solve','/tasks','/reverse','/material-candidates','/remnant-recommendations','/scan','/rolls','/toolpath/optimize'].some(route=>r.endsWith(route))), 'only isolated fixture task, solve, adjustment and report requests');
             passed++; console.log('PASS ' + name);
         } catch(error) {failed++; console.error('FAIL ' + name + '\n' + error.stack); console.error(JSON.stringify({requests,adjustmentBodies,savedPlanRequest,errors,debug:await page.evaluate(()=>{const s=window.camApp?.state;if(!s)return {page:location.pathname};return {pending:s.pendingPlan?.result?.planId,version:s.pendingPlan?.version,geometry:s.pendingPlan?.geometry,pieces:s.getCurrentCaseData().pieces,cuts:s.getCurrentCaseData().cuts,remnants:s.getCurrentCaseData().remnants};})}));}
         finally {await context.close();}
@@ -111,6 +116,36 @@ const server = createServer(async (req,res) => {
         await expect(page.locator('#btn-confirm-station-cut')).toBeEnabled();
     };
     try {
+        await run('toolpath optimization and restoration remain printable and reportable saved versions',async page=>{
+            await loadPlan(page);await page.locator('#tab-right-cut').click();
+            await page.getByRole('button',{name:'优化空走刀',exact:true}).click();
+            await expect(page.locator('#plan-edit-message')).toHaveText('方案版本 2 · 已校验');
+            await expect(page.getByRole('button',{name:'恢复标准',exact:true})).toBeVisible();
+            await expect(page.locator('#btn-confirm-station-cut')).toBeEnabled();
+            const optimizedId=adjustmentBodies[0].adjustmentId;
+            assert.ok(adjustmentBodies[0].cuts.length);assert.equal(adjustmentBodies[0].pieces,undefined);
+            await page.getByRole('button',{name:'打印工单',exact:true}).click();
+            await expect(page.locator('#ticket-no-val')).toHaveText('WO-'+optimizedId+'-V2');
+            await page.evaluate(()=>window.camApp.closeCutTicketModal());
+            await page.getByRole('button',{name:'恢复标准',exact:true}).click();
+            await expect(page.locator('#plan-edit-message')).toHaveText('方案版本 3 · 已校验');
+            await expect(page.getByRole('button',{name:'优化空走刀',exact:true})).toBeVisible();
+            assert.deepEqual(adjustmentBodies[1].cuts,planResult.cuts);
+            await page.locator('#btn-confirm-station-cut').click();await page.locator('#report-confirm-button').click();
+            await expect(page.locator('#report-error')).toContainText('测试仅检查报工绑定');
+            assert.equal(reportBodies[0].planId,adjustmentBodies[1].adjustmentId);
+        });
+        await run('failed toolpath save preserves the reportable original and allows retry',async page=>{
+            await loadPlan(page);failAdjustment=true;await page.locator('#tab-right-cut').click();
+            await page.getByRole('button',{name:'优化空走刀',exact:true}).click();
+            await expect(page.locator('#cad-toast-container')).toContainText('当前调整不能完成贯通切割');
+            await expect(page.locator('#btn-confirm-station-cut')).toBeEnabled();
+            assert.deepEqual(await page.evaluate(()=>window.camApp.state.getCurrentCaseData().cuts),planResult.cuts);
+            assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');
+            failAdjustment=false;await page.getByRole('button',{name:'优化空走刀',exact:true}).click();
+            await expect(page.locator('#plan-edit-message')).toHaveText('方案版本 2 · 已校验');
+            assert.equal(adjustmentBodies[0].adjustmentId,adjustmentBodies[1].adjustmentId);
+        });
         await run('move invalidates old cuts and report, undo and redo preserve exact geometry',async page=>{
             await loadPlan(page);await page.keyboard.press('ArrowDown');
             await expect(page.locator('#lbl-report-status')).toHaveText('手动调整 · 待校验');
@@ -686,5 +721,5 @@ const server = createServer(async (req,res) => {
             assert.ok(fs.statSync('target/visual-consistency/long-ticket.pdf').size>10000);
         });
     } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
-    console.log(JSON.stringify({discovered:54,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
+    console.log(JSON.stringify({discovered:56,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
 })().catch(error=>{console.error(error);server.close();process.exitCode=1;});

@@ -123,7 +123,7 @@ public class SolverFactory {
                     c.getStartY() == null ? (horizontal ? c.getPos() : c.getStart()) : c.getStartY(),
                     c.getEndX() == null ? (horizontal ? c.getEnd() : c.getPos()) : c.getEndX(),
                     c.getEndY() == null ? (horizontal ? c.getPos() : c.getEnd()) : c.getEndY(),
-                    c.getAirDistance() == null ? 0 : c.getAirDistance(), c.getDesc());
+                    c.getAirDistance() == null ? 0 : c.getAirDistance(), c.getDesc(), c.getStage());
         }).toList();
         Map<Integer, Integer> counts = new HashMap<>();
         placements.forEach(p -> counts.merge(p.demandId(), 1, Integer::sum));

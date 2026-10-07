@@ -59,6 +59,8 @@ public final class ManualLayoutValidator {
         for (var remnant : remnants) usedHeight = Math.max(usedHeight, remnant.getY()+remnant.getL());
         if (!problem.sheet() && problem.material().continuesAfterRegion() && usedHeight >= problem.height()-EPS)
             cuts.add(new CutStep(cuts.size()+1, "横切", usedHeight, 0, problem.width(), "分离本工位与后续连续母卷"));
+        // ponytail: keep the validated order; explicit parent dependencies can later unlock independent subregions.
+        cuts.forEach(c -> c.setStage(c.getStep()));
         result.setCuts(cuts); result.setRemnants(remnants); result.setSuggestedFeedLength(usedHeight);
         result.setSuccess(true); result.setMessage("手动调整已通过几何与贯通切割校验");
         invalid = RectangularResultValidator.validate(problem, result);
