@@ -58,6 +58,9 @@ class CuttingTaskTests {
                 List.of(new CuttingTask.Line(7, "主片", 1900, 1000, 3, false)))));
         assertEquals(before - 3000, restored.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength());
         assertThrows(IllegalArgumentException.class, () -> restored.resetRoll("ROLL-2026-0920"));
+        assertTrue(restored.resetRoll("ROLL-2026-0920", true));
+        assertEquals(restored.getMotherRoll("ROLL-2026-0920").getTotalLength(), restored.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength());
+        assertEquals(0.0, restored.getMotherRoll("ROLL-2026-0920").getUsedLength());
     }
 
     @Test void rejectsChangedRevisionWrongMaterialAndInvalidDemand() {

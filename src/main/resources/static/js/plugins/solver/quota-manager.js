@@ -5,12 +5,12 @@ import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 import { renderScene, resetToBedView } from '../cad/cad-renderer.js';
 import { drawRulers } from '../cad/cad-rulers.js';
-import { renderRadar, requireStationReport } from '../radar/radar-scrubber.js';
+import { renderRadar, requireStationReport, updateFabricScrollPosition } from '../radar/radar-scrubber.js';
 import { updateUIInfo, updateWorkflowControls } from './solver-client.js';
-import { showToast } from '../../core/toast.js';
+import { showToast, confirmAction } from '../../core/toast.js';
 import { escapeText, taskInputChanged, startTaskDraft, finishTaskDraft, prepareTaskSwitch } from './task-workspace.js';
 import { layoutMetrics } from './material-accounting.js';
-import { CURTAIN_ORDER_TEMPLATES } from '../presets/scenarios.js';
+import { CURTAIN_ORDER_TEMPLATES, getInitialScenarios } from '../presets/scenarios.js';
 
 export function updateDemandCompletionFromPieces(data) {
     if (!data || !data.demands) return;
@@ -137,6 +137,122 @@ export function resetAllRollCuts() {
     recalculateRollStats(data); updateDemandCompletionFromPieces(data);
     renderDemandsUI(data.demands); renderScene(); updateUIInfo();
     showToast('已清除未报工预览，库存与报工记录保留', 'info');
+}
+
+export async function resetContinuousCutting() {
+    const isRemnantMode = (state.currentCutMode === 'remnant');
+    if (isRemnantMode) {
+        showToast('当前处于料头模式，可切换为母卷开卷排产模式进行连续搭切', 'info');
+        return;
+    }
+    const data = state.getCurrentCaseData();
+    if (!data) return;
+    const rollId = data.rollId || (document.getElementById("sel-mother-roll-id")?.value) || "ROLL-2026-0920";
+
+    const ok = await confirmAction(
+        `确定要重置当前母卷（${escapeText(rollId)}）的搭切进度吗？\n这将清空本卷已报工与实切记录，将工位回到 0m 起点，恢复整卷可用长度，方便重新从头搭切。`,
+        { title: '重新搭切确认', action: '重置并重新搭切' }
+    );
+    if (!ok) return;
+
+    const wasInert = document.body.inert;
+    document.body.inert = true;
+    try {
+        const response = await fetch(`/api/rolls/${encodeURIComponent(rollId)}/reset`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force: true })
+        });
+        if (!response.ok) {
+            const errJson = await response.json().catch(() => ({}));
+            throw new Error(errJson.message || '重置母卷失败');
+        }
+
+        const rollResp = await fetch(`/api/rolls/${encodeURIComponent(rollId)}`, { cache: 'no-store' });
+        let roll = null;
+        if (rollResp.ok) {
+            roll = await rollResp.json();
+        }
+
+        data.pieces = [];
+        data.cuts = [];
+        data.remnants = [];
+        data.cutIntervals = [];
+        data.lastReceipt = null;
+        data.deductLen = 0;
+        data.pieceArea = 0;
+        data.remArea = 0;
+        data.wasteArea = 0;
+        data.stockUsedLength = 0;
+        if (roll) {
+            data.stockRemainingLength = roll.currentRemainingLength;
+            data.totalRollL = roll.totalLength;
+            data.rollW = roll.width;
+        } else {
+            data.stockRemainingLength = data.totalRollL || 60000;
+        }
+        state.lastCutReceipt = null;
+        state.pendingPlan = null;
+        state.setCutStepLimit(999);
+
+        data.windowStartY = 0;
+        updateFabricScrollPosition(0);
+
+        const currentCaseId = state.currentCaseId;
+        const initialScenarios = getInitialScenarios();
+        if (initialScenarios && initialScenarios[currentCaseId]) {
+            const initCase = initialScenarios[currentCaseId];
+            if (initCase.demands) {
+                data.demands = JSON.parse(JSON.stringify(initCase.demands)).map(d => ({
+                    ...d,
+                    completed: 0
+                }));
+            }
+        } else if (data.demands) {
+            data.demands.forEach(d => { d.completed = 0; });
+        }
+        state.taskCompleted = {};
+
+        const totalL = data.totalRollL || (roll ? roll.totalLength : 60000);
+        const totalLenEl = document.getElementById('lbl-roll-total-len');
+        if (totalLenEl) totalLenEl.innerText = totalL.toLocaleString();
+        const remLenEl = document.getElementById('lbl-roll-remaining-len');
+        if (remLenEl) remLenEl.innerText = `${totalL.toLocaleString()} mm`;
+        const usedLenEl = document.getElementById('lbl-roll-used-len');
+        if (usedLenEl) usedLenEl.innerText = '0 mm';
+        const progressEl = document.getElementById('roll-len-progress');
+        if (progressEl) progressEl.style.width = '0%';
+        const baseOriginEl = document.getElementById('lbl-roll-base-origin');
+        if (baseOriginEl) baseOriginEl.innerText = 'Y = 0 mm (0.00m)';
+        const remaining = document.getElementById('lbl-roll-remaining');
+        if (remaining) remaining.innerText = `${totalL} mm`;
+
+        recalculateRollStats(data);
+        updateDemandCompletionFromPieces(data);
+        renderDemandsUI(data.demands);
+        renderRadar();
+        renderScene();
+        resetToBedView();
+        updateUIInfo();
+        updateWorkflowControls();
+
+        if (window.camApp && typeof window.camApp.updateMotherRollRemnantStats === 'function') {
+            await window.camApp.updateMotherRollRemnantStats(rollId);
+        }
+        if (window.camApp && typeof window.camApp.refreshShelfRemnantsList === 'function') {
+            await window.camApp.refreshShelfRemnantsList();
+        }
+        if (window.camApp && typeof window.camApp.renderToolpathUI === 'function') {
+            window.camApp.renderToolpathUI();
+        }
+
+        bus.emit('demands:changed');
+        showToast(`已重置母卷搭切进度，回到第 1 工位（0~${((data.bedL || 5000) / 1000).toFixed(1)}m），可重新开始排料`, 'success');
+    } catch (err) {
+        showToast(`重置搭切失败：${err.message}`, 'error');
+    } finally {
+        document.body.inert = wasInert;
+    }
 }
 
 export function renderDemandsUI(demands) {

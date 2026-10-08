@@ -23,3 +23,4 @@
 .radar-legend .consumed-key { background: var(--text-muted); }
 .radar-legend .defect-key { background: var(--accent-amber); margin-left: 6px; }
 .radar-legend > span { margin-left: 8px; }
+.radar-reset-btn { min-height: 22px; height: 22px; padding: 0 6px; font-size: 11px; border-color: var(--panel-border); }

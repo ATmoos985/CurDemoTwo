@@ -141,8 +141,9 @@ public class FabricCutController {
     }
 
     @PostMapping("/rolls/{rollId}/reset")
-    public Map<String, Object> resetRoll(@PathVariable String rollId) {
-        boolean ok = remnantService.resetRoll(rollId);
+    public Map<String, Object> resetRoll(@PathVariable String rollId, @RequestBody(required = false) Map<String, Object> body) {
+        boolean force = body != null && Boolean.TRUE.equals(body.get("force"));
+        boolean ok = remnantService.resetRoll(rollId, force);
         Map<String, Object> res = new HashMap<>();
         res.put("success", ok);
         res.put("rollId", rollId);

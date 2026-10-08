@@ -663,13 +663,17 @@ public class RemnantService {
     }
 
     public synchronized boolean resetRoll(String rollId) {
-        return mutate(() -> resetRollInternal(rollId));
+        return resetRoll(rollId, false);
     }
 
-    private boolean resetRollInternal(String rollId) {
+    public synchronized boolean resetRoll(String rollId, boolean force) {
+        return mutate(() -> resetRollInternal(rollId, force));
+    }
+
+    private boolean resetRollInternal(String rollId, boolean force) {
         MotherRollInfo roll = motherRolls.get(rollId);
         if (roll == null) return false;
-        if (receipts.values().stream().anyMatch(r -> rollId.equals(r.get("rollId")) && r.get("taskId") != null))
+        if (!force && receipts.values().stream().anyMatch(r -> rollId.equals(r.get("rollId")) && r.get("taskId") != null))
             throw new IllegalArgumentException("该母卷已有任务报工记录，不能通过演示重置清除");
         roll.setCurrentRemainingLength(roll.getTotalLength());
         roll.setUsedLength(0.0);

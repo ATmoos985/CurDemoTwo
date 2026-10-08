@@ -44,7 +44,7 @@ import {
 
 import {
     updateDemandCompletionFromPieces, recalculateRollStats,
-    clearStationCuts, resetAllRollCuts, renderDemandsUI, renderDefectsUI,
+    clearStationCuts, resetAllRollCuts, resetContinuousCutting, renderDemandsUI, renderDefectsUI,
     addDefectRow, addDemandRow, removeDemandRow, getDefectsFromUI, getDemandsFromUI,
     onRollConfigChange, onOriginParamChange, onParamChange,
     updateRollSize, toggleLongitudinal, loadCurtainOrderTemplate
@@ -371,6 +371,7 @@ const camApp = {
     toggleSimSpeed,
     clearStationCuts,
     resetAllRollCuts,
+    resetContinuousCutting,
     advanceBed,
     smartAdvanceBed,
     switchCutMode,

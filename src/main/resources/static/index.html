@@ -264,7 +264,7 @@
 
             <!-- 图例栏 -->
             <div class="workspace-heading canvas-heading"><span class="workflow-number">2</span><h2>排料预览</h2>
-                <div class="canvas-view-actions"><button class="tool-btn" onclick="resetToBedView()">当前工位</button><button class="tool-btn" onclick="viewFullRoll()">全卷</button>
+                <div class="canvas-view-actions"><button class="tool-btn" onclick="resetToBedView()">当前工位</button><button class="tool-btn" onclick="viewFullRoll()">全卷</button><button class="tool-btn" id="btn-reset-continuous" onclick="resetContinuousCutting()" title="重置当前母卷与工位至 0m 起点，清空报工并重新开始搭切">重新搭切</button>
                 <details class="canvas-help"><summary class="tool-btn">图例与操作</summary><div class="canvas-help-body">            <div class="legend-bar">
                 <div class="legend-item"><span class="legend-dot"></span><span>成品</span></div>
                 <div class="legend-item"><span class="legend-dot"></span><span>可用料头</span></div>
@@ -288,7 +288,7 @@
                         <div class="radar-window" id="radar-window" role="slider" tabindex="0" aria-label="母卷工位位置" aria-valuemin="0" aria-valuemax="55000" aria-valuenow="0" aria-describedby="radar-window-text" title="拖动工位滑块，或在轨道上点击、滚动"></div>
                     </div>
                 </div>
-                <div class="radar-caption"><span id="radar-window-text">当前工位 0–5 m</span><span class="radar-legend"><i class="consumed-key"></i>已报工 <i class="defect-key"></i>疵点 <span>单位 m</span></span></div>
+                <div class="radar-caption"><span id="radar-window-text">当前工位 0–5 m</span><button class="tool-btn radar-reset-btn" id="btn-radar-reset" onclick="resetContinuousCutting()" title="重置母卷搭切进度回 0m 起点">重置搭切</button><span class="radar-legend"><i class="consumed-key"></i>已报工 <i class="defect-key"></i>疵点 <span>单位 m</span></span></div>
             </div>
 
             <div class="cad-tools" role="toolbar" aria-label="画布工具">
@@ -461,6 +461,9 @@
                         </button>
                         <button class="tool-btn" onclick="resetAllRollCuts()" title="清除全部预览裁片，从头开始">
                             清空整卷已排
+                        </button>
+                        <button class="tool-btn" onclick="resetContinuousCutting()" title="重置整卷搭切进度回 0m 起点，清空报工并重新搭切">
+                            重新搭切整卷
                         </button>
                     </div></details>
                     </div>
