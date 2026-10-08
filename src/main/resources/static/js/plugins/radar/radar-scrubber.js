@@ -16,13 +16,41 @@ export function requireStationReport() {
     return true;
 }
 
+export function nextCutPosition(data) {
+    if (!data) return 0;
+    const receiptEnd = data.lastReceipt?.feedPortType === 'roll' ? data.lastReceipt.windowStartY + data.lastReceipt.actualCutLen : 0;
+    return Math.max(data.stockUsedLength || 0, receiptEnd, 0, ...(data.pieces || []).map(p => p.y + p.l), ...(data.cuts || []).filter(c => c.type === '横切').map(c => c.pos));
+}
+
+export function getSnappableNextStation(data) {
+    if (!data) return null;
+    if (state.currentCutMode === 'remnant') return 0;
+    const totalL = data.totalRollL || 60000;
+    const bedL = data.bedL || 5000;
+    const maxScrollY = Math.max(0, totalL - bedL);
+    const stationY = nextCutPosition(data);
+    if (!Number.isFinite(stationY)) return null;
+    return Math.max(0, Math.min(maxScrollY, Number(stationY.toFixed(6))));
+}
+
+export function getSnapThresholdMm(trackWidth, totalL = 60000) {
+    if (!trackWidth || trackWidth <= 0) return 1000;
+    const pxPerMm = trackWidth / totalL;
+    return Math.max(800, Math.min(1500, 16 / pxPerMm));
+}
+
+function stationRange(start, length, isSnapped = false) {
+    const rangeText = `当前工位 ${(start / 1000).toFixed(2)}–${((start + length) / 1000).toFixed(2)} m`;
+    return isSnapped ? `${rangeText} (待切接续工位)` : rangeText;
+}
+
 export function updateFabricScrollPosition(targetY) {
     const data = state.getCurrentCaseData();
     if (!data) return;
     const totalL = data.totalRollL || 60000;
     const bedL = data.bedL || 5000;
-    const firstAvailableY = state.currentCutMode === 'remnant' ? 0 : (data.stockUsedLength || 0);
-    targetY = Math.max(firstAvailableY, Math.min(totalL - bedL, Number(targetY.toFixed(6))));
+    const maxScrollY = Math.max(0, totalL - bedL);
+    targetY = Math.max(0, Math.min(maxScrollY, Number(targetY.toFixed(6))));
 
     const prevY = data.windowStartY || 0;
     if (targetY !== prevY && requireStationReport()) return false;
@@ -51,10 +79,15 @@ export function updateFabricScrollPosition(targetY) {
         const leftPct = (targetY / totalL) * 100;
         winEl.style.left = `${leftPct}%`;
         winEl.setAttribute('aria-valuenow', targetY);
-        winEl.setAttribute('aria-valuetext', stationRange(targetY, bedL));
+        const snapStation = getSnappableNextStation(data);
+        const isSnapped = (snapStation !== null && Math.abs(targetY - snapStation) < 1);
+        if (winEl.classList?.toggle) {
+            winEl.classList.toggle('snapped', isSnapped);
+        }
+        winEl.setAttribute('aria-valuetext', stationRange(targetY, bedL, isSnapped));
         const textEl = document.getElementById("radar-window-text");
         if (textEl) {
-            textEl.innerText = stationRange(targetY, bedL);
+            textEl.innerText = stationRange(targetY, bedL, isSnapped);
         }
     }
 
@@ -121,14 +154,18 @@ export function renderRadar() {
     if (winEl) {
         winEl.style.left = `${leftPct}%`;
         winEl.style.width = `${widthPct}%`;
-        const firstAvailableY = state.currentCutMode === 'remnant' ? 0 : (data.stockUsedLength || 0);
-        winEl.setAttribute('aria-valuemin', firstAvailableY);
-        winEl.setAttribute('aria-valuemax', Math.max(firstAvailableY, totalL - bedL));
+        winEl.setAttribute('aria-valuemin', 0);
+        winEl.setAttribute('aria-valuemax', Math.max(0, totalL - bedL));
         winEl.setAttribute('aria-valuenow', winStartY);
-        winEl.setAttribute('aria-valuetext', stationRange(winStartY, bedL));
+        const snapStation = getSnappableNextStation(data);
+        const isSnapped = (snapStation !== null && Math.abs(winStartY - snapStation) < 1);
+        if (winEl.classList?.toggle) {
+            winEl.classList.toggle('snapped', isSnapped);
+        }
+        winEl.setAttribute('aria-valuetext', stationRange(winStartY, bedL, isSnapped));
         const textEl = document.getElementById("radar-window-text");
         if (textEl) {
-            textEl.innerText = stationRange(winStartY, bedL);
+            textEl.innerText = stationRange(winStartY, bedL, isSnapped);
         }
     }
 
@@ -261,9 +298,6 @@ export function radarTickStep(totalL, width = 600) {
     const power = 10 ** Math.floor(Math.log10(Math.max(1, rough)));
     return [1, 2, 5, 10].map(n => n * power).find(n => n >= rough);
 }
-function stationRange(start, length) {
-    return `当前工位 ${(start / 1000).toFixed(2)}–${((start + length) / 1000).toFixed(2)} m`;
-}
 export function setupRadarInteraction() {
     const track = document.getElementById('radar-track');
     const winEl = document.getElementById('radar-window');
@@ -284,29 +318,62 @@ export function setupRadarInteraction() {
         track.setPointerCapture(e.pointerId);
         winEl.focus({ preventScroll: true });
         winEl.classList.add('dragging');
-        if (!onHandle) updateFabricScrollPosition((e.clientX - rect.left - drag.offset) / rect.width * (data.totalRollL || 60000));
+        if (!onHandle) {
+            const totalL = data.totalRollL || 60000;
+            const rawY = (e.clientX - rect.left - drag.offset) / rect.width * totalL;
+            const snapStation = getSnappableNextStation(data);
+            const threshold = getSnapThresholdMm(rect.width, totalL);
+            let targetY = rawY;
+            if (snapStation !== null && Math.abs(rawY - snapStation) <= threshold) {
+                targetY = snapStation;
+            }
+            updateFabricScrollPosition(targetY);
+        }
     });
     track.addEventListener('pointermove', e => {
         if (!drag || e.pointerId !== drag.pointerId) return;
-        const totalL = state.getCurrentCaseData().totalRollL || 60000;
-        updateFabricScrollPosition((e.clientX - drag.rect.left - drag.offset) / drag.rect.width * totalL);
+        const data = state.getCurrentCaseData();
+        if (!data) return;
+        const totalL = data.totalRollL || 60000;
+        const rawY = (e.clientX - drag.rect.left - drag.offset) / drag.rect.width * totalL;
+        const snapStation = getSnappableNextStation(data);
+        const threshold = getSnapThresholdMm(drag.rect.width, totalL);
+
+        let targetY = rawY;
+        if (snapStation !== null && Math.abs(rawY - snapStation) <= threshold) {
+            targetY = snapStation;
+        }
+        updateFabricScrollPosition(targetY);
     });
     const finishDrag = e => {
         if (!drag || e.pointerId !== drag.pointerId) return;
-        const { startY } = drag;
+        const { startY, rect } = drag;
         drag = null;
         winEl.classList.remove('dragging');
         if (track.hasPointerCapture(e.pointerId)) track.releasePointerCapture(e.pointerId);
         const data = state.getCurrentCaseData();
+        if (!data) return;
         let finalY = data.windowStartY || 0;
-        if (finalY === startY) return;
-        // 保留原来的工位 / 裁片末端磁吸，其他位置按 500 mm 对齐。
+        const totalL = data.totalRollL || 60000;
         const bedL = data.bedL || 5000;
-        const maxCutY = Math.max(0, ...(data.pieces || []).map(p => p.y + p.l));
-        const nearestStation = Math.round(finalY / bedL) * bedL;
-        if (maxCutY > 0 && Math.abs(finalY - maxCutY) <= 800) finalY = maxCutY;
-        else if (Math.abs(finalY - nearestStation) <= 800) finalY = nearestStation;
-        else finalY = Math.round(finalY / 500) * 500;
+        const snapStation = getSnappableNextStation(data);
+        const threshold = getSnapThresholdMm(rect?.width || 800, totalL);
+
+        // 1. 若释放于待切工位附近，自动精准吸附到待切工位
+        if (snapStation !== null && Math.abs(finalY - snapStation) <= threshold) {
+            finalY = snapStation;
+        } else {
+            // 2. 离开待切工位后，支持自由查看全卷；松手按裁片末端 / 工位整倍数 / 500mm 对齐
+            const maxCutY = Math.max(0, ...(data.pieces || []).map(p => p.y + p.l));
+            const nearestStation = Math.round(finalY / bedL) * bedL;
+            if (maxCutY > 0 && Math.abs(finalY - maxCutY) <= 800) {
+                finalY = maxCutY;
+            } else if (Math.abs(finalY - nearestStation) <= 800) {
+                finalY = nearestStation;
+            } else {
+                finalY = Math.round(finalY / 500) * 500;
+            }
+        }
         moveStation(finalY, startY);
         bus.emit('radar:dragend', { finalY: data.windowStartY });
     };
@@ -315,21 +382,33 @@ export function setupRadarInteraction() {
         e.preventDefault();
         if (drag || !e.deltaY) return;
         const data = state.getCurrentCaseData();
+        if (!data) return;
         const step = (data.totalRollL || 60000) > 40000 ? 1000 : 500;
-        if (moveStation((data.windowStartY || 0) + Math.sign(e.deltaY) * step)) {
+        let targetY = (data.windowStartY || 0) + Math.sign(e.deltaY) * step;
+        const snapStation = getSnappableNextStation(data);
+        if (snapStation !== null && Math.abs(targetY - snapStation) <= 400) {
+            targetY = snapStation;
+        }
+        if (moveStation(targetY)) {
             bus.emit('radar:wheel', { targetY: data.windowStartY });
         }
     }, { passive: false });
     winEl.addEventListener('keydown', e => {
         if (drag) return;
         const data = state.getCurrentCaseData();
+        if (!data) return;
         const current = data.windowStartY || 0, bedL = data.bedL || 5000;
         const positions = { ArrowLeft: current - 500, ArrowDown: current - 500,
             ArrowRight: current + 500, ArrowUp: current + 500, PageDown: current - bedL,
             PageUp: current + bedL, Home: 0, End: (data.totalRollL || 60000) - bedL };
         if (!(e.key in positions)) return;
         e.preventDefault();
-        moveStation(positions[e.key]);
+        let target = positions[e.key];
+        const snapStation = getSnappableNextStation(data);
+        if (snapStation !== null && Math.abs(target - snapStation) <= 400) {
+            target = snapStation;
+        }
+        moveStation(target);
     });
 }
 function moveStation(targetY, previous = state.getCurrentCaseData()?.windowStartY || 0) {
@@ -355,10 +434,6 @@ export function advanceBed(delta) {
     if (data) moveStation((data.windowStartY || 0) + delta * (data.bedL || 5000));
 }
 
-export function nextCutPosition(data) {
-    const receiptEnd = data.lastReceipt?.feedPortType === 'roll' ? data.lastReceipt.windowStartY + data.lastReceipt.actualCutLen : 0;
-    return Math.max(data.stockUsedLength || 0, receiptEnd, 0, ...(data.pieces || []).map(p => p.y + p.l), ...(data.cuts || []).filter(c => c.type === '横切').map(c => c.pos));
-}
 export function smartAdvanceBed() {
     const data = state.getCurrentCaseData();
     if (!data) return;

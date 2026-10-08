@@ -9,6 +9,8 @@
 .radar-window::before { content: ''; position: absolute; inset: -4px; }
 .radar-window::after { content: ''; position: absolute; inset: 3px 0; margin: auto; width: 1px; background: var(--accent-blue); }
 .radar-window.dragging, .radar-track:has(.dragging) { cursor: grabbing; }
+.radar-window.snapped { border-color: #10b981; background: color-mix(in srgb, #10b981 18%, var(--panel-bg)); box-shadow: 0 0 0 1px #10b981, 0 0 6px rgba(16, 185, 129, 0.45); }
+.radar-window.snapped::after { background: #10b981; }
 .radar-window:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; }
 .radar-defect-marker { position: absolute; top: 3px; height: 8px; min-width: 2px; background: var(--accent-red); z-index: 2; }
 .radar-defect-marker.warning { background: var(--accent-amber); }
