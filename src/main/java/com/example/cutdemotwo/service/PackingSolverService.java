@@ -272,8 +272,8 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                 nodeMap.put(n.nodeId, n);
                 allNodes.add(n);
 
-                double physX = isRightOrigin ? (req.width() - n.x - n.w) : n.x;
-                double physY = mirrorY ? (req.height() - n.y - n.h - trim) : (n.y + trim);
+                double physX = EngineGeometry.normalizeZero(isRightOrigin ? (req.width() - n.x - n.w) : n.x);
+                double physY = EngineGeometry.normalizeZero(mirrorY ? (req.height() - n.y - n.h - trim) : (n.y + trim));
 
                 if (n.type >= 0 && n.cut > 0) {
                     String name = itemMap.getOrDefault(n.type, "裁片-" + n.type);

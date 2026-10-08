@@ -10,7 +10,7 @@ import java.util.Set;
 
 /** Engine-independent checks before a candidate may be exposed or saved as a plan. */
 final class RectangularResultValidator {
-    private static final double EPS = .001;
+    private static final double EPS = EngineGeometry.COORDINATE_EPS_MM;
     static String validate(NestingProblem input, EngineResult output) {
         Map<Integer, NestingProblem.Part> demands = new HashMap<>();
         input.parts().forEach(p -> demands.put(p.id(), p));

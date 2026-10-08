@@ -1,6 +1,7 @@
 package com.example.cutdemotwo.service;
 
 import com.example.cutdemotwo.model.*;
+import com.example.cutdemotwo.service.solver.EngineGeometry;
 import java.util.*;
 
 /** Validated dispositions of saved plan pieces. Does not mutate a plan or inventory. */
@@ -50,6 +51,11 @@ record ReportOutput(List<ReportedPiece> details, List<PlacedPiece> qualified, Li
             candidates.put(id, new RemnantPiece(id, "未切区域毛料", p.getX(), p.getY(), p.getW(), length,
                     p.getW()*length/1_000_000, false));
         }
+        // Old saved plans may contain near-zero coordinates. Normalize copies so validation,
+        // defect clipping and the receipt use the same geometry without rewriting the plan.
+        candidates.replaceAll((id, r) -> new RemnantPiece(r.getId(), r.getStatus(),
+                EngineGeometry.normalizeZero(r.getX()), EngineGeometry.normalizeZero(r.getY()),
+                r.getW(), r.getL(), r.getArea(), r.isHasDefect()));
         return candidates;
     }
 }
