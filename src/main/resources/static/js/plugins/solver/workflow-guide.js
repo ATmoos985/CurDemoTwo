@@ -2,6 +2,7 @@ import {state} from '../../core/state.js';
 import {toggleSidebar, switchRightPanelTab} from '../layout/splitter.js';
 import {workflowState} from './workflow-state.js';
 import {openDemandManager, openMaterialDetails} from '../layout/workbench-panels.js';
+import {scheduleRemnantAvailability} from '../material/material-selection.js';
 
 const el = id => document.getElementById(id);
 const value = id => el(id)?.value;
@@ -25,6 +26,8 @@ export function readWorkflowState(plan = {}) {
 
 /** Stage buttons reveal existing surfaces. They never save, solve, report or move the cutting window. */
 export function navigateWorkflowStage(stage, target) {
+    if (!target && stage === 0) {openDemandManager();return;}
+    if (!target && stage === 1) {openMaterialDetails();return;}
     const node = document.querySelector(target || ['#card-demands','#card-mother-roll','#card-material-balance','#right-roll-actions'][stage]);
     if (!node) return;
     if (stage === 0) openDemandManager();
@@ -55,7 +58,7 @@ export function renderWorkflowGuide(plan = {}) {
         button.dataset.state = index === flow.stage ? 'current' : completed ? 'complete' : 'pending';
         if (index === flow.stage) button.setAttribute('aria-current','step'); else button.removeAttribute('aria-current');
         button.querySelector('.stage-marker').textContent = completed ? '✓' : index+1;
-        button.title = (completed ? '已就绪 · ' : index === flow.stage ? '当前阶段 · ' : '待完成 · ') + '点击查看，执行操作请用右侧按钮';
+        button.title = ['查看当前需求','查看母卷、疵点与料头库','查看排料结果','核对产出并报工'][index];
         button.onclick = () => navigateWorkflowStage(index);
     }
     for (const id of [...Object.values(actions),'btn-workflow-next']) {
@@ -71,6 +74,10 @@ export function renderWorkflowGuide(plan = {}) {
         if (flow.action === 'reports') window.camApp.openTaskReports();
         if (flow.action === 'advance') window.camApp.smartAdvanceBed();
     };
+    const nextHost = flow.stage >= 3 ? footer : el('left-input-actions');
+    if (next.parentElement !== nextHost) nextHost.prepend(next);
+    const statusHost = flow.stage >= 3 ? footer : el('input-flow-status');
+    if (el('workflow-current').parentElement !== statusHost) statusHost.prepend(el('workflow-current'),el('station-action-hint'));
     const solve = el(actions.solve);solve.disabled = !!busy || !flow.canSolve;solve.hidden = !flow.canSolve;
     solve.textContent = busy === '正在生成方案…' ? busy : plan.ready || plan.edited ? '重新排料' : '生成排料方案';
     const report = el(actions.report);report.disabled = !!busy || flow.action !== 'report';report.hidden = !plan.ready && !plan.edited;
@@ -85,5 +92,18 @@ export function renderWorkflowGuide(plan = {}) {
         : (el('lbl-roll-model-desc')?.textContent || '') + ' · 幅宽 ' + data.rollW + ' mm · 余量 ' + (data.stockRemainingLength || 0).toLocaleString() + ' mm';
     el('btn-material-details').onclick = openMaterialDetails;
     if(el('lbl-current-roll-id'))el('lbl-current-roll-id').textContent=data.materialAvailable?data.rollId:'未装载';
+    if(el('current-task-name'))el('current-task-name').textContent = value('task-name') || '未命名任务';
+    const recent = [...(state.taskReports || [])].reverse().find(receipt => receipt.status !== 'REVERSED');
+    if(el('output-empty'))el('output-empty').hidden = !!plan.ready || !!plan.edited || !!recent;
+    if(el('report-output')) {
+        const receipt = recent, children = receipt?.derivedRemnants || [];
+        el('report-output').hidden = !receipt || receipt.status === 'REVERSED';
+        el('report-output-summary').textContent = receipt ? `合格 ${receipt.finishedPieceCount} 件 · 新增料头 ${children.length} 块` : '';
+        if (el('report-output-remnants').dataset.receipt !== (receipt?.planId || '')) el('report-output-remnants').replaceChildren(...children.map(stock => {
+            const item = document.createElement('li');item.textContent = `${stock.id} · ${stock.materialBatch} · ${stock.width} × ${stock.length} mm`;return item;
+        }));
+        el('report-output-remnants').dataset.receipt = receipt?.planId || '';
+    }
+    scheduleRemnantAvailability();
     return flow;
 }

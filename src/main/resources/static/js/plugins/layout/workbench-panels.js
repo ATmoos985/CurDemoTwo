@@ -16,32 +16,34 @@ function panel(id, title, subtitle, actions = '') {
 
 export function initWorkbenchPanels() {
     const demand = panel('demand-manager', '需求管理', '编辑订单与裁片；合格报工才计入完成。',
-        '<span class="muted">修改保留在当前任务</span><button class="tool-btn" onclick="openDemandImport()">导入需求</button><button class="tool-btn" onclick="addDemandRow()">＋ 添加裁片</button><button class="tool-btn active" onclick="saveTaskFromUI()">保存需求</button>');
+        '<span class="muted">修改保留在当前任务</span><button class="tool-btn" id="demand-manager-import" onclick="openDemandImport()">导入需求</button><button class="tool-btn" onclick="addDemandRow()">＋ 添加裁片</button><button class="tool-btn active" onclick="saveTaskFromUI()">保存需求</button>');
     demand.querySelector('.workbench-dialog-body').append(el('card-demands').querySelector('.section-content'));
     const card = el('card-demands');
     card.classList.remove('collapsible', 'collapsed');
     card.querySelector('.section-header').removeAttribute('title');
     card.querySelector('.section-header').innerHTML = '<strong>本次需求 <span id="demands-summary-badge"></span></strong><button class="tool-btn" onclick="openDemandManager()">管理需求 ↗</button>';
     const summary = document.createElement('div'); summary.id = 'demand-quick-list';card.append(summary);
-    const detail = panel('material-details', '用料与疵点', '当前装载材料的尺寸、用量和疵点分布。',
-        '<button class="tool-btn" onclick="openMaterialModal(\'rolls\')">库存档案 ↗</button>');
-    const body = detail.querySelector('.workbench-dialog-body');
+    const body = document.createElement('section');body.id = 'material-details';body.hidden = true;
+    document.body.append(body);
     body.innerHTML = '<section id="material-inspection"></section>';
     // Keep the existing inputs and IDs: there is still one authoritative editor.
     body.append(el('card-mother-roll'), el('card-defects'));
     el('card-mother-roll').classList.remove('collapsed');
     el('card-mother-roll').querySelector('.section-toggle').setAttribute('aria-expanded','true');
-    const demo = el('preset-dropdown-container');
-    el('demo-tools').append(demo);
-    const reset = el('btn-reset-continuous');reset.textContent = '重置演示搭切';
-    el('demo-reset-slot').append(reset);
-    document.querySelectorAll('[onclick="resetContinuousCutting()"]').forEach(button => {
-        if (button !== reset) button.classList.add('demo-reset-hidden');
-    });
+    const reset = document.createElement('details');reset.className = 'detail-disclosure';
+    reset.innerHTML = '<summary>重置搭切记录</summary>';
+    reset.append(el('btn-radar-reset'));body.append(reset);
+    const inputs = el('left-input-actions');
+    inputs.append(el('btn-workflow-next'), el('btn-trigger-solve-station'));
+    el('sidebar-left').querySelector('.sidebar-scroll-body').append(el('right-roll-actions').querySelector('.secondary-workflow-tools'));
+    // Input preparation stays left; reporting and validated output stay right.
+    el('input-flow-status').append(el('workflow-current'), el('station-action-hint'));
+    el('sidebar-left').querySelector('.sidebar-scroll-body').prepend(el('card-demands'), el('material-context'), el('remnant-entry'));
 }
 
 export function openDemandManager(id) {
     const dialog = el('demand-manager'); if (!dialog) return;
+    el('demand-manager-import').hidden = !!state.activeTask;
     if (!dialog.open) dialog.showModal();
     if (id != null) {
         const row = [...el('demands-container').querySelectorAll('.item-row')].find(row => Number(row.dataset.id) === Number(id));
@@ -56,15 +58,13 @@ export function renderDemandSummary(progress, rows) {
         width:rows[index].querySelector('.dem-w').value, length:rows[index].querySelector('.dem-l').value}));
     const signature = JSON.stringify(facts);if (list.dataset.facts === signature) return;list.dataset.facts = signature;
     list.innerHTML = facts.length ? facts.map(item => `<button class="demand-quick-row" data-demand="${item.id}" data-complete="${item.remaining === 0}"><span><strong>${esc(item.name)}</strong><small>${esc(item.width)} × ${esc(item.length)} mm</small></span><span><b>${item.remaining === 0 ? '已满足' : '还差 ' + (item.remaining ?? '—')}</b><small>${item.completed} / ${item.total || '—'} 件</small></span></button>`).join('')
-        : '<div class="workbench-empty"><strong>从真实订单开始</strong><p>导入 Excel，或添加本次要裁的规格和数量。</p><button class="tool-btn active" onclick="openDemandImport()">导入需求</button><button class="tool-btn" onclick="openDemandManager(); addDemandRow()">手动添加</button></div>';
+        : '<div class="workbench-empty"><strong>当前任务还没有需求</strong><p>导入订单，或在需求窗口填写规格和数量。</p><button class="tool-btn active" onclick="openDemandImport()">为当前任务导入</button><button class="tool-btn" onclick="openDemandManager()">填写需求</button></div>';
     list.querySelectorAll('[data-demand]').forEach(button => button.onclick = () => openDemandManager(button.dataset.demand));
     if (el('demand-task-caption')) el('demand-task-caption').textContent = el('task-name')?.value || '当前任务';
 }
 
 export function openMaterialDetails() {
-    const dialog = el('material-details');if (!dialog) return;
-    renderMaterialInspection();
-    if (!dialog.open) dialog.showModal();
+    window.camApp.openMaterialModal('current');
 }
 
 export function renderMaterialInspection() {

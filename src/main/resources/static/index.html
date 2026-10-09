@@ -32,25 +32,9 @@
         <div class="header-title">
             <span class="app-mark" aria-hidden="true">▥</span><span class="app-name">布料裁切<span class="app-subtitle">切割工作台</span></span>
 
-            <!-- 演示工况快捷下拉 (从左侧底座迁入，释放生产操控空间) -->
-            <div class="preset-dropdown-container" id="preset-dropdown-container">
-                <button class="preset-dropdown-trigger" id="btn-preset-trigger" onclick="togglePresetDropdown(event)" title="选择演示场景" aria-expanded="false" aria-controls="preset-dropdown-menu">
-                    <span class="preset-trigger-badge">演示案例</span>
-                    <span id="preset-current-label">案例1: 窗帘定高整幅横切</span>
-                    <span class="preset-dropdown-arrow">▾</span>
-                </button>
-                <div class="preset-dropdown-menu" id="preset-dropdown-menu">
-      <div class="preset-dropdown-header"><strong>选择演示场景</strong><span class="preset-dropdown-sub">先看横切，再看二维套裁，最后演示料头复用。</span></div>
-      <div class="preset-menu-list">
-        <details class="preset-group" open><summary>基础演示 <span>3 个场景</span></summary><button class="preset-menu-item active" id="btn-case-1" onclick="selectPresetCase(1)"><span class="preset-item-head"><span class="preset-item-name">整幅横切</span><span class="preset-item-tag">仅横切</span></span><span class="preset-item-desc">整幅裁片依次下料，避开母卷疵点。</span></button><button class="preset-menu-item" id="btn-case-2" onclick="selectPresetCase(2)"><span class="preset-item-head"><span class="preset-item-name">偏幅与边角套裁</span><span class="preset-item-tag">二维避疵</span></span><span class="preset-item-desc">主帘与小辅件组合排料，查看边角利用。</span></button><button class="preset-menu-item" id="btn-case-3" onclick="selectPresetCase(3)"><span class="preset-item-head"><span class="preset-item-name">短料头复用</span><span class="preset-item-tag">库存复用</span></span><span class="preset-item-desc">用在库短料套裁，查看母卷零扣料。</span></button></details>
-        <details class="preset-group"><summary>组合与连续裁切 <span>3 个场景</span></summary><button class="preset-menu-item" id="btn-case-4" onclick="selectPresetCase(4)"><span class="preset-item-head"><span class="preset-item-name">窗幔与辅件套裁</span><span class="preset-item-tag">多规格</span></span><span class="preset-item-desc">多种尺寸组合排料，查看裁片与料头。</span></button><button class="preset-menu-item" id="btn-case-5" onclick="selectPresetCase(5)"><span class="preset-item-head"><span class="preset-item-name">L 形拆解与对账</span><span class="preset-item-tag">面积核对</span></span><span class="preset-item-desc">从两刀拆解理解成品、料头与面积平衡。</span></button><button class="preset-menu-item" id="btn-case-6" onclick="selectPresetCase(6)"><span class="preset-item-head"><span class="preset-item-name">多工位连续裁切</span><span class="preset-item-tag">连续接刀</span></span><span class="preset-item-desc">移动红框、确认实切，再接续下一工位。</span></button></details>
-        <details class="preset-group"><summary>生产订单样例 <span>2 个场景</span></summary><button class="preset-menu-item" id="btn-case-7" onclick="selectPresetCase(7)"><span class="preset-item-head"><span class="preset-item-name">布艺订单 · 893292</span><span class="preset-item-tag">生产样例</span></span><span class="preset-item-desc">100m 母卷，主帘与边料辅件整单演示。</span></button><button class="preset-menu-item" id="btn-case-8" onclick="selectPresetCase(8)"><span class="preset-item-head"><span class="preset-item-name">工程订单 · 893153</span><span class="preset-item-tag">长裁片</span></span><span class="preset-item-desc">100m 母卷，超长主帘与辅件组合演示。</span></button></details>
-      </div></div>
-            </div>
         </div>
         <div data-product-nav="workbench"></div>
         <div class="header-actions">
-            <button class="tool-btn active" onclick="openDemandImport()">导入需求</button>
             <button class="tool-btn" onclick="openCutTicketModal()">打印工单</button>
             <details class="header-more">
                 <summary class="tool-btn">工具与设置</summary>
@@ -68,18 +52,17 @@
                     <button class="tool-btn" onclick="openSettingsModal()" id="btn-settings">工艺与显示设置</button>
                 </div>
             </details>
-            <details class="demo-tools" id="demo-tools"><summary class="tool-btn">演示</summary><div id="demo-reset-slot"><span class="muted">示例需求与模拟库存</span></div></details>
         </div>
     </header>
 
-    <nav class="task-bar" aria-label="切割任务流程"><div class="task-toolbar"><button class="tool-btn" onclick="newCuttingTask().then(created => { if (created) openDemandManager(); })">新建任务</button><button class="tool-btn" onclick="openTaskList()">打开任务</button><button class="tool-btn" onclick="saveTaskFromUI()">保存需求</button><span id="task-state" role="status">未保存</span><button class="tool-btn" id="btn-local-drafts" onclick="openLocalDrafts()">本机草稿 0</button></div><ol class="workflow-stages" aria-label="查看作业阶段"><li><button type="button" data-workflow-stage="0"><span class="stage-marker">1</span>需求</button></li><li><button type="button" data-workflow-stage="1"><span class="stage-marker">2</span>材料</button></li><li><button type="button" data-workflow-stage="2"><span class="stage-marker">3</span>排料</button></li><li><button type="button" data-workflow-stage="3"><span class="stage-marker">4</span>报工</button></li></ol><div class="task-toolbar"><button class="tool-btn" onclick="openTaskPlans()">方案记录</button><button class="tool-btn" onclick="openTaskReports()">报工记录 <span id="task-report-count">0</span></button></div></nav>
+    <nav class="task-bar" aria-label="切割任务流程"><div class="task-toolbar"><button class="tool-btn" onclick="openNewTask()">新建任务</button><button class="tool-btn" onclick="openTaskList()">打开任务</button><button class="tool-btn" onclick="saveTaskFromUI()">保存需求</button><span id="task-state" role="status">未保存</span><button class="tool-btn" id="btn-local-drafts" onclick="openLocalDrafts()">本机草稿 0</button></div><ol class="workflow-stages" aria-label="查看作业阶段"><li><button type="button" data-workflow-stage="0"><span class="stage-marker">1</span>需求</button></li><li><button type="button" data-workflow-stage="1"><span class="stage-marker">2</span>材料</button></li><li><button type="button" data-workflow-stage="2"><span class="stage-marker">3</span>排料</button></li><li><button type="button" data-workflow-stage="3"><span class="stage-marker">4</span>报工</button></li></ol><div class="task-toolbar"><button class="tool-btn" onclick="openTaskPlans()">方案记录</button><button class="tool-btn" onclick="openTaskReports()">报工记录 <span id="task-report-count">0</span></button></div></nav>
     <!-- 主视窗工作区 -->
     <main>
         <!-- 左侧控制面板：清晰分离母卷排产与料头精益切割两大工位 -->
-        <aside class="sidebar" id="sidebar-left" aria-label="材料与需求">
-            <div class="workspace-heading"><span class="workflow-number">1</span><h1>裁切准备</h1><span>材料与需求</span></div>
-            <section class="material-context" aria-label="当前用料摘要"><div><span>本次用料</span><span><button class="tool-btn" onclick="matchTaskMaterials()">选择用料</button> <button class="tool-btn" id="btn-material-details">详情</button></span></div><strong id="material-context-id">未装载</strong><p id="material-context-info"></p></section>
-            <section class="remnant-entry" aria-label="料头优先"><div><strong>料头优先</strong><p>按剩余需求自动试排</p></div><button class="tool-btn" onclick="matchTaskMaterials({type:'remnant',recommend:true})">料头推荐 →</button></section>
+        <aside class="sidebar" id="sidebar-left" aria-label="作业输入">
+            <div class="task-context"><span>当前任务</span><button id="current-task-name" onclick="openDemandManager()">本次切割</button></div>
+            <section id="material-context" class="material-context" aria-label="当前用料摘要"><div><span>本次用料</span><span><button class="tool-btn" onclick="matchTaskMaterials()">选择用料</button> <button class="tool-btn" id="btn-material-details">详情</button></span></div><strong id="material-context-id">未装载</strong><p id="material-context-info"></p></section>
+            <section id="remnant-entry" class="remnant-entry" aria-label="料头输入"><div class="remnant-entry-heading"><strong>可用料头</strong><button class="tool-btn" onclick="openRemnantModal()">查看料头库</button></div><p id="remnant-availability" role="status">填写需求后匹配料头</p><button class="tool-btn" id="btn-remnant-recommend" onclick="matchTaskMaterials({type:'remnant',recommend:true})">试排推荐</button></section>
             <!-- 顶部工位模式切换器 (Dual-Mode Switcher) -->
             <!-- ======================================================== -->
             <!-- 模式一面板：母卷连续开卷排产 (Mother Roll Mode)             -->
@@ -111,27 +94,7 @@
 
                             <details id="task-details" class="detail-disclosure task-metadata" open><summary id="task-details-title">任务信息</summary><div class="task-fields"><label>任务名称<input class="prop-input" id="task-name" value="本次切割" onchange="taskInputChanged()"></label><label>材料型号<select class="prop-input" id="task-material" onchange="taskInputChanged()"></select></label><details class="detail-disclosure"><summary>订单关联</summary><label>外部订单号<input class="prop-input" id="task-external-ref" placeholder="可选" onchange="taskInputChanged()"></label></details></div></details><p id="demand-progress-summary" class="field-unit" role="status">尺寸：mm · 剩余按合格报工计算，预览不扣数量。</p><div id="demands-container" style="display: flex; flex-direction: column; gap: 8px;">
                                 <!-- 动态生成带有【在库料头提示与选择】的裁片项 -->
-                            </div><details class="detail-disclosure"><summary>需求模板与工艺说明</summary><div class="order-template-bar" style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px; padding: 6px 8px; background: rgba(2, 132, 199, 0.08); border: 1px dashed rgba(2, 132, 199, 0.35); border-radius: 4px;">
-                                <span>订单模板</span>
-                                <select class="prop-input" id="sel-curtain-order-template" onchange="loadCurtainOrderTemplate(this.value)">
-                                    <option value="">-- 选择典型窗帘整单模板 --</option>
-                                    <option value="real_893292_cream"> 订单样例 893292 (2#A3A-Cream) 窗帘整单 (11主帘+3辅件 · 37件套)</option>
-                                    <option value="real_893153_white"> 订单样例 893153 (2#1A-Off White) 窗帘整单 (4大主帘+2辅件 · 18件套)</option>
-                                    <option value="whole_house"> 全屋整套窗帘工程批量单 (32件套 · 支持跨工位连续搭切)</option>
-                                    <option value="hotel_batch"> 星级酒店客房工程批量单 (50件套 · 支持多工位连续搭切)</option>
-                                    <option value="edge_nesting"> 偏幅落地大帘+边角辅料连续单 (24件套 · 支持多工位搭切)</option>
-                                    <option value="valance_suite"> 豪华窗幔与全屋辅配件工程单 (40件套 · 支持连续搭切)</option>
-                                    <option value="remnant_reuse"> 飘窗短帘料头精益复用 (5件套: 飘窗短帘+抱枕套+挂带)</option>
-                                </select>
-                            </div><div id="demands-affiliation-bar" style="margin-bottom: 8px; padding: 6px 8px; background: rgba(15, 23, 42, 0.4); border: 1px solid var(--panel-border); border-radius: 4px; font-size: 11px;">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-                                    <span>需求归属母卷:</span>
-                                    <b id="demands-roll-label" style="color: #38bdf8; font-family: monospace;">ROLL-2026-0920 (2000mm)</b>
-                                </div>
-                                <div id="demands-craft-hint" style="color: var(--text-muted); font-size: 10px; line-height: 1.3;">
-                                    工艺规则：窗帘定高横裁为主要落料，门幅剩余窄边料顺流纵切套排辅件吃净
-                                </div>
-                            </div></details>
+                            </div>
                         </div>
                     </div>
                     <div class="panel-section section-card-blue collapsible collapsed" id="card-mother-roll">
@@ -253,6 +216,7 @@
             <!-- 模式二面板：料头复用精益切割 (Remnant Lean Cutting Mode)   -->
             <!-- ======================================================== -->
 
+        <div id="left-input-actions" class="input-actions"><div id="input-flow-status"></div></div>
         </aside>
 
         <!-- 左分割条 (可拖拽调节左侧面板宽度) -->
@@ -267,19 +231,7 @@
             <button class="sidebar-edge-toggle edge-toggle-right" id="edge-toggle-right" onclick="toggleSidebar('right')" title="点击收起右侧面板">▶</button>
 
             <!-- 图例栏 -->
-            <div class="workspace-heading canvas-heading"><span class="workflow-number">2</span><h2>排料预览</h2>
-                <div class="canvas-view-actions"><button class="tool-btn" onclick="resetToBedView()">当前工位</button><button class="tool-btn" onclick="viewFullRoll()">全卷</button><button class="tool-btn" id="btn-reset-continuous" onclick="resetContinuousCutting()" title="重置当前母卷与工位至 0m 起点，清空报工并重新开始搭切">重新搭切</button>
-                <details class="canvas-help"><summary class="tool-btn">图例与操作</summary><div class="canvas-help-body">            <div class="legend-bar">
-                <div class="legend-item"><span class="legend-dot"></span><span>成品</span></div>
-                <div class="legend-item"><span class="legend-dot"></span><span>可用料头</span></div>
-                <div class="legend-item"><span class="legend-dot"></span><span>带疵料头</span></div>
-                <div class="legend-item"><span class="legend-dot"></span><span>疵点</span></div>
-                <div class="legend-item"><span class="legend-dot"></span><span>切线</span></div>
-
-            </div>
-
-<p>拖动红框调整工位；拖动裁片微调位置。</p><p>方向键微调 5mm，Shift + 方向键微调 20mm；R 旋转 90°。</p><p>滚轮缩放，拖动画布平移。</p><button class="tool-btn" onclick="resetToFlowView()">查看进料全貌</button></div></details></div>
-            </div>
+            <div class="workspace-heading canvas-heading"><h1>排料画布</h1><div class="canvas-view-actions"><button class="tool-btn" onclick="resetToBedView()">当前工位</button><button class="tool-btn" onclick="viewFullRoll()">全卷</button></div></div>
             <!-- 母卷全局疵点雷达与展开视窗导航条 (Global Roll Panorama & Defect Radar) -->
             <div class="roll-radar-bar" id="roll-radar-bar">
                 <div class="radar-label-group">
@@ -331,8 +283,8 @@
         </div>
 
         <!-- 右侧面板：工艺单与对账台账 (Tab 选项卡化收拢) -->
-        <aside class="sidebar-right" id="sidebar-right" aria-label="排料结果与实切">
-            <div class="workspace-heading"><span class="workflow-number">3</span><h2>核对与报工</h2></div>
+        <aside class="sidebar-right" id="sidebar-right" aria-label="作业输出">
+
             <!-- 顶部 Tab 选项卡切换器 -->
             <div class="sidebar-tabs-header">
                 <button class="sidebar-tab-btn" id="tab-right-cut" aria-pressed="false" onclick="switchRightPanelTab('cut')">
@@ -442,6 +394,7 @@
             <div class="sidebar-pinned-footer" id="right-sidebar-actions-footer" style="border-top: 1px solid var(--panel-border); background: var(--panel-bg); flex-shrink: 0;">
                 <!-- 母卷开卷工位排料搭切执行控制 -->
                 <div id="right-roll-actions" class="panel-section action-footer-section" style="padding: 10px 14px 12px 14px;">
+                    <p id="output-empty" class="muted">等待左侧生成排料方案</p><section id="report-output" hidden><strong>最近报工</strong><p id="report-output-summary"></p><details><summary>本次入库料头</summary><ul id="report-output-remnants"></ul><button class="tool-btn" onclick="openRemnantModal()">查看料头库</button></details></section>
                     <strong id="workflow-current" role="status">完善需求</strong>
                     <p id="station-action-hint" class="station-action-hint" role="status">先生成方案，再核对实切并报工保存。</p>
                     <button id="btn-workflow-next" class="tool-btn" type="button">完善需求信息</button>
@@ -465,9 +418,6 @@
                         </button>
                         <button class="tool-btn" onclick="resetAllRollCuts()" title="清除全部预览裁片，从头开始">
                             清空整卷已排
-                        </button>
-                        <button class="tool-btn" onclick="resetContinuousCutting()" title="重置整卷搭切进度回 0m 起点，清空报工并重新搭切">
-                            重新搭切整卷
                         </button>
                     </div></details>
                     </div>

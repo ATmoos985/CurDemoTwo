@@ -6,6 +6,7 @@ import { renderRadar } from '../radar/radar-scrubber.js';
 import { renderDefectsUI } from '../solver/quota-manager.js';
 import { showToast, confirmAction } from '../../core/toast.js';
 import { syncMaterialOptions } from './material-options.js';
+import { renderMaterialInspection } from '../layout/workbench-panels.js';
 
 let cachedRolls = [], cachedRemnants = [];
 let activeRollId = null, activeRemnantId = null, activeTab = 'rolls';
@@ -53,12 +54,13 @@ export function closeMaterialModal() {
 
 export async function switchMaterialTab(tabName) {
     activeTab = tabName;
-    for (const name of ['rolls', 'remnants', 'dict']) {
+    for (const name of (standalone ? ['rolls', 'remnants', 'dict'] : ['current', 'rolls', 'remnants', 'dict'])) {
         const button = document.getElementById(`tab-mat-${name}`);
         button.classList.toggle('active', name === tabName);
         button.setAttribute('aria-pressed', String(name === tabName));
         document.getElementById(`pane-mat-${name}`).hidden = name !== tabName;
     }
+    if (tabName === 'current') {renderMaterialInspection();return;}
     if (tabName === 'dict') return;
     document.getElementById(`material-${tabName}-container`).innerHTML = '<p class="inventory-empty" role="status">正在读取库存…</p>';
     if (tabName === 'rolls') {
@@ -177,7 +179,8 @@ async function renderRemnantsLineage() {
     try {
         const response = await fetch('/api/remnants', { cache: 'no-store' });
         if (!response.ok) throw new Error('读取失败');
-        cachedRemnants = await response.json();
+        cachedRemnants = (await response.json()).sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || '') || b.id.localeCompare(a.id, undefined, {numeric:true}));
+        const count = document.getElementById('header-remnant-count');if (count) count.textContent = cachedRemnants.length;
     } catch { remnantError = '料头库存读取失败，请刷新重试。'; }
     renderRemnantsList();
 }
@@ -186,6 +189,8 @@ function renderRemnantsList() {
     const rows = filtered('remnants', cachedRemnants);
     const container = document.getElementById('material-remnants-container');
     const detail = document.getElementById('material-remnant-detail-panel');
+    const recommendation = document.getElementById('inventory-remnant-recommendation');
+    if (recommendation) recommendation.textContent = document.getElementById('remnant-availability')?.textContent || '按当前任务的剩余需求核对可用料头';
     document.getElementById('inventory-remnants-summary').textContent = remnantError || `${cachedRemnants.length} 块可用料头 · 总面积 ${area(cachedRemnants.reduce((sum, r) => sum + (r.area || 0), 0))} m² · 带疵 ${cachedRemnants.filter(r => r.hasDefect).length} 块`;
     document.getElementById('inventory-remnants-count').textContent = `显示 ${remnantError ? 0 : rows.length} / ${cachedRemnants.length} 块`;
     if (remnantError || !rows.length) {
@@ -196,7 +201,7 @@ function renderRemnantsList() {
     if (!rows.some(r => r.id === activeRemnantId)) activeRemnantId = rows[0].id;
     container.innerHTML = `<table class="inventory-table"><thead><tr><th>料头 / 批次</th><th>规格</th><th>库位 / 质量</th></tr></thead><tbody>${rows.map(r => `
         <tr data-remnant-row="${escapeHtml(r.id)}" class="${r.id === activeRemnantId ? 'selected' : ''}">
-            <td><button class="inventory-item-link" data-remnant="${escapeHtml(r.id)}" aria-pressed="${r.id === activeRemnantId}">${escapeHtml(r.id)}</button><span class="inventory-secondary">${escapeHtml(r.materialBatch)}</span></td>
+            <td><button class="inventory-item-link" data-remnant="${escapeHtml(r.id)}" aria-pressed="${r.id === activeRemnantId}">${escapeHtml(r.id)}</button><span class="inventory-secondary">${escapeHtml(r.materialBatch)}</span><span class="inventory-secondary">入库 ${escapeHtml(r.createdAt || '未登记')}</span></td>
             <td><strong class="inventory-number">${escapeHtml(r.width)} × ${escapeHtml(r.length)}</strong><span class="inventory-secondary">mm · ${area(r.area)} m²</span></td>
             <td>${escapeHtml(r.location || '未登记库位')}<span class="inventory-secondary">${escapeHtml(qualityNames[r.qualityGrade] || r.qualityGrade || '未评级')}${r.hasDefect ? ' · 有疵点' : ''}</span></td>
         </tr>`).join('')}</tbody></table>`;
@@ -211,6 +216,7 @@ function selectStockRemnant(id) {
     document.querySelectorAll('[data-remnant]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.remnant === id)));
     document.getElementById('material-remnant-detail-panel').innerHTML = `
         <div class="inventory-detail-heading"><h3>${escapeHtml(id)}</h3><p>${escapeHtml(remnant.materialBatch)}</p></div>
+        ${standalone ? '' : `<button class="tool-btn inventory-primary" data-match-remnant="${escapeHtml(id)}">核对当前需求并选用…</button>`}
         <div class="inventory-length"><div><span>料头面积</span><strong>${area(remnant.area)} <small>m²</small></strong></div><span>${remnant.hasDefect ? '局部带疵' : '无疵点记录'}</span></div>
         <dl class="inventory-fields">${field('宽 × 长', `${remnant.width} × ${remnant.length} mm`)}${field('库位', remnant.location)}${field('质量等级', qualityNames[remnant.qualityGrade] || remnant.qualityGrade)}</dl>
         <details class="inventory-disclosure"><summary>来源与流转</summary><dl class="inventory-fields">
@@ -222,6 +228,7 @@ function selectStockRemnant(id) {
 
 function inventoryPane(kind, label, placeholder, options, detailId) {
     return `<section id="pane-mat-${kind}" class="inventory-pane" ${kind === 'remnants' ? 'hidden' : ''} aria-label="${label}">
+        ${kind === 'remnants' && !standalone ? '<div class="inventory-task-remnants"><div><strong>当前任务料头推荐</strong><p id="inventory-remnant-recommendation"></p></div><button class="tool-btn inventory-primary" data-recommend>试排并查看推荐</button></div>' : ''}
         <p class="inventory-summary" id="inventory-${kind}-summary" role="status">正在读取库存…</p>
         <div class="inventory-toolbar"><input type="search" id="inventory-${kind}-search" aria-label="搜索${label}" placeholder="${placeholder}">
             <select id="inventory-${kind}-filter" aria-label="筛选${label}"><option value="">全部${kind === 'rolls' ? '验布状态' : '料头'}</option>${options}</select>
@@ -245,9 +252,10 @@ function createMaterialModalDOM() {
     modal.className = 'inventory-dialog';
     modal.setAttribute('aria-labelledby', 'inventory-title');
     modal.innerHTML = `
-        <div class="inventory-header"><h2 id="inventory-title">物料与库存</h2>${standalone?'<p>母卷、料头与疵点档案；选料与报工在裁切作业中完成。</p>':'<button class="tool-btn" data-close autofocus>返回工作台</button>'}</div>
-        <nav class="inventory-tabs" aria-label="库存分类"><button id="tab-mat-rolls" data-tab="rolls" aria-pressed="true" aria-controls="pane-mat-rolls">母卷库存</button><button id="tab-mat-remnants" data-tab="remnants" aria-pressed="false" aria-controls="pane-mat-remnants">料头库存</button><button id="tab-mat-dict" data-tab="dict" aria-pressed="false" aria-controls="pane-mat-dict">疵点参考</button></nav>
+        <div class="inventory-header"><h2 id="inventory-title">材料与库存</h2>${standalone?'<p>母卷、料头与疵点档案；选料与报工在裁切作业中完成。</p>':'<button class="tool-btn" data-close autofocus>返回工作台</button>'}</div>
+        <nav class="inventory-tabs" aria-label="库存分类">${standalone ? '' : '<button id="tab-mat-current" data-tab="current" aria-pressed="false" aria-controls="pane-mat-current">当前用料与疵点</button>'}<button id="tab-mat-rolls" data-tab="rolls" aria-pressed="true" aria-controls="pane-mat-rolls">母卷库存</button><button id="tab-mat-remnants" data-tab="remnants" aria-pressed="false" aria-controls="pane-mat-remnants">料头库存</button><button id="tab-mat-dict" data-tab="dict" aria-pressed="false" aria-controls="pane-mat-dict">疵点参考</button></nav>
         <div class="inventory-body">
+            ${standalone ? '' : '<section id="pane-mat-current" hidden></section>'}
             ${inventoryPane('rolls', '母卷', '搜索编号、面料或库位', '<option value="PASSED">已验合格</option><option value="PENDING">待验</option><option value="QUARANTINED">隔离</option>', 'material-roll-detail-panel')}
             ${inventoryPane('remnants', '料头', '搜索编号、来源母卷或库位', '<option value="clean">无疵点</option><option value="defect">有疵点</option>', 'material-remnant-detail-panel')}
             <section id="pane-mat-dict" class="inventory-reference" hidden>
@@ -263,6 +271,7 @@ function createMaterialModalDOM() {
         if (!button) return;
         const d = button.dataset;
         if ('close' in d) closeMaterialModal();
+        else if ('recommend' in d) {closeMaterialModal();window.camApp.matchTaskMaterials({type:'remnant',recommend:true});}
         else if (d.tab) switchMaterialTab(d.tab);
         else if ('refresh' in d) switchMaterialTab(activeTab);
         else if (d.roll || d.remnant) {
@@ -273,8 +282,13 @@ function createMaterialModalDOM() {
             }
         }
         else if (d.mount) mountRollToStation(d.mount);
+        else if (d.matchRemnant) {closeMaterialModal();window.camApp.matchTaskMaterials({type:'remnant',id:d.matchRemnant,recommend:true});}
         else if (d.scrap) scrapRemnantById(d.scrap);
     });
+    if (!standalone) {
+        const current = document.getElementById('material-details');current.hidden = false;
+        modal.querySelector('#pane-mat-current').append(current);
+    }
     modal.addEventListener('input', event => {
         if (event.target.id === `inventory-${activeTab}-search`) activeTab === 'rolls' ? renderRollsList() : renderRemnantsList();
     });

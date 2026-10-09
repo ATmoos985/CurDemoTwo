@@ -6,6 +6,7 @@ import {switchCutMode} from '../remnant/remnant-shelf.js';
 import {solverSettings} from '../settings/settings.js';
 import {recommendationMarkup, stockSignature} from './remnant-recommendation.js';
 import {showToast} from '../../core/toast.js';
+import {remnantAvailability} from './remnant-availability.js';
 
 const el = id => document.getElementById(id);
 let generation = 0;
@@ -18,10 +19,47 @@ function requestFromUI() {
         demands:getDemandsFromUI().filter(d=>d.demand>0).map(d=>({id:d.id,name:d.name,width:d.width,length:d.length,demand:d.demand,allowRotation:d.allowRotation})),
         allowRotation:el('sel-allow-rotation').value==='1',allowLongitudinal:el('sel-allow-longitudinal').value==='1'};
 }
-const context = () => JSON.stringify([state.activeTask?.id,state.activeTask?.revision,state.taskCompleted,requestFromUI()]);
+const context = () => JSON.stringify([state.activeTask?.id,state.activeTask?.revision,state.taskCompleted,(state.taskReports || []).map(r=>[r.planId,r.status]),requestFromUI()]);
 async function read(url, body) {
     const response=await fetch(url,body ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : {cache:'no-store'});
     const result=await response.json();if(!response.ok)throw new Error(result.message || '读取库存失败，请重试');return result;
+}
+
+let availabilityKey = '', availabilityTimer, availabilityVersion = 0;
+export function scheduleRemnantAvailability({force = false, recommend = false} = {}) {
+    if (!el('remnant-availability')) return;
+    const snapshot = context();
+    if (!force && availabilityKey === snapshot) return;
+    availabilityKey = snapshot;clearTimeout(availabilityTimer);
+    const token = ++availabilityVersion;
+    el('remnant-availability').textContent = '正在核对料头库存…';
+    availabilityTimer = setTimeout(async () => {
+        const request = requestFromUI(), completedBaseline = structuredClone(state.taskCompleted || {});
+        const valid = () => token === availabilityVersion && snapshot === context();
+        try {
+            const stocks = await read('/api/remnants');
+            if (!valid()) return;
+            const canMatch = request.rollModel && request.demands.length && request.demands.every(d => d.width > 0 && d.length > 0 && Number.isInteger(d.demand));
+            const candidates = canMatch ? await read('/api/cutting/material-candidates',request) : [];
+            if (!valid()) return;
+            const facts = remnantAvailability(stocks,candidates,request);
+            el('header-remnant-count').textContent = facts.total;
+            el('remnant-availability').textContent = facts.message;
+            el('btn-remnant-recommend').disabled = !canMatch;
+            el('btn-remnant-recommend').textContent = facts.fitting ? `试排推荐 · ${facts.fitting} 块` : '查看匹配原因';
+            if (recommend && facts.fitting) {
+                el('remnant-availability').textContent = '已更新剩余需求，正在试排可用料头…';
+                el('btn-remnant-recommend').disabled = true;el('btn-remnant-recommend').textContent = '正在试排…';
+                const result = await read('/api/cutting/remnant-recommendations',{input:request,completedBaseline});
+                if (!valid()) return;
+                const best = result.recommendations[0];
+                el('remnant-availability').textContent = best ? `建议先用 ${best.stock.id} · 可切 ${best.pieceCount} 件` : '本次试排未得到可用推荐，点击查看原因';
+                el('btn-remnant-recommend').disabled = false;el('btn-remnant-recommend').textContent = '查看推荐';
+            }
+        } catch (error) {
+            if (valid()) {availabilityKey = '';el('remnant-availability').textContent = `料头核对未完成：${error.message}`;el('btn-remnant-recommend').disabled = false;el('btn-remnant-recommend').textContent = '重新匹配';}
+        }
+    }, recommend ? 0 : 250);
 }
 
 /** One job-wide selector; opening and matching never save a task or change inventory. */
@@ -73,7 +111,7 @@ export async function openMaterialSelection(preferred = {}) {
         const visible=candidates.filter(c=>(type==='all'||c.type===type) && words.every(w=>`${c.id} ${c.location || ''}`.toLowerCase().includes(w)));
         if(!visible.some(c=>key(c)===selected))selected='';
         el('material-match-count').textContent=`显示 ${visible.length} / ${candidates.length} 个匹配来源`;
-        el('material-candidates').innerHTML=visible.length?visible.map(c=>`<label class="material-candidate${key(c)===currentKey()?' material-current':''}"><input type="radio" name="job-material" value="${escapeText(key(c))}" ${key(c)===selected?'checked':''} ${busy?'disabled':''}><span><strong>${c.type==='remnant'?'料头':'母卷'} · ${escapeText(c.id)}${key(c)===currentKey()?' · 当前':''}</strong><span>${c.width} × ${c.length} mm · ${escapeText(c.location || '库位未登记')}${c.hasDefect?' · 需避疵':''}</span><small>${c.fittingLines} / ${request.demands.length} 项需求的单件尺寸可容纳；不代表全部数量可排入</small></span></label>`).join(''):'<p class="inventory-empty">暂无匹配材料。可调整筛选，或到库存档案录入材料后刷新。</p>';
+        el('material-candidates').innerHTML=visible.length?visible.map(c=>`<label class="material-candidate${key(c)===currentKey()?' material-current':''}"><input type="radio" name="job-material" value="${escapeText(key(c))}" ${key(c)===selected?'checked':''} ${busy?'disabled':''}><span><strong>${c.type==='remnant'?'料头':'母卷'} · ${escapeText(c.id)}${key(c)===currentKey()?' · 当前':''}</strong><span>${c.width} × ${c.length} mm · ${escapeText(c.location || '库位未登记')}${c.hasDefect?' · 需避疵':''}</span><small>${c.fittingLines} / ${request.demands.length} 项需求的单件尺寸可容纳；不代表全部数量可排入</small></span></label>`).join(''):'<p class="inventory-empty">当前筛选下没有符合剩余需求和工艺的材料；完整库存仍可从下方库存档案查看。</p>';
         el('material-candidates').querySelectorAll('input').forEach(input=>input.onchange=()=>{selected=input.value;el('material-replace-confirm').checked=false;fail('');update();});update();
     }
     async function refresh() {

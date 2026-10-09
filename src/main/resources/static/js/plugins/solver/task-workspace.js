@@ -196,7 +196,6 @@ export function startTaskDraft(name = '本次切割') {
     el('task-external-ref').value = '';
     el('task-state').textContent = '新任务 · 未保存';
     el('task-report-count').textContent = '0';
-    el('preset-current-label').textContent = '载入示例需求';
     draftReady = false;
     el('demand-undo')?.remove();
 }
@@ -204,20 +203,22 @@ export function startTaskDraft(name = '本次切割') {
 export function finishTaskDraft() { resetDraftTracking(); draftBaseline = ''; taskInputChanged(); }
 
 export async function importDemandTask(task, isCurrent = () => true) {
-    // Read first, then use the existing draft guard. A failed/cancelled import preserves the workspace.
+    if (state.activeTask) throw new Error('当前任务已保存。请在需求窗口编辑；导入另一批订单请先新建任务。');
+    // An import belongs to the current unsaved task; never replace a saved task's report identities.
     const rolls = await api('/api/rolls');
-    if (!isCurrent() || !await prepareTaskSwitch() || !isCurrent()) return false;
+    if (!isCurrent()) return false;
+    if (state.getCurrentCaseData().demands.length && !await confirmAction('替换当前任务的需求草稿？未报工预览将清除，任务名称保留。', {title:'替换需求',action:'替换当前草稿'})) return false;
+    if (!isCurrent() || state.activeTask) return false;
     const wasInert = document.body.inert;document.body.inert = true;
     try {
-        startTaskDraft(task.name);
-        state.scenarios = getInitialScenarios();state.currentCaseId = 1;
+        state.pendingPlan = null;
         syncMaterialOptions(rolls, {model:task.materialModel, rollId:'', fallback:false});
         el('task-external-ref').value = task.externalRef;
         state.getCurrentCaseData().demands = task.demands.map(d => ({...d,count:d.quantity}));
         renderDemandsUI(state.getCurrentCaseData().demands);
         await switchCutMode('roll');
-        finishTaskDraft();updateWorkflowControls();
-        showToast('已建立需求草稿，请核对后保存并选择材料。', 'success');
+        taskInputChanged();updateWorkflowControls();
+        showToast('需求已导入当前任务，请核对后保存并选择材料。', 'success');
         return true;
     } finally {document.body.inert = wasInert;}
 }
@@ -232,6 +233,7 @@ export async function newCuttingTask(rolls, {skipDraftGuard = false} = {}) {
     state.scenarios = getInitialScenarios();
     state.currentCaseId = 1;
     state.getCurrentCaseData().demands = [];
+    Object.assign(state.getCurrentCaseData(), {allowLongitudinal:true,allowRotation:false,trimStart:0});
     renderDemandsUI([]);
     await switchCutMode('roll');
     resetDraftTracking();
@@ -379,7 +381,6 @@ export async function loadTask(id, {skipDraftGuard = false, detail:loadedDetail}
         localStorage.setItem('cutting-task-id', task.id);
         el('task-details').open = false;
         el('task-details-title').textContent = task.name;
-        el('preset-current-label').textContent = '载入示例需求';
         resetDraftTracking();
         return true;
     } catch (error) { showToast(error.message, 'error'); return false; }

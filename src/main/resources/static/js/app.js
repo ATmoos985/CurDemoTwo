@@ -1,6 +1,7 @@
 import { initTaskWorkspace, newCuttingTask, startTaskDraft, finishTaskDraft, prepareTaskSwitch, openLocalDrafts, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, taskInputChanged } from './plugins/solver/task-workspace.js';
 import {initWorkbenchPanels, openDemandManager, openMaterialDetails} from './plugins/layout/workbench-panels.js';
 import {openDemandImport} from './plugins/solver/demand-import.js';
+import {openNewTask} from './plugins/solver/task-creation.js';
 /**
  * 【主装配器】CAM 前端应用主入口 (Application Orchestrator)
  * 挂载微内核与所有独立插件，完成全局事件编排与向后兼容性绑定
@@ -338,7 +339,7 @@ window.addEventListener('keydown', event => {
 // 2. 导出面向全局 DOM 与 Inline Onclick 的统一命名空间
 // ==========================================
 const camApp = {
-    openDemandManager, openMaterialDetails, openDemandImport,
+    openDemandManager, openMaterialDetails, openDemandImport, openNewTask,
     undoPlanEdit, redoPlanEdit, validatePlanAdjustment,
     newCuttingTask, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, openLocalDrafts, taskInputChanged,
     bus,

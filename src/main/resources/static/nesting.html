@@ -12,12 +12,13 @@
     <link rel="stylesheet" href="css/ui-consistency.css">
 </head>
 <body class="nesting-lab">
-    <header class="lab-header"><div><span class="app-mark">▥</span><strong>裁切试验台</strong><span class="lab-subtitle">材料、需求与排料</span></div><div data-product-nav="lab"></div></header>
+    <header class="lab-header"><div><span class="app-mark">▥</span><strong>裁切试验台</strong><span class="lab-subtitle">多场景能力演示 · 不写入业务库存</span></div><div data-product-nav="lab"></div></header>
     <main class="lab-layout">
         <form id="problem-form" class="lab-input">
             <div class="lab-heading"><h1>裁切输入</h1><span>尺寸 mm · 面积 m²</span></div>
             <div class="lab-form-body">
-                <div class="lab-examples"><button type="button" class="tool-btn" id="example-crosscut">横切示例</button><button type="button" class="tool-btn" id="example-guillotine">避疵示例</button><button type="button" class="tool-btn" id="example-contour">异形示例</button></div>
+                <div class="lab-examples" aria-label="演示场景"><button type="button" class="tool-btn" id="example-crosscut">整幅横切</button><button type="button" class="tool-btn" id="example-guillotine">二维避疵</button><button type="button" class="tool-btn" data-lab-scenario="3">短料头复用</button><button type="button" class="tool-btn" data-lab-scenario="4">多规格套裁</button><button type="button" class="tool-btn" data-lab-scenario="6">连续送料工位</button><button type="button" class="tool-btn" id="example-contour">异形排料</button></div>
+                <p class="lab-muted">选一个场景后生成排料。连续送料展示单个加工区的布局与接续边界；完整任务接续与报工在裁切作业中进行。</p>
                 <fieldset><legend>在什么材料上切</legend><label>材料标识<input id="material-id" required maxlength="120" value="MATERIAL-1"></label>
                     <div class="lab-pair"><label>宽度<input id="material-width" type="number" min="0.1" max="10000000" step="0.1" required></label><label>长度<input id="material-height" type="number" min="0.1" max="10000000" step="0.1" required></label></div>
                     <div id="material-shape-editor"></div>

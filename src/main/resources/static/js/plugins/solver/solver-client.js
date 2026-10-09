@@ -23,6 +23,7 @@ import { showToast } from '../../core/toast.js';
 import { solverSettings } from '../settings/settings.js';
 import { renderToolpathUI } from '../toolpath/toolpath-optimizer.js';
 import { selectRemnant, clearRemnantSelection, hoverRemnant } from '../cad/cad-remnant-highlight.js';
+import {scheduleRemnantAvailability} from '../material/material-selection.js';
 
 export function updateUIInfo() {
     const data = state.getCurrentCaseData();
@@ -303,7 +304,7 @@ export function updateWorkflowControls() {
     const flow = renderWorkflowGuide({ready, edited, busy:solving ? '正在生成方案…' : validatingAdjustment ? '正在校验调整…' : reporting ? '正在保存报工…' : ''});
     const data = state.getCurrentCaseData(), reportEl = document.getElementById('lbl-report-status');
     if (reportEl) reportEl.textContent = materialSummary(data, state.currentCutMode === 'remnant').actual ? '已报工保存 · ' + data.lastReceipt.finishedPieceCount + ' 件' :
-        edited ? '手动调整 · 待校验' : ready ? '待报工 · 尚未保存产出' : flow.done || flow.stage < 2 ? flow.title : '当前工位待排料';
+        edited ? '手动调整 · 待校验' : ready ? '待报工 · 尚未保存产出' : flow.done ? '本次需求已完成' : '当前工位尚无排料结果';
     updateDemandProgress({pending:editable ? state.pendingPlan : null, edited, attempt:latestSolveAttempt && latestSolveAttempt.context === solveContext() ? latestSolveAttempt : null});
     renderSolveFeedback(flow);
     return {...flow, ready, edited};
@@ -882,7 +883,10 @@ export async function confirmCutReport() {
         }
     } catch (error) {
         document.getElementById("report-error").textContent = reported ? "报工已完成，页面刷新失败，请重新打开该任务查看结果" : error.message;
-    } finally { reporting = false; document.getElementById("report-confirm-button").disabled = false; updateWorkflowControls(); }
+    } finally {
+        reporting = false; document.getElementById("report-confirm-button").disabled = false; updateWorkflowControls();
+        if (reported) scheduleRemnantAvailability({force:true,recommend:true});
+    }
 }
 
 export function exportCutResult() {

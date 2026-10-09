@@ -5,7 +5,7 @@ import { bus } from '../../core/event-bus.js';
 import { showToast } from '../../core/toast.js';
 
 export async function openRemnantModal() {
-    return window.camApp.matchTaskMaterials({type:'remnant',recommend:true});
+    return window.camApp.openMaterialModal('remnants');
 }
 
 export function closeRemnantModal() {

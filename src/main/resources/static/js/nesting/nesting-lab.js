@@ -1,6 +1,7 @@
 import { rectangle, polygon, shapeArea, createNestingScene } from './nesting-scene.js';
 import { mountNestingViewer } from './nesting-viewer.js';
 import { NestingSession } from './nesting-client.js';
+import {scenarioExample} from './scenario-examples.js';
 
 const byId = id => document.getElementById(id);
 const session = new NestingSession();
@@ -218,6 +219,7 @@ byId('add-exclusion').onclick = () => inputAction(() => { problem = readForm(); 
 byId('example-contour').onclick = () => loadProblem(example('CONTOUR'));
 byId('example-crosscut').onclick = () => loadProblem(example('CROSSCUT'));
 byId('example-guillotine').onclick = () => loadProblem(example('GUILLOTINE'));
+document.querySelectorAll('[data-lab-scenario]').forEach(button => button.onclick = () => loadProblem(scenarioExample(Number(button.dataset.labScenario))));
 byId('problem-form').addEventListener('submit', async event => {
     event.preventDefault(); if (!byId('problem-form').reportValidity()) return;
     try {

@@ -1,6 +1,9 @@
 import {parseDemandSheet, parseDemandJSON, importedTask} from './demand-import-model.js';
 import {importDemandTask, escapeText} from './task-workspace.js';
 import {openDemandManager} from '../layout/workbench-panels.js';
+import {demandSample} from './demand-sample.js';
+import {state} from '../../core/state.js';
+import {showToast} from '../../core/toast.js';
 
 let library;
 function loadSpreadsheetLibrary() {
@@ -13,18 +16,19 @@ function loadSpreadsheetLibrary() {
     return library;
 }
 
-export function openDemandImport() {
+export function openDemandImport({sample = false} = {}) {
+    if (state.activeTask) {showToast('当前任务已保存，请在需求窗口编辑；导入另一批订单请先新建任务。','info');return;}
     if (document.getElementById('demand-import')) {document.getElementById('demand-import').showModal();return;}
     const dialog = document.createElement('dialog');dialog.id = 'demand-import';dialog.className = 'action-dialog workbench-dialog';
     dialog.setAttribute('aria-labelledby','demand-import-title');
-    dialog.innerHTML = `<div class="workbench-dialog-heading"><div><h2 id="demand-import-title">导入需求</h2><p>先核对，再按材料型号建立一份新任务。</p></div><button class="tool-btn" data-close>关闭</button></div>
+    dialog.innerHTML = `<div class="workbench-dialog-heading"><div><h2 id="demand-import-title">${sample ? '选择 9.28 样例需求' : '导入当前任务的需求'}</h2><p>当前任务：${escapeText(document.getElementById('task-name').value)} · 每次选取一种材料型号。</p></div><button class="tool-btn" data-close>关闭</button></div>
         <div class="workbench-dialog-body"><div class="import-file"><label>选择订单文件<input id="demand-import-file" type="file" accept=".xlsx,.csv,.json"></label><button class="tool-btn" id="demand-import-template">下载标准模板</button></div>
         <p class="muted">支持现有 9.28 Excel、标准需求表和现有任务 JSON。文件在本机读取；确认后生成草稿，保存需求才写入服务器。</p>
         <p id="demand-import-status" role="status">等待选择文件</p><label id="demand-import-sheet-label" hidden>工作表 <select id="demand-import-sheet" class="prop-input"></select></label>
         <div id="demand-import-preview" hidden><label class="import-model-label">本次导入的材料型号<select id="demand-import-model" class="prop-input"></select></label><p id="demand-import-count"></p>
         <p id="demand-import-rule" class="source-notice"></p><div class="import-table"><table><thead><tr><th>来源行 / 订单</th><th>裁片</th><th>宽 × 长 (mm)</th><th>件数</th></tr></thead><tbody id="demand-import-rows"></tbody></table></div></div>
         <div id="demand-import-issues" hidden></div><p id="demand-import-error" role="alert" hidden></p></div>
-        <div class="workbench-dialog-footer"><span class="muted">母卷库存、疵点和报工不随订单导入</span><button class="tool-btn" data-close>取消</button><button class="tool-btn active" id="demand-import-apply" disabled>建立需求草稿</button></div>`;
+        <div class="workbench-dialog-footer"><span class="muted">母卷库存、疵点和报工不随订单导入</span><button class="tool-btn" data-close>取消</button><button class="tool-btn active" id="demand-import-apply" disabled>导入当前任务</button></div>`;
     document.body.append(dialog);dialog.showModal();
     const el = id => dialog.querySelector('#' + id), apply = el('demand-import-apply');
     let result, workbook, source = '', version = 0, importing = false;
@@ -94,4 +98,12 @@ export function openDemandImport() {
         const blob = new Blob(['\ufeff订单编号,材料型号,裁片名称,宽度(mm),长度(mm),数量,允许旋转\r\n示例订单,请填写真实型号,示例裁片,600,800,2,否\r\n'], {type:'text/csv;charset=utf-8'});
         const url = URL.createObjectURL(blob), link = document.createElement('a');link.href = url;link.download = '需求导入模板.csv';link.click();setTimeout(() => URL.revokeObjectURL(url),1000);
     };
+    if (sample) {
+        result = demandSample;source = '9.28 样例';
+        dialog.querySelector('.import-file').hidden = true;
+        render();
+        const cream = result.groups.findIndex(group => group.materialModel === '2#A3A-Cream');
+        el('demand-import-model').value = String(Math.max(0,cream));renderGroup();
+        el('demand-import-status').textContent = '9.28 Excel · 100 项有效需求 / 156 件 · 保留原尺寸与数量，订单编号以来源行替代。第 78、79、108、109 行字段不完整，未纳入样例。';
+    }
 }
