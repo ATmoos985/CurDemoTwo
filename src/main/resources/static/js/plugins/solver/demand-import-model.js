@@ -76,3 +76,69 @@ export function importedTask(result, index, source) {
             name:order && !name.includes(order) ? `订单 ${order} · ${name}` : name,
             width, length, quantity, allowRotation}))};
 }
+
+export function evaluateModelMatches(groups, roll, allRolls = []) {
+    const norm = str => String(str ?? '').toLowerCase().replace(/[\s\(\)（）#\-_]/g, '');
+    const rollModelNorm = roll ? norm(roll.rollModel) : '';
+    const allRollList = allRolls || [];
+
+    return groups.map((group, index) => {
+        const groupNorm = norm(group.materialModel);
+        const maxWidth = Math.max(...group.demands.map(d => d.width));
+        const maxLength = Math.max(...group.demands.map(d => d.length));
+        const totalQuantity = group.demands.reduce((n, d) => n + d.quantity, 0);
+
+        let matchStatus = 'NO_STOCK';
+        let statusText = '暂无在库母卷';
+        let statusBadge = 'muted';
+
+        if (roll) {
+            const isTargetModel = group.materialModel === roll.rollModel ||
+                groupNorm === rollModelNorm ||
+                (groupNorm.length >= 4 && rollModelNorm.length >= 4 && (groupNorm.includes(rollModelNorm) || rollModelNorm.includes(groupNorm)));
+
+            if (isTargetModel) {
+                if (maxWidth <= roll.width) {
+                    matchStatus = 'MATCHED';
+                    statusText = `当前母卷可切 (宽≤${roll.width}mm)`;
+                    statusBadge = 'success';
+                } else {
+                    matchStatus = 'OVERSIZE';
+                    statusText = `幅宽超限 (最大${maxWidth}mm > ${roll.width}mm)`;
+                    statusBadge = 'warning';
+                }
+            } else {
+                const other = allRollList.find(r => r.rollModel === group.materialModel || norm(r.rollModel) === groupNorm);
+                if (other) {
+                    matchStatus = 'IN_STOCK_OTHER';
+                    statusText = `匹配其他母卷 (${other.rollId} · ${other.width}mm)`;
+                    statusBadge = 'info';
+                }
+            }
+        } else {
+            const existing = allRollList.find(r => r.rollModel === group.materialModel || norm(r.rollModel) === groupNorm);
+            if (existing) {
+                matchStatus = 'IN_STOCK_OTHER';
+                statusText = `在库有卷 (${existing.rollId} · ${existing.width}mm)`;
+                statusBadge = 'info';
+            }
+        }
+
+        return {
+            index,
+            materialModel: group.materialModel,
+            demandCount: group.demands.length,
+            totalQuantity,
+            maxWidth,
+            maxLength,
+            matchStatus,
+            statusText,
+            statusBadge
+        };
+    });
+}
+
+export function importedTasks(result, indices, source) {
+    return indices.map(index => importedTask(result, index, source));
+}
+

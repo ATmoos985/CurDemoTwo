@@ -54,3 +54,33 @@ test('vendored reader supports real XLSX roundtrip and UTF-8 CSV template in Chi
     const csv=XLSX.read(Buffer.from('\ufeff'+standard.join(',')+'\r\nO,布料,窗帘,600,800,2,否'),{type:'buffer'});
     assert.equal(parseDemandSheet(XLSX.utils.sheet_to_json(csv.Sheets[csv.SheetNames[0]],{header:1})).groups[0].materialModel,'布料');
 });
+
+test('evaluateModelMatches accurately classifies roll match, oversize, and alternative inventory rolls', async () => {
+    const {evaluateModelMatches, importedTasks} = await import('../../main/resources/static/js/plugins/solver/demand-import-model.js');
+    const groups = [
+        {materialModel:'2#1A-Off White', demands:[{id:1,width:2500,length:3000,quantity:2}]},
+        {materialModel:'2#A3A-Cream', demands:[{id:2,width:2900,length:3200,quantity:3}]},
+        {materialModel:'DEMO-LINEN', demands:[{id:3,width:1800,length:2000,quantity:1}]}
+    ];
+    const targetRoll = {rollId:'ROLL-1', rollModel:'2#1A-Off White', width:2800};
+    const allRolls = [targetRoll, {rollId:'ROLL-2', rollModel:'2#A3A-Cream', width:2800}];
+
+    const matches = evaluateModelMatches(groups, targetRoll, allRolls);
+    assert.equal(matches.length, 3);
+    assert.equal(matches[0].matchStatus, 'MATCHED');
+    assert.match(matches[0].statusText, /当前母卷可切/);
+
+    // 针对Cream母卷测试超幅
+    const creamRoll = {rollId:'ROLL-2', rollModel:'2#A3A-Cream', width:2800};
+    const creamMatches = evaluateModelMatches(groups, creamRoll, allRolls);
+    assert.equal(creamMatches[1].matchStatus, 'OVERSIZE');
+    assert.match(creamMatches[1].statusText, /幅宽超限/);
+
+    // 批量抽取任务
+    const result = {groups, format:'标准'};
+    const tasks = importedTasks(result, [0, 1], '测试批次');
+    assert.equal(tasks.length, 2);
+    assert.equal(tasks[0].materialModel, '2#1A-Off White');
+    assert.equal(tasks[1].materialModel, '2#A3A-Cream');
+});
+
