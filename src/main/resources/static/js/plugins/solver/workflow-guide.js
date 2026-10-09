@@ -84,9 +84,15 @@ export function renderWorkflowGuide(plan = {}) {
     const solve = el(actions.solve);solve.disabled = !!busy || !flow.canSolve;solve.hidden = !flow.canSolve;
     solve.textContent = busy === '正在生成方案…' ? busy : plan.ready || plan.edited ? '重新排料' : '生成排料方案';
     const report = el(actions.report);report.disabled = !!busy || flow.action !== 'report';report.hidden = !plan.ready && !plan.edited;
-    report.textContent = '完成本工位 / 继续裁切';
+    report.textContent = '报工保存';
+    const stageAdvance = el('btn-stage-advance');
+    if (stageAdvance) {
+        stageAdvance.hidden = !plan.ready && !plan.edited;
+        stageAdvance.disabled = !!busy || flow.action !== 'report';
+        stageAdvance.textContent = '接续下一工位';
+    }
     const queue = queuedReports(), batch = el('btn-batch-report');
-    batch.hidden = !queue.length;batch.disabled = !!busy;batch.textContent = `集中报工 · ${queue.length} 工位`;
+    batch.hidden = !queue.length;batch.disabled = !!busy;batch.textContent = `一次报工 · 已暂存 ${queue.length} 工位`;
     el('btn-validate-adjustment').hidden = !plan.edited;
     const data = state.getCurrentCaseData(), sheet = state.currentCutMode === 'remnant';
     el('station-navigation-group').hidden = !data.materialAvailable;

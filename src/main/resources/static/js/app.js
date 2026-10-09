@@ -56,7 +56,8 @@ import {
 import {
     updateUIInfo, loadCase, triggerSolve,
     openCutReport, closeCutReport, confirmCutReport, openBatchReport, exportCutResult,
-    openStationLapConfirmModal, updateReportPreview, recordPlanEdit, undoPlanEdit, redoPlanEdit, validatePlanAdjustment
+    openStationLapConfirmModal, updateReportPreview, recordPlanEdit, undoPlanEdit, redoPlanEdit, validatePlanAdjustment,
+    stageAndAdvanceNextStation, handleClearStationClick, handleClearStationDblClick
 } from './plugins/solver/solver-client.js';
 
 import {
@@ -366,6 +367,9 @@ const camApp = {
     triggerSolve,
     openCutReport, closeCutReport, confirmCutReport, openBatchReport, exportCutResult,
     openStationLapConfirmModal, updateReportPreview,
+    stageAndAdvanceNextStation,
+    handleClearStationClick,
+    handleClearStationDblClick,
     loadCase,
     stepCut,
     playCuts,

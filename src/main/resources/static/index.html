@@ -235,8 +235,14 @@
             <button class="sidebar-edge-toggle edge-toggle-left" id="edge-toggle-left" onclick="toggleSidebar('left')" title="点击收起左侧面板">◀</button>
             <button class="sidebar-edge-toggle edge-toggle-right" id="edge-toggle-right" onclick="toggleSidebar('right')" title="点击收起右侧面板">▶</button>
 
-            <!-- 图例栏 -->
-            <div class="workspace-heading canvas-heading"><h1>排料画布</h1><div class="canvas-view-actions"><button class="tool-btn" onclick="resetToBedView()">当前工位</button><button class="tool-btn" onclick="viewFullRoll()">全卷</button><button class="tool-btn" onclick="openMaterialModal()">库存档案</button></div></div>
+            <div class="workspace-heading canvas-heading"><h1>排料画布</h1><div class="canvas-view-actions">
+                <div id="station-navigation-group" class="station-nav-group" role="group" aria-label="工位导航与清理">
+                    <button class="tool-btn icon-btn" id="btn-station-prev" onclick="advanceBed(-1)" title="查看上一工位">◀</button>
+                    <button class="tool-btn icon-btn" id="btn-station-next" onclick="advanceBed(1)" title="查看下一工位">▶</button>
+                    <button class="tool-btn icon-btn" id="btn-station-smart" onclick="smartAdvanceBed()" title="回到待切位置">⌖</button>
+                    <button class="tool-btn icon-btn danger-hover" id="btn-station-clear" onclick="handleClearStationClick()" ondblclick="handleClearStationDblClick()" title="单击清除本工位排料 · 双击清空整卷预览">🗑</button>
+                </div>
+                <button class="tool-btn" onclick="resetToBedView()">当前工位</button><button class="tool-btn" onclick="viewFullRoll()">全卷</button><button class="tool-btn" id="btn-reset-roll-cutting" onclick="resetContinuousCutting()" title="重置本卷报工与搭切进度回 0m 起点">重置本卷报工</button><button class="tool-btn" onclick="openMaterialModal()">库存档案</button></div></div>
             <!-- 母卷全局疵点雷达与展开视窗导航条 (Global Roll Panorama & Defect Radar) -->
             <div class="roll-radar-bar" id="roll-radar-bar">
                 <div class="radar-label-group">
@@ -412,21 +418,13 @@
                     <button class="big-solve-btn roll" id="btn-trigger-solve-station" onclick="triggerSolve()" title="在当前红框工位排料并保留其余工位已切成果">
                         生成排料方案
                     </button>
-                    <button class="tool-btn active" id="btn-confirm-station-cut" onclick="openStationLapConfirmModal()" title="确认当前工位裁切：扣减母卷长度、核销订单需求、将派生料头登记入库">
-
+                    <button class="tool-btn active" id="btn-stage-advance" onclick="stageAndAdvanceNextStation()" style="display:none;" title="暂存当前工位排料并平滑推进至下一工位，零弹窗继续排料">
+                        接续下一工位
+                    </button>
+                    <button class="tool-btn" id="btn-confirm-station-cut" onclick="openStationLapConfirmModal()" title="确认当前工位裁切：核对并提交实切数据、扣减母卷长度、核销订单需求">
                         报工保存
                     </button>
-                    <button class="tool-btn" id="btn-batch-report" hidden onclick="openBatchReport()">集中报工</button><div class="secondary-workflow-tools">
-                    <details id="station-navigation-group" class="detail-disclosure station-navigation"><summary>浏览工位</summary><p class="muted">只移动查看位置；待报工方案须先处理。</p><div class="station-browse-actions"><button class="tool-btn" onclick="advanceBed(-1)">← 查看上一工位</button><button class="tool-btn" onclick="advanceBed(1)">查看下一工位 →</button><button class="tool-btn" id="btn-smart-advance" onclick="smartAdvanceBed()">回到待切位置</button></div></details>
-                    <details class="detail-disclosure reset-actions"><summary>清理排料</summary><div style="display: flex; gap: 6px; margin-top: 6px;">
-                        <button class="tool-btn" onclick="clearStationCuts()" title="仅清除当前红框范围内的裁片与切刀">
-                            清除本工位排料
-                        </button>
-                        <button class="tool-btn" onclick="resetAllRollCuts()" title="清除全部预览裁片，从头开始">
-                            清空整卷预览
-                        </button>
-                    </div></details>
-                    </div>
+                    <button class="tool-btn" id="btn-batch-report" hidden onclick="openBatchReport()">一次报工</button>
                 </div>
 
                 <!-- 料头复用精益切割执行控制 (与母卷工位操作完全统一对齐) -->

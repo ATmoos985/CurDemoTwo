@@ -17,9 +17,10 @@ import { renderRadar, smartAdvanceBed, resizeFeedWindow, updateFeedControls, upd
 import {
     updateDemandCompletionFromPieces, recalculateRollStats, updateOriginHeaderSummary,
     addOrMergeInterval, renderDemandsUI, renderDefectsUI,
-    getDemandsFromUI, getDefectsFromUI
+    getDemandsFromUI, getDefectsFromUI,
+    clearStationCuts, resetAllRollCuts
 } from './quota-manager.js';
-import { showToast } from '../../core/toast.js';
+import { showToast, confirmAction } from '../../core/toast.js';
 import { solverSettings } from '../settings/settings.js';
 import { renderToolpathUI } from '../toolpath/toolpath-optimizer.js';
 import { selectRemnant, clearRemnantSelection, hoverRemnant } from '../cad/cad-remnant-highlight.js';
@@ -810,6 +811,82 @@ export function closeCutReport() { document.getElementById("cut-report-modal").c
 
 export async function openStationLapConfirmModal() {
     await openCutReport();
+}
+
+export async function stageAndAdvanceNextStation() {
+    if (reporting) return;
+    const pending = state.pendingPlan;
+    if (!pending || !canUseCurrentPlan()) {
+        showToast('请先生成当前工位排料方案，再接续下一工位', 'warning');
+        return;
+    }
+    const { result, bedL, feedPortType } = pending;
+    const minW = pending.request?.minRemnantWidth ?? 200, minL = pending.request?.minRemnantLength ?? 300;
+    const recoverable = (result.remnants || []).filter(r => r.w >= minW && r.l >= minL);
+    const defaultCutLen = Math.max(result.deductLen || 0, layoutMetrics({rollW:pending.request.rollW, bedL, pieces:result.pieces, remnants:recoverable, cuts:result.cuts}).deductLen) || bedL;
+    const actualCutLen = feedPortType === "remnant" ? 0 : (pending.reportActualCutLen ?? defaultCutLen);
+    const pieceResults = (result.pieces || []).map(p => ({ pieceId: p.sourcePieceId || p.id, outcome: 'QUALIFIED', reason: '' }));
+    const actualRemnants = readReportRemnants(pending);
+    const report = {
+        planId: pending.result.planId,
+        actualCutLen,
+        finishedPieceCount: (result.pieces || []).length,
+        location: "现场料头架 A-01",
+        actualRemnants,
+        pieceResults
+    };
+    const entries = [...queuedReports().filter(r => r.report.planId !== report.planId), queueEntry(pending, report)];
+    reporting = true;
+    const wasInert = document.body.inert; document.body.inert = true;
+    try {
+        await requestJSON('/api/cutting/report-batch?preview=true', entries.map(r => r.report));
+        saveReportQueue(pending.taskId, entries);
+        state.reportQueue = entries;
+        const data = state.getCurrentCaseData();
+        data.pieces = (data.pieces || []).filter(p => p.planId !== report.planId)
+            .concat((result.pieces || []).map(p => ({ ...p, planId: report.planId, queued: true })));
+        data.remnants = (data.remnants || []).filter(r => r.confirmed || r.queued);
+        data.cuts = [];
+        state.pendingPlan = null;
+        smartAdvanceBed();
+        updateUIInfo();
+        renderScene();
+        renderRadar();
+        showToast(`已暂存当前工位（当前待报工 ${entries.length} 工位），已自动接续下一工位！`, 'success');
+    } catch (error) {
+        showToast('接续暂存失败: ' + error.message, 'error');
+    } finally {
+        reporting = false;
+        document.body.inert = wasInert;
+        updateWorkflowControls();
+    }
+}
+
+let clearClickTimer = null;
+export function handleClearStationClick() {
+    if (clearClickTimer) {
+        clearTimeout(clearClickTimer);
+        clearClickTimer = null;
+        return;
+    }
+    clearClickTimer = setTimeout(() => {
+        clearClickTimer = null;
+        clearStationCuts();
+    }, 280);
+}
+
+export async function handleClearStationDblClick() {
+    if (clearClickTimer) {
+        clearTimeout(clearClickTimer);
+        clearClickTimer = null;
+    }
+    const ok = await confirmAction('确定要清空整卷预览与所有未报工排料吗？\n已暂存方案也将清除，已正式报工的记录保持不变。', {
+        title: '清空整卷预览确认',
+        action: '确认清空整卷'
+    });
+    if (ok) {
+        resetAllRollCuts();
+    }
 }
 
 let reporting = false;

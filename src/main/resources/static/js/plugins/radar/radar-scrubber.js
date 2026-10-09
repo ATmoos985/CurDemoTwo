@@ -47,7 +47,7 @@ function stationRange(start, length, isSnapped = false) {
     return isSnapped ? `${rangeText} (待切接续工位)` : rangeText;
 }
 
-export function updateFabricScrollPosition(targetY) {
+export function updateFabricScrollPosition(targetY, silent = false) {
     const data = state.getCurrentCaseData();
     if (!data) return;
     const totalL = data.totalRollL || 60000;
@@ -56,7 +56,7 @@ export function updateFabricScrollPosition(targetY) {
     targetY = Math.max(0, Math.min(maxScrollY, Number(targetY.toFixed(6))));
 
     const prevY = data.windowStartY || 0;
-    if (targetY !== prevY && requireStationReport()) return false;
+    if (!silent && targetY !== prevY && requireStationReport()) return false;
     data.windowStartY = targetY;
 
     // 1. 红框工位在世界坐标系内对齐到新的 targetY
