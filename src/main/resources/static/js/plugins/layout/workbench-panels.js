@@ -15,8 +15,17 @@ function panel(id, title, subtitle, actions = '') {
 }
 
 export function initWorkbenchPanels() {
-    const demand = panel('demand-manager', '需求管理', '编辑订单与裁片；合格报工才计入完成。',
-        '<span class="muted">修改保留在当前任务</span><button class="tool-btn" id="demand-manager-import" onclick="openDemandImport()">导入需求</button><button class="tool-btn" onclick="addDemandRow()">＋ 添加裁片</button><button class="tool-btn active" onclick="saveTaskFromUI()">保存需求</button>');
+    const demand = panel('demand-manager', '新建裁切任务', '填写任务信息，添加需求后选择材料。',
+        '<span class="muted" id="demand-editor-hint" role="status"></span><button class="tool-btn active" id="demand-editor-save" aria-describedby="demand-editor-hint" disabled>保存并选择材料</button>');
+    const footer = demand.querySelector('.workbench-dialog-footer');
+    footer.insertBefore(footer.querySelector('[data-close]'), el('demand-editor-save'));
+    el('demand-editor-save').onclick = async () => {
+        const creating = !state.activeTask;
+        if (await window.camApp.saveTaskFromUI()) {
+            demand.close();
+            if (creating) window.camApp.matchTaskMaterials();
+        }
+    };
     demand.querySelector('.workbench-dialog-body').append(el('card-demands').querySelector('.section-content'));
     const card = el('card-demands');
     card.classList.remove('collapsible', 'collapsed');
@@ -43,12 +52,27 @@ export function initWorkbenchPanels() {
 
 export function openDemandManager(id) {
     const dialog = el('demand-manager'); if (!dialog) return;
-    el('demand-manager-import').hidden = !!state.activeTask;
     if (!dialog.open) dialog.showModal();
     if (id != null) {
         const row = [...el('demands-container').querySelectorAll('.item-row')].find(row => Number(row.dataset.id) === Number(id));
         if (row) {row.tabIndex = -1;row.focus({preventScroll:true});row.scrollIntoView({block:'center'});}
     }
+}
+
+export function renderDemandEditor(flow) {
+    const dialog = el('demand-manager');if (!dialog) return;
+    const creating = !state.activeTask;
+    dialog.dataset.new = String(creating);
+    el('demand-manager-title').textContent = creating ? '新建裁切任务' : '任务需求';
+    dialog.querySelector('.workbench-dialog-heading p').textContent = creating
+        ? '填写任务信息，添加需求后选择材料。' : '修改当前任务的需求；已报工数量保留。';
+    el('demand-manager-import').hidden = !creating;
+    el('demand-manager-sample').hidden = !creating;
+    el('demand-editor-save').disabled = flow.stage === 0;
+    el('demand-editor-save').textContent = creating ? '保存并选择材料' : '保存修改';
+    el('demand-editor-hint').textContent = flow.stage === 0 ? flow.hint : creating ? '需求已齐备，下一步选择母卷或料头。' : '修改自动保留为本机草稿。';
+    dialog.querySelector('.workbench-dialog-footer [data-close]').textContent = creating ? '稍后继续' : '返回工作台';
+    el('demand-progress-summary').hidden = creating;
 }
 
 export function renderDemandSummary(progress, rows) {

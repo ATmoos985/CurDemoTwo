@@ -88,13 +88,21 @@
                             <details id="demand-recent-change" class="demand-recent-change" hidden><summary></summary><p></p><div></div></details>
                         </section>
                         <div class="section-content">
-                            <!-- 窗帘整单模板快速载入栏 -->
-
                             <section id="task-save-error" class="operation-feedback" role="alert" hidden><p></p><div><button class="tool-btn" data-task-repair>定位输入</button><button class="tool-btn" onclick="saveTaskFromUI()">重试保存</button><button class="tool-btn" onclick="openTaskList()">打开任务核对</button></div></section>
-
-                            <details id="task-details" class="detail-disclosure task-metadata" open><summary id="task-details-title">任务信息</summary><div class="task-fields"><label>任务名称<input class="prop-input" id="task-name" value="本次切割" onchange="taskInputChanged()"></label><label>材料型号<select class="prop-input" id="task-material" onchange="taskInputChanged()"></select></label><details class="detail-disclosure"><summary>订单关联</summary><label>外部订单号<input class="prop-input" id="task-external-ref" placeholder="可选" onchange="taskInputChanged()"></label></details></div></details><p id="demand-progress-summary" class="field-unit" role="status">尺寸：mm · 剩余按合格报工计算，预览不扣数量。</p><div id="demands-container" style="display: flex; flex-direction: column; gap: 8px;">
+                            <section id="task-details" class="task-metadata" aria-label="任务信息">
+                                <div class="task-fields">
+                                    <label>任务名称<input class="prop-input" id="task-name" value="本次切割" maxlength="120" onchange="taskInputChanged()"></label>
+                                    <label>材料型号<select class="prop-input" id="task-material" onchange="taskInputChanged()"></select></label>
+                                </div>
+                            </section>
+                            <section class="demand-entry-heading" id="demand-entry-actions" aria-label="添加需求">
+                                <h3>需求清单 <small>尺寸单位 mm</small></h3>
+                                <div><button class="tool-btn" id="demand-manager-import" onclick="openDemandImport()">导入 Excel / JSON</button><button class="tool-btn" id="demand-manager-sample" onclick="openDemandImport({sample:true})">使用 9.28 样例</button><button class="tool-btn" onclick="addDemandRow()">＋ 添加需求</button></div>
+                            </section>
+                            <p id="demand-progress-summary" class="field-unit" role="status">剩余按合格报工计算，预览不扣数量。</p><div id="demands-container">
                                 <!-- 动态生成带有【在库料头提示与选择】的裁片项 -->
                             </div>
+                            <details class="detail-disclosure task-order-ref"><summary>关联订单号（可选）</summary><label>外部订单号<input class="prop-input" id="task-external-ref" placeholder="可不填写" onchange="taskInputChanged()"></label></details>
                         </div>
                     </div>
                     <div class="panel-section section-card-blue collapsible collapsed" id="card-mother-roll">

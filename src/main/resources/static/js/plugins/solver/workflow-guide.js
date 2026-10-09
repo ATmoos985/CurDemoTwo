@@ -1,7 +1,7 @@
 import {state} from '../../core/state.js';
 import {toggleSidebar, switchRightPanelTab} from '../layout/splitter.js';
 import {workflowState} from './workflow-state.js';
-import {openDemandManager, openMaterialDetails} from '../layout/workbench-panels.js';
+import {openDemandManager, openMaterialDetails, renderDemandEditor} from '../layout/workbench-panels.js';
 import {scheduleRemnantAvailability} from '../material/material-selection.js';
 
 const el = id => document.getElementById(id);
@@ -39,7 +39,6 @@ export function navigateWorkflowStage(stage, target) {
         if (parent.classList.contains('collapsible')) {parent.classList.remove('collapsed');parent.querySelector('.section-toggle')?.setAttribute('aria-expanded','true');}
         if (parent.tagName === 'DETAILS') parent.open = true;
     }
-    if (stage === 0 && !node.closest('#demand-manager')) el('task-details').open = true;
     const focus = stage === 0 && !node.closest('#demand-manager') ? el('task-name') : target ? node : node.querySelector('input,select,button') || node;
     if (!focus.matches('input,select,button,a,[tabindex]')) focus.tabIndex = -1;
     focus.focus({preventScroll:true}); node.scrollIntoView({block:'nearest'});
@@ -47,6 +46,7 @@ export function navigateWorkflowStage(stage, target) {
 
 export function renderWorkflowGuide(plan = {}) {
     const flow = readWorkflowState(plan), busy = plan.busy;
+    renderDemandEditor(flow);
     const actions = {solve:'btn-trigger-solve-station', report:'btn-confirm-station-cut', validate:'btn-validate-adjustment'};
     const primary = actions[flow.action] || 'btn-workflow-next';
     const footer = el('right-roll-actions'); if (!footer) return flow;

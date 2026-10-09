@@ -35,3 +35,12 @@ test('only qualified completion finishes demand; no material is required to revi
     assert.equal(workflowState(input).action,'reports');assert.equal(workflowState(input).done,true);assert.equal(workflowState(input).canSolve,false);
     input.demands[0].quantity=3;assert.equal(workflowState(input).stage,0);assert.equal(workflowState(input).done,false);
 });
+
+test('task demand count respects the same 200-line boundary as saving', () => {
+    const input = source();
+    input.demands = Array.from({length:200}, (_,id) => ({...input.demands[0],id}));
+    assert.notEqual(workflowState(input).stage, 0);
+    input.demands.push({...input.demands[0],id:200});
+    assert.equal(workflowState(input).stage, 0);
+    assert.equal(workflowState(input).target, '#demands-container');
+});

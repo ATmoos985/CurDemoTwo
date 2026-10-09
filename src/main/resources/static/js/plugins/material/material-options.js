@@ -15,7 +15,8 @@ export function syncMaterialOptions(rolls, options = {}) {
     if (materials) {
         const model = options.model ?? materials.value;
         const models = [...new Set([...rolls.map(roll => roll.rollModel), model].filter(Boolean))];
-        materials.replaceChildren(...models.map(value => new Option(value, value)));
-        materials.value = model || selected?.rollModel || models[0] || '';
+        const chosen = model || selected?.rollModel || (options.fallback === false ? '' : models[0]) || '';
+        materials.replaceChildren(new Option('请选择材料型号（导入时自动填写）', ''), ...models.map(value => new Option(value, value)));
+        materials.value = chosen;
     }
 }

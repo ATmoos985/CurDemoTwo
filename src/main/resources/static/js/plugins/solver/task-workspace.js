@@ -162,8 +162,7 @@ async function restoreTaskDraft(id, initial = false) {
             for (const [selector,key] of [['.dem-name','name'],['.dem-w','width'],['.dem-l','length'],['.dem-count','quantity']]) row.querySelector(selector).value = d[key];
         });
         state.pendingPlan = null; draftId = id; draftReady = true;
-        el('task-details-title').textContent = el('task-name').value || '任务信息';
-        el('task-details').open = true; el('task-picker').close();
+        el('task-picker').close();
         persistTaskDraft();
         showToast(conflict ? '原任务已变化，草稿已恢复为独立副本，避免覆盖新版本' : '已恢复本机需求草稿，请核对后保存', conflict ? 'warning' : 'info');
         return true;
@@ -179,7 +178,6 @@ export function taskInputChanged() {
     resetSolveFeedback();
     if(el('task-save-error'))el('task-save-error').hidden=true;
     el('task-state').textContent = '需求已修改 · 待保存';
-    el('task-details-title').textContent = el('task-name').value || '任务信息';
     persistTaskDraft();
     updateWorkflowControls();
 }
@@ -191,8 +189,7 @@ export function startTaskDraft(name = '本次切割') {
     state.pendingPlan = null;
     localStorage.removeItem('cutting-task-id');
     el('task-name').value = name;
-    el('task-details').open = true;
-    el('task-details-title').textContent = name;
+    document.querySelector('.task-order-ref').open = false;
     el('task-external-ref').value = '';
     el('task-state').textContent = '新任务 · 未保存';
     el('task-report-count').textContent = '0';
@@ -259,6 +256,12 @@ function taskPayload() {
 let savingTask;
 export async function saveCurrentTask() {
     if (savingTask) return savingTask;
+    const flow = readWorkflowState();
+    if (flow.stage === 0) {
+        const error = new Error(flow.hint);
+        error.target = flow.target || '#demand-entry-actions';
+        throw error;
+    }
     const wasInert = document.body.inert; document.body.inert = true;
     savingTask = saveTaskSnapshot().catch(error => {
         persistTaskDraft();
@@ -283,14 +286,12 @@ async function saveTaskSnapshot() {
     resetDraftTracking();
     el('task-state').textContent = '已保存 · ' + task.id.slice(0, 8);
     if(el('task-save-error'))el('task-save-error').hidden=true;
-    el('task-details').open = false;
-    el('task-details-title').textContent = task.name;
     return task;
 }
 
 export async function saveTaskFromUI() {
-    try { await saveCurrentTask(); showToast('需求已保存，可跨材料继续裁切', 'success'); }
-    catch (error) { showToast(error.message, 'error');navigateWorkflowStage(0,'#task-save-error'); }
+    try { await saveCurrentTask(); showToast('需求已保存，可跨材料继续裁切', 'success'); return true; }
+    catch (error) { showToast(error.message, 'error');navigateWorkflowStage(0,error.target || '#task-save-error'); return false; }
 }
 
 export async function refreshTaskProgress() {
@@ -379,8 +380,6 @@ export async function loadTask(id, {skipDraftGuard = false, detail:loadedDetail}
         el('task-report-count').textContent = detail.reports.length;
         el('task-picker').close();
         localStorage.setItem('cutting-task-id', task.id);
-        el('task-details').open = false;
-        el('task-details-title').textContent = task.name;
         resetDraftTracking();
         return true;
     } catch (error) { showToast(error.message, 'error'); return false; }

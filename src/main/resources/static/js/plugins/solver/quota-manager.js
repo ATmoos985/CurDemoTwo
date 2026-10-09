@@ -261,7 +261,7 @@ export function renderDemandsUI(demands) {
     if (!container) return;
     container.innerHTML = "";
     if (!demands || demands.length === 0) {
-        container.innerHTML = "<div style='color:var(--text-muted);font-size:11px;padding:4px;'>暂无需求 (可点击上方+增裁片)</div>";
+        container.innerHTML = '<div class="demand-entry-empty"><strong>添加这次任务要裁切的需求</strong><p>导入订单文件、使用 9.28 样例，或点击「添加需求」手动填写。</p></div>';
         const badge = document.getElementById("demands-summary-badge");
         if (badge) badge.innerText = "0 件";
         updateWorkflowControls();
@@ -396,22 +396,23 @@ export function addDemandRow() {
     row.className = "item-row";
     row.setAttribute("data-id", id);
     row.setAttribute("data-completed", 0);
-    row.setAttribute("data-total", 4);
+    row.setAttribute("data-total", 1);
     row.dataset.rotation = 'false';
     row.innerHTML = `
         <div class="item-row-header" style="display:flex; justify-content:space-between; align-items:center;">
-            <input type="text" class="dem-name" aria-label="裁片名称" value="新裁片-${id}" onchange="window.camApp.onParamChange()">
+            <input type="text" class="dem-name" aria-label="裁片名称" value="裁片-${container.querySelectorAll('.item-row').length + 1}" onchange="window.camApp.onParamChange()">
             <button class="del-btn" onclick="window.camApp.removeDemandRow(this)" title="删除此裁片需求">×</button>
         </div>
         <div class="mini-input-group">
-            <label>宽 <input type="number" class="mini-input dem-w" aria-label="裁片宽度 (mm)" value="600" onchange="window.camApp.onParamChange()"></label>
-            <label>长 <input type="number" class="mini-input dem-l" aria-label="裁片长度 (mm)" value="800" onchange="window.camApp.onParamChange()"></label>
-            <label>件数 <input type="number" class="mini-input dem-count" value="4" min="1" onchange="window.camApp.onParamChange()" title="总计划需求件数"></label>
+            <label>宽 <input type="number" class="mini-input dem-w" aria-label="裁片宽度 (mm)" placeholder="填写宽度" onchange="window.camApp.onParamChange()"></label>
+            <label>长 <input type="number" class="mini-input dem-l" aria-label="裁片长度 (mm)" placeholder="填写长度" onchange="window.camApp.onParamChange()"></label>
+            <label>件数 <input type="number" class="mini-input dem-count" value="1" min="1" onchange="window.camApp.onParamChange()" title="总计划需求件数"></label>
         </div>
-        <span class="demand-status">待排 4 件</span><div class="demand-remnant-box" id="rem-hint-new-${id}" style="display:none;"></div>
+        <span class="demand-status"></span><div class="demand-remnant-box" id="rem-hint-new-${id}" style="display:none;"></div>
     `;
     container.appendChild(row);
     onParamChange();
+    row.querySelector('.dem-w').focus();
 }
 
 export function getDefectsFromUI() {

@@ -53,11 +53,33 @@
 .workbench-dialog .task-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px; }
 .workbench-dialog .task-fields > details { grid-column: 1 / -1; }
 .workbench-dialog .task-fields input, .workbench-dialog .task-fields select { min-height: 34px; }
-#demand-manager #demands-container { display: grid !important; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0 24px !important; }
-#demand-manager #demands-container .item-row { padding: 16px 0; border-bottom: 1px solid var(--panel-border); margin: 0; border-radius: 0; }
-#demand-manager .dem-name { background: transparent; color: var(--text-main); border: 0; min-height: 28px; font-size: 13px; min-width: 0; }
-#demand-manager .mini-input { min-height: 30px; font-variant-numeric: tabular-nums; }
-#demand-manager .task-metadata { margin-top: 0; }
+#demand-manager { width: min(900px,calc(100vw - 40px)); }
+#demand-manager .workbench-dialog-body { padding-block: 24px; }
+#demand-manager .task-fields { margin: 0 0 24px; }
+.demand-entry-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+.demand-entry-heading h3 { margin: 0; font-size: 14px; white-space: nowrap; }
+.demand-entry-heading h3 small { display: block; color: var(--text-muted); font-size: 11px; font-weight: 400; margin-top: 6px; }
+.demand-entry-heading > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.demand-entry-empty { border: 1px dashed var(--panel-border); background: var(--panel-header); border-radius: 4px; text-align: center; padding: 40px 16px; }
+.demand-entry-empty strong { font-size: 14px; font-weight: 500; }
+.demand-entry-empty p { font-size: 12px; color: var(--text-muted); margin: 10px 0 0; line-height: 1.8; }
+#demand-manager #demands-container { display: grid; gap: 0; }
+#demand-manager #demands-container .item-row { display: grid; grid-template-columns: minmax(180px,1fr) minmax(320px,1.4fr); align-items: end; gap: 8px 24px; padding: 14px 0; border-bottom: 1px solid var(--panel-border); margin: 0; border-radius: 0; }
+#demand-manager .dem-name { background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--panel-border); border-radius: 4px; padding: 6px 8px; min-height: 34px; font-size: 13px; min-width: 0; box-sizing: border-box; }
+#demand-manager .mini-input-group { display: grid; grid-template-columns: 1fr 1fr 80px; gap: 12px; margin: 0 !important; }
+#demand-manager .mini-input-group label { display: grid; gap: 6px; font-size: 11px; color: var(--text-muted); }
+#demand-manager .mini-input { width: 100% !important; min-width: 0; min-height: 34px; font-variant-numeric: tabular-nums; box-sizing: border-box; }
+#demand-manager .demand-status, #demand-manager .demand-meter, #demand-manager .demand-change, #demand-manager .demand-preview-label, #demand-manager .demand-progress-tools, #demand-manager .demand-remnant-box { grid-column: 1 / -1; }
+#demand-manager .demand-status { grid-column: 1; margin: 0; }
+#demand-manager .demand-meter { grid-column: 2; align-self: center; margin: 0; }
+#demand-manager .demand-progress-tools:has(button:disabled):not(:has(details:not([hidden]))) { display: none; }
+#demand-manager[data-new="true"] :is(.demand-status,.demand-meter,.demand-progress-tools) { display: none; }
+.task-order-ref { margin-top: 20px; }
+.task-order-ref summary { color: var(--text-muted); font-size: 12px; }
+.task-order-ref label { display: grid; gap: 6px; color: var(--text-muted); font-size: 12px; margin-top: 12px; }
+.task-order-ref input { min-height: 34px; width: 100%; text-align: left; }
+#demand-editor-hint { flex: 1; min-width: 160px; line-height: 1.7; }
+#demand-editor-save { min-height: 36px; }
 .inspection-title { display: flex; justify-content: space-between; align-items: center; gap: 14px; }
 .inspection-title span { color: var(--text-muted); font-size: 12px; }
 .inspection-title h3 { font-size: 20px; margin: 8px 0; overflow-wrap: anywhere; }
@@ -79,16 +101,6 @@
 #pane-mat-current .inspection-table th, #pane-mat-current .inspection-table td { text-align: left; padding: 10px; border-bottom: 1px solid var(--panel-border); }
 .inventory-task-remnants { display: flex; justify-content: space-between; align-items: center; gap: 16px; background: var(--panel-header); padding: 14px; border-left: 3px solid var(--accent-blue); margin-bottom: 16px; font-size: 13px; }
 .inventory-task-remnants p { margin: 7px 0 0; color: var(--text-muted); font-size: 12px; }
-.new-task-dialog { width: min(620px,calc(100vw - 32px)); }
-.new-task-dialog form { display: contents; }
-.new-task-name { display: grid; gap: 8px; font-size: 13px; }
-.new-task-name input { height: 38px; }
-.task-source-options { border: 0; padding: 0; margin: 24px 0 0; }
-.task-source-options legend { font-size: 13px; margin-bottom: 12px; }
-.task-source-options label { display: flex; align-items: center; gap: 12px; padding: 15px; border: 1px solid var(--panel-border); margin-bottom: 10px; border-radius: 4px; cursor: pointer; }
-.task-source-options label:has(:checked) { border-color: var(--accent-blue); background: var(--panel-header); }
-.task-source-options strong { display: block; font-size: 14px; }
-.task-source-options small { display: block; color: var(--text-muted); line-height: 1.6; margin-top: 4px; }
 .import-file { display: flex; justify-content: space-between; align-items: end; gap: 16px; padding: 16px; border: 1px solid var(--panel-border); border-radius: 5px; }
 .import-file label { display: grid; gap: 12px; font-weight: 600; }
 .import-file input { max-width: 100%; font: inherit; font-size: 12px; }
@@ -113,7 +125,9 @@
 @media (max-width: 700px) {
     .workbench-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
     .workbench-dialog-heading, .workbench-dialog-body, .workbench-dialog-footer { padding: 14px; }
-    #demand-manager #demands-container { grid-template-columns: 1fr; }
+    #demand-manager #demands-container .item-row { grid-template-columns: 1fr; }
+    #demand-manager .demand-meter { grid-column: 1; }
+    .demand-entry-heading { align-items: start; flex-direction: column; }
     .workbench-dialog .task-fields { grid-template-columns: 1fr; }
     .import-file { align-items: start; flex-direction: column; }
     .inspection-title { align-items: start; flex-direction: column; }

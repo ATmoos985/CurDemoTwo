@@ -44,3 +44,11 @@ test('refreshing stock retains the task model and an existing selected roll', ()
     assert.equal(selector.value, 'actual-stock');
     assert.equal(materials.value, 'saved-task-model');
 });
+
+test('a new task leaves material unselected until an import or explicit choice', () => {
+    const {selector, materials} = controls('actual-stock');
+    syncMaterialOptions(rolls, {model:'', rollId:'', fallback:false});
+    assert.equal(selector.value, '');
+    assert.equal(materials.value, '');
+    assert.deepEqual(materials.options.map(option => option.value), ['', 'real-model']);
+});
