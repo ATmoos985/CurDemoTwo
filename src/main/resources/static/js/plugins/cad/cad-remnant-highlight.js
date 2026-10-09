@@ -120,14 +120,8 @@ export function selectRemnant(remnantId, options = {}) {
         }
     }
 
-    // 3. 联动右侧【料头与对账】Tab 面板与表格行
-    if (options.switchTab !== false) {
-        switchRightPanelTab('balance');
-        const ledger = document.getElementById('card-remnant-ledger');
-        if (ledger && ledger.classList.contains('collapsed')) {
-            toggleSectionCollapse(ledger.querySelector('.section-toggle'));
-        }
-    }
+    // 画布点击进入料头工作区，表格定位时保留画布视野。
+    if (options.switchTab !== false) window.openRemnantModal?.(rem.confirmed ? 'stock' : 'expected');
 
     // 选中对应表格行并平滑滚动
     const tbody = document.getElementById("remnant-table-body");

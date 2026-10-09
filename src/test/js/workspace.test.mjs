@@ -48,21 +48,19 @@ test('result and cut detail switches preserve one visible pane and matching sele
     }
 });
 
-test('selecting a remnant from the drawing opens its otherwise collapsed ledger', () => {
-    const section = element(['collapsed']);
-    const button = element();
-    button.closest = () => section;
-    section.querySelector = () => button;
-    elements.set('card-remnant-ledger', section);
-    const data = state.getCurrentCaseData();
-    const before = data.remnants;
-    data.remnants = [{ id: 'ui-check', x: 0, y: 0, w: 500, l: 600, area: .3 }];
+test('selecting a remnant from the drawing opens the expected-remnant tab', () => {
+    const data = state.getCurrentCaseData(), before = data.remnants, opened = [];
+    window.openRemnantModal = tab => opened.push(tab);
+    data.remnants = [{id:'ui-check',x:0,y:0,w:500,l:600,area:.3}];
     try {
-        selectRemnant('ui-check', { showToastMsg: false });
-        assert.equal(section.classList.contains('collapsed'), false);
-        assert.equal(button.attributes['aria-expanded'], 'true');
-        assert.equal(elements.get('tab-pane-balance').style.display, 'flex');
-    } finally { data.remnants = before; }
+        selectRemnant('ui-check', {showToastMsg:false});
+        assert.deepEqual(opened,['expected']);
+        selectRemnant('ui-check', {showToastMsg:false,switchTab:false});
+        assert.equal(opened.length,1);
+        data.remnants[0].confirmed=true;
+        selectRemnant('ui-check', {showToastMsg:false});
+        assert.deepEqual(opened,['expected','stock']);
+    } finally {data.remnants=before;delete window.openRemnantModal;}
 });
 
 test('current-station framing stays centered in both narrow and wide viewports', async () => {

@@ -1,3 +1,4 @@
+import { expectedRemnants } from '../remnant/remnant-dialog-model.js';
 import { saveCurrentTask, refreshTaskProgress, escapeText } from './task-workspace.js';
 import { createPlanHistory, planScene } from './plan-editing.js';
 import { layoutMetrics, materialSummary } from './material-accounting.js';
@@ -97,17 +98,23 @@ export function updateUIInfo() {
 
     // 料头登记表
     const remBadge = document.getElementById("remnant-count-badge");
-    if (remBadge) remBadge.innerText = `${(data.remnants || []).length} 块`;
+    const expected = expectedRemnants(data);
+    if (remBadge) remBadge.innerText = `${expected.length} 块`;
+    for (const [id,text] of [['remnant-expected-count',expected.length],['remnant-expected-total',`${expected.length} 块`],['remnant-expected-area',`${expected.reduce((sum,r)=>sum+r.w*r.l/1000000,0).toFixed(3)} m²`]]) {
+        const node=document.getElementById(id); if(node)node.textContent=text;
+    }
+    const empty=document.getElementById('remnant-expected-empty'),table=document.getElementById('remnant-expected-table');
+    if(empty)empty.hidden=expected.length>0; if(table)table.hidden=!expected.length;
     const rightTabRemBadge = document.getElementById("right-tab-rem-badge");
     if (rightTabRemBadge) rightTabRemBadge.innerText = `${(data.pieces || []).filter(p => !p.confirmed && !p.queued).length} 件`;
     const remTbody = document.getElementById("remnant-table-body");
     if (remTbody) {
-        remTbody.innerHTML = (data.remnants || []).map(r => {
+        remTbody.innerHTML = expected.map(r => {
             const isSelected = (state.selectedRemnantId === r.id);
             return `
             <tr id="remnant-row-${r.id}" data-remnant-id="${r.id}"
                 class="interactive-row ${isSelected ? 'remnant-selected-row active-row' : ''}"
-                onclick="window.selectRemnant('${r.id}', { fromTable: true, smoothPan: true, showToastMsg: true })"
+                onclick="window.selectRemnant('${r.id}', { fromTable: true, smoothPan: true, showToastMsg: true, switchTab: false }); window.closeRemnantModal()"
                 onmouseenter="window.hoverRemnant('${r.id}', true)"
                 onmouseleave="window.hoverRemnant('${r.id}', false)"
                 title="点击在 CAD 画布中居中定位并高亮此料头 #${r.id}">
@@ -117,7 +124,7 @@ export function updateUIInfo() {
                 <td><span class="quality-badge ${r.hasDefect ? 'has-defect' : ''}">${r.hasDefect ? '带疵' : '无疵'}</span></td>
                 <td>
                     <button class="tool-btn rem-locate-btn"
-                        onclick="event.stopPropagation(); window.selectRemnant('${r.id}', { fromTable: true, smoothPan: true, showToastMsg: true })"
+                        onclick="event.stopPropagation(); window.selectRemnant('${r.id}', { fromTable: true, smoothPan: true, showToastMsg: true, switchTab: false }); window.closeRemnantModal()"
                         title="在 CAD 画布中居中定位此料头">
                         定位
                     </button>

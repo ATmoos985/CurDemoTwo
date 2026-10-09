@@ -44,13 +44,12 @@ export function initWorkbenchPanels() {
     el('card-defects').querySelector('.section-toggle').setAttribute('aria-expanded','true');
     el('card-mother-roll').classList.remove('collapsed');
     el('card-mother-roll').querySelector('.section-toggle').setAttribute('aria-expanded','true');
-    el('right-roll-actions').querySelector('.reset-actions').append(el('btn-radar-reset'));
-    el('btn-radar-reset').textContent = '重置本卷报工与库存…';
+    el('btn-radar-reset').hidden = true;
     const inputs = el('left-input-actions');
     inputs.append(el('btn-workflow-next'));
     // Demand and material inputs stay left; execution controls stay right.
     el('input-flow-status').append(el('workflow-current'), el('station-action-hint'));
-    el('sidebar-left').querySelector('.sidebar-scroll-body').prepend(el('card-demands'), el('material-context'), el('remnant-entry'));
+    el('sidebar-left').querySelector('.sidebar-scroll-body').prepend(el('card-demands'), el('material-context'));
 }
 
 export function openDemandManager(id) {

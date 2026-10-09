@@ -47,7 +47,6 @@
                     <button class="tool-btn" onclick="fitView()">适合视口</button>
                     <button class="tool-btn" onclick="resetZoom()">重置缩放</button>
                     <span class="menu-label">工作台</span>
-                    <button class="tool-btn remnant-shelf-btn" onclick="openRemnantModal()">料头库（<span id="header-remnant-count">—</span>）</button>
                     <button class="tool-btn" onclick="toggleTheme()" id="btn-theme-toggle">切换主题</button>
                     <button class="tool-btn" onclick="openSettingsModal()" id="btn-settings">工艺与显示设置</button>
                 </div>
@@ -62,7 +61,6 @@
         <aside class="sidebar" id="sidebar-left" aria-label="作业输入">
             <div class="task-context"><span>当前任务</span><button id="current-task-name" onclick="openDemandManager()">本次切割</button></div>
             <section id="material-context" class="material-context" aria-label="当前用料摘要"><div><span>本次用料</span><span><button class="tool-btn" onclick="matchTaskMaterials()">选择用料</button> <button class="tool-btn" id="btn-material-details">详情</button></span></div><strong id="material-context-id">未装载</strong><p id="material-context-info"></p></section>
-            <section id="remnant-entry" class="remnant-entry" aria-label="料头输入"><div class="remnant-entry-heading"><strong>可用料头</strong><button class="tool-btn" onclick="openRemnantModal()">查看料头库</button></div><p id="remnant-availability" role="status">填写需求后匹配料头</p><button class="tool-btn" id="btn-remnant-recommend" onclick="matchTaskMaterials({type:'remnant',recommend:true})">试排推荐</button></section>
             <!-- 顶部工位模式切换器 (Dual-Mode Switcher) -->
             <!-- ======================================================== -->
             <!-- 模式一面板：母卷连续开卷排产 (Mother Roll Mode)             -->
@@ -236,13 +234,15 @@
             <button class="sidebar-edge-toggle edge-toggle-right" id="edge-toggle-right" onclick="toggleSidebar('right')" title="点击收起右侧面板">▶</button>
 
             <div class="workspace-heading canvas-heading"><h1>排料画布</h1><div class="canvas-view-actions">
-                <div id="station-navigation-group" class="station-nav-group" role="group" aria-label="工位导航与清理">
-                    <button class="tool-btn icon-btn" id="btn-station-prev" onclick="advanceBed(-1)" title="查看上一工位">◀</button>
-                    <button class="tool-btn icon-btn" id="btn-station-next" onclick="advanceBed(1)" title="查看下一工位">▶</button>
-                    <button class="tool-btn icon-btn" id="btn-station-smart" onclick="smartAdvanceBed()" title="回到待切位置">⌖</button>
-                    <button class="tool-btn icon-btn danger-hover" id="btn-station-clear" onclick="handleClearStationClick()" ondblclick="handleClearStationDblClick()" title="单击清除本工位排料 · 双击清空整卷预览">🗑</button>
+                <div id="station-navigation-group" class="station-nav-group" role="group" aria-label="工位导航">
+                    <button class="tool-btn" id="btn-station-prev" onclick="advanceBed(-1)" aria-label="上一工位" title="查看上一工位"><span aria-hidden="true">‹</span> 上一工位</button>
+                    <button class="tool-btn" id="btn-station-next" onclick="advanceBed(1)" aria-label="下一工位" title="查看下一工位">下一工位 <span aria-hidden="true">›</span></button>
+                    <button class="tool-btn" id="btn-station-smart" onclick="smartAdvanceBed()" title="跳至接续待切位置">待切位置</button>
                 </div>
-                <button class="tool-btn" onclick="resetToBedView()">当前工位</button><button class="tool-btn" onclick="viewFullRoll()">全卷</button><button class="tool-btn" id="btn-reset-roll-cutting" onclick="resetContinuousCutting()" title="重置本卷报工与搭切进度回 0m 起点">重置本卷报工</button><button class="tool-btn" onclick="openMaterialModal()">库存档案</button></div></div>
+                <div class="canvas-action-group" role="group" aria-label="画布视图"><button class="tool-btn" onclick="resetToBedView()">当前工位</button><button class="tool-btn" onclick="viewFullRoll()">全卷</button></div>
+                <div class="canvas-action-group" role="group" aria-label="库存与料头"><button class="tool-btn" onclick="openMaterialModal()">库存档案</button><button class="tool-btn remnant-entry-btn" id="btn-open-remnants" onclick="openRemnantModal()">料头 <span class="badge-rem" id="remnant-count-badge">0 块</span></button></div>
+                <details class="canvas-more"><summary class="tool-btn" aria-label="更多工位操作">更多 ···</summary><div class="canvas-more-menu"><button class="tool-btn" id="btn-station-clear" onclick="handleClearStationClick(); this.closest('details').open=false">清除本工位排料</button><button class="tool-btn" onclick="handleClearStationDblClick(); this.closest('details').open=false">清空整卷预览…</button><button class="tool-btn" id="btn-reset-roll-cutting" onclick="resetContinuousCutting(); this.closest('details').open=false">重置本卷报工…</button></div></details>
+            </div></div>
             <!-- 母卷全局疵点雷达与展开视窗导航条 (Global Roll Panorama & Defect Radar) -->
             <div class="roll-radar-bar" id="roll-radar-bar">
                 <div class="radar-label-group">
@@ -367,36 +367,6 @@
                         </details>
                     </div>
                 </div>
-<div class="panel-section collapsible collapsed" id="card-remnant-ledger">
-                        <div class="section-header" title="点击折叠/展开料头入库登记"><button class="section-title-wrap section-toggle" onclick="toggleSectionCollapse(this)" aria-expanded="false">
-                                <span class="collapse-arrow">▼</span>
-                                <span>料头明细</span>
-                            </button>
-                            <div style="display: flex; align-items: center; gap: 6px;">
-                                <span class="badge-rem" id="remnant-count-badge">2 块</span>
-                                <button class="tool-btn" onclick="event.stopPropagation(); openMaterialModal('remnants')" title="进入料头立体货架二级页面">
-                                    货架档案 ↗
-                                </button>
-                            </div>
-                        </div>
-                        <div class="section-content">
-                            <table class="cam-table">
-                                <thead>
-                                    <tr>
-                                        <th>料头编号</th>
-                                        <th>规格(宽×长)</th>
-                                        <th>面积</th>
-                                        <th>质量状态</th>
-                                        <th width="45">操作</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="remnant-table-body">
-                                    <!-- 动态填充 -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
                 <!-- 母卷扣料与面积守恒台账 -->
 
             </div>
@@ -406,7 +376,7 @@
             <div class="sidebar-pinned-footer" id="right-sidebar-actions-footer" style="border-top: 1px solid var(--panel-border); background: var(--panel-bg); flex-shrink: 0;">
                 <!-- 母卷开卷工位排料搭切执行控制 -->
                 <div id="right-roll-actions" class="panel-section action-footer-section" style="padding: 10px 14px 12px 14px;">
-                    <p id="output-empty" class="muted">生成方案后在此核对产出</p><section id="report-output" hidden><strong>最近报工</strong><button class="tool-btn" onclick="openCutTicketModal()">打印工单</button><p id="report-output-summary"></p><details><summary>本次入库料头</summary><ul id="report-output-remnants"></ul><button class="tool-btn" onclick="openRemnantModal()">查看料头库</button></details></section>
+                    <p id="output-empty" class="muted">生成方案后在此核对产出</p><section id="report-output" hidden><strong>最近报工</strong><button class="tool-btn" onclick="openCutTicketModal()">打印工单</button><p id="report-output-summary"></p><details><summary>本次入库料头</summary><ul id="report-output-remnants"></ul><button class="tool-btn" onclick="openRemnantModal('stock')">查看料头库</button></details></section>
                     <strong id="workflow-current" role="status">完善需求</strong>
                     <p id="station-action-hint" class="station-action-hint" role="status">先生成方案，再核对实切并报工保存。</p>
                     <button id="btn-workflow-next" class="tool-btn" type="button">完善需求信息</button>
@@ -457,46 +427,27 @@
         </div>
     </dialog>
 
-    <!-- 现场料头库存库与扫码识别中心弹窗 -->
-    <div id="remnant-modal" class="settings-modal-overlay">
-        <div class="remnant-modal-dialog">
-            <!-- 弹窗标题 -->
-            <div class="remnant-modal-header">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-weight: 700; font-size: 14px; color: var(--accent-amber);">现场料头库存池与扫码识别中心 (Remnant Inventory & Scan)</span>
-                    <span class="header-tag">Word 4.1.2 规范</span>
-                </div>
-                <button onclick="closeRemnantModal()" style="background: transparent; border: none; color: var(--text-muted); font-size: 18px; cursor: pointer; font-weight: bold;">关闭</button>
-            </div>
-
-            <!-- 扫码与识别控制栏 -->
-            <div class="remnant-modal-bar">
-                <div style="display: flex; gap: 8px; align-items: center;">
-                    <span style="font-size: 12px; color: var(--text-muted); white-space: nowrap;">扫描条码 / 录入料号:</span>
-                    <input type="text" id="inp-scan-barcode" class="scan-input" placeholder="例如: REM-202609-001" onkeydown="if(event.key==='Enter') executeBarcodeScan()" />
-                    <button class="tool-btn active" style="padding: 6px 14px;" onclick="executeBarcodeScan()">扫码识别</button>
-                </div>
-                <!-- 现场快速模拟扫码按钮 -->
-                <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-                    <span style="font-size: 11px; color: var(--text-muted);">快捷模拟扫码:</span>
-                    <button class="tool-btn" style="font-size: 10px; padding: 2px 8px;" onclick="quickScan('REM-202609-001')">REM-202609-001 (2m×1.6m 完好短料)</button>
-                    <button class="tool-btn" style="font-size: 10px; padding: 2px 8px;" onclick="quickScan('REM-202609-002')">REM-202609-002 (0.5m×4m 纵切完好长料)</button>
-                    <button class="tool-btn" style="font-size: 10px; padding: 2px 8px;" onclick="quickScan('REM-202609-003')">REM-202609-003 (0.5m×4m 带疵料头)</button>
-                </div>
-            </div>
-
-            <!-- 在库料头列表卡片区 -->
-            <div id="remnant-cards-container" class="remnant-modal-body">
-                <!-- 动态生成料头卡片 -->
-            </div>
-
-            <!-- 弹窗底部操作 -->
-            <div class="remnant-modal-footer">
-                <span style="font-size: 11px; color: var(--text-muted);">提示：装载料头至【PORT-02 手工料头口】后，母卷消耗量强制为 0，切出成品后自动核销原料头并派生子料头。</span>
-                <button class="tool-btn" onclick="closeRemnantModal()">关闭</button>
-            </div>
+    <dialog id="remnant-modal" class="remnant-workspace" aria-labelledby="remnant-modal-title">
+        <div class="remnant-workspace-heading"><div><h2 id="remnant-modal-title">料头</h2><p id="remnant-roll-scope"></p></div><button class="tool-btn" onclick="closeRemnantModal()">关闭</button></div>
+        <div class="remnant-tabs" role="tablist" aria-label="料头来源">
+            <button id="remnant-tab-expected" role="tab" aria-selected="true" aria-controls="remnant-panel-expected">本次预计新增 <span id="remnant-expected-count">0</span></button>
+            <button id="remnant-tab-stock" role="tab" aria-selected="false" aria-controls="remnant-panel-stock" tabindex="-1">当前母卷料头库 <span id="header-remnant-count">—</span></button>
         </div>
-    </div>
+        <div class="remnant-workspace-body">
+            <section id="remnant-panel-expected" role="tabpanel" aria-labelledby="remnant-tab-expected">
+                <div class="remnant-overview"><div><span>预计回收</span><strong id="remnant-expected-total">0 块</strong></div><div><span>预计面积</span><strong id="remnant-expected-area">0.000 m²</strong></div><span class="remnant-preview-label">预览 · 未入库</span></div>
+                <p class="remnant-note">当前方案预计产出，实切后确认报工才登记入库。</p>
+                <p class="inventory-empty" id="remnant-expected-empty">当前没有预计新增料头。生成排料方案后在此核对。</p>
+                <div class="remnant-table-scroll"><table class="cam-table" id="remnant-expected-table"><thead><tr><th>料头编号</th><th>规格（宽 × 长）</th><th>面积</th><th>质量</th><th>操作</th></tr></thead><tbody id="remnant-table-body"></tbody></table></div>
+            </section>
+            <section id="remnant-panel-stock" role="tabpanel" aria-labelledby="remnant-tab-stock" hidden>
+                <div class="remnant-stock-tools"><label>查找料头<input id="inp-scan-barcode" class="prop-input" type="search" placeholder="编号、库位或扫描条码"></label><button class="tool-btn" id="remnant-refresh">刷新库存</button></div>
+                <p id="remnant-stock-status" class="remnant-note" role="status"></p><div id="remnant-cards-container"></div>
+                <section class="remnant-recommendations"><div class="recommendation-heading"><strong>剩余需求 · 料头推荐</strong><button class="tool-btn" id="btn-remnant-recommend">试排推荐</button></div><p class="remnant-note">仅试排当前母卷的可用料头；推荐不扣库存、不保存方案。</p><p id="remnant-availability" role="status">填写需求后匹配料头</p><div id="remnant-recommend-results"></div></section>
+            </section>
+        </div>
+        <div class="remnant-workspace-footer"><span>预计产出与已入库料头分别核对</span><button class="tool-btn" onclick="closeRemnantModal()">关闭</button></div>
+    </dialog>
 
     <!-- 全局工艺参数与显示配置中心弹窗 (Settings Modal) -->
     <dialog id="settings-modal" class="settings-native-dialog" aria-labelledby="settings-title">

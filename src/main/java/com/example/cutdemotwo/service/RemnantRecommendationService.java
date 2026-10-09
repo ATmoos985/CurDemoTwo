@@ -19,7 +19,9 @@ public class RemnantRecommendationService {
     public RemnantRecommendationService(RemnantService inventory, SolverFactory solver) {
         this.inventory = inventory; this.solver = solver;
     }
-    public record Request(SolveRequest input, Map<String, Integer> completedBaseline) {}
+    public record Request(SolveRequest input, Map<String, Integer> completedBaseline, String sourceRollId) {
+        public Request(SolveRequest input, Map<String, Integer> completedBaseline) { this(input, completedBaseline, null); }
+    }
     public record Line(int demandId, String name, double width, double length, int requested, int placed, int remaining) {}
     public record Recommendation(RemnantStock stock, int pieceCount, double pieceArea, double utilization,
                                  int cutCount, List<Line> lines) {}
@@ -40,8 +42,10 @@ public class RemnantRecommendationService {
             var snapshot = inventory.recommendationSnapshot(input, body.completedBaseline());
             var recommendations = new ArrayList<Recommendation>();
             var unavailable = new ArrayList<Unavailable>();
-            int evaluated = Math.min(MAX_CANDIDATES, snapshot.stocks().size());
-            for (var stock : snapshot.stocks().subList(0, evaluated)) {
+            var stocks = body.sourceRollId() == null ? snapshot.stocks() : snapshot.stocks().stream()
+                    .filter(stock -> body.sourceRollId().equals(stock.getSourceRollId())).toList();
+            int evaluated = Math.min(MAX_CANDIDATES, stocks.size());
+            for (var stock : stocks.subList(0, evaluated)) {
                 if (stock.isHasDefect() && (stock.getDefects() == null || stock.getDefects().isEmpty())) {
                     unavailable.add(new Unavailable(stock.getId(), "DEFECTS_UNLOCATED", "带疵料头尚未登记疵点位置，无法验证可切范围"));
                     continue;
@@ -74,7 +78,7 @@ public class RemnantRecommendationService {
                     .thenComparing(Comparator.comparingDouble(Recommendation::utilization).reversed())
                     .thenComparingInt(Recommendation::cutCount).thenComparing(r -> r.stock().getId()));
             inventory.verifyRecommendationRevision(snapshot.revision());
-            return new Analysis(snapshot.stocks().size(), evaluated, snapshot.stocks().size() - evaluated,
+            return new Analysis(stocks.size(), evaluated, stocks.size() - evaluated,
                     snapshot.revision(), List.copyOf(recommendations), List.copyOf(unavailable));
         } finally { running.release(); }
     }

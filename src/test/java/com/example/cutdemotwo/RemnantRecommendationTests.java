@@ -112,6 +112,17 @@ class RemnantRecommendationTests {
         for(int i=0;i<10;i++)inventory.registerRemnant(stock("REM-"+i,600,1000+i*10));
         var result=recommend(input(false,demand(1,600,500,1)));assertEquals(10,result.candidateCount());assertEquals(8,result.evaluatedCount());assertEquals(2,result.deferredCount());assertEquals(8,result.recommendations().size());
     }
+    @Test void motherRollScopeIsAppliedBeforeTheTrialLimitAndKeepsInventoryUnchanged() throws Exception {
+        for(int i=0;i<10;i++)inventory.registerRemnant(stock("OTHER-"+i,600,500+i));
+        var own=stock("OWN",600,1000);own.setSourceRollId("CURRENT");inventory.registerRemnant(own);
+        byte[] before=Files.readAllBytes(temp.resolve("inventory.json"));
+        var request=input(false,demand(1,600,500,1));
+        var result=service.recommend(new RemnantRecommendationService.Request(request,Map.of(),"CURRENT"));
+        assertEquals(1,result.candidateCount());assertEquals(1,result.evaluatedCount());assertEquals(0,result.deferredCount());
+        assertEquals(List.of("OWN"),result.recommendations().stream().map(r->r.stock().getId()).toList());
+        assertEquals(0,service.recommend(new RemnantRecommendationService.Request(request,Map.of(),"MISSING")).candidateCount());
+        assertArrayEquals(before,Files.readAllBytes(temp.resolve("inventory.json")));
+    }
     @Test void unavailableEngineIsNotPresentedAsNoCompatibleStock() {
         inventory.registerRemnant(stock("REM",600,1000));
         var missing=new RemnantRecommendationService(inventory,new SolverFactory(List.of()));
