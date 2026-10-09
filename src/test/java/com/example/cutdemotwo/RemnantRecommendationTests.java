@@ -144,4 +144,22 @@ class RemnantRecommendationTests {
         mvc.perform(post("/api/cutting/remnant-recommendations").contentType("application/json").content(payload.substring(0,payload.length()-1)+",\"unknown\":true}")).andExpect(status().isBadRequest());
         assertArrayEquals(before,Files.readAllBytes(temp.resolve("inventory.json")));
     }
+
+    @Test void orderDemoRemnantsProduceRealRecommendationsForEveryValidFabricAtWorkbenchOrigin() {
+        inventory.prepareOrderDemoInventory();
+        try (var stream = getClass().getResourceAsStream("/demo/order-materials.json")) {
+            var materials = new tools.jackson.databind.ObjectMapper().readTree(stream);
+            for(var material : materials) {
+                String code=material.get("fabricCode").asText();
+                if (code.equals("894512")) continue; // Original orders still need direction confirmation.
+                var request=input(true,demand(1,material.get("sampleWidth").asDouble(),material.get("sampleLength").asDouble(),2));
+                request.setRollModel(material.get("materialModel").asText());
+                request.setCutOrigin("right-bottom");
+                var analysis=recommend(request);
+                assertFalse(analysis.recommendations().isEmpty(),code + ": " + analysis.unavailable());
+                assertTrue(analysis.unavailable().stream().noneMatch(r->"FAILED".equals(r.status())),code + ": " + analysis.unavailable());
+                assertTrue(analysis.recommendations().stream().allMatch(r->r.stock().getId().startsWith("DEMO-REM-")));
+            }
+        } catch (java.io.IOException error) { throw new java.io.UncheckedIOException(error); }
+    }
 }

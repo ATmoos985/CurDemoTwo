@@ -1,0 +1,191 @@
+[
+  {
+    "fabricCode": "893153",
+    "materialModel": "2#1A-Off White",
+    "width": 2800,
+    "sampleWidth": 2417,
+    "sampleLength": 9070
+  },
+  {
+    "fabricCode": "893292",
+    "materialModel": "2#A3A-Cream",
+    "width": 2800,
+    "sampleWidth": 2715,
+    "sampleLength": 4470
+  },
+  {
+    "fabricCode": "893294",
+    "materialModel": "2#A6A Dark sand taupe",
+    "width": 2800,
+    "sampleWidth": 2460,
+    "sampleLength": 3890
+  },
+  {
+    "fabricCode": "893295",
+    "materialModel": "2#A7A Caramel",
+    "width": 2900,
+    "sampleWidth": 2865,
+    "sampleLength": 5810
+  },
+  {
+    "fabricCode": "894141",
+    "materialModel": "DREAM-A1 Off White（4#）",
+    "width": 2800,
+    "sampleWidth": 2340,
+    "sampleLength": 2580
+  },
+  {
+    "fabricCode": "894152",
+    "materialModel": "DENVER-A16 Pearl（7#）",
+    "width": 2800,
+    "sampleWidth": 2135,
+    "sampleLength": 1687.5
+  },
+  {
+    "fabricCode": "894251",
+    "materialModel": "TWILL-A2 Cream（1#）",
+    "width": 2800,
+    "sampleWidth": 2705,
+    "sampleLength": 2930
+  },
+  {
+    "fabricCode": "894261",
+    "materialModel": "DREAM-A2 Cream（4#）",
+    "width": 2800,
+    "sampleWidth": 2785,
+    "sampleLength": 3875
+  },
+  {
+    "fabricCode": "894262",
+    "materialModel": "DREAM-A3 Light Sand（4#）",
+    "width": 2800,
+    "sampleWidth": 2580,
+    "sampleLength": 4515
+  },
+  {
+    "fabricCode": "894263",
+    "materialModel": "DREAM-A4 SAND（4#）",
+    "width": 2800,
+    "sampleWidth": 2420,
+    "sampleLength": 3890
+  },
+  {
+    "fabricCode": "894265",
+    "materialModel": "DREAM-A6 Taupe（4#）",
+    "width": 2800,
+    "sampleWidth": 2294,
+    "sampleLength": 4530
+  },
+  {
+    "fabricCode": "894266",
+    "materialModel": "DREAM-A7 Caramel（4#）",
+    "width": 2800,
+    "sampleWidth": 2280,
+    "sampleLength": 3655
+  },
+  {
+    "fabricCode": "894273",
+    "materialModel": "TOUCH-A8 Latte（5#）",
+    "width": 2800,
+    "sampleWidth": 2530,
+    "sampleLength": 3250
+  },
+  {
+    "fabricCode": "894279",
+    "materialModel": "DRAPE-A8 Latte（10#）",
+    "width": 2800,
+    "sampleWidth": 2455,
+    "sampleLength": 6800
+  },
+  {
+    "fabricCode": "894286",
+    "materialModel": "DENVER-A3 Light Sand（7#）",
+    "width": 2800,
+    "sampleWidth": 2760,
+    "sampleLength": 5170
+  },
+  {
+    "fabricCode": "894306",
+    "materialModel": "DREAM-A9 Amber（4#）",
+    "width": 2800,
+    "sampleWidth": 2287,
+    "sampleLength": 2260
+  },
+  {
+    "fabricCode": "894511",
+    "materialModel": "DREAM-A11 Dystry Rose（4#）",
+    "width": 2800,
+    "sampleWidth": 2291,
+    "sampleLength": 2260
+  },
+  {
+    "fabricCode": "894512",
+    "materialModel": "TOUCH-A11 Dusty Rose（5#）",
+    "width": 2800,
+    "sampleWidth": 2305,
+    "sampleLength": 2260
+  },
+  {
+    "fabricCode": "894628",
+    "materialModel": "DIVENE-SK13 Dysty blue（8#）",
+    "width": 2800,
+    "sampleWidth": 1460,
+    "sampleLength": 2580
+  },
+  {
+    "fabricCode": "894717",
+    "materialModel": "Delicate-A12 Dusty Green（3#）",
+    "width": 2800,
+    "sampleWidth": 2718,
+    "sampleLength": 3570
+  },
+  {
+    "fabricCode": "894718",
+    "materialModel": "Delicate-A13 Moss Green（3#）",
+    "width": 2800,
+    "sampleWidth": 2635,
+    "sampleLength": 1940
+  },
+  {
+    "fabricCode": "894720",
+    "materialModel": "DREAM-A13 Moss Green（4#）",
+    "width": 2800,
+    "sampleWidth": 2665,
+    "sampleLength": 7760
+  },
+  {
+    "fabricCode": "894884",
+    "materialModel": "DREAM-A18 Grey（4#）",
+    "width": 2800,
+    "sampleWidth": 1875,
+    "sampleLength": 2965
+  },
+  {
+    "fabricCode": "894887",
+    "materialModel": "TOUCH-A18 Grey（5#）",
+    "width": 2800,
+    "sampleWidth": 2270,
+    "sampleLength": 2260
+  },
+  {
+    "fabricCode": "895283",
+    "materialModel": "11#5 Sand",
+    "width": 2800,
+    "sampleWidth": 2595,
+    "sampleLength": 3555
+  },
+  {
+    "fabricCode": "895284",
+    "materialModel": "11#6 Khaki bown",
+    "width": 2800,
+    "sampleWidth": 2637,
+    "sampleLength": 5170
+  },
+  {
+    "fabricCode": "895631",
+    "materialModel": "11#22 Dark blue",
+    "width": 2800,
+    "sampleWidth": 2520,
+    "sampleLength": 6480
+  }
+]

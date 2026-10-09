@@ -229,7 +229,7 @@ export async function selectPresetCase(caseId) {
     let rolls = await readRolls();
     if (!rolls.length) {
         document.body.inert = alreadyInert;
-        const create = await confirmAction('当前没有母卷。确认后会在空库创建 6 卷示例母卷和 5 块示例料头，用于演示完整流程；这些数据不是实物库存。取消则仅载入示例需求。已有业务数据时不会创建或覆盖。', {title:'准备示例材料', action:'创建示例材料并载入'});
+        const create = await confirmAction('当前没有母卷。确认后会在空库创建 31 卷示例母卷和 98 块示例料头（含 9.28 订单材料），用于演示完整流程；这些数据不是实物库存。取消则仅载入示例需求。已有业务数据时不会创建或覆盖。', {title:'准备示例材料', action:'创建示例材料并载入'});
         document.body.inert = true;
         if (create) {
             const response = await fetch('/api/demo/inventory', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({confirmed:true})});

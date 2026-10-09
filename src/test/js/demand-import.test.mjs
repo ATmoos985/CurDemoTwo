@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
-import {parseDemandSheet, parseDemandJSON, importedTask} from '../../main/resources/static/js/plugins/solver/demand-import-model.js';
+import {parseDemandSheet, parseDemandJSON, importedTask, importGroups, matchingImportRolls} from '../../main/resources/static/js/plugins/solver/demand-import-model.js';
 const require = createRequire(import.meta.url);
 const XLSX = require('../../main/resources/static/vendor/sheetjs/xlsx.mini.min.js');
 const header = ['序号','缝纫方式','订单\n编号','布料\n编号','供应\n商\n编号'];
@@ -18,7 +19,7 @@ test('RH maps cut height to physical roll width, cm to mm, and pairs to quantity
 test('material groups stay separate and incomplete rows remain visible as issues', () => {
     const missing = row();missing[11]='';missing[12]='';
     const result = parseDemandSheet([header,row(),row('双','布料 B'),missing]);
-    assert.equal(result.groups.length,2);assert.deepEqual(result.issues,[{row:4,model:'布料 A',message:'裁切方向未确认；当前只转换 RH 横裁订单'}]);
+    assert.equal(result.groups.length,2);assert.equal(result.issues[0].row,4);assert.match(result.issues[0].message,/裁切方向未确认/);
     assert.equal(importedTask(result,1,'input.xlsx / Sheet1').demands.length,1);
 });
 test('merged header continuations, numbered empty rows and totals are not mistaken for orders', () => {
@@ -55,32 +56,44 @@ test('vendored reader supports real XLSX roundtrip and UTF-8 CSV template in Chi
     assert.equal(parseDemandSheet(XLSX.utils.sheet_to_json(csv.Sheets[csv.SheetNames[0]],{header:1})).groups[0].materialModel,'布料');
 });
 
-test('evaluateModelMatches accurately classifies roll match, oversize, and alternative inventory rolls', async () => {
-    const {evaluateModelMatches, importedTasks} = await import('../../main/resources/static/js/plugins/solver/demand-import-model.js');
-    const groups = [
-        {materialModel:'2#1A-Off White', demands:[{id:1,width:2500,length:3000,quantity:2}]},
-        {materialModel:'2#A3A-Cream', demands:[{id:2,width:2900,length:3200,quantity:3}]},
-        {materialModel:'DEMO-LINEN', demands:[{id:3,width:1800,length:2000,quantity:1}]}
-    ];
-    const targetRoll = {rollId:'ROLL-1', rollModel:'2#1A-Off White', width:2800};
-    const allRolls = [targetRoll, {rollId:'ROLL-2', rollModel:'2#A3A-Cream', width:2800}];
 
-    const matches = evaluateModelMatches(groups, targetRoll, allRolls);
-    assert.equal(matches.length, 3);
-    assert.equal(matches[0].matchStatus, 'MATCHED');
-    assert.match(matches[0].statusText, /当前母卷可切/);
-
-    // 针对Cream母卷测试超幅
-    const creamRoll = {rollId:'ROLL-2', rollModel:'2#A3A-Cream', width:2800};
-    const creamMatches = evaluateModelMatches(groups, creamRoll, allRolls);
-    assert.equal(creamMatches[1].matchStatus, 'OVERSIZE');
-    assert.match(creamMatches[1].statusText, /幅宽超限/);
-
-    // 批量抽取任务
-    const result = {groups, format:'标准'};
-    const tasks = importedTasks(result, [0, 1], '测试批次');
-    assert.equal(tasks.length, 2);
-    assert.equal(tasks[0].materialModel, '2#1A-Off White');
-    assert.equal(tasks[1].materialModel, '2#A3A-Cream');
+test('the original 9.28 order cells identify 27 fabrics and preserve all 104 source rows', () => {
+    const raw = JSON.parse(readFileSync(new URL('../fixtures/9.28-orders.json',import.meta.url)));
+    const result = parseDemandSheet(raw), groups = importGroups(result);
+    assert.equal(groups.filter(g=>g.materialModel).length,27);
+    assert.equal(groups.length,28);
+    assert.equal(result.groups.flatMap(g=>g.demands).length,100);
+    assert.deepEqual(result.issues.map(i=>i.row),[78,79,108,109]);
+    assert.equal(result.groups.flatMap(g=>g.demands).reduce((n,d)=>n+d.quantity,0),156);
+    const cream = result.groups.find(g=>g.fabricCode === '893292');
+    assert.equal(cream.demands.length,11);
+    assert.equal(cream.demands.reduce((n,d)=>n+d.quantity,0),23);
+    const line13=cream.demands.find(d=>d.row===13);
+    assert.deepEqual([line13.width,line13.length,line13.quantity],[2715,2930,4]);
+    assert.equal(groups.find(g=>g.fabricCode==='894512').issues.length,2);
+    assert.equal(groups.at(-1).fabricCode,'待定');
 });
-
+test('only checked rows from the selected fabric enter the current task', () => {
+    const raw = JSON.parse(readFileSync(new URL('../fixtures/9.28-orders.json',import.meta.url)));
+    const result = parseDemandSheet(raw), index = result.groups.findIndex(g=>g.fabricCode==='893292');
+    const task = importedTask(result,index,'9.28.xlsx',[10,13]);
+    assert.deepEqual(task.demands.map(d=>d.id),[10,13]);
+    assert.equal(task.demands.reduce((n,d)=>n+d.quantity,0),6);
+    assert.throws(()=>importedTask(result,index,'9.28.xlsx',[6,13]),/不一致/);
+    assert.throws(()=>importedTask(result,index,'9.28.xlsx',[]),/勾选/);
+    assert.throws(()=>importedTask(result,index,'9.28.xlsx',[10,10]),/不一致/);
+});
+test('inventory matches exact models, never similar colors or names, and excludes unusable stock', () => {
+    const group={materialModel:'2#1A-Off White'};
+    const rolls=[
+        {rollId:'yes',rollModel:group.materialModel,currentRemainingLength:1000},
+        {rollId:'similar',rollModel:group.materialModel+' NEW',currentRemainingLength:1000},
+        {rollId:'empty',rollModel:group.materialModel,currentRemainingLength:0},
+        {rollId:'blocked',rollModel:group.materialModel,currentRemainingLength:1000,inspectionStatus:'QUARANTINED'}
+    ];
+    assert.deepEqual(matchingImportRolls(group,rolls).map(r=>r.rollId),['yes']);
+});
+test('different fabric codes stay separate even if a supplier model name is reused', () => {
+    const a=row(),b=row();b[3]='F-2';
+    assert.equal(parseDemandSheet([header,a,b]).groups.length,2);
+});

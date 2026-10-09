@@ -262,34 +262,51 @@
     font-weight: 600;
 }
 
-/* 需求导入弹窗：母卷驱动筛选与型号多选高密列表 */
-#demand-import { width: min(940px, calc(100vw - 32px)); max-height: calc(100dvh - 36px); }
-.import-roll-filter-bar { background: var(--panel-header); padding: 10px 14px; border: 1px solid var(--panel-border); border-radius: 4px; margin-top: 10px; }
-.import-roll-filter-bar .filter-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.import-filter-label { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
-.import-filter-label select { min-height: 32px; min-width: 280px; font-size: 12px; }
-.import-checkbox-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; user-select: none; }
-.import-search-input { min-height: 32px; min-width: 160px; font-size: 12px; padding: 4px 8px; }
-
-.import-models-wrapper { margin-top: 10px; border: 1px solid var(--panel-border); border-radius: 4px; overflow: hidden; background: var(--panel-bg); }
-.models-header-bar { display: flex; justify-content: space-between; align-items: center; background: var(--panel-header); padding: 7px 12px; border-bottom: 1px solid var(--panel-border); font-size: 12px; }
-.models-batch-actions { display: flex; gap: 6px; }
-.models-batch-actions .tool-btn { font-size: 11px; padding: 2px 8px; min-height: 24px; }
-.import-models-scroll { max-height: 180px; overflow-y: auto; }
-
-.import-model-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.import-model-table th { background: var(--panel-header); padding: 6px 10px; text-align: left; font-weight: 500; color: var(--text-muted); border-bottom: 1px solid var(--panel-border); font-size: 11px; }
-.import-model-table td { padding: 7px 10px; border-bottom: 1px solid var(--panel-border); }
-.import-model-row { cursor: pointer; transition: background 0.12s; }
-.import-model-row:hover { background: var(--panel-header); }
-.import-model-row.active { background: #0284c718; }
-.import-model-name { font-weight: 600; font-family: "JetBrains Mono", Consolas, monospace; font-size: 12px; }
-.import-model-stat { font-family: "JetBrains Mono", Consolas, monospace; font-size: 11px; color: var(--text-muted); }
-
-.preview-heading { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; margin-bottom: 6px; }
-.preview-heading h4 { margin: 0; font-size: 13px; font-weight: 600; }
-
-.import-footer-container { display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 16px; }
-.import-footer-summary { flex: 1; font-size: 12px; color: var(--text-muted); }
-.import-footer-summary strong { color: var(--accent-blue); }
-.import-footer-buttons { display: flex; gap: 8px; align-items: center; }
+/* 文件驱动的布料导航与需求行选择 */
+#demand-import { width: min(1180px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); }
+#demand-import .workbench-dialog-body { padding: 14px 20px; }
+#demand-import .import-file { padding: 10px 12px; }
+#demand-import .import-file label { display:flex; align-items:center; gap:12px; }
+#demand-import-status { color:var(--text-muted); font-size:12px; margin:12px 0; }
+.import-workspace { display:grid; grid-template-columns:260px minmax(0,1fr); border:1px solid var(--panel-border); min-height:350px; height: min(480px, calc(100dvh - 320px)); }
+.import-fabrics { display:flex; flex-direction:column; min-height:0; padding:12px; border-right:1px solid var(--panel-border); background:var(--panel-header); }
+.import-fabrics h3,.import-demand-heading h3 { font-size:14px; margin:0 0 8px; }
+.import-fabrics h3 span { font-size:11px; font-weight:400; color:var(--text-muted); margin-left:8px; }
+.import-fabrics input { width:100%; min-height:32px; margin-bottom:10px; }
+.import-group-list { overflow:auto; min-height:0; }
+.import-group { display:flex; flex-direction:column; align-items:flex-start; gap:4px; width:100%; padding:11px 10px; text-align:left; font:inherit; font-size:12px; color:var(--text-main); background:transparent; border:1px solid transparent; border-bottom:1px solid var(--panel-border); cursor:pointer; }
+.import-group span { overflow-wrap:anywhere; }
+.import-group small { font-size:11px; color:var(--text-muted); }
+.import-group:hover { background:var(--panel-bg); }
+.import-group.active { border-color:var(--accent-blue); background:var(--panel-bg); box-shadow:inset 3px 0 var(--accent-blue); }
+.import-group.active strong { color:var(--accent-blue); }
+.import-demands { display:flex; flex-direction:column; min-width:0; min-height:0; }
+.import-demand-heading { padding:14px 16px 8px; }
+.import-demand-heading p { font-size:12px; color:var(--text-muted); margin:0; }
+.import-stock { margin:0 16px 10px; padding:10px 12px; background:var(--panel-header); border:1px solid var(--panel-border); font-size:12px; }
+.import-stock label { display:flex; align-items:center; gap:12px; }
+.import-stock select { flex:1; min-width:0; min-height:30px; }
+.import-stock p { margin:6px 0 0; color:var(--text-muted); }
+.import-selection-bar { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:0 16px 8px; font-size:12px; }
+.import-selection-bar .tool-btn { min-height:28px; }
+.import-demand-scroll { flex:1; overflow:auto; min-height:0; border-top:1px solid var(--panel-border); }
+.import-demand-scroll table { width:100%; border-collapse:collapse; font-size:12px; }
+.import-demand-scroll th { position:sticky; top:0; z-index:1; background:var(--panel-header); text-align:left; }
+.import-demand-scroll th,.import-demand-scroll td { padding:9px 10px; border-bottom:1px solid var(--panel-border); }
+.import-demand-scroll td small { display:block; font-size:10px; line-height:1.5; color:var(--text-muted); max-width:220px; }
+.import-demand-scroll .numeric { font-variant-numeric:tabular-nums; white-space:nowrap; }
+.import-demand-scroll .numeric small { white-space:normal; }
+.import-demand-scroll tr.selected { background:color-mix(in srgb,var(--accent-blue) 8%,var(--panel-bg)); }
+.import-invalid { color:var(--accent-amber); }
+#demand-import input[type=checkbox] { width:16px; height:16px; accent-color:var(--accent-blue); cursor:pointer; }
+.import-axis-note { font-size:11px; line-height:1.6; margin:0; padding:8px 16px; color:var(--text-muted); border-top:1px solid var(--panel-border); }
+#demand-import-issues { margin-top:10px; }
+#demand-import .import-actions { display:flex; justify-content:space-between; align-items:center; gap:16px; }
+.import-actions p { font-size:13px; margin:0; }
+#demand-import-apply { min-width:180px; min-height:36px; }
+@media (max-width:760px) {
+    .import-workspace { grid-template-columns:190px minmax(0,1fr); }
+    #demand-import .workbench-dialog-body { padding:10px; }
+    .import-stock label { align-items:flex-start; flex-direction:column; gap:6px; }
+    .import-stock select { width:100%; }
+}

@@ -15,10 +15,10 @@ class DemoInventoryTests {
         Path path = temp.resolve("demo.json");
         var inventory = new RemnantService(new FileInventoryStore(path.toString()), false);
         assertTrue(inventory.getMotherRolls().isEmpty());
-        assertEquals(Map.of("rolls", 6, "remnants", 5), inventory.initializeDemoInventory());
+        assertEquals(Map.of("rolls", 31, "remnants", 98), inventory.initializeDemoInventory());
         var restored = new RemnantService(new FileInventoryStore(path.toString()), false);
-        assertEquals(6, restored.getMotherRolls().size());
-        assertEquals(5, restored.getRemnantsByRollId(null).size());
+        assertEquals(31, restored.getMotherRolls().size());
+        assertEquals(98, restored.getRemnantsByRollId(null).size());
         assertTrue(restored.getMotherRolls().stream().allMatch(roll -> roll.getStorageLocation().contains("非实物")));
         byte[] before = Files.readAllBytes(path);
         assertThrows(IllegalArgumentException.class, restored::initializeDemoInventory);
@@ -44,5 +44,30 @@ class DemoInventoryTests {
         assertThrows(IllegalStateException.class, inventory::initializeDemoInventory);
         assertTrue(inventory.getMotherRolls().isEmpty());
         assertTrue(inventory.getRemnantsByRollId(null).isEmpty());
+    }
+
+    @Test void orderDemoStockCoversEveryFabricAndPreservesExistingStockOnRepeat() throws Exception {
+        Path path = temp.resolve("orders.json");
+        var inventory = new RemnantService(path.toString());
+        inventory.scrapRemnant("REM-202609-001", "already handled");
+        var before = inventory.getMotherRoll("ROLL-REAL-893153");
+        double remaining = before.getCurrentRemainingLength();
+        assertEquals(Map.of("rolls",25,"remnants",93), inventory.prepareOrderDemoInventory());
+        assertEquals(31,inventory.getMotherRolls().size());
+        assertEquals(remaining,inventory.getMotherRoll("ROLL-REAL-893153").getCurrentRemainingLength());
+        for(var roll : inventory.getMotherRolls()) {
+            var seeded = inventory.getRemnantsByRollId(roll.getRollId()).stream().filter(r->r.getId().startsWith("DEMO-REM-")).toList();
+            assertEquals(3,seeded.size());
+            assertTrue(seeded.stream().allMatch(r->r.getMaterialBatch().equals(roll.getRollModel()) && r.getWidth() <= roll.getWidth()));
+            assertTrue(seeded.stream().anyMatch(r->r.isHasDefect() && !r.getDefects().isEmpty()));
+        }
+        String id="DEMO-REM-ROLL-REAL-893153-1";
+        inventory.scrapRemnant(id,"demo complete");
+        assertEquals(Map.of("rolls",0,"remnants",0),inventory.prepareOrderDemoInventory());
+        var restored = new RemnantService(new FileInventoryStore(path.toString()), "true");
+        assertNull(restored.scanOrGetById(id));
+        assertNull(restored.scanOrGetById("REM-202609-001"));
+        assertEquals(31,restored.getMotherRolls().size());
+        assertTrue(restored.getMotherRoll("ROLL-DEMO-928-893295").getWidth() >= 2865);
     }
 }

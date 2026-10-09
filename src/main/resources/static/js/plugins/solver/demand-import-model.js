@@ -29,12 +29,13 @@ function parseCurtainRows(rows, start) {
         if (!text(row[2]) && (!positive(row[0]) || ![3,4,7,8,13,15].some(column => text(row[column])))) return;
         const number = start + index + 1, pair = text(row[10]), direction = text(row[12]);
         const cutWidth = pair === '双' ? row[15] : row[13], splice = pair === '双' ? row[16] : row[14];
-        let error = !text(row[2]) ? '缺少订单编号' : !['单','双'].includes(pair) ? '单片 / 双片未填写或无法识别'
+        let error = !text(row[2]) ? '缺少订单编号' : !text(row[4]) ? '布料待定或缺少供应商型号' : !['单','双'].includes(pair) ? '单片 / 双片未填写或无法识别'
             : !(direction === '横裁' || (!direction && text(row[11]).toUpperCase() === 'RH')) ? '裁切方向未确认；当前只转换 RH 横裁订单'
             : !positive(cutWidth) || !positive(row[17]) ? '缺少有效裁布宽度或裁布高度'
             : !positive(row[9]) || !Number.isSafeInteger(Number(row[9])) ? '订单支数必须是正整数' : '';
         const note = Number(splice) > 1 ? `最多拼接 ${splice} 片；保留整片需求，未自动拆片` : '';
-        add(result, {row:number, materialModel:text(row[4]), order:text(row[2]),
+        add(result, {row:number, materialModel:text(row[4]), fabricCode:text(row[3]), order:text(row[2]),
+            style:text(row[1]), pair, orderQuantity:Number(row[9]), cutWidthCm:Number(cutWidth), cutHeightCm:Number(row[17]),
             name:`订单 ${text(row[2])} · ${text(row[3])} · 第 ${number} 行`,
             width:cm(row[17]), length:cm(cutWidth), quantity:Number(row[9]) * (pair === '双' ? 2 : 1),
             allowRotation:false, note}, error);
@@ -46,9 +47,9 @@ function add(result, line, error = '') {
     error ||= !line.materialModel ? '缺少材料型号' : !line.name ? '缺少裁片名称'
         : !positive(line.width) || !positive(line.length) ? '宽度、长度必须大于 0'
         : !positive(line.quantity) || !Number.isSafeInteger(Number(line.quantity)) || Number(line.quantity) > 2147483647 ? '数量必须是有效正整数' : '';
-    if (error) {result.issues.push({row:line.row, model:line.materialModel, message:error});return;}
-    let group = result.groups.find(item => item.materialModel === line.materialModel);
-    if (!group) {group = {materialModel:line.materialModel, demands:[]};result.groups.push(group);}
+    if (error) {result.issues.push({row:line.row, model:line.materialModel, message:error, line});return;}
+    let group = result.groups.find(item => item.materialModel === line.materialModel && item.fabricCode === line.fabricCode);
+    if (!group) {group = {materialModel:line.materialModel, fabricCode:line.fabricCode, demands:[]};result.groups.push(group);}
     group.demands.push({...line, id:line.row, width:Number(line.width), length:Number(line.length), quantity:Number(line.quantity)});
 }
 
@@ -67,78 +68,34 @@ export function parseDemandJSON(value) {
     return finish(result);
 }
 
-export function importedTask(result, index, source) {
+export function importedTask(result, index, source, selectedIds = null) {
     const group = result.groups[index];
     if (!group?.demands.length) throw new Error('请选择有有效需求的材料型号。');
+    const demands = selectedIds === null ? group.demands : group.demands.filter(line => selectedIds.includes(line.id));
+    if (!demands.length) throw new Error('请勾选本次需要导入的需求。');
+    if (selectedIds && (new Set(selectedIds).size !== demands.length || selectedIds.length !== demands.length))
+        throw new Error('勾选需求与当前布料不一致，请重新选择。');
     return {name:result.name || `${source} · ${group.materialModel}`, materialModel:group.materialModel,
         externalRef:result.externalRef || source,
-        demands:group.demands.map(({id, name, order, width, length, quantity, allowRotation}) => ({id,
+        demands:demands.map(({id, name, order, width, length, quantity, allowRotation}) => ({id,
             name:order && !name.includes(order) ? `订单 ${order} · ${name}` : name,
             width, length, quantity, allowRotation}))};
 }
 
-export function evaluateModelMatches(groups, roll, allRolls = []) {
-    const norm = str => String(str ?? '').toLowerCase().replace(/[\s\(\)（）#\-_]/g, '');
-    const rollModelNorm = roll ? norm(roll.rollModel) : '';
-    const allRollList = allRolls || [];
-
-    return groups.map((group, index) => {
-        const groupNorm = norm(group.materialModel);
-        const maxWidth = Math.max(...group.demands.map(d => d.width));
-        const maxLength = Math.max(...group.demands.map(d => d.length));
-        const totalQuantity = group.demands.reduce((n, d) => n + d.quantity, 0);
-
-        let matchStatus = 'NO_STOCK';
-        let statusText = '暂无在库母卷';
-        let statusBadge = 'muted';
-
-        if (roll) {
-            const isTargetModel = group.materialModel === roll.rollModel ||
-                groupNorm === rollModelNorm ||
-                (groupNorm.length >= 4 && rollModelNorm.length >= 4 && (groupNorm.includes(rollModelNorm) || rollModelNorm.includes(groupNorm)));
-
-            if (isTargetModel) {
-                if (maxWidth <= roll.width) {
-                    matchStatus = 'MATCHED';
-                    statusText = `当前母卷可切 (宽≤${roll.width}mm)`;
-                    statusBadge = 'success';
-                } else {
-                    matchStatus = 'OVERSIZE';
-                    statusText = `幅宽超限 (最大${maxWidth}mm > ${roll.width}mm)`;
-                    statusBadge = 'warning';
-                }
-            } else {
-                const other = allRollList.find(r => r.rollModel === group.materialModel || norm(r.rollModel) === groupNorm);
-                if (other) {
-                    matchStatus = 'IN_STOCK_OTHER';
-                    statusText = `匹配其他母卷 (${other.rollId} · ${other.width}mm)`;
-                    statusBadge = 'info';
-                }
-            }
-        } else {
-            const existing = allRollList.find(r => r.rollModel === group.materialModel || norm(r.rollModel) === groupNorm);
-            if (existing) {
-                matchStatus = 'IN_STOCK_OTHER';
-                statusText = `在库有卷 (${existing.rollId} · ${existing.width}mm)`;
-                statusBadge = 'info';
-            }
+/** Include identified fabrics whose rows require correction, without making those rows importable. */
+export function importGroups(result) {
+    const groups = result.groups.map((group, index) => ({...group, index, issues:[]}));
+    for (const issue of result.issues) {
+        let group = groups.find(g => g.materialModel === issue.model && g.fabricCode === issue.line?.fabricCode);
+        if (!group) {
+            group = {materialModel:issue.model, fabricCode:issue.line?.fabricCode, demands:[], issues:[], index:-1};
+            groups.push(group);
         }
-
-        return {
-            index,
-            materialModel: group.materialModel,
-            demandCount: group.demands.length,
-            totalQuantity,
-            maxWidth,
-            maxLength,
-            matchStatus,
-            statusText,
-            statusBadge
-        };
-    });
+        group.issues.push(issue);
+    }
+    return groups.sort((a,b) => Math.min(...a.demands.map(d=>d.row), ...a.issues.map(d=>d.row)) - Math.min(...b.demands.map(d=>d.row), ...b.issues.map(d=>d.row)));
 }
 
-export function importedTasks(result, indices, source) {
-    return indices.map(index => importedTask(result, index, source));
+export function matchingImportRolls(group, rolls) {
+    return rolls.filter(roll => roll.rollModel === group.materialModel && roll.currentRemainingLength > 0 && roll.inspectionStatus !== 'QUARANTINED');
 }
-

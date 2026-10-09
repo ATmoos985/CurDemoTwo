@@ -201,23 +201,26 @@ export function startTaskDraft(name = '本次切割') {
 
 export function finishTaskDraft() { resetDraftTracking(); draftBaseline = ''; taskInputChanged(); }
 
-export async function importDemandTask(task, isCurrent = () => true) {
+export async function importDemandTask(task, isCurrent = () => true, rollId = '') {
     if (state.activeTask) throw new Error('当前任务已保存。请在需求窗口编辑；导入另一批订单请先新建任务。');
     // An import belongs to the current unsaved task; never replace a saved task's report identities.
     const rolls = await api('/api/rolls');
     if (!isCurrent()) return false;
+    const roll = rolls.find(item => item.rollId === rollId);
+    if (rollId && (!roll || roll.rollModel !== task.materialModel || roll.currentRemainingLength <= 0 || roll.inspectionStatus === 'QUARANTINED'))
+        throw new Error('所选母卷已不可用或型号与需求不一致，请重新选择。');
     if (state.getCurrentCaseData().demands.length && !await confirmAction('替换当前任务的需求草稿？未报工预览将清除，任务名称保留。', {title:'替换需求',action:'替换当前草稿'})) return false;
     if (!isCurrent() || state.activeTask) return false;
     const wasInert = document.body.inert;document.body.inert = true;
     try {
         state.pendingPlan = null;
-        syncMaterialOptions(rolls, {model:task.materialModel, rollId:'', fallback:false});
+        syncMaterialOptions(rolls, {model:task.materialModel, rollId, fallback:false});
         el('task-external-ref').value = task.externalRef;
         state.getCurrentCaseData().demands = task.demands.map(d => ({...d,count:d.quantity}));
         renderDemandsUI(state.getCurrentCaseData().demands);
-        await switchCutMode('roll');
+        await switchCutMode('roll', null, null, roll);
         taskInputChanged();updateWorkflowControls();
-        showToast('需求已导入当前任务，请核对后保存并选择材料。', 'success');
+        showToast(roll ? '已导入勾选需求并装载对应母卷，请核对后保存任务。' : '需求已导入当前任务，请核对后保存并选择材料。', 'success');
         return true;
     } finally {document.body.inert = wasInert;}
 }

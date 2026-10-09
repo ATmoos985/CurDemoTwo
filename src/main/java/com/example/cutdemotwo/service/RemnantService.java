@@ -47,6 +47,7 @@ public class RemnantService {
     @org.springframework.beans.factory.annotation.Autowired
     public RemnantService(InventoryStore store, @Value("${cutdemo.seed-demo-data:}") String seedDemo) {
         this(store, seedDemo.isBlank() ? !store.shared() : Boolean.parseBoolean(seedDemo));
+        if (seedDemo.isBlank() ? !store.shared() : Boolean.parseBoolean(seedDemo)) prepareOrderDemoInventory();
     }
 
     public RemnantService(InventoryStore store, boolean seedDemo) {
@@ -63,10 +64,68 @@ public class RemnantService {
             }
             initMotherRolls();
             initSampleRemnants();
+            appendOrderDemoInventory(orderDemoMaterials());
             motherRolls.values().forEach(roll -> roll.setStorageLocation("示例材料（非实物）"));
             remnantPool.values().forEach(remnant -> remnant.setLocation("示例料头（非实物）"));
             return Map.of("rolls", motherRolls.size(), "remnants", remnantPool.size());
         });
+    }
+
+    private record DemoMaterial(String fabricCode, String materialModel, double width, double sampleWidth, double sampleLength) {}
+
+    private DemoMaterial[] orderDemoMaterials() {
+        try (var input = new org.springframework.core.io.ClassPathResource("demo/order-materials.json").getInputStream()) {
+            return json.readValue(input, DemoMaterial[].class);
+        } catch (java.io.IOException error) { throw new java.io.UncheckedIOException("读取订单演示材料失败", error); }
+    }
+
+    /** Append fixtures only; a consumed or scrapped demo remnant is never replenished. */
+    public synchronized Map<String, Integer> prepareOrderDemoInventory() {
+        var materials = orderDemoMaterials();
+        return mutate(() -> appendOrderDemoInventory(materials));
+    }
+
+    private Map<String, Integer> appendOrderDemoInventory(DemoMaterial[] materials) {
+        int rollsBefore = motherRolls.size(), remnantsBefore = remnantPool.size();
+        var examples = new LinkedHashMap<String, double[]>();
+        for (var material : materials) {
+            String id = Set.of("893153", "893292").contains(material.fabricCode())
+                    ? "ROLL-REAL-" + material.fabricCode() : "ROLL-DEMO-928-" + material.fabricCode();
+            if (!motherRolls.containsKey(id)) {
+                var roll = new MotherRollInfo(id, material.materialModel(), "DEMO-928-" + material.fabricCode(),
+                        "9.28 订单演示", "布料 " + material.fabricCode(), "演示未标定", 0, "演示未标定",
+                        material.width(), 100000, "9.28 演示预置（非实物）");
+                roll.setInspector("演示预置");
+                roll.setShrinkageRate(0);
+                motherRolls.put(id, roll);
+            }
+            if (material.materialModel().equals(motherRolls.get(id).getRollModel()))
+                examples.put(id, new double[]{material.sampleWidth(), material.sampleLength()});
+        }
+        for (String id : List.of("ROLL-2026-0920", "ROLL-2026-0921", "ROLL-2026-0922", "ROLL-DEMO-2D")) {
+            var roll = motherRolls.get(id);
+            if (roll != null) examples.put(id, new double[]{roll.getWidth(), 1200});
+        }
+        for (var entry : examples.entrySet()) {
+            var roll = motherRolls.get(entry.getKey());
+            double width = Math.min(roll.getWidth(), entry.getValue()[0] + 40), length = entry.getValue()[1] + 60;
+            for (int variant = 1; variant <= 3; variant++) {
+                String id = "DEMO-REM-" + roll.getRollId() + "-" + variant;
+                if (remnantPool.containsKey(id)) continue;
+                boolean defect = variant == 2;
+                double w = variant == 3 ? Math.max(100, Math.floor(width / 3)) : variant == 2 ? roll.getWidth() : width;
+                double l = variant == 2 ? length * 2 + 300 : length;
+                var remnant = new RemnantStock(id, w, l, "演示预置料头（非实物）", roll.getRollModel(),
+                        "AVAILABLE", roll.getRollId(), defect,
+                        variant == 1 ? "演示预置：整片复用" : defect ? "演示预置：局部带疵，需避让" : "演示预置：窄条，展示规格不匹配");
+                remnant.setQualityGrade(defect ? "GRADE_DEFECT" : "GRADE_A");
+                remnant.setGeneration(1);
+                if (defect) remnant.setDefects(new ArrayList<>(List.of(new Defect(1, 40, l - 180, 120, 120,
+                        20, "STAIN", "演示污斑", 2, 2, "MANUAL_INSPECT", "MUST_AVOID", "演示预置疵点"))));
+                remnantPool.put(id, remnant);
+            }
+        }
+        return Map.of("rolls", motherRolls.size() - rollsBefore, "remnants", remnantPool.size() - remnantsBefore);
     }
 
     private InventorySnapshot snapshot() {

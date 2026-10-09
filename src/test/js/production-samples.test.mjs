@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {demandSample} from '../../main/resources/static/js/plugins/solver/demand-sample.js';
-import {importedTask} from '../../main/resources/static/js/plugins/solver/demand-import-model.js';
+import {importedTask, parseDemandSheet} from '../../main/resources/static/js/plugins/solver/demand-import-model.js';
 import {scenarioExample} from '../../main/resources/static/js/nesting/scenario-examples.js';
 import {createNestingScene} from '../../main/resources/static/js/nesting/nesting-scene.js';
 
@@ -18,6 +18,19 @@ test('9.28 sample preserves valid RH quantities with real order identities and f
     const cream = importedTask(demandSample,demandSample.groups.findIndex(g=>g.materialModel==='2#A3A-Cream'),'9.28 样例');
     assert.equal(cream.demands.length,11);assert.equal(cream.demands.reduce((n,d)=>n+d.quantity,0),23);
     assert.deepEqual([cream.demands[0].width,cream.demands[0].length,cream.demands[0].quantity],[2170,3250,2]);
+});
+test('built-in sample and demo inventory catalog agree with the original order cells', () => {
+    const original = JSON.parse(readFileSync(new URL('../fixtures/9.28-orders.json', import.meta.url)));
+    const parsed = parseDemandSheet(original);
+    assert.deepEqual(demandSample.groups, parsed.groups);
+    assert.deepEqual(demandSample.issues, parsed.issues);
+    const materials = JSON.parse(readFileSync(new URL('../../main/resources/demo/order-materials.json', import.meta.url)));
+    assert.equal(materials.length, 27);
+    for (const group of parsed.groups) {
+        const stock = materials.find(m => m.fabricCode === group.fabricCode);
+        assert.equal(stock.materialModel, group.materialModel);
+        assert.ok(group.demands.every(d => d.width <= stock.width && d.width <= stock.sampleWidth && d.length <= stock.sampleLength));
+    }
 });
 test('lab scenarios are standalone preview inputs, with clipped defect avoidance and no business inventory IDs', () => {
     for (const id of [3,4,6]) {
