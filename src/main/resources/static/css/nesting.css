@@ -12,9 +12,8 @@
 .lab-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; min-height: 64px; border-bottom: 1px solid var(--panel-border); flex-shrink: 0; }
 .lab-heading h1, .lab-heading h2 { font-size: 15px; margin: 0; }
 .lab-heading > span { color: var(--text-muted); font-size: 12px; }
-.lab-form-body, .lab-result-body { padding: 18px; overflow: auto; flex: 1; min-height: 0; }
-.lab-examples { display: flex; gap: 8px; margin-bottom: 22px; }
-.lab-examples { flex-wrap: wrap; }
+.lab-examples { display: flex; gap: 8px; margin-bottom: 22px; flex-wrap: wrap; }
+.lab-scenario-label { margin-bottom: 12px; }
 .lab-input textarea.shape-vertices { width: 100%; min-height: 100px; resize: vertical; padding: 7px; border: 1px solid var(--panel-border); font: 12px/1.5 Consolas, monospace; }
 .lab-input input:read-only { background: #f5f7f8; }
 .shape-editor { margin-bottom: 12px; }

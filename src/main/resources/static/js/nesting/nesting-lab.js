@@ -171,6 +171,7 @@ function table(id, headings, rows) {
 }
 function changed() {
     solveToken++; byId('solve-button').disabled = false; byId('solve-button').textContent = '生成排料'; showError('');
+    if (byId('scenario-select')) byId('scenario-select').value = '';
     try {
         problem = readForm();
         const scene = session.setProblem(problem); viewer.setScene(scene); results(scene);
@@ -216,10 +217,15 @@ byId('process-mode').addEventListener('change', () => {
 });
 byId('add-part').onclick = () => inputAction(() => { problem = readForm(); problem.parts.push({ id: Math.max(0, ...problem.parts.map(p => p.id)) + 1, name: '新裁片', shape: rectangle(500, 500), quantity: 1, allowRotation: false }); fillRows(); changed(); });
 byId('add-exclusion').onclick = () => inputAction(() => { problem = readForm(); problem.material.exclusions ||= []; problem.material.exclusions.push({ id: Math.max(0, ...problem.material.exclusions.map(d => d.id)) + 1, x: 0, y: 0, shape: rectangle(100, 100), clearance: 20 }); fillRows(); changed(); });
-byId('example-contour').onclick = () => loadProblem(example('CONTOUR'));
-byId('example-crosscut').onclick = () => loadProblem(example('CROSSCUT'));
-byId('example-guillotine').onclick = () => loadProblem(example('GUILLOTINE'));
-document.querySelectorAll('[data-lab-scenario]').forEach(button => button.onclick = () => loadProblem(scenarioExample(Number(button.dataset.labScenario))));
+function loadScenario(key) {
+    if (byId('scenario-select')) byId('scenario-select').value = key;
+    if (key === 'CROSSCUT' || key === 'GUILLOTINE' || key === 'CONTOUR') {
+        loadProblem(example(key));
+    } else if (key) {
+        loadProblem(scenarioExample(Number(key)));
+    }
+}
+byId('scenario-select')?.addEventListener('change', event => loadScenario(event.target.value));
 byId('problem-form').addEventListener('submit', async event => {
     event.preventDefault(); if (!byId('problem-form').reportValidity()) return;
     try {
@@ -242,7 +248,7 @@ byId('zoom-out').onclick = () => viewer.zoom(1 / 1.25);
 byId('show-paths').onchange = event => viewer.setPaths(event.target.checked);
 byId('show-dimensions').onchange = event => viewer.setDimensions(event.target.checked);
 byId('open-json').onclick = () => inputAction(() => { byId('json-input').value = JSON.stringify(readForm(), null, 2); byId('json-error').textContent = ''; byId('json-dialog').showModal(); });
-byId('apply-json').onclick = () => { try { loadProblem(JSON.parse(byId('json-input').value)); byId('json-dialog').close(); } catch (error) { byId('json-error').textContent = error.message; } };
+byId('apply-json').onclick = () => { try { loadProblem(JSON.parse(byId('json-input').value)); if (byId('scenario-select')) byId('scenario-select').value = ''; byId('json-dialog').close(); } catch (error) { byId('json-error').textContent = error.message; } };
 function download(name, value) {
     const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }));
     const link = document.createElement('a'); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -250,6 +256,6 @@ function download(name, value) {
 byId('export-input').onclick = () => inputAction(() => { if (byId('problem-form').reportValidity()) download('nesting-input.json', readForm()); });
 byId('export-result').onclick = () => { if (session.result) download('nesting-result.json', session.result); };
 window.addEventListener('pagehide', event => { if (!event.persisted) { session.invalidate(); viewer.destroy(); } });
-loadProblem(example('GUILLOTINE'));
+loadScenario('GUILLOTINE');
 fetch('/api/v1/nesting/engines').then(response => { if (!response.ok) throw new Error(); return response.json(); })
     .then(data => { engines = data; engineHint(); }).catch(() => { byId('engine-hint').textContent = '暂时无法读取引擎状态，请检查连接。'; });

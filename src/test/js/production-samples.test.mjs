@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {demandSample} from '../../main/resources/static/js/plugins/solver/demand-sample.js';
 import {importedTask} from '../../main/resources/static/js/plugins/solver/demand-import-model.js';
 import {scenarioExample} from '../../main/resources/static/js/nesting/scenario-examples.js';
@@ -25,4 +26,21 @@ test('lab scenarios are standalone preview inputs, with clipped defect avoidance
         }
         assert.equal(input.taskId,undefined);assert.equal(input.rollId,undefined);
     }
+});
+
+test('lab scenario selector provides all 6 presets in nesting page', () => {
+    const html = readFileSync(new URL('../../main/resources/static/nesting.html', import.meta.url), 'utf8');
+    const selectHtml = html.match(/<select id="scenario-select"[\s\S]*?<\/select>/)?.[0] || '';
+    assert.ok(selectHtml.length > 0);
+    const options = [...selectHtml.matchAll(/<option value="([^"]*)"([^>]*)>(.*?)<\/option>/g)].map(m => ({ value: m[1], label: m[3], selected: m[2].includes('selected') }));
+    assert.deepEqual(options.map(o => [o.value, o.label]), [
+        ['', '自定义输入'],
+        ['CROSSCUT', '整幅横切'],
+        ['GUILLOTINE', '二维避疵'],
+        ['3', '短料头复用'],
+        ['4', '多规格套裁'],
+        ['6', '连续送料工位'],
+        ['CONTOUR', '异形排料']
+    ]);
+    assert.equal(options.find(o => o.value === 'GUILLOTINE')?.selected, true);
 });
