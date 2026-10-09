@@ -8,13 +8,15 @@ const explanations = {
     NOT_PLACED_IN_THIS_SOLUTION:'本次搜索未排入这些数量，不能据此判定无法裁切。可在下一工位续排，或核对加工区、疵点和工艺后重新求解。'
 };
 
-export function demandProgress(demands, completed, {pending, pieces = [], edited = false, attempt} = {}) {
+export function demandProgress(demands, completed, {pending, pieces = [], edited = false, attempt, queued = {}} = {}) {
     const current = pending ? pieces.filter(p => p.planId === pending.result.planId && !p.confirmed) : [];
     const counts = new Map(); current.forEach(p => counts.set(p.demandId,(counts.get(p.demandId) || 0)+1));
     return demands.map(d => {
         const good = Number(completed[d.id] || 0), planned = counts.get(d.id) || 0;
         const remaining = Number.isSafeInteger(d.quantity) && d.quantity > 0 && d.quantity >= good ? d.quantity-good : null;
-        const unplaced = remaining == null ? null : Math.max(0,remaining-planned);
+        const staged = Math.max(0,Number(queued[d.id] || 0));
+        const toCut = remaining == null ? null : Math.max(0,remaining-staged);
+        const unplaced = toCut == null ? null : Math.max(0,toCut-planned);
         const result = pending?.result || attempt?.result;
         const fulfillment = result?.fulfillment?.find(f => f.demandId === d.id);
         const removed = edited ? Math.max(0,(pending.result.pieces || []).filter(p => p.demandId === d.id).length-planned) : 0;
@@ -24,7 +26,7 @@ export function demandProgress(demands, completed, {pending, pieces = [], edited
             else if (result.status && !['FEASIBLE','NO_SOLUTION_FOUND'].includes(result.status)) reason = '本次未生成有效方案，请查看求解反馈并修正后重试。';
             else reason = explanations[fulfillment?.reason] || explanations.NOT_PLACED_IN_THIS_SOLUTION;
         }
-        return {id:d.id, total:d.quantity, completed:good, planned, remaining, unplaced, reason, edited};
+        return {id:d.id, total:d.quantity, completed:good, staged, toCut, planned, remaining, unplaced, reason, edited};
     });
 }
 
@@ -34,6 +36,9 @@ export function summarizeDemandProgress(progress) {
     const satisfied=progress.filter(d=>d.remaining === 0).length;
     return {lines:progress.length,satisfied,partial:progress.filter(d=>d.completed>0 && d.remaining>0).length,
         completed:progress.reduce((n,d)=>n+d.completed,0),
+        staged:progress.reduce((n,d)=>n+d.staged,0),
+        cut:progress.reduce((n,d)=>n+d.completed+d.staged,0),
+        toCut:valid?progress.reduce((n,d)=>n+d.toCut,0):null,
         total:valid?progress.reduce((n,d)=>n+d.total,0):null,
         remaining:valid?progress.reduce((n,d)=>n+d.remaining,0):null};
 }

@@ -50,6 +50,16 @@ class BatchReportTests {
             assertEquals("PENDING",stock.getPlan(a.planId()).status());
         }
     }
+    @Test void oneStagedStationCanReportBeforeTheOtherAndUpdatesDemandImmediately() {
+        var a=report(5000,1);var b=report(6000,1);
+        stock.reportBatch(List.of(a),false);
+        assertEquals(Map.of("1",1),stock.completedQuantities(task.id()));
+        assertEquals("CONFIRMED",stock.getPlan(a.planId()).status());
+        assertEquals("PENDING",stock.getPlan(b.planId()).status());
+        assertEquals(54000,stock.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength());
+        stock.reportBatch(List.of(b),false);
+        assertEquals(Map.of("1",2),stock.completedQuantities(task.id()));
+    }
     @Test void duplicateOverlappingAndStalePlansAreRejected() {
         var a=report(5000,1);var overlap=report(5000,1);
         assertThrows(IllegalArgumentException.class,()->stock.reportBatch(List.of(a,a),false));

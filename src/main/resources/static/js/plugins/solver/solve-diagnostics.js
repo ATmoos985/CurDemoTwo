@@ -1,6 +1,6 @@
 import {demandFeedLength, suggestedFeedLength} from '../radar/feed-window.js';
 
-export function solveDiagnostics(request, result = {}) {
+export function solveDiagnostics(request, result = {}, forward) {
     const width = request.rollW, length = request.rollL - (request.trimStart || 0);
     const lines = (request.demands || []).filter(d => d.demand > 0).map(d => {
         let reason = '';
@@ -28,7 +28,12 @@ export function solveDiagnostics(request, result = {}) {
     const suggestedLength=request.feedPortType!=='remnant' && suggested>request.rollL && suggested<=available?suggested:null;
     if(suggestedLength)facts.push(`按最长单片尺寸需拉布至少 ${suggestedLength} mm（含切头、不含疵点避让），可调整后重新排料；不代表全部件数能一次排完。`);
     else if(suggested>request.rollL && suggested>available)facts.push(`最长单片需拉布 ${suggested} mm，超过当前位置可用的 ${available} mm，请核对卷尾或更换材料。`);
-    return {title:result.status && result.status!=='NO_SOLUTION_FOUND' ? '本次排料未完成' : '本次排料未找到方案',
-        summary:allBlocked ? reasons.join('；') : result.message || '当前条件下未生成可用方案', facts, possible, lines, suggestedLength,
-        advice:suggestedLength ? '可按现场拉布范围调长后重排，整片需求保持不拆分；幅宽、疵点和纵切限制仍需满足。' : '核对需求、材料和本次拉布范围后，可调整工艺或搜索时间再试。'};
+    const found=forward?.search.found, exhausted=forward?.search.exhausted;
+    if(found){
+        facts.push(`排料器已验证后续 ${(forward.request.windowStartY/1000).toFixed(2)}–${((forward.request.windowStartY+forward.request.rollL)/1000).toFixed(2)} m 可排 ${forward.result.pieces.length} 件。`);
+        facts.push(`当前位置到推荐起点相隔 ${((forward.request.windowStartY-request.windowStartY)/1000).toFixed(2)} m；这段布尚未裁切、扣库存或登记料头。`);
+    }else if(exhausted)facts.push(`已检查从 ${(request.windowStartY/1000).toFixed(2)} m 到卷尾的疵点边界候选位置，实际求解 ${forward.search.attempts} 处；仍未找到可用方案，不代表数学证明无解。`);
+    return {title:found?'已找到后续可裁位置':result.status && result.status!=='NO_SOLUTION_FOUND' ? '本次排料未完成' : '本次排料未找到方案',
+        summary:found?'当前窗口被疵点阻挡，后续位置已通过排料验证':allBlocked ? reasons.join('；') : result.message || '当前条件下未生成可用方案', facts, possible:found?[]:possible, lines, suggestedLength,
+        advice:found?'可查看推荐位置；如现场能够展开相应长度，可从当前起点拉长后重新排料，前方布段随本工位在报工时核对回收与损耗。':suggestedLength ? '可按现场拉布范围调长后重排，整片需求保持不拆分；幅宽、疵点和纵切限制仍需满足。' : '核对需求、材料和本次拉布范围后，可调整工艺或搜索时间再试。'};
 }

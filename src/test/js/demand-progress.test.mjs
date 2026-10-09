@@ -26,9 +26,20 @@ test('empty solver results keep reasons, and engine failures are distinct from i
 });
 test('five lines with three satisfied count complete lines separately from partial pieces and previews',()=>{
     const progress=demandProgress([{id:1,quantity:2},{id:2,quantity:4},{id:3,quantity:1},{id:4,quantity:10},{id:5,quantity:3}],{1:2,2:4,3:1,4:6});
-    assert.deepEqual(summarizeDemandProgress(progress),{lines:5,satisfied:3,partial:1,completed:13,total:20,remaining:7});
+    assert.deepEqual(summarizeDemandProgress(progress),{lines:5,satisfied:3,partial:1,completed:13,staged:0,cut:13,toCut:7,total:20,remaining:7});
     assert.equal(summarizeDemandProgress(demandProgress([{id:7,quantity:3}],{},{pending,pieces})).satisfied,0);
     assert.equal(summarizeDemandProgress(demandProgress([{id:7,quantity:NaN}],{7:1})).total,null);
+});
+
+test('staged qualified pieces reduce to-cut immediately while previews never advance cutting progress',()=>{
+    const demands=[{id:7,quantity:5},{id:8,quantity:1}];
+    const progress=demandProgress(demands,{7:1},{queued:{7:2},pending,pieces});
+    assert.deepEqual(progress.map(p=>[p.completed,p.staged,p.toCut,p.unplaced]),[[1,2,2,0],[0,0,1,1]]);
+    const summary=summarizeDemandProgress(progress);
+    assert.equal(summary.cut,3);assert.equal(summary.toCut,3);assert.equal(summary.completed,1);
+    const reported=demandProgress(demands,{7:3},{queued:{}});
+    assert.equal(summarizeDemandProgress(reported).cut,3);assert.equal(reported[0].staged,0);
+    assert.equal(demandProgress(demands,{7:1},{queued:{}})[0].toCut,4);
 });
 test('latest report uses qualified quantities by stable ID and excludes other tasks',()=>{
     const r=latestDemandChange([{taskId:'T',planId:'old',confirmedAt:'2026-10-05T10:00',demandQuantities:{7:2}},

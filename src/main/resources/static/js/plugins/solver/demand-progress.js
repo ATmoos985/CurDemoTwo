@@ -5,6 +5,7 @@ import {getSelectedPieceId, setSelectedPieceId} from '../cad/cad-interactive-nes
 import {focusPiece} from '../cad/cad-renderer.js';
 import {toggleSidebar} from '../layout/splitter.js';
 import {openDemandManager, renderDemandSummary} from '../layout/workbench-panels.js';
+import {queuedQuantities} from './report-queue.js';
 
 let currentPieces = [];
 const rows = () => [...(document.getElementById('demands-container')?.querySelectorAll('.item-row') || [])];
@@ -15,18 +16,18 @@ export function updateDemandProgress(options = {}) {
     const pieces = state.getCurrentCaseData().pieces || [];
     currentPieces = options.pending ? pieces.filter(p => p.planId === options.pending.result.planId && !p.confirmed) : [];
     const progress = demandProgress(list.map(row => ({id:Number(row.dataset.id),quantity:row.querySelector('.dem-count').value.trim() === '' ? NaN : Number(row.querySelector('.dem-count').value)})),
-        state.taskCompleted, {...options,pieces});
+        state.taskCompleted, {...options,pieces,queued:queuedQuantities()});
     const change=latestDemandChange(state.taskReports,state.activeTask?.id);
     list.forEach((row,index) => {
         const item = progress[index];row.dataset.completed = item.completed;
         row.onkeydown=event=>{if(event.target===row)event.stopPropagation();};
         let status = row.querySelector('.demand-status');
         if (!status) {status=document.createElement('div');status.className='demand-status';row.append(status);}
-        status.textContent = `合格完成 ${item.completed} / ${display(Number.isSafeInteger(item.total) && item.total>0?item.total:null)} 件 · ${item.remaining===0?'已满足':`还差 ${display(item.remaining)} 件`}`;
+        status.textContent = `已报工 ${item.completed} / ${display(Number.isSafeInteger(item.total) && item.total>0?item.total:null)} 件 · 待报工 ${item.staged} · 待切 ${display(item.toCut)}`;
         status.classList.toggle('done',item.remaining === 0);
         let meter=row.querySelector('.demand-meter');
         if(!meter){meter=document.createElement('div');meter.className='demand-meter';meter.append(document.createElement('span'));status.after(meter);}
-        renderMeter(meter,item.completed,item.remaining===null?null:item.total,row.querySelector('.dem-name').value+' 合格完成');
+        renderMeter(meter,item.completed,item.remaining===null?null:item.total,row.querySelector('.dem-name').value+' 裁切进度',item.staged);
         row.dataset.fulfilled=String(item.remaining===0);
         let delta=row.querySelector('.demand-change');
         if(!delta){delta=document.createElement('p');delta.className='demand-change';meter.after(delta);}
@@ -37,7 +38,7 @@ export function updateDemandProgress(options = {}) {
         row.dataset.recentChange=difference>0?'reported':difference<0?'reversed':'';
         let preview=row.querySelector('.demand-preview-label');
         if(!preview){preview=document.createElement('p');preview.className='demand-preview-label';delta.after(preview);}
-        preview.hidden=!item.planned;preview.textContent=`本方案 ${item.planned} 件 · ${options.edited?'待校验':'待报工'}，未计入完成`;
+        preview.hidden=!item.planned;preview.textContent=`本方案预览 ${item.planned} 件 · ${options.edited?'待校验':'尚未确认裁切'}`;
         let tools = row.querySelector('.demand-progress-tools');
         if (!tools) {
             tools=document.createElement('div');tools.className='demand-progress-tools';
@@ -57,15 +58,17 @@ export function updateDemandProgress(options = {}) {
     if (badge) badge.textContent=progress.length+' 项';
     const feedback=document.getElementById('demand-progress-summary');
     if (feedback) feedback.textContent=options.attempt ? '求解反馈：'+(options.attempt.result.message || '本次没有生成方案，请核对未排入原因。')
-        : options.pending ? `本方案 ${currentPieces.length} 件${options.edited?' · 手调待校验':''}；剩余数量含本方案尚未报工的裁片。` : '尺寸：mm · 剩余按合格报工计算，预览不扣数量。';
+        : options.pending ? `本方案预览 ${currentPieces.length} 件${options.edited?' · 手调待校验':''}；确认裁切后计入待报工。` : '尺寸：mm · 确认裁切减少待切量，合格报工计入完成量。';
     syncDemandSelection(false);
 }
 
-function renderMeter(element,completed,total,label) {
+function renderMeter(element,completed,total,label,staged=0) {
     element.setAttribute('role','progressbar');element.setAttribute('aria-label',label);element.setAttribute('aria-valuemin','0');
     if(total==null){element.removeAttribute('aria-valuenow');element.removeAttribute('aria-valuemax');element.setAttribute('aria-valuetext','请核对需求数量');}
-    else{element.setAttribute('aria-valuenow',String(Math.min(total,completed)));element.setAttribute('aria-valuemax',String(total));element.setAttribute('aria-valuetext',`${completed} / ${total}`);}
+    else{element.setAttribute('aria-valuenow',String(Math.min(total,completed+staged)));element.setAttribute('aria-valuemax',String(total));element.setAttribute('aria-valuetext',`已报工 ${completed}，待报工 ${staged}，共 ${total} 件`);}
     element.firstElementChild.style.width=total>0?`${Math.min(100,Math.max(0,completed/total*100))}%`:'0%';
+    if(element.children.length<2){const pending=document.createElement('span');pending.className='demand-meter-staged';element.append(pending);}
+    element.lastElementChild.style.width=total>0?`${Math.max(0,Math.min(100-completed/total*100,staged/total*100))}%`:'0%';
     element.dataset.complete=String(total>0 && completed===total);
 }
 
@@ -74,10 +77,11 @@ function renderOverview(progress,list,change) {
     overview.hidden=!progress.length;if(!progress.length)return;
     overview.onkeydown=event=>event.stopPropagation();
     const summary=summarizeDemandProgress(progress);
-    document.getElementById('demand-lines-progress').textContent=`已满足 ${summary.satisfied} / ${summary.lines} 项`;
-    document.getElementById('demand-pieces-progress').textContent=`合格 ${summary.completed} / ${display(summary.total)} 件`;
+    document.getElementById('demand-lines-progress').textContent=`已切 ${summary.cut} / ${display(summary.total)} 件`;
+    document.getElementById('demand-pieces-progress').textContent=`待切 ${display(summary.toCut)} 件`;
+    document.getElementById('demand-progress-counts').textContent=`已报工 ${summary.completed} · 待报工 ${summary.staged} · 已满足 ${summary.satisfied} / ${summary.lines} 项`;
     const segments=document.getElementById('demand-progress-segments'),overall=document.getElementById('demand-overall-meter');
-    segments.hidden=progress.length>12;overall.hidden=progress.length<=12;
+    segments.hidden=true;overall.hidden=false;
     // Reuse segment buttons while typing or moving pieces so keyboard focus is retained.
     const ids=progress.map(d=>d.id).join(',');
     if(segments.dataset.ids!==ids){segments.replaceChildren(...progress.slice(0,12).map(()=>{
@@ -92,7 +96,7 @@ function renderOverview(progress,list,change) {
         button.title=button.ariaLabel=`第 ${index+1} 项 ${name} · 合格 ${item.completed} / ${display(item.remaining===null?null:item.total)} 件 · ${item.remaining===0?'已满足':`还差 ${display(item.remaining)} 件`}，点击定位需求`;
         button.onclick=()=>revealDemand(item.id);
     });
-    if(progress.length>12)renderMeter(overall,summary.satisfied,summary.lines,'已满足需求项');
+    renderMeter(overall,summary.completed,summary.total,'本次裁切进度',summary.staged);
     const recent=document.getElementById('demand-recent-change');recent.hidden=!change;
     if(!change)return;
     const changeKey=change.planId+':'+change.reversed;

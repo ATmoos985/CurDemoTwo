@@ -13,7 +13,7 @@ import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 import { renderScene, resetToBedView } from '../cad/cad-renderer.js';
 import { drawRulers } from '../cad/cad-rulers.js';
-import { renderRadar, smartAdvanceBed, resizeFeedWindow, updateFeedControls } from '../radar/radar-scrubber.js';
+import { renderRadar, smartAdvanceBed, resizeFeedWindow, updateFeedControls, updateFabricScrollPosition } from '../radar/radar-scrubber.js';
 import {
     updateDemandCompletionFromPieces, recalculateRollStats, updateOriginHeaderSummary,
     addOrMergeInterval, renderDemandsUI, renderDefectsUI,
@@ -26,6 +26,8 @@ import { selectRemnant, clearRemnantSelection, hoverRemnant } from '../cad/cad-r
 import {scheduleRemnantAvailability} from '../material/material-selection.js';
 import {solveDiagnostics} from './solve-diagnostics.js';
 import {queuedReports, queuedQuantities, queuedStockLength, saveReportQueue, queueEntry} from './report-queue.js';
+import {windowDefects, findForwardPlan} from './forward-search.js';
+import {demandFeedLength,feedLengthLimits} from '../radar/feed-window.js';
 
 export function updateUIInfo() {
     const data = state.getCurrentCaseData();
@@ -320,7 +322,7 @@ function renderSolveFeedback(flow) {
     const attempt=latestSolveAttempt && latestSolveAttempt.context===solveContext()?latestSolveAttempt:null;
     panel.hidden=!attempt;if(!attempt)return;
     const feedback=failurePresentation(attempt.result);
-    panel.querySelector('strong').textContent=feedback.title;
+    panel.querySelector('strong').textContent=attempt.search?.found?'后续位置可裁':feedback.title;
     panel.querySelector('[data-error-message]').textContent=attempt.diagnostics?.summary || feedback.message;
     const preserved=state.pendingPlan ? (currentPlanContext()?'原方案与手调预览已保留，新结果未应用；需求进度仍按原方案显示。':'旧图形保留供核对，版本或材料需重新核实，不能报工。') : '';
     panel.querySelector('[data-error-hint]').textContent=feedback.hint+(preserved?' '+preserved:'');
@@ -344,6 +346,18 @@ function showSolveFailure() {
         dialog.querySelector('[data-process]').classList.remove('active');
         dialog.querySelector('.workbench-dialog-footer').append(resize);
         resize.onclick=()=>{if(resizeFeedWindow(info.suggestedLength)){dialog.close();triggerSolve();}};
+    }
+    if(attempt.search?.found && !state.pendingPlan){
+        const candidate=attempt.searchRequest, current=state.getCurrentCaseData();
+        const length=candidate.windowStartY+candidate.rollL-current.windowStartY;
+        const locate=document.createElement('button');locate.className='tool-btn';locate.textContent='查看可裁位置';
+        locate.onclick=()=>{dialog.close();updateFabricScrollPosition(candidate.windowStartY);resetToBedView();showToast('已定位推荐区间；前方跨过布段尚未裁切或记账。','info');};
+        const expand=document.createElement('button');expand.className='tool-btn active';
+        expand.textContent=`拉布至 ${(length/1000).toFixed(2)} m 并重新排料`;
+        expand.disabled=length>feedLengthLimits(current,queuedStockLength(current.rollId)).max;
+        expand.title='保留当前起点，将前方布段一起纳入本次用料；报工时核对可回收料头和损耗。';
+        expand.onclick=()=>{if(resizeFeedWindow(length)){dialog.close();triggerSolve();}};
+        dialog.querySelector('[data-process]').classList.remove('active');dialog.querySelector('.workbench-dialog-footer').append(locate,expand);
     }
 }
 let solving = false;
@@ -536,16 +550,7 @@ async function runSolve(operation) {
 
     const allDefects = isRemnantMode ? ((state.loadedRemnant && state.loadedRemnant.defects) || []) : getDefectsFromUI();
 
-    const activeBedDefects = allDefects
-        .filter(d => (d.y + d.h >= winStartY && d.y <= winEndY))
-        .map(d => ({
-            id: d.id,
-            x: d.x,
-            y: Math.max(0, d.y - winStartY),
-            w: d.w,
-            h: d.h,
-            margin: d.margin ?? 20
-        }));
+    const activeBedDefects = windowDefects(allDefects,winStartY,bedL,rollW);
 
     const payload = {
         ...solverSettings(),
@@ -579,6 +584,18 @@ async function runSolve(operation) {
         if(geometry!==planGeometry())throw new ApiError('等待期间预览已调整，当前手调位置保留。','STALE_INPUT');
         if(result.success && (!result.planId || !Array.isArray(result.pieces) || !result.pieces.length || !Array.isArray(result.cuts) || !Array.isArray(result.remnants)))throw new ApiError('求解响应缺少完整方案，原预览保留。','INVALID_RESULT');
         latestSolveAttempt = result.success && result.planId && result.pieces?.length ? null : {context, result:{...result,status:result.status || 'INVALID_RESULT'},diagnostics:solveDiagnostics({...payload,remainingLength:data.stockRemainingLength-queuedStockLength(data.rollId)},result)};
+        if(result.status==='NO_SOLUTION_FOUND' && !isRemnantMode && !state.pendingPlan && allDefects.length &&
+            payload.demands.some(d=>demandFeedLength(d,payload)<=bedL-trimStart)){
+            const found=await findForwardPlan(payload,allDefects,r=>requestJSON('/api/solve',r),{
+                isCurrent:()=>context===solveContext() && geometry===planGeometry(),
+                onAttempt:(r,index,total)=>{const label=document.getElementById('workflow-current');if(label)label.textContent=`向后找可裁位置 ${index} / ${total} · ${(r.windowStartY/1000).toFixed(2)} m`;}
+            });
+            if(!found)return;
+            if(found.search.found)await requestJSON('/api/cutting/plans/'+encodeURIComponent(found.result.planId)+'/cancel',{});
+            if(context!==solveContext() || geometry!==planGeometry())return;
+            latestSolveAttempt={context,result:found.search.found?result:found.result,search:found.search,searchRequest:found.request,
+                diagnostics:solveDiagnostics({...payload,remainingLength:data.stockRemainingLength-queuedStockLength(data.rollId)},found.search.found?result:found.result,found)};
+        }
         {
             const elapsed = Math.round(performance.now() - t0);
             if (result.success && result.planId && result.pieces?.length) {
@@ -833,8 +850,8 @@ async function submitReports(entries) {
     // Once the server confirms, keep these facts even if a later UI refresh fails.
     const byId = new Map((state.taskReports || []).map(r => [r.planId,r]));
     receipts.forEach(r => byId.set(r.planId,r)); state.taskReports = [...byId.values()];
-    state.pendingPlan = null;state.reportQueue = [];
-    try {saveReportQueue(entries[0].pending.taskId,[]);} catch {showToast('报工已成功，本机暂存清理失败；重新打开任务会核对已报工记录。','warning');}
+    state.pendingPlan = null;state.reportQueue = queuedReports();
+    try {saveReportQueue(entries[0].pending.taskId,state.reportQueue);} catch {showToast('报工已成功，本机暂存清理失败；重新打开任务会核对已报工记录。','warning');}
     const data = state.getCurrentCaseData();
     for (const [index,receipt] of receipts.entries()) {
         const pending=entries[index].pending;
@@ -873,9 +890,9 @@ export function openBatchReport() {
         dialog.addEventListener('keydown',event => event.stopPropagation());document.body.append(dialog);
     }
     const entries=queuedReports();
-    dialog.innerHTML='<div class="workbench-dialog-heading"><div><h2 id="batch-report-title">集中报工 · '+entries.length+' 工位</h2><p>下列记录保存在本机，尚未扣库存。确认后统一提交，每个工位生成独立工单。</p></div><button class="tool-btn" data-close>关闭</button></div><div class="workbench-dialog-body">'+
+    dialog.innerHTML='<div class="workbench-dialog-heading"><div><h2 id="batch-report-title">待报工 · '+entries.length+' 工位</h2><p>可以先报一个工位，也可一起提交；每次报工立即更新对应需求、库存和工单。</p></div><button class="tool-btn" data-close>关闭</button></div><div class="workbench-dialog-body">'+
         entries.map((r,index) => '<article class="task-list-item"><strong>工位 '+(index+1)+' · '+escapeText(r.pending.sourceRemnantId || r.pending.rollId)+'</strong><span>合格 '+r.report.finishedPieceCount+' 件 · '+(r.pending.feedPortType==='remnant'?'料头核销':'实切 '+r.report.actualCutLen+' mm · 起点 '+r.pending.windowStartY+' mm')+'</span><small>'+r.report.pieceResults.filter(p=>p.outcome==='REJECTED').length+' 件异常 · '+r.report.pieceResults.filter(p=>p.outcome==='UNCUT').length+' 件未切</small><button class="tool-btn" data-ticket="'+index+'">查看工单</button>'+(index===entries.length-1?'<button class="tool-btn" data-restore>退回核对</button>':'')+'</article>').join('')+
-        '</div><div class="workbench-dialog-footer"><span id="batch-report-error" role="alert"></span><button class="tool-btn" data-close>继续裁切</button><button class="tool-btn active" data-confirm '+(!entries.length?'disabled':'')+'>确认集中报工</button></div>';
+        '</div><div class="workbench-dialog-footer"><span id="batch-report-error" role="alert"></span><button class="tool-btn" data-close>继续裁切</button>'+(entries.length>1?'<button class="tool-btn" data-confirm-one>先报第一个工位</button>':'')+'<button class="tool-btn active" data-confirm '+(!entries.length?'disabled':'')+'>确认'+(entries.length>1?'全部':'本工位')+'报工</button></div>';
     dialog.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>dialog.close());
     dialog.querySelectorAll('[data-ticket]').forEach(b=>b.onclick=async()=>{const {openCutTicketModal}=await import('../export/cut-ticket.js');openCutTicketModal({planId:entries[Number(b.dataset.ticket)].report.planId,historical:true});});
     dialog.querySelector('[data-restore]')?.addEventListener('click',async()=>{
@@ -891,12 +908,14 @@ export function openBatchReport() {
             dialog.close();await openCutReport();
         } catch(error){dialog.querySelector('#batch-report-error').textContent=error.message;}
     });
-    dialog.querySelector('[data-confirm]').onclick=async()=>{
+    const confirm=async selected=>{
         if(reporting)return;reporting=true;const wasInert=document.body.inert;document.body.inert=true;
-        try {await submitReports(entries);dialog.close();}
+        try {await submitReports(selected);dialog.close();}
         catch(error){dialog.querySelector('#batch-report-error').textContent=error.message;}
         finally {reporting=false;document.body.inert=wasInert;updateWorkflowControls();}
     };
+    dialog.querySelector('[data-confirm]').onclick=()=>confirm(entries);
+    dialog.querySelector('[data-confirm-one]')?.addEventListener('click',()=>confirm(entries.slice(0,1)));
     if(!dialog.open)dialog.showModal();
 }
 
