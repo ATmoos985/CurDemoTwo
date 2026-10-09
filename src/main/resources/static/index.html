@@ -421,7 +421,7 @@
                 <section><h3>01 · 本次用料</h3><div class="report-source"><b id="report-preview-roll-id">—</b><span id="report-stock-preview">余量 <span id="report-preview-cur-len">—</span> → <b id="report-preview-after-len">—</b></span></div>
                 <div class="report-fields"><label><span id="report-length-label">实切长度（mm）</span><input id="report-actual-len" type="number" min="0" step="0.1" class="prop-input" oninput="updateReportPreview()"></label><label>合格产出（件）<input id="report-piece-count" type="number" min="0" class="prop-input" readonly></label></div><p id="report-area-preview" class="muted" role="status"></p></section>
                 <section><h3>02 · 逐件核对实际结果</h3><p class="muted">仅合格件完成需求。异常件填写原因，未切件留待后续排料；本次保存后结束当前方案。</p><div class="report-batch-actions"><button id="report-all-qualified" class="tool-btn">全设合格</button><button id="report-all-uncut" class="tool-btn">全设未切</button><button id="report-mark-tail" class="tool-btn">长度外标为未切</button></div><div id="report-pieces"></div><div id="report-preview-demand-text" class="muted"></div><p id="report-outcome-summary" role="status"></p></section>
-                <section><h3>03 · 余料回收 <small id="report-preview-remnant-text"></small></h3><label class="report-location">入库库位<input id="report-location" class="prop-input" value="现场料头架 A-01"></label><div id="report-remnants"></div><details class="detail-disclosure"><summary>实测与回收规则</summary><p>仅勾选已分离并实际回收的矩形料头。未切区域只列出已扣用料中的部分，确认分离后可勾选回收；未勾选部分计入损耗，未分离的卷尾仍在母卷中。实测尺寸不能与合格件、异常件或其他料头重叠，小于方案回收门槛的余料不入库。</p></details></section>
+                <section><h3>03 · 余料处理 <small id="report-preview-remnant-text"></small></h3><label class="report-location" id="report-recovery-location">入库库位<input id="report-location" class="prop-input" value="现场料头架 A-01"></label><div id="report-remnants"></div><details class="detail-disclosure" id="report-recovery-rules"><summary>实测与回收规则</summary><p>仅勾选已分离并实际回收的矩形料头。未切区域只列出已扣用料中的部分，确认分离后可勾选回收；未勾选部分计入损耗，未分离的卷尾仍在母卷中。实测尺寸不能与合格件、异常件或其他料头重叠，小于方案回收门槛的余料不入库。</p></details></section>
             </div>
             <div class="settings-modal-footer"><p id="report-error" role="alert"></p><div class="report-footer-actions"><button class="tool-btn" onclick="closeCutReport()">暂不报工</button><button id="report-stage-button" class="tool-btn active" onclick="confirmCutReport(true)">暂存，继续裁切</button><button id="report-confirm-button" class="tool-btn" onclick="confirmCutReport()">确认报工并保存</button></div></div>
         </div>
@@ -430,15 +430,15 @@
     <dialog id="remnant-modal" class="remnant-workspace" aria-labelledby="remnant-modal-title">
         <div class="remnant-workspace-heading"><div><h2 id="remnant-modal-title">料头</h2><p id="remnant-roll-scope"></p></div><button class="tool-btn" onclick="closeRemnantModal()">关闭</button></div>
         <div class="remnant-tabs" role="tablist" aria-label="料头来源">
-            <button id="remnant-tab-expected" role="tab" aria-selected="true" aria-controls="remnant-panel-expected">本次预计新增 <span id="remnant-expected-count">0</span></button>
+            <button id="remnant-tab-expected" role="tab" aria-selected="true" aria-controls="remnant-panel-expected">本次产出 <span id="remnant-expected-count">0</span></button>
             <button id="remnant-tab-stock" role="tab" aria-selected="false" aria-controls="remnant-panel-stock" tabindex="-1">当前母卷料头库 <span id="header-remnant-count">—</span></button>
         </div>
         <div class="remnant-workspace-body">
             <section id="remnant-panel-expected" role="tabpanel" aria-labelledby="remnant-tab-expected">
-                <div class="remnant-overview"><div><span>预计回收</span><strong id="remnant-expected-total">0 块</strong></div><div><span>预计面积</span><strong id="remnant-expected-area">0.000 m²</strong></div><span class="remnant-preview-label">预览 · 未入库</span></div>
-                <p class="remnant-note">当前方案预计产出，实切后确认报工才登记入库。</p>
-                <p class="inventory-empty" id="remnant-expected-empty">当前没有预计新增料头。生成排料方案后在此核对。</p>
-                <div class="remnant-table-scroll"><table class="cam-table" id="remnant-expected-table"><thead><tr><th>料头编号</th><th>规格（宽 × 长）</th><th>面积</th><th>质量</th><th>操作</th></tr></thead><tbody id="remnant-table-body"></tbody></table></div>
+                <div class="remnant-overview"><div><span>已入库</span><strong id="remnant-reported-total">0 块 · 0.000 m²</strong></div><div><span>待报工（含预计）</span><strong id="remnant-expected-total">0 块 · 0.000 m²</strong></div></div>
+                <p class="remnant-note" id="remnant-output-note"></p>
+                <p class="inventory-empty" id="remnant-expected-empty">当前母卷在本次任务中暂无料头产出。</p>
+                <div class="remnant-table-scroll"><table class="cam-table" id="remnant-expected-table"><thead><tr><th>料头编号</th><th>规格（宽 × 长）</th><th>面积</th><th>质量</th><th>产出状态</th><th>操作</th></tr></thead><tbody id="remnant-table-body"></tbody></table></div>
             </section>
             <section id="remnant-panel-stock" role="tabpanel" aria-labelledby="remnant-tab-stock" hidden>
                 <div class="remnant-stock-tools"><label>查找料头<input id="inp-scan-barcode" class="prop-input" type="search" placeholder="编号、库位或扫描条码"></label><button class="tool-btn" id="remnant-refresh">刷新库存</button></div>
@@ -446,7 +446,7 @@
                 <section class="remnant-recommendations"><div class="recommendation-heading"><strong>剩余需求 · 料头推荐</strong><button class="tool-btn" id="btn-remnant-recommend">试排推荐</button></div><p class="remnant-note">仅试排当前母卷的可用料头；推荐不扣库存、不保存方案。</p><p id="remnant-availability" role="status">填写需求后匹配料头</p><div id="remnant-recommend-results"></div></section>
             </section>
         </div>
-        <div class="remnant-workspace-footer"><span>预计产出与已入库料头分别核对</span><button class="tool-btn" onclick="closeRemnantModal()">关闭</button></div>
+        <div class="remnant-workspace-footer"><span>母卷余料可回收；料头使用一次后不再回收</span><button class="tool-btn" onclick="closeRemnantModal()">关闭</button></div>
     </dialog>
 
     <!-- 全局工艺参数与显示配置中心弹窗 (Settings Modal) -->

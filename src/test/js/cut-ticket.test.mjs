@@ -13,6 +13,14 @@ test('planned output and remnants are explicitly unreported with no invented met
     const html=ticketHTML(ticketModel(plan()));assert.match(html,/待报工方案/);assert.match(html,/计划裁片 · 待现场核对/);assert.match(html,/报工后才生成入库凭证/);
     assert.doesNotMatch(html,/合格成品|6\.18|65\.2|CUT-STATION-01/);
 });
+
+test('single-use remnant ticket excludes planned leftovers but preserves historical receipts',()=>{
+    const p=plan();p.request.feedPortType='remnant';
+    assert.deepEqual(ticketModel(p).remnants,[]);
+    assert.match(ticketHTML(ticketModel(p)),/余料不再回收/);
+    p.status='CONFIRMED';p.receipt={planId:p.id,derivedRemnants:[{id:'historical',width:500,length:500}]};
+    assert.equal(ticketModel(p).remnants[0].id,'historical');
+});
 test('partial report binds exact piece outcomes and actual inventory instead of candidate remnants',()=>{
     const p=plan();p.status='CONFIRMED';p.receipt={planId:p.id,confirmedAt:'2026-10-04',actualCutLen:2100,finishedPieceCount:0,rejectedPieceCount:1,uncutPieceCount:1,
         pieceResults:[{pieceId:1,outcome:'REJECTED',reason:'破损'},{pieceId:2,outcome:'UNCUT'}],derivedRemnants:[{id:'stock-real',width:2000,length:900,location:'A-02'}],recoveredGeometry:[]};

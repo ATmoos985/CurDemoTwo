@@ -35,6 +35,11 @@ export function renderReportPieces(pending, update) {
 }
 
 export function syncReportRemnants(pending, results, update) {
+    if (pending.feedPortType === 'remnant') {
+        pending.reportCandidates = new Map(); pending.reportRecovery = {};
+        document.getElementById('report-remnants').textContent = '料头只使用一次，报工后整块核销，剩余部分计入损耗，不再回收。';
+        return;
+    }
     const length=pending.feedPortType==='remnant' ? pending.bedL : Number(document.getElementById('report-actual-len').value);
     const candidates=reportRecoveryCandidates(pending.result,results,length);
     pending.reportCandidates=new Map(candidates.map(r=>[r.id,r]));
@@ -61,6 +66,7 @@ export function syncReportRemnants(pending, results, update) {
 }
 
 export function readReportRemnants(pending) {
+    if (pending.feedPortType === 'remnant') return [];
     pending.reportRecovery=Object.fromEntries([...document.querySelectorAll('.report-remnant-row')].map(row=>[row.dataset.remnantId,{
         checked:row.querySelector('input[type=checkbox]').checked,w:Number(row.querySelector('.report-w').value),l:Number(row.querySelector('.report-l').value),measured:!!row.dataset.measured}]));
     return Object.entries(pending.reportRecovery).filter(([,r])=>r.checked).map(([id,r])=>({...pending.reportCandidates.get(id),w:r.w,l:r.l}));

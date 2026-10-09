@@ -1,4 +1,4 @@
-import { expectedRemnants } from '../remnant/remnant-dialog-model.js';
+import { renderTaskRemnants } from '../remnant/remnant-modal.js';
 import { saveCurrentTask, refreshTaskProgress, escapeText } from './task-workspace.js';
 import { createPlanHistory, planScene } from './plan-editing.js';
 import { layoutMetrics, materialSummary } from './material-accounting.js';
@@ -96,43 +96,9 @@ export function updateUIInfo() {
         }).join("");
     }
 
-    // 料头登记表
-    const remBadge = document.getElementById("remnant-count-badge");
-    const expected = expectedRemnants(data);
-    if (remBadge) remBadge.innerText = `${expected.length} 块`;
-    for (const [id,text] of [['remnant-expected-count',expected.length],['remnant-expected-total',`${expected.length} 块`],['remnant-expected-area',`${expected.reduce((sum,r)=>sum+r.w*r.l/1000000,0).toFixed(3)} m²`]]) {
-        const node=document.getElementById(id); if(node)node.textContent=text;
-    }
-    const empty=document.getElementById('remnant-expected-empty'),table=document.getElementById('remnant-expected-table');
-    if(empty)empty.hidden=expected.length>0; if(table)table.hidden=!expected.length;
+    renderTaskRemnants();
     const rightTabRemBadge = document.getElementById("right-tab-rem-badge");
     if (rightTabRemBadge) rightTabRemBadge.innerText = `${(data.pieces || []).filter(p => !p.confirmed && !p.queued).length} 件`;
-    const remTbody = document.getElementById("remnant-table-body");
-    if (remTbody) {
-        remTbody.innerHTML = expected.map(r => {
-            const isSelected = (state.selectedRemnantId === r.id);
-            return `
-            <tr id="remnant-row-${r.id}" data-remnant-id="${r.id}"
-                class="interactive-row ${isSelected ? 'remnant-selected-row active-row' : ''}"
-                onclick="window.selectRemnant('${r.id}', { fromTable: true, smoothPan: true, showToastMsg: true, switchTab: false }); window.closeRemnantModal()"
-                onmouseenter="window.hoverRemnant('${r.id}', true)"
-                onmouseleave="window.hoverRemnant('${r.id}', false)"
-                title="点击在 CAD 画布中居中定位并高亮此料头 #${r.id}">
-                <td><code class="remnant-code">${escapeText(r.id)}</code></td>
-                <td>${r.w} × ${r.l} mm</td>
-                <td>${r.area.toFixed(2)} m²</td>
-                <td><span class="quality-badge ${r.hasDefect ? 'has-defect' : ''}">${r.hasDefect ? '带疵' : '无疵'}</span></td>
-                <td>
-                    <button class="tool-btn rem-locate-btn"
-                        onclick="event.stopPropagation(); window.selectRemnant('${r.id}', { fromTable: true, smoothPan: true, showToastMsg: true, switchTab: false }); window.closeRemnantModal()"
-                        title="在 CAD 画布中居中定位此料头">
-                        定位
-                    </button>
-                </td>
-            </tr>
-            `;
-        }).join("");
-    }
 
     // 台账数据：当前工位实切对账
     const winStartYVal = data.windowStartY || 0;
@@ -159,7 +125,7 @@ export function updateUIInfo() {
         ['lbl-rem-area-title',metrics.actual ? '已回收料头' : '候选回收料头'],
         ['lbl-waste-area-title',metrics.actual ? '实切损耗' : '预计损耗'],
         ['lbl-total-area-title',metrics.actual ? '实切用料面积' : '预计用料面积'],
-        ['metrics-note',metrics.actual ? '按报工回执计算；回收料头单独记账。' : sheet ? '裁片面积 ÷ 整块料头面积；报工才核销。' : '裁片面积 ÷ 预计用料面积；预览不扣库存。']
+        ['metrics-note',metrics.actual ? '按报工回执计算；回收料头单独记账。' : sheet ? '整块料头使用一次，余料计入损耗；报工后核销。' : '裁片面积 ÷ 预计用料面积；预览不扣库存。']
     ]) { const element = document.getElementById(id); if (element) element.textContent = text; }
     updateWorkflowControls();
 
@@ -753,6 +719,7 @@ async function prepareCutReport() {
         actualLenInput.value = feedPortType === "remnant" ? 0 : (pending.reportActualCutLen ?? defaultCutLen);
         actualLenInput.disabled = feedPortType === "remnant";
     }
+    for (const id of ['report-recovery-location', 'report-recovery-rules']) document.getElementById(id).hidden = feedPortType === 'remnant';
     renderReportPieces(pending, updateReportPreview);
     document.getElementById('report-remnants').replaceChildren();
     document.getElementById("report-error").textContent = "";
@@ -799,7 +766,7 @@ export async function updateReportPreview() {
     syncReportRemnants(pending,results,updateReportPreview);
     const selected=readReportRemnants(pending);
     const recovered=selected.filter(r=>r.w>=(pending.request.minRemnantWidth ?? 200)&&r.l>=(pending.request.minRemnantLength ?? 300));
-    document.getElementById('report-preview-remnant-text').textContent=recovered.length+' 块回库'+(selected.length>recovered.length ? '，尺寸不足 '+(selected.length-recovered.length)+' 块计入损耗' : '');
+    document.getElementById('report-preview-remnant-text').textContent=feedPortType==='remnant' ? '不回收，剩余部分计入损耗' : recovered.length+' 块回库'+(selected.length>recovered.length ? '，尺寸不足 '+(selected.length-recovered.length)+' 块计入损耗' : '');
     const usedArea=pending.request.rollW*(feedPortType==='remnant'?pending.bedL:cutLen)/1_000_000;
     const pieceArea=groups.QUALIFIED.reduce((sum,p)=>sum+p.w*p.l/1_000_000,0);
     const rejectedArea=groups.REJECTED.reduce((sum,p)=>sum+p.w*p.l/1_000_000,0);
@@ -1008,7 +975,7 @@ export function exportCutResult() {
     const metrics = materialSummary(data, state.currentCutMode === 'remnant');
     const exportData = { status: metrics.actual ? "已实切确认" : "示例或方案预览", receipt: metrics.actual ? data.lastReceipt : null,
         rollId: data.rollId || null, demands: data.demands || [], pieces: data.pieces || [], cuts: data.cuts || [],
-        remnants: data.remnants || [], pieceArea: metrics.pieceArea || 0, usedArea:metrics.totalArea || 0,
+        remnants: state.currentCutMode === 'remnant' && !metrics.actual ? [] : data.remnants || [], pieceArea: metrics.pieceArea || 0, usedArea:metrics.totalArea || 0,
         utilization:metrics.utilization, utilizationBasis:metrics.actual ? 'actual-used-area' : 'estimated-used-area',
         processingArea:metrics.processingArea || 0, processingUtilization:metrics.processingUtilization };
     const url = URL.createObjectURL(new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json;charset=utf-8" }));

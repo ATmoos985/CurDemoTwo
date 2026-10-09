@@ -1,17 +1,56 @@
-/** 当前方案预计产出与当前母卷库存使用独立页签。 */
+/** 本次任务产出与当前母卷库存使用独立页签。 */
 import { state } from '../../core/state.js';
 import { requestJSON } from '../../core/api-request.js';
 import { showToast } from '../../core/toast.js';
 import { requestFromUI, materialContext } from '../material/material-selection.js';
 import { recommendationMarkup } from '../material/remnant-recommendation.js';
-import { motherRollRemnants } from './remnant-dialog-model.js';
+import { motherRollRemnants, taskRemnants } from './remnant-dialog-model.js';
 import { queuedReports } from '../solver/report-queue.js';
-import { escapeText } from '../solver/task-workspace.js';
+import { escapeText, refreshTaskProgress, openTaskReports } from '../solver/task-workspace.js';
+import { solverSettings } from '../settings/settings.js';
 
 const el = id => document.getElementById(id);
 const rollId = () => state.currentCutMode === 'remnant' ? state.loadedRemnant?.sourceRollId : state.getCurrentCaseData().rollId;
 const usable = stock => (stock.status || 'AVAILABLE') === 'AVAILABLE' && !queuedReports().some(row => row.pending.sourceRemnantId === stock.id);
 let generation = 0, stocks = [], recommending = false;
+
+export function renderTaskRemnants() {
+    if (!el('remnant-table-body')) return;
+    const data = state.getCurrentCaseData();
+    const rows = taskRemnants(data, state.taskReports || [], queuedReports(), {
+        ...(state.pendingPlan?.request || solverSettings()), rollId:rollId(), feedPortType:state.currentCutMode
+    });
+    const actual = rows.filter(r => r.phase === 'reported'), pending = rows.filter(r => r.phase !== 'reported');
+    const summary = list => `${list.length} 块 · ${list.reduce((n,r)=>n+r.w*r.l/1e6,0).toFixed(3)} m²`;
+    el('remnant-count-badge').textContent = `${rows.length} 块`;
+    el('remnant-expected-count').textContent = rows.length;
+    el('remnant-reported-total').textContent = summary(actual);
+    el('remnant-expected-total').textContent = summary(pending);
+    el('remnant-output-note').textContent = '本次任务在当前母卷的产出；已入库数量取自报工记录，当前可用状态见料头库。'
+        + (state.currentCutMode === 'remnant' ? ' 当前使用料头，余料不再回收。' : ' 预计产出须确认报工后才入库。');
+    el('remnant-expected-empty').hidden = rows.length > 0;
+    el('remnant-expected-empty').textContent = state.currentCutMode === 'remnant'
+        ? '料头只使用一次，本次裁切的剩余部分计入损耗，不产生新料头。' : '当前母卷在本次任务中暂无料头产出。';
+    el('remnant-expected-table').hidden = !rows.length;
+    const container = el('remnant-table-body');
+    container.innerHTML = rows.map((r,i) => `<tr><td><code class="remnant-code">${escapeText(r.id)}</code></td>
+        <td>${r.w} × ${r.l} mm</td><td>${(r.w*r.l/1e6).toFixed(3)} m²</td>
+        <td><span class="quality-badge ${r.hasDefect ? 'has-defect' : ''}">${r.hasDefect ? '带疵' : '无疵'}</span></td>
+        <td>${{expected:'预计 · 未入库',queued:'待报工 · 未入库',reported:'已入库'}[r.phase]}</td>
+        <td>${r.locatable ? `<button class="tool-btn" data-locate="${i}">定位</button>` : r.phase === 'reported' ? '<button class="tool-btn" data-report>报工记录</button>' : '—'}</td></tr>`).join('');
+    container.querySelectorAll('[data-locate]').forEach(button => {
+        const rem = rows[Number(button.dataset.locate)], row = button.closest('tr');
+        row.id = 'remnant-row-' + rem.id; row.dataset.remnantId = rem.id;
+        row.classList.add('interactive-row');
+        row.classList.toggle('remnant-selected-row', state.selectedRemnantId === rem.id);
+        row.onmouseenter = () => window.hoverRemnant(rem.id, true);
+        row.onmouseleave = () => window.hoverRemnant(rem.id, false);
+        row.onclick = () => {
+            window.selectRemnant(rem.id, {fromTable:true,smoothPan:true,showToastMsg:true,switchTab:false}); closeRemnantModal();
+        };
+    });
+    container.querySelectorAll('[data-report]').forEach(button => button.onclick = () => {closeRemnantModal();openTaskReports();});
+}
 
 function switchTab(tab, focus = false) {
     for (const name of ['expected','stock']) {
@@ -44,6 +83,7 @@ export async function openRemnantModal(tab = 'expected') {
         el('remnant-refresh').onclick = refreshRemnantsList;
         el('inp-scan-barcode').oninput = renderStocks;
         switchTab(tab === 'stock' ? 'stock' : 'expected');
+        renderTaskRemnants();
         dialog.showModal();
         await refreshRemnantsList();
         return;
@@ -75,9 +115,9 @@ export async function refreshRemnantsList() {
     el('remnant-availability').textContent = '按当前剩余需求试排可用料头';
     el('btn-remnant-recommend').disabled = true;
     try {
-        const list = await requestJSON('/api/remnants');
+        const [list] = await Promise.all([requestJSON('/api/remnants'), refreshTaskProgress()]);
         if (!dialog.open || generation !== token || source !== rollId()) return;
-        stocks = motherRollRemnants(list,source);renderStocks();
+        stocks = motherRollRemnants(list,source);renderStocks();renderTaskRemnants();
     } catch(error) {
         if(dialog.open && generation===token) {stocks=[];el('header-remnant-count').textContent='—';el('remnant-cards-container').textContent='读取失败：' + error.message;el('remnant-stock-status').textContent='库存读取未完成，可点击刷新重试。';}
     } finally {

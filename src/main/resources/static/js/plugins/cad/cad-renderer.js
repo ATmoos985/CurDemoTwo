@@ -121,7 +121,7 @@ export function updateCanvasAnnotations() {
         const level = labelDetail(r.w, r.l, scale, view.overview);
         if (!level) continue;
         const w = r.w * scale, h = r.l * scale;
-        label(r.hasDefect ? '带疵料头' : '可用料头', sx(r.x) + 6, sy(r.y) + h / 2 - (level === 2 ? 16 : 6), w - 12, { fill: muted });
+        label(state.currentCutMode === 'remnant' && !r.confirmed ? '余料 · 不回收' : r.hasDefect ? '带疵料头' : '可用料头', sx(r.x) + 6, sy(r.y) + h / 2 - (level === 2 ? 16 : 6), w - 12, { fill: muted });
         if (level === 2) label(`${r.w} × ${r.l} mm`, sx(r.x) + 6, sy(r.y) + h / 2 + 4, w - 12, { fill: muted, fontSize: 11 });
     }
     if (detailed && view.paths) {

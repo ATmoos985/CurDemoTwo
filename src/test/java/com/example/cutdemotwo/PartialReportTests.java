@@ -81,10 +81,10 @@ class PartialReportTests {
         assertEquals("PENDING",failing.getPlan(plan.getPlanId()).status());assertNull(failing.getReceipt(plan.getPlanId()));assertTrue(failing.completedQuantities(task.id()).isEmpty());
         assertDoesNotThrow(()->workflow.confirm(report()));
     }
-    @Test void partialRemnantReportReversesTheParentAndItsRawRecovery(){
+    @Test void partialRemnantReportDiscardsUncutAreaAndCanReverseTheParent(){
         var r=request(task,0);r.setFeedPortType("remnant");r.setSourceRemnantId("REM-202609-001");r.setRollL(1600);
         var sheet=workflow.solve(r);assertEquals(1,sheet.getPieces().size());
-        var receipt=workflow.confirm(new CutReport(sheet.getPlanId(),0,0,List.of(new RemnantPiece("UNCUT-1","毛料",0,0,2000,1000,2,false)),"B",List.of(new CutReport.PieceResult(1,"UNCUT",""))));
+        var receipt=workflow.confirm(new CutReport(sheet.getPlanId(),0,0,List.of(),"B",List.of(new CutReport.PieceResult(1,"UNCUT",""))));
         assertNull(inventory.scanOrGetById("REM-202609-001"));assertEquals(0,receipt.get("finishedPieceCount"));
         inventory.reverseReport(sheet.getPlanId(),"尚未实际切割");assertNotNull(inventory.scanOrGetById("REM-202609-001"));assertTrue(inventory.completedQuantities(task.id()).isEmpty());
     }

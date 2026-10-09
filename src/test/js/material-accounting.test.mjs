@@ -26,6 +26,13 @@ test('sheet use consumes the full sheet with zero mother-roll length, and empty 
     assert.equal(materialSummary(m,true).utilization,25);
     assert.equal(layoutMetrics({...data,pieces:[]},{sheet:true}).totalArea,0);
 });
+
+test('single-use sheet leftovers count as waste instead of recoverable inventory', () => {
+    const metrics=layoutMetrics({rollW:2000,bedL:1600,pieces:[{x:0,y:0,w:2000,l:1000}],
+        remnants:[{x:0,y:1000,w:2000,l:600}]},{sheet:true});
+    assert.equal(metrics.remArea,0); assert.ok(Math.abs(metrics.wasteArea-1.2)<1e-9);
+    assert.equal(metrics.totalArea,3.2); assert.equal(metrics.deductLen,0);
+});
 test('actual metrics use the receipt, not the proposed remnants, and do not leak into the next station', () => {
     const data={windowStartY:0,rollW:2000,bedL:5000,pieceArea:8,remArea:2,wasteArea:0,totalArea:10,processingArea:10,
         lastReceipt:{feedPortType:'roll',windowStartY:0,actualCutLen:4500,usedArea:9,pieceArea:8,remArea:.5,wasteArea:.5,processingArea:10}};

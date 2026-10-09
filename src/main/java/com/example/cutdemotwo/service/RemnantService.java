@@ -638,6 +638,7 @@ public class RemnantService {
         double maxPieceY = output.cutPieces().stream().mapToDouble(p -> p.getY() + p.getL()).max().orElse(0);
         if (!remnantFeed && len + 0.001 < maxPieceY) throw new IllegalArgumentException("实切长度短于合格或异常裁片的末端");
         List<RemnantPiece> actual = report.actualRemnants() == null ? List.of() : report.actualRemnants();
+        if (remnantFeed && !actual.isEmpty()) throw new IllegalArgumentException("料头只使用一次，剩余部分不再回收；请退回核对后重新报工");
         double remArea = 0;
         Set<String> seen = new HashSet<>();
         List<double[]> recoveredBounds = new ArrayList<>();

@@ -40,7 +40,7 @@ class CuttingTaskTests {
         SolveResponse first = workflow.solve(request(task, true, 3));
         assertEquals(1, first.getPieces().size());
         assertTrue(inventory.completedQuantities(task.id()).isEmpty(), "preview must not complete demand");
-        CutReport report = new CutReport(first.getPlanId(), 0, 1, first.getRemnants(), "A-01");
+        CutReport report = new CutReport(first.getPlanId(), 0, 1, List.of(), "A-01");
         var receipt = workflow.confirm(report);
         assertEquals(receipt, workflow.confirm(report), "idempotent retry");
         assertEquals(before, inventory.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength());

@@ -15,7 +15,7 @@ export function layoutMetrics(data, {sheet = false, actualCutLen} = {}) {
     const length = actualCutLen === undefined ? extent : actualCutLen;
     const processingArea = width * height / 1_000_000;
     const totalArea = sheet ? (hasLayout ? processingArea : 0) : width * length / 1_000_000;
-    const pieceArea = area(pieces), remArea = area(remnants);
+    const pieceArea = area(pieces), remArea = sheet ? 0 : area(remnants);
     return {deductLen:sheet ? 0 : length, processingArea, totalArea, pieceArea, remArea,
         wasteArea:Math.max(0, totalArea - pieceArea - remArea)};
 }

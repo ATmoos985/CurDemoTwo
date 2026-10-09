@@ -310,3 +310,5 @@
     .import-stock label { align-items:flex-start; flex-direction:column; gap:6px; }
     .import-stock select { width:100%; }
 }
+
+#cut-report-modal [hidden] { display: none !important; }

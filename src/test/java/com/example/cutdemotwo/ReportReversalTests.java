@@ -34,7 +34,7 @@ class ReportReversalTests {
     Map<String, Object> confirm(SolveRequest request) {
         var plan = workflow.solve(request);
         return workflow.confirm(new CutReport(plan.getPlanId(), "remnant".equals(request.getFeedPortType()) ? 0 : 3000,
-                1, plan.getRemnants(), "A"));
+                1, "remnant".equals(request.getFeedPortType()) ? List.of() : plan.getRemnants(), "A"));
     }
     @Test void reverseRestoresInventoryAndTaskAndRemainsIdempotentAfterRestart() {
         var receipt = confirm(request(5000)); String id = receipt.get("planId").toString();
