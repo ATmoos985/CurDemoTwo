@@ -194,7 +194,8 @@ function loadProblem(next) {
     fillRows(); viewer.setScene(scene, { fitView: true }); results(scene); engineHint(); showError('');
     byId('solve-status').textContent = '输入就绪，等待排料。'; byId('solve-button').disabled = false; byId('solve-button').textContent = '生成排料';
 }
-byId('problem-form').addEventListener('input', event => { if (!event.target.matches('.shape-kind')) changed(); });
+// A select emits input before change; keep the chosen scenario until its own loader runs.
+byId('problem-form').addEventListener('input', event => { if (!event.target.matches('.shape-kind, #scenario-select')) changed(); });
 byId('problem-form').addEventListener('change', event => {
     if (!event.target.matches('.shape-kind')) return;
     if (event.target.value === 'POLYGON' && byId('process-mode').value !== 'CONTOUR') {
