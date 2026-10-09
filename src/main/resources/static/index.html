@@ -34,7 +34,10 @@
 
         </div>
         <div data-product-nav="workbench"></div>
-        <div class="header-actions">
+
+    </header>
+
+    <nav class="task-bar" aria-label="切割任务流程"><div class="task-toolbar"><button class="tool-btn" onclick="openNewTask()">新建任务</button><button class="tool-btn" onclick="openTaskList()">打开任务</button><button class="tool-btn" onclick="saveTaskFromUI()">保存需求</button><span id="task-state" role="status">未保存</span><button class="tool-btn" id="btn-local-drafts" onclick="openLocalDrafts()">本机草稿 0</button></div><ol class="workflow-stages" aria-label="查看作业阶段"><li><button type="button" data-workflow-stage="0"><span class="stage-marker">1</span>需求</button></li><li><button type="button" data-workflow-stage="1"><span class="stage-marker">2</span>材料</button></li><li><button type="button" data-workflow-stage="2"><span class="stage-marker">3</span>排料</button></li><li><button type="button" data-workflow-stage="3"><span class="stage-marker">4</span>报工</button></li></ol><div class="task-toolbar"><button class="tool-btn" onclick="openTaskPlans()">方案记录</button><button class="tool-btn" onclick="openTaskReports()">报工记录 <span id="task-report-count">0</span></button>
             <button class="tool-btn" onclick="openCutTicketModal()">打印工单</button>
             <details class="header-more">
                 <summary class="tool-btn">工具与设置</summary>
@@ -51,10 +54,7 @@
                     <button class="tool-btn" onclick="openSettingsModal()" id="btn-settings">工艺与显示设置</button>
                 </div>
             </details>
-        </div>
-    </header>
-
-    <nav class="task-bar" aria-label="切割任务流程"><div class="task-toolbar"><button class="tool-btn" onclick="openNewTask()">新建任务</button><button class="tool-btn" onclick="openTaskList()">打开任务</button><button class="tool-btn" onclick="saveTaskFromUI()">保存需求</button><span id="task-state" role="status">未保存</span><button class="tool-btn" id="btn-local-drafts" onclick="openLocalDrafts()">本机草稿 0</button></div><ol class="workflow-stages" aria-label="查看作业阶段"><li><button type="button" data-workflow-stage="0"><span class="stage-marker">1</span>需求</button></li><li><button type="button" data-workflow-stage="1"><span class="stage-marker">2</span>材料</button></li><li><button type="button" data-workflow-stage="2"><span class="stage-marker">3</span>排料</button></li><li><button type="button" data-workflow-stage="3"><span class="stage-marker">4</span>报工</button></li></ol><div class="task-toolbar"><button class="tool-btn" onclick="openTaskPlans()">方案记录</button><button class="tool-btn" onclick="openTaskReports()">报工记录 <span id="task-report-count">0</span></button></div></nav>
+</div></nav>
     <!-- 主视窗工作区 -->
     <main>
         <!-- 左侧控制面板：清晰分离母卷排产与料头精益切割两大工位 -->
