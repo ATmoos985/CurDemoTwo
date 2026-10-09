@@ -1,4 +1,5 @@
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+export const helpTip = (label, text) => `<span class="help-tip"><button type="button" class="help-tip-icon" aria-label="${escape(label)}" aria-description="${escape(text)}">?</button><span role="tooltip">${escape(text)}</span></span>`;
 export function stockSignature(stock) {
     return JSON.stringify([stock.id, stock.sourceRollId, stock.materialBatch, stock.width, stock.length,
         stock.status || 'AVAILABLE', !!stock.hasDefect, (stock.defects || []).map(d=>[d.id,d.x,d.y,d.w,d.h,d.margin ?? 20])]);
@@ -6,8 +7,7 @@ export function stockSignature(stock) {
 
 export function recommendationMarkup(analysis) {
     const rows=analysis.recommendations;
-    return `<p class="muted">已试排 ${analysis.evaluatedCount} / ${analysis.candidateCount} 块尺寸候选${analysis.deferredCount?`；另有 ${analysis.deferredCount} 块尚未评估`:''}。每块分别使用同一批剩余需求，结果不能相加。</p>
-        ${rows.length?'':'<p>本次未得到可用推荐。可核对工艺与疵点，或选择母卷继续；未排入不表示已证明无解。</p>'}
+    return `<div class="recommendation-result"><strong>${rows.length ? `找到 ${rows.length} 块可推荐料头` : '暂无可推荐料头'}</strong>${helpTip('本次推荐结果说明',`已试排 ${analysis.evaluatedCount} / ${analysis.candidateCount} 块尺寸候选；${analysis.deferredCount || 0} 块尚未评估。每块使用同一批剩余需求，结果不能相加。无推荐时可核对尺寸、工艺与疵点，或选择母卷；本次未找到不等于已证明无解。`)}</div>
         ${rows.map((r,i)=>`<article class="remnant-recommendation">
             <div class="recommendation-heading"><strong>${i===0?'建议先用':'备选'} · ${escape(r.stock.id)}</strong><button type="button" class="tool-btn ${i===0?'active':''}" data-recommend-stock="${escape(r.stock.id)}">选择并核对</button></div>
             <p>${r.stock.width} × ${r.stock.length} mm · ${escape(r.stock.location || '库位未登记')}${r.stock.hasDefect?' · 已按库存疵点避让':''}</p>

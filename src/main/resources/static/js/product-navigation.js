@@ -1,7 +1,7 @@
 const surfaces=[['workbench','裁切作业','/'],['lab','裁切试验','/nesting.html'],['inventory','库存档案','/inventory.html']];
 for(const host of document.querySelectorAll('[data-product-nav]')) {
     const active=host.dataset.productNav;
-    host.innerHTML=`<nav class="product-nav" aria-label="功能区域">${surfaces.filter(([id])=>id!=='inventory' || active==='inventory').map(([id,label,url])=>`<a href="${url}" ${id===active?'aria-current="page"':'target="_blank" rel="noopener" title="新页面打开，保留当前内容"'}>${label}</a>`).join('')}</nav>${active==='workbench' ? '<button type="button" class="tool-btn" data-inventory>库存档案</button>' : '<button type="button" class="tool-btn" data-capabilities>能力说明</button>'}`;
+    host.innerHTML=`<nav class="product-nav" aria-label="功能区域">${surfaces.filter(([id])=>id!=='inventory' || active==='inventory').map(([id,label,url])=>`<a href="${url}" ${id===active?'aria-current="page"':'target="_blank" rel="noopener" title="新页面打开，保留当前内容"'}>${label}</a>`).join('')}</nav>${active==='workbench' ? '' : '<button type="button" class="tool-btn" data-capabilities>能力说明</button>'}`;
     if(host.querySelector('[data-capabilities]'))host.querySelector('[data-capabilities]').onclick=openCapabilities;
     if(host.querySelector('[data-inventory]'))host.querySelector('[data-inventory]').onclick=()=>window.camApp.openMaterialModal('rolls');
     host.querySelector('[aria-current]').onclick=event=>event.preventDefault();

@@ -198,6 +198,7 @@ export function openRemnantContextMenu(remnant, clientX, clientY) {
  * 打开【合格成品裁片】右键菜单
  */
 export function openPieceContextMenu(piece, clientX, clientY) {
+    if(piece.queued)return showToast('该工位已暂存，请从集中报工退回核对。','info');
     currentTarget = { type: 'piece', data: piece };
     if (piece.confirmed) {
         const html = `
@@ -476,8 +477,8 @@ export function discardPiece(pieceId) {
     const piece = (data.pieces || []).find(p => p.id === pieceId);
     if (!piece) return;
 
-    if (piece.confirmed) {
-        showToast(`裁片 "${piece.name || piece.id}" 已完成实切核销，禁止修改或抛弃。`, 'warning');
+    if (piece.confirmed || piece.queued) {
+        showToast(piece.queued ? '该工位已暂存，请从集中报工退回核对。' : `裁片 "${piece.name || piece.id}" 已完成实切核销，禁止修改或抛弃。`, 'warning');
         return;
     }
 
@@ -534,7 +535,7 @@ export function setPieceAsCutEnd(pieceId) {
     const data = state.getCurrentCaseData();
     if (!data) return;
     const piece = (data.pieces || []).find(p => p.id === pieceId);
-    if (!piece || piece.confirmed) return;
+    if (!piece || piece.confirmed || piece.queued) return;
 
     const cutEndY = piece.y + piece.l;
     const winStartY = data.windowStartY || 0;
@@ -640,7 +641,7 @@ export function rotatePieceById(pieceId) {
     const data = state.getCurrentCaseData();
     if (!data) return;
     const piece = (data.pieces || []).find(p => p.id === pieceId);
-    if (!piece || piece.confirmed) return;
+    if (!piece || piece.confirmed || piece.queued) return;
 
     const oldW = piece.w;
     piece.w = piece.l;

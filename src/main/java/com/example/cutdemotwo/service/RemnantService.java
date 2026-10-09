@@ -199,7 +199,10 @@ public class RemnantService {
             if ("REVERSED".equals(existing.get("status"))) throw new IllegalArgumentException("该报工已冲销，请重新排料");
             return existing;
         }
-        return mutate(() -> {
+        return mutate(() -> confirmPlanInternal(report));
+    }
+
+    private Map<String, Object> confirmPlanInternal(CutReport report) {
             Map<String, Object> receipt = receipts.get(report.planId());
             if (receipt != null) {
                 if ("REVERSED".equals(receipt.get("status"))) throw new IllegalArgumentException("该报工已冲销，请重新排料");
@@ -212,10 +215,37 @@ public class RemnantService {
             Map<String, Object> result = confirmInternal(plan.request(), plan.result(), report);
             plans.put(plan.id(), plan.withStatus("CONFIRMED"));
             return result;
-        });
     }
 
     public synchronized Map<String, Object> getReceipt(String planId) { return read(() -> receipts.get(planId)); }
+
+    /** Validate a whole pending batch without booking stock; final submission commits it atomically. */
+    public synchronized List<Map<String, Object>> reportBatch(List<CutReport> reports, boolean preview) {
+        if (reports == null || reports.isEmpty() || reports.size() > 100)
+            throw new IllegalArgumentException("请选择 1 至 100 个待报工工位");
+        java.util.function.Supplier<List<Map<String, Object>>> command = () -> {
+            Set<String> seen = new HashSet<>();
+            List<Map<String, Object>> result = new ArrayList<>();
+            String taskId = null;
+            for (CutReport report : reports) {
+                if (report == null || report.planId() == null || !seen.add(report.planId()))
+                    throw new IllegalArgumentException("待报工方案编号为空或重复");
+                CuttingPlan plan = plans.get(report.planId());
+                if (plan == null || plan.request().getTaskId() == null)
+                    throw new IllegalArgumentException("待报工方案不存在或未关联任务");
+                if (taskId == null) taskId = plan.request().getTaskId();
+                if (!taskId.equals(plan.request().getTaskId())) throw new IllegalArgumentException("集中报工必须属于同一任务");
+                result.add(confirmPlanInternal(report));
+            }
+            return result;
+        };
+        if (!preview) return mutate(command);
+        return read(() -> {
+            byte[] before = json.writeValueAsBytes(snapshot());
+            try { return command.get(); }
+            finally { restore(json.readValue(before, InventorySnapshot.class)); }
+        });
+    }
 
     public synchronized Map<String, Object> reverseReport(String planId, String reason) {
         if (reason == null || reason.isBlank() || reason.length() > 500)

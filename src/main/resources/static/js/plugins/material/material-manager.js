@@ -6,7 +6,7 @@ import { renderRadar } from '../radar/radar-scrubber.js';
 import { renderDefectsUI } from '../solver/quota-manager.js';
 import { showToast, confirmAction } from '../../core/toast.js';
 import { syncMaterialOptions } from './material-options.js';
-import { renderMaterialInspection } from '../layout/workbench-panels.js';
+import { renderMaterialInspection, mountInspectionRadar } from '../layout/workbench-panels.js';
 
 let cachedRolls = [], cachedRemnants = [];
 let activeRollId = null, activeRemnantId = null, activeTab = 'rolls';
@@ -53,6 +53,7 @@ export function closeMaterialModal() {
 }
 
 export async function switchMaterialTab(tabName) {
+    mountInspectionRadar(tabName === 'current');
     activeTab = tabName;
     for (const name of (standalone ? ['rolls', 'remnants', 'dict'] : ['current', 'rolls', 'remnants', 'dict'])) {
         const button = document.getElementById(`tab-mat-${name}`);
@@ -265,7 +266,7 @@ function createMaterialModalDOM() {
         </div>
         <div class="inventory-footer">此处管理库存档案。为任务选料请进入“选择本次用料”，确认报工才扣库存。</div>`;
     modal.addEventListener('keydown', event => event.stopPropagation());
-    modal.addEventListener('close', () => { detailRequest++; });
+    modal.addEventListener('close', () => { detailRequest++;mountInspectionRadar(false); });
     modal.addEventListener('click', async event => {
         const button = event.target.closest('button');
         if (!button) return;

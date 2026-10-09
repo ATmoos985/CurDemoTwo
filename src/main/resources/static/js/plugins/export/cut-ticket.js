@@ -16,6 +16,10 @@ function showTicket(saved,historical) {
     selected={saved,historical};if(!dialog.open)dialog.showModal();
 }
 export async function openCutTicketModal({planId,historical=false}={}) {
+    if (!planId && !state.pendingPlan) {
+        planId = [...(state.taskReports || [])].reverse().find(r => r.status !== 'REVERSED')?.planId;
+        historical = true;
+    }
     const id=planId || state.pendingPlan?.result?.planId;
     if(!id || (!historical && !currentMatches(id)))return showToast('请先生成方案或校验调整版；历史工单可从方案或报工记录查看。','warning');
     const sequence=++opening;

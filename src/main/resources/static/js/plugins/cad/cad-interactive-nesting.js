@@ -24,13 +24,13 @@ export function setSelectedPieceId(id) {
  * 为单个裁片 Konva 节点注入交互行为与干涉检测
  */
 export function makePieceInteractive(pGroup, piece, caseData) {
-    if (piece.confirmed) {
+    if (piece.confirmed || piece.queued) {
         pGroup.draggable(false);
         pGroup.name(`piece-entity-${piece.id}`);
         pGroup.on("click", (e) => {
             e.cancelBubble = true;
             setSelectedPieceId(piece.id);
-            import('../../core/toast.js').then(m => m.showToast(`裁片 ${piece.name || piece.id} 已完成实切确认核销，已锁定。`, 'info'));
+            import('../../core/toast.js').then(m => m.showToast(`裁片 ${piece.name || piece.id} ${piece.queued ? '已暂存待报工，请从集中报工退回核对。' : '已完成实切确认核销，已锁定。'}`, 'info'));
         });
         pGroup.on("contextmenu", (e) => {
             e.evt.preventDefault();
@@ -264,7 +264,7 @@ export function initNestingKeyboardShortcuts() {
             hideCollisionBadge();
             return;
         }
-        if (piece.confirmed) return;
+        if (piece.confirmed || piece.queued) return;
 
         const step = e.shiftKey ? 20 : 5; // 按住 Shift 粗调 20mm，平常微调 5mm
         let moved = false;

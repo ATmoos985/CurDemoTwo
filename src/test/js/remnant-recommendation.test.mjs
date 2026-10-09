@@ -15,5 +15,5 @@ test('stock checks include dimensions, source and defect margin but ignore displ
 });
 test('empty recommendations preserve unavailable reasons instead of claiming infeasibility',()=>{
     const html=recommendationMarkup({candidateCount:1,evaluatedCount:1,deferredCount:0,recommendations:[],unavailable:[{id:'R',status:'UNAVAILABLE',message:'引擎未就绪'}]});
-    assert.match(html,/未得到可用推荐/);assert.match(html,/不表示已证明无解/);assert.match(html,/引擎未就绪/);
+    assert.match(html,/暂无可推荐料头/);assert.match(html,/不等于已证明无解/);assert.match(html,/引擎未就绪/);assert.match(html,/role="tooltip"/);
 });

@@ -3,6 +3,7 @@ import {toggleSidebar, switchRightPanelTab} from '../layout/splitter.js';
 import {workflowState} from './workflow-state.js';
 import {openDemandManager, openMaterialDetails, renderDemandEditor} from '../layout/workbench-panels.js';
 import {scheduleRemnantAvailability} from '../material/material-selection.js';
+import {queuedReports, queuedQuantities, queuedRollEnd, queuedStockLength} from './report-queue.js';
 
 const el = id => document.getElementById(id);
 const value = id => el(id)?.value;
@@ -10,16 +11,17 @@ const remnantConsumed = data => !!state.loadedRemnant?.id && data.lastReceipt?.f
     && data.lastReceipt.sourceRemnantId === state.loadedRemnant.id && data.lastReceipt.status !== 'REVERSED';
 export function readWorkflowState(plan = {}) {
     const data = state.getCurrentCaseData(), sheet = state.currentCutMode === 'remnant';
-    return workflowState({name:value('task-name'), model:value('task-material'), ...plan,
+    const queue = queuedReports(), staged = queuedQuantities(queue);
+    return workflowState({name:value('task-name'), model:value('task-material'), queued:queue.length, ...plan,
         demands:[...document.querySelectorAll('#demands-container .item-row')].map(row => ({
             id:Number(row.dataset.id), name:row.querySelector('.dem-name').value,
             width:Number(row.querySelector('.dem-w').value), length:Number(row.querySelector('.dem-l').value),
-            quantity:Number(row.querySelector('.dem-count').value), completed:state.taskCompleted[row.dataset.id] || 0
+            quantity:Number(row.querySelector('.dem-count').value), completed:state.taskCompleted[row.dataset.id] || 0, queued:staged[row.dataset.id] || 0
         })),
-        material:{available:data.materialAvailable && (!sheet || (!!state.loadedRemnant && !remnantConsumed(data))), sheet,
+        material:{available:data.materialAvailable && (!sheet || (!!state.loadedRemnant && !remnantConsumed(data) && !queue.some(r => r.pending.sourceRemnantId === state.loadedRemnant.id))), sheet,
             model:sheet ? state.loadedRemnant?.materialBatch : el('lbl-roll-model-desc')?.textContent,
-            length:sheet ? state.loadedRemnant?.length : data.stockRemainingLength,
-            used:data.stockUsedLength || 0, total:data.totalRollL},
+            length:sheet ? state.loadedRemnant?.length : data.stockRemainingLength - queuedStockLength(data.rollId,queue),
+            used:Math.max(data.stockUsedLength || 0,queuedRollEnd(data.rollId,queue)), total:data.totalRollL},
         process:{length:Number(value('inp-bed-l')), start:sheet ? 0 : Number(value('inp-window-start-y')), trim:Number(value('inp-trim-start'))}
     });
 }
@@ -73,15 +75,18 @@ export function renderWorkflowGuide(plan = {}) {
         if (flow.action === 'match') window.camApp.matchTaskMaterials();
         if (flow.action === 'reports') window.camApp.openTaskReports();
         if (flow.action === 'advance') window.camApp.smartAdvanceBed();
+        if (flow.action === 'batch') window.camApp.openBatchReport();
     };
-    const nextHost = flow.stage >= 3 ? footer : el('left-input-actions');
+    const nextHost = flow.stage >= 2 ? footer : el('left-input-actions');
     if (next.parentElement !== nextHost) nextHost.prepend(next);
-    const statusHost = flow.stage >= 3 ? footer : el('input-flow-status');
+    const statusHost = flow.stage >= 2 ? footer : el('input-flow-status');
     if (el('workflow-current').parentElement !== statusHost) statusHost.prepend(el('workflow-current'),el('station-action-hint'));
     const solve = el(actions.solve);solve.disabled = !!busy || !flow.canSolve;solve.hidden = !flow.canSolve;
     solve.textContent = busy === '正在生成方案…' ? busy : plan.ready || plan.edited ? '重新排料' : '生成排料方案';
     const report = el(actions.report);report.disabled = !!busy || flow.action !== 'report';report.hidden = !plan.ready && !plan.edited;
-    report.textContent = '核对实切并报工';
+    report.textContent = '完成本工位 / 继续裁切';
+    const queue = queuedReports(), batch = el('btn-batch-report');
+    batch.hidden = !queue.length;batch.disabled = !!busy;batch.textContent = `集中报工 · ${queue.length} 工位`;
     el('btn-validate-adjustment').hidden = !plan.edited;
     const data = state.getCurrentCaseData(), sheet = state.currentCutMode === 'remnant';
     el('station-navigation-group').hidden = !data.materialAvailable;

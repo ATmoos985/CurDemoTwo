@@ -24,6 +24,8 @@ import { solverSettings } from '../settings/settings.js';
 import { renderToolpathUI } from '../toolpath/toolpath-optimizer.js';
 import { selectRemnant, clearRemnantSelection, hoverRemnant } from '../cad/cad-remnant-highlight.js';
 import {scheduleRemnantAvailability} from '../material/material-selection.js';
+import {solveDiagnostics} from './solve-diagnostics.js';
+import {queuedReports, queuedQuantities, queuedStockLength, saveReportQueue, queueEntry} from './report-queue.js';
 
 export function updateUIInfo() {
     const data = state.getCurrentCaseData();
@@ -94,7 +96,7 @@ export function updateUIInfo() {
     const remBadge = document.getElementById("remnant-count-badge");
     if (remBadge) remBadge.innerText = `${(data.remnants || []).length} 块`;
     const rightTabRemBadge = document.getElementById("right-tab-rem-badge");
-    if (rightTabRemBadge) rightTabRemBadge.innerText = `${(data.pieces || []).filter(p => !p.confirmed).length} 件`;
+    if (rightTabRemBadge) rightTabRemBadge.innerText = `${(data.pieces || []).filter(p => !p.confirmed && !p.queued).length} 件`;
     const remTbody = document.getElementById("remnant-table-body");
     if (remTbody) {
         remTbody.innerHTML = (data.remnants || []).map(r => {
@@ -318,11 +320,23 @@ function renderSolveFeedback(flow) {
     panel.hidden=!attempt;if(!attempt)return;
     const feedback=failurePresentation(attempt.result);
     panel.querySelector('strong').textContent=feedback.title;
-    panel.querySelector('[data-error-message]').textContent=feedback.message;
+    panel.querySelector('[data-error-message]').textContent=attempt.diagnostics?.summary || feedback.message;
     const preserved=state.pendingPlan ? (currentPlanContext()?'原方案与手调预览已保留，新结果未应用；需求进度仍按原方案显示。':'旧图形保留供核对，版本或材料需重新核实，不能报工。') : '';
     panel.querySelector('[data-error-hint]').textContent=feedback.hint+(preserved?' '+preserved:'');
     const retry=panel.querySelector('[data-retry]');retry.disabled=solving || !flow.canSolve;retry.onclick=triggerSolve;
     panel.querySelector('[data-review-input]').onclick=()=>navigateWorkflowStage(feedback.code==='UNSUPPORTED'?2:0,flow.target || (feedback.code==='UNSUPPORTED'?'#card-bed-origin':'#card-demands'));
+}
+function showSolveFailure() {
+    const attempt=latestSolveAttempt;if(!attempt || attempt.context!==solveContext())return;
+    document.getElementById('solve-failure-dialog')?.remove();
+    const info=attempt.diagnostics, feedback=failurePresentation(attempt.result);
+    const dialog=document.createElement('dialog');dialog.id='solve-failure-dialog';dialog.className='action-dialog workbench-dialog';
+    dialog.setAttribute('aria-labelledby','solve-failure-title');
+    dialog.innerHTML=`<div class="workbench-dialog-heading"><div><h2 id="solve-failure-title">${escapeText(info?.title || feedback.title)}</h2><p>${escapeText(info?.summary || feedback.message)}</p></div><button class="tool-btn" data-close>关闭</button></div><div class="workbench-dialog-body">${info ? `<ul>${info.facts.map(f=>`<li>${escapeText(f)}</li>`).join('')}</ul><table><thead><tr><th>需求</th><th>宽 × 长 mm</th><th>核对结果</th></tr></thead><tbody>${info.lines.map(d=>`<tr><td>${escapeText(d.name)}</td><td>${d.width} × ${d.length}</td><td>${escapeText(d.reason || '单片尺寸可容纳')}</td></tr>`).join('')}</tbody></table>${info.possible.length?`<h3>还需核对</h3><ul>${info.possible.map(p=>`<li>${escapeText(p)}</li>`).join('')}</ul>`:''}<p>${escapeText(info.advice)}</p>` : `<p>${escapeText(feedback.hint)}</p>`}</div><div class="workbench-dialog-footer"><button class="tool-btn" data-demands>核对需求</button><button class="tool-btn active" data-process>核对加工参数</button></div>`;
+    document.body.append(dialog);dialog.showModal();dialog.addEventListener('keydown',e=>e.stopPropagation());
+    dialog.querySelector('[data-close]').onclick=()=>dialog.close();
+    dialog.querySelector('[data-demands]').onclick=()=>{dialog.close();navigateWorkflowStage(0);};
+    dialog.querySelector('[data-process]').onclick=()=>{dialog.close();navigateWorkflowStage(2,'#inp-bed-l');};
 }
 let solving = false;
 function planGeometry() {
@@ -459,7 +473,7 @@ export async function triggerSolve() {
         latestSolveAttempt={context:solveContext(),result:{status:error.code || 'SERVICE',message:error.message}};
         if(state.pendingPlan && ['CONFLICT','INVALID_INPUT'].includes(error.code))state.pendingPlan.blockedError=error.message;
     }
-    finally { solving = false; updateWorkflowControls(); }
+    finally { solving = false; updateWorkflowControls();showSolveFailure(); }
 }
 async function runSolve(operation) {
     const task = await saveCurrentTask();
@@ -500,7 +514,8 @@ async function runSolve(operation) {
         rollModel = document.getElementById("lbl-roll-model-desc") ? document.getElementById("lbl-roll-model-desc").innerText : "标准面料";
 
     }
-    activeDemands = getDemandsFromUI().filter(d => d.demand > 0).map(d => ({id:d.id, name:d.name, width:d.width, length:d.length, demand:d.demand, allowRotation:d.allowRotation}));
+    const staged = queuedQuantities();
+    activeDemands = getDemandsFromUI().map(d => ({id:d.id, name:d.name, width:d.width, length:d.length, demand:Math.max(0,d.demand-(staged[d.id] || 0)), allowRotation:d.allowRotation})).filter(d => d.demand > 0);
     if (!activeDemands.length) return showToast('本次需求已全部完成，可新建下一任务', 'info');
     demands = activeDemands;
 
@@ -555,7 +570,7 @@ async function runSolve(operation) {
         }
         if(geometry!==planGeometry())throw new ApiError('等待期间预览已调整，当前手调位置保留。','STALE_INPUT');
         if(result.success && (!result.planId || !Array.isArray(result.pieces) || !result.pieces.length || !Array.isArray(result.cuts) || !Array.isArray(result.remnants)))throw new ApiError('求解响应缺少完整方案，原预览保留。','INVALID_RESULT');
-        latestSolveAttempt = result.success && result.planId && result.pieces?.length ? null : {context, result:{...result,status:result.status || 'INVALID_RESULT'}};
+        latestSolveAttempt = result.success && result.planId && result.pieces?.length ? null : {context, result:{...result,status:result.status || 'INVALID_RESULT'},diagnostics:solveDiagnostics({...payload,remainingLength:data.stockRemainingLength},result)};
         {
             const elapsed = Math.round(performance.now() - t0);
             if (result.success && result.planId && result.pieces?.length) {
@@ -711,7 +726,7 @@ async function prepareCutReport() {
     document.getElementById("report-length-label").textContent = feedPortType === "remnant" ? "母卷扣料（mm）" : "实切长度（mm）";
     pending.currentRemaining = null;
     if (feedPortType === "roll") {
-        try { const response = await fetch(`/api/rolls/${encodeURIComponent(pending.rollId)}`); if (!response.ok) throw new Error(); pending.currentRemaining = (await response.json()).currentRemainingLength; }
+        try { const response = await fetch(`/api/rolls/${encodeURIComponent(pending.rollId)}`); if (!response.ok) throw new Error(); pending.currentRemaining = (await response.json()).currentRemainingLength - queuedStockLength(pending.rollId); }
         catch { showToast("读取库存失败，请重试", "error"); return; }
     }
 
@@ -720,6 +735,7 @@ async function prepareCutReport() {
     await updateReportPreview();
 
     document.getElementById("cut-report-modal").showModal();
+    document.getElementById('report-confirm-button').textContent = queuedReports().length ? '连同待报工一起提交' : '立即报工';
     document.querySelector("#cut-report-modal button").focus();
 }
 
@@ -772,121 +788,108 @@ export async function openStationLapConfirmModal() {
 }
 
 let reporting = false;
-export async function confirmCutReport() {
+export async function confirmCutReport(stageOnly = false) {
     if (reporting) return;
-    const pending = state.pendingPlan;
-    if (!canUseCurrentPlan()) { document.getElementById("report-error").textContent = "方案、需求或材料需重新核实，请重新排料"; return; }
-    const actualCutLen = Number(document.getElementById("report-actual-len").value);
-    const finishedPieceCount = Number(document.getElementById("report-piece-count").value);
-    const location = document.getElementById("report-location").value.trim();
-    const pieceResults=readReportPieces();
-    const inputError=reportPieceError(pending,pieceResults);
-    if(inputError){document.getElementById('report-error').textContent=inputError.message;document.querySelector(inputError.selector)?.focus();return;}
-    const actualRemnants=readReportRemnants(pending);
-
-    const report = {
-        planId: pending.result.planId,
-        actualCutLen: actualCutLen,
-        finishedPieceCount: finishedPieceCount,
-        location: location,
-        actualRemnants: actualRemnants,
-        pieceResults
-    };
-
+    const pending = state.pendingPlan, errorNode = document.getElementById('report-error');
+    if (!canUseCurrentPlan()) { errorNode.textContent = '方案、需求或材料需重新核实，请重新排料'; return; }
+    const pieceResults = readReportPieces(), inputError = reportPieceError(pending,pieceResults);
+    if (inputError) {errorNode.textContent=inputError.message;document.querySelector(inputError.selector)?.focus();return;}
+    const report = {planId:pending.result.planId, actualCutLen:Number(document.getElementById('report-actual-len').value),
+        finishedPieceCount:Number(document.getElementById('report-piece-count').value), location:document.getElementById('report-location').value.trim(),
+        actualRemnants:readReportRemnants(pending),pieceResults};
+    const entries = [...queuedReports().filter(r => r.report.planId !== report.planId),queueEntry(pending,report)];
     reporting = true;
-    let reported = false;
-    document.getElementById("report-confirm-button").disabled = true;
+    const wasInert = document.body.inert; document.body.inert = true;
     try {
-        const response = await fetch("/api/cutting/report-confirm", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(report)
-        });
-        const receipt = await response.json();
-        if (!response.ok) throw new Error(receipt.message || "实切确认失败");
-        reported = true;
-        if (state.activeTask?.id !== pending.taskId || pending.context !== solveContext()) {
-            closeCutReport(); showToast("原任务已完成报工，请从任务记录查看结果", "success"); return;
-        }
-
-        const data = state.getCurrentCaseData();
-        data.lastReceipt = receipt;
-        if (receipt.feedPortType === "roll") {
-            data.stockUsedLength = (data.stockUsedLength || 0) + receipt.actualCutLen;
-            data.stockRemainingLength = receipt.remainingLength;
-        }
-        state.lastCutReceipt = receipt;
-        state.pendingPlan = null;
-
-        applyReportReceipt(data, pending, receipt);
-
-        await refreshTaskProgress();
-        updateDemandCompletionFromPieces(data);
-        renderDemandsUI(data.demands);
-
-        // 3. 更新母卷看板状态 (总长、余量、已扣用料及进度条)
-        const remaining = document.getElementById("lbl-roll-remaining");
-        if (remaining && receipt.remainingLength != null) remaining.innerText = `${receipt.remainingLength} mm`;
-
-        const rollResponse = await fetch(`/api/rolls/${encodeURIComponent(pending.rollId)}`, { cache: "no-store" });
-        if (rollResponse.ok) {
-            const roll = await rollResponse.json();
-            data.stockUsedLength = roll.usedLength; data.stockRemainingLength = roll.currentRemainingLength;
-            const remLenEl = document.getElementById("lbl-roll-remaining-len");
-            if (remLenEl) remLenEl.innerText = `${(roll.currentRemainingLength || 0).toLocaleString()} mm`;
-            const usedLenEl = document.getElementById("lbl-roll-used-len");
-            if (usedLenEl) usedLenEl.innerText = `${(roll.usedLength || 0).toLocaleString()} mm`;
-            const totalLenEl = document.getElementById("lbl-roll-total-len");
-            if (totalLenEl) totalLenEl.innerText = `${(roll.totalLength || 0).toLocaleString()}`;
-            const progressEl = document.getElementById("roll-len-progress");
-            if (progressEl && roll.totalLength > 0) {
-                const pct = Math.min(100, Math.max(0, (roll.usedLength / roll.totalLength) * 100));
-                progressEl.style.width = `${pct.toFixed(1)}%`;
-            }
-            if (remaining) remaining.innerText = `${roll.currentRemainingLength} mm`;
-        }
-
-        // 4. 更新料头库存与货架
-        if (window.camApp && window.camApp.updateMotherRollRemnantStats) {
-            await window.camApp.updateMotherRollRemnantStats(pending.rollId);
-        }
-        if (window.camApp && window.camApp.refreshShelfRemnantsList) {
-            await window.camApp.refreshShelfRemnantsList();
-        }
-
-        // 5. 更新台账与视图
-        recalculateRollStats(data);
-        updateUIInfo();
-        renderScene();
-        renderRadar();
-        closeCutReport();
-
-        // 6. 成功提示并自动平滑转入下一待切工位
-        const remCount = receipt.derivedRemnants ? receipt.derivedRemnants.length : 0;
-        if (pending.feedPortType === "remnant") {
-            showToast(`报工成功：合格 ${receipt.finishedPieceCount} 件，异常 ${receipt.rejectedPieceCount || 0} 件，未切 ${receipt.uncutPieceCount || 0} 件，回收 ${remCount} 块料头`, "success");
+        if (stageOnly) {
+            await requestJSON('/api/cutting/report-batch?preview=true',entries.map(r => r.report));
+            saveReportQueue(pending.taskId,entries);
+            state.reportQueue = entries;
+            const data = state.getCurrentCaseData(), outcomes = new Map(pieceResults.map(r => [r.pieceId,r.outcome]));
+            data.pieces = (data.pieces || []).filter(p => p.planId !== report.planId || outcomes.get(p.sourcePieceId) !== 'UNCUT')
+                .map(p => p.planId === report.planId ? {...p,queued:true} : p);
+            data.remnants = (data.remnants || []).filter(r => r.confirmed || r.queued);
+            data.cuts = [];state.pendingPlan = null;
+            closeCutReport();smartAdvanceBed();updateUIInfo();renderScene();renderRadar();
+            showToast('本工位已暂存，可继续裁切；集中报工后才扣库存并计入完成量。','success');
         } else {
-            showToast(`报工成功：合格 ${receipt.finishedPieceCount} 件，异常 ${receipt.rejectedPieceCount || 0} 件，未切 ${receipt.uncutPieceCount || 0} 件，用料 ${receipt.actualCutLen} mm，回收 ${remCount} 块`, "success");
-
-            // 自动化现场核心交互：自动推进至下一待切工位，已切区域固化为历史，并更新当前拉布基准
-            {
-                data.cuts = [];
-                smartAdvanceBed();
-                const curY = state.getCurrentCaseData().windowStartY || 0;
-                const baseOriginEl = document.getElementById("lbl-roll-base-origin");
-                if (baseOriginEl) baseOriginEl.innerText = `Y = ${curY.toLocaleString()} mm (${(curY/1000).toFixed(2)}m)`;
-                if (window.camApp && window.camApp.updateToolpathStatsUI) {
-                    window.camApp.updateToolpathStatsUI();
-                }
-
-            }
+            await submitReports(entries);
+            closeCutReport();
         }
-    } catch (error) {
-        document.getElementById("report-error").textContent = reported ? "报工已完成，页面刷新失败，请重新打开该任务查看结果" : error.message;
-    } finally {
-        reporting = false; document.getElementById("report-confirm-button").disabled = false; updateWorkflowControls();
-        if (reported) scheduleRemnantAvailability({force:true,recommend:true});
+    } catch (error) {errorNode.textContent = error.message;}
+    finally {reporting=false;document.body.inert=wasInert;updateWorkflowControls();}
+}
+
+async function submitReports(entries) {
+    const receipts = await requestJSON('/api/cutting/report-batch',entries.map(r => r.report));
+    // Once the server confirms, keep these facts even if a later UI refresh fails.
+    const byId = new Map((state.taskReports || []).map(r => [r.planId,r]));
+    receipts.forEach(r => byId.set(r.planId,r)); state.taskReports = [...byId.values()];
+    state.pendingPlan = null;state.reportQueue = [];
+    try {saveReportQueue(entries[0].pending.taskId,[]);} catch {showToast('报工已成功，本机暂存清理失败；重新打开任务会核对已报工记录。','warning');}
+    const data = state.getCurrentCaseData();
+    for (const [index,receipt] of receipts.entries()) {
+        const pending=entries[index].pending;
+        if (pending.rollId === data.rollId && pending.feedPortType === state.currentCutMode && (pending.feedPortType !== 'remnant' || pending.sourceRemnantId === state.loadedRemnant?.id)) {
+            applyReportReceipt(data,pending,receipt);data.lastReceipt=receipt;
+        }
+        state.lastCutReceipt=receipt;
     }
+    try {
+        await refreshTaskProgress();
+        if (data.rollId) {
+            const roll=await requestJSON('/api/rolls/'+encodeURIComponent(data.rollId));
+            data.stockUsedLength=roll.usedLength;data.stockRemainingLength=roll.currentRemainingLength;
+            document.getElementById('lbl-roll-remaining-len').textContent=roll.currentRemainingLength.toLocaleString()+' mm';
+            document.getElementById('lbl-roll-used-len').textContent=roll.usedLength.toLocaleString()+' mm';
+            const progress=document.getElementById('roll-len-progress');
+            if(progress && roll.totalLength>0)progress.style.width=Math.min(100,Math.max(0,roll.usedLength/roll.totalLength*100))+'%';
+            const remaining=document.getElementById('lbl-roll-remaining');
+            if(remaining)remaining.textContent=roll.currentRemainingLength+' mm';
+        }
+        await window.camApp?.updateMotherRollRemnantStats?.(data.rollId);
+        await window.camApp?.refreshShelfRemnantsList?.();
+        updateDemandCompletionFromPieces(data);renderDemandsUI(data.demands);recalculateRollStats(data);
+        updateUIInfo();renderScene();renderRadar();smartAdvanceBed();
+        showToast('已完成 '+receipts.length+' 个工位报工，可立即打印各工单。','success');
+    } catch {showToast('报工已成功，页面刷新失败；请重新打开任务核对库存与工单。','warning');}
+    scheduleRemnantAvailability({force:true,recommend:true});
+}
+
+export function openBatchReport() {
+    if(state.pendingPlan){openCutReport();return;}
+    let dialog=document.getElementById('batch-report-dialog');
+    if (!dialog) {
+        dialog=document.createElement('dialog');dialog.id='batch-report-dialog';dialog.className='action-dialog workbench-dialog';
+        dialog.setAttribute('aria-labelledby','batch-report-title');
+        dialog.addEventListener('keydown',event => event.stopPropagation());document.body.append(dialog);
+    }
+    const entries=queuedReports();
+    dialog.innerHTML='<div class="workbench-dialog-heading"><div><h2 id="batch-report-title">集中报工 · '+entries.length+' 工位</h2><p>下列记录保存在本机，尚未扣库存。确认后统一提交，每个工位生成独立工单。</p></div><button class="tool-btn" data-close>关闭</button></div><div class="workbench-dialog-body">'+
+        entries.map((r,index) => '<article class="task-list-item"><strong>工位 '+(index+1)+' · '+escapeText(r.pending.sourceRemnantId || r.pending.rollId)+'</strong><span>合格 '+r.report.finishedPieceCount+' 件 · '+(r.pending.feedPortType==='remnant'?'料头核销':'实切 '+r.report.actualCutLen+' mm · 起点 '+r.pending.windowStartY+' mm')+'</span><small>'+r.report.pieceResults.filter(p=>p.outcome==='REJECTED').length+' 件异常 · '+r.report.pieceResults.filter(p=>p.outcome==='UNCUT').length+' 件未切</small><button class="tool-btn" data-ticket="'+index+'">查看工单</button>'+(index===entries.length-1?'<button class="tool-btn" data-restore>退回核对</button>':'')+'</article>').join('')+
+        '</div><div class="workbench-dialog-footer"><span id="batch-report-error" role="alert"></span><button class="tool-btn" data-close>继续裁切</button><button class="tool-btn active" data-confirm '+(!entries.length?'disabled':'')+'>确认集中报工</button></div>';
+    dialog.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>dialog.close());
+    dialog.querySelectorAll('[data-ticket]').forEach(b=>b.onclick=async()=>{const {openCutTicketModal}=await import('../export/cut-ticket.js');openCutTicketModal({planId:entries[Number(b.dataset.ticket)].report.planId,historical:true});});
+    dialog.querySelector('[data-restore]')?.addEventListener('click',async()=>{
+        try {
+            if(state.pendingPlan)throw new Error('请先处理当前工位方案，再退回上一工位。');
+            const last=entries.at(-1),data=state.getCurrentCaseData();
+            if(last.pending.rollId!==data.rollId || last.pending.feedPortType!==state.currentCutMode || (last.pending.feedPortType==='remnant' && last.pending.sourceRemnantId!==state.loadedRemnant?.id))throw new Error('请先装载该工位的原材料，再退回核对。');
+            const saved=await requestJSON('/api/cutting/plans/'+encodeURIComponent(last.report.planId));
+            if(saved.status!=='PENDING')throw new Error('该方案状态已变化，请重新打开任务核对报工记录。');
+            const remaining=entries.slice(0,-1);saveReportQueue(state.activeTask.id,remaining);state.reportQueue=remaining;
+            restoreSavedPlan(saved);Object.assign(state.pendingPlan,{reportPieceResults:last.report.pieceResults,reportActualCutLen:last.report.actualCutLen,reportRecovery:last.pending.reportRecovery});
+            document.getElementById('report-location').value=last.report.location;
+            dialog.close();await openCutReport();
+        } catch(error){dialog.querySelector('#batch-report-error').textContent=error.message;}
+    });
+    dialog.querySelector('[data-confirm]').onclick=async()=>{
+        if(reporting)return;reporting=true;const wasInert=document.body.inert;document.body.inert=true;
+        try {await submitReports(entries);dialog.close();}
+        catch(error){dialog.querySelector('#batch-report-error').textContent=error.message;}
+        finally {reporting=false;document.body.inert=wasInert;updateWorkflowControls();}
+    };
+    if(!dialog.open)dialog.showModal();
 }
 
 export function exportCutResult() {

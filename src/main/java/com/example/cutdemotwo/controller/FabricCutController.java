@@ -94,6 +94,14 @@ public class FabricCutController {
         return remnantService.reverseReport(id, body.get("reason"));
     }
 
+    @PostMapping(value = "/cutting/report-batch", consumes = "application/json")
+    public Object reportBatch(@RequestBody String body, @RequestParam(defaultValue = "false") boolean preview) {
+        com.example.cutdemotwo.model.CutReport[] reports;
+        try { reports = reportJson.readValue(body, com.example.cutdemotwo.model.CutReport[].class); }
+        catch (RuntimeException invalid) { throw new IllegalArgumentException("报工格式无效，请核对各工位的裁片结果和件数"); }
+        return remnantService.reportBatch(reports == null ? null : java.util.Arrays.asList(reports), preview);
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Map<String, String> invalidInput(IllegalArgumentException error) {

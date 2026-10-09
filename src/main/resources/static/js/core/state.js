@@ -22,6 +22,7 @@ class StateStore {
         this.activeTask = null;
         this.taskCompleted = {};
         this.taskReports = [];
+        this.reportQueue = [];
         this.nextDemandId = 1;
     }
 

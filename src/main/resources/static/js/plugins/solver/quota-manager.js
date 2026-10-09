@@ -1,6 +1,7 @@
 /**
  * 需求配额核销与工位加工区间管理器 (Quota & Interval Manager Plugin)
  */
+import {queuedReports} from './report-queue.js';
 import { state } from '../../core/state.js';
 import {renderMaterialInspection} from '../layout/workbench-panels.js';
 import { bus } from '../../core/event-bus.js';
@@ -54,9 +55,9 @@ export function clearStationCuts() {
 
     if (isRemnantMode) {
         const removedPieces = (data.pieces || []).length;
-        data.pieces = (data.pieces || []).filter(p => p.confirmed);
+        data.pieces = (data.pieces || []).filter(p => p.confirmed || p.queued);
         data.cuts = [];
-        data.remnants = (data.remnants || []).filter(r => r.confirmed);
+        data.remnants = (data.remnants || []).filter(r => r.confirmed || r.queued);
         data.cutIntervals = [];
         data.deductLen = 0;
         data.pieceArea = 0;
@@ -95,7 +96,7 @@ export function clearStationCuts() {
         return (pMid >= winStartY && pMid < winEndY);
     };
     const oldCount = (data.pieces || []).length;
-    data.pieces = (data.pieces || []).filter(p => p.confirmed || !isPieceInCurrentStation(p));
+    data.pieces = (data.pieces || []).filter(p => p.confirmed || p.queued || !isPieceInCurrentStation(p));
     const removedPieces = oldCount - data.pieces.length;
 
     // 清空切刀：CNC 数控切刀严格属于当前工位
@@ -132,8 +133,8 @@ export function clearStationCuts() {
 
 export function resetAllRollCuts() {
     const data = state.getCurrentCaseData();
-    data.pieces = (data.pieces || []).filter(p => p.confirmed);
-    data.remnants = (data.remnants || []).filter(r => r.confirmed);
+    data.pieces = (data.pieces || []).filter(p => p.confirmed || p.queued);
+    data.remnants = (data.remnants || []).filter(r => r.confirmed || r.queued);
     data.cuts = []; state.pendingPlan = null;
     recalculateRollStats(data); updateDemandCompletionFromPieces(data);
     renderDemandsUI(data.demands); renderScene(); updateUIInfo();
@@ -141,6 +142,7 @@ export function resetAllRollCuts() {
 }
 
 export async function resetContinuousCutting() {
+    if(queuedReports().length){showToast('请先处理待报工工位，再重置库存。','warning');return;}
     const isRemnantMode = (state.currentCutMode === 'remnant');
     if (isRemnantMode) {
         showToast('当前处于料头模式，可切换为母卷开卷排产模式进行连续搭切', 'info');
@@ -300,71 +302,26 @@ export function renderDemandsUI(demands) {
     updateWorkflowControls();
 }
 
-export function renderDefectsUI(defects) {
-    const tagDefects = document.getElementById("tag-defects-summary");
-    if (tagDefects) {
-        const count = (defects || []).length;
-        tagDefects.innerText = count > 0 ? `共 ${count} 处瑕疵` : "无瑕疵";
-        tagDefects.style.color = count > 0 ? "#f59e0b" : "var(--text-muted)";
-    }
-    const container = document.getElementById("defects-container");
-    if (!container) return;
-    container.innerHTML = "";
-    if (!defects || defects.length === 0) {
-        container.innerHTML = "<div style='color:var(--text-muted);font-size:11px;padding:4px;'>暂无瑕疵点 (可点击上方+增疵点)</div>";
-        return;
-    }
-    defects.forEach((d, idx) => {
-        const row = document.createElement("div");
-        row.className = "item-row";
-        row.setAttribute("data-id", d.id || (idx + 1));
-        row.innerHTML = `
-            <div class="item-row-header">
-                <span style="color:#f87171;">瑕疵 #${d.id || (idx + 1)}</span>
-                <button class="del-btn" onclick="this.closest('.item-row').remove(); window.camApp.onParamChange();">×</button>
-            </div>
-            <div class="mini-input-group">
-                <span>X:</span><input type="number" class="mini-input d-x" value="${d.x}" onchange="window.camApp.onParamChange()">
-                <span>Y:</span><input type="number" class="mini-input d-y" value="${d.y}" onchange="window.camApp.onParamChange()">
-                <span>宽:</span><input type="number" class="mini-input d-w" value="${d.w}" onchange="window.camApp.onParamChange()">
-                <span>长:</span><input type="number" class="mini-input d-h" value="${d.h}" onchange="window.camApp.onParamChange()">
-                <span>余:</span><input type="number" class="mini-input d-margin" value="${d.margin !== undefined ? d.margin : 20}" title="安全避让余量" onchange="window.camApp.onParamChange()">
-            </div>
-        `;
-        container.appendChild(row);
-    });
-
+function defectRow(d, open = false) {
+    d=Object.fromEntries(['id','x','y','w','h','margin'].map(key=>[key,Number(d[key] ?? (key==='margin'?20:0))]));
+    const row=document.createElement('details');row.className='item-row defect-editor-row';row.dataset.id=d.id;row.open=open;
+    row.innerHTML='<summary><strong>#'+d.id+'</strong><span>X '+d.x+' / Y '+d.y+'</span><span>'+d.w+' × '+d.h+' mm</span><span>避让 '+(d.margin ?? 20)+' mm</span><small>编辑 ▾</small></summary><div class="defect-editor-fields">'+
+        [['x','幅宽位置 X'],['y','长向位置 Y'],['w','疵点宽度'],['h','疵点长度'],['margin','避让余量']].map(([key,label])=>'<label>'+label+' (mm)<input type="number" min="0" class="mini-input d-'+key+'" value="'+(d[key] ?? 20)+'" onchange="window.camApp.onParamChange()"></label>').join('')+
+        '<button class="tool-btn" onclick="this.closest(\'.item-row\').remove(); window.camApp.onParamChange();">删除此疵点</button></div>';
+    return row;
 }
-
+export function renderDefectsUI(defects) {
+    const container=document.getElementById('defects-container');if(!container)return;
+    container.replaceChildren(...(defects || []).map((d,i)=>defectRow({...d,id:d.id || i+1})));
+    if(!defects?.length)container.innerHTML='<p class="muted">未登记疵点；可在上方添加。</p>';
+    const tag=document.getElementById('tag-defects-summary');if(tag)tag.textContent='共 '+(defects || []).length+' 处';
+}
 export function addDefectRow() {
-    const container = document.getElementById("defects-container");
-    if (!container.querySelector(".item-row")) container.innerHTML = "";
-    const id = Math.max(state.nextDemandId++, 1, ...[...container.querySelectorAll(".item-row")].map(r => Number(r.dataset.id) + 1));
-    state.nextDemandId = id + 1;
-    const row = document.createElement("div");
-    row.className = "item-row";
-    row.setAttribute("data-id", id);
-    row.innerHTML = `
-        <div class="item-row-header">
-            <span style="color:#f87171;">瑕疵 #${id}</span>
-            <button class="del-btn" onclick="this.closest('.item-row').remove(); window.camApp.onParamChange();">×</button>
-        </div>
-        <div class="mini-input-group">
-            <span>X:</span><input type="number" class="mini-input d-x" value="200" onchange="window.camApp.onParamChange()">
-            <span>Y:</span><input type="number" class="mini-input d-y" value="1000" onchange="window.camApp.onParamChange()">
-            <span>宽:</span><input type="number" class="mini-input d-w" value="150" onchange="window.camApp.onParamChange()">
-            <span>长:</span><input type="number" class="mini-input d-h" value="200" onchange="window.camApp.onParamChange()">
-            <span>余:</span><input type="number" class="mini-input d-margin" value="${Number(localStorage.getItem('cam_margin') ?? 20)}" title="安全避让余量" onchange="window.camApp.onParamChange()">
-        </div>
-    `;
-    container.appendChild(row);
-    const tagDefects = document.getElementById("tag-defects-summary");
-    if (tagDefects) {
-        const count = container.querySelectorAll(".item-row").length;
-        tagDefects.innerText = `共 ${count} 处瑕疵`;
-        tagDefects.style.color = "#f59e0b";
-    }
-    onParamChange();
+    const container=document.getElementById('defects-container');
+    if(!container.querySelector('.item-row'))container.replaceChildren();
+    const id=Math.max(1,...[...container.querySelectorAll('.item-row')].map(r=>Number(r.dataset.id)+1));
+    const row=defectRow({id,x:200,y:1000,w:150,h:200,margin:Number(localStorage.getItem('cam_margin') ?? 20)},true);
+    container.append(row);onParamChange();row.querySelector('input').focus();
 }
 
 export function removeDemandRow(button) {
@@ -506,7 +463,10 @@ export function onOriginParamChange() {
     data.firstStageOrientation = document.getElementById("sel-first-stage").value;
     data.allowRotation = (document.getElementById("sel-allow-rotation").value === "1");
     data.globalDefects = getDefectsFromUI();
-    if (document.getElementById('material-details')?.open) renderMaterialInspection();
+    if (document.getElementById('material-manager-modal')?.open) renderMaterialInspection();
+    const tagDefects=document.getElementById('tag-defects-summary');
+    if(tagDefects)tagDefects.textContent='共 '+data.globalDefects.length+' 处';
+    renderRadar();
 
     updateOriginHeaderSummary();
 

@@ -9,6 +9,7 @@ import { recalculateRollStats } from '../solver/quota-manager.js';
 import { updateUIInfo } from '../solver/solver-client.js';
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
+import {queuedRollEnd} from '../solver/report-queue.js';
 
 export function requireStationReport() {
     if (!state.pendingPlan) return false;
@@ -19,7 +20,7 @@ export function requireStationReport() {
 export function nextCutPosition(data) {
     if (!data) return 0;
     const receiptEnd = data.lastReceipt?.feedPortType === 'roll' ? data.lastReceipt.windowStartY + data.lastReceipt.actualCutLen : 0;
-    return Math.max(data.stockUsedLength || 0, receiptEnd, 0, ...(data.pieces || []).map(p => p.y + p.l), ...(data.cuts || []).filter(c => c.type === '横切').map(c => c.pos));
+    return Math.max(data.stockUsedLength || 0, receiptEnd, queuedRollEnd(data.rollId), 0, ...(data.pieces || []).map(p => p.y + p.l), ...(data.cuts || []).filter(c => c.type === '横切').map(c => c.pos));
 }
 
 export function getSnappableNextStation(data) {

@@ -4,22 +4,25 @@ import {readWorkflowState, navigateWorkflowStage} from '../solver/workflow-guide
 import {escapeText} from '../solver/task-workspace.js';
 import {switchCutMode} from '../remnant/remnant-shelf.js';
 import {solverSettings} from '../settings/settings.js';
-import {recommendationMarkup, stockSignature} from './remnant-recommendation.js';
+import {recommendationMarkup, stockSignature, helpTip} from './remnant-recommendation.js';
 import {showToast} from '../../core/toast.js';
 import {remnantAvailability} from './remnant-availability.js';
+import {queuedQuantities, queuedReports} from '../solver/report-queue.js';
 
 const el = id => document.getElementById(id);
 let generation = 0;
 const key = candidate => candidate.type + ':' + candidate.id;
 const currentKey = () => state.currentCutMode === 'remnant' ? 'remnant:' + state.loadedRemnant?.id : 'roll:' + state.getCurrentCaseData().rollId;
 function requestFromUI() {
+    const staged=queuedQuantities();
     return {...solverSettings(), taskId:state.activeTask?.id || null,taskRevision:state.activeTask?.revision || 0,
         rollModel:el('task-material').value,trimStart:Number(el('inp-trim-start').value),
         cutOrigin:el('sel-cut-origin').value,firstStageOrientation:el('sel-first-stage').value,
-        demands:getDemandsFromUI().filter(d=>d.demand>0).map(d=>({id:d.id,name:d.name,width:d.width,length:d.length,demand:d.demand,allowRotation:d.allowRotation})),
+        demands:getDemandsFromUI().map(d=>({id:d.id,name:d.name,width:d.width,length:d.length,demand:Math.max(0,d.demand-(staged[d.id] || 0)),allowRotation:d.allowRotation})).filter(d=>d.demand>0),
         allowRotation:el('sel-allow-rotation').value==='1',allowLongitudinal:el('sel-allow-longitudinal').value==='1'};
 }
-const context = () => JSON.stringify([state.activeTask?.id,state.activeTask?.revision,state.taskCompleted,(state.taskReports || []).map(r=>[r.planId,r.status]),requestFromUI()]);
+const context = () => JSON.stringify([state.activeTask?.id,state.activeTask?.revision,state.taskCompleted,(state.taskReports || []).map(r=>[r.planId,r.status]),queuedReports().map(r=>r.report.planId),requestFromUI()]);
+const unusedRemnant = id => !queuedReports().some(r=>r.pending.sourceRemnantId===id);
 async function read(url, body) {
     const response=await fetch(url,body ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : {cache:'no-store'});
     const result=await response.json();if(!response.ok)throw new Error(result.message || '读取库存失败，请重试');return result;
@@ -42,7 +45,7 @@ export function scheduleRemnantAvailability({force = false, recommend = false} =
             const canMatch = request.rollModel && request.demands.length && request.demands.every(d => d.width > 0 && d.length > 0 && Number.isInteger(d.demand));
             const candidates = canMatch ? await read('/api/cutting/material-candidates',request) : [];
             if (!valid()) return;
-            const facts = remnantAvailability(stocks,candidates,request);
+            const facts = remnantAvailability(stocks.filter(r=>unusedRemnant(r.id)),candidates.filter(c=>c.type!=='remnant' || unusedRemnant(c.id)),request);
             el('header-remnant-count').textContent = facts.total;
             el('remnant-availability').textContent = facts.message;
             el('btn-remnant-recommend').disabled = !canMatch;
@@ -52,7 +55,7 @@ export function scheduleRemnantAvailability({force = false, recommend = false} =
                 el('btn-remnant-recommend').disabled = true;el('btn-remnant-recommend').textContent = '正在试排…';
                 const result = await read('/api/cutting/remnant-recommendations',{input:request,completedBaseline});
                 if (!valid()) return;
-                const best = result.recommendations[0];
+                const best = result.recommendations.find(r=>unusedRemnant(r.stock.id));
                 el('remnant-availability').textContent = best ? `建议先用 ${best.stock.id} · 可切 ${best.pieceCount} 件` : '本次试排未得到可用推荐，点击查看原因';
                 el('btn-remnant-recommend').disabled = false;el('btn-remnant-recommend').textContent = '查看推荐';
             }
@@ -78,8 +81,7 @@ export async function openMaterialSelection(preferred = {}) {
         <div class="material-picker-body"><p class="material-match-scope"><strong>${escapeText(request.rollModel)}</strong> · 全部剩余需求 ${request.demands.length} 项 / ${request.demands.reduce((n,d)=>n+d.demand,0)} 件</p>
         <details class="detail-disclosure"><summary>匹配范围与规则</summary><p>只列同型号、库存尺寸可容纳至少一项剩余需求的材料。料头优先列出；每次选择一个来源，不做多材料联合分配。件数、机台加工区、修边、疵点及工艺限制仍需排料验证。</p>
         <ul>${request.demands.map(d=>`<li>${escapeText(d.name)} · ${d.width} × ${d.length} mm · 剩余 ${d.demand} 件</li>`).join('')}</ul></details>
-        <section class="remnant-recommendations"><div class="recommendation-heading"><strong>先用料头切一部分</strong><button class="tool-btn active" id="material-recommend">计算料头推荐</button></div>
-        <details class="detail-disclosure"><summary>推荐规则与范围</summary><p>按当前工艺、修边、旋转和库存疵点试排；优先消化需求面积，其次整块料头利用率，再按刀数少排序。先评估面积较小的最多 8 块料头，每块搜索 1 秒，不保证全局最优。</p><p>每次选用一块，合格报工后再匹配剩余需求。此处不保存方案、不预占或扣库存；正式方案以装载后重新求解为准。加工区按整块料头计算，请核对实际机台能否容纳。</p></details>
+        <section class="remnant-recommendations"><div class="recommendation-heading"><strong>料头推荐 ${helpTip('推荐规则与范围','按工艺、修边、旋转和库存疵点试排。优先需求面积，再按整块利用率和刀数排序；最多评估 8 块，每块搜索 1 秒。推荐不扣库存、不保存方案；装载后重新排料。加工区按整块料头计算，请核对机台能否容纳。')}</strong><button class="tool-btn" id="material-recommend">计算料头推荐</button></div>
         <p id="material-recommend-status" role="status" hidden></p><div id="material-recommend-results" hidden></div></section>
         <div class="material-picker-filters"><label>来源<select id="material-source-filter" class="prop-input"><option value="all">全部材料</option><option value="remnant">仅料头</option><option value="roll">仅母卷</option></select></label>
         <label>查找<input id="material-search" class="prop-input" type="search" placeholder="编号、库位或扫描条码"></label><button class="tool-btn" id="material-refresh">刷新库存</button></div>
@@ -120,7 +122,7 @@ export async function openMaterialSelection(preferred = {}) {
         try {
             const list=await read('/api/cutting/material-candidates',request);if(!valid())return;
             if(context()!==snapshot)throw new Error('需求已变化，请关闭窗口后重新匹配。');
-            candidates=list;selected=preferred.id && candidates.some(c=>key(c)===key(preferred))?key(preferred):'';
+            candidates=list.filter(c=>c.type!=='remnant' || unusedRemnant(c.id));selected=preferred.id && candidates.some(c=>key(c)===key(preferred))?key(preferred):'';
             if(preferred.id && !selected)fail(`材料 ${preferred.id} 不在本次匹配范围内，可能已用完、型号或尺寸不符合。请选择其他材料。`);
         } catch(error) {if(!valid())return;candidates=[];selected='';fail(error.message);}
         finally {if(valid()){busy=false;render();}}
@@ -133,7 +135,8 @@ export async function openMaterialSelection(preferred = {}) {
         try {
             const result=await read('/api/cutting/remnant-recommendations',{input:request,completedBaseline});if(!valid())return;
             if(context()!==snapshot)throw new Error('需求、已报工数量或工艺已变化，请关闭窗口后重新匹配。');
-            analysis=result;status.textContent=result.recommendations.length?'推荐已更新；选择一块核对后装载。':'暂无可用推荐，请查看原因或选择母卷。';
+            result.recommendations=result.recommendations.filter(r=>unusedRemnant(r.stock.id));
+            analysis=result;status.hidden=true;
             const panel=el('material-recommend-results');panel.innerHTML=recommendationMarkup(result);panel.hidden=false;
             panel.querySelectorAll('[data-recommend-stock]').forEach(button=>button.onclick=()=>{
                 const stock=result.recommendations.find(r=>r.stock.id===button.dataset.recommendStock).stock;

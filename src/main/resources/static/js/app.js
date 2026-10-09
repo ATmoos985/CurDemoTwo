@@ -55,7 +55,7 @@ import {
 
 import {
     updateUIInfo, loadCase, triggerSolve,
-    openCutReport, closeCutReport, confirmCutReport, exportCutResult,
+    openCutReport, closeCutReport, confirmCutReport, openBatchReport, exportCutResult,
     openStationLapConfirmModal, updateReportPreview, recordPlanEdit, undoPlanEdit, redoPlanEdit, validatePlanAdjustment
 } from './plugins/solver/solver-client.js';
 
@@ -363,7 +363,7 @@ const camApp = {
     viewFullRoll,
     zoomCanvas, setCanvasLayer,
     triggerSolve,
-    openCutReport, closeCutReport, confirmCutReport, exportCutResult,
+    openCutReport, closeCutReport, confirmCutReport, openBatchReport, exportCutResult,
     openStationLapConfirmModal, updateReportPreview,
     loadCase,
     stepCut,

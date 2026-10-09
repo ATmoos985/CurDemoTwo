@@ -239,7 +239,7 @@
             <button class="sidebar-edge-toggle edge-toggle-right" id="edge-toggle-right" onclick="toggleSidebar('right')" title="点击收起右侧面板">▶</button>
 
             <!-- 图例栏 -->
-            <div class="workspace-heading canvas-heading"><h1>排料画布</h1><div class="canvas-view-actions"><button class="tool-btn" onclick="resetToBedView()">当前工位</button><button class="tool-btn" onclick="viewFullRoll()">全卷</button></div></div>
+            <div class="workspace-heading canvas-heading"><h1>排料画布</h1><div class="canvas-view-actions"><button class="tool-btn" onclick="resetToBedView()">当前工位</button><button class="tool-btn" onclick="viewFullRoll()">全卷</button><button class="tool-btn" onclick="openMaterialModal()">库存档案</button></div></div>
             <!-- 母卷全局疵点雷达与展开视窗导航条 (Global Roll Panorama & Defect Radar) -->
             <div class="roll-radar-bar" id="roll-radar-bar">
                 <div class="radar-label-group">
@@ -402,7 +402,7 @@
             <div class="sidebar-pinned-footer" id="right-sidebar-actions-footer" style="border-top: 1px solid var(--panel-border); background: var(--panel-bg); flex-shrink: 0;">
                 <!-- 母卷开卷工位排料搭切执行控制 -->
                 <div id="right-roll-actions" class="panel-section action-footer-section" style="padding: 10px 14px 12px 14px;">
-                    <p id="output-empty" class="muted">等待左侧生成排料方案</p><section id="report-output" hidden><strong>最近报工</strong><p id="report-output-summary"></p><details><summary>本次入库料头</summary><ul id="report-output-remnants"></ul><button class="tool-btn" onclick="openRemnantModal()">查看料头库</button></details></section>
+                    <p id="output-empty" class="muted">生成方案后在此核对产出</p><section id="report-output" hidden><strong>最近报工</strong><button class="tool-btn" onclick="openCutTicketModal()">打印工单</button><p id="report-output-summary"></p><details><summary>本次入库料头</summary><ul id="report-output-remnants"></ul><button class="tool-btn" onclick="openRemnantModal()">查看料头库</button></details></section>
                     <strong id="workflow-current" role="status">完善需求</strong>
                     <p id="station-action-hint" class="station-action-hint" role="status">先生成方案，再核对实切并报工保存。</p>
                     <button id="btn-workflow-next" class="tool-btn" type="button">完善需求信息</button>
@@ -418,14 +418,14 @@
 
                         报工保存
                     </button>
-                    <div class="secondary-workflow-tools">
+                    <button class="tool-btn" id="btn-batch-report" hidden onclick="openBatchReport()">集中报工</button><div class="secondary-workflow-tools">
                     <details id="station-navigation-group" class="detail-disclosure station-navigation"><summary>浏览工位</summary><p class="muted">只移动查看位置；待报工方案须先处理。</p><div class="station-browse-actions"><button class="tool-btn" onclick="advanceBed(-1)">← 查看上一工位</button><button class="tool-btn" onclick="advanceBed(1)">查看下一工位 →</button><button class="tool-btn" id="btn-smart-advance" onclick="smartAdvanceBed()">回到待切位置</button></div></details>
                     <details class="detail-disclosure reset-actions"><summary>清理排料</summary><div style="display: flex; gap: 6px; margin-top: 6px;">
                         <button class="tool-btn" onclick="clearStationCuts()" title="仅清除当前红框范围内的裁片与切刀">
                             清除本工位排料
                         </button>
                         <button class="tool-btn" onclick="resetAllRollCuts()" title="清除全部预览裁片，从头开始">
-                            清空整卷已排
+                            清空整卷预览
                         </button>
                     </div></details>
                     </div>
@@ -449,15 +449,15 @@
     <dialog id="task-picker" class="workflow-dialog" aria-labelledby="task-picker-title"><div class="workflow-dialog-heading"><h2 id="task-picker-title">切割任务</h2><button class="tool-btn" onclick="document.getElementById('task-picker').close()">关闭</button></div><div id="task-picker-body" class="workflow-dialog-body"></div></dialog>
     <dialog id="cut-report-modal" class="report-modal" aria-labelledby="report-title">
         <div class="settings-modal-dialog report-dialog">
-            <div class="settings-modal-header"><h2 id="report-title">报工与余料回收</h2><button class="tool-btn" onclick="closeCutReport()">关闭</button></div>
+            <div class="settings-modal-header"><h2 id="report-title">本工位裁切结果</h2><button class="tool-btn" onclick="closeCutReport()">关闭</button></div>
             <div class="report-body">
-                <p class="muted">确认后记录产出、扣减本次用料，并将勾选的余料入库。</p>
+                <p class="muted">可先暂存本工位并继续裁切，最后集中报工；立即报工会连同已暂存工位一起提交。</p>
                 <section><h3>01 · 本次用料</h3><div class="report-source"><b id="report-preview-roll-id">—</b><span id="report-stock-preview">余量 <span id="report-preview-cur-len">—</span> → <b id="report-preview-after-len">—</b></span></div>
                 <div class="report-fields"><label><span id="report-length-label">实切长度（mm）</span><input id="report-actual-len" type="number" min="0" step="0.1" class="prop-input" oninput="updateReportPreview()"></label><label>合格产出（件）<input id="report-piece-count" type="number" min="0" class="prop-input" readonly></label></div><p id="report-area-preview" class="muted" role="status"></p></section>
                 <section><h3>02 · 逐件核对实际结果</h3><p class="muted">仅合格件完成需求。异常件填写原因，未切件留待后续排料；本次保存后结束当前方案。</p><div class="report-batch-actions"><button id="report-all-qualified" class="tool-btn">全设合格</button><button id="report-all-uncut" class="tool-btn">全设未切</button><button id="report-mark-tail" class="tool-btn">长度外标为未切</button></div><div id="report-pieces"></div><div id="report-preview-demand-text" class="muted"></div><p id="report-outcome-summary" role="status"></p></section>
                 <section><h3>03 · 余料回收 <small id="report-preview-remnant-text"></small></h3><label class="report-location">入库库位<input id="report-location" class="prop-input" value="现场料头架 A-01"></label><div id="report-remnants"></div><details class="detail-disclosure"><summary>实测与回收规则</summary><p>仅勾选已分离并实际回收的矩形料头。未切区域只列出已扣用料中的部分，确认分离后可勾选回收；未勾选部分计入损耗，未分离的卷尾仍在母卷中。实测尺寸不能与合格件、异常件或其他料头重叠，小于方案回收门槛的余料不入库。</p></details></section>
             </div>
-            <div class="settings-modal-footer"><p id="report-error" role="alert"></p><div class="report-footer-actions"><button class="tool-btn" onclick="closeCutReport()">暂不报工</button><button id="report-confirm-button" class="tool-btn active" onclick="confirmCutReport()">确认报工并保存</button></div></div>
+            <div class="settings-modal-footer"><p id="report-error" role="alert"></p><div class="report-footer-actions"><button class="tool-btn" onclick="closeCutReport()">暂不报工</button><button id="report-stage-button" class="tool-btn active" onclick="confirmCutReport(true)">暂存，继续裁切</button><button id="report-confirm-button" class="tool-btn" onclick="confirmCutReport()">确认报工并保存</button></div></div>
         </div>
     </dialog>
 

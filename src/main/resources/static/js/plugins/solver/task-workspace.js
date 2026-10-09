@@ -11,6 +11,7 @@ import { createDraftStore } from './task-drafts.js';
 import {requestJSON, failurePresentation} from '../../core/api-request.js';
 import {planStatusLabel, ticketNumber} from '../export/cut-ticket-model.js';
 import {readWorkflowState, navigateWorkflowStage} from './workflow-guide.js';
+import {loadReportQueue, queuedReports} from './report-queue.js';
 
 export const escapeText = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const el = id => document.getElementById(id);
@@ -183,6 +184,7 @@ export function taskInputChanged() {
 }
 
 export function startTaskDraft(name = '本次切割') {
+    state.reportQueue = [];
     state.activeTask = null;
     state.taskCompleted = {};
     state.taskReports = [];
@@ -276,6 +278,13 @@ async function saveTaskSnapshot() {
     state.getCurrentCaseData().demands = getDemandsFromUI();
     const payload = taskPayload();
     const current = state.activeTask;
+    if (queuedReports().length) {
+        // Keep the task revision stable until every staged station has been reported.
+        for (const key of ['name','materialModel','externalRef','demands'])
+            if (JSON.stringify(payload[key]) !== JSON.stringify(current[key]))
+                throw new Error('请先完成集中报工，再修改任务需求；待报工记录已保留。');
+        return current;
+    }
     const task = await api('/api/cutting/tasks', payload);
     if (current !== state.activeTask || JSON.stringify(payload) !== JSON.stringify(taskPayload())) throw new Error('保存期间需求已变化，请再次保存当前需求');
     state.activeTask = task;
@@ -346,11 +355,13 @@ export async function loadTask(id, {skipDraftGuard = false, detail:loadedDetail}
     const wasInert = document.body.inert; document.body.inert = true;
     try {
         const detail = loadedDetail || await api('/api/cutting/tasks/' + encodeURIComponent(id));
+        const reportQueue = loadReportQueue(id);
         const rolls = await api('/api/rolls');
         draftReady = false;
         state.activeTask = detail.task;
         state.taskCompleted = detail.completed;
         state.taskReports = detail.reports;
+        state.reportQueue = reportQueue;
         const task = detail.task;
         el('task-name').value = task.name;
         el('task-external-ref').value = task.externalRef || '';
