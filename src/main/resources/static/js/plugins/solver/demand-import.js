@@ -104,6 +104,6 @@ export function openDemandImport({sample = false} = {}) {
         render();
         const cream = result.groups.findIndex(group => group.materialModel === '2#A3A-Cream');
         el('demand-import-model').value = String(Math.max(0,cream));renderGroup();
-        el('demand-import-status').textContent = '9.28 Excel · 100 项有效需求 / 156 件 · 保留原尺寸与数量，订单编号以来源行替代。第 78、79、108、109 行字段不完整，未纳入样例。';
+        el('demand-import-status').textContent = '9.28 Excel · 100 项有效需求 / 156 件 · 完整保留客户订单编号、工艺款号与规格尺寸。第 78、79、108、109 行字段不完整，未纳入样例。';
     }
 }
