@@ -36,7 +36,7 @@
 .demand-quick-row > .demand-meter { grid-column: 1 / -1; height: 4px; margin: 1px 0; }
 .demand-meter { display: flex; }
 .demand-meter > span { background: var(--accent-green); flex: none; }
-.demand-meter > .demand-meter-staged { background: var(--accent-amber, #b98228); }
+.demand-meter > .demand-meter-staged { background: var(--accent-green); flex: none; }
 .demand-progress-counts { margin: 5px 0 0; font-size: 11px; color: var(--text-muted); }
 .demand-quick-row strong { display: block; font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 185px; }
 .demand-quick-row b { font-size: 12px; color: var(--accent-blue); }

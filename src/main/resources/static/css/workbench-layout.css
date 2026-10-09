@@ -26,13 +26,13 @@
 .demand-overview-heading > span { color: var(--text-muted); }
 .demand-progress-segments { display: flex; gap: 4px; margin-top: 8px; }
 .demand-segment { flex: 1; position: relative; min-width: 0; height: 24px; overflow: hidden; border: 1px solid var(--panel-border); border-radius: 3px; padding: 0; background: var(--panel-header); color: var(--text-main); cursor: pointer; }
-.demand-segment > span { position: absolute; inset: 0 auto 0 0; background: var(--accent-blue); opacity: .25; pointer-events: none; }
+.demand-segment > span { position: absolute; inset: 0 auto 0 0; background: var(--accent-green); opacity: .25; pointer-events: none; }
 .demand-segment b { position: relative; font-size: 10px; }
 .demand-segment[data-complete="true"] { color: #fff; border-color: var(--accent-green); }
 .demand-segment[data-complete="true"] > span { background: var(--accent-green); opacity: 1; }
 .demand-segment:focus-visible, .demand-change-link:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
 .demand-meter { height: 7px; border-radius: 4px; background: var(--panel-border); overflow: hidden; margin: 7px 0; }
-.demand-meter > span { display: block; height: 100%; background: var(--accent-blue); }
+.demand-meter > span { display: block; height: 100%; background: var(--accent-green); }
 .demand-meter[data-complete="true"] > span { background: var(--accent-green); }
 .demand-overview[hidden], .demand-progress-segments[hidden], .demand-meter[hidden], .demand-recent-change[hidden], .demand-change[hidden], .demand-preview-label[hidden] { display: none; }
 .demand-recent-change { margin-top: 7px; font-size: 11px; }
