@@ -177,10 +177,6 @@
                                 <input type="number" class="prop-input" id="inp-roll-w" value="2000" min="500" max="5000" step="100" onchange="onRollConfigChange()" />
                             </div>
                             <div class="prop-row">
-                                <span class="prop-label">台面长度 (mm)</span>
-                                <input type="number" class="prop-input" id="inp-bed-l" value="5000" step="500" onchange="onRollConfigChange()" />
-                            </div>
-                            <div class="prop-row">
                                 <span class="prop-label">卷头修齐 (mm)</span>
                                 <input type="number" class="prop-input" id="inp-trim-start" value="0" min="0" max="1000" step="50" onchange="onOriginParamChange()" />
                             </div>
@@ -243,16 +239,17 @@
             <!-- 母卷全局疵点雷达与展开视窗导航条 (Global Roll Panorama & Defect Radar) -->
             <div class="roll-radar-bar" id="roll-radar-bar">
                 <div class="radar-label-group">
-                    <details class="canvas-help radar-help"><summary class="radar-title">母卷导航 ⓘ</summary><div class="canvas-help-body"><p>横轴单位：米。灰色区域为已报工，红色疵点在当前工位内，黄色疵点在其他位置。</p><p>拖动蓝框、点击轨道、滚轮或方向键可切换查看位置。待报工方案须先处理。</p></div></details>
+                    <details class="canvas-help radar-help"><summary class="radar-title">母卷导航 ⓘ</summary><div class="canvas-help-body"><p>横轴单位：米。灰色区域为已报工，红色疵点在当前工位内，黄色疵点在其他位置。</p><p>拖动框内移动位置，拖动右端调节本次拉布长度；也可直接输入长度。右端选中后用方向键调整，Shift + 方向键微调 0.1 mm。待报工方案须先处理。</p><p>拉布长度表示本次展开排料的范围，按现场可拉布长度设置。整幅横切可按需求拉出整片；二维裁片需在现场可加工范围内完成。改变范围不扣库存。</p></div></details>
                     <span class="radar-info" id="radar-roll-info"></span>
                 </div>
                 <div class="radar-strip-container" id="radar-strip-container">
                     <div class="radar-track" id="radar-track">
                         <!-- 动态生成刻度与疵点针 -->
                         <div class="radar-window" id="radar-window" role="slider" tabindex="0" aria-label="母卷工位位置" aria-valuemin="0" aria-valuemax="55000" aria-valuenow="0" aria-describedby="radar-window-text" title="拖动工位滑块，或在轨道上点击、滚动"></div>
+                        <div class="radar-resize-end" id="radar-resize-end" role="slider" tabindex="0" aria-label="本次拉布长度" aria-valuemin="0.1" aria-valuemax="60000" aria-valuenow="5000" aria-describedby="radar-window-text" title="拖动右端调整拉布长度；方向键调整，Shift 微调">Ⅱ</div>
                     </div>
                 </div>
-                <div class="radar-caption"><span id="radar-window-text">当前工位 0–5 m</span><button class="tool-btn radar-reset-btn" id="btn-radar-reset" onclick="resetContinuousCutting()" title="重置母卷搭切进度回 0m 起点">重置搭切</button><span class="radar-legend"><i class="consumed-key"></i>已报工 <i class="defect-key"></i>疵点 <span>单位 m</span></span></div>
+                <div class="radar-caption"><span id="radar-window-text">当前工位 0–5 m</span><div class="radar-feed-controls"><label>本次拉布 <input type="number" class="prop-input" id="inp-bed-l" aria-label="本次拉布长度（mm）" value="5000" min="0.1" step="0.1" onchange="resizeFeedWindow(Number(this.value))" /> mm</label><button class="tool-btn" id="btn-feed-fit" title="按剩余需求中最长单片的尺寸设置，包含切头量，不含疵点避让；最终以排料结果为准。">按最长单片</button></div><button class="tool-btn radar-reset-btn" id="btn-radar-reset" onclick="resetContinuousCutting()" title="重置母卷搭切进度回 0m 起点">重置搭切</button><span class="radar-legend"><i class="consumed-key"></i>已报工 <i class="defect-key"></i>疵点 <span>单位 m</span></span></div>
             </div>
 
             <div class="cad-tools" role="toolbar" aria-label="画布工具">

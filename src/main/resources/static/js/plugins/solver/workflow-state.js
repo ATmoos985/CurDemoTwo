@@ -25,7 +25,7 @@ export function workflowState(input) {
     if (!material.sheet && process.start < material.used - .001)
         return step(2, '正在回看前面的工位', '此处已有报工或暂存记录；继续排料请回到待切位置。', 'advance', '回到待切位置');
     if (!Number.isFinite(process.length) || process.length <= 0 || process.length > material.length + .001)
-        return step(2, '核对加工区', '加工区长度须大于 0，且不超过材料剩余长度。', 'focus', '修改加工区长度', '#inp-bed-l');
+        return step(2, '核对拉布长度', '本次拉布长度须大于 0，且不超过材料剩余长度。', 'focus', '修改拉布长度', '#inp-bed-l');
     if (!Number.isFinite(process.start) || process.start < 0 || (!material.sheet && process.start+process.length > material.total+.001))
         return step(2, '核对加工区', '当前工位超出材料范围，请在母卷导航中调整位置。', 'focus', '定位母卷导航', '#radar-window');
     if (!Number.isFinite(process.trim) || process.trim < 0 || process.trim >= process.length)

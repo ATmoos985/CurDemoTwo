@@ -13,7 +13,7 @@ import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 import { renderScene, resetToBedView } from '../cad/cad-renderer.js';
 import { drawRulers } from '../cad/cad-rulers.js';
-import { renderRadar, smartAdvanceBed } from '../radar/radar-scrubber.js';
+import { renderRadar, smartAdvanceBed, resizeFeedWindow, updateFeedControls } from '../radar/radar-scrubber.js';
 import {
     updateDemandCompletionFromPieces, recalculateRollStats, updateOriginHeaderSummary,
     addOrMergeInterval, renderDemandsUI, renderDefectsUI,
@@ -291,6 +291,7 @@ export function loadCase(id) {
 }
 
 export function updateWorkflowControls() {
+    updateFeedControls();
     const ready = canUseCurrentPlan();
     const editable = currentPlanContext();
     const edited = editable && !ready;
@@ -337,6 +338,13 @@ function showSolveFailure() {
     dialog.querySelector('[data-close]').onclick=()=>dialog.close();
     dialog.querySelector('[data-demands]').onclick=()=>{dialog.close();navigateWorkflowStage(0);};
     dialog.querySelector('[data-process]').onclick=()=>{dialog.close();navigateWorkflowStage(2,'#inp-bed-l');};
+    if(info?.suggestedLength && !state.pendingPlan){
+        const resize=document.createElement('button');resize.className='tool-btn active';
+        resize.textContent=`拉布至 ${info.suggestedLength.toLocaleString()} mm 后重排`;
+        dialog.querySelector('[data-process]').classList.remove('active');
+        dialog.querySelector('.workbench-dialog-footer').append(resize);
+        resize.onclick=()=>{if(resizeFeedWindow(info.suggestedLength)){dialog.close();triggerSolve();}};
+    }
 }
 let solving = false;
 function planGeometry() {
@@ -570,7 +578,7 @@ async function runSolve(operation) {
         }
         if(geometry!==planGeometry())throw new ApiError('等待期间预览已调整，当前手调位置保留。','STALE_INPUT');
         if(result.success && (!result.planId || !Array.isArray(result.pieces) || !result.pieces.length || !Array.isArray(result.cuts) || !Array.isArray(result.remnants)))throw new ApiError('求解响应缺少完整方案，原预览保留。','INVALID_RESULT');
-        latestSolveAttempt = result.success && result.planId && result.pieces?.length ? null : {context, result:{...result,status:result.status || 'INVALID_RESULT'},diagnostics:solveDiagnostics({...payload,remainingLength:data.stockRemainingLength},result)};
+        latestSolveAttempt = result.success && result.planId && result.pieces?.length ? null : {context, result:{...result,status:result.status || 'INVALID_RESULT'},diagnostics:solveDiagnostics({...payload,remainingLength:data.stockRemainingLength-queuedStockLength(data.rollId)},result)};
         {
             const elapsed = Math.round(performance.now() - t0);
             if (result.success && result.planId && result.pieces?.length) {

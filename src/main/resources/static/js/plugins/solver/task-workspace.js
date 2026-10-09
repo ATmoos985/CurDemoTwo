@@ -494,7 +494,10 @@ export async function initTaskWorkspace() {
         await newCuttingTask(rolls);
     }
     const selector = '#task-name, #task-material, #task-external-ref, #demands-container input, ' + processFields.map(id => '#' + id).join(', ');
-    document.addEventListener('input', event => { if (event.target.matches(selector)) taskInputChanged(); });
+    document.addEventListener('input', event => {
+        if(event.target.id==='inp-bed-l'){event.target.setCustomValidity('');return;}
+        if (event.target.matches(selector)) taskInputChanged();
+    });
     document.addEventListener('change', event => { if (event.target.closest('#sidebar-left')) updateWorkflowControls(); });
     window.addEventListener('beforeunload', event => {
         if (draftDirty && !persistTaskDraft()) { event.preventDefault(); event.returnValue = ''; }

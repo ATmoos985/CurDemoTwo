@@ -4,7 +4,8 @@ import {solveDiagnostics} from '../../main/resources/static/js/plugins/solver/so
 const base={rollW:2800,rollL:5000,remainingLength:97300,allowLongitudinal:true,demands:[{name:'订单',width:2413,length:5490,demand:1}]};
 test('actual 9.28 failure identifies workstation length, not mother roll width or stock',()=>{
     const d=solveDiagnostics(base,{status:'NO_SOLUTION_FOUND'});
-    assert.equal(d.summary,'超过当前加工区长度');assert.equal(d.lines[0].reason,d.summary);
+    assert.equal(d.summary,'超过本次拉布长度');assert.equal(d.lines[0].reason,d.summary);
+    assert.equal(d.suggestedLength,5490);
     assert.ok(!d.facts.some(f=>f.includes('无法用这一卷')));
 });
 test('rotation and longitudinal-cut rules are respected without claiming defects prove infeasibility',()=>{

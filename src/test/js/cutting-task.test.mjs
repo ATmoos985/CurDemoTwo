@@ -5,7 +5,7 @@ let rows = [];
 globalThis.document = { getElementById: () => null, querySelectorAll: () => rows };
 const { state } = await import('../../main/resources/static/js/core/state.js');
 const { updateDemandCompletionFromPieces, getDemandsFromUI } = await import('../../main/resources/static/js/plugins/solver/quota-manager.js');
-const { nextCutPosition, getSnappableNextStation, getSnapThresholdMm, updateFabricScrollPosition, advanceBed, smartAdvanceBed, radarTickStep, setupRadarInteraction } = await import('../../main/resources/static/js/plugins/radar/radar-scrubber.js');
+const { nextCutPosition, getSnappableNextStation, getSnapThresholdMm, updateFabricScrollPosition, advanceBed, smartAdvanceBed, radarTickStep, setupRadarInteraction, resizeFeedWindow } = await import('../../main/resources/static/js/plugins/radar/radar-scrubber.js');
 const { requiredReportLength } = await import('../../main/resources/static/js/plugins/solver/solver-client.js');
 const { bus } = await import('../../main/resources/static/js/core/event-bus.js');
 
@@ -61,6 +61,24 @@ test('report length includes selected recovered tail and radar ticks remain read
         assert.ok(step / length * width >= 70, 'major ticks must not overlap');
         assert.ok(Number.isFinite(step) && step > 0);
     }
+});
+
+test('resizing uses one length for navigation and reporting, without booking stock or discarding a pending plan',()=>{
+    const data=state.getCurrentCaseData();
+    Object.assign(data,{materialAvailable:true,rollId:'resize-test',windowStartY:1000,totalRollL:10000,stockRemainingLength:9000,stockUsedLength:1000,bedL:2000,trimStart:0,pieces:[],remnants:[],cuts:[]});
+    state.setCutMode('roll');state.pendingPlan=null;
+    let changed=0,requested=0;
+    const off=bus.on('feed:resized',()=>changed++),offReport=bus.on('report:requested',()=>requested++);
+    try{
+        assert.equal(resizeFeedWindow(4000.1),true);
+        assert.equal(data.bedL,4000.1);assert.equal(data.windowStartY,1000);
+        assert.equal(data.stockRemainingLength,9000);assert.equal(changed,1);
+        assert.equal(resizeFeedWindow(9000.1),false);assert.equal(data.bedL,4000.1);
+        const pending=state.pendingPlan={result:{planId:'keep'}};
+        assert.equal(resizeFeedWindow(5000),false);assert.equal(state.pendingPlan,pending);assert.equal(requested,1);
+        state.pendingPlan=null;state.setCutMode('remnant');
+        assert.equal(resizeFeedWindow(5000),false);assert.equal(data.bedL,4000.1);
+    }finally{off();offReport();state.pendingPlan=null;state.setCutMode('roll');}
 });
 
 test('the overview handle supports direct drag, track clicks, wheel and keyboard without discarding a pending report', () => {

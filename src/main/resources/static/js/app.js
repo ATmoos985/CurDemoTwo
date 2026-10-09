@@ -36,7 +36,7 @@ import {
 } from './plugins/cad/cad-renderer.js';
 
 import {
-    renderRadar, setupRadarInteraction, updateFabricScrollPosition,
+    renderRadar, setupRadarInteraction, updateFabricScrollPosition, resizeFeedWindow,
     advanceBed, smartAdvanceBed, updateDefectRadarActiveState, updateDefectVisualStates
 } from './plugins/radar/radar-scrubber.js';
 
@@ -129,6 +129,7 @@ bus.on('stage:resized', () => {
 });
 
 bus.on('report:requested', () => { openCutReport(); });
+bus.on('feed:resized', () => { taskInputChanged(); });
 bus.on('station:moved', () => {
     updateUIInfo();
 });
@@ -397,7 +398,7 @@ const camApp = {
     reloadCurrentRemnant,
     onParamChange,
     onOriginParamChange,
-    onRollConfigChange,
+    onRollConfigChange, resizeFeedWindow,
     updateRollSize,
     toggleLongitudinal,
     addDefectRow,

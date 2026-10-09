@@ -142,6 +142,12 @@
 #right-roll-actions .secondary-workflow-tools { margin-top: 12px; border-top: 1px solid var(--border-color,#dbe1e8); padding-top: 8px; }
 #right-roll-actions .reset-actions > .tool-btn { margin-top: 12px; }
 #inspection-radar-slot .roll-radar-bar { width: 100%; margin-block: 16px; min-height: 110px; }
+#inspection-radar-slot .roll-radar-bar { grid-template-columns: minmax(0,1fr); }
+#inspection-radar-slot .radar-caption { grid-row: 3; grid-column: 1; justify-content: space-between; }
+@media (min-width: 961px) and (max-width: 1500px) {
+    [data-theme] #roll-radar-bar { grid-template-columns: minmax(0,1fr); }
+    #roll-radar-bar .radar-caption { grid-row: 3; grid-column: 1; justify-content: space-between; }
+}
 #material-details #card-defects { padding: 0; border: 0; }
 #material-details #card-defects .section-content { padding: 0; }
 #material-details #defects-container { display: block; }

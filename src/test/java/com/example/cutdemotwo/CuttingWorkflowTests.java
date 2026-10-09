@@ -18,6 +18,35 @@ class CuttingWorkflowTests {
     @TempDir Path temp;
 
     @Test
+    void expandingFeedWindowCutsOneLongWholePieceAndReportsOnlyActualLength() {
+        RemnantService inventory = new RemnantService(temp.resolve("dynamic-feed.json").toString());
+        CuttingWorkflowService workflow = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), inventory);
+        CuttingTask task = inventory.saveTask(new CuttingTask(null, "动态拉布", "TC涤棉-B2026", "", 0,
+                List.of(new CuttingTask.Line(1, "四米整幅", 2000, 4000, 1, false)),
+                new CuttingTask.Process(2000, 0, "right-bottom", "horizontal", false, false)));
+        SolveRequest request = new SolveRequest();
+        request.setTaskId(task.id());
+        request.setTaskRevision(task.revision());
+        request.setAllowLongitudinal(false);
+        request.setRollW(2000);
+        request.setWindowStartY(5000);
+        request.setRollL(2000);
+        request.setDemands(List.of(new PieceDemand(1, "四米整幅", 2000, 4000, 1, false)));
+        double before = inventory.getMotherRoll(request.getRollId()).getCurrentRemainingLength();
+        assertFalse(workflow.solve(request).isSuccess());
+        request.setRollL(4500);
+        SolveResponse plan = workflow.solve(request);
+        assertTrue(plan.isSuccess());
+        assertEquals(1, plan.getPieces().size());
+        assertEquals(4000, plan.getPieces().get(0).getL());
+        assertTrue(plan.getCuts().stream().allMatch(c -> "横切".equals(c.getType())));
+        assertEquals(before, inventory.getMotherRoll(request.getRollId()).getCurrentRemainingLength());
+        var receipt = workflow.confirm(new CutReport(plan.getPlanId(), 4000, 1, List.of(), "测试库位"));
+        assertEquals(before - 4000, receipt.get("remainingLength"));
+        assertEquals(4500, ((SolveRequest) workflow.getPlan(plan.getPlanId()).get("request")).getRollL());
+    }
+
+    @Test
     void crosscutAvoidsDefectAndNeverMakesLongitudinalCut() {
         SolveRequest request = new SolveRequest();
         request.setAllowLongitudinal(false);

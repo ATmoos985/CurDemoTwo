@@ -3,13 +3,15 @@
  */
 import { stage, mainLayer, bedStationGroup, defectGroup } from '../cad/cad-stage.js';
 import { drawRulers } from '../cad/cad-rulers.js';
-import { updateStatusBar, renderScene } from '../cad/cad-renderer.js';
+import { updateStatusBar, renderScene, resetToBedView } from '../cad/cad-renderer.js';
 import { clearRemnantSelection } from '../cad/cad-remnant-highlight.js';
-import { recalculateRollStats } from '../solver/quota-manager.js';
+import { recalculateRollStats, getDemandsFromUI } from '../solver/quota-manager.js';
 import { updateUIInfo } from '../solver/solver-client.js';
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
-import {queuedRollEnd} from '../solver/report-queue.js';
+import {queuedRollEnd, queuedStockLength, queuedQuantities} from '../solver/report-queue.js';
+import {feedLengthLimits, suggestedFeedLength} from './feed-window.js';
+import {renderMaterialInspection} from '../layout/workbench-panels.js';
 
 export function requireStationReport() {
     if (!state.pendingPlan) return false;
@@ -41,7 +43,7 @@ export function getSnapThresholdMm(trackWidth, totalL = 60000) {
 }
 
 function stationRange(start, length, isSnapped = false) {
-    const rangeText = `当前工位 ${(start / 1000).toFixed(2)}–${((start + length) / 1000).toFixed(2)} m`;
+    const rangeText = `当前工位 ${(start / 1000).toFixed(2)}–${((start + length) / 1000).toFixed(2)} m · 拉布 ${length.toLocaleString()} mm`;
     return isSnapped ? `${rangeText} (待切接续工位)` : rangeText;
 }
 
@@ -91,12 +93,54 @@ export function updateFabricScrollPosition(targetY) {
             textEl.innerText = stationRange(targetY, bedL, isSnapped);
         }
     }
+    updateFeedControls();
 
     if (mainLayer) mainLayer.batchDraw();
     drawRulers();
     updateStatusBar();
     bus.emit('station:moved', { targetY, bedL, winStartY: targetY, winEndY: targetY + bedL });
     return true;
+}
+
+export function resizeFeedWindow(length, {live = false} = {}) {
+    const data = state.getCurrentCaseData(), input = document.getElementById('inp-bed-l');
+    if (!data || state.currentCutMode === 'remnant' || data.materialAvailable === false) return false;
+    if (requireStationReport()) {if(input)input.value=data.bedL;return false;}
+    const {min,max} = feedLengthLimits(data,queuedStockLength(data.rollId));
+    if (!Number.isFinite(length) || length < min || length > max) {
+        input?.setCustomValidity(`拉布长度须为 ${min}–${max} mm，不能超过卷尾或可用余量。`);
+        input?.reportValidity();
+        return false;
+    }
+    input?.setCustomValidity('');
+    data.bedL = length;
+    if(input)input.value=length;
+    data.cuts=[];
+    recalculateRollStats(data);renderScene();renderRadar();updateUIInfo();
+    if (!live) {resetToBedView();bus.emit('feed:resized',{length});}
+    return true;
+}
+
+export function updateFeedControls() {
+    const data=state.getCurrentCaseData();if(!data)return;
+    const sheet=state.currentCutMode==='remnant', {min,max}=feedLengthLimits(data,queuedStockLength(data.rollId));
+    const input=document.getElementById('inp-bed-l'), end=document.getElementById('radar-resize-end'), fit=document.getElementById('btn-feed-fit');
+    if(input){input.disabled=sheet || data.materialAvailable===false;input.min=min;input.max=max;}
+    if(end){
+        end.hidden=sheet || data.materialAvailable===false;
+        end.style.left=((data.windowStartY||0)+data.bedL)/data.totalRollL*100+'%';
+        for(const [name,value] of Object.entries({'aria-valuemin':min,'aria-valuemax':max,'aria-valuenow':data.bedL,'aria-valuetext':`拉布 ${data.bedL} mm`}))end.setAttribute(name,value);
+    }
+    if(fit){
+        const staged=queuedQuantities();
+        const length=suggestedFeedLength({rollW:data.rollW,trimStart:data.trimStart,allowRotation:data.allowRotation,allowLongitudinal:data.allowLongitudinal!==false,
+            demands:getDemandsFromUI().map(d=>({...d,demand:Math.max(0,d.demand-(staged[d.id]||0))}))});
+        fit.hidden=sheet;fit.disabled=!length || length>max || data.materialAvailable===false;
+        fit.textContent=length?`按最长单片 · ${length.toLocaleString()} mm`:'按最长单片';
+        fit.title=length>max?'当前余量或卷尾放不下最长单片，请选择其他材料。':'按单片尺寸设置，含切头量、不含疵点避让；不代表所有件数能一次排完。';
+        fit.onclick=()=>resizeFeedWindow(length);
+    }
+    if(document.getElementById('material-manager-modal')?.open)renderMaterialInspection();
 }
 
 export function renderRadar() {
@@ -108,6 +152,7 @@ export function renderRadar() {
     const defects = data.globalDefects || data.defects || [];
 
     const track = document.getElementById("radar-track");
+    updateFeedControls();
     if (!track) return;
 
     // 清理旧刻度与旧疵点标及历史实切块，保留 #radar-window
@@ -302,6 +347,7 @@ export function radarTickStep(totalL, width = 600) {
 export function setupRadarInteraction() {
     const track = document.getElementById('radar-track');
     const winEl = document.getElementById('radar-window');
+    const endEl = document.getElementById('radar-resize-end');
     if (!track || !winEl || track.dataset.bound) return;
     track.dataset.bound = 'true';
     let drag = null;
@@ -314,12 +360,13 @@ export function setupRadarInteraction() {
         if (!data || !rect.width || requireStationReport()) return;
         const handle = winEl.getBoundingClientRect();
         const onHandle = winEl.contains(e.target);
-        drag = { pointerId: e.pointerId, startY: data.windowStartY || 0, rect,
+        const resize = e.target === endEl;
+        drag = { pointerId: e.pointerId, startY: data.windowStartY || 0, length:data.bedL, resize, clientX:e.clientX, rect,
             offset: onHandle ? e.clientX - handle.left : handle.width / 2 };
         track.setPointerCapture(e.pointerId);
-        winEl.focus({ preventScroll: true });
+        (resize?endEl:winEl).focus({ preventScroll: true });
         winEl.classList.add('dragging');
-        if (!onHandle) {
+        if (!onHandle && !resize) {
             const totalL = data.totalRollL || 60000;
             const rawY = (e.clientX - rect.left - drag.offset) / rect.width * totalL;
             const snapStation = getSnappableNextStation(data);
@@ -336,6 +383,12 @@ export function setupRadarInteraction() {
         const data = state.getCurrentCaseData();
         if (!data) return;
         const totalL = data.totalRollL || 60000;
+        if(drag.resize){
+            const {min,max}=feedLengthLimits(data,queuedStockLength(data.rollId));
+            const length=Math.round((drag.length+(e.clientX-drag.clientX)/drag.rect.width*totalL)*10)/10;
+            if(max>=min)resizeFeedWindow(Math.min(max,Math.max(min,length)),{live:true});
+            return;
+        }
         const rawY = (e.clientX - drag.rect.left - drag.offset) / drag.rect.width * totalL;
         const snapStation = getSnappableNextStation(data);
         const threshold = getSnapThresholdMm(drag.rect.width, totalL);
@@ -348,12 +401,16 @@ export function setupRadarInteraction() {
     });
     const finishDrag = e => {
         if (!drag || e.pointerId !== drag.pointerId) return;
-        const { startY, rect } = drag;
+        const { startY, rect, resize, length } = drag;
         drag = null;
         winEl.classList.remove('dragging');
         if (track.hasPointerCapture(e.pointerId)) track.releasePointerCapture(e.pointerId);
         const data = state.getCurrentCaseData();
         if (!data) return;
+        if(resize){
+            resizeFeedWindow(e.type==='pointercancel'?length:data.bedL);
+            return;
+        }
         let finalY = data.windowStartY || 0;
         const totalL = data.totalRollL || 60000;
         const bedL = data.bedL || 5000;
@@ -410,6 +467,15 @@ export function setupRadarInteraction() {
             target = snapStation;
         }
         moveStation(target);
+    });
+    endEl?.addEventListener('keydown',e=>{
+        if(drag)return;
+        const data=state.getCurrentCaseData(), {min,max}=feedLengthLimits(data,queuedStockLength(data.rollId));
+        const step=e.shiftKey ? .1 : 100;
+        const targets={ArrowLeft:data.bedL-step,ArrowDown:data.bedL-step,ArrowRight:data.bedL+step,ArrowUp:data.bedL+step,Home:min,End:max};
+        if(!(e.key in targets))return;
+        e.preventDefault();e.stopPropagation();
+        if(max>=min)resizeFeedWindow(Math.min(max,Math.max(min,Math.round(targets[e.key]*10)/10)));
     });
 }
 function moveStation(targetY, previous = state.getCurrentCaseData()?.windowStartY || 0) {

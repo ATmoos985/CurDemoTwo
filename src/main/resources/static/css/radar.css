@@ -12,6 +12,12 @@
 .radar-window.snapped { border-color: #10b981; background: color-mix(in srgb, #10b981 18%, var(--panel-bg)); box-shadow: 0 0 0 1px #10b981, 0 0 6px rgba(16, 185, 129, 0.45); }
 .radar-window.snapped::after { background: #10b981; }
 .radar-window:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; }
+.radar-resize-end { position: absolute; top: 8px; width: 14px; height: 30px; display: grid; place-items: center; transform: translateX(-50%); z-index: 4; border: 1px solid var(--accent-blue); border-radius: 3px; background: var(--panel-bg); color: var(--accent-blue); cursor: ew-resize; font-size: 12px; touch-action: none; }
+.radar-resize-end[hidden] { display: none; }
+.radar-resize-end:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; }
+.radar-feed-controls, .radar-feed-controls label { display: inline-flex; gap: 6px; align-items: center; }
+.radar-feed-controls input.prop-input { width: 92px; height: 28px; padding: 3px 6px; font-variant-numeric: tabular-nums; }
+.radar-feed-controls .tool-btn { min-height: 28px; }
 .radar-defect-marker { position: absolute; top: 3px; height: 8px; min-width: 2px; background: var(--accent-red); z-index: 2; }
 .radar-defect-marker.warning { background: var(--accent-amber); }
 .radar-consumed-history { position: absolute; top: 15px; height: 17px; background: color-mix(in srgb, var(--text-muted) 25%, transparent); border-right: 1px solid var(--text-muted); }
