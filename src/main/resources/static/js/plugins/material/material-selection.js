@@ -52,6 +52,7 @@ export async function openMaterialSelection(preferred = {}) {
         <div class="dialog-actions"><button class="tool-btn" id="material-open-inventory">管理库存档案 ↗</button><button class="tool-btn active" id="material-load" disabled>确认装载</button></div>
         <small class="muted">装载不扣库存、不保存需求；实切后确认报工才记账。</small></div>`;
     document.body.append(dialog);dialog.showModal();
+    if(preferred.type==='remnant')el('material-picker-title').textContent='当前需求 · 料头推荐';
     const valid=()=>dialog.open && generation===token;
     const fail=message=>{el('material-match-error').textContent=message;el('material-match-error').hidden=!message;};
     const update=()=>{
@@ -61,6 +62,7 @@ export async function openMaterialSelection(preferred = {}) {
         el('material-load').textContent=busy?'正在核对库存…':item && key(item)===currentKey()?'保留当前用料':'确认装载';
         el('material-selected-summary').textContent=item?`${item.type==='remnant'?'料头':'母卷'} ${item.id} · ${item.width} × ${item.length} mm · ${item.location || '库位未登记'}`:'选择材料后核对，再装载到当前任务。';
         el('material-refresh').disabled=busy;el('material-recommend').disabled=busy;
+        el('material-recommend').textContent=analysis?'重新计算推荐':'计算料头推荐';
         el('material-recommend-results').querySelectorAll('button').forEach(button=>button.disabled=busy);
         el('material-replace-confirm').disabled=busy;el('material-open-inventory').disabled=busy;
         el('material-source-filter').disabled=busy;el('material-search').disabled=busy;
@@ -85,7 +87,7 @@ export async function openMaterialSelection(preferred = {}) {
         } catch(error) {if(!valid())return;candidates=[];selected='';fail(error.message);}
         finally {if(valid()){busy=false;render();}}
     }
-    el('material-recommend').onclick=async()=>{
+    async function recommend() {
         if(busy)return;
         if(context()!==snapshot)return fail('需求或工艺已变化，请关闭窗口后重新匹配。');
         analysis=null;el('material-recommend-results').hidden=true;busy=true;update();fail('');
@@ -104,11 +106,12 @@ export async function openMaterialSelection(preferred = {}) {
             });
         } catch(error){if(valid()){analysis=null;status.textContent='推荐未完成，可重试；当前用料和预览保留。';fail(error.message);}}
         finally {if(valid()){busy=false;update();}}
-    };
+    }
+    el('material-recommend').onclick=recommend;
     dialog.querySelector('[data-close]').onclick=()=>dialog.close();dialog.addEventListener('close',()=>{if(generation===token)generation++;});
     el('material-source-filter').value=preferred.type || 'all';
-    el('material-source-filter').onchange=render;el('material-search').oninput=render;
-    el('material-replace-confirm').onchange=update;el('material-refresh').onclick=refresh;
+    el('material-source-filter').onchange=()=>{render();if(el('material-source-filter').value==='remnant' && !analysis)recommend();};el('material-search').oninput=render;
+    el('material-replace-confirm').onchange=update;el('material-refresh').onclick=async()=>{await refresh();if(valid() && el('material-source-filter').value==='remnant')await recommend();};
     el('material-open-inventory').onclick=()=>{dialog.close();window.camApp.openMaterialModal(preferred.type==='remnant'?'remnants':'rolls');};
     el('material-load').onclick=async()=>{
         if(busy)return;const item=candidates.find(c=>key(c)===selected);if(!item)return;
@@ -132,4 +135,5 @@ export async function openMaterialSelection(preferred = {}) {
         finally {if(valid()){busy=false;render();}}
     };
     await refresh();
+    if(valid() && (preferred.type==='remnant' || preferred.recommend))await recommend();
 }

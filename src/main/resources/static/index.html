@@ -23,6 +23,7 @@
     <link rel="stylesheet" href="css/product-navigation.css">
     <link rel="stylesheet" href="css/cut-ticket.css">
     <link rel="stylesheet" href="css/ui-consistency.css">
+    <link rel="stylesheet" href="css/production-workbench.css">
 </head>
 <body inert>
 
@@ -49,6 +50,7 @@
         </div>
         <div data-product-nav="workbench"></div>
         <div class="header-actions">
+            <button class="tool-btn active" onclick="openDemandImport()">导入需求</button>
             <button class="tool-btn" onclick="openCutTicketModal()">打印工单</button>
             <details class="header-more">
                 <summary class="tool-btn">工具与设置</summary>
@@ -66,16 +68,18 @@
                     <button class="tool-btn" onclick="openSettingsModal()" id="btn-settings">工艺与显示设置</button>
                 </div>
             </details>
+            <details class="demo-tools" id="demo-tools"><summary class="tool-btn">演示</summary><div id="demo-reset-slot"><span class="muted">示例需求与模拟库存</span></div></details>
         </div>
     </header>
 
-    <nav class="task-bar" aria-label="切割任务流程"><div class="task-toolbar"><button class="tool-btn" onclick="newCuttingTask()">新建任务</button><button class="tool-btn" onclick="openTaskList()">打开任务</button><button class="tool-btn" onclick="saveTaskFromUI()">保存需求</button><span id="task-state" role="status">未保存</span><button class="tool-btn" id="btn-local-drafts" onclick="openLocalDrafts()">本机草稿 0</button></div><ol class="workflow-stages" aria-label="查看作业阶段"><li><button type="button" data-workflow-stage="0"><span class="stage-marker">1</span>需求</button></li><li><button type="button" data-workflow-stage="1"><span class="stage-marker">2</span>材料</button></li><li><button type="button" data-workflow-stage="2"><span class="stage-marker">3</span>排料</button></li><li><button type="button" data-workflow-stage="3"><span class="stage-marker">4</span>报工</button></li></ol><div class="task-toolbar"><button class="tool-btn" onclick="openTaskPlans()">方案记录</button><button class="tool-btn" onclick="openTaskReports()">报工记录 <span id="task-report-count">0</span></button></div></nav>
+    <nav class="task-bar" aria-label="切割任务流程"><div class="task-toolbar"><button class="tool-btn" onclick="newCuttingTask().then(created => { if (created) openDemandManager(); })">新建任务</button><button class="tool-btn" onclick="openTaskList()">打开任务</button><button class="tool-btn" onclick="saveTaskFromUI()">保存需求</button><span id="task-state" role="status">未保存</span><button class="tool-btn" id="btn-local-drafts" onclick="openLocalDrafts()">本机草稿 0</button></div><ol class="workflow-stages" aria-label="查看作业阶段"><li><button type="button" data-workflow-stage="0"><span class="stage-marker">1</span>需求</button></li><li><button type="button" data-workflow-stage="1"><span class="stage-marker">2</span>材料</button></li><li><button type="button" data-workflow-stage="2"><span class="stage-marker">3</span>排料</button></li><li><button type="button" data-workflow-stage="3"><span class="stage-marker">4</span>报工</button></li></ol><div class="task-toolbar"><button class="tool-btn" onclick="openTaskPlans()">方案记录</button><button class="tool-btn" onclick="openTaskReports()">报工记录 <span id="task-report-count">0</span></button></div></nav>
     <!-- 主视窗工作区 -->
     <main>
         <!-- 左侧控制面板：清晰分离母卷排产与料头精益切割两大工位 -->
         <aside class="sidebar" id="sidebar-left" aria-label="材料与需求">
             <div class="workspace-heading"><span class="workflow-number">1</span><h1>裁切准备</h1><span>材料与需求</span></div>
             <section class="material-context" aria-label="当前用料摘要"><div><span>本次用料</span><span><button class="tool-btn" onclick="matchTaskMaterials()">选择用料</button> <button class="tool-btn" id="btn-material-details">详情</button></span></div><strong id="material-context-id">未装载</strong><p id="material-context-info"></p></section>
+            <section class="remnant-entry" aria-label="料头优先"><div><strong>料头优先</strong><p>按剩余需求自动试排</p></div><button class="tool-btn" onclick="matchTaskMaterials({type:'remnant',recommend:true})">料头推荐 →</button></section>
             <!-- 顶部工位模式切换器 (Dual-Mode Switcher) -->
             <!-- ======================================================== -->
             <!-- 模式一面板：母卷连续开卷排产 (Mother Roll Mode)             -->
@@ -111,8 +115,8 @@
                                 <span>订单模板</span>
                                 <select class="prop-input" id="sel-curtain-order-template" onchange="loadCurtainOrderTemplate(this.value)">
                                     <option value="">-- 选择典型窗帘整单模板 --</option>
-                                    <option value="real_893292_cream"> 真实面料 893292 (2#A3A-Cream) 窗帘整单 (11主帘+3辅件 · 37件套)</option>
-                                    <option value="real_893153_white"> 真实面料 893153 (2#1A-Off White) 窗帘整单 (4大主帘+2辅件 · 18件套)</option>
+                                    <option value="real_893292_cream"> 订单样例 893292 (2#A3A-Cream) 窗帘整单 (11主帘+3辅件 · 37件套)</option>
+                                    <option value="real_893153_white"> 订单样例 893153 (2#1A-Off White) 窗帘整单 (4大主帘+2辅件 · 18件套)</option>
                                     <option value="whole_house"> 全屋整套窗帘工程批量单 (32件套 · 支持跨工位连续搭切)</option>
                                     <option value="hotel_batch"> 星级酒店客房工程批量单 (50件套 · 支持多工位连续搭切)</option>
                                     <option value="edge_nesting"> 偏幅落地大帘+边角辅料连续单 (24件套 · 支持多工位搭切)</option>

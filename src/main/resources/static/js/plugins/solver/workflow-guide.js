@@ -1,6 +1,7 @@
 import {state} from '../../core/state.js';
 import {toggleSidebar, switchRightPanelTab} from '../layout/splitter.js';
 import {workflowState} from './workflow-state.js';
+import {openDemandManager, openMaterialDetails} from '../layout/workbench-panels.js';
 
 const el = id => document.getElementById(id);
 const value = id => el(id)?.value;
@@ -26,14 +27,17 @@ export function readWorkflowState(plan = {}) {
 export function navigateWorkflowStage(stage, target) {
     const node = document.querySelector(target || ['#card-demands','#card-mother-roll','#card-material-balance','#right-roll-actions'][stage]);
     if (!node) return;
+    if (stage === 0) openDemandManager();
+    if (node.closest('#material-details')) openMaterialDetails();
     const side = node.closest('#sidebar-left') ? 'left' : 'right';
-    if (el('sidebar-'+side)?.classList.contains('collapsed')) toggleSidebar(side);
+    if (!node.closest('dialog') && el('sidebar-'+side)?.classList.contains('collapsed')) toggleSidebar(side);
     if (stage >= 2) switchRightPanelTab('balance');
     for (let parent=node; parent; parent=parent.parentElement) {
         if (parent.classList.contains('collapsible')) {parent.classList.remove('collapsed');parent.querySelector('.section-toggle')?.setAttribute('aria-expanded','true');}
         if (parent.tagName === 'DETAILS') parent.open = true;
     }
-    const focus = target ? node : node.querySelector('input,select,button') || node;
+    if (stage === 0 && !node.closest('#demand-manager')) el('task-details').open = true;
+    const focus = stage === 0 && !node.closest('#demand-manager') ? el('task-name') : target ? node : node.querySelector('input,select,button') || node;
     if (!focus.matches('input,select,button,a,[tabindex]')) focus.tabIndex = -1;
     focus.focus({preventScroll:true}); node.scrollIntoView({block:'nearest'});
 }
@@ -79,7 +83,7 @@ export function renderWorkflowGuide(plan = {}) {
     el('material-context-info').textContent = sheet && remnantConsumed(data) ? '本块料头已报工核销；继续裁切请重新选料。' : !data.materialAvailable ? '先完善需求，再匹配可用材料。' : sheet
         ? (stock?.materialBatch || '') + ' · ' + stock?.width + ' × ' + stock?.length + ' mm'
         : (el('lbl-roll-model-desc')?.textContent || '') + ' · 幅宽 ' + data.rollW + ' mm · 余量 ' + (data.stockRemainingLength || 0).toLocaleString() + ' mm';
-    el('btn-material-details').onclick = () => navigateWorkflowStage(1);
+    el('btn-material-details').onclick = openMaterialDetails;
     if(el('lbl-current-roll-id'))el('lbl-current-roll-id').textContent=data.materialAvailable?data.rollId:'未装载';
     return flow;
 }

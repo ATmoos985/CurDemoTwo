@@ -2,6 +2,7 @@
  * 需求配额核销与工位加工区间管理器 (Quota & Interval Manager Plugin)
  */
 import { state } from '../../core/state.js';
+import {renderMaterialInspection} from '../layout/workbench-panels.js';
 import { bus } from '../../core/event-bus.js';
 import { renderScene, resetToBedView } from '../cad/cad-renderer.js';
 import { drawRulers } from '../cad/cad-rulers.js';
@@ -386,6 +387,7 @@ export function removeDemandRow(button) {
 }
 
 export function addDemandRow() {
+    window.camApp?.openDemandManager?.();
     const container = document.getElementById("demands-container");
     if (!container.querySelector('.item-row')) container.replaceChildren();
     const id = Math.max(state.nextDemandId, 1, ...[...container.querySelectorAll('.item-row')].map(row => Number(row.dataset.id) + 1));
@@ -503,6 +505,7 @@ export function onOriginParamChange() {
     data.firstStageOrientation = document.getElementById("sel-first-stage").value;
     data.allowRotation = (document.getElementById("sel-allow-rotation").value === "1");
     data.globalDefects = getDefectsFromUI();
+    if (document.getElementById('material-details')?.open) renderMaterialInspection();
 
     updateOriginHeaderSummary();
 

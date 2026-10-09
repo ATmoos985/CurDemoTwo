@@ -6,7 +6,7 @@ export function workflowState(input) {
     const missing = (hint, target) => step(0, '完善需求', hint, 'focus', '完善需求信息', target);
     if (!name?.trim()) return missing('请填写任务名称，方便下次查找和续作。', '#task-name');
     if (!model) return missing('请选择本次需求的材料型号。', '#task-material');
-    if (!demands.length) return step(0, '添加需求', '添加要切出的尺寸和数量，也可以从上方载入示例。', 'add', '添加裁片需求');
+    if (!demands.length) return step(0, '添加需求', '导入订单 Excel，或添加要切出的尺寸和数量。', 'add', '添加裁片需求');
     for (const d of demands) {
         const target = key => `[data-id="${d.id}"] .dem-${key}`;
         if (!d.name?.trim()) return missing('请填写裁片名称。', target('name'));

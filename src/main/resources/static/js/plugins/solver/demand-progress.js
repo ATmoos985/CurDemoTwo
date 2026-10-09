@@ -4,6 +4,7 @@ import {demandProgress, summarizeDemandProgress, latestDemandChange} from './dem
 import {getSelectedPieceId, setSelectedPieceId} from '../cad/cad-interactive-nesting.js';
 import {focusPiece} from '../cad/cad-renderer.js';
 import {toggleSidebar} from '../layout/splitter.js';
+import {openDemandManager, renderDemandSummary} from '../layout/workbench-panels.js';
 
 let currentPieces = [];
 const rows = () => [...(document.getElementById('demands-container')?.querySelectorAll('.item-row') || [])];
@@ -51,6 +52,7 @@ export function updateDemandProgress(options = {}) {
         detail.querySelector('p').textContent=item.reason;
     });
     renderOverview(progress,list,change);
+    renderDemandSummary(progress,list);
     const badge=document.getElementById('demands-summary-badge');
     if (badge) badge.textContent=progress.length+' 项';
     const feedback=document.getElementById('demand-progress-summary');
@@ -108,8 +110,7 @@ function renderOverview(progress,list,change) {
 
 function revealDemand(id) {
     const row=rows().find(r=>Number(r.dataset.id)===id);if(!row)return;
-    const sidebar=document.getElementById('sidebar-left');if(sidebar.classList.contains('collapsed'))toggleSidebar('left');
-    const card=document.getElementById('card-demands');card.classList.remove('collapsed');card.querySelector('.section-toggle').setAttribute('aria-expanded','true');
+    openDemandManager(id);
     rows().forEach(r=>r.classList.toggle('demand-progress-target',r===row));
     row.scrollIntoView({block:'nearest'});row.tabIndex=-1;row.focus({preventScroll:true});
 }
@@ -118,6 +119,7 @@ function locateDemand(id) {
     const matches=currentPieces.filter(p=>p.demandId===id);if(!matches.length)return;
     const index=matches.findIndex(p=>p.id===getSelectedPieceId());
     const piece=matches[(index+1)%matches.length];
+    document.getElementById('demand-manager')?.close();
     setSelectedPieceId(piece.id);focusPiece(piece.id);
 }
 
@@ -128,9 +130,9 @@ function syncDemandSelection(reveal) {
         row.classList.toggle('demand-selected',selected);
         if(selected && reveal) {
             const sidebar=document.getElementById('sidebar-left');if(sidebar.classList.contains('collapsed'))toggleSidebar('left');
-            const card=document.getElementById('card-demands');card.classList.remove('collapsed');card.querySelector('.section-toggle').setAttribute('aria-expanded','true');
-            // Keep keyboard focus on the canvas; revealing the row must not start editing it.
-            row.scrollIntoView({block:'nearest'});
+            // Selecting the canvas must not open a modal or steal keyboard focus.
+            const summary=document.querySelector(`#demand-quick-list [data-demand="${row.dataset.id}"]`);
+            summary?.scrollIntoView({block:'nearest'});
         }
     }
 }

@@ -5,9 +5,7 @@ import { bus } from '../../core/event-bus.js';
 import { showToast } from '../../core/toast.js';
 
 export async function openRemnantModal() {
-    const modal = document.getElementById("remnant-modal");
-    if (modal) modal.style.display = "flex";
-    await refreshRemnantsList();
+    return window.camApp.matchTaskMaterials({type:'remnant',recommend:true});
 }
 
 export function closeRemnantModal() {

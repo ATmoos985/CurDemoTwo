@@ -203,12 +203,31 @@ export function startTaskDraft(name = '本次切割') {
 
 export function finishTaskDraft() { resetDraftTracking(); draftBaseline = ''; taskInputChanged(); }
 
+export async function importDemandTask(task, isCurrent = () => true) {
+    // Read first, then use the existing draft guard. A failed/cancelled import preserves the workspace.
+    const rolls = await api('/api/rolls');
+    if (!isCurrent() || !await prepareTaskSwitch() || !isCurrent()) return false;
+    const wasInert = document.body.inert;document.body.inert = true;
+    try {
+        startTaskDraft(task.name);
+        state.scenarios = getInitialScenarios();state.currentCaseId = 1;
+        syncMaterialOptions(rolls, {model:task.materialModel, rollId:'', fallback:false});
+        el('task-external-ref').value = task.externalRef;
+        state.getCurrentCaseData().demands = task.demands.map(d => ({...d,count:d.quantity}));
+        renderDemandsUI(state.getCurrentCaseData().demands);
+        await switchCutMode('roll');
+        finishTaskDraft();updateWorkflowControls();
+        showToast('已建立需求草稿，请核对后保存并选择材料。', 'success');
+        return true;
+    } finally {document.body.inert = wasInert;}
+}
+
 export async function newCuttingTask(rolls, {skipDraftGuard = false} = {}) {
     if (!skipDraftGuard && !await prepareTaskSwitch()) return false;
     const wasInert = document.body.inert; document.body.inert = true;
     try {
     rolls = rolls || await api('/api/rolls');
-    syncMaterialOptions(rolls, {model:''});
+    syncMaterialOptions(rolls, {model:'', rollId:'', fallback:false});
     startTaskDraft();
     state.scenarios = getInitialScenarios();
     state.currentCaseId = 1;

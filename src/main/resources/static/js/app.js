@@ -1,4 +1,6 @@
 import { initTaskWorkspace, newCuttingTask, startTaskDraft, finishTaskDraft, prepareTaskSwitch, openLocalDrafts, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, taskInputChanged } from './plugins/solver/task-workspace.js';
+import {initWorkbenchPanels, openDemandManager, openMaterialDetails} from './plugins/layout/workbench-panels.js';
+import {openDemandImport} from './plugins/solver/demand-import.js';
 /**
  * 【主装配器】CAM 前端应用主入口 (Application Orchestrator)
  * 挂载微内核与所有独立插件，完成全局事件编排与向后兼容性绑定
@@ -336,6 +338,7 @@ window.addEventListener('keydown', event => {
 // 2. 导出面向全局 DOM 与 Inline Onclick 的统一命名空间
 // ==========================================
 const camApp = {
+    openDemandManager, openMaterialDetails, openDemandImport,
     undoPlanEdit, redoPlanEdit, validatePlanAdjustment,
     newCuttingTask, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, openLocalDrafts, taskInputChanged,
     bus,
@@ -504,6 +507,7 @@ async function bootstrapApp() {
     initLayoutResizers();
     initNestingKeyboardShortcuts();
     // Load real inventory before selecting material; empty databases have no demo rolls.
+    initWorkbenchPanels();
     await initTaskWorkspace();
     renderToolpathUI();
     } catch (error) { showToast("工作台初始化失败：" + error.message, "error"); }
@@ -522,6 +526,8 @@ document.addEventListener("click", (e) => {
     if (container && !container.contains(e.target)) {
         closePresetDropdown();
     }
+    const demos = document.getElementById('demo-tools');
+    if (demos?.open && (!demos.contains(e.target) || e.target.closest('.preset-menu-item, #btn-reset-continuous'))) demos.open = false;
     document.querySelectorAll('.header-more[open], .canvas-help[open], .status-details[open]').forEach(menu => {
         if (!menu.contains(e.target) || e.target.closest('button')) menu.open = false;
     });
@@ -529,7 +535,7 @@ document.addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
         closePresetDropdown();
-        document.querySelectorAll('.header-more[open], .canvas-help[open], .status-details[open]').forEach(menu => {
+        document.querySelectorAll('.header-more[open], .demo-tools[open], .canvas-help[open], .status-details[open]').forEach(menu => {
             menu.open = false;
             menu.querySelector('summary').focus();
         });
