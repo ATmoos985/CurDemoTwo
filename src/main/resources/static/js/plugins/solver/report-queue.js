@@ -1,4 +1,24 @@
 import {state} from '../../core/state.js';
+import {layoutMetrics} from './material-accounting.js';
+import {reportRecoveryCandidates} from './report-outcomes.js';
+
+// 暂存默认采用当前方案；打开实切核对后保留操作者的修改。
+export function stationReport(pending) {
+    const {result, request, bedL, feedPortType} = pending;
+    const minW = request.minRemnantWidth ?? 200, minL = request.minRemnantLength ?? 300;
+    const recoverable = (result.remnants || []).filter(r => r.w >= minW && r.l >= minL);
+    const defaultLength = Math.max(result.deductLen || 0, layoutMetrics({rollW:request.rollW, bedL, pieces:result.pieces, remnants:recoverable, cuts:result.cuts}).deductLen) || bedL;
+    const actualCutLen = feedPortType === 'remnant' ? 0 : pending.reportActualCutLen ?? defaultLength;
+    const pieceResults = pending.reportPieceResults || result.pieces.map(p => ({pieceId:p.id,outcome:'QUALIFIED',reason:''}));
+    const actualRemnants = feedPortType === 'remnant' ? [] : reportRecoveryCandidates(result,pieceResults,actualCutLen).flatMap(r => {
+        const saved = pending.reportRecovery?.[r.id];
+        const checked = saved?.checked ?? (!r.uncut && r.w >= minW && r.l >= minL);
+        return checked ? [{...r,w:saved?.w ?? r.w,l:saved?.l ?? r.l}] : [];
+    });
+    return {planId:result.planId,actualCutLen,pieceResults,actualRemnants,
+        finishedPieceCount:pieceResults.filter(p => p.outcome === 'QUALIFIED').length,
+        location:pending.reportLocation ?? '现场料头架 A-01'};
+}
 
 // shortcut: 待报工只保存在当前浏览器，需要跨设备接力时改为服务端暂存。
 const key = taskId => 'cutting-report-queue-' + taskId;

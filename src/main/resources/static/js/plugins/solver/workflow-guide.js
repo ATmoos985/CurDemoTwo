@@ -49,7 +49,7 @@ export function navigateWorkflowStage(stage, target) {
 export function renderWorkflowGuide(plan = {}) {
     const flow = readWorkflowState(plan), busy = plan.busy;
     renderDemandEditor(flow);
-    const actions = {solve:'btn-trigger-solve-station', report:'btn-confirm-station-cut', validate:'btn-validate-adjustment'};
+    const actions = {solve:'btn-trigger-solve-station', report:'btn-stage-advance', batch:'btn-batch-report', validate:'btn-validate-adjustment'};
     const primary = actions[flow.action] || 'btn-workflow-next';
     const footer = el('right-roll-actions'); if (!footer) return flow;
     footer.dataset.stage = flow.done ? 'complete' : String(flow.stage);
@@ -75,7 +75,6 @@ export function renderWorkflowGuide(plan = {}) {
         if (flow.action === 'match') window.camApp.matchTaskMaterials();
         if (flow.action === 'reports') window.camApp.openTaskReports();
         if (flow.action === 'advance') window.camApp.smartAdvanceBed();
-        if (flow.action === 'batch') window.camApp.openBatchReport();
     };
     const nextHost = flow.stage >= 2 ? footer : el('left-input-actions');
     if (next.parentElement !== nextHost) nextHost.prepend(next);
@@ -83,16 +82,19 @@ export function renderWorkflowGuide(plan = {}) {
     if (el('workflow-current').parentElement !== statusHost) statusHost.prepend(el('workflow-current'),el('station-action-hint'));
     const solve = el(actions.solve);solve.disabled = !!busy || !flow.canSolve;solve.hidden = !flow.canSolve;
     solve.textContent = busy === '正在生成方案…' ? busy : plan.ready || plan.edited ? '重新排料' : '生成排料方案';
-    const report = el(actions.report);report.disabled = !!busy || flow.action !== 'report';report.hidden = !plan.ready && !plan.edited;
-    report.textContent = '报工保存';
-    const stageAdvance = el('btn-stage-advance');
-    if (stageAdvance) {
-        stageAdvance.hidden = !plan.ready && !plan.edited;
-        stageAdvance.disabled = !!busy || flow.action !== 'report';
-        stageAdvance.textContent = '接续下一工位';
-    }
-    const queue = queuedReports(), batch = el('btn-batch-report');
-    batch.hidden = !queue.length;batch.disabled = !!busy;batch.textContent = `一次报工 · 已暂存 ${queue.length} 工位`;
+    const secondary = el('station-secondary-actions');
+    if (plan.ready || plan.edited) secondary.prepend(solve);
+    else footer.insertBefore(solve,el(actions.report));
+    const stageAdvance = el(actions.report);
+    stageAdvance.hidden = !plan.ready;
+    stageAdvance.disabled = !!busy || flow.action !== 'report';
+    stageAdvance.textContent = '记录并排下一工位';
+    const report = el('btn-confirm-station-cut');
+    report.hidden = !plan.ready;report.disabled = !!busy || flow.action !== 'report';
+    const queue = queuedReports(), batch = el(actions.batch);
+    batch.hidden = !queue.length && !plan.ready;
+    batch.disabled = !!busy || !!plan.edited;
+    batch.textContent = '统一报工 · ' + (queue.length + (plan.ready ? 1 : 0)) + ' 工位';
     el('btn-validate-adjustment').hidden = !plan.edited;
     const data = state.getCurrentCaseData(), sheet = state.currentCutMode === 'remnant';
     el('station-navigation-group').hidden = !data.materialAvailable;
@@ -104,17 +106,34 @@ export function renderWorkflowGuide(plan = {}) {
     el('btn-material-details').onclick = openMaterialDetails;
     if(el('lbl-current-roll-id'))el('lbl-current-roll-id').textContent=data.materialAvailable?data.rollId:'未装载';
     if(el('current-task-name'))el('current-task-name').textContent = value('task-name') || '未命名任务';
-    const recent = [...(state.taskReports || [])].reverse().find(receipt => receipt.status !== 'REVERSED');
-    if(el('output-empty'))el('output-empty').hidden = !!plan.ready || !!plan.edited || !!recent;
-    if(el('report-output')) {
-        const receipt = recent, children = receipt?.derivedRemnants || [];
-        el('report-output').hidden = !receipt || receipt.status === 'REVERSED';
-        el('report-output-summary').textContent = receipt ? `合格 ${receipt.finishedPieceCount} 件 · 新增料头 ${children.length} 块` : '';
-        if (el('report-output-remnants').dataset.receipt !== (receipt?.planId || '')) el('report-output-remnants').replaceChildren(...children.map(stock => {
-            const item = document.createElement('li');item.textContent = `${stock.id} · ${stock.materialBatch} · ${stock.width} × ${stock.length} mm`;return item;
-        }));
-        el('report-output-remnants').dataset.receipt = receipt?.planId || '';
-    }
+    const receipts = (state.taskReports || []).filter(r => r.status !== 'REVERSED');
+    if(el('output-empty'))el('output-empty').hidden = !!plan.ready || !!plan.edited || !!queue.length || !!receipts.length;
+    renderStationOrders(queue,receipts);
     scheduleRemnantAvailability();
     return flow;
+}
+
+function renderStationOrders(queue, receipts) {
+    const panel = el('station-work-orders'), list = el('station-work-orders-list');
+    if (!panel || !list) return;
+    panel.hidden = !queue.length && !receipts.length;
+    el('station-work-orders-count').textContent = queue.length + ' 待报 · ' + receipts.length + ' 已报';
+    const signature = JSON.stringify([queue,receipts]);
+    if (list.dataset.signature === signature) return;
+    list.dataset.signature = signature;
+    list.replaceChildren();
+    const rows = [...receipts.map(report => ({report,pending:report,reported:true})), ...queue];
+    rows.forEach(({report,pending,reported},index) => {
+        const item = document.createElement('details');item.className = 'station-order';
+        const summary = document.createElement('summary');
+        summary.textContent = '工位 ' + (index+1) + ' · ' + report.finishedPieceCount + ' 件 · ' + (reported ? '已报工' : '待报工');
+        const source = document.createElement('p');source.textContent = pending.sourceRemnantId || pending.rollId;
+        const range = document.createElement('p');range.className = 'muted-note';
+        range.textContent = pending.feedPortType === 'remnant' ? '料头使用一次，余料不回收' : pending.windowStartY + '–' + (pending.windowStartY+report.actualCutLen) + ' mm · 用料 ' + report.actualCutLen + ' mm';
+        const results = document.createElement('p');results.className = 'muted-note';
+        results.textContent = '合格 ' + report.finishedPieceCount + ' · 异常 ' + (report.pieceResults || []).filter(p => p.outcome === 'REJECTED').length + ' · 未切 ' + (report.pieceResults || []).filter(p => p.outcome === 'UNCUT').length;
+        const ticket = document.createElement('button');ticket.className = 'tool-btn';ticket.textContent = '查看工单';
+        ticket.onclick = () => window.camApp.openCutTicketModal({planId:report.planId,historical:true});
+        item.append(summary,source,range,results,ticket);list.append(item);
+    });
 }

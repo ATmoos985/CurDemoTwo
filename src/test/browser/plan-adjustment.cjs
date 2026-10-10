@@ -1,5 +1,6 @@
 // node src/test/browser/plan-adjustment.cjs
 // Set PLAYWRIGHT_MODULE and CHROME_PATH when using a bundled browser runtime.
+// Optional TEST_FILTER selects scenario names and reports unselected scenarios as skipped.
 const {chromium, expect} = require(process.env.PLAYWRIGHT_MODULE || 'playwright/test');
 const {createServer} = require('node:http');
 const fs = require('node:fs');
@@ -56,9 +57,12 @@ const server = createServer(async (req,res) => {
             const pieces=body.pieces.map(p=>({...planResult.pieces.find(s=>s.id===p.id),...p}));
             const adjusted={id:body.adjustmentId,status:'PENDING',createdAt:'2026-10-04T12:00:00',version:2,parentPlanId:planResult.planId,request:savedPlanRequest,result:{...planResult,planId:body.adjustmentId,pieces,remnants:[],cuts:pieces.map((p,i)=>({step:i+1,type:'横切',pos:p.y+p.l,start:0,end:2000,desc:'调整版'})),deductLen:Math.max(...pieces.map(p=>p.y+p.l))}};storedPlans.set(adjusted.id,adjusted);return json(adjusted);
         }
-        if(url.pathname==='/api/cutting/report-confirm'){
-            let raw='';for await(const chunk of req)raw+=chunk;const body=JSON.parse(raw);reportBodies.push(body);
+        if(url.pathname==='/api/cutting/report-confirm' || url.pathname==='/api/cutting/report-batch'){
+            let raw='';for await(const chunk of req)raw+=chunk;const payload=JSON.parse(raw), batch=Array.isArray(payload);
+            const bodies=batch ? payload : [payload];reportBodies.push(...bodies);
+            if(url.searchParams.get('preview')==='true')return json([]);
             if(!acceptReport)return json({message:'测试仅检查报工绑定，不写库存'},400);
+            const output=bodies.map(body=>{
             const pieceResults=body.pieceResults.map(r=>({...planResult.pieces.find(p=>p.id===r.pieceId),...r}));
             const good=pieceResults.filter(r=>r.outcome==='QUALIFIED'),bad=pieceResults.filter(r=>r.outcome==='REJECTED'),uncut=pieceResults.filter(r=>r.outcome==='UNCUT');
             const pieceArea=good.reduce((a,p)=>a+p.w*p.l/1e6,0),remArea=body.actualRemnants.reduce((a,r)=>a+r.w*r.l/1e6,0),usedArea=stock.width*body.actualCutLen/1e6;
@@ -68,7 +72,8 @@ const server = createServer(async (req,res) => {
             const receipt={...body,taskId:'task-a',status:'CONFIRMED',undo:{},rollId:stock.rollId,feedPortType:'roll',windowStartY:0,pieceResults,
                 rejectedPieceCount:bad.length,uncutPieceCount:uncut.length,demandQuantities:{7:good.length},pieceArea,remArea,usedArea,wasteArea:usedArea-pieceArea-remArea,
                 utilization:pieceArea/usedArea*100,derivedRemnants,recoveredGeometry,remainingLength:stock.currentRemainingLength,confirmedAt:new Date().toISOString()};
-            receipts.push(receipt);return json(receipt);
+            receipts.push(receipt);return receipt;});
+            return json(batch ? output : output[0]);
         }
         if(url.pathname.endsWith('/reverse')){const receipt=receipts.find(r=>r.planId===url.pathname.split('/').at(-2));let raw='';for await(const chunk of req)raw+=chunk;
             receipt.status='REVERSED';receipt.reversedAt=new Date().toISOString();receipt.reversalReason=JSON.parse(raw).reason;stock.usedLength-=receipt.actualCutLen;stock.currentRemainingLength+=receipt.actualCutLen;return json(receipt);}
@@ -87,8 +92,11 @@ const server = createServer(async (req,res) => {
 (async () => {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const browser = await chromium.launch({headless:true, ...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {})});
-    let passed=0, failed=0;
+    let passed=0, failed=0, discovered=0, skipped=0;
+    const filter=process.env.TEST_FILTER && new RegExp(process.env.TEST_FILTER);
     async function run(name, verify) {
+        discovered++;
+        if(filter && !filter.test(name)){skipped++;return;}
         recommendationBodies=[];recommendationWait=undefined;recommendationFailure=false;materialReadOverride=null;
         recommendationData={candidateCount:1,evaluatedCount:1,deferredCount:0,inventoryVersion:10,unavailable:[],recommendations:[{stock:{...structuredClone(remnantStock),status:'AVAILABLE'},pieceCount:1,pieceArea:2.4,utilization:40,cutCount:1,lines:[{demandId:7,name:'主帘',width:2000,length:1200,requested:2,placed:1,remaining:1}]}]};
         storedPlans=new Map([['original-plan',{id:'original-plan',version:1,request:structuredClone(planRequest),result:structuredClone(planResult),status:'PENDING',createdAt:'2026-10-04T12:00:00'}]]);failTicketRead=false;tasks = new Map([['task-a',initialTask()]]); failSave=false; requests=[]; failAdjustment=false; adjustmentBodies=[];reportBodies=[];savedPlanRequest=planRequest;solveResult=planResult;acceptReport=false;receipts=[];stock={...roll};solveWait=undefined;candidateItems=[];candidateBodies=[];failCandidates=false;failMaterialRead=false;candidateWait=undefined;extraRolls=[];failInventory=false;solveHttpStatus=200;solveRawResponse=null;
@@ -99,7 +107,7 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('body')).not.toHaveAttribute('inert','');
             await verify(page);
             assert.deepEqual(errors, []);
-            assert.ok(requests.every(r => !r.startsWith('POST') || ['/adjust','/report-confirm','/solve','/tasks','/reverse','/material-candidates','/remnant-recommendations','/scan','/rolls','/toolpath/optimize'].some(route=>r.endsWith(route))), 'only isolated fixture task, solve, adjustment and report requests');
+            assert.ok(requests.every(r => !r.startsWith('POST') || ['/adjust','/report-confirm','/report-batch','/solve','/tasks','/reverse','/material-candidates','/remnant-recommendations','/scan','/rolls','/toolpath/optimize'].some(route=>r.endsWith(route))), 'only isolated fixture task, solve, adjustment and report requests');
             passed++; console.log('PASS ' + name);
         } catch(error) {failed++; console.error('FAIL ' + name + '\n' + error.stack); console.error(JSON.stringify({requests,adjustmentBodies,savedPlanRequest,errors,debug:await page.evaluate(()=>{const s=window.camApp?.state;if(!s)return {page:location.pathname};return {pending:s.pendingPlan?.result?.planId,version:s.pendingPlan?.version,geometry:s.pendingPlan?.geometry,pieces:s.getCurrentCaseData().pieces,cuts:s.getCurrentCaseData().cuts,remnants:s.getCurrentCaseData().remnants};})}));}
         finally {await context.close();}
@@ -272,7 +280,7 @@ const server = createServer(async (req,res) => {
             await page.getByRole('checkbox',{name:'回收 UNCUT-1',exact:true}).check();
             await page.locator('#report-confirm-button').click();await expect(page.locator('#cut-report-modal')).not.toBeVisible();
             assert.equal(receipts[0].finishedPieceCount,0);assert.equal(receipts[0].derivedRemnants.length,1);
-            await expect(page.locator('#demands-container .demand-status')).toHaveText('合格完成 1 / 3 件 · 还差 2 件');
+            await expect(page.locator('#demands-container .demand-status')).toHaveText('已报工 1 / 3 件 · 待报工 0 · 待切 2');
             await expect(page.locator('#material-context-info')).toContainText('59,000 mm');
             assert.equal(await page.evaluate(()=>window.camApp.state.taskCompleted[7]),1);
         });
@@ -295,7 +303,7 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('#cut-report-modal')).not.toBeVisible();assert.equal(requests.filter(r=>r.startsWith('POST')).length,writes);
             assert.equal(await page.evaluate(()=>window.camApp.state.getCurrentCaseData().windowStartY),0);
             await expect(page.locator('#right-roll-actions .workflow-primary:visible')).toHaveCount(1);
-            await expect(page.locator('#btn-confirm-station-cut')).toHaveClass(/workflow-primary/);
+            await expect(page.locator('#btn-stage-advance')).toHaveClass(/workflow-primary/);
             await expect(page.locator('[data-workflow-stage="3"]')).toHaveAttribute('aria-current','step');
             fs.mkdirSync('target/workflow-guide',{recursive:true});
             for(const width of [1366,1920]){await page.setViewportSize({width,height:width===1366?768:1080});
@@ -315,12 +323,12 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('#btn-trigger-solve-station')).toBeEnabled();
             await expect(page.locator('#right-roll-actions .workflow-primary:visible')).toHaveCount(1);
         });
-        await run('manual changes move the primary action to validation and back to reporting',async page=>{
+        await run('manual changes move the primary action to validation and back to recording the station',async page=>{
             await loadPlan(page);await page.keyboard.press('ArrowDown');
             await expect(page.locator('#btn-validate-adjustment')).toHaveClass(/workflow-primary/);
             await expect(page.locator('[data-workflow-stage="2"]')).toHaveAttribute('aria-current','step');
             await expect(page.locator('#right-roll-actions .workflow-primary:visible')).toHaveCount(1);
-            await page.locator('#btn-undo-plan').click();await expect(page.locator('#btn-confirm-station-cut')).toHaveClass(/workflow-primary/);
+            await page.locator('#btn-undo-plan').click();await expect(page.locator('#btn-stage-advance')).toHaveClass(/workflow-primary/);
         });
         await run('busy solve disables duplicate actions and completion offers report history',async page=>{
             await loadPlan(page);let release;solveWait=new Promise(resolve=>release=resolve);
@@ -391,7 +399,7 @@ const server = createServer(async (req,res) => {
         });
         await run('demand progress separates preview and completion, links both ways and preserves cutting position',async page=>{
             tasks.get('task-a').demands[0].quantity=4;await loadPlan(page);
-            const row=page.locator('#demands-container [data-id="7"]');await expect(row.locator('.demand-status')).toHaveText('合格完成 1 / 4 件 · 还差 3 件');
+            const row=page.locator('#demands-container [data-id="7"]');await expect(row.locator('.demand-status')).toHaveText('已报工 1 / 4 件 · 待报工 0 · 待切 3');
             await row.locator('.demand-unplaced summary').click();await expect(row.locator('.demand-unplaced p')).toContainText('不能据此判定无法裁切');
             const geometry=await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces));
             await row.locator('.demand-locate').click();assert.equal(await page.evaluate(()=>window.camApp.getSelectedPieceId()),1);
@@ -406,7 +414,7 @@ const server = createServer(async (req,res) => {
             await expect(row.locator('.dem-name')).not.toBeFocused();assert.equal(await page.evaluate(()=>window.camApp.getSelectedPieceId()),1);
             await page.keyboard.press('ArrowDown');await expect(page.locator('#demand-progress-summary')).toContainText('手调待校验');
             await page.evaluate(()=>{const data=window.camApp.state.getCurrentCaseData();data.pieces=data.pieces.filter(p=>p.id!==2);window.camApp.bus.emit('plan:edited');});
-            await expect(row.locator('.demand-status')).toHaveText('合格完成 1 / 4 件 · 还差 3 件');
+            await expect(row.locator('.demand-status')).toHaveText('已报工 1 / 4 件 · 待报工 0 · 待切 3');
             await expect(row.locator('.demand-unplaced p')).toContainText('移除了 1 件');
             await page.locator('#btn-undo-plan').click();await expect(row.locator('.demand-preview-label')).toContainText('本方案 2');
             fs.mkdirSync('target/demand-progress',{recursive:true});await page.screenshot({path:'target/demand-progress/linked-1366.png'});
@@ -416,8 +424,8 @@ const server = createServer(async (req,res) => {
             await page.evaluate(async saved=>{const {restoreSavedPlan}=await import('/js/plugins/solver/solver-client.js');restoreSavedPlan(saved);},
                 {request:{...planRequest,demands:[...planRequest.demands,{...planRequest.demands[0],id:8}]},result:{...planResult,pieces:[planResult.pieces[0],{...planResult.pieces[1],demandId:8}]}});
             const first=page.locator('#demands-container [data-id="7"]'),second=page.locator('#demands-container [data-id="8"]');
-            await expect(first.locator('.demand-status')).toHaveText('合格完成 1 / 3 件 · 还差 2 件');
-            await expect(second.locator('.demand-status')).toHaveText('合格完成 0 / 2 件 · 还差 2 件');
+            await expect(first.locator('.demand-status')).toHaveText('已报工 1 / 3 件 · 待报工 0 · 待切 2');
+            await expect(second.locator('.demand-status')).toHaveText('已报工 0 / 2 件 · 待报工 0 · 待切 2');
             await second.locator('.demand-locate').click();assert.equal(await page.evaluate(()=>window.camApp.getSelectedPieceId()),2);
             await expect(second).toHaveClass(/demand-selected/);await expect(first).not.toHaveClass(/demand-selected/);
             await first.locator('.demand-locate').click();assert.equal(await page.evaluate(()=>window.camApp.getSelectedPieceId()),1);
@@ -428,7 +436,7 @@ const server = createServer(async (req,res) => {
             solveResult={success:false,status:'NO_SOLUTION_FOUND',message:'本次没有排入裁片',pieces:[],fulfillment:[{demandId:7,requested:2,placed:0,unplaced:2,reason:'EXCEEDS_PROCESSING_LENGTH'}]};
             await page.locator('#btn-trigger-solve-station').click();await expect(page.locator('#demand-progress-summary')).toContainText('求解反馈');
             const row=page.locator('#demands-container [data-id="7"]');await row.locator('.demand-unplaced summary').click();
-            await expect(row.locator('.demand-unplaced p')).toContainText('有效长度');await expect(row.locator('.demand-status')).toHaveText('合格完成 1 / 3 件 · 还差 2 件');
+            await expect(row.locator('.demand-unplaced p')).toContainText('有效长度');await expect(row.locator('.demand-status')).toHaveText('已报工 1 / 3 件 · 待报工 0 · 待切 2');
             await expect(row.locator('.demand-locate')).toBeDisabled();await expect(page.locator('#btn-confirm-station-cut')).toBeDisabled();
             await page.locator('.dem-l').fill('1200');await expect(row.locator('.demand-unplaced')).toBeHidden();await expect(page.locator('#demand-progress-summary')).not.toContainText('求解反馈');
         });
@@ -445,7 +453,7 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('#demand-lines-progress')).toHaveText('已满足 3 / 5 项');await expect(page.locator('#demand-pieces-progress')).toHaveText('合格 13 / 20 件');
             await expect(page.locator('.demand-segment[data-complete="true"]')).toHaveCount(3);
             const partial=page.locator('#demands-container [data-id="10"]');await expect(partial.locator('.demand-meter')).toHaveAttribute('aria-valuenow','6');await expect(partial.locator('.demand-meter')).toHaveAttribute('aria-valuemax','10');
-            await expect(partial.locator('.demand-change')).toHaveText('最近报工 +2 件');await expect(partial.locator('.demand-status')).toContainText('还差 4 件');
+            await expect(partial.locator('.demand-change')).toHaveText('最近报工 +2 件');await expect(partial.locator('.demand-status')).toContainText('待切 4');
             fs.mkdirSync('target/demand-bars',{recursive:true});await page.screenshot({path:'target/demand-bars/overview-1366.png'});
             await page.locator('#demand-recent-change summary').click();await expect(page.locator('#demand-recent-change')).toContainText('抱枕套：+2 件');
             await page.locator('#card-demands .section-toggle').click();await expect(page.locator('#demand-overview')).toBeVisible();
@@ -553,7 +561,7 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('#material-match-error')).toContainText('测试材料读取失败');
             assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');await expect(page.locator('#material-context-id')).toHaveText(roll.rollId);
             failMaterialRead=false;await page.locator('#material-load').click();await expect(page.locator('#material-picker')).not.toBeVisible();await expect(page.locator('#material-context-id')).toHaveText(secondRoll.rollId);
-            await expect(page.locator('.demand-status')).toHaveText('合格完成 1 / 3 件 · 还差 2 件');assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan),null);
+            await expect(page.locator('.demand-status')).toHaveText('已报工 1 / 3 件 · 待报工 0 · 待切 2');assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan),null);
             assert.equal(await page.evaluate(()=>window.camApp.state.activeTask.id),'task-a');assert.equal(reportBodies.length,0);
         });
         await run('matching failures retry in place and late responses cannot reopen a closed selector',async page=>{
@@ -721,5 +729,5 @@ const server = createServer(async (req,res) => {
             assert.ok(fs.statSync('target/visual-consistency/long-ticket.pdf').size>10000);
         });
     } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
-    console.log(JSON.stringify({discovered:56,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
+    console.log(JSON.stringify({discovered,executed:passed+failed,passed,failed,skipped}));if(failed)process.exitCode=1;
 })().catch(error=>{console.error(error);server.close();process.exitCode=1;});

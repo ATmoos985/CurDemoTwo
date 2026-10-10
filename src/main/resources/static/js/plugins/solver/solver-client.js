@@ -27,7 +27,7 @@ import { renderToolpathUI } from '../toolpath/toolpath-optimizer.js';
 import { selectRemnant, clearRemnantSelection, hoverRemnant } from '../cad/cad-remnant-highlight.js';
 import {scheduleRemnantAvailability} from '../material/material-selection.js';
 import {solveDiagnostics} from './solve-diagnostics.js';
-import {queuedReports, queuedQuantities, queuedStockLength, saveReportQueue, queueEntry} from './report-queue.js';
+import {queuedReports, queuedQuantities, queuedStockLength, saveReportQueue, queueEntry, stationReport} from './report-queue.js';
 import {windowDefects, findForwardPlan} from './forward-search.js';
 import {demandFeedLength,feedLengthLimits} from '../radar/feed-window.js';
 
@@ -272,7 +272,7 @@ export function updateWorkflowControls() {
     const editable = currentPlanContext();
     const edited = editable && !ready;
     const editPanel = document.getElementById('plan-edit-controls');
-    if (editPanel) { editPanel.hidden = !editable; editPanel.dataset.edited = String(edited); editPanel.querySelector('.plan-edit-actions').hidden = !state.pendingPlan?.history?.canUndo && !state.pendingPlan?.history?.canRedo; }
+    if (editPanel) { editPanel.hidden = !editable || (!edited && !state.pendingPlan?.history?.canUndo && !state.pendingPlan?.history?.canRedo); editPanel.dataset.edited = String(edited); editPanel.querySelector('.plan-edit-actions').hidden = !state.pendingPlan?.history?.canUndo && !state.pendingPlan?.history?.canRedo; }
     const validateButton = document.getElementById('btn-validate-adjustment');
     if (validateButton) { validateButton.disabled = !edited || validatingAdjustment; validateButton.textContent = validatingAdjustment ? '正在校验…' : '校验并保存调整版'; }
     for (const [id, enabled] of [['btn-undo-plan',state.pendingPlan?.history?.canUndo],['btn-redo-plan',state.pendingPlan?.history?.canRedo]]) {
@@ -710,16 +710,14 @@ async function prepareCutReport() {
         showToast(pending?.blockedError ? '方案的任务或材料已变化，请重新核对并排料' : pending?.result?.planId ? '调整尚未校验，请先校验并保存调整版' : '请先生成并核对当前排料方案，再进行报工', 'warning');
         return;
     }
-    const { result, bedL, feedPortType } = pending;
-    const minW = pending.request?.minRemnantWidth ?? 200, minL = pending.request?.minRemnantLength ?? 300;
-    const recoverable = (result.remnants || []).filter(r => r.w >= minW && r.l >= minL);
-    const defaultCutLen = Math.max(result.deductLen || 0, layoutMetrics({rollW:pending.request.rollW, bedL, pieces:result.pieces, remnants:recoverable, cuts:result.cuts}).deductLen) || bedL;
+    const { feedPortType } = pending;
     const actualLenInput = document.getElementById("report-actual-len");
     if (actualLenInput) {
-        actualLenInput.value = feedPortType === "remnant" ? 0 : (pending.reportActualCutLen ?? defaultCutLen);
+        actualLenInput.value = stationReport(pending).actualCutLen;
         actualLenInput.disabled = feedPortType === "remnant";
     }
     for (const id of ['report-recovery-location', 'report-recovery-rules']) document.getElementById(id).hidden = feedPortType === 'remnant';
+    document.getElementById('report-location').value = stationReport(pending).location;
     renderReportPieces(pending, updateReportPreview);
     document.getElementById('report-remnants').replaceChildren();
     document.getElementById("report-error").textContent = "";
@@ -753,6 +751,7 @@ export async function updateReportPreview() {
     document.getElementById('report-preview-after-len').textContent = curRemaining == null ? '—' : (curRemaining - cutLen).toLocaleString() + ' mm';
 
     const results=readReportPieces();pending.reportPieceResults=results;pending.reportActualCutLen=cutLen;
+    pending.reportLocation = document.getElementById('report-location').value.trim();
     const groups=classifyReport(result.pieces || [],results);
     document.getElementById('report-piece-count').value=groups.QUALIFIED.length;
     const counts = new Map();
@@ -787,52 +786,42 @@ export async function openStationLapConfirmModal() {
     await openCutReport();
 }
 
+async function stageStation(pending, report) {
+    const entries = [...queuedReports().filter(r => r.report.planId !== report.planId), queueEntry(pending,report)];
+    await requestJSON('/api/cutting/report-batch?preview=true', entries.map(r => r.report));
+    saveReportQueue(pending.taskId,entries);
+    state.reportQueue = entries;
+    const data = state.getCurrentCaseData(), outcomes = new Map(report.pieceResults.map(r => [r.pieceId,r.outcome]));
+    // 保留画布上的全卷坐标、唯一编号和原始裁片映射。
+    data.pieces = (data.pieces || []).filter(p => p.planId !== report.planId || outcomes.get(p.sourcePieceId) !== 'UNCUT')
+        .map(p => p.planId === report.planId ? {...p,queued:true,outcome:outcomes.get(p.sourcePieceId)} : p);
+    data.remnants = (data.remnants || []).filter(r => r.confirmed || r.queued);
+    data.cuts = [];state.pendingPlan = null;
+    smartAdvanceBed();updateUIInfo();renderScene();renderRadar();
+}
+
 export async function stageAndAdvanceNextStation() {
-    if (reporting) return;
+    if (await recordCurrentStation() && updateWorkflowControls().canSolve) await triggerSolve();
+}
+
+async function recordCurrentStation() {
+    if (reporting) return false;
     const pending = state.pendingPlan;
     if (!pending || !canUseCurrentPlan()) {
-        showToast('请先生成当前工位排料方案，再接续下一工位', 'warning');
-        return;
+        showToast('请先生成方案或校验调整版，再记录本工位', 'warning');
+        return false;
     }
-    const { result, bedL, feedPortType } = pending;
-    const minW = pending.request?.minRemnantWidth ?? 200, minL = pending.request?.minRemnantLength ?? 300;
-    const recoverable = (result.remnants || []).filter(r => r.w >= minW && r.l >= minL);
-    const defaultCutLen = Math.max(result.deductLen || 0, layoutMetrics({rollW:pending.request.rollW, bedL, pieces:result.pieces, remnants:recoverable, cuts:result.cuts}).deductLen) || bedL;
-    const actualCutLen = feedPortType === "remnant" ? 0 : (pending.reportActualCutLen ?? defaultCutLen);
-    const pieceResults = (result.pieces || []).map(p => ({ pieceId: p.sourcePieceId || p.id, outcome: 'QUALIFIED', reason: '' }));
-    const actualRemnants = readReportRemnants(pending);
-    const report = {
-        planId: pending.result.planId,
-        actualCutLen,
-        finishedPieceCount: (result.pieces || []).length,
-        location: "现场料头架 A-01",
-        actualRemnants,
-        pieceResults
-    };
-    const entries = [...queuedReports().filter(r => r.report.planId !== report.planId), queueEntry(pending, report)];
     reporting = true;
     const wasInert = document.body.inert; document.body.inert = true;
     try {
-        await requestJSON('/api/cutting/report-batch?preview=true', entries.map(r => r.report));
-        saveReportQueue(pending.taskId, entries);
-        state.reportQueue = entries;
-        const data = state.getCurrentCaseData();
-        data.pieces = (data.pieces || []).filter(p => p.planId !== report.planId)
-            .concat((result.pieces || []).map(p => ({ ...p, planId: report.planId, queued: true })));
-        data.remnants = (data.remnants || []).filter(r => r.confirmed || r.queued);
-        data.cuts = [];
-        state.pendingPlan = null;
-        smartAdvanceBed();
-        updateUIInfo();
-        renderScene();
-        renderRadar();
-        showToast(`已暂存当前工位（当前待报工 ${entries.length} 工位），已自动接续下一工位！`, 'success');
+        await stageStation(pending,stationReport(pending));
+        showToast('本工位已记录，待最后统一报工。', 'success');
+        return true;
     } catch (error) {
-        showToast('接续暂存失败: ' + error.message, 'error');
+        showToast('本工位未暂存：' + error.message, 'error');
+        return false;
     } finally {
-        reporting = false;
-        document.body.inert = wasInert;
-        updateWorkflowControls();
+        reporting = false;document.body.inert = wasInert;updateWorkflowControls();
     }
 }
 
@@ -878,16 +867,9 @@ export async function confirmCutReport(stageOnly = false) {
     const wasInert = document.body.inert; document.body.inert = true;
     try {
         if (stageOnly) {
-            await requestJSON('/api/cutting/report-batch?preview=true',entries.map(r => r.report));
-            saveReportQueue(pending.taskId,entries);
-            state.reportQueue = entries;
-            const data = state.getCurrentCaseData(), outcomes = new Map(pieceResults.map(r => [r.pieceId,r.outcome]));
-            data.pieces = (data.pieces || []).filter(p => p.planId !== report.planId || outcomes.get(p.sourcePieceId) !== 'UNCUT')
-                .map(p => p.planId === report.planId ? {...p,queued:true} : p);
-            data.remnants = (data.remnants || []).filter(r => r.confirmed || r.queued);
-            data.cuts = [];state.pendingPlan = null;
-            closeCutReport();smartAdvanceBed();updateUIInfo();renderScene();renderRadar();
-            showToast('本工位已暂存，可继续裁切；集中报工后才扣库存并计入完成量。','success');
+            await stageStation(pending,report);
+            closeCutReport();
+            showToast('本工位已记录，可继续裁切，最后统一报工。','success');
         } else {
             await submitReports(entries);
             closeCutReport();
@@ -932,8 +914,9 @@ async function submitReports(entries) {
     scheduleRemnantAvailability({force:true,recommend:true});
 }
 
-export function openBatchReport() {
-    if(state.pendingPlan){openCutReport();return;}
+export async function openBatchReport() {
+    if (reporting) return;
+    if (state.pendingPlan && !await recordCurrentStation()) return;
     let dialog=document.getElementById('batch-report-dialog');
     if (!dialog) {
         dialog=document.createElement('dialog');dialog.id='batch-report-dialog';dialog.className='action-dialog workbench-dialog';
@@ -941,9 +924,9 @@ export function openBatchReport() {
         dialog.addEventListener('keydown',event => event.stopPropagation());document.body.append(dialog);
     }
     const entries=queuedReports();
-    dialog.innerHTML='<div class="workbench-dialog-heading"><div><h2 id="batch-report-title">待报工 · '+entries.length+' 工位</h2><p>可以先报一个工位，也可一起提交；每次报工立即更新对应需求、库存和工单。</p></div><button class="tool-btn" data-close>关闭</button></div><div class="workbench-dialog-body">'+
+    dialog.innerHTML='<div class="workbench-dialog-heading"><div><h2 id="batch-report-title">待报工 · '+entries.length+' 工位</h2><p>默认按各工位方案记录合格件与料头。请核对实际结果，确认后一次更新需求和库存。</p></div><button class="tool-btn" data-close>关闭</button></div><div class="workbench-dialog-body">'+
         entries.map((r,index) => '<article class="task-list-item"><strong>工位 '+(index+1)+' · '+escapeText(r.pending.sourceRemnantId || r.pending.rollId)+'</strong><span>合格 '+r.report.finishedPieceCount+' 件 · '+(r.pending.feedPortType==='remnant'?'料头核销':'实切 '+r.report.actualCutLen+' mm · 起点 '+r.pending.windowStartY+' mm')+'</span><small>'+r.report.pieceResults.filter(p=>p.outcome==='REJECTED').length+' 件异常 · '+r.report.pieceResults.filter(p=>p.outcome==='UNCUT').length+' 件未切</small><button class="tool-btn" data-ticket="'+index+'">查看工单</button>'+(index===entries.length-1?'<button class="tool-btn" data-restore>退回核对</button>':'')+'</article>').join('')+
-        '</div><div class="workbench-dialog-footer"><span id="batch-report-error" role="alert"></span><button class="tool-btn" data-close>继续裁切</button>'+(entries.length>1?'<button class="tool-btn" data-confirm-one>先报第一个工位</button>':'')+'<button class="tool-btn active" data-confirm '+(!entries.length?'disabled':'')+'>确认'+(entries.length>1?'全部':'本工位')+'报工</button></div>';
+        '</div><div class="workbench-dialog-footer"><span id="batch-report-error" role="alert"></span><button class="tool-btn" data-close>继续裁切</button><button class="tool-btn active" data-confirm '+(!entries.length?'disabled':'')+'>确认'+(entries.length>1?'全部':'本工位')+'报工</button></div>';
     dialog.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>dialog.close());
     dialog.querySelectorAll('[data-ticket]').forEach(b=>b.onclick=async()=>{const {openCutTicketModal}=await import('../export/cut-ticket.js');openCutTicketModal({planId:entries[Number(b.dataset.ticket)].report.planId,historical:true});});
     dialog.querySelector('[data-restore]')?.addEventListener('click',async()=>{
@@ -954,7 +937,7 @@ export function openBatchReport() {
             const saved=await requestJSON('/api/cutting/plans/'+encodeURIComponent(last.report.planId));
             if(saved.status!=='PENDING')throw new Error('该方案状态已变化，请重新打开任务核对报工记录。');
             const remaining=entries.slice(0,-1);saveReportQueue(state.activeTask.id,remaining);state.reportQueue=remaining;
-            restoreSavedPlan(saved);Object.assign(state.pendingPlan,{reportPieceResults:last.report.pieceResults,reportActualCutLen:last.report.actualCutLen,reportRecovery:last.pending.reportRecovery});
+            restoreSavedPlan(saved);Object.assign(state.pendingPlan,{reportPieceResults:last.report.pieceResults,reportActualCutLen:last.report.actualCutLen,reportRecovery:last.pending.reportRecovery,reportLocation:last.report.location});
             document.getElementById('report-location').value=last.report.location;
             dialog.close();await openCutReport();
         } catch(error){dialog.querySelector('#batch-report-error').textContent=error.message;}
@@ -966,7 +949,6 @@ export function openBatchReport() {
         finally {reporting=false;document.body.inert=wasInert;updateWorkflowControls();}
     };
     dialog.querySelector('[data-confirm]').onclick=()=>confirm(entries);
-    dialog.querySelector('[data-confirm-one]')?.addEventListener('click',()=>confirm(entries.slice(0,1)));
     if(!dialog.open)dialog.showModal();
 }
 

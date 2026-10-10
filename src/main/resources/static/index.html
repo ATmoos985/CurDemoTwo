@@ -367,7 +367,11 @@
                         </details>
                     </div>
                 </div>
-                <!-- 母卷扣料与面积守恒台账 -->
+                <section class="panel-section" id="station-work-orders" hidden aria-label="本次工位工单">
+                    <div class="section-header"><span class="section-title-wrap">本次工位工单</span><span id="station-work-orders-count" class="badge-rem"></span></div>
+                    <p class="muted-note">逐工位记录，最后统一报工；展开可查看工单。</p>
+                    <div id="station-work-orders-list"></div>
+                </section>
 
             </div>
         </div>
@@ -376,7 +380,7 @@
             <div class="sidebar-pinned-footer" id="right-sidebar-actions-footer" style="border-top: 1px solid var(--panel-border); background: var(--panel-bg); flex-shrink: 0;">
                 <!-- 母卷开卷工位排料搭切执行控制 -->
                 <div id="right-roll-actions" class="panel-section action-footer-section" style="padding: 10px 14px 12px 14px;">
-                    <p id="output-empty" class="muted">生成方案后在此核对产出</p><section id="report-output" hidden><strong>最近报工</strong><button class="tool-btn" onclick="openCutTicketModal()">打印工单</button><p id="report-output-summary"></p><details><summary>本次入库料头</summary><ul id="report-output-remnants"></ul><button class="tool-btn" onclick="openRemnantModal('stock')">查看料头库</button></details></section>
+                    <p id="output-empty" class="muted">生成方案后在此核对产出</p>
                     <strong id="workflow-current" role="status">完善需求</strong>
                     <p id="station-action-hint" class="station-action-hint" role="status">先生成方案，再核对实切并报工保存。</p>
                     <button id="btn-workflow-next" class="tool-btn" type="button">完善需求信息</button>
@@ -385,16 +389,16 @@
                         <div class="plan-edit-actions"><button id="btn-undo-plan" class="tool-btn" onclick="undoPlanEdit()" title="撤销本次方案的上一步调整 (Ctrl+Z)">撤销调整</button><button id="btn-redo-plan" class="tool-btn" onclick="redoPlanEdit()" title="重做调整 (Ctrl+Y)">重做</button></div>
                         <button id="btn-validate-adjustment" class="tool-btn active" onclick="validatePlanAdjustment()">校验并保存调整版</button>
                     </div>
-                    <button class="big-solve-btn roll" id="btn-trigger-solve-station" onclick="triggerSolve()" title="在当前红框工位排料并保留其余工位已切成果">
+                    <button class="tool-btn" id="btn-trigger-solve-station" onclick="triggerSolve()" title="在当前红框工位排料并保留其余工位已切成果">
                         生成排料方案
                     </button>
-                    <button class="tool-btn active" id="btn-stage-advance" onclick="stageAndAdvanceNextStation()" style="display:none;" title="暂存当前工位排料并平滑推进至下一工位，零弹窗继续排料">
-                        接续下一工位
+                    <button class="tool-btn" id="btn-stage-advance" hidden onclick="stageAndAdvanceNextStation()" title="按当前方案记录本工位并生成下一工位方案；最后统一报工">
+                        记录并排下一工位
                     </button>
-                    <button class="tool-btn" id="btn-confirm-station-cut" onclick="openStationLapConfirmModal()" title="确认当前工位裁切：核对并提交实切数据、扣减母卷长度、核销订单需求">
-                        报工保存
-                    </button>
-                    <button class="tool-btn" id="btn-batch-report" hidden onclick="openBatchReport()">一次报工</button>
+                    <button class="tool-btn" id="btn-batch-report" hidden onclick="openBatchReport()">统一报工</button>
+                    <div id="station-secondary-actions" class="station-secondary-actions">
+                        <button class="tool-btn" id="btn-confirm-station-cut" onclick="openStationLapConfirmModal()" hidden title="有异常件、未切件或实测尺寸变化时，在这里修改">修改实切结果</button>
+                    </div>
                 </div>
 
                 <!-- 料头复用精益切割执行控制 (与母卷工位操作完全统一对齐) -->
@@ -421,7 +425,7 @@
                 <section><h3>01 · 本次用料</h3><div class="report-source"><b id="report-preview-roll-id">—</b><span id="report-stock-preview">余量 <span id="report-preview-cur-len">—</span> → <b id="report-preview-after-len">—</b></span></div>
                 <div class="report-fields"><label><span id="report-length-label">实切长度（mm）</span><input id="report-actual-len" type="number" min="0" step="0.1" class="prop-input" oninput="updateReportPreview()"></label><label>合格产出（件）<input id="report-piece-count" type="number" min="0" class="prop-input" readonly></label></div><p id="report-area-preview" class="muted" role="status"></p></section>
                 <section><h3>02 · 逐件核对实际结果</h3><p class="muted">仅合格件完成需求。异常件填写原因，未切件留待后续排料；本次保存后结束当前方案。</p><div class="report-batch-actions"><button id="report-all-qualified" class="tool-btn">全设合格</button><button id="report-all-uncut" class="tool-btn">全设未切</button><button id="report-mark-tail" class="tool-btn">长度外标为未切</button></div><div id="report-pieces"></div><div id="report-preview-demand-text" class="muted"></div><p id="report-outcome-summary" role="status"></p></section>
-                <section><h3>03 · 余料处理 <small id="report-preview-remnant-text"></small></h3><label class="report-location" id="report-recovery-location">入库库位<input id="report-location" class="prop-input" value="现场料头架 A-01"></label><div id="report-remnants"></div><details class="detail-disclosure" id="report-recovery-rules"><summary>实测与回收规则</summary><p>仅勾选已分离并实际回收的矩形料头。未切区域只列出已扣用料中的部分，确认分离后可勾选回收；未勾选部分计入损耗，未分离的卷尾仍在母卷中。实测尺寸不能与合格件、异常件或其他料头重叠，小于方案回收门槛的余料不入库。</p></details></section>
+                <section><h3>03 · 余料处理 <small id="report-preview-remnant-text"></small></h3><label class="report-location" id="report-recovery-location">入库库位<input id="report-location" class="prop-input" oninput="updateReportPreview()" value="现场料头架 A-01"></label><div id="report-remnants"></div><details class="detail-disclosure" id="report-recovery-rules"><summary>实测与回收规则</summary><p>仅勾选已分离并实际回收的矩形料头。未切区域只列出已扣用料中的部分，确认分离后可勾选回收；未勾选部分计入损耗，未分离的卷尾仍在母卷中。实测尺寸不能与合格件、异常件或其他料头重叠，小于方案回收门槛的余料不入库。</p></details></section>
             </div>
             <div class="settings-modal-footer"><p id="report-error" role="alert"></p><div class="report-footer-actions"><button class="tool-btn" onclick="closeCutReport()">暂不报工</button><button id="report-stage-button" class="tool-btn active" onclick="confirmCutReport(true)">暂存，继续裁切</button><button id="report-confirm-button" class="tool-btn" onclick="confirmCutReport()">确认报工并保存</button></div></div>
         </div>
