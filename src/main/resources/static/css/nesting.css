@@ -1,4 +1,4 @@
-.nesting-lab { background: #f5f7f8; }
+.nesting-lab { background: #f5f7f8; height: 100dvh; overflow: hidden; }
 .nesting-lab [hidden] { display: none !important; }
 .lab-header { display: flex; align-items: center; justify-content: space-between; background: var(--panel-bg); border-bottom: 1px solid var(--panel-border); }
 .lab-header > div { display: flex; align-items: center; gap: 12px; }
@@ -6,7 +6,9 @@
 .lab-subtitle, .lab-muted { color: var(--text-muted); font-size: 12px; }
 .lab-header a { text-decoration: none; }
 .lab-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 330px minmax(280px, 1fr) 280px; }
-.lab-input, .lab-output { min-width: 0; background: var(--panel-bg); display: flex; flex-direction: column; overflow: hidden; }
+.lab-input, .lab-output { min-width: 0; min-height: 0; background: var(--panel-bg); display: flex; flex-direction: column; overflow: hidden; }
+.lab-form-body, .lab-result-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 18px; }
+.lab-form-body > .lab-muted { margin-bottom: 20px; }
 .lab-input { border-right: 1px solid var(--panel-border); }
 .lab-output { border-left: 1px solid var(--panel-border); }
 .lab-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; min-height: 64px; border-bottom: 1px solid var(--panel-border); flex-shrink: 0; }
@@ -33,10 +35,10 @@
 .lab-details[open] summary { margin-bottom: 10px; color: var(--text-main); }
 .lab-details .tool-btn { margin: 4px 3px 0 0; }
 .lab-details > p { margin-bottom: 10px; }
-.lab-submit { padding: 14px 18px; border-top: 1px solid var(--panel-border); }
+.lab-submit { flex-shrink: 0; padding: 14px 18px; border-top: 1px solid var(--panel-border); }
 .lab-submit p { font-size: 11px; color: var(--text-muted); margin-bottom: 9px; }
 [data-theme] .lab-submit .active, [data-theme] #apply-json { background: var(--accent-blue); color: white; border-color: var(--accent-blue); }
-.lab-submit button { width: 100%; min-height: 42px; font-weight: 600; }
+.lab-submit .tool-btn { width: 100%; min-height: 42px; font-weight: 600; }
 .lab-canvas-panel { min-width: 0; display: flex; flex-direction: column; }
 .lab-canvas-panel .lab-heading { background: white; }
 .lab-canvas-toolbar { padding: 8px 14px; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; background: white; border-bottom: 1px solid var(--panel-border); color: var(--text-muted); font-size: 12px; }

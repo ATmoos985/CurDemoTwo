@@ -170,7 +170,7 @@ function table(id, headings, rows) {
     byId(id).replaceChildren(node);
 }
 function changed() {
-    solveToken++; byId('solve-button').disabled = false; byId('solve-button').textContent = '生成排料'; showError('');
+    solveToken++; byId('solve-button').disabled = false; byId('solve-button').textContent = '开始裁切预览'; showError('');
     if (byId('scenario-select')) byId('scenario-select').value = '';
     try {
         problem = readForm();
@@ -192,7 +192,7 @@ function loadProblem(next) {
     byId('continues').disabled = problem.process.feedMode === 'SHEET';
     byId('material-shape-editor').replaceChildren(shapeEditor(problem.material.shape, byId('material-width'), byId('material-height')));
     fillRows(); viewer.setScene(scene, { fitView: true }); results(scene); engineHint(); showError('');
-    byId('solve-status').textContent = '输入就绪，等待排料。'; byId('solve-button').disabled = false; byId('solve-button').textContent = '生成排料';
+    byId('solve-status').textContent = '输入就绪，等待排料。'; byId('solve-button').disabled = false; byId('solve-button').textContent = '开始裁切预览';
 }
 // A select emits input before change; keep the chosen scenario until its own loader runs.
 byId('problem-form').addEventListener('input', event => { if (!event.target.matches('.shape-kind, #scenario-select')) changed(); });
@@ -240,7 +240,7 @@ byId('problem-form').addEventListener('submit', async event => {
             const unplaced = scene.fulfillment.reduce((sum, f) => sum + f.unplaced, 0);
             byId('solve-status').textContent = scene.status === 'NO_SOLUTION_FOUND' ? '本次未找到可用布局，可调整需求或工艺后重试。' : `已排入 ${scene.placements.length} 件 · 未排 ${unplaced} 件 · ${session.result.elapsedMs} ms`;
         } catch (error) { if (token === solveToken) { showError(error.message); byId('solve-status').textContent = '求解未完成，请检查输入或引擎状态。'; } }
-        finally { if (token === solveToken) { byId('solve-button').disabled = false; byId('solve-button').textContent = '生成排料'; } }
+        finally { if (token === solveToken) { byId('solve-button').disabled = false; byId('solve-button').textContent = '开始裁切预览'; } }
     } catch (error) { showError(error.message); }
 });
 byId('fit-view').onclick = () => viewer.fit();
