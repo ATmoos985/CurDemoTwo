@@ -246,7 +246,7 @@ footer { height: 32px; min-height: 32px; font-size: 11px; gap: 18px; }
 .report-footer-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .report-dialog #report-error { margin: 0 0 8px; }
 
-#cad-toast-container { position: fixed; bottom: 42px; right: 24px; z-index: 100000; display: grid; gap: 8px; pointer-events: none; max-width: min(440px, calc(100vw - 48px)); }
+#cad-toast-container { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 100000; display: grid; gap: 8px; pointer-events: none; width: max-content; max-width: min(440px, calc(100vw - 32px)); }
 .workbench-toast { position: relative; background: var(--panel-bg); border: 1px solid var(--panel-border); border-left: 3px solid var(--accent-blue); color: var(--text-main); padding: 12px 36px 12px 14px; border-radius: 4px; font-size: 13px; box-shadow: 0 4px 14px #0001; white-space: pre-line; pointer-events: auto; }
 .workbench-toast[data-type="error"] { border-left-color: var(--accent-red); }
 .workbench-toast[data-type="warning"] { border-left-color: var(--accent-amber); }

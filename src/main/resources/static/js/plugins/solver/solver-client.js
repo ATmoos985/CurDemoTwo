@@ -12,7 +12,7 @@ import { renderReportPieces, readReportPieces, syncReportRemnants, readReportRem
  */
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
-import { renderScene, resetToBedView } from '../cad/cad-renderer.js';
+import { renderScene, resetToBedView, updateStatusBar } from '../cad/cad-renderer.js';
 import { drawRulers } from '../cad/cad-rulers.js';
 import { renderRadar, smartAdvanceBed, resizeFeedWindow, updateFeedControls, updateFabricScrollPosition } from '../radar/radar-scrubber.js';
 import {
@@ -55,19 +55,7 @@ export function updateUIInfo() {
         document.getElementById("sb-engine").innerText = data.engine || "智能几何排料内核";
     }
 
-    const originStr = (data.cutOrigin || "right-bottom").toLowerCase();
-    const isRight = originStr.startsWith("right");
-    const isBottom = originStr.endsWith("bottom");
-    const trim = data.trimStart || 0;
-    const originX = isRight ? (data.rollW || 2000) : 0;
-    const winStartY = data.windowStartY || 0;
-    const originY = isBottom ? (winStartY + (data.bedL || 5000) - trim) : (winStartY + trim);
-    const originLbl = document.getElementById("sb-origin-lbl");
-    if (originLbl) {
-        let name = isRight ? "靠右导轨" : "靠左布边";
-        let pos = isBottom ? "落料口起切" : "顺流进料口";
-        originLbl.innerText = `${name}·${pos} (${originX}, ${originY}) mm`;
-    }
+    updateStatusBar();
 
     // 现场切刀表
     const totalCutsBadge = document.getElementById("total-cuts-badge");

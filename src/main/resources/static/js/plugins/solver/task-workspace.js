@@ -321,8 +321,9 @@ export async function refreshTaskProgress() {
 }
 
 let pickerRequest=0;
-function picker(title, content) {
+function picker(title, content, kind = '') {
     pickerRequest++;
+    el('task-picker').dataset.kind = kind;
     el('task-picker-title').textContent = title;
     el('task-picker-body').replaceChildren();
     el('task-picker-body').innerHTML = content;
@@ -404,20 +405,21 @@ export {openMaterialSelection as matchTaskMaterials} from '../material/material-
 
 export async function openTaskReports() {
     try { await refreshTaskProgress(); } catch (error) { return showToast(error.message, 'error'); }
-    picker('报工记录与需求汇总', `<div class="report-progress">${state.getCurrentCaseData().demands.map(d => `<p><strong>${escapeText(d.name)}</strong><span>${state.taskCompleted[d.id] || 0} / ${d.count ?? d.demand} 件</span></p>`).join('')}</div>` + (state.taskReports.slice().reverse().map(r => `<article class="task-list-item"><strong>${escapeText(r.sourceRemnantId || r.rollId)} <span class="ui-status" data-state="${escapeText(r.status || 'CONFIRMED')}">${escapeText(planStatusLabel(r.status || 'CONFIRMED'))}</span></strong><span>合格 ${r.finishedPieceCount} 件 · 异常 ${r.rejectedPieceCount || 0} 件 · 未切 ${r.uncutPieceCount || 0} 件 · ${r.feedPortType === 'remnant' ? '料头核销' : `用料 ${r.actualCutLen} mm`} · 回收 ${r.derivedRemnants.length} 块</span><small>${escapeText(new Date(r.confirmedAt).toLocaleString("zh-CN", {hour12:false}))}</small><details class="detail-disclosure"><summary>回收清单与凭证</summary>${r.derivedRemnants.map(rem => `<p>${escapeText(rem.id)} · ${rem.width} × ${rem.length} mm · ${escapeText(rem.location)}</p>`).join("")}<small>报工编号 ${escapeText(r.planId)}</small></details></article>`).join('') || '<p class="muted">暂无报工。排料预览不会扣减需求或库存。</p>'));
+    picker('报工记录与需求汇总', `<details class="report-progress"><summary>需求完成情况 · ${state.getCurrentCaseData().demands.length} 项需求 · ${state.taskReports.length} 条报工记录</summary>${state.getCurrentCaseData().demands.map(d => `<p><strong>${escapeText(d.name)}</strong><span>${state.taskCompleted[d.id] || 0} / ${d.count ?? d.demand} 件</span></p>`).join('')}</details>` + (state.taskReports.slice().reverse().map(r => `<article class="task-list-item report-list-item"><div class="report-list-info"><strong>${escapeText(r.sourceRemnantId || r.rollId)} <span class="ui-status" data-state="${escapeText(r.status || 'CONFIRMED')}">${escapeText(planStatusLabel(r.status || 'CONFIRMED'))}</span></strong><span>合格 ${r.finishedPieceCount} 件 · 异常 ${r.rejectedPieceCount || 0} 件 · 未切 ${r.uncutPieceCount || 0} 件 · ${r.feedPortType === 'remnant' ? '料头核销' : `用料 ${r.actualCutLen} mm`} · 回收 ${r.derivedRemnants.length} 块</span><small>${escapeText(new Date(r.confirmedAt).toLocaleString("zh-CN", {hour12:false}))}</small><details class="detail-disclosure"><summary>回收清单与凭证</summary>${r.derivedRemnants.map(rem => `<p>${escapeText(rem.id)} · ${rem.width} × ${rem.length} mm · ${escapeText(rem.location)}</p>`).join("")}<small>报工编号 ${escapeText(r.planId)}</small></details></div><div class="report-list-actions" role="group" aria-label="报工操作"></div></article>`).join('') || '<p class="muted">暂无报工。排料预览不会扣减需求或库存。</p>'), 'reports');
     el('task-picker-body').querySelectorAll('article').forEach((article, index) => {
         const report = state.taskReports.slice().reverse()[index];
-        appendTicketButton(article,report.planId);
+        const info = article.querySelector('.report-list-info'), actions = article.querySelector('.report-list-actions');
+        appendTicketButton(actions,report.planId);
         if (report.pieceResults?.length) {
             const detail=document.createElement('details');detail.className='detail-disclosure';
             const summary=document.createElement('summary');summary.textContent='逐件结果与异常原因';detail.append(summary);
             for(const piece of report.pieceResults){const row=document.createElement('p');
                 row.textContent='#'+piece.pieceId+' · 需求 '+piece.demandId+' '+piece.name+' · '+({QUALIFIED:'合格',REJECTED:'异常',UNCUT:'未切'}[piece.outcome] || piece.outcome)+(piece.reason?' · '+piece.reason:'');detail.append(row);}
-            article.append(detail);
+            info.append(detail);
         }
         const status = document.createElement('p'); status.className = 'muted';
         if (report.status === 'REVERSED') {
-            status.textContent = '已撤回 · ' + report.reversalReason; article.append(status); return;
+            status.textContent = '已撤回 · ' + report.reversalReason; info.append(status); return;
         }
         const button = document.createElement('button'); button.className = 'tool-btn'; button.textContent = '撤回报工';
         button.disabled = !report.undo;
@@ -435,7 +437,7 @@ export async function openTaskReports() {
                 showToast('报工已撤回，库存和任务完成量已更新', 'success');
             } catch (error) { showToast(error.message, 'error'); button.disabled = false; }
         };
-        article.append(button);
+        actions.append(button);
     });
 }
 

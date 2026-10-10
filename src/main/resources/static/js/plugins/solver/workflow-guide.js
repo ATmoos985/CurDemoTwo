@@ -30,6 +30,7 @@ export function readWorkflowState(plan = {}) {
 export function navigateWorkflowStage(stage, target) {
     if (!target && stage === 0) {openDemandManager();return;}
     if (!target && stage === 1) {openMaterialDetails();return;}
+    if (!target && stage === 3) {window.camApp.openTaskReports();return;}
     const node = document.querySelector(target || ['#card-demands','#card-mother-roll','#card-material-balance','#right-roll-actions'][stage]);
     if (!node) return;
     if (stage === 0) openDemandManager();
@@ -60,7 +61,7 @@ export function renderWorkflowGuide(plan = {}) {
         button.dataset.state = index === flow.stage ? 'current' : completed ? 'complete' : 'pending';
         if (index === flow.stage) button.setAttribute('aria-current','step'); else button.removeAttribute('aria-current');
         button.querySelector('.stage-marker').textContent = completed ? '✓' : index+1;
-        button.title = ['查看当前需求','查看母卷、疵点与料头库','查看排料结果','核对产出并报工'][index];
+        button.title = ['查看当前需求','查看母卷、疵点与料头库','查看排料结果','查看报工记录'][index];
         button.onclick = () => navigateWorkflowStage(index);
     }
     for (const id of [...Object.values(actions),'btn-workflow-next']) {

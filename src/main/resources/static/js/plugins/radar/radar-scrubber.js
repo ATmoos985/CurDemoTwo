@@ -43,8 +43,10 @@ export function getSnapThresholdMm(trackWidth, totalL = 60000) {
 }
 
 function stationRange(start, length, isSnapped = false) {
-    const rangeText = `当前工位 ${(start / 1000).toFixed(2)}–${((start + length) / 1000).toFixed(2)} m · 拉布 ${length.toLocaleString()} mm`;
-    return isSnapped ? `${rangeText} (待切接续工位)` : rangeText;
+    if (state.getCurrentCaseData().materialAvailable === false) return '切割区域 —';
+    const sheet = state.currentCutMode === 'remnant';
+    const rangeText = `${sheet ? '料头区域' : '切割区域'} Y ${start.toLocaleString()}–${(start + length).toLocaleString()} mm · ${sheet ? '长度' : '拉布'} ${length.toLocaleString()} mm`;
+    return isSnapped && !sheet ? `${rangeText} (待切接续工位)` : rangeText;
 }
 
 export function updateFabricScrollPosition(targetY, silent = false) {
@@ -171,7 +173,11 @@ export function renderRadar() {
 
     const infoEl = document.getElementById("radar-roll-info");
     if (infoEl) {
-        infoEl.innerText = `全长 ${totalL / 1000} m · 已报工 ${(maxConfirmedY / 1000).toFixed(2)} m · 疵点 ${defects.length} 处`;
+        const sheet = state.currentCutMode === 'remnant', source = state.loadedRemnant;
+        const consumed = sheet && data.lastReceipt?.sourceRemnantId === source?.id && data.lastReceipt?.status !== 'REVERSED';
+        infoEl.innerText = data.materialAvailable === false ? '材料信息 —' : sheet
+            ? `料头 ${source?.id || '—'} · ${data.rollW.toLocaleString()} × ${bedL.toLocaleString()} mm · ${consumed ? '已核销' : '未核销'} · 疵点 ${defects.length} 处`
+            : `幅宽 ${data.rollW.toLocaleString()} mm · 全长 ${totalL.toLocaleString()} mm · 已报工 ${(data.stockUsedLength || 0).toLocaleString()} mm · 余量 ${(data.stockRemainingLength ?? totalL - (data.stockUsedLength || 0)).toLocaleString()} mm · 疵点 ${defects.length} 处`;
     }
 
     if (maxConfirmedY > 0) {

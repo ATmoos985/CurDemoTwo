@@ -49,7 +49,7 @@ export function initWorkbenchPanels() {
     inputs.append(el('btn-workflow-next'));
     // Demand and material inputs stay left; execution controls stay right.
     el('input-flow-status').append(el('workflow-current'), el('station-action-hint'));
-    el('sidebar-left').querySelector('.sidebar-scroll-body').prepend(el('card-demands'), el('material-context'));
+    el('sidebar-left').querySelector('.sidebar-scroll-body').prepend(el('card-demands'));
 }
 
 export function openDemandManager(id) {

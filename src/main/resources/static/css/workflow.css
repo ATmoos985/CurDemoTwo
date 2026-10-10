@@ -64,6 +64,21 @@ button.task-list-item:hover { background: var(--panel-header); }
 #report-error { color: #b42318; font-size: 13px; margin: 16px 0 0; }
 .report-progress p { display: flex; justify-content: space-between; gap: 16px; }
 .report-progress strong { font-weight: 500; }
+#task-picker[data-kind="reports"] { width: min(1080px, calc(100vw - 40px)); max-height: calc(100dvh - 40px); }
+#task-picker[data-kind="reports"][open] { display: flex; flex-direction: column; }
+#task-picker[data-kind="reports"] .workflow-dialog-heading { flex: none; }
+#task-picker[data-kind="reports"] .workflow-dialog-body { min-height: 0; max-height: none; }
+.report-progress { padding: 10px 0; border-bottom: 1px solid var(--panel-border); font-size: 12px; }
+.report-progress summary { cursor: pointer; color: var(--text-muted); }
+.report-progress p { margin-top: 8px; }
+.report-list-item { grid-template-columns: minmax(0, 1fr) auto; gap: 16px 24px; align-items: start; }
+.report-list-info { display: grid; gap: 6px; min-width: 0; }
+.report-list-info > strong { overflow-wrap: anywhere; }
+.report-list-info .detail-disclosure { margin: 0; }
+.report-list-info .detail-disclosure > summary { padding: 3px 0; }
+.report-list-actions { display: flex; align-items: center; gap: 8px; }
+.report-list-actions .tool-btn { white-space: nowrap; }
+@media (max-width: 700px) { .report-list-item { grid-template-columns: minmax(0, 1fr); gap: 10px; } }
 .settings-modal-overlay { backdrop-filter: none; background: #18273366; }
 .settings-modal-header, .settings-modal-footer { padding: 16px 24px; }
 .report-dialog .settings-modal-footer { display: flex; justify-content: flex-end; gap: 10px; }

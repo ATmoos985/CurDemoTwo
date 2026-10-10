@@ -11,7 +11,7 @@ import { getHomeCoordinates } from '../toolpath/toolpath-optimizer.js';
 import { makePieceInteractive, getSelectedPieceId } from './cad-interactive-nesting.js';
 import { makeRemnantInteractive } from './cad-context-menu.js';
 import { renderRemnantHighlight } from './cad-remnant-highlight.js';
-import { createWorkspaceScene, workspaceCompletedLength } from './workspace-scene.js';
+import { createWorkspaceScene } from './workspace-scene.js';
 import { renderNestingGeometry } from '../../nesting/nesting-renderer.js';
 
 let cutBadges = [];
@@ -37,10 +37,6 @@ export function renderScene() {
     mainLayer.batchDraw();
     drawRulers();
     updateStatusBar();
-}
-
-function confirmedEnd(data) {
-    return workspaceCompletedLength(data);
 }
 
 export function updateCanvasAnnotations() {
@@ -214,7 +210,11 @@ export function updateStatusBar() {
     }
     const data = state.getCurrentCaseData();
     const label = document.getElementById('sb-origin-lbl');
-    if (label) label.innerText = `${stationOrigin(data).label}起刀 · 工位 ${data.windowStartY || 0}–${(data.windowStartY || 0) + data.bedL} mm · 已切至 ${confirmedEnd(data)} mm`;
+    const origin = stationOrigin(data), sheet = state.currentCutMode === 'remnant';
+    const source = document.getElementById('sb-source-label');
+    if (source) source.textContent = sheet ? '来源母卷' : '当前母卷';
+    if (label) label.innerText = data.materialAvailable === false ? '切割基准 —'
+        : `切割基准 ${origin.label} · ${sheet ? '料头' : '母卷'} X ${origin.x.toLocaleString()} / Y ${origin.y.toLocaleString()} mm`;
 }
 for (const event of ['stage:transformed', 'stage:resized', 'station:moved', 'piece:selected', 'piece:dragging', 'stage:empty-clicked', 'remnant:selected']) bus.on(event, updateCanvasAnnotations);
 bus.on('stage:zoomed', () => { fitMode = null; view.overview = false; });

@@ -234,20 +234,23 @@
             <button class="sidebar-edge-toggle edge-toggle-right" id="edge-toggle-right" onclick="toggleSidebar('right')" title="点击收起右侧面板">▶</button>
 
             <div class="workspace-heading canvas-heading"><h1>排料画布</h1><div class="canvas-view-actions">
-                <div id="station-navigation-group" class="station-nav-group" role="group" aria-label="工位导航">
-                    <button class="tool-btn" id="btn-station-prev" onclick="advanceBed(-1)" aria-label="上一工位" title="查看上一工位"><span aria-hidden="true">‹</span> 上一工位</button>
-                    <button class="tool-btn" id="btn-station-next" onclick="advanceBed(1)" aria-label="下一工位" title="查看下一工位">下一工位 <span aria-hidden="true">›</span></button>
-                    <button class="tool-btn" id="btn-station-smart" onclick="smartAdvanceBed()" title="跳至接续待切位置">待切位置</button>
-                </div>
-                <div class="canvas-action-group" role="group" aria-label="画布视图"><button class="tool-btn" onclick="resetToBedView()">当前工位</button><button class="tool-btn" onclick="viewFullRoll()">全卷</button></div>
                 <div class="canvas-action-group" role="group" aria-label="库存与料头"><button class="tool-btn" onclick="openMaterialModal()">库存档案</button><button class="tool-btn remnant-entry-btn" id="btn-open-remnants" onclick="openRemnantModal()">料头 <span class="badge-rem" id="remnant-count-badge">0 块</span></button></div>
                 <details class="canvas-more"><summary class="tool-btn" aria-label="更多工位操作">更多 ···</summary><div class="canvas-more-menu"><button class="tool-btn" id="btn-station-clear" onclick="handleClearStationClick(); this.closest('details').open=false">清除本工位排料</button><button class="tool-btn" onclick="handleClearStationDblClick(); this.closest('details').open=false">清空整卷预览…</button><button class="tool-btn" id="btn-reset-roll-cutting" onclick="resetContinuousCutting(); this.closest('details').open=false">重置本卷报工…</button></div></details>
             </div></div>
+            <div class="canvas-nav-toolbar">
+                <div id="station-navigation-group" class="station-nav-group" role="group" aria-label="工位与画布导航">
+                    <button class="tool-btn" id="btn-station-prev" onclick="advanceBed(-1)" aria-label="上一工位" title="上一工位"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7M4 5v14"/></svg></button>
+                    <button class="tool-btn" id="btn-station-next" onclick="advanceBed(1)" aria-label="下一工位" title="下一工位"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7M20 5v14"/></svg></button>
+                    <button class="tool-btn" id="btn-station-smart" onclick="smartAdvanceBed()" aria-label="待切位置" title="跳至接续待切位置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h12m-4-4 4 4-4 4M20 4v16M17 4h5m-5 16h5"/></svg></button>
+                    <button class="tool-btn" id="btn-view-station" onclick="resetToBedView()" aria-label="当前工位" title="缩放至当前工位"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><rect x="7" y="7" width="10" height="10" rx="1"/></svg></button>
+                    <button class="tool-btn" id="btn-view-roll" onclick="viewFullRoll()" aria-label="全卷" title="查看全卷"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="2"/><path d="M6 7h12M6 17h12M3 9v6m18-6v6"/></svg></button>
+                </div>
+                <div class="radar-feed-controls"><label>本次拉布 <input type="number" class="prop-input" id="inp-bed-l" aria-label="本次拉布长度（mm）" value="5000" min="0.1" step="0.1" onchange="resizeFeedWindow(Number(this.value))" /> mm</label><button class="tool-btn" id="btn-feed-fit" title="按剩余需求中最长单片的尺寸设置，包含切头量，不含疵点避让；最终以排料结果为准。">按最长单片</button></div>
+            </div>
             <!-- 母卷全局疵点雷达与展开视窗导航条 (Global Roll Panorama & Defect Radar) -->
             <div class="roll-radar-bar" id="roll-radar-bar">
                 <div class="radar-label-group">
                     <details class="canvas-help radar-help"><summary class="radar-title">母卷导航 ⓘ</summary><div class="canvas-help-body"><p>横轴单位：米。灰色区域为已报工，红色疵点在当前工位内，黄色疵点在其他位置。</p><p>拖动框内移动位置，拖动右端调节本次拉布长度；也可直接输入长度。右端选中后用方向键调整，Shift + 方向键微调 0.1 mm。待报工方案须先处理。</p><p>拉布长度表示本次展开排料的范围，按现场可拉布长度设置。整幅横切可按需求拉出整片；二维裁片需在现场可加工范围内完成。改变范围不扣库存。</p></div></details>
-                    <span class="radar-info" id="radar-roll-info"></span>
                 </div>
                 <div class="radar-strip-container" id="radar-strip-container">
                     <div class="radar-track" id="radar-track">
@@ -256,7 +259,7 @@
                         <div class="radar-resize-end" id="radar-resize-end" role="slider" tabindex="0" aria-label="本次拉布长度" aria-valuemin="0.1" aria-valuemax="60000" aria-valuenow="5000" aria-describedby="radar-window-text" title="拖动右端调整拉布长度；方向键调整，Shift 微调">Ⅱ</div>
                     </div>
                 </div>
-                <div class="radar-caption"><span id="radar-window-text">当前工位 0–5 m</span><div class="radar-feed-controls"><label>本次拉布 <input type="number" class="prop-input" id="inp-bed-l" aria-label="本次拉布长度（mm）" value="5000" min="0.1" step="0.1" onchange="resizeFeedWindow(Number(this.value))" /> mm</label><button class="tool-btn" id="btn-feed-fit" title="按剩余需求中最长单片的尺寸设置，包含切头量，不含疵点避让；最终以排料结果为准。">按最长单片</button></div><button class="tool-btn radar-reset-btn" id="btn-radar-reset" onclick="resetContinuousCutting()" title="重置母卷搭切进度回 0m 起点">重置搭切</button><span class="radar-legend"><i class="consumed-key"></i>已报工 <i class="defect-key"></i>疵点 <span>单位 m</span></span></div>
+                <div class="radar-caption"><button class="tool-btn radar-reset-btn" id="btn-radar-reset" onclick="resetContinuousCutting()" title="重置母卷搭切进度回 0m 起点">重置搭切</button><span class="radar-legend"><i class="consumed-key"></i>已报工 <i class="defect-key"></i>疵点 <span>单位 m</span></span></div>
             </div>
 
             <div class="cad-tools" role="toolbar" aria-label="画布工具">
@@ -408,9 +411,9 @@
     </main>
 
     <!-- 底部工位状态栏 -->
-    <footer>
-        <div class="status-left"><span>当前母卷 <b id="sb-roll-id">—</b></span><span id="sb-cursor-pos">X: 0 mm | Y: 0 mm</span></div>
-        <div class="status-right"><span>缩放 <b id="sb-scale">—</b></span><details class="status-details"><summary>工位信息</summary><div><p>CUT-STATION-01</p><p id="sb-origin-lbl">—</p><p id="sb-engine">—</p></div></details></div>
+    <footer class="workbench-status" aria-label="画布与材料状态">
+        <div class="status-left"><span><span id="sb-source-label">当前母卷</span> <b id="sb-roll-id">—</b></span><span id="radar-roll-info">材料信息 —</span><span class="status-scale">缩放 <b id="sb-scale">—</b></span></div>
+        <div class="status-right"><span id="radar-window-text">切割区域 —</span><span id="sb-origin-lbl">切割基准 —</span><span id="sb-cursor-pos">指针移入画布查看坐标</span><details class="status-details"><summary>设备 / 引擎</summary><div><p>CUT-STATION-01</p><p id="sb-engine">—</p></div></details></div>
     </footer>
 
     <!-- CAD 工业级右键上下文快捷操作菜单 (Context Menu) -->

@@ -109,7 +109,7 @@ export function initKonva() {
         const worldX = Math.round((pointer.x - stage.x()) / scale);
         const worldY = Math.round((pointer.y - stage.y()) / scale);
         const local = stationCoordinates(worldX, worldY, state.getCurrentCaseData());
-        const cursorText = `工位 X ${local.x} · Y ${local.y} mm  |  全卷 Y ${worldY} mm`;
+        const cursorText = `指针 X ${local.x} · Y ${local.y} mm  |  ${state.currentCutMode === 'remnant' ? '料头' : '母卷'} Y ${worldY} mm`;
         const sbCursor = document.getElementById("sb-cursor-pos");
         if (sbCursor) sbCursor.innerText = cursorText;
 
