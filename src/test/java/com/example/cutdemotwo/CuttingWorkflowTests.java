@@ -18,6 +18,35 @@ class CuttingWorkflowTests {
     @TempDir Path temp;
 
     @Test
+    void expandingFeedWindowCutsOneLongWholePieceAndReportsOnlyActualLength() {
+        RemnantService inventory = new RemnantService(temp.resolve("dynamic-feed.json").toString());
+        CuttingWorkflowService workflow = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), inventory);
+        CuttingTask task = inventory.saveTask(new CuttingTask(null, "动态拉布", "TC涤棉-B2026", "", 0,
+                List.of(new CuttingTask.Line(1, "四米整幅", 2000, 4000, 1, false)),
+                new CuttingTask.Process(2000, 0, "right-bottom", "horizontal", false, false)));
+        SolveRequest request = new SolveRequest();
+        request.setTaskId(task.id());
+        request.setTaskRevision(task.revision());
+        request.setAllowLongitudinal(false);
+        request.setRollW(2000);
+        request.setWindowStartY(5000);
+        request.setRollL(2000);
+        request.setDemands(List.of(new PieceDemand(1, "四米整幅", 2000, 4000, 1, false)));
+        double before = inventory.getMotherRoll(request.getRollId()).getCurrentRemainingLength();
+        assertFalse(workflow.solve(request).isSuccess());
+        request.setRollL(4500);
+        SolveResponse plan = workflow.solve(request);
+        assertTrue(plan.isSuccess());
+        assertEquals(1, plan.getPieces().size());
+        assertEquals(4000, plan.getPieces().get(0).getL());
+        assertTrue(plan.getCuts().stream().allMatch(c -> "横切".equals(c.getType())));
+        assertEquals(before, inventory.getMotherRoll(request.getRollId()).getCurrentRemainingLength());
+        var receipt = workflow.confirm(new CutReport(plan.getPlanId(), 4000, 1, List.of(), "测试库位"));
+        assertEquals(before - 4000, receipt.get("remainingLength"));
+        assertEquals(4500, ((SolveRequest) workflow.getPlan(plan.getPlanId()).get("request")).getRollL());
+    }
+
+    @Test
     void crosscutAvoidsDefectAndNeverMakesLongitudinalCut() {
         SolveRequest request = new SolveRequest();
         request.setAllowLongitudinal(false);
@@ -25,7 +54,7 @@ class CuttingWorkflowTests {
         request.setRollL(4000);
         request.setDemands(List.of(new PieceDemand(1, "窗帘矩形", 2000, 1000, 2, false)));
         request.setDefects(List.of(new Defect(1, 200, 1200, 200, 200, 20)));
-        SolveResponse result = new SolverFactory(List.of(new CrossCutSolverService())).solve(request);
+        SolveResponse result = com.example.cutdemotwo.service.FabricSolveAdapter.solve(new SolverFactory(List.of(new CrossCutSolverService())), request);
         assertTrue(result.isSuccess());
         assertEquals(2, result.getPieces().size());
         assertTrue(result.getCuts().stream().allMatch(c -> "横切".equals(c.getType())));
@@ -66,36 +95,42 @@ class CuttingWorkflowTests {
     }
 
     @Test
-    void remnantCanBeCutIntoAnotherReusableRemnantWithoutDeductingRoll() {
-        RemnantService inventory = new RemnantService(temp.resolve("remnant.json").toString());
-        CuttingWorkflowService workflow = new CuttingWorkflowService(
-                new SolverFactory(List.of(new CrossCutSolverService())), inventory);
+    void remnantIsConsumedOnceAndCannotCreateChildrenOrDeductMotherRoll() {
+        Path file = temp.resolve("remnant.json");
+        RemnantService inventory = new RemnantService(file.toString());
+        CuttingWorkflowService workflow = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), inventory);
         double before = inventory.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength();
         String parentId = "REM-202609-001";
-        for (int generation = 2; generation <= 3; generation++) {
-            RemnantStock parent = inventory.scanOrGetById(parentId);
-            SolveRequest request = new SolveRequest();
-            request.setAllowLongitudinal(false);
-            request.setFeedPortType("remnant");
-            request.setSourceRemnantId(parentId);
-            request.setRollW(parent.getWidth());
-            request.setRollL(parent.getLength());
-            request.setDemands(List.of(new PieceDemand(1, "补单", 2000, generation == 2 ? 1000 : 300, 1, false)));
-            SolveResponse plan = workflow.solve(request);
-            assertTrue(plan.isSuccess());
-            assertNotNull(inventory.scanOrGetById(parentId), "预览不得核销原料头");
-            Map<String, Object> receipt = workflow.confirm(new CutReport(plan.getPlanId(), 0, 1, plan.getRemnants(), "测试料头架"));
-            assertNull(inventory.scanOrGetById(parentId), "确认后原料头应核销");
-            RemnantStock child = ((List<RemnantStock>) receipt.get("derivedRemnants")).get(0);
-            assertEquals(generation, child.getGeneration());
-            assertEquals(parentId, child.getParentRemnantId());
-            parentId = child.getId();
-        }
+        RemnantStock parent = inventory.scanOrGetById(parentId);
+        int count = inventory.getAvailableRemnants().size();
+        SolveRequest request = new SolveRequest();
+        request.setAllowLongitudinal(false); request.setFeedPortType("remnant"); request.setSourceRemnantId(parentId);
+        var task = inventory.saveTask(new CuttingTask(null, "料头单次使用", parent.getMaterialBatch(), "", 0, List.of(new CuttingTask.Line(1, "补单", 2000, 1000, 2, false))));
+        request.setTaskId(task.id()); request.setTaskRevision(task.revision());
+        request.setRollW(parent.getWidth()); request.setRollL(parent.getLength());
+        request.setDemands(List.of(new PieceDemand(1, "补单", 2000, 1000, 1, false)));
+        SolveResponse plan = workflow.solve(request);
+        assertTrue(plan.isSuccess()); assertFalse(plan.getRemnants().isEmpty());
+        var error = assertThrows(IllegalArgumentException.class, () -> workflow.confirm(new CutReport(plan.getPlanId(), 0, 1, plan.getRemnants(), "A")));
+        assertTrue(error.getMessage().contains("料头只使用一次"));
+        assertNotNull(inventory.scanOrGetById(parentId)); assertNull(inventory.getReceipt(plan.getPlanId()));
+        var report = new CutReport(plan.getPlanId(), 0, 1, List.of(), "A");
+        var receipt = workflow.confirm(report);
+        assertEquals(receipt, workflow.confirm(report));
+        assertNull(inventory.scanOrGetById(parentId)); assertEquals(count - 1, inventory.getAvailableRemnants().size());
+        assertTrue(((List<?>)receipt.get("derivedRemnants")).isEmpty());
+        assertEquals(0.0, receipt.get("remArea"));
+        assertEquals(parent.getArea() - 2.0, (double)receipt.get("wasteArea"), 1e-9);
         assertEquals(before, inventory.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength());
+        RemnantService reopened = new RemnantService(file.toString());
+        assertNull(reopened.scanOrGetById(parentId));
+        assertThrows(IllegalArgumentException.class, () -> new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), reopened).solve(request));
+        reopened.reverseReport(plan.getPlanId(), "误报撤回");
+        assertNotNull(reopened.scanOrGetById(parentId));
     }
 
     @Test
-    void repeatedPreviewKeepsOnlyRecentPlans() {
+    void unreportedPlansRemainRecoverableAfterMoreThanOneHundredPreviewsAndRestart() {
         RemnantService inventory = new RemnantService(temp.resolve("bounded.json").toString());
         CuttingWorkflowService workflow = new CuttingWorkflowService(
                 new SolverFactory(List.of(new CrossCutSolverService())), inventory);
@@ -107,10 +142,12 @@ class CuttingWorkflowTests {
         SolveResponse first = workflow.solve(request);
         SolveResponse latest = first;
         for (int i = 0; i < 100; i++) latest = workflow.solve(request);
-        CutReport expired = new CutReport(first.getPlanId(), 1600, 1, first.getRemnants(), "测试库位");
-        assertThrows(IllegalArgumentException.class, () -> workflow.confirm(expired));
-        assertEquals(1, workflow.confirm(new CutReport(latest.getPlanId(), 1600, 1,
-                latest.getRemnants(), "测试库位")).get("finishedPieceCount"));
+        CuttingWorkflowService reopened = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),
+                new RemnantService(temp.resolve("bounded.json").toString()));
+        assertNotNull(reopened.getPlan(first.getPlanId()));
+        assertNotNull(reopened.getPlan(latest.getPlanId()));
+        assertEquals(1, reopened.confirm(new CutReport(first.getPlanId(), 1600, 1,
+                first.getRemnants(), "测试库位")).get("finishedPieceCount"));
     }
 
     @Test

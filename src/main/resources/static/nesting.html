@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>裁切试验台</title>
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/workspace.css">
+    <link rel="stylesheet" href="css/nesting.css">
+    <link rel="stylesheet" href="css/product-navigation.css">
+    <script src="konva.min.js"></script>
+    <link rel="stylesheet" href="css/ui-consistency.css">
+</head>
+<body class="nesting-lab">
+    <header class="lab-header"><div><span class="app-mark">▥</span><strong>裁切试验台</strong><span class="lab-subtitle">多场景能力演示 · 不写入业务库存</span></div><div data-product-nav="lab"></div></header>
+    <main class="lab-layout">
+        <form id="problem-form" class="lab-input">
+            <div class="lab-heading"><h1>裁切输入</h1><span>尺寸 mm · 面积 m²</span></div>
+            <div class="lab-form-body">
+                <label class="lab-scenario-label">演示场景<select id="scenario-select" aria-label="演示场景">
+                    <option value="" disabled hidden>自定义输入</option>
+                    <option value="CROSSCUT">整幅横切</option>
+                    <option value="GUILLOTINE" selected>二维避疵</option>
+                    <option value="3">短料头复用</option>
+                    <option value="4">多规格套裁</option>
+                    <option value="6">连续送料工位</option>
+                    <option value="CONTOUR">异形排料</option>
+                </select></label>
+                <p class="lab-muted">选一个场景后生成排料。连续送料展示单个加工区的布局与接续边界；完整任务接续与报工在裁切作业中进行。</p>
+                <fieldset><legend>在什么材料上切</legend><label>材料标识<input id="material-id" required maxlength="120" value="MATERIAL-1"></label>
+                    <div class="lab-pair"><label>宽度<input id="material-width" type="number" min="0.1" max="10000000" step="0.1" required></label><label>长度<input id="material-height" type="number" min="0.1" max="10000000" step="0.1" required></label></div>
+                    <div id="material-shape-editor"></div>
+                    <label>送料方式<select id="feed-mode"><option value="SHEET">整块材料</option><option value="CONTINUOUS">连续送料</option></select></label>
+                    <label class="lab-check"><input id="continues" type="checkbox">加工区末端仍连接后续材料</label>
+                </fieldset>
+                <fieldset><legend>要切出什么</legend><div id="part-rows"></div><button type="button" class="tool-btn" id="add-part">＋ 增加需求</button></fieldset>
+                <fieldset><legend>切割策略</legend><label>排料方式<select id="process-mode"><option value="GUILLOTINE">矩形贯通切割 · 优先裁片面积</option><option value="CROSSCUT">整幅横切 · 按需求顺序</option><option value="CONTOUR">轮廓排料 · 优先裁片面积</option></select></label><p id="engine-hint" class="lab-muted">正在读取引擎能力…</p></fieldset>
+                <details class="lab-details"><summary>禁入区域 <span id="exclusion-count">0 处</span></summary><p class="lab-muted">以材料左上角为原点，X 向右、Y 向下。</p><div id="exclusion-rows"></div><button type="button" class="tool-btn" id="add-exclusion">＋ 增加区域</button></details>
+                <details class="lab-details"><summary>工艺参数</summary>
+                    <label>起刀位置<select id="start-corner"><option value="right-bottom">右下角</option><option value="left-bottom">左下角</option><option value="right-top">右上角</option><option value="left-top">左上角</option></select></label>
+                    <label>首刀方向<select id="first-orientation"><option value="horizontal">水平</option><option value="vertical">竖直</option><option value="none">不适用（轮廓排料）</option></select></label>
+                    <div class="lab-pair"><label>入口修边<input id="trim-start" type="number" min="0" step="0.1" required></label><label>求解时限（秒）<input id="time-limit" type="number" min="1" max="60" step="1" required></label></div>
+                    <div class="lab-pair"><label>最小回收宽度<input id="reuse-width" type="number" min="0" step="0.1" required></label><label>最小回收长度<input id="reuse-height" type="number" min="0" step="0.1" required></label></div>
+                    <p class="lab-muted">当前支持零刀缝。轮廓排料支持简单多边形、90° 步进旋转，不生成余料回收划分。</p>
+                </details>
+                <details class="lab-details" id="protocol-details"><summary>标准输入 / 输出</summary><p class="lab-muted">可导入完整 JSON 输入，或导出本次输入与结果。</p><button type="button" class="tool-btn" id="open-json">编辑输入 JSON</button><button type="button" class="tool-btn" id="export-input">导出输入</button><button type="button" class="tool-btn" id="export-result" disabled>导出结果</button></details>
+            </div>
+            <div class="lab-submit"><p>仅计算预览，不保存任务或扣减库存。</p><button class="tool-btn active" id="solve-button" type="submit">生成排料</button></div>
+        </form>
+        <section class="lab-canvas-panel" aria-label="材料与排料画布">
+            <div class="lab-heading"><h2>排料预览</h2><button class="tool-btn" id="fit-view">适合材料</button></div>
+            <div class="lab-canvas-toolbar"><label><input id="show-dimensions" type="checkbox" checked>外接尺寸</label><label><input id="show-paths" type="checkbox" checked>刀路 / 轮廓</label><span id="region-summary"></span><div><button class="tool-btn" id="zoom-out" aria-label="缩小画布">−</button><output id="zoom-label">—</output><button class="tool-btn" id="zoom-in" aria-label="放大画布">＋</button></div></div>
+            <div id="nesting-canvas" tabindex="0" role="img" aria-label="材料加工区与求解排布；滚轮缩放，拖动画布平移；加减键缩放，0 键适合材料"></div>
+            <div class="lab-legend"><span class="legend-material">加工区</span><span class="legend-piece">裁片</span><span class="legend-remnant">候选余料</span><span class="legend-exclusion">禁入区域</span><small>滚轮缩放 · 拖动画布平移 · 点击裁片查看</small></div>
+        </section>
+        <aside class="lab-output" aria-label="求解结果">
+            <div class="lab-heading"><h2>求解结果</h2></div>
+            <div class="lab-result-body"><p id="solve-status" role="status" aria-live="polite">输入就绪，等待排料。</p><p id="solve-error" role="alert" hidden></p>
+                <dl class="lab-metrics"><div><dt>加工区面积</dt><dd id="area-processing">—</dd></div><div><dt>裁片面积 / 占比</dt><dd id="area-pieces">—</dd></div><div><dt>候选回收面积</dt><dd id="area-leftovers">—</dd></div><div><dt>未分配面积</dt><dd id="area-unassigned">—</dd></div></dl>
+                <p class="lab-muted">未分配面积可能包含连续尾料，不代表报废。</p>
+                <p id="contour-note" class="lab-muted" hidden>轮廓表示裁片边界，尚未生成机床走刀顺序与刀具补偿；剩余区域未划分为可回收料头。</p>
+                <h3>需求排入情况</h3><div id="fulfillment">生成方案后显示排入与未排数量。</div>
+                <div id="selected-piece" hidden><h3>选中裁片</h3><p id="piece-description"></p></div>
+                <details class="lab-details"><summary>裁片位置</summary><div id="placement-list"></div></details>
+                <details class="lab-details"><summary>刀序 / 轮廓明细</summary><div id="cut-list"></div></details>
+            </div>
+        </aside>
+    </main>
+    <dialog id="json-dialog" aria-labelledby="json-dialog-title"><form method="dialog"><div class="lab-heading"><h2 id="json-dialog-title">标准输入 JSON</h2><button class="tool-btn">关闭</button></div></form><label for="json-input">表单未列出的约束也会提交；不支持的内容将明确提示。</label><textarea id="json-input" spellcheck="false"></textarea><p id="json-error" role="alert"></p><button id="apply-json" class="tool-btn active">应用输入</button></dialog>
+    <script type="module" src="js/nesting/nesting-lab.js"></script>
+    <script type="module" src="js/product-navigation.js"></script>
+</body>
+</html>

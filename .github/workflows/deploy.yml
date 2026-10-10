@@ -1,0 +1,53 @@
+name: Deploy
+on:
+  workflow_call:
+    inputs:
+      image:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      image:
+        description: 'Verified image: ghcr.io/owner/repo@sha256:digest'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: cutdemo-production
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: Deploy verified image through SSH
+        env:
+          IMAGE: ${{ inputs.image }}
+          REPOSITORY: ${{ github.repository }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PORT DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS; do
+            if [[ -z "${!name}" ]]; then
+              printf '::error::Missing production deployment configuration: %s\n' "$name"
+              exit 1
+            fi
+          done
+          expected="ghcr.io/${REPOSITORY,,}@sha256:"
+          [[ "$IMAGE" == "$expected"* && "${IMAGE#"$expected"}" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ && "$DEPLOY_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ && "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
+          umask 077
+          mkdir -p "$RUNNER_TEMP/cutdemo-ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/cutdemo-ssh/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/cutdemo-ssh/known_hosts"
+          ssh -T -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$RUNNER_TEMP/cutdemo-ssh/known_hosts" \
+            -i "$RUNNER_TEMP/cutdemo-ssh/key" -p "$DEPLOY_PORT" \
+            "$DEPLOY_USER@$DEPLOY_HOST" "bash /opt/cutdemo/deploy-server.sh '$IMAGE'"

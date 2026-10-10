@@ -1,34 +1,33 @@
 /**
  * CAD/CAM 工业级刀路优化插件 (Toolpath Optimizer Plugin)
- * 核心功能：以机床右下角 (Right-Bottom Home Point) 为起始停刀位，
- * 运用 Segment-TSP (线段旅行商) 启发式双向寻优与 2-Opt 局部搜索算法，
- * 极大压缩空刀快移 (Air Cut / Rapid Move) 距离与刀具抬刀磨损。
+ * 以所选机台原点为起点，使用最近邻、方向翻转和相邻交换减少空走距离。
+ * 保留工艺先后关系，优化和恢复均保存为可追溯的方案版本。
  */
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 import { renderScene } from '../cad/cad-renderer.js';
-import { renderCutTable } from '../solver/solver-client.js';
+import { renderCutTable, canUseCurrentPlan, saveToolpathAdjustment } from '../solver/solver-client.js';
+import { showToast } from '../../core/toast.js';
+
+let optimizing = false;
 
 /**
- * 获取当前工位的右下角基准停刀原点 (Right-Bottom Home Point)
+ * 获取当前工位所选机台原点。
  */
 export function getHomeCoordinates(data) {
     const isRemnantMode = (state.currentCutMode === "remnant");
-    let homeX, homeY;
-    if (isRemnantMode && state.loadedRemnant) {
-        homeX = state.loadedRemnant.width || 2000;
-        homeY = state.loadedRemnant.length || 1600;
-    } else {
-        homeX = data.rollW || 2000;
-        homeY = (data.windowStartY || 0) + (data.bedL || 5000);
-    }
-    return { x: homeX, y: homeY };
+    const origin = data.cutOrigin || 'right-bottom';
+    const width = isRemnantMode ? state.loadedRemnant?.width || data.rollW : data.rollW;
+    const height = isRemnantMode ? state.loadedRemnant?.length || data.bedL : data.bedL;
+    return {x:origin.startsWith('right') ? width || 2000 : 0,
+        y:(isRemnantMode ? 0 : data.windowStartY || 0) + (origin.endsWith('bottom') ? height || 5000 : 0)};
 }
 
 /**
  * 针对切刀序列执行纯前端/后端协同的刀路优化
  */
 export async function optimizeCurrentToolpath(respectPrecedence = true) {
+    if (optimizing) return;
     const data = state.getCurrentCaseData();
     const cuts = data.cuts || [];
     if (cuts.length === 0) {
@@ -36,39 +35,38 @@ export async function optimizeCurrentToolpath(respectPrecedence = true) {
         return;
     }
 
-    // 备份原始切序 (防破坏)
-    if (!state.originalCutsBackup || !state.isToolpathOptimized) {
-        state.originalCutsBackup = JSON.parse(JSON.stringify(cuts));
-    }
-
+    const pending = state.pendingPlan;
+    if (pending && !canUseCurrentPlan()) { showToast('请先校验裁片调整，再优化刀路', 'warning'); return; }
+    const snapshot = JSON.stringify({pieces:data.pieces, remnants:data.remnants, cuts});
+    const backup = JSON.parse(JSON.stringify(cuts));
     const home = getHomeCoordinates(data);
-
-    // 1. 尝试调用后端 /api/toolpath/optimize 工业级算法
+    optimizing = true;
     try {
-        const res = await fetch("/api/toolpath/optimize", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                cuts: state.originalCutsBackup,
-                homeX: home.x,
-                homeY: home.y,
-                respectPrecedence: respectPrecedence
-            })
-        });
-        if (res.ok) {
-            const result = await res.json();
-            if (result.success && result.optimizedCuts) {
-                applyOptimizedResult(data, result, home);
-                return;
+        let result;
+        try {
+            const res = await fetch('/api/toolpath/optimize', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({cuts:backup, homeX:home.x, homeY:home.y, respectPrecedence})
+            });
+            if (res.ok) {
+                const response = await res.json();
+                if (response.success && Array.isArray(response.optimizedCuts)) result = response;
             }
+        } catch (e) {
+            console.warn('刀路接口不可达，使用本地算法计算候选刀路', e);
         }
-    } catch (e) {
-        console.warn("后端刀路接口不可达，自动回退至前端内置 Segment-TSP 引擎", e);
-    }
-
-    // 2. 本地微内核内置 Segment-TSP + 2-Opt 快速求解 (Fallback)
-    const localResult = solveLocalSegmentTSP(state.originalCutsBackup, home.x, home.y, respectPrecedence);
-    applyOptimizedResult(data, localResult, home);
+        result ||= solveLocalSegmentTSP(backup, home.x, home.y, respectPrecedence);
+        if (data !== state.getCurrentCaseData() || pending !== state.pendingPlan
+                || snapshot !== JSON.stringify({pieces:data.pieces, remnants:data.remnants, cuts:data.cuts})
+                || JSON.stringify(home) !== JSON.stringify(getHomeCoordinates(data))) return;
+        if (pending) {
+            if (!await saveToolpathAdjustment(result.optimizedCuts)) return;
+            result.optimizedCuts = data.cuts;
+        }
+        state.originalCutsBackup = backup;
+        applyOptimizedResult(data, result, home);
+    } catch (e) { showToast(e.message || '刀路保存失败，原方案保留', 'error'); }
+    finally { optimizing = false; }
 }
 
 /**
@@ -92,17 +90,22 @@ function applyOptimizedResult(data, result, home) {
 /**
  * 恢复原始默认切序
  */
-export function restoreOriginalToolpath() {
-    if (!state.originalCutsBackup) return;
+export async function restoreOriginalToolpath() {
+    if (optimizing || !state.originalCutsBackup) return;
     const data = state.getCurrentCaseData();
-    data.cuts = JSON.parse(JSON.stringify(state.originalCutsBackup));
-    state.isToolpathOptimized = false;
-    state.toolpathStats = null;
-
-    renderToolpathUI();
-    renderCutTable(data.cuts);
-    renderScene();
-    bus.emit('toolpath:restored');
+    const cuts = JSON.parse(JSON.stringify(state.originalCutsBackup));
+    optimizing = true;
+    try {
+        if (state.pendingPlan) {
+            if (!await saveToolpathAdjustment(cuts)) return;
+        } else data.cuts = cuts;
+        state.isToolpathOptimized = false;
+        state.toolpathStats = null;
+        state.originalCutsBackup = null;
+        renderToolpathUI(); renderCutTable(data.cuts); renderScene();
+        bus.emit('toolpath:restored');
+    } catch (e) { showToast(e.message || '恢复刀路失败，当前方案保留', 'error'); }
+    finally { optimizing = false; }
 }
 
 /**
@@ -117,12 +120,13 @@ export function toggleToolpathOptimization() {
 }
 
 /**
- * 本地 Segment-TSP 启发式双向寻优与 2-Opt
+ * 本地最近邻、方向翻转与相邻交换。
  */
 function solveLocalSegmentTSP(rawCuts, homeX, homeY, respectPrecedence) {
-    const segments = rawCuts.map((c) => {
+    const explicitStages = rawCuts.every(c => Number.isInteger(c.stage) && c.stage > 0);
+    const segments = rawCuts.map((c, index) => {
         let p1x, p1y, p2x, p2y;
-        if (c.startX !== undefined && c.endX !== undefined && c.startY !== undefined && c.endY !== undefined) {
+        if (c.startX != null && c.endX != null && c.startY != null && c.endY != null) {
             p1x = c.startX; p1y = c.startY;
             p2x = c.endX; p2y = c.endY;
         } else if (c.type === "横切") {
@@ -132,9 +136,7 @@ function solveLocalSegmentTSP(rawCuts, homeX, homeY, respectPrecedence) {
             p1x = c.pos; p1y = c.start;
             p2x = c.pos; p2y = c.end;
         }
-        let stage = 1;
-        const m = (c.desc || "").match(/第\s*(\d+)\s*阶段/);
-        if (m) stage = parseInt(m[1]);
+        const stage = !respectPrecedence ? 1 : explicitStages ? c.stage : index + 1;
 
         return {
             original: c,
@@ -166,10 +168,11 @@ function solveLocalSegmentTSP(rawCuts, homeX, homeY, respectPrecedence) {
     };
 
     const origAir = calcAir(segments);
+    const original = segments.map(s => ({...s}));
 
     // 贪心最近邻构建
     const pool = [...segments];
-    const tour = [];
+    let tour = [];
     let curX = homeX, curY = homeY;
 
     // 按阶段排序分组
@@ -203,7 +206,7 @@ function solveLocalSegmentTSP(rawCuts, homeX, homeY, respectPrecedence) {
         }
     });
 
-    // 2-Opt 局部路径交换与端点翻转
+    // 同阶段相邻交换与端点翻转。
     let pass = 0;
     let improved = true;
     while (improved && pass++ < 80) {
@@ -226,9 +229,27 @@ function solveLocalSegmentTSP(rawCuts, homeX, homeY, respectPrecedence) {
                 improved = true;
             }
         }
+        // Match the server's adjacent-swap search, including the open route's free final endpoint.
+        for (let i = 0; i + 1 < tour.length; i++) {
+            const a = tour[i], b = tour[i + 1];
+            if (a.stage !== b.stage) continue;
+            const prev = i ? tour[i - 1] : {endX:homeX,endY:homeY};
+            const next = tour[i + 2];
+            const cost = (first, second) => Math.hypot(first.startX-prev.endX,first.startY-prev.endY)
+                + Math.hypot(second.startX-first.endX,second.startY-first.endY)
+                + (next ? Math.hypot(next.startX-second.endX,next.startY-second.endY) : 0);
+            if (cost(b,a) + 1e-4 < cost(a,b)) {
+                [tour[i],tour[i + 1]] = [b,a];
+                improved = true;
+            }
+        }
     }
 
-    const optAir = calcAir(tour);
+    let optAir = calcAir(tour);
+    if (original.every((s,i) => !i || original[i - 1].stage <= s.stage) && origAir <= optAir + 1e-6) {
+        tour = original;
+        optAir = origAir;
+    }
     const saved = Math.max(0, origAir - optAir);
     const cutLen = tour.reduce((sum, s) => sum + s.length, 0);
 
@@ -237,6 +258,7 @@ function solveLocalSegmentTSP(rawCuts, homeX, homeY, respectPrecedence) {
         const airDist = Math.hypot(s.startX - cx, s.startY - cy);
         cx = s.endX; cy = s.endY;
         return {
+            ...s.original,
             step: idx + 1,
             type: s.original.type,
             pos: s.original.pos,
@@ -325,6 +347,7 @@ export function renderToolpathUI() {
     const stats = state.toolpathStats;
     const data = state.getCurrentCaseData();
     const cycle = calculateCycleTime(data, stats);
+    const originLabel = {'right-bottom':'右下角','right-top':'右上角','left-bottom':'左下角','left-top':'左上角'}[data.cutOrigin || 'right-bottom'];
 
     if (data.cuts == null || data.cuts.length === 0) {
         container.innerHTML = `
@@ -339,7 +362,7 @@ export function renderToolpathUI() {
         container.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div style="font-size: 11px; color: var(--text-muted);">
-                    起刀点: <b style="color: #f59e0b;">右下角原点</b> | 状态: <span style="color:#94a3b8;">标准直刀切序</span>
+                    起刀点: <b style="color: #f59e0b;">${originLabel}</b> | 状态: <span style="color:#94a3b8;">当前方案刀序</span>
                 </div>
                 <button class="tool-btn active" style="font-size: 10.5px; padding: 2px 8px; background: #0284c7;" onclick="window.camApp.toggleToolpathOptimization()">
                     优化空走刀
@@ -350,7 +373,7 @@ export function renderToolpathUI() {
         container.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                 <div style="font-size: 11px; font-weight: bold; color: #10b981;">
-                    ✓ 刀路已优化 (空程已压缩)
+                    ${stats.savedAirDistance > 0 ? '✓ 刀路已优化 (空程已压缩)' : '✓ 刀路已核对 (保留工艺顺序)'}
                 </div>
                 <div style="display: flex; gap: 6px;">
                     <button class="tool-btn" style="font-size: 10px; padding: 2px 6px; background: rgba(239, 68, 68, 0.12); color: #dc2626; border-color: rgba(239, 68, 68, 0.3);" onclick="window.camApp.toggleToolpathOptimization()">

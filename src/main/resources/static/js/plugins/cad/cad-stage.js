@@ -3,10 +3,11 @@
  */
 import { bus } from '../../core/event-bus.js';
 import { state } from '../../core/state.js';
+import { stationCoordinates } from './cad-view.js';
 
-export let stage, mainLayer;
+export let stage, mainLayer, annotationLayer;
 export let fabricScrollGroup, fabricBgGroup, gridGroup, defectGroup, remnantGroup, pieceGroup, cutGroup, remnantHighlightGroup;
-export let bedStationGroup, dynBedRangeBadge, dynBedBottomBadge;
+export let bedStationGroup;
 
 export function initKonva() {
     const container = document.getElementById("konva-container");
@@ -23,6 +24,18 @@ export function initKonva() {
 
     mainLayer = new Konva.Layer();
     stage.add(mainLayer);
+    annotationLayer = new Konva.Layer({ listening: false });
+    stage.add(annotationLayer);
+
+    // 所有视口入口（滚轮、适配、料头定位动画）共用一次标注更新。
+    let viewFrame = null;
+    stage.on('xChange yChange scaleXChange scaleYChange', () => {
+        if (viewFrame !== null) return;
+        viewFrame = requestAnimationFrame(() => {
+            viewFrame = null;
+            bus.emit('stage:transformed', {});
+        });
+    });
 
     // 1. 随滑块上下贯穿滚动的长布料组 (Fabric Continuous Roll)
     fabricScrollGroup = new Konva.Group();
@@ -43,7 +56,7 @@ export function initKonva() {
     fabricScrollGroup.add(cutGroup);
     fabricScrollGroup.add(remnantHighlightGroup);
 
-    // 2. 绝对固定在视口中央的醒目大红框物理裁切工位 (Fixed Red Cutting Bed Station)
+    // 2. 固定裁切工位；几何边界保留真实尺寸。
     bedStationGroup = new Konva.Group();
     mainLayer.add(bedStationGroup);
 
@@ -63,7 +76,7 @@ export function initKonva() {
         const factor = 1.12;
         const newScale = direction > 0 ? oldScale * factor : oldScale / factor;
 
-        if (newScale < 0.015 || newScale > 3.0) return;
+        if (newScale < 0.002 || newScale > 3.0) return;
 
         stage.scale({ x: newScale, y: newScale });
         const newPos = {
@@ -71,10 +84,12 @@ export function initKonva() {
             y: pointer.y - mousePointTo.y * newScale,
         };
         stage.position(newPos);
+        bus.emit('stage:zoomed');
         bus.emit('stage:transformed', { pointerX: pointer.x, pointerY: pointer.y });
     });
 
     // 移动与平移
+    stage.on('dragstart', e => { if (e.target === stage) bus.emit('stage:panned'); });
     stage.on("dragmove", () => {
         const pointer = stage.getPointerPosition();
         bus.emit('stage:transformed', pointer ? { pointerX: pointer.x, pointerY: pointer.y } : {});
@@ -93,18 +108,8 @@ export function initKonva() {
         const scale = stage.scaleX();
         const worldX = Math.round((pointer.x - stage.x()) / scale);
         const worldY = Math.round((pointer.y - stage.y()) / scale);
-        const data = state.getCurrentCaseData();
-        const rollW = data.rollW || 2000;
-        const bedL = data.bedL || 5000;
-        const winStartY = data.windowStartY || 0;
-        const winEndY = winStartY + bedL;
-        const originStr = (data.cutOrigin || "right-bottom").toLowerCase();
-        const isRight = originStr.startsWith("right");
-        const isBottom = originStr.endsWith("bottom");
-        const bedY = isBottom ? (winEndY - worldY) : (worldY - winStartY);
-        const xLabel = isRight ? `距右导轨 X: ${rollW - worldX} mm` : `距左布边 X: ${worldX} mm`;
-        const yLabel = isBottom ? `距落料起刀线 Y: ${bedY} mm` : `距进料接刀口 Y: ${bedY} mm`;
-        const cursorText = `${xLabel} | ${yLabel} | 全卷展开 Y: ${worldY} mm (${(worldY/1000).toFixed(2)}m)`;
+        const local = stationCoordinates(worldX, worldY, state.getCurrentCaseData());
+        const cursorText = `工位 X ${local.x} · Y ${local.y} mm  |  全卷 Y ${worldY} mm`;
         const sbCursor = document.getElementById("sb-cursor-pos");
         if (sbCursor) sbCursor.innerText = cursorText;
 
@@ -122,6 +127,9 @@ export function initKonva() {
     bus.on('viewport:resized', () => {
         handleStageResize();
     });
+    if (typeof ResizeObserver !== 'undefined') {
+        new ResizeObserver(handleStageResize).observe(container);
+    }
 }
 
 export function handleStageResize() {
@@ -131,9 +139,4 @@ export function handleStageResize() {
         stage.height(container.clientHeight);
         bus.emit('stage:resized');
     }
-}
-
-export function setDynBedBadges(rangeBadge, bottomBadge) {
-    dynBedRangeBadge = rangeBadge;
-    dynBedBottomBadge = bottomBadge;
 }

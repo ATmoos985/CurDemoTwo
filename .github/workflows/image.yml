@@ -1,0 +1,57 @@
+name: Verify and publish image
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.publish.outputs.digest }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Verify restricted deployment command
+        run: bash src/test/deploy/actions-ssh-command.test.sh
+      - name: Build Linux solver and execute Java and JavaScript tests
+        env:
+          COMMIT: ${{ github.sha }}
+        run: |
+          docker build --label "org.opencontainers.image.revision=$COMMIT" -t "cutdemo:git-$COMMIT" .
+      - name: Publish immutable image
+        id: publish
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+          REPOSITORY: ${{ github.repository }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          registry_image="ghcr.io/${REPOSITORY,,}"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+          docker tag "cutdemo:git-$COMMIT" "$registry_image:git-$COMMIT"
+          docker push "$registry_image:git-$COMMIT"
+          digest=$(docker inspect --format '{{index .RepoDigests 0}}' "$registry_image:git-$COMMIT")
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+          printf 'Verified image: `%s`\n\nDeploy using the Deploy workflow and this digest.\n' "$digest" >> "$GITHUB_STEP_SUMMARY"
+      - name: Registry logout
+        if: always()
+        run: docker logout ghcr.io
+  deploy:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
+    needs: image
+    uses: ./.github/workflows/deploy.yml
+    with:
+      image: ${{ needs.image.outputs.digest }}
+    secrets: inherit

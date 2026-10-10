@@ -13,8 +13,11 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api")
-@CrossOrigin(origins = "*")
 public class FabricCutController {
+    private final tools.jackson.databind.json.JsonMapper reportJson = tools.jackson.databind.json.JsonMapper.builder()
+            .enable(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .disable(tools.jackson.databind.DeserializationFeature.ACCEPT_FLOAT_AS_INT,
+                    tools.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
 
     private final com.example.cutdemotwo.service.solver.SolverFactory solverFactory;
     private final ScenarioOneService scenarioOneService;
@@ -35,14 +38,68 @@ public class FabricCutController {
         this.workflowService = workflowService;
     }
 
+    @GetMapping("/cutting/tasks")
+    public java.util.List<com.example.cutdemotwo.model.CuttingTask> tasks() { return remnantService.listTasks(); }
+
+    @GetMapping("/cutting/task-summaries")
+    public java.util.List<Map<String, Object>> taskSummaries() { return remnantService.taskSummaries(); }
+
+    @GetMapping("/cutting/tasks/{id}")
+    public Map<String, Object> task(@PathVariable String id) { return remnantService.taskDetail(id); }
+
+    @PostMapping("/cutting/tasks")
+    public com.example.cutdemotwo.model.CuttingTask saveTask(@RequestBody com.example.cutdemotwo.model.CuttingTask task) {
+        return remnantService.saveTask(task);
+    }
+
+    @PostMapping("/cutting/material-candidates")
+    public java.util.List<Map<String, Object>> candidates(@RequestBody SolveRequest request) { return remnantService.materialCandidates(request); }
+
+    @GetMapping("/cutting/plans/{id}")
+    public Map<String, Object> plan(@PathVariable String id) { return workflowService.getPlan(id); }
+
+    @GetMapping("/cutting/tasks/{id}/plans")
+    public java.util.List<com.example.cutdemotwo.model.CuttingPlan> taskPlans(@PathVariable String id) { return remnantService.taskPlans(id); }
+
+    @PostMapping("/cutting/plans/{id}/cancel")
+    public Object cancelPlan(@PathVariable String id) { return remnantService.changePlanStatus(id, false); }
+
+    @PostMapping("/cutting/plans/{id}/restore")
+    public Object restorePlan(@PathVariable String id) { return remnantService.changePlanStatus(id, true); }
+
+    @PostMapping("/cutting/plans/{id}/adjust")
+    public Object adjustPlan(@PathVariable String id, @RequestBody com.example.cutdemotwo.model.PlanAdjustment adjustment) {
+        return workflowService.adjust(id, adjustment);
+    }
+
+    @ExceptionHandler(com.example.cutdemotwo.persistence.InventoryConflictException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public Map<String, String> conflict(RuntimeException error) { return Map.of("message", error.getMessage()); }
+
     @PostMapping("/solve")
     public SolveResponse solve(@RequestBody SolveRequest request) {
         return workflowService.solve(request);
     }
 
-    @PostMapping("/cutting/report-confirm")
-    public Map<String, Object> confirmCut(@RequestBody com.example.cutdemotwo.model.CutReport report) {
+    @PostMapping(value = "/cutting/report-confirm", consumes = "application/json")
+    public Map<String, Object> confirmCut(@RequestBody String body) {
+        com.example.cutdemotwo.model.CutReport report;
+        try { report = reportJson.readValue(body, com.example.cutdemotwo.model.CutReport.class); }
+        catch (RuntimeException invalid) { throw new IllegalArgumentException("报工格式无效：裁片编号和件数必须为整数，请核对输入"); }
         return workflowService.confirm(report);
+    }
+
+    @PostMapping("/cutting/reports/{id}/reverse")
+    public Map<String, Object> reverseReport(@PathVariable String id, @RequestBody Map<String, String> body) {
+        return remnantService.reverseReport(id, body.get("reason"));
+    }
+
+    @PostMapping(value = "/cutting/report-batch", consumes = "application/json")
+    public Object reportBatch(@RequestBody String body, @RequestParam(defaultValue = "false") boolean preview) {
+        com.example.cutdemotwo.model.CutReport[] reports;
+        try { reports = reportJson.readValue(body, com.example.cutdemotwo.model.CutReport[].class); }
+        catch (RuntimeException invalid) { throw new IllegalArgumentException("报工格式无效，请核对各工位的裁片结果和件数"); }
+        return remnantService.reportBatch(reports == null ? null : java.util.Arrays.asList(reports), preview);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
@@ -63,6 +120,12 @@ public class FabricCutController {
         return scenarioOneService.getScenario(id);
     }
 
+    @PostMapping("/demo/inventory")
+    public Map<String, Integer> initializeDemoInventory(@RequestBody Map<String, Boolean> body) {
+        if (!Boolean.TRUE.equals(body.get("confirmed"))) throw new IllegalArgumentException("请先确认创建示例材料");
+        return remnantService.initializeDemoInventory();
+    }
+
     @GetMapping("/rolls")
     public java.util.List<com.example.cutdemotwo.model.MotherRollInfo> listRolls() {
         return remnantService.getMotherRolls();
@@ -70,7 +133,9 @@ public class FabricCutController {
 
     @GetMapping("/rolls/{rollId}")
     public com.example.cutdemotwo.model.MotherRollInfo getRollDetail(@PathVariable String rollId) {
-        return remnantService.getMotherRoll(rollId);
+        var roll = remnantService.getMotherRoll(rollId);
+        if (roll == null) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.NOT_FOUND, "母卷不存在");
+        return roll;
     }
 
     @PostMapping("/rolls")
@@ -84,8 +149,9 @@ public class FabricCutController {
     }
 
     @PostMapping("/rolls/{rollId}/reset")
-    public Map<String, Object> resetRoll(@PathVariable String rollId) {
-        boolean ok = remnantService.resetRoll(rollId);
+    public Map<String, Object> resetRoll(@PathVariable String rollId, @RequestBody(required = false) Map<String, Object> body) {
+        boolean force = body != null && Boolean.TRUE.equals(body.get("force"));
+        boolean ok = remnantService.resetRoll(rollId, force);
         Map<String, Object> res = new HashMap<>();
         res.put("success", ok);
         res.put("rollId", rollId);

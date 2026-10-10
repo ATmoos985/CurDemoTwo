@@ -1,29 +1,13 @@
 package com.example.cutdemotwo.service;
 
 import com.example.cutdemotwo.model.*;
-import com.example.cutdemotwo.service.solver.ICutSolverEngine;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
 
 @Service
-public class ScenarioOneService implements ICutSolverEngine {
-
-    @Override
-    public String getEngineType() {
-        return "preset";
-    }
-
-    @Override
-    public boolean isAvailable() {
-        return true;
-    }
-
-    @Override
-    public SolveResponse solve(SolveRequest request) {
-        return getTableOneLShape();
-    }
+public class ScenarioOneService {
 
     public SolveResponse getScenario(int scenarioId) {
         switch (scenarioId) {
@@ -33,6 +17,8 @@ public class ScenarioOneService implements ICutSolverEngine {
                 return getWidthAdaptation(true);
             case 3:
                 return getShortRemnantReuse();
+            case 7:
+                return getRealFabricScenario();
             default:
                 return getTableOneLShape();
         }
@@ -129,6 +115,39 @@ public class ScenarioOneService implements ICutSolverEngine {
         res.setRemArea(1.2);
         res.setWasteArea(0.0);
         res.setTotalArea(3.2);
+        return res;
+    }
+
+    public SolveResponse getRealFabricScenario() {
+        SolveResponse res = new SolveResponse();
+        res.setSuccess(true);
+        res.setEngine("工业布艺真实排产内核 (100m母卷 · 15处随机疵点规避)");
+        res.setRollW(2800.0);
+        res.setRollL(5000.0);
+
+        List<PlacedPiece> pieces = new ArrayList<>();
+        pieces.add(new PlacedPiece(1, "D5_双开_高217.0cm (左片)", 0, 0, 2170, 3250, false, 1));
+        res.setPieces(pieces);
+
+        List<RemnantPiece> remnants = new ArrayList<>();
+        remnants.add(new RemnantPiece("REM-REAL-01", "门幅纵切可用长料头 (630×3250mm)", 2170, 0, 630, 3250, 2.048, false));
+        remnants.add(new RemnantPiece("REM-REAL-02", "工位1末端避瑕可用料头 (2800×360mm)", 0, 3250, 2800, 360, 1.008, false));
+        remnants.add(new RemnantPiece("REM-DEF-01", "断纬跳纱隔离带料头 (2800×221mm)", 0, 3610, 2800, 221, 0.619, true));
+        remnants.add(new RemnantPiece("REM-REAL-03", "工位1接续待排可用料段 (2800×1169mm)", 0, 3831, 2800, 1169, 3.273, false));
+        res.setRemnants(remnants);
+
+        List<CutStep> cuts = new ArrayList<>();
+        cuts.add(new CutStep(1, "纵切", 2170, 0, 3250, "第 1 刀纵切：在宽度 2170mm 处纵切，切离落地大帘主片与右侧长条料头 REM-REAL-01"));
+        cuts.add(new CutStep(2, "横切", 3250, 0, 2800, "第 2 刀整幅横切：在展开 3250mm 处横向贯穿切断，完好产出落地主帘成品并切下料头"));
+        cuts.add(new CutStep(3, "横切", 3610, 0, 2800, "第 3 刀整幅横切：在展开 3610mm 处下刀，切出避瑕料头 REM-REAL-02 并进入断纬疵点隔离区"));
+        cuts.add(new CutStep(4, "横切", 3831, 0, 2800, "第 4 刀整幅横切：在展开 3831mm 处切断，剥离断纬带疵废料段 REM-DEF-01，无瑕恢复后续排产"));
+        res.setCuts(cuts);
+
+        res.setDeductLen(5000.0);
+        res.setPieceArea(7.053);
+        res.setRemArea(6.947);
+        res.setWasteArea(0.0);
+        res.setTotalArea(14.0);
         return res;
     }
 }

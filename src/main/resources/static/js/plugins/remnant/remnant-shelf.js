@@ -4,84 +4,79 @@
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 import { renderScene, resetToBedView, updateStatusBar } from '../cad/cad-renderer.js';
-import { renderDefectsUI, updateDemandCompletionFromPieces } from '../solver/quota-manager.js';
+import { renderDefectsUI, updateDemandCompletionFromPieces, loadCurtainOrderTemplate, renderDemandsUI, getDemandsFromUI, addDemandRow } from '../solver/quota-manager.js';
 import { renderRadar } from '../radar/radar-scrubber.js';
 import { updateUIInfo } from '../solver/solver-client.js';
 import { showToast } from '../../core/toast.js';
 
-export async function switchCutMode(mode, targetRemnant, presetData = null) {
-    state.setCutMode(mode);
-
-    const btnRoll = document.getElementById("tab-btn-roll");
-    const btnRem = document.getElementById("tab-btn-remnant");
-    const panelRoll = document.getElementById("panel-roll-mode");
-    const panelRem = document.getElementById("panel-remnant-mode");
-    const radarBar = document.getElementById("roll-radar-bar");
-
-    const rightRollActions = document.getElementById("right-roll-actions");
-    const rightRemnantActions = document.getElementById("right-remnant-actions");
-
-    if (mode === "roll") {
-        if (btnRoll) btnRoll.className = "mode-tab-btn active roll-mode";
-        if (btnRem) btnRem.className = "mode-tab-btn";
-        if (panelRoll) panelRoll.style.display = "flex";
-        if (panelRem) panelRem.style.display = "none";
-        if (rightRollActions) rightRollActions.style.display = "block";
-        if (rightRemnantActions) rightRemnantActions.style.display = "none";
-        if (radarBar) {
-            radarBar.style.opacity = "1";
-            radarBar.style.pointerEvents = "auto";
-        }
-        // 关键修复：从料头切回母卷时，彻底恢复母卷工况 (Bed L = 5000mm)，杜绝料头尺寸残留
-        if (window.camApp && typeof window.camApp.loadCase === 'function') {
-            window.camApp.loadCase(state.currentCaseId);
-        } else {
-            await onMotherRollChange(true);
-        }
-    } else {
-        if (btnRoll) btnRoll.className = "mode-tab-btn";
-        if (btnRem) btnRem.className = "mode-tab-btn active remnant-mode";
-        if (panelRoll) panelRoll.style.display = "none";
-        if (panelRem) panelRem.style.display = "flex";
-        if (rightRollActions) rightRollActions.style.display = "none";
-        if (rightRemnantActions) rightRemnantActions.style.display = "block";
-        if (radarBar) {
-            radarBar.style.opacity = "0.35";
-            radarBar.style.pointerEvents = "none";
-        }
-
-        const curRollId = targetRemnant?.sourceRollId ||
-            (document.getElementById("sel-mother-roll-id") ? document.getElementById("sel-mother-roll-id").value : "ROLL-2026-0920");
-        const selFilter = document.getElementById("sel-remnant-filter-roll");
-        if (selFilter && curRollId) {
-            selFilter.value = curRollId;
-        }
-
-        refreshShelfRemnantsList();
-
-        if (targetRemnant) {
-            mountRemnantToBed(targetRemnant, presetData);
-        } else if (!state.loadedRemnant) {
-            selectAndMountFromShelf("REM-202609-001");
-        } else {
-            mountRemnantToBed(state.loadedRemnant, presetData);
-        }
+export async function switchCutMode(mode, targetRemnant, presetData = null, loadedRoll = null) {
+    const alreadyInert = document.body.inert;
+    document.body.inert = true;
+    try {
+    const data = state.getCurrentCaseData();
+    // Material is a source for the same demand batch, never a separate order pool.
+    if (!presetData) data.demands = getDemandsFromUI();
+    if (mode === 'remnant' && !targetRemnant) {
+        return window.camApp.matchTaskMaterials();
     }
+    state.setCutMode(mode, targetRemnant);
+    data.pieces = []; data.cuts = []; data.remnants = []; data.cutIntervals = [];
+    data.lastReceipt = null; data.deductLen = 0; data.pieceArea = 0; data.totalArea = 0;
+    document.body.dataset.source = mode;
+    document.getElementById('source-kind').textContent = mode === 'remnant' ? '在库料头' : '母卷';
+    document.getElementById('source-remnant-summary').hidden = mode !== 'remnant';
+    if (mode === 'remnant') {
+        data.materialAvailable = true; document.body.dataset.material = 'ready';
+        mountRemnantToBed(targetRemnant, presetData);
+    }
+    else { data.windowStartY = 0; await onMotherRollChange(true, loadedRoll); }
+    updateDemandCompletionFromPieces(data);
+    renderDemandsUI(data.demands);
+    renderScene(); renderRadar(); resetToBedView(); updateUIInfo();
+    } finally { document.body.inert = alreadyInert; }
 }
 
-export async function onMotherRollChange(forceResetBed = false) {
+export async function onMotherRollChange(forceResetBed = false, loadedRoll = null) {
     const sel = document.getElementById("sel-mother-roll-id");
-    const rollId = sel ? sel.value : "ROLL-2026-0920";
+    state.pendingPlan = null;
+    const rollId = sel?.value || '';
+    const unavailable = () => {
+        const current = state.getCurrentCaseData();
+        Object.assign(current, {materialAvailable:false, rollId:'', stockUsedLength:0, stockRemainingLength:0,
+            pieces:[], cuts:[], remnants:[], cutIntervals:[], globalDefects:[], lastReceipt:null});
+        document.body.dataset.material = 'empty';
+        for (const id of ['lbl-roll-model-desc','lbl-roll-remaining-len','sb-roll-id']) {
+            const label = document.getElementById(id); if (label) label.textContent = '未装载';
+        }
+        for (const id of ['lbl-roll-w-desc','lbl-roll-used-len','lbl-roll-total-len','lbl-roll-base-origin','lbl-roll-rem-count','lbl-roll-rem-area']) {
+            const label = document.getElementById(id); if (label) label.textContent = '—';
+        }
+        document.getElementById('inp-roll-id').value = '';
+        document.getElementById('roll-len-progress').style.width = '0%';
+        renderDefectsUI([]); updateUIInfo(); renderScene(); renderRadar();
+    };
+    if (!rollId) { unavailable(); return; }
     let spec = state.motherRollSpecs[rollId] || { model: "TC涤棉-B2026", rollW: 2000, totalRollL: 60000, bedL: 5000 };
     try {
-        const response = await fetch(`/api/rolls/${encodeURIComponent(rollId)}`, { cache: "no-store" });
+        const response = loadedRoll ? {ok:true,json:async()=>loadedRoll} : await fetch(`/api/rolls/${encodeURIComponent(rollId)}`, { cache: "no-store" });
+        if (response.status === 404) {
+            const option = [...sel.options].find(item => item.value === rollId);
+            if (option) option.remove();
+            sel.value = '';
+            throw new Error('所选母卷不在当前库存中，请重新选择或录入材料');
+        }
+        if (!response.ok) throw new Error('读取母卷失败，请刷新库存后重试');
         if (response.ok) {
             const roll = await response.json();
+            if (!roll?.rollId) { unavailable(); return; }
             if (roll && roll.rollId) {
                 spec = { model: roll.rollModel, rollW: roll.width, totalRollL: roll.totalLength,
                     bedL: Math.min(5000, roll.currentRemainingLength) };
                 const current = state.getCurrentCaseData();
+                current.materialAvailable = true; document.body.dataset.material = 'ready';
                 current.rollId = rollId;
+                current.stockUsedLength = roll.usedLength || 0;
+                current.stockRemainingLength = roll.currentRemainingLength;
                 current.globalDefects = roll.defects || [];
                 const remaining = document.getElementById("lbl-roll-remaining");
                 if (remaining) remaining.innerText = `${roll.currentRemainingLength} mm`;
@@ -109,7 +104,7 @@ export async function onMotherRollChange(forceResetBed = false) {
                 }
             }
         }
-    } catch (error) { console.error("读取母卷疵点失败", error); }
+    } catch (error) { unavailable(); throw error; }
 
     if (document.getElementById("inp-roll-id")) document.getElementById("inp-roll-id").value = rollId;
     if (document.getElementById("inp-roll-w")) document.getElementById("inp-roll-w").value = spec.rollW;
@@ -139,6 +134,13 @@ export async function onMotherRollChange(forceResetBed = false) {
     if (wLbl) wLbl.innerText = spec.rollW;
     const sbRoll = document.getElementById("sb-roll-id");
     if (sbRoll) sbRoll.innerText = rollId;
+    if (!state.activeTask) {
+        const materials = document.getElementById('task-material');
+        if (materials) {
+            if (![...materials.options].some(option => option.value === spec.model)) materials.add(new Option(spec.model, spec.model));
+            materials.value = spec.model;
+        }
+    }
 
     // 更新折叠卡片摘要
     const originTag = document.getElementById("tag-cut-origin-header");
@@ -151,11 +153,26 @@ export async function onMotherRollChange(forceResetBed = false) {
 
     await updateMotherRollRemnantStats(rollId);
 
+    // 同步更新需求清单卡片上的归属母卷标签与窗帘工艺说明
+    const demandsRollLbl = document.getElementById("demands-roll-label");
+    if (demandsRollLbl) demandsRollLbl.innerText = `${rollId} (${spec.rollW}mm · ${spec.model})`;
+    const craftHint = document.getElementById("demands-craft-hint");
+    if (craftHint) {
+        if (rollId === "ROLL-REAL-893292") {
+            craftHint.innerHTML = "🏆 <b>893292 窗帘整单</b>: 11项主帘定高横裁(幅宽2170~2715mm) · 门幅剩余630mm边料竖切套排窗幔/绑带/抱枕(37件套)";
+        } else if (rollId === "ROLL-REAL-893153") {
+            craftHint.innerHTML = "🏆 <b>893153 工程整单</b>: 4大超长工程主帘(5.4m~9m横裁) · 门幅剩余边料竖切套排长绑带/抱枕(18件套)";
+        } else {
+            craftHint.innerText = "工艺规则：窗帘定高横裁为主要落料，门幅剩余窄边料顺流纵切套排辅件吃净";
+        }
+    }
+
     renderScene();
     renderRadar();
     resetToBedView();
     checkAllDemandsRemnantMatch();
     updateStatusBar();
+    updateUIInfo();
 }
 
 export async function updateMotherRollRemnantStats(rollId) {
@@ -191,90 +208,10 @@ export async function updateMotherRollRemnantStats(rollId) {
     }
 }
 
-export async function checkAllDemandsRemnantMatch() {
-    if (state.currentCutMode === "remnant") return;
-    const rollId = document.getElementById("sel-mother-roll-id") ? document.getElementById("sel-mother-roll-id").value : "ROLL-2026-0920";
-    const allowRotation = (document.getElementById("sel-allow-rotation").value === "1");
-    const rows = document.querySelectorAll("#demands-container .item-row");
+export async function checkAllDemandsRemnantMatch() { /* Replaced by task-wide material matching. */ }
 
-    for (let idx = 0; idx < rows.length; idx++) {
-        const r = rows[idx];
-        const w = parseFloat(r.querySelector(".dem-w").value) || 500;
-        const l = parseFloat(r.querySelector(".dem-l").value) || 500;
-        const hintEl = document.getElementById(`rem-hint-${idx}`);
-        if (!hintEl) continue;
-
-        try {
-            const res = await fetch("/api/remnants/match", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ rollId: rollId, w: w, l: l, allowRotation: allowRotation })
-            });
-            if (res.ok) {
-                const matches = await res.json();
-                if (matches && matches.length > 0) {
-                    const best = matches[0];
-                    hintEl.style.display = "block";
-                    hintEl.innerHTML = `
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                            <span style="font-weight: 700; color: var(--accent-amber); font-size: 10.5px;">发现本卷可用在库料头</span>
-                            <span style="background: var(--badge-green-bg); color: var(--badge-green-color); font-size: 9px; padding: 1px 4px; border-radius: 2px; font-weight: 600;">0 扣母卷</span>
-                        </div>
-                        <div style="font-size: 10px; color: var(--text-main); line-height: 1.3;">
-                            料号: <b style="color: var(--accent-blue);">${best.id}</b> (${best.width}×${best.length}mm, ${best.location})
-                        </div>
-                        <div style="display: flex; gap: 6px; margin-top: 5px;">
-                            <button class="btn-action-use-rem" onclick="window.camApp.chooseRemnantForDemand('${best.id}', ${idx})">
-                                改用料头切 (0扣料)
-                            </button>
-                            <button class="btn-action-keep-roll" onclick="window.camApp.dismissRemnantHint(${idx})">
-                                坚持母卷切
-                            </button>
-                        </div>
-                    `;
-                } else {
-                    hintEl.style.display = "none";
-                }
-            }
-        } catch (e) {
-            console.error("Match remnant error for idx " + idx, e);
-        }
-    }
-}
-
-export async function chooseRemnantForDemand(remId, demIdx) {
-    try {
-        const res = await fetch("/api/remnants/scan", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: remId })
-        });
-        if (res.ok) {
-            const rem = await res.json();
-            if (rem && rem.id) {
-                const rows = document.querySelectorAll("#demands-container .item-row");
-                let demItem = null;
-                if (rows[demIdx]) {
-                    demItem = {
-                        name: rows[demIdx].querySelector(".dem-name").value,
-                        width: parseFloat(rows[demIdx].querySelector(".dem-w").value) || 500,
-                        length: parseFloat(rows[demIdx].querySelector(".dem-l").value) || 500,
-                        count: parseInt(rows[demIdx].querySelector(".dem-count").value) || 1
-                    };
-                }
-
-                switchCutMode("remnant", rem);
-
-                if (demItem) {
-                    renderRemnantDemandsUI([demItem]);
-                }
-
-                showToast(`已切换至【模式二：料头复用】\n装载料头: [${rem.id}] (${rem.width}×${rem.length}mm)\n母卷 0 消耗保证。`, "success");
-            }
-        }
-    } catch (e) {
-        showToast("装载料头异常: " + e.message, "error");
-    }
+export async function chooseRemnantForDemand(remId) {
+    return window.camApp.matchTaskMaterials({type:'remnant',id:remId});
 }
 
 export function dismissRemnantHint(demIdx) {
@@ -333,7 +270,7 @@ export async function refreshShelfRemnantsList() {
                         </div>
                     </div>
                     <button class="tool-btn active" style="font-size: 10.5px; padding: 4px 8px;" onclick="window.camApp.selectAndMountFromShelf('${r.id}')">
-                        装载机台
+                        为当前任务选用…
                     </button>
                 </div>
             `).join("");
@@ -344,21 +281,7 @@ export async function refreshShelfRemnantsList() {
 }
 
 export async function selectAndMountFromShelf(remId) {
-    try {
-        const res = await fetch("/api/remnants/scan", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: remId })
-        });
-        if (res.ok) {
-            const rem = await res.json();
-            if (rem && rem.id) {
-                mountRemnantToBed(rem);
-            }
-        }
-    } catch (e) {
-        showToast("装载料头异常: " + e.message, "error");
-    }
+    return window.camApp.matchTaskMaterials({type:'remnant',id:remId});
 }
 
 export async function executeShelfBarcodeScan() {
@@ -377,12 +300,13 @@ export function quickSelectRemnant(id) {
 
 export function mountRemnantToBed(rem, presetData = null) {
     state.setLoadedRemnant(rem);
+    document.getElementById("tag-cut-origin-header").textContent = `料头 · ${rem.length}mm`;
 
     document.getElementById("lbl-shelf-active-id").innerText = rem.id;
     document.getElementById("lbl-shelf-active-size").innerText = `${rem.width} × ${rem.length} mm (${(rem.width * rem.length / 1000000).toFixed(2)} m²)`;
     document.getElementById("lbl-shelf-active-loc").innerText = rem.location || "现场库位";
     document.getElementById("lbl-shelf-active-status").innerText = rem.hasDefect ? "带瑕疵料头 (已启动避让)" : "完好可用料头";
-    document.getElementById("lbl-shelf-active-status").style.color = rem.hasDefect ? "#fbbf24" : "#4ade80";
+    document.getElementById("lbl-shelf-active-status").style.color = "var(--text-muted)";
 
     document.getElementById("inp-roll-w").value = rem.width;
     document.getElementById("inp-bed-l").value = rem.length;
@@ -421,13 +345,7 @@ export function mountRemnantToBed(rem, presetData = null) {
         data.totalArea = 0;
     }
 
-    const currentRemDemands = getRemnantDemandsFromUI();
-    if (currentRemDemands.length === 0) {
-        const onlyCrosscut = document.getElementById("sel-allow-longitudinal")?.value === "0";
-        const fitW = onlyCrosscut ? rem.width : (rem.width >= 1000 ? Math.round(rem.width * 0.7) : rem.width);
-        const fitL = rem.length >= 800 ? Math.round(rem.length * 0.6) : rem.length;
-        renderRemnantDemandsUI([{ name: "料头裁片-1", width: fitW, length: fitL, count: 1 }]);
-    }
+    /* Shared demand batch already loaded. */
 
     renderDefectsUI(data.globalDefects);
     renderScene();
@@ -438,67 +356,11 @@ export function mountRemnantToBed(rem, presetData = null) {
 }
 
 export function renderRemnantDemandsUI(demands) {
-    const container = document.getElementById("remnant-demands-container");
-    if (!container) return;
-    container.innerHTML = "";
-    if (!demands || demands.length === 0) {
-        container.innerHTML = "<div style='color:var(--text-muted);font-size:11px;padding:4px;'>暂无需求 (可点击上方+增裁片)</div>";
-        return;
-    }
-    demands.forEach((dem, idx) => {
-        const row = document.createElement("div");
-        row.className = "item-row";
-        const wVal = dem.w !== undefined ? dem.w : (dem.width !== undefined ? dem.width : 500);
-        const lVal = dem.l !== undefined ? dem.l : (dem.length !== undefined ? dem.length : 500);
-        const cVal = dem.count !== undefined ? dem.count : (dem.demand !== undefined ? dem.demand : 1);
-        row.innerHTML = `
-            <div class="item-row-header">
-                <input type="text" class="dem-name remnant-dem" value="${dem.name || ('料头成品-' + (idx + 1))}">
-                <button class="del-btn" onclick="this.closest('.item-row').remove();">×</button>
-            </div>
-            <div class="mini-input-group">
-                <span>宽:</span><input type="number" class="mini-input dem-w" value="${wVal}">
-                <span>长:</span><input type="number" class="mini-input dem-l" value="${lVal}">
-                <span>件数:</span><input type="number" class="mini-input dem-count" value="${cVal}" style="width:40px;">
-            </div>
-        `;
-        container.appendChild(row);
-    });
+    state.getCurrentCaseData().demands = demands;
+    renderDemandsUI(demands);
 }
-
-export function addRemnantDemandRow() {
-    const container = document.getElementById("remnant-demands-container");
-    if (container.querySelector("div[style*='暂无']")) container.innerHTML = "";
-    const id = container.querySelectorAll(".item-row").length + 1;
-    const row = document.createElement("div");
-    row.className = "item-row";
-    row.innerHTML = `
-        <div class="item-row-header">
-            <input type="text" class="dem-name remnant-dem" value="套裁裁片-${id}">
-            <button class="del-btn" onclick="this.closest('.item-row').remove();">×</button>
-        </div>
-        <div class="mini-input-group">
-            <span>宽:</span><input type="number" class="mini-input dem-w" value="500">
-            <span>长:</span><input type="number" class="mini-input dem-l" value="600">
-            <span>件数:</span><input type="number" class="mini-input dem-count" value="1" style="width:40px;">
-        </div>
-    `;
-    container.appendChild(row);
-}
-
-export function getRemnantDemandsFromUI() {
-    const list = [];
-    const rows = document.querySelectorAll("#remnant-demands-container .item-row");
-    rows.forEach((r, idx) => {
-        const id = idx + 1;
-        const name = r.querySelector(".dem-name").value.trim() || ("料头成品-" + id);
-        const width = parseFloat(r.querySelector(".dem-w").value) || 500;
-        const length = parseFloat(r.querySelector(".dem-l").value) || 500;
-        const demand = parseInt(r.querySelector(".dem-count").value) || 1;
-        list.push({ id, name, width, length, demand, allowRotation: false });
-    });
-    return list;
-}
+export function addRemnantDemandRow() { addDemandRow(); }
+export function getRemnantDemandsFromUI() { return getDemandsFromUI(); }
 
 /**
  * 重置在台料头至初始未排状态

@@ -1,6 +1,10 @@
 package com.example.cutdemotwo.service;
 
 import com.example.cutdemotwo.model.*;
+import com.example.cutdemotwo.model.nesting.NestingProblem;
+import com.example.cutdemotwo.service.solver.EngineResult;
+import com.example.cutdemotwo.service.solver.EngineCapabilities;
+import com.example.cutdemotwo.service.solver.EngineGeometry;
 import com.example.cutdemotwo.service.solver.ICutSolverEngine;
 import com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,81 +28,74 @@ public class CrossCutSolverService implements ICutSolverEngine {
         this.toolpathOptimizerService = new ToolpathOptimizerService();
     }
     @Override public String getEngineType() { return "crosscut"; }
+    @Override
+    public EngineCapabilities capabilities() {
+        return new EngineCapabilities(getEngineType(), "1", List.of("RECTANGLE"), List.of("CROSSCUT"), List.of("INPUT_ORDER"), .1, true);
+    }
+
     @Override public boolean isAvailable() { return true; }
 
     @Override
-    public SolveResponse solve(SolveRequest req) {
-        SolveResponse res = new SolveResponse();
-        res.setRollW(req.getRollW());
-        res.setRollL(req.getRollL());
-        res.setDefects(req.getDefects());
-        res.setEngine("仅横切顺序排料");
-        res.setFeedPortType(req.getFeedPortType());
-        res.setSourceRemnantId(req.getSourceRemnantId());
-        if (req.getRollW() <= 0 || req.getRollL() <= 0 || req.getTrimStart() < 0 || req.getTrimStart() >= req.getRollL()) {
+    public EngineResult solve(NestingProblem req) {
+        EngineResult res = new EngineResult();
+        if (req.width() <= 0 || req.height() <= 0 || req.process().trimStart() < 0 || req.process().trimStart() >= req.height()) {
             res.setMessage("母料尺寸或卷头修齐量无效");
             return res;
         }
         List<double[]> blocked = new ArrayList<>();
-        for (Defect d : req.getDefects()) {
-            if (d.getSafeX() < req.getRollW() && d.getSafeX() + d.getSafeW() > 0) {
-                blocked.add(new double[]{Math.max(0, d.getSafeY()), Math.min(req.getRollL(), d.getSafeY() + d.getSafeH())});
+        for (Defect d : EngineGeometry.defects(req)) {
+            if (d.getSafeX() < req.width() && d.getSafeX() + d.getSafeW() > 0) {
+                blocked.add(new double[]{Math.max(0, d.getSafeY()), Math.min(req.height(), d.getSafeY() + d.getSafeH())});
             }
         }
         blocked.sort(Comparator.comparingDouble(a -> a[0]));
         List<PlacedPiece> pieces = new ArrayList<>();
         List<RemnantPiece> remnants = new ArrayList<>();
         List<CutStep> cuts = new ArrayList<>();
-        double cursor = req.getTrimStart();
-        if (cursor >= 300) addRemnant(remnants, req.getRollW(), 0, cursor, overlaps(blocked, 0, cursor));
+        double cursor = req.process().trimStart();
+        if (cursor > 0 && req.width() >= req.process().minReusableWidth() && cursor >= req.process().minReusableHeight()) addRemnant(remnants, req.width(), 0, cursor, overlaps(blocked, 0, cursor));
         int unmet = 0;
-        for (PieceDemand demand : req.getDemands()) {
-            double length = demand.getLength();
-            if (Math.abs(demand.getWidth() - req.getRollW()) > 0.001 || length <= 0 || demand.getDemand() < 0) {
-                res.setMessage("仅横切要求裁片宽度等于母料幅宽，且长度与件数有效：" + demand.getName());
+        for (NestingProblem.Part demand : req.parts()) {
+            double length = demand.shape().height();
+            if (Math.abs(demand.shape().width() - req.width()) > 0.001 || length <= 0 || demand.quantity() < 0) {
+                res.setMessage("仅横切要求裁片宽度等于母料幅宽，且长度与件数有效：" + demand.name());
                 return res;
             }
-            for (int i = 0; i < demand.getDemand(); i++) {
+            for (int i = 0; i < demand.quantity(); i++) {
                 double start = cursor;
                 for (double[] interval : blocked) {
                     if (start < interval[1] && start + length > interval[0]) start = interval[1];
                 }
-                if (start + length > req.getRollL()) {
+                if (start + length > req.height()) {
                     unmet++;
                     continue;
                 }
                 if (start > cursor) {
-                    if (start - cursor >= 300) addRemnant(remnants, req.getRollW(), cursor, start - cursor, overlaps(blocked, cursor, start));
-                    cuts.add(new CutStep(cuts.size() + 1, "横切", start, 0, req.getRollW(), "隔离疵点区后起切"));
+                    if (req.width() >= req.process().minReusableWidth() && start - cursor >= req.process().minReusableHeight()) addRemnant(remnants, req.width(), cursor, start - cursor, overlaps(blocked, cursor, start));
+                    cuts.add(new CutStep(cuts.size() + 1, "横切", start, 0, req.width(), "隔离疵点区后起切"));
                 }
-                pieces.add(new PlacedPiece(pieces.size() + 1, demand.getName(), 0, start,
-                        req.getRollW(), length, false, demand.getId()));
-                cuts.add(new CutStep(cuts.size() + 1, "横切", start + length, 0, req.getRollW(),
-                        "整幅横切 " + demand.getName()));
+                pieces.add(new PlacedPiece(pieces.size() + 1, demand.name(), 0, start,
+                        req.width(), length, false, demand.id()));
+                cuts.add(new CutStep(cuts.size() + 1, "横切", start + length, 0, req.width(),
+                        "整幅横切 " + demand.name()));
                 cursor = start + length;
             }
         }
         if (pieces.isEmpty()) {
+            res.setFailureStatus("NO_SOLUTION_FOUND");
             res.setMessage("当前窗口无法排入整幅裁片，请检查尺寸、疵点或扩大窗口");
             return res;
         }
-        if (req.getRollL() - cursor >= 300) addRemnant(remnants, req.getRollW(), cursor, req.getRollL() - cursor,
-                overlaps(blocked, cursor, req.getRollL()));
-        double totalArea = req.getRollW() * req.getRollL() / 1_000_000.0;
-        double pieceArea = pieces.stream().mapToDouble(p -> p.getW() * p.getL()).sum() / 1_000_000.0;
-        double remArea = remnants.stream().mapToDouble(RemnantPiece::getArea).sum();
-        double homeX = "right-bottom".equalsIgnoreCase(req.getCutOrigin()) ? req.getRollW() : 0.0;
-        double homeY = "right-bottom".equalsIgnoreCase(req.getCutOrigin()) ? req.getRollL() : 0.0;
+        if (req.height() > cursor && req.width() >= req.process().minReusableWidth() && req.height() - cursor >= req.process().minReusableHeight()) addRemnant(remnants, req.width(), cursor, req.height() - cursor,
+                overlaps(blocked, cursor, req.height()));
+        double homeX = req.process().startCorner().startsWith("right") ? req.width() : 0.0;
+        double homeY = req.process().startCorner().endsWith("bottom") ? req.height() : 0.0;
         List<CutStep> continuousCuts = toolpathOptimizerService.optimizeAndChain(cuts, homeX, homeY, false);
         res.setPieces(pieces);
         res.setRemnants(remnants);
         res.setCuts(continuousCuts);
         double maxBoundaryY = Math.max(cursor, remnants.stream().mapToDouble(r -> r.getY() + r.getL()).max().orElse(0));
-        res.setDeductLen("remnant".equalsIgnoreCase(req.getFeedPortType()) ? 0 : maxBoundaryY);
-        res.setTotalArea(totalArea);
-        res.setPieceArea(pieceArea);
-        res.setRemArea(remArea);
-        res.setWasteArea(Math.max(0, totalArea - pieceArea - remArea));
+        res.setSuggestedFeedLength(maxBoundaryY);
         res.setSuccess(true);
         if (unmet > 0) res.setMessage("当前窗口未排入 " + unmet + " 件，可在后续工位接续");
         return res;

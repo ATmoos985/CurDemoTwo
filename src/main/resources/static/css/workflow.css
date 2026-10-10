@@ -1,0 +1,79 @@
+.task-bar { min-height: 49px; display: flex; align-items: center; gap: 20px; padding: 8px 20px; background: var(--panel-bg); border-bottom: 1px solid var(--panel-border); flex-shrink: 0; }
+.task-toolbar { display: flex; align-items: center; gap: 8px; }
+.task-bar ol { display: flex; list-style: none; gap: 4px; padding: 0; margin: 0 auto; color: var(--text-muted); font-size: 12px; }
+.task-bar li + li::before { content: '›'; padding-right: 4px; color: var(--text-muted); }
+.workflow-stages { white-space: nowrap; }
+.workflow-stages button { padding: 5px; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer; font: inherit; }
+.workflow-stages button:hover { background: var(--panel-header); }
+.workflow-stages button[aria-current] { color: var(--accent-blue); font-weight: 600; background: var(--panel-header); }
+.stage-marker { display: inline-grid; place-items: center; width: 19px; height: 19px; margin-right: 3px; border: 1px solid var(--panel-border); border-radius: 50%; }
+.workflow-stages [data-state="complete"] .stage-marker { color: var(--accent-blue); }
+#workflow-current { display: block; font-size: 14px; margin-bottom: 8px; }
+.action-footer-section [hidden] { display: none !important; }
+[data-theme] #right-roll-actions .workflow-primary { width: 100%; min-height: 40px; background: var(--accent-blue); border: 1px solid var(--accent-blue); color: white; font-weight: 600; }
+[data-theme] #right-roll-actions .workflow-secondary { background: var(--panel-bg); border: 1px solid var(--panel-border); color: var(--text-muted); font-weight: 400; }
+.station-browse-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0; }
+.station-browse-actions > button { flex: 1; white-space: nowrap; }
+.station-browse-actions > #btn-smart-advance { flex-basis: 100%; }
+#task-state { color: var(--text-muted); font-size: 12px; }
+.task-fields { display: grid; gap: 10px; margin-bottom: 16px; }
+.task-fields label, .report-fields label, .report-location { display: grid; gap: 6px; color: var(--text-muted); font-size: 12px; }
+.task-fields .prop-input { width: 100%; text-align: left; }
+.material-selection { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+#source-remnant-summary { padding: 12px 0; border-bottom: 1px solid var(--panel-border); margin-bottom: 12px; line-height: 1.7; }
+#source-remnant-summary p { margin: 4px 0; }
+#source-remnant-summary > button { display: block; margin-top: 10px; }
+.workflow-dialog { color: var(--text-main); background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 7px; padding: 0; width: min(720px, calc(100vw - 40px)); max-height: 85vh; margin: auto; }
+.workflow-dialog::backdrop { background: #18273366; }
+.workflow-dialog-heading { padding: 18px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--panel-border); }
+.workflow-dialog h2, .report-dialog h2 { font-size: 17px; font-weight: 600; margin: 0; }
+.workflow-dialog-body { padding: 12px 24px 24px; max-height: 68vh; overflow: auto; }
+.workflow-dialog-body h3 { font-size: 13px; font-weight: 600; margin: 24px 0 10px; }
+.task-list-item { display: grid; gap: 7px; width: 100%; padding: 15px 0; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--panel-border); color: var(--text-main); line-height: 1.5; }
+button.task-list-item { cursor: pointer; }
+button.task-list-item:hover { background: var(--panel-header); }
+.task-list-item strong { font-size: 14px; font-weight: 600; }
+.task-list-item span, .task-list-item small { color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
+.task-list-item strong small { font-weight: 400; float: right; }
+.muted { color: var(--text-muted); font-size: 12px; line-height: 1.7; }
+.report-dialog { width: min(680px, calc(100vw - 32px)); max-width: 680px; max-height: 90vh; }
+.report-modal { padding: 0; border: 0; background: transparent; margin: auto; max-width: calc(100vw - 24px); max-height: 92vh; color: var(--text-main); }
+.report-modal::backdrop { background: #18273366; }
+.task-metadata > summary { padding: 3px 0 12px; color: var(--text-main); font-weight: 500; }
+.task-metadata .task-fields { margin-top: 8px; }
+.report-body { padding: 8px 24px 22px; overflow: auto; }
+.report-body section { padding: 12px 0 18px; border-bottom: 1px solid var(--panel-border); }
+.report-body h3 { font-size: 13px; font-weight: 600; margin: 4px 0 16px; }
+.report-body h3 small { float: right; font-weight: 400; color: var(--text-muted); }
+.report-source { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; margin-bottom: 16px; }
+.report-source b { font-weight: 600; }
+.report-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.report-fields .prop-input { width: 100%; }
+.report-location { grid-template-columns: 72px 1fr; align-items: center; margin-bottom: 15px; }
+.report-remnant-row { display: grid; grid-template-columns: 18px minmax(110px, 1fr) 78px 12px 78px 20px; gap: 8px; align-items: center; padding: 8px 0; font-size: 12px; }
+.report-remnant-row .prop-input { width: 100%; }
+.report-batch-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.report-piece-row { display: grid; grid-template-columns: minmax(0,1fr) 90px; align-items: center; gap: 6px 12px; padding: 8px 0; border-bottom: 1px solid var(--panel-border); font-size: 12px; }
+.report-piece-row label { overflow-wrap: anywhere; }
+.report-piece-row input { grid-column: 1 / -1; width: 100%; }
+.report-piece-row input[hidden] { display: none; }
+#report-pieces { max-height: 230px; overflow-y: auto; margin-bottom: 10px; }
+#report-outcome-summary { font-size: 12px; line-height: 1.6; }
+.report-remnant-row span { overflow-wrap: anywhere; }
+#report-error:empty { display: none; }
+#report-error { color: #b42318; font-size: 13px; margin: 16px 0 0; }
+.report-progress p { display: flex; justify-content: space-between; gap: 16px; }
+.report-progress strong { font-weight: 500; }
+.settings-modal-overlay { backdrop-filter: none; background: #18273366; }
+.settings-modal-header, .settings-modal-footer { padding: 16px 24px; }
+.report-dialog .settings-modal-footer { display: flex; justify-content: flex-end; gap: 10px; }
+.report-location .prop-input { width: 100%; text-align: left; }
+body[data-source="remnant"] #source-roll-summary, body[data-source="remnant"] #roll-radar-bar,
+body[data-source="remnant"] .station-navigation { display: none; }
+.settings-modal-dialog .tool-btn.active { background: var(--accent-blue); color: white; border-color: var(--accent-blue); }
+.settings-modal-dialog :is(input,select,textarea) { font-size: 13px; }
+[data-theme] .demand-status, [data-theme] #demands-summary-badge { background: var(--panel-header) !important; color: var(--text-muted) !important; border-color: var(--panel-border) !important; }
+#source-kind { color: var(--text-muted); font-size: 12px; }
+body[data-source="remnant"] #btn-smart-advance, body[data-source="remnant"] #btn-advance-bed { display: none; }
+@media (max-width: 1250px) { .task-bar { flex-wrap: wrap; gap: 8px 14px; } .task-bar ol { order: 3; width: 100%; justify-content: center; } .task-bar > .task-toolbar:last-child { margin-left: auto; } }
+@media (max-width: 650px) { #task-state { display: none; } .task-bar { gap: 8px; padding: 8px; } .report-remnant-row { grid-template-columns: 18px 1fr 65px 8px 65px 20px; gap: 4px; } }

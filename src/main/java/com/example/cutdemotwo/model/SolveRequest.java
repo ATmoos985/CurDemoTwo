@@ -20,6 +20,29 @@ public class SolveRequest {
     private String rollModel = "TC涤棉-B2026";   // 母卷材质型号
     private String feedPortType = "roll"; // "roll"(母卷连续料口) 或 "remnant"(手工料头投料口)
     private String sourceRemnantId;      // 若为料头投料，记录原料头编号
+    private double minRemnantWidth = 200;
+    private double minRemnantLength = 300;
+    private int timeLimitSeconds = 3;
+    public double getMinRemnantWidth() { return minRemnantWidth; }
+    public void setMinRemnantWidth(double value) { minRemnantWidth = value; }
+    public double getMinRemnantLength() { return minRemnantLength; }
+    public void setMinRemnantLength(double value) { minRemnantLength = value; }
+    public int getTimeLimitSeconds() { return timeLimitSeconds; }
+    public void setTimeLimitSeconds(int value) { timeLimitSeconds = value; }
+
+    public void validateSettings() {
+        if (!Double.isFinite(minRemnantWidth) || minRemnantWidth < 50 || minRemnantWidth > 1000 ||
+                !Double.isFinite(minRemnantLength) || minRemnantLength < 50 || minRemnantLength > 2000 ||
+                timeLimitSeconds < 1 || timeLimitSeconds > 60)
+            throw new IllegalArgumentException("回收宽度应为 50–1000 mm、长度 50–2000 mm，求解时限 1–60 秒");
+    }
+
+    private String taskId;
+    private long taskRevision;
+    public String getTaskId() { return taskId; }
+    public void setTaskId(String taskId) { this.taskId = taskId; }
+    public long getTaskRevision() { return taskRevision; }
+    public void setTaskRevision(long taskRevision) { this.taskRevision = taskRevision; }
 
     public SolveRequest() {}
 

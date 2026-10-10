@@ -42,7 +42,7 @@ export function stepCut(delta) {
     }
 
     state.setCutStepLimit(currentLimit);
-    updateSimStatusText(`刀序演播: ${currentLimit === 0 ? '未下刀 (原料状态)' : (currentLimit >= cuts.length ? `全部显示 (共 ${cuts.length} 刀)` : `当前第 ${currentLimit} / ${cuts.length} 刀`)}`);
+    updateSimStatusText(`刀序演播: ${currentLimit === 0 ? '未下刀 (原料状态)' : (currentLimit >= cuts.length ? `共 ${cuts.length} 刀 · 仅预览，未报工` : `当前第 ${currentLimit} / ${cuts.length} 刀`)}`);
     
     destroySimTool();
     renderScene();
@@ -148,7 +148,7 @@ function simAnimationLoop(now) {
         state.setCutStepLimit(cuts.length);
         renderScene();
         destroySimTool();
-        updateSimStatusText(`仿真完成: 共 ${cuts.length} 刀全部加工完成！`);
+        updateSimStatusText(`预览完成 · ${cuts.length} 刀 · 实切后请报工保存`);
         return;
     }
 
@@ -176,7 +176,7 @@ function simAnimationLoop(now) {
         const curY = simState.fromY + (startY - simState.fromY) * Math.min(1.0, simState.progress);
         renderSimTool(curX, curY, 'rapid', simState.stepIndex + 1, cuts.length);
 
-        updateSimStatusText(`[快移飞奔] 刀序 #${simState.stepIndex + 1} ➔ 下刀点 (${Math.round(startX)}, ${Math.round(startY)})`);
+        updateSimStatusText(`刀头空移 刀序 #${simState.stepIndex + 1} ➔ 下刀点 (${Math.round(startX)}, ${Math.round(startY)})`);
 
         if (simState.progress >= 1.0) {
             // 到达下刀点，切换至下刀切削
@@ -280,6 +280,6 @@ function updatePlayPauseButtonUI(isPlaying) {
     const btn = document.getElementById("btn-sim-play-pause");
     if (btn) {
         btn.innerText = isPlaying ? "暂停仿真" : "▶ 连续仿真";
-        btn.style.background = isPlaying ? "#d97706" : "#0284c7";
+        btn.classList.toggle('is-playing', isPlaying);
     }
 }

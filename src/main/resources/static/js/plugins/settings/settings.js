@@ -3,6 +3,13 @@
  */
 import { bus } from '../../core/event-bus.js';
 import { state } from '../../core/state.js';
+import { showToast } from '../../core/toast.js';
+
+export function solverSettings() {
+    return {minRemnantWidth:Number(localStorage.getItem('cam_min_rem_w') ?? 200),
+        minRemnantLength:Number(localStorage.getItem('cam_min_rem_l') ?? 300),
+        timeLimitSeconds:Number(localStorage.getItem('cam_timeout') ?? 3)};
+}
 
 export function toggleTheme() {
     const current = document.documentElement.getAttribute("data-theme") || "dark";
@@ -26,12 +33,12 @@ export function setTheme(theme) {
 export function openSettingsModal() {
     loadSavedSettings();
     const modal = document.getElementById("settings-modal");
-    if (modal) modal.style.display = "flex";
+    if (modal && !modal.open) modal.showModal();
 }
 
 export function closeSettingsModal() {
     const modal = document.getElementById("settings-modal");
-    if (modal) modal.style.display = "none";
+    if (modal) modal.close();
 }
 
 export function switchSettingsTab(tabName) {
@@ -44,7 +51,7 @@ export function switchSettingsTab(tabName) {
 }
 
 export function loadSavedSettings() {
-    const theme = localStorage.getItem("cam_theme") || "dark";
+    const theme = localStorage.getItem("cam_theme") || "light";
     let origin = localStorage.getItem("cam_origin");
     if (!origin || origin === "right-top") {
         origin = "right-bottom";
@@ -56,7 +63,6 @@ export function loadSavedSettings() {
     const longi = localStorage.getItem("cam_longi") || "1";
     const minRemW = localStorage.getItem("cam_min_rem_w") || "200";
     const minRemL = localStorage.getItem("cam_min_rem_l") || "300";
-    const remHint = localStorage.getItem("cam_rem_hint") || "1";
     const timeout = localStorage.getItem("cam_timeout") || "3";
     const firstStage = localStorage.getItem("cam_first_stage") || "horizontal";
 
@@ -68,12 +74,14 @@ export function loadSavedSettings() {
     if (document.getElementById("cfg-allow-longi")) document.getElementById("cfg-allow-longi").value = longi;
     if (document.getElementById("cfg-min-rem-w")) document.getElementById("cfg-min-rem-w").value = minRemW;
     if (document.getElementById("cfg-min-rem-l")) document.getElementById("cfg-min-rem-l").value = minRemL;
-    if (document.getElementById("cfg-rem-hint")) document.getElementById("cfg-rem-hint").value = remHint;
     if (document.getElementById("cfg-timeout")) document.getElementById("cfg-timeout").value = timeout;
     if (document.getElementById("cfg-first-stage")) document.getElementById("cfg-first-stage").value = firstStage;
 }
 
 export function saveSettings() {
+    for (const input of document.querySelectorAll('#settings-modal input[type="number"]')) {
+        if (!input.value.trim() || !input.reportValidity()) return showToast('请填写有效的参数范围', 'warning');
+    }
     const theme = document.getElementById("cfg-theme-select").value;
     const origin = document.getElementById("cfg-cut-origin").value;
     const margin = document.getElementById("cfg-defect-margin").value;
@@ -82,7 +90,6 @@ export function saveSettings() {
     const longi = document.getElementById("cfg-allow-longi").value;
     const minRemW = document.getElementById("cfg-min-rem-w").value;
     const minRemL = document.getElementById("cfg-min-rem-l").value;
-    const remHint = document.getElementById("cfg-rem-hint").value;
     const timeout = document.getElementById("cfg-timeout").value;
     const firstStage = document.getElementById("cfg-first-stage").value;
 
@@ -94,7 +101,6 @@ export function saveSettings() {
     localStorage.setItem("cam_longi", longi);
     localStorage.setItem("cam_min_rem_w", minRemW);
     localStorage.setItem("cam_min_rem_l", minRemL);
-    localStorage.setItem("cam_rem_hint", remHint);
     localStorage.setItem("cam_timeout", timeout);
     localStorage.setItem("cam_first_stage", firstStage);
 
@@ -103,6 +109,8 @@ export function saveSettings() {
     if (document.getElementById("inp-trim-start")) document.getElementById("inp-trim-start").value = trim;
     if (document.getElementById("sel-allow-rotation")) document.getElementById("sel-allow-rotation").value = rot;
     if (document.getElementById("sel-allow-longitudinal")) document.getElementById("sel-allow-longitudinal").value = longi;
+    if (document.getElementById("sel-first-stage")) document.getElementById("sel-first-stage").value = firstStage;
+    state.pendingPlan = null;
 
     const curCase = state.getCurrentCaseData();
     if (curCase) {
@@ -115,23 +123,13 @@ export function saveSettings() {
 
     closeSettingsModal();
     bus.emit('settings:updated', { curCase });
-    alert("全局工艺参数与显示配置已成功保存并生效！");
+    showToast('本机设置已保存，下一次排料使用新参数；已有方案保留原参数', 'success');
 }
 
 export function restoreDefaultSettings() {
-    if (!confirm("确定要恢复出厂默认参数配置吗？")) return;
-    localStorage.removeItem("cam_theme");
-    localStorage.removeItem("cam_origin");
-    localStorage.removeItem("cam_margin");
-    localStorage.removeItem("cam_trim");
-    localStorage.removeItem("cam_rot");
-    localStorage.removeItem("cam_longi");
-    localStorage.removeItem("cam_min_rem_w");
-    localStorage.removeItem("cam_min_rem_l");
-    localStorage.removeItem("cam_rem_hint");
-    localStorage.removeItem("cam_timeout");
-    localStorage.removeItem("cam_first_stage");
-    loadSavedSettings();
-    setTheme("dark");
-    alert("已恢复默认设置。");
+    const defaults = {'cfg-theme-select':'light','cfg-cut-origin':'right-bottom','cfg-defect-margin':20,
+        'cfg-trim-start':0,'cfg-allow-rot':0,'cfg-allow-longi':1,'cfg-min-rem-w':200,'cfg-min-rem-l':300,
+        'cfg-timeout':3,'cfg-first-stage':'horizontal'};
+    Object.entries(defaults).forEach(([id,value]) => document.getElementById(id).value = value);
+    showToast('已填入默认值，点击保存后应用', 'info');
 }

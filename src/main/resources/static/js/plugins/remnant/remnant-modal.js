@@ -1,113 +1,164 @@
-/**
- * 现场料头库存池与扫码识别弹窗插件 (Remnant Modal Plugin)
- */
-import { bus } from '../../core/event-bus.js';
-import { switchCutMode } from './remnant-shelf.js';
+/** 本次任务产出与当前母卷库存使用独立页签。 */
+import { state } from '../../core/state.js';
+import { requestJSON } from '../../core/api-request.js';
+import { showToast } from '../../core/toast.js';
+import { requestFromUI, materialContext } from '../material/material-selection.js';
+import { recommendationMarkup } from '../material/remnant-recommendation.js';
+import { motherRollRemnants, taskRemnants } from './remnant-dialog-model.js';
+import { queuedReports } from '../solver/report-queue.js';
+import { escapeText, refreshTaskProgress, openTaskReports } from '../solver/task-workspace.js';
+import { solverSettings } from '../settings/settings.js';
 
-export async function openRemnantModal() {
-    const modal = document.getElementById("remnant-modal");
-    if (modal) modal.style.display = "flex";
-    await refreshRemnantsList();
+const el = id => document.getElementById(id);
+const rollId = () => state.currentCutMode === 'remnant' ? state.loadedRemnant?.sourceRollId : state.getCurrentCaseData().rollId;
+const usable = stock => (stock.status || 'AVAILABLE') === 'AVAILABLE' && !queuedReports().some(row => row.pending.sourceRemnantId === stock.id);
+let generation = 0, stocks = [], recommending = false;
+
+export function renderTaskRemnants() {
+    if (!el('remnant-table-body')) return;
+    const data = state.getCurrentCaseData();
+    const rows = taskRemnants(data, state.taskReports || [], queuedReports(), {
+        ...(state.pendingPlan?.request || solverSettings()), rollId:rollId(), feedPortType:state.currentCutMode
+    });
+    const actual = rows.filter(r => r.phase === 'reported'), pending = rows.filter(r => r.phase !== 'reported');
+    const summary = list => `${list.length} 块 · ${list.reduce((n,r)=>n+r.w*r.l/1e6,0).toFixed(3)} m²`;
+    el('remnant-count-badge').textContent = `${rows.length} 块`;
+    el('remnant-expected-count').textContent = rows.length;
+    el('remnant-reported-total').textContent = summary(actual);
+    el('remnant-expected-total').textContent = summary(pending);
+    el('remnant-output-note').textContent = '本次任务在当前母卷的产出；已入库数量取自报工记录，当前可用状态见料头库。'
+        + (state.currentCutMode === 'remnant' ? ' 当前使用料头，余料不再回收。' : ' 预计产出须确认报工后才入库。');
+    el('remnant-expected-empty').hidden = rows.length > 0;
+    el('remnant-expected-empty').textContent = state.currentCutMode === 'remnant'
+        ? '料头只使用一次，本次裁切的剩余部分计入损耗，不产生新料头。' : '当前母卷在本次任务中暂无料头产出。';
+    el('remnant-expected-table').hidden = !rows.length;
+    const container = el('remnant-table-body');
+    container.innerHTML = rows.map((r,i) => `<tr><td><code class="remnant-code">${escapeText(r.id)}</code></td>
+        <td>${r.w} × ${r.l} mm</td><td>${(r.w*r.l/1e6).toFixed(3)} m²</td>
+        <td><span class="quality-badge ${r.hasDefect ? 'has-defect' : ''}">${r.hasDefect ? '带疵' : '无疵'}</span></td>
+        <td>${{expected:'预计 · 未入库',queued:'待报工 · 未入库',reported:'已入库'}[r.phase]}</td>
+        <td>${r.locatable ? `<button class="tool-btn" data-locate="${i}">定位</button>` : r.phase === 'reported' ? '<button class="tool-btn" data-report>报工记录</button>' : '—'}</td></tr>`).join('');
+    container.querySelectorAll('[data-locate]').forEach(button => {
+        const rem = rows[Number(button.dataset.locate)], row = button.closest('tr');
+        row.id = 'remnant-row-' + rem.id; row.dataset.remnantId = rem.id;
+        row.classList.add('interactive-row');
+        row.classList.toggle('remnant-selected-row', state.selectedRemnantId === rem.id);
+        row.onmouseenter = () => window.hoverRemnant(rem.id, true);
+        row.onmouseleave = () => window.hoverRemnant(rem.id, false);
+        row.onclick = () => {
+            window.selectRemnant(rem.id, {fromTable:true,smoothPan:true,showToastMsg:true,switchTab:false}); closeRemnantModal();
+        };
+    });
+    container.querySelectorAll('[data-report]').forEach(button => button.onclick = () => {closeRemnantModal();openTaskReports();});
 }
 
-export function closeRemnantModal() {
-    const modal = document.getElementById("remnant-modal");
-    if (modal) modal.style.display = "none";
+function switchTab(tab, focus = false) {
+    for (const name of ['expected','stock']) {
+        const selected = name === tab, button = el('remnant-tab-' + name);
+        button.setAttribute('aria-selected',String(selected));button.tabIndex = selected ? 0 : -1;
+        el('remnant-panel-' + name).hidden = !selected;
+        if (selected && focus) button.focus();
+    }
+}
+
+export async function openRemnantModal(tab = 'expected') {
+    const dialog = el('remnant-modal');
+    if (!dialog.open) {
+        const token = ++generation;
+        dialog.onclose = () => { if (generation === token) generation++; };
+        dialog.onkeydown = event => {
+            event.stopPropagation();
+            if (event.target.getAttribute('role') !== 'tab') return;
+            if (['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) {
+                event.preventDefault();
+                switchTab(event.key === 'Home' ? 'expected' : event.key === 'End' ? 'stock' : event.target.id.endsWith('expected') ? 'stock' : 'expected',true);
+            }
+        };
+        for (const name of ['expected','stock']) el('remnant-tab-' + name).onclick = () => switchTab(name);
+        el('remnant-roll-scope').textContent = rollId() ? '所属母卷 · ' + rollId() : '尚未装载母卷，请先选择用料';
+        el('inp-scan-barcode').value = '';
+        el('remnant-recommend-results').replaceChildren();
+        el('remnant-availability').textContent = '按当前剩余需求试排可用料头';
+        el('btn-remnant-recommend').onclick = recommend;
+        el('remnant-refresh').onclick = refreshRemnantsList;
+        el('inp-scan-barcode').oninput = renderStocks;
+        switchTab(tab === 'stock' ? 'stock' : 'expected');
+        renderTaskRemnants();
+        dialog.showModal();
+        await refreshRemnantsList();
+        return;
+    }
+    if (dialog.open) switchTab(tab === 'stock' ? 'stock' : 'expected');
+}
+
+export function closeRemnantModal() { el('remnant-modal')?.close(); }
+
+function renderStocks() {
+    const words = el('inp-scan-barcode').value.trim().toLowerCase();
+    const visible = stocks.filter(r => (r.id + ' ' + (r.location || '')).toLowerCase().includes(words));
+    el('header-remnant-count').textContent = stocks.length;
+    el('remnant-stock-status').textContent = rollId() ? '本母卷共 ' + stocks.length + ' 块 · 可用 ' + stocks.filter(usable).length + ' 块' : '选择母卷后查看其料头';
+    const container = el('remnant-cards-container');
+    container.innerHTML = visible.length ? visible.map(r => {
+        const status = usable(r) ? r.hasDefect ? '可用 · 带疵需避让' : '可用 · 无疵' : queuedReports().some(row=>row.pending.sourceRemnantId===r.id) ? '本机待报工占用' : ({CONSUMED:'已用完',SCRAPPED:'已报废',RESERVED:'已占用',IN_USE:'在制',PENDING:'待整理'}[r.status] || r.status || '不可用');
+        return '<article class="remnant-stock-row"><div><strong>' + escapeText(r.id) + '</strong><span class="remnant-stock-status">' + escapeText(status) + '</span><p class="remnant-dimensions">' + r.width + ' × ' + r.length + ' mm <span>· ' + (r.width*r.length/1000000).toFixed(3) + ' m²</span></p><small>' + escapeText(r.location || '库位未登记') + ' · ' + escapeText(r.materialBatch || '型号未登记') + '</small></div><button class="tool-btn" data-stock-id="' + escapeText(r.id) + '" ' + (usable(r) ? '' : 'disabled') + '>选择并核对</button></article>';
+    }).join('') : '<p class="inventory-empty">' + (words ? '没有匹配的料头，请调整编号或库位。' : '当前母卷尚无料头库存。确认回收报工后在此查看。') + '</p>';
+    container.querySelectorAll('[data-stock-id]').forEach(button => button.onclick = () => selectAndLoadRemnant(button.dataset.stockId));
 }
 
 export async function refreshRemnantsList() {
-    const container = document.getElementById("remnant-cards-container");
-    if (!container) return;
-    container.innerHTML = `<div style="color: #a1a1aa; font-size: 12px; padding: 20px; text-align: center;">正在读取现场料头库存...</div>`;
+    const dialog = el('remnant-modal');if (!dialog?.open) return;
+    const token = ++generation, source = rollId();
+    dialog.onclose = () => { if(generation === token) generation++; };
+    el('remnant-cards-container').textContent = '正在读取本母卷料头库存…';
+    el('remnant-recommend-results').replaceChildren();
+    el('remnant-availability').textContent = '按当前剩余需求试排可用料头';
+    el('btn-remnant-recommend').disabled = true;
     try {
-        const res = await fetch("/api/remnants");
-        if (res.ok) {
-            const list = await res.json();
-            const headCount = document.getElementById("header-remnant-count");
-            if (headCount) headCount.innerText = list.length;
-            if (list.length === 0) {
-                container.innerHTML = `<div style="color: #a1a1aa; font-size: 12px; padding: 20px; text-align: center;">当前现场料头库存为空。</div>`;
-                return;
-            }
-            container.innerHTML = list.map(r => `
-                <div class="shelf-card-box" style="padding: 10px 14px; margin-bottom: 8px;">
-                    <div>
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <span style="font-family: monospace; font-size: 13px; font-weight: 700; color: var(--accent-blue);">${r.id}</span>
-                            <span class="${r.hasDefect ? 'badge-cut' : 'badge-piece'}" style="padding: 1px 6px; font-size: 10px;">
-                                ${r.hasDefect ? '带疵需避让' : '完好可用'}
-                            </span>
-                            <span style="color: var(--text-muted); font-size: 11px;">${r.materialBatch || '标准面料'}</span>
-                        </div>
-                        <div style="font-size: 12px; color: var(--text-main); margin-top: 4px;">
-                            规格: <b>${r.width} × ${r.length} mm</b> (${r.area.toFixed(2)} m²) | 
-                            存放库位: <span style="color: var(--accent-amber);">${r.location}</span> | 
-                            来源: <span>${r.sourceRollId || '母卷切出'}</span>
-                        </div>
-                        <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">
-                            ${r.defectDesc || '登记时间: ' + (r.createdAt || '近期')}
-                        </div>
-                    </div>
-                    <div>
-                        <button class="tool-btn active" style="font-size: 11px; padding: 6px 14px;" onclick="window.camApp.selectAndLoadRemnant('${r.id}')">
-                            装载至机台切割
-                        </button>
-                    </div>
-                </div>
-            `).join("");
-        }
-    } catch (e) {
-        container.innerHTML = `<div style="color: #ef4444; font-size: 12px; padding: 20px; text-align: center;">读取料头库失败: ${e.message}</div>`;
+        const [list] = await Promise.all([requestJSON('/api/remnants'), refreshTaskProgress()]);
+        if (!dialog.open || generation !== token || source !== rollId()) return;
+        stocks = motherRollRemnants(list,source);renderStocks();renderTaskRemnants();
+    } catch(error) {
+        if(dialog.open && generation===token) {stocks=[];el('header-remnant-count').textContent='—';el('remnant-cards-container').textContent='读取失败：' + error.message;el('remnant-stock-status').textContent='库存读取未完成，可点击刷新重试。';}
+    } finally {
+        if(dialog.open && generation===token) el('btn-remnant-recommend').disabled = recommending || !source;
     }
 }
 
+async function recommend() {
+    if(recommending || !rollId())return;
+    const dialog = el('remnant-modal'), token = generation, snapshot = materialContext(), source = rollId();
+    const input = requestFromUI(), completedBaseline = structuredClone(state.taskCompleted || {});
+    const valid = () => dialog.open && token===generation;
+    recommending=true;el('btn-remnant-recommend').disabled=true;el('remnant-refresh').disabled=true;
+    el('remnant-recommend-results').replaceChildren();el('remnant-availability').textContent='正在试排本母卷的可用料头…';
+    try {
+        if(!input.rollModel || !input.demands.length)throw new Error('请先填写材料型号与剩余需求，再计算推荐。');
+        const result = await requestJSON('/api/cutting/remnant-recommendations',{input,completedBaseline,sourceRollId:source});
+        if(!valid())return;
+        if(snapshot!==materialContext())throw new Error('需求、工艺或用料已变化，请重新计算推荐。');
+        result.recommendations = result.recommendations.filter(r=>usable(r.stock));
+        el('remnant-availability').textContent='按本母卷料头独立试排，每块的产出不能相加。';
+        const panel=el('remnant-recommend-results');panel.innerHTML=recommendationMarkup(result);
+        panel.querySelectorAll('[data-recommend-stock]').forEach(button=>button.onclick=()=>{
+            if(snapshot!==materialContext()) {el('remnant-availability').textContent='需求或工艺已变化，请重新计算推荐。';panel.replaceChildren();return;}
+            selectAndLoadRemnant(button.dataset.recommendStock);
+        });
+    } catch(error) {if(valid())el('remnant-availability').textContent='推荐未完成：' + error.message;}
+    finally {
+        recommending=false;el('btn-remnant-recommend').disabled=!rollId();el('remnant-refresh').disabled=false;
+    }
+}
+
+export async function selectAndLoadRemnant(id) {
+    const source = rollId();closeRemnantModal();
+    return window.camApp.matchTaskMaterials({type:'remnant',id,sourceRollId:source,skipRecommend:true});
+}
 export async function executeBarcodeScan() {
-    const code = document.getElementById("inp-scan-barcode").value.trim();
-    if (!code) {
-        alert("请输入或扫描料头条码！");
-        return;
-    }
-    try {
-        const res = await fetch("/api/remnants/scan", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: code })
-        });
-        if (res.ok) {
-            const rem = await res.json();
-            if (rem && rem.id) {
-                selectAndLoadRemnant(rem.id);
-            } else {
-                alert(`【未识别到料头】条码 [${code}] 在现场库存中不存在！`);
-            }
-        }
-    } catch (e) {
-        alert("扫码识别异常: " + e.message);
-    }
+    const code=el('inp-scan-barcode').value.trim();
+    if(!code)return showToast('请输入或扫描料头条码','warning');
+    const stock=stocks.find(r=>r.id===code);
+    if(!stock || !usable(stock))return showToast('该料头不属于当前母卷或不可用','warning');
+    return selectAndLoadRemnant(code);
 }
-
-export function quickScan(id) {
-    const inp = document.getElementById("inp-scan-barcode");
-    if (inp) inp.value = id;
-    executeBarcodeScan();
-}
-
-export async function selectAndLoadRemnant(remId) {
-    try {
-        const res = await fetch("/api/remnants/scan", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: remId })
-        });
-        if (res.ok) {
-            const rem = await res.json();
-            if (rem && rem.id) {
-                closeRemnantModal();
-                switchCutMode("remnant", rem);
-                alert(`成功识别并装载料头 [${rem.id}]！\n规格: ${rem.width}×${rem.length} mm\n库位: ${rem.location}\n模式: 模式二：料头复用精益切割\n母卷实切扣减已锁定为 0mm，点击执行料头排料即可！`);
-            }
-        }
-    } catch (e) {
-        alert("装载料头失败: " + e.message);
-    }
-}
+export function quickScan(id) {el('inp-scan-barcode').value=id;return executeBarcodeScan();}

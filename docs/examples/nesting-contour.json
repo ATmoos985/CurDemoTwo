@@ -1,0 +1,129 @@
+{
+  "schemaVersion": "1",
+  "unit": "mm",
+  "engine": "auto",
+  "timeLimitSeconds": 3,
+  "material": {
+    "id": "POLYGON-1",
+    "shape": {
+      "type": "POLYGON",
+      "width": 1600,
+      "height": 1600,
+      "vertices": [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 1600,
+          "y": 0
+        },
+        {
+          "x": 1600,
+          "y": 900
+        },
+        {
+          "x": 1000,
+          "y": 900
+        },
+        {
+          "x": 1000,
+          "y": 1600
+        },
+        {
+          "x": 0,
+          "y": 1600
+        }
+      ]
+    },
+    "continuesAfterRegion": false,
+    "exclusions": [
+      {
+        "id": 1,
+        "x": 300,
+        "y": 300,
+        "shape": {
+          "type": "RECTANGLE",
+          "width": 120,
+          "height": 120
+        },
+        "clearance": 0
+      }
+    ]
+  },
+  "parts": [
+    {
+      "id": 1,
+      "name": "L 形裁片",
+      "shape": {
+        "type": "POLYGON",
+        "width": 500,
+        "height": 500,
+        "vertices": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 500,
+            "y": 0
+          },
+          {
+            "x": 500,
+            "y": 200
+          },
+          {
+            "x": 200,
+            "y": 200
+          },
+          {
+            "x": 200,
+            "y": 500
+          },
+          {
+            "x": 0,
+            "y": 500
+          }
+        ]
+      },
+      "quantity": 8,
+      "allowRotation": true
+    },
+    {
+      "id": 2,
+      "name": "三角裁片",
+      "shape": {
+        "type": "POLYGON",
+        "width": 400,
+        "height": 400,
+        "vertices": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 400,
+            "y": 0
+          },
+          {
+            "x": 0,
+            "y": 400
+          }
+        ]
+      },
+      "quantity": 6,
+      "allowRotation": true
+    }
+  ],
+  "process": {
+    "mode": "CONTOUR",
+    "feedMode": "SHEET",
+    "startCorner": "left-top",
+    "firstStageOrientation": "none",
+    "trimStart": 0,
+    "minReusableWidth": 0,
+    "minReusableHeight": 0,
+    "kerf": 0,
+    "objective": "MAXIMIZE_PIECE_AREA"
+  }
+}

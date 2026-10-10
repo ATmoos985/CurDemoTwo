@@ -1,0 +1,56 @@
+name: cutdemo
+services:
+  mysql:
+    image: mysql:8.4@sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 0.5
+    environment:
+      MYSQL_DATABASE: cutdemo
+      MYSQL_USER: cutdemo
+      MYSQL_PASSWORD: ${CUTDEMO_DB_PASSWORD:?Configure database password}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Configure root password}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_bin", "--default-storage-engine=InnoDB", "--innodb-buffer-pool-size=128M", "--max-connections=30", "--performance-schema=OFF"]
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks: [database]
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$${MYSQL_PASSWORD}\" mysql --protocol=TCP -h 127.0.0.1 -u\"$${MYSQL_USER}\" \"$${MYSQL_DATABASE}\" -N -e 'SELECT 1' >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+  app:
+    image: ${CUTDEMO_IMAGE:?Use a verified immutable image}
+    restart: unless-stopped
+    init: true
+    mem_limit: 768m
+    cpus: 1.5
+    depends_on:
+      mysql: {condition: service_healthy}
+    environment:
+      SPRING_PROFILES_ACTIVE: mysql
+      SERVER_ADDRESS: 0.0.0.0
+      CUTDEMO_DB_URL: jdbc:mysql://mysql:3306/cutdemo?characterEncoding=UTF-8&connectionTimeZone=Asia/Taipei
+      CUTDEMO_DB_USER: cutdemo
+      CUTDEMO_DB_PASSWORD: ${CUTDEMO_DB_PASSWORD}
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:ActiveProcessorCount=2
+      SERVER_TOMCAT_THREADS_MAX: 12
+    ports:
+      - "127.0.0.1:${CUTDEMO_HTTP_PORT:-18080}:8080"
+    networks:
+      database:
+      proxy:
+        aliases: [cutdemo-app]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+networks:
+  database: {internal: true}
+  proxy:
+    external: true
+    name: ${CUTDEMO_PROXY_NETWORK:-cpa_cpa-net}
+volumes:
+  mysql-data:

@@ -24,13 +24,13 @@ export function setSelectedPieceId(id) {
  * 为单个裁片 Konva 节点注入交互行为与干涉检测
  */
 export function makePieceInteractive(pGroup, piece, caseData) {
-    if (piece.confirmed) {
+    if (piece.confirmed || piece.queued) {
         pGroup.draggable(false);
         pGroup.name(`piece-entity-${piece.id}`);
         pGroup.on("click", (e) => {
             e.cancelBubble = true;
-            bus.emit('piece:selected', { pieceId: piece.id });
-            import('../../core/toast.js').then(m => m.showToast(`裁片 ${piece.name || piece.id} 已完成实切确认核销，已锁定。`, 'info'));
+            setSelectedPieceId(piece.id);
+            import('../../core/toast.js').then(m => m.showToast(`裁片 ${piece.name || piece.id} ${piece.queued ? '已暂存待报工，请从集中报工退回核对。' : '已完成实切确认核销，已锁定。'}`, 'info'));
         });
         pGroup.on("contextmenu", (e) => {
             e.evt.preventDefault();
@@ -47,7 +47,6 @@ export function makePieceInteractive(pGroup, piece, caseData) {
         e.evt.preventDefault();
         e.cancelBubble = true;
         setSelectedPieceId(piece.id);
-        highlightSelectedPiece(pGroup);
         openPieceContextMenu(piece, e.evt.clientX, e.evt.clientY);
     });
 
@@ -63,7 +62,7 @@ export function makePieceInteractive(pGroup, piece, caseData) {
         if (container) container.style.cursor = "move";
         const mainRect = pGroup.findOne("Rect");
         if (mainRect && selectedPieceId !== piece.id) {
-            mainRect.strokeWidth(4);
+            mainRect.strokeWidth(2);
             mainLayer.batchDraw();
         }
     });
@@ -73,7 +72,7 @@ export function makePieceInteractive(pGroup, piece, caseData) {
         if (container) container.style.cursor = "default";
         const mainRect = pGroup.findOne("Rect");
         if (mainRect && selectedPieceId !== piece.id) {
-            mainRect.strokeWidth(3);
+            mainRect.strokeWidth(1);
             mainLayer.batchDraw();
         }
     });
@@ -82,7 +81,6 @@ export function makePieceInteractive(pGroup, piece, caseData) {
     pGroup.on("click", (e) => {
         e.cancelBubble = true;
         setSelectedPieceId(piece.id);
-        highlightSelectedPiece(pGroup);
     });
 
     // 拖拽开始
@@ -91,7 +89,6 @@ export function makePieceInteractive(pGroup, piece, caseData) {
         dragInitialPos = { x: pGroup.x(), y: pGroup.y() };
         setSelectedPieceId(piece.id);
         pGroup.moveToTop();
-        highlightSelectedPiece(pGroup);
     });
 
     // 拖拽过程中的实时碰撞与瑕疵干涉检测
@@ -100,6 +97,7 @@ export function makePieceInteractive(pGroup, piece, caseData) {
         const curX = pGroup.x();
         const curY = pGroup.y();
 
+        bus.emit('piece:dragging');
         const collision = checkCollision(piece, curX, curY, caseData);
         const mainRect = pGroup.findOne("Rect");
 
@@ -108,15 +106,15 @@ export function makePieceInteractive(pGroup, piece, caseData) {
             if (mainRect) {
                 mainRect.fill("rgba(239, 68, 68, 0.45)");
                 mainRect.stroke("#dc2626");
-                mainRect.strokeWidth(4);
+                mainRect.strokeWidth(2);
             }
             showCollisionBadge(curX, curY, `[干涉警报] ${collision.reason}`);
         } else {
-            // 安全合规状态 (翠绿色)
+            // 无干涉时恢复裁片底色
             if (mainRect) {
-                mainRect.fill(isDark ? "rgba(6, 95, 70, 0.85)" : "rgba(236, 253, 245, 0.85)");
-                mainRect.stroke("#10b981");
-                mainRect.strokeWidth(3);
+                mainRect.fill(isDark ? "#304d5a" : "#e2edf2");
+                mainRect.stroke("#62899b");
+                mainRect.strokeWidth(1);
             }
             showCollisionBadge(curX, curY, `安全位置: X=${Math.round(curX)}, Y=${Math.round(curY)}`, false);
         }
@@ -129,6 +127,7 @@ export function makePieceInteractive(pGroup, piece, caseData) {
         const curX = pGroup.x();
         const curY = pGroup.y();
 
+        bus.emit('piece:dragging');
         const collision = checkCollision(piece, curX, curY, caseData);
         hideCollisionBadge();
 
@@ -141,17 +140,18 @@ export function makePieceInteractive(pGroup, piece, caseData) {
                 onFinish: () => {
                     const mainRect = pGroup.findOne("Rect");
                     if (mainRect) {
-                        mainRect.fill(isDark ? "#065f46" : "#ecfdf5");
-                        mainRect.stroke(isDark ? "#10b981" : "#059669");
-                        mainRect.strokeWidth(3);
+                        mainRect.fill(isDark ? "#304d5a" : "#e2edf2");
+                        mainRect.stroke("#62899b");
+                        mainRect.strokeWidth(1);
                     }
                     mainLayer.batchDraw();
+                    bus.emit('piece:dragging');
                 }
             });
         } else {
             // 合法移动：固化新物理坐标
-            piece.x = Math.round(curX);
-            piece.y = Math.round(curY);
+            piece.x = Math.round(curX * 10) / 10;
+            piece.y = Math.round(curY * 10) / 10;
             bus.emit('piece:moved', { pieceId: piece.id, x: piece.x, y: piece.y });
         }
     });
@@ -235,7 +235,9 @@ function showCollisionBadge(x, y, text, isAlert = true) {
     tipText.fill("#ffffff");
     tipText.position({ x: 10, y: 6 });
 
-    activeTooltip.position({ x: x + 10, y: Math.max(10, y - 32) });
+    const inv = 1 / stage.scaleX();
+    activeTooltip.scale({ x: inv, y: inv });
+    activeTooltip.position({ x: x + 10 * inv, y: y - 32 * inv });
     activeTooltip.moveToTop();
     activeTooltip.show();
 }
@@ -247,41 +249,22 @@ function hideCollisionBadge() {
     }
 }
 
-function highlightSelectedPiece(pGroup) {
-    mainLayer.find(".selection-handle").forEach(node => node.destroy());
-    const mainRect = pGroup.findOne("Rect");
-    if (!mainRect) return;
-
-    // 绘制高亮外包手柄
-    const w = mainRect.width();
-    const h = mainRect.height();
-    const handleGrp = new Konva.Group({ name: "selection-handle" });
-
-    // 四角蓝色定位手柄
-    const corners = [
-        { x: 0, y: 0 }, { x: w, y: 0 },
-        { x: 0, y: h }, { x: w, y: h }
-    ];
-    corners.forEach(c => {
-        handleGrp.add(new Konva.Rect({
-            x: c.x - 5, y: c.y - 5, width: 10, height: 10,
-            fill: "#0284c7", stroke: "#ffffff", strokeWidth: 2
-        }));
-    });
-
-    pGroup.add(handleGrp);
-    mainLayer.batchDraw();
-}
-
 /**
  * 键盘快捷键监听：方向键精确微调 (5mm/20mm) 与 R 键 90° 旋转
  */
 export function initNestingKeyboardShortcuts() {
     window.addEventListener("keydown", (e) => {
-        if (!selectedPieceId) return;
+        if (selectedPieceId === null || !mainLayer.listening()) return;
+        if (e.target?.closest?.("input, textarea, select, [contenteditable=true]")) return;
         const data = state.getCurrentCaseData();
         const piece = (data.pieces || []).find(p => p.id === selectedPieceId);
         if (!piece) return;
+        if (e.key === "Escape") {
+            setSelectedPieceId(null);
+            hideCollisionBadge();
+            return;
+        }
+        if (piece.confirmed || piece.queued) return;
 
         const step = e.shiftKey ? 20 : 5; // 按住 Shift 粗调 20mm，平常微调 5mm
         let moved = false;
@@ -309,19 +292,14 @@ export function initNestingKeyboardShortcuts() {
                 showCollisionBadge(piece.x, piece.y, `[旋转干涉] ${collision.reason}`);
                 setTimeout(hideCollisionBadge, 1500);
             } else {
+                piece.rotated = !piece.rotated;
                 bus.emit('piece:moved', { pieceId: piece.id, x: piece.x, y: piece.y });
             }
             e.preventDefault();
             return;
-        } else if (e.key === "Escape") {
-            setSelectedPieceId(null);
-            mainLayer.find(".selection-handle").forEach(node => node.destroy());
-            mainLayer.batchDraw();
-            return;
         } else if (e.key === "Delete" || e.key === "Backspace") {
             const pieceToDiscard = selectedPieceId;
             setSelectedPieceId(null);
-            mainLayer.find(".selection-handle").forEach(node => node.destroy());
             mainLayer.batchDraw();
             discardPiece(pieceToDiscard);
             e.preventDefault();
@@ -348,7 +326,6 @@ bus.on('remnant:selected', () => {
     selectedPieceId = null;
     hideCollisionBadge();
     if (mainLayer) {
-        mainLayer.find(".selection-handle").forEach(node => node.destroy());
         mainLayer.batchDraw();
     }
 });
@@ -357,8 +334,9 @@ bus.on('stage:empty-clicked', () => {
     selectedPieceId = null;
     hideCollisionBadge();
     if (mainLayer) {
-        mainLayer.find(".selection-handle").forEach(node => node.destroy());
         mainLayer.batchDraw();
     }
 });
 
+
+for (const event of ['case:changed', 'mode:changed']) bus.on(event, () => { selectedPieceId = null; hideCollisionBadge(); });

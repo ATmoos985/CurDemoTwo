@@ -14,7 +14,7 @@ import { renderScene } from './cad-renderer.js';
 import { updateDemandCompletionFromPieces, recalculateRollStats, renderDemandsUI } from '../solver/quota-manager.js';
 import { updateUIInfo } from '../solver/solver-client.js';
 import {
-    updateFabricScrollPosition, updateDefectVisualStates,
+    updateFabricScrollPosition, updateDefectVisualStates, requireStationReport,
     updateDefectRadarActiveState, smartAdvanceBed
 } from '../radar/radar-scrubber.js';
 import { selectRemnant, clearRemnantSelection } from './cad-remnant-highlight.js';
@@ -158,14 +158,14 @@ export function openRemnantContextMenu(remnant, clientX, clientY) {
     const html = `
         <div class="cad-menu-header">
             <span style="display:flex; align-items:center; gap:6px;">
-                <span style="color:#38bdf8;">🧩</span>
+                <span style="color:#38bdf8;"></span>
                 <span>${remnant.status || '料头块'} · ${remnant.id}</span>
             </span>
             <span style="font-size:10px; color:#94a3b8; font-family:monospace;">${remnant.w}×${remnant.l}mm</span>
         </div>
         <div class="cad-menu-item danger" onclick="window.cadMenuActions.discardRemnant('${remnant.id}')">
             <div class="cad-menu-item-title">
-                <span>🗑 抛弃此料头 · 保持母卷不切断</span>
+                <span> 抛弃此料头 · 保持母卷不切断</span>
             </div>
             <div class="cad-menu-item-desc">
                 取消此料头切刀，${isTail ? '母卷该区域恢复未切断状态，自动收缩工位切断线' : '从入库清单中移除'}
@@ -174,7 +174,7 @@ export function openRemnantContextMenu(remnant, clientX, clientY) {
         ${isTail ? `
         <div class="cad-menu-item highlight" onclick="window.cadMenuActions.advanceFromRemnant('${remnant.id}')">
             <div class="cad-menu-item-title">
-                <span>✂ 从此料头起点接刀开启下一工位 ▶</span>
+                <span> 从此料头起点接刀开启下一工位 ▶</span>
             </div>
             <div class="cad-menu-item-desc">
                 机台工位红框吸附至 Y=${Math.round(remnant.y)}mm，从该处接续排料
@@ -184,7 +184,7 @@ export function openRemnantContextMenu(remnant, clientX, clientY) {
         <div class="cad-menu-divider"></div>
         <div class="cad-menu-item" onclick="window.cadMenuActions.locateRemnant('${remnant.id}')">
             <div class="cad-menu-item-title">
-                <span>🔍 查看详细参数与坐标</span>
+                <span> 查看详细参数与坐标</span>
             </div>
             <div class="cad-menu-item-desc">
                 起点: (${remnant.x}, ${remnant.y}) | 面积: ${remnant.area.toFixed(2)}m² | ${remnant.hasDefect ? '带疵' : '无疵'}
@@ -198,6 +198,7 @@ export function openRemnantContextMenu(remnant, clientX, clientY) {
  * 打开【合格成品裁片】右键菜单
  */
 export function openPieceContextMenu(piece, clientX, clientY) {
+    if(piece.queued)return showToast('该工位已暂存，请从集中报工退回核对。','info');
     currentTarget = { type: 'piece', data: piece };
     if (piece.confirmed) {
         const html = `
@@ -223,7 +224,7 @@ export function openPieceContextMenu(piece, clientX, clientY) {
         </div>
         <div class="cad-menu-item danger" onclick="window.cadMenuActions.discardPiece(${piece.id})">
             <div class="cad-menu-item-title">
-                <span>🗑 抛弃此裁片 · 退回需求池</span>
+                <span> 抛弃此裁片 · 退回需求池</span>
             </div>
             <div class="cad-menu-item-desc">
                 从工位中移除，订单需求数自动返还，母卷该区域恢复未切
@@ -240,7 +241,7 @@ export function openPieceContextMenu(piece, clientX, clientY) {
         <div class="cad-menu-divider"></div>
         <div class="cad-menu-item success" onclick="window.cadMenuActions.setAsStationCutEnd(${piece.id})">
             <div class="cad-menu-item-title">
-                <span>✂ 设为本工位收尾截断线</span>
+                <span> 设为本工位收尾截断线</span>
             </div>
             <div class="cad-menu-item-desc">
                 以此裁片底边 (Y=${piece.y + piece.l}mm) 截断，下方余料全部归还母卷
@@ -267,14 +268,14 @@ export function openStationContextMenu(clientX, clientY) {
         const html = `
             <div class="cad-menu-header">
                 <span style="display:flex; align-items:center; gap:6px;">
-                    <span style="color:#d97706;">🧩</span>
+                    <span style="color:#d97706;"></span>
                     <span>在台料头 [${code}]</span>
                 </span>
                 <span style="font-size:10px; color:#94a3b8;">${w}×${l}mm</span>
             </div>
             <div class="cad-menu-item highlight" onclick="window.cadMenuActions.solveRemnant()">
                 <div class="cad-menu-item-title">
-                    <span>⚡ 执行料头智能排料 (母卷 0 扣料)</span>
+                    <span> 执行料头智能排料 (母卷 0 扣料)</span>
                 </div>
                 <div class="cad-menu-item-desc">
                     在当前在台料头上执行直刀优化排料，自动避开瑕疵
@@ -318,7 +319,7 @@ export function openStationContextMenu(clientX, clientY) {
         </div>
         <div class="cad-menu-item success" onclick="window.cadMenuActions.autoTrimTail()">
             <div class="cad-menu-item-title">
-                <span>✂ 一键去除尾部料头 (收缩切线归还母卷)</span>
+                <span> 一键去除尾部料头 (收缩切线归还母卷)</span>
             </div>
             <div class="cad-menu-item-desc">
                 自动清除工位末端零散料头，切断线下移对齐至最后一块裁片底边
@@ -338,7 +339,7 @@ export function openStationContextMenu(clientX, clientY) {
                 <span>🧹 清空当前工位排料结果</span>
             </div>
             <div class="cad-menu-item-desc">
-                撤销本工位所有裁片与刀路，母卷整段恢复初始未切
+                清除本工位未报工预览；库存与报工保留，可从方案记录恢复
             </div>
         </div>
     `;
@@ -353,6 +354,7 @@ export function discardRemnant(remnantId) {
     if (!data) return;
     const remnant = (data.remnants || []).find(r => r.id === remnantId);
     if (!remnant) return;
+    if (remnant.confirmed) return showToast('已报工料头请从报工记录撤回', 'warning');
 
     const winStartY = data.windowStartY || 0;
     const bedL = data.bedL || 5000;
@@ -360,9 +362,6 @@ export function discardRemnant(remnantId) {
 
     // 1. 从已排料头列表中移除
     data.remnants = (data.remnants || []).filter(r => r.id !== remnantId);
-    if (state.pendingPlan && state.pendingPlan.result && state.pendingPlan.result.remnants) {
-        state.pendingPlan.result.remnants = state.pendingPlan.result.remnants.filter(r => r.id !== remnantId);
-    }
 
     // 2. 判断是否属于工位尾部/落料端料头
     const maxPieceY = Math.max(winStartY, ...((data.pieces || []).map(p => p.y + p.l)));
@@ -415,11 +414,8 @@ export function discardRemnant(remnantId) {
         }
 
         recalculateRollStats(data);
-        if (state.pendingPlan && state.pendingPlan.result) {
-            state.pendingPlan.result.deductLen = data.deductLen;
-        }
 
-        showToast(`已抛弃料头 ${remnant.id}，恢复 ${(remnant.l/1000).toFixed(2)}m 布料至母卷未切状态！工位落料点收缩至 Y=${newStationCutEnd}mm。`, 'success');
+        showToast(`已从预览移除料头 ${remnant.id}，请校验后核对用料与回收；库存尚未变化`, 'info');
     } else {
         // B. 侧边料头或疵点料头
         recalculateRollStats(data);
@@ -430,6 +426,7 @@ export function discardRemnant(remnantId) {
         clearRemnantSelection();
     }
 
+    bus.emit('plan:edited');
     updateUIInfo();
     renderScene();
 }
@@ -438,6 +435,7 @@ export function discardRemnant(remnantId) {
  * 从料头起点开启下一工位
  */
 export function advanceFromRemnantStart(remnantId) {
+    if (requireStationReport()) return;
     const data = state.getCurrentCaseData();
     if (!data) return;
     const remnant = (data.remnants || []).find(r => r.id === remnantId);
@@ -479,16 +477,13 @@ export function discardPiece(pieceId) {
     const piece = (data.pieces || []).find(p => p.id === pieceId);
     if (!piece) return;
 
-    if (piece.confirmed) {
-        showToast(`裁片 "${piece.name || piece.id}" 已完成实切核销，禁止修改或抛弃。`, 'warning');
+    if (piece.confirmed || piece.queued) {
+        showToast(piece.queued ? '该工位已暂存，请从集中报工退回核对。' : `裁片 "${piece.name || piece.id}" 已完成实切核销，禁止修改或抛弃。`, 'warning');
         return;
     }
 
     // 1. 从裁片列表中移除
     data.pieces = (data.pieces || []).filter(p => p.id !== pieceId);
-    if (state.pendingPlan && state.pendingPlan.result && state.pendingPlan.result.pieces) {
-        state.pendingPlan.result.pieces = state.pendingPlan.result.pieces.filter(p => p.id !== pieceId);
-    }
 
     // 2. 自动重新核销与返还需求池配额
     updateDemandCompletionFromPieces(data);
@@ -526,13 +521,11 @@ export function discardPiece(pieceId) {
     }
 
     recalculateRollStats(data);
-    if (state.pendingPlan && state.pendingPlan.result) {
-        state.pendingPlan.result.deductLen = data.deductLen;
-    }
 
+    bus.emit('plan:edited');
     updateUIInfo();
     renderScene();
-    showToast(`已抛弃裁片 "${piece.name || piece.id}"，已退回 1 件需求至订单池，母卷恢复未切断。`, 'success');
+    showToast(`已从预览移除裁片 "${piece.name || piece.id}"，需求完成量与库存尚未变化；请校验调整版`, 'info');
 }
 
 /**
@@ -542,7 +535,7 @@ export function setPieceAsCutEnd(pieceId) {
     const data = state.getCurrentCaseData();
     if (!data) return;
     const piece = (data.pieces || []).find(p => p.id === pieceId);
-    if (!piece) return;
+    if (!piece || piece.confirmed || piece.queued) return;
 
     const cutEndY = piece.y + piece.l;
     const winStartY = data.windowStartY || 0;
@@ -576,14 +569,11 @@ export function setPieceAsCutEnd(pieceId) {
     data.cutIntervals.push({ start: winStartY, end: cutEndY });
 
     recalculateRollStats(data);
-    if (state.pendingPlan && state.pendingPlan.result) {
-        state.pendingPlan.result.deductLen = data.deductLen;
-        state.pendingPlan.result.remnants = (data.remnants || []).map(r => ({ ...r }));
-    }
 
     updateUIInfo();
     renderScene();
-    showToast(`已以此裁片底边 (Y=${cutEndY}mm) 截断工位，下方布料全部归还母卷！`, 'success');
+    bus.emit('plan:edited');
+    showToast('已调整预览截断线，请校验后核对实际用料；库存尚未变化', 'info');
 }
 
 /**
@@ -610,9 +600,6 @@ export function autoTrimStationTailWaste() {
 
     // 抛弃所有在 maxPieceY 之后的尾部料头
     data.remnants = (data.remnants || []).filter(r => r.y < maxPieceY - 5);
-    if (state.pendingPlan && state.pendingPlan.result) {
-        state.pendingPlan.result.remnants = (data.remnants || []).map(r => ({ ...r }));
-    }
 
     // 移除位于 maxPieceY 之后的所有切刀
     data.cuts = (data.cuts || []).filter(c => {
@@ -639,14 +626,12 @@ export function autoTrimStationTailWaste() {
     data.cutIntervals.push({ start: winStartY, end: maxPieceY });
 
     recalculateRollStats(data);
-    if (state.pendingPlan && state.pendingPlan.result) {
-        state.pendingPlan.result.deductLen = data.deductLen;
-    }
 
     const savedMm = Math.round(winEndY - maxPieceY);
     updateUIInfo();
     renderScene();
-    showToast(`已一键去除尾部料头，切断线收缩至 Y=${maxPieceY}mm，恢复 ${savedMm}mm (${(savedMm/1000).toFixed(2)}m) 布料至母卷未切状态！`, 'success');
+    bus.emit('plan:edited');
+    showToast(`已调整尾料预览 ${savedMm}mm，请校验后核对实际用料；库存尚未变化`, 'info');
 }
 
 /**
@@ -656,11 +641,12 @@ export function rotatePieceById(pieceId) {
     const data = state.getCurrentCaseData();
     if (!data) return;
     const piece = (data.pieces || []).find(p => p.id === pieceId);
-    if (!piece) return;
+    if (!piece || piece.confirmed || piece.queued) return;
 
     const oldW = piece.w;
     piece.w = piece.l;
     piece.l = oldW;
+    piece.rotated = !piece.rotated;
 
     updateUIInfo();
     renderScene();

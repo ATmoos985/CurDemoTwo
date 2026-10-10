@@ -1,3 +1,7 @@
+import { initTaskWorkspace, newCuttingTask, startTaskDraft, finishTaskDraft, prepareTaskSwitch, openLocalDrafts, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, taskInputChanged } from './plugins/solver/task-workspace.js';
+import {initWorkbenchPanels, openDemandManager, openMaterialDetails} from './plugins/layout/workbench-panels.js';
+import {openDemandImport} from './plugins/solver/demand-import.js';
+import {openNewTask} from './plugins/solver/task-creation.js';
 /**
  * 【主装配器】CAM 前端应用主入口 (Application Orchestrator)
  * 挂载微内核与所有独立插件，完成全局事件编排与向后兼容性绑定
@@ -14,7 +18,9 @@ import {
 import {
     toggleSectionCollapse, toggleSidebar, initLayoutResizers, switchRightPanelTab
 } from './plugins/layout/splitter.js';
-import { showToast } from './core/toast.js';
+import { showToast, confirmAction } from './core/toast.js';
+import { syncMaterialOptions } from './plugins/material/material-options.js';
+import { getInitialScenarios, MOTHER_ROLL_SPECS } from './plugins/presets/scenarios.js';
 
 import {
     initKonva, stage
@@ -26,11 +32,11 @@ import {
 
 import {
     renderScene, resetToBedView, resetToFlowView, viewFullRoll,
-    fitView, resetZoom, updateStatusBar
+    fitView, resetZoom, updateStatusBar, zoomCanvas, setCanvasLayer
 } from './plugins/cad/cad-renderer.js';
 
 import {
-    renderRadar, setupRadarInteraction, updateFabricScrollPosition,
+    renderRadar, setupRadarInteraction, updateFabricScrollPosition, resizeFeedWindow,
     advanceBed, smartAdvanceBed, updateDefectRadarActiveState, updateDefectVisualStates
 } from './plugins/radar/radar-scrubber.js';
 
@@ -41,16 +47,17 @@ import {
 
 import {
     updateDemandCompletionFromPieces, recalculateRollStats,
-    clearStationCuts, resetAllRollCuts, renderDemandsUI, renderDefectsUI,
-    addDefectRow, addDemandRow, getDefectsFromUI, getDemandsFromUI,
+    clearStationCuts, resetAllRollCuts, resetContinuousCutting, renderDemandsUI, renderDefectsUI,
+    addDefectRow, addDemandRow, removeDemandRow, getDefectsFromUI, getDemandsFromUI,
     onRollConfigChange, onOriginParamChange, onParamChange,
     updateRollSize, toggleLongitudinal, loadCurtainOrderTemplate
 } from './plugins/solver/quota-manager.js';
 
 import {
     updateUIInfo, loadCase, triggerSolve,
-    openCutReport, closeCutReport, confirmCutReport, exportCutResult,
-    openStationLapConfirmModal, updateReportPreview
+    openCutReport, closeCutReport, confirmCutReport, openBatchReport, exportCutResult,
+    openStationLapConfirmModal, updateReportPreview, recordPlanEdit, undoPlanEdit, redoPlanEdit, validatePlanAdjustment,
+    stageAndAdvanceNextStation, handleClearStationClick, handleClearStationDblClick
 } from './plugins/solver/solver-client.js';
 
 import {
@@ -122,6 +129,8 @@ bus.on('stage:resized', () => {
     renderRadar();
 });
 
+bus.on('report:requested', () => { openCutReport(); });
+bus.on('feed:resized', () => { taskInputChanged(); });
 bus.on('station:moved', () => {
     updateUIInfo();
 });
@@ -185,6 +194,7 @@ export function togglePresetDropdown(e) {
     const trigger = document.getElementById('btn-preset-trigger');
     if (!menu) return;
     const isOpen = menu.classList.contains('show');
+    if (trigger) trigger.setAttribute('aria-expanded', String(!isOpen));
     if (isOpen) {
         menu.classList.remove('show');
         if (trigger) trigger.classList.remove('active');
@@ -199,9 +209,43 @@ export function closePresetDropdown() {
     const trigger = document.getElementById('btn-preset-trigger');
     if (menu) menu.classList.remove('show');
     if (trigger) trigger.classList.remove('active');
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
 }
 
+let loadingPreset = false;
 export async function selectPresetCase(caseId) {
+    if (loadingPreset) return;
+    loadingPreset = true;
+    if (!await prepareTaskSwitch()) { loadingPreset = false; return; }
+    const alreadyInert = document.body.inert;
+    let replaced = false;
+    document.body.inert = true;
+    try {
+    const readRolls = async () => {
+        const response = await fetch('/api/rolls', {cache:'no-store'});
+        if (!response.ok) throw new Error('无法读取库存，请稍后重试');
+        return response.json();
+    };
+    let rolls = await readRolls();
+    if (!rolls.length) {
+        document.body.inert = alreadyInert;
+        const create = await confirmAction('当前没有母卷。确认后会在空库创建 31 卷示例母卷和 98 块示例料头（含 9.28 订单材料），用于演示完整流程；这些数据不是实物库存。取消则仅载入示例需求。已有业务数据时不会创建或覆盖。', {title:'准备示例材料', action:'创建示例材料并载入'});
+        document.body.inert = true;
+        if (create) {
+            const response = await fetch('/api/demo/inventory', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({confirmed:true})});
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.message || '创建示例材料失败');
+            rolls = await readRolls();
+        }
+    }
+    const scenarios = getInitialScenarios();
+    const preset = scenarios[caseId];
+    if (!preset) throw new Error('示例不存在');
+    const model = preset.rollModel || MOTHER_ROLL_SPECS[preset.rollId]?.model || '';
+    syncMaterialOptions(rolls, {rollId:preset.rollId, model, fallback:false});
+    startTaskDraft(document.querySelector(`#btn-case-${caseId} .preset-item-name`)?.textContent || "示例切割任务");
+    replaced = true;
+    state.scenarios = scenarios;
     if (typeof loadCase === 'function') {
         loadCase(caseId);
     }
@@ -229,7 +273,7 @@ export async function selectPresetCase(caseId) {
             if (!remnant) {
                 const listRes = await fetch('/api/remnants');
                 if (listRes.ok) {
-                    const list = await listRes.json();
+                    const list = (await listRes.json()).filter(item => item.status === 'AVAILABLE' && item.materialBatch === model);
                     if (Array.isArray(list) && list.length > 0) {
                         // 优先选用完好的大料头
                         remnant = list.find(r => !r.hasDefect && r.area >= 1.0) || list[0];
@@ -245,60 +289,61 @@ export async function selectPresetCase(caseId) {
                 updateUIInfo();
                 renderToolpathUI();
             } else {
-                showToast('在库料头已耗尽，请从母卷排料生成料头或在料头库新增。', 'warning');
+                document.getElementById('sel-mother-roll-id').value = '';
+                await onMotherRollChange();
+                showToast('已载入示例需求；暂无同型号可用料头，请录入材料或选择其他示例。', 'warning');
             }
         } catch (e) {
-            console.error("Case 3 load error:", e);
+            throw e;
         }
     } else {
-        const selectedRoll = state.getCurrentCaseData().rollId || 'ROLL-2026-0920';
-        const selector = document.getElementById('sel-mother-roll-id');
-        if (selector) selector.value = selectedRoll;
         await onMotherRollChange();
+        if (!state.getCurrentCaseData().materialAvailable) showToast('示例需求已载入；当前库存没有对应示例母卷，请录入材料或匹配同型号库存。', 'info', 7000);
     }
+    document.getElementById("task-material").value = model;
     updatePresetTriggerLabel(caseId);
     closePresetDropdown();
+    } catch (error) { showToast(error.message, 'error'); }
+    finally { if (replaced) finishTaskDraft(); document.body.inert = alreadyInert; loadingPreset = false; }
 }
 
 export function updatePresetTriggerLabel(caseId) {
     const label = document.getElementById('preset-current-label');
     if (!label) return;
-    const names = {
-        1: '案例1: 窗帘定高整幅横切 (套排)',
-        2: '案例2: 偏幅单帘与边角套裁 (吃净)',
-        3: '案例3: 短料料头套裁 (0扣料)',
-        4: '案例4: 窗幔帘头辅件套裁 (10件套)',
-        5: '案例5: Word 表1 L形拆解 (守恒)',
-        6: '案例6: 60m大卷多工位搭切 (10件套)'
-    };
-    label.textContent = names[caseId] || `案例${caseId}`;
+    const name = document.querySelector(`#btn-case-${caseId} .preset-item-name`);
+    label.textContent = name ? name.textContent : `案例${caseId}`;
 }
 
 bus.on('toolpath:optimized', () => {
+    resetContinuousSim();
     renderScene();
     renderToolpathUI();
 });
 
 bus.on('toolpath:restored', () => {
+    resetContinuousSim();
     renderScene();
     renderToolpathUI();
 });
 
 bus.on('piece:moved', (payload) => {
-    // 裁片在画布上手动微调后，动态重新计算切线、刀路与对账指标
-    state.isToolpathOptimized = false;
-    state.toolpathStats = null;
-    state.originalCutsBackup = null;
-    renderScene();
-    renderToolpathUI();
-    recalculateRollStats();
-    updateDemandCompletionFromPieces();
+    // Preserve the saved version; only a validated adjustment can supply new cuts and leftovers.
+    recordPlanEdit();
+});
+bus.on('plan:edited', recordPlanEdit);
+window.addEventListener('keydown', event => {
+    if (event.target?.closest?.('input, textarea, select, [contenteditable=true]') || !(event.ctrlKey || event.metaKey)) return;
+    if (event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redoPlanEdit() : undoPlanEdit(); }
+    if (event.key.toLowerCase() === 'y') { event.preventDefault(); redoPlanEdit(); }
 });
 
 // ==========================================
 // 2. 导出面向全局 DOM 与 Inline Onclick 的统一命名空间
 // ==========================================
 const camApp = {
+    openDemandManager, openMaterialDetails, openDemandImport, openNewTask,
+    undoPlanEdit, redoPlanEdit, validatePlanAdjustment,
+    newCuttingTask, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, openLocalDrafts, taskInputChanged,
     bus,
     state,
     toggleTheme,
@@ -318,9 +363,13 @@ const camApp = {
     resetToBedView,
     resetToFlowView,
     viewFullRoll,
+    zoomCanvas, setCanvasLayer,
     triggerSolve,
-    openCutReport, closeCutReport, confirmCutReport, exportCutResult,
+    openCutReport, closeCutReport, confirmCutReport, openBatchReport, exportCutResult,
     openStationLapConfirmModal, updateReportPreview,
+    stageAndAdvanceNextStation,
+    handleClearStationClick,
+    handleClearStationDblClick,
     loadCase,
     stepCut,
     playCuts,
@@ -331,6 +380,7 @@ const camApp = {
     toggleSimSpeed,
     clearStationCuts,
     resetAllRollCuts,
+    resetContinuousCutting,
     advanceBed,
     smartAdvanceBed,
     switchCutMode,
@@ -352,11 +402,11 @@ const camApp = {
     reloadCurrentRemnant,
     onParamChange,
     onOriginParamChange,
-    onRollConfigChange,
+    onRollConfigChange, resizeFeedWindow,
     updateRollSize,
     toggleLongitudinal,
     addDefectRow,
-    addDemandRow,
+    addDemandRow, removeDemandRow,
     chooseRemnantForDemand,
     dismissRemnantHint,
     checkAllDemandsRemnantMatch,
@@ -443,7 +493,9 @@ window.camApp = camApp;
 // 3. 应用程序自启动装配与初始化 (Robust Bootstrap)
 // ==========================================
 async function bootstrapApp() {
-    const savedTheme = localStorage.getItem("cam_theme") || "dark";
+    document.body.inert = true;
+    try {
+    const savedTheme = localStorage.getItem("cam_theme") || "light";
     setTheme(savedTheme);
 
     let savedOrigin = localStorage.getItem("cam_origin");
@@ -460,11 +512,12 @@ async function bootstrapApp() {
     setupRadarInteraction();
     initLayoutResizers();
     initNestingKeyboardShortcuts();
-    loadCase(1); // 默认打开案例1：窗帘定高整幅横切
-    updatePresetTriggerLabel(1);
-    await onMotherRollChange();
-    refreshShelfRemnantsList();
+    // Load real inventory before selecting material; empty databases have no demo rolls.
+    initWorkbenchPanels();
+    await initTaskWorkspace();
     renderToolpathUI();
+    } catch (error) { showToast("工作台初始化失败：" + error.message, "error"); }
+    finally { document.body.inert = false; }
 }
 
 if (document.readyState === "loading") {
@@ -479,9 +532,18 @@ document.addEventListener("click", (e) => {
     if (container && !container.contains(e.target)) {
         closePresetDropdown();
     }
+    const demos = document.getElementById('demo-tools');
+    if (demos?.open && (!demos.contains(e.target) || e.target.closest('.preset-menu-item, #btn-reset-continuous'))) demos.open = false;
+    document.querySelectorAll('.header-more[open], .canvas-help[open], .status-details[open]').forEach(menu => {
+        if (!menu.contains(e.target) || e.target.closest('button')) menu.open = false;
+    });
 });
 document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
         closePresetDropdown();
+        document.querySelectorAll('.header-more[open], .demo-tools[open], .canvas-help[open], .status-details[open]').forEach(menu => {
+            menu.open = false;
+            menu.querySelector('summary').focus();
+        });
     }
 });

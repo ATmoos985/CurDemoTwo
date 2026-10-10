@@ -1,6 +1,10 @@
 package com.example.cutdemotwo.service;
 
 import com.example.cutdemotwo.model.*;
+import com.example.cutdemotwo.model.nesting.NestingProblem;
+import com.example.cutdemotwo.service.solver.EngineResult;
+import com.example.cutdemotwo.service.solver.EngineCapabilities;
+import com.example.cutdemotwo.service.solver.EngineGeometry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,78 +18,65 @@ import java.util.*;
 @Service
 public class PackingSolverService implements com.example.cutdemotwo.service.solver.ICutSolverEngine {
     private static final Logger log = LoggerFactory.getLogger(PackingSolverService.class);
+    // Native rectangle coordinates are integers; one native unit represents 0.1 mm.
+    private static final int UNITS_PER_MM = 10;
 
     @Override
     public String getEngineType() {
         return "packingsolver";
     }
 
-    @Value("${packingsolver.executable.path:}")
+    @Value("${packingsolver.executable.path:data/solver/packingsolver_rectangleguillotine.exe}")
     private String solverPath;
 
     private final com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService toolpathOptimizerService;
     private final com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService cutBoundaryCompletionService;
-    private final com.example.cutdemotwo.service.solver.JavaGuillotineSolverEngine fallbackEngine;
 
     @org.springframework.beans.factory.annotation.Autowired
     public PackingSolverService(
             com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService toolpathOptimizerService,
-            com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService cutBoundaryCompletionService,
-            com.example.cutdemotwo.service.solver.JavaGuillotineSolverEngine fallbackEngine) {
+            com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService cutBoundaryCompletionService) {
         this.toolpathOptimizerService = toolpathOptimizerService;
         this.cutBoundaryCompletionService = cutBoundaryCompletionService;
-        this.fallbackEngine = fallbackEngine;
     }
 
     public PackingSolverService() {
         this.toolpathOptimizerService = new com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService();
         this.cutBoundaryCompletionService = new com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService();
-        this.fallbackEngine = new com.example.cutdemotwo.service.solver.JavaGuillotineSolverEngine(
-                this.toolpathOptimizerService, this.cutBoundaryCompletionService
-        );
     }
 
-    public boolean isNativeAvailable() {
-        if (solverPath != null && !solverPath.trim().isEmpty()) {
-            File f = new File(solverPath);
-            if (f.exists() && f.canExecute()) return true;
-        }
-        // 自动探测本地常见可执行文件路径
-        String[] probePaths = {
-            "/usr/local/bin/packingsolver_rectangleguillotine",
-            "/opt/homebrew/bin/packingsolver_rectangleguillotine",
-            "/Users/atmoos/Documents/GitHub/packingsolver/build/src/rectangleguillotine/packingsolver_rectangleguillotine"
-        };
-        for (String p : probePaths) {
-            File pf = new File(p);
-            if (pf.exists() && pf.canExecute()) {
-                this.solverPath = p;
-                return true;
-            }
-        }
-        return false;
+    @Override
+    public EngineCapabilities capabilities() {
+        return new EngineCapabilities(getEngineType(), "2", List.of("RECTANGLE"), List.of("GUILLOTINE"), List.of("MAXIMIZE_PIECE_AREA"), 1.0 / UNITS_PER_MM, isAvailable());
     }
 
     public boolean isAvailable() {
-        return true;
+        if (solverPath == null || solverPath.isBlank()) return false;
+        File f = new File(solverPath);
+        return f.exists() && f.canExecute();
     }
 
-    public SolveResponse solve(SolveRequest req) {
-        if (!isNativeAvailable()) {
-            log.info("未检测到外部 C++ PackingSolver 可执行文件，自动平滑切换至内置 Java 原生直刀排料内核。");
-            return fallbackEngine.solve(req);
+    public EngineResult solve(NestingProblem req) {
+        if (!isAvailable()) {
+            EngineResult err = new EngineResult();
+            err.setSuccess(false);
+            err.setFailureStatus("UNAVAILABLE");
+            err.setMessage("PackingSolver 可执行文件不存在或不可执行");
+            return err;
         }
 
+        Path tmpDir = null;
+        Process process = null;
         try {
-            Path tmpDir = Files.createTempDirectory("ps_cut_");
+            tmpDir = Files.createTempDirectory("ps_cut_");
             File binsCsv = tmpDir.resolve("bins.csv").toFile();
             File itemsCsv = tmpDir.resolve("items.csv").toFile();
             File defectsCsv = tmpDir.resolve("defects.csv").toFile();
             File certCsv = tmpDir.resolve("certificate.csv").toFile();
 
-            double activeL = req.getRollL() - req.getTrimStart();
+            double activeL = req.height() - req.process().trimStart();
             if (activeL <= 0) {
-                SolveResponse err = new SolveResponse();
+                EngineResult err = new EngineResult();
                 err.setSuccess(false);
                 err.setMessage("卷头修齐量不能大于等于展开总长度");
                 return err;
@@ -94,48 +85,48 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
             // 1. bins.csv
             try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(new FileOutputStream(binsCsv), java.nio.charset.StandardCharsets.UTF_8))) {
                 pw.println("ID,WIDTH,HEIGHT");
-                pw.println("0," + (int)req.getRollW() + "," + (int)activeL);
+                pw.println("0," + nativeUnits(req.width()) + "," + nativeUnits(activeL));
             }
 
             // 2. items.csv
             Map<Integer, String> itemMap = new HashMap<>();
             Map<Integer, Integer> demandIdMap = new HashMap<>();
             try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(new FileOutputStream(itemsCsv), java.nio.charset.StandardCharsets.UTF_8))) {
-                pw.println("ID,WIDTH,HEIGHT,STACK_ID");
+                pw.println("ID,WIDTH,HEIGHT,STACK_ID,ORIENTED");
                 int idx = 0;
-                for (PieceDemand it : req.getDemands()) {
-                    for (int c = 0; c < it.getDemand(); c++) {
-                        pw.println(idx + "," + (int)it.getWidth() + "," + (int)it.getLength() + ",0");
-                        itemMap.put(idx, it.getName());
-                        demandIdMap.put(idx, it.getId());
+                for (NestingProblem.Part it : req.parts()) {
+                    for (int c = 0; c < it.quantity(); c++) {
+                        pw.println(idx + "," + nativeUnits(it.shape().width()) + "," + nativeUnits(it.shape().height()) + "," + idx + "," + (it.allowRotation() ? 0 : 1));
+                        itemMap.put(idx, it.name());
+                        demandIdMap.put(idx, it.id());
                         idx++;
                     }
                 }
             }
 
-            String origin = req.getCutOrigin() != null ? req.getCutOrigin().trim().toLowerCase() : "right-top";
+            String origin = req.process().startCorner() != null ? req.process().startCorner().trim().toLowerCase() : "right-top";
             boolean isRightOrigin = origin.startsWith("right");
             boolean isBottomOrigin = origin.endsWith("bottom");
-            boolean isRemnantFeed = "remnant".equalsIgnoreCase(req.getFeedPortType());
-            boolean mirrorY = isRemnantFeed && isBottomOrigin;
+            boolean isSheet = req.sheet();
+            boolean mirrorY = isSheet && isBottomOrigin;
 
             // 3. defects.csv (offset Y by trimStart)
             try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(new FileOutputStream(defectsCsv), java.nio.charset.StandardCharsets.UTF_8))) {
                 pw.println("ID,BIN,X,Y,WIDTH,HEIGHT");
-                for (Defect d : req.getDefects()) {
-                    double dy = d.getY() - req.getTrimStart();
+                for (Defect d : EngineGeometry.defects(req)) {
+                    double dy = d.getY() - req.process().trimStart();
                     if (dy + d.getH() >= 0) {
                         double safeX = isRightOrigin ?
-                                Math.max(0, req.getRollW() - d.getX() - d.getW() - d.getMargin()) : d.getSafeX();
+                                Math.max(0, req.width() - d.getX() - d.getW() - d.getMargin()) : d.getSafeX();
                         double safeY = mirrorY ?
-                                Math.max(0, req.getRollL() - dy - d.getH() - d.getMargin()) : Math.max(0, dy - d.getMargin());
-                        pw.println(d.getId() + ",0," + (int)safeX + "," + (int)safeY + "," +
-                                (int)d.getSafeW() + "," + (int)d.getSafeH());
+                                Math.max(0, req.height() - dy - d.getH() - d.getMargin()) : Math.max(0, dy - d.getMargin());
+                        pw.println(d.getId() + ",0," + nativeUnits(safeX) + "," + nativeUnits(safeY) + "," +
+                                nativeUnits(d.getSafeW()) + "," + nativeUnits(d.getSafeH()));
                     }
                 }
             }
 
-            String firstStage = "vertical".equalsIgnoreCase(req.getFirstStageOrientation()) ? "vertical" : "horizontal";
+            String firstStage = "vertical".equalsIgnoreCase(req.process().firstStageOrientation()) ? "vertical" : "horizontal";
 
             List<String> cmd = new ArrayList<>();
             cmd.add(solverPath);
@@ -148,44 +139,62 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
             cmd.add("--first-stage-orientation"); cmd.add(firstStage);
             cmd.add("--linear-programming-solver"); cmd.add("highs");
             cmd.add("--certificate"); cmd.add(certCsv.getAbsolutePath());
-            cmd.add("--time-limit"); cmd.add("2");
+            cmd.add("--time-limit"); cmd.add(Integer.toString(req.timeLimitSeconds()));
 
-            if (!req.isAllowRotation()) {
+            if (!req.parts().stream().anyMatch(NestingProblem.Part::allowRotation)) {
                 cmd.add("--no-item-rotation");
             }
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
-            Process process = pb.start();
-
-            // Read output
-            StringBuilder logOut = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    logOut.append(line).append("\n");
-                }
-            }
-
-            int exitCode = process.waitFor();
+            Path output = tmpDir.resolve("solver.log");
+            pb.redirectOutput(output.toFile());
+            process = pb.start();
+            if (!process.waitFor(req.timeLimitSeconds() + 5L, java.util.concurrent.TimeUnit.SECONDS))
+                throw new IOException("求解超过时限，已终止；库存未变更");
+            int exitCode = process.exitValue();
             log.info("PackingSolver finished with code {}", exitCode);
 
-            if (!certCsv.exists() || certCsv.length() == 0) {
-                SolveResponse err = new SolveResponse();
+            if (exitCode != 0 || !certCsv.exists() || certCsv.length() == 0) {
+                EngineResult err = new EngineResult();
                 err.setSuccess(false);
-                err.setMessage("求解失败或无证书输出:\n" + logOut);
+                log.warn("Solver failure code {} (0x{})", exitCode, Integer.toHexString(exitCode));
+                err.setMessage(exitCode == -1073741515 ? "求解器缺少运行库（0xC0000135），请检查服务器的 C++ 运行环境；库存未变更" :
+                        "求解器退出码 " + exitCode + "，未生成有效方案；请检查求解器运行环境和输入");
                 return err;
             }
 
             return parseCertificate(certCsv, req, itemMap, demandIdMap);
 
         } catch (Exception e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             log.error("Execution error", e);
-            SolveResponse err = new SolveResponse();
+            EngineResult err = new EngineResult();
             err.setSuccess(false);
             err.setMessage("求解执行异常: " + e.getMessage());
             return err;
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.descendants().forEach(ProcessHandle::destroyForcibly);
+                process.destroyForcibly();
+                try { process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS); }
+                catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            }
+            // Only delete files created in this invocation's fresh temporary directory; never follow links.
+            if (tmpDir != null) {
+                try (var files = Files.walk(tmpDir)) {
+                    for (Path file : files.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(file);
+                } catch (IOException cleanup) { log.warn("Unable to clean solver temporary directory", cleanup); }
+            }
         }
+    }
+
+    private static long nativeUnits(double millimeters) {
+        double scaled = millimeters * UNITS_PER_MM;
+        long units = Math.round(scaled);
+        if (!Double.isFinite(scaled) || Math.abs(scaled - units) > .000001)
+            throw new IllegalArgumentException("尺寸必须是 0.1 mm 的整数倍");
+        return units;
     }
 
     private static class CertNode {
@@ -197,48 +206,40 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
         List<CertNode> children = new ArrayList<>();
     }
 
-    private SolveResponse parseCertificate(File certCsv, SolveRequest req, Map<Integer, String> itemMap, Map<Integer, Integer> demandIdMap) throws IOException {
-        SolveResponse res = new SolveResponse();
+    private EngineResult parseCertificate(File certCsv, NestingProblem req, Map<Integer, String> itemMap, Map<Integer, Integer> demandIdMap) throws IOException {
+        EngineResult res = new EngineResult();
         res.setSuccess(true);
-        res.setEngine("PackingSolver (C++ 2D-Guillotine & HiGHS)");
-        res.setRollW(req.getRollW());
-        res.setRollL(req.getRollL());
-        res.setDefects(req.getDefects());
 
         List<PlacedPiece> pieces = new ArrayList<>();
         List<RemnantPiece> remnants = new ArrayList<>();
         List<CutStep> rawCutSteps = new ArrayList<>();
 
         int remIndex = 1;
-        String origin = req.getCutOrigin() != null ? req.getCutOrigin().trim().toLowerCase() : "right-top";
+        String origin = req.process().startCorner() != null ? req.process().startCorner().trim().toLowerCase() : "right-top";
         boolean isRightOrigin = origin.startsWith("right");
         boolean isBottomOrigin = origin.endsWith("bottom");
-        boolean isRemnantFeed = "remnant".equalsIgnoreCase(req.getFeedPortType());
+        boolean isSheet = req.sheet();
         
-        int stationIdx = (int) Math.round(req.getWindowStartY() / Math.max(100.0, req.getRollL())) + 1;
-        if (stationIdx <= 0) stationIdx = 1;
-        String remPrefix = isRemnantFeed ? "REM-RM" : ("REM-S" + stationIdx);
+        String remPrefix = "LEFTOVER";
         
-        // 关键统一：在母卷连续开卷长卷模式下，裁片排料必须顺着送料进给流向紧贴工位入口 (y + trim)，
-        // 余量留在当前工位末尾，彻底杜绝反转导致两工位交界处凭空留出 260mm 悬空死区！
-        // 仅在单板料头模式且指定底部原点时，才将料头裁片倒贴至料头下底边。
-        boolean mirrorY = isRemnantFeed && isBottomOrigin;
-        double trim = req.getTrimStart();
+        // 连续送料沿 Y 正方向排料；整块材料允许按底部起刀基准镜像排列。
+        boolean mirrorY = isSheet && isBottomOrigin;
+        double trim = req.process().trimStart();
 
         if (trim > 0) {
-            double trimArea = (req.getRollW() * trim) / 1_000_000.0;
-            double trimY = mirrorY ? (req.getRollL() - trim) : 0;
+            double trimArea = (req.width() * trim) / 1_000_000.0;
+            double trimY = mirrorY ? (req.height() - trim) : 0;
             remnants.add(new RemnantPiece(
-                    String.format("REM-TRIM-S%d-%02d", stationIdx, remIndex++),
+                    String.format("TRIM-%02d", remIndex++),
                     "卷头修齐料头",
-                    0, trimY, req.getRollW(), trim, trimArea, false
+                    0, trimY, req.width(), trim, trimArea, false
             ));
             rawCutSteps.add(new CutStep(
                     1,
                     "横切",
-                    mirrorY ? (req.getRollL() - trim) : trim,
+                    mirrorY ? (req.height() - trim) : trim,
                     0,
-                    req.getRollW(),
+                    req.width(),
                     String.format("第 0 阶段：卷头修齐横切断刀，切除 0~%.0f mm 不规则料头并确立绝对测量原点", trim)
             ));
         }
@@ -256,10 +257,10 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
 
                 CertNode n = new CertNode();
                 n.nodeId = Integer.parseInt(parts[2].trim());
-                n.x = Double.parseDouble(parts[3].trim());
-                n.y = Double.parseDouble(parts[4].trim());
-                n.w = Double.parseDouble(parts[5].trim());
-                n.h = Double.parseDouble(parts[6].trim());
+                n.x = Double.parseDouble(parts[3].trim()) / UNITS_PER_MM;
+                n.y = Double.parseDouble(parts[4].trim()) / UNITS_PER_MM;
+                n.w = Double.parseDouble(parts[5].trim()) / UNITS_PER_MM;
+                n.h = Double.parseDouble(parts[6].trim()) / UNITS_PER_MM;
                 n.type = Integer.parseInt(parts[7].trim());
                 n.cut = Integer.parseInt(parts[8].trim());
                 if (parts.length >= 10 && !parts[9].trim().isEmpty()) {
@@ -271,23 +272,25 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                 nodeMap.put(n.nodeId, n);
                 allNodes.add(n);
 
-                double physX = isRightOrigin ? (req.getRollW() - n.x - n.w) : n.x;
-                double physY = mirrorY ? (req.getRollL() - n.y - n.h - trim) : (n.y + trim);
+                double physX = EngineGeometry.normalizeZero(isRightOrigin ? (req.width() - n.x - n.w) : n.x);
+                double physY = EngineGeometry.normalizeZero(mirrorY ? (req.height() - n.y - n.h - trim) : (n.y + trim));
 
                 if (n.type >= 0 && n.cut > 0) {
                     String name = itemMap.getOrDefault(n.type, "裁片-" + n.type);
                     Integer demId = demandIdMap != null ? demandIdMap.get(n.type) : null;
-                    pieces.add(new PlacedPiece(n.type, name, physX, physY, n.w, n.h, false, demId));
+                    var part = req.parts().stream().filter(d -> Objects.equals(d.id(), demId)).findFirst().orElseThrow();
+                    boolean rotated = Math.abs(n.w - part.shape().width()) > .001 || Math.abs(n.h - part.shape().height()) > .001;
+                    pieces.add(new PlacedPiece(n.type, name, physX, physY, n.w, n.h, rotated, demId));
                 } else if (n.type == -1 || n.type == -3) {
                     // Remnant / waste
-                    // 关键过滤：在母卷长卷连续开卷模式下，若母卷尚未开完，位于工位尾部全幅贯通的未排空区属于连续母卷自然顺延，并非被切断废弃的边料料头！
-                    boolean isContinuousMotherRollTail = !isRemnantFeed &&
-                            (req.getWindowStartY() + req.getRollL() < req.getTotalRollL() - 100) &&
-                            (n.w >= req.getRollW() - 30) &&
-                            (physY + n.h >= req.getRollL() - 30 || n.y + n.h >= req.getRollL() - 30);
-                    if (!isContinuousMotherRollTail && n.w >= 200 && n.h >= 300) {
+                    // 后续仍连接材料时，全幅尾部保留为连续材料，不生成独立回收块。
+                    boolean isContinuousTail = !isSheet &&
+                            req.material().continuesAfterRegion() &&
+                            (n.w >= req.width() - 30) &&
+                            (physY + n.h >= req.height() - 30 || n.y + n.h >= req.height() - 30);
+                    if (!isContinuousTail && n.w >= req.process().minReusableWidth() && n.h >= req.process().minReusableHeight()) {
                         double area = (n.w * n.h) / 1_000_000.0;
-                        boolean hasDefect = checkDefectOverlap(physX, physY, n.w, n.h, req.getDefects());
+                        boolean hasDefect = checkDefectOverlap(physX, physY, n.w, n.h, EngineGeometry.defects(req));
                         String status = hasDefect ? "带疵料头" : "可用料头";
                         remnants.add(new RemnantPiece(String.format("%s-%02d", remPrefix, remIndex++), status, physX, physY, n.w, n.h, area, hasDefect));
                     }
@@ -326,15 +329,16 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                     double minX = chList.stream().mapToDouble(c -> c.x).min().orElse(p.x);
                     double maxX = chList.stream().mapToDouble(c -> c.x + c.w).max().orElse(p.x + p.w);
 
-                    double physPos = mirrorY ? (req.getRollL() - cutY - trim) : (cutY + trim);
-                    double physStart = isRightOrigin ? (req.getRollW() - maxX) : minX;
-                    double physEnd = isRightOrigin ? (req.getRollW() - minX) : maxX;
+                    double physPos = mirrorY ? (req.height() - cutY - trim) : (cutY + trim);
+                    double physStart = isRightOrigin ? (req.width() - maxX) : minX;
+                    double physEnd = isRightOrigin ? (req.width() - minX) : maxX;
                     int cutLvl = Math.max(1, c2.cut);
 
                     rawCutSteps.add(new CutStep(
                             rawCutSteps.size() + 1, "横切", physPos, Math.min(physStart, physEnd), Math.max(physStart, physEnd),
                             String.format("第 %d 阶段横切，裁切范围 [%.0f × %.0f mm]", cutLvl, maxX - minX, p.h)
                     ));
+                    rawCutSteps.get(rawCutSteps.size() - 1).setStage(cutLvl);
                 }
             } else if (distinctX.size() > 1) {
                 // 垂直纵切
@@ -348,48 +352,37 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                     double minY = chList.stream().mapToDouble(c -> c.y).min().orElse(p.y);
                     double maxY = chList.stream().mapToDouble(c -> c.y + c.h).max().orElse(p.y + p.h);
 
-                    double physPos = isRightOrigin ? (req.getRollW() - cutX) : cutX;
-                    double physStart = mirrorY ? (req.getRollL() - maxY - trim) : (minY + trim);
-                    double physEnd = mirrorY ? (req.getRollL() - minY - trim) : (maxY + trim);
+                    double physPos = isRightOrigin ? (req.width() - cutX) : cutX;
+                    double physStart = mirrorY ? (req.height() - maxY - trim) : (minY + trim);
+                    double physEnd = mirrorY ? (req.height() - minY - trim) : (maxY + trim);
                     int cutLvl = Math.max(1, c2.cut);
 
                     rawCutSteps.add(new CutStep(
                             rawCutSteps.size() + 1, "纵切", physPos, Math.min(physStart, physEnd), Math.max(physStart, physEnd),
                             String.format("第 %d 阶段纵切，裁切范围 [%.0f × %.0f mm]", cutLvl, p.w, maxY - minY)
                     ));
+                    rawCutSteps.get(rawCutSteps.size() - 1).setStage(cutLvl);
                 }
             }
         }
 
         // 100% 完整切断自愈检查 (确保无粘连)
         List<CutStep> fullySeparatedCuts = cutBoundaryCompletionService.ensureCompleteSeparation(
-                pieces, remnants, rawCutSteps, req.getRollW(), req.getRollL(), isRemnantFeed
+                pieces, remnants, rawCutSteps, req.width(), req.height(), isSheet
         );
 
         // 刀路连续平滑优化 (赋予 startX, startY, endX, endY, airDistance，消除乱跳)
-        double homeX = isRightOrigin ? req.getRollW() : 0.0;
-        double homeY = isBottomOrigin ? req.getRollL() : 0.0;
+        double homeX = isRightOrigin ? req.width() : 0.0;
+        double homeY = isBottomOrigin ? req.height() : 0.0;
         List<CutStep> continuousCuts = toolpathOptimizerService.optimizeAndChain(fullySeparatedCuts, homeX, homeY, true);
 
         res.setPieces(pieces);
         res.setRemnants(remnants);
         res.setCuts(continuousCuts);
 
-        // Area balance
-        double rollArea = (req.getRollW() * req.getRollL()) / 1_000_000.0;
-        double pieceArea = pieces.stream().mapToDouble(p -> p.getW() * p.getL()).sum() / 1_000_000.0;
-        double remArea = remnants.stream().mapToDouble(RemnantPiece::getArea).sum();
-        double wasteArea = Math.max(0, rollArea - pieceArea - remArea);
-
-        double maxY = pieces.stream().mapToDouble(p -> p.getY() + p.getL()).max().orElse(req.getRollL());
-        res.setFeedPortType(isRemnantFeed ? "remnant" : "roll");
-        res.setSourceRemnantId(req.getSourceRemnantId());
-        // 料头投料口: 严格保证母卷扣料为 0!
-        res.setDeductLen(isRemnantFeed ? 0.0 : maxY);
-        res.setPieceArea(pieceArea);
-        res.setRemArea(remArea);
-        res.setWasteArea(wasteArea);
-        res.setTotalArea(rollArea);
+        // 面积由统一结果层核算；此处只给出当前策略的进给范围提示。
+        double maxY = pieces.stream().mapToDouble(p -> p.getY() + p.getL()).max().orElse(0);
+        res.setSuggestedFeedLength(maxY);
 
         return res;
     }

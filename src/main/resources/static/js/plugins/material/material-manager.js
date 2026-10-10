@@ -1,82 +1,311 @@
-/**
- * 母卷与料头物料档案全生命周期管理插件 (Material & Remnant Manager Plugin)
- * 涵盖：母卷物理工艺属性、纺织4分制标准疵点空间模型、料头代际血统追溯与报废管理
- */
+/** 物料库存：清单选料，详情核对；写入沿用现有库存接口。 */
 import { state } from '../../core/state.js';
-import { bus } from '../../core/event-bus.js';
-import { onMotherRollChange, refreshShelfRemnantsList } from '../remnant/remnant-shelf.js';
+import { refreshShelfRemnantsList } from '../remnant/remnant-shelf.js';
 import { renderScene } from '../cad/cad-renderer.js';
 import { renderRadar } from '../radar/radar-scrubber.js';
 import { renderDefectsUI } from '../solver/quota-manager.js';
+import { showToast, confirmAction } from '../../core/toast.js';
+import { syncMaterialOptions } from './material-options.js';
+import { renderMaterialInspection, mountInspectionRadar } from '../layout/workbench-panels.js';
 
-let cachedRolls = [];
-let activeRollId = "ROLL-2026-0920";
+let cachedRolls = [], cachedRemnants = [];
+let activeRollId = null, activeRemnantId = null, activeTab = 'rolls';
+let rollError = '', remnantError = '', detailRequest = 0;
+let standalone = false;
+const inspectionNames = { PASSED: '已验合格', PENDING: '待验', QUARANTINED: '隔离' };
+const qualityNames = { GRADE_A: '完好', GRADE_DEFECT: '带疵', GRADE_B: '边角料' };
+const escapeHtml = value => String(value ?? '未登记').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const meters = value => Number.isFinite(value) ? (value / 1000).toLocaleString('zh-CN', { maximumFractionDigits: 3 }) : '—';
+const area = value => Number.isFinite(value) ? value.toFixed(2) : '—';
+const remaining = roll => roll.currentRemainingLength ?? roll.totalLength;
+const field = (label, value) => `<div><dt>${label}</dt><dd>${escapeHtml(value === '' ? null : value)}</dd></div>`;
 
-/**
- * 打开母卷与料头物料档案中心
- */
+export function filterInventory(items, query, status, kind) {
+    const words = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+    return items.filter(item => {
+        const fields = kind === 'rolls'
+            ? [item.rollId, item.materialName, item.rollModel, item.batchNo, item.storageLocation]
+            : [item.id, item.sourceRollId, item.parentRemnantId, item.materialBatch, item.location];
+        const text = fields.filter(Boolean).join(' ').toLocaleLowerCase();
+        const matchesStatus = !status || (kind === 'rolls' ? item.inspectionStatus === status
+            : status === 'defect' ? item.hasDefect : !item.hasDefect);
+        return matchesStatus && words.every(word => text.includes(word));
+    });
+}
+
 export async function openMaterialModal(tab = 'rolls') {
-    let modal = document.getElementById("material-manager-modal");
-    if (!modal) {
-        createMaterialModalDOM();
-        modal = document.getElementById("material-manager-modal");
-    }
-    modal.style.display = "flex";
-    await refreshRollsList();
-    switchMaterialTab(tab);
+    if (!document.getElementById('material-manager-modal')) createMaterialModalDOM();
+    const modal = document.getElementById('material-manager-modal');
+    activeRollId = state.getCurrentCaseData().rollId || activeRollId;
+    if (!modal.open) modal.showModal();
+    await switchMaterialTab(tab);
+}
+
+export async function initInventoryPage(tab = 'rolls') {
+    standalone = true;
+    createMaterialModalDOM();
+    await switchMaterialTab(tab);
 }
 
 export function closeMaterialModal() {
-    const modal = document.getElementById("material-manager-modal");
-    if (modal) modal.style.display = "none";
+    detailRequest++;
+    document.getElementById('material-manager-modal')?.close();
 }
 
-export function switchMaterialTab(tabName) {
-    const btnRolls = document.getElementById("tab-mat-rolls");
-    const btnRemnants = document.getElementById("tab-mat-remnants");
-    const btnDictionary = document.getElementById("tab-mat-dict");
-
-    const paneRolls = document.getElementById("pane-mat-rolls");
-    const paneRemnants = document.getElementById("pane-mat-remnants");
-    const paneDict = document.getElementById("pane-mat-dict");
-
-    if (btnRolls) btnRolls.classList.toggle("active", tabName === 'rolls');
-    if (btnRemnants) btnRemnants.classList.toggle("active", tabName === 'remnants');
-    if (btnDictionary) btnDictionary.classList.toggle("active", tabName === 'dict');
-
-    if (paneRolls) paneRolls.style.display = (tabName === 'rolls') ? "flex" : "none";
-    if (paneRemnants) paneRemnants.style.display = (tabName === 'remnants') ? "flex" : "none";
-    if (paneDict) paneDict.style.display = (tabName === 'dict') ? "flex" : "none";
-
+export async function switchMaterialTab(tabName) {
+    mountInspectionRadar(tabName === 'current');
+    activeTab = tabName;
+    for (const name of (standalone ? ['rolls', 'remnants', 'dict'] : ['current', 'rolls', 'remnants', 'dict'])) {
+        const button = document.getElementById(`tab-mat-${name}`);
+        button.classList.toggle('active', name === tabName);
+        button.setAttribute('aria-pressed', String(name === tabName));
+        document.getElementById(`pane-mat-${name}`).hidden = name !== tabName;
+    }
+    if (tabName === 'current') {renderMaterialInspection();return;}
+    if (tabName === 'dict') return;
+    document.getElementById(`material-${tabName}-container`).innerHTML = '<p class="inventory-empty" role="status">正在读取库存…</p>';
     if (tabName === 'rolls') {
+        await refreshRollsList();
         renderRollsList();
-    } else if (tabName === 'remnants') {
-        renderRemnantsLineage();
+    } else await renderRemnantsLineage();
+}
+
+export async function refreshRollsList() {
+    rollError = '';
+    try {
+        const response = await fetch('/api/rolls', { cache: 'no-store' });
+        if (!response.ok) throw new Error('读取失败');
+        cachedRolls = await response.json();
+        if (!standalone) syncMaterialOptions(cachedRolls);
+        for (const roll of cachedRolls) {
+            const filter = document.getElementById('sel-remnant-filter-roll');
+            if (filter && ![...filter.options].some(option => option.value === roll.rollId)) filter.add(new Option(roll.rollId, roll.rollId));
+        }
+    } catch { rollError = '母卷库存读取失败，请刷新重试。'; }
+}
+
+function filtered(kind, items) {
+    return filterInventory(items, document.getElementById(`inventory-${kind}-search`).value,
+        document.getElementById(`inventory-${kind}-filter`).value, kind);
+}
+
+function renderRollsList() {
+    const container = document.getElementById('material-rolls-container');
+    const detail = document.getElementById('material-roll-detail-panel');
+    const rows = filtered('rolls', cachedRolls);
+    document.getElementById('inventory-rolls-summary').textContent = rollError || `${cachedRolls.length} 卷母卷 · 账面剩余 ${meters(cachedRolls.reduce((sum, r) => sum + (remaining(r) || 0), 0))} m · 待验 ${cachedRolls.filter(r => r.inspectionStatus === 'PENDING').length} 卷`;
+    document.getElementById('inventory-rolls-count').textContent = `显示 ${rollError ? 0 : rows.length} / ${cachedRolls.length} 卷`;
+    if (rollError || !rows.length) {
+        detailRequest++;
+        container.innerHTML = `<p class="inventory-empty">${rollError || (cachedRolls.length ? '没有匹配的母卷，试试其他编号、面料或库位。' : '暂无母卷，可通过「录入母卷」添加。')}</p>`;
+        detail.innerHTML = '<p class="inventory-empty">选择母卷后查看详情。</p>';
+        return;
+    }
+    if (!rows.some(r => r.rollId === activeRollId)) activeRollId = rows[0].rollId;
+    const mounted = standalone ? null : state.getCurrentCaseData().rollId;
+    container.innerHTML = `<table class="inventory-table"><thead><tr><th>母卷 / 面料</th><th>余量</th><th>库位 / 状态</th></tr></thead><tbody>${rows.map(r => `
+        <tr data-roll-row="${escapeHtml(r.rollId)}" class="${r.rollId === activeRollId ? 'selected' : ''}">
+            <td><button class="inventory-item-link" data-roll="${escapeHtml(r.rollId)}" aria-pressed="${r.rollId === activeRollId}">${escapeHtml(r.rollId)}</button>
+                <span class="inventory-secondary">${escapeHtml(r.materialName || r.rollModel)}</span>${r.rollId === mounted ? '<span class="inventory-current">当前台面</span>' : ''}</td>
+            <td><strong class="inventory-number">${meters(remaining(r))} m</strong><span class="inventory-secondary">幅宽 ${escapeHtml(r.width)} mm</span></td>
+            <td>${escapeHtml(r.storageLocation || '未登记库位')}<span class="inventory-secondary">${escapeHtml(inspectionNames[r.inspectionStatus] || r.inspectionStatus || '未登记')}</span></td>
+        </tr>`).join('')}</tbody></table>`;
+    selectRollForDetail(activeRollId);
+}
+
+export async function selectRollForDetail(rollId) {
+    activeRollId = rollId;
+    const request = ++detailRequest;
+    const detail = document.getElementById('material-roll-detail-panel');
+    if (!detail) return;
+    document.querySelectorAll('[data-roll-row]').forEach(row => row.classList.toggle('selected', row.dataset.rollRow === rollId));
+    document.querySelectorAll('[data-roll]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.roll === rollId)));
+    detail.innerHTML = '<p class="inventory-empty" role="status">正在读取母卷详情…</p>';
+    try {
+        const response = await fetch(`/api/rolls/${encodeURIComponent(rollId)}`, { cache: 'no-store' });
+        if (!response.ok) throw new Error('读取失败');
+        const roll = await response.json();
+        if (request !== detailRequest) return;
+        const rem = remaining(roll), used = roll.usedLength ?? (roll.totalLength - rem);
+        const pct = roll.totalLength > 0 ? Math.min(100, Math.max(0, rem / roll.totalLength * 100)) : 0;
+        detail.innerHTML = `
+            <div class="inventory-detail-heading"><h3>${escapeHtml(roll.rollId)}</h3><p>${escapeHtml(roll.materialName || roll.rollModel)}</p></div>
+            ${standalone ? '<p class="inventory-secondary">为作业选用此材料，请回到裁切作业的“选择用料”。</p>' : `<button class="tool-btn inventory-primary" data-mount="${escapeHtml(roll.rollId)}">为当前任务选用…</button>`}
+            <div class="inventory-length"><div><span>账面剩余</span><strong>${meters(rem)} <small>m</small></strong></div><span>${escapeHtml(inspectionNames[roll.inspectionStatus] || roll.inspectionStatus || '未登记')}</span></div>
+            <div class="inventory-length-track" role="img" aria-label="剩余长度占原卷 ${Math.round(pct)}%"><span style="width:${pct}%"></span></div>
+            <p class="inventory-secondary">原卷 ${meters(roll.totalLength)} m · 已用 ${meters(used)} m</p>
+            <dl class="inventory-fields">${field('净幅宽', `${roll.width} mm`)}${field('库位', roll.storageLocation)}${field('批次', roll.batchNo)}</dl>
+            <details class="inventory-disclosure"><summary>面料与验布资料</summary><dl class="inventory-fields">
+                ${field('型号', roll.rollModel)}${field('毛幅宽 (mm)', roll.rawWidth)}${field('克重 (g/m²)', roll.grammage)}${field('缩水率 (%)', roll.shrinkageRate)}${field('成分', roll.composition)}${field('供应商', roll.supplier)}${field('验布员', roll.inspector)}${field('在库料头', `${roll.remnantCount ?? 0} 块 / ${area(roll.remnantTotalArea ?? 0)} m²`)}
+            </dl></details>
+            <details class="inventory-disclosure"><summary>疵点记录 <span>${(roll.defects || []).length} 处</span></summary>
+                ${defectRecords(roll.defects || [])}
+                <details id="add-defect-form-box" class="inventory-form-disclosure"><summary>＋ 标定新疵点</summary>${defectForm(rollId)}</details>
+            </details>`;
+    } catch {
+        if (request === detailRequest) detail.innerHTML = '<p class="inventory-empty" role="status">详情读取失败，请重新选择母卷或刷新库存。</p>';
     }
 }
 
-/**
- * 从后端刷新母卷列表
- */
-export async function refreshRollsList() {
+function defectRecords(defects) {
+    if (!defects.length) return '<p class="inventory-secondary">暂无疵点记录。</p>';
+    return `<div class="inventory-defects">${defects.map(d => `<details><summary>
+        <span>${escapeHtml(d.typeName || d.defectType || `疵点 ${d.id}`)}</span><span>Y ${escapeHtml(d.y)} mm</span></summary>
+        <dl class="inventory-fields">${field('坐标 X / Y', `${d.x} / ${d.y} mm`)}${field('宽 × 长', `${d.w} × ${d.h} mm`)}${field('避让间距 (mm)', d.margin)}${field('扣分', d.points)}
+            ${field('来源', d.detectionSource === 'AI_VISION_SCANNER' ? '视觉验布' : d.detectionSource === 'MANUAL_INSPECT' ? '人工标定' : d.detectionSource)}
+            ${field('处理策略', d.avoidanceStrategy === 'MUST_AVOID' ? '必须避让' : d.avoidanceStrategy === 'PENETRABLE' ? '允许贯通' : d.avoidanceStrategy)}
+        </dl></details>`).join('')}</div>`;
+}
+
+function defectForm(rollId) {
+    return `<form class="inventory-form" data-defect-form="${escapeHtml(rollId)}">
+        <label>纵向 Y (mm)<input id="inp-new-defect-y" type="number" min="0" value="4500" step="any" required></label>
+        <label>横向 X (mm)<input id="inp-new-defect-x" type="number" min="0" value="600" step="any" required></label>
+        <label>宽 (mm)<input id="inp-new-defect-w" type="number" min="0.001" value="200" step="any" required></label>
+        <label>长 (mm)<input id="inp-new-defect-h" type="number" min="0.001" value="150" step="any" required></label>
+        <label>疵点类型<select id="sel-new-defect-type"><option value="HOLE">破洞</option><option value="WEFT_DEFECT">抽纱 / 跳纱</option><option value="STAIN" selected>油污 / 黄斑</option><option value="SLUB">粗节 / 结头</option></select></label>
+        <label>避让间距 (mm)<input id="inp-new-defect-m" type="number" min="0" value="20" step="any" required></label>
+        <label class="inventory-form-wide">检出来源<select id="sel-new-defect-src"><option value="AI_VISION_SCANNER">视觉验布机</option><option value="MANUAL_INSPECT">现场人工标定</option></select></label>
+        <button class="tool-btn inventory-primary inventory-form-wide" type="submit">保存疵点</button>
+    </form>`;
+}
+
+export function toggleAddDefectForm() {
+    const form = document.getElementById('add-defect-form-box');
+    if (form) { form.parentElement.open = true; form.open = !form.open; }
+}
+
+async function renderRemnantsLineage() {
+    remnantError = '';
     try {
-        const res = await fetch("/api/rolls", { cache: "no-store" });
-        if (res.ok) {
-            cachedRolls = await res.json();
-            for (const roll of cachedRolls) {
-                const selector = document.getElementById("sel-mother-roll-id");
-                if (selector && ![...selector.options].some(option => option.value === roll.rollId)) {
-                    selector.add(new Option(`${roll.rollId} (${roll.rollModel})`, roll.rollId));
-                }
-                const filter = document.getElementById("sel-remnant-filter-roll");
-                if (filter && ![...filter.options].some(option => option.value === roll.rollId)) {
-                    filter.add(new Option(roll.rollId, roll.rollId));
-                }
+        const response = await fetch('/api/remnants', { cache: 'no-store' });
+        if (!response.ok) throw new Error('读取失败');
+        cachedRemnants = (await response.json()).sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || '') || b.id.localeCompare(a.id, undefined, {numeric:true}));
+        const count = document.getElementById('header-remnant-count');if (count) count.textContent = cachedRemnants.length;
+    } catch { remnantError = '料头库存读取失败，请刷新重试。'; }
+    renderRemnantsList();
+}
+
+function renderRemnantsList() {
+    const rows = filtered('remnants', cachedRemnants);
+    const container = document.getElementById('material-remnants-container');
+    const detail = document.getElementById('material-remnant-detail-panel');
+    const recommendation = document.getElementById('inventory-remnant-recommendation');
+    if (recommendation) recommendation.textContent = document.getElementById('remnant-availability')?.textContent || '按当前任务的剩余需求核对可用料头';
+    document.getElementById('inventory-remnants-summary').textContent = remnantError || `${cachedRemnants.length} 块可用料头 · 总面积 ${area(cachedRemnants.reduce((sum, r) => sum + (r.area || 0), 0))} m² · 带疵 ${cachedRemnants.filter(r => r.hasDefect).length} 块`;
+    document.getElementById('inventory-remnants-count').textContent = `显示 ${remnantError ? 0 : rows.length} / ${cachedRemnants.length} 块`;
+    if (remnantError || !rows.length) {
+        container.innerHTML = `<p class="inventory-empty">${remnantError || (cachedRemnants.length ? '没有匹配的料头，试试其他编号、来源母卷或库位。' : '暂无可用料头，实切确认后可登记入库。')}</p>`;
+        detail.innerHTML = '<p class="inventory-empty">选择料头后查看详情。</p>';
+        return;
+    }
+    if (!rows.some(r => r.id === activeRemnantId)) activeRemnantId = rows[0].id;
+    container.innerHTML = `<table class="inventory-table"><thead><tr><th>料头 / 批次</th><th>规格</th><th>库位 / 质量</th></tr></thead><tbody>${rows.map(r => `
+        <tr data-remnant-row="${escapeHtml(r.id)}" class="${r.id === activeRemnantId ? 'selected' : ''}">
+            <td><button class="inventory-item-link" data-remnant="${escapeHtml(r.id)}" aria-pressed="${r.id === activeRemnantId}">${escapeHtml(r.id)}</button><span class="inventory-secondary">${escapeHtml(r.materialBatch)}</span><span class="inventory-secondary">入库 ${escapeHtml(r.createdAt || '未登记')}</span></td>
+            <td><strong class="inventory-number">${escapeHtml(r.width)} × ${escapeHtml(r.length)}</strong><span class="inventory-secondary">mm · ${area(r.area)} m²</span></td>
+            <td>${escapeHtml(r.location || '未登记库位')}<span class="inventory-secondary">${escapeHtml(qualityNames[r.qualityGrade] || r.qualityGrade || '未评级')}${r.hasDefect ? ' · 有疵点' : ''}</span></td>
+        </tr>`).join('')}</tbody></table>`;
+    selectStockRemnant(activeRemnantId);
+}
+
+function selectStockRemnant(id) {
+    activeRemnantId = id;
+    const remnant = cachedRemnants.find(r => r.id === id);
+    if (!remnant) return;
+    document.querySelectorAll('[data-remnant-row]').forEach(row => row.classList.toggle('selected', row.dataset.remnantRow === id));
+    document.querySelectorAll('[data-remnant]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.remnant === id)));
+    document.getElementById('material-remnant-detail-panel').innerHTML = `
+        <div class="inventory-detail-heading"><h3>${escapeHtml(id)}</h3><p>${escapeHtml(remnant.materialBatch)}</p></div>
+        ${standalone ? '' : `<button class="tool-btn inventory-primary" data-match-remnant="${escapeHtml(id)}">核对当前需求并选用…</button>`}
+        <div class="inventory-length"><div><span>料头面积</span><strong>${area(remnant.area)} <small>m²</small></strong></div><span>${remnant.hasDefect ? '局部带疵' : '无疵点记录'}</span></div>
+        <dl class="inventory-fields">${field('宽 × 长', `${remnant.width} × ${remnant.length} mm`)}${field('库位', remnant.location)}${field('质量等级', qualityNames[remnant.qualityGrade] || remnant.qualityGrade)}</dl>
+        <details class="inventory-disclosure"><summary>来源与流转</summary><dl class="inventory-fields">
+            ${field('来源母卷', remnant.sourceRollId)}${field('父级料头', remnant.parentRemnantId || (remnant.generation === 1 ? '无（母卷直切）' : null))}${field('代数', remnant.generation)}${field('入库时间', remnant.createdAt)}${field('备注', remnant.defectDesc)}
+        </dl></details>
+        <details class="inventory-disclosure"><summary>疵点记录 <span>${(remnant.defects || []).length} 处</span></summary>${defectRecords(remnant.defects || [])}</details>
+        <details class="inventory-disclosure"><summary>库存处置</summary><p class="inventory-secondary">报废后将移出可用库存。</p><button class="tool-btn inventory-danger" data-scrap="${escapeHtml(id)}">报废此料头</button></details>`;
+}
+
+function inventoryPane(kind, label, placeholder, options, detailId) {
+    return `<section id="pane-mat-${kind}" class="inventory-pane" ${kind === 'remnants' ? 'hidden' : ''} aria-label="${label}">
+        ${kind === 'remnants' && !standalone ? '<div class="inventory-task-remnants"><div><strong>当前任务料头推荐</strong><p id="inventory-remnant-recommendation"></p></div><button class="tool-btn inventory-primary" data-recommend>试排并查看推荐</button></div>' : ''}
+        <p class="inventory-summary" id="inventory-${kind}-summary" role="status">正在读取库存…</p>
+        <div class="inventory-toolbar"><input type="search" id="inventory-${kind}-search" aria-label="搜索${label}" placeholder="${placeholder}">
+            <select id="inventory-${kind}-filter" aria-label="筛选${label}"><option value="">全部${kind === 'rolls' ? '验布状态' : '料头'}</option>${options}</select>
+            <button class="tool-btn" data-refresh>刷新</button></div>
+        ${kind === 'rolls' ? `<details class="inventory-new-roll"><summary>＋ 录入母卷</summary>
+            <form id="inventory-new-roll-form" class="inventory-form">
+                <label>母卷编号<input id="new-roll-id" required></label><label>面料名称 / 型号<input id="new-roll-model" required></label>
+                <label>净幅宽 (mm)<input id="new-roll-width" type="number" min="0.001" step="any" required></label>
+                <label>总长度 (mm)<input id="new-roll-length" type="number" min="0.001" step="any" required></label>
+                <label>库位<input id="new-roll-location"></label><button class="tool-btn inventory-primary" type="submit">保存母卷档案</button>
+                <p id="new-roll-error" class="inventory-form-wide inventory-error" role="alert"></p>
+            </form></details>` : ''}
+        <div class="inventory-browser"><div class="inventory-list"><p id="inventory-${kind}-count" class="inventory-list-caption"></p><div id="material-${kind}-container" class="inventory-table-scroll"></div></div>
+            <aside id="${detailId}" class="inventory-detail" aria-label="${kind === 'rolls' ? '母卷' : '料头'}详情"></aside></div>
+    </section>`;
+}
+
+function createMaterialModalDOM() {
+    const modal = document.createElement(standalone ? 'main' : 'dialog');
+    modal.id = 'material-manager-modal';
+    modal.className = 'inventory-dialog';
+    modal.setAttribute('aria-labelledby', 'inventory-title');
+    modal.innerHTML = `
+        <div class="inventory-header"><h2 id="inventory-title">材料与库存</h2>${standalone?'<p>母卷、料头与疵点档案；选料与报工在裁切作业中完成。</p>':'<button class="tool-btn" data-close autofocus>返回工作台</button>'}</div>
+        <nav class="inventory-tabs" aria-label="库存分类">${standalone ? '' : '<button id="tab-mat-current" data-tab="current" aria-pressed="false" aria-controls="pane-mat-current">当前用料与疵点</button>'}<button id="tab-mat-rolls" data-tab="rolls" aria-pressed="true" aria-controls="pane-mat-rolls">母卷库存</button><button id="tab-mat-remnants" data-tab="remnants" aria-pressed="false" aria-controls="pane-mat-remnants">料头库存</button><button id="tab-mat-dict" data-tab="dict" aria-pressed="false" aria-controls="pane-mat-dict">疵点参考</button></nav>
+        <div class="inventory-body">
+            ${standalone ? '' : '<section id="pane-mat-current" hidden></section>'}
+            ${inventoryPane('rolls', '母卷', '搜索编号、面料或库位', '<option value="PASSED">已验合格</option><option value="PENDING">待验</option><option value="QUARANTINED">隔离</option>', 'material-roll-detail-panel')}
+            ${inventoryPane('remnants', '料头', '搜索编号、来源母卷或库位', '<option value="clean">无疵点</option><option value="defect">有疵点</option>', 'material-remnant-detail-panel')}
+            <section id="pane-mat-dict" class="inventory-reference" hidden>
+                <h3>疵点类型说明</h3><p>以下为演示中的分类参考。具体坐标、避让间距与处理策略，请查看物料的疵点记录。</p>
+                ${[['HOLE', '破洞', '经纬向断裂形成孔洞。'], ['WEFT_DEFECT', '断纬 / 抽纱', '纱线缺失或排列异常。'], ['STAIN', '油污 / 色渍', '布面油污、黄斑或印染污染。'], ['SLUB', '粗节 / 结头', '纱线局部增粗或形成结头。'], ['SHADING', '色差', '布面不同区域颜色不一致。']].map(([code, name, description]) => `<details class="inventory-disclosure"><summary>${name}<span>${code}</span></summary><p>${description}</p></details>`).join('')}
+            </section>
+        </div>
+        <div class="inventory-footer">此处管理库存档案。为任务选料请进入“选择本次用料”，确认报工才扣库存。</div>`;
+    modal.addEventListener('keydown', event => event.stopPropagation());
+    modal.addEventListener('close', () => { detailRequest++;mountInspectionRadar(false); });
+    modal.addEventListener('click', async event => {
+        const button = event.target.closest('button');
+        if (!button) return;
+        const d = button.dataset;
+        if ('close' in d) closeMaterialModal();
+        else if ('recommend' in d) {closeMaterialModal();window.camApp.matchTaskMaterials({type:'remnant',recommend:true});}
+        else if (d.tab) switchMaterialTab(d.tab);
+        else if ('refresh' in d) switchMaterialTab(activeTab);
+        else if (d.roll || d.remnant) {
+            if (d.roll) await selectRollForDetail(d.roll);
+            else selectStockRemnant(d.remnant);
+            if (window.matchMedia('(max-width: 960px)').matches) {
+                document.getElementById(d.roll ? 'material-roll-detail-panel' : 'material-remnant-detail-panel').scrollIntoView({ block: 'start' });
             }
         }
-    } catch (e) {
-        console.warn("读取母卷失败，使用本地状态", e);
+        else if (d.mount) mountRollToStation(d.mount);
+        else if (d.matchRemnant) {closeMaterialModal();window.camApp.matchTaskMaterials({type:'remnant',id:d.matchRemnant,recommend:true});}
+        else if (d.scrap) scrapRemnantById(d.scrap);
+    });
+    if (!standalone) {
+        const current = document.getElementById('material-details');current.hidden = false;
+        modal.querySelector('#pane-mat-current').append(current);
     }
+    modal.addEventListener('input', event => {
+        if (event.target.id === `inventory-${activeTab}-search`) activeTab === 'rolls' ? renderRollsList() : renderRemnantsList();
+    });
+    modal.addEventListener('change', event => {
+        if (event.target.id === `inventory-${activeTab}-filter`) activeTab === 'rolls' ? renderRollsList() : renderRemnantsList();
+    });
+    modal.addEventListener('submit', async event => {
+        event.preventDefault();
+        const button = event.submitter;
+        if (button) button.disabled = true;
+        try {
+            if (event.target.id === 'inventory-new-roll-form') await submitNewRoll();
+            else if (event.target.dataset.defectForm) await submitNewDefect(event.target.dataset.defectForm);
+        } finally { if (button) button.disabled = false; }
+    });
+    document.body.appendChild(modal);
 }
 
 export async function submitNewRoll() {
@@ -102,235 +331,13 @@ export async function submitNewRoll() {
         if (!response.ok) throw new Error("母卷录入失败");
         await refreshRollsList();
         renderRollsList();
-        await mountRollToStation(roll.rollId);
+        await selectRollForDetail(roll.rollId);
+        showToast('母卷档案已保存，当前任务用料保持不变', 'success');
         error.textContent = "";
     } catch (e) { error.textContent = e.message; }
 }
 
-/**
- * 渲染 Tab 1: 母卷档案与全景疵点
- */
-function renderRollsList() {
-    const container = document.getElementById("material-rolls-container");
-    if (!container) return;
 
-    if (!cachedRolls || cachedRolls.length === 0) {
-        container.innerHTML = `<div style="padding: 20px; color: var(--text-muted); text-align: center;">暂无母卷档案</div>`;
-        return;
-    }
-
-    container.innerHTML = cachedRolls.map(r => {
-        const remLen = r.currentRemainingLength ?? r.totalLength;
-        const usedLen = r.usedLength ?? (r.totalLength - remLen);
-        const percent = Math.round((remLen / r.totalLength) * 100);
-        const isCurrent = (r.rollId === (state.getCurrentCaseData().rollId || activeRollId));
-
-        return `
-            <div class="roll-archive-card ${isCurrent ? 'active-roll' : ''}" onclick="window.cutApp.plugins.material.selectRollForDetail('${r.rollId}')" style="background: var(--panel-bg); border: 1px solid ${isCurrent ? '#0284c7' : 'var(--panel-border)'}; border-radius: 6px; padding: 12px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s;">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="font-family: monospace; font-size: 13.5px; font-weight: 700; color: ${isCurrent ? '#0284c7' : 'var(--text-main)'};">${r.rollId}</span>
-                        <span class="header-tag" style="font-size: 10px; color: ${r.inspectionStatus === 'PASSED' ? '#10b981' : '#f59e0b'}; border-color: currentColor;">
-                            ${r.inspectionStatus === 'PASSED' ? '验布合格' : (r.inspectionStatus === 'QUARANTINED' ? '隔离' : '待验')}
-                        </span>
-                        ${isCurrent ? '<span style="font-size: 10px; padding: 1px 6px; background: #0284c7; color: #fff; border-radius: 3px; font-weight: bold;">当前生产卷</span>' : ''}
-                    </div>
-                    <div style="font-size: 11.5px; color: var(--text-muted);">
-                        批次: <b>${r.batchNo || 'BAT-2026'}</b> | 库位: <span>${r.storageLocation || '立库 A-01'}</span>
-                    </div>
-                </div>
-
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; font-size: 11px; margin-top: 8px; color: var(--text-muted);">
-                    <div>材质品名: <b style="color: var(--text-main);">${r.materialName || r.rollModel}</b></div>
-                    <div>幅宽净门幅: <b style="color: var(--text-main);">${r.width} mm</b> (毛边${r.rawWidth || (r.width+50)}mm)</div>
-                    <div>面料克重: <span>${r.grammage || 240} g/m²</span></div>
-                    <div>经向缩水率: <span>${r.shrinkageRate || 1.5}%</span></div>
-                </div>
-
-                <!-- 剩余米数动态进度条 -->
-                <div style="margin-top: 10px;">
-                    <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px;">
-                        <span>剩余有效长度: <b style="color: #10b981;">${(remLen/1000).toFixed(1)}m</b> / ${(r.totalLength/1000).toFixed(1)}m (已开卷切下 ${(usedLen/1000).toFixed(1)}m)</span>
-                        <span style="font-weight: bold; color: ${percent > 30 ? '#10b981' : '#f59e0b'};">${percent}% 结存</span>
-                    </div>
-                    <div style="height: 6px; width: 100%; background: var(--panel-border); border-radius: 3px; overflow: hidden;">
-                        <div style="height: 100%; width: ${percent}%; background: ${percent > 30 ? '#10b981' : '#f59e0b'}; transition: width 0.3s;"></div>
-                    </div>
-                </div>
-
-                <!-- 疵点与料头统计胶囊 -->
-                <div style="display: flex; gap: 12px; margin-top: 8px; font-size: 11px; border-top: 1px dashed var(--panel-border); padding-top: 6px;">
-                    <span>所含标准疵点: <b style="color: #ef4444;">${r.defectsCount || (r.defects ? r.defects.length : 0)} 处</b> (已标定避让)</span>
-                    <span>切下在库料头: <b style="color: #0284c7;">${r.remnantCount || 0} 块</b> (${(r.remnantTotalArea || 0).toFixed(2)} m²)</span>
-                    <span style="margin-left: auto; color: #0284c7; font-weight: bold;">点击查看详情 & 疵点图谱 &gt;&gt;</span>
-                </div>
-            </div>
-        `;
-    }).join('');
-
-    // 默认展示首个母卷详情
-    if (cachedRolls.length > 0) {
-        selectRollForDetail(activeRollId || cachedRolls[0].rollId);
-    }
-}
-
-/**
- * 选中某母卷，在右侧/底部面板展示其详细档案、疵点清单与录入表单
- */
-export async function selectRollForDetail(rollId) {
-    activeRollId = rollId;
-    const detailBox = document.getElementById("material-roll-detail-panel");
-    if (!detailBox) return;
-
-    let roll = cachedRolls.find(r => r.rollId === rollId);
-    try {
-        const res = await fetch("/api/rolls/" + rollId);
-        if (res.ok) {
-            roll = await res.json();
-        }
-    } catch (e) {
-        console.warn("获取母卷详情异常", e);
-    }
-
-    if (!roll) return;
-
-    const defects = roll.defects || [];
-
-    detailBox.innerHTML = `
-        <div style="background: var(--card-blue-bg); border: 1px solid var(--accent-blue); border-radius: 6px; padding: 12px; margin-bottom: 12px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <h3 style="margin: 0; font-size: 15px; font-weight: 700; color: var(--accent-blue);">母卷档案: ${roll.rollId} (${roll.materialName || roll.rollModel})</h3>
-                    <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">
-                        面料成分: ${roll.composition || '65%涤/35%棉'} | 供应商: ${roll.supplier || '华联纺织'} | 验布员: ${roll.inspector || 'AI视觉验布机'}
-                    </div>
-                </div>
-                <div style="display: flex; gap: 8px;">
-                    <button class="tool-btn active" style="background: #10b981; font-weight: bold; padding: 4px 12px;" onclick="window.cutApp.plugins.material.mountRollToStation('${roll.rollId}')">
-                        装载本卷至 CAM 台面排产
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- 疵点清单与空间标定表 -->
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <div style="font-weight: 700; font-size: 12.5px; color: var(--text-main);">
-                本卷标定疵点清单 (共 ${defects.length} 处，纺织 4 分制标准)
-            </div>
-            <button class="tool-btn" style="font-size: 10.5px; padding: 2px 8px; background: rgba(239, 68, 68, 0.1); color: #dc2626; border-color: rgba(239, 68, 68, 0.3);" onclick="window.cutApp.plugins.material.toggleAddDefectForm()">
-                + 标定新疵点
-            </button>
-        </div>
-
-        <!-- 新增疵点表单 (默认收起) -->
-        <div id="add-defect-form-box" style="display: none; background: var(--bg-main); border: 1px solid var(--panel-border); border-radius: 6px; padding: 10px; margin-bottom: 10px;">
-            <div style="font-size: 11.5px; font-weight: bold; margin-bottom: 6px; color: var(--accent-blue);">录入/标定新疵点参数 (毫米世界坐标)</div>
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; font-size: 11px;">
-                <div>
-                    <span>经向纵深 Y (mm):</span>
-                    <input type="number" id="inp-new-defect-y" class="prop-input" value="4500" step="100" style="width: 100%;">
-                </div>
-                <div>
-                    <span>横向 X (mm):</span>
-                    <input type="number" id="inp-new-defect-x" class="prop-input" value="600" step="50" style="width: 100%;">
-                </div>
-                <div>
-                    <span>缺陷宽 W (mm):</span>
-                    <input type="number" id="inp-new-defect-w" class="prop-input" value="200" step="20" style="width: 100%;">
-                </div>
-                <div>
-                    <span>缺陷长 H (mm):</span>
-                    <input type="number" id="inp-new-defect-h" class="prop-input" value="150" step="20" style="width: 100%;">
-                </div>
-                <div>
-                    <span>工业分类类型:</span>
-                    <select id="sel-new-defect-type" class="prop-input" style="width: 100%;">
-                        <option value="HOLE">破洞 (HOLE - 扣4分)</option>
-                        <option value="WEFT_DEFECT">抽纱/跳纱 (WEFT - 扣3分)</option>
-                        <option value="STAIN" selected>油污/黄斑 (STAIN - 扣2分)</option>
-                        <option value="SLUB">粗节/结头 (SLUB - 扣1分)</option>
-                    </select>
-                </div>
-                <div>
-                    <span>安全避让间距 (Margin):</span>
-                    <input type="number" id="inp-new-defect-m" class="prop-input" value="20" step="5" style="width: 100%;">
-                </div>
-                <div>
-                    <span>检出来源方式:</span>
-                    <select id="sel-new-defect-src" class="prop-input" style="width: 100%;">
-                        <option value="AI_VISION_SCANNER">AI 视觉验布机扫描</option>
-                        <option value="MANUAL_INSPECT">现场人工打码标定</option>
-                    </select>
-                </div>
-                <div style="display: flex; align-items: flex-end;">
-                    <button class="tool-btn active" style="width: 100%; height: 26px; background: #0284c7; font-size: 11px;" onclick="window.cutApp.plugins.material.submitNewDefect('${roll.rollId}')">
-                        保存并写入母卷
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <div style="max-height: 260px; overflow-y: auto; border: 1px solid var(--panel-border); border-radius: 4px;">
-            <table class="cam-table">
-                <thead>
-                    <tr>
-                        <th width="40">序号</th>
-                        <th width="80">工业类型</th>
-                        <th>空间定位 (X, Y 毫米)</th>
-                        <th>缺陷尺寸 (宽×长)</th>
-                        <th>4分制扣分</th>
-                        <th>安全避让区</th>
-                        <th>检出来源与处理策略</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${defects.map(d => `
-                        <tr>
-                            <td style="text-align: center; font-family: monospace;">#${d.id}</td>
-                            <td>
-                                <span style="font-size: 10px; padding: 1px 5px; border-radius: 3px; font-weight: bold; background: ${getDefectColor(d.defectType)}; color: #fff;">
-                                    ${d.typeName || d.defectType}
-                                </span>
-                            </td>
-                            <td style="font-family: monospace;">X: ${d.x}mm | Y: ${d.y}mm (${(d.y/1000).toFixed(2)}m)</td>
-                            <td style="font-family: monospace;">${d.w} × ${d.h} mm</td>
-                            <td style="text-align: center; font-weight: bold; color: ${d.points >= 3 ? '#dc2626' : '#d97706'};">扣 ${d.points || 2} 分</td>
-                            <td>外扩 +${d.margin || 20}mm (${(d.w + (d.margin||20)*2)}×${(d.h + (d.margin||20)*2)}mm)</td>
-                            <td style="font-size: 10.5px; color: var(--text-muted);">
-                                ${d.detectionSource === 'AI_VISION_SCANNER' ? '视觉验布' : '人工标定'} · 
-                                <b style="color: ${d.avoidanceStrategy === 'MUST_AVOID' ? '#dc2626' : '#0284c7'};">
-                                    ${d.avoidanceStrategy === 'MUST_AVOID' ? '强制切出料头隔离' : '允许落入余料'}
-                                </b>
-                            </td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        </div>
-    `;
-}
-
-function getDefectColor(type) {
-    switch (type) {
-        case 'HOLE': return '#dc2626';
-        case 'WEFT_DEFECT': return '#d97706';
-        case 'STAIN': return '#7c3aed';
-        case 'SLUB': return '#059669';
-        default: return '#ef4444';
-    }
-}
-
-export function toggleAddDefectForm() {
-    const box = document.getElementById("add-defect-form-box");
-    if (box) {
-        box.style.display = (box.style.display === "none") ? "block" : "none";
-    }
-}
-
-/**
- * 提交新增疵点并更新母卷
- */
 export async function submitNewDefect(rollId) {
     const y = parseFloat(document.getElementById("inp-new-defect-y").value) || 0;
     const x = parseFloat(document.getElementById("inp-new-defect-x").value) || 0;
@@ -371,249 +378,46 @@ export async function submitNewDefect(rollId) {
             selectRollForDetail(rollId);
             // 如果正是当前主 CAM 台面生产的母卷，同步至主画布
             const curData = state.getCurrentCaseData();
-            if (curData.rollId === rollId) {
+            if (!standalone && curData.rollId === rollId) {
                 curData.globalDefects = curData.globalDefects || [];
                 curData.globalDefects.push(savedDefect);
                 renderDefectsUI(curData.globalDefects);
                 renderScene();
                 renderRadar();
             }
-            alert("疵点标定成功并已持久化至母卷档案！");
+            if (!standalone) state.pendingPlan = null;
+            showToast('疵点已保存，请重新排料后报工', 'success');
         } else {
-            alert("疵点标定失败：坐标需落在母卷范围内");
+            showToast((await res.json()).message || '疵点标定失败', 'error');
         }
     } catch (e) {
-        alert("提交疵点失败，请检查服务状态");
+        showToast('提交疵点失败，请检查服务状态', 'error');
     }
 }
 
-/**
- * 将指定母卷装载至主 CAM 切割台面
- */
+
 export async function mountRollToStation(rollId) {
-    const sel = document.getElementById("sel-mother-roll-id");
-    if (sel) {
-        sel.value = rollId;
-        await onMotherRollChange();
-        closeMaterialModal();
-        alert(`已成功装载母卷 [${rollId}] 至主 CAM 裁切工位！`);
-    }
+    closeMaterialModal();
+    return window.camApp.matchTaskMaterials({type:'roll',id:rollId});
 }
 
-/**
- * 渲染 Tab 2: 料头货架与代际血统追溯
- */
-async function renderRemnantsLineage() {
-    const container = document.getElementById("material-remnants-container");
-    if (!container) return;
-
-    let remnants = [];
-    try {
-        const res = await fetch("/api/remnants");
-        if (res.ok) remnants = await res.json();
-    } catch (e) {
-        console.warn("加载料头失败", e);
-    }
-
-    if (!remnants || remnants.length === 0) {
-        container.innerHTML = `<div style="padding: 20px; color: var(--text-muted); text-align: center;">暂无在库料头</div>`;
-        return;
-    }
-
-    container.innerHTML = `
-        <table class="cam-table">
-            <thead>
-                <tr>
-                    <th width="120">料头编号/条码</th>
-                    <th width="80">血统代数</th>
-                    <th width="120">来源母卷</th>
-                    <th>规格尺寸 (宽×长)</th>
-                    <th>有效面积</th>
-                    <th>质量评级</th>
-                    <th>存放库位</th>
-                    <th>疵点隔离情况</th>
-                    <th width="80">处置操作</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${remnants.map(r => `
-                    <tr>
-                        <td style="font-family: monospace; font-weight: bold; color: ${r.hasDefect ? '#d97706' : '#0284c7'};">
-                            ${r.id}
-                        </td>
-                        <td>
-                            <span style="font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: bold; background: ${r.generation === 1 ? '#0284c7' : '#7c3aed'}; color: #fff;">
-                                ${r.generation === 1 ? '一代母卷直切' : '二代套裁派生'}
-                            </span>
-                        </td>
-                        <td style="font-family: monospace;">${r.sourceRollId || '-'}</td>
-                        <td style="font-family: monospace; font-weight: bold;">${r.width} × ${r.length} mm</td>
-                        <td style="font-family: monospace;">${r.area.toFixed(2)} m²</td>
-                        <td>
-                            <span style="font-size: 10px; padding: 1px 5px; border-radius: 2px; font-weight: bold; ${r.qualityGrade === 'GRADE_A' ? 'background: rgba(16, 185, 129, 0.15); color: #059669;' : 'background: rgba(245, 158, 11, 0.15); color: #d97706;'}">
-                                ${r.qualityGrade === 'GRADE_A' ? '优质完好' : (r.qualityGrade === 'GRADE_DEFECT' ? '局部带疵' : '边角料')}
-                            </span>
-                        </td>
-                        <td style="color: var(--accent-amber); font-weight: 500;">${r.location || '临时堆放区'}</td>
-                        <td style="font-size: 11px; color: ${r.hasDefect ? '#dc2626' : '#10b981'};">
-                            ${r.hasDefect ? `含 ${r.defects ? r.defects.length : 1} 处疵点 (已安全避让)` : '无疵点完好短料'}
-                        </td>
-                        <td>
-                            <button class="tool-btn" style="font-size: 10px; padding: 2px 6px; background: rgba(239, 68, 68, 0.1); color: #dc2626; border-color: rgba(239, 68, 68, 0.3);" onclick="window.cutApp.plugins.material.scrapRemnantById('${r.id}')">
-                                报废核销
-                            </button>
-                        </td>
-                    </tr>
-                `).join('')}
-            </tbody>
-        </table>
-    `;
-}
 
 export async function scrapRemnantById(id) {
-    if (!confirm(`确定对料头 [${id}] 执行报废处置吗？报废后将移出可用货架库。`)) return;
+    if (!await confirmAction(`料头 ${id} 将移出可用货架，请确认实物已判定报废。`, {title:'报废料头', action:'确认报废'})) return;
     try {
-        const res = await fetch(`/api/remnants/${id}/scrap`, {
+        const res = await fetch(`/api/remnants/${encodeURIComponent(id)}/scrap`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ reason: "车间质检判定破损报废" })
         });
+        const result = await res.json();
+        if (!res.ok || !result.success) throw new Error(result.message || '报废失败，料头可能已变化');
         if (res.ok) {
             renderRemnantsLineage();
             refreshShelfRemnantsList();
-            alert(`料头 [${id}] 已成功核销报废！`);
+            showToast(`料头 ${id} 已报废`, 'success');
         }
     } catch (e) {
-        alert("操作失败");
+        showToast(e.message, 'error');
     }
-}
-
-function createMaterialModalDOM() {
-    const div = document.createElement("div");
-    div.id = "material-manager-modal";
-    div.className = "settings-modal-overlay";
-    div.style.display = "none";
-    div.innerHTML = `
-        <div class="settings-modal-dialog" style="width: 960px; max-width: 96vw; height: 720px; display: flex; flex-direction: column;">
-            <div class="settings-modal-header">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-weight: 700; font-size: 15px; color: var(--accent-blue);">母卷物料档案、疵点精准空间库与料头管理中心</span>
-                    <span class="header-tag" style="color: #10b981;">纺织 4 分制 / MES 物料血统</span>
-                </div>
-                <button onclick="window.cutApp.plugins.material.closeMaterialModal()" style="background: transparent; border: none; color: var(--text-muted); font-size: 18px; cursor: pointer; font-weight: bold;">关闭</button>
-            </div>
-
-            <!-- 顶部选项卡 -->
-            <div class="settings-nav-tabs" style="padding: 0 16px; margin-top: 6px;">
-                <button class="settings-tab-btn active" id="tab-mat-rolls" onclick="window.cutApp.plugins.material.switchMaterialTab('rolls')">母卷档案与全景疵点库 (Master Rolls)</button>
-                <button class="settings-tab-btn" id="tab-mat-remnants" onclick="window.cutApp.plugins.material.switchMaterialTab('remnants')">料头货架与代际血统追溯 (Remnant Lineage)</button>
-                <button class="settings-tab-btn" id="tab-mat-dict" onclick="window.cutApp.plugins.material.switchMaterialTab('dict')">工业疵点标准与避让策略字典</button>
-            </div>
-
-            <!-- 主内容区 -->
-            <div style="flex: 1; overflow-y: auto; padding: 16px;">
-                <!-- Tab 1: 母卷档案 -->
-                <div id="pane-mat-rolls" style="display: flex; flex-direction: column; gap: 12px;">
-                    <details style="border:1px solid var(--panel-border);padding:8px;border-radius:4px;"><summary style="cursor:pointer;">＋ 录入母卷</summary>
-                        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-                            <input id="new-roll-id" class="prop-input" placeholder="母卷编号">
-                            <input id="new-roll-model" class="prop-input" placeholder="面料名称 / 型号">
-                            <input id="new-roll-width" class="prop-input" type="number" min="1" placeholder="净幅宽 mm">
-                            <input id="new-roll-length" class="prop-input" type="number" min="1" placeholder="总长度 mm">
-                            <input id="new-roll-location" class="prop-input" placeholder="库位">
-                            <button class="tool-btn active" onclick="window.cutApp.plugins.material.submitNewRoll()">保存并装载</button>
-                        </div><div id="new-roll-error" style="color:var(--accent-red);"></div>
-                    </details>
-                    <div style="display: grid; grid-template-columns: 360px 1fr; gap: 14px;">
-                        <!-- 左侧母卷卡片列表 -->
-                        <div style="display: flex; flex-direction: column;">
-                            <div style="font-size: 12px; font-weight: bold; margin-bottom: 6px; color: var(--text-muted);">在库母卷台账 (点击查看详情)</div>
-                            <div id="material-rolls-container" style="max-height: 520px; overflow-y: auto;">
-                                <!-- 动态填充 -->
-                            </div>
-                        </div>
-                        <!-- 右侧母卷详情与疵点表 -->
-                        <div id="material-roll-detail-panel" style="display: flex; flex-direction: column;">
-                            <!-- 动态填充 -->
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Tab 2: 料头血统与货架 -->
-                <div id="pane-mat-remnants" style="display: none; flex-direction: column; gap: 12px;">
-                    <div style="font-size: 12px; color: var(--text-muted);">
-                        说明：记录母卷切下的所有在库可用料头及再次套裁派生的二代子料头，支持追踪其直系父级、质量评级与存放库位。
-                    </div>
-                    <div id="material-remnants-container" style="max-height: 520px; overflow-y: auto;">
-                        <!-- 动态填充 -->
-                    </div>
-                </div>
-
-                <!-- Tab 3: 疵点字典 -->
-                <div id="pane-mat-dict" style="display: none; flex-direction: column; gap: 12px;">
-                    <div style="font-size: 12px; font-weight: bold; color: var(--accent-blue);">纺织 4 分制 (Four-Point System) 工业疵点评级与数控裁床避让策略标准</div>
-                    <table class="cam-table">
-                        <thead>
-                            <tr>
-                                <th width="100">疵点类型代码</th>
-                                <th width="120">中文名称与定义</th>
-                                <th width="100">扣分标准 (4分制)</th>
-                                <th width="110">严重等级</th>
-                                <th width="100">推荐避让间距</th>
-                                <th>CAM 数控切刀避让与工艺处置策略</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td><b>HOLE</b></td>
-                                <td style="color: #dc2626; font-weight: bold;">经纬向断裂破洞</td>
-                                <td style="text-align: center; color: #dc2626; font-weight: bold;">扣 4 分 (致命)</td>
-                                <td>4级 (致命)</td>
-                                <td><b>+25 mm</b></td>
-                                <td><b>绝对避让 (MUST_AVOID)</b>：裁片绝对禁止穿过，算法必须规划横刀或纵刀切出带疵废料头将其物理隔离。</td>
-                            </tr>
-                            <tr>
-                                <td><b>WEFT_DEFECT</b></td>
-                                <td style="color: #d97706; font-weight: bold;">断纬 / 抽纱 / 稀密档</td>
-                                <td style="text-align: center; color: #d97706; font-weight: bold;">扣 3 分 (重度)</td>
-                                <td>3级 (严重)</td>
-                                <td><b>+20 mm</b></td>
-                                <td><b>强制避让 (MUST_AVOID)</b>：影响成品拉伸强力与抗撕裂，切片边缘与抽纱线保持安全裕量。</td>
-                            </tr>
-                            <tr>
-                                <td><b>STAIN</b></td>
-                                <td style="color: #7c3aed; font-weight: bold;">印染滴油 / 色渍黄斑</td>
-                                <td style="text-align: center; color: #7c3aed; font-weight: bold;">扣 2 分 (中度)</td>
-                                <td>2级 (一般)</td>
-                                <td><b>+20 mm</b></td>
-                                <td><b>外观避让 (MUST_AVOID)</b>：绝不允许落入A类/正面合格裁片；若落入内部衬料或料头则可免切除。</td>
-                            </tr>
-                            <tr>
-                                <td><b>SLUB</b></td>
-                                <td style="color: #059669; font-weight: bold;">纱支粗节 / 死棉结头</td>
-                                <td style="text-align: center; color: #059669; font-weight: bold;">扣 1 分 (轻微)</td>
-                                <td>1级 (轻微)</td>
-                                <td><b>+15 mm</b></td>
-                                <td><b>允许贯通 (PENETRABLE)</b>：轻微粗节允许落入次级裁片或留存料头中，不强制切除，最大化利用率。</td>
-                            </tr>
-                            <tr>
-                                <td><b>SHADING</b></td>
-                                <td style="color: #0284c7; font-weight: bold;">边中色差 / 经向色花</td>
-                                <td style="text-align: center; color: #0284c7; font-weight: bold;">扣 2~4 分</td>
-                                <td>2~3级 (中度)</td>
-                                <td><b>整幅对色</b></td>
-                                <td><b>保向对色排料</b>：严格保持裁片经向与布料纤维经向平行，禁止混色混批裁切。</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <div class="settings-footer">
-                <span style="font-size: 11px; color: var(--text-muted);">物料闭环：母卷开卷排切 ➔ 实切扣减母卷有效长度 ➔ 自动派生在库料头 ➔ 新订单优先在库料头免母卷消耗。</span>
-                <button class="tool-btn" onclick="window.cutApp.plugins.material.closeMaterialModal()">关闭</button>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(div);
 }

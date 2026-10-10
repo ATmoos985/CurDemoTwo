@@ -6,7 +6,9 @@ import { bus } from '../../core/event-bus.js';
 export function toggleSectionCollapse(headerEl) {
     const section = headerEl.closest(".panel-section");
     if (!section) return;
-    section.classList.toggle("collapsed");
+    const collapsed = section.classList.toggle("collapsed");
+    const toggle = section.querySelector('.section-toggle');
+    if (toggle) toggle.setAttribute('aria-expanded', String(!collapsed));
 }
 
 export function toggleSidebar(side) {
@@ -25,8 +27,8 @@ export function toggleSidebar(side) {
         }
         if (topBtn) topBtn.innerText = isCollapsed ? "展开左栏" : "收起左栏";
         if (!isCollapsed) {
-            const savedW = localStorage.getItem("cutdemo_left_sidebar_w") || "380";
-            bar.style.width = `${savedW}px`;
+            const savedW = localStorage.getItem("cutdemo_left_sidebar_w");
+            bar.style.width = savedW ? `${savedW}px` : "";
         }
     } else if (side === "right") {
         const bar = document.getElementById("sidebar-right");
@@ -43,8 +45,8 @@ export function toggleSidebar(side) {
         }
         if (topBtn) topBtn.innerText = isCollapsed ? "展开右栏" : "收起右栏";
         if (!isCollapsed) {
-            const savedW = localStorage.getItem("cutdemo_right_sidebar_w") || "360";
-            bar.style.width = `${savedW}px`;
+            const savedW = localStorage.getItem("cutdemo_right_sidebar_w");
+            bar.style.width = savedW ? `${savedW}px` : "";
         }
     }
     setTimeout(() => {
@@ -105,8 +107,8 @@ export function initLayoutResizers() {
         leftResizer.addEventListener("pointercancel", stopLeftDrag);
 
         leftResizer.addEventListener("dblclick", () => {
-            leftSidebar.style.width = "380px";
-            localStorage.setItem("cutdemo_left_sidebar_w", "380");
+            leftSidebar.style.width = "";
+            localStorage.removeItem("cutdemo_left_sidebar_w");
             onCanvasResize();
         });
     }
@@ -149,8 +151,8 @@ export function initLayoutResizers() {
         rightResizer.addEventListener("pointercancel", stopRightDrag);
 
         rightResizer.addEventListener("dblclick", () => {
-            rightSidebar.style.width = "360px";
-            localStorage.setItem("cutdemo_right_sidebar_w", "360");
+            rightSidebar.style.width = "";
+            localStorage.removeItem("cutdemo_right_sidebar_w");
             onCanvasResize();
         });
     }
@@ -164,6 +166,8 @@ export function switchRightPanelTab(tabName) {
 
     if (btnCut) btnCut.classList.toggle("active", tabName === "cut");
     if (btnBal) btnBal.classList.toggle("active", tabName === "balance");
+    if (btnCut) btnCut.setAttribute('aria-pressed', String(tabName === 'cut'));
+    if (btnBal) btnBal.setAttribute('aria-pressed', String(tabName === 'balance'));
     if (paneCut) paneCut.style.display = (tabName === "cut") ? "flex" : "none";
     if (paneBal) paneBal.style.display = (tabName === "balance") ? "flex" : "none";
 }

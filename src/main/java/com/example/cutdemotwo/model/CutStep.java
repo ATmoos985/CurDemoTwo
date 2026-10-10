@@ -13,6 +13,7 @@ public class CutStep {
     private Double endX;
     private Double endY;
     private Double airDistance;
+    private Integer stage;
 
     public CutStep() {}
 
@@ -69,4 +70,8 @@ public class CutStep {
 
     public Double getAirDistance() { return airDistance; }
     public void setAirDistance(Double airDistance) { this.airDistance = airDistance; }
+
+    /** Lower stages must finish first; null keeps legacy cuts in their supplied order. */
+    public Integer getStage() { return stage; }
+    public void setStage(Integer stage) { this.stage = stage; }
 }

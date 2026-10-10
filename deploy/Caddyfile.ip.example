@@ -1,0 +1,19 @@
+# Merge the global options into the existing global block, or add one at the top.
+# Preserve existing HTTP routes. Do not replace the existing Caddyfile with this example.
+{
+    auto_https disable_redirects
+    default_sni 47.77.181.58
+}
+
+https://47.77.181.58 {
+    tls {
+        issuer acme {
+            dir https://acme-v02.api.letsencrypt.org/directory
+            profile shortlived
+        }
+    }
+    basic_auth {
+        cutdemo REPLACE_WITH_PASSWORD_HASH
+    }
+    reverse_proxy cutdemo-app:8080
+}

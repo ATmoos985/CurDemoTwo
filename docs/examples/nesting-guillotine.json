@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "1",
+  "unit": "mm",
+  "material": {
+    "id": "sheet-A",
+    "shape": { "type": "RECTANGLE", "width": 2000, "height": 4000 },
+    "exclusions": [
+      { "id": 1, "x": 200, "y": 1500, "shape": { "type": "RECTANGLE", "width": 150, "height": 600 }, "clearance": 50 }
+    ],
+    "continuesAfterRegion": false
+  },
+  "parts": [
+    { "id": 1, "name": "零件A", "shape": { "type": "RECTANGLE", "width": 1500, "height": 3000 }, "quantity": 1, "allowRotation": false }
+  ],
+  "process": {
+    "mode": "GUILLOTINE", "feedMode": "SHEET", "startCorner": "right-top", "firstStageOrientation": "vertical",
+    "trimStart": 0, "minReusableWidth": 200, "minReusableHeight": 300, "kerf": 0, "objective": "MAXIMIZE_PIECE_AREA"
+  },
+  "engine": "packingsolver",
+  "timeLimitSeconds": 3
+}

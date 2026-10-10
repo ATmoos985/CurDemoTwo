@@ -14,6 +14,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest
 class FabricCutBusinessTests {
+    @org.junit.jupiter.api.io.TempDir
+    static java.nio.file.Path testState;
+
+    @org.springframework.test.context.DynamicPropertySource
+    static void isolatedInventory(org.springframework.test.context.DynamicPropertyRegistry registry) {
+        registry.add("cutdemo.state.path", () -> testState.resolve("inventory.json").toString());
+    }
+
 
     @Autowired
     private ScenarioOneService scenarioOneService;
@@ -59,6 +67,19 @@ class FabricCutBusinessTests {
     }
 
     @Test
+    void testRealFabricScenario7AreaBalance() {
+        SolveResponse res = scenarioOneService.getRealFabricScenario();
+        assertTrue(res.isSuccess());
+        assertEquals(1, res.getPieces().size());
+        assertEquals(4, res.getRemnants().size());
+        assertEquals(7.053, res.getPieceArea(), 0.001);
+        assertEquals(6.947, res.getRemArea(), 0.001);
+        assertEquals(14.0, res.getTotalArea(), 0.001);
+        // 100% Strict area conservation: Piece (7.053) + Remnant (6.947) = 14.000 m2
+        assertEquals(res.getTotalArea(), res.getPieceArea() + res.getRemArea() + res.getWasteArea(), 0.001);
+    }
+
+    @Test
     void testPackingSolverRealExecutionWithDefects() {
         SolveRequest req = new SolveRequest();
         req.setRollW(2000.0);
@@ -75,7 +96,7 @@ class FabricCutBusinessTests {
         defects.add(new Defect(2, 1300, 3200, 200, 100, 30));
         req.setDefects(defects);
 
-        SolveResponse res = packingSolverService.solve(req);
+        SolveResponse res = com.example.cutdemotwo.service.FabricSolveAdapter.solve(new com.example.cutdemotwo.service.solver.SolverFactory(List.of(packingSolverService)), req);
         assertTrue(res.isSuccess());
         assertFalse(res.getPieces().isEmpty());
         assertFalse(res.getCuts().isEmpty());
@@ -129,7 +150,7 @@ class FabricCutBusinessTests {
         demands.add(new PieceDemand(1, "短料成品", 2000, 1000, 1, false));
         req.setDemands(demands);
 
-        SolveResponse res = packingSolverService.solve(req);
+        SolveResponse res = com.example.cutdemotwo.service.FabricSolveAdapter.solve(new com.example.cutdemotwo.service.solver.SolverFactory(List.of(packingSolverService)), req);
         assertTrue(res.isSuccess());
         assertEquals("remnant", res.getFeedPortType());
         assertEquals(0.0, res.getDeductLen(), 0.001); // 严格核算母卷0扣料!
@@ -160,7 +181,7 @@ class FabricCutBusinessTests {
         demands.add(new PieceDemand(1, "右对齐裁片", 1500, 3000, 1, false));
         req.setDemands(demands);
 
-        SolveResponse res = packingSolverService.solve(req);
+        SolveResponse res = com.example.cutdemotwo.service.FabricSolveAdapter.solve(new com.example.cutdemotwo.service.solver.SolverFactory(List.of(packingSolverService)), req);
         assertTrue(res.isSuccess());
         assertEquals("roll", res.getFeedPortType());
         assertTrue(res.getDerivedRemnants().isEmpty());
@@ -180,7 +201,7 @@ class FabricCutBusinessTests {
         req.setFirstStageOrientation("vertical");
         req.setDemands(List.of(new PieceDemand(1, "窗帘偏幅", 1500, 4000, 1, false)));
         req.setDefects(List.of(new Defect(21, 200, 1500, 150, 600, 50)));
-        SolveResponse result = packingSolverService.solve(req);
+        SolveResponse result = com.example.cutdemotwo.service.FabricSolveAdapter.solve(new com.example.cutdemotwo.service.solver.SolverFactory(List.of(packingSolverService)), req);
         assertTrue(result.isSuccess());
         assertTrue(result.getCuts().stream().anyMatch(c -> "纵切".equals(c.getType()) && Math.abs(c.getPos() - 500) < 1));
         assertTrue(result.getCuts().stream().anyMatch(c -> "横切".equals(c.getType()) && Math.abs(c.getPos() - 4000) < 1));
@@ -195,7 +216,7 @@ class FabricCutBusinessTests {
         req.setCutOrigin("right-bottom");
         req.setFeedPortType("remnant");
         req.setDemands(List.of(new PieceDemand(1, "窗帘补单", 2000, 1000, 1, false)));
-        SolveResponse result = packingSolverService.solve(req);
+        SolveResponse result = com.example.cutdemotwo.service.FabricSolveAdapter.solve(new com.example.cutdemotwo.service.solver.SolverFactory(List.of(packingSolverService)), req);
         assertTrue(result.isSuccess());
         assertTrue(result.getCuts().stream().noneMatch(c -> "纵切".equals(c.getType())));
     }
@@ -211,7 +232,7 @@ class FabricCutBusinessTests {
         req.setFirstStageOrientation("vertical");
         req.setDemands(List.of(new PieceDemand(1, "窗帘偏幅", 1500, 4000, 1, false)));
         req.setDefects(List.of(new Defect(21, 200, 1500, 150, 600, 50)));
-        SolveResponse plan = packingSolverService.solve(req);
+        SolveResponse plan = com.example.cutdemotwo.service.FabricSolveAdapter.solve(new com.example.cutdemotwo.service.solver.SolverFactory(List.of(packingSolverService)), req);
         assertTrue(plan.isSuccess());
         var inventory = new com.example.cutdemotwo.service.RemnantService(temp.resolve("two-dimensional.json").toString());
         var receipt = inventory.confirm(req, plan,
