@@ -45,7 +45,7 @@ export async function onMotherRollChange(forceResetBed = false, loadedRoll = nul
         Object.assign(current, {materialAvailable:false, rollId:'', stockUsedLength:0, stockRemainingLength:0,
             pieces:[], cuts:[], remnants:[], cutIntervals:[], globalDefects:[], lastReceipt:null});
         document.body.dataset.material = 'empty';
-        for (const id of ['lbl-roll-model-desc','lbl-roll-remaining-len','sb-roll-id']) {
+        for (const id of ['lbl-roll-model-desc','lbl-roll-remaining-len']) {
             const label = document.getElementById(id); if (label) label.textContent = '未装载';
         }
         for (const id of ['lbl-roll-w-desc','lbl-roll-used-len','lbl-roll-total-len','lbl-roll-base-origin','lbl-roll-rem-count','lbl-roll-rem-area']) {
@@ -132,8 +132,6 @@ export async function onMotherRollChange(forceResetBed = false, loadedRoll = nul
     if (modelLbl) modelLbl.innerText = spec.model;
     const wLbl = document.getElementById("lbl-roll-w-desc");
     if (wLbl) wLbl.innerText = spec.rollW;
-    const sbRoll = document.getElementById("sb-roll-id");
-    if (sbRoll) sbRoll.innerText = rollId;
     if (!state.activeTask) {
         const materials = document.getElementById('task-material');
         if (materials) {

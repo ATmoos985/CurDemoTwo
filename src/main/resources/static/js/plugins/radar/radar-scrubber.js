@@ -178,6 +178,7 @@ export function renderRadar() {
         infoEl.innerText = data.materialAvailable === false ? '材料信息 —' : sheet
             ? `料头 ${source?.id || '—'} · ${data.rollW.toLocaleString()} × ${bedL.toLocaleString()} mm · ${consumed ? '已核销' : '未核销'} · 疵点 ${defects.length} 处`
             : `幅宽 ${data.rollW.toLocaleString()} mm · 全长 ${totalL.toLocaleString()} mm · 已报工 ${(data.stockUsedLength || 0).toLocaleString()} mm · 余量 ${(data.stockRemainingLength ?? totalL - (data.stockUsedLength || 0)).toLocaleString()} mm · 疵点 ${defects.length} 处`;
+        infoEl.title = infoEl.textContent;
     }
 
     if (maxConfirmedY > 0) {

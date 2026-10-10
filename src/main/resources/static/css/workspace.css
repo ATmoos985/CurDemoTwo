@@ -114,13 +114,13 @@ select.prop-input { font-family: inherit; text-align: left; }
 [data-theme] .demand-remnant-box { background: transparent; border: none; }
 .canvas-heading { background: var(--panel-bg); padding: 12px 18px; gap: 8px; flex-wrap: wrap; }
 .cad-surface { position: relative; flex: 1; min-height: 120px; overflow: hidden; }
-.cad-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 7px 14px; border-bottom: 1px solid var(--panel-border); background: var(--panel-bg); flex-shrink: 0; }
+.cad-tools { display: flex; align-items: center; gap: 6px; padding: 7px 14px; border-bottom: 1px solid var(--panel-border); background: var(--panel-bg); flex-shrink: 0; }
 .cad-tools .tool-btn { min-height: 28px; padding: 3px 8px; }
 .cad-tools .tool-btn[aria-pressed="true"] { color: var(--accent-blue); border-color: var(--accent-blue); background: var(--panel-header); }
 .cad-tool-hint { color: var(--text-muted); font-size: 11px; flex: 1; min-width: 100px; }
 .cad-zoom { margin-left: auto; display: flex; align-items: center; gap: 4px; }
 .cad-zoom output { font: 12px Consolas, monospace; text-align: center; min-width: 48px; }
-.cad-view-caption { flex: 1; min-width: 100px; color: var(--text-muted); font-size: 11px; }
+.cad-material-info { flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: thin; white-space: nowrap; color: var(--text-muted); font-size: 11px; }
 .cad-layer-options label { display: flex; align-items: center; gap: 8px; padding: 8px 0; font-size: 13px; cursor: pointer; }
 .cad-selection { padding: 14px 18px; background: var(--panel-bg); border-bottom: 1px solid var(--panel-border); line-height: 1.8; font-size: 12px; }
 .cad-selection-label { display: block; color: var(--text-muted); font-size: 11px; }
@@ -179,9 +179,6 @@ footer { height: 32px; min-height: 32px; font-size: 11px; gap: 18px; }
 .status-left { min-width: 0; }
 #sb-cursor-pos { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .status-left > span:first-child, .status-right { flex-shrink: 0; }
-.status-details > summary { cursor: pointer; }
-.status-details > div { position: absolute; bottom: 38px; right: 16px; background: var(--panel-bg); padding: 16px; border: 1px solid var(--panel-border); max-width: 80vw; z-index: 40; }
-.status-details p + p { margin-top: 8px; }
 @media (max-width: 1250px) {
     .app-subtitle { display: none; }
     .sidebar { width: 310px; }

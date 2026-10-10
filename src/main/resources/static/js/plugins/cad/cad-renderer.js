@@ -148,8 +148,6 @@ export function updateCanvasAnnotations() {
             document.getElementById('cad-selection-state').textContent = selected.confirmed ? '已实切 · 锁定' : '方向键微调 · R 旋转';
         }
     }
-    const caption = document.getElementById('cad-view-caption');
-    if (caption) caption.textContent = view.overview ? '全卷坐标 · mm' : `${origin.label}起刀原点 · mm${data.trimStart ? ` · 修齐 ${data.trimStart}` : ''}`;
     renderRemnantHighlight();
     annotationLayer.batchDraw();
 }
@@ -211,8 +209,6 @@ export function updateStatusBar() {
     const data = state.getCurrentCaseData();
     const label = document.getElementById('sb-origin-lbl');
     const origin = stationOrigin(data), sheet = state.currentCutMode === 'remnant';
-    const source = document.getElementById('sb-source-label');
-    if (source) source.textContent = sheet ? '来源母卷' : '当前母卷';
     if (label) label.innerText = data.materialAvailable === false ? '切割基准 —'
         : `切割基准 ${origin.label} · ${sheet ? '料头' : '母卷'} X ${origin.x.toLocaleString()} / Y ${origin.y.toLocaleString()} mm`;
 }

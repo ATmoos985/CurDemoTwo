@@ -207,7 +207,7 @@ body[data-source="remnant"] :is(#btn-station-prev,#btn-station-next,#btn-station
     box-shadow: 0 1px 2px rgba(0,0,0,0.06);
 }
 .canvas-view-actions { align-items: center; flex-wrap: wrap; gap: 8px; }
-.station-nav-group { margin: 0; gap: 2px; padding: 2px; border-radius: 4px; }
+.station-nav-group { margin: 0 0 0 auto; gap: 2px; padding: 2px; border-radius: 4px; }
 .station-nav-group .tool-btn + .tool-btn { border-left: 1px solid var(--panel-border); }
 .station-nav-group .tool-btn { width: 34px; padding: 5px; }
 .station-nav-group svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
@@ -221,13 +221,11 @@ body[data-source="remnant"] :is(#btn-station-prev,#btn-station-next,#btn-station
 .canvas-more-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 110; display: grid; gap: 4px; min-width: 180px; padding: 8px; background: var(--panel-bg); border: 1px solid var(--panel-border); box-shadow: 0 6px 18px #0002; border-radius: 4px; }
 .canvas-more-menu .tool-btn { text-align: left; }
 .canvas-more-menu .tool-btn:hover { color: var(--accent-red); }
-.workbench-status { height: auto; flex: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 6px 14px; font-size: 11px; line-height: 1.5; }
-.workbench-status .status-left, .workbench-status .status-right { display: flex; flex-wrap: wrap; gap: 4px 18px; min-width: 0; }
-.workbench-status .status-scale, .workbench-status .status-details { margin-left: auto; }
+.workbench-status { height: 32px; flex: none; display: flex; flex-wrap: nowrap; gap: 18px; padding: 4px 14px; overflow-x: auto; scrollbar-width: thin; white-space: nowrap; font-size: 11px; line-height: 1.5; }
+.workbench-status > span { flex: none; }
+.workbench-status .status-scale { margin-left: auto; }
 .workbench-status #radar-window-text, .workbench-status #sb-origin-lbl { color: var(--text-main); }
-.workbench-status #sb-cursor-pos { display: inline; white-space: normal; }
-.workbench-status .status-details { position: relative; }
-.workbench-status .status-details > div { bottom: 24px; right: 0; min-width: 190px; }
+.workbench-status #sb-cursor-pos { display: inline; overflow: visible; }
 .remnant-workspace { width: min(880px,calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 40px); padding: 0; border: 1px solid var(--panel-border); border-radius: 8px; color: var(--text-main); background: var(--panel-bg); box-shadow: 0 16px 48px #0003; }
 .remnant-workspace[open] { display: flex; flex-direction: column; }
 .remnant-workspace::backdrop { background: #0f172a66; }

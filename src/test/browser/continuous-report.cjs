@@ -31,7 +31,7 @@ async function api(path,body) {
         };
         const waitQueue=length=>page.waitForFunction(length=>window.testState.reportQueue.length===length&&!document.body.inert,length);
         await load();
-        for (const [width,height] of [[920,678],[1366,768],[1920,1080],[2183,1244]]) {
+        for (const [width,height] of [[920,678],[1366,768],[1878,1244],[1920,1080],[2183,1244]]) {
             await page.setViewportSize({width,height});
             const material=await page.locator('#material-context').boundingBox(), demands=await page.locator('#card-demands').boundingBox();
             assert.ok(material.y+material.height<=demands.y+1);
@@ -39,6 +39,14 @@ async function api(path,body) {
             assert.ok(name.x>label.x+label.width && Math.abs(name.y-label.y)<10);
             assert.equal(await page.locator('.canvas-nav-toolbar #station-navigation-group button svg').count(),5);
             assert.equal(await page.locator('.canvas-heading #station-navigation-group').count(),0);
+            const feed=await page.locator('.radar-feed-controls').boundingBox(), nav=await page.locator('#station-navigation-group').boundingBox();
+            assert.ok(feed.x+feed.width<=nav.x && Math.abs(feed.y+feed.height/2-nav.y-nav.height/2)<2);
+            await expect(page.locator('.cad-tools #radar-roll-info')).toContainText('幅宽 2,000 mm');
+            assert.equal(await page.locator('#radar-roll-info').evaluate(el=>getComputedStyle(el).whiteSpace),'nowrap');
+            assert.equal(await page.locator('#sb-roll-id, #sb-source-label, .status-details, #cad-view-caption').count(),0);
+            assert.equal(await page.locator('.workbench-status').evaluate(el=>el.offsetHeight),32);
+            const statusRows=await page.locator('.workbench-status > span').evaluateAll(els=>els.map(el=>el.getBoundingClientRect().top));
+            assert.ok(Math.max(...statusRows)-Math.min(...statusRows)<2);
             await expect(page.locator('#btn-radar-reset')).toBeHidden();
             if(width>960) {
                 await expect(page.locator('.workbench-status')).toBeInViewport({ratio:1});
@@ -47,7 +55,13 @@ async function api(path,body) {
             assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
         }
         await page.setViewportSize({width:1366,height:768});
-        pass('task name shares its label row, material precedes demand, and SVG navigation fits four screen sizes');
+        pass('feed controls precede navigation, material statistics use the canvas toolbar, and footer stays one row at five screen sizes');
+        await page.locator('#btn-measure-tool').click();
+        await expect(page.locator('#radar-roll-info')).toBeHidden();
+        await expect(page.locator('#cad-tool-hint')).toBeVisible();
+        await page.keyboard.press('Escape');
+        await expect(page.locator('#radar-roll-info')).toBeVisible();
+        await expect(page.locator('#cad-tool-hint')).toBeHidden();
         await page.locator('#btn-station-next').click();
         await expect(page.locator('#radar-window-text')).toContainText('1,500–3,000 mm');
         await page.locator('#btn-station-prev').click();
@@ -173,7 +187,6 @@ async function api(path,body) {
             const stock=await fetch('/api/remnants/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:stockId})}).then(r=>r.json());
             await (await import('/js/plugins/remnant/remnant-shelf.js')).switchCutMode('remnant',stock);
         },{taskId:sheetTask.id,stockId:remnant.id});
-        await expect(page.locator('#sb-source-label')).toHaveText('来源母卷');
         await expect(page.locator('#sb-origin-lbl')).toContainText('料头 X');
         await expect(page.locator('#radar-window-text')).toContainText('料头区域');
         await expect(page.locator('#radar-roll-info')).toContainText(remnant.id);

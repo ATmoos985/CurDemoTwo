@@ -47,14 +47,6 @@ export function updateUIInfo() {
     if (document.getElementById("sel-allow-longitudinal")) document.getElementById("sel-allow-longitudinal").value = data.allowLongitudinal === false ? "0" : "1";
     updateOriginHeaderSummary();
 
-    const rollIdInp = document.getElementById("inp-roll-id");
-    if (rollIdInp && document.getElementById("sb-roll-id")) {
-        document.getElementById("sb-roll-id").innerText = data.materialAvailable === false ? '未装载' : rollIdInp.value;
-    }
-    if (document.getElementById("sb-engine")) {
-        document.getElementById("sb-engine").innerText = data.engine || "智能几何排料内核";
-    }
-
     updateStatusBar();
 
     // 现场切刀表
@@ -200,8 +192,6 @@ export function loadCase(id) {
     if (modelLbl) modelLbl.innerText = spec.model || data.rollModel || "标准布卷";
     const wLbl = document.getElementById("lbl-roll-w-desc");
     if (wLbl) wLbl.innerText = spec.rollW;
-    const sbRoll = document.getElementById("sb-roll-id");
-    if (sbRoll) sbRoll.innerText = rollId;
     const totalLenEl = document.getElementById("lbl-roll-total-len");
     if (totalLenEl) totalLenEl.innerText = spec.totalRollL.toLocaleString();
     const remLenEl = document.getElementById("lbl-roll-remaining-len");

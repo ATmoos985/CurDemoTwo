@@ -14,8 +14,8 @@ export function toggleMeasureTool(force = null) {
     }
     const hint = document.getElementById('cad-tool-hint');
     if (hint) hint.hidden = !measuring;
-    const caption = document.getElementById('cad-view-caption');
-    if (caption) caption.hidden = measuring;
+    const materialInfo = document.getElementById('radar-roll-info');
+    if (materialInfo) materialInfo.hidden = measuring;
     if (stage) {
         stage.draggable(!measuring);
         stage.off('click.measure mousemove.measure');

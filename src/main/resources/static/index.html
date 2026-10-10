@@ -238,6 +238,7 @@
                 <details class="canvas-more"><summary class="tool-btn" aria-label="更多工位操作">更多 ···</summary><div class="canvas-more-menu"><button class="tool-btn" id="btn-station-clear" onclick="handleClearStationClick(); this.closest('details').open=false">清除本工位排料</button><button class="tool-btn" onclick="handleClearStationDblClick(); this.closest('details').open=false">清空整卷预览…</button><button class="tool-btn" id="btn-reset-roll-cutting" onclick="resetContinuousCutting(); this.closest('details').open=false">重置本卷报工…</button></div></details>
             </div></div>
             <div class="canvas-nav-toolbar">
+                <div class="radar-feed-controls"><label>本次拉布 <input type="number" class="prop-input" id="inp-bed-l" aria-label="本次拉布长度（mm）" value="5000" min="0.1" step="0.1" onchange="resizeFeedWindow(Number(this.value))" /> mm</label><button class="tool-btn" id="btn-feed-fit" title="按剩余需求中最长单片的尺寸设置，包含切头量，不含疵点避让；最终以排料结果为准。">按最长单片</button></div>
                 <div id="station-navigation-group" class="station-nav-group" role="group" aria-label="工位与画布导航">
                     <button class="tool-btn" id="btn-station-prev" onclick="advanceBed(-1)" aria-label="上一工位" title="上一工位"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7M4 5v14"/></svg></button>
                     <button class="tool-btn" id="btn-station-next" onclick="advanceBed(1)" aria-label="下一工位" title="下一工位"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7M20 5v14"/></svg></button>
@@ -245,7 +246,6 @@
                     <button class="tool-btn" id="btn-view-station" onclick="resetToBedView()" aria-label="当前工位" title="缩放至当前工位"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><rect x="7" y="7" width="10" height="10" rx="1"/></svg></button>
                     <button class="tool-btn" id="btn-view-roll" onclick="viewFullRoll()" aria-label="全卷" title="查看全卷"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="2"/><path d="M6 7h12M6 17h12M3 9v6m18-6v6"/></svg></button>
                 </div>
-                <div class="radar-feed-controls"><label>本次拉布 <input type="number" class="prop-input" id="inp-bed-l" aria-label="本次拉布长度（mm）" value="5000" min="0.1" step="0.1" onchange="resizeFeedWindow(Number(this.value))" /> mm</label><button class="tool-btn" id="btn-feed-fit" title="按剩余需求中最长单片的尺寸设置，包含切头量，不含疵点避让；最终以排料结果为准。">按最长单片</button></div>
             </div>
             <!-- 母卷全局疵点雷达与展开视窗导航条 (Global Roll Panorama & Defect Radar) -->
             <div class="roll-radar-bar" id="roll-radar-bar">
@@ -270,7 +270,7 @@
                     <button class="tool-btn" onclick="clearAllMeasurements()">清空测量</button>
                 </div></details>
                 <span class="cad-tool-hint" id="cad-tool-hint" hidden>依次点击两点 · Esc 取消</span>
-                <span class="cad-view-caption" id="cad-view-caption" title="滚轮缩放，拖动空白处平移">工位坐标 · mm</span>
+                <span class="cad-material-info" id="radar-roll-info" aria-label="当前材料统计">材料信息 —</span>
                 <div class="cad-zoom"><button class="tool-btn" aria-label="缩小画布" onclick="zoomCanvas(1 / 1.25)">−</button><output id="cad-scale" aria-label="视图缩放">—</output><button class="tool-btn" aria-label="放大画布" onclick="zoomCanvas(1.25)">＋</button></div>
             </div>
             <!-- 标尺必须与 Konva 宿主并列，避免 Stage 初始化时被清空。 -->
@@ -411,9 +411,11 @@
     </main>
 
     <!-- 底部工位状态栏 -->
-    <footer class="workbench-status" aria-label="画布与材料状态">
-        <div class="status-left"><span><span id="sb-source-label">当前母卷</span> <b id="sb-roll-id">—</b></span><span id="radar-roll-info">材料信息 —</span><span class="status-scale">缩放 <b id="sb-scale">—</b></span></div>
-        <div class="status-right"><span id="radar-window-text">切割区域 —</span><span id="sb-origin-lbl">切割基准 —</span><span id="sb-cursor-pos">指针移入画布查看坐标</span><details class="status-details"><summary>设备 / 引擎</summary><div><p>CUT-STATION-01</p><p id="sb-engine">—</p></div></details></div>
+    <footer class="workbench-status" aria-label="画布状态">
+        <span id="radar-window-text">切割区域 —</span>
+        <span id="sb-origin-lbl">切割基准 —</span>
+        <span id="sb-cursor-pos">指针移入画布查看坐标</span>
+        <span class="status-scale">缩放 <b id="sb-scale">—</b></span>
     </footer>
 
     <!-- CAD 工业级右键上下文快捷操作菜单 (Context Menu) -->

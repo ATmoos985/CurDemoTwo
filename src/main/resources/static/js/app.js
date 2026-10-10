@@ -534,14 +534,14 @@ document.addEventListener("click", (e) => {
     }
     const demos = document.getElementById('demo-tools');
     if (demos?.open && (!demos.contains(e.target) || e.target.closest('.preset-menu-item, #btn-reset-continuous'))) demos.open = false;
-    document.querySelectorAll('.header-more[open], .canvas-help[open], .status-details[open]').forEach(menu => {
+    document.querySelectorAll('.header-more[open], .canvas-help[open]').forEach(menu => {
         if (!menu.contains(e.target) || e.target.closest('button')) menu.open = false;
     });
 });
 document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
         closePresetDropdown();
-        document.querySelectorAll('.header-more[open], .demo-tools[open], .canvas-help[open], .status-details[open]').forEach(menu => {
+        document.querySelectorAll('.header-more[open], .demo-tools[open], .canvas-help[open]').forEach(menu => {
             menu.open = false;
             menu.querySelector('summary').focus();
         });
