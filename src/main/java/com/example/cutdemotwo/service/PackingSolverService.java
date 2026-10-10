@@ -31,18 +31,24 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
 
     private final com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService toolpathOptimizerService;
     private final com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService cutBoundaryCompletionService;
+    private final com.example.cutdemotwo.service.solver.JavaGuillotineSolverEngine javaFallbackEngine;
 
     @org.springframework.beans.factory.annotation.Autowired
     public PackingSolverService(
             com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService toolpathOptimizerService,
-            com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService cutBoundaryCompletionService) {
+            com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService cutBoundaryCompletionService,
+            com.example.cutdemotwo.service.solver.JavaGuillotineSolverEngine javaFallbackEngine) {
         this.toolpathOptimizerService = toolpathOptimizerService;
         this.cutBoundaryCompletionService = cutBoundaryCompletionService;
+        this.javaFallbackEngine = javaFallbackEngine;
     }
 
     public PackingSolverService() {
         this.toolpathOptimizerService = new com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService();
         this.cutBoundaryCompletionService = new com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService();
+        this.javaFallbackEngine = new com.example.cutdemotwo.service.solver.JavaGuillotineSolverEngine(
+                this.toolpathOptimizerService, this.cutBoundaryCompletionService
+        );
     }
 
     @Override
@@ -50,19 +56,22 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
         return new EngineCapabilities(getEngineType(), "2", List.of("RECTANGLE"), List.of("GUILLOTINE"), List.of("MAXIMIZE_PIECE_AREA"), 1.0 / UNITS_PER_MM, isAvailable());
     }
 
-    public boolean isAvailable() {
+    public boolean isNativeAvailable() {
         if (solverPath == null || solverPath.isBlank()) return false;
         File f = new File(solverPath);
         return f.exists() && f.canExecute();
     }
 
+    @Override
+    public boolean isAvailable() {
+        return true;
+    }
+
+    @Override
     public EngineResult solve(NestingProblem req) {
-        if (!isAvailable()) {
-            EngineResult err = new EngineResult();
-            err.setSuccess(false);
-            err.setFailureStatus("UNAVAILABLE");
-            err.setMessage("PackingSolver 可执行文件不存在或不可执行");
-            return err;
+        if (!isNativeAvailable()) {
+            log.info("未检测到外部 C++ PackingSolver 可执行文件，自动平滑切换至内置 Java 原生直刀排料内核。");
+            return javaFallbackEngine.solve(req);
         }
 
         Path tmpDir = null;
