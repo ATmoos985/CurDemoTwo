@@ -270,7 +270,7 @@
                     <button class="tool-btn" onclick="clearAllMeasurements()">清空测量</button>
                 </div></details>
                 <span class="cad-tool-hint" id="cad-tool-hint" hidden>依次点击两点 · Esc 取消</span>
-                <span class="cad-material-info" id="radar-roll-info" aria-label="当前材料统计">材料信息 —</span>
+                <span class="cad-station-info" id="cad-station-info" aria-label="当前切割区域与基准"><span id="radar-window-text">切割区域 —</span><span id="sb-origin-lbl">切割基准 —</span></span>
                 <div class="cad-zoom"><button class="tool-btn" aria-label="缩小画布" onclick="zoomCanvas(1 / 1.25)">−</button><output id="cad-scale" aria-label="视图缩放">—</output><button class="tool-btn" aria-label="放大画布" onclick="zoomCanvas(1.25)">＋</button></div>
             </div>
             <!-- 标尺必须与 Konva 宿主并列，避免 Stage 初始化时被清空。 -->
@@ -411,9 +411,8 @@
     </main>
 
     <!-- 底部工位状态栏 -->
-    <footer class="workbench-status" aria-label="画布状态">
-        <span id="radar-window-text">切割区域 —</span>
-        <span id="sb-origin-lbl">切割基准 —</span>
+    <footer class="workbench-status" aria-label="材料与画布状态">
+        <span id="radar-roll-info" aria-label="当前材料统计">材料信息 —</span>
         <span id="sb-cursor-pos">指针移入画布查看坐标</span>
         <span class="status-scale">缩放 <b id="sb-scale">—</b></span>
     </footer>

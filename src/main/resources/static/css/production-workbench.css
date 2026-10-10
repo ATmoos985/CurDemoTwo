@@ -224,7 +224,6 @@ body[data-source="remnant"] :is(#btn-station-prev,#btn-station-next,#btn-station
 .workbench-status { height: 32px; flex: none; display: flex; flex-wrap: nowrap; gap: 18px; padding: 4px 14px; overflow-x: auto; scrollbar-width: thin; white-space: nowrap; font-size: 11px; line-height: 1.5; }
 .workbench-status > span { flex: none; }
 .workbench-status .status-scale { margin-left: auto; }
-.workbench-status #radar-window-text, .workbench-status #sb-origin-lbl { color: var(--text-main); }
 .workbench-status #sb-cursor-pos { display: inline; overflow: visible; }
 .remnant-workspace { width: min(880px,calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 40px); padding: 0; border: 1px solid var(--panel-border); border-radius: 8px; color: var(--text-main); background: var(--panel-bg); box-shadow: 0 16px 48px #0003; }
 .remnant-workspace[open] { display: flex; flex-direction: column; }

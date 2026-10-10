@@ -41,7 +41,10 @@ async function api(path,body) {
             assert.equal(await page.locator('.canvas-heading #station-navigation-group').count(),0);
             const feed=await page.locator('.radar-feed-controls').boundingBox(), nav=await page.locator('#station-navigation-group').boundingBox();
             assert.ok(feed.x+feed.width<=nav.x && Math.abs(feed.y+feed.height/2-nav.y-nav.height/2)<2);
-            await expect(page.locator('.cad-tools #radar-roll-info')).toContainText('幅宽 2,000 mm');
+            await expect(page.locator('.workbench-status #radar-roll-info')).toContainText('幅宽 2,000 mm');
+            await expect(page.locator('.cad-tools #radar-window-text')).toContainText('0–1,500 mm');
+            await expect(page.locator('.cad-tools #sb-origin-lbl')).toContainText('母卷 X 2,000 / Y 1,500 mm');
+            assert.equal(await page.locator('#cad-station-info').evaluate(el=>getComputedStyle(el).whiteSpace),'nowrap');
             assert.equal(await page.locator('#radar-roll-info').evaluate(el=>getComputedStyle(el).whiteSpace),'nowrap');
             assert.equal(await page.locator('#sb-roll-id, #sb-source-label, .status-details, #cad-view-caption').count(),0);
             assert.equal(await page.locator('.workbench-status').evaluate(el=>el.offsetHeight),32);
@@ -55,12 +58,13 @@ async function api(path,body) {
             assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
         }
         await page.setViewportSize({width:1366,height:768});
-        pass('feed controls precede navigation, material statistics use the canvas toolbar, and footer stays one row at five screen sizes');
+        pass('station region and origin use the canvas toolbar, material statistics use the footer, and both stay one row at five screen sizes');
         await page.locator('#btn-measure-tool').click();
-        await expect(page.locator('#radar-roll-info')).toBeHidden();
+        await expect(page.locator('#cad-station-info')).toBeHidden();
+        await expect(page.locator('#radar-roll-info')).toBeVisible();
         await expect(page.locator('#cad-tool-hint')).toBeVisible();
         await page.keyboard.press('Escape');
-        await expect(page.locator('#radar-roll-info')).toBeVisible();
+        await expect(page.locator('#cad-station-info')).toBeVisible();
         await expect(page.locator('#cad-tool-hint')).toBeHidden();
         await page.locator('#btn-station-next').click();
         await expect(page.locator('#radar-window-text')).toContainText('1,500–3,000 mm');
@@ -77,7 +81,7 @@ async function api(path,body) {
             await expect(page.locator('#sb-origin-lbl')).toHaveText(`切割基准 ${label} · 母卷 X ${x} / Y ${y} mm`);
         }
         await page.evaluate(async()=>{const data=window.testState.getCurrentCaseData();data.trimStart=0;(await import('/js/plugins/solver/solver-client.js')).updateUIInfo();(await import('/js/plugins/cad/cad-renderer.js')).renderScene();});
-        pass('navigation keeps stock unchanged and footer origins share the drawing coordinates including fractional trim');
+        pass('navigation keeps stock unchanged and toolbar origins share the drawing coordinates including fractional trim');
         await page.evaluate(()=>window.showToast('顶部居中提示验证','info',30000));
         const toast=await page.locator('#cad-toast-container').boundingBox();
         assert.ok(toast.y<20 && Math.abs(toast.x+toast.width/2-683)<2);
