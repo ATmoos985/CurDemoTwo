@@ -7,6 +7,7 @@ const measurements = [];
 
 export function toggleMeasureTool(force = null) {
     measuring = force === null ? !measuring : !!force;
+    if (measuring) bus.emit('canvas:tool-changed', 'measure');
     const button = document.getElementById('btn-measure-tool');
     if (button) {
         button.setAttribute('aria-pressed', String(measuring));

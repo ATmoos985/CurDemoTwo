@@ -55,6 +55,7 @@ export function initCADContextMenu() {
     if (stage) {
         stage.on("contextmenu", (e) => {
             e.evt.preventDefault();
+            if (!mainLayer.listening()) return;
             // 如果点在空白处（没有被 pieceGroup 或 remnantGroup 的子图形冒泡拦截）
             if (e.target === stage || !e.target || e.target.name() === "" || e.target.parent === stage) {
                 openStationContextMenu(e.evt.clientX, e.evt.clientY);

@@ -264,6 +264,7 @@
 
             <div class="cad-tools" role="toolbar" aria-label="画布工具">
                 <button class="tool-btn" id="btn-measure-tool" aria-pressed="false" onclick="toggleMeasureTool()">测量</button>
+                <button class="tool-btn" id="btn-defect-tool" aria-pressed="false" onclick="toggleDefectTool()" title="在母卷上点击标记疵点中心">标记疵点</button>
                 <details class="canvas-help"><summary class="tool-btn">显示</summary><div class="canvas-help-body cad-layer-options">
                     <label><input type="checkbox" checked onchange="setCanvasLayer('dimensions', this.checked)"> 工位尺寸</label>
                     <label><input type="checkbox" checked onchange="setCanvasLayer('paths', this.checked)"> 刀路与刀序</label>
@@ -421,6 +422,22 @@
     <div id="cad-context-menu" class="cad-context-menu" style="display: none;"></div>
 
     <dialog id="task-picker" class="workflow-dialog" aria-labelledby="task-picker-title"><div class="workflow-dialog-heading"><h2 id="task-picker-title">切割任务</h2><button class="tool-btn" onclick="document.getElementById('task-picker').close()">关闭</button></div><div id="task-picker-body" class="workflow-dialog-body"></div></dialog>
+    <dialog id="cad-defect-dialog" class="workbench-dialog" aria-labelledby="cad-defect-title">
+        <form id="cad-defect-form">
+            <div class="workbench-dialog-heading"><div><h2 id="cad-defect-title">标记新疵点</h2><p id="cad-defect-source"></p></div></div>
+            <div class="workbench-dialog-body">
+                <p id="cad-defect-position"></p>
+                <p class="muted">点击位置为疵点中心，按实际范围填写尺寸。保存到母卷档案后需重新排料。</p>
+                <div class="defect-editor-fields">
+                    <label>疵点宽度 (mm)<input name="width" class="mini-input" type="number" min="0.1" step="0.1" value="100" required></label>
+                    <label>疵点长度 (mm)<input name="height" class="mini-input" type="number" min="0.1" step="0.1" value="100" required></label>
+                    <label>避让间距 (mm)<input name="margin" class="mini-input" type="number" min="0" step="0.1" value="20" required></label>
+                </div>
+                <p id="cad-defect-error" role="alert"></p>
+            </div>
+            <div class="workbench-dialog-footer"><button class="tool-btn" type="button" data-cancel>取消</button><button class="tool-btn active" type="submit">保存疵点</button></div>
+        </form>
+    </dialog>
     <dialog id="cut-report-modal" class="report-modal" aria-labelledby="report-title">
         <div class="settings-modal-dialog report-dialog">
             <div class="settings-modal-header"><h2 id="report-title">本工位裁切结果</h2><button class="tool-btn" onclick="closeCutReport()">关闭</button></div>

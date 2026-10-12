@@ -82,6 +82,7 @@ import {
 import {
     toggleMeasureTool, clearAllMeasurements
 } from './plugins/cad/cad-measure.js';
+import { toggleDefectTool } from './plugins/cad/cad-defect-tool.js';
 
 import {
     initNestingKeyboardShortcuts, getSelectedPieceId, setSelectedPieceId
@@ -416,6 +417,7 @@ const camApp = {
     renderToolpathUI,
     calculateCycleTime,
     toggleMeasureTool,
+    toggleDefectTool,
     clearAllMeasurements,
     getSelectedPieceId,
     setSelectedPieceId,

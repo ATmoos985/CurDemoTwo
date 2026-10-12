@@ -38,6 +38,15 @@ export function stationCoordinates(x, y, data) {
     return { x: (x - origin.x) * origin.dx, y: (y - origin.y) * origin.dy };
 }
 
+export function defectFromCenter(point, w, h, margin, data) {
+    if (![point.x, point.y, w, h, margin].every(Number.isFinite) || w <= 0 || h <= 0 || margin < 0)
+        throw new Error('请填写有效的疵点尺寸和避让间距。');
+    const x = Number((point.x - w / 2).toFixed(3)), y = Number((point.y - h / 2).toFixed(3));
+    if (x < 0 || y < 0 || x + w > data.rollW || y + h > data.totalRollL)
+        throw new Error('疵点范围超出母卷，请缩小尺寸或取消后重新标记。');
+    return {x, y, w, h, margin};
+}
+
 export function rulerOrigin(data, overview = false) {
     return overview ? { x: 0, y: 0, dx: 1, dy: 1 } : stationOrigin(data);
 }

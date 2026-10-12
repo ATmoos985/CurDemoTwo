@@ -1,7 +1,7 @@
 // node --test src/test/js/*.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fitBounds, stationOrigin, stationCoordinates, rulerOrigin, rulerStep, labelDetail } from '../../main/resources/static/js/plugins/cad/cad-view.js';
+import { fitBounds, stationOrigin, stationCoordinates, rulerOrigin, rulerStep, labelDetail, defectFromCenter } from '../../main/resources/static/js/plugins/cad/cad-view.js';
 
 test('framing reserves screen-space dimensions for small remnants and 100m rolls', () => {
     for (const [width, height] of [[280, 320], [600, 480], [1440, 900]]) {
@@ -35,6 +35,29 @@ test('all four origins agree with ruler and cursor, including trim and a moved s
         assert.deepEqual(local, { x: 120, y: 350 });
         assert.equal(Math.abs(stationCoordinates(origin.x, origin.y, data).y), 0);
     }
+});
+
+test('marked centers retain physical coordinates and fractional extents for every station origin', () => {
+    for (const cutOrigin of ['left-top', 'right-top', 'left-bottom', 'right-bottom']) {
+        const data = {rollW:2000, bedL:5000, totalRollL:30000, windowStartY:15000, trimStart:25.5, cutOrigin};
+        const origin = stationOrigin(data);
+        const point = {x:origin.x + origin.dx * 375.4, y:origin.y + origin.dy * 800.6};
+        const defect = defectFromCenter(point, 100.1, 200.1, 0, data);
+        assert.ok(Math.abs(defect.x + defect.w/2 - point.x)<1e-8);
+        assert.ok(Math.abs(defect.y + defect.h/2 - point.y)<1e-8);
+        assert.equal(defect.margin,0);
+        const local = stationCoordinates(point.x,point.y,data);
+        assert.ok(Math.abs(local.x-375.4)<1e-8 && Math.abs(local.y-800.6)<1e-8);
+    }
+});
+
+test('defect extents reject invalid dimensions and all four material boundaries without moving the marker', () => {
+    const data = {rollW:2000,totalRollL:30000};
+    for (const point of [{x:10,y:1000},{x:1990,y:1000},{x:1000,y:10},{x:1000,y:29990}])
+        assert.throws(()=>defectFromCenter(point,100,100,20,data),/超出母卷/);
+    for (const values of [[0,100,20],[-10,100,20],[100,NaN,20],[100,100,-1],[100,100,Infinity]])
+        assert.throws(()=>defectFromCenter({x:1000,y:20000},...values,data),/有效/);
+    assert.deepEqual(defectFromCenter({x:50,y:50},100,100,20,data),{x:0,y:0,w:100,h:100,margin:20});
 });
 
 test('adaptive ruler keeps major labels apart at overview and close-up scales', () => {

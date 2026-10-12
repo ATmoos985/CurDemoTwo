@@ -3,7 +3,9 @@ import { state } from '../../core/state.js';
 import { refreshShelfRemnantsList } from '../remnant/remnant-shelf.js';
 import { renderScene } from '../cad/cad-renderer.js';
 import { renderRadar } from '../radar/radar-scrubber.js';
-import { renderDefectsUI } from '../solver/quota-manager.js';
+import { renderDefectsUI, recalculateRollStats, updateDemandCompletionFromPieces } from '../solver/quota-manager.js';
+import { updateUIInfo, updateWorkflowControls } from '../solver/solver-client.js';
+import { requestJSON } from '../../core/api-request.js';
 import { showToast, confirmAction } from '../../core/toast.js';
 import { syncMaterialOptions } from './material-options.js';
 import { renderMaterialInspection, mountInspectionRadar } from '../layout/workbench-panels.js';
@@ -343,7 +345,7 @@ export async function submitNewDefect(rollId) {
     const x = parseFloat(document.getElementById("inp-new-defect-x").value) || 0;
     const w = parseFloat(document.getElementById("inp-new-defect-w").value) || 100;
     const h = parseFloat(document.getElementById("inp-new-defect-h").value) || 100;
-    const margin = parseFloat(document.getElementById("inp-new-defect-m").value) || 20;
+    const margin = Number(document.getElementById("inp-new-defect-m").value);
     const type = document.getElementById("sel-new-defect-type").value;
     const src = document.getElementById("sel-new-defect-src").value;
 
@@ -367,34 +369,32 @@ export async function submitNewDefect(rollId) {
     };
 
     try {
-        const res = await fetch(`/api/rolls/${rollId}/defects`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(newDef)
-        });
-        if (res.ok) {
-            const savedDefect = await res.json();
-            await refreshRollsList();
-            selectRollForDetail(rollId);
-            // 如果正是当前主 CAM 台面生产的母卷，同步至主画布
-            const curData = state.getCurrentCaseData();
-            if (!standalone && curData.rollId === rollId) {
-                curData.globalDefects = curData.globalDefects || [];
-                curData.globalDefects.push(savedDefect);
-                renderDefectsUI(curData.globalDefects);
-                renderScene();
-                renderRadar();
-            }
-            if (!standalone) state.pendingPlan = null;
-            showToast('疵点已保存，请重新排料后报工', 'success');
-        } else {
-            showToast((await res.json()).message || '疵点标定失败', 'error');
-        }
+        await saveRollDefect(rollId, newDef);
+        showToast('疵点已保存，请重新排料后报工', 'success');
     } catch (e) {
-        showToast('提交疵点失败，请检查服务状态', 'error');
+        showToast(e.message, 'error');
     }
 }
 
+export async function saveRollDefect(rollId, defect) {
+    const saved = await requestJSON(`/api/rolls/${encodeURIComponent(rollId)}/defects`, defect);
+    const data = state.getCurrentCaseData();
+    if (!standalone && state.currentCutMode === 'roll' && data.rollId === rollId) {
+        data.globalDefects = [...(data.globalDefects || []), saved];
+        // 新疵点使旧预览失效；已报工和待报工实切记录仍需保留。
+        state.pendingPlan = null;
+        data.pieces = (data.pieces || []).filter(p => p.confirmed || p.queued);
+        data.remnants = (data.remnants || []).filter(r => r.confirmed || r.queued);
+        data.cuts = [];
+        renderDefectsUI(data.globalDefects);
+        recalculateRollStats(data);
+        updateDemandCompletionFromPieces(data);
+        renderScene();renderRadar();updateUIInfo();updateWorkflowControls();
+    }
+    await refreshRollsList();
+    await selectRollForDetail(rollId);
+    return saved;
+}
 
 export async function mountRollToStation(rollId) {
     closeMaterialModal();
