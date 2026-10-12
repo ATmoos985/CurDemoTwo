@@ -122,7 +122,7 @@ select.prop-input { font-family: inherit; text-align: left; }
 .cad-zoom output { font: 12px Consolas, monospace; text-align: center; min-width: 48px; }
 .cad-station-info { flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: thin; white-space: nowrap; color: var(--text-main); font-size: 11px; }
 .cad-station-info > span + span { margin-left: 16px; }
-.cad-defect-tooltip { position: absolute; z-index: 8; pointer-events: none; padding: 8px 10px; border: 1px solid var(--accent-red); border-radius: 4px; background: var(--panel-bg); color: var(--text-main); font: 12px/1.7 var(--font-mono); white-space: pre-line; box-shadow: 0 2px 8px #0002; }
+.cad-defect-distance { position: absolute; z-index: 8; pointer-events: none; padding: 2px 5px; border-radius: 2px; background: var(--panel-bg); color: var(--accent-blue); font: 12px/18px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cad-layer-options label { display: flex; align-items: center; gap: 8px; padding: 8px 0; font-size: 13px; cursor: pointer; }
 .cad-selection { padding: 14px 18px; background: var(--panel-bg); border-bottom: 1px solid var(--panel-border); line-height: 1.8; font-size: 12px; }
 .cad-selection-label { display: block; color: var(--text-muted); font-size: 11px; }

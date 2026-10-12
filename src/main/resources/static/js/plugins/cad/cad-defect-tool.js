@@ -6,7 +6,8 @@ import {bus} from '../../core/event-bus.js';
 import {showToast} from '../../core/toast.js';
 import {saveRollDefect} from '../material/material-manager.js';
 
-let marking = false, guides = null, tooltip = null, selected = null, saving = false;
+let marking = false, guides = null, selected = null, saving = false;
+const distanceLabels = [];
 const el = id => document.getElementById(id);
 
 export function toggleDefectTool(force = !marking) {
@@ -45,7 +46,7 @@ function pointerPoint() {
 }
 
 function hidePointer() {
-    if (tooltip) tooltip.hidden = true;
+    for (const label of distanceLabels) label.hidden = true;
     if (guides) {guides.hide();mainLayer.batchDraw();}
 }
 
@@ -57,20 +58,42 @@ function drawPointer() {
     const local = stationCoordinates(point.x, point.y, data), inv = 1 / stage.scaleX();
     if (!guides) {guides = new Konva.Group({listening:false});mainLayer.add(guides);}
     guides.destroyChildren();
-    const color = getComputedStyle(document.documentElement).getPropertyValue('--accent-red').trim();
-    guides.add(new Konva.Line({points:[origin.x, origin.y, point.x, origin.y, point.x, point.y], stroke:color,
-        strokeWidth:1.2, strokeScaleEnabled:false, dash:[5*inv, 4*inv]}));
-    guides.add(new Konva.Line({points:[point.x-7*inv, point.y, point.x+7*inv, point.y, point.x, point.y, point.x, point.y-7*inv, point.x, point.y+7*inv], stroke:color, strokeWidth:1.5, strokeScaleEnabled:false}));
+    guides.clip({x:(RULER_SIZE-stage.x())*inv, y:(RULER_SIZE-stage.y())*inv,
+        width:(stage.width()-RULER_SIZE)*inv, height:(stage.height()-RULER_SIZE)*inv});
+    const color = getComputedStyle(document.documentElement).getPropertyValue('--accent-blue').trim();
+    const line = (points, name) => guides.add(new Konva.Line({points, name, stroke:color, strokeWidth:1, strokeScaleEnabled:false}));
+    line([point.x, point.y, origin.x, point.y], 'defect-distance-x');
+    line([point.x, point.y, point.x, origin.y], 'defect-distance-y');
+    line([origin.x, point.y-4*inv, origin.x, point.y+4*inv]);
+    line([point.x-4*inv, origin.y, point.x+4*inv, origin.y]);
+    guides.add(new Konva.Circle({x:point.x, y:point.y, radius:3*inv, fill:color, listening:false}));
     guides.show();guides.moveToTop();mainLayer.batchDraw();
-    if (!tooltip) {
-        tooltip = document.createElement('div');tooltip.id = 'cad-defect-tooltip';tooltip.className = 'cad-defect-tooltip';
-        el('konva-container').parentElement.append(tooltip);
+    if (!distanceLabels.length) {
+        for (const axis of ['x', 'y']) {
+            const label = document.createElement('span');
+            label.id = `cad-defect-distance-${axis}`;label.className = 'cad-defect-distance';
+            el('konva-container').parentElement.append(label);
+            distanceLabels.push(label);
+        }
     }
-    tooltip.textContent = `距${origin.label}基准点\n横向 X ${local.x.toFixed(1)} mm · 竖向 Y ${local.y.toFixed(1)} mm\n点击标记疵点中心 · Esc 退出`;
-    tooltip.hidden = false;
-    const pointer = stage.getPointerPosition();
-    tooltip.style.left = Math.max(RULER_SIZE, Math.min(pointer.x + 16, stage.width() - tooltip.offsetWidth - 8)) + 'px';
-    tooltip.style.top = Math.max(RULER_SIZE, Math.min(pointer.y + 16, stage.height() - tooltip.offsetHeight - 8)) + 'px';
+    const [horizontal, vertical] = distanceLabels;
+    horizontal.textContent = `距${origin.label[0]} ${local.x.toFixed(1)} mm`;
+    vertical.textContent = `距${origin.label[1]} ${local.y.toFixed(1)} mm`;
+    for (const label of distanceLabels) label.hidden = false;
+    const px = stage.x()+point.x/inv, py = stage.y()+point.y/inv;
+    const clampX = x => Math.max(RULER_SIZE+4, Math.min(x, stage.width()-4));
+    const clampY = y => Math.max(RULER_SIZE+4, Math.min(y, stage.height()-4));
+    const place = (label, x, y) => {
+        label.style.left = Math.max(RULER_SIZE+4, Math.min(x, stage.width()-label.offsetWidth-4))+'px';
+        label.style.top = Math.max(RULER_SIZE+4, Math.min(y, stage.height()-label.offsetHeight-4))+'px';
+    };
+    place(horizontal, (px+clampX(stage.x()+origin.x/inv))/2-horizontal.offsetWidth/2,
+        py+(origin.dy < 0 ? -horizontal.offsetHeight-8 : 8));
+    place(vertical, px+(origin.dx < 0 ? -vertical.offsetWidth-8 : 8),
+        (py+clampY(stage.y()+origin.y/inv))/2-vertical.offsetHeight/2);
+    const h = horizontal.getBoundingClientRect(), v = vertical.getBoundingClientRect();
+    if (h.left < v.right && h.right > v.left && h.top < v.bottom && h.bottom > v.top)
+        place(vertical, vertical.offsetLeft, horizontal.offsetTop+(origin.dy < 0 ? h.height+8 : -v.height-8));
 }
 
 function selectPoint(event) {

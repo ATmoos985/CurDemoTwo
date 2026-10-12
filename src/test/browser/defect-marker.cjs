@@ -44,9 +44,24 @@ async function api(path,body) {
                 return {x:origin.x+origin.dx*375.4,y:origin.y+origin.dy*800.6};
             },cutOrigin);
             await page.locator('#btn-defect-tool').click();
-            const {local}=await move(point);
-            await expect(page.locator('#cad-defect-tooltip')).toContainText(`横向 X ${local.x.toFixed(1)} mm · 竖向 Y ${local.y.toFixed(1)} mm`);
-            const box=await page.locator('#cad-defect-tooltip').boundingBox();assert.ok(box.x>=0 && box.x+box.width<=1366);
+            let moved;
+            for (const target of [point, {x:point.x+(cutOrigin.startsWith('right')?-70:70), y:point.y+(cutOrigin.endsWith('bottom')?-120:120)}]) {
+                moved=await move(target);
+                await expect(page.locator('#cad-defect-distance-x')).toHaveText(`距${cutOrigin.startsWith('right')?'右':'左'} ${moved.local.x.toFixed(1)} mm`);
+                await expect(page.locator('#cad-defect-distance-y')).toHaveText(`距${cutOrigin.endsWith('bottom')?'下':'上'} ${moved.local.y.toFixed(1)} mm`);
+                const geometry=await page.evaluate(async()=>{
+                    const stage=window.testStage.stage;
+                    return {x:stage.findOne('.defect-distance-x').points(),y:stage.findOne('.defect-distance-y').points(),
+                        origin:(await import('/js/plugins/cad/cad-view.js')).stationOrigin(window.testState.getCurrentCaseData())};
+                });
+                assert.deepEqual(geometry.x,[moved.point.x,moved.point.y,geometry.origin.x,moved.point.y]);
+                assert.deepEqual(geometry.y,[moved.point.x,moved.point.y,moved.point.x,geometry.origin.y]);
+                for (const label of ['x','y']) {
+                    const box=await page.locator('#cad-defect-distance-'+label).boundingBox();
+                    assert.ok(box.x>=0 && box.x+box.width<=1366 && box.height<=24);
+                }
+            }
+            const {local}=moved;
             await page.mouse.down();await page.mouse.up();
             await expect(page.locator('#cad-defect-dialog')).toBeVisible();
             await expect(page.locator('#cad-defect-position')).toContainText(`横向 X ${local.x.toFixed(1)} mm`);
@@ -58,15 +73,43 @@ async function api(path,body) {
         await move({x:1000,y:12000});
         await page.locator('[aria-label="放大画布"]').click();
         const zoomed=await move({x:1000,y:12000});
-        await expect(page.locator('#cad-defect-tooltip')).toContainText(`横向 X ${zoomed.local.x.toFixed(1)} mm`);
+        await expect(page.locator('#cad-defect-distance-x')).toHaveText(`距右 ${zoomed.local.x.toFixed(1)} mm`);
         await page.locator('#btn-measure-tool').click();
         await expect(page.locator('#btn-defect-tool')).toHaveAttribute('aria-pressed','false');
-        await expect(page.locator('#cad-defect-tooltip')).toBeHidden();
+        await expect(page.locator('#cad-defect-distance-x')).toBeHidden();
+        await expect(page.locator('#cad-defect-distance-y')).toBeHidden();
         await page.locator('#btn-defect-tool').click();
         await expect(page.locator('#btn-measure-tool')).toHaveAttribute('aria-pressed','false');
         await page.keyboard.press('Escape');
         assert.deepEqual(await page.evaluate(()=>[window.testStage.stage.draggable(),window.testStage.mainLayer.listening()]),[true,true]);
         pass('zoom keeps coordinates correct; measurement and marking exclude each other; Escape restores interaction');
+        const previousGeometry=await page.evaluate(()=>{
+            const data=window.testState.getCurrentCaseData();
+            const previous=Object.fromEntries(['rollW','totalRollL','bedL','windowStartY','trimStart'].map(key=>[key,data[key]]));
+            Object.assign(data,{rollW:2800,totalRollL:100000,bedL:10630,windowStartY:17130,trimStart:0});
+            return previous;
+        });
+        for (const viewport of [{width:1366,height:768},{width:1920,height:1080}]) {
+            await page.setViewportSize(viewport);
+            await page.evaluate(async()=>{const r=await import('/js/plugins/cad/cad-renderer.js');r.renderScene();r.resetToBedView();});
+            await page.locator('#btn-defect-tool').click();
+            for (const point of [{x:1286.3,y:23612.6},{x:2795,y:27755}]) {
+                const moved=await move(point);
+                await expect(page.locator('#cad-defect-distance-x')).toHaveText(`距右 ${moved.local.x.toFixed(1)} mm`);
+                await expect(page.locator('#cad-defect-distance-y')).toHaveText(`距下 ${moved.local.y.toFixed(1)} mm`);
+                const h=await page.locator('#cad-defect-distance-x').boundingBox(),v=await page.locator('#cad-defect-distance-y').boundingBox();
+                assert.ok(h.x+h.width<=v.x || v.x+v.width<=h.x || h.y+h.height<=v.y || v.y+v.height<=h.y,'dimension labels must not overlap');
+                const canvas=await page.locator('#konva-container').boundingBox();
+                for (const box of [h,v]) assert.ok(box.x>=canvas.x+28 && box.y>=canvas.y+28 && box.x+box.width<=canvas.x+canvas.width && box.y+box.height<=canvas.y+canvas.height);
+                if (process.env.SCREENSHOT_PATH && point.x===1286.3)
+                    await page.screenshot({path:process.env.SCREENSHOT_PATH.replace('.png',`-narrow-${viewport.width}.png`)});
+            }
+            await page.keyboard.press('Escape');
+        }
+        await page.evaluate(previous=>Object.assign(window.testState.getCurrentCaseData(),previous),previousGeometry);
+        await page.setViewportSize({width:1366,height:900});
+        await page.evaluate(async()=>{const r=await import('/js/plugins/cad/cad-renderer.js');r.renderScene();r.resetToBedView();});
+        pass('long narrow rolls have readable, separate dimension labels at normal and near-zero distances in both desktop sizes');
         await page.locator('#btn-defect-tool').click();
         await move({x:-40,y:12000});await page.mouse.down();await page.mouse.up();
         await expect(page.locator('#cad-defect-dialog')).toBeHidden();
