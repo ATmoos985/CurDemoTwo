@@ -36,3 +36,13 @@ test('inventory belongs to the selected mother roll, including consumed history'
     assert.deepEqual(motherRollRemnants(rows,'ROLL-A'),[own,used]);
     assert.deepEqual(motherRollRemnants(rows,null),[]);
 });
+
+test('output rows locate the exact station geometry even when candidate names repeat', () => {
+    const queue=['first','second'].map(planId=>({pending:{rollId:'A',request:{}},report:{planId,actualRemnants:[{id:'tail',w:800,l:500}]}}));
+    const data={remnants:[{id:'preview',w:800,l:500},
+        ...queue.map(({report})=>({id:'queued-'+report.planId,sourceCandidateId:'tail',planId:report.planId,queued:true})),
+        {id:'stock',confirmed:true}]};
+    const reports=[{planId:'done',rollId:'A',derivedRemnants:[{id:'stock',width:800,length:500},{id:'old',width:800,length:500}]}];
+    const rows=taskRemnants(data,reports,queue,{rollId:'A'});
+    assert.deepEqual(rows.map(r=>r.canvasId),['preview','queued-first','queued-second','stock',undefined]);
+});

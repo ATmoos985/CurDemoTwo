@@ -37,16 +37,17 @@ export function renderTaskRemnants() {
         <td>${r.w} × ${r.l} mm</td><td>${(r.w*r.l/1e6).toFixed(3)} m²</td>
         <td><span class="quality-badge ${r.hasDefect ? 'has-defect' : ''}">${r.hasDefect ? '带疵' : '无疵'}</span></td>
         <td>${{expected:'预计 · 未入库',queued:'待报工 · 未入库',reported:'已入库'}[r.phase]}</td>
-        <td>${r.locatable ? `<button class="tool-btn" data-locate="${i}">定位</button>` : r.phase === 'reported' ? '<button class="tool-btn" data-report>报工记录</button>' : '—'}</td></tr>`).join('');
+        <td>${r.canvasId ? `<button class="tool-btn" data-locate="${i}" aria-label="定位料头 ${escapeText(r.id)}">定位</button>` : r.phase === 'reported' ? '<button class="tool-btn" data-report>报工记录</button>' : '—'}</td></tr>`).join('');
     container.querySelectorAll('[data-locate]').forEach(button => {
         const rem = rows[Number(button.dataset.locate)], row = button.closest('tr');
-        row.id = 'remnant-row-' + rem.id; row.dataset.remnantId = rem.id;
+        row.id = 'remnant-row-' + rem.canvasId; row.dataset.remnantId = rem.canvasId;
         row.classList.add('interactive-row');
-        row.classList.toggle('remnant-selected-row', state.selectedRemnantId === rem.id);
-        row.onmouseenter = () => window.hoverRemnant(rem.id, true);
-        row.onmouseleave = () => window.hoverRemnant(rem.id, false);
+        row.classList.toggle('remnant-selected-row', state.selectedRemnantId === rem.canvasId);
+        row.onmouseenter = () => window.hoverRemnant(rem.canvasId, true);
+        row.onmouseleave = () => window.hoverRemnant(rem.canvasId, false);
         row.onclick = () => {
-            window.selectRemnant(rem.id, {fromTable:true,smoothPan:true,showToastMsg:true,switchTab:false}); closeRemnantModal();
+            closeRemnantModal();
+            window.selectRemnant(rem.canvasId, {fromTable:true,smoothPan:true,showToastMsg:false,switchTab:false});
         };
     });
     container.querySelectorAll('[data-report]').forEach(button => button.onclick = () => {closeRemnantModal();openTaskReports();});

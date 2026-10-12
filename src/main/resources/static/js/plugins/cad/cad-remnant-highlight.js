@@ -111,11 +111,7 @@ export function selectRemnant(remnantId, options = {}) {
         if (options.smoothPan || !isWellVisible) {
             const centerX = rem.x + rem.w / 2;
             const centerY = rem.y + rem.l / 2;
-            // 若当前视口缩放过小 (如全卷宏观缩放 < 0.2)，自动平滑变焦至适宜观察的 0.28 比例
-            let targetZoom = scale;
-            if (scale < 0.22) {
-                targetZoom = 0.28;
-            }
+            const targetZoom = Math.max(.002, Math.min(.6, (cw - 120) / rem.w, (ch - 160) / rem.l));
             panToCADCoord(centerX, centerY, targetZoom, 320);
         }
     }
@@ -237,7 +233,7 @@ export function renderRemnantHighlight() {
     const screenY = Math.max(34, Math.min(stage.y() + rem.y / inv - 58, stage.height() - 64));
     const badge = new Konva.Group({ name: 'remnant-tooltip', x: screenX, y: screenY, listening: false });
     badge.add(new Konva.Rect({ width, height: 48, fill: dark ? '#242f3b' : '#ffffff', stroke: color, strokeWidth: 1, cornerRadius: 3 }));
-    badge.add(new Konva.Text({ x: 10, y: 8, width: width - 20, text: `余料 ${rem.id} · ${rem.confirmed ? '已报工' : '待回收确认'}`, fontSize: 12,
+    badge.add(new Konva.Text({ x: 10, y: 8, width: width - 20, text: `料头 ${rem.sourceCandidateId || rem.id} · ${rem.confirmed ? '已报工' : rem.queued ? '待报工' : '预计产出'}`, fontSize: 12,
         fontFamily: 'Segoe UI, Microsoft YaHei, sans-serif', fill: color, wrap: 'none', ellipsis: true }));
     badge.add(new Konva.Text({ x: 10, y: 28, width: width - 20,
         text: `${rem.w} × ${rem.l} mm · ${rem.hasDefect ? '带疵' : '无疵'}`, fontSize: 11,
