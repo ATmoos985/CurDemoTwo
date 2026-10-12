@@ -13,6 +13,7 @@ public class SolveRequest {
     private List<PieceDemand> demands = new ArrayList<>();
     private String firstStageOrientation = "horizontal";
     private double trimStart = 0.0;
+    private double pieceGap = 0.0;
     private String cutOrigin = "right-top";  // 默认右上角基准 (靠右导轨对齐 · 顺流进给)
     private double totalRollL = 60000.0;
     private double windowStartY = 0.0;
@@ -31,11 +32,19 @@ public class SolveRequest {
     public void setTimeLimitSeconds(int value) { timeLimitSeconds = value; }
 
     public void validateSettings() {
+        validatePieceGap(pieceGap);
         if (!Double.isFinite(minRemnantWidth) || minRemnantWidth < 50 || minRemnantWidth > 1000 ||
                 !Double.isFinite(minRemnantLength) || minRemnantLength < 50 || minRemnantLength > 2000 ||
                 timeLimitSeconds < 1 || timeLimitSeconds > 60)
             throw new IllegalArgumentException("回收宽度应为 50–1000 mm、长度 50–2000 mm，求解时限 1–60 秒");
     }
+
+    public static void validatePieceGap(double value) {
+        if (!Double.isFinite(value) || value < 0 || value > 100 || Math.abs(value * 10 - Math.rint(value * 10)) > .000001)
+            throw new IllegalArgumentException("裁片间距应为 0–100 mm，精确到 0.1 mm");
+    }
+    public double getPieceGap() { return pieceGap; }
+    public void setPieceGap(double value) { pieceGap = value; }
 
     private String taskId;
     private long taskRevision;

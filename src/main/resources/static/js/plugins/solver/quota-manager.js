@@ -459,6 +459,7 @@ export function onOriginParamChange() {
     state.pendingPlan = null;
     const data = state.getCurrentCaseData();
     data.trimStart = parseFloat(document.getElementById("inp-trim-start").value) || 0;
+    data.pieceGap = Number(document.getElementById('inp-piece-gap').value);
     data.cutOrigin = document.getElementById("sel-cut-origin").value || "right-bottom";
     data.firstStageOrientation = document.getElementById("sel-first-stage").value;
     data.allowRotation = (document.getElementById("sel-allow-rotation").value === "1");

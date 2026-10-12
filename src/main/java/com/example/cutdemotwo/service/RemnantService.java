@@ -430,6 +430,7 @@ public class RemnantService {
         if (previous != null && previous.revision() != input.revision()) throw new IllegalArgumentException("任务已更新，请重新打开后编辑");
         Set<Integer> ids = new HashSet<>();
         CuttingTask.Process process = input.process();
+        if (process != null) SolveRequest.validatePieceGap(process.pieceGap());
         if (process != null && (!Double.isFinite(process.bedLength()) || process.bedLength() <= 0 ||
                 !Double.isFinite(process.trimStart()) || process.trimStart() < 0 ||
                 !Set.of("left-top", "right-top", "left-bottom", "right-bottom").contains(String.valueOf(process.cutOrigin())) ||

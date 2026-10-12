@@ -41,6 +41,7 @@ export function updateUIInfo() {
     if (document.getElementById("inp-roll-w")) document.getElementById("inp-roll-w").value = data.rollW || 2000;
 
     if (document.getElementById("inp-trim-start")) document.getElementById("inp-trim-start").value = data.trimStart || 0;
+    if (document.getElementById('inp-piece-gap')) document.getElementById('inp-piece-gap').value = data.pieceGap ?? 0;
     if (document.getElementById("sel-cut-origin")) document.getElementById("sel-cut-origin").value = data.cutOrigin || "right-bottom";
     if (document.getElementById("sel-first-stage")) document.getElementById("sel-first-stage").value = data.firstStageOrientation || "horizontal";
     if (document.getElementById("sel-allow-rotation")) document.getElementById("sel-allow-rotation").value = data.allowRotation ? "1" : "0";
@@ -204,6 +205,7 @@ export function loadCase(id) {
     if (baseOriginEl) baseOriginEl.innerText = `Y = ${(data.windowStartY || 0).toLocaleString()} mm (${((data.windowStartY || 0)/1000).toFixed(2)}m)`;
 
     if (document.getElementById("inp-trim-start")) document.getElementById("inp-trim-start").value = data.trimStart || 0;
+    if (document.getElementById('inp-piece-gap')) document.getElementById('inp-piece-gap').value = data.pieceGap ?? 0;
     if (document.getElementById("sel-cut-origin")) document.getElementById("sel-cut-origin").value = data.cutOrigin || "right-bottom";
     const headerTag = document.getElementById("tag-cut-origin-header");
     if (headerTag) {
@@ -409,7 +411,7 @@ export async function validatePlanAdjustment() {
 }
 function solveContext() {
     return JSON.stringify([state.activeTask?.id, state.activeTask?.revision, state.currentCaseId, state.currentCutMode, state.loadedRemnant?.id,
-        getDemandsFromUI(), getDefectsFromUI(), solverSettings(), ...['task-name','task-material','sel-mother-roll-id','inp-roll-w','inp-bed-l','inp-window-start-y','inp-trim-start','sel-cut-origin','sel-first-stage','sel-allow-rotation','sel-allow-longitudinal'].map(id => document.getElementById(id)?.value)]);
+        getDemandsFromUI(), getDefectsFromUI(), solverSettings(), ...['task-name','task-material','sel-mother-roll-id','inp-roll-w','inp-bed-l','inp-window-start-y','inp-trim-start','inp-piece-gap','sel-cut-origin','sel-first-stage','sel-allow-rotation','sel-allow-longitudinal'].map(id => document.getElementById(id)?.value)]);
 }
 export function restoreSavedPlan(saved) {
     const {request, result} = saved;
@@ -417,7 +419,7 @@ export function restoreSavedPlan(saved) {
     const data = state.getCurrentCaseData();
     const offset = request.feedPortType === 'remnant' ? 0 : request.windowStartY;
     Object.assign(data, {rollId:request.rollId, rollW:request.rollW, bedL:request.rollL,
-        windowStartY:offset, trimStart:request.trimStart, cutOrigin:request.cutOrigin,
+        windowStartY:offset, trimStart:request.trimStart, pieceGap:request.pieceGap ?? 0, cutOrigin:request.cutOrigin,
         firstStageOrientation:request.firstStageOrientation, allowRotation:request.allowRotation,
         allowLongitudinal:request.allowLongitudinal, lastReceipt:null});
     data.pieces = (result.pieces || []).map(p => ({...p, sourcePieceId:p.id, planId:result.planId, y:p.y + offset}));
@@ -515,6 +517,7 @@ async function runSolve(operation) {
         totalRollL: totalL,
         windowStartY: winStartY,
         trimStart: trimStart,
+        pieceGap: Number(document.getElementById('inp-piece-gap').value),
         cutOrigin: cutOrigin,
         firstStageOrientation: firstStageOrientation,
         allowRotation: allowRotation,

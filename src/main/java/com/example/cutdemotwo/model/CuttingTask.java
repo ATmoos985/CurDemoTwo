@@ -10,5 +10,11 @@ public record CuttingTask(String id, String name, String materialModel, String e
     }
     public record Line(int id, String name, double width, double length, int quantity, boolean allowRotation) {}
     public record Process(double bedLength, double trimStart, String cutOrigin, String firstStageOrientation,
-                          boolean allowRotation, boolean allowLongitudinal) {}
+                          boolean allowRotation, boolean allowLongitudinal, Double pieceGap) {
+        public Process { pieceGap = pieceGap == null ? 0.0 : pieceGap; }
+        public Process(double bedLength, double trimStart, String cutOrigin, String firstStageOrientation,
+                       boolean allowRotation, boolean allowLongitudinal) {
+            this(bedLength, trimStart, cutOrigin, firstStageOrientation, allowRotation, allowLongitudinal, 0.0);
+        }
+    }
 }

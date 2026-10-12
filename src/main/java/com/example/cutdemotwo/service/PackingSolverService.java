@@ -123,14 +123,14 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
             try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(new FileOutputStream(defectsCsv), java.nio.charset.StandardCharsets.UTF_8))) {
                 pw.println("ID,BIN,X,Y,WIDTH,HEIGHT");
                 for (Defect d : EngineGeometry.defects(req)) {
-                    double dy = d.getY() - req.process().trimStart();
-                    if (dy + d.getH() >= 0) {
-                        double safeX = isRightOrigin ?
-                                Math.max(0, req.width() - d.getX() - d.getW() - d.getMargin()) : d.getSafeX();
-                        double safeY = mirrorY ?
-                                Math.max(0, req.height() - dy - d.getH() - d.getMargin()) : Math.max(0, dy - d.getMargin());
-                        pw.println(d.getId() + ",0," + nativeUnits(safeX) + "," + nativeUnits(safeY) + "," +
-                                nativeUnits(d.getSafeW()) + "," + nativeUnits(d.getSafeH()));
+                    double x = isRightOrigin ? req.width() - d.getX() - d.getW() - d.getMargin() : d.getX() - d.getMargin();
+                    double y = mirrorY ? activeL - d.getY() - d.getH() - d.getMargin() : d.getY() - req.process().trimStart() - d.getMargin();
+                    double left = Math.max(0, x), top = Math.max(0, y);
+                    double width = Math.min(req.width(), x + d.getSafeW()) - left;
+                    double height = Math.min(activeL, y + d.getSafeH()) - top;
+                    if (width > 0 && height > 0) {
+                        pw.println(d.getId() + ",0," + nativeUnits(left) + "," + nativeUnits(top) + "," +
+                                nativeUnits(width) + "," + nativeUnits(height));
                     }
                 }
             }

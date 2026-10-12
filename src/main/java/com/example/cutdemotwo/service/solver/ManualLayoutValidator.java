@@ -18,8 +18,10 @@ public final class ManualLayoutValidator {
         EngineResult result = new EngineResult(); result.setPieces(pieces);
         String invalid = RectangularResultValidator.validate(problem, result);
         if (invalid != null) throw new IllegalArgumentException(invalid);
+        boolean trimAtEnd = problem.sheet() && "GUILLOTINE".equals(problem.process().mode()) && problem.process().startCorner().endsWith("bottom");
         for (PlacedPiece piece : pieces) {
-            if (piece.getY() < problem.process().trimStart() - EPS) throw new IllegalArgumentException("裁片进入卷头修边区域");
+            if (trimAtEnd ? piece.getY()+piece.getL() > problem.height()-problem.process().trimStart()+EPS
+                    : piece.getY() < problem.process().trimStart()-EPS) throw new IllegalArgumentException("裁片进入卷头修边区域");
             for (double value : new double[]{piece.getX(), piece.getY(), piece.getW(), piece.getL()})
                 if (Math.abs(value * 10 - Math.rint(value * 10)) > .000001)
                     throw new IllegalArgumentException("调整位置与尺寸须精确到 0.1 mm，不能静默舍入");

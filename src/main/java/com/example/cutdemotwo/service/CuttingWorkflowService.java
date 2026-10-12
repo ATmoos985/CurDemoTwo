@@ -65,7 +65,7 @@ public class CuttingWorkflowService {
             pieces.add(new PlacedPiece(source.getId(), source.getName(), position.x(), position.y(),
                     swap ? source.getL() : source.getW(), swap ? source.getW() : source.getL(), position.rotated(), source.getDemandId()));
         }
-        var result = FabricSolveAdapter.toLegacy(original.request(), solverFactory.validateAdjustment(FabricSolveAdapter.toProblem(original.request()), pieces));
+        var result = FabricSolveAdapter.adjust(solverFactory, original.request(), pieces);
         result.setPlanId(adjustment.adjustmentId());
         return inventory.rememberAdjustment(id, adjustment.adjustmentId(), result);
     }

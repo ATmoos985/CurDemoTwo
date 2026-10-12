@@ -30,6 +30,9 @@ export function workflowState(input) {
         return step(2, '核对加工区', '当前工位超出材料范围，请在母卷导航中调整位置。', 'focus', '定位母卷导航', '#radar-window');
     if (!Number.isFinite(process.trim) || process.trim < 0 || process.trim >= process.length)
         return step(2, '核对切头量', '切头量须不小于 0，且小于加工区长度。', 'focus', '修改切头量', '#inp-trim-start');
+    const gap = process.gap ?? 0;
+    if (!Number.isFinite(gap) || gap < 0 || gap > 100 || Math.abs(gap * 10 - Math.round(gap * 10)) > .000001)
+        return step(2, '核对裁片间距', '裁片间距应为 0–100 mm，精确到 0.1 mm。', 'focus', '修改裁片间距', '#inp-piece-gap');
     if (ready) return step(3, '本工位待记录', '默认按方案记录合格件和料头。实切有变化时先修改；可连续多轮后统一报工。', 'report', '记录并排下一工位', null, {canSolve:true});
     if (edited) return step(2, '校验手调方案', '手动调整尚未校验，保存调整版后再打印和报工。', 'validate', '校验并保存调整版', null, {canSolve:true});
     return step(2, '生成排料方案', `还有 ${toCut} 件待裁切${input.queued ? `，${input.queued} 个工位待报工` : ''}。预览不扣库存。`, 'solve', '生成排料方案', null, {canSolve:true});

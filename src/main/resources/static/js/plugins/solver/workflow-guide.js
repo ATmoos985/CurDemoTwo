@@ -22,7 +22,7 @@ export function readWorkflowState(plan = {}) {
             model:sheet ? state.loadedRemnant?.materialBatch : el('lbl-roll-model-desc')?.textContent,
             length:sheet ? state.loadedRemnant?.length : data.stockRemainingLength - queuedStockLength(data.rollId,queue),
             used:Math.max(data.stockUsedLength || 0,queuedRollEnd(data.rollId,queue)), total:data.totalRollL},
-        process:{length:Number(value('inp-bed-l')), start:sheet ? 0 : Number(value('inp-window-start-y')), trim:Number(value('inp-trim-start'))}
+        process:{length:Number(value('inp-bed-l')), start:sheet ? 0 : Number(value('inp-window-start-y')), trim:Number(value('inp-trim-start')), gap:Number(value('inp-piece-gap') ?? 0)}
     });
 }
 

@@ -176,9 +176,15 @@
                                 <input type="number" class="prop-input" id="inp-roll-w" value="2000" min="500" max="5000" step="100" onchange="onRollConfigChange()" />
                             </div>
                             <div class="prop-row">
-                                <span class="prop-label">卷头修齐 (mm)</span>
-                                <input type="number" class="prop-input" id="inp-trim-start" value="0" min="0" max="1000" step="50" onchange="onOriginParamChange()" />
+                                <label class="prop-label" for="inp-trim-start">工位起始修齐 (mm)</label>
+                                <input type="number" class="prop-input" id="inp-trim-start" value="0" min="0" max="1000" step="0.1" aria-describedby="trim-start-help" onchange="onOriginParamChange()" />
                             </div>
+                            <p id="trim-start-help" class="field-unit">每个工位起始预留的修边长度，这段不排裁片。</p>
+                            <div class="prop-row">
+                                <label class="prop-label" for="inp-piece-gap">裁片间距 (mm)</label>
+                                <input type="number" class="prop-input" id="inp-piece-gap" value="0" min="0" max="100" step="0.1" aria-describedby="piece-gap-help" onchange="onOriginParamChange()" />
+                            </div>
+                            <p id="piece-gap-help" class="field-unit">相邻裁片预留损耗间隔，成品尺寸不变；0 表示紧邻排料。</p>
                             <div class="prop-row">
                                 <span class="prop-label">设备纵切能力</span>
                                 <select class="prop-input" id="sel-allow-longitudinal" onchange="toggleLongitudinal()">

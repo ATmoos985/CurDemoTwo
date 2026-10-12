@@ -11,7 +11,39 @@ public final class FabricSolveAdapter {
     private FabricSolveAdapter() {}
 
     public static SolveResponse solve(SolverFactory factory, SolveRequest request) {
-        return toLegacy(request, factory.solve(toProblem(request)));
+        var problem = toProblem(request);
+        double gap = request.getPieceGap();
+        if (gap == 0) return toLegacy(request, factory.solve(problem));
+        // Equal padding on parts and the outer boundary reserves inter-piece space without shrinking edge capacity.
+        var material = new NestingProblem.Material(problem.material().id(),
+                NestingProblem.Shape.rectangle(problem.width() + gap, problem.height() + gap),
+                problem.material().exclusions(), problem.material().continuesAfterRegion());
+        var parts = problem.parts().stream().map(p -> new NestingProblem.Part(p.id(), p.name(),
+                NestingProblem.Shape.rectangle(p.shape().width() + gap, p.shape().height() + gap), p.quantity(), p.allowRotation())).toList();
+        var padded = new NestingProblem(problem.schemaVersion(), problem.unit(), material, parts, problem.process(), problem.engine(), problem.timeLimitSeconds());
+        var candidate = factory.solve(padded);
+        if (!candidate.feasible()) return toLegacy(request, candidate);
+        var pieces = candidate.placements().stream().map(p -> {
+            var part = problem.parts().stream().filter(d -> d.id() == p.demandId()).findFirst().orElseThrow();
+            boolean rotated = p.rotationDegrees() != 0;
+            return new PlacedPiece(p.id(), p.name(), Math.rint(p.x()*10)/10, Math.rint(p.y()*10)/10,
+                    rotated ? part.shape().height() : part.shape().width(), rotated ? part.shape().width() : part.shape().height(), rotated, p.demandId());
+        }).toList();
+        var result = adjust(factory, request, pieces);
+        result.setEngine(candidate.engine());
+        return result;
+    }
+
+    public static SolveResponse adjust(SolverFactory factory, SolveRequest request, List<PlacedPiece> pieces) {
+        double gap = request.getPieceGap();
+        SolveRequest.validatePieceGap(gap);
+        for (int i = 0; gap > 0 && i < pieces.size(); i++) for (int j = i + 1; j < pieces.size(); j++) {
+            var a = pieces.get(i); var b = pieces.get(j);
+            if (a.getX()+a.getW()+gap > b.getX()+.001 && b.getX()+b.getW()+gap > a.getX()+.001
+                    && a.getY()+a.getL()+gap > b.getY()+.001 && b.getY()+b.getL()+gap > a.getY()+.001)
+                throw new IllegalArgumentException("裁片之间须保留至少 " + gap + " mm 间距");
+        }
+        return toLegacy(request, factory.validateAdjustment(toProblem(request), pieces));
     }
 
     public static NestingProblem toProblem(SolveRequest r) {

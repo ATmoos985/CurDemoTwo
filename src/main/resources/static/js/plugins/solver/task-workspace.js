@@ -16,7 +16,7 @@ import {loadReportQueue, queuedReports} from './report-queue.js';
 export const escapeText = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const el = id => document.getElementById(id);
 const DRAFT_ACTIVE = 'cutting-demand-draft-active';
-const processFields = ['inp-bed-l', 'inp-trim-start', 'sel-cut-origin', 'sel-first-stage', 'sel-allow-rotation', 'sel-allow-longitudinal'];
+const processFields = ['inp-bed-l', 'inp-trim-start', 'inp-piece-gap', 'sel-cut-origin', 'sel-first-stage', 'sel-allow-rotation', 'sel-allow-longitudinal'];
 let draftId = null, draftBaseline = '', draftReady = false, draftDirty = false, draftStored = false;
 let switchPrompt = false;
 const draftStore = () => createDraftStore(localStorage);
@@ -154,7 +154,7 @@ async function restoreTaskDraft(id, initial = false) {
             await switchCutMode('roll');
         }
         const fields = task.fields || {};
-        Object.assign(data, {bedL:Number(fields['inp-bed-l']), trimStart:Number(fields['inp-trim-start']), cutOrigin:fields['sel-cut-origin'],
+        Object.assign(data, {bedL:Number(fields['inp-bed-l']), trimStart:Number(fields['inp-trim-start']), pieceGap:Number(fields['inp-piece-gap'] ?? 0), cutOrigin:fields['sel-cut-origin'],
             firstStageOrientation:fields['sel-first-stage'], allowRotation:fields['sel-allow-rotation'] === '1', allowLongitudinal:fields['sel-allow-longitudinal'] === '1'});
         updateDemandCompletionFromPieces(data); renderDemandsUI(data.demands); updateUIInfo(); renderScene(); renderRadar(); resetToBedView();
         for (const field of processFields) if (fields[field] !== undefined) el(field).value = fields[field];
@@ -235,7 +235,7 @@ export async function newCuttingTask(rolls, {skipDraftGuard = false} = {}) {
     state.scenarios = getInitialScenarios();
     state.currentCaseId = 1;
     state.getCurrentCaseData().demands = [];
-    Object.assign(state.getCurrentCaseData(), {allowLongitudinal:true,allowRotation:false,trimStart:0});
+    Object.assign(state.getCurrentCaseData(), {allowLongitudinal:true,allowRotation:false,trimStart:0,pieceGap:0});
     renderDemandsUI([]);
     await switchCutMode('roll');
     resetDraftTracking();
@@ -250,7 +250,7 @@ function taskPayload() {
         id: state.activeTask?.id, revision: state.activeTask?.revision || 0,
         name: el('task-name').value.trim(), materialModel: el('task-material').value,
         externalRef: el('task-external-ref').value.trim(),
-        process: {bedLength:Number(el('inp-bed-l').value), trimStart:Number(el('inp-trim-start').value),
+        process: {bedLength:Number(el('inp-bed-l').value), trimStart:Number(el('inp-trim-start').value), pieceGap:Number(el('inp-piece-gap').value),
             cutOrigin:el('sel-cut-origin').value, firstStageOrientation:el('sel-first-stage').value,
             allowRotation:el('sel-allow-rotation').value === '1', allowLongitudinal:el('sel-allow-longitudinal').value === '1'},
         demands: getDemandsFromUI().map(d => ({ id: d.id, name: d.name, width: d.width,
@@ -385,7 +385,7 @@ export async function loadTask(id, {skipDraftGuard = false, detail:loadedDetail}
         await switchCutMode('roll');
         if (task.process) {
             const p = task.process;
-            Object.assign(data, {bedL: Math.min(p.bedLength, data.stockRemainingLength), trimStart:p.trimStart, cutOrigin:p.cutOrigin,
+            Object.assign(data, {bedL: Math.min(p.bedLength, data.stockRemainingLength), trimStart:p.trimStart, pieceGap:p.pieceGap ?? 0, cutOrigin:p.cutOrigin,
                 firstStageOrientation:p.firstStageOrientation, allowRotation:p.allowRotation, allowLongitudinal:p.allowLongitudinal});
             updateUIInfo(); renderScene(); renderRadar(); resetToBedView();
         }
