@@ -8,6 +8,8 @@ import { renderDefectsUI, updateDemandCompletionFromPieces, loadCurtainOrderTemp
 import { renderRadar } from '../radar/radar-scrubber.js';
 import { updateUIInfo } from '../solver/solver-client.js';
 import { showToast } from '../../core/toast.js';
+import {restoreRecordedGeometry} from '../solver/report-outcomes.js';
+import {queuedReports} from '../solver/report-queue.js';
 
 export async function switchCutMode(mode, targetRemnant, presetData = null, loadedRoll = null) {
     const alreadyInert = document.body.inert;
@@ -28,6 +30,7 @@ export async function switchCutMode(mode, targetRemnant, presetData = null, load
     if (mode === 'remnant') {
         data.materialAvailable = true; document.body.dataset.material = 'ready';
         mountRemnantToBed(targetRemnant, presetData);
+        restoreRecordedGeometry(data,state.taskReports,queuedReports(),mode,targetRemnant.id);
     }
     else { data.windowStartY = 0; await onMotherRollChange(true, loadedRoll); }
     updateDemandCompletionFromPieces(data);
@@ -165,6 +168,7 @@ export async function onMotherRollChange(forceResetBed = false, loadedRoll = nul
         }
     }
 
+    restoreRecordedGeometry(data,state.taskReports,queuedReports());
     renderScene();
     renderRadar();
     resetToBedView();

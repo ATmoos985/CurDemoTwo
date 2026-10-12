@@ -104,7 +104,7 @@ export function updateCanvasAnnotations() {
         const level = labelDetail(p.w, p.l, scale, view.overview);
         if (x + w < RULER_SIZE || x > stage.width() || y + h < RULER_SIZE || y > stage.height()) continue;
         if (level) label(level === 2 ? (p.name || `#${p.id}`) : `#${p.id}`, x + 6, y + h / 2 - (level === 2 ? 16 : 6), w - 12, { fontStyle: 'bold' });
-        if (level === 2) label(`${p.w} × ${p.l} mm${p.outcome === 'REJECTED' ? ' · 异常' : p.confirmed ? ' · 合格' : ''}`, x + 6, y + h / 2 + 4, w - 12, { fontSize: 11, fill: muted });
+        if (level === 2) label(`${p.w} × ${p.l} mm${p.outcome === 'REJECTED' ? ' · 异常' : p.confirmed ? ' · 合格' : p.queued ? ' · 待报工' : ''}`, x + 6, y + h / 2 + 4, w - 12, { fontSize: 11, fill: muted });
         if (selectedDemand != null && p.demandId === selectedDemand && p.id !== selectedId) {
             annotationLayer.add(new Konva.Rect({name:'demand-related',x,y,width:w,height:h,stroke:'#2d7899',strokeWidth:1.5,dash:[5,3],listening:false}));
         }
@@ -118,7 +118,7 @@ export function updateCanvasAnnotations() {
         if (!level) continue;
         const w = r.w * scale, h = r.l * scale;
         label(state.currentCutMode === 'remnant' && !r.confirmed ? '余料 · 不回收' : r.hasDefect ? '带疵料头' : '可用料头', sx(r.x) + 6, sy(r.y) + h / 2 - (level === 2 ? 16 : 6), w - 12, { fill: muted });
-        if (level === 2) label(`${r.w} × ${r.l} mm`, sx(r.x) + 6, sy(r.y) + h / 2 + 4, w - 12, { fill: muted, fontSize: 11 });
+        if (level === 2) label(`${r.w} × ${r.l} mm${r.queued ? ' · 待报工' : r.confirmed ? ' · 已报工' : ''}`, sx(r.x) + 6, sy(r.y) + h / 2 + 4, w - 12, { fill: muted, fontSize: 11 });
     }
     if (detailed && view.paths) {
         // ponytail: 当前工位少量刀序直接检查邻近；上千刀时改为空间分桶。
@@ -145,7 +145,7 @@ export function updateCanvasAnnotations() {
             document.getElementById('cad-selection-name').textContent = selected.name || `裁片 ${selected.id}`;
             document.getElementById('cad-selection-size').textContent = `${selected.w} × ${selected.l} mm`;
             document.getElementById('cad-selection-position').textContent = `距原点 X ${local.x} · Y ${local.y} mm`;
-            document.getElementById('cad-selection-state').textContent = selected.confirmed ? '已实切 · 锁定' : '方向键微调 · R 旋转';
+            document.getElementById('cad-selection-state').textContent = selected.confirmed ? '已实切 · 锁定' : selected.queued ? '已记录 · 待报工' : '方向键微调 · R 旋转';
         }
     }
     renderRemnantHighlight();

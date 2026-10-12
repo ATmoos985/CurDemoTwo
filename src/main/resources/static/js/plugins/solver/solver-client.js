@@ -5,7 +5,7 @@ import { layoutMetrics, materialSummary } from './material-accounting.js';
 import { renderWorkflowGuide, navigateWorkflowStage } from './workflow-guide.js';
 import { requestJSON, ApiError, failurePresentation } from '../../core/api-request.js';
 import { updateDemandProgress } from './demand-progress.js';
-import { classifyReport, applyReportReceipt } from './report-outcomes.js';
+import { classifyReport, applyReportReceipt, restoreRecordedGeometry } from './report-outcomes.js';
 import { renderReportPieces, readReportPieces, syncReportRemnants, readReportRemnants, reportPieceError } from './report-editor.js';
 /**
  * 求解器通信与排料控制插件 (Solver Client Plugin)
@@ -328,7 +328,7 @@ export function recordPlanEdit() {
     const data = state.getCurrentCaseData();
     // The old cut tree and leftover partition cease to describe a moved or removed piece.
     if (JSON.stringify(data.pieces) !== JSON.stringify(pending.history.current.pieces)) {
-        data.cuts = []; data.remnants = []; data.cutIntervals = [];
+        data.cuts = []; data.remnants = (data.remnants || []).filter(r => r.confirmed || r.queued); data.cutIntervals = [];
     }
     if (pending.history.record(planScene(data))) {
         pending.adjustmentError = ''; pending.adjustmentId = null;
@@ -421,7 +421,8 @@ export function restoreSavedPlan(saved) {
         firstStageOrientation:request.firstStageOrientation, allowRotation:request.allowRotation,
         allowLongitudinal:request.allowLongitudinal, lastReceipt:null});
     data.pieces = (result.pieces || []).map(p => ({...p, sourcePieceId:p.id, planId:result.planId, y:p.y + offset}));
-    data.remnants = (result.remnants || []).map(r => ({...r, y:r.y + offset}));
+    data.remnants = (result.remnants || []).map(r => ({...r, planId:result.planId, y:r.y + offset}));
+    restoreRecordedGeometry(data,state.taskReports,queuedReports(),state.currentCutMode,state.loadedRemnant?.id);
     data.cuts = offsetCuts(result.cuts, offset);
     data.cutIntervals = [{start:offset, end:offset + request.rollL}];
     data.engine = result.engine;
@@ -577,7 +578,7 @@ async function runSolve(operation) {
                         const pMid = p.y + p.l / 2;
                         return (pMid >= winStartY && pMid < winEndY);
                     };
-                    const retainedPieces = (data.pieces || []).filter(p => !isPieceInCurrentStation(p));
+                    const retainedPieces = (data.pieces || []).filter(p => p.confirmed || p.queued || !isPieceInCurrentStation(p));
                     const newPieces = (result.pieces || []).map((p, idx) => {
                         const matchedDemand = (activeDemands || []).find(ad => ad.id === p.demandId);
                         return {
@@ -602,8 +603,9 @@ async function runSolve(operation) {
                     // A. 凡是起始坐标已在当前待切工位内（r.y >= winStartY - 1）的旧料头彻底清除；
                     // B. 凡是跨过当前工位起始线 winStartY 的旧料头，物理截断至 winStartY，绝不允许刺入当前工位；
                     const retainedRemnants = (data.remnants || [])
-                        .filter(r => r.y < winStartY - 1)
+                        .filter(r => r.confirmed || r.queued || r.y < winStartY - 1)
                         .map(r => {
+                            if (r.confirmed || r.queued) return r;
                             if (r.y + r.l > winStartY) {
                                 const newL = Math.max(0, winStartY - r.y);
                                 return {
@@ -614,7 +616,7 @@ async function runSolve(operation) {
                             }
                             return r;
                         })
-                        .filter(r => r.l >= 100);
+                        .filter(r => r.confirmed || r.queued || r.l >= 100);
 
                     // 2. 注入新工位料头，保证全局 ID 唯一性与工位溯源性
                     const existingIds = new Set(retainedRemnants.map(r => r.id));
@@ -631,6 +633,7 @@ async function runSolve(operation) {
                         return {
                             ...r,
                             id: finalId,
+                            planId: result.planId,
                             y: r.y + winStartY
                         };
                     });
@@ -769,11 +772,9 @@ async function stageStation(pending, report) {
     await requestJSON('/api/cutting/report-batch?preview=true', entries.map(r => r.report));
     saveReportQueue(pending.taskId,entries);
     state.reportQueue = entries;
-    const data = state.getCurrentCaseData(), outcomes = new Map(report.pieceResults.map(r => [r.pieceId,r.outcome]));
-    // 保留画布上的全卷坐标、唯一编号和原始裁片映射。
-    data.pieces = (data.pieces || []).filter(p => p.planId !== report.planId || outcomes.get(p.sourcePieceId) !== 'UNCUT')
-        .map(p => p.planId === report.planId ? {...p,queued:true,outcome:outcomes.get(p.sourcePieceId)} : p);
+    const data = state.getCurrentCaseData();
     data.remnants = (data.remnants || []).filter(r => r.confirmed || r.queued);
+    restoreRecordedGeometry(data,state.taskReports,entries,state.currentCutMode,state.loadedRemnant?.id);
     data.cuts = [];state.pendingPlan = null;
     smartAdvanceBed();updateUIInfo();renderScene();renderRadar();
 }

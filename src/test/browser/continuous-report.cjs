@@ -24,6 +24,17 @@ async function api(path,body) {
         await page.evaluate(async()=>{window.testState=(await import('/js/core/state.js')).state;});
         const load=async()=>assert.equal(await page.evaluate(async id=>(await import('/js/plugins/solver/task-workspace.js')).loadTask(id),task.id),true);
         const snapshot=()=>page.evaluate(async()=>{const {state}=await import('/js/core/state.js');return {pending:state.pendingPlan,queue:state.reportQueue,data:state.getCurrentCaseData(),completed:state.taskCompleted};});
+        const checkRecordedCanvas=async()=>{
+            const snap=await snapshot(),queued=snap.data.remnants.filter(r=>r.queued);
+            const expected=snap.queue.flatMap(({pending,report})=>report.actualRemnants.map(r=>({planId:report.planId,x:r.x,y:r.y+pending.windowStartY,w:r.w,l:r.l})));
+            assert.deepEqual(queued.map(({planId,x,y,w,l})=>({planId,x,y,w,l})),expected);
+            assert.equal(new Set(snap.data.remnants.map(r=>r.id)).size,snap.data.remnants.length);
+            const drawn=await page.evaluate(async()=>{
+                const {remnantGroup,pieceGroup}=await import('/js/plugins/cad/cad-stage.js');
+                return {remnants:remnantGroup.getChildren().length,pieces:pieceGroup.getChildren().length};
+            });
+            assert.equal(drawn.remnants,snap.data.remnants.length);assert.equal(drawn.pieces,snap.data.pieces.length);
+        };
         const solve=async()=>{
             await page.locator('#btn-trigger-solve-station').click();
             await page.waitForFunction(()=>!!window.testState.pendingPlan?.result?.planId && !document.querySelector('#btn-stage-advance').disabled);
@@ -117,6 +128,7 @@ async function api(path,body) {
             assert.equal(new Set(after.data.pieces.map(p=>p.id)).size,after.data.pieces.length);
             assert.equal((await api('/api/rolls/'+rollId)).usedLength,0);
             assert.equal((await api('/api/cutting/tasks/'+task.id)).reports.length,0);
+            await checkRecordedCanvas();
         }
         assert.equal(await page.locator('#station-work-orders-list details').count(),2);
         pass('two stations continue without dialogs, preserve global geometry and leave inventory unreported');
@@ -124,6 +136,8 @@ async function api(path,body) {
         await page.reload();await page.waitForLoadState('networkidle');
         await page.evaluate(async()=>{window.testState=(await import('/js/core/state.js')).state;});
         assert.equal((await snapshot()).queue.length,2);
+        assert.equal((await snapshot()).data.pieces.filter(p=>p.queued).length,2);
+        await checkRecordedCanvas();
         assert.equal(await page.locator('#station-work-orders-list details').count(),2);
         await page.locator('#station-work-orders-list summary').first().click();
         await page.locator('#station-work-orders-list button').first().click();
@@ -153,6 +167,11 @@ async function api(path,body) {
         assert.equal((await api('/api/rolls/'+rollId)).usedLength,totalLength);
         assert.equal(detail.reports.reduce((n,r)=>n+r.derivedRemnants.length,0),queued.reduce((n,r)=>n+r.report.actualRemnants.length,0));
         assert.equal((await snapshot()).queue.length,0);
+        const reportedCanvas=(await snapshot()).data;
+        assert.equal(reportedCanvas.remnants.length,detail.reports.reduce((n,r)=>n+r.recoveredGeometry.length,0));
+        assert.ok(reportedCanvas.remnants.every(r=>r.confirmed && !r.queued));
+        assert.ok(reportedCanvas.pieces.every(p=>p.confirmed && !p.queued));
+        await checkRecordedCanvas();
         assert.match(await page.locator('#station-work-orders-count').textContent(),/0 待报 · 3 已报/);
         pass('one final batch commits three stations, qualified counts, stock deduction and recovered remnants exactly once');
         const reportWrites=commits;
@@ -173,6 +192,13 @@ async function api(path,body) {
         assert.equal(commits,reportWrites);assert.equal((await api('/api/cutting/tasks/'+task.id)).reports.length,3);
         await page.locator('#task-picker .workflow-dialog-heading button').click();
         pass('report stage opens wider history with information left and print/reverse actions right; cancellation keeps receipts');
+        await page.reload();await page.waitForLoadState('networkidle');
+        await page.evaluate(async()=>{window.testState=(await import('/js/core/state.js')).state;});
+        const restored=(await snapshot()).data;
+        assert.equal(restored.pieces.length,3);assert.equal(restored.remnants.length,reportedCanvas.remnants.length);
+        assert.deepEqual(restored.remnants.map(({id,x,y,w,l})=>({id,x,y,w,l})),reportedCanvas.remnants.map(({id,x,y,w,l})=>({id,x,y,w,l})));
+        await checkRecordedCanvas();
+        pass('queued and reported pieces and remnants remain drawn at their original positions after continuation and reload');
         for(const width of [920,1366,1920]) {
             await page.setViewportSize({width,height:width===920?678:900});
             assert.equal(await page.locator('.workflow-primary:visible').count(),1);

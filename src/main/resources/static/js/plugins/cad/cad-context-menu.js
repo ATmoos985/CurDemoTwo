@@ -148,6 +148,7 @@ export function makeRemnantInteractive(rGroup, remnant, caseData) {
  * 打开【料头块】右键菜单
  */
 export function openRemnantContextMenu(remnant, clientX, clientY) {
+    if (remnant.queued || remnant.confirmed) return showToast(remnant.queued ? '该料头已记录，待统一报工；修改请从统一报工退回核对。' : '该料头已报工，请从报工记录核对。', 'info');
     currentTarget = { type: 'remnant', data: remnant };
     const data = state.getCurrentCaseData();
     const winStartY = data.windowStartY || 0;
@@ -356,6 +357,7 @@ export function discardRemnant(remnantId) {
     const remnant = (data.remnants || []).find(r => r.id === remnantId);
     if (!remnant) return;
     if (remnant.confirmed) return showToast('已报工料头请从报工记录撤回', 'warning');
+    if (remnant.queued) return showToast('该料头已记录，请从统一报工退回核对。', 'warning');
 
     const winStartY = data.windowStartY || 0;
     const bedL = data.bedL || 5000;
@@ -441,6 +443,7 @@ export function advanceFromRemnantStart(remnantId) {
     if (!data) return;
     const remnant = (data.remnants || []).find(r => r.id === remnantId);
     if (!remnant) return;
+    if (remnant.confirmed || remnant.queued) return showToast('已记录料头不能作为母卷未切区间接刀。', 'warning');
 
     const targetY = Math.round(remnant.y);
     discardRemnant(remnantId);

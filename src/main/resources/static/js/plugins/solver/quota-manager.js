@@ -108,7 +108,7 @@ export function clearStationCuts() {
         const rMid = r.y + r.l / 2;
         return (rMid >= winStartY && rMid < winEndY);
     };
-    data.remnants = (data.remnants || []).filter(r => r.confirmed || !isRemInCurrentStation(r));
+    data.remnants = (data.remnants || []).filter(r => r.confirmed || r.queued || !isRemInCurrentStation(r));
 
     if (data.cutIntervals) {
         data.cutIntervals = data.cutIntervals.filter(inv => inv.end <= winStartY || inv.start >= winEndY);
