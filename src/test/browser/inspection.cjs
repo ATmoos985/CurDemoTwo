@@ -1,0 +1,67 @@
+// Disposable service only: exercise real pointer input and persistence without changing the user's inventory.
+const assert=require('node:assert/strict');
+const {chromium,expect}=require(process.env.PLAYWRIGHT_MODULE||'playwright/test');
+const base=process.env.BASE_URL;
+if(!base||new URL(base).port==='8080')throw Error('Use an isolated service outside port 8080.');
+(async()=>{
+    const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH});
+    let passed=0;const pass=m=>{passed++;console.log('PASS '+m);};
+    try{
+        const page=await browser.newPage({viewport:{width:1366,height:900}}),errors=[];
+        page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
+        const id='INSPECT-UI-'+Date.now();await page.goto(base+'/inspection.html');
+        await page.locator('#new-roll').click();await page.locator('#new-roll-form [name=rollId]').fill(id);await page.locator('#new-roll-form [name=rollModel]').fill('验布测试');
+        await page.locator('#new-roll-form button[type=submit]').click();await expect(page.locator('#inspection-roll')).toHaveValue(id);await expect(page.locator('#canvas-empty')).not.toBeVisible();
+        pass('registers a new roll and opens the whole-roll canvas');
+        await page.locator('#feed-position').fill('12.3456');await page.locator('#set-position').click();
+        await expect(page.locator('#feed-position')).toHaveValue('12.3456');
+        const box=await page.locator('#inspection-canvas').boundingBox();
+        await page.mouse.move(box.x+300,box.y+180);await page.mouse.down();await page.mouse.move(box.x+405,box.y+255,{steps:8});
+        await expect(page.locator('#gesture-size')).toBeVisible();await page.mouse.up();await expect(page.locator('#pending-count')).toHaveText('1');
+        let drafts=()=>page.evaluate(id=>JSON.parse(localStorage.getItem('fabric-inspection:'+id)),id);
+        const first=(await drafts()).pending[0];assert.ok(first.y>12000&&first.w>0&&first.h>0);pass('left-button drag records size and global coordinates at the current feed position');
+        await page.locator('#defect-editor [name=w]').fill('250.5');await page.locator('#defect-editor [name=w]').press('Tab');assert.equal((await drafts()).pending[0].w,250.5);
+        await page.locator('#delete-mark').click();await expect(page.locator('#pending-count')).toHaveText('0');await page.locator('#undo-mark').click();await expect(page.locator('#pending-count')).toHaveText('1');
+        pass('supports precise size edits and reversible deletion');
+        await page.reload();await expect(page.locator('#inspection-roll')).toHaveValue(id);await expect(page.locator('#pending-count')).toHaveText('1');await expect(page.locator('#feed-position')).toHaveValue('12.3456');
+        pass('reload restores unsaved marks and the calibrated feed position');
+        await page.locator('#feed-speed').fill('6');await page.locator('#feed-toggle').click();
+        await page.waitForFunction(()=>Number(document.querySelector('#feed-position').value)>12.46);
+        await page.locator('#feed-toggle').click();const after=Number(await page.locator('#feed-position').inputValue());assert.ok(after>12.46&&after<13);
+        assert.equal((await drafts()).pending[0].y,first.y);await page.locator('#feed-next').click();assert.ok(Number(await page.locator('#feed-position').inputValue())>after+.99);
+        pass('automatic speed advances the meter without moving defect coordinates; manual advance remains available');
+        await page.locator('#defect-list button').first().click();await expect(page.locator('#view-status')).toContainText('浏览');
+        await page.locator('#tool-select').click();const bounds=await page.evaluate(()=>{const r=Konva.stages[0].findOne('.inspection-defect');return {x:r.x(),y:r.y(),w:r.width(),h:r.height()};});
+        const startX=box.x+bounds.x+bounds.w/2,startY=box.y+bounds.y+bounds.h/2;
+        await page.mouse.move(startX,startY);await page.mouse.down();await page.mouse.move(startX+20,startY+15,{steps:6});await page.mouse.up();
+        assert.notEqual((await drafts()).pending[0].x,first.x);pass('canvas selection can move a pending defect and update its physical coordinates');
+        const handle=await page.evaluate(()=>{const a=Konva.stages[0].findOne('Transformer').findOne('.bottom-right');return a.getAbsolutePosition();});
+        const priorWidth=(await drafts()).pending[0].w;
+        await page.mouse.move(box.x+handle.x,box.y+handle.y);await page.mouse.down();await page.mouse.move(box.x+handle.x+20,box.y+handle.y+20,{steps:8});await page.mouse.up();
+        assert.ok((await drafts()).pending[0].w>priorWidth);pass('holding and dragging a corner resizes a pending defect');
+        await page.route('**/inspection-defects',route=>route.abort());await page.locator('#save-inspection').click();await expect(page.locator('#save-error')).toContainText('保留');await expect(page.locator('#pending-count')).toHaveText('1');await page.unroute('**/inspection-defects');
+        await page.locator('#save-inspection').click();await expect(page.locator('#pending-count')).toHaveText('0');await expect(page.locator('#saved-count')).toHaveText('1');
+        const saved=await (await fetch(base+'/api/rolls/'+id)).json();assert.equal(saved.defects.length,1);assert.equal(saved.currentRemainingLength,100000);assert.ok(saved.defects[0].w>250.5);
+        pass('failed save keeps local marks; retry persists defects without consuming material');
+        await page.locator('#follow-feed').click();await page.locator('#tool-mark').click();await page.locator('#feed-toggle').click();
+        const movingBox=await page.locator('#inspection-canvas').boundingBox();await page.mouse.move(movingBox.x+450,movingBox.y+180);await page.mouse.down();await page.mouse.move(movingBox.x+510,movingBox.y+230,{steps:12});await page.mouse.up();await page.locator('#feed-toggle').click();
+        await expect(page.locator('#pending-count')).toHaveText('1');const marked=(await drafts()).pending[0];assert.ok(marked.w>0&&marked.h>0&&marked.y>12000);
+        await page.route('**/inspection-defects',async route=>{await route.fetch();await route.abort();});
+        await page.locator('#save-inspection').click();await expect(page.locator('#save-error')).toContainText('保留');await page.unroute('**/inspection-defects');
+        await page.locator('#save-inspection').click();await expect(page.locator('#saved-count')).toHaveText('2');
+        assert.equal((await (await fetch(base+'/api/rolls/'+id)).json()).defects.length,2);
+        pass('marks while cloth is scrolling and an acknowledged-lost save can be retried without duplicates');
+        await page.reload();await expect(page.locator('#saved-count')).toHaveText('2');await expect(page.locator('#pending-count')).toHaveText('0');
+        for(const size of [{width:1366,height:768},{width:1920,height:1080}]){await page.setViewportSize(size);const b=await page.locator('#save-inspection').boundingBox();assert.ok(b&&b.y+b.height<=size.height);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);}
+        pass('saved marks reload and main controls remain visible at workshop and desktop sizes');
+        await page.locator('#defect-list button').first().click();await expect(page.locator('#defect-editor [name=w]')).toBeDisabled();
+        assert.deepEqual(errors,[]);pass('saved marks are protected and no browser errors occur');
+        await page.locator('#follow-feed').click();
+        if(process.env.SCREENSHOT_PATH)await page.screenshot({path:process.env.SCREENSHOT_PATH});
+        await page.setViewportSize({width:464,height:678});await page.reload();await expect(page.locator('#inspection-roll')).toHaveValue(id);
+        assert.ok((await page.locator('#inspection-canvas').boundingBox()).width>400);
+        await page.locator('#toggle-panel').click();await expect(page.locator('#defect-editor')).toBeVisible();
+        pass('narrow windows keep a usable canvas and allow opening the editing panel');
+        console.log(`Browser tests: ${passed} executed, ${passed} passed, 0 failed, 0 skipped.`);
+    }finally{await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1;});
