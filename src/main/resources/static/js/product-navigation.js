@@ -1,4 +1,4 @@
-const surfaces=[['workbench','裁切作业','/'],['inspection','跑布验疵','/inspection.html'],['lab','裁切试验','/nesting.html'],['inventory','库存档案','/inventory.html']];
+const surfaces=[['workbench','裁切作业','/'],['linear','一维分切','/linear.html'],['inspection','跑布验疵','/inspection.html'],['lab','裁切试验','/nesting.html'],['inventory','库存档案','/inventory.html']];
 for(const host of document.querySelectorAll('[data-product-nav]')) {
     const active=host.dataset.productNav;
     host.innerHTML=`<nav class="product-nav" aria-label="功能区域">${surfaces.filter(([id])=>id!=='inventory' || active==='inventory').map(([id,label,url])=>`<a href="${url}" ${id===active?'aria-current="page"':'target="_blank" rel="noopener" title="新页面打开，保留当前内容"'}>${label}</a>`).join('')}</nav>${active==='workbench' ? '' : '<button type="button" class="tool-btn" data-capabilities>能力说明</button>'}`;
@@ -13,6 +13,7 @@ function openCapabilities() {
     dialog.innerHTML=`<div class="capability-heading"><h2 id="capability-title">选择适合的裁切入口</h2><button type="button" class="tool-btn" data-close>关闭</button></div>
         <table><thead><tr><th>入口</th><th>适用内容</th><th>保存与结果</th></tr></thead><tbody>
         <tr><th>裁切作业</th><td>母卷、料头上的矩形裁切；整幅横切及贯通套裁</td><td>保存任务和方案；实切报工扣库存，可按依赖撤回误报</td></tr>
+        <tr><th>一维分切</th><td>长阳订单导入、按幅宽组合分切、选组重切及 Excel 导出</td><td>独立任务预览，不扣二维库存；本页保留需求，服务重启后重新计算</td></tr>
         <tr><th>裁切试验</th><td>标准材料与需求输入；矩形及简单凹凸多边形排样</td><td>只计算预览、导出标准结果；不保存业务任务或操作库存</td></tr>
         <tr><th>跑布验疵</th><td>整卷跑布、按速度滚动、拖框录入疵点</td><td>本地保留记录，批量保存到母卷；手动校准跑布位置，不连接设备</td></tr>
         <tr><th>库存档案</th><td>母卷、疵点、料头来源与库位管理</td><td>录入及维护库存档案；选料和报工在裁切作业内完成</td></tr></tbody></table>
