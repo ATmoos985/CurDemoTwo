@@ -52,11 +52,12 @@ const assert = require('node:assert/strict');
                 assert.ok(result.placements.every(p => p.shape.type === 'POLYGON' && p.rotationDegrees === 0));
                 await expect(page.locator('#contour-note')).toBeVisible();
                 if (key === 'GARMENT_FULL') {
-                    assert.equal(result.placements.length, 6);
-                    assert.ok(result.fulfillment.every(item => item.unplaced === 0));
-                    assert.equal(result.metrics.pieceAreaMm2, result.metrics.processingAreaMm2);
-                    assert.equal(result.metrics.unassignedAreaMm2, 0);
-                    await expect(page.locator('#area-pieces')).toContainText('100.0%');
+                    const utilization = result.metrics.pieceAreaMm2 / result.metrics.processingAreaMm2;
+                    assert.ok(utilization >= 0.8 && utilization < 1, `密排利用率 ${utilization}`);
+                    assert.ok(result.placements.length >= 15);
+                    assert.ok(result.fulfillment.some(item => item.unplaced > 0));
+                    assert.ok(result.metrics.unassignedAreaMm2 > 0);
+                    await expect(page.locator('#area-pieces')).toContainText(`${(utilization * 100).toFixed(1)}%`);
                 }
                 if (process.env.SCREENSHOT_DIR) await page.screenshot({path:`${process.env.SCREENSHOT_DIR}/${key}.png`,fullPage:true});
             }

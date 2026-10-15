@@ -4,10 +4,6 @@ import {rectangle, polygon} from './nesting-scene.js';
 export function garmentExample(id) {
     // shortcut: 用折线近似服装曲边；接入生产纸样时需真实曲线、缝份与丝缕校验。
     const samples = {
-        GARMENT_FULL: {height:1800, parts:[
-            ['拼接裙片 A', 3, [[0,0],[600,0],[900,600],[0,600]]],
-            ['拼接裙片 B', 3, [[0,0],[900,0],[900,600],[300,600]]]
-        ]},
         GARMENT_SHIRT: {height:1600, parts:[
             ['上衣前片', 1, [[0,640],[20,380],[0,220],[45,205],[70,170],[85,120],[90,55],[180,0],[195,35],[220,65],[250,75],[280,65],[305,35],[320,0],[410,55],[415,120],[430,170],[455,205],[500,220],[480,380],[500,640]]],
             ['上衣后片', 1, [[0,650],[20,380],[0,220],[45,205],[70,170],[85,120],[90,55],[180,0],[210,20],[250,28],[290,20],[320,0],[410,55],[415,120],[430,170],[455,205],[500,220],[480,380],[500,650]]],
@@ -23,9 +19,13 @@ export function garmentExample(id) {
             ['半裙贴袋', 2, [[0,0],[160,0],[160,160],[130,195],[80,210],[30,195],[0,160]]]
         ]}
     };
+    samples.GARMENT_FULL = {height:2000, parts:[
+        ...samples.GARMENT_SHIRT.parts.map(([name,,points], index) => [name,[3,3,8][index],points]),
+        [samples.GARMENT_SKIRT.parts[1][0],12,samples.GARMENT_SKIRT.parts[1][2]]
+    ]};
     const sample = samples[id];
     if (!sample) throw new Error('服装示例不存在');
-    return {schemaVersion:'1', unit:'mm', engine:'auto', timeLimitSeconds:3,
+    return {schemaVersion:'1', unit:'mm', engine:'auto', timeLimitSeconds:id === 'GARMENT_FULL' ? 10 : 3,
         material:{id:`DEMO-${id}`, shape:rectangle(1500,sample.height), continuesAfterRegion:false, exclusions:[]},
         parts:sample.parts.map(([name,quantity,points], index) => ({id:index+1,name,quantity,allowRotation:false,
             shape:polygon(points.map(([x,y]) => ({x,y})))})),

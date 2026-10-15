@@ -45,7 +45,7 @@ test('lab scenarios are standalone preview inputs, with clipped defect avoidance
 });
 
 test('garment samples preserve irregular outlines, quantities and fabric direction without inventory writes', () => {
-    for (const [id, quantity] of [['GARMENT_SHIRT',4], ['GARMENT_PANTS',6], ['GARMENT_SKIRT',6], ['GARMENT_FULL',6]]) {
+    for (const [id, quantity] of [['GARMENT_SHIRT',4], ['GARMENT_PANTS',6], ['GARMENT_SKIRT',6], ['GARMENT_FULL',26]]) {
         const input = garmentExample(id), scene = createNestingScene(input);
         assert.equal(scene.process.mode, 'CONTOUR');
         assert.equal(input.material.id, `DEMO-${id}`);
@@ -63,13 +63,14 @@ test('garment samples preserve irregular outlines, quantities and fabric directi
     assert.throws(() => garmentExample('unknown'), /示例不存在/);
 });
 
-test('full-cloth sample has complementary edges and exactly covers three rows', () => {
-    const input = garmentExample('GARMENT_FULL'), [a,b] = input.parts;
-    assert.deepEqual(input.material.shape, {type:'RECTANGLE',width:1500,height:1800});
-    assert.equal(input.parts.reduce((sum,p) => sum + p.quantity * shapeArea(p.shape), 0), shapeArea(input.material.shape));
-    assert.deepEqual(a.shape.vertices.slice(1,3), [b.shape.vertices[0],b.shape.vertices[3]].map(p => ({x:p.x+600,y:p.y})));
-    assert.equal(a.shape.height * a.quantity, input.material.shape.height);
-    assert.equal(input.process.kerf, 0);
+test('dense garment sample reuses original outlines and supplies enough pieces to fill the cloth', () => {
+    const input = garmentExample('GARMENT_FULL');
+    const originals = [...garmentExample('GARMENT_SHIRT').parts, garmentExample('GARMENT_SKIRT').parts[1]];
+    assert.deepEqual(input.material.shape, {type:'RECTANGLE',width:1500,height:2000});
+    assert.deepEqual(input.parts.map(p => p.shape), originals.map(p => p.shape));
+    assert.deepEqual(input.parts.map(p => p.quantity), [3,3,8,12]);
+    assert.ok(input.parts.reduce((sum,p) => sum + p.quantity * shapeArea(p.shape), 0) > shapeArea(input.material.shape));
+    assert.equal(input.timeLimitSeconds, 10);
 });
 
 test('lab scenario selector provides all 10 presets in nesting page', () => {
@@ -88,7 +89,7 @@ test('lab scenario selector provides all 10 presets in nesting page', () => {
         ['GARMENT_SHIRT', '服装 · 上衣裁片'],
         ['GARMENT_PANTS', '服装 · 长裤裁片'],
         ['GARMENT_SKIRT', '服装 · 半裙裁片'],
-        ['GARMENT_FULL', '服装 · 拼接裙片满铺']
+        ['GARMENT_FULL', '服装 · 衣身袖片密排']
     ]);
     assert.equal(options.find(o => o.value === 'GUILLOTINE')?.selected, true);
 });
