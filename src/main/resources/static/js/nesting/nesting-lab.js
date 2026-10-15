@@ -1,7 +1,7 @@
 import { rectangle, polygon, shapeArea, createNestingScene } from './nesting-scene.js';
 import { mountNestingViewer } from './nesting-viewer.js';
 import { NestingSession } from './nesting-client.js';
-import {scenarioExample} from './scenario-examples.js';
+import {scenarioExample, garmentExample} from './scenario-examples.js';
 
 const byId = id => document.getElementById(id);
 const session = new NestingSession();
@@ -222,6 +222,8 @@ function loadScenario(key) {
     if (byId('scenario-select')) byId('scenario-select').value = key;
     if (key === 'CROSSCUT' || key === 'GUILLOTINE' || key === 'CONTOUR') {
         loadProblem(example(key));
+    } else if (key.startsWith('GARMENT_')) {
+        loadProblem(garmentExample(key));
     } else if (key) {
         loadProblem(scenarioExample(Number(key)));
     }
