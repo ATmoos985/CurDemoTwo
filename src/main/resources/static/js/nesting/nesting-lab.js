@@ -2,6 +2,7 @@ import { rectangle, polygon, shapeArea, createNestingScene } from './nesting-sce
 import { mountNestingViewer } from './nesting-viewer.js';
 import { NestingSession } from './nesting-client.js';
 import {scenarioExample, garmentExample} from './scenario-examples.js';
+import { toggleMeasureTool, clearAllMeasurements } from '../plugins/cad/cad-measure.js';
 
 const byId = id => document.getElementById(id);
 const session = new NestingSession();
@@ -246,6 +247,8 @@ byId('problem-form').addEventListener('submit', async event => {
     } catch (error) { showError(error.message); }
 });
 byId('fit-view').onclick = () => viewer.fit();
+byId('btn-measure-tool').onclick = () => toggleMeasureTool();
+byId('clear-measurements').onclick = clearAllMeasurements;
 byId('zoom-in').onclick = () => viewer.zoom(1.25);
 byId('zoom-out').onclick = () => viewer.zoom(1 / 1.25);
 byId('show-paths').onchange = event => viewer.setPaths(event.target.checked);

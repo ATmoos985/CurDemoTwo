@@ -41,10 +41,11 @@
 .lab-submit .tool-btn { width: 100%; min-height: 42px; font-weight: 600; }
 .lab-canvas-panel { min-width: 0; display: flex; flex-direction: column; }
 .lab-canvas-panel .lab-heading { background: white; }
-.lab-canvas-toolbar { padding: 8px 14px; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; background: white; border-bottom: 1px solid var(--panel-border); color: var(--text-muted); font-size: 12px; }
-.lab-canvas-toolbar > div { margin-left: auto; display: flex; align-items: center; gap: 6px; }
-#zoom-label { min-width: 42px; text-align: center; }
-#nesting-canvas { flex: 1; min-height: 220px; overflow: hidden; }
+.lab-canvas-panel .cad-tools { flex-wrap: wrap; }
+.lab-canvas-panel .cad-surface { min-height: 180px; }
+#nesting-canvas { position: absolute; inset: 0; overflow: hidden; }
+#nesting-canvas:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: -2px; }
+.lab-cursor { padding: 4px 14px; color: var(--text-muted); background: var(--panel-bg); border-top: 1px solid var(--panel-border); font: 11px Consolas, monospace; }
 .lab-legend { display: flex; flex-wrap: wrap; gap: 12px; padding: 10px 16px; background: white; border-top: 1px solid var(--panel-border); font-size: 11px; color: var(--text-muted); }
 .lab-legend span::before { content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 5px; border: 1px solid; }
 .legend-material::before { border-color: #c45656 !important; }

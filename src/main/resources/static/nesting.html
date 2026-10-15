@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>裁切试验台</title>
     <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/cad.css">
     <link rel="stylesheet" href="css/workspace.css">
     <link rel="stylesheet" href="css/nesting.css">
     <link rel="stylesheet" href="css/product-navigation.css">
@@ -54,8 +55,22 @@
         </form>
         <section class="lab-canvas-panel" aria-label="材料与排料画布">
             <div class="lab-heading"><h2>排料预览</h2><button class="tool-btn" id="fit-view">适合材料</button></div>
-            <div class="lab-canvas-toolbar"><label><input id="show-dimensions" type="checkbox" checked>外接尺寸</label><label><input id="show-paths" type="checkbox" checked>刀路 / 轮廓</label><span id="region-summary"></span><div><button class="tool-btn" id="zoom-out" aria-label="缩小画布">−</button><output id="zoom-label">—</output><button class="tool-btn" id="zoom-in" aria-label="放大画布">＋</button></div></div>
-            <div id="nesting-canvas" tabindex="0" role="img" aria-label="材料加工区与求解排布；滚轮缩放，拖动画布平移；加减键缩放，0 键适合材料"></div>
+            <div class="cad-tools" role="toolbar" aria-label="画布工具">
+                <button class="tool-btn" id="btn-measure-tool" aria-pressed="false">测量</button>
+                <details class="canvas-help"><summary class="tool-btn">显示</summary><div class="canvas-help-body cad-layer-options">
+                    <label><input id="show-dimensions" type="checkbox" checked>外接尺寸与基准</label>
+                    <label><input id="show-paths" type="checkbox" checked>刀路 / 轮廓</label>
+                    <button class="tool-btn" id="clear-measurements">清空测量</button>
+                </div></details>
+                <span class="cad-tool-hint" id="cad-tool-hint" hidden>依次点击两点 · Esc 取消</span>
+                <span class="cad-station-info" id="cad-station-info"><span id="region-summary"></span></span>
+                <div class="cad-zoom"><button class="tool-btn" id="zoom-out" aria-label="缩小画布">−</button><output id="zoom-label" aria-label="视图缩放">—</output><button class="tool-btn" id="zoom-in" aria-label="放大画布">＋</button></div>
+            </div>
+            <div class="cad-surface">
+                <div id="nesting-canvas" tabindex="0" role="img" aria-label="材料加工区与求解排布；滚轮缩放，拖动画布平移；加减键缩放，0 键适合材料"></div>
+                <canvas id="cad-ruler-canvas" aria-hidden="true"></canvas>
+            </div>
+            <div class="lab-cursor" id="sb-cursor-pos">指针 — · 单位 mm</div>
             <div class="lab-legend"><span class="legend-material">加工区</span><span class="legend-piece">裁片</span><span class="legend-remnant">候选余料</span><span class="legend-exclusion">禁入区域</span><small>滚轮缩放 · 拖动画布平移 · 点击裁片查看</small></div>
         </section>
         <aside class="lab-output" aria-label="求解结果">

@@ -8,15 +8,19 @@ import { stationCoordinates } from './cad-view.js';
 export let stage, mainLayer, annotationLayer;
 export let fabricScrollGroup, fabricBgGroup, gridGroup, defectGroup, remnantGroup, pieceGroup, cutGroup, remnantHighlightGroup;
 export let bedStationGroup;
+let dataSource = () => state.getCurrentCaseData();
+export const getCanvasData = () => dataSource();
 
-export function initKonva() {
-    const container = document.getElementById("konva-container");
+export function initKonva({ container = document.getElementById('konva-container'),
+    getData = () => state.getCurrentCaseData(), materialLabel = () => state.currentCutMode === 'remnant' ? '料头' : '母卷',
+    Konva = globalThis.Konva } = {}) {
     if (!container) return;
+    dataSource = getData;
     const width = container.clientWidth;
     const height = container.clientHeight;
 
     stage = new Konva.Stage({
-        container: "konva-container",
+        container,
         width: width,
         height: height,
         draggable: true
@@ -108,8 +112,10 @@ export function initKonva() {
         const scale = stage.scaleX();
         const worldX = Math.round((pointer.x - stage.x()) / scale);
         const worldY = Math.round((pointer.y - stage.y()) / scale);
-        const local = stationCoordinates(worldX, worldY, state.getCurrentCaseData());
-        const cursorText = `指针 X ${local.x} · Y ${local.y} mm  |  ${state.currentCutMode === 'remnant' ? '料头' : '母卷'} Y ${worldY} mm`;
+        const data = getCanvasData();
+        if (!data) return;
+        const local = stationCoordinates(worldX, worldY, data);
+        const cursorText = `指针 X ${local.x} · Y ${local.y} mm  |  ${materialLabel()} Y ${worldY} mm`;
         const sbCursor = document.getElementById("sb-cursor-pos");
         if (sbCursor) sbCursor.innerText = cursorText;
 
@@ -120,20 +126,23 @@ export function initKonva() {
         bus.emit('stage:mouseleave');
     });
 
-    window.addEventListener("resize", () => {
-        handleStageResize();
-    });
-
-    bus.on('viewport:resized', () => {
-        handleStageResize();
-    });
+    window.addEventListener('resize', handleStageResize);
+    const unsubscribeResize = bus.on('viewport:resized', handleStageResize);
+    let resize;
     if (typeof ResizeObserver !== 'undefined') {
-        new ResizeObserver(handleStageResize).observe(container);
+        resize = new ResizeObserver(handleStageResize);
+        resize.observe(container);
     }
+    return () => {
+        resize?.disconnect(); unsubscribeResize();
+        window.removeEventListener('resize', handleStageResize);
+        if (viewFrame !== null) cancelAnimationFrame(viewFrame);
+        stage.destroy();
+    };
 }
 
 export function handleStageResize() {
-    const container = document.getElementById("konva-container");
+    const container = stage?.container();
     if (stage && container) {
         stage.width(container.clientWidth);
         stage.height(container.clientHeight);
