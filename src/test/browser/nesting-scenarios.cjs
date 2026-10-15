@@ -30,7 +30,8 @@ const assert = require('node:assert/strict');
             ['6','DEMO-6','GUILLOTINE'], ['CONTOUR','POLYGON-1','CONTOUR'],
             ['GARMENT_SHIRT','DEMO-GARMENT_SHIRT','CONTOUR'],
             ['GARMENT_PANTS','DEMO-GARMENT_PANTS','CONTOUR'],
-            ['GARMENT_SKIRT','DEMO-GARMENT_SKIRT','CONTOUR']
+            ['GARMENT_SKIRT','DEMO-GARMENT_SKIRT','CONTOUR'],
+            ['GARMENT_FULL','DEMO-GARMENT_FULL','CONTOUR']
         ]) {
             // Real select interaction dispatches input before change, reproducing the original failure.
             await page.locator('#scenario-select').selectOption(key);
@@ -50,6 +51,13 @@ const assert = require('node:assert/strict');
                 for (const item of result.fulfillment) assert.ok(item.placed > 0, `未展示裁片 ${item.demandId}`);
                 assert.ok(result.placements.every(p => p.shape.type === 'POLYGON' && p.rotationDegrees === 0));
                 await expect(page.locator('#contour-note')).toBeVisible();
+                if (key === 'GARMENT_FULL') {
+                    assert.equal(result.placements.length, 6);
+                    assert.ok(result.fulfillment.every(item => item.unplaced === 0));
+                    assert.equal(result.metrics.pieceAreaMm2, result.metrics.processingAreaMm2);
+                    assert.equal(result.metrics.unassignedAreaMm2, 0);
+                    await expect(page.locator('#area-pieces')).toContainText('100.0%');
+                }
                 if (process.env.SCREENSHOT_DIR) await page.screenshot({path:`${process.env.SCREENSHOT_DIR}/${key}.png`,fullPage:true});
             }
             await expect(page.locator('#export-result')).toBeEnabled();
@@ -73,9 +81,9 @@ const assert = require('node:assert/strict');
         await expect(page.locator('#area-pieces')).toHaveText('—');
         await expect(page.locator('#export-result')).toBeDisabled();
         assert.deepEqual(errors, []);
-        assert.equal(writes.length, 10);
+        assert.equal(writes.length, 11);
         assert.ok(writes.every(url => url.endsWith('/api/v1/nesting/solve')));
         passed++;
-        console.log(JSON.stringify({discovered:15,executed:15,passed,failed:0,skipped:0}));
+        console.log(JSON.stringify({discovered:16,executed:16,passed,failed:0,skipped:0}));
     } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

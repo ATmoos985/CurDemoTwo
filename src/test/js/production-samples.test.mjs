@@ -45,7 +45,7 @@ test('lab scenarios are standalone preview inputs, with clipped defect avoidance
 });
 
 test('garment samples preserve irregular outlines, quantities and fabric direction without inventory writes', () => {
-    for (const [id, quantity] of [['GARMENT_SHIRT',4], ['GARMENT_PANTS',6], ['GARMENT_SKIRT',6]]) {
+    for (const [id, quantity] of [['GARMENT_SHIRT',4], ['GARMENT_PANTS',6], ['GARMENT_SKIRT',6], ['GARMENT_FULL',6]]) {
         const input = garmentExample(id), scene = createNestingScene(input);
         assert.equal(scene.process.mode, 'CONTOUR');
         assert.equal(input.material.id, `DEMO-${id}`);
@@ -63,7 +63,16 @@ test('garment samples preserve irregular outlines, quantities and fabric directi
     assert.throws(() => garmentExample('unknown'), /示例不存在/);
 });
 
-test('lab scenario selector provides all 9 presets in nesting page', () => {
+test('full-cloth sample has complementary edges and exactly covers three rows', () => {
+    const input = garmentExample('GARMENT_FULL'), [a,b] = input.parts;
+    assert.deepEqual(input.material.shape, {type:'RECTANGLE',width:1500,height:1800});
+    assert.equal(input.parts.reduce((sum,p) => sum + p.quantity * shapeArea(p.shape), 0), shapeArea(input.material.shape));
+    assert.deepEqual(a.shape.vertices.slice(1,3), [b.shape.vertices[0],b.shape.vertices[3]].map(p => ({x:p.x+600,y:p.y})));
+    assert.equal(a.shape.height * a.quantity, input.material.shape.height);
+    assert.equal(input.process.kerf, 0);
+});
+
+test('lab scenario selector provides all 10 presets in nesting page', () => {
     const html = readFileSync(new URL('../../main/resources/static/nesting.html', import.meta.url), 'utf8');
     const selectHtml = html.match(/<select id="scenario-select"[\s\S]*?<\/select>/)?.[0] || '';
     assert.ok(selectHtml.length > 0);
@@ -78,7 +87,8 @@ test('lab scenario selector provides all 9 presets in nesting page', () => {
         ['CONTOUR', '异形排料'],
         ['GARMENT_SHIRT', '服装 · 上衣裁片'],
         ['GARMENT_PANTS', '服装 · 长裤裁片'],
-        ['GARMENT_SKIRT', '服装 · 半裙裁片']
+        ['GARMENT_SKIRT', '服装 · 半裙裁片'],
+        ['GARMENT_FULL', '服装 · 拼接裙片满铺']
     ]);
     assert.equal(options.find(o => o.value === 'GUILLOTINE')?.selected, true);
 });
