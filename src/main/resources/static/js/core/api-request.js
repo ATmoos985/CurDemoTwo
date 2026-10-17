@@ -31,3 +31,9 @@ export function failurePresentation(error) {
     const [title,hint]=messages[code] || messages.SERVICE;
     return {code,title,hint,message:error.message || '未取得有效结果'};
 }
+/** Null when the requested engine ran; otherwise the server-stated reason a stand-in engine produced this layout. */
+export function fallbackPresentation(result) {
+    if(!result?.fallbackReason)return null;
+    return {title:'已降级求解',message:result.fallbackReason,
+        hint:`布局由 ${result.engine} 生成，利用率可能低于原生引擎；恢复原生引擎后可重新排料对比。`};
+}

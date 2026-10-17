@@ -199,6 +199,8 @@ public class FabricCutController {
         map.put("status", "UP");
         com.example.cutdemotwo.service.solver.ICutSolverEngine packingEngine = solverFactory.getEngine("packingsolver");
         map.put("packingsolverAvailable", packingEngine != null && packingEngine.isAvailable());
+        // Null unless the native engine is missing and a registered stand-in will run (and be labelled) instead.
+        map.put("packingsolverFallback", solverFactory.fallbackFor("packingsolver"));
         map.put("remnantsInStock", remnantService.getAvailableRemnants().size());
         return map;
     }

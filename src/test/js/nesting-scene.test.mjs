@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createNestingScene, rectangle, polygon, shapeArea, sceneOrigin } from '../../main/resources/static/js/nesting/nesting-scene.js';
 import { createWorkspaceScene } from '../../main/resources/static/js/plugins/cad/workspace-scene.js';
-import { NestingSession } from '../../main/resources/static/js/nesting/nesting-client.js';
+import { NestingSession, dispatchedEngine } from '../../main/resources/static/js/nesting/nesting-client.js';
 import { renderNestingGeometry } from '../../main/resources/static/js/nesting/nesting-renderer.js';
 
 const input = { schemaVersion: '1', unit: 'mm', engine: 'crosscut', timeLimitSeconds: 3,
@@ -155,4 +155,13 @@ test('shared renderer draws actual closed polygon boundaries without a bounding-
         assert.equal(node.attrs.closed,true); assert.deepEqual(node.attrs.points,points); assert.equal(node.attrs.width,undefined);
     }
     assert.deepEqual(badges,[]); assert.equal(groups.exclusions.children[0].children.length,2);
+});
+
+test('engine hint follows auto-dispatch instead of the first engine that lists the same mode', () => {
+    const engines = [{ id: 'crosscut', modes: ['CROSSCUT'], available: true }, { id: 'javaguillotine', modes: ['GUILLOTINE'], available: true },
+        { id: 'packingsolver', modes: ['GUILLOTINE'], available: false }, { id: 'packingsolver-irregular', modes: ['CONTOUR'], available: true }];
+    assert.equal(dispatchedEngine(engines, 'GUILLOTINE').id, 'packingsolver');
+    assert.equal(dispatchedEngine(engines, 'CROSSCUT').id, 'crosscut');
+    assert.equal(dispatchedEngine(engines, 'CONTOUR').id, 'packingsolver-irregular');
+    assert.equal(dispatchedEngine([], 'GUILLOTINE'), null);
 });

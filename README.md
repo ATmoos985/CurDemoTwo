@@ -182,7 +182,7 @@ CutDemoTwo/
 | `POST` | `/api/remnants/scan` | 模拟工业扫码枪扫入料头条码（如 `{"id": "REM-202609-001"}`），快速调取信息 |
 | `POST` | `/api/remnants/match` | 传入订单目标裁片长宽，智能推荐本卷中面积最小且满足切割的在库料头 |
 | `POST` | `/api/remnants/register` | 新料头登记入库与状态变更 |
-| `GET` | `/api/health` | 服务健康检查，返回 C++ 求解器是否就绪与库存概况 |
+| `GET` | `/api/health` | 服务健康检查，返回原生求解器可执行文件是否就绪（`packingsolverAvailable`）、缺失时改用的引擎（`packingsolverFallback`，无降级为 `null`）与库存概况 |
 
 ---
 
@@ -197,7 +197,7 @@ CutDemoTwo/
   ```properties
   packingsolver.executable.path=d:/GitLab/packingsolver/build/src/rectangleguillotine/packingsolver_rectangleguillotine.exe
   ```
-  *(注：二维排料需要可运行的 C++ 求解器，不会自动切换算法；仅横切工艺使用内置横切引擎。Windows 运行库准备及服务器配置见 [部署说明](DEPLOYMENT.md)。)*
+  *(注：原生矩形求解器缺失或不可执行时，二维直刀排料默认显式降级到内置 `javaguillotine` 引擎：结果的 `engine` 是实际运行的引擎，并带 `requestedEngine` 与 `fallbackReason`，页面结果区提示"已降级求解"，利用率可能低于原生引擎。设置 `PACKINGSOLVER_FALLBACK_ENABLED=false`（即 `packingsolver.fallback.enabled=false`）可关闭降级，改为返回 `UNAVAILABLE`。异形排料不降级；横切工艺使用内置横切引擎。Windows 运行库准备及服务器配置见 [部署说明](DEPLOYMENT.md)。)*
 
 ### 2. 编译与单元测试
 在项目根目录下执行 Maven 自动化构建与测试：

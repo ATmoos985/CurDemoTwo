@@ -1,7 +1,8 @@
 import { rectangle, polygon, shapeArea, createNestingScene } from './nesting-scene.js';
 import { mountNestingViewer } from './nesting-viewer.js';
-import { NestingSession } from './nesting-client.js';
+import { NestingSession, dispatchedEngine } from './nesting-client.js';
 import {scenarioExample} from './scenario-examples.js';
+import { fallbackPresentation } from '../core/api-request.js';
 
 const byId = id => document.getElementById(id);
 const session = new NestingSession();
@@ -137,14 +138,18 @@ function showError(message) { byId('solve-error').hidden = !message; byId('solve
 function inputAction(action) { try { action(); } catch (error) { showError(error.message); } }
 function engineHint() {
     const mode = byId('process-mode').value;
-    const capability = engines.find(e => e.modes.includes(mode));
-    byId('engine-hint').textContent = capability ? `${mode === 'CROSSCUT' ? '需求宽度须等于材料宽度' : mode === 'CONTOUR' ? '简单多边形 · 单块材料 · 90° 步进旋转' : '支持逐件选择 90° 旋转'} · 精度 ${capability.coordinateResolutionMm} mm${capability.available ? '' : ' · 引擎未就绪'}` : '引擎状态尚未获取，求解时将检查能力。';
+    const capability = dispatchedEngine(engines, mode);
+    const standIn = mode === 'GUILLOTINE' && engines.some(e => e.id === 'javaguillotine' && e.available);
+    byId('engine-hint').textContent = capability ? `${mode === 'CROSSCUT' ? '需求宽度须等于材料宽度' : mode === 'CONTOUR' ? '简单多边形 · 单块材料 · 90° 步进旋转' : '支持逐件选择 90° 旋转'} · 精度 ${capability.coordinateResolutionMm} mm${capability.available ? '' : standIn ? ' · 原生引擎未就绪，可能改用 javaguillotine（结果会注明）' : ' · 引擎未就绪'}` : '引擎状态尚未获取，求解时将检查能力。';
 }
 const area = value => `${(value / 1_000_000).toFixed(3)} m²`;
 function results(scene) {
     byId('area-processing').textContent = scene ? area(shapeArea(scene.region.shape)) : '—';
     byId('region-summary').textContent = scene ? `${scene.region.shape.width} × ${scene.region.shape.height} mm` : '请完善输入';
     byId('contour-note').hidden = scene?.process.mode !== 'CONTOUR';
+    const fallback = fallbackPresentation(session.result);
+    byId('engine-fallback').hidden = !fallback;
+    byId('engine-fallback').textContent = fallback ? `${fallback.title}：${fallback.message}。${fallback.hint}` : '';
     const metrics = scene?.metrics;
     byId('area-pieces').textContent = metrics ? `${area(metrics.pieceAreaMm2)} / ${(metrics.pieceAreaMm2 / metrics.processingAreaMm2 * 100).toFixed(1)}%` : '—';
     byId('area-leftovers').textContent = metrics ? area(metrics.reusableAreaMm2) : '—';
@@ -238,7 +243,7 @@ byId('problem-form').addEventListener('submit', async event => {
             if (token !== solveToken || !scene) return;
             viewer.setScene(scene); results(scene);
             const unplaced = scene.fulfillment.reduce((sum, f) => sum + f.unplaced, 0);
-            byId('solve-status').textContent = scene.status === 'NO_SOLUTION_FOUND' ? '本次未找到可用布局，可调整需求或工艺后重试。' : `已排入 ${scene.placements.length} 件 · 未排 ${unplaced} 件 · ${session.result.elapsedMs} ms`;
+            byId('solve-status').textContent = scene.status === 'NO_SOLUTION_FOUND' ? '本次未找到可用布局，可调整需求或工艺后重试。' : `已排入 ${scene.placements.length} 件 · 未排 ${unplaced} 件 · ${session.result.elapsedMs} ms · 引擎 ${session.result.engine}`;
         } catch (error) { if (token === solveToken) { showError(error.message); byId('solve-status').textContent = '求解未完成，请检查输入或引擎状态。'; } }
         finally { if (token === solveToken) { byId('solve-button').disabled = false; byId('solve-button').textContent = '开始裁切预览'; } }
     } catch (error) { showError(error.message); }

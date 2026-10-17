@@ -22,7 +22,7 @@
 
 ## 接口
 
-- `GET /api/v1/nesting/engines`：返回引擎标识、适配器版本、支持的形状、工艺、目标、尺寸精度要求和是否可用。
+- `GET /api/v1/nesting/engines`：返回引擎标识、适配器版本、支持的形状、工艺、目标、尺寸精度要求和是否可用。原生引擎的 `available` 只在可执行文件存在且可执行时为 `true`。
 - `POST /api/v1/nesting/solve`：`Content-Type: application/json`，传入完整标准问题，返回标准结果。
 
 服务器沿用现有认证配置。接口本身不保存认证信息。示例：
@@ -54,7 +54,7 @@ Windows PowerShell 中使用 `curl.exe`。其他可调用示例为 `docs/example
 | `process.minReusableWidth/Height` | 候选回收余料的最小宽高 |
 | `process.kerf` | 当前仅支持 `0`，非零值明确拒绝 |
 | `process.objective` | 横切为 `INPUT_ORDER`；矩形贯通切割与轮廓排料为 `MAXIMIZE_PIECE_AREA` |
-| `engine` | `auto`、`crosscut`、`packingsolver`、`packingsolver-irregular`；未知名称明确拒绝，不回退其他引擎 |
+| `engine` | `auto`、`crosscut`、`packingsolver`、`packingsolver-irregular`、`javaguillotine`；未知名称明确拒绝。仅 `packingsolver`（含 `auto` 分发到它）在原生可执行文件缺失时，按 `packingsolver.fallback.enabled`（默认 `true`）显式降级到 `javaguillotine` 并在结果中注明；其他引擎不回退 |
 | `timeLimitSeconds` | 1–60 秒；C++ 进程另有启动及终止宽限时间 |
 
 横切要求每个零件占满材料幅宽，按输入顺序尝试排列；矩形引擎使用当前三阶段贯通切割策略。它们的优化目标不同，当前没有对两者作“谁更优”的自动比较。
@@ -67,7 +67,7 @@ Windows PowerShell 中使用 `curl.exe`。其他可调用示例为 `docs/example
 
 ## 输出
 
-`schemaVersion`、`unit`、`coordinateSystem` 描述协议。`engine` 和 `engineVersion` 标识策略及适配器版本，`elapsedMs` 是包括检查和转换的调用耗时。
+`schemaVersion`、`unit`、`coordinateSystem` 描述协议。`engine` 和 `engineVersion` 标识实际运行的策略及适配器版本，`elapsedMs` 是包括检查和转换的调用耗时。`requestedEngine` 是请求或自动分发选中的引擎；发生降级时它与 `engine` 不同，`fallbackReason` 说明原因，否则 `fallbackReason` 为 `null`。原业务接口 `/api/solve` 及保存的方案同样带这两个字段。
 
 | 字段 | 含义 |
 | --- | --- |
@@ -110,7 +110,7 @@ Windows PowerShell 中使用 `curl.exe`。其他可调用示例为 `docs/example
 | 200 | `NO_SOLUTION_FOUND` | 本次未获得可用零件布局，仍返回材料与未完成数量；不宣称已证明无解 |
 | 400 | `INVALID_INPUT` | 格式、数量、单位内数值或标识等输入有误 |
 | 422 | `UNSUPPORTED` | 协议版本、形状、工艺、目标、精度或其他能力不支持 |
-| 503 | `UNAVAILABLE` | 所需引擎未就绪 |
+| 503 | `UNAVAILABLE` | 所需引擎未就绪，且没有启用或可用的降级引擎 |
 | 500 | `FAILED` / `INVALID_RESULT` | 引擎执行失败或结果未通过公共校验 |
 
 错误结果不包含可用于报工的几何。错误不产生任务、方案或库存变更。

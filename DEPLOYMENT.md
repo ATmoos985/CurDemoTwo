@@ -76,7 +76,7 @@ java -jar target/CutDemoTwo-0.0.1-SNAPSHOT.jar
 
 应用目前没有用户账号和权限系统。对外开放前，必须在入口反向代理接入身份认证与 HTTPS，并限制网络访问；不要直接公开应用端口。默认已移除任意跨域开放。MySQL 远程连接按服务器证书配置 `sslMode=VERIFY_IDENTITY` 等 TLS 参数，容器内网连接配置与远程生产连接分开管理。
 
-Dockerfile 从固定的 PackingSolver 提交 `3f4faae1a4bc42e2276c5729878933010d37ca14` 构建 Linux 原生程序，并在同一系统版本下执行 Java 和 JavaScript 测试后打包。运行镜像已包含求解器与依赖许可证，不需要挂载 Windows `.exe` 或另行编译。仅横切工艺使用内置横切引擎。
+Dockerfile 从固定的 PackingSolver 提交 `3f4faae1a4bc42e2276c5729878933010d37ca14` 构建 Linux 原生程序，并在同一系统版本下执行 Java 和 JavaScript 测试后打包。运行镜像已包含求解器与依赖许可证，不需要挂载 Windows `.exe` 或另行编译。横切工艺使用内置横切引擎；原生直刀求解器缺失时的显式降级见下文 Windows 原生求解器一节。
 
 ## 阿里云 Linux 服务器
 
@@ -140,7 +140,7 @@ restrict,command="/opt/cutdemo/actions-ssh-command.sh" ssh-ed25519 <Actions公�
 ./mvnw.cmd spring-boot:run
 ```
 
-脚本设置当前 PowerShell 会话的 `PACKINGSOLVER_PATH`。服务管理器或服务器重启后仍需在相应服务环境中配置此变量。健康接口的 `packingsolverAvailable` 只表示文件可执行，实际运行库是否齐全以一次真实排料为准。求解预算为 1–60 秒，额外保留 5 秒退出时间；超过后终止子进程且不写库存。
+脚本设置当前 PowerShell 会话的 `PACKINGSOLVER_PATH`。服务管理器或服务器重启后仍需在相应服务环境中配置此变量。健康接口的 `packingsolverAvailable` 只表示文件存在且可执行，实际运行库是否齐全以一次真实排料为准。文件缺失时 `packingsolverFallback` 为 `javaguillotine`，直刀排料改由内置引擎求解，结果注明实际引擎与降级原因；生产环境若要求必须使用原生引擎，设置 `PACKINGSOLVER_FALLBACK_ENABLED=false`，缺失时直接返回 `UNAVAILABLE`。求解预算为 1–60 秒，额外保留 5 秒退出时间；超过后终止子进程且不写库存。
 
 ## 撤回与设置口径
 

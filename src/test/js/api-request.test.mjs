@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {requestJSON,failurePresentation,ApiError} from '../../main/resources/static/js/core/api-request.js';
+import {requestJSON,failurePresentation,fallbackPresentation,ApiError} from '../../main/resources/static/js/core/api-request.js';
 const original=globalThis.fetch;
 test('HTTP rejection retains status and server message instead of treating it as infeasibility',async()=>{
     try {for(const [status,code]of [[400,'INVALID_INPUT'],[409,'CONFLICT'],[422,'UNSUPPORTED'],[503,'UNAVAILABLE'],[401,'AUTH'],[500,'SERVICE']]){
@@ -17,6 +17,15 @@ test('empty search, unsupported input and stale preview have distinct recovery g
     assert.match(failurePresentation({status:'NO_SOLUTION_FOUND'}).hint,/不表示已证明无解/);
     assert.match(failurePresentation({status:'UNSUPPORTED'}).hint,/精度/);
     assert.match(failurePresentation(new ApiError('changed','STALE_INPUT')).hint,/未应用/);
+});
+test('a stand-in engine result is named and explained instead of passing as the requested engine',()=>{
+    assert.equal(fallbackPresentation(null),null);
+    assert.equal(fallbackPresentation({status:'FEASIBLE',engine:'packingsolver',requestedEngine:'packingsolver'}),null);
+    const notice=fallbackPresentation({status:'FEASIBLE',engine:'javaguillotine',requestedEngine:'packingsolver',
+        fallbackReason:'packingsolver 未就绪（原生可执行文件缺失或不可执行），本次由 javaguillotine 求解'});
+    assert.match(notice.title,/降级/);
+    assert.match(notice.message,/packingsolver 未就绪/);
+    assert.match(notice.hint,/javaguillotine/);
 });
 test('valid payloads preserve result fields and sends explicit JSON only for writes',async()=>{
     const calls=[];try{globalThis.fetch=async(...args)=>{calls.push(args);return new Response(JSON.stringify({status:'FEASIBLE',planId:'p'}));};

@@ -31,6 +31,8 @@ public final class FabricSolveAdapter {
         }).toList();
         var result = adjust(factory, request, pieces);
         result.setEngine(candidate.engine());
+        result.setRequestedEngine(candidate.requestedEngine());
+        result.setFallbackReason(candidate.fallbackReason());
         return result;
     }
 
@@ -98,6 +100,8 @@ public final class FabricSolveAdapter {
                                     : "NOT_PLACED_IN_THIS_SOLUTION"))).toList());
         }
         response.setEngine(result.engine());
+        response.setRequestedEngine(result.requestedEngine());
+        response.setFallbackReason(result.fallbackReason());
         response.setRollW(request.getRollW());
         response.setRollL(request.getRollL());
         response.setDefects(request.getDefects());
