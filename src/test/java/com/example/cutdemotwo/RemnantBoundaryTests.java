@@ -77,7 +77,7 @@ class RemnantBoundaryTests {
                 List.of(), new NestingProblem.Process("GUILLOTINE", "SHEET", origin, "horizontal",
                 0, 200, 300, 0, "MAXIMIZE_PIECE_AREA"), "packingsolver", 1);
         EngineResult result = ReflectionTestUtils.invokeMethod(new PackingSolverService(), "parseCertificate",
-                certificate.toFile(), problem, Map.of(), Map.of());
+                certificate.toFile(), problem, List.of());
         assertNotNull(result);
         assertEquals(1, result.getRemnants().size());
         var remnant = result.getRemnants().get(0);

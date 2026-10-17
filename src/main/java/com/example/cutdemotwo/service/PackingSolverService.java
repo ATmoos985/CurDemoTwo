@@ -90,20 +90,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
             }
 
             // 2. items.csv
-            Map<Integer, String> itemMap = new HashMap<>();
-            Map<Integer, Integer> demandIdMap = new HashMap<>();
-            try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(new FileOutputStream(itemsCsv), java.nio.charset.StandardCharsets.UTF_8))) {
-                pw.println("ID,WIDTH,HEIGHT,STACK_ID,ORIENTED");
-                int idx = 0;
-                for (NestingProblem.Part it : req.parts()) {
-                    for (int c = 0; c < it.quantity(); c++) {
-                        pw.println(idx + "," + nativeUnits(it.shape().width()) + "," + nativeUnits(it.shape().height()) + "," + idx + "," + (it.allowRotation() ? 0 : 1));
-                        itemMap.put(idx, it.name());
-                        demandIdMap.put(idx, it.id());
-                        idx++;
-                    }
-                }
-            }
+            List<NestingProblem.Part> itemTypes = writeItems(itemsCsv, req.parts());
 
             String origin = req.process().startCorner() != null ? req.process().startCorner().trim().toLowerCase() : "right-top";
             boolean isRightOrigin = origin.startsWith("right");
@@ -165,7 +152,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                 return err;
             }
 
-            return parseCertificate(certCsv, req, itemMap, demandIdMap);
+            return parseCertificate(certCsv, req, itemTypes);
 
         } catch (Exception e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
@@ -190,6 +177,23 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
         }
     }
 
+    /**
+     * One item type per demand with COPIES, so the solver treats identical pieces as one type instead of
+     * one type per piece. Returns the demands in item-type order, which is the certificate's TYPE.
+     */
+    private static List<NestingProblem.Part> writeItems(File itemsCsv, List<NestingProblem.Part> parts) throws IOException {
+        List<NestingProblem.Part> itemTypes = parts.stream().filter(p -> p.quantity() > 0).toList();
+        try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(new FileOutputStream(itemsCsv), java.nio.charset.StandardCharsets.UTF_8))) {
+            pw.println("ID,WIDTH,HEIGHT,COPIES,STACK_ID,ORIENTED");
+            for (int type = 0; type < itemTypes.size(); type++) {
+                NestingProblem.Part it = itemTypes.get(type);
+                pw.println(type + "," + nativeUnits(it.shape().width()) + "," + nativeUnits(it.shape().height()) + ","
+                        + it.quantity() + "," + type + "," + (it.allowRotation() ? 0 : 1));
+            }
+        }
+        return itemTypes;
+    }
+
     private static long nativeUnits(double millimeters) {
         double scaled = millimeters * UNITS_PER_MM;
         long units = Math.round(scaled);
@@ -207,9 +211,14 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
         List<CertNode> children = new ArrayList<>();
     }
 
-    private EngineResult parseCertificate(File certCsv, NestingProblem req, Map<Integer, String> itemMap, Map<Integer, Integer> demandIdMap) throws IOException {
+    private EngineResult parseCertificate(File certCsv, NestingProblem req, List<NestingProblem.Part> itemTypes) throws IOException {
         EngineResult res = new EngineResult();
         res.setSuccess(true);
+
+        // Copies share their item type's TYPE; each demand's pieces take ids from its own range, in certificate order,
+        // so ids stay unique and grouped by demand as when every piece was its own item type.
+        int[] nextPieceId = new int[itemTypes.size()];
+        for (int type = 1; type < itemTypes.size(); type++) nextPieceId[type] = nextPieceId[type - 1] + itemTypes.get(type - 1).quantity();
 
         List<PlacedPiece> pieces = new ArrayList<>();
         List<RemnantPiece> remnants = new ArrayList<>();
@@ -277,11 +286,10 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                 double physY = EngineGeometry.normalizeZero(mirrorY ? (req.height() - n.y - n.h - trim) : (n.y + trim));
 
                 if (n.type >= 0 && n.cut > 0) {
-                    String name = itemMap.getOrDefault(n.type, "裁片-" + n.type);
-                    Integer demId = demandIdMap != null ? demandIdMap.get(n.type) : null;
-                    var part = req.parts().stream().filter(d -> Objects.equals(d.id(), demId)).findFirst().orElseThrow();
+                    if (n.type >= itemTypes.size()) throw new IOException("求解器返回了未知裁片类型 " + n.type);
+                    var part = itemTypes.get(n.type);
                     boolean rotated = Math.abs(n.w - part.shape().width()) > .001 || Math.abs(n.h - part.shape().height()) > .001;
-                    pieces.add(new PlacedPiece(n.type, name, physX, physY, n.w, n.h, rotated, demId));
+                    pieces.add(new PlacedPiece(nextPieceId[n.type]++, part.name(), physX, physY, n.w, n.h, rotated, part.id()));
                 } else if (n.type == -1 || n.type == -3) {
                     // Remnant / waste
                     // 后续仍连接材料时，全幅尾部保留为连续材料，不生成独立回收块。
