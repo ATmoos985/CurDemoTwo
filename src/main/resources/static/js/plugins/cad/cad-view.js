@@ -101,3 +101,42 @@ export function spacedPoints(points, distance) {
     }
     return kept;
 }
+
+/** 视口在模型坐标中的范围，四周外扩 margin 个屏幕像素。 */
+export function viewRect(width, height, x, y, scale, margin = 0) {
+    const m = margin / scale;
+    return { x1: -x / scale - m, y1: -y / scale - m, x2: (width - x) / scale + m, y2: (height - y) / scale + m };
+}
+
+/** Konva 节点在父级坐标中的范围（未计自身 x/y）；带旋转、缩放、偏移或阴影时返回 null，表示始终绘制。 */
+export function localBounds(node) {
+    if (node.rotation() || node.scaleX() !== 1 || node.scaleY() !== 1 || node.skewX() || node.skewY()
+        || node.offsetX() || node.offsetY() || node.hasShadow?.()) return null;
+    if (!node.children) {
+        const r = node.getSelfRect(), pad = node.hasStroke() && node.strokeScaleEnabled() ? node.strokeWidth() / 2 : 0;
+        return { x1: r.x - pad, y1: r.y - pad, x2: r.x + r.width + pad, y2: r.y + r.height + pad };
+    }
+    let box = null;
+    for (const child of node.children) {
+        const b = localBounds(child), x = child.x(), y = child.y();
+        if (!b) return null;
+        box = box ? { x1: Math.min(box.x1, x + b.x1), y1: Math.min(box.y1, y + b.y1), x2: Math.max(box.x2, x + b.x2), y2: Math.max(box.y2, y + b.y2) }
+            : { x1: x + b.x1, y1: y + b.y1, x2: x + b.x2, y2: y + b.y2 };
+    }
+    return box;
+}
+
+/** 视口裁剪：只隐藏视口外仍可见的节点，只恢复自己隐藏的节点，业务设置的显隐保持不变。节点几何改变时须重建节点。 */
+export function createViewCull() {
+    const bounds = new WeakMap(), hidden = new WeakSet();
+    return (nodes, view) => {
+        for (const node of nodes) {
+            let b = bounds.get(node);
+            if (b === undefined) bounds.set(node, b = localBounds(node));
+            const x = node.x(), y = node.y();
+            const inside = !b || (x + b.x2 >= view.x1 && x + b.x1 <= view.x2 && y + b.y2 >= view.y1 && y + b.y1 <= view.y2);
+            if (!inside && node.visible()) { node.visible(false); hidden.add(node); }
+            else if (inside && hidden.delete(node)) node.visible(true);
+        }
+    };
+}

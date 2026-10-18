@@ -4,7 +4,7 @@
  */
 import { state } from '../../core/state.js';
 import { renderScene } from '../cad/cad-renderer.js';
-import { stage, mainLayer } from '../cad/cad-stage.js';
+import { stage, interactionLayer } from '../cad/cad-stage.js';
 import { bus } from '../../core/event-bus.js';
 import { getHomeCoordinates } from '../toolpath/toolpath-optimizer.js';
 
@@ -218,11 +218,11 @@ function simAnimationLoop(now) {
  * 在 Konva 视口中渲染动态刀头实体
  */
 function renderSimTool(x, y, mode, stepNum, totalSteps) {
-    if (!mainLayer) return;
+    if (!interactionLayer) return;
 
     if (!simToolGroup) {
         simToolGroup = new Konva.Group({ name: "sim-tool-head" });
-        mainLayer.add(simToolGroup);
+        interactionLayer.add(simToolGroup);
     }
     simToolGroup.destroyChildren();
 
@@ -260,14 +260,14 @@ function renderSimTool(x, y, mode, stepNum, totalSteps) {
     }));
 
     simToolGroup.moveToTop();
-    mainLayer.batchDraw();
+    interactionLayer.batchDraw();
 }
 
 function destroySimTool() {
     if (simToolGroup) {
         simToolGroup.destroy();
         simToolGroup = null;
-        if (mainLayer) mainLayer.batchDraw();
+        if (interactionLayer) interactionLayer.batchDraw();
     }
 }
 

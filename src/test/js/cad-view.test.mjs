@@ -1,7 +1,7 @@
 // node --test src/test/js/*.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fitBounds, stationOrigin, stationCoordinates, rulerOrigin, rulerStep, labelDetail, defectFromCenter, gridIndex, spacedPoints } from '../../main/resources/static/js/plugins/cad/cad-view.js';
+import { fitBounds, stationOrigin, stationCoordinates, rulerOrigin, rulerStep, labelDetail, defectFromCenter, gridIndex, spacedPoints, viewRect, localBounds, createViewCull } from '../../main/resources/static/js/plugins/cad/cad-view.js';
 
 test('framing reserves screen-space dimensions for small remnants and 100m rolls', () => {
     for (const [width, height] of [[280, 320], [600, 480], [1440, 900]]) {
@@ -104,4 +104,53 @@ test('badge spacing keeps the same greedy choice as checking every earlier badge
     const edge = [{x: 100, y: 100}, {x: 125, y: 100}, {x: 124.9, y: 100}];
     assert.deepEqual(spacedPoints(edge, 25), edge.slice(0, 2), 'exactly 25 px apart still fits');
     assert.equal(spacedPoints([{x: Infinity, y: 0}, {x: Infinity, y: 0}, {x: 30, y: 30}], 25).length, 3, 'non-finite points never block others');
+});
+
+// 只实现视口裁剪读到的 Konva 接口。
+function fakeNode({ x = 0, y = 0, rect, children, stroke = 0, strokeScale = true, rotation = 0, scale = 1, offset = 0, shadow = false } = {}) {
+    let visible = true, selfRectCalls = 0;
+    return {
+        children, get selfRectCalls() { return selfRectCalls; },
+        x: () => x, y: () => y, move(dx, dy) { x += dx; y += dy; },
+        rotation: () => rotation, scaleX: () => scale, scaleY: () => scale, skewX: () => 0, skewY: () => 0,
+        offsetX: () => offset, offsetY: () => 0, hasShadow: () => shadow,
+        getSelfRect: () => { selfRectCalls++; return rect; },
+        hasStroke: () => stroke > 0, strokeScaleEnabled: () => strokeScale, strokeWidth: () => stroke,
+        visible(value) { if (value === undefined) return visible; visible = value; return this; }
+    };
+}
+
+test('the culling viewport is the stage window in mm, widened by a screen-pixel margin', () => {
+    assert.deepEqual(viewRect(1000, 800, 100, -200, 0.5, 32), { x1: -264, y1: 336, x2: 1864, y2: 2064 });
+    assert.deepEqual(viewRect(1000, 800, 40, 60, 2), { x1: -20, y1: -30, x2: 480, y2: 370 });
+});
+
+test('entity bounds include scaled strokes and child offsets, and give up on transformed nodes', () => {
+    const rect = { x: 0, y: 0, width: 100, height: 40 };
+    assert.deepEqual(localBounds(fakeNode({ rect, stroke: 2 })), { x1: -1, y1: -1, x2: 101, y2: 41 });
+    assert.deepEqual(localBounds(fakeNode({ rect, stroke: 2, strokeScale: false })), { x1: 0, y1: 0, x2: 100, y2: 40 }, 'screen-pixel strokes are left to the margin');
+    const group = fakeNode({ x: 500, children: [fakeNode({ x: 10, y: 20, rect }), fakeNode({ rect: { x: -5, y: -5, width: 10, height: 10 } })] });
+    assert.deepEqual(localBounds(group), { x1: -5, y1: -5, x2: 110, y2: 60 }, 'own x/y stay out of the cached bounds');
+    for (const attrs of [{ rotation: 90 }, { scale: 0.5 }, { offset: 3 }, { shadow: true }]) {
+        assert.equal(localBounds(fakeNode({ rect, ...attrs })), null);
+        assert.equal(localBounds(fakeNode({ children: [fakeNode({ rect }), fakeNode({ rect, ...attrs })] })), null);
+    }
+});
+
+test('view culling hides off-screen entities, restores only its own, and keeps bounds until rebuilt', () => {
+    const cull = createViewCull(), view = { x1: 0, y1: 0, x2: 1000, y2: 1000 };
+    const rect = { x: 0, y: 0, width: 50, height: 50 };
+    const inside = fakeNode({ x: 100, y: 100, rect }), below = fakeNode({ x: 100, y: 1200, rect });
+    const touching = fakeNode({ x: -50, y: 1000, rect }), rotated = fakeNode({ x: 5000, y: 5000, rect, rotation: 30 });
+    const hiddenByApp = fakeNode({ x: 2000, y: 0, rect });
+    hiddenByApp.visible(false);
+    const nodes = [inside, below, touching, rotated, hiddenByApp];
+    cull(nodes, view);
+    assert.deepEqual(nodes.map(n => n.visible()), [true, false, true, true, false]);
+    below.move(0, -1000); hiddenByApp.move(-1500, 0); inside.move(0, 5000);
+    cull(nodes, view);
+    assert.deepEqual(nodes.map(n => n.visible()), [false, true, true, true, false], 'dragged entities follow their current position');
+    cull(nodes, { x1: -1e9, y1: -1e9, x2: 1e9, y2: 1e9 });
+    assert.deepEqual(nodes.map(n => n.visible()), [true, true, true, true, false], 'business visibility is never overridden');
+    assert.ok(nodes.every(n => n.selfRectCalls <= 1), 'geometry is measured once per node');
 });

@@ -1,6 +1,6 @@
 // Canvas frame cost with ~2000 synthetic pieces on a long roll. Client-side only: every API write is aborted.
 // BASE_URL=http://127.0.0.1:18091 [BASELINE_URL=http://127.0.0.1:18090] [SNAPSHOT_DIR=...] node src/test/browser/canvas-performance.cjs
-// With BASELINE_URL the same views are captured on both services and compared pixel by pixel.
+// With BASELINE_URL the same views are captured on both services and compared pixel by pixel. Both open /index.html, since / is the intro page.
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
@@ -68,7 +68,7 @@ async function openWorkbench(browser, url) {
         writes.push(route.request().url());
         return route.abort();
     });
-    await page.goto(url);
+    await page.goto(new URL('/index.html', url).href);
     await page.waitForLoadState('networkidle');
     await page.waitForFunction(() => !document.body.inert);
     const scene = await page.evaluate(loadScene, PIECES);
@@ -147,21 +147,40 @@ async function benchmark(page, scene) {
     }, 40, i => page.mouse.move(start.x + (i + 1) * 3, start.y + (i + 1) * 2)));
     await page.mouse.up();
     await page.keyboard.press('Escape');
+    // Overlay-only changes on the full roll, where every entity is on screen.
+    results.push(await measure(page, cdp, '料头悬停（全卷）', () => page.evaluate(() => window.perf.renderer.viewFullRoll()), 24,
+        i => page.evaluate(i => {
+            const remnants = window.perf.state.getCurrentCaseData().remnants;
+            window.perf.remnants.hoverRemnant(remnants[(i >> 1) % remnants.length].id, i % 2 === 0);
+        }, i)));
+    results.push(await measure(page, cdp, '测量预览（全卷）', async () => {
+        await page.evaluate(async () => {
+            window.perf.renderer.viewFullRoll();
+            (await import('/js/plugins/cad/cad-measure.js')).toggleMeasureTool(true);
+        });
+        const box = await page.locator('#konva-container').boundingBox();
+        start = {x: box.x + 200, y: box.y + 200};
+        await page.mouse.click(start.x, start.y);
+    }, 24, i => page.mouse.move(start.x + (i + 1) * 5, start.y + (i + 1) * 4)));
+    await page.evaluate(async () => {
+        const measure = await import('/js/plugins/cad/cad-measure.js');
+        measure.toggleMeasureTool(false); measure.clearAllMeasurements();
+    });
     await station();
     const direct = await page.evaluate(() => {
-        const {renderer, stage} = window.perf, runs = 20;
-        let t = performance.now();
-        for (let i = 0; i < runs; i++) renderer.updateCanvasAnnotations();
-        const update = (performance.now() - t) / runs;
-        t = performance.now();
-        for (let i = 0; i < runs; i++) stage.annotationLayer.draw();
-        const draw = (performance.now() - t) / runs;
-        t = performance.now();
-        for (let i = 0; i < 5; i++) stage.mainLayer.draw();
-        const main = (performance.now() - t) / 5;
-        t = performance.now();
-        for (let i = 0; i < 5; i++) renderer.renderScene();
-        return {update, draw, main, render: (performance.now() - t) / 5};
+        const {renderer, stage} = window.perf;
+        const time = (runs, run) => { const t = performance.now(); for (let i = 0; i < runs; i++) run(); return (performance.now() - t) / runs; };
+        const update = time(20, () => renderer.updateCanvasAnnotations());
+        const draw = time(20, () => stage.annotationLayer.draw());
+        const main = time(5, () => stage.mainLayer.draw());
+        const all = time(5, () => stage.stage.draw());
+        renderer.viewFullRoll();
+        const fullMain = time(5, () => stage.mainLayer.draw());
+        const fullAll = time(5, () => stage.stage.draw());
+        renderer.resetToBedView();
+        const render = time(5, () => renderer.renderScene());
+        const rebuild = time(5, () => { renderer.renderScene(); stage.stage.draw(); });
+        return {update, draw, main, all, fullMain, fullAll, render, rebuild};
     });
     return {results, direct};
 }
@@ -206,6 +225,18 @@ const SNAPSHOTS = {
         piece.y = y;
         bus.emit('piece:moved', {pieceId: piece.id, x: piece.x, y});
         stage.stage.y(stage.stage.y() - 20000 * stage.stage.scaleY());
+    },
+    // Overlays drawn above the entities: a table-hover preview, then a finished and a live measurement.
+    hover: async () => {
+        const data = window.perf.state.getCurrentCaseData(), remnant = data.remnants.find(r => !r.confirmed) || data.remnants.at(-1);
+        window.perf.remnants.hoverRemnant(remnant.id, true);
+    },
+    measure: async () => {
+        const {stage} = window.perf.stage, box = stage.container().getBoundingClientRect();
+        (await import('/js/plugins/cad/cad-measure.js')).toggleMeasureTool(true);
+        const at = (type, x, y) => { stage.setPointersPositions({clientX: box.x + x, clientY: box.y + y}); stage.fire(type, {evt: {}}); };
+        at('click', 420, 300); at('click', 980, 620);
+        at('click', 600, 700); at('mousemove', 900, 760);
     }
 };
 
@@ -258,8 +289,10 @@ async function compare(browser, left, right) {
         console.log(`场景：${scene.pieces} 件裁片 · ${scene.remnants} 块料头 · 当前工位 ${scene.active} 件 / ${scene.cuts} 刀 · 卷长 ${scene.totalRollL} mm`);
         const {results, direct} = await benchmark(page, scene);
         console.log('交互（每步 = 一次输入 + 后续帧，busy 为主线程任务耗时）');
-        for (const r of results) console.log(`  ${r.name.padEnd(10)} busy ${r.busyMs.toFixed(1).padStart(7)} ms/步 · script ${r.scriptMs.toFixed(1).padStart(7)} ms/步 · 帧间隔 p50 ${r.frameP50.toFixed(1)} / p95 ${r.frameP95.toFixed(1)} / max ${r.frameMax.toFixed(1)} ms`);
-        console.log(`直接调用：updateCanvasAnnotations ${direct.update.toFixed(2)} ms · 标注层绘制 ${direct.draw.toFixed(2)} ms · 主图层绘制（含命中图）${direct.main.toFixed(1)} ms · renderScene ${direct.render.toFixed(1)} ms`);
+        for (const r of results) console.log(`  ${r.name.padEnd(9, '　')} busy ${r.busyMs.toFixed(1).padStart(7)} ms/步 · script ${r.scriptMs.toFixed(1).padStart(7)} ms/步 · 帧间隔 p50 ${r.frameP50.toFixed(1)} / p95 ${r.frameP95.toFixed(1)} / max ${r.frameMax.toFixed(1)} ms`);
+        console.log(`直接调用：updateCanvasAnnotations ${direct.update.toFixed(2)} ms · 标注层绘制 ${direct.draw.toFixed(2)} ms · renderScene ${direct.render.toFixed(1)} ms · renderScene + 全部图层绘制 ${direct.rebuild.toFixed(1)} ms`);
+        console.log(`  工位视图：主图层绘制（含命中图）${direct.main.toFixed(1)} ms · 全部图层绘制 ${direct.all.toFixed(1)} ms`);
+        console.log(`  全卷视图：主图层绘制（含命中图）${direct.fullMain.toFixed(1)} ms · 全部图层绘制 ${direct.fullAll.toFixed(1)} ms`);
         assert.deepEqual(errors, [], errors.join('; '));
         assert.deepEqual(writes, [], 'benchmark must never write business data');
         await page.close();

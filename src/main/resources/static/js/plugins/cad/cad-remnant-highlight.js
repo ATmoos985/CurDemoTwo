@@ -1,5 +1,5 @@
 /** 料头与台账双向定位，使用克制的固定像素选中标记。 */
-import { stage, mainLayer, annotationLayer, remnantGroup, remnantHighlightGroup } from './cad-stage.js';
+import { stage, interactionLayer, annotationLayer, remnantGroup, remnantHighlightGroup } from './cad-stage.js';
 import { updateStatusBar } from './cad-renderer.js';
 import { drawRulers } from './cad-rulers.js';
 import { state } from '../../core/state.js';
@@ -38,7 +38,7 @@ export function panToCADCoord(worldX, worldY, targetScale = null, duration = 320
         drawRulers();
         updateStatusBar();
         renderRemnantHighlight();
-        if (mainLayer) mainLayer.batchDraw();
+        if (interactionLayer) interactionLayer.batchDraw();
         return;
     }
 
@@ -62,7 +62,7 @@ export function panToCADCoord(worldX, worldY, targetScale = null, duration = 320
             requestAnimationFrame(step);
         } else {
             renderRemnantHighlight();
-            if (mainLayer) mainLayer.batchDraw();
+            if (interactionLayer) interactionLayer.batchDraw();
         }
     }
     requestAnimationFrame(step);
@@ -169,8 +169,8 @@ export function clearRemnantSelection() {
         });
     }
 
-    if (mainLayer) {
-        mainLayer.batchDraw();
+    if (interactionLayer) {
+        interactionLayer.batchDraw();
     }
 
     bus.emit('remnant:deselected');
@@ -209,10 +209,10 @@ export function hoverRemnant(remnantId, isHovering) {
                 listening: false
             });
             remnantHighlightGroup.add(hoverHighlightNode);
-            mainLayer.batchDraw();
+            interactionLayer.batchDraw();
         }
     } else {
-        if (mainLayer) mainLayer.batchDraw();
+        if (interactionLayer) interactionLayer.batchDraw();
     }
 }
 
@@ -222,7 +222,7 @@ export function renderRemnantHighlight() {
     remnantHighlightGroup.destroyChildren();
     hoverHighlightNode = null;
     const rem = (state.getCurrentCaseData().remnants || []).find(r => r.id === state.selectedRemnantId);
-    if (!rem) { if (mainLayer) mainLayer.batchDraw(); return; }
+    if (!rem) { if (interactionLayer) interactionLayer.batchDraw(); return; }
     const inv = 1 / stage.scaleX();
     const dark = document.documentElement.getAttribute('data-theme') !== 'light';
     const color = dark ? '#81abc2' : '#275c7b';
@@ -240,7 +240,7 @@ export function renderRemnantHighlight() {
         fontFamily: 'Consolas, Microsoft YaHei, sans-serif', fill: dark ? '#becbd5' : '#607484', wrap: 'none', ellipsis: true }));
     annotationLayer.add(badge);
     annotationLayer.batchDraw();
-    mainLayer.batchDraw();
+    interactionLayer.batchDraw();
 }
 
 // 监听画布视口变换（缩放或平移时实时自适应重绘高亮标牌大小）
