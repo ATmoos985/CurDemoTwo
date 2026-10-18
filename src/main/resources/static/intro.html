@@ -3,31 +3,65 @@
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>搭切解决方案 · 介绍</title>
 <link rel="stylesheet" href="css/base.css"><link rel="stylesheet" href="css/product-navigation.css"><link rel="stylesheet" href="css/intro.css"></head>
 <body class="intro-page">
-<header class="intro-header"><div><span class="app-mark" aria-hidden="true">▥</span><strong>搭切解决方案</strong><span class="intro-subtitle">切割能力与行业场景</span></div><div data-product-nav="intro"></div></header>
+<header class="intro-header"><a class="intro-brand" href="/" aria-label="搭切解决方案首页"><svg class="app-mark" width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true"><path d="M3 3h22v22H3zM3 12h22M12 3v22M19 12v13" stroke="currentColor" stroke-width="1.6"/></svg><strong>搭切解决方案</strong></a><div data-product-nav="intro"></div></header>
 <main class="intro-main">
 <section class="intro-hero" aria-labelledby="intro-title">
-    <p class="intro-eyebrow">窗帘 · 服装 · 板材 · 卷材</p>
-    <h1 id="intro-title">把不同订单“搭”在同一块材料上切</h1>
-    <p class="intro-lead">二维按裁片排料，一维按幅宽分条；整幅横切、贯通套裁、异形排料和一维搭切共用一套服务，行业差异通过规则配置带入。每项能力都标明真实程度：已支持、演示级或未支持。</p>
-    <div class="intro-actions"><a class="tool-btn active" href="/index.html">进入通用操作台</a><a class="tool-btn" href="/nesting.html">浏览场景演示</a><a class="tool-btn" href="/linear-demo.html">一维搭切对比</a></div>
-    <p class="intro-stats" id="intro-stats"></p>
+    <div class="hero-copy">
+        <h1 id="intro-title">不同订单，<br><em>一起切。</em></h1>
+        <p class="hero-promise">让每一寸材料，更尽其用。</p>
+        <p class="intro-lead">把不同尺寸的需求，搭在同一块材料上。<br>从排料到切割，让方案一目了然。</p>
+        <div class="intro-actions"><a class="tool-btn active" href="/index.html">进入通用操作台 <span aria-hidden="true">→</span></a><a class="hero-secondary" href="/nesting.html">体验场景演示 <span aria-hidden="true">↗</span></a></div>
+        <p class="hero-industries">窗帘 <span>·</span> 服装 <span>·</span> 板材 <span>·</span> 卷材</p>
+    </div>
+    <figure class="cutting-showcase" id="cutting-showcase" data-mode="sheet">
+        <div class="showcase-top"><div class="cutting-switch" role="group" aria-label="切割演示类型"><button type="button" data-cut-mode="sheet" aria-pressed="true">二维裁切</button><button type="button" data-cut-mode="strip" aria-pressed="false">一维分切</button></div><span class="showcase-note">原理演示</span></div>
+        <svg class="cutting-canvas" viewBox="0 0 640 410" role="img" aria-labelledby="cutting-title cutting-desc">
+            <title id="cutting-title">不同订单搭配排料与切割示意</title>
+            <desc id="cutting-desc">三种颜色代表三组订单，裁片组合在同一块材料上，虚线显示切割方向；图示不代表实际计算结果或设备刀路。</desc>
+            <defs><pattern id="cut-grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#283e4a" stroke-width=".6"/></pattern><pattern id="remnant-hatch" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 8L8 0" stroke="#3b5260" stroke-width="1"/></pattern></defs>
+            <rect x="48" y="62" width="544" height="286" fill="url(#cut-grid)" stroke="#58707d"/>
+            <g class="dimension-lines" fill="none" stroke="#67818f"><path d="M48 39h544M48 33v12M592 33v12M26 62v286M20 62h12M20 348h12"/></g>
+            <g class="canvas-label" fill="#b8cad3" font-size="11"><text x="320" y="28" text-anchor="middle">同一块材料 · 不同订单组合</text><text x="48" y="382">排料区域</text><text x="592" y="382" text-anchor="end">示意尺寸 / 非实际比例</text></g>
+            <g class="sheet-scene">
+                <g class="cut-piece piece-a" style="--dx:-14px;--dy:-15px"><rect x="57" y="71" width="204" height="144"/><text x="159" y="143">A / 01</text></g>
+                <g class="cut-piece piece-b" style="--dx:12px;--dy:-10px"><rect x="267" y="71" width="158" height="144"/><text x="346" y="143">B / 01</text></g>
+                <g class="cut-piece piece-c" style="--dx:18px;--dy:8px"><rect x="431" y="71" width="152" height="144"/><text x="507" y="143">C / 01</text></g>
+                <g class="cut-piece piece-b" style="--dx:-18px;--dy:16px"><rect x="57" y="221" width="158" height="118"/><text x="136" y="280">B / 02</text></g>
+                <g class="cut-piece piece-c" style="--dx:9px;--dy:20px"><rect x="221" y="221" width="152" height="118"/><text x="297" y="280">C / 02</text></g>
+                <g class="cut-piece piece-a" style="--dx:20px;--dy:15px"><rect x="379" y="221" width="144" height="118"/><text x="451" y="280">A / 02</text></g>
+                <rect x="529" y="221" width="54" height="118" fill="url(#remnant-hatch)"/>
+                <path class="cut-guide" d="M48 218H592M264 62V218M428 62V218M218 218V348M376 218V348M526 218V348"/>
+                <path class="cut-trace" pathLength="1" d="M48 218H592"/>
+                <g class="cut-head"><path d="M0-17V-7M0 7V17M-17 0H-7M7 0H17"/><circle r="5"/></g>
+            </g>
+            <g class="strip-scene">
+                <g class="cut-piece piece-a" style="--dx:-10px;--dy:-12px"><rect x="57" y="71" width="130" height="268"/><text x="122" y="205">A / 01</text></g>
+                <g class="cut-piece piece-b" style="--dx:8px;--dy:16px"><rect x="193" y="71" width="96" height="268"/><text x="241" y="205">B / 01</text></g>
+                <g class="cut-piece piece-c" style="--dx:12px;--dy:-15px"><rect x="295" y="71" width="82" height="268"/><text x="336" y="205">C / 01</text></g>
+                <g class="cut-piece piece-a" style="--dx:16px;--dy:12px"><rect x="383" y="71" width="130" height="268"/><text x="448" y="205">A / 02</text></g>
+                <rect x="519" y="71" width="64" height="268" fill="url(#remnant-hatch)"/>
+                <path class="cut-guide" d="M190 62V348M292 62V348M380 62V348M516 62V348"/>
+                <path class="cut-trace" pathLength="1" d="M190 62V348M292 62V348M380 62V348M516 62V348"/>
+            </g>
+        </svg>
+        <div class="showcase-legend"><span class="legend-a">订单 A</span><span class="legend-b">订单 B</span><span class="legend-c">订单 C</span><span class="legend-remnant">余料</span><button type="button" id="motion-toggle" aria-pressed="false">暂停动效</button></div>
+        <figcaption><strong id="cutting-caption">多种尺寸，一起排料</strong><span id="cutting-detail">矩形裁片紧凑组合，沿切线分开。</span></figcaption>
+    </figure>
 </section>
-<nav class="intro-toc" aria-label="本页目录"><a href="#capabilities">切割能力</a><a href="#industries">行业场景</a><a href="#workbench">通用操作台</a><a href="#demos">场景演示</a><a href="#linear">一维搭切</a><a href="#limits">能力边界</a></nav>
+<section class="intro-overview" aria-label="产品流程"><div><strong>需求合在一起</strong><p>多订单、多规格，统一安排。</p></div><div><strong>材料排得更紧凑</strong><p>按尺寸与工艺，组合裁片或条宽。</p></div><div><strong>切割看得更清楚</strong><p>查看排料方案，再进入对应工作台。</p></div></section>
+<div class="intro-detail-heading"><h2>从你的材料出发。</h2><p>按需展开能力、行业与操作说明。</p><p class="intro-stats" id="intro-stats"></p></div>
 
-<section id="capabilities" class="intro-section" aria-labelledby="capabilities-title">
-    <div class="section-head"><h2 id="capabilities-title">切割能力</h2><p>入口按“二维 / 一维”区分。状态说明当前版本的真实程度，不把演示效果当作生产能力。</p><div class="status-legend" id="status-legend"></div></div>
+<details id="capabilities" class="intro-section"><summary><h2 id="capabilities-title">切割能力</h2><span class="disclosure-indicator" aria-hidden="true"></span></summary><div class="intro-detail-body"><div class="section-head"><p>入口按“二维 / 一维”区分。状态说明当前版本的真实程度，不把演示效果当作生产能力。</p><div class="status-legend" id="status-legend"></div></div>
     <div class="capability-columns" id="capability-columns"></div>
     <p class="engine-line" id="engine-line" role="status">正在读取服务器引擎…</p>
-</section>
+</div></details>
 
-<section id="industries" class="intro-section" aria-labelledby="industries-title">
-    <div class="section-head"><h2 id="industries-title">行业场景与规则</h2><p>每个行业列出常用切法、规则配置的位置，以及能直接运行的示例。</p></div>
+<details id="industries" class="intro-section"><summary><h2 id="industries-title">行业场景与规则</h2><span class="disclosure-indicator" aria-hidden="true"></span></summary><div class="intro-detail-body"><div class="section-head"><p>每个行业列出常用切法、规则配置的位置，以及能直接运行的示例。</p></div>
     <div class="industry-tabs" id="industry-tabs" role="tablist" aria-label="行业"></div>
     <div class="industry-panel" id="industry-panel" role="tabpanel"></div>
-</section>
+</div></details>
 
-<section id="workbench" class="intro-section" aria-labelledby="workbench-title">
-    <div class="section-head"><h2 id="workbench-title">通用操作台与行业规则配置</h2><p>一个操作台承载任务、材料、排料、切割、报工和余料回收；各行业的特殊规则通过预设带入，再逐项微调。</p></div>
+<details id="workbench" class="intro-section"><summary><h2 id="workbench-title">通用操作台与行业规则配置</h2><span class="disclosure-indicator" aria-hidden="true"></span></summary><div class="intro-detail-body"><div class="section-head"><p>一个操作台承载任务、材料、排料、切割、报工和余料回收；各行业的特殊规则通过预设带入，再逐项微调。</p></div>
     <div class="workbench-grid">
         <ol class="step-list">
             <li><strong>打开设置</strong><span>通用操作台 → 工具与设置 → 工艺与显示设置。</span></li>
@@ -38,15 +72,13 @@
             <p class="note">预设数值是示例，按工厂实际工艺调整。通用操作台目前处理矩形裁切；服装异形排料在场景演示中预览，尚未接入作业流程。</p>
             <a class="tool-btn active" href="/index.html">进入通用操作台</a></div>
     </div>
-</section>
+</div></details>
 
-<section id="demos" class="intro-section" aria-labelledby="demos-title">
-    <div class="section-head"><h2 id="demos-title">基本功能场景演示</h2><p>场景演示页内置下列示例，一键载入后即可排料预览；只计算预览，不写入业务库存。</p></div>
+<details id="demos" class="intro-section"><summary><h2 id="demos-title">基本功能场景演示</h2><span class="disclosure-indicator" aria-hidden="true"></span></summary><div class="intro-detail-body"><div class="section-head"><p>场景演示页内置下列示例，一键载入后即可排料预览；只计算预览，不写入业务库存。</p></div>
     <div class="demo-groups" id="demo-groups"></div>
-</section>
+</div></details>
 
-<section id="linear" class="intro-section" aria-labelledby="linear-title">
-    <div class="section-head"><h2 id="linear-title">一维：搭切求解器</h2><p>一维按幅宽方向分条。逐单独立分切时每种规格自己占母卷；搭切把不同订单的条宽组合到同一母卷，减少母卷用量。</p></div>
+<details id="linear" class="intro-section"><summary><h2 id="linear-title">一维：搭切求解器</h2><span class="disclosure-indicator" aria-hidden="true"></span></summary><div class="intro-detail-body"><div class="section-head"><p>一维按幅宽方向分条。逐单独立分切时每种规格自己占母卷；搭切把不同订单的条宽组合到同一母卷，减少母卷用量。</p></div>
     <div class="table-wrap"><table class="rule-table compare-table">
         <thead><tr><th></th><th>逐单独立分切</th><th>搭切 · 快速</th><th>搭切 · 精细</th></tr></thead>
         <tbody>
@@ -69,17 +101,16 @@
         <tr><th>入口</th><td>通用操作台、场景演示</td><td>分切工作台、搭切对比</td></tr>
         <tr><th>与库存</th><td>操作台报工后扣减母卷与料头库存</td><td>独立预览，不扣二维库存</td></tr>
         </tbody></table></div>
-</section>
+</div></details>
 
-<section id="limits" class="intro-section" aria-labelledby="limits-title">
-    <div class="section-head"><h2 id="limits-title">能力边界</h2><p>以下内容当前版本没有，演示或沟通时请如实说明。</p></div>
+<details id="limits" class="intro-section"><summary><h2 id="limits-title">能力边界</h2><span class="disclosure-indicator" aria-hidden="true"></span></summary><div class="intro-detail-body"><div class="section-head"><p>以下内容当前版本没有，演示或沟通时请如实说明。</p></div>
     <ul class="limit-list">
         <li><strong>异形结果仅为边界预览</strong>：没有可执行的轮廓刀路、刀具补偿、轮廓生产报工，也不划分余料。</li>
         <li><strong>二维引擎的几何限制</strong>：不支持孔洞、圆弧、任意角度旋转、非零刀缝和多材料联合优化；锯缝以“裁片间距”近似。</li>
         <li><strong>行业专有工艺</strong>：对花、对条对格、板材的封边排钻与多板联合排料尚未实现。</li>
         <li><strong>搭切不承诺全局最优</strong>：一维结果为预计值，需按订单核对差额；一维分切独立于二维库存，不扣减、不回写。</li>
     </ul>
-</section>
+</div></details>
 </main>
 <footer class="intro-footer">搭切解决方案 · 能力演示版本 · 示例数值仅用于演示</footer>
 <script type="module" src="js/product-navigation.js"></script><script type="module" src="js/intro/intro-page.js"></script>

@@ -1,5 +1,6 @@
 import {STATUS, PRESET_FIELDS, INDUSTRIES, CAPABILITIES, presets, describePreset} from '../industry/industry-profiles.js';
 import {escapeHtml as esc} from '../linear/linear-model.js';
+import './cutting-showcase.js';
 
 const $ = id => document.getElementById(id);
 const HINTS = {ready: '生产流程可用', demo: '可预览或属近似实现，不直接用于生产', none: '当前版本没有'};
@@ -52,7 +53,12 @@ $('industry-tabs').addEventListener('keydown', event => {
     if (next !== undefined) { event.preventDefault(); selectIndustry(ids[next], true); }
 });
 renderIndustries();
-if (location.hash.startsWith('#industry-')) $('industries').scrollIntoView();
+function revealSection() {
+    const section = location.hash.startsWith('#industry-') ? $('industries') : document.getElementById(location.hash.slice(1));
+    if (section?.matches('details.intro-section')) { section.open = true; section.scrollIntoView(); }
+}
+revealSection();
+window.addEventListener('hashchange', revealSection);
 
 $('preset-table').innerHTML = `<thead><tr><th>预设</th>${PRESET_FIELDS.map(f => `<th>${esc(f.label)}</th>`).join('')}</tr></thead><tbody>
     ${presets().map(p => `<tr><th>${esc(p.name)}</th>${describePreset(p.values).map(d => `<td>${esc(d.text)}</td>`).join('')}</tr>`).join('')}</tbody>`;
