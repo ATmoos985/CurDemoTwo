@@ -55,3 +55,49 @@ export function labelDetail(width, height, scale, overview = false) {
     if (overview || width * scale < 64 || height * scale < 26) return 0;
     return width * scale >= 124 && height * scale >= 56 ? 2 : 1;
 }
+
+// 单个数字作格键；|cy| < 2^19 格时不冲突（1 m 格约 500 km）。
+const cellKey = (cx, cy) => cx * 1048576 + cy;
+
+/** 均匀网格分桶：query 返回所在格与查询框相交的条目序号（去重、升序），调用方再按屏幕框精确判断。 */
+export function gridIndex(rects, size) {
+    const cells = new Map(), seen = new Uint32Array(rects.length);
+    let stamp = 0, minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    rects.forEach((r, i) => {
+        const x0 = Math.floor(r.x / size), x1 = Math.floor((r.x + r.w) / size);
+        const y0 = Math.floor(r.y / size), y1 = Math.floor((r.y + r.h) / size);
+        if (![x0, x1, y0, y1].every(Number.isFinite) || x0 > x1 || y0 > y1) return;
+        minX = Math.min(minX, x0); maxX = Math.max(maxX, x1); minY = Math.min(minY, y0); maxY = Math.max(maxY, y1);
+        for (let cx = x0; cx <= x1; cx++) for (let cy = y0; cy <= y1; cy++) {
+            const list = cells.get(cellKey(cx, cy));
+            if (list) list.push(i); else cells.set(cellKey(cx, cy), [i]);
+        }
+    });
+    return {
+        query(x0, y0, x1, y1) {
+            const found = [];
+            stamp++;
+            for (let cx = Math.max(minX, Math.floor(x0 / size)); cx <= Math.min(maxX, Math.floor(x1 / size)); cx++)
+                for (let cy = Math.max(minY, Math.floor(y0 / size)); cy <= Math.min(maxY, Math.floor(y1 / size)); cy++)
+                    for (const i of cells.get(cellKey(cx, cy)) || []) if (seen[i] !== stamp) { seen[i] = stamp; found.push(i); }
+            return found.sort((a, b) => a - b);
+        }
+    };
+}
+
+/** 按输入顺序贪心保留与已保留点相距不小于 distance 的点；只查相邻 3×3 格。 */
+export function spacedPoints(points, distance) {
+    const cells = new Map(), kept = [];
+    for (const point of points) {
+        const cx = Math.floor(point.x / distance), cy = Math.floor(point.y / distance);
+        if (!Number.isFinite(cx + cy)) { kept.push(point); continue; }
+        let near = false;
+        for (let i = cx - 1; i <= cx + 1 && !near; i++) for (let j = cy - 1; j <= cy + 1 && !near; j++)
+            near = (cells.get(cellKey(i, j)) || []).some(q => Math.hypot(point.x - q.x, point.y - q.y) < distance);
+        if (near) continue;
+        kept.push(point);
+        const list = cells.get(cellKey(cx, cy));
+        if (list) list.push(point); else cells.set(cellKey(cx, cy), [point]);
+    }
+    return kept;
+}

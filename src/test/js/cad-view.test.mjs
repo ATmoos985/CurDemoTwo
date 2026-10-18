@@ -1,7 +1,7 @@
 // node --test src/test/js/*.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fitBounds, stationOrigin, stationCoordinates, rulerOrigin, rulerStep, labelDetail, defectFromCenter } from '../../main/resources/static/js/plugins/cad/cad-view.js';
+import { fitBounds, stationOrigin, stationCoordinates, rulerOrigin, rulerStep, labelDetail, defectFromCenter, gridIndex, spacedPoints } from '../../main/resources/static/js/plugins/cad/cad-view.js';
 
 test('framing reserves screen-space dimensions for small remnants and 100m rolls', () => {
     for (const [width, height] of [[280, 320], [600, 480], [1440, 900]]) {
@@ -73,4 +73,35 @@ test('detail is disclosed only when labels fit, and never in full-roll overview'
     assert.equal(labelDetail(2000, 1200, .1), 2);
     assert.equal(labelDetail(2000, 1200, .5, true), 0);
     assert.equal(labelDetail(2000, 10, 1), 0, 'narrow strips do not carry overlapping text');
+});
+
+const random = (seed => () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32)(20261017);
+
+test('grid buckets return every rectangle touching the viewport once, in data order', () => {
+    const rects = Array.from({length: 600}, () => ({x: random() * 2800, y: random() * 60000, w: 50 + random() * 1200, h: 50 + random() * 1200}));
+    rects.push({x: NaN, y: 0, w: 10, h: 10}, {x: 0, y: 0, w: -5, h: 10}, {x: Infinity, y: 0, w: 10, h: 10});
+    const grid = gridIndex(rects, 1000);
+    for (let n = 0; n < 200; n++) {
+        const x0 = random() * 4000 - 600, y0 = random() * 64000 - 2000, x1 = x0 + random() * 3000, y1 = y0 + random() * 9000;
+        const found = grid.query(x0, y0, x1, y1);
+        assert.deepEqual(found, [...new Set(found)].sort((a, b) => a - b));
+        rects.forEach((r, i) => {
+            if (r.w >= 0 && r.x <= x1 && r.x + r.w >= x0 && r.y <= y1 && r.y + r.h >= y0) assert.ok(found.includes(i), `missed ${i}`);
+        });
+        assert.ok(!found.some(i => i >= 600), 'invalid rectangles are never bucketed');
+    }
+    assert.equal(grid.query(-Infinity, -1e9, 1e9, Infinity).length, 600, 'huge viewports stay bounded by the occupied cells');
+    assert.deepEqual(gridIndex([], 1000).query(0, 0, 10, 10), []);
+});
+
+test('badge spacing keeps the same greedy choice as checking every earlier badge', () => {
+    for (let n = 0; n < 50; n++) {
+        const points = Array.from({length: 120}, () => ({x: 28 + random() * 900, y: 28 + random() * 600}));
+        const expected = [];
+        for (const p of points) if (!expected.some(q => Math.hypot(p.x - q.x, p.y - q.y) < 25)) expected.push(p);
+        assert.deepEqual(spacedPoints(points, 25), expected);
+    }
+    const edge = [{x: 100, y: 100}, {x: 125, y: 100}, {x: 124.9, y: 100}];
+    assert.deepEqual(spacedPoints(edge, 25), edge.slice(0, 2), 'exactly 25 px apart still fits');
+    assert.equal(spacedPoints([{x: Infinity, y: 0}, {x: Infinity, y: 0}, {x: 30, y: 30}], 25).length, 3, 'non-finite points never block others');
 });
