@@ -38,7 +38,7 @@ node benchmark/run.mjs --smoke http://127.0.0.1:18311
 ```
 
 ```bash
-node benchmark/run.mjs --set all 30e3d4b=http://127.0.0.1:18310 05022f8=http://127.0.0.1:18311 > report.md
+node benchmark/run.mjs --set all 30e3d4b=http://127.0.0.1:18310 05022f8=http://127.0.0.1:18311 > benchmark/results/report.md
 ```
 
 - 服务写作 `[标签=]地址`，标签建议用提交号；第一个是 A，第二个是 B。
@@ -51,17 +51,17 @@ node benchmark/run.mjs --set all 30e3d4b=http://127.0.0.1:18310 05022f8=http://1
 
 题目全部由 `problems.mjs` 生成，不存 JSON。每行结果都记录请求体哈希（`JSON.stringify` 的 SHA-256 前 12 位）：哈希相同，请求就逐字节相同，可以跨次比较。
 
-| 题集 | 题目 | 两个服务时约需 |
+| 题集 | 题目 | 两个服务时实测约需 |
 |---|---|---|
-| `smoke` | guillotine、contour14、scenario4、synthetic2000（`--smoke` 统一限时 2 s、1 轮、不预热） | 30 s（1 轮） |
-| `demo`（默认） | 试验台两个示例 + 前端预设案例 1–8，限时 3 s | 4 min（4 轮） |
+| `smoke` | guillotine、contour14、scenario4、synthetic2000（`--smoke` 统一限时 2 s、1 轮、不预热） | 15 s（1 轮） |
+| `demo`（默认） | 试验台两个示例 + 前端预设案例 1–8，限时 3 s，多数提前结束 | 1.5 min（4 轮） |
 | `large` | synthetic2000、synthetic10000、contour200，限时 20 s | 8 min（4 轮） |
-| `all` | demo + large | 12 min（4 轮） |
+| `all` | demo + large | 10 min（4 轮） |
 
 另可用 `--problems` 点名：
 
 - `scenario<N>`：前端预设案例，经 `scenario-examples.js` 转成请求，改了预设哈希就会变。
-- `synthetic<N>`：10 种规格各 N/10 件，2000 × 30N mm 连续卷，需求是可用面积的 1.75 倍，两处避让；N 为 10 的倍数且不超过 10000。synthetic2000、synthetic10000 与之前 COPIES、`-e` 两次对比的请求相同（`e6227b8cb038`、`1869b4e841ef`）。
+- `synthetic<N>`：10 种规格各 N/10 件，2000 × 30N mm 连续卷，需求是材料面积的 1.75 倍，两处避让；N 为 10 的倍数且不超过 10000。synthetic2000、synthetic10000 与之前 COPIES、`-e` 两次对比的请求相同（`e6227b8cb038`、`1869b4e841ef`）。
 - `distinct<N>`：N 种不同规格各 1 件（mulberry32 种子 20261018），原生求解器要处理 N 种物品，是 COPIES 的最坏情况；不在任何题集里。
 
 ## 4. 测量口径
