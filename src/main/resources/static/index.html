@@ -527,6 +527,12 @@
 
                 <!-- Tab 2: 工艺与切刀 -->
                 <div class="settings-tab-pane" id="pane-craft">
+                    <div class="settings-group-title">行业规则预设</div>
+                    <div class="prop-row">
+                        <label class="prop-label" for="cfg-industry">套用预设</label>
+                        <select class="prop-input" id="cfg-industry" style="width: 220px;" onchange="applyIndustryPreset(this.value)"></select>
+                    </div>
+                    <p id="cfg-industry-hint" role="status" style="margin: 0 0 14px; font-size: 12px; line-height: 1.6; color: var(--text-muted);"></p>
                     <div class="settings-group-title">下刀裁切与瑕疵安全隔离</div>
                     <div class="prop-row">
                         <label class="prop-label" for="cfg-defect-margin">疵点避让间距</label>

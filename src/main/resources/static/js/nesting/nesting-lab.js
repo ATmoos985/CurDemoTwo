@@ -1,11 +1,13 @@
 import { rectangle, polygon, shapeArea, createNestingScene } from './nesting-scene.js';
 import { mountNestingViewer } from './nesting-viewer.js';
 import { NestingSession } from './nesting-client.js';
-import {scenarioExample} from './scenario-examples.js';
+import {scenarioExample, garmentExample, boardExample} from './scenario-examples.js';
+import {industryOfScenario, scenarioRules} from '../industry/industry-profiles.js';
+import { toggleMeasureTool, clearAllMeasurements } from '../plugins/cad/cad-measure.js';
 
 const byId = id => document.getElementById(id);
 const session = new NestingSession();
-let problem, engines = [], solveToken = 0;
+let problem, engines = [], solveToken = 0, sceneKey = '';
 const viewer = mountNestingViewer(byId('nesting-canvas'), {
     onZoom: scale => { byId('zoom-label').textContent = `${(scale * 100).toFixed(1)}%`; },
     onSelect: piece => {
@@ -140,6 +142,17 @@ function engineHint() {
     const capability = engines.find(e => e.modes.includes(mode));
     byId('engine-hint').textContent = capability ? `${mode === 'CROSSCUT' ? '需求宽度须等于材料宽度' : mode === 'CONTOUR' ? '简单多边形 · 单块材料 · 90° 步进旋转' : '支持逐件选择 90° 旋转'} · 精度 ${capability.coordinateResolutionMm} mm${capability.available ? '' : ' · 引擎未就绪'}` : '引擎状态尚未获取，求解时将检查能力。';
 }
+// 行业规则小结：行业取自所选场景，规则取自当前表单里的标准输入，编辑后随之更新。
+function renderBrief() {
+    const industry = industryOfScenario(sceneKey);
+    byId('brief-industry').textContent = industry ? `${industry.name} · ${industry.dimension}` : '自定义输入';
+    byId('brief-lead').textContent = industry ? industry.lead : '以下按当前输入列出实际用到的规则。';
+    byId('brief-link').href = industry ? `/intro.html#industry-${industry.id}` : '/intro.html#industries';
+    byId('brief-rules').replaceChildren(...scenarioRules(problem).map(({ name, value }) => {
+        const row = document.createElement('div'), term = document.createElement('dt'), detail = document.createElement('dd');
+        term.textContent = name; detail.textContent = value; row.append(term, detail); return row;
+    }));
+}
 const area = value => `${(value / 1_000_000).toFixed(3)} m²`;
 function results(scene) {
     byId('area-processing').textContent = scene ? area(shapeArea(scene.region.shape)) : '—';
@@ -174,7 +187,7 @@ function changed() {
     if (byId('scenario-select')) byId('scenario-select').value = '';
     try {
         problem = readForm();
-        const scene = session.setProblem(problem); viewer.setScene(scene); results(scene);
+        const scene = session.setProblem(problem); viewer.setScene(scene); results(scene); renderBrief();
         byId('solve-status').textContent = '输入已更新，等待排料。';
     } catch (error) {
         session.invalidate(); viewer.setScene(null); results(null); byId('solve-status').textContent = '请完善裁切输入。'; showError(error.message);
@@ -191,7 +204,7 @@ function loadProblem(next) {
     byId('continues').checked = !!problem.material.continuesAfterRegion;
     byId('continues').disabled = problem.process.feedMode === 'SHEET';
     byId('material-shape-editor').replaceChildren(shapeEditor(problem.material.shape, byId('material-width'), byId('material-height')));
-    fillRows(); viewer.setScene(scene, { fitView: true }); results(scene); engineHint(); showError('');
+    fillRows(); viewer.setScene(scene, { fitView: true }); results(scene); renderBrief(); engineHint(); showError('');
     byId('solve-status').textContent = '输入就绪，等待排料。'; byId('solve-button').disabled = false; byId('solve-button').textContent = '开始裁切预览';
 }
 // A select emits input before change; keep the chosen scenario until its own loader runs.
@@ -219,9 +232,14 @@ byId('process-mode').addEventListener('change', () => {
 byId('add-part').onclick = () => inputAction(() => { problem = readForm(); problem.parts.push({ id: Math.max(0, ...problem.parts.map(p => p.id)) + 1, name: '新裁片', shape: rectangle(500, 500), quantity: 1, allowRotation: false }); fillRows(); changed(); });
 byId('add-exclusion').onclick = () => inputAction(() => { problem = readForm(); problem.material.exclusions ||= []; problem.material.exclusions.push({ id: Math.max(0, ...problem.material.exclusions.map(d => d.id)) + 1, x: 0, y: 0, shape: rectangle(100, 100), clearance: 20 }); fillRows(); changed(); });
 function loadScenario(key) {
+    sceneKey = key;
     if (byId('scenario-select')) byId('scenario-select').value = key;
     if (key === 'CROSSCUT' || key === 'GUILLOTINE' || key === 'CONTOUR') {
         loadProblem(example(key));
+    } else if (key.startsWith('GARMENT_')) {
+        loadProblem(garmentExample(key));
+    } else if (key.startsWith('BOARD_')) {
+        loadProblem(boardExample(key));
     } else if (key) {
         loadProblem(scenarioExample(Number(key)));
     }
@@ -244,12 +262,14 @@ byId('problem-form').addEventListener('submit', async event => {
     } catch (error) { showError(error.message); }
 });
 byId('fit-view').onclick = () => viewer.fit();
+byId('btn-measure-tool').onclick = () => toggleMeasureTool();
+byId('clear-measurements').onclick = clearAllMeasurements;
 byId('zoom-in').onclick = () => viewer.zoom(1.25);
 byId('zoom-out').onclick = () => viewer.zoom(1 / 1.25);
 byId('show-paths').onchange = event => viewer.setPaths(event.target.checked);
 byId('show-dimensions').onchange = event => viewer.setDimensions(event.target.checked);
 byId('open-json').onclick = () => inputAction(() => { byId('json-input').value = JSON.stringify(readForm(), null, 2); byId('json-error').textContent = ''; byId('json-dialog').showModal(); });
-byId('apply-json').onclick = () => { try { loadProblem(JSON.parse(byId('json-input').value)); if (byId('scenario-select')) byId('scenario-select').value = ''; byId('json-dialog').close(); } catch (error) { byId('json-error').textContent = error.message; } };
+byId('apply-json').onclick = () => { try { loadProblem(JSON.parse(byId('json-input').value)); sceneKey = ''; renderBrief(); if (byId('scenario-select')) byId('scenario-select').value = ''; byId('json-dialog').close(); } catch (error) { byId('json-error').textContent = error.message; } };
 function download(name, value) {
     const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }));
     const link = document.createElement('a'); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -257,6 +277,8 @@ function download(name, value) {
 byId('export-input').onclick = () => inputAction(() => { if (byId('problem-form').reportValidity()) download('nesting-input.json', readForm()); });
 byId('export-result').onclick = () => { if (session.result) download('nesting-result.json', session.result); };
 window.addEventListener('pagehide', event => { if (!event.persisted) { session.invalidate(); viewer.destroy(); } });
-loadScenario('GUILLOTINE');
+// 介绍页的示例链接用 ?scenario=<键> 直达；键不在场景列表里时回到默认场景。
+const requested = new URLSearchParams(location.search).get('scenario');
+loadScenario([...byId('scenario-select').options].some(option => option.value && option.value === requested) ? requested : 'GUILLOTINE');
 fetch('/api/v1/nesting/engines').then(response => { if (!response.ok) throw new Error(); return response.json(); })
     .then(data => { engines = data; engineHint(); }).catch(() => { byId('engine-hint').textContent = '暂时无法读取引擎状态，请检查连接。'; });

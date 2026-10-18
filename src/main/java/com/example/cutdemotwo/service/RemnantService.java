@@ -1045,6 +1045,54 @@ public class RemnantService {
         return mutate(() -> addDefectToRollInternal(rollId, defect));
     }
 
+    public record InspectionInput(double width, double totalLength, List<Defect> defects) {}
+
+    public synchronized MotherRollInfo createInspectionRoll(MotherRollInfo input) {
+        return mutate(() -> {
+            if (input == null || input.getRollId() == null || input.getRollId().isBlank())
+                throw new IllegalArgumentException("请输入母卷编号");
+            if (motherRolls.containsKey(input.getRollId())) throw new IllegalArgumentException("此母卷编号已存在，请选择已有母卷");
+            var roll = new MotherRollInfo();
+            roll.setRollId(input.getRollId()); roll.setRollModel(input.getRollModel());
+            roll.setWidth(input.getWidth()); roll.setRawWidth(input.getWidth()); roll.setTotalLength(input.getTotalLength());
+            roll.setInspectionStatus("PENDING"); roll.setInspector("人工验布");
+            roll.setInspectionDate(null); roll.setCreatedAt(LocalDateTime.now().toString());
+            return saveOrUpdateMotherRollInternal(roll);
+        });
+    }
+
+    public synchronized MotherRollInfo saveInspection(String rollId, InspectionInput input) {
+        return mutate(() -> {
+            var roll = motherRolls.get(rollId);
+            if (roll == null) throw new IllegalArgumentException("未找到母卷，请重新选择");
+            if (input == null || input.width() != roll.getWidth() || input.totalLength() != roll.getTotalLength())
+                throw new IllegalArgumentException("母卷尺寸已变化，请重新载入后核对标记");
+            if (input.defects() == null || input.defects().isEmpty() || input.defects().size() > 5000)
+                throw new IllegalArgumentException("每次请保存 1–5000 处疵点");
+            var keys = new HashSet<String>();
+            for (var incoming : input.defects()) {
+                if (incoming == null || incoming.getCaptureId() == null || !incoming.getCaptureId().matches("[a-zA-Z0-9-]{1,80}")
+                        || !keys.add(incoming.getCaptureId())) throw new IllegalArgumentException("疵点记录标识无效或重复");
+                var defect = json.readValue(json.writeValueAsBytes(incoming), Defect.class);
+                defect.setId(0);
+                defect.setDetectionSource("MANUAL_INSPECT");
+                defect.setAvoidanceStrategy("MUST_AVOID");
+                var existing = roll.getDefects().stream().filter(d -> incoming.getCaptureId().equals(d.getCaptureId())).findFirst();
+                if (existing.isPresent()) {
+                    var copy = json.readValue(json.writeValueAsBytes(existing.get()), Defect.class); copy.setId(0);
+                    if (!json.writeValueAsString(copy).equals(json.writeValueAsString(defect)))
+                        throw new IllegalArgumentException("此疵点已保存，内容与本地记录不同，请重新载入核对");
+                    continue; // A retry after a lost response must not duplicate physical defects.
+                }
+                for (double n : new double[]{defect.getX(), defect.getY(), defect.getW(), defect.getH(), defect.getMargin()})
+                    if (!Double.isFinite(n) || Math.abs(n * 10 - Math.rint(n * 10)) > .000001)
+                        throw new IllegalArgumentException("疵点位置和尺寸须精确到 0.1 mm");
+                addDefectToRollInternal(rollId, defect);
+            }
+            return roll;
+        });
+    }
+
     private Defect addDefectToRollInternal(String rollId, Defect defect) {
         MotherRollInfo roll = getMotherRoll(rollId);
         if (roll == null) {
@@ -1057,7 +1105,10 @@ public class RemnantService {
                 defect.getY() + defect.getH() > roll.getTotalLength()) {
             throw new IllegalArgumentException("疵点坐标或尺寸超出母卷范围");
         }
+        if (!Double.isFinite(defect.getMargin()) || defect.getMargin() < 0)
+            throw new IllegalArgumentException("疵点避让间距必须是非负数");
         if (defect.getId() == 0) {
+            defectSeq.accumulateAndGet(roll.getDefects().stream().mapToInt(Defect::getId).max().orElse(0), Math::max);
             defect.setId(defectSeq.incrementAndGet());
         }
         roll.getDefects().add(defect);

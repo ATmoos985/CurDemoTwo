@@ -148,6 +148,17 @@ public class FabricCutController {
         return remnantService.addDefectToRoll(rollId, defect);
     }
 
+    @PostMapping("/rolls/{rollId}/inspection-defects")
+    public com.example.cutdemotwo.model.MotherRollInfo saveInspection(@PathVariable String rollId,
+            @RequestBody com.example.cutdemotwo.service.RemnantService.InspectionInput input) {
+        return remnantService.saveInspection(rollId, input);
+    }
+
+    @PostMapping("/inspection/rolls")
+    public com.example.cutdemotwo.model.MotherRollInfo createInspectionRoll(@RequestBody com.example.cutdemotwo.model.MotherRollInfo roll) {
+        return remnantService.createInspectionRoll(roll);
+    }
+
     @PostMapping("/rolls/{rollId}/reset")
     public Map<String, Object> resetRoll(@PathVariable String rollId, @RequestBody(required = false) Map<String, Object> body) {
         boolean force = body != null && Boolean.TRUE.equals(body.get("force"));

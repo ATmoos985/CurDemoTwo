@@ -1,6 +1,5 @@
 /** 固定屏幕像素的毫米标尺；原点与工位起刀设置一致。 */
-import { stage } from './cad-stage.js';
-import { state } from '../../core/state.js';
+import { stage, getCanvasData } from './cad-stage.js';
 import { RULER_SIZE, rulerStep, rulerOrigin, canvasView } from './cad-view.js';
 
 export function drawRulers(cursorX, cursorY) {
@@ -17,7 +16,9 @@ export function drawRulers(cursorX, cursorY) {
     }
     const ctx = canvas.getContext('2d');
     const size = RULER_SIZE, scale = stage.scaleX(), pos = stage.position();
-    const data = state.getCurrentCaseData(), origin = rulerOrigin(data, canvasView.overview);
+    const data = getCanvasData();
+    if (!data) { ctx.clearRect(0, 0, canvas.width, canvas.height); return; }
+    const origin = rulerOrigin(data, canvasView.overview);
     const dark = document.documentElement.getAttribute('data-theme') !== 'light';
     const bg = dark ? '#18212d' : '#f1f4f6';
     const border = dark ? '#465362' : '#ccd4dc';

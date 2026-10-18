@@ -9,6 +9,13 @@
 .lab-input, .lab-output { min-width: 0; min-height: 0; background: var(--panel-bg); display: flex; flex-direction: column; overflow: hidden; }
 .lab-form-body, .lab-result-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 18px; }
 .lab-form-body > .lab-muted { margin-bottom: 20px; }
+.industry-brief { margin: 0 0 18px; padding: 10px 12px; background: var(--card-box-bg); border: 1px solid var(--panel-border); border-left: 3px solid var(--accent-blue); border-radius: 3px; }
+.industry-brief-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 13px; }
+.industry-brief-head a { color: var(--accent-blue); font-size: 12px; text-decoration: none; white-space: nowrap; }
+.industry-brief .lab-muted { margin: 4px 0 8px; line-height: 1.6; }
+.industry-brief dl > div { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; border-top: 1px solid #e7edf1; font-size: 12px; }
+.industry-brief dt { flex-shrink: 0; color: var(--text-muted); }
+.industry-brief dd { text-align: right; overflow-wrap: anywhere; }
 .lab-input { border-right: 1px solid var(--panel-border); }
 .lab-output { border-left: 1px solid var(--panel-border); }
 .lab-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; min-height: 64px; border-bottom: 1px solid var(--panel-border); flex-shrink: 0; }
@@ -41,10 +48,11 @@
 .lab-submit .tool-btn { width: 100%; min-height: 42px; font-weight: 600; }
 .lab-canvas-panel { min-width: 0; display: flex; flex-direction: column; }
 .lab-canvas-panel .lab-heading { background: white; }
-.lab-canvas-toolbar { padding: 8px 14px; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; background: white; border-bottom: 1px solid var(--panel-border); color: var(--text-muted); font-size: 12px; }
-.lab-canvas-toolbar > div { margin-left: auto; display: flex; align-items: center; gap: 6px; }
-#zoom-label { min-width: 42px; text-align: center; }
-#nesting-canvas { flex: 1; min-height: 220px; overflow: hidden; }
+.lab-canvas-panel .cad-tools { flex-wrap: wrap; }
+.lab-canvas-panel .cad-surface { min-height: 180px; }
+#nesting-canvas { position: absolute; inset: 0; overflow: hidden; }
+#nesting-canvas:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: -2px; }
+.lab-cursor { padding: 4px 14px; color: var(--text-muted); background: var(--panel-bg); border-top: 1px solid var(--panel-border); font: 11px Consolas, monospace; }
 .lab-legend { display: flex; flex-wrap: wrap; gap: 12px; padding: 10px 16px; background: white; border-top: 1px solid var(--panel-border); font-size: 11px; color: var(--text-muted); }
 .lab-legend span::before { content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 5px; border: 1px solid; }
 .legend-material::before { border-color: #c45656 !important; }

@@ -5,6 +5,7 @@ package com.example.cutdemotwo.model;
  */
 public class Defect {
     private Integer id = 0;             // 疵点流水序号
+    private String captureId;
     private double x;                   // 横向坐标 (距左导轨/靠山 mm)
     private double y;                   // 经向坐标 (距布卷起始端 mm)
     private double w;                   // 横向缺陷宽度 (mm)
@@ -51,6 +52,9 @@ public class Defect {
 
     public int getId() { return id != null ? id : 0; }
     public void setId(Integer id) { this.id = id; }
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public String getCaptureId() { return captureId; }
+    public void setCaptureId(String captureId) { this.captureId = captureId; }
 
     public double getX() { return x; }
     public void setX(double x) { this.x = x; }

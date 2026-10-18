@@ -12,7 +12,7 @@ import { state } from './core/state.js';
 // 导入各业务与显示插件
 import {
     toggleTheme, setTheme, openSettingsModal, closeSettingsModal,
-    switchSettingsTab, loadSavedSettings, saveSettings, restoreDefaultSettings
+    switchSettingsTab, loadSavedSettings, saveSettings, restoreDefaultSettings, applyIndustryPreset
 } from './plugins/settings/settings.js';
 
 import {
@@ -355,6 +355,7 @@ const camApp = {
     loadSavedSettings,
     saveSettings,
     restoreDefaultSettings,
+    applyIndustryPreset,
     toggleSectionCollapse,
     toggleSidebar,
     initLayoutResizers,

@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>裁切试验台</title>
+    <title>场景演示</title>
     <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/cad.css">
     <link rel="stylesheet" href="css/workspace.css">
     <link rel="stylesheet" href="css/nesting.css">
     <link rel="stylesheet" href="css/product-navigation.css">
@@ -12,21 +13,40 @@
     <link rel="stylesheet" href="css/ui-consistency.css">
 </head>
 <body class="nesting-lab">
-    <header class="lab-header"><div><span class="app-mark">▥</span><strong>裁切试验台</strong><span class="lab-subtitle">多场景能力演示 · 不写入业务库存</span></div><div data-product-nav="lab"></div></header>
+    <header class="lab-header"><div><span class="app-mark">▥</span><strong>场景演示</strong><span class="lab-subtitle">二维 · 窗帘 / 服装 / 板材 · 不写入业务库存</span></div><div data-product-nav="lab"></div></header>
     <main class="lab-layout">
         <form id="problem-form" class="lab-input">
             <div class="lab-heading"><h1>裁切输入</h1><span>尺寸 mm · 面积 m²</span></div>
             <div class="lab-form-body">
                 <label class="lab-scenario-label">演示场景<select id="scenario-select" aria-label="演示场景">
                     <option value="" disabled hidden>自定义输入</option>
-                    <option value="CROSSCUT">整幅横切</option>
-                    <option value="GUILLOTINE" selected>二维避疵</option>
-                    <option value="3">短料头复用</option>
-                    <option value="4">多规格套裁</option>
-                    <option value="6">连续送料工位</option>
-                    <option value="CONTOUR">异形排料</option>
+                    <optgroup label="窗帘 · 家纺">
+                        <option value="CROSSCUT">整幅横切</option>
+                        <option value="GUILLOTINE" selected>二维避疵</option>
+                        <option value="3">短料头复用</option>
+                        <option value="4">多规格套裁</option>
+                        <option value="6">连续送料工位</option>
+                    </optgroup>
+                    <optgroup label="服装">
+                        <option value="CONTOUR">异形排料</option>
+                        <option value="GARMENT_SHIRT">上衣裁片</option>
+                        <option value="GARMENT_PANTS">长裤裁片</option>
+                        <option value="GARMENT_SKIRT">半裙裁片</option>
+                        <option value="GARMENT_FULL">衣身袖片密排</option>
+                    </optgroup>
+                    <optgroup label="板材">
+                        <option value="BOARD_GRAIN">木纹板 · 禁止旋转</option>
+                        <option value="BOARD_PLAIN">素色板 · 允许旋转</option>
+                    </optgroup>
                 </select></label>
-                <p class="lab-muted">选一个场景后生成排料。连续送料展示单个加工区的布局与接续边界；完整任务接续与报工在裁切作业中进行。</p>
+                <section class="industry-brief" aria-label="行业规则小结" aria-live="polite">
+                    <div class="industry-brief-head"><strong id="brief-industry"></strong><a id="brief-link" href="/intro.html#industries" target="_blank" rel="noopener">行业规则 ↗</a></div>
+                    <p id="brief-lead" class="lab-muted"></p>
+                    <dl id="brief-rules"></dl>
+                </section>
+                <p class="lab-muted">选一个场景后生成排料。连续送料展示单个加工区的布局与接续边界；完整任务接续与报工在通用操作台中进行。</p>
+                <p class="lab-muted">服装示例含衣身、袖片、裤片和裙片，默认固定经向。曲边以折线近似，仅用于效果演示，非生产纸样。密排示例增加衣身、袖片与贴袋需求，求解约 10 秒，按实际结果显示利用率、空隙与未排数量。</p>
+                <p class="lab-muted">板材两个示例使用同一批柜体裁片：木纹板固定纹理方向，素色板允许旋转。示例经挑选以突出旋转规则的影响，实际差距取决于裁片组成。</p>
                 <fieldset><legend>在什么材料上切</legend><label>材料标识<input id="material-id" required maxlength="120" value="MATERIAL-1"></label>
                     <div class="lab-pair"><label>宽度<input id="material-width" type="number" min="0.1" max="10000000" step="0.1" required></label><label>长度<input id="material-height" type="number" min="0.1" max="10000000" step="0.1" required></label></div>
                     <div id="material-shape-editor"></div>
@@ -49,8 +69,22 @@
         </form>
         <section class="lab-canvas-panel" aria-label="材料与排料画布">
             <div class="lab-heading"><h2>排料预览</h2><button class="tool-btn" id="fit-view">适合材料</button></div>
-            <div class="lab-canvas-toolbar"><label><input id="show-dimensions" type="checkbox" checked>外接尺寸</label><label><input id="show-paths" type="checkbox" checked>刀路 / 轮廓</label><span id="region-summary"></span><div><button class="tool-btn" id="zoom-out" aria-label="缩小画布">−</button><output id="zoom-label">—</output><button class="tool-btn" id="zoom-in" aria-label="放大画布">＋</button></div></div>
-            <div id="nesting-canvas" tabindex="0" role="img" aria-label="材料加工区与求解排布；滚轮缩放，拖动画布平移；加减键缩放，0 键适合材料"></div>
+            <div class="cad-tools" role="toolbar" aria-label="画布工具">
+                <button class="tool-btn" id="btn-measure-tool" aria-pressed="false">测量</button>
+                <details class="canvas-help"><summary class="tool-btn">显示</summary><div class="canvas-help-body cad-layer-options">
+                    <label><input id="show-dimensions" type="checkbox" checked>外接尺寸与基准</label>
+                    <label><input id="show-paths" type="checkbox" checked>刀路 / 轮廓</label>
+                    <button class="tool-btn" id="clear-measurements">清空测量</button>
+                </div></details>
+                <span class="cad-tool-hint" id="cad-tool-hint" hidden>依次点击两点 · Esc 取消</span>
+                <span class="cad-station-info" id="cad-station-info"><span id="region-summary"></span></span>
+                <div class="cad-zoom"><button class="tool-btn" id="zoom-out" aria-label="缩小画布">−</button><output id="zoom-label" aria-label="视图缩放">—</output><button class="tool-btn" id="zoom-in" aria-label="放大画布">＋</button></div>
+            </div>
+            <div class="cad-surface">
+                <div id="nesting-canvas" tabindex="0" role="img" aria-label="材料加工区与求解排布；滚轮缩放，拖动画布平移；加减键缩放，0 键适合材料"></div>
+                <canvas id="cad-ruler-canvas" aria-hidden="true"></canvas>
+            </div>
+            <div class="lab-cursor" id="sb-cursor-pos">指针 — · 单位 mm</div>
             <div class="lab-legend"><span class="legend-material">加工区</span><span class="legend-piece">裁片</span><span class="legend-remnant">候选余料</span><span class="legend-exclusion">禁入区域</span><small>滚轮缩放 · 拖动画布平移 · 点击裁片查看</small></div>
         </section>
         <aside class="lab-output" aria-label="求解结果">

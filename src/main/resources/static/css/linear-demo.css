@@ -1,0 +1,83 @@
+.compare-page { display: block; height: auto; min-height: 100vh; overflow: auto; background: #f5f7f8; }
+.compare-header { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 0 24px; background: var(--panel-bg); border-bottom: 1px solid var(--panel-border); }
+.compare-header > div { display: flex; align-items: center; gap: 12px; }
+.compare-header strong { font-size: 18px; }
+.compare-header .app-mark { color: var(--accent-blue); font-size: 24px; }
+.compare-subtitle { color: var(--text-muted); font-size: 12px; }
+.compare-main { max-width: 1060px; margin: 0 auto; padding: 0 24px 56px; }
+.compare-main > section { padding-top: 32px; }
+.compare-main h2 { margin-bottom: 14px; font-size: 18px; }
+.compare-hero { padding-top: 40px !important; }
+.compare-hero h1 { margin-bottom: 12px; font-size: 30px; line-height: 1.3; }
+.compare-hero p { max-width: 760px; color: var(--text-muted); font-size: 15px; line-height: 1.8; }
+.note { color: var(--text-muted); font-size: 12px; line-height: 1.7; }
+
+.scenario-tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.scenario-tabs button { display: block; padding: 12px 14px; border: 1px solid var(--panel-border); border-radius: 4px; background: var(--panel-bg); color: var(--text-main); text-align: left; cursor: pointer; }
+.scenario-tabs button strong { display: block; font-size: 14px; }
+.scenario-tabs button span { display: block; margin-top: 4px; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.scenario-tabs button:hover { border-color: var(--accent-blue); }
+.scenario-tabs button[aria-pressed="true"] { border-color: var(--accent-blue); box-shadow: inset 0 3px 0 var(--accent-blue); }
+.scenario-tabs button:focus-visible, .view-switch button:focus-visible, .handoff a:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+
+.input-card { padding: 14px 16px; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 4px; }
+.input-summary { display: flex; flex-wrap: wrap; gap: 6px 26px; margin-bottom: 12px; font-size: 13px; }
+.input-summary dt { display: inline; color: var(--text-muted); }
+.input-summary dt::after { content: '：'; }
+.input-summary dd { display: inline; font: 600 13px var(--font-mono); }
+
+.table-wrap { overflow-x: auto; }
+.compare-table { width: 100%; border-collapse: collapse; background: var(--panel-bg); font-size: 13px; text-align: left; }
+.result-table { border: 1px solid var(--panel-border); }
+.compare-table th, .compare-table td { padding: 9px 12px; border-bottom: 1px solid #e7edf1; line-height: 1.6; vertical-align: middle; }
+.compare-table thead th { background: var(--panel-header); color: var(--text-muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.compare-table tbody th { min-width: 150px; font-weight: 600; }
+.compare-table th small { display: block; color: var(--text-muted); font-size: 11px; font-weight: 400; }
+.compare-table td small { color: var(--text-muted); font-size: 11px; }
+.compare-table .num { font-family: var(--font-mono); }
+.cell-note { color: var(--text-muted); font-size: 12px; }
+.cell-note.running { color: var(--accent-blue); }
+.cell-note.failed, .loss { color: #b91c1c; }
+.gain { color: #047857; font-weight: 600; }
+.solver-row { background: #f0f9ff; }
+.compare-table .tool-btn { height: 28px; padding: 0 14px; }
+.compare-status { min-height: 22px; margin-bottom: 10px; color: var(--accent-blue); font-size: 14px; }
+.result-table + .note { margin-top: 8px; }
+
+.view-switch { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.view-switch button[aria-pressed="true"] { background: var(--accent-blue); border-color: var(--accent-blue); color: #fff; }
+.strip-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-bottom: 12px; font-size: 12px; color: var(--text-muted); }
+.strip-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.strip-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.legend-product { background: #0284c7; }
+.legend-trim { background: #94a3b8; }
+.legend-remain { background: #fbbf24; }
+.pattern-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); gap: 12px; }
+.pattern-card { padding: 10px 12px 12px; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 4px; }
+.pattern-card header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-size: 12px; }
+.pattern-card header span { color: var(--text-muted); font-family: var(--font-mono); }
+.pattern-card p { margin-top: 8px; color: var(--text-muted); font-size: 11px; }
+.pattern-card p b { color: var(--text-main); font-family: var(--font-mono); }
+.strip { display: flex; width: 100%; height: 44px; overflow: hidden; border: 1px solid var(--panel-border); }
+.strip span { display: flex; align-items: center; justify-content: center; min-width: 0; overflow: hidden; border-right: 1px solid rgba(255, 255, 255, .6); color: #fff; font: 12px var(--font-mono); }
+.strip .product { background: #0284c7; }
+.strip .product.alt { background: #0369a1; }
+.strip .trim { background: #94a3b8; }
+.strip .remaining { background: #fbbf24; color: #713f12; }
+
+.handoff-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.handoff-actions .tool-btn { height: 36px; padding: 0 18px; text-decoration: none; }
+.notes-list { padding-left: 20px; }
+.notes-list li { margin-bottom: 9px; color: var(--text-muted); font-size: 13px; line-height: 1.8; }
+.notes-list strong { color: var(--text-main); }
+.compare-footer { padding: 20px; border-top: 1px solid var(--panel-border); background: var(--panel-bg); color: var(--text-muted); font-size: 12px; text-align: center; }
+
+@media (max-width: 960px) {
+    .compare-hero h1 { font-size: 25px; }
+    .pattern-list { grid-template-columns: 1fr; }
+}
+@media (max-width: 650px) {
+    .compare-header { padding: 0 14px; }
+    .compare-subtitle { display: none; }
+    .compare-main { padding: 0 14px 40px; }
+}

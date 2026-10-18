@@ -24,7 +24,7 @@ export function toggleMeasureTool(force = null) {
     }
     // 测量时让点击穿过实体，避免移动裁片或打开料头操作。
     if (mainLayer) mainLayer.listening(!measuring);
-    const container = document.getElementById('konva-container');
+    const container = stage?.container();
     if (container) container.style.cursor = measuring ? 'crosshair' : 'default';
     start = preview = null;
     drawMeasurements();
