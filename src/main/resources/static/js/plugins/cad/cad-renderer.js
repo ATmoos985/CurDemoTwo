@@ -1,7 +1,7 @@
 /** CAD 几何使用 mm；尺寸、文字和选择标记在独立屏幕图层绘制。 */
 import {
     stage, mainLayer, annotationLayer, fabricBgGroup, defectGroup, remnantGroup,
-    pieceGroup, cutGroup, bedStationGroup
+    pieceGroup, cutGroup, bedStationGroup, invalidatePanSnapshot
 } from './cad-stage.js';
 import { drawRulers } from './cad-rulers.js';
 import { fitBounds, gridIndex, labelDetail, spacedPoints, stationOrigin, stationCoordinates, RULER_SIZE, canvasView as view } from './cad-view.js';
@@ -12,7 +12,7 @@ import { makePieceInteractive, getSelectedPieceId } from './cad-interactive-nest
 import { makeRemnantInteractive } from './cad-context-menu.js';
 import { renderRemnantHighlight } from './cad-remnant-highlight.js';
 import { createWorkspaceScene } from './workspace-scene.js';
-import { renderNestingGeometry } from '../../nesting/nesting-renderer.js';
+import { renderNestingGeometry, setNestingCutStep } from '../../nesting/nesting-renderer.js';
 
 let cutBadges = [];
 let fitMode = 'station';
@@ -28,6 +28,7 @@ let entities = new Map(), index = null, markGroup = null, shown = new Map(), vie
 
 export function renderScene() {
     if (!stage || !mainLayer) return;
+    invalidatePanSnapshot();
     const data = state.getCurrentCaseData();
     const { scene, overlay } = createWorkspaceScene(data);
     const pieces = new Map((data.pieces || []).map(p => [p.id, p]));
@@ -38,7 +39,7 @@ export function renderScene() {
         background: fabricBgGroup, exclusions: defectGroup, leftovers: remnantGroup,
         placements: pieceGroup, cuts: cutGroup, boundary: bedStationGroup
     }, scene, {
-        dark: isDark(), overlay, stepLimit: state.currentCutStepLimit,
+        dark: isDark(), overlay, stepLimit: state.currentCutStepLimit, retainCutSteps: true,
         optimized: state.isToolpathOptimized, showPaths: view.paths, home: getHomeCoordinates(data),
         onPlacement: (group, p) => {
             if (!entities.has(p.id)) entities.set(p.id, group);
@@ -50,6 +51,15 @@ export function renderScene() {
     mainLayer.batchDraw();
     drawRulers();
     updateStatusBar();
+}
+
+/** 演播仅改变刀线显隐与刀序标注，保持实体、交互状态和空间索引。 */
+export function updateCutProgress() {
+    if (!cutGroup) return;
+    invalidatePanSnapshot();
+    setNestingCutStep(cutGroup, state.currentCutStepLimit);
+    updateCanvasAnnotations();
+    mainLayer.batchDraw();
 }
 
 // 裁片可能正被拖动，位置以实体为准。
@@ -207,6 +217,7 @@ export function updateCanvasAnnotations() {
     if (detailed && view.paths) {
         const visible = [];
         for (const c of cutBadges) {
+            if (c.step > state.currentCutStepLimit) continue;
             const x = v.sx(c.x), y = v.sy(c.y);
             if (x < RULER_SIZE || y < RULER_SIZE || x > v.width || y > v.height) continue;
             visible.push({ x, y, c });
@@ -243,6 +254,14 @@ export function updateCanvasAnnotations() {
 function updateDraggedPiece() {
     dragFrame = null;
     if (!stage || !annotationLayer) return;
+    // 本回调与实体同帧直接绘制，属性更新不再安排下一帧重复提交同一张画布。
+    const autoDraw = Konva.autoDrawEnabled;
+    Konva.autoDrawEnabled = false;
+    try { drawDraggedPiece(); }
+    finally { Konva.autoDrawEnabled = autoDraw; }
+}
+
+function drawDraggedPiece() {
     const data = state.getCurrentCaseData(), idx = annotationIndex(data), i = idx.ids.get(getSelectedPieceId());
     if (i === undefined || viewSignature() !== viewKey) return updateCanvasAnnotations();
     const before = shown.get(i) || NONE, now = pieceMarks(idx.pieces[i], viewContext(data, idx));
@@ -252,6 +271,7 @@ function updateDraggedPiece() {
 
 export function setCanvasLayer(name, enabled) {
     if (!['dimensions', 'paths'].includes(name)) return;
+    invalidatePanSnapshot();
     view[name] = !!enabled;
     if (cutGroup) { cutGroup.visible(view.paths); mainLayer.batchDraw(); }
     updateCanvasAnnotations();
@@ -310,7 +330,7 @@ export function updateStatusBar() {
     if (label) label.innerText = data.materialAvailable === false ? '切割基准 —'
         : `切割基准 ${origin.label} · ${sheet ? '料头' : '母卷'} X ${origin.x.toLocaleString()} / Y ${origin.y.toLocaleString()} mm`;
 }
-// 舞台变换会先同步、再经 rAF 各通知一次；视口未变的那次直接跳过。
+// 适配视图已同步更新过标注时，跳过后续属性变更通知。
 const viewSignature = () => `${stage.scaleX()} ${stage.x()} ${stage.y()} ${stage.width()} ${stage.height()}`;
 const updateView = () => { if (stage && viewSignature() !== viewKey) updateCanvasAnnotations(); };
 for (const event of ['stage:transformed', 'stage:resized']) bus.on(event, updateView);

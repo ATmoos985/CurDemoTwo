@@ -3,7 +3,9 @@
  */
 import { bus } from '../../core/event-bus.js';
 import { state } from '../../core/state.js';
-import { stationCoordinates, viewRect, createViewCull } from './cad-view.js';
+import { stationCoordinates, viewRect, createViewCull, fitBounds, wheelScale, canvasView } from './cad-view.js';
+import { deferHitGraph } from './cad-hit-graph.js';
+import { cacheOverviewPan } from './cad-pan-snapshot.js';
 
 // 视口裁剪外扩的屏幕像素，覆盖不随缩放的描边和斜接角。
 const CULL_MARGIN = 32;
@@ -11,6 +13,7 @@ const CULL_MARGIN = 32;
 export let stage, backgroundLayer, mainLayer, interactionLayer, annotationLayer;
 export let fabricBgGroup, gridGroup, defectGroup, remnantGroup, pieceGroup, cutGroup, remnantHighlightGroup;
 export let bedStationGroup;
+export let invalidatePanSnapshot = () => {};
 let dataSource = () => state.getCurrentCaseData();
 export const getCanvasData = () => dataSource();
 
@@ -36,6 +39,7 @@ export function initKonva({ container = document.getElementById('konva-container
     // annotationLayer  屏幕像素标注。
     backgroundLayer = new Konva.Layer({ listening: false });
     mainLayer = new Konva.Layer();
+    deferHitGraph(mainLayer);
     interactionLayer = new Konva.Layer();
     annotationLayer = new Konva.Layer({ listening: false });
     stage.add(backgroundLayer, mainLayer, interactionLayer, annotationLayer);
@@ -44,11 +48,16 @@ export function initKonva({ container = document.getElementById('konva-container
 
     // 所有视口入口（滚轮、适配、料头定位动画）共用一次标注更新。
     let viewFrame = null;
+    const notifyView = (payload = {}) => {
+        if (viewFrame !== null) cancelAnimationFrame(viewFrame);
+        viewFrame = null;
+        bus.emit('stage:transformed', payload);
+    };
     stage.on('xChange yChange scaleXChange scaleYChange', () => {
         if (viewFrame !== null) return;
         viewFrame = requestAnimationFrame(() => {
             viewFrame = null;
-            bus.emit('stage:transformed', {});
+            notifyView();
         });
     });
 
@@ -76,6 +85,7 @@ export function initKonva({ container = document.getElementById('konva-container
         try { for (const group of entities) cull(group.children, view); }
         finally { Konva.autoDrawEnabled = autoDraw; }
     });
+    invalidatePanSnapshot = cacheOverviewPan(mainLayer, stage, () => canvasView.overview);
 
     // 鼠标滚轮平滑缩放与上下漫游
     stage.on("wheel", (e) => {
@@ -89,27 +99,28 @@ export function initKonva({ container = document.getElementById('konva-container
             y: (pointer.y - stage.y()) / oldScale,
         };
 
-        const direction = e.evt.deltaY > 0 ? -1 : 1;
-        const factor = 1.12;
-        const newScale = direction > 0 ? oldScale * factor : oldScale / factor;
-
-        if (newScale < 0.002 || newScale > 3.0) return;
-
-        stage.scale({ x: newScale, y: newScale });
+        const data = getCanvasData() || {};
+        const fullScale = fitBounds(stage.width(), stage.height(), {
+            x: 0, y: 0, width: data.rollW || 2000, height: data.totalRollL || 60000
+        }).scale;
+        const newScale = wheelScale(oldScale, e.evt.deltaY, fullScale);
+        if (newScale === oldScale) return;
         const newPos = {
             x: pointer.x - mousePointTo.x * newScale,
             y: pointer.y - mousePointTo.y * newScale,
         };
-        stage.position(newPos);
+        // setAttrs 批量提交变换，仅清理一次所有后代的绝对变换缓存。
+        stage.setAttrs({ scaleX: newScale, scaleY: newScale, ...newPos });
         bus.emit('stage:zoomed');
-        bus.emit('stage:transformed', { pointerX: pointer.x, pointerY: pointer.y });
+        notifyView({ pointerX: pointer.x, pointerY: pointer.y });
     });
 
     // 移动与平移
     stage.on('dragstart', e => { if (e.target === stage) bus.emit('stage:panned'); });
-    stage.on("dragmove", () => {
+    stage.on("dragmove", e => {
+        if (e.target !== stage) return;
         const pointer = stage.getPointerPosition();
-        bus.emit('stage:transformed', pointer ? { pointerX: pointer.x, pointerY: pointer.y } : {});
+        notifyView(pointer ? { pointerX: pointer.x, pointerY: pointer.y } : {});
     });
 
     // 点击空白处通知去选；背景层不做命中检测，点在布面上时目标就是舞台。

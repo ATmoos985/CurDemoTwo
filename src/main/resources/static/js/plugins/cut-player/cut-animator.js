@@ -3,7 +3,7 @@
  * 支持离散单步推演与 60fps 平滑连续真机轨迹仿真、多倍速调节(1x/2x/5x/10x)、下刀/提刀/快移状态指示
  */
 import { state } from '../../core/state.js';
-import { renderScene } from '../cad/cad-renderer.js';
+import { updateCutProgress } from '../cad/cad-renderer.js';
 import { stage, interactionLayer } from '../cad/cad-stage.js';
 import { bus } from '../../core/event-bus.js';
 import { getHomeCoordinates } from '../toolpath/toolpath-optimizer.js';
@@ -45,7 +45,7 @@ export function stepCut(delta) {
     updateSimStatusText(`刀序演播: ${currentLimit === 0 ? '未下刀 (原料状态)' : (currentLimit >= cuts.length ? `共 ${cuts.length} 刀 · 仅预览，未报工` : `当前第 ${currentLimit} / ${cuts.length} 刀`)}`);
     
     destroySimTool();
-    renderScene();
+    updateCutProgress();
     bus.emit('cut:stepped', { step: currentLimit, total: cuts.length });
 }
 
@@ -118,7 +118,7 @@ export function resetContinuousSim() {
 
     state.setCutStepLimit(0);
     destroySimTool();
-    renderScene();
+    updateCutProgress();
     updateSimStatusText("刀序演播: 未下刀 (原料状态)");
 }
 
@@ -146,7 +146,7 @@ function simAnimationLoop(now) {
         isSimulating = false;
         updatePlayPauseButtonUI(false);
         state.setCutStepLimit(cuts.length);
-        renderScene();
+        updateCutProgress();
         destroySimTool();
         updateSimStatusText(`预览完成 · ${cuts.length} 刀 · 实切后请报工保存`);
         return;
@@ -200,7 +200,7 @@ function simAnimationLoop(now) {
         if (simState.progress >= 1.0) {
             // 本刀切完，更新永久切刀显示至本步
             state.setCutStepLimit(simState.stepIndex + 1);
-            renderScene();
+            updateCutProgress();
 
             // 切换至下一刀
             simState.stepIndex++;

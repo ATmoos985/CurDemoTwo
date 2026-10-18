@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright/test');
-const base = process.env.BASE_URL || 'http://localhost:8080';
+const base = process.env.BASE_URL || 'http://127.0.0.1:18191';
 const PIECES = Number(process.env.PIECES || 2000);
 const VIEWPORT = {width: 1600, height: 1000};
 
@@ -60,6 +60,7 @@ const frames = page => page.evaluate(() => new Promise(resolve =>
     requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 0)))));
 
 async function openWorkbench(browser, url) {
+    assert.notEqual(new URL(url).port, '8080', 'performance scenarios must use an isolated test service, never 8080');
     const page = await browser.newPage({viewport: VIEWPORT}), errors = [], writes = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
@@ -95,6 +96,7 @@ const screenPoint = (page, world) => page.evaluate(({x, y}) => {
 async function measure(page, cdp, name, prepare, steps, step) {
     await prepare();
     await frames(page);
+    await page.evaluate(name => performance.mark(`${name}:start`), name);
     const read = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map(m => [m.name, m.value]));
     await page.evaluate(() => {
         window.perfFrames = []; window.perfRecording = true;
@@ -104,6 +106,7 @@ async function measure(page, cdp, name, prepare, steps, step) {
     const before = await read();
     for (let i = 0; i < steps; i++) { await step(i); await frames(page); }
     const after = await read();
+    await page.evaluate(name => performance.mark(`${name}:end`), name);
     const stamps = await page.evaluate(() => { window.perfRecording = false; return window.perfFrames; });
     const intervals = stamps.slice(1).map((time, i) => time - stamps[i]).sort((a, b) => a - b);
     const at = q => intervals[Math.min(intervals.length - 1, Math.floor(q * intervals.length))] || 0;
@@ -123,7 +126,7 @@ async function benchmark(page, scene) {
     };
     results.push(await measure(page, cdp, '工位视图滚轮缩放', async () => { await station(); await center(); }, 32,
         i => page.mouse.wheel(0, i < 8 || i >= 24 ? 100 : -100)));
-    // A 380 m roll fits below the 0.002 wheel limit, so the overview is exercised by panning.
+    // Keep the same pan input on both versions; wheel recovery is asserted separately.
     let start;
     results.push(await measure(page, cdp, '全卷视图平移', async () => {
         await page.evaluate(() => window.perf.renderer.viewFullRoll());
@@ -147,6 +150,8 @@ async function benchmark(page, scene) {
     }, 40, i => page.mouse.move(start.x + (i + 1) * 3, start.y + (i + 1) * 2)));
     await page.mouse.up();
     await page.keyboard.press('Escape');
+    // Invalid drops animate back for 150 ms; do not charge that tween to the next hover scenario.
+    await page.waitForTimeout(200);
     // Overlay-only changes on the full roll, where every entity is on screen.
     results.push(await measure(page, cdp, '料头悬停（全卷）', () => page.evaluate(() => window.perf.renderer.viewFullRoll()), 24,
         i => page.evaluate(i => {
@@ -166,6 +171,46 @@ async function benchmark(page, scene) {
         const measure = await import('/js/plugins/cad/cad-measure.js');
         measure.toggleMeasureTool(false); measure.clearAllMeasurements();
     });
+    // Drive the real continuous-simulation callback with a deterministic clock.
+    // Only the simulator's rAF is captured; Konva and browser paint still run normally.
+    results.push(await measure(page, cdp, '走刀逐刀完成', async () => {
+        await station();
+        await page.evaluate(async () => {
+            const sim = await import('/js/plugins/cut-player/cut-animator.js');
+            sim.resetContinuousSim();
+            window.perf.sim = sim;
+            window.perf.nativeRaf = window.requestAnimationFrame;
+            window.perf.simClock = performance.now();
+            window.perf.cutCompletionMs = [];
+            window.requestAnimationFrame = callback => {
+                if (callback.name !== 'simAnimationLoop') return window.perf.nativeRaf.call(window, callback);
+                window.perf.simFrame = callback;
+                return -1;
+            };
+            sim.startContinuousSim();
+        });
+    }, 12, () => page.evaluate(() => {
+        const before = window.perf.state.currentCutStepLimit;
+        for (let i = 0; i < 1000; i++) {
+            const callback = window.perf.simFrame;
+            window.perf.simFrame = null;
+            if (!callback) throw new Error('simulation stopped before next cut');
+            window.perf.simClock += 100;
+            const t = performance.now();
+            callback(window.perf.simClock);
+            if (window.perf.state.currentCutStepLimit !== before) {
+                window.perf.cutCompletionMs.push(performance.now() - t);
+                return;
+            }
+        }
+        throw new Error('simulation did not complete a cut');
+    })));
+    const cutCompletionMs = await page.evaluate(() => {
+        window.perf.sim.pauseContinuousSim();
+        window.requestAnimationFrame = window.perf.nativeRaf;
+        window.perf.sim.stepCut(999);
+        return window.perf.cutCompletionMs;
+    });
     await station();
     const direct = await page.evaluate(() => {
         const {renderer, stage} = window.perf;
@@ -180,8 +225,12 @@ async function benchmark(page, scene) {
         renderer.resetToBedView();
         const render = time(5, () => renderer.renderScene());
         const rebuild = time(5, () => { renderer.renderScene(); stage.stage.draw(); });
-        return {update, draw, main, all, fullMain, fullAll, render, rebuild};
+        // Include picking separately: deferred hit drawing moves this cost to the first real query.
+        renderer.viewFullRoll();
+        const fullDrawAndPick = time(5, () => { stage.mainLayer.draw(); stage.mainLayer.getIntersection({x:1,y:1}); });
+        return {update, draw, main, all, fullMain, fullAll, render, rebuild, fullDrawAndPick};
     });
+    direct.cutCompletion = cutCompletionMs.reduce((a,b) => a+b,0) / cutCompletionMs.length;
     return {results, direct};
 }
 
@@ -197,6 +246,26 @@ const SNAPSHOTS = {
     },
     flow: async () => { window.perf.renderer.resetToFlowView(); },
     full: async () => { window.perf.renderer.viewFullRoll(); },
+    fullPan: async () => {
+        const {stage,renderer}=window.perf;
+        renderer.viewFullRoll(); stage.stage.draw();
+        stage.stage.fire('dragstart',{target:stage.stage});
+        stage.stage.position({x:stage.stage.x()+64,y:stage.stage.y()+48});
+    },
+    fullPanFractional: async () => {
+        const {stage,renderer}=window.perf;
+        renderer.viewFullRoll(); stage.stage.draw();
+        stage.stage.fire('dragstart',{target:stage.stage});
+        stage.stage.position({x:stage.stage.x()+64.25,y:stage.stage.y()+48.25});
+    },
+    fullPanChanged: async () => {
+        const {stage,renderer}=window.perf;
+        renderer.viewFullRoll(); stage.stage.draw();
+        stage.stage.fire('dragstart',{target:stage.stage});
+        stage.stage.position({x:stage.stage.x()+64,y:stage.stage.y()+48});
+        const sim=await import('/js/plugins/cut-player/cut-animator.js');
+        sim.stepCut(-999);
+    },
     history: async scene => {
         window.perf.stage.stage.position({x: window.perf.stage.stage.x(), y: window.perf.stage.stage.y() + 4200 * window.perf.stage.stage.scaleY()});
     },
@@ -206,6 +275,19 @@ const SNAPSHOTS = {
         await new Promise(resolve => setTimeout(resolve, 500));
     },
     optimized: async () => { window.perf.state.isToolpathOptimized = true; window.perf.renderer.renderScene(); },
+    cutMiddle: async () => {
+        const sim = await import('/js/plugins/cut-player/cut-animator.js');
+        sim.stepCut(-999); for (let i=0;i<9;i++) sim.stepCut(1);
+    },
+    cutOptimized: async () => {
+        window.perf.state.isToolpathOptimized = true; window.perf.renderer.renderScene();
+        const sim = await import('/js/plugins/cut-player/cut-animator.js');
+        sim.stepCut(-999); for (let i=0;i<9;i++) sim.stepCut(1);
+    },
+    cutReset: async () => {
+        const sim = await import('/js/plugins/cut-player/cut-animator.js');
+        sim.stepCut(-999);
+    },
     noDimensions: async () => { window.perf.renderer.setCanvasLayer('dimensions', false); },
     dark: async scene => { window.perf.settings.setTheme('dark'); window.perf.nesting.setSelectedPieceId(scene.dragId); },
     // Mid-drag: the entity has moved and its labels follow on the next frame.
@@ -247,7 +329,7 @@ async function snapshots(browser, url) {
         scene.piecesById = await page.evaluate(() => Object.fromEntries(window.perf.state.getCurrentCaseData().pieces.map(p => [p.id, p])));
         await page.evaluate(`(${apply.toString()})(${JSON.stringify(scene)})`);
         await frames(page); await frames(page);
-        shots[name] = await page.locator('.cad-surface').screenshot();
+        shots[name] = await page.locator('.cad-surface').screenshot({animations:'disabled'});
         assert.deepEqual(errors, [], `${url} ${name}: ${errors.join('; ')}`);
         assert.deepEqual(writes, []);
         await page.close();
@@ -266,8 +348,8 @@ async function compare(browser, left, right) {
         let changed = 0;
         const diff = ctx.createImageData(x.width, x.height);
         for (let i = 0; i < p.data.length; i += 4) {
-            const delta = Math.max(Math.abs(p.data[i] - q.data[i]), Math.abs(p.data[i + 1] - q.data[i + 1]), Math.abs(p.data[i + 2] - q.data[i + 2]));
-            const hit = delta > 40;
+            const delta = Math.max(...[0,1,2,3].map(k => Math.abs(p.data[i+k] - q.data[i+k])));
+            const hit = delta > 0;
             changed += hit;
             diff.data.set(hit ? [220, 30, 30, 255] : [p.data[i], p.data[i + 1], p.data[i + 2], 50], i);
         }
@@ -281,18 +363,22 @@ async function compare(browser, left, right) {
     return result;
 }
 
-(async () => {
+module.exports = {openWorkbench, frames, screenPoint, benchmark, snapshots, compare};
+
+if (require.main === module) (async () => {
     const browser = await chromium.launch({headless: true, ...(process.env.CHROME_PATH ? {executablePath: process.env.CHROME_PATH} : {})});
     try {
         const {page, errors, writes, scene} = await openWorkbench(browser, base);
         scene.piecesById = await page.evaluate(() => Object.fromEntries(window.perf.state.getCurrentCaseData().pieces.map(p => [p.id, p])));
         console.log(`场景：${scene.pieces} 件裁片 · ${scene.remnants} 块料头 · 当前工位 ${scene.active} 件 / ${scene.cuts} 刀 · 卷长 ${scene.totalRollL} mm`);
         const {results, direct} = await benchmark(page, scene);
+        if (process.env.RESULT_FILE) fs.writeFileSync(process.env.RESULT_FILE, JSON.stringify({results, direct}, null, 2));
         console.log('交互（每步 = 一次输入 + 后续帧，busy 为主线程任务耗时）');
         for (const r of results) console.log(`  ${r.name.padEnd(9, '　')} busy ${r.busyMs.toFixed(1).padStart(7)} ms/步 · script ${r.scriptMs.toFixed(1).padStart(7)} ms/步 · 帧间隔 p50 ${r.frameP50.toFixed(1)} / p95 ${r.frameP95.toFixed(1)} / max ${r.frameMax.toFixed(1)} ms`);
         console.log(`直接调用：updateCanvasAnnotations ${direct.update.toFixed(2)} ms · 标注层绘制 ${direct.draw.toFixed(2)} ms · renderScene ${direct.render.toFixed(1)} ms · renderScene + 全部图层绘制 ${direct.rebuild.toFixed(1)} ms`);
-        console.log(`  工位视图：主图层绘制（含命中图）${direct.main.toFixed(1)} ms · 全部图层绘制 ${direct.all.toFixed(1)} ms`);
-        console.log(`  全卷视图：主图层绘制（含命中图）${direct.fullMain.toFixed(1)} ms · 全部图层绘制 ${direct.fullAll.toFixed(1)} ms`);
+        console.log(`  工位视图：主图层绘制 ${direct.main.toFixed(1)} ms · 全部图层绘制 ${direct.all.toFixed(1)} ms`);
+        console.log(`  全卷视图：主图层绘制 ${direct.fullMain.toFixed(1)} ms · 全部图层绘制 ${direct.fullAll.toFixed(1)} ms · 主层绘制并拾取 ${direct.fullDrawAndPick.toFixed(1)} ms`);
+        console.log(`  连续仿真完成一刀的回调：${direct.cutCompletion.toFixed(2)} ms`);
         assert.deepEqual(errors, [], errors.join('; '));
         assert.deepEqual(writes, [], 'benchmark must never write business data');
         await page.close();
@@ -310,7 +396,7 @@ async function compare(browser, left, right) {
                     fs.writeFileSync(path.join(dir, `${name}-current.png`), current[name]);
                     fs.writeFileSync(path.join(dir, `${name}-diff.png`), Buffer.from(result.diff, 'base64'));
                 }
-                if (!result.sameSize || ratio > Number(process.env.PIXEL_TOLERANCE || 0.0005)) failed++;
+                if (!result.sameSize || ratio > Number(process.env.PIXEL_TOLERANCE || 0)) failed++;
             }
             assert.equal(failed, 0, `${failed} 个视图与基线不一致`);
         }

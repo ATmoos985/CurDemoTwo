@@ -15,6 +15,13 @@ export function fitBounds(width, height, bounds) {
     };
 }
 
+/** 长卷可从全卷比例逐步放大；缩小最多回到全卷适配比例，上限仍为 3。 */
+export function wheelScale(oldScale, deltaY, fullRollScale) {
+    const min = Math.min(0.002, fullRollScale);
+    const next = deltaY > 0 ? oldScale / 1.12 : oldScale * 1.12;
+    return deltaY > 0 ? Math.max(Math.min(oldScale, min), next) : Math.min(3, next);
+}
+
 export function rulerStep(scale) {
     const desired = 80 / scale;
     const magnitude = 10 ** Math.floor(Math.log10(desired));
