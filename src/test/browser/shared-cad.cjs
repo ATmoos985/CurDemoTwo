@@ -22,7 +22,7 @@ const base = process.env.BASE_URL || 'http://localhost:8080';
             const {stage} = await import('/js/plugins/cad/cad-stage.js');
             return stage.find('Text').filter(n => n.text().includes('ΔX')).map(n => n.text());
         });
-        for (const path of ['/', '/nesting.html']) {
+        for (const path of ['/index.html', '/nesting.html']) {
             await page.goto(base+path); await page.waitForLoadState('networkidle');
             const info = await page.evaluate(async () => {
                 const {stage,getCanvasData} = await import('/js/plugins/cad/cad-stage.js');
@@ -30,15 +30,15 @@ const base = process.env.BASE_URL || 'http://localhost:8080';
                 const painted = canvas.getContext('2d').getImageData(0,0,28,28).data.some(value => value > 0);
                 return {container:stage.container().id,width:canvas.width,expected:Math.round(stage.width()*devicePixelRatio),painted,data:getCanvasData()};
             });
-            assert.equal(info.container,path === '/' ? 'konva-container' : 'nesting-canvas');
+            assert.equal(info.container,path === '/index.html' ? 'konva-container' : 'nesting-canvas');
             assert.equal(info.width,info.expected); assert.ok(info.painted);
-            if (path === '/') assert.equal(await page.evaluate(async () => {
+            if (path === '/index.html') assert.equal(await page.evaluate(async () => {
                 const {getCanvasData} = await import('/js/plugins/cad/cad-stage.js');
                 const {state} = await import('/js/core/state.js');
                 return getCanvasData() === state.getCurrentCaseData();
             }),true);
             passed++;
-            if (path === '/') {
+            if (path === '/index.html') {
                 // Supply only an in-memory material so the empty-workbench guard does not hide the canvas.
                 await page.evaluate(async () => {
                     const {state}=await import('/js/core/state.js');

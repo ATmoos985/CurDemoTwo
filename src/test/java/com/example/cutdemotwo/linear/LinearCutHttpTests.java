@@ -51,4 +51,25 @@ class LinearCutHttpTests {
         assertEquals(404,http.send(HttpRequest.newBuilder(URI.create(base+"/api/linear/tasks/not-a-task")).GET().build(),HttpResponse.BodyHandlers.ofString()).statusCode());
         assertEquals(404,http.send(HttpRequest.newBuilder(URI.create(base+"/api/cutting/v2/preview")).POST(HttpRequest.BodyPublishers.ofString("{}")).header("Content-Type","application/json").build(),HttpResponse.BodyHandlers.ofString()).statusCode());
     }
+    private HttpResponse<String> send(String method,String id) throws Exception {
+        return http.send(HttpRequest.newBuilder(URI.create("http://localhost:"+port+"/api/linear/tasks/"+id)).method(method,HttpRequest.BodyPublishers.noBody()).build(),HttpResponse.BodyHandlers.ofString());
+    }
+    @Test void finishedTaskIsReleasedOnceWhileRunningTaskIsKept() throws Exception {
+        String id=json.readTree(post(json.writeValueAsString(LinearCutTests.input("释放订单"))).body()).get("taskId").asString();
+        var early=send("DELETE",id);
+        assertTrue(early.statusCode()==409||early.statusCode()==204,early.body());
+        if(early.statusCode()==409){
+            long deadline=System.nanoTime()+java.time.Duration.ofSeconds(60).toNanos();
+            String status="RUNNING";
+            while(status.equals("RUNNING")&&System.nanoTime()<deadline){
+                status=json.readTree(send("GET",id).body()).get("status").asString();
+                if(status.equals("RUNNING"))Thread.sleep(100);
+            }
+            assertEquals("SUCCEEDED",status);
+            assertEquals(204,send("DELETE",id).statusCode());
+        }
+        assertEquals(404,send("GET",id).statusCode());
+        assertEquals(404,send("DELETE",id).statusCode());
+        assertEquals(404,send("DELETE","not-a-task").statusCode());
+    }
 }

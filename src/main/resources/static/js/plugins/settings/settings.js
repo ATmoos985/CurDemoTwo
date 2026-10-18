@@ -4,6 +4,33 @@
 import { bus } from '../../core/event-bus.js';
 import { state } from '../../core/state.js';
 import { showToast } from '../../core/toast.js';
+import { PRESET_FIELDS, presets, matchPreset, describePreset } from '../../industry/industry-profiles.js';
+
+const presetValues = () => Object.fromEntries(PRESET_FIELDS.map(({ key, id }) => [key, document.getElementById(id)?.value]));
+
+/** 行业预设下拉：按当前表单值回显匹配的预设，改动任一预设字段即回到“自定义”。 */
+function syncIndustryPreset() {
+    const select = document.getElementById("cfg-industry");
+    if (!select) return;
+    if (!select.options.length) {
+        select.add(new Option("自定义（不套用）", ""));
+        presets().forEach(preset => select.add(new Option(preset.name, preset.id)));
+    }
+    const matched = matchPreset(presetValues()), preset = presets().find(p => p.id === matched);
+    select.value = matched;
+    document.getElementById("cfg-industry-hint").textContent = preset
+        ? `当前参数与「${preset.name}」预设一致：${describePreset(preset.values).map(d => `${d.label} ${d.text}`).join("，")}。`
+        : "参数已按需调整，未对应任何行业预设。预设数值为示例，请按工厂实际工艺修改。";
+}
+
+/** 把所选行业预设填入设置表单；点击“保存并应用”后才写入本机并用于下一次排料。 */
+export function applyIndustryPreset(id) {
+    const preset = presets().find(p => p.id === id);
+    if (!preset) return syncIndustryPreset();
+    PRESET_FIELDS.forEach(({ key, id: fieldId }) => { document.getElementById(fieldId).value = preset.values[key]; });
+    syncIndustryPreset();
+    showToast(`已填入「${preset.name}」预设，保存并应用后生效`, 'info');
+}
 
 export function solverSettings() {
     return {minRemnantWidth:Number(localStorage.getItem('cam_min_rem_w') ?? 200),
@@ -76,6 +103,13 @@ export function loadSavedSettings() {
     if (document.getElementById("cfg-min-rem-l")) document.getElementById("cfg-min-rem-l").value = minRemL;
     if (document.getElementById("cfg-timeout")) document.getElementById("cfg-timeout").value = timeout;
     if (document.getElementById("cfg-first-stage")) document.getElementById("cfg-first-stage").value = firstStage;
+
+    const modal = document.getElementById("settings-modal");
+    if (modal && !modal.dataset.industryBound) {
+        modal.dataset.industryBound = "1";
+        modal.addEventListener("input", event => { if (PRESET_FIELDS.some(({ id }) => event.target.id === id)) syncIndustryPreset(); });
+    }
+    syncIndustryPreset();
 }
 
 export function saveSettings() {
@@ -131,5 +165,6 @@ export function restoreDefaultSettings() {
         'cfg-trim-start':0,'cfg-allow-rot':0,'cfg-allow-longi':1,'cfg-min-rem-w':200,'cfg-min-rem-l':300,
         'cfg-timeout':3,'cfg-first-stage':'horizontal'};
     Object.entries(defaults).forEach(([id,value]) => document.getElementById(id).value = value);
+    syncIndustryPreset();
     showToast('已填入默认值，点击保存后应用', 'info');
 }

@@ -31,7 +31,8 @@ const assert = require('node:assert/strict');
             ['GARMENT_SHIRT','DEMO-GARMENT_SHIRT','CONTOUR'],
             ['GARMENT_PANTS','DEMO-GARMENT_PANTS','CONTOUR'],
             ['GARMENT_SKIRT','DEMO-GARMENT_SKIRT','CONTOUR'],
-            ['GARMENT_FULL','DEMO-GARMENT_FULL','CONTOUR']
+            ['GARMENT_FULL','DEMO-GARMENT_FULL','CONTOUR'],
+            ['BOARD_GRAIN','DEMO-BOARD_GRAIN','GUILLOTINE'], ['BOARD_PLAIN','DEMO-BOARD_PLAIN','GUILLOTINE']
         ]) {
             // Real select interaction dispatches input before change, reproducing the original failure.
             await page.locator('#scenario-select').selectOption(key);
@@ -82,9 +83,9 @@ const assert = require('node:assert/strict');
         await expect(page.locator('#area-pieces')).toHaveText('—');
         await expect(page.locator('#export-result')).toBeDisabled();
         assert.deepEqual(errors, []);
-        assert.equal(writes.length, 11);
+        assert.equal(writes.length, 13);
         assert.ok(writes.every(url => url.endsWith('/api/v1/nesting/solve')));
         passed++;
-        console.log(JSON.stringify({discovered:16,executed:16,passed,failed:0,skipped:0}));
+        console.log(JSON.stringify({discovered:18,executed:18,passed,failed:0,skipped:0}));
     } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

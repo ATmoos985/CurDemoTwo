@@ -9,6 +9,13 @@
 .lab-input, .lab-output { min-width: 0; min-height: 0; background: var(--panel-bg); display: flex; flex-direction: column; overflow: hidden; }
 .lab-form-body, .lab-result-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 18px; }
 .lab-form-body > .lab-muted { margin-bottom: 20px; }
+.industry-brief { margin: 0 0 18px; padding: 10px 12px; background: var(--card-box-bg); border: 1px solid var(--panel-border); border-left: 3px solid var(--accent-blue); border-radius: 3px; }
+.industry-brief-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 13px; }
+.industry-brief-head a { color: var(--accent-blue); font-size: 12px; text-decoration: none; white-space: nowrap; }
+.industry-brief .lab-muted { margin: 4px 0 8px; line-height: 1.6; }
+.industry-brief dl > div { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; border-top: 1px solid #e7edf1; font-size: 12px; }
+.industry-brief dt { flex-shrink: 0; color: var(--text-muted); }
+.industry-brief dd { text-align: right; overflow-wrap: anywhere; }
 .lab-input { border-right: 1px solid var(--panel-border); }
 .lab-output { border-left: 1px solid var(--panel-border); }
 .lab-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; min-height: 64px; border-bottom: 1px solid var(--panel-border); flex-shrink: 0; }

@@ -25,6 +25,10 @@ public class LinearCutController {
         return service.create(request);
     }
     @GetMapping("/tasks/{id}") public Map<String, Object> get(@PathVariable String id) { return service.get(id); }
+    @DeleteMapping("/tasks/{id}") public ResponseEntity<Void> discard(@PathVariable String id) {
+        service.discard(id);
+        return ResponseEntity.noContent().build();
+    }
     @PostMapping("/tasks/{id}/{action}") public Map<String, Object> change(@PathVariable String id,
             @PathVariable String action, @RequestBody Map<String, Object> request) { return service.change(id, action, request); }
     @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

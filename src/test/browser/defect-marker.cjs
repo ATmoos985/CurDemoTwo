@@ -18,7 +18,7 @@ async function api(path,body) {
         const task=await api('/api/cutting/tasks',{name:'画布疵点验证',materialModel:id,revision:0,
             demands:[{id:1,name:'验证裁片',width:2000,length:1000,quantity:3,allowRotation:false}],
             process:{bedLength:4000,trimStart:25.5,cutOrigin:'right-bottom',firstStageOrientation:'horizontal',allowRotation:false,allowLongitudinal:false}});
-        await page.goto(base);await page.waitForLoadState('networkidle');
+        await page.goto(base+'/index.html');await page.waitForLoadState('networkidle');
         await page.evaluate(async id=>{
             window.testState=(await import('/js/core/state.js')).state;
             window.testStage=await import('/js/plugins/cad/cad-stage.js');

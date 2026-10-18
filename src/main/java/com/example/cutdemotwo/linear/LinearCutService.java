@@ -110,6 +110,16 @@ public class LinearCutService {
         return response;
     }
 
+    /** 释放已结束的任务；计算中的任务不可释放，调用方稍后重试。 */
+    public void discard(String id) {
+        Task task = tasks.get(id);
+        if (task == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "任务已过期或服务已重启。");
+        synchronized (task) {
+            if (task.status.equals("RUNNING")) throw new ResponseStatusException(HttpStatus.CONFLICT, "计算中，暂不能释放任务。");
+            tasks.remove(id, task);
+        }
+    }
+
     public Map<String, Object> change(String id, String action, Map<String, Object> request) {
         Task task = task(id);
         synchronized (task) {

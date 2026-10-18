@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>搭切对比</title>
+<link rel="stylesheet" href="css/base.css"><link rel="stylesheet" href="css/product-navigation.css"><link rel="stylesheet" href="css/linear-demo.css"></head>
+<body class="compare-page">
+<header class="compare-header"><div><span class="app-mark" aria-hidden="true">▥</span><strong>搭切对比</strong><span class="compare-subtitle">一维 · 逐单独立分切 与 搭切求解器</span></div><div data-product-nav="compare"></div></header>
+<main class="compare-main">
+<section class="compare-hero">
+    <h1>同一批订单，要用多少母卷？</h1>
+    <p>选一个示例需求：页面先按“逐单独立分切”算出母卷用量，再调用长阳搭切求解器真实计算，把不同订单的条宽搭配到同一母卷，两边并排比较。搭切结果不是预设数字。</p>
+</section>
+
+<section aria-labelledby="scenario-title">
+    <h2 id="scenario-title">1. 选择示例需求</h2>
+    <div id="scenario-tabs" class="scenario-tabs" role="group" aria-label="示例需求"></div>
+    <div class="input-card">
+        <dl id="input-summary" class="input-summary"></dl>
+        <div class="table-wrap"><table class="compare-table order-table">
+            <thead><tr><th>订单</th><th>幅宽 mm</th><th>需求 卷</th><th id="length-head">卷长</th><th>表面处理</th></tr></thead>
+            <tbody id="order-rows"></tbody>
+        </table></div>
+    </div>
+</section>
+
+<section aria-labelledby="result-title">
+    <h2 id="result-title">2. 并排比较</h2>
+    <p id="compare-status" class="compare-status" role="status" aria-live="polite"></p>
+    <div class="table-wrap"><table class="compare-table result-table">
+        <thead><tr><th>方式</th><th>用母卷</th><th>较逐单分切</th><th>得率</th><th>超产</th><th>组合数</th><th>耗时</th></tr></thead>
+        <tbody id="compare-rows"></tbody>
+    </table></div>
+    <p class="note">得率 = 需求成品面积 ÷ 母卷面积；超产的成品不计入得率。耗时为服务端求解时间。</p>
+</section>
+
+<section aria-labelledby="pattern-title">
+    <h2 id="pattern-title">3. 分切组合</h2>
+    <div class="view-switch" id="view-switch" role="group" aria-label="查看哪种方式的分切组合"></div>
+    <div class="strip-legend"><span><i class="legend-product"></i>成品</span><span><i class="legend-trim"></i>固定切边</span><span><i class="legend-remain"></i>可切区余边</span><span class="note">横向按母卷实际幅宽等比例显示</span></div>
+    <div id="pattern-list" class="pattern-list"></div>
+</section>
+
+<section class="handoff" aria-labelledby="handoff-title">
+    <h2 id="handoff-title">4. 带着这批订单继续</h2>
+    <p id="handoff-note" class="note"></p>
+    <div class="handoff-actions"><button type="button" class="tool-btn active" id="handoff">在分切工作台打开</button><a class="tool-btn" href="/intro.html#linear">返回一维能力说明</a></div>
+</section>
+
+<section aria-labelledby="notes-title">
+    <h2 id="notes-title">口径与限制</h2>
+    <ul class="notes-list">
+        <li><strong>逐单独立分切</strong>：同卷长、同表面处理、同幅宽的需求合并后单独开卷，每卷只切一种幅宽，末卷不足时按实际条数计。该基线不要求满足组合宽度下限，对它有利。</li>
+        <li><strong>得率与超产</strong>：搭切允许在超产上限内多切几条，超产条数单独列出，不计入得率；分切工作台的“整卷得率”把超产条也算作成品，所以数值会略高于这里。</li>
+        <li><strong>快速与精细</strong>：本页三个示例里两种方式的母卷用量一致，精细的组合数有时更少；精细只在更难的算例上才可能多省母卷，窄条难例耗时可超过 1 分钟，且同样不承诺全局最优。</li>
+        <li><strong>只比较母卷用量</strong>：没有计入换刀、调机和搭切带来的管理成本，组合数列供参考。</li>
+        <li><strong>示例是演示数据</strong>：不是某个客户的真实订单。要算真实订单，请进入分切工作台导入 Excel。</li>
+    </ul>
+</section>
+</main>
+<footer class="compare-footer">搭切解决方案 · 一维搭切对比 · 方案为预计值，不扣减库存</footer>
+<script type="module" src="js/product-navigation.js"></script><script type="module" src="js/linear/linear-demo.js"></script>
+</body></html>

@@ -33,6 +33,18 @@ export function garmentExample(id) {
             minReusableWidth:0,minReusableHeight:0,kerf:0,objective:'MAXIMIZE_PIECE_AREA'}};
 }
 
+// 同一批柜体裁片切 1220 × 2440 整板：木纹板固定纹理方向（禁止旋转），素色板允许 90° 旋转。示例经挑选以突出旋转规则的影响。
+const BOARD_PARTS = [['隔板',400,396,1], ['层板',764,396,1], ['门板',800,1200,1], ['侧板',600,500,3], ['抽屉面板',720,396,1]];
+
+export function boardExample(id) {
+    if (id !== 'BOARD_GRAIN' && id !== 'BOARD_PLAIN') throw new Error('板材示例不存在');
+    return {schemaVersion:'1', unit:'mm', engine:'auto', timeLimitSeconds:3,
+        material:{id:`DEMO-${id}`, shape:rectangle(1220,2440), continuesAfterRegion:false, exclusions:[]},
+        parts:BOARD_PARTS.map(([name,width,length,quantity], index) => ({id:index+1, name, quantity, allowRotation:id === 'BOARD_PLAIN', shape:rectangle(width,length)})),
+        process:{mode:'GUILLOTINE', feedMode:'SHEET', startCorner:'left-top', firstStageOrientation:'horizontal', trimStart:0,
+            minReusableWidth:100, minReusableHeight:100, kerf:0, objective:'MAXIMIZE_PIECE_AREA'}};
+}
+
 export function scenarioExample(id) {
     const source = getInitialScenarios()[id], continuous = source.totalRollL > source.bedL;
     const width = source.rollW, height = source.bedL;

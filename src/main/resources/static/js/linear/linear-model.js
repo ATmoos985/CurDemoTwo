@@ -42,4 +42,30 @@ export function demandBalance(orders,patterns) {
     for(const p of patterns||[])for(const [width,count] of Object.entries(p.subRolls||{}))get(p,Number(width)).actual+=count*p.usageCount;
     return [...rows.values()].map(r=>({...r,difference:r.actual-r.demand})).sort((a,b)=>a.group.localeCompare(b.group)||b.width-a.width);
 }
+/** 逐规格独立分切基线：同卷长、同表面处理、同幅宽的需求合并后单独开卷，每卷只切一种幅宽，不同规格不搭配。
+ *  末卷条数不足时单独成组，空位不算成品。基线不受组合下限约束，对基线有利。返回与搭切结果同形的方案行。 */
+export function independentBaseline(input) {
+    const available=input.motherWidth-input.leftTrim-input.rightTrim,specs=new Map();
+    for(const order of input.orderItems){
+        const key=JSON.stringify([groupKey(order),order.width]);
+        if(!specs.has(key))specs.set(key,{width:order.width,length:order.length,surfaceTreatment:order.surfaceTreatment,quantity:0});
+        specs.get(key).quantity+=order.quantity;
+    }
+    return [...specs.values()].flatMap(spec=>{
+        const perRoll=Math.floor(available/spec.width);
+        if(perRoll<1)throw Error('订单幅宽超过可切区，无法独立分切。');
+        const row=(count,usageCount)=>({comboExpanded:Array(count).fill(spec.width),length:spec.length,surfaceTreatment:spec.surfaceTreatment,usageCount});
+        const full=Math.floor(spec.quantity/perRoll),tail=spec.quantity%perRoll;
+        return [...(full?[row(perRoll,full)]:[]),...(tail?[row(tail,1)]:[])];
+    });
+}
+/** 方案汇总，求解结果与基线共用同一口径：得率 = 需求成品面积 ÷ 母卷面积（按卷长加权），超产不计入得率；超产和缺口按规格逐项对账。 */
+export function planSummary(plan,input) {
+    let rolls=0,motherArea=0,demandArea=0,surplus=0,shortage=0;
+    for(const row of plan){rolls+=row.usageCount;motherArea+=row.usageCount*input.motherWidth*row.length;}
+    for(const order of input.orderItems)demandArea+=order.width*order.quantity*order.length;
+    const patterns=plan.map(row=>({...row,subRolls:row.comboExpanded.reduce((count,width)=>({...count,[width]:(count[width]||0)+1}),{})}));
+    for(const {difference} of demandBalance(input.orderItems,patterns)){if(difference>0)surplus+=difference;else shortage-=difference;}
+    return {rolls,groups:plan.length,rate:motherArea?demandArea/motherArea*100:null,surplus,shortage};
+}
 export const escapeHtml=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>搭切解决方案 · 介绍</title>
+<link rel="stylesheet" href="css/base.css"><link rel="stylesheet" href="css/product-navigation.css"><link rel="stylesheet" href="css/intro.css"></head>
+<body class="intro-page">
+<header class="intro-header"><div><span class="app-mark" aria-hidden="true">▥</span><strong>搭切解决方案</strong><span class="intro-subtitle">切割能力与行业场景</span></div><div data-product-nav="intro"></div></header>
+<main class="intro-main">
+<section class="intro-hero" aria-labelledby="intro-title">
+    <p class="intro-eyebrow">窗帘 · 服装 · 板材 · 卷材</p>
+    <h1 id="intro-title">把不同订单“搭”在同一块材料上切</h1>
+    <p class="intro-lead">二维按裁片排料，一维按幅宽分条；整幅横切、贯通套裁、异形排料和一维搭切共用一套服务，行业差异通过规则配置带入。每项能力都标明真实程度：已支持、演示级或未支持。</p>
+    <div class="intro-actions"><a class="tool-btn active" href="/index.html">进入通用操作台</a><a class="tool-btn" href="/nesting.html">浏览场景演示</a><a class="tool-btn" href="/linear-demo.html">一维搭切对比</a></div>
+    <p class="intro-stats" id="intro-stats"></p>
+</section>
+<nav class="intro-toc" aria-label="本页目录"><a href="#capabilities">切割能力</a><a href="#industries">行业场景</a><a href="#workbench">通用操作台</a><a href="#demos">场景演示</a><a href="#linear">一维搭切</a><a href="#limits">能力边界</a></nav>
+
+<section id="capabilities" class="intro-section" aria-labelledby="capabilities-title">
+    <div class="section-head"><h2 id="capabilities-title">切割能力</h2><p>入口按“二维 / 一维”区分。状态说明当前版本的真实程度，不把演示效果当作生产能力。</p><div class="status-legend" id="status-legend"></div></div>
+    <div class="capability-columns" id="capability-columns"></div>
+    <p class="engine-line" id="engine-line" role="status">正在读取服务器引擎…</p>
+</section>
+
+<section id="industries" class="intro-section" aria-labelledby="industries-title">
+    <div class="section-head"><h2 id="industries-title">行业场景与规则</h2><p>每个行业列出常用切法、规则配置的位置，以及能直接运行的示例。</p></div>
+    <div class="industry-tabs" id="industry-tabs" role="tablist" aria-label="行业"></div>
+    <div class="industry-panel" id="industry-panel" role="tabpanel"></div>
+</section>
+
+<section id="workbench" class="intro-section" aria-labelledby="workbench-title">
+    <div class="section-head"><h2 id="workbench-title">通用操作台与行业规则配置</h2><p>一个操作台承载任务、材料、排料、切割、报工和余料回收；各行业的特殊规则通过预设带入，再逐项微调。</p></div>
+    <div class="workbench-grid">
+        <ol class="step-list">
+            <li><strong>打开设置</strong><span>通用操作台 → 工具与设置 → 工艺与显示设置。</span></li>
+            <li><strong>选择行业规则预设</strong><span>在“工艺与切刀”页顶部选择窗帘、服装或板材，参数会填入表单。</span></li>
+            <li><strong>保存并应用</strong><span>确认或微调后保存；下一次排料使用新参数，已有方案保留原参数。</span></li>
+        </ol>
+        <div><div class="table-wrap"><table class="rule-table" id="preset-table"></table></div>
+            <p class="note">预设数值是示例，按工厂实际工艺调整。通用操作台目前处理矩形裁切；服装异形排料在场景演示中预览，尚未接入作业流程。</p>
+            <a class="tool-btn active" href="/index.html">进入通用操作台</a></div>
+    </div>
+</section>
+
+<section id="demos" class="intro-section" aria-labelledby="demos-title">
+    <div class="section-head"><h2 id="demos-title">基本功能场景演示</h2><p>场景演示页内置下列示例，一键载入后即可排料预览；只计算预览，不写入业务库存。</p></div>
+    <div class="demo-groups" id="demo-groups"></div>
+</section>
+
+<section id="linear" class="intro-section" aria-labelledby="linear-title">
+    <div class="section-head"><h2 id="linear-title">一维：搭切求解器</h2><p>一维按幅宽方向分条。逐单独立分切时每种规格自己占母卷；搭切把不同订单的条宽组合到同一母卷，减少母卷用量。</p></div>
+    <div class="table-wrap"><table class="rule-table compare-table">
+        <thead><tr><th></th><th>逐单独立分切</th><th>搭切 · 快速</th><th>搭切 · 精细</th></tr></thead>
+        <tbody>
+        <tr><th>做法</th><td>同规格需求合并后单独开卷，同一母卷只切同一幅宽</td><td colspan="2">不同订单的条宽组合到同一母卷，组合受宽度上下限与固定切边约束</td></tr>
+        <tr><th>可搭配的订单</th><td>不搭配</td><td colspan="2">卷长相同且表面处理相同的订单</td></tr>
+        <tr><th>计算耗时</th><td>即时</td><td>通常数秒</td><td>更久；窄条难例可超过 1 分钟</td></tr>
+        <tr><th>方案调整</th><td>无</td><td colspan="2">勾选组合重切、撤销调整、导出 Excel</td></tr>
+        <tr><th>结果保证</th><td>简单可预期，母卷用量偏多</td><td colspan="2">不承诺全局最优；示例中两种方式的母卷用量一致，精细的组合数有时更少</td></tr>
+        </tbody></table></div>
+    <div class="intro-actions"><a class="tool-btn active" href="/linear-demo.html">运行搭切对比</a><a class="tool-btn" href="/linear.html">进入分切工作台</a></div>
+
+    <h3 class="sub-head">一维与二维对照</h3>
+    <div class="table-wrap"><table class="rule-table compare-table">
+        <thead><tr><th></th><th>二维</th><th>一维</th></tr></thead>
+        <tbody>
+        <tr><th>切什么</th><td>把矩形或多边形裁片排进一块材料，避开疵点</td><td>把母卷沿幅宽方向切成多条，订单条宽搭配成组合</td></tr>
+        <tr><th>输入</th><td>材料尺寸、裁片清单、疵点与禁入区、工艺参数</td><td>母卷幅宽与固定切边、订单（幅宽 × 数量 × 卷长 × 表面处理）、组合宽度范围</td></tr>
+        <tr><th>求解</th><td>整幅横切、贯通切割、轮廓排料引擎</td><td>搭切求解器（列生成 + 集合划分）</td></tr>
+        <tr><th>结果</th><td>裁片位置、刀序或轮廓、候选余料</td><td>每个组合的条宽构成与重复用卷数</td></tr>
+        <tr><th>入口</th><td>通用操作台、场景演示</td><td>分切工作台、搭切对比</td></tr>
+        <tr><th>与库存</th><td>操作台报工后扣减母卷与料头库存</td><td>独立预览，不扣二维库存</td></tr>
+        </tbody></table></div>
+</section>
+
+<section id="limits" class="intro-section" aria-labelledby="limits-title">
+    <div class="section-head"><h2 id="limits-title">能力边界</h2><p>以下内容当前版本没有，演示或沟通时请如实说明。</p></div>
+    <ul class="limit-list">
+        <li><strong>异形结果仅为边界预览</strong>：没有可执行的轮廓刀路、刀具补偿、轮廓生产报工，也不划分余料。</li>
+        <li><strong>二维引擎的几何限制</strong>：不支持孔洞、圆弧、任意角度旋转、非零刀缝和多材料联合优化；锯缝以“裁片间距”近似。</li>
+        <li><strong>行业专有工艺</strong>：对花、对条对格、板材的封边排钻与多板联合排料尚未实现。</li>
+        <li><strong>搭切不承诺全局最优</strong>：一维结果为预计值，需按订单核对差额；一维分切独立于二维库存，不扣减、不回写。</li>
+    </ul>
+</section>
+</main>
+<footer class="intro-footer">搭切解决方案 · 能力演示版本 · 示例数值仅用于演示</footer>
+<script type="module" src="js/product-navigation.js"></script><script type="module" src="js/intro/intro-page.js"></script>
+</body></html>

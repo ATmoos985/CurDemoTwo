@@ -73,7 +73,7 @@ test('dense garment sample reuses original outlines and supplies enough pieces t
     assert.equal(input.timeLimitSeconds, 10);
 });
 
-test('lab scenario selector provides all 10 presets in nesting page', () => {
+test('lab scenario selector provides all 12 presets, grouped by industry, in nesting page', () => {
     const html = readFileSync(new URL('../../main/resources/static/nesting.html', import.meta.url), 'utf8');
     const selectHtml = html.match(/<select id="scenario-select"[\s\S]*?<\/select>/)?.[0] || '';
     assert.ok(selectHtml.length > 0);
@@ -86,10 +86,13 @@ test('lab scenario selector provides all 10 presets in nesting page', () => {
         ['4', '多规格套裁'],
         ['6', '连续送料工位'],
         ['CONTOUR', '异形排料'],
-        ['GARMENT_SHIRT', '服装 · 上衣裁片'],
-        ['GARMENT_PANTS', '服装 · 长裤裁片'],
-        ['GARMENT_SKIRT', '服装 · 半裙裁片'],
-        ['GARMENT_FULL', '服装 · 衣身袖片密排']
+        ['GARMENT_SHIRT', '上衣裁片'],
+        ['GARMENT_PANTS', '长裤裁片'],
+        ['GARMENT_SKIRT', '半裙裁片'],
+        ['GARMENT_FULL', '衣身袖片密排'],
+        ['BOARD_GRAIN', '木纹板 · 禁止旋转'],
+        ['BOARD_PLAIN', '素色板 · 允许旋转']
     ]);
+    assert.deepEqual([...selectHtml.matchAll(/<optgroup label="([^"]+)"/g)].map(m => m[1]), ['窗帘 · 家纺', '服装', '板材']);
     assert.equal(options.find(o => o.value === 'GUILLOTINE')?.selected, true);
 });
