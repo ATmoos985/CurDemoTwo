@@ -114,26 +114,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                 }
             }
 
-            String firstStage = "vertical".equalsIgnoreCase(req.process().firstStageOrientation()) ? "vertical" : "horizontal";
-
-            List<String> cmd = new ArrayList<>();
-            cmd.add(solverPath);
-            cmd.add("--items"); cmd.add(itemsCsv.getAbsolutePath());
-            cmd.add("--bins"); cmd.add(binsCsv.getAbsolutePath());
-            cmd.add("--defects"); cmd.add(defectsCsv.getAbsolutePath());
-            cmd.add("--objective"); cmd.add("knapsack");
-            cmd.add("--number-of-stages"); cmd.add("3");
-            cmd.add("--cut-type"); cmd.add("roadef2018");
-            cmd.add("--first-stage-orientation"); cmd.add(firstStage);
-            cmd.add("--linear-programming-solver"); cmd.add("highs");
-            cmd.add("--certificate"); cmd.add(certCsv.getAbsolutePath());
-            cmd.add("--time-limit"); cmd.add(Integer.toString(req.timeLimitSeconds()));
-
-            if (!req.parts().stream().anyMatch(NestingProblem.Part::allowRotation)) {
-                cmd.add("--no-item-rotation");
-            }
-
-            ProcessBuilder pb = new ProcessBuilder(cmd);
+            ProcessBuilder pb = new ProcessBuilder(command(req, itemsCsv, binsCsv, defectsCsv, certCsv));
             pb.redirectErrorStream(true);
             Path output = tmpDir.resolve("solver.log");
             pb.redirectOutput(output.toFile());
@@ -175,6 +156,33 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                 } catch (IOException cleanup) { log.warn("Unable to clean solver temporary directory", cleanup); }
             }
         }
+    }
+
+    /**
+     * The solver writes the certificate once, when it exits normally: by default it rewrites the whole file after every
+     * improvement, which on large instances takes most of the search time. Only a normal exit's certificate is read.
+     */
+    private List<String> command(NestingProblem req, File itemsCsv, File binsCsv, File defectsCsv, File certCsv) {
+        String firstStage = "vertical".equalsIgnoreCase(req.process().firstStageOrientation()) ? "vertical" : "horizontal";
+
+        List<String> cmd = new ArrayList<>();
+        cmd.add(solverPath);
+        cmd.add("--items"); cmd.add(itemsCsv.getAbsolutePath());
+        cmd.add("--bins"); cmd.add(binsCsv.getAbsolutePath());
+        cmd.add("--defects"); cmd.add(defectsCsv.getAbsolutePath());
+        cmd.add("--objective"); cmd.add("knapsack");
+        cmd.add("--number-of-stages"); cmd.add("3");
+        cmd.add("--cut-type"); cmd.add("roadef2018");
+        cmd.add("--first-stage-orientation"); cmd.add(firstStage);
+        cmd.add("--linear-programming-solver"); cmd.add("highs");
+        cmd.add("--certificate"); cmd.add(certCsv.getAbsolutePath());
+        cmd.add("--only-write-at-the-end");
+        cmd.add("--time-limit"); cmd.add(Integer.toString(req.timeLimitSeconds()));
+
+        if (!req.parts().stream().anyMatch(NestingProblem.Part::allowRotation)) {
+            cmd.add("--no-item-rotation");
+        }
+        return cmd;
     }
 
     /**
