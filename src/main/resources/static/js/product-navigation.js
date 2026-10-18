@@ -5,12 +5,18 @@ for(const host of document.querySelectorAll('[data-product-nav]')) {
     // 介绍页没有需要保留的作业内容，直接在本页跳转；其余页面新开标签，避免丢失当前内容。
     const link=item=>`<a href="${item.href}" ${item.id===active?'aria-current="page"':hub?'':'target="_blank" rel="noopener" title="新页面打开，保留当前内容"'}>${item.name}</a>`;
     const groups=navGroups(active).map(group=>group.label
-        ?`<span class="nav-group" role="group" aria-label="${group.label}"><span class="nav-group-label" aria-hidden="true">${group.label}</span>${group.items.map(link).join('')}</span>`
+        ?`<details class="nav-group"><summary ${group.items.some(item=>item.id===active)?'class="nav-current"':''}>${group.label==='二维'?'二维裁切':'一维分切'}</summary><div class="nav-dropdown">${group.items.map(link).join('')}</div></details>`
         :group.items.map(link).join('')).join('');
     host.innerHTML=`<nav class="product-nav" aria-label="功能区域">${groups}</nav>${active==='workbench'||hub ? '' : '<button type="button" class="tool-btn" data-capabilities>能力说明</button>'}`;
     if(host.querySelector('[data-capabilities]'))host.querySelector('[data-capabilities]').onclick=openCapabilities;
     if(host.querySelector('[data-inventory]'))host.querySelector('[data-inventory]').onclick=()=>window.camApp.openMaterialModal('rolls');
     host.querySelector('[aria-current]').onclick=event=>event.preventDefault();
+    for(const menu of host.querySelectorAll('.nav-group')) {
+        menu.addEventListener('toggle',()=>{if(menu.open)for(const other of host.querySelectorAll('.nav-group'))if(other!==menu)other.open=false;});
+        menu.addEventListener('keydown',event=>{if(event.key==='Escape'){menu.open=false;menu.querySelector('summary').focus();event.stopPropagation();}});
+        menu.addEventListener('focusout',event=>{if(!menu.contains(event.relatedTarget))menu.open=false;});
+    }
+    document.addEventListener('click',event=>{for(const menu of host.querySelectorAll('.nav-group[open]'))if(!menu.contains(event.target))menu.open=false;});
 }
 
 function openCapabilities() {
