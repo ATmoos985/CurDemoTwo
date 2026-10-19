@@ -1,5 +1,7 @@
 /** 功能入口目录：导航栏与介绍页共用，页面路径只在这里维护。 */
 export const ENTRIES = Object.freeze([
+    {id:'marker', name:'服装唛架', href:'/marker-demo.html', group:'', navHidden:true, summary:'固定布宽、齐套衣片、缩短唛架'},
+    {id:'demos', name:'功能演示', href:'/demos.html', group:'', summary:'二维场景、服装唛架与一维搭切的统一演示'},
     {id: 'intro', name: '介绍', href: '/intro.html', group: '', summary: '切割能力、行业场景与演示入口总览'},
     {id: 'workbench', name: '通用操作台', href: '/index.html', group: '二维',
         summary: '任务、排料、切割、报工与余料的完整作业流程；行业规则在“设置 → 工艺与切刀”中一键套用'},
@@ -17,14 +19,8 @@ export const ENTRIES = Object.freeze([
 
 export const entry = id => ENTRIES.find(item => item.id === id) ?? null;
 
-/** 导航分组：相邻且 group 相同的入口合成一组；navHidden 的入口仅在自己的页面显示。 */
-export function navGroups(active) {
-    const groups = [];
-    for (const item of ENTRIES) {
-        if (item.navHidden && item.id !== active) continue;
-        const last = groups[groups.length - 1];
-        if (last && item.group && last.label === item.group) last.items.push(item);
-        else groups.push({label: item.group, items: [item]});
-    }
-    return groups;
+/** Five primary destinations; legacy demonstrations remain registered for direct links. */
+export function navGroups() {
+    return [entry('intro'), {...entry('workbench'), name:'二维裁切'}, {...entry('linear'), name:'一维裁切'},
+        entry('demos'), entry('inspection')].map(item => ({label:'', items:[item]}));
 }

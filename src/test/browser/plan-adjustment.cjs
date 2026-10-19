@@ -590,14 +590,14 @@ const server = createServer(async (req,res) => {
             await page.getByRole('button',{name:'保存母卷档案',exact:true}).click();await expect(page.locator('#material-roll-detail-panel')).toContainText('NEW-INVENTORY');
             await expect(page.locator('#material-context-id')).toHaveText(roll.rollId);assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');
         });
-        await run('peer navigation opens a standalone inventory page while the active job stays intact',async page=>{
+        await run('standalone inventory preserves the active job with the unified navigation',async page=>{
             await loadPlan(page);const before=await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData()));
-            await expect(page.locator('.product-nav [aria-current]')).toHaveText('通用操作台');
+            await expect(page.locator('.product-nav [aria-current]')).toHaveText('二维裁切');
             await page.locator('.product-nav [aria-current]').click();assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');
-            const popup=page.waitForEvent('popup');await page.getByRole('link',{name:'库存档案',exact:true}).click();const inventory=await popup,errors=[];inventory.on('pageerror',e=>errors.push(e.message));
+            const inventory=await page.context().newPage(),errors=[];inventory.on('pageerror',e=>errors.push(e.message));await inventory.goto(new URL('/inventory.html',page.url()).href);
             await expect(inventory.locator('main#material-manager-modal')).toBeVisible();await expect(inventory.locator('.inventory-number').first()).toContainText('60');
             assert.equal(await inventory.locator('dialog.inventory-dialog').count(),0);assert.equal(await inventory.locator('#konva-container').count(),0);
-            await expect(inventory.locator('.product-nav [aria-current]')).toHaveText('库存档案');
+            await expect(inventory.locator('.product-nav a')).toHaveText(['介绍','二维裁切','一维裁切','功能演示','跑布验疵']);
             fs.mkdirSync('target/product-navigation',{recursive:true});
             for(const size of [{width:1366,height:768},{width:1920,height:1080}]){await inventory.setViewportSize(size);assert.equal(await inventory.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await inventory.screenshot({path:'target/product-navigation/inventory-'+size.width+'.png'});}
             await inventory.getByRole('button',{name:'料头库存',exact:true}).click();await expect(inventory.locator('#pane-mat-remnants')).toBeVisible();
@@ -607,15 +607,15 @@ const server = createServer(async (req,res) => {
             assert.equal(await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData())),before);assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');
             assert.deepEqual(errors,[]);await inventory.close();await page.screenshot({path:'target/product-navigation/workbench-1366.png'});
         });
-        await run('capability guide distinguishes production from contour experiments and exposes standard IO',async page=>{
-            await loadPlan(page);await page.getByRole('button',{name:'能力说明',exact:true}).click();await expect(page.locator('#capability-dialog')).toContainText('尚无可执行轮廓刀路');
-            await page.locator('#capability-dialog details').last().locator('summary').click();await expect(page.locator('#capability-engine-status')).toContainText('未就绪');
-            await page.locator('#capability-dialog details').first().locator('summary').click();
-            const popup=page.waitForEvent('popup');await page.getByRole('link',{name:'打开标准输入 / 输出 ↗'}).click();const lab=await popup,errors=[];lab.on('pageerror',e=>errors.push(e.message));
-            await expect(lab.locator('#protocol-details')).toHaveAttribute('open','');await expect(lab.locator('.product-nav [aria-current]')).toHaveText('场景演示');
-            await lab.locator('#example-contour').click();await expect(lab.locator('#engine-hint')).toContainText('引擎未就绪');await lab.locator('#open-json').click();
-            await expect(lab.locator('#json-dialog')).toBeVisible();assert.equal(JSON.parse(await lab.locator('#json-input').inputValue()).process.mode,'CONTOUR');
-            assert.equal(requests.filter(r=>r==='POST /api/cutting/tasks' || r==='POST /api/solve').length,0);assert.deepEqual(errors,[]);await lab.close();await page.screenshot({path:'target/product-navigation/capabilities-1366.png'});
+        await run('unified demonstrations open separately and preserve the active cutting job',async page=>{
+            await loadPlan(page);const before=await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData()));
+            await expect(page.getByRole('button',{name:'能力说明',exact:true})).toHaveCount(0);
+            const popup=page.waitForEvent('popup');await page.getByRole('link',{name:'功能演示',exact:true}).click();const demos=await popup,errors=[];demos.on('pageerror',e=>errors.push(e.message));
+            await expect(demos.locator('.product-nav [aria-current]')).toHaveText('功能演示');await expect(demos.getByRole('tab')).toHaveCount(3);
+            await expect(demos.locator('iframe').first()).toBeVisible();
+            assert.equal(await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData())),before);
+            assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');
+            assert.equal(requests.filter(r=>r==='POST /api/cutting/tasks' || r==='POST /api/solve').length,0);assert.deepEqual(errors,[]);await demos.close();
         });
         await run('standalone inventory read failure can refresh without loading a cutting task',async page=>{
             failInventory=true;const before=requests.length;await page.goto(page.url()+'inventory.html');await expect(page.locator('#inventory-rolls-summary')).toContainText('读取失败');

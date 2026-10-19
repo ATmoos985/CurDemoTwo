@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>功能演示 · 搭切解决方案</title>
+<link rel="stylesheet" href="css/base.css"><link rel="stylesheet" href="css/product-navigation.css"><link rel="stylesheet" href="css/demos.css"></head>
+<body class="demos-page">
+<header class="demos-header"><a href="/intro.html" class="demo-brand">搭切解决方案</a><div data-product-nav="demos"></div></header>
+<main class="demos-main">
+<div class="demos-heading"><div><h1>选一种材料，看一遍完整方案。</h1><p>二维排料、服装唛架、一维搭切，在这里统一体验。演示只计算预览，不扣减库存。</p></div><a id="demo-standalone" href="/nesting.html" target="_blank" rel="noopener">独立窗口打开 ↗</a></div>
+<div class="demo-tabs" role="tablist" aria-label="功能演示类型">
+<button id="tab-sheet" role="tab" aria-controls="panel-sheet" aria-selected="true" data-demo="sheet">二维裁切<span>窗帘 · 板材 · 避疵 · 料头</span></button>
+<button id="tab-marker" role="tab" aria-controls="panel-marker" aria-selected="false" tabindex="-1" data-demo="marker">服装唛架<span>齐套排入 · 固定布宽 · 缩短用布</span></button>
+<button id="tab-linear" role="tab" aria-controls="panel-linear" aria-selected="false" tabindex="-1" data-demo="linear">一维搭切对比<span>逐单分切 · 快速搭切 · 精细优化</span></button>
+</div>
+<section class="demo-panel" id="panel-sheet" role="tabpanel" aria-labelledby="tab-sheet"></section>
+<section class="demo-panel" id="panel-marker" role="tabpanel" aria-labelledby="tab-marker" hidden></section>
+<section class="demo-panel" id="panel-linear" role="tabpanel" aria-labelledby="tab-linear" hidden></section>
+</main>
+<script type="module" src="js/product-navigation.js"></script><script type="module" src="js/demos.js"></script></body></html>

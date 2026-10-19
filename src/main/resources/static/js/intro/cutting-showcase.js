@@ -1,31 +1,53 @@
+import {CUT_PATHS, cuttingFrame} from './cutting-timeline.js';
 const showcase = document.getElementById('cutting-showcase');
 const motion = document.getElementById('motion-toggle');
-const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-
-function setPaused(paused) {
-    showcase.classList.toggle('is-paused', paused);
-    motion.setAttribute('aria-pressed', String(paused));
-    motion.textContent = paused ? '播放动效' : '暂停动效';
+const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+const ns = 'http://www.w3.org/2000/svg';
+let elapsed = 0, last = null, paused = false, visible = true;
+for (const [mode, paths] of Object.entries(CUT_PATHS)) {
+    const scene = showcase.querySelector(`.${mode}-scene`);
+    scene.querySelectorAll('.cut-trace,.cut-head').forEach(node => node.remove());
+    for (const [x1,y1,x2,y2] of paths) {
+        const line = document.createElementNS(ns,'path'); line.setAttribute('class','cut-trace');
+        line.setAttribute('d',`M${x1} ${y1}L${x2} ${y2}`); line.setAttribute('pathLength','1'); scene.append(line);
+    }
+    const head = document.createElementNS(ns,'circle'); head.setAttribute('class','cut-head'); head.setAttribute('r','5'); scene.append(head);
 }
-function applyMotionPreference() {
-    setPaused(reducedMotion.matches);
-    motion.disabled = reducedMotion.matches;
-    if (reducedMotion.matches) motion.textContent = '已减少动态效果';
-}
-applyMotionPreference();
-reducedMotion.addEventListener('change', applyMotionPreference);
-motion.addEventListener('click', () => setPaused(motion.getAttribute('aria-pressed') !== 'true'));
-
-for (const button of showcase.querySelectorAll('[data-cut-mode]')) {
-    button.addEventListener('click', () => {
-        const sheet = button.dataset.cutMode === 'sheet';
-        showcase.dataset.mode = button.dataset.cutMode;
-        for (const option of showcase.querySelectorAll('[data-cut-mode]')) option.setAttribute('aria-pressed', String(option === button));
-        document.getElementById('cutting-caption').textContent = sheet ? '多种尺寸，一起排料' : '不同幅宽，共用一卷';
-        document.getElementById('cutting-detail').textContent = sheet ? '矩形裁片紧凑组合，沿切线分开。' : '将不同订单的条宽搭配，沿幅宽方向分条。';
+function draw() {
+    const mode = showcase.dataset.mode, scene = showcase.querySelector(`.${mode}-scene`);
+    const frame = cuttingFrame(reduced.matches ? 12000 : elapsed, mode);
+    showcase.dataset.phase = frame.phase; showcase.dataset.completedCuts = frame.complete;
+    scene.querySelectorAll('.cut-piece').forEach(piece => {
+        const style = getComputedStyle(piece);
+        piece.setAttribute('transform',`translate(${parseFloat(style.getPropertyValue('--dx')) * frame.offset},${parseFloat(style.getPropertyValue('--dy')) * frame.offset})`);
     });
+    scene.querySelectorAll('.cut-trace').forEach((line,index) => {
+        line.style.strokeDashoffset = 1 - Math.max(0,Math.min(1,frame.progress-index));
+        line.style.opacity = frame.phase === '裁片分离' ? '0' : '1';
+    });
+    const head = scene.querySelector('.cut-head'), path = frame.paths[Math.min(frame.complete,frame.paths.length-1)];
+    const p = frame.progress-frame.complete;
+    head.setAttribute('cx',path[0]+(path[2]-path[0])*p); head.setAttribute('cy',path[1]+(path[3]-path[1])*p);
+    head.style.opacity = frame.phase === '切割' ? '1' : '0';
+    document.getElementById('cutting-detail').textContent = `${frame.phase} · ${frame.complete} / ${frame.paths.length} 刀完成`;
 }
-
-// 离开视口或切到后台时停止绘制，保留用户选择的播放状态。
-new IntersectionObserver(([entry]) => showcase.classList.toggle('is-offscreen', !entry.isIntersecting)).observe(showcase);
-document.addEventListener('visibilitychange', () => showcase.classList.toggle('is-hidden', document.hidden));
+function updateMotion() {
+    motion.disabled = reduced.matches; motion.setAttribute('aria-pressed',String(paused || reduced.matches));
+    motion.textContent = reduced.matches ? '已减少动态效果' : paused ? '播放动效' : '暂停动效';
+    draw();
+}
+motion.onclick = () => { paused = !paused; updateMotion(); };
+reduced.addEventListener('change',updateMotion);
+for (const button of showcase.querySelectorAll('[data-cut-mode]')) button.onclick = () => {
+    showcase.dataset.mode = button.dataset.cutMode; elapsed = 0;
+    for (const option of showcase.querySelectorAll('[data-cut-mode]')) option.setAttribute('aria-pressed',String(option===button));
+    document.getElementById('cutting-caption').textContent = button.dataset.cutMode === 'sheet' ? '多种尺寸，一起排料' : '不同幅宽，共用一卷';
+    draw();
+};
+new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; }).observe(showcase);
+function tick(now) {
+    if (last !== null && visible && !document.hidden && !paused && !reduced.matches) { elapsed += now-last; draw(); }
+    last = now; requestAnimationFrame(tick);
+}
+document.addEventListener('visibilitychange', () => { last = null; });
+updateMotion(); requestAnimationFrame(tick);

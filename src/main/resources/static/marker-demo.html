@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>服装唛架演示</title>
+<link rel="stylesheet" href="css/base.css"><link rel="stylesheet" href="css/product-navigation.css"><link rel="stylesheet" href="css/marker-demo.css"><script src="konva.min.js"></script></head>
+<body class="marker-page"><header class="marker-header"><strong>服装唛架</strong><div data-product-nav="marker"></div></header>
+<main class="marker-main">
+<div class="marker-lead"><div><h1>一片不漏，再把布用短。</h1><p>同一张唛架混排 M / L 两个尺码。固定门幅，先核对衣片齐套，再尝试缩短长度。</p></div><span class="marker-preview">演示纸样 · 仅排料预览</span></div>
+<div class="marker-workspace">
+<section class="marker-input" aria-label="唛架输入"><h2>一款上衣，两种尺码</h2><p>每码 1 件：前片、后片、袖片、领片、贴边、袋布，共 18 片。</p>
+<form id="marker-form"><label for="marker-width">固定门幅 / mm</label><input id="marker-width" type="number" value="1500" min="1200" max="2000" step="10" required>
+<p class="marker-rule">所有衣片固定纱向、同向排放，不旋转。</p><button class="tool-btn active" id="marker-run">齐套排料并缩短长度</button><button type="button" class="tool-btn" id="marker-cancel" hidden>停止尝试</button></form>
+<h3>衣片齐套核对</h3><div id="marker-checklist"></div>
+<details><summary>工艺与示例范围</summary><p>曲边用折线近似，未含缝份。对条对格、色差配套、微角度偏斜未建模；不能直接作为生产纸样或设备刀路。</p><p>先在较长材料上求解，再尝试更短长度。未排齐的候选不会作为完成方案；结果是本次搜索找到的较短方案，不保证全局最短。</p></details></section>
+<section class="marker-result" aria-label="唛架结果"><div class="marker-toolbar"><strong id="marker-state" role="status" aria-live="polite">待排料 · 衣片齐全才算完成</strong><button type="button" class="tool-btn" id="marker-fit">适合画面</button></div>
+<div class="marker-metrics"><div><span>实际唛架长度</span><strong id="marker-length">—</strong></div><div><span>唛架利用率</span><strong id="marker-utilization">—</strong></div><div><span>较首个齐套方案缩短</span><strong id="marker-saving">—</strong></div></div>
+<div id="marker-canvas" tabindex="0" role="img" aria-label="服装唛架排料画布，滚轮缩放，拖动平移"></div>
+<p id="sb-cursor-pos" class="marker-cursor">指针 — · 单位 mm</p><p id="marker-selection">点击衣片查看尺码与名称；滚轮缩放、拖动平移。</p>
+<p id="marker-error" role="alert" hidden></p><p class="marker-formula">利用率 = 全部衣片净面积 ÷（固定门幅 × 实际唛架长度）。图中浅色区域为当前试排材料，裁片末端以外不计入唛架长度。</p>
+<details><summary>长度尝试记录</summary><ol id="marker-trials"></ol></details>
+<div class="marker-exports"><button class="tool-btn" id="marker-input-export">导出示例输入</button><button class="tool-btn" id="marker-result-export" disabled>导出齐套结果</button></div>
+</section></div></main><script type="module" src="js/product-navigation.js"></script><script type="module" src="js/nesting/marker-page.js"></script></body></html>

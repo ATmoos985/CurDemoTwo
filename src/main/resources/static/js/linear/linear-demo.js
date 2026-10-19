@@ -62,7 +62,8 @@ function select(key) {
     const scenario = SCENARIOS.find(item => item.key === key) ?? SCENARIOS[0], plan = independentBaseline(scenario.input);
     Object.assign(state, {scenario, view: 'FAST', epoch: state.epoch + 1});
     state.runs = {baseline: {status: 'done', plan, summary: planSummary(plan, scenario.input)}, FAST: {status: 'idle'}, QUALITY: {status: 'idle'}};
-    history.replaceState(null, '', `?scenario=${scenario.key}`);
+    const params = new URLSearchParams(location.search); params.set('scenario', scenario.key);
+    history.replaceState(null, '', `?${params}`);
     solve('FAST');
 }
 
@@ -151,7 +152,8 @@ $('handoff').onclick = () => {
         if (existing?.orderItems?.length && !confirm('分切工作台在本标签页保留了一份需求，打开示例会替换它。继续吗？')) return;
         sessionStorage.setItem(draftKey, JSON.stringify({...state.scenario.input, profile: 'FAST', draftDirty: false}));
         sessionStorage.removeItem(taskKey);
-        location.href = '/linear.html';
+        if (window.self !== window.top && new URLSearchParams(location.search).get('embed') === '1') window.top.location.href = '/linear.html';
+        else location.href = '/linear.html';
     } catch {
         $('compare-status').textContent = '浏览器不允许保存草稿，无法带入分切工作台。';
     }

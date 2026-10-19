@@ -19,10 +19,12 @@ test('every entry points at a real page and every nav host names a known entry',
     for (const item of ENTRIES) assert.equal(hosts.get(item.id), item.href.slice(1), `${item.id} 页面缺少对应导航宿主`);
 });
 
-test('navigation groups 2D and 1D entries and shows the inventory page only on itself', () => {
-    const summary = active => navGroups(active).map(g => `${g.label}:${g.items.map(i => i.id).join(',')}`);
-    assert.deepEqual(summary('lab'), [':intro', '二维:workbench,lab', '一维:linear,compare', ':inspection']);
-    assert.deepEqual(summary('inventory').at(-1), ':inventory');
+test('navigation exposes the five unified product destinations on every page', () => {
+    for (const active of ENTRIES.map(e => e.id)) {
+        const items=navGroups(active).flatMap(g=>g.items);
+        assert.deepEqual(items.map(item=>item.name), ['介绍','二维裁切','一维裁切','功能演示','跑布验疵']);
+        assert.deepEqual(items.map(item=>item.href), ['/intro.html','/index.html','/linear.html','/demos.html','/inspection.html']);
+    }
 });
 
 test('statuses stay inside the three agreed levels and every rule is explained', () => {
