@@ -25,7 +25,7 @@
     <link rel="stylesheet" href="css/ui-consistency.css">
     <link rel="stylesheet" href="css/production-workbench.css">
 </head>
-<body inert>
+<body class="rectangle-workbench" inert>
 
     <!-- 顶部工业控制栏 -->
     <header>
@@ -96,7 +96,7 @@
                             </section>
                             <section class="demand-entry-heading" id="demand-entry-actions" aria-label="添加需求">
                                 <h3>需求清单 <small>尺寸单位 mm</small></h3>
-                                <div><button class="tool-btn" id="demand-manager-import" onclick="openDemandImport()">导入 Excel / JSON</button><button class="tool-btn" id="demand-manager-sample" onclick="openDemandImport({sample:true})">使用 9.28 样例</button><button class="tool-btn" onclick="addDemandRow()">＋ 添加需求</button></div>
+                                <div><a class="tool-btn" id="demand-manager-garment" href="/cutting.html" target="_blank" rel="noopener">服装案例 · 唛架 ↗</a><button class="tool-btn" id="demand-manager-import" onclick="openDemandImport()">导入 Excel / JSON</button><button class="tool-btn" id="demand-manager-sample" onclick="openDemandImport({sample:true})">使用 9.28 样例</button><button class="tool-btn" onclick="addDemandRow()">＋ 添加需求</button></div>
                             </section>
                             <p id="demand-progress-summary" class="field-unit" role="status">剩余按合格报工计算，预览不扣数量。</p><div id="demands-container">
                                 <!-- 动态生成带有【在库料头提示与选择】的裁片项 -->

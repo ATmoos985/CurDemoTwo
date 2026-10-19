@@ -5,8 +5,8 @@
 <main class="marker-main">
 <div class="marker-lead"><div><h1>一片不漏，再把布用短。</h1><p>同一张唛架混排 M / L 两个尺码。固定门幅，先核对衣片齐套，再尝试缩短长度。</p></div><span class="marker-preview">演示纸样 · 仅排料预览</span></div>
 <div class="marker-workspace">
-<section class="marker-input" aria-label="唛架输入"><h2>一款上衣，两种尺码</h2><p>每码 1 件：前片、后片、袖片、领片、贴边、袋布，共 18 片。</p>
-<form id="marker-form"><label for="marker-width">固定门幅 / mm</label><input id="marker-width" type="number" value="1500" min="1200" max="2000" step="10" required>
+<section class="marker-input" aria-label="唛架输入"><h2 id="marker-style-title">服装案例</h2><p id="marker-style-description"></p>
+<form id="marker-form"><label for="marker-style">选择款式</label><select id="marker-style"></select><label for="marker-width">固定门幅 / mm</label><input id="marker-width" type="number" value="1500" min="1200" max="2000" step="10" required>
 <p class="marker-rule">所有衣片固定纱向、同向排放，不旋转。</p><button class="tool-btn active" id="marker-run">齐套排料并缩短长度</button><button type="button" class="tool-btn" id="marker-cancel" hidden>停止尝试</button></form>
 <h3>衣片齐套核对</h3><div id="marker-checklist"></div>
 <details><summary>工艺与示例范围</summary><p>曲边用折线近似，未含缝份。对条对格、色差配套、微角度偏斜未建模；不能直接作为生产纸样或设备刀路。</p><p>先在较长材料上求解，再尝试更短长度。未排齐的候选不会作为完成方案；结果是本次搜索找到的较短方案，不保证全局最短。</p></details></section>

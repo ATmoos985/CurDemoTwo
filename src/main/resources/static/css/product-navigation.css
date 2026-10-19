@@ -38,3 +38,4 @@
 @media (max-width:650px) {
     .product-nav .nav-group:first-of-type .nav-dropdown { left: 0; right: auto; }
 }
+.demo-embedded .rectangle-workbench > header { display:none; }

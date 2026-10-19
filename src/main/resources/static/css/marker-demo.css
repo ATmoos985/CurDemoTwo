@@ -11,7 +11,7 @@
 .marker-input h2 { font-size:17px; }.marker-input h3 { font-size:14px; margin:28px 0 12px; }
 .marker-input p,.marker-formula { font-size:12px; color:#536a77; line-height:1.8; margin:10px 0 18px; }
 #marker-form label { display:block; margin:24px 0 8px; font-size:13px; }
-#marker-width { width:100%; height:38px; border:1px solid #b3c6d1; border-radius:4px; padding:8px; font:15px Consolas,monospace; }
+#marker-width, #marker-style { width:100%; height:38px; border:1px solid #b3c6d1; border-radius:4px; padding:8px; font:15px Consolas,monospace; background:#fff; color:inherit; }
 #marker-form .tool-btn { width:100%; margin:5px 0; min-height:38px; justify-content:center; }
 .marker-check { display:flex; justify-content:space-between; gap:12px; padding:7px 0; font-size:12px; border-bottom:1px solid #edf1f3; }
 .marker-check span { font-family:Consolas,monospace; white-space:nowrap; }

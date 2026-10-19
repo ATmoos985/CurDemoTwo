@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {markerExample, markerSummary, searchMarker} from '../../main/resources/static/js/nesting/marker-demo.js';
+import {MARKER_STYLES, markerExample, markerSummary, searchMarker} from '../../main/resources/static/js/nesting/marker-demo.js';
 import {cuttingFrame, CUT_PATHS} from '../../main/resources/static/js/intro/cutting-timeline.js';
 
 const sceneFor = (problem, length, complete = true) => ({status:'FEASIBLE', placements:problem.parts.flatMap(part =>
@@ -19,6 +19,18 @@ test('one missing piece or substituting another size cannot qualify as a complet
     assert.equal(markerSummary(p,partial).utilization,null);
     partial.placements.push({...partial.placements[0]});
     assert.equal(markerSummary(p,partial).complete,false);
+});
+test('all garment cases include both sizes and small parts within the fixed fabric width', () => {
+    const counts = {GARMENT_SHIRT:18, GARMENT_PANTS:18, GARMENT_SKIRT:14};
+    for (const style of MARKER_STYLES) for (const width of [1200,1500,2000]) {
+        const p=markerExample(width,style.id);
+        assert.equal(p.parts.reduce((sum,part)=>sum+part.quantity,0),counts[style.id]);
+        assert.equal(p.material.shape.width,width);
+        assert.ok(p.parts.every(part=>!part.allowRotation && part.shape.width<=width));
+        for (const size of ['M','L']) assert.ok(p.parts.some(part=>part.name.startsWith(size)));
+        assert.equal(markerSummary(p,sceneFor(p,2000,false)).complete,false);
+    }
+    assert.throws(()=>markerExample(1500,'unknown'));
 });
 test('utilization uses actual occupied marker length instead of trial material length', () => {
     const p=markerExample(), result=markerSummary(p,sceneFor(p,1800));

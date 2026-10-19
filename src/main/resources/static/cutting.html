@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>二维裁切 · 服装唛架</title>
+<link rel="stylesheet" href="css/base.css"><link rel="stylesheet" href="css/product-navigation.css"><link rel="stylesheet" href="css/cutting-modes.css"></head>
+<body class="cutting-page"><header class="cutting-header"><a href="/intro.html">布料裁切</a><div data-product-nav="cutting"></div></header>
+<div class="cutting-modes" role="tablist" aria-label="二维裁切模式">
+<button id="mode-marker" role="tab" aria-controls="workspace-marker" aria-selected="true" data-cutting-mode="marker">服装唛架<span>固定布宽 · 衣片齐套 · 缩短长度</span></button>
+<button id="mode-rectangle" role="tab" aria-controls="workspace-rectangle" aria-selected="false" tabindex="-1" data-cutting-mode="rectangle">矩形裁切<span>窗帘与矩形裁片 · 库存 · 报工</span></button>
+</div>
+<main class="cutting-workspace"><section id="workspace-marker" role="tabpanel" aria-labelledby="mode-marker"></section><section id="workspace-rectangle" role="tabpanel" aria-labelledby="mode-rectangle" hidden></section></main>
+<script type="module" src="js/product-navigation.js"></script><script type="module" src="js/cutting-modes.js"></script></body></html>

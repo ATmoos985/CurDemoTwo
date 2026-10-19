@@ -1,10 +1,13 @@
-import {markerExample, markerSummary, searchMarker} from './marker-demo.js';
+import {MARKER_STYLES, markerExample, markerSummary, searchMarker} from './marker-demo.js';
 import {createNestingScene} from './nesting-scene.js';
 import {NestingSession} from './nesting-client.js';
 import {mountNestingViewer} from './nesting-viewer.js';
 
 const $ = id => document.getElementById(id);
 const session = new NestingSession();
+for (const style of MARKER_STYLES) $('marker-style').add(new Option(style.name, style.id));
+const initialStyle = new URLSearchParams(location.search).get('style');
+if (MARKER_STYLES.some(style => style.id === initialStyle)) $('marker-style').value = initialStyle;
 let problem = markerExample(), best = null, controller = null, revision = 0;
 const viewer = mountNestingViewer($('marker-canvas'), {onSelect:piece => {
     $('marker-selection').textContent = piece ? `${piece.name} · X ${piece.x} / Y ${piece.y} mm · 固定纱向`
@@ -24,10 +27,18 @@ function reset() {
     $('marker-trials').replaceChildren(); $('marker-error').hidden = true;
     checklist();
     if (!$('marker-width').checkValidity()) { viewer.setScene(null); $('marker-state').textContent = '请输入 1200–2000 mm 的布宽（步长 10 mm）'; return; }
-    problem = markerExample($('marker-width').valueAsNumber); viewer.setScene(createNestingScene(problem), {fitView:true}); checklist();
+    problem = markerExample($('marker-width').valueAsNumber, $('marker-style').value);
+    const style = MARKER_STYLES.find(item => item.id === $('marker-style').value);
+    $('marker-style-title').textContent = `${style.name} · M / L 两种尺码`;
+    $('marker-style-description').textContent = `每码 1 件：${style.description}，共 ${markerSummary(problem,null).requested} 片。`;
+    viewer.setScene(createNestingScene(problem), {fitView:true}); checklist();
     $('marker-state').textContent = '待排料 · 衣片齐全才算完成';
 }
 $('marker-width').addEventListener('input', reset);
+$('marker-style').addEventListener('change', () => {
+    const params = new URLSearchParams(location.search); params.set('style',$('marker-style').value);
+    history.replaceState(null,'',`${location.pathname}?${params}${location.hash}`); reset();
+});
 $('marker-cancel').onclick = () => { cancel(); busy(false); $('marker-state').textContent = '已停止，可重新开始排料'; };
 $('marker-form').addEventListener('submit', async event => {
     event.preventDefault(); if (!$('marker-form').reportValidity()) return;
