@@ -1,3 +1,4 @@
+import {rotateOutlinePiece} from './outline-geometry.js';
 /**
  * CAD 实体右键操作上下文菜单插件 (CAD Entity Context Menu Plugin)
  * 满足现场操作员在画布上对【料头块】、【成品裁片】、【机台工位】的直接审查与干预：
@@ -647,10 +648,7 @@ export function rotatePieceById(pieceId) {
     const piece = (data.pieces || []).find(p => p.id === pieceId);
     if (!piece || piece.confirmed || piece.queued) return;
 
-    const oldW = piece.w;
-    piece.w = piece.l;
-    piece.l = oldW;
-    piece.rotated = !piece.rotated;
+    if(!rotateOutlinePiece(piece,data.demands)){showToast('该衣片要求固定纱向，不能旋转','warning');return;}
 
     updateUIInfo();
     renderScene();

@@ -120,7 +120,7 @@ function pieceMarks(p, v) {
     if (level) out.push(placeLabel(m.name ||= new Konva.Text({ ...TEXT, fontStyle: 'bold' }),
         level === 2 ? (p.name || `#${p.id}`) : `#${p.id}`, x + 6, y + h / 2 - (level === 2 ? 16 : 6), w - 12, v.ink));
     if (level === 2) out.push(placeLabel(m.size ||= new Konva.Text({ ...TEXT, fontSize: 11 }),
-        `${p.w} × ${p.l} mm${p.outcome === 'REJECTED' ? ' · 异常' : p.confirmed ? ' · 合格' : p.queued ? ' · 待报工' : ''}`, x + 6, y + h / 2 + 4, w - 12, v.muted));
+        `${Number(p.w.toFixed(1))} × ${Number(p.l.toFixed(1))} mm${p.outcome === 'REJECTED' ? ' · 异常' : p.confirmed ? ' · 合格' : p.queued ? ' · 待报工' : ''}`, x + 6, y + h / 2 + 4, w - 12, v.muted));
     if (related) {
         m.related ||= new Konva.Rect({ name: 'demand-related', stroke: '#2d7899', strokeWidth: 1.5, dash: [5, 3], listening: false });
         out.push(m.related.setAttrs({ x, y, width: w, height: h }));
@@ -143,7 +143,7 @@ function remnantMarks(r, v) {
     const m = marksOf(r), out = [placeLabel(m.name ||= new Konva.Text({ ...TEXT }),
         state.currentCutMode === 'remnant' && !r.confirmed ? '余料 · 不回收' : r.hasDefect ? '带疵料头' : '可用料头', x + 6, y + h / 2 - (level === 2 ? 16 : 6), w - 12, v.muted)];
     if (level === 2) out.push(placeLabel(m.size ||= new Konva.Text({ ...TEXT, fontSize: 11 }),
-        `${r.w} × ${r.l} mm${r.queued ? ' · 待报工' : r.confirmed ? ' · 已报工' : ''}`, x + 6, y + h / 2 + 4, w - 12, v.muted));
+        `${Number(r.w.toFixed(1))} × ${Number(r.l.toFixed(1))} mm${r.queued ? ' · 待报工' : r.confirmed ? ' · 已报工' : ''}`, x + 6, y + h / 2 + 4, w - 12, v.muted));
     return out;
 }
 
@@ -216,8 +216,11 @@ export function updateCanvasAnnotations() {
     if (!view.overview) for (const i of candidates(idx.remnantGrid, v)) list.push(...remnantMarks(idx.remnants[i], v));
     if (detailed && view.paths) {
         const visible = [];
+        const contour = data.pieces?.some(p => p.shape);
         for (const c of cutBadges) {
             if (c.step > state.currentCutStepLimit) continue;
+            // A garment has many short edges; show the active edge number while keeping every cut line visible.
+            if (contour && c.step !== state.currentCutStepLimit) continue;
             const x = v.sx(c.x), y = v.sy(c.y);
             if (x < RULER_SIZE || y < RULER_SIZE || x > v.width || y > v.height) continue;
             visible.push({ x, y, c });
@@ -241,7 +244,7 @@ export function updateCanvasAnnotations() {
         if (selected) {
             const local = stationCoordinates(selected.x + (origin.dx < 0 ? selected.w : 0), selected.y + (origin.dy < 0 ? selected.l : 0), data);
             setText('cad-selection-name', selected.name || `裁片 ${selected.id}`);
-            setText('cad-selection-size', `${selected.w} × ${selected.l} mm`);
+            setText('cad-selection-size', `${Number(selected.w.toFixed(1))} × ${Number(selected.l.toFixed(1))} mm`);
             setText('cad-selection-position', `距原点 X ${local.x} · Y ${local.y} mm`);
             setText('cad-selection-state', selected.confirmed ? '已实切 · 锁定' : selected.queued ? '已记录 · 待报工' : '方向键微调 · R 旋转');
         }
@@ -292,6 +295,11 @@ function frameBounds(bounds, mode = 'station') {
 export function focusPiece(id) {
     const piece = (state.getCurrentCaseData().pieces || []).find(p => p.id === id);
     if (piece) frameBounds({x:piece.x-120,y:piece.y-120,width:piece.w+240,height:piece.l+240}, 'piece');
+}
+export function focusCurrentLayout() {
+    const data=state.getCurrentCaseData(), start=data.windowStartY || 0;
+    const pieces=(data.pieces || []).filter(p=>!p.confirmed && !p.queued && p.y>=start && p.y<start+data.bedL);
+    if(pieces.length)frameBounds({x:0,y:start,width:data.rollW,height:Math.max(...pieces.map(p=>p.y+p.l))-start}, 'layout');
 }
 export function resetToBedView() {
     const data = state.getCurrentCaseData();
@@ -345,5 +353,6 @@ bus.on('stage:resized', () => {
     if (fitMode === 'station') resetToBedView();
     else if (fitMode === 'full') viewFullRoll();
     else if (fitMode === 'flow') resetToFlowView();
+    else if (fitMode === 'layout') focusCurrentLayout();
 });
 for (const event of ['case:changed', 'mode:changed']) bus.on(event, () => { view.overview = false; });

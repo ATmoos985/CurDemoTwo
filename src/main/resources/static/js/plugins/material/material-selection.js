@@ -19,7 +19,7 @@ export function requestFromUI() {
     return {...solverSettings(), taskId:state.activeTask?.id || null,taskRevision:state.activeTask?.revision || 0,
         rollModel:el('task-material').value,trimStart:Number(el('inp-trim-start').value),pieceGap:Number(el('inp-piece-gap').value),
         cutOrigin:el('sel-cut-origin').value,firstStageOrientation:el('sel-first-stage').value,
-        demands:getDemandsFromUI().map(d=>({id:d.id,name:d.name,width:d.width,length:d.length,demand:Math.max(0,d.demand-(staged[d.id] || 0)),allowRotation:d.allowRotation})).filter(d=>d.demand>0),
+        demands:getDemandsFromUI().map(d=>({id:d.id,name:d.name,width:d.width,length:d.length,shape:d.shape,demand:Math.max(0,d.demand-(staged[d.id] || 0)),allowRotation:d.allowRotation})).filter(d=>d.demand>0),
         allowRotation:el('sel-allow-rotation').value==='1',allowLongitudinal:el('sel-allow-longitudinal').value==='1'};
 }
 const context = () => JSON.stringify([state.getCurrentCaseData().rollId,state.loadedRemnant?.sourceRollId,state.activeTask?.id,state.activeTask?.revision,state.taskCompleted,(state.taskReports || []).map(r=>[r.planId,r.status]),queuedReports().map(r=>r.report.planId),requestFromUI()]);

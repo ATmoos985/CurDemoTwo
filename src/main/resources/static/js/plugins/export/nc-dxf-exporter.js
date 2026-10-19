@@ -42,7 +42,7 @@ export function generateGCode(caseData = null, options = {}) {
     gcode.push(`( ORIGIN DATUM  : ${data.cutOrigin || 'right-bottom'}                                  )`);
     gcode.push(`( TOTAL CUTS    : ${cuts.length} STEPS                                   )`);
     gcode.push(`( OPTIMIZED     : ${state.isToolpathOptimized ? 'YES (Segment-TSP 2-Opt)' : 'NO (Sequential)'}            )`);
-    gcode.push("( CONTROL TYPE  : 2D-Guillotine Oscillating Knife / Laser Cutting  )");
+    gcode.push("( CONTROL TYPE  : 2D CUTTING - VERIFY MACHINE POSTPROCESSOR BEFORE USE )");
     gcode.push("(------------------------------------------------------------------)");
     gcode.push("");
     gcode.push("G21          (Metric Units: Millimeters)");
@@ -175,7 +175,8 @@ export function generateDXF(caseData = null) {
 
     // 2. 成品裁片 (Layer: 1_PIECES)
     pieces.forEach(p => {
-        addRect("1_PIECES", p.x, p.y, p.x + p.w, p.y + p.l);
+        if(p.shape?.type==='POLYGON')p.shape.vertices.forEach((v,i)=>{const next=p.shape.vertices[(i+1)%p.shape.vertices.length];addLine('1_PIECES',p.x+v.x,p.y+v.y,p.x+next.x,p.y+next.y);});
+        else addRect("1_PIECES", p.x, p.y, p.x + p.w, p.y + p.l);
         addText("1_PIECES", p.x + 15, p.y + p.l / 2 - 10, 30, `${p.name || 'Piece'}`);
         addText("1_PIECES", p.x + 15, p.y + p.l / 2 + 30, 24, `${p.w}x${p.l}mm`);
     });

@@ -3,6 +3,12 @@ package com.example.cutdemotwo.model;
 public class PieceDemand {
     private Integer id = 0;
     private String name;
+    private com.example.cutdemotwo.model.nesting.NestingProblem.Shape shape;
+    public com.example.cutdemotwo.model.nesting.NestingProblem.Shape getShape() { return shape; }
+    public void setShape(com.example.cutdemotwo.model.nesting.NestingProblem.Shape value) { shape = value; }
+    public com.example.cutdemotwo.model.nesting.NestingProblem.Shape geometry() {
+        return shape == null ? com.example.cutdemotwo.model.nesting.NestingProblem.Shape.rectangle(getWidth(), getLength()) : shape;
+    }
     private double width;
     private double length;
     private int demand = 1;

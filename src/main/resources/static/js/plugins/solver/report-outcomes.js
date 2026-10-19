@@ -6,7 +6,7 @@ export function classifyReport(pieces, results) {
 }
 
 export function reportRecoveryCandidates(result, results, length) {
-    const uncut = classifyReport(result.pieces || [], results).UNCUT;
+    const uncut = classifyReport(result.pieces || [], results).UNCUT.filter(p=>!p.shape);
     return [...(result.remnants || []), ...uncut.flatMap(p => {
         const l = Math.max(0, Math.min(p.y+p.l,length)-p.y);
         return l ? [{id:'UNCUT-'+p.id,status:'未切毛料 #'+p.id,x:p.x,y:p.y,w:p.w,l,area:p.w*l/1_000_000,hasDefect:false,uncut:true}] : [];

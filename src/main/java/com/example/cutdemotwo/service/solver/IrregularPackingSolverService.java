@@ -89,7 +89,7 @@ public class IrregularPackingSolverService implements ICutSolverEngine {
                     .map(angle -> Map.of("start", angle, "end", angle, "mirror", false)).toList());
             return item;
         }).toList();
-        return Map.of("objective", "knapsack", "bin_types", List.of(bin), "item_types", items);
+        return Map.of("objective", "knapsack", "bin_types", List.of(bin), "item_types", items, "parameters", Map.of("item_item_minimum_spacing", p.process().pieceGap()));
     }
     static EngineResult parseCertificate(JsonNode root, NestingProblem problem) {
         var result = new EngineResult(); result.setSuccess(true);

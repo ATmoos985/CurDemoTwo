@@ -444,6 +444,11 @@ public class RemnantService {
                 !Set.of("horizontal", "vertical").contains(String.valueOf(process.firstStageOrientation()))))
             throw new IllegalArgumentException("机台工艺参数无效");
         for (CuttingTask.Line line : input.demands()) {
+            if (line != null && line.shape() != null) {
+                com.example.cutdemotwo.service.solver.PolygonGeometry.validate(line.shape());
+                if (line.width() != line.shape().width() || line.length() != line.shape().height())
+                    throw new IllegalArgumentException("需求尺寸必须与轮廓外接尺寸一致");
+            }
             if (line == null || line.id() <= 0 || !ids.add(line.id()) || line.name() == null || line.name().isBlank() ||
                     !Double.isFinite(line.width()) || !Double.isFinite(line.length()) || line.width() <= 0 || line.length() <= 0 ||
                     line.quantity() <= 0 || line.quantity() > 10000)
@@ -458,7 +463,7 @@ public class RemnantService {
                 if (count == 0) continue;
                 CuttingTask.Line line = input.demands().stream().filter(d -> d.id() == old.id()).findFirst()
                         .orElseThrow(() -> new IllegalArgumentException("已报工需求不能删除"));
-                if (line.width() != old.width() || line.length() != old.length() || !line.name().equals(old.name()) || line.quantity() < count)
+                if (!Objects.equals(line.shape(), old.shape()) || line.width() != old.width() || line.length() != old.length() || !line.name().equals(old.name()) || line.quantity() < count)
                     throw new IllegalArgumentException("已报工需求的名称和尺寸不能修改，总件数不得小于已报工件数");
             }
             if (Objects.equals(previous.name(), input.name()) && Objects.equals(previous.materialModel(), input.materialModel()) &&
@@ -505,7 +510,7 @@ public class RemnantService {
             if (demand == null || !seen.add(demand.getId())) throw new IllegalArgumentException("排料需求编号重复或为空");
             CuttingTask.Line line = task.demands().stream().filter(d -> d.id() == demand.getId()).findFirst()
                     .orElseThrow(() -> new IllegalArgumentException("需求不属于当前任务"));
-            if (demand.getWidth() != line.width() || demand.getLength() != line.length() ||
+            if (!Objects.equals(demand.getShape(), line.shape()) || demand.getWidth() != line.width() || demand.getLength() != line.length() ||
                     demand.getDemand() <= 0 || demand.getDemand() > line.quantity() - counts.getOrDefault(String.valueOf(line.id()), 0))
                 throw new IllegalArgumentException("需求尺寸或剩余数量已变化，请刷新任务后重新排料");
             demand.setName(line.name());
@@ -585,9 +590,9 @@ public class RemnantService {
     private void addCandidate(List<Map<String, Object>> result, SolveRequest request, String type, String id, String rollId,
                               double width, double length, String location, boolean defects) {
         long fit = request.getDemands().stream().filter(d -> d != null && d.getDemand() > 0 && d.getWidth() > 0 && d.getLength() > 0 &&
-                ((d.getWidth() <= width && d.getLength() <= length && (request.isAllowLongitudinal() || Math.abs(d.getWidth()-width) < .001)) ||
+                ((d.getWidth() <= width && d.getLength() <= length && (ContourWorkflow.isContour(request) || request.isAllowLongitudinal() || Math.abs(d.getWidth()-width) < .001)) ||
                  ((request.isAllowRotation() || d.isAllowRotation()) && d.getLength() <= width && d.getWidth() <= length &&
-                  (request.isAllowLongitudinal() || Math.abs(d.getLength()-width) < .001)))).count();
+                  (ContourWorkflow.isContour(request) || request.isAllowLongitudinal() || Math.abs(d.getLength()-width) < .001)))).count();
         if (fit == 0) return;
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("type", type); row.put("id", id); row.put("rollId", rollId); row.put("width", width); row.put("length", length);

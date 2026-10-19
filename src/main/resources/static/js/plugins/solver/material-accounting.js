@@ -1,4 +1,5 @@
-const area = rectangles => rectangles.reduce((sum, p) => sum + p.w * p.l / 1_000_000, 0);
+import {shapeArea, rectangle} from '../../nesting/nesting-scene.js';
+const area = rectangles => rectangles.reduce((sum, p) => sum + shapeArea(p.shape || rectangle(p.w,p.l)) / 1_000_000, 0);
 const percent = (part, total) => total > 0 ? part / total * 100 : 0;
 
 /** Processing area and consumed material are different denominators. Coordinates remain in mm. */

@@ -30,7 +30,7 @@ function draftSnapshot() {
             demands:[...document.querySelectorAll('#demands-container .item-row')].map(row => ({
                 id:Number(row.dataset.id), name:row.querySelector('.dem-name').value,
                 width:row.querySelector('.dem-w').value, length:row.querySelector('.dem-l').value,
-                quantity:row.querySelector('.dem-count').value, allowRotation:row.dataset.rotation === 'true'
+                shape:row.dataset.shape ? JSON.parse(row.dataset.shape) : null, quantity:row.querySelector('.dem-count').value, allowRotation:row.dataset.rotation === 'true'
             }))},
         source: {mode:state.currentCutMode, rollId:state.getCurrentCaseData().rollId, remnantId:state.loadedRemnant?.id}
     };
@@ -254,7 +254,7 @@ function taskPayload() {
             cutOrigin:el('sel-cut-origin').value, firstStageOrientation:el('sel-first-stage').value,
             allowRotation:el('sel-allow-rotation').value === '1', allowLongitudinal:el('sel-allow-longitudinal').value === '1'},
         demands: getDemandsFromUI().map(d => ({ id: d.id, name: d.name, width: d.width,
-            length: d.length, quantity: d.count, allowRotation: d.allowRotation }))
+            length: d.length, quantity: d.count, shape:d.shape, allowRotation: d.allowRotation }))
     };
 }
 

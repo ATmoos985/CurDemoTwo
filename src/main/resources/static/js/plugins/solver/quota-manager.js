@@ -280,6 +280,7 @@ export function renderDemandsUI(demands) {
 
         row.setAttribute("data-id", dem.id || idx + 1);
         row.dataset.rotation = String(Boolean(dem.allowRotation));
+        if (dem.shape) row.dataset.shape = JSON.stringify(dem.shape);
         row.setAttribute("data-completed", completed);
         row.setAttribute("data-total", totalCount);
 
@@ -296,6 +297,10 @@ export function renderDemandsUI(demands) {
             <div class="demand-status"></div>
             <div class="demand-remnant-box" id="rem-hint-${idx}" style="display: none;"></div>
         `;
+        if (dem.shape) {
+            row.querySelectorAll('.dem-w,.dem-l').forEach(input => input.readOnly = true);
+            const hint=document.createElement('small');hint.className='muted';hint.textContent='衣片轮廓 · 尺寸为外接框 · '+(dem.allowRotation?'允许旋转':'固定纱向');row.append(hint);
+        }
         container.appendChild(row);
     });
 
@@ -409,6 +414,7 @@ export function getDemandsFromUI() {
             count: totalCount,
             demand: remaining,
             completed: completed,
+            shape: r.dataset.shape ? JSON.parse(r.dataset.shape) : null,
             allowRotation: r.dataset.rotation === "true"
         });
     });

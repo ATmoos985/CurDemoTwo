@@ -62,8 +62,16 @@ public class CuttingWorkflowService {
             var source = original.result().getPieces().stream().filter(p -> p.getId() == position.id()).findFirst()
                     .orElseThrow(() -> new IllegalArgumentException("调整中包含不属于原方案的裁片"));
             boolean swap = source.isRotated() != position.rotated();
-            pieces.add(new PlacedPiece(source.getId(), source.getName(), position.x(), position.y(),
-                    swap ? source.getL() : source.getW(), swap ? source.getW() : source.getL(), position.rotated(), source.getDemandId()));
+            var moved = new PlacedPiece(source.getId(), source.getName(), position.x(), position.y(),
+                    swap ? source.getL() : source.getW(), swap ? source.getW() : source.getL(), position.rotated(), source.getDemandId());
+            if (source.getShape() != null) {
+                int angle = position.rotationDegrees() == null ? (source.getRotationDegrees() + (swap ? 90 : 0)) % 360 : position.rotationDegrees();
+                if (!Set.of(0,90,180,270).contains(angle) || (angle % 180 != 0) != position.rotated())
+                    throw new IllegalArgumentException("轮廓旋转角度与尺寸状态不一致");
+                moved.setShape(com.example.cutdemotwo.service.solver.PolygonGeometry.rotate(source.getShape(), (angle-source.getRotationDegrees()+360)%360));
+                moved.setRotationDegrees(angle);
+            }
+            pieces.add(moved);
         }
         var result = FabricSolveAdapter.adjust(solverFactory, original.request(), pieces);
         result.setPlanId(adjustment.adjustmentId());

@@ -27,7 +27,7 @@ public final class PolygonGeometry {
         }
         return sum / 2;
     }
-    static void validate(Shape shape) {
+    public static void validate(Shape shape) {
         require(shape != null && shape.type() != null, "必须提供几何类型");
         if ("RECTANGLE".equals(shape.type())) { rectangle(shape); return; }
         supported("POLYGON".equals(shape.type()), "仅支持矩形和简单多边形");

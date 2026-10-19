@@ -264,10 +264,10 @@ function solveLocalSegmentTSP(rawCuts, homeX, homeY, respectPrecedence) {
             pos: s.original.pos,
             start: s.original.start,
             end: s.original.end,
-            startX: Math.round(s.startX * 10) / 10,
-            startY: Math.round(s.startY * 10) / 10,
-            endX: Math.round(s.endX * 10) / 10,
-            endY: Math.round(s.endY * 10) / 10,
+            startX: s.startX,
+            startY: s.startY,
+            endX: s.endX,
+            endY: s.endY,
             airDistance: Math.round(airDist * 10) / 10,
             desc: s.original.desc
         };

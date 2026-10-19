@@ -57,7 +57,7 @@ public class RemnantRecommendationService {
                 trial.setRollL(stock.getLength()); trial.setTotalRollL(stock.getLength()); trial.setWindowStartY(0);
                 trial.setDefects(stock.getDefects() == null ? List.of() : stock.getDefects());
                 trial.setTimeLimitSeconds(1);
-                if (!trial.isAllowLongitudinal() && trial.getDemands().stream().noneMatch(d -> Math.abs(d.getWidth() - stock.getWidth()) < .001)) {
+                if (!ContourWorkflow.isContour(trial) && !trial.isAllowLongitudinal() && trial.getDemands().stream().noneMatch(d -> Math.abs(d.getWidth() - stock.getWidth()) < .001)) {
                     unavailable.add(new Unavailable(stock.getId(), "PROCESS_MISMATCH", "仅横切需要裁片原始宽度等于料头幅宽，不能旋转后替代"));
                     continue;
                 }
@@ -70,7 +70,7 @@ public class RemnantRecommendationService {
                 result.getPieces().forEach(p -> counts.merge(p.getDemandId(), 1, Integer::sum));
                 var lines = input.getDemands().stream().map(d -> new Line(d.getId(), d.getName(), d.getWidth(), d.getLength(),
                         d.getDemand(), counts.getOrDefault(d.getId(), 0), d.getDemand() - counts.getOrDefault(d.getId(), 0))).toList();
-                double area = result.getPieces().stream().mapToDouble(p -> p.getW() * p.getL() / 1_000_000).sum();
+                double area = result.getPieces().stream().mapToDouble(p -> p.areaMm2() / 1_000_000).sum();
                 recommendations.add(new Recommendation(stock, result.getPieces().size(), area,
                         area / stock.getArea() * 100, result.getCuts().size(), lines));
             }

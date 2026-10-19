@@ -1,3 +1,4 @@
+import {shapeArea, rectangle} from '../../nesting/nesting-scene.js';
 import { renderTaskRemnants } from '../remnant/remnant-modal.js';
 import { saveCurrentTask, refreshTaskProgress, escapeText } from './task-workspace.js';
 import { createPlanHistory, planScene } from './plan-editing.js';
@@ -12,7 +13,7 @@ import { renderReportPieces, readReportPieces, syncReportRemnants, readReportRem
  */
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
-import { renderScene, resetToBedView, updateStatusBar } from '../cad/cad-renderer.js';
+import { renderScene, resetToBedView, focusCurrentLayout, updateStatusBar } from '../cad/cad-renderer.js';
 import { drawRulers } from '../cad/cad-rulers.js';
 import { renderRadar, smartAdvanceBed, resizeFeedWindow, updateFeedControls, updateFabricScrollPosition } from '../radar/radar-scrubber.js';
 import {
@@ -395,7 +396,7 @@ export async function validatePlanAdjustment() {
     const geometry = planGeometry();
     pending.adjustmentId ||= crypto.randomUUID();
     const pieces = state.getCurrentCaseData().pieces.filter(p => !p.confirmed && p.planId === pending.result.planId)
-        .map(p => ({id:p.sourcePieceId, x:p.x, y:p.y-pending.windowStartY, rotated:!!p.rotated}));
+        .map(p => ({id:p.sourcePieceId, x:p.x, y:p.y-pending.windowStartY, rotated:!!p.rotated, rotationDegrees:p.shape ? p.rotationDegrees : null}));
     validatingAdjustment = true;
     const wasInert = document.body.inert; document.body.inert = true;
     try {
@@ -495,7 +496,7 @@ async function runSolve(operation) {
 
     }
     const staged = queuedQuantities();
-    activeDemands = getDemandsFromUI().map(d => ({id:d.id, name:d.name, width:d.width, length:d.length, demand:Math.max(0,d.demand-(staged[d.id] || 0)), allowRotation:d.allowRotation})).filter(d => d.demand > 0);
+    activeDemands = getDemandsFromUI().map(d => ({id:d.id, name:d.name, width:d.width, length:d.length, shape:d.shape, demand:Math.max(0,d.demand-(staged[d.id] || 0)), allowRotation:d.allowRotation})).filter(d => d.demand > 0);
     if (!activeDemands.length) return showToast('本次需求已全部完成，可新建下一任务', 'info');
     demands = activeDemands;
 
@@ -659,7 +660,8 @@ async function runSolve(operation) {
                 data.engine = `${result.engine} [${elapsed}ms]`;
                 state.setCutStepLimit(999);
                 renderScene();
-                if (isRemnantMode) {
+                if (result.pieces.some(p=>p.shape)) focusCurrentLayout();
+                else if (isRemnantMode) {
                     resetToBedView();
                 }
                 updateUIInfo();
@@ -675,7 +677,7 @@ async function runSolve(operation) {
                 const thisBedPieces = (result.pieces || []).length;
 
                 const fallback = fallbackPresentation(result);
-                showToast(`${fallback ? `直刀排料完成（${fallback.title}，引擎 ${result.engine}）` : '直刀排料计算成功'}：产出 ${thisBedPieces} 件，预计利用率 ${materialSummary(data, isRemnantMode).utilization.toFixed(1)}%`, fallback ? 'warning' : 'success');
+                showToast(`${fallback ? `直刀排料完成（${fallback.title}，引擎 ${result.engine}）` : (result.pieces.some(p=>p.shape) ? '唛架齐套排料成功' : '直刀排料计算成功')}：产出 ${thisBedPieces} 件，预计利用率 ${materialSummary(data, isRemnantMode).utilization.toFixed(1)}%`, fallback ? 'warning' : 'success');
                 return;
             } else {
                 return;
@@ -755,8 +757,8 @@ export async function updateReportPreview() {
     const recovered=selected.filter(r=>r.w>=(pending.request.minRemnantWidth ?? 200)&&r.l>=(pending.request.minRemnantLength ?? 300));
     document.getElementById('report-preview-remnant-text').textContent=feedPortType==='remnant' ? '不回收，剩余部分计入损耗' : recovered.length+' 块回库'+(selected.length>recovered.length ? '，尺寸不足 '+(selected.length-recovered.length)+' 块计入损耗' : '');
     const usedArea=pending.request.rollW*(feedPortType==='remnant'?pending.bedL:cutLen)/1_000_000;
-    const pieceArea=groups.QUALIFIED.reduce((sum,p)=>sum+p.w*p.l/1_000_000,0);
-    const rejectedArea=groups.REJECTED.reduce((sum,p)=>sum+p.w*p.l/1_000_000,0);
+    const pieceArea=groups.QUALIFIED.reduce((sum,p)=>sum+shapeArea(p.shape || rectangle(p.w,p.l))/1_000_000,0);
+    const rejectedArea=groups.REJECTED.reduce((sum,p)=>sum+shapeArea(p.shape || rectangle(p.w,p.l))/1_000_000,0);
     const remArea=recovered.reduce((sum,r)=>sum+r.w*r.l/1_000_000,0);
     document.getElementById('report-area-preview').textContent=usedArea>0&&Number.isFinite(usedArea)
         ? '待保存利用率 '+(pieceArea/usedArea*100).toFixed(1)+'% · 合格 '+pieceArea.toFixed(3)+' ÷ 用料 '+usedArea.toFixed(3)+' m²；回收 '+remArea.toFixed(3)+' m² 另计'

@@ -7,11 +7,11 @@ export function feedLengthLimits(data, reserved = 0) {
 }
 
 export function demandFeedLength(demand, request) {
-    const fitsWidth = width => request.allowLongitudinal ? width <= request.rollW : Math.abs(width - request.rollW) < .001;
+    const fitsWidth = width => (demand.shape || request.allowLongitudinal) ? width <= request.rollW : Math.abs(width - request.rollW) < .001;
     const lengths = [];
     if (fitsWidth(demand.width) && demand.length > 0) lengths.push(demand.length);
     // The crosscut engine keeps the fabric direction and only cuts the full width.
-    if (request.allowLongitudinal && (request.allowRotation || demand.allowRotation) && fitsWidth(demand.length) && demand.width > 0)
+    if (request.allowLongitudinal && (demand.shape ? demand.allowRotation : request.allowRotation || demand.allowRotation) && fitsWidth(demand.length) && demand.width > 0)
         lengths.push(demand.width);
     return Math.min(...lengths);
 }

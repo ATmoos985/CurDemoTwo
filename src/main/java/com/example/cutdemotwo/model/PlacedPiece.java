@@ -3,6 +3,13 @@ package com.example.cutdemotwo.model;
 public class PlacedPiece {
     private int id;
     private String name;
+    private com.example.cutdemotwo.model.nesting.NestingProblem.Shape shape;
+    private int rotationDegrees;
+    public com.example.cutdemotwo.model.nesting.NestingProblem.Shape getShape() { return shape; }
+    public void setShape(com.example.cutdemotwo.model.nesting.NestingProblem.Shape value) { shape = value; }
+    public int getRotationDegrees() { return rotationDegrees; }
+    public void setRotationDegrees(int value) { rotationDegrees = value; }
+    public double areaMm2() { return shape == null ? w * l : com.example.cutdemotwo.service.solver.PolygonGeometry.area(shape); }
     private double x;
     private double y;
     private double w;

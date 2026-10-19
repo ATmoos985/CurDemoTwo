@@ -7,10 +7,10 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
 
-final class PolygonResultValidator {
+public final class PolygonResultValidator {
     // Boolean area tolerance only; it is not a user-configurable cutting allowance.
     private static final double AREA_EPS = .001;
-    static String validate(NestingProblem input, EngineResult output) {
+    public static String validate(NestingProblem input, EngineResult output) {
         if (!output.getPieces().isEmpty() || !output.getRemnants().isEmpty() || !output.getCuts().isEmpty())
             return "轮廓排料不能混入矩形料头或直刀刀序";
         var material = PolygonGeometry.region(input.material().shape(), 0, 0);
@@ -35,6 +35,23 @@ final class PolygonResultValidator {
                 if (PolygonGeometry.area(overlap) > AREA_EPS) return "异形结果进入禁入区域";
             }
             occupied.add(placed);
+        }
+        if (input.process().pieceGap() > 0) {
+            var pieces = output.getPlacements();
+            for (int i = 0; i < pieces.size(); i++) for (int j = i + 1; j < pieces.size(); j++) {
+                var a = pieces.get(i); var b = pieces.get(j);
+                var av = PolygonGeometry.vertices(a.shape()); var bv = PolygonGeometry.vertices(b.shape());
+                for (int ai = 0; ai < av.size(); ai++) for (int bi = 0; bi < bv.size(); bi++) {
+                    var p = av.get(ai); var q = av.get((ai + 1) % av.size());
+                    var r = bv.get(bi); var t = bv.get((bi + 1) % bv.size());
+                    double ax=p.x()+a.x(), ay=p.y()+a.y(), bx=q.x()+a.x(), by=q.y()+a.y();
+                    double cx=r.x()+b.x(), cy=r.y()+b.y(), dx=t.x()+b.x(), dy=t.y()+b.y();
+                    double distance = java.awt.geom.Line2D.linesIntersect(ax,ay,bx,by,cx,cy,dx,dy) ? 0 : Math.min(
+                        Math.min(java.awt.geom.Line2D.ptSegDist(ax,ay,bx,by,cx,cy), java.awt.geom.Line2D.ptSegDist(ax,ay,bx,by,dx,dy)),
+                        Math.min(java.awt.geom.Line2D.ptSegDist(cx,cy,dx,dy,ax,ay), java.awt.geom.Line2D.ptSegDist(cx,cy,dx,dy,bx,by)));
+                    if (distance + .001 < input.process().pieceGap()) return "轮廓裁片间距不足";
+                }
+            }
         }
         return null;
     }

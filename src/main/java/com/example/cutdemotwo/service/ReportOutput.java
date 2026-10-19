@@ -6,7 +6,7 @@ import java.util.*;
 
 /** Validated dispositions of saved plan pieces. Does not mutate a plan or inventory. */
 record ReportOutput(List<ReportedPiece> details, List<PlacedPiece> qualified, List<PlacedPiece> rejected, List<PlacedPiece> uncut) {
-    record ReportedPiece(int pieceId, Integer demandId, String name, double x, double y, double w, double l, String outcome, String reason) {}
+    record ReportedPiece(int pieceId, Integer demandId, String name, double x, double y, double w, double l, String outcome, String reason, com.example.cutdemotwo.model.nesting.NestingProblem.Shape shape, int rotationDegrees) {}
 
     static ReportOutput resolve(SolveResponse plan, CutReport report) {
         var supplied = report.pieceResults() == null ? plan.getPieces().stream()
@@ -28,7 +28,7 @@ record ReportOutput(List<ReportedPiece> details, List<PlacedPiece> qualified, Li
             if (row == null) throw new IllegalArgumentException("报工裁片不属于当前方案");
             switch (row.outcome()) { case "QUALIFIED" -> qualified.add(p); case "REJECTED" -> rejected.add(p); default -> uncut.add(p); }
             details.add(new ReportedPiece(p.getId(), p.getDemandId(), p.getName(), p.getX(), p.getY(), p.getW(), p.getL(),
-                    row.outcome(), row.reason() == null ? "" : row.reason().trim()));
+                    row.outcome(), row.reason() == null ? "" : row.reason().trim(), p.getShape(), p.getRotationDegrees()));
         }
         if (report.finishedPieceCount() != qualified.size() || plan.getPieces().isEmpty())
             throw new IllegalArgumentException("合格产出数量与逐件结果不一致");
@@ -38,12 +38,13 @@ record ReportOutput(List<ReportedPiece> details, List<PlacedPiece> qualified, Li
     List<PlacedPiece> cutPieces() { var all = new ArrayList<>(qualified); all.addAll(rejected); return all; }
     double qualifiedArea() { return area(qualified); }
     double rejectedArea() { return area(rejected); }
-    private static double area(List<PlacedPiece> pieces) { return pieces.stream().mapToDouble(p -> p.getW()*p.getL()/1_000_000).sum(); }
+    private static double area(List<PlacedPiece> pieces) { return pieces.stream().mapToDouble(p -> p.areaMm2()/1_000_000).sum(); }
 
     Map<String, RemnantPiece> recoveryCandidates(SolveResponse plan, double sourceLength) {
         Map<String, RemnantPiece> candidates = new LinkedHashMap<>();
         plan.getRemnants().forEach(r -> candidates.put(r.getId(), r));
         for (var p : uncut) {
+            if (p.getShape() != null) continue; // Nested outline bounding boxes are not intact recoverable rectangles.
             double length = Math.min(p.getY()+p.getL(), sourceLength) - p.getY();
             if (length <= 0) continue; // The unseparated tail stays on the roll.
             String id = "UNCUT-" + p.getId();

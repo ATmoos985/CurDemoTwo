@@ -25,7 +25,12 @@ public record NestingProblem(
     public record Part(int id, String name, Shape shape, int quantity, boolean allowRotation) {}
     public record Process(String mode, String feedMode, String startCorner, String firstStageOrientation,
                           double trimStart, double minReusableWidth, double minReusableHeight,
-                          double kerf, String objective) {}
+                          double kerf, String objective, double pieceGap) {
+        public Process(String mode, String feedMode, String startCorner, String firstStageOrientation,
+                       double trimStart, double minReusableWidth, double minReusableHeight, double kerf, String objective) {
+            this(mode, feedMode, startCorner, firstStageOrientation, trimStart, minReusableWidth, minReusableHeight, kerf, objective, 0);
+        }
+    }
 
     public double width() { return material.shape().width(); }
     public double height() { return material.shape().height(); }

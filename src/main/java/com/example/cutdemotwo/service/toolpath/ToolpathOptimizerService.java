@@ -87,10 +87,10 @@ public class ToolpathOptimizerService {
                     seg.original.getEnd(),
                     seg.original.getDesc()
             );
-            cs.setStartX(Math.round(seg.startX * 10.0) / 10.0);
-            cs.setStartY(Math.round(seg.startY * 10.0) / 10.0);
-            cs.setEndX(Math.round(seg.endX * 10.0) / 10.0);
-            cs.setEndY(Math.round(seg.endY * 10.0) / 10.0);
+            cs.setStartX(seg.startX);
+            cs.setStartY(seg.startY);
+            cs.setEndX(seg.endX);
+            cs.setEndY(seg.endY);
             cs.setAirDistance(Math.round(airDist * 10.0) / 10.0);
             cs.setStage(seg.original.getStage());
             finalCuts.add(cs);
@@ -309,13 +309,13 @@ public class ToolpathOptimizerService {
         boolean isReversed = false;
 
         CutSegment(CutStep cs) {
-            if (cs == null || !("横切".equals(cs.getType()) || "纵切".equals(cs.getType())))
+            if (cs == null || !("横切".equals(cs.getType()) || "纵切".equals(cs.getType()) || "轮廓切".equals(cs.getType())))
                 throw new IllegalArgumentException("刀路包含无效切割类型");
             if (cs.getStage() != null && cs.getStage() <= 0) throw new IllegalArgumentException("切割阶段必须为正数");
             this.original = cs;
             int coordinates = (cs.getStartX() == null ? 0 : 1) + (cs.getStartY() == null ? 0 : 1)
                     + (cs.getEndX() == null ? 0 : 1) + (cs.getEndY() == null ? 0 : 1);
-            if (coordinates != 0 && coordinates != 4) throw new IllegalArgumentException("刀路端点坐标不完整");
+            if (("轮廓切".equals(cs.getType()) && coordinates != 4) || (coordinates != 0 && coordinates != 4)) throw new IllegalArgumentException("刀路端点坐标不完整");
             if (cs.getStartX() != null && cs.getEndX() != null && cs.getStartY() != null && cs.getEndY() != null) {
                 p1x = cs.getStartX();
                 p1y = cs.getStartY();
@@ -335,10 +335,10 @@ public class ToolpathOptimizerService {
             for (double value : new double[]{cs.getPos(), cs.getStart(), cs.getEnd(), p1x, p1y, p2x, p2y})
                 if (!Double.isFinite(value)) throw new IllegalArgumentException("刀路坐标必须为有限数值");
             boolean horizontal = "横切".equals(cs.getType());
-            if (Math.abs((horizontal ? p1y : p1x)-cs.getPos()) > EPS
+            if (!"轮廓切".equals(cs.getType()) && (Math.abs((horizontal ? p1y : p1x)-cs.getPos()) > EPS
                     || Math.abs((horizontal ? p2y : p2x)-cs.getPos()) > EPS
                     || Math.abs(Math.min(horizontal ? p1x : p1y, horizontal ? p2x : p2y)-Math.min(cs.getStart(),cs.getEnd())) > EPS
-                    || Math.abs(Math.max(horizontal ? p1x : p1y, horizontal ? p2x : p2y)-Math.max(cs.getStart(),cs.getEnd())) > EPS)
+                    || Math.abs(Math.max(horizontal ? p1x : p1y, horizontal ? p2x : p2y)-Math.max(cs.getStart(),cs.getEnd())) > EPS))
                 throw new IllegalArgumentException("刀路端点与切割线不一致");
             this.length = Math.hypot(p2x - p1x, p2y - p1y);
             this.startX = p1x;

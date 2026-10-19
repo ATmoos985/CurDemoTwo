@@ -11,9 +11,9 @@ export function createWorkspaceScene(data) {
     const width = data.rollW || 2000, height = data.totalRollL || 60000;
     const start = data.windowStartY || 0, length = data.bedL || 5000;
     const placements = (data.pieces || []).map(p => ({ id: p.id, demandId: p.demandId, name: p.name,
-        x: p.x, y: p.y, shape: rectangle(p.w, p.l), rotationDegrees: p.rotated ? 90 : 0 }));
+        x: p.x, y: p.y, shape: p.shape || rectangle(p.w, p.l), rotationDegrees: p.rotationDegrees ?? (p.rotated ? 90 : 0) }));
     const cuts = (data.cuts || []).filter(c => {
-        const y = c.type === '横切' ? c.pos : (c.start + c.end) / 2;
+        const y = c.startY != null ? (c.startY+c.endY)/2 : c.type === '横切' ? c.pos : (c.start + c.end) / 2;
         return y >= start - 10 && y <= start + length + 10;
     }).map(c => {
         const horizontal = c.type === '横切';

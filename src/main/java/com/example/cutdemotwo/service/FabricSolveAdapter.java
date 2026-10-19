@@ -11,6 +11,7 @@ public final class FabricSolveAdapter {
     private FabricSolveAdapter() {}
 
     public static SolveResponse solve(SolverFactory factory, SolveRequest request) {
+        if (ContourWorkflow.isContour(request)) return ContourWorkflow.solve(factory, request);
         var problem = toProblem(request);
         double gap = request.getPieceGap();
         if (gap == 0) return toLegacy(request, factory.solve(problem));
@@ -37,6 +38,7 @@ public final class FabricSolveAdapter {
     }
 
     public static SolveResponse adjust(SolverFactory factory, SolveRequest request, List<PlacedPiece> pieces) {
+        if (ContourWorkflow.isContour(request)) return ContourWorkflow.adjust(request, pieces);
         double gap = request.getPieceGap();
         SolveRequest.validatePieceGap(gap);
         for (int i = 0; gap > 0 && i < pieces.size(); i++) for (int j = i + 1; j < pieces.size(); j++) {

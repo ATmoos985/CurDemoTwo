@@ -1,3 +1,4 @@
+import {pieceVertices, outlinesConflict, rotateOutlinePiece} from './outline-geometry.js';
 /**
  * CAD 交互式手动排料微调与碰撞/瑕疵干涉检测插件 (Interactive Nesting & Collision Detection Plugin)
  * 允许用户在画布上直接点选、拖拽移动、方向键精确微调(5mm/20mm)、90°旋转，并提供毫秒级干涉碰撞报警
@@ -60,7 +61,7 @@ export function makePieceInteractive(pGroup, piece, caseData) {
     pGroup.on("mouseenter", () => {
         const container = document.getElementById("konva-container");
         if (container) container.style.cursor = "move";
-        const mainRect = pGroup.findOne("Rect");
+        const mainRect = pGroup.findOne("Rect") || pGroup.findOne("Line");
         if (mainRect && selectedPieceId !== piece.id) {
             mainRect.strokeWidth(2);
             mainLayer.batchDraw();
@@ -70,7 +71,7 @@ export function makePieceInteractive(pGroup, piece, caseData) {
     pGroup.on("mouseleave", () => {
         const container = document.getElementById("konva-container");
         if (container) container.style.cursor = "default";
-        const mainRect = pGroup.findOne("Rect");
+        const mainRect = pGroup.findOne("Rect") || pGroup.findOne("Line");
         if (mainRect && selectedPieceId !== piece.id) {
             mainRect.strokeWidth(1);
             mainLayer.batchDraw();
@@ -99,7 +100,7 @@ export function makePieceInteractive(pGroup, piece, caseData) {
 
         bus.emit('piece:dragging');
         const collision = checkCollision(piece, curX, curY, caseData);
-        const mainRect = pGroup.findOne("Rect");
+        const mainRect = pGroup.findOne("Rect") || pGroup.findOne("Line");
 
         if (collision.hasConflict) {
             // 触发干涉告警视觉呈现 (刺眼半透明红 + 红色高亮边框)
@@ -138,7 +139,7 @@ export function makePieceInteractive(pGroup, piece, caseData) {
                 y: dragInitialPos.y,
                 duration: 0.15,
                 onFinish: () => {
-                    const mainRect = pGroup.findOne("Rect");
+                    const mainRect = pGroup.findOne("Rect") || pGroup.findOne("Line");
                     if (mainRect) {
                         mainRect.fill(isDark ? "#304d5a" : "#e2edf2");
                         mainRect.stroke("#62899b");
@@ -179,6 +180,15 @@ function checkCollision(targetPiece, testX, testY, caseData) {
     if (pY1 < winStartY) return { hasConflict: true, reason: "超出当前工位上界" };
     if (pY2 > winEndY) return { hasConflict: true, reason: "超出当前工位展开下界" };
 
+    if (targetPiece.shape || pieces.some(p=>p.shape)) {
+        const outline=pieceVertices(targetPiece,testX,testY);
+        for(const d of defects) {
+            const m=d.margin ?? 20;
+            if(outlinesConflict(outline,pieceVertices({x:d.x-m,y:d.y-m,w:d.w+2*m,l:d.h+2*m})))return {hasConflict:true,reason:'进入疵点避让区域'};
+        }
+        for(const other of pieces)if(other.id!==targetPiece.id && outlinesConflict(outline,pieceVertices(other),caseData.pieceGap || 0))return {hasConflict:true,reason:'衣片重叠或间距不足'};
+        return {hasConflict:false};
+    }
     // 2. 瑕疵碰撞检测 (Defect Safety Zone Collision)
     for (let d of defects) {
         const m = d.margin !== undefined ? d.margin : 20;
@@ -281,18 +291,17 @@ export function initNestingKeyboardShortcuts() {
             newY += step; moved = true;
         } else if (e.key === "r" || e.key === "R") {
             // 90° 旋转
-            const oldW = piece.w;
-            piece.w = piece.l;
-            piece.l = oldW;
+            const original={...piece};
+            if(!rotateOutlinePiece(piece,data.demands)) {
+                import('../../core/toast.js').then(m=>m.showToast('该衣片要求固定纱向，不能旋转','warning'));return;
+            }
             const collision = checkCollision(piece, piece.x, piece.y, data);
             if (collision.hasConflict) {
                 // 旋转冲突撤销
-                piece.w = piece.l;
-                piece.l = oldW;
+                Object.assign(piece,original);
                 showCollisionBadge(piece.x, piece.y, `[旋转干涉] ${collision.reason}`);
                 setTimeout(hideCollisionBadge, 1500);
             } else {
-                piece.rotated = !piece.rotated;
                 bus.emit('piece:moved', { pieceId: piece.id, x: piece.x, y: piece.y });
             }
             e.preventDefault();

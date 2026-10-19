@@ -70,6 +70,7 @@ export function renderDemandEditor(flow) {
         ? '填写任务信息，添加需求后选择材料。' : '修改当前任务的需求；已报工数量保留。';
     el('demand-manager-import').hidden = !creating;
     el('demand-manager-sample').hidden = !creating;
+    el('garment-demand-actions').hidden = !creating;
     el('demand-editor-save').disabled = flow.stage === 0;
     el('demand-editor-save').textContent = creating ? '保存并选择材料' : '保存修改';
     el('demand-editor-hint').textContent = flow.stage === 0 ? flow.hint : creating ? '需求已齐备，下一步选择母卷或料头。' : '修改自动保留为本机草稿。';

@@ -63,7 +63,7 @@ export function parseDemandJSON(value) {
     if (value.demands.length > 10000) throw new Error('需求超过 10000 行，请按批次拆分。');
     const result = {groups:[], issues:[], format:'现有任务 JSON · mm', name:text(value.name), externalRef:text(value.externalRef)};
     value.demands.forEach((line, index) => add(result, {row:index + 1, materialModel:text(value.materialModel),
-        name:text(line?.name), width:line?.width, length:line?.length, quantity:line?.quantity,
+        ...(line?.shape == null ? {} : {shape:line.shape}), name:text(line?.name), width:line?.width, length:line?.length, quantity:line?.quantity,
         allowRotation:line?.allowRotation === true}, line?.allowRotation != null && typeof line.allowRotation !== 'boolean' ? 'allowRotation 必须是布尔值' : ''));
     return finish(result);
 }
@@ -77,9 +77,9 @@ export function importedTask(result, index, source, selectedIds = null) {
         throw new Error('勾选需求与当前布料不一致，请重新选择。');
     return {name:result.name || `${source} · ${group.materialModel}`, materialModel:group.materialModel,
         externalRef:result.externalRef || source,
-        demands:demands.map(({id, name, order, width, length, quantity, allowRotation}) => ({id,
+        demands:demands.map(({id, name, order, width, length, quantity, allowRotation, shape}) => ({id,
             name:order && !name.includes(order) ? `订单 ${order} · ${name}` : name,
-            width, length, quantity, allowRotation}))};
+            width, length, quantity, allowRotation, ...(shape == null ? {} : {shape})}))};
 }
 
 /** Include identified fabrics whose rows require correction, without making those rows importable. */
