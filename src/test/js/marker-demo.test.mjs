@@ -45,11 +45,18 @@ test('no initial complete kit produces no successful result and cancellation sto
 });
 test('every separating animation frame comes after all 2D or 1D cuts', () => {
     for(const mode of Object.keys(CUT_PATHS)) {
-        const seen=new Set();
-        for(let t=0;t<16000;t+=10){const frame=cuttingFrame(t,mode);seen.add(frame.complete);
+        for(let t=0;t<13000;t+=10){const frame=cuttingFrame(t,mode);
             if(frame.phase==='裁片分离')assert.equal(frame.complete,CUT_PATHS[mode].length);
             if(frame.phase==='切割')assert.equal(frame.offset,0);
         }
-        assert.equal(seen.size,CUT_PATHS[mode].length+1);
+        assert.equal(cuttingFrame(2800,mode).phase,'裁片分离');
     }
+});
+
+test('2D crosscut finishes before all remaining edges advance together', () => {
+    assert.deepEqual(cuttingFrame(1200,'sheet').progress,[.5,0,0,0,0,0]);
+    assert.deepEqual(cuttingFrame(2100,'sheet').progress,[1,.5,.5,.5,.5,.5]);
+    assert.equal(cuttingFrame(2100,'sheet').complete,1);
+    assert.equal(cuttingFrame(2600,'sheet').complete,6);
+    assert.deepEqual(cuttingFrame(1700,'strip').progress,[.5,.5,.5,.5]);
 });
