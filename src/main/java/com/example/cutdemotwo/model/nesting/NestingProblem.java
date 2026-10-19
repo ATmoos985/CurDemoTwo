@@ -25,10 +25,20 @@ public record NestingProblem(
     public record Part(int id, String name, Shape shape, int quantity, boolean allowRotation) {}
     public record Process(String mode, String feedMode, String startCorner, String firstStageOrientation,
                           double trimStart, double minReusableWidth, double minReusableHeight,
-                          double kerf, String objective, double pieceGap) {
+                          double kerf, String objective, Double pieceGap) {
+        public Process {
+            // Older demo/API inputs omit the optional spacing constraint.
+            pieceGap = pieceGap == null ? 0.0 : pieceGap;
+        }
         public Process(String mode, String feedMode, String startCorner, String firstStageOrientation,
                        double trimStart, double minReusableWidth, double minReusableHeight, double kerf, String objective) {
-            this(mode, feedMode, startCorner, firstStageOrientation, trimStart, minReusableWidth, minReusableHeight, kerf, objective, 0);
+            this(mode, feedMode, startCorner, firstStageOrientation, trimStart, minReusableWidth, minReusableHeight, kerf, objective, 0.0);
+        }
+        public Process(String mode, String feedMode, String startCorner, String firstStageOrientation,
+                       double trimStart, double minReusableWidth, double minReusableHeight, double kerf, String objective,
+                       double pieceGap) {
+            this(mode, feedMode, startCorner, firstStageOrientation, trimStart, minReusableWidth,
+                    minReusableHeight, kerf, objective, Double.valueOf(pieceGap));
         }
     }
 

@@ -66,7 +66,8 @@ const assert = require('node:assert/strict');
             await expect(page.locator('#solve-button')).toHaveText('开始裁切预览');
             passed++;
         }
-        await page.locator('#scenario-select').focus(); await page.keyboard.press('Home');
+        // Native select Home-key behavior differs on macOS; dispatch the real selection events.
+        await page.locator('#scenario-select').selectOption('CROSSCUT');
         await expect(page.locator('#scenario-select')).toHaveValue('CROSSCUT');
         await expect(page.locator('#material-height')).toHaveValue('3000');
         await page.locator('#material-width').fill('2100');

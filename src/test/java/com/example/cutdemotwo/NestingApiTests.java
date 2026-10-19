@@ -3,6 +3,8 @@ package com.example.cutdemotwo;
 import com.example.cutdemotwo.model.nesting.*;
 import com.example.cutdemotwo.service.RemnantService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -91,5 +93,54 @@ class NestingApiTests {
         var notPlaced = json.readValue(noRotation.body(), NestingResult.class);
         assertEquals("NO_SOLUTION_FOUND", notPlaced.status());
         assertEquals(1, notPlaced.fulfillment().get(0).unplaced());
+    }
+
+    private String legacyProblem(String mode) {
+        // Raw legacy HTTP input, independent of DTO serialization and local generated files.
+        return """
+                {"schemaVersion":"1","unit":"mm","engine":"auto","timeLimitSeconds":2,
+                 "material":{"id":"legacy-demo","shape":{"type":"RECTANGLE","width":1000,"height":1200},
+                             "exclusions":[],"continuesAfterRegion":false},
+                 "parts":[{"id":1,"name":"legacy-part","shape":{"type":"RECTANGLE","width":1000,"height":100},
+                           "quantity":3,"allowRotation":false}],
+                 "process": {"mode":"%s","feedMode":"SHEET","startCorner":"left-top",
+                             "firstStageOrientation":"%s","trimStart":0,"minReusableWidth":0,
+                             "minReusableHeight":0,"kerf":0,"objective":"%s"}}
+                """.formatted(mode, "CONTOUR".equals(mode) ? "none" : "horizontal",
+                        "CROSSCUT".equals(mode) ? "INPUT_ORDER" : "MAXIMIZE_PIECE_AREA");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"CROSSCUT", "GUILLOTINE", "CONTOUR"})
+    void legacyExamplesWithoutPieceGapStillSolve(String mode) throws Exception {
+        String body = legacyProblem(mode);
+        assertFalse(json.readTree(body).get("process").has("pieceGap"));
+        assertEquals(0.0, json.readValue(body, NestingProblem.class).process().pieceGap());
+        var response = post(body);
+        assertEquals(200, response.statusCode(), response.body());
+        var result = json.readValue(response.body(), NestingResult.class);
+        assertEquals("FEASIBLE", result.status());
+        assertFalse(result.placements().isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"null", "0", "5.5"})
+    void optionalPieceGapDefaultsToZeroAndPreservesExplicitSpacing(String value) throws Exception {
+        String legacy = legacyProblem("CONTOUR");
+        String body = legacy.replace("\"process\": {", "\"process\": {\"pieceGap\":" + value + ",");
+        var problem = json.readValue(body, NestingProblem.class);
+        assertEquals("null".equals(value) ? 0.0 : Double.parseDouble(value), problem.process().pieceGap());
+        var response = post(body);
+        assertEquals(200, response.statusCode(), response.body());
+        assertEquals("FEASIBLE", json.readValue(response.body(), NestingResult.class).status());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"-1", "100.1", "0.01", "\"invalid\"", "{}"})
+    void invalidPieceGapIsStillRejected(String value) throws Exception {
+        String legacy = legacyProblem("CONTOUR");
+        var response = post(legacy.replace("\"process\": {", "\"process\": {\"pieceGap\":" + value + ","));
+        assertEquals(400, response.statusCode(), response.body());
+        assertEquals("INVALID_INPUT", json.readValue(response.body(), NestingResult.class).status());
     }
 }

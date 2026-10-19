@@ -18,6 +18,7 @@ public class NestingController {
     private final JsonMapper json = JsonMapper.builder()
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT).build();
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(NestingController.class);
     public NestingController(SolverFactory solvers) { this.solvers = solvers; }
 
     @GetMapping("/engines")
@@ -28,6 +29,7 @@ public class NestingController {
         NestingProblem problem;
         try { problem = json.readValue(body, NestingProblem.class); }
         catch (RuntimeException invalid) {
+            log.warn("反序列化 NestingProblem 失败: {}", invalid.getMessage());
             return ResponseEntity.badRequest().body(NestingResult.failure("INVALID_INPUT", "输入格式无效、存在未知字段或字段类型错误", null, 0));
         }
         NestingResult result = solvers.solve(problem);

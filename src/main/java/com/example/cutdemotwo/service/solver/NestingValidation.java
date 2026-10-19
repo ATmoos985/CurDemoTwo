@@ -46,7 +46,11 @@ final class NestingValidation {
         require(nonnegative(c.trimStart()) && c.trimStart() < p.height(), "修边长度必须小于加工区长度");
         require(nonnegative(c.minReusableWidth()) && nonnegative(c.minReusableHeight()), "余料回收尺寸无效");
         supported(c.kerf() == 0, "当前引擎适配仅支持零刀缝");
-        com.example.cutdemotwo.model.SolveRequest.validatePieceGap(c.pieceGap());
+        try {
+            com.example.cutdemotwo.model.SolveRequest.validatePieceGap(c.pieceGap());
+        } catch (IllegalArgumentException invalid) {
+            throw new Rejected("INVALID_INPUT", invalid.getMessage());
+        }
         supported(contour || c.pieceGap() == 0, "矩形间距请使用工作台适配层");
         require(p.timeLimitSeconds() >= 1 && p.timeLimitSeconds() <= 60, "求解时限应为 1–60 秒");
         require(!p.parts().isEmpty(), "至少提供一项需求");
