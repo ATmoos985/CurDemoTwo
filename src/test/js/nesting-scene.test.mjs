@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createNestingScene, rectangle, polygon, shapeArea, sceneOrigin } from '../../main/resources/static/js/nesting/nesting-scene.js';
 import { createWorkspaceScene } from '../../main/resources/static/js/plugins/cad/workspace-scene.js';
-import { NestingSession } from '../../main/resources/static/js/nesting/nesting-client.js';
-import { renderNestingGeometry } from '../../main/resources/static/js/nesting/nesting-renderer.js';
+import { NestingSession, dispatchedEngine } from '../../main/resources/static/js/nesting/nesting-client.js';
+import { renderNestingGeometry, setNestingCutStep } from '../../main/resources/static/js/nesting/nesting-renderer.js';
 
 const input = { schemaVersion: '1', unit: 'mm', engine: 'crosscut', timeLimitSeconds: 3,
     material: { id: 'sheet-A', shape: rectangle(2000, 3000), exclusions: [], continuesAfterRegion: false },
@@ -78,7 +78,34 @@ class Node {
     visible(value) { this.attrs.visible = value; }
     position(value) { Object.assign(this.attrs, value); }
     listening(value) { this.attrs.listening = value; }
+    getAttr(key) { return this.attrs[key]; }
 }
+
+test('cut playback retains entities and toggles cut and rapid lines together, independently of culling', () => {
+    const scene = createNestingScene(input, result());
+    scene.cuts = [
+        {sequence: 1, startX: 0, startY: 500, endX: 2000, endY: 500},
+        {sequence: 2, startX: 100, startY: 1000, endX: 800, endY: 1000}
+    ];
+    const groups = Object.fromEntries(['background','exclusions','leftovers','placements','cuts','boundary'].map(k => [k,new Node()]));
+    const badges = renderNestingGeometry({Rect:Node,Line:Node,Group:Node}, groups, scene,
+        {retainCutSteps:true, stepLimit:0, optimized:true, home:{x:0,y:0}});
+    const piece = groups.placements.children[0], [first,second] = groups.cuts.children;
+    assert.equal(badges.length, 2);
+    assert.equal(first.children[0].children.length, 2);
+    assert.equal(first.children[0].attrs.visible, false);
+    first.visible(false); // culling owns the outer group
+    setNestingCutStep(groups.cuts, 1);
+    assert.equal(first.attrs.visible, false);
+    assert.equal(first.children[0].attrs.visible, true);
+    assert.equal(second.children[0].attrs.visible, false);
+    setNestingCutStep(groups.cuts, 999);
+    assert.equal(second.children[0].attrs.visible, true);
+    setNestingCutStep(groups.cuts, 0);
+    assert.equal(first.children[0].attrs.visible, false);
+    assert.equal(groups.placements.children[0], piece);
+    assert.equal(groups.cuts.children[0], first);
+});
 test('shared renderer honors overlays, explicit cut endpoints and callbacks without moving geometry', () => {
     const scene = createNestingScene(input, result());
     const before = JSON.stringify(scene), groups = Object.fromEntries(['background', 'exclusions', 'leftovers', 'placements', 'cuts', 'boundary'].map(k => [k, new Node()]));
@@ -155,4 +182,13 @@ test('shared renderer draws actual closed polygon boundaries without a bounding-
         assert.equal(node.attrs.closed,true); assert.deepEqual(node.attrs.points,points); assert.equal(node.attrs.width,undefined);
     }
     assert.deepEqual(badges,[]); assert.equal(groups.exclusions.children[0].children.length,2);
+});
+
+test('engine hint follows auto-dispatch instead of the first engine that lists the same mode', () => {
+    const engines = [{ id: 'crosscut', modes: ['CROSSCUT'], available: true }, { id: 'javaguillotine', modes: ['GUILLOTINE'], available: true },
+        { id: 'packingsolver', modes: ['GUILLOTINE'], available: false }, { id: 'packingsolver-irregular', modes: ['CONTOUR'], available: true }];
+    assert.equal(dispatchedEngine(engines, 'GUILLOTINE').id, 'packingsolver');
+    assert.equal(dispatchedEngine(engines, 'CROSSCUT').id, 'crosscut');
+    assert.equal(dispatchedEngine(engines, 'CONTOUR').id, 'packingsolver-irregular');
+    assert.equal(dispatchedEngine([], 'GUILLOTINE'), null);
 });

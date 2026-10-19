@@ -1,5 +1,11 @@
 import { createNestingScene } from './nesting-scene.js';
 
+/** Mirrors the server's auto-dispatch so capability hints describe the engine that will be asked first. */
+export function dispatchedEngine(engines, mode) {
+    const id = mode === 'CROSSCUT' ? 'crosscut' : mode === 'CONTOUR' ? 'packingsolver-irregular' : 'packingsolver';
+    return engines.find(e => e.id === id) || null;
+}
+
 /** Input revisions own results. Late responses can never replace a newer input. */
 export class NestingSession {
     constructor(fetchImpl = (...args) => globalThis.fetch(...args)) { this.fetch = fetchImpl; this.revision = 0; this.result = null; }

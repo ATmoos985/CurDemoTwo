@@ -13,6 +13,8 @@ public class SolveResponse {
     public List<com.example.cutdemotwo.model.nesting.NestingResult.Fulfillment> getFulfillment() { return fulfillment; }
     public void setFulfillment(List<com.example.cutdemotwo.model.nesting.NestingResult.Fulfillment> fulfillment) { this.fulfillment = fulfillment; }
     private String engine;
+    private String requestedEngine;
+    private String fallbackReason;
     private double rollW;
     private double rollL;
     private List<PlacedPiece> pieces = new ArrayList<>();
@@ -51,6 +53,12 @@ public class SolveResponse {
 
     public String getEngine() { return engine; }
     public void setEngine(String engine) { this.engine = engine; }
+
+    public String getRequestedEngine() { return requestedEngine; }
+    public void setRequestedEngine(String requestedEngine) { this.requestedEngine = requestedEngine; }
+
+    public String getFallbackReason() { return fallbackReason; }
+    public void setFallbackReason(String fallbackReason) { this.fallbackReason = fallbackReason; }
 
     public double getRollW() { return rollW; }
     public void setRollW(double rollW) { this.rollW = rollW; }

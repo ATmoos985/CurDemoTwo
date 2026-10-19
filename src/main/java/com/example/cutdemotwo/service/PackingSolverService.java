@@ -31,24 +31,18 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
 
     private final com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService toolpathOptimizerService;
     private final com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService cutBoundaryCompletionService;
-    private final com.example.cutdemotwo.service.solver.JavaGuillotineSolverEngine javaFallbackEngine;
 
     @org.springframework.beans.factory.annotation.Autowired
     public PackingSolverService(
             com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService toolpathOptimizerService,
-            com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService cutBoundaryCompletionService,
-            com.example.cutdemotwo.service.solver.JavaGuillotineSolverEngine javaFallbackEngine) {
+            com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService cutBoundaryCompletionService) {
         this.toolpathOptimizerService = toolpathOptimizerService;
         this.cutBoundaryCompletionService = cutBoundaryCompletionService;
-        this.javaFallbackEngine = javaFallbackEngine;
     }
 
     public PackingSolverService() {
         this.toolpathOptimizerService = new com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService();
         this.cutBoundaryCompletionService = new com.example.cutdemotwo.service.toolpath.CutBoundaryCompletionService();
-        this.javaFallbackEngine = new com.example.cutdemotwo.service.solver.JavaGuillotineSolverEngine(
-                this.toolpathOptimizerService, this.cutBoundaryCompletionService
-        );
     }
 
     @Override
@@ -56,22 +50,20 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
         return new EngineCapabilities(getEngineType(), "2", List.of("RECTANGLE"), List.of("GUILLOTINE"), List.of("MAXIMIZE_PIECE_AREA"), 1.0 / UNITS_PER_MM, isAvailable());
     }
 
-    public boolean isNativeAvailable() {
-        if (solverPath == null || solverPath.isBlank()) return false;
-        File f = new File(solverPath);
-        return f.exists() && f.canExecute();
-    }
-
+    /** Only the native executable counts; any stand-in engine is chosen and labelled by SolverFactory. */
     @Override
     public boolean isAvailable() {
-        return true;
+        return solverPath != null && !solverPath.isBlank() && Files.isRegularFile(Path.of(solverPath)) && Files.isExecutable(Path.of(solverPath));
     }
 
     @Override
     public EngineResult solve(NestingProblem req) {
-        if (!isNativeAvailable()) {
-            log.info("未检测到外部 C++ PackingSolver 可执行文件，自动平滑切换至内置 Java 原生直刀排料内核。");
-            return javaFallbackEngine.solve(req);
+        if (!isAvailable()) {
+            EngineResult err = new EngineResult();
+            err.setSuccess(false);
+            err.setFailureStatus("UNAVAILABLE");
+            err.setMessage("原生直刀引擎可执行文件缺失或不可执行");
+            return err;
         }
 
         Path tmpDir = null;
@@ -98,20 +90,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
             }
 
             // 2. items.csv
-            Map<Integer, String> itemMap = new HashMap<>();
-            Map<Integer, Integer> demandIdMap = new HashMap<>();
-            try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(new FileOutputStream(itemsCsv), java.nio.charset.StandardCharsets.UTF_8))) {
-                pw.println("ID,WIDTH,HEIGHT,STACK_ID,ORIENTED");
-                int idx = 0;
-                for (NestingProblem.Part it : req.parts()) {
-                    for (int c = 0; c < it.quantity(); c++) {
-                        pw.println(idx + "," + nativeUnits(it.shape().width()) + "," + nativeUnits(it.shape().height()) + "," + idx + "," + (it.allowRotation() ? 0 : 1));
-                        itemMap.put(idx, it.name());
-                        demandIdMap.put(idx, it.id());
-                        idx++;
-                    }
-                }
-            }
+            List<NestingProblem.Part> itemTypes = writeItems(itemsCsv, req.parts());
 
             String origin = req.process().startCorner() != null ? req.process().startCorner().trim().toLowerCase() : "right-top";
             boolean isRightOrigin = origin.startsWith("right");
@@ -135,26 +114,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                 }
             }
 
-            String firstStage = "vertical".equalsIgnoreCase(req.process().firstStageOrientation()) ? "vertical" : "horizontal";
-
-            List<String> cmd = new ArrayList<>();
-            cmd.add(solverPath);
-            cmd.add("--items"); cmd.add(itemsCsv.getAbsolutePath());
-            cmd.add("--bins"); cmd.add(binsCsv.getAbsolutePath());
-            cmd.add("--defects"); cmd.add(defectsCsv.getAbsolutePath());
-            cmd.add("--objective"); cmd.add("knapsack");
-            cmd.add("--number-of-stages"); cmd.add("3");
-            cmd.add("--cut-type"); cmd.add("roadef2018");
-            cmd.add("--first-stage-orientation"); cmd.add(firstStage);
-            cmd.add("--linear-programming-solver"); cmd.add("highs");
-            cmd.add("--certificate"); cmd.add(certCsv.getAbsolutePath());
-            cmd.add("--time-limit"); cmd.add(Integer.toString(req.timeLimitSeconds()));
-
-            if (!req.parts().stream().anyMatch(NestingProblem.Part::allowRotation)) {
-                cmd.add("--no-item-rotation");
-            }
-
-            ProcessBuilder pb = new ProcessBuilder(cmd);
+            ProcessBuilder pb = new ProcessBuilder(command(req, itemsCsv, binsCsv, defectsCsv, certCsv));
             pb.redirectErrorStream(true);
             Path output = tmpDir.resolve("solver.log");
             pb.redirectOutput(output.toFile());
@@ -173,7 +133,7 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                 return err;
             }
 
-            return parseCertificate(certCsv, req, itemMap, demandIdMap);
+            return parseCertificate(certCsv, req, itemTypes);
 
         } catch (Exception e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
@@ -198,6 +158,50 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
         }
     }
 
+    /**
+     * The solver writes the certificate once, when it exits normally: by default it rewrites the whole file after every
+     * improvement, which on large instances takes most of the search time. Only a normal exit's certificate is read.
+     */
+    private List<String> command(NestingProblem req, File itemsCsv, File binsCsv, File defectsCsv, File certCsv) {
+        String firstStage = "vertical".equalsIgnoreCase(req.process().firstStageOrientation()) ? "vertical" : "horizontal";
+
+        List<String> cmd = new ArrayList<>();
+        cmd.add(solverPath);
+        cmd.add("--items"); cmd.add(itemsCsv.getAbsolutePath());
+        cmd.add("--bins"); cmd.add(binsCsv.getAbsolutePath());
+        cmd.add("--defects"); cmd.add(defectsCsv.getAbsolutePath());
+        cmd.add("--objective"); cmd.add("knapsack");
+        cmd.add("--number-of-stages"); cmd.add("3");
+        cmd.add("--cut-type"); cmd.add("roadef2018");
+        cmd.add("--first-stage-orientation"); cmd.add(firstStage);
+        cmd.add("--linear-programming-solver"); cmd.add("highs");
+        cmd.add("--certificate"); cmd.add(certCsv.getAbsolutePath());
+        cmd.add("--only-write-at-the-end");
+        cmd.add("--time-limit"); cmd.add(Integer.toString(req.timeLimitSeconds()));
+
+        if (!req.parts().stream().anyMatch(NestingProblem.Part::allowRotation)) {
+            cmd.add("--no-item-rotation");
+        }
+        return cmd;
+    }
+
+    /**
+     * One item type per demand with COPIES, so the solver treats identical pieces as one type instead of
+     * one type per piece. Returns the demands in item-type order, which is the certificate's TYPE.
+     */
+    private static List<NestingProblem.Part> writeItems(File itemsCsv, List<NestingProblem.Part> parts) throws IOException {
+        List<NestingProblem.Part> itemTypes = parts.stream().filter(p -> p.quantity() > 0).toList();
+        try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(new FileOutputStream(itemsCsv), java.nio.charset.StandardCharsets.UTF_8))) {
+            pw.println("ID,WIDTH,HEIGHT,COPIES,STACK_ID,ORIENTED");
+            for (int type = 0; type < itemTypes.size(); type++) {
+                NestingProblem.Part it = itemTypes.get(type);
+                pw.println(type + "," + nativeUnits(it.shape().width()) + "," + nativeUnits(it.shape().height()) + ","
+                        + it.quantity() + "," + type + "," + (it.allowRotation() ? 0 : 1));
+            }
+        }
+        return itemTypes;
+    }
+
     private static long nativeUnits(double millimeters) {
         double scaled = millimeters * UNITS_PER_MM;
         long units = Math.round(scaled);
@@ -215,9 +219,14 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
         List<CertNode> children = new ArrayList<>();
     }
 
-    private EngineResult parseCertificate(File certCsv, NestingProblem req, Map<Integer, String> itemMap, Map<Integer, Integer> demandIdMap) throws IOException {
+    private EngineResult parseCertificate(File certCsv, NestingProblem req, List<NestingProblem.Part> itemTypes) throws IOException {
         EngineResult res = new EngineResult();
         res.setSuccess(true);
+
+        // Copies share their item type's TYPE; each demand's pieces take ids from its own range, in certificate order,
+        // so ids stay unique and grouped by demand as when every piece was its own item type.
+        int[] nextPieceId = new int[itemTypes.size()];
+        for (int type = 1; type < itemTypes.size(); type++) nextPieceId[type] = nextPieceId[type - 1] + itemTypes.get(type - 1).quantity();
 
         List<PlacedPiece> pieces = new ArrayList<>();
         List<RemnantPiece> remnants = new ArrayList<>();
@@ -285,11 +294,10 @@ public class PackingSolverService implements com.example.cutdemotwo.service.solv
                 double physY = EngineGeometry.normalizeZero(mirrorY ? (req.height() - n.y - n.h - trim) : (n.y + trim));
 
                 if (n.type >= 0 && n.cut > 0) {
-                    String name = itemMap.getOrDefault(n.type, "裁片-" + n.type);
-                    Integer demId = demandIdMap != null ? demandIdMap.get(n.type) : null;
-                    var part = req.parts().stream().filter(d -> Objects.equals(d.id(), demId)).findFirst().orElseThrow();
+                    if (n.type >= itemTypes.size()) throw new IOException("求解器返回了未知裁片类型 " + n.type);
+                    var part = itemTypes.get(n.type);
                     boolean rotated = Math.abs(n.w - part.shape().width()) > .001 || Math.abs(n.h - part.shape().height()) > .001;
-                    pieces.add(new PlacedPiece(n.type, name, physX, physY, n.w, n.h, rotated, demId));
+                    pieces.add(new PlacedPiece(nextPieceId[n.type]++, part.name(), physX, physY, n.w, n.h, rotated, part.id()));
                 } else if (n.type == -1 || n.type == -3) {
                     // Remnant / waste
                     // 后续仍连接材料时，全幅尾部保留为连续材料，不生成独立回收块。

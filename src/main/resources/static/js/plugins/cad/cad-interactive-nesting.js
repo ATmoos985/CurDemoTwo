@@ -2,7 +2,7 @@
  * CAD 交互式手动排料微调与碰撞/瑕疵干涉检测插件 (Interactive Nesting & Collision Detection Plugin)
  * 允许用户在画布上直接点选、拖拽移动、方向键精确微调(5mm/20mm)、90°旋转，并提供毫秒级干涉碰撞报警
  */
-import { stage, mainLayer } from './cad-stage.js';
+import { stage, mainLayer, interactionLayer } from './cad-stage.js';
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 import { openPieceContextMenu, discardPiece } from './cad-context-menu.js';
@@ -219,7 +219,7 @@ function showCollisionBadge(x, y, text, isAlert = true) {
         activeTooltip.add(new Konva.Text({
             name: "tip-text", fontSize: 13, fontStyle: "bold", fontFamily: "sans-serif"
         }));
-        mainLayer.add(activeTooltip);
+        interactionLayer.add(activeTooltip);
     }
 
     const tipBg = activeTooltip.findOne(".tip-bg");
@@ -245,7 +245,7 @@ function showCollisionBadge(x, y, text, isAlert = true) {
 function hideCollisionBadge() {
     if (activeTooltip) {
         activeTooltip.hide();
-        mainLayer.batchDraw();
+        interactionLayer.batchDraw();
     }
 }
 

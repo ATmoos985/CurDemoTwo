@@ -62,11 +62,15 @@ export function renderNestingGeometry(Konva, groups, scene, options = {}) {
     let lastX = home.x, lastY = home.y;
     const badges = [];
     for (const c of scene.cuts) {
-        if (c.sequence > stepLimit) continue;
+        if (c.sequence > stepLimit && !options.retainCutSteps) continue;
+        // 工作区演播保留刀线节点，显隐放在子组中，避免与外层视口裁剪互相覆盖。
+        const step = options.retainCutSteps ? new Konva.Group({ cutSequence: c.sequence }) : cuts;
+        const lines = options.retainCutSteps ? new Konva.Group({ visible: c.sequence <= stepLimit }) : cuts;
+        if (options.retainCutSteps) { step.add(lines); cuts.add(step); }
         const { startX: x1, startY: y1, endX: x2, endY: y2 } = c;
-        if (optimized && Math.hypot(x1 - lastX, y1 - lastY) > 1) cuts.add(new Konva.Line({
+        if (optimized && Math.hypot(x1 - lastX, y1 - lastY) > 1) lines.add(new Konva.Line({
             points: [lastX, lastY, x1, y1], stroke: '#739eaf', strokeWidth: 1, strokeScaleEnabled: false, dash: [5, 5], listening: false }));
-        cuts.add(new Konva.Line({ points: [x1, y1, x2, y2], stroke: '#b96070',
+        lines.add(new Konva.Line({ points: [x1, y1, x2, y2], stroke: '#b96070',
             strokeWidth: 1.5, strokeScaleEnabled: false, dash: optimized ? [] : [7, 5], listening: false }));
         badges.push({ x: x1, y: y1, x2, y2, step: c.sequence });
         lastX = x2; lastY = y2;
@@ -84,4 +88,11 @@ export function renderNestingGeometry(Konva, groups, scene, options = {}) {
     boundary.position({ x: region.x, y: region.y });
     boundary.listening(false);
     return badges;
+}
+
+export function setNestingCutStep(cuts, limit) {
+    for (const step of cuts.children) {
+        const sequence = step.getAttr('cutSequence');
+        if (sequence !== undefined) step.children[0].visible(sequence <= limit);
+    }
 }

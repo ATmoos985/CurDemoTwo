@@ -3,7 +3,7 @@ import { saveCurrentTask, refreshTaskProgress, escapeText } from './task-workspa
 import { createPlanHistory, planScene } from './plan-editing.js';
 import { layoutMetrics, materialSummary } from './material-accounting.js';
 import { renderWorkflowGuide, navigateWorkflowStage } from './workflow-guide.js';
-import { requestJSON, ApiError, failurePresentation } from '../../core/api-request.js';
+import { requestJSON, ApiError, failurePresentation, fallbackPresentation } from '../../core/api-request.js';
 import { updateDemandProgress } from './demand-progress.js';
 import { classifyReport, applyReportReceipt, restoreRecordedGeometry } from './report-outcomes.js';
 import { renderReportPieces, readReportPieces, syncReportRemnants, readReportRemnants, reportPieceError } from './report-editor.js';
@@ -108,6 +108,9 @@ export function updateUIInfo() {
         ['lbl-total-area-title',metrics.actual ? '实切用料面积' : '预计用料面积'],
         ['metrics-note',metrics.actual ? '按报工回执计算；回收料头单独记账。' : sheet ? '整块料头使用一次，余料计入损耗；报工后核销。' : '裁片面积 ÷ 预计用料面积；预览不扣库存。']
     ]) { const element = document.getElementById(id); if (element) element.textContent = text; }
+    const fallbackNote = document.getElementById('engine-fallback-note');
+    const fallback = hasStationPlan ? fallbackPresentation(state.pendingPlan?.result) : null;
+    if (fallbackNote) { fallbackNote.hidden = !fallback; fallbackNote.textContent = fallback ? `${fallback.title}：${fallback.message}。${fallback.hint}` : ''; }
     updateWorkflowControls();
 
     const sum = (metrics.pieceArea || 0) + (metrics.remArea || 0) + (metrics.wasteArea || 0);
@@ -671,7 +674,8 @@ async function runSolve(operation) {
                 const totalCutPieces = (data.pieces || []).length;
                 const thisBedPieces = (result.pieces || []).length;
 
-                showToast(`直刀排料计算成功：产出 ${thisBedPieces} 件，预计利用率 ${materialSummary(data, isRemnantMode).utilization.toFixed(1)}%`, 'success');
+                const fallback = fallbackPresentation(result);
+                showToast(`${fallback ? `直刀排料完成（${fallback.title}，引擎 ${result.engine}）` : '直刀排料计算成功'}：产出 ${thisBedPieces} 件，预计利用率 ${materialSummary(data, isRemnantMode).utilization.toFixed(1)}%`, fallback ? 'warning' : 'success');
                 return;
             } else {
                 return;

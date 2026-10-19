@@ -20,7 +20,7 @@ async function api(path,body) {
         const task=await api('/api/cutting/tasks',{name:'连续三工位验证',materialModel:model,revision:0,
             demands:[{id:1,name:'验证裁片',width:2000,length:1000,quantity:3,allowRotation:false}],
             process:{bedLength:1500,trimStart:0,cutOrigin:'right-bottom',firstStageOrientation:'horizontal',allowRotation:false,allowLongitudinal:false}});
-        await page.goto(base);await page.waitForLoadState('networkidle');
+        await page.goto(base+'/index.html');await page.waitForLoadState('networkidle');
         await page.evaluate(async()=>{window.testState=(await import('/js/core/state.js')).state;});
         const load=async()=>assert.equal(await page.evaluate(async id=>(await import('/js/plugins/solver/task-workspace.js')).loadTask(id),task.id),true);
         const snapshot=()=>page.evaluate(async()=>{const {state}=await import('/js/core/state.js');return {pending:state.pendingPlan,queue:state.reportQueue,data:state.getCurrentCaseData(),completed:state.taskCompleted};});

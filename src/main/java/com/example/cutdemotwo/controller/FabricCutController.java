@@ -148,6 +148,17 @@ public class FabricCutController {
         return remnantService.addDefectToRoll(rollId, defect);
     }
 
+    @PostMapping("/rolls/{rollId}/inspection-defects")
+    public com.example.cutdemotwo.model.MotherRollInfo saveInspection(@PathVariable String rollId,
+            @RequestBody com.example.cutdemotwo.service.RemnantService.InspectionInput input) {
+        return remnantService.saveInspection(rollId, input);
+    }
+
+    @PostMapping("/inspection/rolls")
+    public com.example.cutdemotwo.model.MotherRollInfo createInspectionRoll(@RequestBody com.example.cutdemotwo.model.MotherRollInfo roll) {
+        return remnantService.createInspectionRoll(roll);
+    }
+
     @PostMapping("/rolls/{rollId}/reset")
     public Map<String, Object> resetRoll(@PathVariable String rollId, @RequestBody(required = false) Map<String, Object> body) {
         boolean force = body != null && Boolean.TRUE.equals(body.get("force"));
@@ -199,6 +210,8 @@ public class FabricCutController {
         map.put("status", "UP");
         com.example.cutdemotwo.service.solver.ICutSolverEngine packingEngine = solverFactory.getEngine("packingsolver");
         map.put("packingsolverAvailable", packingEngine != null && packingEngine.isAvailable());
+        // Null unless the native engine is missing and a registered stand-in will run (and be labelled) instead.
+        map.put("packingsolverFallback", solverFactory.fallbackFor("packingsolver"));
         map.put("remnantsInStock", remnantService.getAvailableRemnants().size());
         return map;
     }

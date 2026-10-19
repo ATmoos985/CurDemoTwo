@@ -592,7 +592,7 @@ const server = createServer(async (req,res) => {
         });
         await run('peer navigation opens a standalone inventory page while the active job stays intact',async page=>{
             await loadPlan(page);const before=await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData()));
-            await expect(page.locator('.product-nav [aria-current]')).toHaveText('裁切作业');
+            await expect(page.locator('.product-nav [aria-current]')).toHaveText('通用操作台');
             await page.locator('.product-nav [aria-current]').click();assert.equal(await page.evaluate(()=>window.camApp.state.pendingPlan.result.planId),'original-plan');
             const popup=page.waitForEvent('popup');await page.getByRole('link',{name:'库存档案',exact:true}).click();const inventory=await popup,errors=[];inventory.on('pageerror',e=>errors.push(e.message));
             await expect(inventory.locator('main#material-manager-modal')).toBeVisible();await expect(inventory.locator('.inventory-number').first()).toContainText('60');
@@ -612,7 +612,7 @@ const server = createServer(async (req,res) => {
             await page.locator('#capability-dialog details').last().locator('summary').click();await expect(page.locator('#capability-engine-status')).toContainText('未就绪');
             await page.locator('#capability-dialog details').first().locator('summary').click();
             const popup=page.waitForEvent('popup');await page.getByRole('link',{name:'打开标准输入 / 输出 ↗'}).click();const lab=await popup,errors=[];lab.on('pageerror',e=>errors.push(e.message));
-            await expect(lab.locator('#protocol-details')).toHaveAttribute('open','');await expect(lab.locator('.product-nav [aria-current]')).toHaveText('裁切试验');
+            await expect(lab.locator('#protocol-details')).toHaveAttribute('open','');await expect(lab.locator('.product-nav [aria-current]')).toHaveText('场景演示');
             await lab.locator('#example-contour').click();await expect(lab.locator('#engine-hint')).toContainText('引擎未就绪');await lab.locator('#open-json').click();
             await expect(lab.locator('#json-dialog')).toBeVisible();assert.equal(JSON.parse(await lab.locator('#json-input').inputValue()).process.mode,'CONTOUR');
             assert.equal(requests.filter(r=>r==='POST /api/cutting/tasks' || r==='POST /api/solve').length,0);assert.deepEqual(errors,[]);await lab.close();await page.screenshot({path:'target/product-navigation/capabilities-1366.png'});

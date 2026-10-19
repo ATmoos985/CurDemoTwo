@@ -27,7 +27,12 @@ const assert = require('node:assert/strict');
         for (const [key, material, mode] of [
             ['CROSSCUT','MATERIAL-1','CROSSCUT'], ['GUILLOTINE','MATERIAL-1','GUILLOTINE'],
             ['3','DEMO-3','GUILLOTINE'], ['4','DEMO-4','GUILLOTINE'],
-            ['6','DEMO-6','GUILLOTINE'], ['CONTOUR','POLYGON-1','CONTOUR']
+            ['6','DEMO-6','GUILLOTINE'], ['CONTOUR','POLYGON-1','CONTOUR'],
+            ['GARMENT_SHIRT','DEMO-GARMENT_SHIRT','CONTOUR'],
+            ['GARMENT_PANTS','DEMO-GARMENT_PANTS','CONTOUR'],
+            ['GARMENT_SKIRT','DEMO-GARMENT_SKIRT','CONTOUR'],
+            ['GARMENT_FULL','DEMO-GARMENT_FULL','CONTOUR'],
+            ['BOARD_GRAIN','DEMO-BOARD_GRAIN','GUILLOTINE'], ['BOARD_PLAIN','DEMO-BOARD_PLAIN','GUILLOTINE']
         ]) {
             // Real select interaction dispatches input before change, reproducing the original failure.
             await page.locator('#scenario-select').selectOption(key);
@@ -37,8 +42,26 @@ const assert = require('node:assert/strict');
             await expect(page.locator('#solve-error')).toBeHidden();
             assert.ok(await page.locator('#part-rows .lab-row').count() > 0);
             await expect(page.locator('#solve-button')).toBeInViewport({ratio:1});
+            const solved = page.waitForResponse(response => response.url().endsWith('/api/v1/nesting/solve') && response.request().method() === 'POST');
             await page.locator('#solve-button').click();
+            const result = await (await solved).json();
             await expect(page.locator('#solve-status')).toContainText('已排入', {timeout:20000});
+            if (key.startsWith('GARMENT_')) {
+                assert.equal(result.status, 'FEASIBLE');
+                assert.equal(result.contours.length, result.placements.length);
+                for (const item of result.fulfillment) assert.ok(item.placed > 0, `未展示裁片 ${item.demandId}`);
+                assert.ok(result.placements.every(p => p.shape.type === 'POLYGON' && p.rotationDegrees === 0));
+                await expect(page.locator('#contour-note')).toBeVisible();
+                if (key === 'GARMENT_FULL') {
+                    const utilization = result.metrics.pieceAreaMm2 / result.metrics.processingAreaMm2;
+                    assert.ok(utilization >= 0.8 && utilization < 1, `密排利用率 ${utilization}`);
+                    assert.ok(result.placements.length >= 15);
+                    assert.ok(result.fulfillment.some(item => item.unplaced > 0));
+                    assert.ok(result.metrics.unassignedAreaMm2 > 0);
+                    await expect(page.locator('#area-pieces')).toContainText(`${(utilization * 100).toFixed(1)}%`);
+                }
+                if (process.env.SCREENSHOT_DIR) await page.screenshot({path:`${process.env.SCREENSHOT_DIR}/${key}.png`,fullPage:true});
+            }
             await expect(page.locator('#export-result')).toBeEnabled();
             await expect(page.locator('#solve-button')).toHaveText('开始裁切预览');
             passed++;
@@ -60,9 +83,9 @@ const assert = require('node:assert/strict');
         await expect(page.locator('#area-pieces')).toHaveText('—');
         await expect(page.locator('#export-result')).toBeDisabled();
         assert.deepEqual(errors, []);
-        assert.equal(writes.length, 7);
+        assert.equal(writes.length, 13);
         assert.ok(writes.every(url => url.endsWith('/api/v1/nesting/solve')));
         passed++;
-        console.log(JSON.stringify({discovered:12,executed:12,passed,failed:0,skipped:0}));
+        console.log(JSON.stringify({discovered:18,executed:18,passed,failed:0,skipped:0}));
     } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

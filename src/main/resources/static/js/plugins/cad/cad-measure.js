@@ -1,5 +1,5 @@
 /** 两点测量：端点使用模型 mm，标签保持屏幕像素大小。 */
-import { stage, mainLayer } from './cad-stage.js';
+import { stage, mainLayer, interactionLayer } from './cad-stage.js';
 import { bus } from '../../core/event-bus.js';
 
 let measuring = false, start = null, preview = null, group = null;
@@ -24,7 +24,7 @@ export function toggleMeasureTool(force = null) {
     }
     // 测量时让点击穿过实体，避免移动裁片或打开料头操作。
     if (mainLayer) mainLayer.listening(!measuring);
-    const container = document.getElementById('konva-container');
+    const container = stage?.container();
     if (container) container.style.cursor = measuring ? 'crosshair' : 'default';
     start = preview = null;
     drawMeasurements();
@@ -56,8 +56,8 @@ function movePoint() {
     drawMeasurements();
 }
 function drawMeasurements() {
-    if (!stage || !mainLayer) return;
-    if (!group) { group = new Konva.Group({ listening: false }); mainLayer.add(group); }
+    if (!stage || !interactionLayer) return;
+    if (!group) { group = new Konva.Group({ listening: false }); interactionLayer.add(group); }
     group.destroyChildren();
     const inv = 1 / stage.scaleX();
     const dark = document.documentElement.getAttribute('data-theme') !== 'light';
@@ -79,7 +79,7 @@ function drawMeasurements() {
         group.add(badge);
     }
     group.moveToTop();
-    mainLayer.batchDraw();
+    interactionLayer.batchDraw();
 }
 window.addEventListener('keydown', event => {
     if (event.key !== 'Escape' || !measuring) return;

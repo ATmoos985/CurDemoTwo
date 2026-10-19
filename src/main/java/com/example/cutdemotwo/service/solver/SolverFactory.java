@@ -3,6 +3,7 @@ package com.example.cutdemotwo.service.solver;
 import com.example.cutdemotwo.model.nesting.NestingProblem;
 import com.example.cutdemotwo.model.nesting.NestingResult;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -15,18 +16,36 @@ import static com.example.cutdemotwo.service.solver.NestingValidation.*;
 /**
  * 排料求解策略工厂 (Strategy Factory)
  * 按显式能力分发标准问题，并统一核验和转换输出。引擎在应用启动时注册。
+ * 原生引擎不可用时只在此处显式降级到已注册的替代引擎，结果始终标注实际运行的引擎和降级原因。
  */
 @Service
 public class SolverFactory {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SolverFactory.class);
+    /** Native engine id → registered stand-in that may run, with a stated reason, while the native one is unavailable. */
+    private static final Map<String, String> FALLBACKS = Map.of("packingsolver", "javaguillotine");
 
     private final Map<String, ICutSolverEngine> engineMap = new ConcurrentHashMap<>();
+    private final boolean fallbackEnabled;
+
+    public SolverFactory(List<ICutSolverEngine> engines) {
+        this(engines, true);
+    }
 
     @Autowired
-    public SolverFactory(List<ICutSolverEngine> engines) {
+    public SolverFactory(List<ICutSolverEngine> engines,
+                         @Value("${packingsolver.fallback.enabled:true}") boolean fallbackEnabled) {
         for (ICutSolverEngine engine : engines) {
             engineMap.put(engine.getEngineType().toLowerCase(), engine);
         }
+        this.fallbackEnabled = fallbackEnabled;
+    }
+
+    /** The engine that will run instead of {@code engineType}, or null when it is available or has no usable stand-in. */
+    public String fallbackFor(String engineType) {
+        ICutSolverEngine engine = engineType == null ? null : engineMap.get(engineType.toLowerCase());
+        if (!fallbackEnabled || engine == null || engine.isAvailable()) return null;
+        ICutSolverEngine fallback = engineMap.get(FALLBACKS.getOrDefault(engine.getEngineType().toLowerCase(), ""));
+        return fallback != null && fallback.isAvailable() ? fallback.getEngineType() : null;
     }
 
     public ICutSolverEngine getEngine(String solverType) {
@@ -45,6 +64,7 @@ public class SolverFactory {
     public NestingResult solve(NestingProblem problem) {
         long start = System.nanoTime();
         String selected = problem == null ? null : problem.engine();
+        String requested = selected, fallbackReason = null;
         try {
             validate(problem);
             if (selected == null || selected.isBlank() || "auto".equals(selected))
@@ -53,35 +73,49 @@ public class SolverFactory {
                     case "CONTOUR" -> "packingsolver-irregular";
                     default -> "packingsolver";
                 };
+            requested = selected;
             ICutSolverEngine engine = engineMap.get(selected);
             supported(engine != null, "系统未找到排料引擎: " + selected);
+            checkSupport(problem, engine.capabilities());
+            String fallback = fallbackFor(selected);
+            if (fallback != null) {
+                fallbackReason = requested + " 未就绪（原生可执行文件缺失或不可执行），本次由 " + fallback + " 求解";
+                log.warn("Explicit engine fallback: {}", fallbackReason);
+                selected = fallback;
+                engine = engineMap.get(fallback);
+                checkSupport(problem, engine.capabilities());
+            }
             var capabilities = engine.capabilities();
-            supported(capabilities.modes().contains(problem.process().mode()), "所选引擎不支持请求的切割工艺");
-            supported(capabilities.objectives().contains(String.valueOf(problem.process().objective())), "所选引擎不支持请求的优化目标");
-            supported(capabilities.shapes().contains(problem.material().shape().type())
-                    && problem.parts().stream().allMatch(p -> capabilities.shapes().contains(p.shape().type()))
-                    && problem.material().exclusions().stream().allMatch(d -> capabilities.shapes().contains(d.shape().type())),
-                    "所选引擎不支持请求的几何类型");
-            validatePrecision(problem, capabilities.coordinateResolutionMm());
             if ("CROSSCUT".equals(problem.process().mode())) {
                 supported("horizontal".equals(problem.process().firstStageOrientation()), "横切策略仅支持水平首刀");
                 for (var part : problem.parts()) require(Math.abs(part.shape().width() - problem.width()) < .001,
                         "横切需求必须等于材料幅宽");
             }
-            if (!engine.isAvailable()) return NestingResult.failure("UNAVAILABLE", "求解引擎尚未就绪", selected, elapsed(start));
+            if (!engine.isAvailable())
+                return NestingResult.failure("UNAVAILABLE", "求解引擎尚未就绪", selected, requested, fallbackReason, elapsed(start));
             EngineResult result = engine.solve(problem);
             if (!result.isSuccess() && !"NO_SOLUTION_FOUND".equals(result.getFailureStatus()))
-                return NestingResult.failure(result.getFailureStatus(), result.getMessage(), selected, elapsed(start));
+                return NestingResult.failure(result.getFailureStatus(), result.getMessage(), selected, requested, fallbackReason, elapsed(start));
             String error = "CONTOUR".equals(problem.process().mode()) ? PolygonResultValidator.validate(problem, result)
                     : !result.getPlacements().isEmpty() ? "矩形工艺不能混入轮廓候选结果" : RectangularResultValidator.validate(problem, result);
-            if (error != null) return NestingResult.failure("INVALID_RESULT", error, selected, elapsed(start));
-            return toResult(problem, result, selected, capabilities.version(), elapsed(start));
+            if (error != null) return NestingResult.failure("INVALID_RESULT", error, selected, requested, fallbackReason, elapsed(start));
+            return toResult(problem, result, selected, capabilities.version(), elapsed(start), requested, fallbackReason);
         } catch (Rejected error) {
-            return NestingResult.failure(error.status, error.getMessage(), selected, elapsed(start));
+            return NestingResult.failure(error.status, error.getMessage(), selected, requested, fallbackReason, elapsed(start));
         } catch (RuntimeException error) {
             log.error("Nesting engine or result conversion failed: {}", selected, error);
-            return NestingResult.failure("FAILED", "求解执行或结果转换失败", selected, elapsed(start));
+            return NestingResult.failure("FAILED", "求解执行或结果转换失败", selected, requested, fallbackReason, elapsed(start));
         }
+    }
+
+    private static void checkSupport(NestingProblem problem, EngineCapabilities capabilities) {
+        supported(capabilities.modes().contains(problem.process().mode()), "所选引擎不支持请求的切割工艺");
+        supported(capabilities.objectives().contains(String.valueOf(problem.process().objective())), "所选引擎不支持请求的优化目标");
+        supported(capabilities.shapes().contains(problem.material().shape().type())
+                && problem.parts().stream().allMatch(p -> capabilities.shapes().contains(p.shape().type()))
+                && problem.material().exclusions().stream().allMatch(d -> capabilities.shapes().contains(d.shape().type())),
+                "所选引擎不支持请求的几何类型");
+        validatePrecision(problem, capabilities.coordinateResolutionMm());
     }
 
     private static long elapsed(long start) { return (System.nanoTime() - start) / 1_000_000; }
@@ -89,7 +123,7 @@ public class SolverFactory {
     public NestingResult validateAdjustment(NestingProblem problem, List<com.example.cutdemotwo.model.PlacedPiece> pieces) {
         long start = System.nanoTime();
         var result = ManualLayoutValidator.validate(problem, pieces);
-        return toResult(problem, result, "manual-guillotine", "1", elapsed(start));
+        return toResult(problem, result, "manual-guillotine", "1", elapsed(start), "manual-guillotine", null);
     }
 
     private static void precision(double value, double resolution) {
@@ -110,7 +144,8 @@ public class SolverFactory {
         for (var point : shape.vertices()) { precision(point.x(), resolution); precision(point.y(), resolution); }
     }
 
-    private static NestingResult toResult(NestingProblem problem, EngineResult result, String engine, String version, long elapsed) {
+    private static NestingResult toResult(NestingProblem problem, EngineResult result, String engine, String version, long elapsed,
+                                          String requestedEngine, String fallbackReason) {
         boolean contour = "CONTOUR".equals(problem.process().mode());
         var placements = contour ? List.copyOf(result.getPlacements()) : result.getPieces().stream().map(p -> new NestingResult.Placement(p.getId(), p.getDemandId(),
                 p.getName(), p.getX(), p.getY(), NestingProblem.Shape.rectangle(p.getW(), p.getL()), p.isRotated() ? 90 : 0)).toList();
@@ -139,6 +174,7 @@ public class SolverFactory {
                 problem.material().id(), problem.material().shape(), placements, leftovers, cuts, fulfillment,
                 new NestingResult.Metrics(area, pieces, reusable, Math.max(0, area - pieces - reusable), contour ? 0 : result.getSuggestedFeedLength()),
                 contour ? placements.stream().map(p -> new NestingResult.Contour(p.id(), PolygonGeometry.vertices(p.shape()).stream()
-                        .map(v -> new NestingProblem.Point(v.x() + p.x(), v.y() + p.y())).toList(), true)).toList() : List.of());
+                        .map(v -> new NestingProblem.Point(v.x() + p.x(), v.y() + p.y())).toList(), true)).toList() : List.of(),
+                requestedEngine, fallbackReason);
     }
 }

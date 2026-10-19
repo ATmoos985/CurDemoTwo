@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {demandSample} from '../../main/resources/static/js/plugins/solver/demand-sample.js';
 import {importedTask, parseDemandSheet} from '../../main/resources/static/js/plugins/solver/demand-import-model.js';
-import {scenarioExample} from '../../main/resources/static/js/nesting/scenario-examples.js';
-import {createNestingScene} from '../../main/resources/static/js/nesting/nesting-scene.js';
+import {scenarioExample, garmentExample} from '../../main/resources/static/js/nesting/scenario-examples.js';
+import {createNestingScene, shapeArea} from '../../main/resources/static/js/nesting/nesting-scene.js';
 
 test('9.28 sample preserves valid RH quantities with real order identities and fabric specs', () => {
     const rows = demandSample.groups.flatMap(group => group.demands);
@@ -44,7 +44,36 @@ test('lab scenarios are standalone preview inputs, with clipped defect avoidance
     }
 });
 
-test('lab scenario selector provides all 6 presets in nesting page', () => {
+test('garment samples preserve irregular outlines, quantities and fabric direction without inventory writes', () => {
+    for (const [id, quantity] of [['GARMENT_SHIRT',4], ['GARMENT_PANTS',6], ['GARMENT_SKIRT',6], ['GARMENT_FULL',26]]) {
+        const input = garmentExample(id), scene = createNestingScene(input);
+        assert.equal(scene.process.mode, 'CONTOUR');
+        assert.equal(input.material.id, `DEMO-${id}`);
+        assert.equal(input.parts.reduce((sum,p) => sum+p.quantity,0), quantity);
+        for (const part of scene.parts) {
+            assert.equal(part.allowRotation, false);
+            assert.equal(part.shape.type, 'POLYGON');
+            assert.ok(shapeArea(part.shape) > 0 && shapeArea(part.shape) < part.shape.width * part.shape.height);
+            assert.ok(part.shape.width <= scene.material.shape.width && part.shape.height <= scene.material.shape.height);
+        }
+        assert.equal(input.taskId, undefined); assert.equal(input.rollId, undefined);
+        input.parts[0].shape.vertices[0].x = -100;
+        assert.ok(garmentExample(id).parts[0].shape.vertices[0].x >= 0);
+    }
+    assert.throws(() => garmentExample('unknown'), /示例不存在/);
+});
+
+test('dense garment sample reuses original outlines and supplies enough pieces to fill the cloth', () => {
+    const input = garmentExample('GARMENT_FULL');
+    const originals = [...garmentExample('GARMENT_SHIRT').parts, garmentExample('GARMENT_SKIRT').parts[1]];
+    assert.deepEqual(input.material.shape, {type:'RECTANGLE',width:1500,height:2000});
+    assert.deepEqual(input.parts.map(p => p.shape), originals.map(p => p.shape));
+    assert.deepEqual(input.parts.map(p => p.quantity), [3,3,8,12]);
+    assert.ok(input.parts.reduce((sum,p) => sum + p.quantity * shapeArea(p.shape), 0) > shapeArea(input.material.shape));
+    assert.equal(input.timeLimitSeconds, 10);
+});
+
+test('lab scenario selector provides all 12 presets, grouped by industry, in nesting page', () => {
     const html = readFileSync(new URL('../../main/resources/static/nesting.html', import.meta.url), 'utf8');
     const selectHtml = html.match(/<select id="scenario-select"[\s\S]*?<\/select>/)?.[0] || '';
     assert.ok(selectHtml.length > 0);
@@ -56,7 +85,14 @@ test('lab scenario selector provides all 6 presets in nesting page', () => {
         ['3', '短料头复用'],
         ['4', '多规格套裁'],
         ['6', '连续送料工位'],
-        ['CONTOUR', '异形排料']
+        ['CONTOUR', '异形排料'],
+        ['GARMENT_SHIRT', '上衣裁片'],
+        ['GARMENT_PANTS', '长裤裁片'],
+        ['GARMENT_SKIRT', '半裙裁片'],
+        ['GARMENT_FULL', '衣身袖片密排'],
+        ['BOARD_GRAIN', '木纹板 · 禁止旋转'],
+        ['BOARD_PLAIN', '素色板 · 允许旋转']
     ]);
+    assert.deepEqual([...selectHtml.matchAll(/<optgroup label="([^"]+)"/g)].map(m => m[1]), ['窗帘 · 家纺', '服装', '板材']);
     assert.equal(options.find(o => o.value === 'GUILLOTINE')?.selected, true);
 });

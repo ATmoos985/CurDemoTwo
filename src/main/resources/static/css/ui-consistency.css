@@ -17,6 +17,7 @@ dialog{margin:auto}:is(.workflow-dialog,.inventory-dialog,.settings-native-dialo
 .ui-status{display:inline-block;width:fit-content;padding:2px 7px;border:1px solid var(--panel-border);border-radius:4px;font-size:12px;line-height:1.5;color:var(--text-muted);background:var(--panel-header)}
 .ui-status[data-state=PENDING]{color:var(--accent-blue)}.ui-status[data-state=CONFIRMED]{color:var(--status-ok)}.ui-status[data-state=REVERSED],.ui-status[data-state=CANCELLED]{color:var(--text-muted)}
 :is(#solve-error,#json-error,#report-error,#plan-edit-message[role=alert]):not(:empty){padding:10px 12px;border-left:3px solid var(--status-error);background:var(--panel-header);color:var(--status-error);line-height:1.6;overflow-wrap:anywhere}
+:is(#engine-fallback,#engine-fallback-note):not([hidden]){margin:8px 0;padding:8px 12px;border-left:3px solid var(--status-warn);background:var(--panel-header);color:var(--status-warn);font-size:12px;line-height:1.6;overflow-wrap:anywhere}
 .operation-feedback{border-left-color:var(--status-warn)}.workbench-toast[data-type=error]{border-left-color:var(--status-error)}.workbench-toast[data-type=success]{border-left-color:var(--status-ok)}
 .settings-native-dialog#cam-export-modal{padding:0;border:0;margin:auto;max-width:calc(100vw - 32px);max-height:calc(100dvh - 32px);background:transparent;color:var(--text-main)}
 #export-preview-content{background:var(--panel-header)!important;outline-offset:2px}#export-preview-content:focus-visible{outline:2px solid var(--accent-blue)!important}

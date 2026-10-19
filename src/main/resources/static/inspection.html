@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>跑布验疵 · 布料裁切</title>
+    <link rel="stylesheet" href="css/base.css"><link rel="stylesheet" href="css/product-navigation.css">
+    <link rel="stylesheet" href="css/inspection.css"><script src="konva.min.js"></script>
+</head>
+<body class="inspection-page">
+<header class="inspection-header"><div class="brand"><span class="brand-mark">▥</span><strong>跑布验疵</strong><span>整卷标记 · 母卷档案</span></div><div data-product-nav="inspection"></div></header>
+<section class="material-bar" aria-label="验布材料">
+    <label for="inspection-roll">当前母卷</label><select id="inspection-roll"><option value="">选择母卷开始验布</option></select>
+    <button id="new-roll">新建母卷</button><span id="roll-summary">先选择已有母卷，或登记一卷新布</span>
+    <span id="draft-status" role="status">尚未选择材料</span>
+</section>
+<section class="feed-bar" aria-label="跑布控制">
+    <label>当前位置 <span class="input-unit"><input id="feed-position" type="number" min="0" step="0.0001" value="0" aria-label="累计跑布长度（米）"><span>m</span></span></label>
+    <button id="set-position" title="按现场读数校准累计长度">定位 / 校准</button>
+    <span class="divider"></span>
+    <label>每次前进 <span class="input-unit"><input id="feed-step" type="number" min="0.001" max="100" step="0.1" value="1" aria-label="手动前进长度（米）"><span>m</span></span></label>
+    <button id="feed-next">前进一段 ↓</button>
+    <span class="divider"></span>
+    <label>自动速度 <span class="input-unit"><input id="feed-speed" type="number" min="0.1" max="100" step="0.1" value="3" aria-label="自动跑布速度（米每分钟）"><span>m/min</span></span></label>
+    <button id="feed-toggle" aria-pressed="false">▶ 开始自动跑布</button>
+    <span id="feed-status" role="status">手动 · 自动位置按设定速度估算</span>
+</section>
+<main class="inspection-layout">
+    <section class="canvas-panel" aria-label="整卷验布画布">
+        <div class="canvas-toolbar"><div class="tool-group" role="group" aria-label="画布工具">
+            <button id="tool-mark" aria-pressed="true" title="左键按住拖出范围，松开记录">＋ 标记疵点</button>
+            <button id="tool-select" aria-pressed="false" title="选择疵点，拖动位置或四角调整大小">选择 / 调整</button>
+            <button id="undo-mark" disabled title="撤销本次尚未保存的操作（Ctrl+Z）">↶ 撤销</button>
+        </div><span class="canvas-help">左键拖框 · 滚轮浏览 · Ctrl + 滚轮缩放 · Esc 取消</span>
+        <div class="tool-group"><button id="follow-feed">回到验布线</button><button id="view-all">全卷</button><button id="toggle-panel" aria-expanded="true" title="收起或展开疵点面板">☷</button></div></div>
+        <div class="canvas-wrap"><div id="inspection-canvas" tabindex="0" role="application" aria-label="疵点标记画布，可拖框录入；也可使用右侧精确录入表单"></div>
+            <div id="canvas-empty">选择母卷后开始标记<span>整卷连续画布，所有疵点按卷头累计位置记录</span></div>
+            <div id="gesture-size" hidden></div>
+        </div>
+        <div class="canvas-status"><span id="pointer-status">基准：右边缘 / 卷头 · 单位 mm</span><span id="view-status">—</span></div>
+    </section>
+    <aside class="inspection-sidebar" aria-label="疵点记录与编辑">
+        <div class="sidebar-heading"><h1>疵点记录</h1><span id="defect-count">0 处</span></div>
+        <div class="sidebar-scroll">
+            <div class="record-summary"><span>已入档 <b id="saved-count">0</b></span><span>本次待保存 <b id="pending-count">0</b></span></div>
+            <form id="defect-editor">
+                <div class="editor-heading"><strong id="editor-title">快速标记 / 精确录入</strong><button type="button" id="new-mark">新标记</button></div>
+                <div class="form-grid">
+                    <label>距右边缘 (mm)<input name="right" type="number" min="0" step="0.1" value="0" required></label>
+                    <label>距卷头 (mm)<input name="y" type="number" min="0" step="0.1" value="0" required></label>
+                    <label>疵点宽 (mm)<input name="w" type="number" min="0.1" step="0.1" value="50" required></label>
+                    <label>疵点长 (mm)<input name="h" type="number" min="0.1" step="0.1" value="50" required></label>
+                    <label>类型<select name="defectType"><option value="STAIN">污渍 / 斑点</option><option value="HOLE">破洞</option><option value="WEFT_DEFECT">跳纱</option><option value="SLUB">粗节</option><option value="SHADING">色差</option><option value="MANUAL_MARK">其他疵点</option></select></label>
+                    <label>避让外扩 (mm)<input name="margin" type="number" min="0" max="1000" step="0.1" value="20" required></label>
+                </div>
+                <p class="hint">位置以疵点靠右、靠卷头的边缘计量。尺寸支持 0.1 mm。</p>
+                <p id="editor-note" class="hint" hidden>此疵点已入档；本页只调整本次尚未保存的标记。</p>
+                <p id="editor-error" role="alert"></p>
+                <div class="editor-actions"><button id="apply-mark" type="submit">添加到本次记录</button><button id="delete-mark" type="button" hidden>删除标记</button></div>
+            </form>
+            <div class="list-heading"><strong>全部疵点</strong><span>点击定位</span></div>
+            <div id="defect-list"><p class="hint">暂无记录，按住左键拖出第一处疵点。</p></div>
+        </div>
+        <div class="save-area"><p id="save-hint">记录自动保留在本机；保存后进入母卷档案。</p><button id="save-inspection" class="primary" disabled>保存到母卷</button><p id="save-error" role="alert"></p></div>
+    </aside>
+</main>
+<dialog id="new-roll-dialog" aria-labelledby="new-roll-title"><form id="new-roll-form"><div class="dialog-heading"><h2 id="new-roll-title">登记验布母卷</h2><button type="button" data-close>关闭</button></div>
+    <p class="hint">填写实物卷号和尺寸，整卷疵点将保存到这份档案。</p>
+    <label>母卷编号<input name="rollId" required maxlength="80" autocomplete="off"></label><label>材料型号<input name="rollModel" required maxlength="100"></label>
+    <div class="form-grid"><label>幅宽 (mm)<input name="width" type="number" min="0.1" step="0.1" value="2000" required></label><label>整卷长度 (m)<input name="length" type="number" min="0.001" step="0.0001" value="100" required></label></div>
+    <p id="new-roll-error" role="alert"></p><button class="primary" type="submit">登记并开始标记</button>
+</form></dialog>
+<script type="module" src="js/product-navigation.js"></script><script type="module" src="js/inspection/inspection-page.js"></script>
+</body></html>

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>分切工作台</title>
+<link rel="stylesheet" href="css/base.css"><link rel="stylesheet" href="css/product-navigation.css"><link rel="stylesheet" href="css/linear.css"></head>
+<body class="linear-workbench">
+<header class="linear-header"><div><span class="app-mark" aria-hidden="true">▥</span><strong>分切工作台</strong><span class="muted">一维 · 长阳搭切求解器</span></div><div data-product-nav="linear"></div></header>
+<nav class="linear-toolbar" aria-label="分切任务操作"><div><button class="tool-btn" id="new-task">新建需求</button><button class="tool-btn" id="import-excel">导入 Excel</button><input id="excel-file" type="file" accept=".xlsx,.xls" hidden><button class="tool-btn" id="load-sample">载入示例</button><span id="draft-status" role="status">本页自动保留需求</span></div><div><button class="tool-btn" id="refresh-result" disabled>刷新结果</button><button class="tool-btn" id="theme">切换主题</button></div></nav>
+<main class="linear-layout">
+<form id="linear-form" class="linear-input">
+<div class="panel-heading"><h1>订单与工艺</h1><span class="muted">幅宽 mm · 卷长 m</span></div>
+<div class="input-scroll"><fieldset id="input-fields">
+<section class="input-section"><h2>母卷与固定切边</h2><label>母卷总幅宽（mm）<input id="motherWidth" type="number" min="1" max="100000" step="1" required value="4600"></label>
+<div class="field-pair"><label>左切边（mm）<input id="leftTrim" type="number" min="0" step="1" required value="100"></label><label>右切边（mm）<input id="rightTrim" type="number" min="0" step="1" required value="100"></label></div>
+<p class="material-summary">可切区 <strong id="available-width">4400 mm</strong></p></section>
+<section class="input-section"><div class="section-heading"><h2>分切需求 <span id="order-count">0 条</span></h2><button type="button" class="tool-btn" id="add-order">＋ 添加</button></div><p class="muted">按卷长和表面处理分组计算。支持长阳 APS / 线下 Excel 模板。</p><div id="order-rows"></div><p id="empty-orders" class="empty-hint">导入订单，或添加一条分切需求。</p></section>
+<details class="input-section" open><summary>组合宽度与计算方式</summary><div class="field-pair"><label>组合下限（mm）<input id="minWidth" type="number" min="1" step="1" required value="4300"></label><label>组合上限（mm）<input id="maxWidth" type="number" min="1" step="1" required value="4400"></label></div>
+<div class="field-pair"><label>宽度步长（mm）<input id="step" type="number" min="1" step="1" required value="10"></label><label>超产上限（卷）<input id="totalOverCap" type="number" min="0" max="10000" step="1" required value="30"></label></div><label>计算方式<select id="profile"><option value="FAST">快速计算</option><option value="QUALITY">精细优化</option></select></label>
+<p class="muted">上下限相同表示固定组合宽度。精细优化耗时更长；搜索结果不承诺全局最优。</p></details>
+</fieldset></div><div class="input-action"><p id="input-hint" class="muted">方案预览不扣库存、不计入实际完成。</p><button class="tool-btn active" id="solve" type="submit">生成分切方案</button></div></form>
+<section class="linear-center" aria-label="分切组合预览"><div class="panel-heading"><h2>分切组合</h2><span id="plan-label" class="status-label">尚未计算</span></div>
+<div id="feedback" class="linear-feedback" role="status" aria-live="polite" hidden></div>
+<div class="result-tools"><label>订单分组<select id="group-filter" disabled><option value="">全部分组</option></select></label><button class="tool-btn" id="recut" disabled>重切所选组合</button><button class="tool-btn" id="undo" disabled>撤销调整</button></div>
+<div class="diagram-legend"><span><i class="legend-product"></i>成品</span><span><i class="legend-trim"></i>固定切边</span><span><i class="legend-remain"></i>可切区余边</span><span class="muted">横向按母卷实际幅宽等比例显示</span></div>
+<div id="patterns" class="pattern-list"><div class="canvas-empty"><span aria-hidden="true">▥</span><h3>等待分切需求</h3><p>导入订单后生成方案，在这里查看每个组合的分切宽度和重复用卷数。</p></div></div></section>
+<aside class="linear-results" aria-label="分切结果与组合明细"><div class="panel-heading"><h2>方案结果</h2><span class="muted">预计值</span></div><div class="result-scroll"><div id="metrics" class="metric-grid"></div><section class="result-section"><h3>需求对账</h3><div id="fulfillment" class="muted">计算后显示需求、预计产出和差额。</div></section><section class="result-section"><h3>组合明细</h3><div id="selection" class="muted">选择中间的分切组合查看订单明细。</div></section><details class="result-section"><summary>统计口径与保存</summary><p>整卷得率按原母卷面积统计。可切区利用率按重复用卷数累计宽度计算，分母仅扣除左右固定切边。余边与固定切边单独列示。</p><p>需求草稿保留在本浏览器；服务端方案暂存 8 小时，重启后需重新计算。请及时导出 Excel。</p></details></div><div class="result-action"><button class="tool-btn" id="export" disabled>导出方案 Excel</button><p class="muted" id="result-note">尚无可导出的方案</p></div></aside>
+</main><footer class="linear-footer"><span id="footer-status">就绪</span><span>一维分切 · 需求与二维库存独立</span></footer>
+<dialog id="confirm-dialog"><form method="dialog"><h2 id="confirm-title">确认操作</h2><p id="confirm-message"></p><div class="dialog-actions"><button class="tool-btn" value="cancel">取消</button><button class="tool-btn active" value="confirm">确认</button></div></form></dialog>
+<script type="module" src="js/product-navigation.js"></script><script type="module" src="js/linear/linear-workbench.js"></script>
+</body></html>

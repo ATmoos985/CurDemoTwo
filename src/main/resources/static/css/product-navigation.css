@@ -1,10 +1,21 @@
 [data-product-nav] { display: flex; align-items: center; gap: 12px; }
-.product-nav { display: flex; gap: 3px; }
+.product-nav { display: flex; align-items: center; gap: 4px; }
 .product-nav a { color: var(--text-muted); text-decoration: none; padding: 8px 10px; white-space: nowrap; border-bottom: 2px solid transparent; font-size: 13px; }
+.nav-group { position: relative; }
+.nav-group summary { display: flex; align-items: center; gap: 9px; padding: 10px 12px; color: var(--text-muted); font-size: 13px; white-space: nowrap; cursor: pointer; list-style: none; border-radius: 4px; }
+.nav-group summary::-webkit-details-marker { display: none; }
+.nav-group summary::after { content: ''; width: 5px; height: 5px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: rotate(45deg) translateY(-2px); }
+.nav-group[open] summary, .nav-group summary:hover, .nav-group .nav-current { color: var(--accent-blue); background: var(--panel-header); }
+.nav-dropdown { position: absolute; top: calc(100% + 8px); right: 0; z-index: 100; min-width: 170px; padding: 6px; border: 1px solid var(--panel-border); border-radius: 8px; background: var(--panel-bg); }
+.nav-dropdown a { display: block; border: 0; border-radius: 4px; padding: 12px; }
+.nav-dropdown a:hover { background: var(--panel-header); }
+.product-nav :focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; }
 .product-nav a:hover, .product-nav a[aria-current] { color: var(--accent-blue); }
 .product-nav a[aria-current] { border-bottom-color: var(--accent-blue); font-weight: 600; }
 .capability-dialog { width: min(800px, calc(100vw - 32px)); max-height: calc(100vh - 32px); margin: auto; }
 .capability-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.capability-lead { margin: 4px 0 12px; color: var(--text-muted); font-size: 13px; }
+.capability-lead a { color: var(--accent-blue); }
 .capability-dialog table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
 .capability-dialog th, .capability-dialog td { padding: 12px 10px; border-bottom: 1px solid var(--panel-border); line-height: 1.7; vertical-align: top; }
 .capability-dialog th:first-child { min-width: 90px; }
@@ -17,5 +28,9 @@
 @media (max-width:1100px) {
     [data-product-nav] { gap: 4px; }
     .product-nav a { padding: 8px 6px; }
+    .nav-group summary { padding: 9px 8px; }
     .app-subtitle { display: none; }
+}
+@media (max-width:650px) {
+    .product-nav .nav-group:first-of-type .nav-dropdown { left: 0; right: auto; }
 }

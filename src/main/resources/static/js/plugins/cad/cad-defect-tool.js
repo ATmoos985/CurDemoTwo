@@ -1,4 +1,4 @@
-import {stage, mainLayer} from './cad-stage.js';
+import {stage, mainLayer, interactionLayer} from './cad-stage.js';
 import {stationCoordinates, stationOrigin, defectFromCenter, RULER_SIZE} from './cad-view.js';
 import {toggleMeasureTool} from './cad-measure.js';
 import {state} from '../../core/state.js';
@@ -47,7 +47,7 @@ function pointerPoint() {
 
 function hidePointer() {
     for (const label of distanceLabels) label.hidden = true;
-    if (guides) {guides.hide();mainLayer.batchDraw();}
+    if (guides) {guides.hide();interactionLayer.batchDraw();}
 }
 
 function drawPointer() {
@@ -56,7 +56,7 @@ function drawPointer() {
     if (!point) {hidePointer();return;}
     const data = state.getCurrentCaseData(), origin = stationOrigin(data);
     const local = stationCoordinates(point.x, point.y, data), inv = 1 / stage.scaleX();
-    if (!guides) {guides = new Konva.Group({listening:false});mainLayer.add(guides);}
+    if (!guides) {guides = new Konva.Group({listening:false});interactionLayer.add(guides);}
     guides.destroyChildren();
     guides.clip({x:(RULER_SIZE-stage.x())*inv, y:(RULER_SIZE-stage.y())*inv,
         width:(stage.width()-RULER_SIZE)*inv, height:(stage.height()-RULER_SIZE)*inv});
@@ -67,7 +67,7 @@ function drawPointer() {
     line([origin.x, point.y-4*inv, origin.x, point.y+4*inv]);
     line([point.x-4*inv, origin.y, point.x+4*inv, origin.y]);
     guides.add(new Konva.Circle({x:point.x, y:point.y, radius:3*inv, fill:color, listening:false}));
-    guides.show();guides.moveToTop();mainLayer.batchDraw();
+    guides.show();guides.moveToTop();interactionLayer.batchDraw();
     if (!distanceLabels.length) {
         for (const axis of ['x', 'y']) {
             const label = document.createElement('span');

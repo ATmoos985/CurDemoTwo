@@ -53,6 +53,8 @@ class PackingSolverPrecisionTests {
         for (String origin : List.of("left-top", "right-top", "left-bottom", "right-bottom")) {
             var result = kernel.solve(problem(600.5, 800.7, 600.5, 200.2, false, 10.1, origin));
             assertTrue(result.feasible(), origin + ": " + result.message());
+            assertEquals("packingsolver", result.engine());
+            assertNull(result.fallbackReason());
             var placed = result.placements().get(0);
             assertEquals(600.5, placed.shape().width(), 1e-8);
             assertEquals(200.2, placed.shape().height(), 1e-8);
