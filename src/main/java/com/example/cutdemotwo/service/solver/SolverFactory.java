@@ -22,7 +22,10 @@ import static com.example.cutdemotwo.service.solver.NestingValidation.*;
 public class SolverFactory {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SolverFactory.class);
     /** Native engine id → registered stand-in that may run, with a stated reason, while the native one is unavailable. */
-    private static final Map<String, String> FALLBACKS = Map.of("packingsolver", "javaguillotine");
+    private static final Map<String, String> FALLBACKS = Map.of(
+            "packingsolver", "javaguillotine",
+            "packingsolver-irregular", "javairregular"
+    );
 
     private final Map<String, ICutSolverEngine> engineMap = new ConcurrentHashMap<>();
     private final boolean fallbackEnabled;

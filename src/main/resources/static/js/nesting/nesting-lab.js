@@ -141,8 +141,10 @@ function inputAction(action) { try { action(); } catch (error) { showError(error
 function engineHint() {
     const mode = byId('process-mode').value;
     const capability = dispatchedEngine(engines, mode);
-    const standIn = mode === 'GUILLOTINE' && engines.some(e => e.id === 'javaguillotine' && e.available);
-    byId('engine-hint').textContent = capability ? `${mode === 'CROSSCUT' ? '需求宽度须等于材料宽度' : mode === 'CONTOUR' ? '简单多边形 · 单块材料 · 90° 步进旋转' : '支持逐件选择 90° 旋转'} · 精度 ${capability.coordinateResolutionMm} mm${capability.available ? '' : standIn ? ' · 原生引擎未就绪，可能改用 javaguillotine（结果会注明）' : ' · 引擎未就绪'}` : '引擎状态尚未获取，求解时将检查能力。';
+    const standIn = (mode === 'GUILLOTINE' && engines.some(e => e.id === 'javaguillotine' && e.available))
+        || (mode === 'CONTOUR' && engines.some(e => e.id === 'javairregular' && e.available));
+    const standInName = mode === 'CONTOUR' ? 'javairregular' : 'javaguillotine';
+    byId('engine-hint').textContent = capability ? `${mode === 'CROSSCUT' ? '需求宽度须等于材料宽度' : mode === 'CONTOUR' ? '简单多边形 · 单块材料 · 90° 步进旋转' : '支持逐件选择 90° 旋转'} · 精度 ${capability.coordinateResolutionMm} mm${capability.available ? '' : standIn ? ` · 原生引擎未就绪，改用 ${standInName}（结果会注明）` : ' · 引擎未就绪'}` : '引擎状态尚未获取，求解时将检查能力。';
 }
 // 行业规则小结：行业取自所选场景，规则取自当前表单里的标准输入，编辑后随之更新。
 function renderBrief() {

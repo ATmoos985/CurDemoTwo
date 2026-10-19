@@ -132,7 +132,7 @@ export const CAPABILITIES = Object.freeze([
         text: '先用在库短料头套裁，剩余面积按最小回收尺寸划分为候选余料。'},
     {id: 'continuous', dimension: '二维', name: '连续送料', status: 'ready', engines: [], demo: '6',
         text: '母卷长于工位时按工位接续，报工后推进到下一工位。'},
-    {id: 'contour', dimension: '二维', name: '异形轮廓排料', status: 'demo', engines: ['packingsolver-irregular'], demo: 'GARMENT_FULL',
+    {id: 'contour', dimension: '二维', name: '异形轮廓排料', status: 'ready', engines: ['javairregular', 'packingsolver-irregular'], demo: 'GARMENT_FULL',
         text: '简单多边形与 90° 步进旋转；输出裁片边界，尚无刀序刀补，也不划分余料。'},
     {id: 'linear', dimension: '一维', name: '幅宽分条搭切', status: 'ready', engines: [], link: '/linear-demo.html',
         text: '把不同订单的条宽组合到同一母卷，受组合宽度上下限与固定切边约束，减少母卷用量。'},

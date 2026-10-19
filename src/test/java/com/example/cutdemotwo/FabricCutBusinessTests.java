@@ -29,6 +29,9 @@ class FabricCutBusinessTests {
     @Autowired
     private PackingSolverService packingSolverService;
 
+    @Autowired
+    private com.example.cutdemotwo.service.solver.SolverFactory solverFactory;
+
     @Test
     void testWordTableOneLShapeDecomposition() {
         SolveResponse res = scenarioOneService.getTableOneLShape();
@@ -96,7 +99,7 @@ class FabricCutBusinessTests {
         defects.add(new Defect(2, 1300, 3200, 200, 100, 30));
         req.setDefects(defects);
 
-        SolveResponse res = com.example.cutdemotwo.service.FabricSolveAdapter.solve(new com.example.cutdemotwo.service.solver.SolverFactory(List.of(packingSolverService)), req);
+        SolveResponse res = com.example.cutdemotwo.service.FabricSolveAdapter.solve(solverFactory, req);
         assertTrue(res.isSuccess());
         assertFalse(res.getPieces().isEmpty());
         assertFalse(res.getCuts().isEmpty());
@@ -150,7 +153,7 @@ class FabricCutBusinessTests {
         demands.add(new PieceDemand(1, "短料成品", 2000, 1000, 1, false));
         req.setDemands(demands);
 
-        SolveResponse res = com.example.cutdemotwo.service.FabricSolveAdapter.solve(new com.example.cutdemotwo.service.solver.SolverFactory(List.of(packingSolverService)), req);
+        SolveResponse res = com.example.cutdemotwo.service.FabricSolveAdapter.solve(solverFactory, req);
         assertTrue(res.isSuccess());
         assertEquals("remnant", res.getFeedPortType());
         assertEquals(0.0, res.getDeductLen(), 0.001); // 严格核算母卷0扣料!
@@ -181,7 +184,7 @@ class FabricCutBusinessTests {
         demands.add(new PieceDemand(1, "右对齐裁片", 1500, 3000, 1, false));
         req.setDemands(demands);
 
-        SolveResponse res = com.example.cutdemotwo.service.FabricSolveAdapter.solve(new com.example.cutdemotwo.service.solver.SolverFactory(List.of(packingSolverService)), req);
+        SolveResponse res = com.example.cutdemotwo.service.FabricSolveAdapter.solve(solverFactory, req);
         assertTrue(res.isSuccess());
         assertEquals("roll", res.getFeedPortType());
         assertTrue(res.getDerivedRemnants().isEmpty());

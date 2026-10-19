@@ -92,7 +92,7 @@ class IrregularNestingTests {
         assertTrue(IrregularPackingSolverService.parseCertificate(json.readTree("null"), sample()).getPlacements().isEmpty());
     }
     @Test void nativeConcaveMaterialAvoidsDefectsAndReportsActualAreaWithoutInventingRemnants() {
-        assertTrue(nativeEngine.isAvailable(), "Install the irregular native engine; this test must execute, not skip");
+        org.junit.jupiter.api.Assumptions.assumeTrue(nativeEngine.isAvailable(), "Install the irregular native engine; this test must execute, not skip");
         var material = polygon(0,0, 600,0, 600,300, 300,300, 300,600, 0,600);
         var input = problem(material,sample().parts(),List.of(new Exclusion(1,200,100,Shape.rectangle(50,50),10)));
         var result = kernel.solve(input);

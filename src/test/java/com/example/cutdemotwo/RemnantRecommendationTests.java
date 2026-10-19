@@ -24,7 +24,7 @@ class RemnantRecommendationTests {
         inventory = new RemnantService(new FileInventoryStore(temp.resolve("inventory.json").toString()), false);
         var nativeEngine = new PackingSolverService();
         ReflectionTestUtils.setField(nativeEngine, "solverPath", System.getenv().getOrDefault("PACKINGSOLVER_PATH", "data/solver/packingsolver_rectangleguillotine.exe"));
-        kernel = new SolverFactory(List.of(new CrossCutSolverService(), nativeEngine));
+        kernel = new SolverFactory(List.of(new CrossCutSolverService(), new com.example.cutdemotwo.service.solver.JavaGuillotineSolverEngine(), nativeEngine));
         service = new RemnantRecommendationService(inventory, kernel);
     }
     RemnantStock stock(String id, double w, double h) {

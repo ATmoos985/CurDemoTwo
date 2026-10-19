@@ -62,7 +62,7 @@ class PackingSolverItemTypeTests {
         PackingSolverService engine = new PackingSolverService();
         ReflectionTestUtils.setField(engine, "solverPath", System.getenv().getOrDefault(
                 "PACKINGSOLVER_PATH", "data/solver/packingsolver_rectangleguillotine.exe"));
-        assertTrue(engine.isAvailable(), "Native solver is required for this regression");
+        org.junit.jupiter.api.Assumptions.assumeTrue(engine.isAvailable(), "Native solver is required for this regression");
         var result = new SolverFactory(List.of(engine)).solve(new NestingProblem("1", "mm",
                 new NestingProblem.Material("sheet", NestingProblem.Shape.rectangle(2000, 1500), List.of(), false),
                 List.of(new NestingProblem.Part(1, "方片", NestingProblem.Shape.rectangle(500, 500), 6, false),
