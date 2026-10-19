@@ -262,6 +262,10 @@ public class RemnantService {
     }
 
     private Map<String, Object> confirmPlanInternal(CutReport report) {
+        return confirmPlanInternal(report, Set.of());
+    }
+
+    private Map<String, Object> confirmPlanInternal(CutReport report, Set<String> pendingBatchPlans) {
             Map<String, Object> receipt = receipts.get(report.planId());
             if (receipt != null) {
                 if ("REVERSED".equals(receipt.get("status"))) throw new IllegalArgumentException("该报工已冲销，请重新排料");
@@ -271,7 +275,7 @@ public class RemnantService {
             if (plan == null || !"PENDING".equals(plan.status())) throw new IllegalArgumentException("方案不存在或已取消，请重新排料");
             if (!Objects.equals(plan.baseline(), materialFingerprintInternal(plan.request())))
                 throw new IllegalArgumentException("材料或疵点已更新，请重新装载并排料");
-            Map<String, Object> result = confirmInternal(plan.request(), plan.result(), report);
+            Map<String, Object> result = confirmInternal(plan.request(), plan.result(), report, pendingBatchPlans);
             plans.put(plan.id(), plan.withStatus("CONFIRMED"));
             return result;
     }
@@ -284,6 +288,7 @@ public class RemnantService {
             throw new IllegalArgumentException("请选择 1 至 100 个待报工工位");
         java.util.function.Supplier<List<Map<String, Object>>> command = () -> {
             Set<String> seen = new HashSet<>();
+            Set<String> pendingBatchPlans = new HashSet<>();
             List<Map<String, Object>> result = new ArrayList<>();
             String taskId = null;
             for (CutReport report : reports) {
@@ -294,7 +299,9 @@ public class RemnantService {
                     throw new IllegalArgumentException("待报工方案不存在或未关联任务");
                 if (taskId == null) taskId = plan.request().getTaskId();
                 if (!taskId.equals(plan.request().getTaskId())) throw new IllegalArgumentException("集中报工必须属于同一任务");
-                result.add(confirmPlanInternal(report));
+                boolean alreadyReported = receipts.containsKey(report.planId());
+                result.add(confirmPlanInternal(report, pendingBatchPlans));
+                if (!alreadyReported) pendingBatchPlans.add(report.planId());
             }
             return result;
         };
@@ -599,6 +606,11 @@ public class RemnantService {
     }
 
     private Map<String, Object> confirmInternal(SolveRequest request, SolveResponse plan, CutReport report) {
+        return confirmInternal(request, plan, report, Set.of());
+    }
+
+    private Map<String, Object> confirmInternal(SolveRequest request, SolveResponse plan, CutReport report,
+                                              Set<String> pendingBatchPlans) {
         Map<String, Object> old = receipts.get(report.planId());
         if (old != null) {
             if ("REVERSED".equals(old.get("status"))) throw new IllegalArgumentException("该报工已撤回，请重新排料");
@@ -633,7 +645,16 @@ public class RemnantService {
                 if (!request.getRollId().equals(receipt.get("rollId")) || !"roll".equals(receipt.get("feedPortType"))) continue;
                 double oldStart = ((Number) receipt.get("windowStartY")).doubleValue();
                 double oldEnd = oldStart + ((Number) receipt.get("actualCutLen")).doubleValue();
-                if (start < oldEnd && start + len > oldStart) throw new IllegalArgumentException("红框区域已实切确认，请移动到未切区间");
+                // Ignore only binary arithmetic noise at touching endpoints, not a physical cutting allowance.
+                double end = start + len;
+                double noise = 4 * Math.max(Math.max(Math.ulp(start), Math.ulp(end)),
+                        Math.max(Math.ulp(oldStart), Math.ulp(oldEnd)));
+                if (Math.min(end, oldEnd) - Math.max(start, oldStart) > noise) {
+                    boolean pendingConflict = pendingBatchPlans.contains(receipt.get("planId"));
+                    throw new IllegalArgumentException(pendingConflict
+                            ? "本工位实切区间与本批次待报工工位重叠，请核对工位位置和实切长度"
+                            : "本工位实切区间与已报工区间重叠，请移动到未切区间");
+                }
             }
         }
         double maxPieceY = output.cutPieces().stream().mapToDouble(p -> p.getY() + p.getL()).max().orElse(0);

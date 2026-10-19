@@ -68,4 +68,56 @@ class BatchReportTests {
         assertThrows(IllegalArgumentException.class,()->stock.reportBatch(List.of(a),false));
         assertNull(stock.getReceipt(a.planId()));assertEquals(55000,stock.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength());
     }
+
+    CutReport reportWithLength(double start, double length) {
+        var request=new SolveRequest();request.setTaskId(task.id());request.setTaskRevision(task.revision());
+        request.setRollL(length);request.setWindowStartY(start);request.setAllowLongitudinal(false);
+        request.setDemands(List.of(new PieceDemand(1,"片",2000,1000,1,false)));
+        var result=workflow.solve(request);assertTrue(result.isSuccess());
+        return new CutReport(result.getPlanId(),length,1,List.of(),"A");
+    }
+    @Test void decimalStationEndpointsTouchWithoutFalseOverlapInEitherBatchOrder() throws Exception {
+        var a=reportWithLength(24351.9,2597.9);var b=reportWithLength(26949.8,2210.2);
+        assertTrue(24351.9+2597.9>26949.8); // The production failure: one ULP of apparent overlap.
+        byte[] before=Files.readAllBytes(temp.resolve("stock.json"));
+        for(var batch:List.of(List.of(a,b),List.of(b,a))) {
+            assertEquals(2,stock.reportBatch(batch,true).size());
+            assertArrayEquals(before,Files.readAllBytes(temp.resolve("stock.json")));
+            assertNull(stock.getReceipt(a.planId()));assertNull(stock.getReceipt(b.planId()));
+            assertEquals("PENDING",stock.getPlan(a.planId()).status());
+        }
+        assertEquals(2,stock.reportBatch(List.of(a,b),false).size());
+        assertEquals(55000-2597.9-2210.2,stock.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength(),1e-8);
+        assertEquals(Map.of("1",2),stock.completedQuantities(task.id()));
+    }
+    @Test void decimalEndpointCanContinueAfterAnAlreadyReportedStation() {
+        var a=reportWithLength(24351.9,2597.9);var b=reportWithLength(26949.8,2210.2);
+        stock.confirmPlan(a);
+        assertEquals(1,stock.reportBatch(List.of(b),true).size());
+        assertNull(stock.getReceipt(b.planId()));
+        stock.confirmPlan(b);
+        assertEquals(Map.of("1",2),stock.completedQuantities(task.id()));
+    }
+    @Test void physicalOverlapWithinPendingBatchIsRejectedAndRolledBack() throws Exception {
+        var a=reportWithLength(24351.9,2597.9);var b=reportWithLength(26949.7999,2210.2);
+        byte[] before=Files.readAllBytes(temp.resolve("stock.json"));
+        for(boolean preview:List.of(true,false)) for(var batch:List.of(List.of(a,b),List.of(b,a))) {
+            var error=assertThrows(IllegalArgumentException.class,()->stock.reportBatch(batch,preview));
+            assertTrue(error.getMessage().contains("本批次待报工工位重叠"));
+            assertArrayEquals(before,Files.readAllBytes(temp.resolve("stock.json")));
+            assertNull(stock.getReceipt(a.planId()));assertNull(stock.getReceipt(b.planId()));
+            assertEquals("PENDING",stock.getPlan(a.planId()).status());
+            assertEquals("PENDING",stock.getPlan(b.planId()).status());
+            assertTrue(stock.completedQuantities(task.id()).isEmpty());
+        }
+    }
+    @Test void alreadyReportedOverlapIsNotMislabelledAsPendingEvenWhenIncludedInRetry() {
+        var a=report(5000,1);var b=report(5999.9999,1);stock.confirmPlan(a);
+        for(boolean preview:List.of(true,false)) {
+            var error=assertThrows(IllegalArgumentException.class,()->stock.reportBatch(List.of(a,b),preview));
+            assertTrue(error.getMessage().contains("与已报工区间重叠"));
+            assertNull(stock.getReceipt(b.planId()));assertEquals("CONFIRMED",stock.getPlan(a.planId()).status());
+            assertEquals(54000,stock.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength());
+        }
+    }
 }
