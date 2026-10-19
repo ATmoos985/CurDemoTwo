@@ -8,6 +8,8 @@ import { bus } from '../core/event-bus.js';
 /** Reusable read-only canvas; hosts own input editing and business actions. */
 export function mountNestingViewer(container, { Konva = globalThis.Konva, onSelect = () => {}, onZoom = () => {} } = {}) {
     let scene = null, selected = null, showPaths = true, showDimensions = true, fitted = true;
+    let markerLength = null;
+    const mm = value => `${Number(value.toFixed(1))} mm`;
     const getData = () => scene ? { rollW: scene.material.shape.width, bedL: scene.region.shape.height,
         windowStartY: scene.region.y, cutOrigin: scene.process.startCorner, trimStart: scene.process.trimStart } : null;
     const destroyStage = cad.initKonva({ container, Konva, getData, materialLabel: () => '材料' });
@@ -27,7 +29,16 @@ export function mountNestingViewer(container, { Konva = globalThis.Konva, onSele
         const { width, height } = scene.region.shape;
         if (showDimensions) {
             text(`${width} mm`, pos.x, pos.y - 26, width * scale);
-            text(`${height} mm`, pos.x + width * scale + 10, pos.y + height * scale / 2, 86, { align: 'left' });
+            if (markerLength === null) text(`${height} mm`, pos.x + width * scale + 10, pos.y + height * scale / 2, 86, { align: 'left' });
+            else {
+                const right = pos.x + width * scale + 10, tail = height - markerLength;
+                text(`唛架终止 ${mm(markerLength)}`, right, pos.y + markerLength * scale - 14, 150,
+                    { align:'left', fill:'#147759', name:'marker-end-label' });
+                text(`试排 ${mm(height)}`, right, pos.y + height * scale + 4, 150, { align:'left' });
+                if (tail * scale >= 36 && width * scale >= 80) text(`未使用尾料\n${mm(tail)}`,
+                    pos.x, pos.y + (markerLength + tail / 2) * scale - 14, width * scale,
+                    { lineHeight:1.4, ellipsis:false, name:'marker-tail-label' });
+            }
             const origin = stationOrigin(getData());
             text(`切割基准 ${origin.label} · X ${origin.x} / Y ${origin.y} mm`, pos.x, pos.y + height * scale + 16, Math.max(250, width * scale), { align: 'left', fontSize: 11 });
             const x = pos.x + origin.x * scale, y = pos.y + origin.y * scale;
@@ -50,7 +61,7 @@ export function mountNestingViewer(container, { Konva = globalThis.Konva, onSele
     function fit() {
         if (!scene) return;
         fitted = true;
-        const fittedView = fitBounds(stage.width(), stage.height(), { x: 0, y: 0, width: scene.material.shape.width, height: scene.material.shape.height });
+        const fittedView = fitBounds(stage.width() - (markerLength === null ? 0 : 140), stage.height(), { x: 0, y: 0, width: scene.material.shape.width, height: scene.material.shape.height });
         stage.scale({ x: fittedView.scale, y: fittedView.scale });
         stage.position({ x: fittedView.x, y: fittedView.y });
         annotations();
@@ -81,14 +92,23 @@ export function mountNestingViewer(container, { Konva = globalThis.Konva, onSele
     };
     container.addEventListener('keydown', keydown);
     return {
-        setScene(next, { fitView = false } = {}) {
+        setScene(next, { fitView = false, markerLength: occupiedLength = null } = {}) {
             clearAllMeasurements(); toggleMeasureTool(false);
             scene = next; selected = null; onSelect(null);
+            markerLength = scene && Number.isFinite(occupiedLength) && occupiedLength > 0
+                && occupiedLength <= scene.region.shape.height ? occupiedLength : null;
             document.getElementById('sb-cursor-pos').textContent = '指针 — · 单位 mm';
             if (!scene) { Object.values(groups).forEach(group => group.destroyChildren()); labels.destroyChildren(); layer.batchDraw(); labels.batchDraw(); drawRulers(); return; }
             renderNestingGeometry(Konva, groups, scene, { showPaths, onPlacement(group, piece) {
                 group.on('click tap', event => { event.cancelBubble = true; selected = piece.id; onSelect(piece); annotations(); });
             } });
+            if (markerLength !== null) {
+                const {width, height} = scene.region.shape;
+                groups.background.add(new Konva.Rect({name:'marker-unused-tail', y:markerLength,
+                    width, height:height-markerLength, fill:'#e9edf0', listening:false}));
+                groups.boundary.add(new Konva.Line({name:'marker-end-line', points:[0,markerLength,width,markerLength],
+                    stroke:'#147759', strokeWidth:2, strokeScaleEnabled:false, dash:[8,5], listening:false}));
+            }
             if (fitView || fitted) fit(); else annotations();
             drawRulers();
             layer.batchDraw();

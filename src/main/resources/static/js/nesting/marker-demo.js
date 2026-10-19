@@ -44,7 +44,9 @@ export function markerSummary(problem, scene) {
         && scene.placements.length === requested;
     const length = scene?.placements.length ? Math.max(...scene.placements.map(p => p.y + p.shape.height)) : 0;
     const pieceArea = problem.parts.reduce((sum, p) => sum + shapeArea(p.shape) * p.quantity, 0);
-    return {requested, rows, complete:!!complete, length,
+    const trialLength = problem.material.shape.height;
+    return {requested, rows, complete:!!complete, length, trialLength,
+        unusedTail:complete ? Math.max(0, trialLength - length) : null,
         utilization:complete && length > 0 ? pieceArea / (problem.material.shape.width * length) : null};
 }
 
@@ -64,7 +66,8 @@ export async function searchMarker(problem, solve, {signal, onTrial = () => {}, 
         signal?.throwIfAborted();
         const summary = markerSummary(candidate, solved.scene);
         latest = {problem:candidate, ...solved, summary};
-        history.push({length, complete:summary.complete, placed:solved.scene.placements.length});
+        history.push({length, occupiedLength:summary.complete ? summary.length : null,
+            complete:summary.complete, placed:solved.scene.placements.length});
         if (summary.complete) {
             if (!first) first = latest;
             if (!best || summary.length < best.summary.length) best = latest;

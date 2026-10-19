@@ -13,8 +13,9 @@
 <section class="marker-result" aria-label="唛架结果"><div class="marker-toolbar"><strong id="marker-state" role="status" aria-live="polite">待排料 · 衣片齐全才算完成</strong><button type="button" class="tool-btn" id="marker-fit">适合画面</button></div>
 <div class="marker-metrics"><div><span>实际唛架长度</span><strong id="marker-length">—</strong></div><div><span>唛架利用率</span><strong id="marker-utilization">—</strong></div><div><span>较首个齐套方案缩短</span><strong id="marker-saving">—</strong></div></div>
 <div id="marker-canvas" tabindex="0" role="img" aria-label="服装唛架排料画布，滚轮缩放，拖动平移"></div>
+<p id="marker-length-note" class="marker-formula" aria-live="polite" hidden></p>
 <p id="sb-cursor-pos" class="marker-cursor">指针 — · 单位 mm</p><p id="marker-selection">点击衣片查看尺码与名称；滚轮缩放、拖动平移。</p>
-<p id="marker-error" role="alert" hidden></p><p class="marker-formula">利用率 = 全部衣片净面积 ÷（固定门幅 × 实际唛架长度）。图中浅色区域为当前试排材料，裁片末端以外不计入唛架长度。</p>
+<p id="marker-error" role="alert" hidden></p><p class="marker-formula">利用率 = 全部衣片净面积 ÷（固定门幅 × 实际唛架长度）。齐套后，绿色虚线标出唛架终止位置，灰色区域为未使用尾料；该线为长度标记，不代表设备刀路。</p>
 <details><summary>长度尝试记录</summary><ol id="marker-trials"></ol></details>
 <div class="marker-exports"><button class="tool-btn" id="marker-input-export">导出示例输入</button><button class="tool-btn" id="marker-result-export" disabled>导出齐套结果</button></div>
 </section></div></main><script type="module" src="js/product-navigation.js"></script><script type="module" src="js/nesting/marker-page.js"></script></body></html>

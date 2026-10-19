@@ -4,6 +4,7 @@ import {NestingSession} from './nesting-client.js';
 import {mountNestingViewer} from './nesting-viewer.js';
 
 const $ = id => document.getElementById(id);
+const mm = value => `${Number(value.toFixed(1))} mm`;
 const session = new NestingSession();
 for (const style of MARKER_STYLES) $('marker-style').add(new Option(style.name, style.id));
 const initialStyle = new URLSearchParams(location.search).get('style');
@@ -25,6 +26,7 @@ function reset() {
     cancel(); busy(false); best = null; $('marker-result-export').disabled = true;
     for (const id of ['marker-length','marker-utilization','marker-saving']) $(id).textContent = '—';
     $('marker-trials').replaceChildren(); $('marker-error').hidden = true;
+    $('marker-length-note').hidden = true; $('marker-length-note').textContent = '';
     checklist();
     if (!$('marker-width').checkValidity()) { viewer.setScene(null); $('marker-state').textContent = '请输入 1200–2000 mm 的布宽（步长 10 mm）'; return; }
     problem = markerExample($('marker-width').valueAsNumber, $('marker-style').value);
@@ -52,15 +54,22 @@ $('marker-form').addEventListener('submit', async event => {
         if (token !== revision) return;
         best = output.best;
         const displayed = best || output.latest;
-        if (displayed) { viewer.setScene(displayed.scene, {fitView:true}); checklist(displayed.summary); }
+        if (displayed) {
+            viewer.setScene(displayed.scene, {fitView:true, markerLength:best?.summary.length ?? null});
+            checklist(displayed.summary);
+        }
         $('marker-trials').replaceChildren(...output.history.map(trial => {
-            const li = document.createElement('li'); li.textContent = `${trial.length} mm：${trial.complete ? '衣片齐套' : `未齐套，排入 ${trial.placed} 片（不采用）`}`; return li;
+            const li = document.createElement('li');
+            li.textContent = `试排 ${mm(trial.length)}：${trial.complete ? `衣片齐套，实际占用 ${mm(trial.occupiedLength)}` : `未齐套，排入 ${trial.placed} 片（不采用）`}`;
+            return li;
         }));
         if (best) {
             $('marker-state').textContent = `${best.summary.requested} / ${best.summary.requested} 片齐套 · 本次找到的较短方案`;
-            $('marker-length').textContent = `${best.summary.length.toFixed(0)} mm`;
+            $('marker-length').textContent = mm(best.summary.length);
+            $('marker-length-note').hidden = false;
+            $('marker-length-note').textContent = `试排 ${mm(best.summary.trialLength)} = 实际唛架 ${mm(best.summary.length)} + 未使用尾料 ${mm(best.summary.unusedTail)}。尾料不计入本次用布长度与利用率。`;
             $('marker-utilization').textContent = `${(best.summary.utilization * 100).toFixed(1)}%`;
-            $('marker-saving').textContent = `${Math.max(0, output.first.summary.length - best.summary.length).toFixed(0)} mm`;
+            $('marker-saving').textContent = mm(Math.max(0, output.first.summary.length - best.summary.length));
             $('marker-result-export').disabled = false;
         } else $('marker-state').textContent = '本次搜索未排齐全部衣片，请重试；不代表该布宽无解。';
     } catch (error) {

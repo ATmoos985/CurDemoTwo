@@ -38,6 +38,15 @@ test('utilization uses actual occupied marker length instead of trial material l
     const longer=structuredClone(p);longer.material.shape.height+=1000;
     assert.equal(markerSummary(longer,sceneFor(longer,1800)).utilization,result.utilization);
 });
+test('tail accounting preserves decimal lengths and never labels an incomplete kit as finished', () => {
+    const p=markerExample(), summary=markerSummary(p,sceneFor(p,1831.5));
+    assert.equal(summary.trialLength,2492);
+    assert.equal(summary.unusedTail,660.5);
+    assert.equal(summary.length+summary.unusedTail,summary.trialLength);
+    assert.equal(markerSummary(p,sceneFor(p,2492)).unusedTail,0);
+    assert.equal(markerSummary(p,sceneFor(p,1831.5,false)).unusedTail,null);
+    assert.equal(markerSummary(p,null).unusedTail,null);
+});
 test('length search keeps the best complete result when shorter attempts miss a piece', async () => {
     const p=markerExample();let calls=0;
     const output=await searchMarker(p, async candidate=>{
@@ -46,6 +55,10 @@ test('length search keeps the best complete result when shorter attempts miss a 
     });
     assert.equal(output.best.result.attempt,2);assert.equal(output.best.summary.length,1900);
     assert.equal(output.first.summary.length,2200);assert.ok(calls<=5);
+    assert.equal(output.history[0].length,p.material.shape.height);
+    assert.equal(output.history[0].occupiedLength,2200);
+    assert.equal(output.history[1].occupiedLength,1900);
+    assert.equal(output.history[2].occupiedLength,null);
 });
 test('no initial complete kit produces no successful result and cancellation stops more trials', async () => {
     const p=markerExample();

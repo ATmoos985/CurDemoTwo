@@ -87,6 +87,38 @@ const assert = require('node:assert/strict');
         assert.equal(writes.length, 13);
         assert.ok(writes.every(url => url.endsWith('/api/v1/nesting/solve')));
         passed++;
-        console.log(JSON.stringify({discovered:18,executed:18,passed,failed:0,skipped:0}));
+        for (const [style,width,height,count] of [
+            ['GARMENT_SHIRT',1920,1080,18], ['GARMENT_PANTS',1366,768,18], ['GARMENT_SKIRT',390,844,14]
+        ]) {
+            await page.setViewportSize({width,height});
+            await page.goto((process.env.BASE_URL || 'http://localhost:8080') + '/marker-demo.html');
+            await page.selectOption('#marker-style',style);
+            await expect(page.locator('#marker-length-note')).toBeHidden();
+            await page.click('#marker-run');
+            await expect(page.locator('#marker-state')).toContainText(`${count} / ${count} 片齐套`,{timeout:30000});
+            await expect(page.locator('#marker-error')).toBeHidden();
+            await expect(page.locator('#marker-length-note')).toContainText('尾料不计入');
+            await expect(page.locator('#marker-trials li').first()).toContainText('实际占用');
+            const overlay = await page.evaluate(() => {
+                const stage=Konva.stages.find(s=>s?.container().id==='marker-canvas');
+                const line=stage.findOne('.marker-end-line'), tail=stage.findOne('.marker-unused-tail');
+                const label=stage.findOne('.marker-end-label').getClientRect();
+                return {end:line.points()[1],tailY:tail.y(),tail:tail.height(),labelRight:label.x+label.width,
+                    canvasWidth:stage.width(),actual:parseFloat(document.getElementById('marker-length').textContent)};
+            });
+            assert.equal(overlay.end,overlay.actual);
+            assert.equal(overlay.tailY,overlay.actual);
+            assert.ok(overlay.tail>=0);
+            assert.ok(overlay.labelRight<=overlay.canvasWidth, 'marker annotation must fit the canvas');
+            await page.locator('#marker-canvas').focus();await page.keyboard.press('+');
+            await page.click('#marker-fit');
+            if(process.env.SCREENSHOT_DIR)await page.screenshot({path:`${process.env.SCREENSHOT_DIR}/marker-${style}.png`,fullPage:true});
+            await page.selectOption('#marker-style',style==='GARMENT_SHIRT'?'GARMENT_PANTS':'GARMENT_SHIRT');
+            await expect(page.locator('#marker-length-note')).toBeHidden();
+            assert.equal(await page.evaluate(()=>Konva.stages.find(s=>s?.container().id==='marker-canvas').find('.marker-end-line').length),0);
+            passed++;
+        }
+        assert.deepEqual(errors, []);
+        console.log(JSON.stringify({discovered:21,executed:21,passed,failed:0,skipped:0}));
     } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
