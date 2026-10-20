@@ -82,4 +82,21 @@ class OptimizationApiTests {
         var schema=call("/api-v2/optimization-request.schema.json",null,null);assertEquals(200,schema.statusCode());assertFalse(json.readTree(schema.body()).get("additionalProperties").asBoolean());
         var example=call("/api-v2/example-request.json",null,null);assertEquals(200,example.statusCode());assertEquals(200,call("/api/v2/problem-validations",example.body(),null).statusCode());
     }
+
+    @Test void slittingExampleIsStrictAndReturnsVerifiedStringOrderFulfillment()throws Exception {
+        String body=call("/api-v2/example-slitting-request.json",null,null).body();
+        assertEquals(200,call("/api/v2/problem-validations",body,null).statusCode());
+        assertEquals(422,call("/api/v2/problem-validations",body.replace("3000","3001"),null).statusCode());
+        assertEquals(400,call("/api/v2/problem-validations",body.replace("\"leftTrimMm\": 10,", ""),null).statusCode());
+        assertEquals(400,call("/api/v2/problem-validations",body.replace("\"widthMm\": 500","\"widthMm\": 500.5"),null).statusCode());
+        assertEquals(400,call("/api/v2/problem-validations",body.replace("\"profile\": \"FAST\"","\"profile\": \"FAST\", \"unknown\": true"),null).statusCode());
+        var accepted=call("/api/v2/optimization-jobs",body,UUID.randomUUID().toString());
+        assertEquals(202,accepted.statusCode(),accepted.body());var id=json.readTree(accepted.body()).get("id").asText();
+        OptimizationJob job=null;
+        for(int i=0;i<200;i++){job=json.readValue(call("/api/v2/optimization-jobs/"+id,null,null).body(),OptimizationJob.class);if(job.terminal())break;Thread.sleep(50);}
+        assertEquals("SUCCEEDED",job.state(),job.toString());
+        var result=json.readValue(call("/api/v2/optimization-results/"+id,null,null).body(),OptimizationResult.class);
+        assertEquals("COMPLETE",result.fulfillmentStatus());assertNull(result.layout());assertNotNull(result.slitting());
+        assertTrue(inventory.getMotherRolls().isEmpty());assertFalse(Files.exists(temp.resolve("inventory.json")));
+    }
 }

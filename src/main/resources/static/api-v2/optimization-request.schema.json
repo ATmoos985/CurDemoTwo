@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "OptimizationRequest (v2 job / nesting-v1 profile)",
+  "title": "OptimizationRequest (v2 / nesting-v1 or slitting-v1)",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -10,7 +10,10 @@
     },
     "problemType": {
       "type": "string",
-      "const": "NESTING_2D"
+      "enum": [
+        "NESTING_2D",
+        "SLITTING_1D"
+      ]
     },
     "clientRequestId": {
       "type": "string",
@@ -18,7 +21,14 @@
       "maxLength": 128
     },
     "problem": {
-      "$ref": "#/$defs/NestingProblem"
+      "oneOf": [
+        {
+          "$ref": "#/$defs/NestingProblem"
+        },
+        {
+          "$ref": "#/$defs/SlittingProblem"
+        }
+      ]
     },
     "allowFallback": {
       "type": "boolean"
@@ -318,6 +328,155 @@
         "version",
         "maxTrials"
       ]
+    },
+    "SlittingProblem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "1"
+        },
+        "unit": {
+          "type": "string",
+          "const": "mm"
+        },
+        "motherWidthMm": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "leftTrimMm": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 99999
+        },
+        "rightTrimMm": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 99999
+        },
+        "minWidthMm": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "maxWidthMm": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "widthStepMm": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "totalOverCap": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "FAST",
+            "QUALITY"
+          ]
+        },
+        "orders": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "widthMm": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100000
+              },
+              "lengthMm": {
+                "type": "integer",
+                "minimum": 1000,
+                "maximum": 1000000000,
+                "multipleOf": 1000
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100000
+              },
+              "surfaceTreatment": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              }
+            },
+            "required": [
+              "id",
+              "widthMm",
+              "lengthMm",
+              "quantity",
+              "surfaceTreatment"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 500
+        },
+        "timeLimitSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "unit",
+        "motherWidthMm",
+        "leftTrimMm",
+        "rightTrimMm",
+        "minWidthMm",
+        "maxWidthMm",
+        "widthStepMm",
+        "totalOverCap",
+        "profile",
+        "orders",
+        "timeLimitSeconds"
+      ],
+      "description": "整数 mm；当前内核卷长必须整除1000。ID唯一，候选宽度不超过扣边可用幅宽；需求总卷数+超产上限<=100000。跨字段约束由服务验证。"
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "problemType": {
+            "const": "SLITTING_1D"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "problem": {
+            "$ref": "#/$defs/SlittingProblem"
+          }
+        },
+        "not": {
+          "required": [
+            "strategy"
+          ]
+        }
+      },
+      "else": {
+        "properties": {
+          "problem": {
+            "$ref": "#/$defs/NestingProblem"
+          }
+        }
+      }
+    }
+  ]
 }

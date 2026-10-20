@@ -20,6 +20,7 @@ public class OptimizationService implements AutoCloseable {
     }
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(OptimizationService.class);
     private final SolverFactory solvers;
+    private final com.example.cutdemotwo.algorithm.solver.ISlittingSolverEngine slitting;
     private final OptimizationJobStore store;
     private final LeasedOptimizationJobStore shared;
     private final String owner=UUID.randomUUID().toString();
@@ -39,12 +40,18 @@ public class OptimizationService implements AutoCloseable {
     private final Map<String,Thread> running = new HashMap<>();
     private boolean closing, storageFailed;
 
+    public OptimizationService(SolverFactory solvers, OptimizationJobStore store, int workers, int queueCapacity, int maxStored) {
+        this(solvers, new com.example.cutdemotwo.algorithm.solver.LinearSlittingSolverEngine(), store, workers, queueCapacity, maxStored);
+    }
+
     @Autowired
-    public OptimizationService(SolverFactory solvers, OptimizationJobStore store,
+    public OptimizationService(SolverFactory solvers,
+            com.example.cutdemotwo.algorithm.solver.ISlittingSolverEngine slitting,
+            OptimizationJobStore store,
             @Value("${cutdemo.jobs.workers:2}") int workers,
             @Value("${cutdemo.jobs.queue-capacity:16}") int queueCapacity,
             @Value("${cutdemo.jobs.max-stored:1000}") int maxStored) {
-        this.solvers=solvers;this.store=store;this.workers=workers;this.queueCapacity=queueCapacity;this.maxStored=maxStored;
+        this.solvers=solvers;this.slitting=slitting;this.store=store;this.workers=workers;this.queueCapacity=queueCapacity;this.maxStored=maxStored;
         this.shared=store instanceof LeasedOptimizationJobStore leased?leased:null;
         if (workers<1 || workers>16 || queueCapacity<1 || queueCapacity>1000 || maxStored<1) {
             store.close();throw new IllegalArgumentException("计算作业并发、排队或归档限额配置无效");
@@ -68,7 +75,10 @@ public class OptimizationService implements AutoCloseable {
     }
 
     public Map<String,Object> capabilities() {
-        return Map.of("schemaVersion","2.0","problemTypes",List.of("NESTING_2D"),"inputProfile","nesting-v1",
+        return Map.of("schemaVersion","2.0","problemTypes",List.of("NESTING_2D","SLITTING_1D"),"inputProfile","nesting-v1",
+                "inputProfiles",List.of("nesting-v1","slitting-v1"),
+                "slittingEngine",Map.of("id",slitting.getEngineType(),"available",slitting.isAvailable(),"cancellation","isolated-process",
+                        "maxOrders",500,"maxTotalProducedRolls",100000,"lengthResolutionMm",1000,"maxHeapMiB",512),
                 "engines",solvers.capabilities(),"limits",Map.of("workers",workers,"queueCapacity",queueCapacity,"maxStoredJobs",maxStored,
                         "maxRequestBytes",262144,"maxPieces",10000,"maxContourPieces",200,"maxTimeLimitSeconds",60),
                 "features",Map.of("polling",true,"cancellation","cooperative-request","hardPreemption",false,"progress","phase-only",
@@ -81,8 +91,25 @@ public class OptimizationService implements AutoCloseable {
         if (request == null || request.problem()==null || request.allowFallback()==null || request.requireComplete()==null
                 || request.clientRequestId()==null || request.clientRequestId().isBlank() || request.clientRequestId().length()>128)
             throw new Failure("INVALID_INPUT","必须提供问题、明确的降级/齐套选项及 1–128 字调用方请求编号",400,false);
-        if (!"2.0".equals(request.schemaVersion()) || !"NESTING_2D".equals(request.problemType()))
-            throw new Failure("UNSUPPORTED_CONSTRAINT","当前仅支持 schemaVersion=2.0、NESTING_2D 与 nesting-v1 输入",422,false);
+        if (!"2.0".equals(request.schemaVersion()))
+            throw new Failure("UNSUPPORTED_CONSTRAINT","当前仅支持 schemaVersion=2.0",422,false);
+        if ("SLITTING_1D".equals(request.problemType())) {
+            if (!(request.problem() instanceof com.example.cutdemotwo.contracts.slitting.SlittingProblem))
+                throw new Failure("INVALID_INPUT","问题类型与内容不匹配",400,false);
+            if(request.strategy()!=null)throw new Failure("UNSUPPORTED_CONSTRAINT","一维问题不支持唛架策略",422,false);
+            if(!slitting.isAvailable())throw new Failure("ENGINE_UNAVAILABLE","一维计算运行时不可用",503,true);
+            try {
+                com.example.cutdemotwo.contracts.slitting.SlittingValidation.validateProblem(request.slittingProblem());
+                return new SolverFactory.ProblemCheck("VALID", "一维分切问题合法",slitting.getEngineType(),slitting.getEngineType(),null);
+            } catch (com.example.cutdemotwo.contracts.slitting.SlittingValidation.ValidationException e) {
+                int status = "INVALID_INPUT".equals(e.getCode()) ? 400 : 422;
+                throw new Failure(e.getCode(), e.getMessage(), status, false);
+            }
+        }
+        if (!"NESTING_2D".equals(request.problemType()))
+            throw new Failure("UNSUPPORTED_CONSTRAINT","不支持的作业类型: " + request.problemType(),422,false);
+        if (!(request.problem() instanceof com.example.cutdemotwo.contracts.nesting.NestingProblem))
+            throw new Failure("INVALID_INPUT","问题类型与内容不匹配",400,false);
         var check=solvers.validateProblem(request.nestingProblem(),request.allowFallback());
         if (!"VALID".equals(check.status())) throw switch(check.status()) {
             case "INVALID_INPUT" -> new Failure("INVALID_INPUT",check.message(),400,false);
@@ -178,6 +205,21 @@ public class OptimizationService implements AutoCloseable {
                 timeout=timer.schedule(()->deadline(id),document.input().problem().timeLimitSeconds(),TimeUnit.SECONDS);
             }
             long start=System.nanoTime();
+            if ("SLITTING_1D".equals(document.input().problemType())) {
+                var slittingResult = slitting.solve(document.input().slittingProblem());
+                synchronized(this) {
+                    document=required(id);
+                    boolean stop="CANCEL_REQUESTED".equals(document.job().state());
+                    boolean timed="TIMED_OUT".equals(document.job().code()) || (!stop && System.nanoTime()-start>=TimeUnit.SECONDS.toNanos(document.input().problem().timeLimitSeconds()));
+                    Thread.interrupted();
+                    boolean valid=Set.of("FEASIBLE","NO_SOLUTION_FOUND").contains(slittingResult.status());
+                    String state=timed?"TIMED_OUT":stop?"CANCELLED":valid?"SUCCEEDED":"FAILED";
+                    var result=valid?resultSlitting(document,slittingResult,timed?"TIME_LIMIT":stop?"CANCELLED":"COMPLETED"):null;
+                    persist(transition(document,state,"STOPPED",timed?"TIMED_OUT":stop?"CANCELLED":valid?null:slittingResult.status(),
+                            timed?"计算已退出，达到时限":stop?"计算已退出，取消完成":valid?"计算结束，履约状态请查看结果":slittingResult.status(),result));
+                }
+                return;
+            }
             var outcome=document.input().strategy()==null
                     ? new MarkerOptimization.Outcome(solvers.solve(document.input().nestingProblem(),document.input().allowFallback()),null,null)
                     : MarkerOptimization.solve(document.input(),solvers,message->progress(id,message));
@@ -199,7 +241,7 @@ public class OptimizationService implements AutoCloseable {
                 Thread.interrupted();
                 var document=documents.get(id);
                 if(document!=null && !document.job().terminal()) {
-                    var failed=transition(document,"FAILED","STOPPED","EXECUTION_FAILED","作业执行或持久化失败，请检查服务日志",null);
+                    var failed=executionFailure(document,error);
                     try {persist(failed);} catch(RuntimeException storageError) {storageFailed=true;documents.put(id,failed);log.error("Optimization result could not be persisted",storageError);}
                 }
                 log.error("Optimization job failed: {}",id,error);
@@ -224,8 +266,10 @@ public class OptimizationService implements AutoCloseable {
                 }
             }
             while(leases.size()<workers) {
-                var lease=shared.claim(owner,LEASE_MILLIS,document->"VALID".equals(
-                        solvers.validateProblem(document.input().nestingProblem(),document.input().allowFallback()).status()));
+                var lease=shared.claim(owner,LEASE_MILLIS,document->{
+                    if ("SLITTING_1D".equals(document.input().problemType())) return slitting.isAvailable();
+                    return "VALID".equals(solvers.validateProblem(document.input().nestingProblem(),document.input().allowFallback()).status());
+                });
                 if(lease==null)break;
                 var local=new LocalLease(lease);String id=lease.document().job().id();
                 leases.put(id,local);
@@ -249,8 +293,18 @@ public class OptimizationService implements AutoCloseable {
             }
             var document=local.lease.document();
             // A retry shares the first attempt's wall-clock deadline; it does not get a new full budget.
-            var input=document.input();var p=input.nestingProblem();
+            var input=document.input();
             int seconds=Math.max(1,(int)Math.ceil(local.lease.remainingMillis()/1000d));
+            if("SLITTING_1D".equals(input.problemType())) {
+                var p=input.slittingProblem();
+                var bounded=new com.example.cutdemotwo.contracts.slitting.SlittingProblem(p.schemaVersion(),p.unit(),p.motherWidthMm(),
+                        p.leftTrimMm(),p.rightTrimMm(),p.minWidthMm(),p.maxWidthMm(),p.widthStepMm(),p.totalOverCap(),p.profile(),p.orders(),seconds);
+                var result=slitting.solve(bounded);
+                Thread.interrupted();
+                if(!local.lost)shared.update(local.lease,current->finishedSlitting(current,result),true);
+                return;
+            }
+            var p=input.nestingProblem();
             var bounded=new com.example.cutdemotwo.contracts.nesting.NestingProblem(p.schemaVersion(),p.unit(),p.material(),p.parts(),p.process(),p.engine(),seconds);
             var execution=new OptimizationRequest(input.schemaVersion(),input.problemType(),input.clientRequestId(),bounded,input.allowFallback(),input.requireComplete(),input.strategy());
             var outcome=execution.strategy()==null
@@ -265,17 +319,39 @@ public class OptimizationService implements AutoCloseable {
         } catch(Throwable error) {
             Thread.interrupted();
             if(!local.lost)try {
-                shared.update(local.lease,current->{
-                    boolean stopping="CANCEL_REQUESTED".equals(current.job().state());
-                    String state=stopping?("TIMED_OUT".equals(current.job().code())?"TIMED_OUT":"CANCELLED"):"FAILED";
-                    return transition(current,state,"STOPPED",stopping?state:"EXECUTION_FAILED","执行失败或已停止；详情请查服务日志",null);
-                },true);
+                shared.update(local.lease,current->executionFailure(current,error),true);
             } catch(RuntimeException writeError){log.error("Shared optimization final state not persisted; lease recovery will resolve it",writeError);}
             log.error("Shared optimization execution failed: {}",id,error);
         } finally {
             synchronized(this){running.remove(id);leases.remove(id);}
             Thread.interrupted();
         }
+    }
+    private StoredOptimizationJob executionFailure(StoredOptimizationJob document,Throwable error) {
+        boolean stopping="CANCEL_REQUESTED".equals(document.job().state());
+        boolean timed="TIMED_OUT".equals(document.job().code())
+                || (!stopping && error instanceof com.example.cutdemotwo.algorithm.solver.LinearSlittingSolverEngine.ComputationTimeout);
+        String state=timed?"TIMED_OUT":stopping?"CANCELLED":"FAILED";
+        String code=timed || stopping?state:error instanceof com.example.cutdemotwo.contracts.slitting.SlittingValidation.ValidationException
+                ?"INVALID_RESULT":"EXECUTION_FAILED";
+        return transition(document,state,"STOPPED",code,timed || stopping?"计算进程已退出":"执行或结果验证失败，请检查服务日志",null);
+    }
+    private StoredOptimizationJob finishedSlitting(StoredOptimizationJob current,com.example.cutdemotwo.contracts.slitting.SlittingResult result) {
+        boolean stop="CANCEL_REQUESTED".equals(current.job().state()),timed=stop && "TIMED_OUT".equals(current.job().code());
+        return transition(current,timed?"TIMED_OUT":stop?"CANCELLED":"SUCCEEDED","STOPPED",timed?"TIMED_OUT":stop?"CANCELLED":null,
+                "计算已退出，履约状态请查看结果",resultSlitting(current,result,timed?"TIME_LIMIT":stop?"CANCELLED":"COMPLETED"));
+    }
+    private OptimizationResult resultSlitting(StoredOptimizationJob document,com.example.cutdemotwo.contracts.slitting.SlittingResult r,String termination) {
+        com.example.cutdemotwo.contracts.slitting.SlittingValidation.validateResult(document.input().slittingProblem(),r);
+        boolean complete=!r.fulfillment().isEmpty() && r.fulfillment().stream().allMatch(f->f.missing()==0);
+        boolean any=r.fulfillment().stream().anyMatch(f->f.produced()>0);
+        var metrics=List.of(
+                new OptimizationResult.Metric("motherAreaUtilization",r.motherAreaMm2()>0?100d*r.pieceAreaMm2()/r.motherAreaMm2():0,
+                        "%",r.pieceAreaMm2(),r.motherAreaMm2(),"planned-produced-area / planned-mother-area; includes fixed trims in denominator","1"),
+                new OptimizationResult.Metric("usableAreaUtilization",r.usableAreaMm2()>0?100d*r.pieceAreaMm2()/r.usableAreaMm2():0,
+                        "%",r.pieceAreaMm2(),r.usableAreaMm2(),"planned-produced-area / planned-usable-area; excludes fixed trims from denominator","1"));
+        return new OptimizationResult(document.job().id(),document.job().id(),document.job().inputHash(),"2.0","PASSED",
+                complete?"COMPLETE":any?"PARTIAL":"NONE",any && (!document.input().requireComplete() || complete),termination,metrics,r);
     }
     private StoredOptimizationJob finished(StoredOptimizationJob current,MarkerOptimization.Outcome outcome) {
         boolean stop="CANCEL_REQUESTED".equals(current.job().state()),timed=stop && "TIMED_OUT".equals(current.job().code());

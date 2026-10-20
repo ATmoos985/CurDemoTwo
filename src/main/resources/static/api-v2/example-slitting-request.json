@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "2.0",
+  "problemType": "SLITTING_1D",
+  "clientRequestId": "ERP-SLITTING-001",
+  "problem": {
+    "schemaVersion": "1",
+    "unit": "mm",
+    "motherWidthMm": 1200,
+    "leftTrimMm": 10,
+    "rightTrimMm": 10,
+    "minWidthMm": 1000,
+    "maxWidthMm": 1180,
+    "widthStepMm": 10,
+    "totalOverCap": 10,
+    "profile": "FAST",
+    "orders": [
+      {
+        "id": "order-A",
+        "widthMm": 500,
+        "lengthMm": 3000,
+        "quantity": 4,
+        "surfaceTreatment": "素色"
+      },
+      {
+        "id": "order-B",
+        "widthMm": 600,
+        "lengthMm": 3000,
+        "quantity": 2,
+        "surfaceTreatment": "素色"
+      }
+    ],
+    "timeLimitSeconds": 10
+  },
+  "allowFallback": false,
+  "requireComplete": true
+}

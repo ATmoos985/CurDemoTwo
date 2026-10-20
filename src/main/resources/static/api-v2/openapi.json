@@ -3,7 +3,7 @@
   "info": {
     "title": "CurDemoTwo Optimization Jobs",
     "version": "2.0.0",
-    "description": "Single-dispatcher local job archive, nesting-v1 geometry profile. No inventory writes. v1 endpoints remain compatible. No distributed leases, SSE, authentication or multi-material support in this stage. Schema validation is followed by engine and geometry checks. timeLimitSeconds requests cooperative interruption, not guaranteed hard preemption."
+    "description": "Single-dispatcher local job archive, nesting-v1 geometry profile. No inventory writes. v1 endpoints remain compatible. No distributed leases, SSE, authentication or multi-material support in this stage. Schema validation is followed by engine and geometry checks. timeLimitSeconds requests cooperative interruption, not guaranteed hard preemption. 一维 slitting-v1 使用独立计算进程；输入单位 mm，卷长分辨率1000 mm。"
   },
   "servers": [
     {
@@ -1070,7 +1070,10 @@
           },
           "problemType": {
             "type": "string",
-            "const": "NESTING_2D"
+            "enum": [
+              "NESTING_2D",
+              "SLITTING_1D"
+            ]
           },
           "clientRequestId": {
             "type": "string",
@@ -1078,7 +1081,14 @@
             "maxLength": 128
           },
           "problem": {
-            "$ref": "#/components/schemas/NestingProblem"
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NestingProblem"
+              },
+              {
+                "$ref": "#/components/schemas/SlittingProblem"
+              }
+            ]
           },
           "allowFallback": {
             "type": "boolean"
@@ -1097,6 +1107,36 @@
           "problem",
           "allowFallback",
           "requireComplete"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "problemType": {
+                  "const": "SLITTING_1D"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "problem": {
+                  "$ref": "#/components/schemas/SlittingProblem"
+                }
+              },
+              "not": {
+                "required": [
+                  "strategy"
+                ]
+              }
+            },
+            "else": {
+              "properties": {
+                "problem": {
+                  "$ref": "#/components/schemas/NestingProblem"
+                }
+              }
+            }
+          }
         ]
       },
       "OptimizationJob": {
@@ -1584,6 +1624,9 @@
           },
           "marker": {
             "$ref": "#/components/schemas/MarkerReport"
+          },
+          "slitting": {
+            "$ref": "#/components/schemas/SlittingResult"
           }
         },
         "required": [
@@ -1595,8 +1638,38 @@
           "fulfillmentStatus",
           "meetsRequirement",
           "terminationReason",
-          "metrics",
-          "layout"
+          "metrics"
+        ],
+        "oneOf": [
+          {
+            "required": [
+              "layout"
+            ],
+            "not": {
+              "required": [
+                "slitting"
+              ]
+            }
+          },
+          {
+            "required": [
+              "slitting"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "layout"
+                  ]
+                },
+                {
+                  "required": [
+                    "marker"
+                  ]
+                }
+              ]
+            }
+          }
         ]
       },
       "Error": {
@@ -1866,6 +1939,56 @@
                 "maxTrials"
               ]
             }
+          },
+          "inputProfiles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "slittingEngine": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "available": {
+                "type": "boolean"
+              },
+              "cancellation": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "maxOrders": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxTotalProducedRolls": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "lengthResolutionMm": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxHeapMiB": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "id",
+              "available",
+              "cancellation",
+              "maxOrders",
+              "maxTotalProducedRolls",
+              "lengthResolutionMm",
+              "maxHeapMiB"
+            ]
           }
         },
         "required": [
@@ -2001,6 +2124,315 @@
           "trialLengthMm",
           "trials",
           "optimalityProven"
+        ]
+      },
+      "SlittingProblem": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "const": "1"
+          },
+          "unit": {
+            "type": "string",
+            "const": "mm"
+          },
+          "motherWidthMm": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000
+          },
+          "leftTrimMm": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 99999
+          },
+          "rightTrimMm": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 99999
+          },
+          "minWidthMm": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000
+          },
+          "maxWidthMm": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000
+          },
+          "widthStepMm": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "totalOverCap": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "FAST",
+              "QUALITY"
+            ]
+          },
+          "orders": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "widthMm": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100000
+                },
+                "lengthMm": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 1000000000,
+                  "multipleOf": 1000
+                },
+                "quantity": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100000
+                },
+                "surfaceTreatment": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                }
+              },
+              "required": [
+                "id",
+                "widthMm",
+                "lengthMm",
+                "quantity",
+                "surfaceTreatment"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 500
+          },
+          "timeLimitSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "unit",
+          "motherWidthMm",
+          "leftTrimMm",
+          "rightTrimMm",
+          "minWidthMm",
+          "maxWidthMm",
+          "widthStepMm",
+          "totalOverCap",
+          "profile",
+          "orders",
+          "timeLimitSeconds"
+        ],
+        "description": "整数 mm；当前内核卷长必须整除1000。ID唯一，候选宽度不超过扣边可用幅宽；需求总卷数+超产上限<=100000。跨字段约束由服务验证。"
+      },
+      "SlittingResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "const": "1"
+          },
+          "unit": {
+            "type": "string",
+            "const": "mm"
+          },
+          "engine": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "engineVersion": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "FEASIBLE",
+              "NO_SOLUTION_FOUND"
+            ]
+          },
+          "optimalityProven": {
+            "type": "boolean",
+            "const": false
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "rollWidthMm": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "patternWidthMm": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "lengthMm": {
+                  "type": "integer",
+                  "minimum": 1000
+                },
+                "surfaceTreatment": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                "repetitions": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "stations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "widthMm": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "countPerRepetition": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "required": [
+                      "widthMm",
+                      "countPerRepetition"
+                    ]
+                  }
+                },
+                "allocations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "orderId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "quantity": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "required": [
+                      "orderId",
+                      "quantity"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "rollWidthMm",
+                "patternWidthMm",
+                "lengthMm",
+                "surfaceTreatment",
+                "repetitions",
+                "stations",
+                "allocations"
+              ]
+            }
+          },
+          "fulfillment": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "orderId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "requested": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "produced": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "missing": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "overproduced": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "orderId",
+                "requested",
+                "produced",
+                "missing",
+                "overproduced"
+              ]
+            }
+          },
+          "pieceAreaMm2": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "motherAreaMm2": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "usableAreaMm2": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalOverproduced": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "unit",
+          "engine",
+          "engineVersion",
+          "status",
+          "optimalityProven",
+          "patterns",
+          "fulfillment",
+          "pieceAreaMm2",
+          "motherAreaMm2",
+          "usableAreaMm2",
+          "totalOverproduced"
         ]
       }
     }

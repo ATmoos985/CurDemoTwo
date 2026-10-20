@@ -122,4 +122,33 @@ metric = next(m for m in result['metrics'] if m['name'] == 'markerAreaUtilizatio
 assert abs(metric['denominator'] - occupied * marker['problem']['material']['shape']['width']) < .01
 assert call('/api/cutting/tasks') == [] and call('/api/remnants') == []
 check('API-only marker shortening returns a verified complete kit, trial history and occupied-area metric')
+slitting = call('/api-v2/example-slitting-request.json')
+Draft202012Validator(schema).validate(slitting)
+matches('ProblemCheck', call('/api/v2/problem-validations', slitting))
+key = str(uuid.uuid4())
+job = call('/api/v2/optimization-jobs', slitting, key, expected=202)
+for _ in range(300):
+    job = call('/api/v2/optimization-jobs/' + job['id'])
+    if job['state'] in ['SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT']:
+        break
+    time.sleep(.05)
+assert job['state'] == 'SUCCEEDED', job
+result = call(job['resultRef'])
+matches('OptimizationResult', result)
+assert result['fulfillmentStatus'] == 'COMPLETE' and result['meetsRequirement']
+assert 'layout' not in result and result['slitting']['optimalityProven'] is False
+assert [f['orderId'] for f in result['slitting']['fulfillment']] == ['order-A', 'order-B']
+assert call('/api/v2/optimization-jobs', slitting, key, expected=202)['id'] == job['id']
+matches('OptimizationRequest', call('/api/v2/optimization-jobs/' + job['id'] + '/input'))
+assert result['metrics'][0]['denominator'] > result['metrics'][1]['denominator']
+assert call('/api/cutting/tasks') == [] and call('/api/rolls') == [] and call('/api/remnants') == []
+check('packaged one-dimensional child JVM returns verified allocations, metrics, durable identity and no inventory writes')
+invalid = json.loads(json.dumps(slitting))
+invalid['problem']['orders'][0]['lengthMm'] = 3001
+assert list(Draft202012Validator(schema).iter_errors(invalid))
+matches('Error', call('/api/v2/problem-validations', invalid, expected=422))
+invalid = {**slitting, 'strategy': {'id': 'marker-shortening', 'version': '1', 'maxTrials': 1}}
+assert list(Draft202012Validator(schema).iter_errors(invalid))
+matches('Error', call('/api/v2/problem-validations', invalid, expected=422))
+check('unsupported one-dimensional precision and strategy are rejected by schema and real HTTP')
 print(f'Executed {passed}; passed {passed}; failed 0')

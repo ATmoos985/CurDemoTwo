@@ -36,7 +36,8 @@ class OptimizationImportConfigurationTests {
             context.registerBean(DataSource.class,()->source);
             context.registerBean(InventoryStore.class,()->new JdbcInventoryStore(source));
             context.registerBean(SolverFactory.class,()->new SolverFactory(List.of()));
-            context.register(OptimizationConfiguration.class,OptimizationService.class);
+            context.register(OptimizationConfiguration.class,OptimizationService.class,
+                    com.example.cutdemotwo.algorithm.solver.LinearSlittingSolverEngine.class);
             context.refresh();
             var service=context.getBean(OptimizationService.class);
             assertEquals("FAILED",service.get(id).state());
