@@ -4,9 +4,9 @@ globalThis.window = { addEventListener() {} };
 let rows = [];
 globalThis.document = { getElementById: () => null, querySelectorAll: () => rows };
 const { state } = await import('../../main/resources/static/js/core/state.js');
-const { updateDemandCompletionFromPieces, getDemandsFromUI } = await import('../../main/resources/static/js/plugins/solver/quota-manager.js');
+const { updateDemandCompletionFromPieces, getDemandsFromUI } = await import('../../main/resources/static/js/business/cutting/quota-manager.js');
 const { nextCutPosition, getSnappableNextStation, getSnapThresholdMm, updateFabricScrollPosition, advanceBed, smartAdvanceBed, radarTickStep, setupRadarInteraction, resizeFeedWindow } = await import('../../main/resources/static/js/plugins/radar/radar-scrubber.js');
-const { requiredReportLength } = await import('../../main/resources/static/js/plugins/solver/solver-client.js');
+const { requiredReportLength } = await import('../../main/resources/static/js/business/cutting/solver-client.js');
 const { bus } = await import('../../main/resources/static/js/core/event-bus.js');
 
 test('preview and same-sized pieces never masquerade as reported demand completion', () => {

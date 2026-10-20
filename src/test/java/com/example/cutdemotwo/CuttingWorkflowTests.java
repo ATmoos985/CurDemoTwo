@@ -1,10 +1,18 @@
 package com.example.cutdemotwo;
 
-import com.example.cutdemotwo.model.*;
-import com.example.cutdemotwo.service.CrossCutSolverService;
-import com.example.cutdemotwo.service.CuttingWorkflowService;
-import com.example.cutdemotwo.service.RemnantService;
-import com.example.cutdemotwo.service.solver.SolverFactory;
+import com.example.cutdemotwo.business.model.CutReport;
+import com.example.cutdemotwo.business.model.CuttingTask;
+import com.example.cutdemotwo.business.model.PieceDemand;
+import com.example.cutdemotwo.business.model.RemnantStock;
+import com.example.cutdemotwo.business.model.SolveRequest;
+import com.example.cutdemotwo.business.model.SolveResponse;
+import com.example.cutdemotwo.contracts.geometry.Defect;
+import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
+import com.example.cutdemotwo.contracts.geometry.RemnantPiece;
+import com.example.cutdemotwo.algorithm.solver.CrossCutSolverService;
+import com.example.cutdemotwo.business.cutting.CuttingWorkflowService;
+import com.example.cutdemotwo.business.cutting.RemnantService;
+import com.example.cutdemotwo.algorithm.solver.SolverFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -54,7 +62,7 @@ class CuttingWorkflowTests {
         request.setRollL(4000);
         request.setDemands(List.of(new PieceDemand(1, "窗帘矩形", 2000, 1000, 2, false)));
         request.setDefects(List.of(new Defect(1, 200, 1200, 200, 200, 20)));
-        SolveResponse result = com.example.cutdemotwo.service.FabricSolveAdapter.solve(new SolverFactory(List.of(new CrossCutSolverService())), request);
+        SolveResponse result = com.example.cutdemotwo.business.cutting.FabricSolveAdapter.solve(new SolverFactory(List.of(new CrossCutSolverService())), request);
         assertTrue(result.isSuccess());
         assertEquals(2, result.getPieces().size());
         assertTrue(result.getCuts().stream().allMatch(c -> "横切".equals(c.getType())));

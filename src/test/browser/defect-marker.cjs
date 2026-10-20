@@ -22,7 +22,7 @@ async function api(path,body) {
         await page.evaluate(async id=>{
             window.testState=(await import('/js/core/state.js')).state;
             window.testStage=await import('/js/plugins/cad/cad-stage.js');
-            await(await import('/js/plugins/solver/task-workspace.js')).loadTask(id);
+            await(await import('/js/business/cutting/task-workspace.js')).loadTask(id);
         },task.id);
         const move=async point=>{
             const screen=await page.evaluate(point=>{const s=window.testStage.stage,r=s.container().getBoundingClientRect();return{x:r.x+s.x()+point.x*s.scaleX(),y:r.y+s.y()+point.y*s.scaleY()};},point);
@@ -30,7 +30,7 @@ async function api(path,body) {
             return page.evaluate(async()=>{
                 const s=window.testStage.stage,p=s.getPointerPosition();
                 const point={x:Number(((p.x-s.x())/s.scaleX()).toFixed(1)),y:Number(((p.y-s.y())/s.scaleY()).toFixed(1))};
-                const local=(await import('/js/plugins/cad/cad-view.js')).stationCoordinates(point.x,point.y,window.testState.getCurrentCaseData());
+                const local=(await import('/js/canvas/cad-view.js')).stationCoordinates(point.x,point.y,window.testState.getCurrentCaseData());
                 return {point,local};
             });
         };
@@ -38,9 +38,9 @@ async function api(path,body) {
             const point=await page.evaluate(async cutOrigin=>{
                 const data=window.testState.getCurrentCaseData();Object.assign(data,{cutOrigin,windowStartY:10000});
                 const renderer=await import('/js/plugins/cad/cad-renderer.js');
-                (await import('/js/plugins/solver/solver-client.js')).updateUIInfo();
+                (await import('/js/business/cutting/solver-client.js')).updateUIInfo();
                 renderer.renderScene();renderer.resetToBedView();
-                const origin=(await import('/js/plugins/cad/cad-view.js')).stationOrigin(data);
+                const origin=(await import('/js/canvas/cad-view.js')).stationOrigin(data);
                 return {x:origin.x+origin.dx*375.4,y:origin.y+origin.dy*800.6};
             },cutOrigin);
             await page.locator('#btn-defect-tool').click();
@@ -52,7 +52,7 @@ async function api(path,body) {
                 const geometry=await page.evaluate(async()=>{
                     const stage=window.testStage.stage;
                     return {x:stage.findOne('.defect-distance-x').points(),y:stage.findOne('.defect-distance-y').points(),
-                        origin:(await import('/js/plugins/cad/cad-view.js')).stationOrigin(window.testState.getCurrentCaseData())};
+                        origin:(await import('/js/canvas/cad-view.js')).stationOrigin(window.testState.getCurrentCaseData())};
                 });
                 assert.deepEqual(geometry.x,[moved.point.x,moved.point.y,geometry.origin.x,moved.point.y]);
                 assert.deepEqual(geometry.y,[moved.point.x,moved.point.y,moved.point.x,geometry.origin.y]);

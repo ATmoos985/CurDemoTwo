@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {demandProgress,summarizeDemandProgress,latestDemandChange} from '../../main/resources/static/js/plugins/solver/demand-progress-model.js';
+import {demandProgress,summarizeDemandProgress,latestDemandChange} from '../../main/resources/static/js/business/cutting/demand-progress-model.js';
 const pieces=[{id:1,demandId:7,planId:'P'},{id:2,demandId:7,planId:'P'},
     {id:3,demandId:8,planId:'old',confirmed:true},{id:4,demandId:7,planId:'old'}];
 const pending={result:{planId:'P',pieces:pieces.slice(0,2),fulfillment:[{demandId:7,requested:3,placed:2,unplaced:1,reason:'NOT_PLACED_IN_THIS_SOLUTION'}]}};

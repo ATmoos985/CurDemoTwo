@@ -1,7 +1,8 @@
 package com.example.cutdemotwo;
 
-import com.example.cutdemotwo.model.*;
-import com.example.cutdemotwo.service.RemnantService;
+import com.example.cutdemotwo.business.model.MotherRollInfo;
+import com.example.cutdemotwo.contracts.geometry.Defect;
+import com.example.cutdemotwo.business.cutting.RemnantService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;

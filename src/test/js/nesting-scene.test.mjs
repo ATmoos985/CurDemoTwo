@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createNestingScene, rectangle, polygon, shapeArea, sceneOrigin } from '../../main/resources/static/js/nesting/nesting-scene.js';
-import { createWorkspaceScene } from '../../main/resources/static/js/plugins/cad/workspace-scene.js';
+import { createNestingScene, rectangle, polygon, shapeArea, sceneOrigin } from '../../main/resources/static/js/canvas/nesting-scene.js';
+import { createWorkspaceScene } from '../../main/resources/static/js/business/cutting/workspace-scene.js';
 import { NestingSession, dispatchedEngine } from '../../main/resources/static/js/nesting/nesting-client.js';
-import { renderNestingGeometry, setNestingCutStep } from '../../main/resources/static/js/nesting/nesting-renderer.js';
+import { renderNestingGeometry, setNestingCutStep } from '../../main/resources/static/js/canvas/nesting-renderer.js';
 
 const input = { schemaVersion: '1', unit: 'mm', engine: 'crosscut', timeLimitSeconds: 3,
     material: { id: 'sheet-A', shape: rectangle(2000, 3000), exclusions: [], continuesAfterRegion: false },

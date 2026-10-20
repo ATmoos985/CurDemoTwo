@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {classifyReport,reportRecoveryCandidates,applyReportReceipt,restoreRecordedGeometry} from '../../main/resources/static/js/plugins/solver/report-outcomes.js';
+import {classifyReport,reportRecoveryCandidates,applyReportReceipt,restoreRecordedGeometry} from '../../main/resources/static/js/business/cutting/report-outcomes.js';
 
 const pieces=[1,2,3].map((id,i)=>({id,demandId:id===3?9:7,name:'同尺寸',x:0,y:i*1000,w:2000,l:1000}));
 const results=[{pieceId:1,outcome:'QUALIFIED'},{pieceId:2,outcome:'REJECTED',reason:'破损'},{pieceId:3,outcome:'UNCUT'}];

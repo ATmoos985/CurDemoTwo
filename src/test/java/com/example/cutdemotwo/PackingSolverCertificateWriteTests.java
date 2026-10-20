@@ -1,8 +1,8 @@
 package com.example.cutdemotwo;
 
-import com.example.cutdemotwo.model.nesting.NestingProblem;
-import com.example.cutdemotwo.service.PackingSolverService;
-import com.example.cutdemotwo.service.solver.SolverFactory;
+import com.example.cutdemotwo.contracts.nesting.NestingProblem;
+import com.example.cutdemotwo.algorithm.solver.PackingSolverService;
+import com.example.cutdemotwo.algorithm.solver.SolverFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;

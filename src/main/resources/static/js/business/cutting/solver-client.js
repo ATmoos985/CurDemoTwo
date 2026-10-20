@@ -1,0 +1,960 @@
+import {shapeArea, rectangle} from '../../canvas/nesting-scene.js';
+import { renderTaskRemnants } from '../../plugins/remnant/remnant-modal.js';
+import { saveCurrentTask, refreshTaskProgress, escapeText } from './task-workspace.js';
+import { createPlanHistory, planScene } from './plan-editing.js';
+import { layoutMetrics, materialSummary } from './material-accounting.js';
+import { renderWorkflowGuide, navigateWorkflowStage } from './workflow-guide.js';
+import { requestJSON, ApiError, failurePresentation, fallbackPresentation } from '../../core/api-request.js';
+import { updateDemandProgress } from './demand-progress.js';
+import { classifyReport, applyReportReceipt, restoreRecordedGeometry } from './report-outcomes.js';
+import { renderReportPieces, readReportPieces, syncReportRemnants, readReportRemnants, reportPieceError } from './report-editor.js';
+/**
+ * 求解器通信与排料控制插件 (Solver Client Plugin)
+ */
+import { state } from '../../core/state.js';
+import { bus } from '../../core/event-bus.js';
+import { renderScene, resetToBedView, focusCurrentLayout, updateStatusBar } from '../../plugins/cad/cad-renderer.js';
+import { drawRulers } from '../../plugins/cad/cad-rulers.js';
+import { renderRadar, smartAdvanceBed, resizeFeedWindow, updateFeedControls, updateFabricScrollPosition } from '../../plugins/radar/radar-scrubber.js';
+import {
+    updateDemandCompletionFromPieces, recalculateRollStats, updateOriginHeaderSummary,
+    addOrMergeInterval, renderDemandsUI, renderDefectsUI,
+    getDemandsFromUI, getDefectsFromUI,
+    clearStationCuts, resetAllRollCuts
+} from './quota-manager.js';
+import { showToast, confirmAction } from '../../core/toast.js';
+import { solverSettings } from '../../plugins/settings/settings.js';
+import { renderToolpathUI } from '../../plugins/toolpath/toolpath-optimizer.js';
+import { selectRemnant, clearRemnantSelection, hoverRemnant } from '../../plugins/cad/cad-remnant-highlight.js';
+import {scheduleRemnantAvailability} from '../../plugins/material/material-selection.js';
+import {solveDiagnostics} from './solve-diagnostics.js';
+import {queuedReports, queuedQuantities, queuedStockLength, saveReportQueue, queueEntry, stationReport} from './report-queue.js';
+import {windowDefects, findForwardPlan} from './forward-search.js';
+import {demandFeedLength,feedLengthLimits} from '../../plugins/radar/feed-window.js';
+
+export function updateUIInfo() {
+    const data = state.getCurrentCaseData();
+    if (!data) return;
+
+    if (document.getElementById("inp-total-roll-l")) document.getElementById("inp-total-roll-l").value = data.totalRollL || 60000;
+    if (document.getElementById("inp-bed-l")) document.getElementById("inp-bed-l").value = data.bedL || 5000;
+    if (document.getElementById("inp-window-start-y")) document.getElementById("inp-window-start-y").value = data.windowStartY || 0;
+    if (document.getElementById("inp-roll-w")) document.getElementById("inp-roll-w").value = data.rollW || 2000;
+
+    if (document.getElementById("inp-trim-start")) document.getElementById("inp-trim-start").value = data.trimStart || 0;
+    if (document.getElementById('inp-piece-gap')) document.getElementById('inp-piece-gap').value = data.pieceGap ?? 0;
+    if (document.getElementById("sel-cut-origin")) document.getElementById("sel-cut-origin").value = data.cutOrigin || "right-bottom";
+    if (document.getElementById("sel-first-stage")) document.getElementById("sel-first-stage").value = data.firstStageOrientation || "horizontal";
+    if (document.getElementById("sel-allow-rotation")) document.getElementById("sel-allow-rotation").value = data.allowRotation ? "1" : "0";
+    if (document.getElementById("sel-allow-longitudinal")) document.getElementById("sel-allow-longitudinal").value = data.allowLongitudinal === false ? "0" : "1";
+    updateOriginHeaderSummary();
+
+    updateStatusBar();
+
+    // 现场切刀表
+    const totalCutsBadge = document.getElementById("total-cuts-badge");
+    if (totalCutsBadge) totalCutsBadge.innerText = `${(data.cuts || []).length} 刀`;
+    const rightTabCutBadge = document.getElementById("right-tab-cut-badge");
+    if (rightTabCutBadge) rightTabCutBadge.innerText = `${(data.cuts || []).length} 刀`;
+
+    const cutTbody = document.getElementById("cut-table-body");
+    if (cutTbody) {
+        const currentLimit = state.currentCutStepLimit;
+        const isOpt = state.isToolpathOptimized;
+        cutTbody.innerHTML = (data.cuts || []).map(c => {
+            const isActive = (c.step === currentLimit);
+            const dirStr = (c.startX !== undefined && c.endX !== undefined) ?
+                `<div style="font-size:10px; color:#0284c7; font-family:monospace; margin-top:2px;">(${Math.round(c.startX)},${Math.round(c.startY)}) ➔ (${Math.round(c.endX)},${Math.round(c.endY)})</div>` : "";
+            const airBadge = (isOpt && c.airDistance !== undefined) ?
+                `<span style="font-size:9px; background:rgba(2,132,199,0.12); color:#0284c7; padding:1px 4px; border-radius:3px; border:1px solid rgba(2,132,199,0.25); margin-left:4px; font-family:monospace;">空+${Math.round(c.airDistance)}</span>` : "";
+            return `
+            <tr class="${isActive ? 'active-row' : ''}">
+                <td><span class="badge-cut">${c.step}</span></td>
+                <td><b>${c.type}</b>${airBadge}</td>
+                <td>${c.pos}mm${dirStr}</td>
+                <td>${c.desc}</td>
+            </tr>
+            `;
+        }).join("");
+    }
+
+    renderTaskRemnants();
+    const rightTabRemBadge = document.getElementById("right-tab-rem-badge");
+    if (rightTabRemBadge) rightTabRemBadge.innerText = `${(data.pieces || []).filter(p => !p.confirmed && !p.queued).length} 件`;
+
+    // 台账数据：当前工位实切对账
+    const winStartYVal = data.windowStartY || 0;
+    const bedLVal = data.bedL || 5000;
+    const winEndYVal = winStartYVal + bedLVal;
+    const hasStationPlan = ((data.totalArea || 0) > 0 || (data.pieces || []).some(p => {
+        const pMid = p.y + p.l / 2;
+        return pMid >= winStartYVal && pMid < winEndYVal;
+    }));
+
+    const sheet = state.currentCutMode === 'remnant';
+    const metrics = materialSummary(data, sheet);
+    if (document.getElementById('lbl-deduct-len')) document.getElementById('lbl-deduct-len').innerText = hasStationPlan ? metrics.deductLen + ' mm' : '—';
+    for (const [id,value] of [['lbl-piece-area',metrics.pieceArea],['lbl-rem-area',metrics.remArea],['lbl-waste-area',metrics.wasteArea],['lbl-total-area',metrics.totalArea],['lbl-processing-area',metrics.processingArea]]) {
+        const element = document.getElementById(id); if (element) element.innerText = hasStationPlan ? (value || 0).toFixed(3) + ' m²' : '—';
+    }
+    const utilEl = document.getElementById('lbl-utilization');
+    if (utilEl) utilEl.innerText = hasStationPlan && metrics.totalArea > 0 ? metrics.utilization.toFixed(1) + '%' : '—';
+    const processingUtilEl = document.getElementById('lbl-processing-utilization');
+    if (processingUtilEl) processingUtilEl.innerText = hasStationPlan ? metrics.processingUtilization.toFixed(1) + '%' : '—';
+    for (const [id,text] of [
+        ['lbl-utilization-title',metrics.actual ? '实际利用率' : '预计利用率'],
+        ['lbl-usage-title',sheet ? '母卷扣料' : metrics.actual ? '实切用料' : '预计用料'],
+        ['lbl-rem-area-title',metrics.actual ? '已回收料头' : '候选回收料头'],
+        ['lbl-waste-area-title',metrics.actual ? '实切损耗' : '预计损耗'],
+        ['lbl-total-area-title',metrics.actual ? '实切用料面积' : '预计用料面积'],
+        ['metrics-note',metrics.actual ? '按报工回执计算；回收料头单独记账。' : sheet ? '整块料头使用一次，余料计入损耗；报工后核销。' : '裁片面积 ÷ 预计用料面积；预览不扣库存。']
+    ]) { const element = document.getElementById(id); if (element) element.textContent = text; }
+    const fallbackNote = document.getElementById('engine-fallback-note');
+    const fallback = hasStationPlan ? fallbackPresentation(state.pendingPlan?.result) : null;
+    if (fallbackNote) { fallbackNote.hidden = !fallback; fallbackNote.textContent = fallback ? `${fallback.title}：${fallback.message}。${fallback.hint}` : ''; }
+    updateWorkflowControls();
+
+    const sum = (metrics.pieceArea || 0) + (metrics.remArea || 0) + (metrics.wasteArea || 0);
+    const diff = Math.abs(sum - (metrics.totalArea || 0));
+    const statusEl = document.getElementById("lbl-balance-status");
+    if (statusEl) {
+        if (!hasStationPlan || (data.totalArea || 0) === 0) {
+            statusEl.className = "status-badge";
+            statusEl.innerText = "工位就绪 (待排料)";
+        } else if (diff < 0.001) {
+            statusEl.className = "status-badge";
+            statusEl.innerText = metrics.actual ? "回执面积一致" : "预计面积一致";
+        } else {
+            statusEl.className = "badge-cut";
+            statusEl.innerText = `偏差: ${diff.toFixed(3)} m²`;
+        }
+    }
+
+    // 母卷剩余米数实时对齐
+    const rollRemainingEl = document.getElementById("lbl-roll-remaining");
+    if (rollRemainingEl) {
+        const totalRollL = data.totalRollL || 60000;
+        let maxConfirmedY = data.stockUsedLength || 0;
+        (data.pieces || []).filter(p => p.confirmed).forEach(p => {
+            if (p.y + p.l > maxConfirmedY) maxConfirmedY = p.y + p.l;
+        });
+        if (data.lastReceipt && data.lastReceipt.windowStartY !== undefined && data.lastReceipt.actualCutLen) {
+            const rEnd = data.lastReceipt.windowStartY + data.lastReceipt.actualCutLen;
+            if (rEnd > maxConfirmedY) maxConfirmedY = rEnd;
+        }
+        const remainingLen = Math.max(0, totalRollL - maxConfirmedY);
+        rollRemainingEl.innerText = `${remainingLen.toLocaleString()} mm`;
+    }
+}
+
+export function loadCase(id) {
+    state.pendingPlan = null;
+    clearRemnantSelection();
+    state.setCutMode('roll');
+    document.body.dataset.source = 'roll';
+    document.getElementById('source-kind').textContent = '母卷';
+    document.getElementById('source-remnant-summary').hidden = true;
+    state.setCaseId(id);
+    Object.assign(state.scenarios[id], {lastReceipt:null, pieces:[], cuts:[], remnants:[], cutIntervals:[], pieceArea:0, totalArea:0, deductLen:0});
+    for (let i = 1; i <= 8; i++) {
+        const btn = document.getElementById(`btn-case-${i}`);
+        if (btn) btn.classList.toggle("active", i === id);
+    }
+    const data = state.getCurrentCaseData();
+    const rollId = data.rollId || "ROLL-2026-0920";
+    data.materialAvailable = false;
+    document.body.dataset.material = 'empty';
+
+    // 1. 同步母卷下拉选框选项与当前值
+    const selMother = document.getElementById("sel-mother-roll-id");
+    if (selMother) {
+        selMother.value = [...selMother.options].some(option => option.value === rollId) ? rollId : '';
+    }
+
+    // 2. 规范母卷规格与状态
+    const spec = state.motherRollSpecs[rollId] || {
+        model: data.rollModel || "标准面料",
+        rollW: data.rollW || 2000,
+        totalRollL: data.totalRollL || 60000,
+        bedL: data.bedL || 5000
+    };
+    if (data.rollW) spec.rollW = data.rollW;
+    if (data.totalRollL) spec.totalRollL = data.totalRollL;
+    if (data.bedL) spec.bedL = data.bedL;
+    if (data.rollModel) spec.model = data.rollModel;
+    state.motherRollSpecs[rollId] = spec;
+    data.rollW = spec.rollW;
+    data.totalRollL = spec.totalRollL;
+
+    if (document.getElementById("inp-roll-id")) document.getElementById("inp-roll-id").value = rollId;
+    if (document.getElementById("inp-roll-w")) document.getElementById("inp-roll-w").value = data.rollW;
+    if (document.getElementById("inp-total-roll-l")) document.getElementById("inp-total-roll-l").value = data.totalRollL;
+    if (document.getElementById("inp-bed-l")) document.getElementById("inp-bed-l").value = data.bedL || 5000;
+    if (document.getElementById("inp-window-start-y")) document.getElementById("inp-window-start-y").value = data.windowStartY || 0;
+
+    // 3. 同步左侧母卷规格卡片文字标签
+    const modelLbl = document.getElementById("lbl-roll-model-desc");
+    if (modelLbl) modelLbl.innerText = spec.model || data.rollModel || "标准布卷";
+    const wLbl = document.getElementById("lbl-roll-w-desc");
+    if (wLbl) wLbl.innerText = spec.rollW;
+    const totalLenEl = document.getElementById("lbl-roll-total-len");
+    if (totalLenEl) totalLenEl.innerText = spec.totalRollL.toLocaleString();
+    const remLenEl = document.getElementById("lbl-roll-remaining-len");
+    if (remLenEl) remLenEl.innerText = `${spec.totalRollL.toLocaleString()} mm`;
+    const usedLenEl = document.getElementById("lbl-roll-used-len");
+    if (usedLenEl) usedLenEl.innerText = `0 mm`;
+    const progressEl = document.getElementById("roll-len-progress");
+    if (progressEl) progressEl.style.width = `0%`;
+    const baseOriginEl = document.getElementById("lbl-roll-base-origin");
+    if (baseOriginEl) baseOriginEl.innerText = `Y = ${(data.windowStartY || 0).toLocaleString()} mm (${((data.windowStartY || 0)/1000).toFixed(2)}m)`;
+
+    if (document.getElementById("inp-trim-start")) document.getElementById("inp-trim-start").value = data.trimStart || 0;
+    if (document.getElementById('inp-piece-gap')) document.getElementById('inp-piece-gap').value = data.pieceGap ?? 0;
+    if (document.getElementById("sel-cut-origin")) document.getElementById("sel-cut-origin").value = data.cutOrigin || "right-bottom";
+    const headerTag = document.getElementById("tag-cut-origin-header");
+    if (headerTag) {
+        const val = data.cutOrigin || "right-bottom";
+        const bedL = data.bedL || 5000;
+        if (val === "right-bottom") { headerTag.innerText = `右下角 · ${bedL}mm`; headerTag.style.color = "var(--text-muted)"; }
+        else if (val === "right-top") { headerTag.innerText = `右上角 · ${bedL}mm`; headerTag.style.color = "var(--text-muted)"; }
+        else if (val === "left-bottom") { headerTag.innerText = `左下角 · ${bedL}mm`; headerTag.style.color = "var(--text-muted)"; }
+        else { headerTag.innerText = `左上角 · ${bedL}mm`; headerTag.style.color = "var(--text-muted)"; }
+    }
+    if (document.getElementById("sel-first-stage")) document.getElementById("sel-first-stage").value = data.firstStageOrientation || "horizontal";
+    if (document.getElementById("sel-allow-rotation")) document.getElementById("sel-allow-rotation").value = data.allowRotation ? "1" : "0";
+    if (document.getElementById("sel-allow-longitudinal")) document.getElementById("sel-allow-longitudinal").value = data.allowLongitudinal === false ? "0" : "1";
+
+    updateDemandCompletionFromPieces(data);
+    recalculateRollStats(data);
+
+    renderDefectsUI(data.globalDefects || data.defects || []);
+    renderDemandsUI(data.demands);
+
+    const demandsRollLbl = document.getElementById("demands-roll-label");
+    if (demandsRollLbl) demandsRollLbl.innerText = `${rollId} (${spec.rollW}mm · ${spec.model || data.rollModel || ''})`;
+    const craftHint = document.getElementById("demands-craft-hint");
+    if (craftHint) {
+        if (rollId === "ROLL-REAL-893292" || id === 7) {
+            craftHint.innerHTML = "<b>893292 窗帘整单</b>: 11项主帘定高横裁(幅宽2170~2715mm) · 门幅剩余630mm边料竖切套排窗幔/绑带/抱枕(37件套)";
+        } else if (rollId === "ROLL-REAL-893153" || id === 8) {
+            craftHint.innerHTML = "<b>893153 工程整单</b>: 4大超长工程主帘(5.4m~9m横裁) · 门幅剩余边料竖切套排长绑带/抱枕(18件套)";
+        } else {
+            craftHint.innerText = "工艺规则：窗帘定高横裁为主要落料，门幅剩余窄边料顺流纵切套排辅件吃净";
+        }
+    }
+
+    renderScene();
+    renderRadar();
+    resetToBedView();
+    bus.emit('demands:changed');
+    updateUIInfo();
+}
+
+export function updateWorkflowControls() {
+    updateFeedControls();
+    const ready = canUseCurrentPlan();
+    const editable = currentPlanContext();
+    const edited = editable && !ready;
+    const editPanel = document.getElementById('plan-edit-controls');
+    if (editPanel) { editPanel.hidden = !editable || (!edited && !state.pendingPlan?.history?.canUndo && !state.pendingPlan?.history?.canRedo); editPanel.dataset.edited = String(edited); editPanel.querySelector('.plan-edit-actions').hidden = !state.pendingPlan?.history?.canUndo && !state.pendingPlan?.history?.canRedo; }
+    const validateButton = document.getElementById('btn-validate-adjustment');
+    if (validateButton) { validateButton.disabled = !edited || validatingAdjustment; validateButton.textContent = validatingAdjustment ? '正在校验…' : '校验并保存调整版'; }
+    for (const [id, enabled] of [['btn-undo-plan',state.pendingPlan?.history?.canUndo],['btn-redo-plan',state.pendingPlan?.history?.canRedo]]) {
+        const button = document.getElementById(id); if (button) button.disabled = !enabled || validatingAdjustment;
+    }
+    const editMessage = document.getElementById('plan-edit-message');
+    if (editMessage) editMessage.textContent = editable ? state.pendingPlan.adjustmentError || (edited ? '手动调整待校验；刀序与候选余料将重新计算。' : `方案版本 ${state.pendingPlan.version || 1} · 已校验`) : '';
+    const flow = renderWorkflowGuide({ready, edited, busy:solving ? '正在生成方案…' : validatingAdjustment ? '正在校验调整…' : reporting ? '正在保存报工…' : ''});
+    const data = state.getCurrentCaseData(), reportEl = document.getElementById('lbl-report-status');
+    if (reportEl) reportEl.textContent = materialSummary(data, state.currentCutMode === 'remnant').actual ? '已报工保存 · ' + data.lastReceipt.finishedPieceCount + ' 件' :
+        edited ? '手动调整 · 待校验' : ready ? '待报工 · 尚未保存产出' : flow.done ? '本次需求已完成' : '当前工位尚无排料结果';
+    updateDemandProgress({pending:editable ? state.pendingPlan : null, edited, attempt:latestSolveAttempt && latestSolveAttempt.context === solveContext() ? latestSolveAttempt : null});
+    renderSolveFeedback(flow);
+    return {...flow, ready, edited};
+}
+
+let latestSolveAttempt = null;
+export function resetSolveFeedback() { latestSolveAttempt = null; }
+function renderSolveFeedback(flow) {
+    const panel=document.getElementById('solve-feedback');if(!panel)return;
+    const attempt=latestSolveAttempt && latestSolveAttempt.context===solveContext()?latestSolveAttempt:null;
+    panel.hidden=!attempt;if(!attempt)return;
+    const feedback=failurePresentation(attempt.result);
+    panel.querySelector('strong').textContent=attempt.search?.found?'后续位置可裁':feedback.title;
+    panel.querySelector('[data-error-message]').textContent=attempt.diagnostics?.summary || feedback.message;
+    const preserved=state.pendingPlan ? (currentPlanContext()?'原方案与手调预览已保留，新结果未应用；需求进度仍按原方案显示。':'旧图形保留供核对，版本或材料需重新核实，不能报工。') : '';
+    panel.querySelector('[data-error-hint]').textContent=feedback.hint+(preserved?' '+preserved:'');
+    const retry=panel.querySelector('[data-retry]');retry.disabled=solving || !flow.canSolve;retry.onclick=triggerSolve;
+    panel.querySelector('[data-review-input]').onclick=()=>navigateWorkflowStage(feedback.code==='UNSUPPORTED'?2:0,flow.target || (feedback.code==='UNSUPPORTED'?'#card-bed-origin':'#card-demands'));
+}
+function showSolveFailure() {
+    const attempt=latestSolveAttempt;if(!attempt || attempt.context!==solveContext())return;
+    document.getElementById('solve-failure-dialog')?.remove();
+    const info=attempt.diagnostics, feedback=failurePresentation(attempt.result);
+    const dialog=document.createElement('dialog');dialog.id='solve-failure-dialog';dialog.className='action-dialog workbench-dialog';
+    dialog.setAttribute('aria-labelledby','solve-failure-title');
+    dialog.innerHTML=`<div class="workbench-dialog-heading"><div><h2 id="solve-failure-title">${escapeText(info?.title || feedback.title)}</h2><p>${escapeText(info?.summary || feedback.message)}</p></div><button class="tool-btn" data-close>关闭</button></div><div class="workbench-dialog-body">${info ? `<ul>${info.facts.map(f=>`<li>${escapeText(f)}</li>`).join('')}</ul><table><thead><tr><th>需求</th><th>宽 × 长 mm</th><th>核对结果</th></tr></thead><tbody>${info.lines.map(d=>`<tr><td>${escapeText(d.name)}</td><td>${d.width} × ${d.length}</td><td>${escapeText(d.reason || '单片尺寸可容纳')}</td></tr>`).join('')}</tbody></table>${info.possible.length?`<h3>还需核对</h3><ul>${info.possible.map(p=>`<li>${escapeText(p)}</li>`).join('')}</ul>`:''}<p>${escapeText(info.advice)}</p>` : `<p>${escapeText(feedback.hint)}</p>`}</div><div class="workbench-dialog-footer"><button class="tool-btn" data-demands>核对需求</button><button class="tool-btn active" data-process>核对加工参数</button></div>`;
+    document.body.append(dialog);dialog.showModal();dialog.addEventListener('keydown',e=>e.stopPropagation());
+    dialog.querySelector('[data-close]').onclick=()=>dialog.close();
+    dialog.querySelector('[data-demands]').onclick=()=>{dialog.close();navigateWorkflowStage(0);};
+    dialog.querySelector('[data-process]').onclick=()=>{dialog.close();navigateWorkflowStage(2,'#inp-bed-l');};
+    if(info?.suggestedLength && !state.pendingPlan){
+        const resize=document.createElement('button');resize.className='tool-btn active';
+        resize.textContent=`拉布至 ${info.suggestedLength.toLocaleString()} mm 后重排`;
+        dialog.querySelector('[data-process]').classList.remove('active');
+        dialog.querySelector('.workbench-dialog-footer').append(resize);
+        resize.onclick=()=>{if(resizeFeedWindow(info.suggestedLength)){dialog.close();triggerSolve();}};
+    }
+    if(attempt.search?.found && !state.pendingPlan){
+        const candidate=attempt.searchRequest, current=state.getCurrentCaseData();
+        const length=candidate.windowStartY+candidate.rollL-current.windowStartY;
+        const locate=document.createElement('button');locate.className='tool-btn';locate.textContent='查看可裁位置';
+        locate.onclick=()=>{dialog.close();updateFabricScrollPosition(candidate.windowStartY);resetToBedView();showToast('已定位推荐区间；前方跨过布段尚未裁切或记账。','info');};
+        const expand=document.createElement('button');expand.className='tool-btn active';
+        expand.textContent=`拉布至 ${(length/1000).toFixed(2)} m 并重新排料`;
+        expand.disabled=length>feedLengthLimits(current,queuedStockLength(current.rollId)).max;
+        expand.title='保留当前起点，将前方布段一起纳入本次用料；报工时核对可回收料头和损耗。';
+        expand.onclick=()=>{if(resizeFeedWindow(length)){dialog.close();triggerSolve();}};
+        dialog.querySelector('[data-process]').classList.remove('active');dialog.querySelector('.workbench-dialog-footer').append(locate,expand);
+    }
+}
+let solving = false;
+function planGeometry() {
+    const {pieces, remnants, cuts} = state.getCurrentCaseData();
+    return JSON.stringify({pieces, remnants, cuts});
+}
+export function canUseCurrentPlan() {
+    return currentPlanContext() && state.pendingPlan.geometry === planGeometry();
+}
+function currentPlanContext() {return !!state.pendingPlan?.result?.planId && !state.pendingPlan.blockedError && state.pendingPlan.context===solveContext()
+    && (!state.activeTask || state.pendingPlan.request?.taskRevision===state.activeTask.revision);}
+export function recordPlanEdit() {
+    const pending = state.pendingPlan;
+    if (!pending?.history) return;
+    const data = state.getCurrentCaseData();
+    // The old cut tree and leftover partition cease to describe a moved or removed piece.
+    if (JSON.stringify(data.pieces) !== JSON.stringify(pending.history.current.pieces)) {
+        data.cuts = []; data.remnants = (data.remnants || []).filter(r => r.confirmed || r.queued); data.cutIntervals = [];
+    }
+    if (pending.history.record(planScene(data))) {
+        pending.adjustmentError = ''; pending.adjustmentId = null;
+        state.isToolpathOptimized = false; state.toolpathStats = null; state.originalCutsBackup = null;
+    }
+    recalculateRollStats(data); updateUIInfo(); renderScene(); renderToolpathUI();
+}
+export function undoPlanEdit() { applyPlanHistory('undo'); }
+export function redoPlanEdit() { applyPlanHistory('redo'); }
+function applyPlanHistory(direction) {
+    const pending = state.pendingPlan;
+    if (validatingAdjustment || !pending?.history || pending.context !== solveContext()) return;
+    const scene = pending.history[direction]();
+    if (!scene) return;
+    Object.assign(state.getCurrentCaseData(), scene);
+    pending.adjustmentError = ''; pending.adjustmentId = null;
+    state.isToolpathOptimized = false; state.toolpathStats = null; state.originalCutsBackup = null;
+    recalculateRollStats(state.getCurrentCaseData()); updateUIInfo(); renderScene(); renderToolpathUI();
+}
+let validatingAdjustment = false;
+function offsetCuts(cuts, offset) {
+    return (cuts || []).map(c => ({...c,
+        pos:c.type === '横切' ? c.pos + offset : c.pos,
+        start:c.type === '横切' ? c.start : c.start + offset,
+        end:c.type === '横切' ? c.end : c.end + offset,
+        ...(c.startY == null ? {} : {startY:c.startY + offset}),
+        ...(c.endY == null ? {} : {endY:c.endY + offset})}));
+}
+
+export async function saveToolpathAdjustment(cuts) {
+    if (validatingAdjustment || !canUseCurrentPlan()) throw new Error('请先生成方案或校验裁片调整，再调整刀路');
+    const pending = state.pendingPlan, geometry = planGeometry();
+    const localCuts = offsetCuts(cuts, -pending.windowStartY);
+    const signature = JSON.stringify(localCuts);
+    if (pending.toolpathOperation?.signature !== signature)
+        pending.toolpathOperation = {id:crypto.randomUUID(), signature};
+    validatingAdjustment = true;
+    const wasInert = document.body.inert; document.body.inert = true;
+    try {
+        const saved = await requestJSON('/api/cutting/plans/' + encodeURIComponent(pending.result.planId) + '/adjust',
+            {adjustmentId:pending.toolpathOperation.id, cuts:localCuts});
+        if (state.pendingPlan !== pending || pending.context !== solveContext() || geometry !== planGeometry()) return false;
+        if (saved.result?.planId !== pending.toolpathOperation.id || !Array.isArray(saved.result.cuts))
+            throw new Error('刀路保存响应不完整，请重试');
+        const data = state.getCurrentCaseData();
+        data.cuts = offsetCuts(saved.result.cuts, pending.windowStartY);
+        data.pieces = data.pieces.map(p => p.planId === pending.result.planId ? {...p, planId:saved.id} : p);
+        state.pendingPlan = {...pending, result:saved.result, version:saved.version,
+            geometry:planGeometry(), history:createPlanHistory(planScene(data)), toolpathOperation:null,
+            adjustmentId:null, adjustmentError:''};
+        return true;
+    } finally { validatingAdjustment = false; document.body.inert = wasInert; updateUIInfo(); }
+}
+
+export async function validatePlanAdjustment() {
+    const pending = state.pendingPlan;
+    if (validatingAdjustment || !pending || !currentPlanContext()) return;
+    if (canUseCurrentPlan()) return;
+    const geometry = planGeometry();
+    pending.adjustmentId ||= crypto.randomUUID();
+    const pieces = state.getCurrentCaseData().pieces.filter(p => !p.confirmed && p.planId === pending.result.planId)
+        .map(p => ({id:p.sourcePieceId, x:p.x, y:p.y-pending.windowStartY, rotated:!!p.rotated, rotationDegrees:p.shape ? p.rotationDegrees : null}));
+    validatingAdjustment = true;
+    const wasInert = document.body.inert; document.body.inert = true;
+    try {
+        pending.adjustmentError = ''; updateUIInfo();
+        const response = await fetch('/api/cutting/plans/' + encodeURIComponent(pending.result.planId) + '/adjust', {
+            method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({adjustmentId:pending.adjustmentId, pieces})
+        });
+        const saved = await response.json();
+        if (state.pendingPlan !== pending || pending.context !== solveContext() || geometry !== planGeometry()) return;
+        if (!response.ok) throw new Error(saved.message || '调整校验失败，请检查布局后重试');
+        restoreSavedPlan(saved);
+        showToast(`调整版 ${saved.version} 已保存，原方案已取消；请核对后实切报工`, 'success');
+    } catch (error) {
+        if (state.pendingPlan === pending) { pending.adjustmentError = error.message; showToast(error.message, 'error'); }
+    } finally { validatingAdjustment = false; document.body.inert = wasInert; updateUIInfo(); }
+}
+function solveContext() {
+    return JSON.stringify([state.activeTask?.id, state.activeTask?.revision, state.currentCaseId, state.currentCutMode, state.loadedRemnant?.id,
+        getDemandsFromUI(), getDefectsFromUI(), solverSettings(), ...['task-name','task-material','sel-mother-roll-id','inp-roll-w','inp-bed-l','inp-window-start-y','inp-trim-start','inp-piece-gap','sel-cut-origin','sel-first-stage','sel-allow-rotation','sel-allow-longitudinal'].map(id => document.getElementById(id)?.value)]);
+}
+export function restoreSavedPlan(saved) {
+    const {request, result} = saved;
+    latestSolveAttempt = null;
+    const data = state.getCurrentCaseData();
+    const offset = request.feedPortType === 'remnant' ? 0 : request.windowStartY;
+    Object.assign(data, {rollId:request.rollId, rollW:request.rollW, bedL:request.rollL,
+        windowStartY:offset, trimStart:request.trimStart, pieceGap:request.pieceGap ?? 0, cutOrigin:request.cutOrigin,
+        firstStageOrientation:request.firstStageOrientation, allowRotation:request.allowRotation,
+        allowLongitudinal:request.allowLongitudinal, lastReceipt:null});
+    data.pieces = (result.pieces || []).map(p => ({...p, sourcePieceId:p.id, planId:result.planId, y:p.y + offset}));
+    data.remnants = (result.remnants || []).map(r => ({...r, planId:result.planId, y:r.y + offset}));
+    restoreRecordedGeometry(data,state.taskReports,queuedReports(),state.currentCutMode,state.loadedRemnant?.id);
+    data.cuts = offsetCuts(result.cuts, offset);
+    data.cutIntervals = [{start:offset, end:offset + request.rollL}];
+    data.engine = result.engine;
+    recalculateRollStats(data);
+    updateUIInfo(); renderScene(); renderRadar(); resetToBedView();
+    state.pendingPlan = {result, request, rollId:request.rollId, rollModel:request.rollModel, bedL:request.rollL,
+        feedPortType:request.feedPortType, sourceRemnantId:request.sourceRemnantId,
+        taskId:request.taskId, windowStartY:offset, context:solveContext(), geometry:planGeometry(), version:saved.version || 1,
+        history:createPlanHistory(planScene(data))};
+    updateUIInfo();
+    bus.emit('solve:success', {result, elapsed:0, rollId:request.rollId});
+}
+export async function triggerSolve() {
+    if (solving) return;
+    const flow = updateWorkflowControls();
+    if (!flow.canSolve) { showToast(flow.hint, 'warning');navigateWorkflowStage(flow.stage,flow.target);return; }
+    solving = true; latestSolveAttempt = null;
+    const operation={context:solveContext()};
+    updateWorkflowControls();
+    try { await runSolve(operation); }
+    catch (error) {
+        if(operation.context!==solveContext())return;
+        latestSolveAttempt={context:solveContext(),result:{status:error.code || 'SERVICE',message:error.message}};
+        if(state.pendingPlan && ['CONFLICT','INVALID_INPUT'].includes(error.code))state.pendingPlan.blockedError=error.message;
+    }
+    finally { solving = false; updateWorkflowControls();showSolveFailure(); }
+}
+async function runSolve(operation) {
+    const task = await saveCurrentTask();
+    operation.context=solveContext();
+    const data = state.getCurrentCaseData();
+    const isRemnantMode = (state.currentCutMode === "remnant");
+
+    let rollW, bedL, totalL, winStartY, demands, sourceRemnantId, feedPortType, rollId, rollModel, activeDemands;
+
+    if (isRemnantMode) {
+        const loadedRemnant = state.loadedRemnant;
+        if (!loadedRemnant) {
+            showToast("请先在左侧料头货架中选择或扫描一块料头装载至机台！", "warning");
+            return;
+        }
+        demands = window.camApp ? window.camApp.getRemnantDemandsFromUI() : [];
+        if (!demands || demands.length === 0) {
+            showToast("请至少在左侧添加 1 项料头裁片套裁需求！", "warning");
+            return;
+        }
+        activeDemands = demands;
+        rollW = loadedRemnant.width;
+        bedL = loadedRemnant.length;
+        totalL = loadedRemnant.length;
+        winStartY = 0;
+        sourceRemnantId = loadedRemnant.id;
+        feedPortType = "remnant";
+        rollId = loadedRemnant.sourceRollId || (document.getElementById("sel-mother-roll-id") ? document.getElementById("sel-mother-roll-id").value : "ROLL-2026-0920");
+        rollModel = loadedRemnant.materialBatch || "在库料头";
+    } else {
+        rollW = parseFloat(document.getElementById("inp-roll-w").value) || data.rollW || 2000;
+        bedL = parseFloat(document.getElementById("inp-bed-l").value) || data.bedL || 5000;
+        winStartY = parseFloat(document.getElementById("inp-window-start-y").value) || data.windowStartY || 0;
+        totalL = data.totalRollL || 60000;
+        sourceRemnantId = null;
+        feedPortType = "roll";
+        rollId = document.getElementById("sel-mother-roll-id") ? document.getElementById("sel-mother-roll-id").value : "ROLL-2026-0920";
+        rollModel = document.getElementById("lbl-roll-model-desc") ? document.getElementById("lbl-roll-model-desc").innerText : "标准面料";
+
+    }
+    const staged = queuedQuantities();
+    activeDemands = getDemandsFromUI().map(d => ({id:d.id, name:d.name, width:d.width, length:d.length, shape:d.shape, demand:Math.max(0,d.demand-(staged[d.id] || 0)), allowRotation:d.allowRotation})).filter(d => d.demand > 0);
+    if (!activeDemands.length) return showToast('本次需求已全部完成，可新建下一任务', 'info');
+    demands = activeDemands;
+
+    const winEndY = winStartY + bedL;
+    const trimStart = parseFloat(document.getElementById("inp-trim-start").value) || 0;
+    const cutOrigin = document.getElementById("sel-cut-origin").value || "right-bottom";
+    const firstStageOrientation = document.getElementById("sel-first-stage").value || "horizontal";
+    const allowRotation = (document.getElementById("sel-allow-rotation").value === "1");
+    const allowLongitudinal = (document.getElementById("sel-allow-longitudinal").value === "1");
+
+    const allDefects = isRemnantMode ? ((state.loadedRemnant && state.loadedRemnant.defects) || []) : getDefectsFromUI();
+
+    const activeBedDefects = windowDefects(allDefects,winStartY,bedL,rollW);
+
+    const payload = {
+        ...solverSettings(),
+        taskId: task.id, taskRevision: task.revision,
+        rollId: rollId,
+        rollModel: rollModel,
+        rollW: rollW,
+        rollL: bedL,
+        totalRollL: totalL,
+        windowStartY: winStartY,
+        trimStart: trimStart,
+        pieceGap: Number(document.getElementById('inp-piece-gap').value),
+        cutOrigin: cutOrigin,
+        firstStageOrientation: firstStageOrientation,
+        allowRotation: allowRotation,
+        allowLongitudinal: allowLongitudinal,
+        feedPortType: feedPortType,
+        sourceRemnantId: sourceRemnantId,
+        solver: "packingsolver",
+        defects: activeBedDefects,
+        demands: demands
+    };
+
+    const context = solveContext();
+    const geometry=planGeometry();
+    const t0 = performance.now();
+        const result = await requestJSON('/api/solve',payload);
+        if (context !== solveContext()) {
+            if(state.activeTask?.id===task.id)latestSolveAttempt={context:solveContext(),result:{status:'STALE_INPUT',message:'需求或材料已变化，未应用返回方案，请重新排料。'}};
+            return;
+        }
+        if(geometry!==planGeometry())throw new ApiError('等待期间预览已调整，当前手调位置保留。','STALE_INPUT');
+        if(result.success && (!result.planId || !Array.isArray(result.pieces) || !result.pieces.length || !Array.isArray(result.cuts) || !Array.isArray(result.remnants)))throw new ApiError('求解响应缺少完整方案，原预览保留。','INVALID_RESULT');
+        latestSolveAttempt = result.success && result.planId && result.pieces?.length ? null : {context, result:{...result,status:result.status || 'INVALID_RESULT'},diagnostics:solveDiagnostics({...payload,remainingLength:data.stockRemainingLength-queuedStockLength(data.rollId)},result)};
+        if(result.status==='NO_SOLUTION_FOUND' && !isRemnantMode && !state.pendingPlan && allDefects.length &&
+            payload.demands.some(d=>demandFeedLength(d,payload)<=bedL-trimStart)){
+            const found=await findForwardPlan(payload,allDefects,r=>requestJSON('/api/solve',r),{
+                isCurrent:()=>context===solveContext() && geometry===planGeometry(),
+                onAttempt:(r,index,total)=>{const label=document.getElementById('workflow-current');if(label)label.textContent=`向后找可裁位置 ${index} / ${total} · ${(r.windowStartY/1000).toFixed(2)} m`;}
+            });
+            if(!found)return;
+            if(found.search.found)await requestJSON('/api/cutting/plans/'+encodeURIComponent(found.result.planId)+'/cancel',{});
+            if(context!==solveContext() || geometry!==planGeometry())return;
+            latestSolveAttempt={context,result:found.search.found?result:found.result,search:found.search,searchRequest:found.request,
+                diagnostics:solveDiagnostics({...payload,remainingLength:data.stockRemainingLength-queuedStockLength(data.rollId)},found.search.found?result:found.result,found)};
+        }
+        {
+            const elapsed = Math.round(performance.now() - t0);
+            if (result.success && result.planId && result.pieces?.length) {
+                state.pendingPlan = { result, request:payload, rollId, rollModel, bedL, feedPortType, sourceRemnantId, context, taskId:task.id, windowStartY: winStartY };
+                data.lastReceipt = null;
+                data.rollW = rollW;
+                data.bedL = bedL;
+                data.windowStartY = winStartY;
+                data.trimStart = trimStart;
+                data.cutOrigin = cutOrigin;
+                data.firstStageOrientation = firstStageOrientation;
+                data.allowRotation = allowRotation;
+                data.allowLongitudinal = allowLongitudinal;
+                data.globalDefects = allDefects;
+
+                if (isRemnantMode) {
+                    data.pieces = (result.pieces || []).map(p => ({ ...p, sourcePieceId:p.id, planId:result.planId, y: p.y }));
+                    data.cuts = (result.cuts || []).map(c => ({ ...c }));
+                    data.remnants = (result.remnants || []).map(r => ({ ...r }));
+                    data.deductLen = 0.0;
+                    data.pieceArea = result.pieceArea;
+                    data.remArea = result.remArea;
+                    data.wasteArea = result.wasteArea;
+                    data.totalArea = result.totalArea;
+                } else {
+                    const isPieceInCurrentStation = (p) => {
+                        const pMid = p.y + p.l / 2;
+                        return (pMid >= winStartY && pMid < winEndY);
+                    };
+                    const retainedPieces = (data.pieces || []).filter(p => p.confirmed || p.queued || !isPieceInCurrentStation(p));
+                    const newPieces = (result.pieces || []).map((p, idx) => {
+                        const matchedDemand = (activeDemands || []).find(ad => ad.id === p.demandId);
+                        return {
+                            ...p,
+                            id: Math.max(0, ...retainedPieces.map(p => p.id)) + idx + 1,
+                            sourcePieceId: p.id,
+                            planId: result.planId,
+                            demandId: matchedDemand ? (matchedDemand.id || (activeDemands.indexOf(matchedDemand) + 1)) : p.demandId,
+                            name: matchedDemand ? matchedDemand.name : p.name,
+                            y: p.y + winStartY
+                        };
+                    });
+                    data.pieces = [...retainedPieces, ...newPieces].sort((a, b) => a.y - b.y || a.x - b.x);
+
+                    // CNC 数控切刀严格归属于当前工位切削循环，严禁拼接或保留历史工位切刀
+                    const newCuts = offsetCuts(result.cuts, winStartY);
+                    data.cuts = newCuts;
+
+                    const currentStationIdx = Math.round(winStartY / Math.max(100, bedL || 5000)) + 1;
+                    
+                    // 1. 过滤与修复历史料头：
+                    // A. 凡是起始坐标已在当前待切工位内（r.y >= winStartY - 1）的旧料头彻底清除；
+                    // B. 凡是跨过当前工位起始线 winStartY 的旧料头，物理截断至 winStartY，绝不允许刺入当前工位；
+                    const retainedRemnants = (data.remnants || [])
+                        .filter(r => r.confirmed || r.queued || r.y < winStartY - 1)
+                        .map(r => {
+                            if (r.confirmed || r.queued) return r;
+                            if (r.y + r.l > winStartY) {
+                                const newL = Math.max(0, winStartY - r.y);
+                                return {
+                                    ...r,
+                                    l: newL,
+                                    area: Number(((r.w * newL) / 1000000.0).toFixed(3))
+                                };
+                            }
+                            return r;
+                        })
+                        .filter(r => r.confirmed || r.queued || r.l >= 100);
+
+                    // 2. 注入新工位料头，保证全局 ID 唯一性与工位溯源性
+                    const existingIds = new Set(retainedRemnants.map(r => r.id));
+                    let nextRemSeq = 1;
+                    const newRemnants = (result.remnants || []).map((r, idx) => {
+                        let finalId = r.id;
+                        // 若 ID 重复或包含旧格式 REM-PS-，重构为 REM-S{工位}-{序号} 全局唯一编号
+                        if (!finalId || existingIds.has(finalId) || finalId.startsWith("REM-PS-")) {
+                            do {
+                                finalId = `REM-S${currentStationIdx}-${String(nextRemSeq++).padStart(2, '0')}`;
+                            } while (existingIds.has(finalId));
+                        }
+                        existingIds.add(finalId);
+                        return {
+                            ...r,
+                            id: finalId,
+                            planId: result.planId,
+                            y: r.y + winStartY
+                        };
+                    });
+                    data.remnants = [...retainedRemnants, ...newRemnants];
+
+                    if (!data.cutIntervals) data.cutIntervals = [];
+                    data.cutIntervals = addOrMergeInterval(data.cutIntervals, winStartY, winEndY);
+
+                    recalculateRollStats(data);
+                    updateDemandCompletionFromPieces(data);
+                    renderDemandsUI(data.demands);
+                }
+
+                recalculateRollStats(data);
+                updateDemandCompletionFromPieces(data);
+                renderDemandsUI(data.demands);
+                data.engine = `${result.engine} [${elapsed}ms]`;
+                state.setCutStepLimit(999);
+                renderScene();
+                if (result.pieces.some(p=>p.shape)) focusCurrentLayout();
+                else if (isRemnantMode) {
+                    resetToBedView();
+                }
+                updateUIInfo();
+
+                state.pendingPlan.geometry = planGeometry();
+                state.pendingPlan.history = createPlanHistory(planScene(data));
+                state.pendingPlan.version = 1;
+                updateUIInfo();
+                bus.emit('solve:success', { result, elapsed, rollId });
+
+                const stationCount = (data.cutIntervals || []).length;
+                const totalCutPieces = (data.pieces || []).length;
+                const thisBedPieces = (result.pieces || []).length;
+
+                const fallback = fallbackPresentation(result);
+                showToast(`${fallback ? `直刀排料完成（${fallback.title}，引擎 ${result.engine}）` : (result.pieces.some(p=>p.shape) ? '唛架齐套排料成功' : '直刀排料计算成功')}：产出 ${thisBedPieces} 件，预计利用率 ${materialSummary(data, isRemnantMode).utilization.toFixed(1)}%`, fallback ? 'warning' : 'success');
+                return;
+            } else {
+                return;
+            }
+        }
+}
+
+export function requiredReportLength(pieces = [], remnants = []) {
+    return Math.max(0, ...pieces.map(p => p.y + p.l), ...remnants.map(r => r.y + r.l));
+}
+let openingReport = false;
+export async function openCutReport() {
+    if (openingReport || document.getElementById('cut-report-modal').open) return;
+    openingReport = true;
+    try { await prepareCutReport(); } finally { openingReport = false; }
+}
+async function prepareCutReport() {
+    let pending = state.pendingPlan;
+    if (!canUseCurrentPlan()) {
+        showToast(pending?.blockedError ? '方案的任务或材料已变化，请重新核对并排料' : pending?.result?.planId ? '调整尚未校验，请先校验并保存调整版' : '请先生成并核对当前排料方案，再进行报工', 'warning');
+        return;
+    }
+    const { feedPortType } = pending;
+    const actualLenInput = document.getElementById("report-actual-len");
+    if (actualLenInput) {
+        actualLenInput.value = stationReport(pending).actualCutLen;
+        actualLenInput.disabled = feedPortType === "remnant";
+    }
+    for (const id of ['report-recovery-location', 'report-recovery-rules']) document.getElementById(id).hidden = feedPortType === 'remnant';
+    document.getElementById('report-location').value = stationReport(pending).location;
+    renderReportPieces(pending, updateReportPreview);
+    document.getElementById('report-remnants').replaceChildren();
+    document.getElementById("report-error").textContent = "";
+    document.getElementById("report-length-label").textContent = feedPortType === "remnant" ? "母卷扣料（mm）" : "实切长度（mm）";
+    pending.currentRemaining = null;
+    if (feedPortType === "roll") {
+        try { const response = await fetch(`/api/rolls/${encodeURIComponent(pending.rollId)}`); if (!response.ok) throw new Error(); pending.currentRemaining = (await response.json()).currentRemainingLength - queuedStockLength(pending.rollId); }
+        catch { showToast("读取库存失败，请重试", "error"); return; }
+    }
+
+    if (state.pendingPlan !== pending || pending.context !== solveContext()) return;
+    // 当前方案的报工预览
+    await updateReportPreview();
+
+    document.getElementById("cut-report-modal").showModal();
+    document.getElementById('report-confirm-button').textContent = queuedReports().length ? '连同待报工一起提交' : '立即报工';
+    document.querySelector("#cut-report-modal button").focus();
+}
+
+export async function updateReportPreview() {
+    const pending = state.pendingPlan;
+    if (!pending) return;
+    const { rollId, result, feedPortType } = pending;
+    const rollIdEl = document.getElementById("report-preview-roll-id");
+    if (rollIdEl) rollIdEl.innerText = feedPortType === "remnant" ? (pending.sourceRemnantId || "料头切削") : (rollId || "母卷开卷");
+
+    const curRemaining = pending.currentRemaining;
+    document.getElementById('report-stock-preview').hidden = feedPortType === 'remnant';
+    document.getElementById('report-preview-cur-len').textContent = curRemaining == null ? '—' : curRemaining.toLocaleString() + ' mm';
+    const cutLen = Number(document.getElementById('report-actual-len').value);
+    document.getElementById('report-preview-after-len').textContent = curRemaining == null ? '—' : (curRemaining - cutLen).toLocaleString() + ' mm';
+
+    const results=readReportPieces();pending.reportPieceResults=results;pending.reportActualCutLen=cutLen;
+    pending.reportLocation = document.getElementById('report-location').value.trim();
+    const groups=classifyReport(result.pieces || [],results);
+    document.getElementById('report-piece-count').value=groups.QUALIFIED.length;
+    const counts = new Map();
+    for(const p of result.pieces || []) {
+        if(!counts.has(p.demandId))counts.set(p.demandId,{name:p.name,QUALIFIED:0,REJECTED:0,UNCUT:0});
+        const outcome=results.find(r=>r.pieceId===p.id)?.outcome;
+        if(outcome)counts.get(p.demandId)[outcome]++;
+    }
+    document.getElementById('report-preview-demand-text').textContent=[...counts].map(([id,c])=>
+        '需求 '+id+' '+c.name+'：合格 '+c.QUALIFIED+' / 异常 '+c.REJECTED+' / 未切 '+c.UNCUT).join('；');
+    syncReportRemnants(pending,results,updateReportPreview);
+    const selected=readReportRemnants(pending);
+    const recovered=selected.filter(r=>r.w>=(pending.request.minRemnantWidth ?? 200)&&r.l>=(pending.request.minRemnantLength ?? 300));
+    document.getElementById('report-preview-remnant-text').textContent=feedPortType==='remnant' ? '不回收，剩余部分计入损耗' : recovered.length+' 块回库'+(selected.length>recovered.length ? '，尺寸不足 '+(selected.length-recovered.length)+' 块计入损耗' : '');
+    const usedArea=pending.request.rollW*(feedPortType==='remnant'?pending.bedL:cutLen)/1_000_000;
+    const pieceArea=groups.QUALIFIED.reduce((sum,p)=>sum+shapeArea(p.shape || rectangle(p.w,p.l))/1_000_000,0);
+    const rejectedArea=groups.REJECTED.reduce((sum,p)=>sum+shapeArea(p.shape || rectangle(p.w,p.l))/1_000_000,0);
+    const remArea=recovered.reduce((sum,r)=>sum+r.w*r.l/1_000_000,0);
+    document.getElementById('report-area-preview').textContent=usedArea>0&&Number.isFinite(usedArea)
+        ? '待保存利用率 '+(pieceArea/usedArea*100).toFixed(1)+'% · 合格 '+pieceArea.toFixed(3)+' ÷ 用料 '+usedArea.toFixed(3)+' m²；回收 '+remArea.toFixed(3)+' m² 另计'
+        : '请填写有效的实切长度，报工成功后才记录实际利用率。';
+    document.getElementById('report-outcome-summary').textContent='合格 '+groups.QUALIFIED.length+' 件 · 异常 '+groups.REJECTED.length+' 件 · 未切 '+groups.UNCUT.length+' 件。预计损耗 '+Math.max(0,usedArea-pieceArea-remArea).toFixed(3)+' m²（含异常 '+rejectedArea.toFixed(3)+' m²）。';
+    const uncutLost=Math.max(0,[...pending.reportCandidates.values()].filter(r=>r.uncut).reduce((sum,r)=>sum+r.w*r.l/1_000_000,0)
+        -recovered.filter(r=>r.uncut).reduce((sum,r)=>sum+r.w*r.l/1_000_000,0));
+    if(uncutLost>.000001)document.getElementById('report-outcome-summary').textContent+=' 未切区域有 '+uncutLost.toFixed(3)+' m² 已计入用料但未回收，将计入损耗。';
+
+}
+
+export function closeCutReport() { document.getElementById("cut-report-modal").close(); document.getElementById("btn-confirm-station-cut")?.focus(); }
+
+export async function openStationLapConfirmModal() {
+    await openCutReport();
+}
+
+async function stageStation(pending, report) {
+    const entries = [...queuedReports().filter(r => r.report.planId !== report.planId), queueEntry(pending,report)];
+    await requestJSON('/api/cutting/report-batch?preview=true', entries.map(r => r.report));
+    saveReportQueue(pending.taskId,entries);
+    state.reportQueue = entries;
+    const data = state.getCurrentCaseData();
+    data.remnants = (data.remnants || []).filter(r => r.confirmed || r.queued);
+    restoreRecordedGeometry(data,state.taskReports,entries,state.currentCutMode,state.loadedRemnant?.id);
+    data.cuts = [];state.pendingPlan = null;
+    smartAdvanceBed();updateUIInfo();renderScene();renderRadar();
+}
+
+export async function stageAndAdvanceNextStation() {
+    if (await recordCurrentStation() && updateWorkflowControls().canSolve) await triggerSolve();
+}
+
+async function recordCurrentStation() {
+    if (reporting) return false;
+    const pending = state.pendingPlan;
+    if (!pending || !canUseCurrentPlan()) {
+        showToast('请先生成方案或校验调整版，再记录本工位', 'warning');
+        return false;
+    }
+    reporting = true;
+    const wasInert = document.body.inert; document.body.inert = true;
+    try {
+        await stageStation(pending,stationReport(pending));
+        showToast('本工位已记录，待最后统一报工。', 'success');
+        return true;
+    } catch (error) {
+        showToast('本工位未暂存：' + error.message, 'error');
+        return false;
+    } finally {
+        reporting = false;document.body.inert = wasInert;updateWorkflowControls();
+    }
+}
+
+let clearClickTimer = null;
+export function handleClearStationClick() {
+    if (clearClickTimer) {
+        clearTimeout(clearClickTimer);
+        clearClickTimer = null;
+        return;
+    }
+    clearClickTimer = setTimeout(() => {
+        clearClickTimer = null;
+        clearStationCuts();
+    }, 280);
+}
+
+export async function handleClearStationDblClick() {
+    if (clearClickTimer) {
+        clearTimeout(clearClickTimer);
+        clearClickTimer = null;
+    }
+    const ok = await confirmAction('确定要清空整卷预览与所有未报工排料吗？\n已暂存方案也将清除，已正式报工的记录保持不变。', {
+        title: '清空整卷预览确认',
+        action: '确认清空整卷'
+    });
+    if (ok) {
+        resetAllRollCuts();
+    }
+}
+
+let reporting = false;
+export async function confirmCutReport(stageOnly = false) {
+    if (reporting) return;
+    const pending = state.pendingPlan, errorNode = document.getElementById('report-error');
+    if (!canUseCurrentPlan()) { errorNode.textContent = '方案、需求或材料需重新核实，请重新排料'; return; }
+    const pieceResults = readReportPieces(), inputError = reportPieceError(pending,pieceResults);
+    if (inputError) {errorNode.textContent=inputError.message;document.querySelector(inputError.selector)?.focus();return;}
+    const report = {planId:pending.result.planId, actualCutLen:Number(document.getElementById('report-actual-len').value),
+        finishedPieceCount:Number(document.getElementById('report-piece-count').value), location:document.getElementById('report-location').value.trim(),
+        actualRemnants:readReportRemnants(pending),pieceResults};
+    const entries = [...queuedReports().filter(r => r.report.planId !== report.planId),queueEntry(pending,report)];
+    reporting = true;
+    const wasInert = document.body.inert; document.body.inert = true;
+    try {
+        if (stageOnly) {
+            await stageStation(pending,report);
+            closeCutReport();
+            showToast('本工位已记录，可继续裁切，最后统一报工。','success');
+        } else {
+            await submitReports(entries);
+            closeCutReport();
+        }
+    } catch (error) {errorNode.textContent = error.message;}
+    finally {reporting=false;document.body.inert=wasInert;updateWorkflowControls();}
+}
+
+async function submitReports(entries) {
+    const receipts = await requestJSON('/api/cutting/report-batch',entries.map(r => r.report));
+    // Once the server confirms, keep these facts even if a later UI refresh fails.
+    const byId = new Map((state.taskReports || []).map(r => [r.planId,r]));
+    receipts.forEach(r => byId.set(r.planId,r)); state.taskReports = [...byId.values()];
+    state.pendingPlan = null;state.reportQueue = queuedReports();
+    try {saveReportQueue(entries[0].pending.taskId,state.reportQueue);} catch {showToast('报工已成功，本机暂存清理失败；重新打开任务会核对已报工记录。','warning');}
+    const data = state.getCurrentCaseData();
+    for (const [index,receipt] of receipts.entries()) {
+        const pending=entries[index].pending;
+        if (pending.rollId === data.rollId && pending.feedPortType === state.currentCutMode && (pending.feedPortType !== 'remnant' || pending.sourceRemnantId === state.loadedRemnant?.id)) {
+            applyReportReceipt(data,pending,receipt);data.lastReceipt=receipt;
+        }
+        state.lastCutReceipt=receipt;
+    }
+    try {
+        await refreshTaskProgress();
+        if (data.rollId) {
+            const roll=await requestJSON('/api/rolls/'+encodeURIComponent(data.rollId));
+            data.stockUsedLength=roll.usedLength;data.stockRemainingLength=roll.currentRemainingLength;
+            document.getElementById('lbl-roll-remaining-len').textContent=roll.currentRemainingLength.toLocaleString()+' mm';
+            document.getElementById('lbl-roll-used-len').textContent=roll.usedLength.toLocaleString()+' mm';
+            const progress=document.getElementById('roll-len-progress');
+            if(progress && roll.totalLength>0)progress.style.width=Math.min(100,Math.max(0,roll.usedLength/roll.totalLength*100))+'%';
+            const remaining=document.getElementById('lbl-roll-remaining');
+            if(remaining)remaining.textContent=roll.currentRemainingLength+' mm';
+        }
+        await window.camApp?.updateMotherRollRemnantStats?.(data.rollId);
+        await window.camApp?.refreshShelfRemnantsList?.();
+        updateDemandCompletionFromPieces(data);renderDemandsUI(data.demands);recalculateRollStats(data);
+        updateUIInfo();renderScene();renderRadar();smartAdvanceBed();
+        showToast('已完成 '+receipts.length+' 个工位报工，可立即打印各工单。','success');
+    } catch {showToast('报工已成功，页面刷新失败；请重新打开任务核对库存与工单。','warning');}
+    scheduleRemnantAvailability({force:true,recommend:true});
+}
+
+export async function openBatchReport() {
+    if (reporting) return;
+    if (state.pendingPlan && !await recordCurrentStation()) return;
+    let dialog=document.getElementById('batch-report-dialog');
+    if (!dialog) {
+        dialog=document.createElement('dialog');dialog.id='batch-report-dialog';dialog.className='action-dialog workbench-dialog';
+        dialog.setAttribute('aria-labelledby','batch-report-title');
+        dialog.addEventListener('keydown',event => event.stopPropagation());document.body.append(dialog);
+    }
+    const entries=queuedReports();
+    dialog.innerHTML='<div class="workbench-dialog-heading"><div><h2 id="batch-report-title">待报工 · '+entries.length+' 工位</h2><p>默认按各工位方案记录合格件与料头。请核对实际结果，确认后一次更新需求和库存。</p></div><button class="tool-btn" data-close>关闭</button></div><div class="workbench-dialog-body">'+
+        entries.map((r,index) => '<article class="task-list-item"><strong>工位 '+(index+1)+' · '+escapeText(r.pending.sourceRemnantId || r.pending.rollId)+'</strong><span>合格 '+r.report.finishedPieceCount+' 件 · '+(r.pending.feedPortType==='remnant'?'料头核销':'实切 '+r.report.actualCutLen+' mm · 起点 '+r.pending.windowStartY+' mm')+'</span><small>'+r.report.pieceResults.filter(p=>p.outcome==='REJECTED').length+' 件异常 · '+r.report.pieceResults.filter(p=>p.outcome==='UNCUT').length+' 件未切</small><button class="tool-btn" data-ticket="'+index+'">查看工单</button>'+(index===entries.length-1?'<button class="tool-btn" data-restore>退回核对</button>':'')+'</article>').join('')+
+        '</div><div class="workbench-dialog-footer"><span id="batch-report-error" role="alert"></span><button class="tool-btn" data-close>继续裁切</button><button class="tool-btn active" data-confirm '+(!entries.length?'disabled':'')+'>确认'+(entries.length>1?'全部':'本工位')+'报工</button></div>';
+    dialog.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>dialog.close());
+    dialog.querySelectorAll('[data-ticket]').forEach(b=>b.onclick=async()=>{const {openCutTicketModal}=await import('../../plugins/export/cut-ticket.js');openCutTicketModal({planId:entries[Number(b.dataset.ticket)].report.planId,historical:true});});
+    dialog.querySelector('[data-restore]')?.addEventListener('click',async()=>{
+        try {
+            if(state.pendingPlan)throw new Error('请先处理当前工位方案，再退回上一工位。');
+            const last=entries.at(-1),data=state.getCurrentCaseData();
+            if(last.pending.rollId!==data.rollId || last.pending.feedPortType!==state.currentCutMode || (last.pending.feedPortType==='remnant' && last.pending.sourceRemnantId!==state.loadedRemnant?.id))throw new Error('请先装载该工位的原材料，再退回核对。');
+            const saved=await requestJSON('/api/cutting/plans/'+encodeURIComponent(last.report.planId));
+            if(saved.status!=='PENDING')throw new Error('该方案状态已变化，请重新打开任务核对报工记录。');
+            const remaining=entries.slice(0,-1);saveReportQueue(state.activeTask.id,remaining);state.reportQueue=remaining;
+            restoreSavedPlan(saved);Object.assign(state.pendingPlan,{reportPieceResults:last.report.pieceResults,reportActualCutLen:last.report.actualCutLen,reportRecovery:last.pending.reportRecovery,reportLocation:last.report.location});
+            document.getElementById('report-location').value=last.report.location;
+            dialog.close();await openCutReport();
+        } catch(error){dialog.querySelector('#batch-report-error').textContent=error.message;}
+    });
+    const confirm=async selected=>{
+        if(reporting)return;reporting=true;const wasInert=document.body.inert;document.body.inert=true;
+        try {await submitReports(selected);dialog.close();}
+        catch(error){dialog.querySelector('#batch-report-error').textContent=error.message;}
+        finally {reporting=false;document.body.inert=wasInert;updateWorkflowControls();}
+    };
+    dialog.querySelector('[data-confirm]').onclick=()=>confirm(entries);
+    if(!dialog.open)dialog.showModal();
+}
+
+export function exportCutResult() {
+    const data = state.getCurrentCaseData();
+    const metrics = materialSummary(data, state.currentCutMode === 'remnant');
+    const exportData = { status: metrics.actual ? "已实切确认" : "示例或方案预览", receipt: metrics.actual ? data.lastReceipt : null,
+        rollId: data.rollId || null, demands: data.demands || [], pieces: data.pieces || [], cuts: data.cuts || [],
+        remnants: state.currentCutMode === 'remnant' && !metrics.actual ? [] : data.remnants || [], pieceArea: metrics.pieceArea || 0, usedArea:metrics.totalArea || 0,
+        utilization:metrics.utilization, utilizationBasis:metrics.actual ? 'actual-used-area' : 'estimated-used-area',
+        processingArea:metrics.processingArea || 0, processingUtilization:metrics.processingUtilization };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json;charset=utf-8" }));
+    const link = document.createElement("a"); link.href = url; link.download = `cut-result-${Date.now()}.json`; link.click();
+    URL.revokeObjectURL(url);
+}
+
+export function renderCutTable(cuts) {
+    const data = state.getCurrentCaseData();
+    if (cuts) data.cuts = cuts;
+    recalculateRollStats(data);
+}

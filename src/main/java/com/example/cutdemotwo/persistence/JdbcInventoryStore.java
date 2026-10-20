@@ -1,6 +1,9 @@
 package com.example.cutdemotwo.persistence;
 
-import com.example.cutdemotwo.model.*;
+import com.example.cutdemotwo.business.model.CuttingPlan;
+import com.example.cutdemotwo.business.model.CuttingTask;
+import com.example.cutdemotwo.business.model.MotherRollInfo;
+import com.example.cutdemotwo.business.model.RemnantStock;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;

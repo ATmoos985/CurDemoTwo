@@ -118,7 +118,7 @@ const server = createServer(async (req,res) => {
         await expect(page.locator('body')).not.toHaveAttribute('inert','');
         await expect(page.locator('#task-state')).toContainText('已保存');
         await page.evaluate(async saved => {
-            const {restoreSavedPlan}=await import('/js/plugins/solver/solver-client.js');restoreSavedPlan(saved);
+            const {restoreSavedPlan}=await import('/js/business/cutting/solver-client.js');restoreSavedPlan(saved);
             window.camApp.setSelectedPieceId(2);
         },{request:planRequest,result:planResult,version:1});
         await expect(page.locator('#btn-confirm-station-cut')).toBeEnabled();
@@ -370,7 +370,7 @@ const server = createServer(async (req,res) => {
                 await window.camApp.switchCutMode('remnant',stock);
                 const data=window.camApp.state.getCurrentCaseData();
                 data.lastReceipt={feedPortType:'remnant',sourceRemnantId:stock.id,status:'CONFIRMED',finishedPieceCount:1,actualCutLen:0,windowStartY:0};
-                const {updateWorkflowControls}=await import('/js/plugins/solver/solver-client.js');updateWorkflowControls();
+                const {updateWorkflowControls}=await import('/js/business/cutting/solver-client.js');updateWorkflowControls();
             });
             await expect(page.locator('#material-context-id')).toHaveText('REM-LAYOUT');
             await expect(page.locator('#material-context-info')).toContainText('已报工核销');
@@ -381,7 +381,7 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('#task-state')).toContainText('已保存');
             await expect(page.locator('#task-picker')).not.toBeVisible();
             await expect(page.locator('body')).not.toHaveAttribute('inert','');
-            await page.evaluate(async()=>{window.camApp.state.getCurrentCaseData().windowStartY=70000;const {updateUIInfo}=await import('/js/plugins/solver/solver-client.js');updateUIInfo();});
+            await page.evaluate(async()=>{window.camApp.state.getCurrentCaseData().windowStartY=70000;const {updateUIInfo}=await import('/js/business/cutting/solver-client.js');updateUIInfo();});
             await expect(page.locator('#btn-workflow-next')).toHaveText('定位母卷导航');await page.locator('#btn-workflow-next').click();
             await expect(page.locator('#radar-window')).toBeFocused();await expect(page.locator('#radar-window')).toHaveAttribute('tabindex','0');await page.keyboard.press('Home');
             const track=await page.locator('#radar-track').boundingBox();
@@ -421,7 +421,7 @@ const server = createServer(async (req,res) => {
         });
         await run('equal names and dimensions retain distinct demand identities when locating the drawing',async page=>{
             tasks.get('task-a').demands.push({...tasks.get('task-a').demands[0],id:8,quantity:2});await loadPlan(page);
-            await page.evaluate(async saved=>{const {restoreSavedPlan}=await import('/js/plugins/solver/solver-client.js');restoreSavedPlan(saved);},
+            await page.evaluate(async saved=>{const {restoreSavedPlan}=await import('/js/business/cutting/solver-client.js');restoreSavedPlan(saved);},
                 {request:{...planRequest,demands:[...planRequest.demands,{...planRequest.demands[0],id:8}]},result:{...planResult,pieces:[planResult.pieces[0],{...planResult.pieces[1],demandId:8}]}});
             const first=page.locator('#demands-container [data-id="7"]'),second=page.locator('#demands-container [data-id="8"]');
             await expect(first.locator('.demand-status')).toHaveText('已报工 1 / 3 件 · 待报工 0 · 待切 2');
@@ -448,7 +448,7 @@ const server = createServer(async (req,res) => {
             await page.evaluate(async()=>{
                 window.camApp.state.taskCompleted={7:2,8:4,9:1,10:6};
                 window.camApp.state.taskReports=[{taskId:'task-a',planId:'RECENT',status:'CONFIRMED',confirmedAt:'2026-10-05T09:30:00',demandQuantities:{8:2,9:1,10:2}}];
-                const {updateWorkflowControls}=await import('/js/plugins/solver/solver-client.js');updateWorkflowControls();
+                const {updateWorkflowControls}=await import('/js/business/cutting/solver-client.js');updateWorkflowControls();
             });
             await expect(page.locator('#demand-lines-progress')).toHaveText('已满足 3 / 5 项');await expect(page.locator('#demand-pieces-progress')).toHaveText('合格 13 / 20 件');
             await expect(page.locator('.demand-segment[data-complete="true"]')).toHaveCount(3);
@@ -642,7 +642,7 @@ const server = createServer(async (req,res) => {
             await loadPlan(page);solveHttpStatus=409;solveResult={message:'库存版本已变化'};const before=await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces));
             await page.locator('#btn-trigger-solve-station').click();await expect(page.locator('#solve-feedback')).toContainText('数据版本冲突');await expect(page.locator('#solve-feedback')).toContainText('不能报工');
             await expect(page.locator('#btn-confirm-station-cut')).not.toBeVisible();assert.equal(await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces)),before);
-            await page.evaluate(async()=>{const {canUseCurrentPlan,validatePlanAdjustment}=await import('/js/plugins/solver/solver-client.js');if(canUseCurrentPlan())throw new Error('stale plan ready');await validatePlanAdjustment();});assert.equal(adjustmentBodies.length,0);
+            await page.evaluate(async()=>{const {canUseCurrentPlan,validatePlanAdjustment}=await import('/js/business/cutting/solver-client.js');if(canUseCurrentPlan())throw new Error('stale plan ready');await validatePlanAdjustment();});assert.equal(adjustmentBodies.length,0);
         });
         await run('new manual edits during a solve are not overwritten by the arriving result',async page=>{
             await loadPlan(page);let finish;solveWait=new Promise(resolve=>finish=resolve);await page.locator('#btn-trigger-solve-station').click();await expect.poll(()=>requests.filter(r=>r==='POST /api/solve').length).toBe(1);

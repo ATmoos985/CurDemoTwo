@@ -1,9 +1,19 @@
 package com.example.cutdemotwo;
 
-import com.example.cutdemotwo.model.*;
+import com.example.cutdemotwo.business.model.CutReport;
+import com.example.cutdemotwo.business.model.CuttingTask;
+import com.example.cutdemotwo.business.model.PieceDemand;
+import com.example.cutdemotwo.business.model.RemnantStock;
+import com.example.cutdemotwo.business.model.SolveRequest;
+import com.example.cutdemotwo.contracts.geometry.Defect;
 import com.example.cutdemotwo.persistence.*;
-import com.example.cutdemotwo.service.*;
-import com.example.cutdemotwo.service.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.solver.CrossCutSolverService;
+import com.example.cutdemotwo.algorithm.solver.PackingSolverService;
+import com.example.cutdemotwo.business.cutting.CuttingWorkflowService;
+import com.example.cutdemotwo.business.cutting.FabricSolveAdapter;
+import com.example.cutdemotwo.business.cutting.RemnantRecommendationService;
+import com.example.cutdemotwo.business.cutting.RemnantService;
+import com.example.cutdemotwo.algorithm.solver.SolverFactory;
 import com.example.cutdemotwo.controller.RemnantRecommendationController;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
@@ -24,7 +34,7 @@ class RemnantRecommendationTests {
         inventory = new RemnantService(new FileInventoryStore(temp.resolve("inventory.json").toString()), false);
         var nativeEngine = new PackingSolverService();
         ReflectionTestUtils.setField(nativeEngine, "solverPath", System.getenv().getOrDefault("PACKINGSOLVER_PATH", "data/solver/packingsolver_rectangleguillotine.exe"));
-        kernel = new SolverFactory(List.of(new CrossCutSolverService(), new com.example.cutdemotwo.service.solver.JavaGuillotineSolverEngine(), nativeEngine));
+        kernel = new SolverFactory(List.of(new CrossCutSolverService(), new com.example.cutdemotwo.algorithm.solver.JavaGuillotineSolverEngine(), nativeEngine));
         service = new RemnantRecommendationService(inventory, kernel);
     }
     RemnantStock stock(String id, double w, double h) {
@@ -100,7 +110,7 @@ class RemnantRecommendationTests {
     @Test void changesDuringTrialAreRejectedAndTheNextAttemptIsAllowed() {
         inventory.registerRemnant(stock("REM",600,1000));
         var changingKernel=new SolverFactory(List.of(new CrossCutSolverService())) {
-            @Override public com.example.cutdemotwo.model.nesting.NestingResult solve(com.example.cutdemotwo.model.nesting.NestingProblem problem) {
+            @Override public com.example.cutdemotwo.contracts.nesting.NestingResult solve(com.example.cutdemotwo.contracts.nesting.NestingProblem problem) {
                 var result=super.solve(problem);inventory.updateStatus("REM","SCRAPPED");return result;
             }
         };

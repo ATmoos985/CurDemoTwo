@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import {createPlanHistory, planScene} from '../../main/resources/static/js/plugins/solver/plan-editing.js';
+import {createPlanHistory, planScene} from '../../main/resources/static/js/business/cutting/plan-editing.js';
 
 const root = new URL('../../main/resources/static/js/', import.meta.url);
 const source = fs.readFileSync(new URL('plugins/toolpath/toolpath-optimizer.js', root), 'utf8');
@@ -81,7 +81,7 @@ function savedPlanHarness() {
     const ctx={state:{getCurrentCaseData:()=>data},document:{body:{inert:false}},createPlanHistory,planScene,
         solveContext:()=>'context',crypto:{randomUUID:()=>'toolpath-operation-0001'},updateUIInfo(){}};
     vm.createContext(ctx);vm.runInContext('let validatingAdjustment=false;',ctx);
-    const solver=fs.readFileSync(new URL('plugins/solver/solver-client.js',root),'utf8');
+    const solver=fs.readFileSync(new URL('business/cutting/solver-client.js',root),'utf8');
     for(const name of ['planGeometry','offsetCuts','saveToolpathAdjustment']) {
         const fn=solver.match(new RegExp('(?:export )?(?:async )?function '+name+'\\([^\\n]*\\) \\{[\\s\\S]*?\\n\\}'));
         assert.ok(fn,name);vm.runInContext(fn[0].replace(/export /,''),ctx);

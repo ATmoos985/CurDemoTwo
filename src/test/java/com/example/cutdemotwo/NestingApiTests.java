@@ -1,7 +1,8 @@
 package com.example.cutdemotwo;
 
-import com.example.cutdemotwo.model.nesting.*;
-import com.example.cutdemotwo.service.RemnantService;
+import com.example.cutdemotwo.contracts.nesting.NestingProblem;
+import com.example.cutdemotwo.contracts.nesting.NestingResult;
+import com.example.cutdemotwo.business.cutting.RemnantService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;

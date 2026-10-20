@@ -64,7 +64,7 @@ test('selecting a remnant from the drawing opens the expected-remnant tab', () =
 });
 
 test('current-station framing stays centered in both narrow and wide viewports', async () => {
-    const { fitBounds } = await import('../../main/resources/static/js/plugins/cad/cad-view.js');
+    const { fitBounds } = await import('../../main/resources/static/js/canvas/cad-view.js');
     const data = state.getCurrentCaseData();
     for (const [width, height] of [[280, 320], [620, 490], [1100, 720]]) {
         const { scale, x, y } = fitBounds(width, height, {
@@ -82,7 +82,7 @@ test('a remnant plan with zero mother-roll usage is distinct from an empty plan'
     elements.clear();
     const usage = element();
     elements.set('lbl-deduct-len', usage);
-    const { updateUIInfo } = await import('../../main/resources/static/js/plugins/solver/solver-client.js');
+    const { updateUIInfo } = await import('../../main/resources/static/js/business/cutting/solver-client.js');
     const data = state.getCurrentCaseData();
     const before = { totalArea: data.totalArea, deductLen: data.deductLen, pieces: data.pieces };
     try {

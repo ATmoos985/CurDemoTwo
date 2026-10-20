@@ -1,9 +1,21 @@
 package com.example.cutdemotwo;
 
-import com.example.cutdemotwo.model.*;
-import com.example.cutdemotwo.model.nesting.*;
-import com.example.cutdemotwo.service.*;
-import com.example.cutdemotwo.service.solver.*;
+import com.example.cutdemotwo.business.model.CutReport;
+import com.example.cutdemotwo.business.model.CuttingTask;
+import com.example.cutdemotwo.business.model.PieceDemand;
+import com.example.cutdemotwo.business.model.PlanAdjustment;
+import com.example.cutdemotwo.business.model.SolveRequest;
+import com.example.cutdemotwo.contracts.geometry.Defect;
+import com.example.cutdemotwo.contracts.nesting.NestingProblem;
+import com.example.cutdemotwo.contracts.nesting.NestingResult;
+import com.example.cutdemotwo.business.cutting.CuttingWorkflowService;
+import com.example.cutdemotwo.business.cutting.FabricSolveAdapter;
+import com.example.cutdemotwo.business.cutting.RemnantService;
+import com.example.cutdemotwo.algorithm.solver.EngineCapabilities;
+import com.example.cutdemotwo.algorithm.solver.EngineResult;
+import com.example.cutdemotwo.algorithm.solver.ICutSolverEngine;
+import com.example.cutdemotwo.algorithm.solver.PolygonGeometry;
+import com.example.cutdemotwo.algorithm.solver.SolverFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
@@ -100,7 +112,7 @@ class ContourWorkflowTests {
     }
     @Test void toolpathAdjustmentPreservesEveryObliqueEdge(){
         var cuts=FabricSolveAdapter.solve(factory(),request()).getCuts();
-        var optimizer=new com.example.cutdemotwo.service.toolpath.ToolpathOptimizerService();
+        var optimizer=new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService();
         var result=optimizer.optimizeAndChain(cuts,0,0,true);
         assertEquals(cuts.size(),optimizer.validateReorderedCuts(cuts,result,0,0,true).size());
         assertThrows(IllegalArgumentException.class,()->optimizer.validateReorderedCuts(cuts,result.subList(0,5),0,0,true));

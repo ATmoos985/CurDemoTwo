@@ -33,8 +33,20 @@ if(!base || !process.env.CUT_TEST_ISOLATED || new URL(base).port==='8080')throw 
    const saved=await (await page.request.get(base+'/api/cutting/plans/'+solved.planId)).json();
    assert.equal(saved.request.demands.reduce((n,d)=>n+d.demand,0),count);assert.ok(saved.request.demands.every(d=>d.shape));
    await page.screenshot({path:'target/garment-workflow/'+style+'.png'});
-   const canvas=await page.evaluate(async()=>{const {mainLayer}=await import('/js/plugins/cad/cad-stage.js');return mainLayer.find('Line').filter(n=>n.closed()).length;});
-   assert.ok(canvas>=count,'workbench draws true closed polygons');
+   const canvas=await page.evaluate(async()=>{
+    const {pieceGroup}=await import('/js/plugins/cad/cad-stage.js');
+    return pieceGroup.getChildren().map(group=>{
+     const shape=group.getChildren()[0];
+     return {id:Number(group.name().replace('piece-entity-','')),type:shape.getClassName(),
+      closed:shape.getClassName()==='Line' ? shape.closed() : null};
+    });
+   });
+   assert.equal(canvas.length,count,'every produced piece has its own canvas entity');
+   for(const piece of solved.pieces){
+    const drawn=canvas.find(p=>p.id===piece.id);assert.ok(drawn,'piece identity is preserved');
+    assert.equal(drawn.type,piece.shape.type==='POLYGON'?'Line':'Rect');
+    if(piece.shape.type==='POLYGON')assert.equal(drawn.closed,true,'polygon outlines remain closed');
+   }
    const marks=await page.evaluate(async()=>{const {annotationLayer}=await import('/js/plugins/cad/cad-stage.js');return {badges:annotationLayer.find('Circle').filter(n=>n.radius()===9).length,text:annotationLayer.find('Text').map(n=>n.text()).join(' ')};});
    assert.ok(marks.badges<=1,'contour edge numbers do not cover the marker');assert.ok(!/\d\.\d{6}/.test(marks.text),'dimensions hide floating-point tails');
    const preview=await page.evaluate(async()=>{

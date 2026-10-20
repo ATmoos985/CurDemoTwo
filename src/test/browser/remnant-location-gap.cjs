@@ -19,7 +19,7 @@ async function api(path,body) {
             demands:[{id:1,name:'保留原规格',width:490,length:600,quantity:8,allowRotation:false}],
             process:{bedLength:1220,trimStart:0,pieceGap:10.5,cutOrigin:'right-bottom',firstStageOrientation:'horizontal',allowRotation:false,allowLongitudinal:true}});
         await page.goto(base+'/index.html');await page.waitForLoadState('networkidle');
-        await page.evaluate(async id=>{window.s=(await import('/js/core/state.js')).state;return (await import('/js/plugins/solver/task-workspace.js')).loadTask(id);},task.id);
+        await page.evaluate(async id=>{window.s=(await import('/js/core/state.js')).state;return (await import('/js/business/cutting/task-workspace.js')).loadTask(id);},task.id);
         await expect(page.locator('#inp-piece-gap')).toHaveValue('10.5');
         await page.locator('#card-bed-origin .section-toggle').click();
         await page.locator('#inp-piece-gap').fill('100.5');await page.locator('#inp-piece-gap').press('Tab');

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {layoutMetrics, materialSummary} from '../../main/resources/static/js/plugins/solver/material-accounting.js';
+import {layoutMetrics, materialSummary} from '../../main/resources/static/js/business/cutting/material-accounting.js';
 
 test('estimated utilization excludes the uncut tail while processing occupancy includes it', () => {
     const data = {rollW:2000, bedL:5000, pieces:[{x:0,y:330,w:2000,l:4540}], cuts:[{type:'横切',pos:4870}]};

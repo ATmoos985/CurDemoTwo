@@ -1,7 +1,9 @@
 package com.example.cutdemotwo;
 
-import com.example.cutdemotwo.model.*;
-import com.example.cutdemotwo.service.toolpath.*;
+import com.example.cutdemotwo.contracts.geometry.CutStep;
+import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
+import com.example.cutdemotwo.algorithm.toolpath.CutBoundaryCompletionService;
+import com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService;
 import org.junit.jupiter.api.Test;
 import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;

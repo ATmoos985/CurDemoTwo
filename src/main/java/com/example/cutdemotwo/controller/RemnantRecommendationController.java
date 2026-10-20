@@ -1,6 +1,6 @@
 package com.example.cutdemotwo.controller;
 
-import com.example.cutdemotwo.service.RemnantRecommendationService;
+import com.example.cutdemotwo.business.cutting.RemnantRecommendationService;
 import com.example.cutdemotwo.persistence.InventoryConflictException;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.HttpStatus;

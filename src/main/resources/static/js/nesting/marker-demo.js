@@ -1,5 +1,5 @@
 import {garmentExample} from './scenario-examples.js';
-import {polygon, rectangle, shapeArea} from './nesting-scene.js';
+import {polygon, rectangle, shapeArea} from '../canvas/nesting-scene.js';
 
 export const MARKER_STYLES = Object.freeze([
     {id:'GARMENT_SHIRT', name:'上衣', description:'前片、后片、袖片、领片、贴边与袋布'},

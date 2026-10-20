@@ -1,14 +1,14 @@
 import {state} from '../../core/state.js';
-import {getDemandsFromUI} from '../solver/quota-manager.js';
-import {readWorkflowState, navigateWorkflowStage} from '../solver/workflow-guide.js';
-import {escapeText} from '../solver/task-workspace.js';
+import {getDemandsFromUI} from '../../business/cutting/quota-manager.js';
+import {readWorkflowState, navigateWorkflowStage} from '../../business/cutting/workflow-guide.js';
+import {escapeText} from '../../business/cutting/task-workspace.js';
 import {switchCutMode} from '../remnant/remnant-shelf.js';
 import {solverSettings} from '../settings/settings.js';
 import {recommendationMarkup, stockSignature, helpTip} from './remnant-recommendation.js';
 import {showToast} from '../../core/toast.js';
 import {motherRollRemnants} from '../remnant/remnant-dialog-model.js';
 import {remnantAvailability} from './remnant-availability.js';
-import {queuedQuantities, queuedReports} from '../solver/report-queue.js';
+import {queuedQuantities, queuedReports} from '../../business/cutting/report-queue.js';
 
 const el = id => document.getElementById(id);
 let generation = 0;

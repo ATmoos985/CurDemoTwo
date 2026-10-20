@@ -1,9 +1,14 @@
 package com.example.cutdemotwo;
 
-import com.example.cutdemotwo.model.*;
+import com.example.cutdemotwo.business.model.CutReport;
+import com.example.cutdemotwo.business.model.PieceDemand;
+import com.example.cutdemotwo.business.model.SolveRequest;
+import com.example.cutdemotwo.business.model.SolveResponse;
 import com.example.cutdemotwo.persistence.*;
-import com.example.cutdemotwo.service.*;
-import com.example.cutdemotwo.service.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.solver.CrossCutSolverService;
+import com.example.cutdemotwo.business.cutting.CuttingWorkflowService;
+import com.example.cutdemotwo.business.cutting.RemnantService;
+import com.example.cutdemotwo.algorithm.solver.SolverFactory;
 import org.flywaydb.core.Flyway;
 import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.*;

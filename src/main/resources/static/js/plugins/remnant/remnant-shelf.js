@@ -4,12 +4,12 @@
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 import { renderScene, resetToBedView, updateStatusBar } from '../cad/cad-renderer.js';
-import { renderDefectsUI, updateDemandCompletionFromPieces, loadCurtainOrderTemplate, renderDemandsUI, getDemandsFromUI, addDemandRow } from '../solver/quota-manager.js';
+import { renderDefectsUI, updateDemandCompletionFromPieces, loadCurtainOrderTemplate, renderDemandsUI, getDemandsFromUI, addDemandRow } from '../../business/cutting/quota-manager.js';
 import { renderRadar } from '../radar/radar-scrubber.js';
-import { updateUIInfo } from '../solver/solver-client.js';
+import { updateUIInfo } from '../../business/cutting/solver-client.js';
 import { showToast } from '../../core/toast.js';
-import {restoreRecordedGeometry} from '../solver/report-outcomes.js';
-import {queuedReports} from '../solver/report-queue.js';
+import {restoreRecordedGeometry} from '../../business/cutting/report-outcomes.js';
+import {queuedReports} from '../../business/cutting/report-queue.js';
 
 export async function switchCutMode(mode, targetRemnant, presetData = null, loadedRoll = null) {
     const alreadyInert = document.body.inert;

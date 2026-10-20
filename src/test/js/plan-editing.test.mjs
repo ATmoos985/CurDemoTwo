@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createPlanHistory,planScene} from '../../main/resources/static/js/plugins/solver/plan-editing.js';
+import {createPlanHistory,planScene} from '../../main/resources/static/js/business/cutting/plan-editing.js';
 
 test('undo and redo restore geometry and derived cuts without mutating the saved plan', () => {
     const original={pieces:[{id:1,x:0,y:0,w:800,l:1000}],cuts:[{pos:1000}],remnants:[{id:'r',w:100}],cutIntervals:[]};

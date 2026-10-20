@@ -1,7 +1,7 @@
 // node --test src/test/js/*.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { wheelScale } from '../../main/resources/static/js/plugins/cad/cad-view.js';
+import { wheelScale } from '../../main/resources/static/js/canvas/cad-view.js';
 
 test('long-roll wheel zoom advances below the old floor and returns to full fit', () => {
     const fit = fitBounds(1100, 800, {x: 0, y: 0, width: 2800, height: 380000}).scale;
@@ -19,7 +19,7 @@ test('wheel bounds preserve normal zoom, max scale and recovery below full fit',
     assert.equal(wheelScale(.0005, -100, .001), .0005 * 1.12);
     assert.equal(wheelScale(.0005, 100, .001), .0005);
 });
-import { fitBounds, stationOrigin, stationCoordinates, rulerOrigin, rulerStep, labelDetail, defectFromCenter, gridIndex, spacedPoints, viewRect, localBounds, createViewCull } from '../../main/resources/static/js/plugins/cad/cad-view.js';
+import { fitBounds, stationOrigin, stationCoordinates, rulerOrigin, rulerStep, labelDetail, defectFromCenter, gridIndex, spacedPoints, viewRect, localBounds, createViewCull } from '../../main/resources/static/js/canvas/cad-view.js';
 
 test('framing reserves screen-space dimensions for small remnants and 100m rolls', () => {
     for (const [width, height] of [[280, 320], [600, 480], [1440, 900]]) {

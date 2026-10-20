@@ -1,7 +1,7 @@
-import { initTaskWorkspace, newCuttingTask, startTaskDraft, finishTaskDraft, prepareTaskSwitch, openLocalDrafts, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, taskInputChanged } from './plugins/solver/task-workspace.js';
+import { initTaskWorkspace, newCuttingTask, startTaskDraft, finishTaskDraft, prepareTaskSwitch, openLocalDrafts, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, taskInputChanged } from './business/cutting/task-workspace.js';
 import {initWorkbenchPanels, openDemandManager, openMaterialDetails} from './plugins/layout/workbench-panels.js';
-import {openDemandImport} from './plugins/solver/demand-import.js';
-import {openNewTask} from './plugins/solver/task-creation.js';
+import {openDemandImport} from './business/cutting/demand-import.js';
+import {openNewTask} from './business/cutting/task-creation.js';
 /**
  * 【主装配器】CAM 前端应用主入口 (Application Orchestrator)
  * 挂载微内核与所有独立插件，完成全局事件编排与向后兼容性绑定
@@ -51,14 +51,14 @@ import {
     addDefectRow, addDemandRow, removeDemandRow, getDefectsFromUI, getDemandsFromUI,
     onRollConfigChange, onOriginParamChange, onParamChange,
     updateRollSize, toggleLongitudinal, loadCurtainOrderTemplate
-} from './plugins/solver/quota-manager.js';
+} from './business/cutting/quota-manager.js';
 
 import {
     updateUIInfo, loadCase, triggerSolve,
     openCutReport, closeCutReport, confirmCutReport, openBatchReport, exportCutResult,
     openStationLapConfirmModal, updateReportPreview, recordPlanEdit, undoPlanEdit, redoPlanEdit, validatePlanAdjustment,
     stageAndAdvanceNextStation, handleClearStationClick, handleClearStationDblClick
-} from './plugins/solver/solver-client.js';
+} from './business/cutting/solver-client.js';
 
 import {
     switchCutMode, onMotherRollChange, updateMotherRollRemnantStats,

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {expectedRemnants, motherRollRemnants, taskRemnants} from '../../main/resources/static/js/plugins/remnant/remnant-dialog-model.js';
-import {readReportRemnants} from '../../main/resources/static/js/plugins/solver/report-editor.js';
+import {readReportRemnants} from '../../main/resources/static/js/business/cutting/report-editor.js';
 
 test('expected additions exclude reported and staged historical geometry', () => {
     const current = {id:'current',w:600,l:1000};

@@ -1,4 +1,4 @@
-import {shapeVertices, rectangle} from '../../nesting/nesting-scene.js';
+import {shapeVertices, rectangle} from '../../canvas/nesting-scene.js';
 
 export function pieceVertices(p, x=p.x, y=p.y) {
     return shapeVertices(p.shape || rectangle(p.w,p.l)).map(v=>({x:v.x+x,y:v.y+y}));

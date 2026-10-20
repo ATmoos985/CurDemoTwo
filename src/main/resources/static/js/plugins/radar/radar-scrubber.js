@@ -5,11 +5,11 @@ import { stage, mainLayer, bedStationGroup, defectGroup } from '../cad/cad-stage
 import { drawRulers } from '../cad/cad-rulers.js';
 import { updateStatusBar, renderScene, resetToBedView } from '../cad/cad-renderer.js';
 import { clearRemnantSelection } from '../cad/cad-remnant-highlight.js';
-import { recalculateRollStats, getDemandsFromUI } from '../solver/quota-manager.js';
-import { updateUIInfo } from '../solver/solver-client.js';
+import { recalculateRollStats, getDemandsFromUI } from '../../business/cutting/quota-manager.js';
+import { updateUIInfo } from '../../business/cutting/solver-client.js';
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
-import {queuedRollEnd, queuedStockLength, queuedQuantities} from '../solver/report-queue.js';
+import {queuedRollEnd, queuedStockLength, queuedQuantities} from '../../business/cutting/report-queue.js';
 import {feedLengthLimits, suggestedFeedLength} from './feed-window.js';
 import {renderMaterialInspection} from '../layout/workbench-panels.js';
 

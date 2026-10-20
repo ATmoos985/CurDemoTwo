@@ -1,5 +1,5 @@
 import {getInitialScenarios} from '../plugins/presets/scenarios.js';
-import {rectangle, polygon} from './nesting-scene.js';
+import {rectangle, polygon} from '../canvas/nesting-scene.js';
 
 export function garmentExample(id) {
     // shortcut: 用折线近似服装曲边；接入生产纸样时需真实曲线、缝份与丝缕校验。

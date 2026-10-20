@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {polygon,rectangle} from '../../main/resources/static/js/nesting/nesting-scene.js';
-import {layoutMetrics} from '../../main/resources/static/js/plugins/solver/material-accounting.js';
-import {createWorkspaceScene} from '../../main/resources/static/js/plugins/cad/workspace-scene.js';
+import {polygon,rectangle} from '../../main/resources/static/js/canvas/nesting-scene.js';
+import {layoutMetrics} from '../../main/resources/static/js/business/cutting/material-accounting.js';
+import {createWorkspaceScene} from '../../main/resources/static/js/business/cutting/workspace-scene.js';
 import {outlinesConflict,pieceVertices,rotateOutlinePiece} from '../../main/resources/static/js/plugins/cad/outline-geometry.js';
-import {reportRecoveryCandidates,restoreRecordedGeometry} from '../../main/resources/static/js/plugins/solver/report-outcomes.js';
-import {parseDemandJSON,importedTask} from '../../main/resources/static/js/plugins/solver/demand-import-model.js';
+import {reportRecoveryCandidates,restoreRecordedGeometry} from '../../main/resources/static/js/business/cutting/report-outcomes.js';
+import {parseDemandJSON,importedTask} from '../../main/resources/static/js/business/cutting/demand-import-model.js';
 import {ticketBlueprint} from '../../main/resources/static/js/plugins/export/cut-ticket-model.js';
 const shape=polygon([{x:0,y:0},{x:200,y:0},{x:0,y:200}]);
 const piece={id:1,demandId:1,name:'衣片',x:0,y:5000,w:200,l:200,shape,rotationDegrees:0};

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {deferHitGraph} from '../../main/resources/static/js/plugins/cad/cad-hit-graph.js';
+import {deferHitGraph} from '../../main/resources/static/js/canvas/cad-hit-graph.js';
 
 test('hit graph refreshes once before picking, including after listening/drag suspension', () => {
     let draws = 0, enabled = true, rendered = 0, geometry = 1;

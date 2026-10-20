@@ -1,8 +1,8 @@
 package com.example.cutdemotwo;
 
-import com.example.cutdemotwo.model.PieceDemand;
-import com.example.cutdemotwo.model.SolveRequest;
-import com.example.cutdemotwo.model.nesting.NestingResult;
+import com.example.cutdemotwo.business.model.PieceDemand;
+import com.example.cutdemotwo.business.model.SolveRequest;
+import com.example.cutdemotwo.contracts.nesting.NestingResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Value;

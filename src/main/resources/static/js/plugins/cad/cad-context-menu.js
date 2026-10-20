@@ -12,8 +12,8 @@ import { bus } from '../../core/event-bus.js';
 import { showToast } from '../../core/toast.js';
 import { stage, mainLayer } from './cad-stage.js';
 import { renderScene } from './cad-renderer.js';
-import { updateDemandCompletionFromPieces, recalculateRollStats, renderDemandsUI } from '../solver/quota-manager.js';
-import { updateUIInfo } from '../solver/solver-client.js';
+import { updateDemandCompletionFromPieces, recalculateRollStats, renderDemandsUI } from '../../business/cutting/quota-manager.js';
+import { updateUIInfo } from '../../business/cutting/solver-client.js';
 import {
     updateFabricScrollPosition, updateDefectVisualStates, requireStationReport,
     updateDefectRadarActiveState, smartAdvanceBed
@@ -692,11 +692,11 @@ window.cadMenuActions = {
     },
     clearStation: () => {
         closeCADContextMenu();
-        import('../solver/quota-manager.js').then(m => m.clearStationCuts());
+        import('../../business/cutting/quota-manager.js').then(m => m.clearStationCuts());
     },
     clearRemnantCuts: () => {
         closeCADContextMenu();
-        import('../solver/quota-manager.js').then(m => m.clearStationCuts());
+        import('../../business/cutting/quota-manager.js').then(m => m.clearStationCuts());
     },
     reloadRemnant: () => {
         closeCADContextMenu();
@@ -704,6 +704,6 @@ window.cadMenuActions = {
     },
     solveRemnant: () => {
         closeCADContextMenu();
-        import('../solver/solver-client.js').then(m => m.triggerSolve());
+        import('../../business/cutting/solver-client.js').then(m => m.triggerSolve());
     }
 };

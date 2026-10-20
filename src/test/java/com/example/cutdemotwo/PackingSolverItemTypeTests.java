@@ -1,11 +1,11 @@
 package com.example.cutdemotwo;
 
-import com.example.cutdemotwo.model.PlacedPiece;
-import com.example.cutdemotwo.model.nesting.NestingProblem;
-import com.example.cutdemotwo.model.nesting.NestingResult;
-import com.example.cutdemotwo.service.PackingSolverService;
-import com.example.cutdemotwo.service.solver.EngineResult;
-import com.example.cutdemotwo.service.solver.SolverFactory;
+import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
+import com.example.cutdemotwo.contracts.nesting.NestingProblem;
+import com.example.cutdemotwo.contracts.nesting.NestingResult;
+import com.example.cutdemotwo.algorithm.solver.PackingSolverService;
+import com.example.cutdemotwo.algorithm.solver.EngineResult;
+import com.example.cutdemotwo.algorithm.solver.SolverFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;

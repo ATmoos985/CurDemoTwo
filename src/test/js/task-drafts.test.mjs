@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDraftStore } from '../../main/resources/static/js/plugins/solver/task-drafts.js';
+import { createDraftStore } from '../../main/resources/static/js/business/cutting/task-drafts.js';
 
 function storage() {
     const values = new Map();

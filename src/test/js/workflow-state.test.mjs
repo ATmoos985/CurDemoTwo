@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {workflowState} from '../../main/resources/static/js/plugins/solver/workflow-state.js';
+import {workflowState} from '../../main/resources/static/js/business/cutting/workflow-state.js';
 const source = () => ({name:'订单', model:'A', demands:[{id:7,name:'主帘',width:2000,length:1200,quantity:4,completed:1}],
     material:{available:true,sheet:false,model:'A',length:5000,used:5000,total:10000},process:{length:5000,start:5000,trim:0}});
 

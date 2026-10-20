@@ -4,15 +4,15 @@ import {
     pieceGroup, cutGroup, bedStationGroup, invalidatePanSnapshot
 } from './cad-stage.js';
 import { drawRulers } from './cad-rulers.js';
-import { fitBounds, gridIndex, labelDetail, spacedPoints, stationOrigin, stationCoordinates, RULER_SIZE, canvasView as view } from './cad-view.js';
+import { fitBounds, gridIndex, labelDetail, spacedPoints, stationOrigin, stationCoordinates, RULER_SIZE, canvasView as view } from '../../canvas/cad-view.js';
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 import { getHomeCoordinates } from '../toolpath/toolpath-optimizer.js';
 import { makePieceInteractive, getSelectedPieceId } from './cad-interactive-nesting.js';
 import { makeRemnantInteractive } from './cad-context-menu.js';
 import { renderRemnantHighlight } from './cad-remnant-highlight.js';
-import { createWorkspaceScene } from './workspace-scene.js';
-import { renderNestingGeometry, setNestingCutStep } from '../../nesting/nesting-renderer.js';
+import { createWorkspaceScene } from '../../business/cutting/workspace-scene.js';
+import { renderNestingGeometry, setNestingCutStep } from '../../canvas/nesting-renderer.js';
 
 let cutBadges = [];
 let fitMode = 'station';

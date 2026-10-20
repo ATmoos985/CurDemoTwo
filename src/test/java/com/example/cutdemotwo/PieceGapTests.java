@@ -1,8 +1,16 @@
 package com.example.cutdemotwo;
 
-import com.example.cutdemotwo.model.*;
-import com.example.cutdemotwo.service.*;
-import com.example.cutdemotwo.service.solver.*;
+import com.example.cutdemotwo.business.model.CuttingTask;
+import com.example.cutdemotwo.business.model.PieceDemand;
+import com.example.cutdemotwo.business.model.SolveRequest;
+import com.example.cutdemotwo.business.model.SolveResponse;
+import com.example.cutdemotwo.contracts.geometry.Defect;
+import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
+import com.example.cutdemotwo.algorithm.solver.CrossCutSolverService;
+import com.example.cutdemotwo.algorithm.solver.PackingSolverService;
+import com.example.cutdemotwo.business.cutting.FabricSolveAdapter;
+import com.example.cutdemotwo.algorithm.solver.JavaGuillotineSolverEngine;
+import com.example.cutdemotwo.algorithm.solver.SolverFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 import java.util.List;

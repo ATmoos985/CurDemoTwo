@@ -61,7 +61,7 @@ const base = process.env.BASE_URL || 'http://localhost:8080';
         await move(500,1000);
         const cursor = await page.evaluate(async () => {
             const {stage,getCanvasData} = await import('/js/plugins/cad/cad-stage.js');
-            const {stationCoordinates} = await import('/js/plugins/cad/cad-view.js');
+            const {stationCoordinates} = await import('/js/canvas/cad-view.js');
             const p=stage.getPointerPosition(), s=stage.scaleX();
             return stationCoordinates(Math.round((p.x-stage.x())/s),Math.round((p.y-stage.y())/s),getCanvasData());
         });

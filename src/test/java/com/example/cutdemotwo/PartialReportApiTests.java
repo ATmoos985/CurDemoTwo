@@ -1,7 +1,11 @@
 package com.example.cutdemotwo;
 
-import com.example.cutdemotwo.model.*;
-import com.example.cutdemotwo.service.*;
+import com.example.cutdemotwo.business.model.CutReport;
+import com.example.cutdemotwo.business.model.PieceDemand;
+import com.example.cutdemotwo.business.model.SolveRequest;
+import com.example.cutdemotwo.business.model.SolveResponse;
+import com.example.cutdemotwo.business.cutting.CuttingWorkflowService;
+import com.example.cutdemotwo.business.cutting.RemnantService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.*;

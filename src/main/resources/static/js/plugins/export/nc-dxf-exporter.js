@@ -4,7 +4,7 @@
  */
 import { state } from '../../core/state.js';
 import { getHomeCoordinates } from '../toolpath/toolpath-optimizer.js';
-import { canUseCurrentPlan } from '../solver/solver-client.js';
+import { canUseCurrentPlan } from '../../business/cutting/solver-client.js';
 import { showToast } from '../../core/toast.js';
 
 function requireValidatedPlan() {

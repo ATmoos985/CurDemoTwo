@@ -3,9 +3,9 @@
  */
 import { bus } from '../../core/event-bus.js';
 import { state } from '../../core/state.js';
-import { stationCoordinates, viewRect, createViewCull, fitBounds, wheelScale, canvasView } from './cad-view.js';
-import { deferHitGraph } from './cad-hit-graph.js';
-import { cacheOverviewPan } from './cad-pan-snapshot.js';
+import { stationCoordinates, viewRect, createViewCull, fitBounds, wheelScale, canvasView } from '../../canvas/cad-view.js';
+import { deferHitGraph } from '../../canvas/cad-hit-graph.js';
+import { cacheOverviewPan } from '../../canvas/cad-pan-snapshot.js';
 
 // 视口裁剪外扩的屏幕像素，覆盖不随缩放的描边和斜接角。
 const CULL_MARGIN = 32;

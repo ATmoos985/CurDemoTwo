@@ -1,10 +1,16 @@
 package com.example.cutdemotwo;
 
-import com.example.cutdemotwo.model.*;
-import com.example.cutdemotwo.model.nesting.NestingProblem;
-import com.example.cutdemotwo.service.PackingSolverService;
-import com.example.cutdemotwo.service.RemnantService;
-import com.example.cutdemotwo.service.solver.EngineResult;
+import com.example.cutdemotwo.business.model.CutReport;
+import com.example.cutdemotwo.business.model.CuttingPlan;
+import com.example.cutdemotwo.business.model.RemnantStock;
+import com.example.cutdemotwo.business.model.SolveRequest;
+import com.example.cutdemotwo.business.model.SolveResponse;
+import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
+import com.example.cutdemotwo.contracts.geometry.RemnantPiece;
+import com.example.cutdemotwo.contracts.nesting.NestingProblem;
+import com.example.cutdemotwo.algorithm.solver.PackingSolverService;
+import com.example.cutdemotwo.business.cutting.RemnantService;
+import com.example.cutdemotwo.algorithm.solver.EngineResult;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;

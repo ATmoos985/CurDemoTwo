@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {loadReportQueue, saveReportQueue, queuedQuantities, queuedRollEnd, queuedStockLength, queuedReports, stationReport} from '../../main/resources/static/js/plugins/solver/report-queue.js';
+import {loadReportQueue, saveReportQueue, queuedQuantities, queuedRollEnd, queuedStockLength, queuedReports, stationReport} from '../../main/resources/static/js/business/cutting/report-queue.js';
 import {state} from '../../main/resources/static/js/core/state.js';
-import {workflowState} from '../../main/resources/static/js/plugins/solver/workflow-state.js';
+import {workflowState} from '../../main/resources/static/js/business/cutting/workflow-state.js';
 const entry=(id,start=0)=>({pending:{taskId:'T',rollId:'R',feedPortType:'roll',windowStartY:start,result:{pieces:[{id:1,demandId:9},{id:2,demandId:9},{id:3,demandId:9}]}},report:{planId:id,actualCutLen:1000,pieceResults:[{pieceId:1,outcome:'QUALIFIED'},{pieceId:2,outcome:'REJECTED'},{pieceId:3,outcome:'UNCUT'}]}});
 test('queued quality reserves only qualified demand, stock is not counted as reported',()=>{
     const rows=[entry('A'),entry('B',1000)];

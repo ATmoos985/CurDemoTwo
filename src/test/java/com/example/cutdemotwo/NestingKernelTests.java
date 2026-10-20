@@ -1,10 +1,16 @@
 package com.example.cutdemotwo;
 
-import com.example.cutdemotwo.model.*;
-import com.example.cutdemotwo.model.nesting.*;
-import com.example.cutdemotwo.service.CrossCutSolverService;
-import com.example.cutdemotwo.service.FabricSolveAdapter;
-import com.example.cutdemotwo.service.solver.*;
+import com.example.cutdemotwo.business.model.PieceDemand;
+import com.example.cutdemotwo.business.model.SolveRequest;
+import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
+import com.example.cutdemotwo.contracts.nesting.NestingProblem;
+import com.example.cutdemotwo.contracts.nesting.NestingResult;
+import com.example.cutdemotwo.algorithm.solver.CrossCutSolverService;
+import com.example.cutdemotwo.business.cutting.FabricSolveAdapter;
+import com.example.cutdemotwo.algorithm.solver.EngineCapabilities;
+import com.example.cutdemotwo.algorithm.solver.EngineResult;
+import com.example.cutdemotwo.algorithm.solver.ICutSolverEngine;
+import com.example.cutdemotwo.algorithm.solver.SolverFactory;
 import org.junit.jupiter.api.Test;
 import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;

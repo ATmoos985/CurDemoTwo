@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {cacheOverviewPan} from '../../main/resources/static/js/plugins/cad/cad-pan-snapshot.js';
+import {cacheOverviewPan} from '../../main/resources/static/js/canvas/cad-pan-snapshot.js';
 
 function fixture() {
     let x=50,y=50,scale=1,width=800,overview=true,draws=0,replays=0;

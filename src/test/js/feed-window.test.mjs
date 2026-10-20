@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {feedLengthLimits, suggestedFeedLength} from '../../main/resources/static/js/plugins/radar/feed-window.js';
-import {solveDiagnostics} from '../../main/resources/static/js/plugins/solver/solve-diagnostics.js';
+import {solveDiagnostics} from '../../main/resources/static/js/business/cutting/solve-diagnostics.js';
 
 test('length is bounded by the current roll tail, staged use and trim, preserving tenths of a millimeter',()=>{
     assert.deepEqual(feedLengthLimits({totalRollL:10000,windowStartY:6500,stockRemainingLength:8000,trimStart:30.2},500),{min:30.3,max:3500});

@@ -1,4 +1,4 @@
-import { rectangle, polygon, shapeArea, createNestingScene } from './nesting-scene.js';
+import { rectangle, polygon, shapeArea, createNestingScene } from '../canvas/nesting-scene.js';
 import { mountNestingViewer } from './nesting-viewer.js';
 import { NestingSession, dispatchedEngine } from './nesting-client.js';
 import {scenarioExample, garmentExample, boardExample} from './scenario-examples.js';

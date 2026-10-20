@@ -1,5 +1,5 @@
 import {state} from '../../core/state.js';
-import {queuedReports} from '../solver/report-queue.js';
+import {queuedReports} from '../../business/cutting/report-queue.js';
 
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

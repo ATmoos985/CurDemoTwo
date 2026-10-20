@@ -1,6 +1,6 @@
 /** 固定屏幕像素的毫米标尺；原点与工位起刀设置一致。 */
 import { stage, getCanvasData } from './cad-stage.js';
-import { RULER_SIZE, rulerStep, rulerOrigin, canvasView } from './cad-view.js';
+import { RULER_SIZE, rulerStep, rulerOrigin, canvasView } from '../../canvas/cad-view.js';
 
 export function drawRulers(cursorX, cursorY) {
     const canvas = document.getElementById('cad-ruler-canvas');

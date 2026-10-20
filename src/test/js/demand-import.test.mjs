@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
-import {parseDemandSheet, parseDemandJSON, importedTask, importGroups, matchingImportRolls} from '../../main/resources/static/js/plugins/solver/demand-import-model.js';
+import {parseDemandSheet, parseDemandJSON, importedTask, importGroups, matchingImportRolls} from '../../main/resources/static/js/business/cutting/demand-import-model.js';
 const require = createRequire(import.meta.url);
 const XLSX = require('../../main/resources/static/vendor/sheetjs/xlsx.mini.min.js');
 const header = ['序号','缝纫方式','订单\n编号','布料\n编号','供应\n商\n编号'];

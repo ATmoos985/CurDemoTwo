@@ -1,6 +1,6 @@
 import {INDUSTRIES} from '../industry/industry-profiles.js';
 import {markerExample} from '../nesting/marker-demo.js';
-import {shapeVertices} from '../nesting/nesting-scene.js';
+import {shapeVertices} from '../canvas/nesting-scene.js';
 import './cutting-showcase.js';
 
 const groups = document.getElementById('demo-groups');

@@ -1,5 +1,5 @@
-import { renderNestingGeometry, shapeNode } from './nesting-renderer.js';
-import { fitBounds, labelDetail, stationOrigin, RULER_SIZE } from '../plugins/cad/cad-view.js';
+import { renderNestingGeometry, shapeNode } from '../canvas/nesting-renderer.js';
+import { fitBounds, labelDetail, stationOrigin, RULER_SIZE } from '../canvas/cad-view.js';
 import * as cad from '../plugins/cad/cad-stage.js';
 import { drawRulers } from '../plugins/cad/cad-rulers.js';
 import { clearAllMeasurements, toggleMeasureTool } from '../plugins/cad/cad-measure.js';

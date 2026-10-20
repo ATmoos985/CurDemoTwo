@@ -22,7 +22,7 @@ async function api(path,body) {
             process:{bedLength:1500,trimStart:0,cutOrigin:'right-bottom',firstStageOrientation:'horizontal',allowRotation:false,allowLongitudinal:false}});
         await page.goto(base+'/index.html');await page.waitForLoadState('networkidle');
         await page.evaluate(async()=>{window.testState=(await import('/js/core/state.js')).state;});
-        const load=async()=>assert.equal(await page.evaluate(async id=>(await import('/js/plugins/solver/task-workspace.js')).loadTask(id),task.id),true);
+        const load=async()=>assert.equal(await page.evaluate(async id=>(await import('/js/business/cutting/task-workspace.js')).loadTask(id),task.id),true);
         const snapshot=()=>page.evaluate(async()=>{const {state}=await import('/js/core/state.js');return {pending:state.pendingPlan,queue:state.reportQueue,data:state.getCurrentCaseData(),completed:state.taskCompleted};});
         const checkRecordedCanvas=async()=>{
             const snap=await snapshot(),queued=snap.data.remnants.filter(r=>r.queued);
@@ -88,10 +88,10 @@ async function api(path,body) {
         await page.locator('#btn-view-station').click();assert.notEqual(await page.locator('#sb-scale').textContent(),fullScale);
         assert.equal((await api('/api/rolls/'+rollId)).usedLength,0);
         for (const [corner,label,x,y] of [['left-top','左上','0','25.5'],['right-top','右上','2,000','25.5'],['left-bottom','左下','0','1,474.5'],['right-bottom','右下','2,000','1,474.5']]) {
-            await page.evaluate(async corner=>{const data=window.testState.getCurrentCaseData();data.cutOrigin=corner;data.trimStart=25.5;(await import('/js/plugins/solver/solver-client.js')).updateUIInfo();},corner);
+            await page.evaluate(async corner=>{const data=window.testState.getCurrentCaseData();data.cutOrigin=corner;data.trimStart=25.5;(await import('/js/business/cutting/solver-client.js')).updateUIInfo();},corner);
             await expect(page.locator('#sb-origin-lbl')).toHaveText(`切割基准 ${label} · 母卷 X ${x} / Y ${y} mm`);
         }
-        await page.evaluate(async()=>{const data=window.testState.getCurrentCaseData();data.trimStart=0;(await import('/js/plugins/solver/solver-client.js')).updateUIInfo();(await import('/js/plugins/cad/cad-renderer.js')).renderScene();});
+        await page.evaluate(async()=>{const data=window.testState.getCurrentCaseData();data.trimStart=0;(await import('/js/business/cutting/solver-client.js')).updateUIInfo();(await import('/js/plugins/cad/cad-renderer.js')).renderScene();});
         pass('navigation keeps stock unchanged and toolbar origins share the drawing coordinates including fractional trim');
         await page.evaluate(()=>window.showToast('顶部居中提示验证','info',30000));
         const toast=await page.locator('#cad-toast-container').boundingBox();
@@ -213,7 +213,7 @@ async function api(path,body) {
             demands:[{id:1,name:'短片',width:2000,length:250,quantity:1,allowRotation:false}],
             process:{bedLength:500,trimStart:0,cutOrigin:'right-bottom',firstStageOrientation:'horizontal',allowRotation:false,allowLongitudinal:false}});
         await page.evaluate(async ({taskId,stockId})=>{
-            await (await import('/js/plugins/solver/task-workspace.js')).loadTask(taskId);
+            await (await import('/js/business/cutting/task-workspace.js')).loadTask(taskId);
             const stock=await fetch('/api/remnants/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:stockId})}).then(r=>r.json());
             await (await import('/js/plugins/remnant/remnant-shelf.js')).switchCutMode('remnant',stock);
         },{taskId:sheetTask.id,stockId:remnant.id});

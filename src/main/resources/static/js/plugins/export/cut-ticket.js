@@ -1,7 +1,7 @@
 import {state} from '../../core/state.js';
 import {requestJSON} from '../../core/api-request.js';
 import {showToast} from '../../core/toast.js';
-import {canUseCurrentPlan} from '../solver/solver-client.js';
+import {canUseCurrentPlan} from '../../business/cutting/solver-client.js';
 import {ticketModel, ticketHTML} from './cut-ticket-model.js';
 
 let selected=null, opening=0;

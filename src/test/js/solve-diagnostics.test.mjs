@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {solveDiagnostics} from '../../main/resources/static/js/plugins/solver/solve-diagnostics.js';
+import {solveDiagnostics} from '../../main/resources/static/js/business/cutting/solve-diagnostics.js';
 const base={rollW:2800,rollL:5000,remainingLength:97300,allowLongitudinal:true,demands:[{name:'订单',width:2413,length:5490,demand:1}]};
 test('actual 9.28 failure identifies workstation length, not mother roll width or stock',()=>{
     const d=solveDiagnostics(base,{status:'NO_SOLUTION_FOUND'});

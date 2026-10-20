@@ -1,5 +1,5 @@
 import {stage, mainLayer, interactionLayer} from './cad-stage.js';
-import {stationCoordinates, stationOrigin, defectFromCenter, RULER_SIZE} from './cad-view.js';
+import {stationCoordinates, stationOrigin, defectFromCenter, RULER_SIZE} from '../../canvas/cad-view.js';
 import {toggleMeasureTool} from './cad-measure.js';
 import {state} from '../../core/state.js';
 import {bus} from '../../core/event-bus.js';

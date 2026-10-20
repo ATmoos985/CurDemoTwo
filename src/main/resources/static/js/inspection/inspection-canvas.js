@@ -1,4 +1,4 @@
-import {rulerStep} from '../plugins/cad/cad-view.js';
+import {rulerStep} from '../canvas/cad-view.js';
 import {round, clamp, dragDefect, pointAt, screenRect} from './inspection-model.js';
 
 export function mountInspectionCanvas(container, {onMark, onSelect, onEdit, onBrowse, onPointer, onView, onSize}) {

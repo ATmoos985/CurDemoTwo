@@ -6,7 +6,7 @@
 import { state } from '../../core/state.js';
 import { bus } from '../../core/event-bus.js';
 import { renderScene } from '../cad/cad-renderer.js';
-import { renderCutTable, canUseCurrentPlan, saveToolpathAdjustment } from '../solver/solver-client.js';
+import { renderCutTable, canUseCurrentPlan, saveToolpathAdjustment } from '../../business/cutting/solver-client.js';
 import { showToast } from '../../core/toast.js';
 
 let optimizing = false;

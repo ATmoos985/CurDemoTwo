@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import {demandSample} from '../../main/resources/static/js/plugins/solver/demand-sample.js';
-import {importedTask, parseDemandSheet} from '../../main/resources/static/js/plugins/solver/demand-import-model.js';
+import {demandSample} from '../../main/resources/static/js/business/cutting/demand-sample.js';
+import {importedTask, parseDemandSheet} from '../../main/resources/static/js/business/cutting/demand-import-model.js';
 import {scenarioExample, garmentExample} from '../../main/resources/static/js/nesting/scenario-examples.js';
-import {createNestingScene, shapeArea} from '../../main/resources/static/js/nesting/nesting-scene.js';
+import {createNestingScene, shapeArea} from '../../main/resources/static/js/canvas/nesting-scene.js';
 
 test('9.28 sample preserves valid RH quantities with real order identities and fabric specs', () => {
     const rows = demandSample.groups.flatMap(group => group.demands);

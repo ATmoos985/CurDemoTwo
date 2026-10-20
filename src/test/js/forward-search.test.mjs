@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {windowDefects, forwardWindows, findForwardPlan} from '../../main/resources/static/js/plugins/solver/forward-search.js';
+import {windowDefects, forwardWindows, findForwardPlan} from '../../main/resources/static/js/business/cutting/forward-search.js';
 const request={feedPortType:'roll',windowStartY:0,totalRollL:12000,rollW:2000,rollL:4000,trimStart:0,allowLongitudinal:false,demands:[{id:1,width:2000,length:4000,demand:1}]};
 test('defect clearance crossing either edge remains blocked without extending its original end',()=>{
     assert.deepEqual(windowDefects([{id:1,x:10,y:990,w:10,h:20,margin:20}],1000,4000,2000),[{id:1,x:0,y:0,w:40,h:30,margin:0}]);

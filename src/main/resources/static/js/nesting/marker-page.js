@@ -1,5 +1,5 @@
 import {MARKER_STYLES, markerExample, markerSummary, searchMarker} from './marker-demo.js';
-import {createNestingScene} from './nesting-scene.js';
+import {createNestingScene} from '../canvas/nesting-scene.js';
 import {NestingSession} from './nesting-client.js';
 import {mountNestingViewer} from './nesting-viewer.js';
 

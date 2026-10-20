@@ -1,9 +1,9 @@
 package com.example.cutdemotwo.controller;
 
-import com.example.cutdemotwo.model.nesting.NestingProblem;
-import com.example.cutdemotwo.model.nesting.NestingResult;
-import com.example.cutdemotwo.service.solver.EngineCapabilities;
-import com.example.cutdemotwo.service.solver.SolverFactory;
+import com.example.cutdemotwo.contracts.nesting.NestingProblem;
+import com.example.cutdemotwo.contracts.nesting.NestingResult;
+import com.example.cutdemotwo.algorithm.solver.EngineCapabilities;
+import com.example.cutdemotwo.algorithm.solver.SolverFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import tools.jackson.databind.DeserializationFeature;

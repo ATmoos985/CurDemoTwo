@@ -5,8 +5,8 @@ import { showToast } from '../../core/toast.js';
 import { requestFromUI, materialContext } from '../material/material-selection.js';
 import { recommendationMarkup } from '../material/remnant-recommendation.js';
 import { motherRollRemnants, taskRemnants } from './remnant-dialog-model.js';
-import { queuedReports } from '../solver/report-queue.js';
-import { escapeText, refreshTaskProgress, openTaskReports } from '../solver/task-workspace.js';
+import { queuedReports } from '../../business/cutting/report-queue.js';
+import { escapeText, refreshTaskProgress, openTaskReports } from '../../business/cutting/task-workspace.js';
 import { solverSettings } from '../settings/settings.js';
 
 const el = id => document.getElementById(id);

@@ -1,6 +1,9 @@
 package com.example.cutdemotwo.persistence;
 
-import com.example.cutdemotwo.model.*;
+import com.example.cutdemotwo.business.model.CuttingPlan;
+import com.example.cutdemotwo.business.model.CuttingTask;
+import com.example.cutdemotwo.business.model.MotherRollInfo;
+import com.example.cutdemotwo.business.model.RemnantStock;
 import java.util.*;
 
 /** File compatibility boundary; JDBC stores each aggregate in its own keyed table. */

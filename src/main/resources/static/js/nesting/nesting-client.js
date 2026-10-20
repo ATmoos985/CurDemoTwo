@@ -1,4 +1,4 @@
-import { createNestingScene } from './nesting-scene.js';
+import { createNestingScene } from '../canvas/nesting-scene.js';
 
 /** Mirrors the server's auto-dispatch so capability hints describe the engine that will be asked first. */
 export function dispatchedEngine(engines, mode) {

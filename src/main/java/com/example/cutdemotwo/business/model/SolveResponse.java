@@ -1,0 +1,100 @@
+package com.example.cutdemotwo.business.model;
+
+import com.example.cutdemotwo.contracts.geometry.CutStep;
+import com.example.cutdemotwo.contracts.geometry.Defect;
+import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
+import com.example.cutdemotwo.contracts.geometry.RemnantPiece;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class SolveResponse {
+    private boolean success;
+    private String message;
+    private String status;
+    private List<com.example.cutdemotwo.contracts.nesting.NestingResult.Fulfillment> fulfillment = new ArrayList<>();
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+    public List<com.example.cutdemotwo.contracts.nesting.NestingResult.Fulfillment> getFulfillment() { return fulfillment; }
+    public void setFulfillment(List<com.example.cutdemotwo.contracts.nesting.NestingResult.Fulfillment> fulfillment) { this.fulfillment = fulfillment; }
+    private String engine;
+    private String requestedEngine;
+    private String fallbackReason;
+    private double rollW;
+    private double rollL;
+    private List<PlacedPiece> pieces = new ArrayList<>();
+    private List<RemnantPiece> remnants = new ArrayList<>();
+    private List<CutStep> cuts = new ArrayList<>();
+    private List<Defect> defects = new ArrayList<>();
+    private double deductLen;
+    private double pieceArea;
+    private double remArea;
+    private double wasteArea;
+    private double totalArea;
+    private String feedPortType = "roll";
+    private String sourceRemnantId;
+    private String planId;
+    private List<RemnantStock> derivedRemnants = new ArrayList<>();
+
+    public SolveResponse() {}
+
+    public String getPlanId() { return planId; }
+    public void setPlanId(String planId) { this.planId = planId; }
+
+    public String getFeedPortType() { return feedPortType; }
+    public void setFeedPortType(String feedPortType) { this.feedPortType = feedPortType; }
+
+    public String getSourceRemnantId() { return sourceRemnantId; }
+    public void setSourceRemnantId(String sourceRemnantId) { this.sourceRemnantId = sourceRemnantId; }
+
+    public List<RemnantStock> getDerivedRemnants() { return derivedRemnants; }
+    public void setDerivedRemnants(List<RemnantStock> derivedRemnants) { this.derivedRemnants = derivedRemnants; }
+
+    public boolean isSuccess() { return success; }
+    public void setSuccess(boolean success) { this.success = success; }
+
+    public String getMessage() { return message; }
+    public void setMessage(String message) { this.message = message; }
+
+    public String getEngine() { return engine; }
+    public void setEngine(String engine) { this.engine = engine; }
+
+    public String getRequestedEngine() { return requestedEngine; }
+    public void setRequestedEngine(String requestedEngine) { this.requestedEngine = requestedEngine; }
+
+    public String getFallbackReason() { return fallbackReason; }
+    public void setFallbackReason(String fallbackReason) { this.fallbackReason = fallbackReason; }
+
+    public double getRollW() { return rollW; }
+    public void setRollW(double rollW) { this.rollW = rollW; }
+
+    public double getRollL() { return rollL; }
+    public void setRollL(double rollL) { this.rollL = rollL; }
+
+    public List<PlacedPiece> getPieces() { return pieces; }
+    public void setPieces(List<PlacedPiece> pieces) { this.pieces = pieces; }
+
+    public List<RemnantPiece> getRemnants() { return remnants; }
+    public void setRemnants(List<RemnantPiece> remnants) { this.remnants = remnants; }
+
+    public List<CutStep> getCuts() { return cuts; }
+    public void setCuts(List<CutStep> cuts) { this.cuts = cuts; }
+
+    public List<Defect> getDefects() { return defects; }
+    public void setDefects(List<Defect> defects) { this.defects = defects; }
+
+    public double getDeductLen() { return deductLen; }
+    public void setDeductLen(double deductLen) { this.deductLen = deductLen; }
+
+    public double getPieceArea() { return pieceArea; }
+    public void setPieceArea(double pieceArea) { this.pieceArea = pieceArea; }
+
+    public double getRemArea() { return remArea; }
+    public void setRemArea(double remArea) { this.remArea = remArea; }
+
+    public double getWasteArea() { return wasteArea; }
+    public void setWasteArea(double wasteArea) { this.wasteArea = wasteArea; }
+
+    public double getTotalArea() { return totalArea; }
+    public void setTotalArea(double totalArea) { this.totalArea = totalArea; }
+}
