@@ -9,6 +9,7 @@ import tools.jackson.databind.json.JsonMapper;
 import javax.sql.DataSource;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.*;
 import java.util.function.*;
 
@@ -211,4 +212,32 @@ public final class JdbcOptimizationJobStore implements LeasedOptimizationJobStor
         catch(java.security.NoSuchAlgorithmException e){throw new IllegalStateException(e);}
     }
     @Override public void close() {} // Shared DataSource lifecycle belongs to Spring.
+
+    int importArchive(OptimizationArchiveImport.Archive archive) {
+        return locked(()->{
+            var imported=jdbc.query("SELECT job_count FROM optimization_archive_import WHERE id=?",
+                    (rs,n)->rs.getInt(1),archive.fingerprint());
+            if(!imported.isEmpty())return imported.get(0); // Response loss/restart is safe to retry.
+            if(jdbc.queryForObject("SELECT COUNT(*) FROM optimization_job",Long.class)!=0)
+                throw new IllegalStateException("目标作业库已有数据，拒绝覆盖或混合导入；相同归档可重复执行");
+            long time=now();
+            jdbc.update("INSERT INTO optimization_archive_import(id,source_path,imported_at,job_count) VALUES(?,?,?,?)",
+                    archive.fingerprint(),archive.source(),time,archive.jobs().size());
+            for(var original:archive.jobs()) {
+                var document=original.job().terminal()?original:original.transition("FAILED","STOPPED","PROCESS_RESTARTED",
+                        "文件归档中的未完成作业在迁移时中止，未自动重算；原始快照保留于迁移记录",null,time);
+                var j=document.job();
+                jdbc.update("INSERT INTO optimization_job(id,key_digest,state,created_at,token,document_json) VALUES(?,?,?,?,0,?)",
+                        j.id(),digest(document.idempotencyKey()),j.state(),Instant.parse(j.createdAt()).toEpochMilli(),json.writeValueAsString(document));
+                // Token zero is an imported snapshot, explicitly not a fabricated worker execution.
+                jdbc.update("INSERT INTO optimization_attempt(job_id,token,owner_id,started_at,finished_at,outcome) VALUES(?,0,'archive-import',?,?,'IMPORTED')",
+                        j.id(),time,time);
+                if(document.result()!=null)jdbc.update("INSERT INTO optimization_result(job_id,token,result_json) VALUES(?,0,?)",
+                        j.id(),json.writeValueAsString(document.result()));
+                jdbc.update("INSERT INTO optimization_archive_entry(import_id,job_id,original_json) VALUES(?,?,?)",
+                        archive.fingerprint(),j.id(),archive.originals().get(j.id()));
+            }
+            return archive.jobs().size();
+        });
+    }
 }

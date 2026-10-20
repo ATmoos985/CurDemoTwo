@@ -4,7 +4,6 @@ import com.example.cutdemotwo.algorithm.solver.*;
 import com.example.cutdemotwo.contracts.jobs.*;
 import com.example.cutdemotwo.persistence.*;
 import org.flywaydb.core.Flyway;
-import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import javax.sql.DataSource;
@@ -21,9 +20,7 @@ class JdbcOptimizationTests {
     JdbcOptimizationJobStore a,b;
     List<OptimizationService> services=new ArrayList<>();
     @BeforeEach void setup() {
-        var h2=new JdbcDataSource();
-        h2.setURL("jdbc:h2:mem:"+UUID.randomUUID()+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1");
-        source=h2;sql=new JdbcTemplate(source);
+        source=OptimizationTestDatabase.create();sql=new JdbcTemplate(source);
         Flyway.configure().dataSource(source).load().migrate();
         a=store();b=store();
     }
@@ -141,6 +138,27 @@ class JdbcOptimizationTests {
         assertNull(a.find(d.job().id()).result());
         assertEquals(0,sql.queryForObject("SELECT COUNT(*) FROM optimization_result",Integer.class));
         assertEquals(2,b.claim("b",15000).token());
+    }
+    @Test void workersWithDifferentSessionTimeZonesShareTheSameLeaseClock() {
+        var west=new JdbcOptimizationJobStore(zoned("-08:00"));
+        var east=new JdbcOptimizationJobStore(zoned("+08:00"));
+        west.configure(1,1,100);east.configure(1,1,100);
+        var d=west.submitOrGet(document("time-zone-key","hash"));
+        var lease=west.claim("west",15000);
+        assertNotNull(east.heartbeat(lease,15000));
+        assertTrue(east.update(lease,this::success,true));
+        assertEquals("SUCCEEDED",west.find(d.job().id()).job().state());
+    }
+    DataSource zoned(String zone) {
+        return new org.springframework.jdbc.datasource.AbstractDataSource() {
+            @Override public java.sql.Connection getConnection()throws java.sql.SQLException {
+                var connection=source.getConnection();
+                String command="MySQL".equals(connection.getMetaData().getDatabaseProductName())?"SET time_zone = ?":"SET TIME ZONE ?";
+                try(var statement=connection.prepareStatement(command)){statement.setString(1,zone);statement.execute();}
+                return connection;
+            }
+            @Override public java.sql.Connection getConnection(String user,String password)throws java.sql.SQLException{return getConnection();}
+        };
     }
     @Test void globalQuotaIsSharedAndQueuedCancellationReleasesCapacity()throws Exception {
         var accepted=race(()->a.submitOrGet(document("quota-key-a","hash")),()->b.submitOrGet(document("quota-key-b","hash")));

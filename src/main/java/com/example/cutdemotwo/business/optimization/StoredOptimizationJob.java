@@ -3,10 +3,18 @@ package com.example.cutdemotwo.business.optimization;
 import com.example.cutdemotwo.contracts.jobs.*;
 import java.time.Instant;
 import java.util.Set;
+import java.security.MessageDigest;
+import java.util.HexFormat;
+import tools.jackson.databind.json.JsonMapper;
 
 /** Internal durable document. The idempotency key is never returned in public job representations. */
 public record StoredOptimizationJob(String idempotencyKey, OptimizationRequest input,
                                     OptimizationJob job, OptimizationResult result) {
+    private static final JsonMapper JSON=JsonMapper.builder().build();
+    public static String inputHash(OptimizationRequest input) {
+        try {return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(JSON.writeValueAsBytes(input)));}
+        catch(java.security.NoSuchAlgorithmException impossible){throw new IllegalStateException(impossible);}
+    }
     public StoredOptimizationJob transition(String state, String phase, String code, String message,
                                              OptimizationResult result, long timeMillis) {
         String now=Instant.ofEpochMilli(timeMillis).toString();

@@ -15,11 +15,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Exercises the actual Spring bean wiring and migrations, using isolated H2 in MySQL mode. */
 @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties={
-        "cutdemo.storage=mysql","cutdemo.jobs.storage=mysql","cutdemo.seed-demo-data=false",
-        "cutdemo.database.username=sa","cutdemo.database.password="})
+        "cutdemo.storage=mysql","cutdemo.jobs.storage=mysql","cutdemo.seed-demo-data=false"})
 class OptimizationJdbcApiTests {
-    static final String database="jdbc:h2:mem:"+UUID.randomUUID()+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1";
-    @DynamicPropertySource static void properties(DynamicPropertyRegistry r){r.add("cutdemo.database.url",()->database);}
+    static final org.springframework.jdbc.datasource.DriverManagerDataSource database=OptimizationTestDatabase.create();
+    @DynamicPropertySource static void properties(DynamicPropertyRegistry r){
+        r.add("cutdemo.database.url",database::getUrl);
+        r.add("cutdemo.database.username",database::getUsername);
+        r.add("cutdemo.database.password",database::getPassword);
+    }
     @Value("${local.server.port}") int port;
     @Autowired OptimizationJobStore store;
     @Autowired DataSource source;

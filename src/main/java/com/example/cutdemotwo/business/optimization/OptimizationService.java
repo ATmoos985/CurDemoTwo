@@ -7,8 +7,6 @@ import com.example.cutdemotwo.persistence.*;
 import org.springframework.beans.factory.annotation.*;
 import org.springframework.stereotype.Service;
 import jakarta.annotation.PreDestroy;
-import tools.jackson.databind.json.JsonMapper;
-import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
@@ -39,7 +37,6 @@ public class OptimizationService implements AutoCloseable {
     private final Map<String,String> keys = new HashMap<>();
     private final Map<String,Runnable> pending = new HashMap<>();
     private final Map<String,Thread> running = new HashMap<>();
-    private final JsonMapper json = JsonMapper.builder().build();
     private boolean closing, storageFailed;
 
     @Autowired
@@ -325,8 +322,7 @@ public class OptimizationService implements AutoCloseable {
     }
     private void persist(StoredOptimizationJob document) {store.save(document);documents.put(document.job().id(),document);}
     private String hash(OptimizationRequest input) {
-        try {return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(json.writeValueAsBytes(input)));}
-        catch(java.security.NoSuchAlgorithmException impossible){throw new IllegalStateException(impossible);}
+        return StoredOptimizationJob.inputHash(input);
     }
     @Override @PreDestroy public void close() {
         synchronized(this) {
