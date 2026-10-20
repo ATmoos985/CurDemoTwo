@@ -6,7 +6,21 @@ import java.util.List;
 /** Immutable verified computation result, not a work order or an inventory receipt. */
 public record OptimizationResult(String id, String jobId, String inputHash, String schemaVersion,
                                  String validationStatus, String fulfillmentStatus, boolean meetsRequirement,
-                                 String terminationReason, List<Metric> metrics, NestingResult layout) {
+                                 String terminationReason, List<Metric> metrics, NestingResult layout,
+                                 @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                                 MarkerReport marker) {
+    public OptimizationResult(String id, String jobId, String inputHash, String schemaVersion,
+                              String validationStatus, String fulfillmentStatus, boolean meetsRequirement,
+                              String terminationReason, List<Metric> metrics, NestingResult layout) {
+        this(id, jobId, inputHash, schemaVersion, validationStatus, fulfillmentStatus, meetsRequirement,
+                terminationReason, metrics, layout, null);
+    }
     public record Metric(String name, double value, String unit, double numerator, double denominator,
                          String basis, String version) {}
+    public record MarkerReport(String strategyVersion, Double firstOccupiedLengthMm, Double occupiedLengthMm,
+                               double trialLengthMm, List<Trial> trials, boolean optimalityProven) {
+        public MarkerReport { trials = List.copyOf(trials); }
+    }
+    public record Trial(int index, double lengthMm, Double occupiedLengthMm, String status, boolean complete,
+                        int placed, int timeLimitSeconds, long elapsedMillis, String engine, String engineVersion) {}
 }

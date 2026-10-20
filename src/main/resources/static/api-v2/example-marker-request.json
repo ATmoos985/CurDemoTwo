@@ -1,0 +1,673 @@
+{
+  "schemaVersion": "2.0",
+  "problemType": "NESTING_2D",
+  "clientRequestId": "marker-example-001",
+  "problem": {
+    "schemaVersion": "1",
+    "unit": "mm",
+    "engine": "auto",
+    "timeLimitSeconds": 10,
+    "material": {
+      "id": "DEMO-MARKER-GARMENT_SHIRT-ML",
+      "shape": {
+        "type": "RECTANGLE",
+        "width": 1500,
+        "height": 2492
+      },
+      "continuesAfterRegion": false,
+      "exclusions": []
+    },
+    "parts": [
+      {
+        "name": "M码 · 上衣前片",
+        "quantity": 1,
+        "shape": {
+          "type": "POLYGON",
+          "width": 500,
+          "height": 640,
+          "vertices": [
+            {
+              "x": 0,
+              "y": 640
+            },
+            {
+              "x": 20,
+              "y": 380
+            },
+            {
+              "x": 0,
+              "y": 220
+            },
+            {
+              "x": 45,
+              "y": 205
+            },
+            {
+              "x": 70,
+              "y": 170
+            },
+            {
+              "x": 85,
+              "y": 120
+            },
+            {
+              "x": 90,
+              "y": 55
+            },
+            {
+              "x": 180,
+              "y": 0
+            },
+            {
+              "x": 195,
+              "y": 35
+            },
+            {
+              "x": 220,
+              "y": 65
+            },
+            {
+              "x": 250,
+              "y": 75
+            },
+            {
+              "x": 280,
+              "y": 65
+            },
+            {
+              "x": 305,
+              "y": 35
+            },
+            {
+              "x": 320,
+              "y": 0
+            },
+            {
+              "x": 410,
+              "y": 55
+            },
+            {
+              "x": 415,
+              "y": 120
+            },
+            {
+              "x": 430,
+              "y": 170
+            },
+            {
+              "x": 455,
+              "y": 205
+            },
+            {
+              "x": 500,
+              "y": 220
+            },
+            {
+              "x": 480,
+              "y": 380
+            },
+            {
+              "x": 500,
+              "y": 640
+            }
+          ]
+        },
+        "allowRotation": false,
+        "id": 1
+      },
+      {
+        "name": "M码 · 上衣后片",
+        "quantity": 1,
+        "shape": {
+          "type": "POLYGON",
+          "width": 500,
+          "height": 650,
+          "vertices": [
+            {
+              "x": 0,
+              "y": 650
+            },
+            {
+              "x": 20,
+              "y": 380
+            },
+            {
+              "x": 0,
+              "y": 220
+            },
+            {
+              "x": 45,
+              "y": 205
+            },
+            {
+              "x": 70,
+              "y": 170
+            },
+            {
+              "x": 85,
+              "y": 120
+            },
+            {
+              "x": 90,
+              "y": 55
+            },
+            {
+              "x": 180,
+              "y": 0
+            },
+            {
+              "x": 210,
+              "y": 20
+            },
+            {
+              "x": 250,
+              "y": 28
+            },
+            {
+              "x": 290,
+              "y": 20
+            },
+            {
+              "x": 320,
+              "y": 0
+            },
+            {
+              "x": 410,
+              "y": 55
+            },
+            {
+              "x": 415,
+              "y": 120
+            },
+            {
+              "x": 430,
+              "y": 170
+            },
+            {
+              "x": 455,
+              "y": 205
+            },
+            {
+              "x": 500,
+              "y": 220
+            },
+            {
+              "x": 480,
+              "y": 380
+            },
+            {
+              "x": 500,
+              "y": 650
+            }
+          ]
+        },
+        "allowRotation": false,
+        "id": 2
+      },
+      {
+        "name": "M码 · 袖片",
+        "quantity": 2,
+        "shape": {
+          "type": "POLYGON",
+          "width": 320,
+          "height": 500,
+          "vertices": [
+            {
+              "x": 0,
+              "y": 150
+            },
+            {
+              "x": 25,
+              "y": 100
+            },
+            {
+              "x": 65,
+              "y": 55
+            },
+            {
+              "x": 110,
+              "y": 18
+            },
+            {
+              "x": 160,
+              "y": 0
+            },
+            {
+              "x": 210,
+              "y": 18
+            },
+            {
+              "x": 255,
+              "y": 55
+            },
+            {
+              "x": 295,
+              "y": 100
+            },
+            {
+              "x": 320,
+              "y": 150
+            },
+            {
+              "x": 280,
+              "y": 500
+            },
+            {
+              "x": 40,
+              "y": 500
+            }
+          ]
+        },
+        "allowRotation": false,
+        "id": 3
+      },
+      {
+        "name": "M码 · 领片",
+        "quantity": 1,
+        "shape": {
+          "type": "POLYGON",
+          "width": 340,
+          "height": 70,
+          "vertices": [
+            {
+              "x": 0,
+              "y": 0
+            },
+            {
+              "x": 340,
+              "y": 0
+            },
+            {
+              "x": 320,
+              "y": 70
+            },
+            {
+              "x": 20,
+              "y": 70
+            }
+          ]
+        },
+        "allowRotation": false,
+        "id": 4
+      },
+      {
+        "name": "M码 · 贴边",
+        "quantity": 2,
+        "shape": {
+          "type": "RECTANGLE",
+          "width": 55,
+          "height": 400
+        },
+        "allowRotation": false,
+        "id": 5
+      },
+      {
+        "name": "M码 · 袋布",
+        "quantity": 2,
+        "shape": {
+          "type": "POLYGON",
+          "width": 150,
+          "height": 180,
+          "vertices": [
+            {
+              "x": 0,
+              "y": 0
+            },
+            {
+              "x": 150,
+              "y": 0
+            },
+            {
+              "x": 150,
+              "y": 140
+            },
+            {
+              "x": 75,
+              "y": 180
+            },
+            {
+              "x": 0,
+              "y": 140
+            }
+          ]
+        },
+        "allowRotation": false,
+        "id": 6
+      },
+      {
+        "name": "L码 · 上衣前片",
+        "quantity": 1,
+        "shape": {
+          "type": "POLYGON",
+          "width": 540,
+          "height": 691,
+          "vertices": [
+            {
+              "x": 0,
+              "y": 691
+            },
+            {
+              "x": 22,
+              "y": 410
+            },
+            {
+              "x": 0,
+              "y": 238
+            },
+            {
+              "x": 49,
+              "y": 221
+            },
+            {
+              "x": 76,
+              "y": 184
+            },
+            {
+              "x": 92,
+              "y": 130
+            },
+            {
+              "x": 97,
+              "y": 59
+            },
+            {
+              "x": 194,
+              "y": 0
+            },
+            {
+              "x": 211,
+              "y": 38
+            },
+            {
+              "x": 238,
+              "y": 70
+            },
+            {
+              "x": 270,
+              "y": 81
+            },
+            {
+              "x": 302,
+              "y": 70
+            },
+            {
+              "x": 329,
+              "y": 38
+            },
+            {
+              "x": 346,
+              "y": 0
+            },
+            {
+              "x": 443,
+              "y": 59
+            },
+            {
+              "x": 448,
+              "y": 130
+            },
+            {
+              "x": 464,
+              "y": 184
+            },
+            {
+              "x": 491,
+              "y": 221
+            },
+            {
+              "x": 540,
+              "y": 238
+            },
+            {
+              "x": 518,
+              "y": 410
+            },
+            {
+              "x": 540,
+              "y": 691
+            }
+          ]
+        },
+        "allowRotation": false,
+        "id": 7
+      },
+      {
+        "name": "L码 · 上衣后片",
+        "quantity": 1,
+        "shape": {
+          "type": "POLYGON",
+          "width": 540,
+          "height": 702,
+          "vertices": [
+            {
+              "x": 0,
+              "y": 702
+            },
+            {
+              "x": 22,
+              "y": 410
+            },
+            {
+              "x": 0,
+              "y": 238
+            },
+            {
+              "x": 49,
+              "y": 221
+            },
+            {
+              "x": 76,
+              "y": 184
+            },
+            {
+              "x": 92,
+              "y": 130
+            },
+            {
+              "x": 97,
+              "y": 59
+            },
+            {
+              "x": 194,
+              "y": 0
+            },
+            {
+              "x": 227,
+              "y": 22
+            },
+            {
+              "x": 270,
+              "y": 30
+            },
+            {
+              "x": 313,
+              "y": 22
+            },
+            {
+              "x": 346,
+              "y": 0
+            },
+            {
+              "x": 443,
+              "y": 59
+            },
+            {
+              "x": 448,
+              "y": 130
+            },
+            {
+              "x": 464,
+              "y": 184
+            },
+            {
+              "x": 491,
+              "y": 221
+            },
+            {
+              "x": 540,
+              "y": 238
+            },
+            {
+              "x": 518,
+              "y": 410
+            },
+            {
+              "x": 540,
+              "y": 702
+            }
+          ]
+        },
+        "allowRotation": false,
+        "id": 8
+      },
+      {
+        "name": "L码 · 袖片",
+        "quantity": 2,
+        "shape": {
+          "type": "POLYGON",
+          "width": 346,
+          "height": 540,
+          "vertices": [
+            {
+              "x": 0,
+              "y": 162
+            },
+            {
+              "x": 27,
+              "y": 108
+            },
+            {
+              "x": 70,
+              "y": 59
+            },
+            {
+              "x": 119,
+              "y": 19
+            },
+            {
+              "x": 173,
+              "y": 0
+            },
+            {
+              "x": 227,
+              "y": 19
+            },
+            {
+              "x": 275,
+              "y": 59
+            },
+            {
+              "x": 319,
+              "y": 108
+            },
+            {
+              "x": 346,
+              "y": 162
+            },
+            {
+              "x": 302,
+              "y": 540
+            },
+            {
+              "x": 43,
+              "y": 540
+            }
+          ]
+        },
+        "allowRotation": false,
+        "id": 9
+      },
+      {
+        "name": "L码 · 领片",
+        "quantity": 1,
+        "shape": {
+          "type": "POLYGON",
+          "width": 367,
+          "height": 76,
+          "vertices": [
+            {
+              "x": 0,
+              "y": 0
+            },
+            {
+              "x": 367,
+              "y": 0
+            },
+            {
+              "x": 346,
+              "y": 76
+            },
+            {
+              "x": 22,
+              "y": 76
+            }
+          ]
+        },
+        "allowRotation": false,
+        "id": 10
+      },
+      {
+        "name": "L码 · 贴边",
+        "quantity": 2,
+        "shape": {
+          "type": "RECTANGLE",
+          "width": 59,
+          "height": 432
+        },
+        "allowRotation": false,
+        "id": 11
+      },
+      {
+        "name": "L码 · 袋布",
+        "quantity": 2,
+        "shape": {
+          "type": "POLYGON",
+          "width": 162,
+          "height": 194,
+          "vertices": [
+            {
+              "x": 0,
+              "y": 0
+            },
+            {
+              "x": 162,
+              "y": 0
+            },
+            {
+              "x": 162,
+              "y": 151
+            },
+            {
+              "x": 81,
+              "y": 194
+            },
+            {
+              "x": 0,
+              "y": 151
+            }
+          ]
+        },
+        "allowRotation": false,
+        "id": 12
+      }
+    ],
+    "process": {
+      "mode": "CONTOUR",
+      "feedMode": "SHEET",
+      "startCorner": "left-top",
+      "firstStageOrientation": "none",
+      "trimStart": 0,
+      "minReusableWidth": 0,
+      "minReusableHeight": 0,
+      "kerf": 0,
+      "objective": "MAXIMIZE_PIECE_AREA"
+    }
+  },
+  "allowFallback": true,
+  "requireComplete": true,
+  "strategy": {
+    "id": "marker-shortening",
+    "version": "1",
+    "maxTrials": 5
+  }
+}

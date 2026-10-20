@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {MARKER_STYLES, markerExample, markerSummary, searchMarker} from '../../main/resources/static/js/nesting/marker-demo.js';
+import {MARKER_STYLES, markerExample, markerSummary} from '../../main/resources/static/js/nesting/marker-demo.js';
 import {cuttingFrame, CUT_PATHS} from '../../main/resources/static/js/intro/cutting-timeline.js';
 
 const sceneFor = (problem, length, complete = true) => ({status:'FEASIBLE', placements:problem.parts.flatMap(part =>
@@ -46,27 +46,6 @@ test('tail accounting preserves decimal lengths and never labels an incomplete k
     assert.equal(markerSummary(p,sceneFor(p,2492)).unusedTail,0);
     assert.equal(markerSummary(p,sceneFor(p,1831.5,false)).unusedTail,null);
     assert.equal(markerSummary(p,null).unusedTail,null);
-});
-test('length search keeps the best complete result when shorter attempts miss a piece', async () => {
-    const p=markerExample();let calls=0;
-    const output=await searchMarker(p, async candidate=>{
-        assert.equal(candidate.material.shape.width,p.material.shape.width);calls++;
-        return {scene:sceneFor(candidate,calls===1?2200:1900,calls<=2),result:{attempt:calls}};
-    });
-    assert.equal(output.best.result.attempt,2);assert.equal(output.best.summary.length,1900);
-    assert.equal(output.first.summary.length,2200);assert.ok(calls<=5);
-    assert.equal(output.history[0].length,p.material.shape.height);
-    assert.equal(output.history[0].occupiedLength,2200);
-    assert.equal(output.history[1].occupiedLength,1900);
-    assert.equal(output.history[2].occupiedLength,null);
-});
-test('no initial complete kit produces no successful result and cancellation stops more trials', async () => {
-    const p=markerExample();
-    const output=await searchMarker(p,async candidate=>({scene:sceneFor(candidate,2000,false)}));
-    assert.equal(output.best,null);assert.equal(output.history.length,1);
-    const controller=new AbortController();let calls=0;
-    await assert.rejects(searchMarker(p,async candidate=>{calls++;controller.abort();return {scene:sceneFor(candidate,2000)};},{signal:controller.signal}),{name:'AbortError'});
-    assert.equal(calls,1);
 });
 test('every separating animation frame comes after all 2D or 1D cuts', () => {
     for(const mode of Object.keys(CUT_PATHS)) {

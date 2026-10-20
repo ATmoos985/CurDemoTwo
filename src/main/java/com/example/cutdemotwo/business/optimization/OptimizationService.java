@@ -68,7 +68,8 @@ public class OptimizationService implements AutoCloseable {
                         "maxRequestBytes",262144,"maxPieces",10000,"maxContourPieces",200,"maxTimeLimitSeconds",60),
                 "features",Map.of("polling",true,"cancellation","cooperative-request","hardPreemption",false,"progress","phase-only",
                         "storage","single-dispatcher-local-files","distributedWorkers",false,"sse",false,"inventoryWrites",false),
-                "units",Map.of("length","mm","area","mm2"));
+                "units",Map.of("length","mm","area","mm2"),
+                "strategies",List.of(Map.of("id","marker-shortening","version","1","maxTrials",12)));
     }
 
     public SolverFactory.ProblemCheck validate(OptimizationRequest request) {
@@ -83,6 +84,7 @@ public class OptimizationService implements AutoCloseable {
             case "UNAVAILABLE" -> new Failure("ENGINE_UNAVAILABLE",check.message(),503,true);
             default -> new Failure("UNSUPPORTED_CONSTRAINT",check.message(),422,false);
         };
+        MarkerOptimization.validate(request);
         return check;
     }
 
@@ -152,7 +154,10 @@ public class OptimizationService implements AutoCloseable {
                 timeout=timer.schedule(()->deadline(id),document.input().problem().timeLimitSeconds(),TimeUnit.SECONDS);
             }
             long start=System.nanoTime();
-            NestingResult layout=solvers.solve(document.input().problem(),document.input().allowFallback());
+            var outcome=document.input().strategy()==null
+                    ? new MarkerOptimization.Outcome(solvers.solve(document.input().problem(),document.input().allowFallback()),null,null)
+                    : MarkerOptimization.solve(document.input(),solvers,message->progress(id,message));
+            NestingResult layout=outcome.layout();
             synchronized(this) {
                 document=required(id);
                 boolean stop="CANCEL_REQUESTED".equals(document.job().state());
@@ -160,10 +165,10 @@ public class OptimizationService implements AutoCloseable {
                 // Interrupts are execution signals, not permission to interrupt the final durable write.
                 Thread.interrupted();
                 boolean valid=Set.of("FEASIBLE","NO_SOLUTION_FOUND").contains(layout.status());
-                String state=timed?"TIMED_OUT":stop?"CANCELLED":valid?"SUCCEEDED":"FAILED";
-                var result=valid?result(document,layout,timed?"TIME_LIMIT":stop?"CANCELLED":"COMPLETED"):null;
-                persist(transition(document,state,"STOPPED",timed?"TIMED_OUT":stop?"CANCELLED":valid?null:layout.status(),
-                        timed?"计算已退出，达到时限":stop?"计算已退出，取消完成":valid?"计算结束，履约状态请查看结果":layout.message(),result));
+                String state=timed?"TIMED_OUT":stop?"CANCELLED":valid && outcome.failureCode()==null?"SUCCEEDED":"FAILED";
+                var result=valid?result(document,layout,timed?"TIME_LIMIT":stop?"CANCELLED":outcome.failureCode()!=null?"ENGINE_ERROR":"COMPLETED",outcome.marker()):null;
+                persist(transition(document,state,"STOPPED",timed?"TIMED_OUT":stop?"CANCELLED":outcome.failureCode()!=null?outcome.failureCode():valid?null:layout.status(),
+                        timed?"计算已退出，达到时限":stop?"计算已退出，取消完成":outcome.failureCode()!=null?"后续试排失败；此前已验证结果如有保留，请查看结果与试排记录":valid?"计算结束，履约状态请查看结果":layout.message(),result));
             }
         } catch(Throwable error) {
             synchronized(this) {
@@ -181,14 +186,30 @@ public class OptimizationService implements AutoCloseable {
             Thread.interrupted();
         }
     }
-    private OptimizationResult result(StoredOptimizationJob document,NestingResult layout,String termination) {
+    private synchronized void progress(String id,String message) {
+        var document=required(id);
+        if (!"RUNNING".equals(document.job().state())) return;
+        var j=document.job();
+        var job=new OptimizationJob(j.id(),j.schemaVersion(),j.clientRequestId(),j.inputHash(),j.state(),j.phase(),
+                j.createdAt(),j.startedAt(),j.finishedAt(),j.timeLimitSeconds(),j.resultRef(),j.code(),message);
+        persist(new StoredOptimizationJob(document.idempotencyKey(),document.input(),job,document.result()));
+    }
+    private OptimizationResult result(StoredOptimizationJob document,NestingResult layout,String termination,OptimizationResult.MarkerReport marker) {
         int requested=layout.fulfillment().stream().mapToInt(NestingResult.Fulfillment::requested).sum();
         int placed=layout.fulfillment().stream().mapToInt(NestingResult.Fulfillment::placed).sum();
         boolean complete=requested>0 && requested==placed;
         var m=layout.metrics();
+        var metrics=new ArrayList<OptimizationResult.Metric>();
+        metrics.add(new OptimizationResult.Metric("processingAreaUtilization",m.processingAreaMm2()>0?m.pieceAreaMm2()/m.processingAreaMm2()*100:0,
+                "%",m.pieceAreaMm2(),m.processingAreaMm2(),"piece-net-area / submitted-processing-area; not actual consumed material","1"));
+        if(marker!=null && marker.occupiedLengthMm()!=null && complete) {
+            double area=layout.processingRegion().width()*marker.occupiedLengthMm();
+            metrics.add(new OptimizationResult.Metric("markerAreaUtilization",m.pieceAreaMm2()/area*100,"%",
+                    m.pieceAreaMm2(),area,"complete-kit-net-area / (fixed-width * occupied-marker-length); excludes unused tail; planned","1"));
+        }
         return new OptimizationResult(document.job().id(),document.job().id(),document.job().inputHash(),"2.0","PASSED",
                 complete?"COMPLETE":placed>0?"PARTIAL":"NONE",layout.feasible() && (!document.input().requireComplete() || complete),termination,
-                List.of(new OptimizationResult.Metric("processingAreaUtilization",m.processingAreaMm2()>0?m.pieceAreaMm2()/m.processingAreaMm2()*100:0,"%",m.pieceAreaMm2(),m.processingAreaMm2(),"piece-net-area / submitted-processing-area; not actual consumed material","1")),layout);
+                List.copyOf(metrics),layout,marker);
     }
     private StoredOptimizationJob transition(StoredOptimizationJob d,String state,String phase,String code,String message,OptimizationResult result) {
         var j=d.job();String now=Instant.now().toString();

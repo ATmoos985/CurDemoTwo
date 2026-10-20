@@ -49,34 +49,3 @@ export function markerSummary(problem, scene) {
         unusedTail:complete ? Math.max(0, trialLength - length) : null,
         utilization:complete && length > 0 ? pieceArea / (problem.material.shape.width * length) : null};
 }
-
-/** Bounded trial search. A missed candidate is not proof of infeasibility; retain only complete kits. */
-export async function searchMarker(problem, solve, {signal, onTrial = () => {}, trials = 5} = {}) {
-    let high = problem.material.shape.height;
-    let low = Math.max(...problem.parts.map(p => p.shape.height),
-        problem.parts.reduce((sum, p) => sum + shapeArea(p.shape) * p.quantity, 0) / problem.material.shape.width);
-    let best = null, first = null, latest = null;
-    const history = [];
-    for (let index = 0; index < trials; index++) {
-        signal?.throwIfAborted();
-        const length = index ? Math.ceil((low + high) / 2) : high;
-        const candidate = structuredClone(problem); candidate.material.shape.height = length;
-        onTrial({index:index + 1, total:trials, length});
-        const solved = await solve(candidate);
-        signal?.throwIfAborted();
-        const summary = markerSummary(candidate, solved.scene);
-        latest = {problem:candidate, ...solved, summary};
-        history.push({length, occupiedLength:summary.complete ? summary.length : null,
-            complete:summary.complete, placed:solved.scene.placements.length});
-        if (summary.complete) {
-            if (!first) first = latest;
-            if (!best || summary.length < best.summary.length) best = latest;
-            high = Math.min(length, summary.length);
-        } else {
-            if (!best) break;
-            low = length;
-        }
-        if (high - low <= 10) break;
-    }
-    return {best, first, latest, history};
-}

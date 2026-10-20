@@ -1085,6 +1085,9 @@
           },
           "requireComplete": {
             "type": "boolean"
+          },
+          "strategy": {
+            "$ref": "#/components/schemas/Strategy"
           }
         },
         "required": [
@@ -1566,7 +1569,8 @@
             "enum": [
               "COMPLETED",
               "TIME_LIMIT",
-              "CANCELLED"
+              "CANCELLED",
+              "ENGINE_ERROR"
             ]
           },
           "metrics": {
@@ -1577,6 +1581,9 @@
           },
           "layout": {
             "$ref": "#/components/schemas/NestingResult"
+          },
+          "marker": {
+            "$ref": "#/components/schemas/MarkerReport"
           }
         },
         "required": [
@@ -1836,6 +1843,29 @@
               "length",
               "area"
             ]
+          },
+          "strategies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                },
+                "maxTrials": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "version",
+                "maxTrials"
+              ]
+            }
           }
         },
         "required": [
@@ -1846,6 +1876,131 @@
           "limits",
           "features",
           "units"
+        ]
+      },
+      "Strategy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "const": "marker-shortening"
+          },
+          "version": {
+            "type": "string",
+            "const": "1"
+          },
+          "maxTrials": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "maxTrials"
+        ]
+      },
+      "MarkerTrial": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "type": "integer"
+          },
+          "lengthMm": {
+            "type": "number"
+          },
+          "occupiedLengthMm": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "placed": {
+            "type": "integer"
+          },
+          "elapsedMillis": {
+            "type": "integer"
+          },
+          "engine": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "engineVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timeLimitSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60
+          }
+        },
+        "required": [
+          "index",
+          "lengthMm",
+          "occupiedLengthMm",
+          "status",
+          "complete",
+          "placed",
+          "elapsedMillis",
+          "engine",
+          "engineVersion",
+          "timeLimitSeconds"
+        ]
+      },
+      "MarkerReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "strategyVersion": {
+            "type": "string"
+          },
+          "firstOccupiedLengthMm": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "occupiedLengthMm": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "trialLengthMm": {
+            "type": "number"
+          },
+          "trials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarkerTrial"
+            }
+          },
+          "optimalityProven": {
+            "type": "boolean",
+            "const": false
+          }
+        },
+        "required": [
+          "strategyVersion",
+          "firstOccupiedLengthMm",
+          "occupiedLengthMm",
+          "trialLengthMm",
+          "trials",
+          "optimalityProven"
         ]
       }
     }

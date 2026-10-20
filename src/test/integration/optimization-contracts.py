@@ -103,4 +103,23 @@ for _ in range(100):
 assert job['state'] == 'SUCCEEDED', job
 matches('OptimizationResult', call(job['resultRef']))
 check('omitted optional engine and part name round-trip through input and result schemas')
+marker = call('/api-v2/example-marker-request.json')
+Draft202012Validator(schema).validate(marker)
+job = call('/api/v2/optimization-jobs', marker, str(uuid.uuid4()), expected=202)
+for _ in range(300):
+    job = call('/api/v2/optimization-jobs/' + job['id'])
+    if job['state'] in ['SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT']:
+        break
+    time.sleep(.05)
+assert job['state'] == 'SUCCEEDED', job
+result = call(job['resultRef'])
+matches('OptimizationResult', result)
+assert result['fulfillmentStatus'] == 'COMPLETE' and result['marker']['optimalityProven'] is False
+assert 1 <= len(result['marker']['trials']) <= 5
+occupied = max(p['y'] + p['shape']['height'] for p in result['layout']['placements'])
+assert abs(occupied - result['marker']['occupiedLengthMm']) < .001
+metric = next(m for m in result['metrics'] if m['name'] == 'markerAreaUtilization')
+assert abs(metric['denominator'] - occupied * marker['problem']['material']['shape']['width']) < .01
+assert call('/api/cutting/tasks') == [] and call('/api/remnants') == []
+check('API-only marker shortening returns a verified complete kit, trial history and occupied-area metric')
 print(f'Executed {passed}; passed {passed}; failed 0')

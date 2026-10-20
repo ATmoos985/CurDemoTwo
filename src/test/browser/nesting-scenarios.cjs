@@ -118,6 +118,10 @@ const assert = require('node:assert/strict');
             assert.equal(await page.evaluate(()=>Konva.stages.find(s=>s?.container().id==='marker-canvas').find('.marker-end-line').length),0);
             passed++;
         }
+        assert.equal(writes.filter(url => url.endsWith('/api/v2/optimization-jobs')).length, 3,
+            'Each garment page submits one server-side marker job');
+        assert.equal(writes.filter(url => url.endsWith('/api/v1/nesting/solve')).length, 13,
+            'Marker shortening must not run its trial loop through browser v1 requests');
         assert.deepEqual(errors, []);
         console.log(JSON.stringify({discovered:21,executed:21,passed,failed:0,skipped:0}));
     } finally { await browser.close(); }

@@ -1,15 +1,23 @@
-import {MARKER_STYLES, markerExample, markerSummary, searchMarker} from './marker-demo.js';
+import {MARKER_STYLES, markerExample, markerSummary} from './marker-demo.js';
 import {createNestingScene} from '../canvas/nesting-scene.js';
-import {NestingSession} from './nesting-client.js';
+import {OptimizationSession} from '../business/optimization/job-client.js';
 import {mountNestingViewer} from './nesting-viewer.js';
 
 const $ = id => document.getElementById(id);
 const mm = value => `${Number(value.toFixed(1))} mm`;
-const session = new NestingSession();
+const session = new OptimizationSession(undefined,150,error => {
+    $('marker-error').hidden = false;
+    $('marker-error').textContent = `未能确认取消：${error.message}。服务端仍受计算时限限制。`;
+});
 for (const style of MARKER_STYLES) $('marker-style').add(new Option(style.name, style.id));
 const initialStyle = new URLSearchParams(location.search).get('style');
 if (MARKER_STYLES.some(style => style.id === initialStyle)) $('marker-style').value = initialStyle;
 let problem = markerExample(), best = null, controller = null, revision = 0;
+function markerRequest() {
+    return {schemaVersion:'2.0',problemType:'NESTING_2D',clientRequestId:crypto.randomUUID(),
+        problem:{...problem,timeLimitSeconds:10},allowFallback:true,requireComplete:true,
+        strategy:{id:'marker-shortening',version:'1',maxTrials:5}};
+}
 const viewer = mountNestingViewer($('marker-canvas'), {onSelect:piece => {
     $('marker-selection').textContent = piece ? `${piece.name} · X ${piece.x} / Y ${piece.y} mm · 固定纱向`
         : '点击衣片查看尺码与名称；滚轮缩放、拖动平移。';
@@ -20,7 +28,7 @@ function checklist(summary = markerSummary(problem, null)) {
         el.append(row.name); const count = document.createElement('span'); count.textContent = `${row.placed} / ${row.requested}`; el.append(count); return el;
     }));
 }
-function cancel() { controller?.abort(); controller = null; session.invalidate(); revision++; }
+function cancel() { controller?.abort(); controller = null; session.cancel(); revision++; }
 function busy(value) { $('marker-run').disabled = value; $('marker-cancel').hidden = !value; }
 function reset() {
     cancel(); busy(false); best = null; $('marker-result-export').disabled = true;
@@ -41,35 +49,37 @@ $('marker-style').addEventListener('change', () => {
     const params = new URLSearchParams(location.search); params.set('style',$('marker-style').value);
     history.replaceState(null,'',`${location.pathname}?${params}${location.hash}`); reset();
 });
-$('marker-cancel').onclick = () => { cancel(); busy(false); $('marker-state').textContent = '已停止，可重新开始排料'; };
+$('marker-cancel').onclick = () => { cancel(); busy(false); $('marker-state').textContent = '已请求停止计算，可重新开始排料'; };
 $('marker-form').addEventListener('submit', async event => {
     event.preventDefault(); if (!$('marker-form').reportValidity()) return;
     reset(); const token = ++revision; controller = new AbortController(); const signal = controller.signal; busy(true);
     try {
-        const output = await searchMarker(problem, async candidate => {
-            session.setProblem(candidate); const scene = await session.solve();
-            signal.throwIfAborted(); if (!scene) throw new Error('本次排料已取消');
-            return {scene, result:session.result};
-        }, {signal, onTrial:trial => { $('marker-state').textContent = `尝试 ${trial.index} / ${trial.total} · 门幅 ${problem.material.shape.width} mm · 长度 ${trial.length} mm`; }});
+        const request = markerRequest();
+        const output = await session.solve(request,
+            {onProgress:job => { if(token === revision) $('marker-state').textContent = job.message; }});
         if (token !== revision) return;
-        best = output.best;
-        const displayed = best || output.latest;
+        signal.throwIfAborted();
+        const result = output.result.layout, marker = output.result.marker;
+        const candidate = {...problem,material:{...problem.material,shape:result.processingRegion}};
+        const scene = createNestingScene(candidate,result), summary = markerSummary(candidate,scene);
+        const displayed = {problem:candidate,scene,result:output.result,summary,input:request};
+        best = summary.complete ? displayed : null;
         if (displayed) {
             viewer.setScene(displayed.scene, {fitView:true, markerLength:best?.summary.length ?? null});
             checklist(displayed.summary);
         }
-        $('marker-trials').replaceChildren(...output.history.map(trial => {
+        $('marker-trials').replaceChildren(...marker.trials.map(trial => {
             const li = document.createElement('li');
-            li.textContent = `试排 ${mm(trial.length)}：${trial.complete ? `衣片齐套，实际占用 ${mm(trial.occupiedLength)}` : `未齐套，排入 ${trial.placed} 片（不采用）`}`;
+            li.textContent = `试排 ${mm(trial.lengthMm)}：${trial.complete ? `衣片齐套，实际占用 ${mm(trial.occupiedLengthMm)}` : `未齐套，排入 ${trial.placed} 片（不采用）`}`;
             return li;
         }));
         if (best) {
-            $('marker-state').textContent = `${best.summary.requested} / ${best.summary.requested} 片齐套 · 本次找到的较短方案`;
+            $('marker-state').textContent = `${best.summary.requested} / ${best.summary.requested} 片齐套 · 本次找到的较短方案${output.job.state === 'SUCCEEDED' ? '' : ' · 搜索提前结束，保留已验证方案'}`;
             $('marker-length').textContent = mm(best.summary.length);
             $('marker-length-note').hidden = false;
             $('marker-length-note').textContent = `试排 ${mm(best.summary.trialLength)} = 实际唛架 ${mm(best.summary.length)} + 未使用尾料 ${mm(best.summary.unusedTail)}。尾料不计入本次用布长度与利用率。`;
             $('marker-utilization').textContent = `${(best.summary.utilization * 100).toFixed(1)}%`;
-            $('marker-saving').textContent = mm(Math.max(0, output.first.summary.length - best.summary.length));
+            $('marker-saving').textContent = mm(Math.max(0, marker.firstOccupiedLengthMm - best.summary.length));
             $('marker-result-export').disabled = false;
         } else $('marker-state').textContent = '本次搜索未排齐全部衣片，请重试；不代表该布宽无解。';
     } catch (error) {
@@ -77,7 +87,7 @@ $('marker-form').addEventListener('submit', async event => {
     } finally { if (token === revision) { busy(false); controller = null; } }
 });
 function download(name, value) { const url = URL.createObjectURL(new Blob([JSON.stringify(value,null,2)], {type:'application/json'})); const link = document.createElement('a'); link.href=url; link.download=name; link.click(); setTimeout(() => URL.revokeObjectURL(url),1000); }
-$('marker-input-export').onclick = () => { if ($('marker-form').reportValidity()) download('marker-input.json', best?.problem || problem); };
+$('marker-input-export').onclick = () => { if ($('marker-form').reportValidity()) download('marker-input.json', best?.input || markerRequest()); };
 $('marker-result-export').onclick = () => { if (best) download('marker-result.json', best.result); };
 $('marker-fit').onclick = () => viewer.fit();
 window.addEventListener('pagehide', event => { if (!event.persisted) { cancel(); viewer.destroy(); } });
