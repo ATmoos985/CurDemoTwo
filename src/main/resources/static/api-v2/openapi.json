@@ -1,0 +1,1847 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CurDemoTwo Optimization Jobs",
+    "version": "2.0.0",
+    "description": "Single-dispatcher local job archive, nesting-v1 geometry profile. No inventory writes. v1 endpoints remain compatible. No distributed leases, SSE, authentication or multi-material support in this stage. Schema validation is followed by engine and geometry checks. timeLimitSeconds requests cooperative interruption, not guaranteed hard preemption."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/api/v2/capabilities": {
+      "get": {
+        "summary": "Query real engine availability and implemented job features",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Capabilities"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or no result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unsupported profile or constraint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Queue or archive limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable engine or persistence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/problem-validations": {
+      "post": {
+        "summary": "Validate input and engine compatibility without executing a solver",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemCheck"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or no result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unsupported profile or constraint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Queue or archive limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable engine or persistence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptimizationRequest"
+              },
+              "example": {
+                "schemaVersion": "2.0",
+                "problemType": "NESTING_2D",
+                "clientRequestId": "ERP-20261020-001",
+                "allowFallback": false,
+                "requireComplete": true,
+                "problem": {
+                  "schemaVersion": "1",
+                  "unit": "mm",
+                  "material": {
+                    "id": "external-stock-001",
+                    "shape": {
+                      "type": "RECTANGLE",
+                      "width": 2000,
+                      "height": 3000
+                    },
+                    "exclusions": [],
+                    "continuesAfterRegion": false
+                  },
+                  "parts": [
+                    {
+                      "id": 7,
+                      "name": "order-line-007",
+                      "shape": {
+                        "type": "RECTANGLE",
+                        "width": 2000,
+                        "height": 1000
+                      },
+                      "quantity": 3,
+                      "allowRotation": false
+                    }
+                  ],
+                  "process": {
+                    "mode": "CROSSCUT",
+                    "feedMode": "SHEET",
+                    "startCorner": "left-top",
+                    "firstStageOrientation": "horizontal",
+                    "trimStart": 0,
+                    "minReusableWidth": 200,
+                    "minReusableHeight": 300,
+                    "kerf": 0,
+                    "pieceGap": 0,
+                    "objective": "INPUT_ORDER"
+                  },
+                  "engine": "auto",
+                  "timeLimitSeconds": 3
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/optimization-jobs": {
+      "post": {
+        "summary": "Persist and enqueue a pure computation; repeat key returns same job",
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizationJob"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "Job polling URL",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Suggested polling delay in seconds",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or no result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unsupported profile or constraint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Queue or archive limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable engine or persistence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptimizationRequest"
+              },
+              "example": {
+                "schemaVersion": "2.0",
+                "problemType": "NESTING_2D",
+                "clientRequestId": "ERP-20261020-001",
+                "allowFallback": false,
+                "requireComplete": true,
+                "problem": {
+                  "schemaVersion": "1",
+                  "unit": "mm",
+                  "material": {
+                    "id": "external-stock-001",
+                    "shape": {
+                      "type": "RECTANGLE",
+                      "width": 2000,
+                      "height": 3000
+                    },
+                    "exclusions": [],
+                    "continuesAfterRegion": false
+                  },
+                  "parts": [
+                    {
+                      "id": 7,
+                      "name": "order-line-007",
+                      "shape": {
+                        "type": "RECTANGLE",
+                        "width": 2000,
+                        "height": 1000
+                      },
+                      "quantity": 3,
+                      "allowRotation": false
+                    }
+                  ],
+                  "process": {
+                    "mode": "CROSSCUT",
+                    "feedMode": "SHEET",
+                    "startCorner": "left-top",
+                    "firstStageOrientation": "horizontal",
+                    "trimStart": 0,
+                    "minReusableWidth": 200,
+                    "minReusableHeight": 300,
+                    "kerf": 0,
+                    "pieceGap": 0,
+                    "objective": "INPUT_ORDER"
+                  },
+                  "engine": "auto",
+                  "timeLimitSeconds": 3
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v2/optimization-jobs/{id}": {
+      "get": {
+        "summary": "Poll actual execution state; no fabricated percentage",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizationJob"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or no result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unsupported profile or constraint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Queue or archive limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable engine or persistence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/api/v2/optimization-jobs/{id}/input": {
+      "get": {
+        "summary": "Read immutable normalized input snapshot",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizationRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or no result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unsupported profile or constraint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Queue or archive limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable engine or persistence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/api/v2/optimization-jobs/{id}/cancellations": {
+      "post": {
+        "summary": "Request cancellation; terminal only after execution stops",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizationJob"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or no result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unsupported profile or constraint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Queue or archive limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable engine or persistence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/api/v2/optimization-results/{id}": {
+      "get": {
+        "summary": "Read immutable independently validated result, not inventory output",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or no result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unsupported profile or constraint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Queue or archive limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable engine or persistence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    }
+  },
+  "components": {
+    "schemas": {
+      "Point": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "x": {
+            "type": "number",
+            "minimum": 0
+          },
+          "y": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ]
+      },
+      "Shape": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "RECTANGLE",
+              "POLYGON"
+            ]
+          },
+          "width": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 10000000
+          },
+          "height": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 10000000
+          },
+          "vertices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            }
+          }
+        },
+        "required": [
+          "type",
+          "width",
+          "height"
+        ]
+      },
+      "Exclusion": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "x": {
+            "type": "number",
+            "minimum": 0
+          },
+          "y": {
+            "type": "number",
+            "minimum": 0
+          },
+          "shape": {
+            "$ref": "#/components/schemas/Shape"
+          },
+          "clearance": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "x",
+          "y",
+          "shape"
+        ]
+      },
+      "Material": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "shape": {
+            "$ref": "#/components/schemas/Shape"
+          },
+          "exclusions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Exclusion"
+            }
+          },
+          "continuesAfterRegion": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "shape"
+        ]
+      },
+      "Part": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "shape": {
+            "$ref": "#/components/schemas/Shape"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "allowRotation": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "shape",
+          "quantity"
+        ]
+      },
+      "Process": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "CROSSCUT",
+              "GUILLOTINE",
+              "CONTOUR"
+            ]
+          },
+          "feedMode": {
+            "type": "string",
+            "enum": [
+              "SHEET",
+              "CONTINUOUS"
+            ]
+          },
+          "startCorner": {
+            "type": "string",
+            "enum": [
+              "left-top",
+              "right-top",
+              "left-bottom",
+              "right-bottom"
+            ]
+          },
+          "firstStageOrientation": {
+            "type": "string",
+            "enum": [
+              "horizontal",
+              "vertical",
+              "none"
+            ]
+          },
+          "trimStart": {
+            "type": "number",
+            "minimum": 0
+          },
+          "minReusableWidth": {
+            "type": "number",
+            "minimum": 0
+          },
+          "minReusableHeight": {
+            "type": "number",
+            "minimum": 0
+          },
+          "kerf": {
+            "type": "number",
+            "const": 0
+          },
+          "objective": {
+            "type": "string"
+          },
+          "pieceGap": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.1
+          }
+        },
+        "required": [
+          "mode",
+          "feedMode",
+          "startCorner",
+          "firstStageOrientation",
+          "objective"
+        ]
+      },
+      "NestingProblem": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "const": "1"
+          },
+          "unit": {
+            "type": "string",
+            "const": "mm"
+          },
+          "material": {
+            "$ref": "#/components/schemas/Material"
+          },
+          "parts": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/Part"
+            }
+          },
+          "process": {
+            "$ref": "#/components/schemas/Process"
+          },
+          "engine": {
+            "type": "string",
+            "default": "auto"
+          },
+          "timeLimitSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "unit",
+          "material",
+          "parts",
+          "process",
+          "timeLimitSeconds"
+        ]
+      },
+      "OptimizationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "const": "2.0"
+          },
+          "problemType": {
+            "type": "string",
+            "const": "NESTING_2D"
+          },
+          "clientRequestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "problem": {
+            "$ref": "#/components/schemas/NestingProblem"
+          },
+          "allowFallback": {
+            "type": "boolean"
+          },
+          "requireComplete": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "problemType",
+          "clientRequestId",
+          "problem",
+          "allowFallback",
+          "requireComplete"
+        ]
+      },
+      "OptimizationJob": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "schemaVersion": {
+            "type": "string",
+            "const": "2.0"
+          },
+          "clientRequestId": {
+            "type": "string"
+          },
+          "inputHash": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "RUNNING",
+              "CANCEL_REQUESTED",
+              "SUCCEEDED",
+              "FAILED",
+              "CANCELLED",
+              "TIMED_OUT"
+            ]
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "SOLVING",
+              "STOPPING",
+              "STOPPED"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timeLimitSeconds": {
+            "type": "integer"
+          },
+          "resultRef": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "schemaVersion",
+          "clientRequestId",
+          "inputHash",
+          "state",
+          "phase",
+          "createdAt",
+          "startedAt",
+          "finishedAt",
+          "timeLimitSeconds",
+          "resultRef",
+          "code",
+          "message"
+        ]
+      },
+      "Placement": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "demandId": {
+            "type": "integer"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "shape": {
+            "$ref": "#/components/schemas/Shape"
+          },
+          "rotationDegrees": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "demandId",
+          "name",
+          "x",
+          "y",
+          "shape",
+          "rotationDegrees"
+        ]
+      },
+      "Leftover": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "shape": {
+            "$ref": "#/components/schemas/Shape"
+          },
+          "hasDefect": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "x",
+          "y",
+          "shape",
+          "hasDefect"
+        ]
+      },
+      "Cut": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sequence": {
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "startX": {
+            "type": "number"
+          },
+          "startY": {
+            "type": "number"
+          },
+          "endX": {
+            "type": "number"
+          },
+          "endY": {
+            "type": "number"
+          },
+          "airDistanceMm": {
+            "type": "number"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stage": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "sequence",
+          "kind",
+          "startX",
+          "startY",
+          "endX",
+          "endY",
+          "airDistanceMm",
+          "description",
+          "stage"
+        ]
+      },
+      "Fulfillment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "demandId": {
+            "type": "integer"
+          },
+          "requested": {
+            "type": "integer"
+          },
+          "placed": {
+            "type": "integer"
+          },
+          "unplaced": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "demandId",
+          "requested",
+          "placed",
+          "unplaced",
+          "reason"
+        ]
+      },
+      "Contour": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "placementId": {
+            "type": "integer"
+          },
+          "vertices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            }
+          },
+          "closed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "placementId",
+          "vertices",
+          "closed"
+        ]
+      },
+      "NestingResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "coordinateSystem": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "engine": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "engineVersion": {
+            "type": "string"
+          },
+          "elapsedMs": {
+            "type": "integer"
+          },
+          "materialId": {
+            "type": "string"
+          },
+          "processingRegion": {
+            "$ref": "#/components/schemas/Shape"
+          },
+          "placements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Placement"
+            }
+          },
+          "leftovers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Leftover"
+            }
+          },
+          "cuts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Cut"
+            }
+          },
+          "fulfillment": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Fulfillment"
+            }
+          },
+          "metrics": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "processingAreaMm2": {
+                "type": "number"
+              },
+              "pieceAreaMm2": {
+                "type": "number"
+              },
+              "reusableAreaMm2": {
+                "type": "number"
+              },
+              "unassignedAreaMm2": {
+                "type": "number"
+              },
+              "suggestedFeedLengthMm": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "processingAreaMm2",
+              "pieceAreaMm2",
+              "reusableAreaMm2",
+              "unassignedAreaMm2",
+              "suggestedFeedLengthMm"
+            ]
+          },
+          "contours": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Contour"
+            }
+          },
+          "requestedEngine": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fallbackReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "unit",
+          "coordinateSystem",
+          "status",
+          "message",
+          "engine",
+          "engineVersion",
+          "elapsedMs",
+          "materialId",
+          "processingRegion",
+          "placements",
+          "leftovers",
+          "cuts",
+          "fulfillment",
+          "metrics",
+          "contours",
+          "requestedEngine",
+          "fallbackReason"
+        ]
+      },
+      "Metric": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "numerator": {
+            "type": "number"
+          },
+          "denominator": {
+            "type": "number"
+          },
+          "basis": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "unit",
+          "numerator",
+          "denominator",
+          "basis",
+          "version"
+        ]
+      },
+      "OptimizationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "inputHash": {
+            "type": "string"
+          },
+          "schemaVersion": {
+            "type": "string"
+          },
+          "validationStatus": {
+            "type": "string",
+            "enum": [
+              "PASSED"
+            ]
+          },
+          "fulfillmentStatus": {
+            "type": "string",
+            "enum": [
+              "COMPLETE",
+              "PARTIAL",
+              "NONE"
+            ]
+          },
+          "meetsRequirement": {
+            "type": "boolean"
+          },
+          "terminationReason": {
+            "type": "string",
+            "enum": [
+              "COMPLETED",
+              "TIME_LIMIT",
+              "CANCELLED"
+            ]
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Metric"
+            }
+          },
+          "layout": {
+            "$ref": "#/components/schemas/NestingResult"
+          }
+        },
+        "required": [
+          "id",
+          "jobId",
+          "inputHash",
+          "schemaVersion",
+          "validationStatus",
+          "fulfillmentStatus",
+          "meetsRequirement",
+          "terminationReason",
+          "metrics",
+          "layout"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "fieldErrors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "message"
+              ]
+            }
+          },
+          "traceId": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "details": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "fieldErrors",
+          "traceId",
+          "retryable",
+          "details"
+        ]
+      },
+      "ProblemCheck": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "VALID"
+          },
+          "message": {
+            "type": "string"
+          },
+          "requestedEngine": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "engine": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fallbackReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "requestedEngine",
+          "engine",
+          "fallbackReason"
+        ]
+      },
+      "Engine": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "shapes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "modes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "objectives": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "coordinateResolutionMm": {
+            "type": "number"
+          },
+          "available": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "shapes",
+          "modes",
+          "objectives",
+          "coordinateResolutionMm",
+          "available"
+        ]
+      },
+      "Capabilities": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "string"
+          },
+          "problemTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "inputProfile": {
+            "type": "string"
+          },
+          "engines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Engine"
+            }
+          },
+          "limits": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "workers": {
+                "type": "integer"
+              },
+              "queueCapacity": {
+                "type": "integer"
+              },
+              "maxStoredJobs": {
+                "type": "integer"
+              },
+              "maxRequestBytes": {
+                "type": "integer"
+              },
+              "maxPieces": {
+                "type": "integer"
+              },
+              "maxContourPieces": {
+                "type": "integer"
+              },
+              "maxTimeLimitSeconds": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "workers",
+              "queueCapacity",
+              "maxStoredJobs",
+              "maxRequestBytes",
+              "maxPieces",
+              "maxContourPieces",
+              "maxTimeLimitSeconds"
+            ]
+          },
+          "features": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "polling": {
+                "type": "boolean"
+              },
+              "cancellation": {
+                "type": "string"
+              },
+              "hardPreemption": {
+                "type": "boolean"
+              },
+              "progress": {
+                "type": "string"
+              },
+              "storage": {
+                "type": "string"
+              },
+              "distributedWorkers": {
+                "type": "boolean"
+              },
+              "sse": {
+                "type": "boolean"
+              },
+              "inventoryWrites": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "polling",
+              "cancellation",
+              "hardPreemption",
+              "progress",
+              "storage",
+              "distributedWorkers",
+              "sse",
+              "inventoryWrites"
+            ]
+          },
+          "units": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "length": {
+                "type": "string"
+              },
+              "area": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "length",
+              "area"
+            ]
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "problemTypes",
+          "inputProfile",
+          "engines",
+          "limits",
+          "features",
+          "units"
+        ]
+      }
+    }
+  }
+}

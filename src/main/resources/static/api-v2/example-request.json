@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "2.0",
+  "problemType": "NESTING_2D",
+  "clientRequestId": "ERP-20261020-001",
+  "allowFallback": false,
+  "requireComplete": true,
+  "problem": {
+    "schemaVersion": "1",
+    "unit": "mm",
+    "material": {
+      "id": "external-stock-001",
+      "shape": {
+        "type": "RECTANGLE",
+        "width": 2000,
+        "height": 3000
+      },
+      "exclusions": [],
+      "continuesAfterRegion": false
+    },
+    "parts": [
+      {
+        "id": 7,
+        "name": "order-line-007",
+        "shape": {
+          "type": "RECTANGLE",
+          "width": 2000,
+          "height": 1000
+        },
+        "quantity": 3,
+        "allowRotation": false
+      }
+    ],
+    "process": {
+      "mode": "CROSSCUT",
+      "feedMode": "SHEET",
+      "startCorner": "left-top",
+      "firstStageOrientation": "horizontal",
+      "trimStart": 0,
+      "minReusableWidth": 200,
+      "minReusableHeight": 300,
+      "kerf": 0,
+      "pieceGap": 0,
+      "objective": "INPUT_ORDER"
+    },
+    "engine": "auto",
+    "timeLimitSeconds": 3
+  }
+}

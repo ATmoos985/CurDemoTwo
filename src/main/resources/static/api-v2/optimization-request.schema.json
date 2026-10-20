@@ -1,0 +1,290 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OptimizationRequest (v2 job / nesting-v1 profile)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "2.0"
+    },
+    "problemType": {
+      "type": "string",
+      "const": "NESTING_2D"
+    },
+    "clientRequestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "problem": {
+      "$ref": "#/$defs/NestingProblem"
+    },
+    "allowFallback": {
+      "type": "boolean"
+    },
+    "requireComplete": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "problemType",
+    "clientRequestId",
+    "problem",
+    "allowFallback",
+    "requireComplete"
+  ],
+  "$defs": {
+    "Point": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": 0
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ]
+    },
+    "Shape": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "RECTANGLE",
+            "POLYGON"
+          ]
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 10000000
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 10000000
+        },
+        "vertices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Point"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "width",
+        "height"
+      ]
+    },
+    "Exclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "x": {
+          "type": "number",
+          "minimum": 0
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0
+        },
+        "shape": {
+          "$ref": "#/$defs/Shape"
+        },
+        "clearance": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "id",
+        "x",
+        "y",
+        "shape"
+      ]
+    },
+    "Material": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "shape": {
+          "$ref": "#/$defs/Shape"
+        },
+        "exclusions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Exclusion"
+          }
+        },
+        "continuesAfterRegion": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "shape"
+      ]
+    },
+    "Part": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "shape": {
+          "$ref": "#/$defs/Shape"
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "allowRotation": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "shape",
+        "quantity"
+      ]
+    },
+    "Process": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "CROSSCUT",
+            "GUILLOTINE",
+            "CONTOUR"
+          ]
+        },
+        "feedMode": {
+          "type": "string",
+          "enum": [
+            "SHEET",
+            "CONTINUOUS"
+          ]
+        },
+        "startCorner": {
+          "type": "string",
+          "enum": [
+            "left-top",
+            "right-top",
+            "left-bottom",
+            "right-bottom"
+          ]
+        },
+        "firstStageOrientation": {
+          "type": "string",
+          "enum": [
+            "horizontal",
+            "vertical",
+            "none"
+          ]
+        },
+        "trimStart": {
+          "type": "number",
+          "minimum": 0
+        },
+        "minReusableWidth": {
+          "type": "number",
+          "minimum": 0
+        },
+        "minReusableHeight": {
+          "type": "number",
+          "minimum": 0
+        },
+        "kerf": {
+          "type": "number",
+          "const": 0
+        },
+        "objective": {
+          "type": "string"
+        },
+        "pieceGap": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "multipleOf": 0.1
+        }
+      },
+      "required": [
+        "mode",
+        "feedMode",
+        "startCorner",
+        "firstStageOrientation",
+        "objective"
+      ]
+    },
+    "NestingProblem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "1"
+        },
+        "unit": {
+          "type": "string",
+          "const": "mm"
+        },
+        "material": {
+          "$ref": "#/$defs/Material"
+        },
+        "parts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Part"
+          }
+        },
+        "process": {
+          "$ref": "#/$defs/Process"
+        },
+        "engine": {
+          "type": "string",
+          "default": "auto"
+        },
+        "timeLimitSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "unit",
+        "material",
+        "parts",
+        "process",
+        "timeLimitSeconds"
+      ]
+    }
+  }
+}

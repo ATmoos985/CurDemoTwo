@@ -64,36 +64,57 @@ public class SolverFactory {
                 .sorted(Comparator.comparing(EngineCapabilities::id)).toList();
     }
 
-    public NestingResult solve(NestingProblem problem) {
+    /** Validation/selection only: does not execute an engine or mutate business data. */
+    public record ProblemCheck(String status, String message, String requestedEngine, String engine, String fallbackReason) {}
+    private record Selection(String requested, ICutSolverEngine engine, String fallbackReason) {}
+
+    private Selection select(NestingProblem problem, boolean allowFallback) {
+        validate(problem);
+        String requested = problem.engine();
+        if (requested == null || requested.isBlank() || "auto".equals(requested))
+            requested = switch (problem.process().mode()) {
+                case "CROSSCUT" -> "crosscut";
+                case "CONTOUR" -> "packingsolver-irregular";
+                default -> "packingsolver";
+            };
+        ICutSolverEngine engine = engineMap.get(requested);
+        supported(engine != null, "系统未找到排料引擎: " + requested);
+        checkSupport(problem, engine.capabilities());
+        String fallback = allowFallback ? fallbackFor(requested) : null, reason = null;
+        if (fallback != null) {
+            reason = requested + " 未就绪（原生可执行文件缺失或不可执行），本次由 " + fallback + " 求解";
+            engine = engineMap.get(fallback);
+            checkSupport(problem, engine.capabilities());
+        }
+        if ("CROSSCUT".equals(problem.process().mode())) {
+            supported("horizontal".equals(problem.process().firstStageOrientation()), "横切策略仅支持水平首刀");
+            for (var part : problem.parts()) require(Math.abs(part.shape().width() - problem.width()) < .001,
+                    "横切需求必须等于材料幅宽");
+        }
+        return new Selection(requested, engine, reason);
+    }
+
+    public ProblemCheck validateProblem(NestingProblem problem, boolean allowFallback) {
+        try {
+            var selected = select(problem, allowFallback);
+            return new ProblemCheck(selected.engine().isAvailable() ? "VALID" : "UNAVAILABLE",
+                    selected.engine().isAvailable() ? "输入与引擎能力检查通过；尚未求解" : "求解引擎尚未就绪",
+                    selected.requested(), selected.engine().getEngineType(), selected.fallbackReason());
+        } catch (Rejected error) { return new ProblemCheck(error.status, error.getMessage(), problem == null ? null : problem.engine(), null, null); }
+    }
+
+    public NestingResult solve(NestingProblem problem) { return solve(problem, true); }
+
+    public NestingResult solve(NestingProblem problem, boolean allowFallback) {
         long start = System.nanoTime();
         String selected = problem == null ? null : problem.engine();
         String requested = selected, fallbackReason = null;
         try {
-            validate(problem);
-            if (selected == null || selected.isBlank() || "auto".equals(selected))
-                selected = switch (problem.process().mode()) {
-                    case "CROSSCUT" -> "crosscut";
-                    case "CONTOUR" -> "packingsolver-irregular";
-                    default -> "packingsolver";
-                };
-            requested = selected;
-            ICutSolverEngine engine = engineMap.get(selected);
-            supported(engine != null, "系统未找到排料引擎: " + selected);
-            checkSupport(problem, engine.capabilities());
-            String fallback = fallbackFor(selected);
-            if (fallback != null) {
-                fallbackReason = requested + " 未就绪（原生可执行文件缺失或不可执行），本次由 " + fallback + " 求解";
-                log.warn("Explicit engine fallback: {}", fallbackReason);
-                selected = fallback;
-                engine = engineMap.get(fallback);
-                checkSupport(problem, engine.capabilities());
-            }
+            var selection = select(problem, allowFallback);
+            ICutSolverEngine engine = selection.engine();
+            requested = selection.requested(); selected = engine.getEngineType(); fallbackReason = selection.fallbackReason();
+            if (fallbackReason != null) log.warn("Explicit engine fallback: {}", fallbackReason);
             var capabilities = engine.capabilities();
-            if ("CROSSCUT".equals(problem.process().mode())) {
-                supported("horizontal".equals(problem.process().firstStageOrientation()), "横切策略仅支持水平首刀");
-                for (var part : problem.parts()) require(Math.abs(part.shape().width() - problem.width()) < .001,
-                        "横切需求必须等于材料幅宽");
-            }
             if (!engine.isAvailable())
                 return NestingResult.failure("UNAVAILABLE", "求解引擎尚未就绪", selected, requested, fallbackReason, elapsed(start));
             EngineResult result = engine.solve(problem);
