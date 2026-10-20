@@ -20,8 +20,8 @@ final class MarkerOptimization {
             throw new OptimizationService.Failure("UNSUPPORTED_CONSTRAINT", "不支持的编排策略或版本", 422, false);
         if (strategy.maxTrials() < 1 || strategy.maxTrials() > 12)
             throw new OptimizationService.Failure("INVALID_INPUT", "唛架试排次数必须为 1–12", 400, false);
-        if (!Boolean.TRUE.equals(input.requireComplete()) || !"CONTOUR".equals(input.problem().process().mode())
-                || !"RECTANGLE".equals(input.problem().material().shape().type()))
+        if (!Boolean.TRUE.equals(input.requireComplete()) || !"CONTOUR".equals(input.nestingProblem().process().mode())
+                || !"RECTANGLE".equals(input.nestingProblem().material().shape().type()))
             throw new OptimizationService.Failure("UNSUPPORTED_CONSTRAINT", "唛架缩长要求矩形门幅、轮廓工艺及完整齐套", 422, false);
     }
 
@@ -33,7 +33,7 @@ final class MarkerOptimization {
     static Outcome solve(OptimizationRequest input, BiFunction<NestingProblem, Boolean, NestingResult> solve,
                          Consumer<String> progress) {
         validate(input);
-        var original = input.problem();
+        var original = input.nestingProblem();
         long started = System.nanoTime(), budget = original.timeLimitSeconds() * 1_000_000_000L;
         double high = original.height();
         // Rotated parts may use their shorter dimension along the feed direction.

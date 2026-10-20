@@ -83,7 +83,7 @@ public class OptimizationService implements AutoCloseable {
             throw new Failure("INVALID_INPUT","必须提供问题、明确的降级/齐套选项及 1–128 字调用方请求编号",400,false);
         if (!"2.0".equals(request.schemaVersion()) || !"NESTING_2D".equals(request.problemType()))
             throw new Failure("UNSUPPORTED_CONSTRAINT","当前仅支持 schemaVersion=2.0、NESTING_2D 与 nesting-v1 输入",422,false);
-        var check=solvers.validateProblem(request.problem(),request.allowFallback());
+        var check=solvers.validateProblem(request.nestingProblem(),request.allowFallback());
         if (!"VALID".equals(check.status())) throw switch(check.status()) {
             case "INVALID_INPUT" -> new Failure("INVALID_INPUT",check.message(),400,false);
             case "UNAVAILABLE" -> new Failure("ENGINE_UNAVAILABLE",check.message(),503,true);
@@ -179,7 +179,7 @@ public class OptimizationService implements AutoCloseable {
             }
             long start=System.nanoTime();
             var outcome=document.input().strategy()==null
-                    ? new MarkerOptimization.Outcome(solvers.solve(document.input().problem(),document.input().allowFallback()),null,null)
+                    ? new MarkerOptimization.Outcome(solvers.solve(document.input().nestingProblem(),document.input().allowFallback()),null,null)
                     : MarkerOptimization.solve(document.input(),solvers,message->progress(id,message));
             NestingResult layout=outcome.layout();
             synchronized(this) {
@@ -225,7 +225,7 @@ public class OptimizationService implements AutoCloseable {
             }
             while(leases.size()<workers) {
                 var lease=shared.claim(owner,LEASE_MILLIS,document->"VALID".equals(
-                        solvers.validateProblem(document.input().problem(),document.input().allowFallback()).status()));
+                        solvers.validateProblem(document.input().nestingProblem(),document.input().allowFallback()).status()));
                 if(lease==null)break;
                 var local=new LocalLease(lease);String id=lease.document().job().id();
                 leases.put(id,local);
@@ -249,7 +249,7 @@ public class OptimizationService implements AutoCloseable {
             }
             var document=local.lease.document();
             // A retry shares the first attempt's wall-clock deadline; it does not get a new full budget.
-            var input=document.input();var p=input.problem();
+            var input=document.input();var p=input.nestingProblem();
             int seconds=Math.max(1,(int)Math.ceil(local.lease.remainingMillis()/1000d));
             var bounded=new com.example.cutdemotwo.contracts.nesting.NestingProblem(p.schemaVersion(),p.unit(),p.material(),p.parts(),p.process(),p.engine(),seconds);
             var execution=new OptimizationRequest(input.schemaVersion(),input.problemType(),input.clientRequestId(),bounded,input.allowFallback(),input.requireComplete(),input.strategy());

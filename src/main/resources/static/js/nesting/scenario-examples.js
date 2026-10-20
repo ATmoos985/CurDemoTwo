@@ -30,7 +30,7 @@ export function garmentExample(id) {
         parts:sample.parts.map(([name,quantity,points], index) => ({id:index+1,name,quantity,allowRotation:false,
             shape:polygon(points.map(([x,y]) => ({x,y})))})),
         process:{mode:'CONTOUR',feedMode:'SHEET',startCorner:'left-top',firstStageOrientation:'none',trimStart:0,
-            minReusableWidth:0,minReusableHeight:0,kerf:0,objective:'MAXIMIZE_PIECE_AREA'}};
+            minReusableWidth:0,minReusableHeight:0,kerf:0,objective:'MAXIMIZE_PIECE_AREA',pieceGap:0}};
 }
 
 // 同一批柜体裁片切 1220 × 2440 整板：木纹板固定纹理方向（禁止旋转），素色板允许 90° 旋转。示例经挑选以突出旋转规则的影响。
@@ -42,7 +42,7 @@ export function boardExample(id) {
         material:{id:`DEMO-${id}`, shape:rectangle(1220,2440), continuesAfterRegion:false, exclusions:[]},
         parts:BOARD_PARTS.map(([name,width,length,quantity], index) => ({id:index+1, name, quantity, allowRotation:id === 'BOARD_PLAIN', shape:rectangle(width,length)})),
         process:{mode:'GUILLOTINE', feedMode:'SHEET', startCorner:'left-top', firstStageOrientation:'horizontal', trimStart:0,
-            minReusableWidth:100, minReusableHeight:100, kerf:0, objective:'MAXIMIZE_PIECE_AREA'}};
+            minReusableWidth:100, minReusableHeight:100, kerf:0, objective:'MAXIMIZE_PIECE_AREA', pieceGap:0}};
 }
 
 export function scenarioExample(id) {
@@ -58,5 +58,5 @@ export function scenarioExample(id) {
         parts:source.demands.map(d => ({id:d.id,name:d.name,shape:rectangle(d.w ?? d.width,d.l ?? d.length),quantity:d.count,allowRotation:d.allowRotation ?? source.allowRotation})),
         process:{mode:source.allowLongitudinal ? 'GUILLOTINE' : 'CROSSCUT',feedMode:continuous ? 'CONTINUOUS' : 'SHEET',startCorner:source.cutOrigin,
             firstStageOrientation:source.firstStageOrientation,trimStart:source.trimStart,minReusableWidth:100,minReusableHeight:100,kerf:0,
-            objective:source.allowLongitudinal ? 'MAXIMIZE_PIECE_AREA' : 'INPUT_ORDER'}};
+            objective:source.allowLongitudinal ? 'MAXIMIZE_PIECE_AREA' : 'INPUT_ORDER',pieceGap:0}};
 }

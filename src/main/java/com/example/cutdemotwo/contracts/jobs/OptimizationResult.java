@@ -8,7 +8,15 @@ public record OptimizationResult(String id, String jobId, String inputHash, Stri
                                  String validationStatus, String fulfillmentStatus, boolean meetsRequirement,
                                  String terminationReason, List<Metric> metrics, NestingResult layout,
                                  @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-                                 MarkerReport marker) {
+                                 MarkerReport marker,
+                                 @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                                 com.example.cutdemotwo.contracts.slitting.SlittingResult slitting) {
+    public OptimizationResult(String id, String jobId, String inputHash, String schemaVersion,
+                              String validationStatus, String fulfillmentStatus, boolean meetsRequirement,
+                              String terminationReason, List<Metric> metrics, NestingResult layout, MarkerReport marker) {
+        this(id,jobId,inputHash,schemaVersion,validationStatus,fulfillmentStatus,meetsRequirement,
+                terminationReason,metrics,layout,marker,null);
+    }
     public OptimizationResult(String id, String jobId, String inputHash, String schemaVersion,
                               String validationStatus, String fulfillmentStatus, boolean meetsRequirement,
                               String terminationReason, List<Metric> metrics, NestingResult layout) {

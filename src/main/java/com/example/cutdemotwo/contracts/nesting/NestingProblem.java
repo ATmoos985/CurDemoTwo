@@ -5,7 +5,7 @@ import java.util.List;
 /** A complete, source-local cutting problem. Contains no inventory or task state. */
 public record NestingProblem(
         String schemaVersion, String unit, Material material, List<Part> parts,
-        Process process, String engine, int timeLimitSeconds) {
+        Process process, String engine, int timeLimitSeconds) implements com.example.cutdemotwo.contracts.jobs.OptimizationProblem {
     public NestingProblem {
         parts = parts == null ? List.of() : List.copyOf(parts);
     }

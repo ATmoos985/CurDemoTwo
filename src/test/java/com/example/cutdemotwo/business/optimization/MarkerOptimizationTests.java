@@ -49,7 +49,7 @@ class MarkerOptimizationTests {
         assertNull(result.marker().trials().get(1).occupiedLengthMm());
         assertEquals(2,result.layout().placements().size());
         assertFalse(result.marker().optimalityProven());
-        assertEquals(1000,input.problem().height());
+        assertEquals(1000,input.nestingProblem().height());
     }
     @Test void cancellationRetainsOnlyThePreviouslyValidatedCompleteKit() {
         var engine=new TrialsEngine();engine.interruptSecond=true;
@@ -134,7 +134,7 @@ class MarkerOptimizationTests {
         }
     }
     @Test void incompleteInitialTrialHasNoCompleteMarkerMetricOrFalseInfeasibilityClaim() throws Exception {
-        var r=request("javairregular");var p=r.problem();
+        var r=request("javairregular");var p=r.nestingProblem();
         var impossible=new NestingProblem(p.schemaVersion(),p.unit(),p.material(),
                 List.of(new NestingProblem.Part(1,"too tall",NestingProblem.Shape.rectangle(100,2000),1,false)),
                 p.process(),p.engine(),p.timeLimitSeconds());

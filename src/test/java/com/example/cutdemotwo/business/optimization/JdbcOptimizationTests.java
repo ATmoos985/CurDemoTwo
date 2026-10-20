@@ -38,7 +38,7 @@ class JdbcOptimizationTests {
         return current.transition("SUCCEEDED","STOPPED",null,"done",result(current),System.currentTimeMillis());
     }
     OptimizationResult result(StoredOptimizationJob d) {
-        var layout=new SolverFactory(List.of(new CrossCutSolverService())).solve(d.input().problem(),false);
+        var layout=new SolverFactory(List.of(new CrossCutSolverService())).solve(d.input().nestingProblem(),false);
         return new OptimizationResult(d.job().id(),d.job().id(),d.job().inputHash(),"2.0","PASSED","COMPLETE",true,"COMPLETED",List.of(),layout);
     }
     <T> List<T> race(Callable<T> first,Callable<T> second)throws Exception {

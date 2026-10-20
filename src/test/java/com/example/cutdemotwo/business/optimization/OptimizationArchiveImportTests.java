@@ -33,7 +33,7 @@ class OptimizationArchiveImportTests {
     }
     StoredOptimizationJob complete(String key) {
         var d=queued(key);
-        var layout=new SolverFactory(List.of(new CrossCutSolverService())).solve(d.input().problem(),false);
+        var layout=new SolverFactory(List.of(new CrossCutSolverService())).solve(d.input().nestingProblem(),false);
         var result=new OptimizationResult(d.job().id(),d.job().id(),d.job().inputHash(),"2.0","PASSED","COMPLETE",true,"COMPLETED",List.of(),layout);
         return d.transition("SUCCEEDED","STOPPED",null,"done",result,System.currentTimeMillis());
     }

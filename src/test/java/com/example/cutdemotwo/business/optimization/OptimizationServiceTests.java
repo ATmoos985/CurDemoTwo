@@ -59,7 +59,7 @@ class OptimizationServiceTests {
         var s=service(new CrossCutSolverService());var job=s.submit("key-partial",request("crosscut",4,3,false));
         assertEquals("SUCCEEDED",finished(s,job.id()).state());var result=s.result(job.id());
         assertEquals("PARTIAL",result.fulfillmentStatus());assertFalse(result.meetsRequirement());assertEquals("FEASIBLE",result.layout().status());
-        var r=request("crosscut",1,3,false);var p=r.problem();
+        var r=request("crosscut",1,3,false);var p=r.nestingProblem();
         var impossible=new NestingProblem(p.schemaVersion(),p.unit(),p.material(),List.of(new NestingProblem.Part(42,"long",NestingProblem.Shape.rectangle(2000,4000),1,false)),p.process(),p.engine(),p.timeLimitSeconds());
         var empty=s.submit("key-no-solution",new OptimizationRequest("2.0","NESTING_2D","client-2",impossible,false,true));
         assertEquals("SUCCEEDED",finished(s,empty.id()).state());assertEquals("NO_SOLUTION_FOUND",s.result(empty.id()).layout().status());assertEquals("NONE",s.result(empty.id()).fulfillmentStatus());
@@ -182,7 +182,7 @@ class OptimizationServiceTests {
         var count=new java.util.concurrent.atomic.AtomicInteger();
         ICutSolverEngine unavailable=new ICutSolverEngine(){public String getEngineType(){return "packingsolver";}public boolean isAvailable(){return false;}public EngineCapabilities capabilities(){return new EngineCapabilities("packingsolver","1",List.of("RECTANGLE"),List.of("GUILLOTINE"),List.of("MAXIMIZE_PIECE_AREA"),.1,false);}public EngineResult solve(NestingProblem p){count.incrementAndGet();throw new AssertionError();}};
         var factory=new SolverFactory(List.of(unavailable,new JavaGuillotineSolverEngine()));
-        var p=request("packingsolver",1,3,false).problem();
+        var p=request("packingsolver",1,3,false).nestingProblem();
         p=new NestingProblem("1","mm",p.material(),p.parts(),new NestingProblem.Process("GUILLOTINE","SHEET","left-top","horizontal",0,200,300,0,"MAXIMIZE_PIECE_AREA"),"packingsolver",3);
         assertEquals("UNAVAILABLE",factory.validateProblem(p,false).status());assertEquals("VALID",factory.validateProblem(p,true).status());
         assertEquals("UNAVAILABLE",factory.solve(p,false).status());assertEquals(0,count.get());
