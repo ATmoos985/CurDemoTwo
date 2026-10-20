@@ -1,5 +1,7 @@
 package com.example.cutdemotwo.algorithm.solver;
 
+import com.example.cutdemotwo.algorithm.ComputationCancellation;
+
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import java.awt.geom.Area;
 import java.util.ArrayList;
@@ -11,12 +13,14 @@ public final class PolygonResultValidator {
     // Boolean area tolerance only; it is not a user-configurable cutting allowance.
     private static final double AREA_EPS = .001;
     public static String validate(NestingProblem input, EngineResult output) {
+        ComputationCancellation.check();
         if (!output.getPieces().isEmpty() || !output.getRemnants().isEmpty() || !output.getCuts().isEmpty())
             return "轮廓排料不能混入矩形料头或直刀刀序";
         var material = PolygonGeometry.region(input.material().shape(), 0, 0);
         var occupied = new ArrayList<Area>();
         var counts = new HashMap<Integer, Integer>(); var ids = new HashSet<Integer>();
         for (var p : output.getPlacements()) {
+            ComputationCancellation.check();
             var demand = input.parts().stream().filter(d -> d.id() == p.demandId()).findFirst().orElse(null);
             if (demand == null || !ids.add(p.id()) || counts.merge(demand.id(), 1, Integer::sum) > demand.quantity()) return "异形结果的需求归属、标识或数量无效";
             if (!Set.of(0, 90, 180, 270).contains(p.rotationDegrees()) || (!demand.allowRotation() && p.rotationDegrees() != 0)) return "异形结果违反旋转约束";
@@ -30,6 +34,7 @@ public final class PolygonResultValidator {
             if (PolygonGeometry.area(outside) > AREA_EPS) return "异形结果超出材料实际轮廓";
             for (Area prior : occupied) { var overlap = new Area(placed); overlap.intersect(prior); if (PolygonGeometry.area(overlap) > AREA_EPS) return "异形结果裁片重叠"; }
             for (var d : input.material().exclusions()) {
+                ComputationCancellation.check();
                 var shape = d.clearance() == 0 ? d.shape() : NestingProblem.Shape.rectangle(d.shape().width() + d.clearance()*2, d.shape().height() + d.clearance()*2);
                 var overlap = new Area(placed); overlap.intersect(PolygonGeometry.region(shape, d.x() - d.clearance(), d.y() - d.clearance()));
                 if (PolygonGeometry.area(overlap) > AREA_EPS) return "异形结果进入禁入区域";
@@ -39,9 +44,11 @@ public final class PolygonResultValidator {
         if (input.process().pieceGap() > 0) {
             var pieces = output.getPlacements();
             for (int i = 0; i < pieces.size(); i++) for (int j = i + 1; j < pieces.size(); j++) {
+                ComputationCancellation.check();
                 var a = pieces.get(i); var b = pieces.get(j);
                 var av = PolygonGeometry.vertices(a.shape()); var bv = PolygonGeometry.vertices(b.shape());
                 for (int ai = 0; ai < av.size(); ai++) for (int bi = 0; bi < bv.size(); bi++) {
+                    ComputationCancellation.check();
                     var p = av.get(ai); var q = av.get((ai + 1) % av.size());
                     var r = bv.get(bi); var t = bv.get((bi + 1) % bv.size());
                     double ax=p.x()+a.x(), ay=p.y()+a.y(), bx=q.x()+a.x(), by=q.y()+a.y();

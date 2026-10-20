@@ -152,7 +152,10 @@
           "type": "integer"
         },
         "name": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "shape": {
           "$ref": "#/$defs/Shape"
@@ -268,7 +271,10 @@
           "$ref": "#/$defs/Process"
         },
         "engine": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "default": "auto"
         },
         "timeLimitSeconds": {

@@ -84,4 +84,23 @@ assert call('/api/cutting/tasks') == []
 assert call('/api/rolls') == []
 assert call('/api/remnants') == []
 check('unknown input is rejected and calculation writes no inventory, roll or business task')
+
+# Optional fields must round-trip through the advertised input and result contracts.
+optional = json.loads(json.dumps(example))
+optional['problem'].pop('engine', None)
+for part in optional['problem']['parts']:
+    part.pop('name', None)
+Draft202012Validator(schema).validate(optional)
+job = call('/api/v2/optimization-jobs', optional, str(uuid.uuid4()), expected=202)
+archived = call('/api/v2/optimization-jobs/' + job['id'] + '/input')
+matches('OptimizationRequest', archived)
+Draft202012Validator(schema).validate(archived)
+for _ in range(100):
+    job = call('/api/v2/optimization-jobs/' + job['id'])
+    if job['state'] in ['SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT']:
+        break
+    time.sleep(.05)
+assert job['state'] == 'SUCCEEDED', job
+matches('OptimizationResult', call(job['resultRef']))
+check('omitted optional engine and part name round-trip through input and result schemas')
 print(f'Executed {passed}; passed {passed}; failed 0')

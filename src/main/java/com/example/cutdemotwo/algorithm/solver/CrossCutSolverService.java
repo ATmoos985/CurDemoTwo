@@ -1,5 +1,7 @@
 package com.example.cutdemotwo.algorithm.solver;
 
+import com.example.cutdemotwo.algorithm.ComputationCancellation;
+
 import com.example.cutdemotwo.contracts.geometry.CutStep;
 import com.example.cutdemotwo.contracts.geometry.Defect;
 import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
@@ -40,6 +42,7 @@ public class CrossCutSolverService implements ICutSolverEngine {
 
     @Override
     public EngineResult solve(NestingProblem req) {
+        ComputationCancellation.check();
         EngineResult res = new EngineResult();
         if (req.width() <= 0 || req.height() <= 0 || req.process().trimStart() < 0 || req.process().trimStart() >= req.height()) {
             res.setMessage("母料尺寸或卷头修齐量无效");
@@ -47,6 +50,7 @@ public class CrossCutSolverService implements ICutSolverEngine {
         }
         List<double[]> blocked = new ArrayList<>();
         for (Defect d : EngineGeometry.defects(req)) {
+            ComputationCancellation.check();
             if (d.getSafeX() < req.width() && d.getSafeX() + d.getSafeW() > 0) {
                 blocked.add(new double[]{Math.max(0, d.getSafeY()), Math.min(req.height(), d.getSafeY() + d.getSafeH())});
             }
@@ -59,14 +63,17 @@ public class CrossCutSolverService implements ICutSolverEngine {
         if (cursor > 0 && req.width() >= req.process().minReusableWidth() && cursor >= req.process().minReusableHeight()) addRemnant(remnants, req.width(), 0, cursor, overlaps(blocked, 0, cursor));
         int unmet = 0;
         for (NestingProblem.Part demand : req.parts()) {
+            ComputationCancellation.check();
             double length = demand.shape().height();
             if (Math.abs(demand.shape().width() - req.width()) > 0.001 || length <= 0 || demand.quantity() < 0) {
                 res.setMessage("仅横切要求裁片宽度等于母料幅宽，且长度与件数有效：" + demand.name());
                 return res;
             }
             for (int i = 0; i < demand.quantity(); i++) {
+                ComputationCancellation.check();
                 double start = cursor;
                 for (double[] interval : blocked) {
+                    ComputationCancellation.check();
                     if (start < interval[1] && start + length > interval[0]) start = interval[1];
                 }
                 if (start + length > req.height()) {

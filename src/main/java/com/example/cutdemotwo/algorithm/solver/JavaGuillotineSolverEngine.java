@@ -1,5 +1,7 @@
 package com.example.cutdemotwo.algorithm.solver;
 
+import com.example.cutdemotwo.algorithm.ComputationCancellation;
+
 import com.example.cutdemotwo.contracts.geometry.CutStep;
 import com.example.cutdemotwo.contracts.geometry.Defect;
 import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
@@ -93,6 +95,7 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
 
     @Override
     public EngineResult solve(com.example.cutdemotwo.contracts.nesting.NestingProblem req) {
+        ComputationCancellation.check();
         EngineResult res = new EngineResult();
         res.setSuccess(true);
 
@@ -120,8 +123,10 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
         int itemSeq = 0;
         if (req.parts() != null) {
             for (com.example.cutdemotwo.contracts.nesting.NestingProblem.Part p : req.parts()) {
+                ComputationCancellation.check();
                 int count = Math.max(0, p.quantity());
                 for (int c = 0; c < count; c++) {
+                    ComputationCancellation.check();
                     boolean rot = p.allowRotation();
                     items.add(new DemItem(itemSeq++, p.name(), p.shape().width(), p.shape().height(), rot, p.id()));
                 }
@@ -135,6 +140,7 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
         List<Defect> allDefects = EngineGeometry.defects(req);
         List<Defect> localDefects = new ArrayList<>();
         for (Defect d : allDefects) {
+            ComputationCancellation.check();
             // 转换到 [0, activeL] 的局部坐标
             double defLocalY = mirrorY ? (rollL - (d.getSafeY() + d.getSafeH()) - trim) : (d.getSafeY() - trim);
             double defLocalX = isRightOrigin ? (rollW - (d.getSafeX() + d.getSafeW())) : d.getSafeX();
@@ -151,9 +157,11 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
         List<FreeRect> remainingSpaces = new ArrayList<>();
 
         for (DemItem it : items) {
+            ComputationCancellation.check();
             boolean placed = false;
             // 尝试在现有可用空间中寻找适格位置
             for (int rIdx = 0; rIdx < freeRects.size(); rIdx++) {
+                ComputationCancellation.check();
                 FreeRect r = freeRects.get(rIdx);
 
                 // 尝试正常方向与旋转方向
@@ -268,6 +276,7 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
         // 映射裁片物理坐标 (考虑基准点对齐与反转)
         List<PlacedPiece> finalPieces = new ArrayList<>();
         for (PlacedPiece p : rawPieces) {
+            ComputationCancellation.check();
             double physX = EngineGeometry.normalizeZero(isRightOrigin ? (rollW - p.getX() - p.getW()) : p.getX());
             double physY = EngineGeometry.normalizeZero(mirrorY ? (rollL - p.getY() - p.getL() - trim) : (p.getY() + trim));
             finalPieces.add(new PlacedPiece(p.getId(), p.getName(), physX, physY, p.getW(), p.getL(), p.isRotated(), p.getDemandId()));
@@ -289,6 +298,7 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
         }
 
         for (FreeRect fr : freeRects) {
+            ComputationCancellation.check();
             if (fr.w < 10 || fr.h < 10) continue;
 
             double physX = EngineGeometry.normalizeZero(isRightOrigin ? (rollW - fr.x - fr.w) : fr.x);
@@ -327,6 +337,7 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
             ));
         }
         for (CutStep cs : rawCutSteps) {
+            ComputationCancellation.check();
             if ("横切".equals(cs.getType())) {
                 double cutY = cs.getPos();
                 double physPos = mirrorY ? (rollL - cutY - trim) : (cutY + trim);
@@ -367,6 +378,7 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
 
     private boolean isSafeFromDefects(double px, double py, double pw, double pl, List<Defect> defects) {
         for (Defect d : defects) {
+            ComputationCancellation.check();
             boolean overlaps = !(px + pw <= d.getX() || px >= d.getX() + d.getW() ||
                     py + pl <= d.getY() || py >= d.getY() + d.getH());
             if (overlaps) {
@@ -380,6 +392,7 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
         // 查找矩形内与该裁片相交的所有瑕疵
         List<Defect> colliding = new ArrayList<>();
         for (Defect d : defects) {
+            ComputationCancellation.check();
             boolean inRect = !(r.x + r.w <= d.getX() || r.x >= d.getX() + d.getW() ||
                     r.y + r.h <= d.getY() || r.y >= d.getY() + d.getH());
             if (inRect) colliding.add(d);
@@ -392,6 +405,7 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
         candY.add(r.y);
 
         for (Defect d : colliding) {
+            ComputationCancellation.check();
             if (d.getX() + d.getW() >= r.x && d.getX() + d.getW() + pw <= r.x + r.w) {
                 candX.add(d.getX() + d.getW());
             }
@@ -401,7 +415,9 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
         }
 
         for (double cx : candX) {
+            ComputationCancellation.check();
             for (double cy : candY) {
+                ComputationCancellation.check();
                 if (cx + pw <= r.x + r.w && cy + pl <= r.y + r.h) {
                     if (isSafeFromDefects(cx, cy, pw, pl, defects)) {
                         return new double[]{cx, cy};
@@ -464,6 +480,7 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
     private boolean checkDefectOverlap(double x, double y, double w, double h, List<Defect> defects) {
         if (defects == null) return false;
         for (Defect d : defects) {
+            ComputationCancellation.check();
             boolean noOverlap = (x + w <= d.getSafeX() || x >= d.getSafeX() + d.getSafeW() ||
                     y + h <= d.getSafeY() || y >= d.getSafeY() + d.getSafeH());
             if (!noOverlap) return true;

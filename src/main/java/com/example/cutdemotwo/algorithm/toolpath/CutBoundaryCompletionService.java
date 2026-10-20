@@ -1,5 +1,7 @@
 package com.example.cutdemotwo.algorithm.toolpath;
 
+import com.example.cutdemotwo.algorithm.ComputationCancellation;
+
 import com.example.cutdemotwo.contracts.geometry.CutStep;
 import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
 import com.example.cutdemotwo.contracts.geometry.RemnantPiece;
@@ -25,10 +27,12 @@ public class CutBoundaryCompletionService {
             double rollW,
             double rollL,
             boolean isRemnantFeed) {
+        ComputationCancellation.check();
 
         List<CutStep> result = new ArrayList<>();
         if (initialCuts != null) {
             for (CutStep cs : initialCuts) {
+                ComputationCancellation.check();
                 if (isOuterBoundaryCut(cs, rollW, rollL, isRemnantFeed)) {
                     continue;
                 }
@@ -41,11 +45,13 @@ public class CutBoundaryCompletionService {
         List<double[]> rects = new ArrayList<>(); // [x, y, w, h]
         if (pieces != null) {
             for (PlacedPiece p : pieces) {
+                ComputationCancellation.check();
                 rects.add(new double[]{p.getX(), p.getY(), p.getW(), p.getL()});
             }
         }
         if (remnants != null) {
             for (RemnantPiece r : remnants) {
+                ComputationCancellation.check();
                 rects.add(new double[]{r.getX(), r.getY(), r.getW(), r.getL()});
             }
         }
@@ -57,6 +63,7 @@ public class CutBoundaryCompletionService {
         Map<Long, List<double[]>> neededVert = new HashMap<>();
 
         for (double[] r : rects) {
+            ComputationCancellation.check();
             double rx = r[0];
             double ry = r[1];
             double rw = r[2];
@@ -86,6 +93,7 @@ public class CutBoundaryCompletionService {
         Map<Long, List<double[]>> existingVert = new HashMap<>();
 
         for (CutStep cs : result) {
+            ComputationCancellation.check();
             if ("横切".equals(cs.getType())) {
                 addSegment(existingHoriz, cs.getPos(), Math.min(cs.getStart(), cs.getEnd()), Math.max(cs.getStart(), cs.getEnd()));
             } else {
@@ -95,12 +103,14 @@ public class CutBoundaryCompletionService {
 
         // 4. 检查水平横切漏刀并补齐
         for (Map.Entry<Long, List<double[]>> entry : neededHoriz.entrySet()) {
+            ComputationCancellation.check();
             double y = entry.getKey() / 10.0;
             List<double[]> mergedNeeded = mergeIntervals(entry.getValue());
             List<double[]> covered = existingHoriz.getOrDefault(entry.getKey(), Collections.emptyList());
 
             List<double[]> missing = subtractIntervals(mergedNeeded, covered);
             for (double[] interval : missing) {
+                ComputationCancellation.check();
                 if (interval[1] - interval[0] > EPS) {
                     String desc = String.format("横切补刀，切断物理边界 [Y=%.1f mm, X=%.1f~%.1f mm]", y, interval[0], interval[1]);
                     CutStep cutPatch = new CutStep(result.size() + 1, "横切", y, interval[0], interval[1], desc);
@@ -113,12 +123,14 @@ public class CutBoundaryCompletionService {
 
         // 5. 检查垂直纵切漏刀并补齐
         for (Map.Entry<Long, List<double[]>> entry : neededVert.entrySet()) {
+            ComputationCancellation.check();
             double x = entry.getKey() / 10.0;
             List<double[]> mergedNeeded = mergeIntervals(entry.getValue());
             List<double[]> covered = existingVert.getOrDefault(entry.getKey(), Collections.emptyList());
 
             List<double[]> missing = subtractIntervals(mergedNeeded, covered);
             for (double[] interval : missing) {
+                ComputationCancellation.check();
                 if (interval[1] - interval[0] > EPS) {
                     String desc = String.format("纵切补刀，切断物理边界 [X=%.1f mm, Y=%.1f~%.1f mm]", x, interval[0], interval[1]);
                     CutStep cutPatch = new CutStep(result.size() + 1, "纵切", x, interval[0], interval[1], desc);
@@ -162,6 +174,7 @@ public class CutBoundaryCompletionService {
         double[] cur = new double[]{list.get(0)[0], list.get(0)[1]};
 
         for (int i = 1; i < list.size(); i++) {
+            ComputationCancellation.check();
             double[] next = list.get(i);
             if (next[0] <= cur[1] + EPS) {
                 cur[1] = Math.max(cur[1], next[1]);
@@ -182,10 +195,12 @@ public class CutBoundaryCompletionService {
         List<double[]> result = new ArrayList<>();
 
         for (double[] n : needed) {
+            ComputationCancellation.check();
             double curStart = n[0];
             double curEnd = n[1];
 
             for (double[] c : covMerged) {
+                ComputationCancellation.check();
                 if (c[1] <= curStart + EPS) continue;
                 if (c[0] >= curEnd - EPS) break;
 
@@ -209,6 +224,7 @@ public class CutBoundaryCompletionService {
         Map<String, List<CutStep>> grouped = new LinkedHashMap<>();
         int legacyOrder = 0;
         for (CutStep cs : cuts) {
+            ComputationCancellation.check();
             // Co-linear cuts at different stages can depend on different parent regions.
             String key = cs.getType() + "_" + Math.round(cs.getPos() * 10.0) + "_"
                     + (cs.getStage() == null ? "legacy" + legacyOrder++ : cs.getStage());
@@ -217,6 +233,7 @@ public class CutBoundaryCompletionService {
 
         List<CutStep> consolidated = new ArrayList<>();
         for (List<CutStep> group : grouped.values()) {
+            ComputationCancellation.check();
             if (group.size() == 1) {
                 consolidated.add(group.get(0));
                 continue;
@@ -225,12 +242,14 @@ public class CutBoundaryCompletionService {
             // 合并同一位置的重叠/相邻段
             List<double[]> intervals = new ArrayList<>();
             for (CutStep cs : group) {
+                ComputationCancellation.check();
                 intervals.add(new double[]{Math.min(cs.getStart(), cs.getEnd()), Math.max(cs.getStart(), cs.getEnd())});
             }
             List<double[]> merged = mergeIntervals(intervals);
             CutStep template = group.get(0);
 
             for (double[] m : merged) {
+                ComputationCancellation.check();
                 CutStep cs = new CutStep(
                         consolidated.size() + 1,
                         template.getType(),
@@ -249,6 +268,7 @@ public class CutBoundaryCompletionService {
             consolidated.sort(Comparator.comparingInt(CutStep::getStage));
 
         for (int i = 0; i < consolidated.size(); i++) {
+            ComputationCancellation.check();
             consolidated.get(i).setStep(i + 1);
         }
         return consolidated;

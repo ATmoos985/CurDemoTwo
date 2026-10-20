@@ -920,7 +920,10 @@
             "type": "integer"
           },
           "name": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "shape": {
             "$ref": "#/components/schemas/Shape"
@@ -1036,7 +1039,10 @@
             "$ref": "#/components/schemas/Process"
           },
           "engine": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "default": "auto"
           },
           "timeLimitSeconds": {

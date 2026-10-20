@@ -1,5 +1,7 @@
 package com.example.cutdemotwo.algorithm.solver;
 
+import com.example.cutdemotwo.algorithm.ComputationCancellation;
+
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -12,12 +14,14 @@ import java.util.Set;
 final class RectangularResultValidator {
     private static final double EPS = EngineGeometry.COORDINATE_EPS_MM;
     static String validate(NestingProblem input, EngineResult output) {
+        ComputationCancellation.check();
         Map<Integer, NestingProblem.Part> demands = new HashMap<>();
         input.parts().forEach(p -> demands.put(p.id(), p));
         Map<Integer, Integer> counts = new HashMap<>();
         Set<Integer> ids = new HashSet<>();
         List<double[]> occupied = new ArrayList<>();
         for (var p : output.getPieces()) {
+            ComputationCancellation.check();
             var demand = demands.get(p.getDemandId());
             if (demand == null || !ids.add(p.getId())) return "求解结果的裁片标识或需求归属无效";
             if (counts.merge(demand.id(), 1, Integer::sum) > demand.quantity()) return "求解结果超过需求数量";
@@ -28,6 +32,7 @@ final class RectangularResultValidator {
             double[] rect = {p.getX(), p.getY(), p.getW(), p.getL()};
             if (!inside(rect, input) || occupied.stream().anyMatch(r -> overlap(r, rect))) return "求解结果裁片越界或重叠";
             for (var d : input.material().exclusions()) {
+                ComputationCancellation.check();
                 double[] excluded = {d.x() - d.clearance(), d.y() - d.clearance(),
                         d.shape().width() + d.clearance() * 2, d.shape().height() + d.clearance() * 2};
                 if (overlap(rect, excluded)) return "求解结果进入禁入区域";
@@ -36,6 +41,7 @@ final class RectangularResultValidator {
         }
         Set<String> leftovers = new HashSet<>();
         for (var r : output.getRemnants()) {
+            ComputationCancellation.check();
             double[] rect = {r.getX(), r.getY(), r.getW(), r.getL()};
             if (r.getId() == null || r.getId().isBlank() || !leftovers.add(r.getId()) || !inside(rect, input) || occupied.stream().anyMatch(p -> overlap(p, rect)))
                 return "求解结果余料越界、重叠或标识重复";
@@ -44,6 +50,7 @@ final class RectangularResultValidator {
         if (!Double.isFinite(output.getSuggestedFeedLength()) || output.getSuggestedFeedLength() < 0
                 || output.getSuggestedFeedLength() > input.height() + EPS) return "求解结果的进给长度无效";
         for (var c : output.getCuts()) {
+            ComputationCancellation.check();
             boolean horizontal = "横切".equals(c.getType());
             if (!horizontal && !"纵切".equals(c.getType())) return "求解结果包含未知刀路类型";
             double x1 = c.getStartX() == null ? (horizontal ? c.getStart() : c.getPos()) : c.getStartX();

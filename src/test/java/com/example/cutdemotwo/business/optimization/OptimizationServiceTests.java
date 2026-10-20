@@ -146,6 +146,27 @@ class OptimizationServiceTests {
             engine.release.countDown();assertEquals("SUCCEEDED",finished(s,ids.iterator().next()).state());
         } finally {engine.release.countDown();pool.shutdownNow();}
     }
+    @Test @Timeout(20) void acceptedJobsAreNotRejectedDuringWorkerHandoff() throws Exception {
+        var store=new OptimizationJobStore(){
+            public List<StoredOptimizationJob> load(){return List.of();}
+            public void save(StoredOptimizationJob document){}
+            public void close(){}
+        };
+        var s=service(new SolverFactory(List.of(new CrossCutSolverService())),store,1,10000);
+        var ids=new ArrayList<String>();
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
+        while(ids.size()<10000 && System.nanoTime()<deadline) {
+            try {
+                var job=s.submit("handoff-"+ids.size(),request("crosscut",1,3,false));
+                assertNotEquals("QUEUE_REJECTED",job.code(),"Durably accepted work must not be lost at worker handoff");
+                ids.add(job.id());
+            } catch(OptimizationService.Failure full) {
+                assertEquals("QUOTA_EXCEEDED",full.code);Thread.yield();
+            }
+        }
+        assertEquals(10000,ids.size());
+        for(String id:ids)assertEquals("SUCCEEDED",finished(s,id).state());
+    }
     private record FileCount(Path path){long count()throws Exception{try(var files=Files.list(path)){return files.filter(p->p.toString().endsWith(".json")).count();}}}
     @Test void invalidEngineOutputIsFailedWithoutPublishingUnsafeGeometry()throws Exception{
         ICutSolverEngine invalid=new ICutSolverEngine(){

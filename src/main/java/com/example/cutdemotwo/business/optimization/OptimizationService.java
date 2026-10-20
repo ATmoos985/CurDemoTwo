@@ -47,7 +47,10 @@ public class OptimizationService implements AutoCloseable {
         if (workers<1 || workers>16 || queueCapacity<1 || queueCapacity>1000 || maxStored<1) {
             store.close();throw new IllegalArgumentException("计算作业并发、排队或归档限额配置无效");
         }
-        executor = new ThreadPoolExecutor(workers,workers,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(queueCapacity),r->{var t=new Thread(r,"optimization-worker");t.setDaemon(true);return t;});
+        // pending bounds accepted work to workers + queueCapacity. A finishing task releases
+        // that permit just before ThreadPoolExecutor releases its worker; reserve handoff slots
+        // so an already persisted replacement cannot be rejected during that brief interval.
+        executor = new ThreadPoolExecutor(workers,workers,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(workers+queueCapacity),r->{var t=new Thread(r,"optimization-worker");t.setDaemon(true);return t;});
         timer = Executors.newSingleThreadScheduledExecutor(r->{var t=new Thread(r,"optimization-deadline");t.setDaemon(true);return t;});
         try {
             for (var document : store.load()) {

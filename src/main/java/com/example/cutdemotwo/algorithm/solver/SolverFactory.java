@@ -110,6 +110,7 @@ public class SolverFactory {
         String selected = problem == null ? null : problem.engine();
         String requested = selected, fallbackReason = null;
         try {
+            com.example.cutdemotwo.algorithm.ComputationCancellation.check();
             var selection = select(problem, allowFallback);
             ICutSolverEngine engine = selection.engine();
             requested = selection.requested(); selected = engine.getEngineType(); fallbackReason = selection.fallbackReason();
@@ -118,12 +119,16 @@ public class SolverFactory {
             if (!engine.isAvailable())
                 return NestingResult.failure("UNAVAILABLE", "求解引擎尚未就绪", selected, requested, fallbackReason, elapsed(start));
             EngineResult result = engine.solve(problem);
+            com.example.cutdemotwo.algorithm.ComputationCancellation.check();
             if (!result.isSuccess() && !"NO_SOLUTION_FOUND".equals(result.getFailureStatus()))
                 return NestingResult.failure(result.getFailureStatus(), result.getMessage(), selected, requested, fallbackReason, elapsed(start));
             String error = "CONTOUR".equals(problem.process().mode()) ? PolygonResultValidator.validate(problem, result)
                     : !result.getPlacements().isEmpty() ? "矩形工艺不能混入轮廓候选结果" : RectangularResultValidator.validate(problem, result);
             if (error != null) return NestingResult.failure("INVALID_RESULT", error, selected, requested, fallbackReason, elapsed(start));
+            com.example.cutdemotwo.algorithm.ComputationCancellation.check();
             return toResult(problem, result, selected, capabilities.version(), elapsed(start), requested, fallbackReason);
+        } catch (java.util.concurrent.CancellationException cancelled) {
+            return NestingResult.failure("CANCELLED", "计算已响应停止请求；未发布未经完整校验的结果", selected, requested, fallbackReason, elapsed(start));
         } catch (Rejected error) {
             return NestingResult.failure(error.status, error.getMessage(), selected, requested, fallbackReason, elapsed(start));
         } catch (RuntimeException error) {
