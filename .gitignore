@@ -36,3 +36,19 @@ build/
 
 ### Temporary Scratch Files ###
 scratch*
+
+### Logs & Runtime Output ###
+*.log
+*.log.*
+logs/
+app.log
+nohup.out
+*.dump
+*.dumpstream
+hs_err_pid*
+replay_pid*
+
+### OS Generated ###
+.DS_Store
+Thumbs.db
+
