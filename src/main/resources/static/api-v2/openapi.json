@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "CurDemoTwo Optimization Jobs",
+    "title": "CurDemoTwo Computation and Execution API",
     "version": "2.0.0",
-    "description": "Single-dispatcher local job archive, nesting-v1 geometry profile. No inventory writes. v1 endpoints remain compatible. No distributed leases, SSE, authentication or multi-material support in this stage. Schema validation is followed by engine and geometry checks. timeLimitSeconds requests cooperative interruption, not guaranteed hard preemption. 一维 slitting-v1 使用独立计算进程；输入单位 mm，卷长分辨率1000 mm。"
+    "description": "标准计算作业不写库存；文件模式单实例，JDBC 模式支持租约调度。二维、唛架与一维适配能力以 capabilities 为准。执行单接口关联已保存的二维业务任务方案，与库存共享事务；整卷/整块预约、开工、报工和取消已实现。身份认证、多材料、不可变流水及 MCP 尚待实现。"
   },
   "servers": [
     {
@@ -800,6 +800,288 @@
           }
         }
       ]
+    },
+    "/api/v2/execution-orders": {
+      "get": {
+        "summary": "查询执行单及有效预约状态",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；命令幂等重放返回当前执行单状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExecutionView"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "字段、业务输入无效或资源不存在"
+          },
+          "409": {
+            "description": "幂等内容、版本、预约或执行状态冲突"
+          }
+        }
+      },
+      "post": {
+        "summary": "从已有任务方案创建草稿执行单；不预约库存",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；命令幂等重放返回当前执行单状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionOrder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "字段、业务输入无效或资源不存在"
+          },
+          "409": {
+            "description": "幂等内容、版本、预约或执行状态冲突"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v2/execution-orders/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "responses": {
+          "200": {
+            "description": "成功；命令幂等重放返回当前执行单状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "字段、业务输入无效或资源不存在"
+          },
+          "409": {
+            "description": "幂等内容、版本、预约或执行状态冲突"
+          }
+        }
+      }
+    },
+    "/api/v2/execution-orders/{id}/release": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "下达并预约整卷/整块及需求；时长 1–86400 秒",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；命令幂等重放返回当前执行单状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionOrder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "字段、业务输入无效或资源不存在"
+          },
+          "409": {
+            "description": "幂等内容、版本、预约或执行状态冲突"
+          }
+        }
+      }
+    },
+    "/api/v2/execution-orders/{id}/start": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "开工；预约不再自动过期",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；命令幂等重放返回当前执行单状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionOrder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "字段、业务输入无效或资源不存在"
+          },
+          "409": {
+            "description": "幂等内容、版本、预约或执行状态冲突"
+          }
+        }
+      }
+    },
+    "/api/v2/execution-orders/{id}/cancel": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "仅未开工可取消；必须填写原因",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；命令幂等重放返回当前执行单状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionOrder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "字段、业务输入无效或资源不存在"
+          },
+          "409": {
+            "description": "幂等内容、版本、预约或执行状态冲突"
+          }
+        }
+      }
+    },
+    "/api/v2/execution-orders/{id}/reports": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "按已开工方案报工；回执沿用业务报工契约，同方案不同报工内容冲突",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionReport"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；命令幂等重放返回当前执行单状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "字段、业务输入无效或资源不存在"
+          },
+          "409": {
+            "description": "幂等内容、版本、预约或执行状态冲突"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2433,6 +2715,294 @@
           "motherAreaMm2",
           "usableAreaMm2",
           "totalOverproduced"
+        ]
+      },
+      "ExecutionCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "planId": {
+            "type": "string"
+          },
+          "station": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "planId",
+          "station"
+        ]
+      },
+      "ExecutionCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reservationSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 86400
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "operationId",
+          "expectedVersion",
+          "reservationSeconds",
+          "reason"
+        ]
+      },
+      "ExecutionEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "operationId": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "expectedVersion": {
+            "type": "integer"
+          },
+          "reservationSeconds": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "at": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "operationId",
+          "action",
+          "expectedVersion",
+          "reservationSeconds",
+          "reason",
+          "at"
+        ]
+      },
+      "ExecutionOrder": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "planId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "station": {
+            "type": "string"
+          },
+          "materialType": {
+            "enum": [
+              "roll",
+              "remnant"
+            ]
+          },
+          "materialId": {
+            "type": "string"
+          },
+          "demandQuantities": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "state": {
+            "enum": [
+              "DRAFT",
+              "RELEASED",
+              "RUNNING",
+              "CANCELLED",
+              "REPORTED",
+              "REVERSED"
+            ]
+          },
+          "version": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "expiresAt": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExecutionEvent"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "idempotencyKey",
+          "planId",
+          "taskId",
+          "station",
+          "materialType",
+          "materialId",
+          "demandQuantities",
+          "state",
+          "version",
+          "createdAt",
+          "expiresAt",
+          "events"
+        ]
+      },
+      "ExecutionView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "execution": {
+            "$ref": "#/components/schemas/ExecutionOrder"
+          },
+          "effectiveState": {
+            "enum": [
+              "DRAFT",
+              "RELEASED",
+              "EXPIRED",
+              "RUNNING",
+              "CANCELLED",
+              "REPORTED",
+              "REVERSED"
+            ]
+          },
+          "reservationActive": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "execution",
+          "effectiveState",
+          "reservationActive"
+        ]
+      },
+      "ExecutionRecoveredRemnant": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "w": {
+            "type": "number"
+          },
+          "l": {
+            "type": "number"
+          },
+          "area": {
+            "type": "number"
+          },
+          "hasDefect": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "w",
+          "l",
+          "hasDefect"
+        ]
+      },
+      "ExecutionReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "planId": {
+            "type": "string"
+          },
+          "actualCutLen": {
+            "type": "number",
+            "minimum": 0
+          },
+          "finishedPieceCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "actualRemnants": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ExecutionRecoveredRemnant"
+            }
+          },
+          "location": {
+            "type": "string"
+          },
+          "pieceResults": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "pieceId": {
+                  "type": "integer"
+                },
+                "outcome": {
+                  "enum": [
+                    "QUALIFIED",
+                    "REJECTED",
+                    "UNCUT"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pieceId",
+                "outcome",
+                "reason"
+              ]
+            }
+          }
+        },
+        "required": [
+          "planId",
+          "actualCutLen",
+          "finishedPieceCount",
+          "location"
         ]
       }
     }

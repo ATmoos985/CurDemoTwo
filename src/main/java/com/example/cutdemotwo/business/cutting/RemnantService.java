@@ -2,6 +2,7 @@ package com.example.cutdemotwo.business.cutting;
 
 import com.example.cutdemotwo.contracts.geometry.Defect;
 import com.example.cutdemotwo.business.model.CuttingTask;
+import com.example.cutdemotwo.business.model.ExecutionOrder;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
 import com.example.cutdemotwo.business.model.RemnantStock;
 import com.example.cutdemotwo.business.model.SolveRequest;
@@ -38,8 +39,10 @@ public class RemnantService {
     private final ObjectMapper json = new ObjectMapper();
     private final InventoryStore store;
     private final Map<String, CuttingPlan> plans = new LinkedHashMap<>();
+    private final Map<String,ExecutionOrder> executions = new LinkedHashMap<>();
     private long revision;
     private boolean accessing;
+    private long operationTime;
     @Value("${cutdemo.measurement.tolerance-mm:5}")
     private double measurementToleranceMm = 5;
 
@@ -131,7 +134,7 @@ public class RemnantService {
 
     private InventorySnapshot snapshot() {
         return new InventorySnapshot(new ArrayList<>(motherRolls.values()), new ArrayList<>(remnantPool.values()),
-                receipts, remnantSeq.get(), defectSeq.get(), tasks, plans, revision);
+                receipts, remnantSeq.get(), defectSeq.get(), tasks, plans, revision, executions);
     }
 
     private void restore(InventorySnapshot snapshot) {
@@ -140,6 +143,7 @@ public class RemnantService {
         receipts.clear(); receipts.putAll(snapshot.receipts());
         tasks.clear(); if (snapshot.tasks() != null) tasks.putAll(snapshot.tasks());
         plans.clear(); if (snapshot.plans() != null) plans.putAll(snapshot.plans());
+        executions.clear();executions.putAll(snapshot.executions());
         revision = snapshot.revision();
         remnantSeq.set(snapshot.remnantSeq()); defectSeq.set(snapshot.defectSeq());
     }
@@ -147,6 +151,7 @@ public class RemnantService {
     /** One business command either persists every change or restores its entire before-image. */
     private <T> T mutate(java.util.function.Supplier<T> command) {
         refresh();
+        operationTime = store.now();
         byte[] before = json.writeValueAsBytes(snapshot());
         restore(json.readValue(before, InventorySnapshot.class));
         accessing = true;
@@ -169,8 +174,150 @@ public class RemnantService {
 
     private <T> T read(java.util.function.Supplier<T> query) {
         if (accessing) return query.get();
-        refresh(); accessing = true;
+        refresh(); operationTime = store.now(); accessing = true;
         try { return query.get(); } finally { accessing = false; }
+    }
+
+    public synchronized ExecutionOrder createExecution(String key,ExecutionOrder.Create input) {
+        if(key==null || !key.matches("[A-Za-z0-9._:-]{8,128}") || input==null || input.planId()==null
+                || input.station()==null || input.station().isBlank() || input.station().length()>100)
+            throw new IllegalArgumentException("请提供有效幂等键、方案和 1–100 字工位");
+        return mutate(()->{
+            for(var e:executions.values())if(e.idempotencyKey().equals(key)) {
+                if(!e.planId().equals(input.planId()) || !e.station().equals(input.station()))
+                    throw new InventoryConflictException("同一幂等键已用于其他执行单内容");
+                return e;
+            }
+            var plan=plans.get(input.planId());
+            if(plan==null || !"PENDING".equals(plan.status()) || plan.request().getTaskId()==null || plan.result().getPieces().isEmpty())
+                throw new IllegalArgumentException("执行单必须关联有裁片且尚未报工的任务方案");
+            if(executions.values().stream().anyMatch(e->e.planId().equals(plan.id())
+                    && !Set.of("CANCELLED","EXPIRED").contains(e.effectiveState(operationTime))))
+                throw new InventoryConflictException("该方案已有执行单，请查询已有执行单");
+            var counts=new LinkedHashMap<String,Integer>();
+            plan.result().getPieces().forEach(piece->{
+                if(piece.getDemandId()==null)throw new IllegalArgumentException("裁片缺少需求身份");
+                counts.merge(String.valueOf(piece.getDemandId()),1,Integer::sum);
+            });
+            var request=plan.request();boolean remnant="remnant".equals(request.getFeedPortType());
+            var e=new ExecutionOrder(UUID.randomUUID().toString(),key,plan.id(),request.getTaskId(),input.station(),
+                    remnant?"remnant":"roll",remnant?request.getSourceRemnantId():request.getRollId(),counts,
+                    "DRAFT",1,operationTime,null,List.of());
+            executions.put(e.id(),e);return e;
+        });
+    }
+
+    public synchronized List<Map<String,Object>> executionOrders(String taskId) {
+        return read(()->executions.values().stream().filter(e->taskId==null || taskId.equals(e.taskId()))
+                .sorted(Comparator.comparingLong(ExecutionOrder::createdAt).thenComparing(ExecutionOrder::id)).map(this::executionView).toList());
+    }
+    public synchronized Map<String,Object> executionOrder(String id) { return read(()->executionView(requiredExecution(id))); }
+    private Map<String,Object> executionView(ExecutionOrder e) {
+        return Map.of("execution",e,"effectiveState",e.effectiveState(operationTime),"reservationActive",e.reserves(operationTime));
+    }
+    private ExecutionOrder requiredExecution(String id) {
+        var e=executions.get(id);if(e==null)throw new IllegalArgumentException("执行单不存在");return e;
+    }
+    public synchronized ExecutionOrder changeExecution(String id,String action,ExecutionOrder.Command command) {
+        if(command==null || command.operationId()==null || !command.operationId().matches("[A-Za-z0-9._:-]{8,128}")
+                || command.expectedVersion()<1 || command.reason()==null || command.reason().length()>500)
+            throw new IllegalArgumentException("请提供操作幂等编号、执行单版本与不超过 500 字原因");
+        if(!Set.of("release","start","cancel").contains(action))throw new IllegalArgumentException("未知执行单操作");
+        if("release".equals(action)?command.reservationSeconds()<1 || command.reservationSeconds()>86400:command.reservationSeconds()!=0)
+            throw new IllegalArgumentException("下达预约时长须为 1–86400 秒，其他操作填 0");
+        if("cancel".equals(action) && command.reason().isBlank())throw new IllegalArgumentException("取消须填写原因");
+        return mutate(()->{
+            var e=requiredExecution(id);
+            for(var event:e.events())if(event.operationId().equals(command.operationId())) {
+                if(!event.action().equals(action) || event.expectedVersion()!=command.expectedVersion()
+                        || event.reservationSeconds()!=command.reservationSeconds() || !event.reason().equals(command.reason()))
+                    throw new InventoryConflictException("操作编号已绑定不同执行命令");
+                return e;
+            }
+            if(e.version()!=command.expectedVersion())throw new InventoryConflictException("执行单版本已变化，请刷新");
+            long now=operationTime;String state=e.effectiveState(now);ExecutionOrder updated;
+            switch(action) {
+                case "release" -> {
+                    if(!Set.of("DRAFT","EXPIRED").contains(state))throw new InventoryConflictException("只有待下达或预约已过期的执行单可以下达");
+                    validateExecutionRelease(e);
+                    updated=e.transition("RELEASED",now+command.reservationSeconds()*1000L,action,command,now);
+                }
+                case "start" -> {
+                    if(!"RELEASED".equals(state))throw new InventoryConflictException("执行单尚未下达、预约已过期或已开工");
+                    validateExecutionRelease(e);
+                    updated=e.transition("RUNNING",null,action,command,now);
+                }
+                default -> {
+                    if(!Set.of("DRAFT","RELEASED","EXPIRED").contains(state))throw new InventoryConflictException("已开工不能取消或删除；请按实际产出报工");
+                    updated=e.transition("CANCELLED",null,action,command,now);
+                }
+            }
+            executions.put(id,updated);return updated;
+        });
+    }
+    private void validateExecutionRelease(ExecutionOrder execution) {
+        if(executions.values().stream().anyMatch(e->!e.id().equals(execution.id()) && e.planId().equals(execution.planId()) && e.reserves(operationTime)))
+            throw new InventoryConflictException("同一方案已有其他有效执行单");
+        var plan=plans.get(execution.planId());
+        if(plan==null || !"PENDING".equals(plan.status()))throw new InventoryConflictException("方案已失效或报工");
+        prepareTaskSolveInternal(plan.request());
+        if(!Objects.equals(plan.baseline(),materialFingerprintInternal(plan.request())))throw new InventoryConflictException("方案材料快照已变化，请重新排料");
+        ensureMaterialNotReserved(execution.materialType(),execution.materialId(),execution.planId());
+        if("roll".equals(execution.materialType()) && !"PASSED".equals(motherRolls.get(execution.materialId()).getInspectionStatus()))
+            throw new InventoryConflictException("母卷尚未检验合格，不能下达");
+        var completed=completedQuantitiesInternal(execution.taskId());var reserved=reservedQuantities(execution.taskId(),execution.planId());
+        var task=tasks.get(execution.taskId());
+        for(var entry:execution.demandQuantities().entrySet()) {
+            var line=task.demands().stream().filter(d->String.valueOf(d.id()).equals(entry.getKey())).findFirst()
+                    .orElseThrow(()->new InventoryConflictException("执行单需求已失效"));
+            if(entry.getValue()>line.quantity()-completed.getOrDefault(entry.getKey(),0)-reserved.getOrDefault(entry.getKey(),0))
+                throw new InventoryConflictException("需求已被其他执行单占用或已完成，不能重复下达");
+        }
+    }
+    public synchronized Map<String,Object> reportExecution(String id,CutReport report) {
+        return mutate(()->{
+            var e=requiredExecution(id);
+            if(report==null || !e.planId().equals(report.planId()))throw new IllegalArgumentException("报工方案与执行单不一致");
+            if(!Set.of("RUNNING","REPORTED").contains(e.state()))throw new InventoryConflictException("执行单尚未开工或已终止");
+            return confirmPlanInternal(report);
+        });
+    }
+    private Map<String,Integer> reservedQuantities(String taskId,String exceptPlan) {
+        var counts=new LinkedHashMap<String,Integer>();long now=operationTime;
+        executions.values().stream().filter(e->Objects.equals(e.taskId(),taskId) && !Objects.equals(e.planId(),exceptPlan) && e.reserves(now))
+                .forEach(e->e.demandQuantities().forEach((id,n)->counts.merge(id,n,Integer::sum)));
+        return counts;
+    }
+    private void ensureMaterialNotReserved(String type,String id,String exceptPlan) {
+        if(executions.values().stream().anyMatch(e->e.materialType().equals(type) && Objects.equals(e.materialId(),id)
+                && !Objects.equals(e.planId(),exceptPlan) && e.reserves(operationTime)))
+            throw new InventoryConflictException("材料已被其他执行单预约或正在加工，请先处理原执行单");
+    }
+    private void ensurePlanNotExecuting(String planId) {
+        if(executions.values().stream().anyMatch(e->e.planId().equals(planId) && e.reserves(operationTime)))
+            throw new InventoryConflictException("方案已有有效执行单，请先取消未开工执行单；已开工须实际报工");
+    }
+    private void validateExecutionReport(SolveRequest request,SolveResponse result,CutReport report) {
+        boolean remnant="remnant".equalsIgnoreCase(request.getFeedPortType());
+        ensureMaterialNotReserved(remnant?"remnant":"roll",remnant?request.getSourceRemnantId():request.getRollId(),report.planId());
+        var execution=executions.values().stream().filter(e->e.planId().equals(report.planId()))
+                .max(Comparator.comparing((ExecutionOrder e)->"RUNNING".equals(e.state())).thenComparingLong(ExecutionOrder::createdAt));
+        if(execution.isPresent()) {
+            var e=execution.get();
+            if(!"RUNNING".equals(e.state()))throw new InventoryConflictException("请通过已下达执行单开工后报工");
+            var original=plans.get(e.planId());
+            if(original==null || !json.writeValueAsString(request).equals(json.writeValueAsString(original.request()))
+                    || !json.writeValueAsString(result).equals(json.writeValueAsString(original.result())))
+                throw new InventoryConflictException("执行报工不得替换已下达方案内容");
+        }
+    }
+    private void finishExecution(String planId,String state) {
+        executions.replaceAll((id,e)->e.planId().equals(planId) && Set.of("RUNNING","REPORTED").contains(e.state())
+                ?e.transition(state,null,state.toLowerCase(),new ExecutionOrder.Command("system-"+state.toLowerCase()+"-"+planId,e.version(),0,"报工事务"),operationTime):e);
+    }
+    private void verifyReportReplay(Map<String,Object> receipt,CutReport report) {
+        Object hash=receipt.get("reportContent");
+        if(hash!=null && !hash.equals(json.writeValueAsString(report)))throw new InventoryConflictException("该方案已报工，重复提交的内容不同");
     }
 
     public synchronized String materialFingerprint(SolveRequest request) {
@@ -219,6 +366,7 @@ public class RemnantService {
                     throw new IllegalArgumentException("调整操作编号已用于其他内容，请重新校验");
                 return existing;
             }
+            ensurePlanNotExecuting(parentId);
             CuttingPlan parent = plans.get(parentId);
             if (parent == null || !"PENDING".equals(parent.status())) throw new IllegalArgumentException("原方案已报工或取消，不能保存调整版");
             prepareTaskSolveInternal(parent.request());
@@ -239,6 +387,7 @@ public class RemnantService {
 
     public synchronized CuttingPlan changePlanStatus(String id, boolean restore) {
         return mutate(() -> {
+            ensurePlanNotExecuting(id);
             CuttingPlan plan = plans.get(id);
             if (plan == null || !Set.of("PENDING", "CANCELLED").contains(plan.status()))
                 throw new IllegalArgumentException("已报工方案不能取消或恢复，请通过报工记录冲销");
@@ -257,6 +406,7 @@ public class RemnantService {
         Map<String, Object> existing = read(() -> receipts.get(report.planId()));
         if (existing != null) {
             if ("REVERSED".equals(existing.get("status"))) throw new IllegalArgumentException("该报工已冲销，请重新排料");
+            verifyReportReplay(existing,report);
             return qualityProjection(existing);
         }
         return mutate(() -> confirmPlanInternal(report));
@@ -270,6 +420,7 @@ public class RemnantService {
             Map<String, Object> receipt = receipts.get(report.planId());
             if (receipt != null) {
                 if ("REVERSED".equals(receipt.get("status"))) throw new IllegalArgumentException("该报工已冲销，请重新排料");
+                verifyReportReplay(receipt,report);
                 return qualityProjection(receipt);
             }
             CuttingPlan plan = plans.get(report.planId());
@@ -402,12 +553,14 @@ public class RemnantService {
             List<RemnantStock> children = new ArrayList<>();
             for (Object item : (List<?>) receipt.get("derivedRemnants")) {
                 RemnantStock original = json.convertValue(item, RemnantStock.class);
+                ensureMaterialNotReserved("remnant",original.getId(),null);
                 RemnantStock current = remnantPool.get(original.getId());
                 if (current == null || !json.writeValueAsString(original).equals(json.writeValueAsString(current)))
                     throw new IllegalArgumentException("派生料头 " + original.getId() + " 已流转或修改，请先撤回后续操作");
                 children.add(current);
             }
             boolean remnant = "remnant".equals(receipt.get("feedPortType"));
+            ensureMaterialNotReserved(remnant?"remnant":"roll",String.valueOf(receipt.get(remnant?"sourceRemnantId":"rollId")),null);
             if (remnant) {
                 RemnantStock parent = remnantPool.get(receipt.get("sourceRemnantId"));
                 if (parent == null || !json.writeValueAsString(parent).equals(undo.get("parentAfter")))
@@ -432,6 +585,7 @@ public class RemnantService {
             receipt.put("status", "REVERSED");
             receipt.put("reversedAt", LocalDateTime.now().toString());
             receipt.put("reversalReason", reason.trim());
+            finishExecution(planId,"REVERSED");
             CuttingPlan plan = plans.get(planId);
             if (plan != null) plans.put(planId, plan.withStatus("REVERSED"));
             return receipt;
@@ -499,7 +653,7 @@ public class RemnantService {
     private Map<String, Object> taskDetailInternal(String id) {
         CuttingTask task = tasks.get(id);
         if (task == null) throw new IllegalArgumentException("切割任务不存在");
-        return Map.of("task", task, "completed", completedQuantities(id), "reports", taskReports(id));
+        return Map.of("task", task, "completed", completedQuantities(id), "reserved",reservedQuantities(id,null), "reports", taskReports(id), "executions",executionOrders(id));
     }
 
     public synchronized CuttingTask saveTask(CuttingTask input) {
@@ -513,6 +667,8 @@ public class RemnantService {
         String id = input.id() == null || input.id().isBlank() ? UUID.randomUUID().toString() : input.id();
         CuttingTask previous = tasks.get(id);
         if (previous == null && input.id() != null && !input.id().isBlank()) throw new IllegalArgumentException("切割任务不存在");
+        if (previous != null && executions.values().stream().anyMatch(e->e.taskId().equals(id) && e.reserves(operationTime)))
+            throw new InventoryConflictException("任务已有下达或执行中的需求，请完成报工或取消预约后编辑");
         if (previous != null && previous.revision() != input.revision()) throw new IllegalArgumentException("任务已更新，请重新打开后编辑");
         Set<Integer> ids = new HashSet<>();
         CuttingTask.Process process = input.process();
@@ -609,13 +765,14 @@ public class RemnantService {
         if (plan.getPieces().stream().anyMatch(p -> p.getDemandId() == null)) throw new IllegalArgumentException("裁片缺少需求归属");
         Map<Integer, Long> good = result.qualified().stream().collect(Collectors.groupingBy(p -> p.getDemandId(), Collectors.counting()));
         Map<String, Integer> completed = completedQuantities(task.id());
+        var reserved=reservedQuantities(task.id(),plan.getPlanId());
         for (var piece : plan.getPieces()) {
             var line = task.demands().stream().filter(d -> d.id() == piece.getDemandId()).findFirst()
                     .orElseThrow(() -> new IllegalArgumentException("裁片缺少需求归属"));
             double w = piece.isRotated() ? line.length() : line.width(), l = piece.isRotated() ? line.width() : line.length();
             if (Math.abs(piece.getW()-w) > .001 || Math.abs(piece.getL()-l) > .001)
                 throw new IllegalArgumentException("裁片尺寸与当前需求不一致");
-            if (good.getOrDefault(line.id(), 0L) > line.quantity() - completed.getOrDefault(String.valueOf(line.id()), 0))
+            if (good.getOrDefault(line.id(), 0L) > line.quantity() - completed.getOrDefault(String.valueOf(line.id()), 0) - reserved.getOrDefault(String.valueOf(line.id()),0))
                 throw new IllegalArgumentException("合格裁片超过当前剩余需求，请刷新任务后核对");
         }
     }
@@ -698,8 +855,10 @@ public class RemnantService {
         Map<String, Object> old = receipts.get(report.planId());
         if (old != null) {
             if ("REVERSED".equals(old.get("status"))) throw new IllegalArgumentException("该报工已撤回，请重新排料");
+            verifyReportReplay(old,report);
             return old;
         }
+        validateExecutionReport(request,plan,report);
         ReportOutput output = ReportOutput.resolve(plan, report);
         validateTaskReport(request, plan, output);
         boolean remnantFeed = "remnant".equalsIgnoreCase(request.getFeedPortType());
@@ -854,7 +1013,9 @@ public class RemnantService {
         receipt.put("derivedRemnants", children);
         receipt.put("recoveredGeometry", recoveredGeometry);
         receipt.put("confirmedAt", LocalDateTime.now().toString());
+        receipt.put("reportContent",json.writeValueAsString(report));
         receipts.put(report.planId(), receipt);
+        finishExecution(report.planId(),"REPORTED");
         return receipt;
     }
 
@@ -867,11 +1028,14 @@ public class RemnantService {
     }
 
     private boolean resetRollInternal(String rollId, boolean force) {
+        ensureMaterialNotReserved("roll",rollId,null);
+        if(executions.values().stream().anyMatch(e->Objects.equals(e.materialId(),rollId) || plans.containsKey(e.planId()) && Objects.equals(plans.get(e.planId()).request().getRollId(),rollId)))
+            throw new InventoryConflictException("材料已有执行单追溯，禁止演示重置");
         MotherRollInfo roll = motherRolls.get(rollId);
         if (roll == null) return false;
         if (receipts.values().stream().anyMatch(r -> rollId.equals(r.get("rollId")) && !qualityEvents(r).isEmpty()))
             throw new IllegalArgumentException("母卷已有复检处置，不能通过演示重置清除产出追溯");
-        if (!force && receipts.values().stream().anyMatch(r -> rollId.equals(r.get("rollId")) && r.get("taskId") != null))
+        if (receipts.values().stream().anyMatch(r -> rollId.equals(r.get("rollId")) && r.get("taskId") != null))
             throw new IllegalArgumentException("该母卷已有任务报工记录，不能通过演示重置清除");
         roll.setCurrentRemainingLength(roll.getTotalLength());
         roll.setUsedLength(0.0);
@@ -1114,6 +1278,7 @@ public class RemnantService {
                 roll.getWidth() <= 0 || roll.getTotalLength() <= 0) {
             throw new IllegalArgumentException("母卷幅宽和总长度必须大于零");
         }
+        ensureMaterialNotReserved("roll",roll.getRollId(),null);
         MotherRollInfo existing = motherRolls.get(roll.getRollId());
         if (existing != null) {
             if (Math.abs(existing.getWidth() - roll.getWidth()) > 0.001 ||
@@ -1201,6 +1366,7 @@ public class RemnantService {
     }
 
     private Defect addDefectToRollInternal(String rollId, Defect defect) {
+        ensureMaterialNotReserved("roll",rollId,null);
         MotherRollInfo roll = getMotherRoll(rollId);
         if (roll == null) {
             throw new IllegalArgumentException("未找到母卷: " + rollId);
@@ -1227,6 +1393,7 @@ public class RemnantService {
     }
 
     private boolean scrapRemnantInternal(String id, String reason) {
+        ensureMaterialNotReserved("remnant",id,null);
         RemnantStock item = remnantPool.get(id);
         if (item == null) return false;
         item.setStatus("SCRAPPED");
@@ -1354,6 +1521,7 @@ public class RemnantService {
     }
 
     private boolean consumeRemnantInternal(String id) {
+        ensureMaterialNotReserved("remnant",id,null);
         if (id == null) return false;
         RemnantStock item = remnantPool.get(id);
         if (item != null) {
@@ -1369,6 +1537,7 @@ public class RemnantService {
     }
 
     private boolean updateStatusInternal(String id, String status) {
+        ensureMaterialNotReserved("remnant",id,null);
         if (id == null) return false;
         RemnantStock item = remnantPool.get(id);
         if (item != null) {

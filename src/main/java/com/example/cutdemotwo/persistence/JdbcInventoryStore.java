@@ -1,6 +1,7 @@
 package com.example.cutdemotwo.persistence;
 
 import com.example.cutdemotwo.business.model.CuttingPlan;
+import com.example.cutdemotwo.business.model.ExecutionOrder;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
 import com.example.cutdemotwo.business.model.RemnantStock;
@@ -17,10 +18,17 @@ import java.util.function.Function;
 public class JdbcInventoryStore implements InventoryStore {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
+    private final boolean mysql;
     private final ObjectMapper json = new ObjectMapper();
     public JdbcInventoryStore(DataSource dataSource) {
         jdbc = new JdbcTemplate(dataSource);
+        mysql = "MySQL".equals(jdbc.execute((org.springframework.jdbc.core.ConnectionCallback<String>)
+                connection -> connection.getMetaData().getDatabaseProductName()));
         transaction = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
+    }
+    @Override public long now() {
+        if (mysql) return Objects.requireNonNull(jdbc.queryForObject("SELECT UNIX_TIMESTAMP(CURRENT_TIMESTAMP(3))*1000", Long.class));
+        return Objects.requireNonNull(jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(3)", java.sql.Timestamp.class)).getTime();
     }
     @Override public boolean shared() { return true; }
     @Override public InventorySnapshot load() {
@@ -38,8 +46,10 @@ public class JdbcInventoryStore implements InventoryStore {
             jdbc.query("SELECT id, data_json FROM cut_report ORDER BY sort_order", rs -> {
                 receipts.put(rs.getString("id"), json.readValue(rs.getString("data_json"), new TypeReference<Map<String, Object>>() {}));
             });
+            Map<String,ExecutionOrder> executions=new LinkedHashMap<>();
+            rows("execution_order",ExecutionOrder.class).forEach(e->executions.put(e.id(),e));
             return new InventorySnapshot(rolls, remnants, receipts, ((Number)meta.get("remnant_seq")).intValue(),
-                    ((Number)meta.get("defect_seq")).intValue(), tasks, plans, revision);
+                    ((Number)meta.get("defect_seq")).intValue(), tasks, plans, revision, executions);
         });
     }
     private <T> List<T> rows(String table, Class<T> type) {
@@ -60,6 +70,9 @@ public class JdbcInventoryStore implements InventoryStore {
                     p -> Arrays.asList(p.request().getTaskId(), p.status()));
             sync("cut_report", List.of("task_id", "roll_id", "source_remnant_id", "status"), values(snapshot.receipts()), r -> r.get("planId").toString(),
                     r -> Arrays.asList(r.get("taskId"), r.get("rollId"), r.get("sourceRemnantId"), r.getOrDefault("status", "CONFIRMED")));
+            sync("execution_order", List.of("idempotency_key","plan_id","task_id","material_type","material_id","state","version","expires_at"),
+                    values(snapshot.executions()),ExecutionOrder::id,
+                    e->Arrays.asList(e.idempotencyKey(),e.planId(),e.taskId(),e.materialType(),e.materialId(),e.state(),e.version(),e.expiresAt()));
             return snapshot.revision() + 1;
         }));
     }
