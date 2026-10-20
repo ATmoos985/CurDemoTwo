@@ -1,3 +1,4 @@
+import {effectivePieceResults} from './quality-review.js';
 export const outcomeLabels = {QUALIFIED:'合格', REJECTED:'异常', UNCUT:'未切'};
 
 export function classifyReport(pieces, results) {
@@ -20,7 +21,7 @@ export function restoreRecordedGeometry(data, reports, queue, feedPortType = 'ro
     const reported = new Set(reports.map(r => r.planId));
     const stations = reports.filter(r => r.status !== 'REVERSED' && matches(r)).map(r => ({
         planId:r.planId, offset:r.windowStartY || 0, pieces:(r.pieceResults || []).map(p => ({...p,id:p.pieceId})),
-        results:r.pieceResults || [], remnants:r.recoveredGeometry || [], queued:false
+        results:effectivePieceResults(r), remnants:r.recoveredGeometry || [], queued:false
     }));
     for (const {pending,report} of queue) {
         if (reported.has(report.planId) || !matches(pending)) continue;
@@ -51,7 +52,7 @@ export function restoreRecordedGeometry(data, reports, queue, feedPortType = 'ro
 
 /** Draw only reported cut pieces and actually recovered rectangles; unfinished previews are discarded. */
 export function applyReportReceipt(data, pending, receipt) {
-    const results = receipt.pieceResults || pending.result.pieces.map(p => ({pieceId:p.id,outcome:'QUALIFIED'}));
+    const results = receipt.pieceResults ? effectivePieceResults(receipt) : pending.result.pieces.map(p => ({pieceId:p.id,outcome:'QUALIFIED'}));
     const byId = new Map(results.map(r => [r.pieceId,r]));
     data.pieces = (data.pieces || []).flatMap(p => {
         if (p.planId !== pending.result.planId) return [p];

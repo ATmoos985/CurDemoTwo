@@ -95,6 +95,32 @@ class JdbcInventoryTests {
         assertEquals(54000, first.getMotherRoll(request.getRollId()).getCurrentRemainingLength());
         assertEquals("CONFIRMED", first.getPlan(plan.getPlanId()).status());
     }
+    @Test void concurrentQualityWritersKeepOneDispositionAndOneChildAcrossRestart() throws Exception {
+        var first = new RemnantService(store, true);
+        var request = new SolveRequest(); request.setAllowLongitudinal(false); request.setRollL(1000); request.setWindowStartY(5000);
+        request.setDemands(List.of(new PieceDemand(1,"piece",2000,1000,1,false)));
+        var plan = workflow(first).solve(request);
+        workflow(first).confirm(new CutReport(plan.getPlanId(),1000,1,List.of(),"A"));
+        var second = new RemnantService(new JdbcInventoryStore(dataSource),false);
+        var command = new com.example.cutdemotwo.business.model.QualityDisposition.Command(UUID.randomUUID().toString(),0,1,"REMNANT","破损","甲",
+                new com.example.cutdemotwo.business.model.QualityDisposition.Recovery(0,0,500,500,"B","RECOVERABLE"));
+        var pool = Executors.newFixedThreadPool(2);
+        try {
+            var start = new CountDownLatch(1);
+            var a=pool.submit(()->{start.await();return first.disposeQuality(plan.getPlanId(),command);});
+            var b=pool.submit(()->{start.await();return second.disposeQuality(plan.getPlanId(),command);});
+            start.countDown(); int successes=0;
+            for(var result:List.of(a,b)) try { assertEquals(1,result.get().command().pieceId());successes++; }
+                catch(ExecutionException error){assertInstanceOf(InventoryConflictException.class,error.getCause());}
+            assertTrue(successes>=1);
+        } finally {pool.shutdownNow();}
+        var reopened = new RemnantService(new JdbcInventoryStore(dataSource),false);
+        var event = reopened.disposeQuality(plan.getPlanId(),command);
+        assertEquals(1,reopened.getAllRemnants().stream().filter(r->event.id().equals(r.getQualityDispositionId())).count());
+        assertEquals(1,reopened.qualityReview(plan.getPlanId()).get("qualityRevision"));
+        assertEquals(0,reopened.qualityReview(plan.getPlanId()).get("netFinishedPieceCount"));
+        assertEquals(54000,reopened.getMotherRoll(request.getRollId()).getCurrentRemainingLength());
+    }
     private CuttingWorkflowService workflow(RemnantService inventory) {
         return new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), inventory);
     }

@@ -45,3 +45,8 @@ test('old receipts retain an explicit actual denominator reconstructed from the 
     const m=materialSummary({windowStartY:0,rollW:2000,bedL:5000,lastReceipt:{feedPortType:'roll',windowStartY:0,actualCutLen:4500,pieceArea:8,remArea:.5,wasteArea:.5}});
     assert.equal(m.totalArea,9);assert.equal(m.utilization.toFixed(1),'88.9');
 });
+test('reinspection changes net utilization without changing original material denominator',()=>{
+    const receipt={feedPortType:'roll',windowStartY:0,actualCutLen:10000,usedArea:20,pieceArea:20,remArea:0,wasteArea:0,netPieceArea:16,netRemArea:.25,netWasteArea:3.75};
+    const m=materialSummary({windowStartY:0,rollW:2000,bedL:10000,lastReceipt:receipt});
+    assert.equal(m.utilization,80);assert.equal(m.totalArea,20);assert.equal(m.remArea,.25);assert.equal(m.wasteArea,3.75);assert.equal(receipt.pieceArea,20);
+});

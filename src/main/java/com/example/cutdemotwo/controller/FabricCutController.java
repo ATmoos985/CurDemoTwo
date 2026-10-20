@@ -1,6 +1,7 @@
 package com.example.cutdemotwo.controller;
 
 import com.example.cutdemotwo.business.model.SolveRequest;
+import com.example.cutdemotwo.business.model.QualityDisposition;
 import com.example.cutdemotwo.business.model.SolveResponse;
 import com.example.cutdemotwo.algorithm.solver.PackingSolverService;
 import com.example.cutdemotwo.business.cutting.ScenarioOneService;
@@ -18,6 +19,14 @@ public class FabricCutController {
             .enable(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .disable(tools.jackson.databind.DeserializationFeature.ACCEPT_FLOAT_AS_INT,
                     tools.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
+
+    private final tools.jackson.databind.json.JsonMapper qualityJson = tools.jackson.databind.json.JsonMapper.builder()
+            .enable(tools.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,
+                    tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS,
+                    tools.jackson.databind.DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES,
+                    tools.jackson.databind.DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES)
+            .disable(tools.jackson.databind.DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+            .disable(tools.jackson.databind.MapperFeature.ALLOW_COERCION_OF_SCALARS).build();
 
     private final com.example.cutdemotwo.algorithm.solver.SolverFactory solverFactory;
     private final ScenarioOneService scenarioOneService;
@@ -87,6 +96,17 @@ public class FabricCutController {
         try { report = reportJson.readValue(body, com.example.cutdemotwo.business.model.CutReport.class); }
         catch (RuntimeException invalid) { throw new IllegalArgumentException("报工格式无效：裁片编号和件数必须为整数，请核对输入"); }
         return workflowService.confirm(report);
+    }
+
+    @GetMapping("/cutting/reports/{id}/quality-dispositions")
+    public Map<String, Object> qualityReview(@PathVariable String id) { return remnantService.qualityReview(id); }
+
+    @PostMapping(value = "/cutting/reports/{id}/quality-dispositions", consumes = "application/json")
+    public QualityDisposition disposeQuality(@PathVariable String id, @RequestBody String body) {
+        QualityDisposition.Command command;
+        try { command = qualityJson.readValue(body, QualityDisposition.Command.class); }
+        catch (RuntimeException invalid) { throw new IllegalArgumentException("复检格式无效：请核对完整字段、整数编号及毫米数值；报废的 recovery 填 null"); }
+        return remnantService.disposeQuality(id, command);
     }
 
     @PostMapping("/cutting/reports/{id}/reverse")
@@ -180,8 +200,13 @@ public class FabricCutController {
     }
 
     @GetMapping("/remnants")
-    public java.util.List<com.example.cutdemotwo.business.model.RemnantStock> listRemnants(@RequestParam(required = false) String rollId) {
-        return remnantService.getRemnantsByRollId(rollId);
+    public java.util.List<com.example.cutdemotwo.business.model.RemnantStock> listRemnants(@RequestParam(required = false) String rollId,
+            @RequestParam(defaultValue = "false") boolean includeQuarantined) {
+        if (!includeQuarantined) return remnantService.getRemnantsByRollId(rollId);
+        return remnantService.getAllRemnants().stream()
+                .filter(r -> "AVAILABLE".equals(r.getStatus()) || "QUARANTINED".equals(r.getStatus()))
+                .filter(r -> rollId == null || rollId.isBlank() || "ALL".equalsIgnoreCase(rollId) || rollId.trim().equalsIgnoreCase(r.getSourceRollId()))
+                .sorted(java.util.Comparator.comparing(com.example.cutdemotwo.business.model.RemnantStock::getId)).toList();
     }
 
     @PostMapping("/remnants/scan")

@@ -40,3 +40,7 @@ test('historical preview is not an execution instruction and user content is esc
     const p=plan();p.result.pieces[0].name='<img src=x onerror=alert(1)>';p.request.rollModel='<script>';
     const html=ticketHTML(ticketModel(p,true));assert.match(html,/执行前须恢复并重新校验/);assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img|<script/);
 });
+test('print preserves original report and appends quality trace with current good count',()=>{
+    const p=plan();p.status='CONFIRMED';p.receipt={planId:p.id,finishedPieceCount:2,netFinishedPieceCount:1,pieceResults:[{pieceId:1,outcome:'QUALIFIED'}],qualityDispositions:[{createdAt:'2026-10-20',command:{pieceId:1,disposition:'SCRAP',reason:'<破损>',inspector:'甲'}}]};
+    const m=ticketModel(p),html=ticketHTML(m);assert.equal(m.pieces[0].outcome,'QUALIFIED');assert.match(html,/当前净良品 1 件/);assert.match(html,/原始报工结果/);assert.match(html,/&lt;破损&gt;/);
+});

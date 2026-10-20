@@ -7,6 +7,7 @@ import com.example.cutdemotwo.business.model.RemnantStock;
 import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.business.model.SolveResponse;
 import com.example.cutdemotwo.business.model.CutReport;
+import com.example.cutdemotwo.business.model.QualityDisposition;
 import com.example.cutdemotwo.contracts.geometry.RemnantPiece;
 import com.example.cutdemotwo.business.model.CuttingPlan;
 import com.example.cutdemotwo.persistence.*;
@@ -256,7 +257,7 @@ public class RemnantService {
         Map<String, Object> existing = read(() -> receipts.get(report.planId()));
         if (existing != null) {
             if ("REVERSED".equals(existing.get("status"))) throw new IllegalArgumentException("该报工已冲销，请重新排料");
-            return existing;
+            return qualityProjection(existing);
         }
         return mutate(() -> confirmPlanInternal(report));
     }
@@ -269,7 +270,7 @@ public class RemnantService {
             Map<String, Object> receipt = receipts.get(report.planId());
             if (receipt != null) {
                 if ("REVERSED".equals(receipt.get("status"))) throw new IllegalArgumentException("该报工已冲销，请重新排料");
-                return receipt;
+                return qualityProjection(receipt);
             }
             CuttingPlan plan = plans.get(report.planId());
             if (plan == null || !"PENDING".equals(plan.status())) throw new IllegalArgumentException("方案不存在或已取消，请重新排料");
@@ -277,10 +278,85 @@ public class RemnantService {
                 throw new IllegalArgumentException("材料或疵点已更新，请重新装载并排料");
             Map<String, Object> result = confirmInternal(plan.request(), plan.result(), report, pendingBatchPlans);
             plans.put(plan.id(), plan.withStatus("CONFIRMED"));
-            return result;
+            return qualityProjection(result);
     }
 
-    public synchronized Map<String, Object> getReceipt(String planId) { return read(() -> receipts.get(planId)); }
+    public synchronized Map<String, Object> getReceipt(String planId) { return read(() -> qualityProjection(receipts.get(planId))); }
+
+    private List<QualityDisposition> qualityEvents(Map<String, Object> receipt) {
+        if (!(receipt.get("qualityDispositions") instanceof List<?> events)) return List.of();
+        return events.stream().map(event -> json.convertValue(event, QualityDisposition.class)).toList();
+    }
+
+    /** Read projection: original production facts are never overwritten by reinspection. Areas are m². */
+    private Map<String, Object> qualityProjection(Map<String, Object> receipt) {
+        if (receipt == null) return null;
+        var result = new LinkedHashMap<>(receipt);
+        var events = qualityEvents(receipt);
+        var removed = events.stream().filter(e -> "QUALIFIED".equals(e.originalOutcome())).toList();
+        double removedArea = removed.stream().mapToDouble(QualityDisposition::pieceAreaMm2).sum() / 1_000_000;
+        double recovered = events.stream().mapToDouble(QualityDisposition::recoveredAreaMm2).sum() / 1_000_000;
+        double goodArea = ((Number) receipt.get("pieceArea")).doubleValue() - removedArea;
+        double usedArea = ((Number) receipt.get("usedArea")).doubleValue();
+        result.put("qualityDispositions", events);
+        result.put("qualityRevision", events.size());
+        result.put("netFinishedPieceCount", ((Number) receipt.get("finishedPieceCount")).intValue() - removed.size());
+        result.put("netPieceArea", Math.max(0, goodArea));
+        result.put("netRemArea", ((Number) receipt.get("remArea")).doubleValue() + recovered);
+        result.put("netWasteArea", Math.max(0, ((Number) receipt.get("wasteArea")).doubleValue() + removedArea - recovered));
+        result.put("netUtilization", usedArea > 0 ? Math.max(0, goodArea) / usedArea * 100 : 0);
+        return result;
+    }
+
+    public synchronized Map<String, Object> qualityReview(String planId) {
+        return read(() -> {
+            var receipt = receipts.get(planId);
+            if (receipt == null) throw new IllegalArgumentException("报工记录不存在");
+            return qualityProjection(receipt);
+        });
+    }
+
+    public synchronized QualityDisposition disposeQuality(String planId, QualityDisposition.Command command) {
+        QualityDispositionRules.validateCommand(command);
+        return mutate(() -> {
+            var receipt = receipts.get(planId);
+            if (receipt == null) throw new IllegalArgumentException("报工记录不存在");
+            var events = new ArrayList<>(qualityEvents(receipt));
+            for (var event : events) if (event.command().operationId().equals(command.operationId())) {
+                if (event.command().equals(command)) return event;
+                throw new InventoryConflictException("此操作编号已用于其他复检内容，请刷新记录");
+            }
+            if (!"CONFIRMED".equals(receipt.get("status"))) throw new IllegalArgumentException("仅已确认报工可以复检处置");
+            if (command.expectedRevision() != events.size()) throw new InventoryConflictException("复检记录已更新，请重新打开报工记录");
+            if (events.stream().anyMatch(e -> e.command().pieceId() == command.pieceId()))
+                throw new InventoryConflictException("该裁片已处置，不能重复转料头或报废");
+            if (!(receipt.get("pieceResults") instanceof List<?> pieces)) throw new IllegalArgumentException("历史记录缺少逐件产出，不能自动复检处置");
+            var piece = pieces.stream().map(p -> json.convertValue(p, ReportOutput.ReportedPiece.class))
+                    .filter(p -> p.pieceId() == command.pieceId()).findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("裁片不属于此报工"));
+            var request = getPlan(planId).request();
+            double recovered = QualityDispositionRules.recoveredArea(command, piece, request.getMinRemnantWidth(), request.getMinRemnantLength());
+            double area = piece.shape() == null ? piece.w() * piece.l() : piece.shape().areaMm2();
+            String eventId = UUID.randomUUID().toString(), now = LocalDateTime.now().toString(), remnantId = null;
+            if ("REMNANT".equals(command.disposition())) {
+                var region = command.recovery();
+                remnantId = "REM-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMM")) + "-" + String.format("%03d", remnantSeq.incrementAndGet());
+                boolean isolated = "QUARANTINED".equals(region.quality());
+                var child = new RemnantStock(remnantId, region.width(), region.length(), region.location().trim(), request.getRollModel(),
+                        isolated ? "QUARANTINED" : "AVAILABLE", request.getRollId(), isolated, command.reason().trim());
+                var parent = remnantPool.get(request.getSourceRemnantId() == null ? "" : request.getSourceRemnantId());
+                child.setParentRemnantId(parent == null ? null : parent.getId());
+                child.setGeneration(parent == null ? 1 : parent.getGeneration() + 1);
+                child.setCreatedAt(now); child.setSourceReportId(planId); child.setSourcePieceId(piece.pieceId());
+                child.setQualityDispositionId(eventId);
+                remnantPool.put(remnantId, child);
+            }
+            var event = new QualityDisposition(eventId, planId, command, piece.demandId(), piece.outcome(), area,
+                    recovered, Math.max(0, area - recovered), remnantId, now);
+            events.add(event); receipt.put("qualityDispositions", events);
+            return event;
+        });
+    }
 
     /** Validate a whole pending batch without booking stock; final submission commits it atomically. */
     public synchronized List<Map<String, Object>> reportBatch(List<CutReport> reports, boolean preview) {
@@ -320,6 +396,7 @@ public class RemnantService {
             Map<String, Object> receipt = receipts.get(planId);
             if (receipt == null) throw new IllegalArgumentException("报工记录不存在");
             if ("REVERSED".equals(receipt.get("status"))) return receipt;
+            if (!qualityEvents(receipt).isEmpty()) throw new IllegalArgumentException("报工已有复检处置，不能撤回原料耗用；请保留实际裁切事实");
             if (!(receipt.get("undo") instanceof Map<?, ?> undo))
                 throw new IllegalArgumentException("历史报工没有撤回快照，请人工核对库存后处理");
             List<RemnantStock> children = new ArrayList<>();
@@ -366,7 +443,7 @@ public class RemnantService {
     }
 
     private List<Map<String, Object>> taskReportsInternal(String taskId) {
-        return receipts.values().stream().filter(r -> Objects.equals(taskId, r.get("taskId"))).toList();
+        return receipts.values().stream().filter(r -> Objects.equals(taskId, r.get("taskId"))).map(this::qualityProjection).toList();
     }
 
     public synchronized Map<String, Integer> completedQuantities(String taskId) {
@@ -379,6 +456,8 @@ public class RemnantService {
             if ("REVERSED".equals(receipt.get("status"))) continue;
             if (receipt.get("demandQuantities") instanceof Map<?, ?> output)
                 output.forEach((id, n) -> counts.merge(id.toString(), ((Number) n).intValue(), Integer::sum));
+            for (var event : qualityEvents(receipt))
+                if ("QUALIFIED".equals(event.originalOutcome())) counts.merge(String.valueOf(event.demandId()), -1, Integer::sum);
         }
         return counts;
     }
@@ -408,7 +487,7 @@ public class RemnantService {
             detail.put("id", plan.id()); detail.put("unit", "mm"); detail.put("coordinateSystem", "source-local-top-left");
             detail.put("request", plan.request()); detail.put("result", plan.result()); detail.put("status", plan.status());
             detail.put("createdAt", plan.createdAt()); detail.put("version", plan.version()); detail.put("parentPlanId", plan.parentPlanId());
-            detail.put("receipt", receipts.get(id));
+            detail.put("receipt", qualityProjection(receipts.get(id)));
             return detail;
         });
     }
@@ -790,6 +869,8 @@ public class RemnantService {
     private boolean resetRollInternal(String rollId, boolean force) {
         MotherRollInfo roll = motherRolls.get(rollId);
         if (roll == null) return false;
+        if (receipts.values().stream().anyMatch(r -> rollId.equals(r.get("rollId")) && !qualityEvents(r).isEmpty()))
+            throw new IllegalArgumentException("母卷已有复检处置，不能通过演示重置清除产出追溯");
         if (!force && receipts.values().stream().anyMatch(r -> rollId.equals(r.get("rollId")) && r.get("taskId") != null))
             throw new IllegalArgumentException("该母卷已有任务报工记录，不能通过演示重置清除");
         roll.setCurrentRemainingLength(roll.getTotalLength());

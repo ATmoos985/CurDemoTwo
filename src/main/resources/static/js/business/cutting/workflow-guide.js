@@ -127,12 +127,12 @@ function renderStationOrders(queue, receipts) {
     rows.forEach(({report,pending,reported},index) => {
         const item = document.createElement('details');item.className = 'station-order';
         const summary = document.createElement('summary');
-        summary.textContent = '工位 ' + (index+1) + ' · ' + report.finishedPieceCount + ' 件 · ' + (reported ? '已报工' : '待报工');
+        summary.textContent = '工位 ' + (index+1) + ' · ' + (report.netFinishedPieceCount ?? report.finishedPieceCount) + ' 件净良品 · ' + (reported ? '已报工' : '待报工');
         const source = document.createElement('p');source.textContent = pending.sourceRemnantId || pending.rollId;
         const range = document.createElement('p');range.className = 'muted-note';
         range.textContent = pending.feedPortType === 'remnant' ? '料头使用一次，余料不回收' : pending.windowStartY + '–' + (pending.windowStartY+report.actualCutLen) + ' mm · 用料 ' + report.actualCutLen + ' mm';
         const results = document.createElement('p');results.className = 'muted-note';
-        results.textContent = '合格 ' + report.finishedPieceCount + ' · 异常 ' + (report.pieceResults || []).filter(p => p.outcome === 'REJECTED').length + ' · 未切 ' + (report.pieceResults || []).filter(p => p.outcome === 'UNCUT').length;
+        results.textContent = '净良品 ' + (report.netFinishedPieceCount ?? report.finishedPieceCount) + '（原报 ' + report.finishedPieceCount + '） · 原报异常 ' + (report.pieceResults || []).filter(p => p.outcome === 'REJECTED').length + ' · 未切 ' + (report.pieceResults || []).filter(p => p.outcome === 'UNCUT').length;
         const ticket = document.createElement('button');ticket.className = 'tool-btn';ticket.textContent = '查看工单';
         ticket.onclick = () => window.camApp.openCutTicketModal({planId:report.planId,historical:true});
         item.append(summary,source,range,results,ticket);list.append(item);

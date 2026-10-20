@@ -266,7 +266,7 @@ export function updateWorkflowControls() {
     if (editMessage) editMessage.textContent = editable ? state.pendingPlan.adjustmentError || (edited ? '手动调整待校验；刀序与候选余料将重新计算。' : `方案版本 ${state.pendingPlan.version || 1} · 已校验`) : '';
     const flow = renderWorkflowGuide({ready, edited, busy:solving ? '正在生成方案…' : validatingAdjustment ? '正在校验调整…' : reporting ? '正在保存报工…' : ''});
     const data = state.getCurrentCaseData(), reportEl = document.getElementById('lbl-report-status');
-    if (reportEl) reportEl.textContent = materialSummary(data, state.currentCutMode === 'remnant').actual ? '已报工保存 · ' + data.lastReceipt.finishedPieceCount + ' 件' :
+    if (reportEl) reportEl.textContent = materialSummary(data, state.currentCutMode === 'remnant').actual ? '已报工保存 · ' + (data.lastReceipt.netFinishedPieceCount ?? data.lastReceipt.finishedPieceCount) + ' 件净良品' :
         edited ? '手动调整 · 待校验' : ready ? '待报工 · 尚未保存产出' : flow.done ? '本次需求已完成' : '当前工位尚无排料结果';
     updateDemandProgress({pending:editable ? state.pendingPlan : null, edited, attempt:latestSolveAttempt && latestSolveAttempt.context === solveContext() ? latestSolveAttempt : null});
     renderSolveFeedback(flow);

@@ -99,10 +99,10 @@ function renderOverview(progress,list,change) {
     renderMeter(overall,summary.completed,summary.total,'本次裁切进度',summary.staged);
     const recent=document.getElementById('demand-recent-change');recent.hidden=!change;
     if(!change)return;
-    const changeKey=change.planId+':'+change.reversed;
+    const changeKey=change.planId+':'+(change.eventId || change.reversed);
     if(recent.dataset.change!==changeKey){recent.open=false;recent.dataset.change=changeKey;}
     recent.querySelector('summary').textContent=!change.known?(change.reversed?'最近撤回 · 逐项明细未登记':'最近报工 · 逐项明细未登记')
-        :change.reversed?`最近撤回 · 恢复待切 ${change.pieces} 件`:`最近报工 +${change.pieces} 件 · 查看变化`;
+        :change.quality?`最近复检 · 新增补产 ${change.pieces} 件`:change.reversed?`最近撤回 · 恢复待切 ${change.pieces} 件`:`最近报工 +${change.pieces} 件 · 查看变化`;
     recent.querySelector('p').textContent=`${change.time.replace('T',' ')}${!change.reversed && (change.rejected || change.uncut)?` · 异常 ${change.rejected}、未切 ${change.uncut} 件未计入完成`:''}`;
     const changes=recent.querySelector('div');changes.replaceChildren();
     for(const item of progress){const delta=change.deltas[item.id];if(!delta)continue;

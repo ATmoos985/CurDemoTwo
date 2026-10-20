@@ -27,7 +27,7 @@ export function materialSummary(data, sheet = false) {
     const actual = !!r && r.status !== 'REVERSED' && (sheet ? r.feedPortType === 'remnant'
         : r.feedPortType === 'roll' && Math.abs(r.windowStartY - (data.windowStartY || 0)) < .001);
     const values = actual ? {
-        deductLen:r.actualCutLen, pieceArea:r.pieceArea, remArea:r.remArea, wasteArea:r.wasteArea,
+        deductLen:r.actualCutLen, pieceArea:r.netPieceArea ?? r.pieceArea, remArea:r.netRemArea ?? r.remArea, wasteArea:r.netWasteArea ?? r.wasteArea,
         totalArea:r.usedArea ?? (r.pieceArea + r.remArea + r.wasteArea),
         processingArea:r.processingArea ?? (data.rollW * data.bedL / 1_000_000)
     } : data;

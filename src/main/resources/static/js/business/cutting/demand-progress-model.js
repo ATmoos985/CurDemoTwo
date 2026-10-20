@@ -49,6 +49,13 @@ export function latestDemandChange(reports, taskId) {
     const candidates=(reports || []).filter(r=>r.taskId===taskId);
     const eventTime=r=>r.status==='REVERSED'?(r.reversedAt || r.confirmedAt):r.confirmedAt;
     const report=candidates.reduce((latest,r)=>!latest || String(eventTime(r) || '')>=String(eventTime(latest) || '')?r:latest,null);
+    const quality = candidates.flatMap(r => (r.qualityDispositions || []).map(e => ({...e,planId:r.planId})))
+        .reduce((latest,e) => !latest || e.createdAt >= latest.createdAt ? e : latest,null);
+    if (quality && (!report || quality.createdAt >= eventTime(report))) {
+        const removed = quality.originalOutcome === 'QUALIFIED';
+        return {planId:quality.planId,eventId:quality.id,quality:true,reversed:false,known:true,
+            deltas:removed ? {[quality.demandId]:-1} : {},time:quality.createdAt,pieces:removed ? 1 : 0,rejected:0,uncut:0};
+    }
     if(!report)return null;
     let quantities=report.demandQuantities;
     if(!quantities && Array.isArray(report.pieceResults) && (report.pieceResults.length || report.finishedPieceCount===0)) {

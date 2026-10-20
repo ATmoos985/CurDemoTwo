@@ -26,6 +26,16 @@ public class RemnantStock {
     private String consumedAt;       // 领用核销时间
     private String consumedByOrder;  // 消耗工单号
 
+    private String sourceReportId;
+    private Integer sourcePieceId;
+    private String qualityDispositionId;
+    public String getSourceReportId() { return sourceReportId; }
+    public void setSourceReportId(String value) { sourceReportId = value; }
+    public Integer getSourcePieceId() { return sourcePieceId; }
+    public void setSourcePieceId(Integer value) { sourcePieceId = value; }
+    public String getQualityDispositionId() { return qualityDispositionId; }
+    public void setQualityDispositionId(String value) { qualityDispositionId = value; }
+
     public RemnantStock() {}
 
     public RemnantStock(String id, double width, double length, String location, String materialBatch,

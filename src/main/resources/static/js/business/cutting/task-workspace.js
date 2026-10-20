@@ -1,3 +1,4 @@
+import {openQualityReview, reviewablePieces} from './quality-review.js';
 import { state } from '../../core/state.js';
 import { getInitialScenarios } from '../../plugins/presets/scenarios.js';
 import { renderDemandsUI, getDemandsFromUI, updateDemandCompletionFromPieces } from './quota-manager.js';
@@ -324,6 +325,7 @@ export async function refreshTaskProgress() {
     state.taskCompleted = detail.completed;
     state.taskReports = detail.reports;
     const data = state.getCurrentCaseData();
+    if (data.lastReceipt) data.lastReceipt = detail.reports.find(r => r.planId === data.lastReceipt.planId) || null;
     updateDemandCompletionFromPieces(data);
     renderDemandsUI(data.demands);
     el('task-report-count').textContent = detail.reports.length;
@@ -415,25 +417,49 @@ export {openMaterialSelection as matchTaskMaterials} from '../../plugins/materia
 
 export async function openTaskReports() {
     try { await refreshTaskProgress(); } catch (error) { return showToast(error.message, 'error'); }
-    picker('报工记录与需求汇总', `<details class="report-progress"><summary>需求完成情况 · ${state.getCurrentCaseData().demands.length} 项需求 · ${state.taskReports.length} 条报工记录</summary>${state.getCurrentCaseData().demands.map(d => `<p><strong>${escapeText(d.name)}</strong><span>${state.taskCompleted[d.id] || 0} / ${d.count ?? d.demand} 件</span></p>`).join('')}</details>` + (state.taskReports.slice().reverse().map(r => `<article class="task-list-item report-list-item"><div class="report-list-info"><strong>${escapeText(r.sourceRemnantId || r.rollId)} <span class="ui-status" data-state="${escapeText(r.status || 'CONFIRMED')}">${escapeText(planStatusLabel(r.status || 'CONFIRMED'))}</span></strong><span>合格 ${r.finishedPieceCount} 件 · 异常 ${r.rejectedPieceCount || 0} 件 · 未切 ${r.uncutPieceCount || 0} 件 · ${r.feedPortType === 'remnant' ? '料头核销' : `用料 ${r.actualCutLen} mm`} · 回收 ${r.derivedRemnants.length} 块</span><small>${escapeText(new Date(r.confirmedAt).toLocaleString("zh-CN", {hour12:false}))}</small><details class="detail-disclosure"><summary>回收清单与凭证</summary>${r.derivedRemnants.map(rem => `<p>${escapeText(rem.id)} · ${rem.width} × ${rem.length} mm · ${escapeText(rem.location)}</p>`).join("")}<small>报工编号 ${escapeText(r.planId)}</small></details></div><div class="report-list-actions" role="group" aria-label="报工操作"></div></article>`).join('') || '<p class="muted">暂无报工。排料预览不会扣减需求或库存。</p>'), 'reports');
+    picker('报工记录与需求汇总', `<details class="report-progress"><summary>需求完成情况 · ${state.getCurrentCaseData().demands.length} 项需求 · ${state.taskReports.length} 条报工记录</summary>${state.getCurrentCaseData().demands.map(d => `<p><strong>${escapeText(d.name)}</strong><span>${state.taskCompleted[d.id] || 0} / ${d.count ?? d.demand} 件</span></p>`).join('')}</details>` + (state.taskReports.slice().reverse().map(r => `<article class="task-list-item report-list-item"><div class="report-list-info"><strong>${escapeText(r.sourceRemnantId || r.rollId)} <span class="ui-status" data-state="${escapeText(r.status || 'CONFIRMED')}">${escapeText(planStatusLabel(r.status || 'CONFIRMED'))}</span></strong><span>净良品 ${r.netFinishedPieceCount ?? r.finishedPieceCount} 件（原报 ${r.finishedPieceCount} 件） · 异常 ${r.rejectedPieceCount || 0} 件 · 未切 ${r.uncutPieceCount || 0} 件 · ${r.feedPortType === 'remnant' ? '料头核销' : `用料 ${r.actualCutLen} mm`} · 原报回收 ${r.derivedRemnants.length} 块</span><small>${escapeText(new Date(r.confirmedAt).toLocaleString("zh-CN", {hour12:false}))}</small><details class="detail-disclosure"><summary>回收清单与凭证</summary>${r.derivedRemnants.map(rem => `<p>${escapeText(rem.id)} · ${rem.width} × ${rem.length} mm · ${escapeText(rem.location)}</p>`).join("")}<small>报工编号 ${escapeText(r.planId)}</small></details></div><div class="report-list-actions" role="group" aria-label="报工操作"></div></article>`).join('') || '<p class="muted">暂无报工。排料预览不会扣减需求或库存。</p>'), 'reports');
     el('task-picker-body').querySelectorAll('article').forEach((article, index) => {
         const report = state.taskReports.slice().reverse()[index];
         const info = article.querySelector('.report-list-info'), actions = article.querySelector('.report-list-actions');
         appendTicketButton(actions,report.planId);
         if (report.pieceResults?.length) {
             const detail=document.createElement('details');detail.className='detail-disclosure';
-            const summary=document.createElement('summary');summary.textContent='逐件结果与异常原因';detail.append(summary);
+            const summary=document.createElement('summary');summary.textContent='原始逐件结果与异常原因';detail.append(summary);
             for(const piece of report.pieceResults){const row=document.createElement('p');
                 row.textContent='#'+piece.pieceId+' · 需求 '+piece.demandId+' '+piece.name+' · '+({QUALIFIED:'合格',REJECTED:'异常',UNCUT:'未切'}[piece.outcome] || piece.outcome)+(piece.reason?' · '+piece.reason:'');detail.append(row);}
             info.append(detail);
+        }
+        if (report.qualityDispositions?.length) {
+            const history = document.createElement('details'); history.className = 'detail-disclosure';
+            const heading = document.createElement('summary'); heading.textContent = `复检处置记录 · ${report.qualityDispositions.length} 件`; history.append(heading);
+            for (const event of report.qualityDispositions) {
+                const row = document.createElement('p');
+                row.textContent = `#${event.command.pieceId} · ${event.command.disposition === 'REMNANT' ? '转料头 '+event.remnantId : '报废'} · ${event.command.reason} · 检验人 ${event.command.inspector} · ${new Date(event.createdAt).toLocaleString('zh-CN',{hour12:false})}`;
+                if (event.command.recovery) row.textContent += ` · ${event.command.recovery.width} × ${event.command.recovery.length} mm · ${event.command.recovery.location} · ${event.command.recovery.quality === 'QUARANTINED' ? '入库时待检隔离' : '入库时已验收可用'}`;
+                history.append(row);
+            }
+            const areas = document.createElement('p'); areas.textContent = `复检后：良品 ${report.netPieceArea.toFixed(3)} m² · 回收 ${report.netRemArea.toFixed(3)} m² · 损耗 ${report.netWasteArea.toFixed(3)} m² · 良品利用率 ${report.netUtilization.toFixed(1)}%`;
+            history.append(areas); info.append(history);
+        }
+        if (reviewablePieces(report).length) {
+            const quality = document.createElement('button'); quality.className = 'tool-btn'; quality.textContent = '复检处置';
+            quality.onclick = async () => {
+                if (queuedReports().length) return showToast('请先完成集中报工，再进行复检处置', 'info');
+                if (!await prepareTaskSwitch()) return;
+                openQualityReview(report, async () => {
+                    state.pendingPlan = null;
+                    try { await loadTask(state.activeTask.id, {skipDraftGuard:true}); await openTaskReports(); showToast('复检已保存，净良品与补产需求已更新', 'success'); }
+                    catch (error) { showToast('复检已保存，页面刷新失败：'+error.message, 'warning'); }
+                });
+            }; actions.append(quality);
         }
         const status = document.createElement('p'); status.className = 'muted';
         if (report.status === 'REVERSED') {
             status.textContent = '已撤回 · ' + report.reversalReason; info.append(status); return;
         }
         const button = document.createElement('button'); button.className = 'tool-btn'; button.textContent = '撤回报工';
-        button.disabled = !report.undo;
-        button.title = report.undo ? '退回本次需求数量和库存，并保留原记录' : '历史记录没有撤回快照';
+        button.disabled = !report.undo || !!report.qualityDispositions?.length;
+        button.title = report.qualityDispositions?.length ? '已复检处置，不能退回实际原料耗用' : report.undo ? '退回本次需求数量和库存，并保留原记录' : '历史记录没有撤回快照';
         button.onclick = async () => {
             if (!await prepareTaskSwitch()) return;
             const reason = await confirmAction('仅用于纠正误报。请确认现场实物与退回后的库存一致；已实际裁切的布料无法物理复原。派生料头已有后续流转时，需先撤回后续记录。', {title:'撤回本次报工', action:'确认撤回', reason:true});

@@ -180,7 +180,7 @@ export function toggleAddDefectForm() {
 async function renderRemnantsLineage() {
     remnantError = '';
     try {
-        const response = await fetch('/api/remnants', { cache: 'no-store' });
+        const response = await fetch('/api/remnants?includeQuarantined=true', { cache: 'no-store' });
         if (!response.ok) throw new Error('读取失败');
         cachedRemnants = (await response.json()).sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || '') || b.id.localeCompare(a.id, undefined, {numeric:true}));
         const count = document.getElementById('header-remnant-count');if (count) count.textContent = cachedRemnants.length;
@@ -194,7 +194,7 @@ function renderRemnantsList() {
     const detail = document.getElementById('material-remnant-detail-panel');
     const recommendation = document.getElementById('inventory-remnant-recommendation');
     if (recommendation) recommendation.textContent = document.getElementById('remnant-availability')?.textContent || '按当前任务的剩余需求核对可用料头';
-    document.getElementById('inventory-remnants-summary').textContent = remnantError || `${cachedRemnants.length} 块可用料头 · 总面积 ${area(cachedRemnants.reduce((sum, r) => sum + (r.area || 0), 0))} m² · 带疵 ${cachedRemnants.filter(r => r.hasDefect).length} 块`;
+    document.getElementById('inventory-remnants-summary').textContent = remnantError || `${cachedRemnants.length} 块库存料头（可用 ${cachedRemnants.filter(r => r.status === 'AVAILABLE').length} / 隔离 ${cachedRemnants.filter(r => r.status === 'QUARANTINED').length}） · 总面积 ${area(cachedRemnants.reduce((sum, r) => sum + (r.area || 0), 0))} m² · 带疵 ${cachedRemnants.filter(r => r.hasDefect).length} 块`;
     document.getElementById('inventory-remnants-count').textContent = `显示 ${remnantError ? 0 : rows.length} / ${cachedRemnants.length} 块`;
     if (remnantError || !rows.length) {
         container.innerHTML = `<p class="inventory-empty">${remnantError || (cachedRemnants.length ? '没有匹配的料头，试试其他编号、来源母卷或库位。' : '暂无可用料头，实切确认后可登记入库。')}</p>`;
@@ -206,7 +206,7 @@ function renderRemnantsList() {
         <tr data-remnant-row="${escapeHtml(r.id)}" class="${r.id === activeRemnantId ? 'selected' : ''}">
             <td><button class="inventory-item-link" data-remnant="${escapeHtml(r.id)}" aria-pressed="${r.id === activeRemnantId}">${escapeHtml(r.id)}</button><span class="inventory-secondary">${escapeHtml(r.materialBatch)}</span><span class="inventory-secondary">入库 ${escapeHtml(r.createdAt || '未登记')}</span></td>
             <td><strong class="inventory-number">${escapeHtml(r.width)} × ${escapeHtml(r.length)}</strong><span class="inventory-secondary">mm · ${area(r.area)} m²</span></td>
-            <td>${escapeHtml(r.location || '未登记库位')}<span class="inventory-secondary">${escapeHtml(qualityNames[r.qualityGrade] || r.qualityGrade || '未评级')}${r.hasDefect ? ' · 有疵点' : ''}</span></td>
+            <td>${escapeHtml(r.location || '未登记库位')}<span class="inventory-secondary">${r.status === 'QUARANTINED' ? '待检隔离 · ' : ''}${escapeHtml(qualityNames[r.qualityGrade] || r.qualityGrade || '未评级')}${r.hasDefect ? ' · 有疵点' : ''}</span></td>
         </tr>`).join('')}</tbody></table>`;
     selectStockRemnant(activeRemnantId);
 }
@@ -219,11 +219,11 @@ function selectStockRemnant(id) {
     document.querySelectorAll('[data-remnant]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.remnant === id)));
     document.getElementById('material-remnant-detail-panel').innerHTML = `
         <div class="inventory-detail-heading"><h3>${escapeHtml(id)}</h3><p>${escapeHtml(remnant.materialBatch)}</p></div>
-        ${standalone ? '' : `<button class="tool-btn inventory-primary" data-match-remnant="${escapeHtml(id)}">核对当前需求并选用…</button>`}
+        ${standalone || remnant.status !== 'AVAILABLE' ? '' : `<button class="tool-btn inventory-primary" data-match-remnant="${escapeHtml(id)}">核对当前需求并选用…</button>`}
         <div class="inventory-length"><div><span>料头面积</span><strong>${area(remnant.area)} <small>m²</small></strong></div><span>${remnant.hasDefect ? '局部带疵' : '无疵点记录'}</span></div>
-        <dl class="inventory-fields">${field('宽 × 长', `${remnant.width} × ${remnant.length} mm`)}${field('库位', remnant.location)}${field('质量等级', qualityNames[remnant.qualityGrade] || remnant.qualityGrade)}</dl>
+        <dl class="inventory-fields">${field('宽 × 长', `${remnant.width} × ${remnant.length} mm`)}${field('库位', remnant.location)}${field('库存状态', remnant.status === 'QUARANTINED' ? '待检隔离（不能选料）' : '可用')}${field('质量等级', qualityNames[remnant.qualityGrade] || remnant.qualityGrade)}</dl>
         <details class="inventory-disclosure"><summary>来源与流转</summary><dl class="inventory-fields">
-            ${field('来源母卷', remnant.sourceRollId)}${field('父级料头', remnant.parentRemnantId || (remnant.generation === 1 ? '无（母卷直切）' : null))}${field('代数', remnant.generation)}${field('入库时间', remnant.createdAt)}${field('备注', remnant.defectDesc)}
+            ${field('来源母卷', remnant.sourceRollId)}${field('父级料头', remnant.parentRemnantId || (remnant.generation === 1 ? '无（母卷直切）' : null))}${field('来源报工', remnant.sourceReportId)}${field('来源裁片', remnant.sourcePieceId)}${field('复检处置编号', remnant.qualityDispositionId)}${field('代数', remnant.generation)}${field('入库时间', remnant.createdAt)}${field('备注', remnant.defectDesc)}
         </dl></details>
         <details class="inventory-disclosure"><summary>疵点记录 <span>${(remnant.defects || []).length} 处</span></summary>${defectRecords(remnant.defects || [])}</details>
         <details class="inventory-disclosure"><summary>库存处置</summary><p class="inventory-secondary">报废后将移出可用库存。</p><button class="tool-btn inventory-danger" data-scrap="${escapeHtml(id)}">报废此料头</button></details>`;

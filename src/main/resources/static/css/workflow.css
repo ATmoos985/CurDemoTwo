@@ -92,3 +92,18 @@ body[data-source="remnant"] .station-navigation { display: none; }
 body[data-source="remnant"] #btn-smart-advance, body[data-source="remnant"] #btn-advance-bed { display: none; }
 @media (max-width: 1250px) { .task-bar { flex-wrap: wrap; gap: 8px 14px; } .task-bar ol { order: 3; width: 100%; justify-content: center; } .task-bar > .task-toolbar:last-child { margin-left: auto; } }
 @media (max-width: 650px) { #task-state { display: none; } .task-bar { gap: 8px; padding: 8px; } .report-remnant-row { grid-template-columns: 18px 1fr 65px 8px 65px 20px; gap: 4px; } }
+
+.quality-fields { border: 0; padding: 0; margin: 0; display: grid; gap: 12px; }
+.quality-fields label { display: grid; gap: 5px; font-size: 12px; }
+.quality-fields :is(input,select,textarea) { width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid var(--panel-border); border-radius: 4px; background: var(--panel-bg); color: var(--text-main); font: inherit; }
+.quality-fields fieldset { border: 1px solid var(--panel-border); padding: 12px; }
+.quality-fields [hidden] { display: none; }
+.quality-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-bottom: 12px; }
+.quality-grid input { font-family: var(--font-mono); }
+.quality-actions { padding: 12px 24px; border-top: 1px solid var(--panel-border); display: flex; justify-content: flex-end; }
+.quality-actions .active { background: var(--accent-blue); color: white; }
+.quality-error { color: var(--accent-red); font-size: 12px; }
+.quality-dialog .muted { font-size: 12px; line-height: 1.6; }
+.quality-dialog[open] { display: flex; flex-direction: column; }
+.quality-dialog form { min-height: 0; display: flex; flex-direction: column; }
+.quality-dialog .workflow-dialog-body { min-height: 0; }
