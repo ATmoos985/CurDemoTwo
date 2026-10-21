@@ -57,4 +57,18 @@ class ExecutionApiTests {
         assertEquals("REPORTED",view.get("effectiveState").asString());
         assertFalse(view.get("reservationActive").asBoolean());
     }
+    @Test void ledgerPaginationAndReconciliationAreReadOnly()throws Exception {
+        byte[] before=java.nio.file.Files.readAllBytes(temp.resolve("inventory.json"));
+        var first=call("/api/v2/inventory-ledger?limit=1",null,null);
+        assertEquals(200,first.statusCode());
+        var page=json.readTree(first.body());assertEquals(1,page.get("items").size());
+        long cursor=page.get("nextCursor").asLong();assertTrue(page.get("hasMore").asBoolean());
+        var next=json.readTree(call("/api/v2/inventory-ledger?limit=1&after="+cursor,null,null).body());
+        assertTrue(next.get("nextCursor").asLong()>cursor);
+        var reconciliation=call("/api/v2/inventory-ledger/reconciliation",null,null);
+        assertEquals(200,reconciliation.statusCode());
+        assertEquals("BALANCED",json.readTree(reconciliation.body()).get("status").asString(),reconciliation.body());
+        assertEquals(400,call("/api/v2/inventory-ledger?limit=501",null,null).statusCode());
+        assertArrayEquals(before,java.nio.file.Files.readAllBytes(temp.resolve("inventory.json")));
+    }
 }

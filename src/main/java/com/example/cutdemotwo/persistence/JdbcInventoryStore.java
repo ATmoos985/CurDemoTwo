@@ -2,6 +2,7 @@ package com.example.cutdemotwo.persistence;
 
 import com.example.cutdemotwo.business.model.CuttingPlan;
 import com.example.cutdemotwo.business.model.ExecutionOrder;
+import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
 import com.example.cutdemotwo.business.model.RemnantStock;
@@ -49,8 +50,12 @@ public class JdbcInventoryStore implements InventoryStore {
             Map<String,ExecutionOrder> executions=new LinkedHashMap<>();
             rows("execution_order",ExecutionOrder.class).forEach(e->executions.put(e.id(),e));
             return new InventorySnapshot(rolls, remnants, receipts, ((Number)meta.get("remnant_seq")).intValue(),
-                    ((Number)meta.get("defect_seq")).intValue(), tasks, plans, revision, executions);
+                    ((Number)meta.get("defect_seq")).intValue(), tasks, plans, revision, executions, ledger());
         });
+    }
+    private List<InventoryLedgerEntry> ledger() {
+        return jdbc.query("SELECT data_json FROM inventory_ledger ORDER BY entry_sequence",
+                (rs,index) -> json.readValue(rs.getString(1),InventoryLedgerEntry.class));
     }
     private <T> List<T> rows(String table, Class<T> type) {
         return jdbc.query("SELECT data_json FROM " + table + " ORDER BY sort_order", (rs, index) -> json.readValue(rs.getString(1), type));
@@ -73,6 +78,13 @@ public class JdbcInventoryStore implements InventoryStore {
             sync("execution_order", List.of("idempotency_key","plan_id","task_id","material_type","material_id","state","version","expires_at"),
                     values(snapshot.executions()),ExecutionOrder::id,
                     e->Arrays.asList(e.idempotencyKey(),e.planId(),e.taskId(),e.materialType(),e.materialId(),e.state(),e.version(),e.expiresAt()));
+            var previous = ledger();
+            InventoryLedgerEntry.requireAppendOnly(previous,snapshot.ledger());
+            for (var entry : snapshot.ledger().subList(previous.size(),snapshot.ledger().size())) {
+                jdbc.update("INSERT INTO inventory_ledger (id,entry_sequence,transaction_id,event_type,aggregate_type,aggregate_id,occurred_at,data_json) VALUES (?,?,?,?,?,?,?,?)",
+                        entry.id(),entry.sequence(),entry.transactionId(),entry.eventType(),entry.aggregateType(),entry.aggregateId(),
+                        entry.occurredAt(),json.writeValueAsString(entry));
+            }
             return snapshot.revision() + 1;
         }));
     }

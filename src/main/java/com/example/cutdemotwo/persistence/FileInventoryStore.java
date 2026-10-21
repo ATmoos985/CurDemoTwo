@@ -19,6 +19,9 @@ public class FileInventoryStore implements InventoryStore {
         catch (Exception e) { throw new IllegalStateException("库存文件读取失败，请检查后恢复: " + file, e); }
     }
     @Override public long save(InventorySnapshot snapshot) {
+        var previous = load();
+        com.example.cutdemotwo.business.model.InventoryLedgerEntry.requireAppendOnly(
+                previous == null ? java.util.List.of() : previous.ledger(), snapshot.ledger());
         try {
             Path parent = file.toAbsolutePath().getParent();
             Files.createDirectories(parent);

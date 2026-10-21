@@ -3,6 +3,7 @@ package com.example.cutdemotwo.business.cutting;
 import com.example.cutdemotwo.contracts.geometry.Defect;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.ExecutionOrder;
+import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
 import com.example.cutdemotwo.business.model.RemnantStock;
 import com.example.cutdemotwo.business.model.SolveRequest;
@@ -40,6 +41,7 @@ public class RemnantService {
     private final InventoryStore store;
     private final Map<String, CuttingPlan> plans = new LinkedHashMap<>();
     private final Map<String,ExecutionOrder> executions = new LinkedHashMap<>();
+    private List<InventoryLedgerEntry> ledger = List.of();
     private long revision;
     private boolean accessing;
     private long operationTime;
@@ -62,7 +64,7 @@ public class RemnantService {
     }
 
     public synchronized Map<String, Integer> initializeDemoInventory() {
-        return mutate(() -> {
+        return mutate("DEMO_RECEIPT",null,"SYSTEM_DEMO",() -> {
             if (!motherRolls.isEmpty() || !remnantPool.isEmpty() || !tasks.isEmpty() || !plans.isEmpty() || !receipts.isEmpty()) {
                 throw new IllegalArgumentException("当前库已有业务数据，不能创建整套示例材料；请使用已有库存或单独准备演示库");
             }
@@ -86,7 +88,7 @@ public class RemnantService {
     /** Append fixtures only; a consumed or scrapped demo remnant is never replenished. */
     public synchronized Map<String, Integer> prepareOrderDemoInventory() {
         var materials = orderDemoMaterials();
-        return mutate(() -> appendOrderDemoInventory(materials));
+        return mutate("DEMO_RECEIPT",null,"SYSTEM_DEMO",() -> appendOrderDemoInventory(materials));
     }
 
     private Map<String, Integer> appendOrderDemoInventory(DemoMaterial[] materials) {
@@ -134,7 +136,7 @@ public class RemnantService {
 
     private InventorySnapshot snapshot() {
         return new InventorySnapshot(new ArrayList<>(motherRolls.values()), new ArrayList<>(remnantPool.values()),
-                receipts, remnantSeq.get(), defectSeq.get(), tasks, plans, revision, executions);
+                receipts, remnantSeq.get(), defectSeq.get(), tasks, plans, revision, executions, ledger);
     }
 
     private void restore(InventorySnapshot snapshot) {
@@ -144,12 +146,17 @@ public class RemnantService {
         tasks.clear(); if (snapshot.tasks() != null) tasks.putAll(snapshot.tasks());
         plans.clear(); if (snapshot.plans() != null) plans.putAll(snapshot.plans());
         executions.clear();executions.putAll(snapshot.executions());
+        ledger = snapshot.ledger();
         revision = snapshot.revision();
         remnantSeq.set(snapshot.remnantSeq()); defectSeq.set(snapshot.defectSeq());
     }
 
     /** One business command either persists every change or restores its entire before-image. */
     private <T> T mutate(java.util.function.Supplier<T> command) {
+        return mutate("SYSTEM_UPDATE",null,"UNAUTHENTICATED_LOCAL",command);
+    }
+
+    private <T> T mutate(String eventType,String businessId,String actor,java.util.function.Supplier<T> command) {
         refresh();
         operationTime = store.now();
         byte[] before = json.writeValueAsBytes(snapshot());
@@ -157,6 +164,8 @@ public class RemnantService {
         accessing = true;
         try {
             T result = command.get();
+            ledger = InventoryJournal.append(json.readValue(before,InventorySnapshot.class),snapshot(),
+                    eventType,businessId,actor,operationTime);
             save();
             return result;
         } catch (RuntimeException error) {
@@ -176,6 +185,22 @@ public class RemnantService {
         if (accessing) return query.get();
         refresh(); operationTime = store.now(); accessing = true;
         try { return query.get(); } finally { accessing = false; }
+    }
+
+    public synchronized Map<String,Object> inventoryLedger(String aggregateType,String aggregateId,long after,int limit) {
+        if(after<0 || limit<1 || limit>500)throw new IllegalArgumentException("流水游标不得为负，分页大小为 1–500");
+        return read(() -> {
+            var page=ledger.stream().filter(e -> e.sequence()>after
+                    && (aggregateType==null || aggregateType.equals(e.aggregateType()))
+                    && (aggregateId==null || aggregateId.equals(e.aggregateId()))).limit(limit+1L).toList();
+            var items=page.stream().limit(limit).toList();
+            return Map.of("items",items,"hasMore",page.size()>limit,
+                    "nextCursor",items.isEmpty()?after:items.get(items.size()-1).sequence(),"revision",revision);
+        });
+    }
+
+    public synchronized Map<String,Object> reconcileInventory() {
+        return read(() -> InventoryJournal.reconcile(snapshot()));
     }
 
     public synchronized ExecutionOrder createExecution(String key,ExecutionOrder.Create input) {
@@ -275,7 +300,7 @@ public class RemnantService {
         }
     }
     public synchronized Map<String,Object> reportExecution(String id,CutReport report) {
-        return mutate(()->{
+        return mutate("CUT_REPORT",report == null ? null : report.planId(),"UNAUTHENTICATED_LOCAL",()->{
             var e=requiredExecution(id);
             if(report==null || !e.planId().equals(report.planId()))throw new IllegalArgumentException("报工方案与执行单不一致");
             if(!Set.of("RUNNING","REPORTED").contains(e.state()))throw new InventoryConflictException("执行单尚未开工或已终止");
@@ -409,7 +434,7 @@ public class RemnantService {
             verifyReportReplay(existing,report);
             return qualityProjection(existing);
         }
-        return mutate(() -> confirmPlanInternal(report));
+        return mutate("CUT_REPORT",report.planId(),"UNAUTHENTICATED_LOCAL",() -> confirmPlanInternal(report));
     }
 
     private Map<String, Object> confirmPlanInternal(CutReport report) {
@@ -469,7 +494,7 @@ public class RemnantService {
 
     public synchronized QualityDisposition disposeQuality(String planId, QualityDisposition.Command command) {
         QualityDispositionRules.validateCommand(command);
-        return mutate(() -> {
+        return mutate("QUALITY_DISPOSITION",planId,"DECLARED:"+command.inspector(),() -> {
             var receipt = receipts.get(planId);
             if (receipt == null) throw new IllegalArgumentException("报工记录不存在");
             var events = new ArrayList<>(qualityEvents(receipt));
@@ -532,7 +557,7 @@ public class RemnantService {
             }
             return result;
         };
-        if (!preview) return mutate(command);
+        if (!preview) return mutate("CUT_REPORT_BATCH",null,"UNAUTHENTICATED_LOCAL",command);
         return read(() -> {
             byte[] before = json.writeValueAsBytes(snapshot());
             try { return command.get(); }
@@ -543,7 +568,7 @@ public class RemnantService {
     public synchronized Map<String, Object> reverseReport(String planId, String reason) {
         if (reason == null || reason.isBlank() || reason.length() > 500)
             throw new IllegalArgumentException("请填写 1 至 500 字的撤回原因");
-        return mutate(() -> {
+        return mutate("REPORT_REVERSE",planId,"UNAUTHENTICATED_LOCAL",() -> {
             Map<String, Object> receipt = receipts.get(planId);
             if (receipt == null) throw new IllegalArgumentException("报工记录不存在");
             if ("REVERSED".equals(receipt.get("status"))) return receipt;
@@ -657,7 +682,7 @@ public class RemnantService {
     }
 
     public synchronized CuttingTask saveTask(CuttingTask input) {
-        return mutate(() -> saveTaskInternal(input));
+        return mutate("DEMAND_ADJUSTMENT",input == null ? null : input.id(),"UNAUTHENTICATED_LOCAL",() -> saveTaskInternal(input));
     }
 
     private CuttingTask saveTaskInternal(CuttingTask input) {
@@ -837,7 +862,7 @@ public class RemnantService {
     }
 
     public synchronized Map<String, Object> confirm(SolveRequest request, SolveResponse plan, CutReport report) {
-        return mutate(() -> confirmInternal(request, plan, report));
+        return mutate("CUT_REPORT",report.planId(),"UNAUTHENTICATED_LOCAL",() -> confirmInternal(request, plan, report));
     }
 
     public synchronized Map<String, Object> confirm(SolveRequest request, SolveResponse plan, CutReport report, String baseline) {
@@ -1024,7 +1049,7 @@ public class RemnantService {
     }
 
     public synchronized boolean resetRoll(String rollId, boolean force) {
-        return mutate(() -> resetRollInternal(rollId, force));
+        return mutate("DEMO_RESET",rollId,"UNAUTHENTICATED_LOCAL",() -> resetRollInternal(rollId, force));
     }
 
     private boolean resetRollInternal(String rollId, boolean force) {
@@ -1035,11 +1060,10 @@ public class RemnantService {
         if (roll == null) return false;
         if (receipts.values().stream().anyMatch(r -> rollId.equals(r.get("rollId")) && !qualityEvents(r).isEmpty()))
             throw new IllegalArgumentException("母卷已有复检处置，不能通过演示重置清除产出追溯");
-        if (receipts.values().stream().anyMatch(r -> rollId.equals(r.get("rollId")) && r.get("taskId") != null))
-            throw new IllegalArgumentException("该母卷已有任务报工记录，不能通过演示重置清除");
+        if (receipts.values().stream().anyMatch(r -> rollId.equals(r.get("rollId"))))
+            throw new IllegalArgumentException("该母卷已有报工记录，不能通过演示重置清除；请保留原记录并按实际情况冲销");
         roll.setCurrentRemainingLength(roll.getTotalLength());
         roll.setUsedLength(0.0);
-        receipts.entrySet().removeIf(e -> rollId.equals(e.getValue().get("rollId")));
         remnantPool.entrySet().removeIf(e -> rollId.equals(e.getValue().getSourceRollId()));
         if ("ROLL-2026-0920".equals(rollId)) {
             RemnantStock r1 = new RemnantStock("REM-202609-001", 2000, 1600, "库位 A-01-03", "TC涤棉-B2026",
@@ -1267,7 +1291,7 @@ public class RemnantService {
     }
 
     public synchronized MotherRollInfo saveOrUpdateMotherRoll(MotherRollInfo roll) {
-        return mutate(() -> saveOrUpdateMotherRollInternal(roll));
+        return mutate("ROLL_RECEIPT_OR_UPDATE",roll == null ? null : roll.getRollId(),"UNAUTHENTICATED_LOCAL",() -> saveOrUpdateMotherRollInternal(roll));
     }
 
     private MotherRollInfo saveOrUpdateMotherRollInternal(MotherRollInfo roll) {
@@ -1314,13 +1338,13 @@ public class RemnantService {
     }
 
     public synchronized Defect addDefectToRoll(String rollId, Defect defect) {
-        return mutate(() -> addDefectToRollInternal(rollId, defect));
+        return mutate("INSPECTION",rollId,"UNAUTHENTICATED_LOCAL",() -> addDefectToRollInternal(rollId, defect));
     }
 
     public record InspectionInput(double width, double totalLength, List<Defect> defects) {}
 
     public synchronized MotherRollInfo createInspectionRoll(MotherRollInfo input) {
-        return mutate(() -> {
+        return mutate("ROLL_RECEIPT",input == null ? null : input.getRollId(),"UNAUTHENTICATED_LOCAL",() -> {
             if (input == null || input.getRollId() == null || input.getRollId().isBlank())
                 throw new IllegalArgumentException("请输入母卷编号");
             if (motherRolls.containsKey(input.getRollId())) throw new IllegalArgumentException("此母卷编号已存在，请选择已有母卷");
@@ -1334,7 +1358,7 @@ public class RemnantService {
     }
 
     public synchronized MotherRollInfo saveInspection(String rollId, InspectionInput input) {
-        return mutate(() -> {
+        return mutate("INSPECTION",rollId,"UNAUTHENTICATED_LOCAL",() -> {
             var roll = motherRolls.get(rollId);
             if (roll == null) throw new IllegalArgumentException("未找到母卷，请重新选择");
             if (input == null || input.width() != roll.getWidth() || input.totalLength() != roll.getTotalLength())
@@ -1389,7 +1413,7 @@ public class RemnantService {
     }
 
     public synchronized boolean scrapRemnant(String id, String reason) {
-        return mutate(() -> scrapRemnantInternal(id, reason));
+        return mutate("REMNANT_SCRAP",id,"UNAUTHENTICATED_LOCAL",() -> scrapRemnantInternal(id, reason));
     }
 
     private boolean scrapRemnantInternal(String id, String reason) {
@@ -1476,7 +1500,7 @@ public class RemnantService {
     }
 
     public synchronized RemnantStock registerRemnant(RemnantStock item) {
-        return mutate(() -> registerRemnantInternal(item));
+        return mutate("REMNANT_RECEIPT",item == null ? null : item.getId(),"UNAUTHENTICATED_LOCAL",() -> registerRemnantInternal(item));
     }
 
     private RemnantStock registerRemnantInternal(RemnantStock item) {
@@ -1498,7 +1522,7 @@ public class RemnantService {
     }
 
     public synchronized RemnantStock autoRegisterCutRemnant(String rollId, String parentRemnantId, double w, double l, boolean hasDefect, String desc) {
-        return mutate(() -> autoRegisterCutRemnantInternal(rollId, parentRemnantId, w, l, hasDefect, desc));
+        return mutate("REMNANT_RECEIPT",rollId,"UNAUTHENTICATED_LOCAL",() -> autoRegisterCutRemnantInternal(rollId, parentRemnantId, w, l, hasDefect, desc));
     }
 
     private RemnantStock autoRegisterCutRemnantInternal(String rollId, String parentRemnantId, double w, double l, boolean hasDefect, String desc) {
@@ -1517,7 +1541,7 @@ public class RemnantService {
     }
 
     public synchronized boolean consumeRemnant(String id) {
-        return mutate(() -> consumeRemnantInternal(id));
+        return mutate("REMNANT_ISSUE",id,"UNAUTHENTICATED_LOCAL",() -> consumeRemnantInternal(id));
     }
 
     private boolean consumeRemnantInternal(String id) {
@@ -1533,7 +1557,7 @@ public class RemnantService {
     }
 
     public synchronized boolean updateStatus(String id, String status) {
-        return mutate(() -> updateStatusInternal(id, status));
+        return mutate("REMNANT_STATUS_ADJUSTMENT",id,"UNAUTHENTICATED_LOCAL",() -> updateStatusInternal(id, status));
     }
 
     private boolean updateStatusInternal(String id, String status) {

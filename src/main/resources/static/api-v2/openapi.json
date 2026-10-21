@@ -3,7 +3,7 @@
   "info": {
     "title": "CurDemoTwo Computation and Execution API",
     "version": "2.0.0",
-    "description": "标准计算作业不写库存；文件模式单实例，JDBC 模式支持租约调度。二维、唛架与一维适配能力以 capabilities 为准。执行单接口关联已保存的二维业务任务方案，与库存共享事务；整卷/整块预约、开工、报工和取消已实现。身份认证、多材料、不可变流水及 MCP 尚待实现。"
+    "description": "标准计算作业不写库存；文件模式单实例，JDBC 模式支持租约调度。二维、唛架与一维适配能力以 capabilities 为准。执行单接口关联已保存的二维业务任务方案，与库存共享事务；整卷/整块预约、开工、报工和取消已实现。不可变库存/需求流水与内部对账已实现；身份认证、多材料、外部库存对账及 MCP 尚待实现。"
   },
   "servers": [
     {
@@ -1079,6 +1079,84 @@
           },
           "409": {
             "description": "幂等内容、版本、预约或执行状态冲突"
+          }
+        }
+      }
+    },
+    "/api/v2/inventory-ledger": {
+      "get": {
+        "summary": "分页查询不可变库存与需求流水",
+        "parameters": [
+          {
+            "name": "aggregateType",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "ROLL",
+                "REMNANT",
+                "DEMAND",
+                "REPORT",
+                "CHECKPOINT"
+              ]
+            }
+          },
+          {
+            "name": "aggregateId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "只读结果；不迁移或修正业务余额",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryLedgerPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "分页参数无效"
+          }
+        }
+      }
+    },
+    "/api/v2/inventory-ledger/reconciliation": {
+      "get": {
+        "summary": "流水重放与当前余额、需求、母卷长度及报工面积分解核对",
+        "responses": {
+          "200": {
+            "description": "只读结果；不迁移或修正业务余额",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryReconciliation"
+                }
+              }
+            }
           }
         }
       }
@@ -3004,6 +3082,126 @@
           "finishedPieceCount",
           "location"
         ]
+      },
+      "InventoryLedgerEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer"
+          },
+          "transactionId": {
+            "type": "string"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "aggregateType": {
+            "type": "string"
+          },
+          "aggregateId": {
+            "type": "string"
+          },
+          "businessId": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "integer"
+          },
+          "beforeVersion": {
+            "type": "integer"
+          },
+          "afterVersion": {
+            "type": "integer"
+          },
+          "sourceReportIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reverses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "同账户来源流水关联；批次共享余额可只冲销部分数量，以 beforeJson / afterJson 为实际变化"
+          },
+          "beforeJson": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "规范化 JSON 余额及几何；空为不存在"
+          },
+          "afterJson": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "规范化 JSON 余额及几何；空为移除"
+          }
+        }
+      },
+      "InventoryLedgerPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryLedgerEntry"
+            }
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "nextCursor": {
+            "type": "integer"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        }
+      },
+      "InventoryReconciliation": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "enum": [
+              "NOT_INITIALIZED",
+              "BALANCED",
+              "MISMATCH"
+            ]
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "entryCount": {
+            "type": "integer"
+          },
+          "aggregateCount": {
+            "type": "integer"
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "areas": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
       }
     }
   }
