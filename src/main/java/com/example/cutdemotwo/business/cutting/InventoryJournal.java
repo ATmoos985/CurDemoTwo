@@ -56,6 +56,7 @@ public final class InventoryJournal {
                     Map.of("taskId",task.id(),"materialModel",task.materialModel(),"line",line,
                             "completed",completed.getOrDefault(String.valueOf(line.id()),0)));
         }
+        snapshot.transfers().forEach((id,document)->put(result,"TRANSFER",id,document));
         return result;
     }
 

@@ -22,6 +22,8 @@ public class FileInventoryStore implements InventoryStore {
         var previous = load();
         com.example.cutdemotwo.business.model.InventoryLedgerEntry.requireAppendOnly(
                 previous == null ? java.util.List.of() : previous.ledger(), snapshot.ledger());
+        com.example.cutdemotwo.business.model.InventoryTransfer.requireAppendOnly(
+                previous == null ? java.util.Map.of() : previous.transfers(), snapshot.transfers());
         try {
             Path parent = file.toAbsolutePath().getParent();
             Files.createDirectories(parent);

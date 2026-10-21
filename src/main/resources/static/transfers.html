@@ -1,0 +1,14 @@
+<!DOCTYPE html><html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>材料移库 · 布料裁切</title><link rel="stylesheet" href="css/base.css"><link rel="stylesheet" href="css/product-navigation.css"><link rel="stylesheet" href="css/management.css"></head>
+<body class="management-page"><header><a class="brand" href="/inventory.html">布料裁切 <span>材料移库</span></a><div data-product-nav="transfers"></div></header><main>
+<div class="management-heading"><div><h1>材料移库</h1><p>选择在库材料，核对原库位后登记目标库位。数量、质量状态和来源保持不变。</p></div><button id="refresh-transfers">刷新库存与单据</button></div>
+<p><a href="/inventory.html" target="_blank" rel="noopener">库存档案</a> · <a href="/analysis.html#ledger" target="_blank" rel="noopener">库存流水与对账</a></p>
+<p id="transfer-message" role="status">正在读取库存…</p><p id="transfer-error" role="alert" hidden></p>
+<section id="transfer-pending" hidden><h2>待确认的移库请求</h2><p>上次请求的结果尚未确认。重试会使用原请求，避免重复过账；确认前不能发起新单。</p><pre id="transfer-pending-summary"></pre><button id="retry-transfer">确认上次提交结果</button></section>
+<form id="transfer-form"><fieldset id="transfer-fields"><legend>新建移库单</legend>
+<div class="management-filters"><label>目标库位<input id="transfer-destination" required maxlength="120"></label><label>移库原因<input id="transfer-reason" required maxlength="500"></label><label>经办人<input id="transfer-operator" required maxlength="100"></label></div>
+<p class="scope-note">经办人为手工登记，尚未接入账号认证。被执行单预约或加工中的材料不可移库；隔离料移库后仍保持隔离。</p>
+<div class="management-table-wrap"><table><thead><tr><th>选择</th><th>材料编号 / 类型</th><th>型号</th><th>当前库位</th><th>移库状态</th></tr></thead><tbody id="transfer-materials"></tbody></table></div>
+<p id="transfer-selection">已选 0 项</p><button id="post-transfer" type="submit" class="action-primary">确认并登记移库</button> <button id="clear-transfer-selection" type="button">清空选择</button>
+</fieldset></form>
+<section><h2>已过账移库单</h2><p>保留原始单据。更正位置请新建移库单，不能删除历史。</p><div id="transfer-history"></div></section>
+</main><script type="module" src="js/product-navigation.js"></script><script type="module" src="js/business/inventory/transfer-page.js"></script></body></html>

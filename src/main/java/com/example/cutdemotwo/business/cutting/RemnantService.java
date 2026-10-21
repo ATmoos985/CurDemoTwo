@@ -4,6 +4,7 @@ import com.example.cutdemotwo.contracts.geometry.Defect;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.ExecutionOrder;
 import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
+import com.example.cutdemotwo.business.model.InventoryTransfer;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
 import com.example.cutdemotwo.business.model.RemnantStock;
 import com.example.cutdemotwo.business.model.SolveRequest;
@@ -41,6 +42,7 @@ public class RemnantService {
     private final InventoryStore store;
     private final Map<String, CuttingPlan> plans = new LinkedHashMap<>();
     private final Map<String,ExecutionOrder> executions = new LinkedHashMap<>();
+    private final Map<String,InventoryTransfer> transfers=new LinkedHashMap<>();
     private List<InventoryLedgerEntry> ledger = List.of();
     private long revision;
     private boolean accessing;
@@ -136,7 +138,7 @@ public class RemnantService {
 
     private InventorySnapshot snapshot() {
         return new InventorySnapshot(new ArrayList<>(motherRolls.values()), new ArrayList<>(remnantPool.values()),
-                receipts, remnantSeq.get(), defectSeq.get(), tasks, plans, revision, executions, ledger);
+                receipts, remnantSeq.get(), defectSeq.get(), tasks, plans, revision, executions, ledger, transfers);
     }
 
     private void restore(InventorySnapshot snapshot) {
@@ -147,6 +149,7 @@ public class RemnantService {
         plans.clear(); if (snapshot.plans() != null) plans.putAll(snapshot.plans());
         executions.clear();executions.putAll(snapshot.executions());
         ledger = snapshot.ledger();
+        transfers.clear();transfers.putAll(snapshot.transfers());
         revision = snapshot.revision();
         remnantSeq.set(snapshot.remnantSeq()); defectSeq.set(snapshot.defectSeq());
     }
@@ -196,6 +199,71 @@ public class RemnantService {
             var items=page.stream().limit(limit).toList();
             return Map.of("items",items,"hasMore",page.size()>limit,
                     "nextCursor",items.isEmpty()?after:items.get(items.size()-1).sequence(),"revision",revision);
+        });
+    }
+
+    public synchronized Map<String,Object> transferOptions() {
+        return read(()->{
+            var materials=new ArrayList<Map<String,Object>>();
+            for(var roll:motherRolls.values())materials.add(transferOption("roll",roll.getRollId(),roll.getStorageLocation(),roll.getRollModel()));
+            for(var remnant:remnantPool.values())materials.add(transferOption("remnant",remnant.getId(),remnant.getLocation(),remnant.getMaterialBatch()));
+            materials.sort(Comparator.comparing(row->row.get("type")+"/"+row.get("id")));
+            return Map.of("revision",revision,"materials",materials);
+        });
+    }
+    private Map<String,Object> transferOption(String type,String id,String location,String model) {
+        String reason=transferBlock(type,id);
+        return Map.of("type",type,"id",id,"location",Objects.toString(location,""),"materialModel",Objects.toString(model,""),
+                "allowed",reason.isEmpty(),"reason",reason);
+    }
+    private String transferBlock(String type,String id) {
+        if("roll".equals(type)) {
+            var roll=motherRolls.get(id);
+            if(roll==null)return "母卷不存在";
+            if(roll.getCurrentRemainingLength()<=0)return "母卷已用尽";
+        } else if("remnant".equals(type)) {
+            var remnant=remnantPool.get(id);
+            if(remnant==null)return "料头不存在";
+            if(!Set.of("AVAILABLE","QUARANTINED").contains(remnant.getStatus()))return "料头已不在库";
+        } else return "材料类型必须为 roll 或 remnant";
+        if(executions.values().stream().anyMatch(e->e.materialType().equals(type)&&e.materialId().equals(id)&&e.reserves(operationTime)))
+            return "材料已被执行单预约或正在加工";
+        return "";
+    }
+    public synchronized List<InventoryTransfer> inventoryTransfers() {
+        return read(()->transfers.values().stream().sorted(Comparator.comparingLong(InventoryTransfer::inventoryRevision).reversed()).toList());
+    }
+    public synchronized InventoryTransfer transferInventory(String key,InventoryTransfer.Command command) {
+        if(key==null || key.isBlank() || key.length()>128 || command==null || command.expectedRevision()<0
+                || command.destination()==null || command.destination().isBlank() || command.destination().length()>120
+                || command.reason()==null || command.reason().isBlank() || command.reason().length()>500
+                || command.operator()==null || command.operator().isBlank() || command.operator().length()>100
+                || command.materials()==null || command.materials().isEmpty() || command.materials().size()>100)
+            throw new IllegalArgumentException("请填写有效库存版本、目标库位、移库原因、经办人和 1–100 项材料");
+        String documentId=UUID.randomUUID().toString();
+        return mutate("INVENTORY_TRANSFER",documentId,"DECLARED:"+command.operator(),()->{
+            for(var previous:transfers.values())if(previous.idempotencyKey().equals(key)) {
+                if(!previous.command().equals(command))throw new InventoryConflictException("同一幂等键已用于其他移库内容");
+                return previous;
+            }
+            if(command.expectedRevision()!=revision)throw new InventoryConflictException("库存版本已变化，请刷新材料后重新核对移库单");
+            var identities=new HashSet<String>();var lines=new ArrayList<InventoryTransfer.Line>();
+            for(var material:command.materials()) {
+                if(material==null || material.id()==null || material.id().isBlank() || material.type()==null)
+                    throw new IllegalArgumentException("材料类型和编号不能为空");
+                if(!identities.add(material.type()+"/"+material.id()))throw new IllegalArgumentException("同一材料不能重复移库");
+                String blocked=transferBlock(material.type(),material.id());
+                if(!blocked.isEmpty())throw new InventoryConflictException(material.id()+"："+blocked);
+                String old="roll".equals(material.type())?motherRolls.get(material.id()).getStorageLocation():remnantPool.get(material.id()).getLocation();
+                if(command.destination().equals(Objects.toString(old,"")))throw new IllegalArgumentException("目标库位与当前库位相同："+material.id());
+                lines.add(new InventoryTransfer.Line(material.type(),material.id(),Objects.toString(old,""),command.destination()));
+            }
+            for(var line:lines) {
+                if("roll".equals(line.type()))motherRolls.get(line.id()).setStorageLocation(line.toLocation());
+                else remnantPool.get(line.id()).setLocation(line.toLocation());
+            }
+            var document=new InventoryTransfer(documentId,key,command,operationTime,revision+1,lines);
+            transfers.put(document.id(),document);return document;
         });
     }
 
@@ -1097,6 +1165,10 @@ public class RemnantService {
 
     private boolean resetRollInternal(String rollId, boolean force) {
         ensureMaterialNotReserved("roll",rollId,null);
+        if(transfers.values().stream().flatMap(t->t.lines().stream()).anyMatch(line->
+                "roll".equals(line.type()) && rollId.equals(line.id()) || "remnant".equals(line.type())
+                && remnantPool.containsKey(line.id()) && rollId.equals(remnantPool.get(line.id()).getSourceRollId())))
+            throw new InventoryConflictException("材料已有移库单追溯，禁止演示重置；请新建移库单更正库位");
         if(executions.values().stream().anyMatch(e->Objects.equals(e.materialId(),rollId) || plans.containsKey(e.planId()) && Objects.equals(plans.get(e.planId()).request().getRollId(),rollId)))
             throw new InventoryConflictException("材料已有执行单追溯，禁止演示重置");
         MotherRollInfo roll = motherRolls.get(rollId);
@@ -1362,7 +1434,8 @@ public class RemnantService {
             existing.setWidth(roll.getWidth());
             existing.setRawWidth(roll.getRawWidth());
             existing.setTotalLength(roll.getTotalLength());
-            existing.setStorageLocation(roll.getStorageLocation());
+            if(!Objects.equals(Objects.toString(existing.getStorageLocation(),""),Objects.toString(roll.getStorageLocation(),"")))
+                throw new IllegalArgumentException("已登记材料请通过移库单变更库位");
             existing.setInspectionStatus(roll.getInspectionStatus());
             if (roll.getDefects() != null && !roll.getDefects().isEmpty()) {
                 existing.setDefects(roll.getDefects());

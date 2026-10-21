@@ -1160,6 +1160,101 @@
           }
         }
       }
+    },
+    "/api/v2/inventory-transfers": {
+      "get": {
+        "summary": "List posted immutable transfer documents, newest first; read only",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InventoryTransfer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Atomically move 1-100 inventory materials and post a document plus journal",
+        "description": "Expected revision comes from options. Reserved/running materials, consumed or scrapped remnants cannot move. Quarantine status is preserved. Same key and identical command returns the original document before revision checking. Correct an old move using a new document; no delete/update. File mode supports one application instance. Operator is manually declared until authentication is implemented.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryTransfer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or missing fields, empty materials, duplicate material, same location",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Inventory revision, reservation, material availability or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/inventory-transfers/options": {
+      "get": {
+        "summary": "Read material locations and move eligibility with one inventory revision",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferOptions"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3276,6 +3371,169 @@
             "items": {
               "type": "object",
               "additionalProperties": true
+            }
+          }
+        }
+      },
+      "TransferMaterial": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "id"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "roll",
+              "remnant"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "TransferCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "destination",
+          "reason",
+          "operator",
+          "materials"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "destination": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "operator": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Manually declared operator; not authenticated identity."
+          },
+          "materials": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/TransferMaterial"
+            }
+          }
+        }
+      },
+      "InventoryTransfer": {
+        "type": "object",
+        "required": [
+          "id",
+          "idempotencyKey",
+          "command",
+          "postedAt",
+          "inventoryRevision",
+          "lines"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "command": {
+            "$ref": "#/components/schemas/TransferCommand"
+          },
+          "postedAt": {
+            "type": "integer",
+            "description": "Unix time in milliseconds"
+          },
+          "inventoryRevision": {
+            "type": "integer"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "type",
+                "id",
+                "fromLocation",
+                "toLocation"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "fromLocation": {
+                  "type": "string"
+                },
+                "toLocation": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "TransferOptions": {
+        "type": "object",
+        "required": [
+          "revision",
+          "materials"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer"
+          },
+          "materials": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "type",
+                "id",
+                "location",
+                "materialModel",
+                "allowed",
+                "reason"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "location": {
+                  "type": "string"
+                },
+                "materialModel": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "allowed": {
+                  "type": "boolean"
+                }
+              }
             }
           }
         }
