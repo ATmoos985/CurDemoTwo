@@ -19,11 +19,11 @@ test('every entry points at a real page and every nav host names a known entry',
     for (const item of ENTRIES) assert.equal(hosts.get(item.id), item.href.slice(1), `${item.id} 页面缺少对应导航宿主`);
 });
 
-test('navigation exposes the five unified product destinations on every page', () => {
+test('navigation exposes four production management destinations on every page', () => {
     for (const active of ENTRIES.map(e => e.id)) {
         const items=navGroups(active).flatMap(g=>g.items);
-        assert.deepEqual(items.map(item=>item.name), ['介绍','二维裁切','一维裁切','功能演示','跑布验疵']);
-        assert.deepEqual(items.map(item=>item.href), ['/intro.html','/index.html','/linear.html','/demos.html','/inspection.html']);
+        assert.deepEqual(items.map(item=>item.name), ['任务','材料','分析','设置']);
+        assert.deepEqual(items.map(item=>item.href), ['/tasks.html','/inventory.html','/analysis.html','/settings.html']);
     }
 });
 

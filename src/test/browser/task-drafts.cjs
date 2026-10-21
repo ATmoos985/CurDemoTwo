@@ -46,25 +46,41 @@ const server = createServer(async (req,res) => {
     async function run(name, verify) {
         tasks = new Map([['task-a',initialTask()]]); failSave=false; requests=[];
         const context = await browser.newContext({viewport:{width:1366,height:768}}), page = await context.newPage(), errors=[];
+        page.setDefaultTimeout(7000);
         page.on('pageerror',error => errors.push(error.message));
         try {
             await page.goto(`http://127.0.0.1:${server.address().port}`);
             await expect(page.locator('body')).not.toHaveAttribute('inert','');
             await verify(page);
             assert.deepEqual(errors, []);
-            assert.ok(requests.every(r => !r.startsWith('POST') || r === 'POST /api/cutting/tasks'), 'no inventory or report writes');
+            assert.ok(requests.every(r => !r.startsWith('POST') || r === 'POST /api/cutting/tasks'), 'no inventory or report writes: '+requests.filter(r=>r.startsWith('POST')).join(', '));
             passed++; console.log('PASS ' + name);
         } catch(error) {failed++; console.error('FAIL ' + name + '\n' + error.stack);}
         finally {await context.close();}
     }
+    const openEditor = async page => {
+        if (!await page.locator('#demand-manager').evaluate(dialog => dialog.open)) await page.getByRole('button',{name:'管理需求 ↗',exact:true}).click();
+    };
+    const closeEditor = async page => {
+        if (await page.locator('#demand-manager').evaluate(dialog => dialog.open)) await page.locator('#demand-manager .workbench-dialog-heading [data-close]').click();
+    };
+    const newTask = async page => { await closeEditor(page); await page.getByRole('button',{name:'新建任务',exact:true}).click(); };
     const edit = async page => {
-        await page.getByRole('button',{name:'+ 增裁片',exact:true}).click();
+        await openEditor(page);
+        await page.locator('#task-name').fill('草稿任务');
+        await page.locator('#task-material').selectOption(roll.rollModel);
+        await page.getByRole('button',{name:'＋ 添加需求',exact:true}).click();
+        await page.locator('.dem-l').fill('1200'); await page.locator('.dem-count').fill('3');
         await page.locator('.dem-name').fill('草稿主帘'); await page.locator('.dem-w').fill('1234.5');
         await expect(page.locator('#task-state')).toContainText('本机草稿');
     };
     const openTask = async page => {
+        await closeEditor(page);
         await page.getByRole('button',{name:'打开任务',exact:true}).click();
         await page.locator('[data-task="task-a"]').click();
+        if (!await page.locator('.draft-switch-dialog').count()) {
+            await expect(page.locator('#task-picker')).not.toBeVisible(); await openEditor(page);
+        }
     };
     try {
         await run('typing without blur survives reload, including an incomplete numeric field', async page => {
@@ -74,21 +90,21 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('#task-state')).toContainText('未保存到服务器');
         });
         await run('new task can cancel, retain and restore a separate draft', async page => {
-            await edit(page); await page.getByRole('button',{name:'新建任务',exact:true}).click();
-            fs.mkdirSync('target/task-drafts', {recursive:true});
-            await page.screenshot({path:'target/task-drafts/switch-1366.png'});
+            await edit(page); await newTask(page);
+            fs.mkdirSync('/tmp/cutdemo-task-drafts', {recursive:true});
+            await page.screenshot({path:'/tmp/cutdemo-task-drafts/switch-1366.png'});
             const dialogBox = await page.locator('.draft-switch-dialog').boundingBox();
             assert.ok(Math.abs(dialogBox.x + dialogBox.width/2 - 683) < 2);
             await page.getByRole('button',{name:'继续编辑',exact:true}).click();
             await expect(page.locator('.dem-w')).toHaveValue('1234.5');
-            await page.getByRole('button',{name:'新建任务',exact:true}).click();
+            await newTask(page);
             await page.getByRole('button',{name:'保留草稿并继续',exact:true}).click();
             await expect(page.locator('#demands-container .item-row')).toHaveCount(0);
-            await page.locator('#btn-local-drafts').click(); await page.locator('[data-draft]').click();
+            await closeEditor(page); await page.locator('#btn-local-drafts').click(); await page.locator('[data-draft]').click();
             await expect(page.locator('.dem-name')).toHaveValue('草稿主帘');
         });
         await run('save and continue persists once and removes the corresponding local draft', async page => {
-            await edit(page); await page.getByRole('button',{name:'新建任务',exact:true}).click();
+            await edit(page); await newTask(page);
             await page.getByRole('button',{name:'保存并继续',exact:true}).click();
             await expect(page.locator('#demands-container .item-row')).toHaveCount(0);
             await expect(page.locator('#btn-local-drafts')).toHaveText('本机草稿 0');
@@ -97,7 +113,7 @@ const server = createServer(async (req,res) => {
         });
         await run('failed server save keeps the current workspace and recoverable draft', async page => {
             await edit(page); failSave=true;
-            await page.getByRole('button',{name:'新建任务',exact:true}).click();
+            await newTask(page);
             await page.getByRole('button',{name:'保存并继续',exact:true}).click();
             await expect(page.locator('#task-state')).toContainText('服务器保存失败');
             await expect(page.locator('.dem-w')).toHaveValue('1234.5');
@@ -111,11 +127,14 @@ const server = createServer(async (req,res) => {
             assert.equal(tasks.get('task-a').revision,1);
         });
         await run('preset replacement protects the old draft and retains the new example separately', async page => {
-            await edit(page); await page.locator('#btn-preset-trigger').click(); await page.locator('#btn-case-1').click();
+            await edit(page); await closeEditor(page); await page.evaluate(()=>{window.presetOperation=window.camApp.selectPresetCase(1);});
             await page.getByRole('button',{name:'继续编辑',exact:true}).click();
+            await page.evaluate(()=>window.presetOperation);
             await expect(page.locator('.dem-name')).toHaveValue('草稿主帘');
-            await page.locator('#btn-preset-trigger').click(); await page.locator('#btn-case-1').click(); await page.getByRole('button',{name:'保留草稿并继续',exact:true}).click();
-            await expect(page.locator('#task-name')).toHaveValue('整幅横切');
+            await closeEditor(page); await page.evaluate(()=>{window.presetOperation=window.camApp.selectPresetCase(1);}); await page.getByRole('button',{name:'保留草稿并继续',exact:true}).click();
+            await page.evaluate(()=>window.presetOperation);
+            await expect(page.locator('#task-name')).toHaveValue('示例切割任务');
+            assert.equal(await page.evaluate(()=>window.camApp.state.currentCaseId),1);
             await expect(page.locator('#btn-local-drafts')).toHaveText('本机草稿 2');
         });
         await run('deleting a demand can be undone without losing its ID or values', async page => {
@@ -136,9 +155,9 @@ const server = createServer(async (req,res) => {
         });
         await run('local storage failure cannot silently retain and abandon unsaved input', async page => {
             await page.evaluate(()=>{const original=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key.startsWith('cutting-demand-draft'))throw new DOMException('full','QuotaExceededError');return original.call(this,key,value);};});
-            await page.getByRole('button',{name:'+ 增裁片',exact:true}).click(); await page.locator('.dem-w').fill('1888');
+            await openEditor(page); await page.getByRole('button',{name:'＋ 添加需求',exact:true}).click(); await page.locator('.dem-w').fill('1888');
             await expect(page.locator('#task-state')).toContainText('草稿保存失败');
-            await page.getByRole('button',{name:'新建任务',exact:true}).click();
+            await newTask(page);
             await page.getByRole('button',{name:'保留草稿并继续',exact:true}).click();
             await expect(page.locator('.dem-w')).toHaveValue('1888');
             await expect(page.locator('.workbench-toast').last()).toContainText('本机草稿保存失败');
@@ -155,9 +174,9 @@ const server = createServer(async (req,res) => {
             } finally {roll.usedLength=0;roll.currentRemainingLength=60000;}
         });
         await run('new row after deletion does not reuse an existing demand ID', async page => {
-            await edit(page); await page.getByRole('button',{name:'+ 增裁片',exact:true}).click();
+            await edit(page); await openEditor(page); await page.getByRole('button',{name:'＋ 添加需求',exact:true}).click();
             await page.locator('#demands-container .del-btn').first().click();
-            await page.getByRole('button',{name:'+ 增裁片',exact:true}).click();
+            await openEditor(page); await page.getByRole('button',{name:'＋ 添加需求',exact:true}).click();
             const ids = await page.locator('#demands-container .item-row').evaluateAll(rows=>rows.map(r=>r.dataset.id));
             assert.equal(new Set(ids).size,ids.length);
             await page.getByRole('button',{name:'撤销删除',exact:true}).click();

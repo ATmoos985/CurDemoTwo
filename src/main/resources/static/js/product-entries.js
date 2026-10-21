@@ -1,6 +1,8 @@
 /** 功能入口目录：导航栏与介绍页共用，页面路径只在这里维护。 */
 export const ENTRIES = Object.freeze([
-    {id:'tasks', name:'任务管理', href:'/tasks.html', group:'', navHidden:true, summary:'生产任务、净良品履约与执行预约'},
+    {id:'tasks', name:'任务', href:'/tasks.html', group:'', navHidden:true, summary:'生产任务、净良品履约与执行预约'},
+    {id:'analysis', name:'分析', href:'/analysis.html', group:'', summary:'实际报工面积、库存对账与流水'},
+    {id:'settings', name:'设置', href:'/settings.html', group:'', summary:'工艺参数入口、本机显示与服务端运行能力'},
     {id:'marker', name:'服装唛架', href:'/marker-demo.html', group:'', navHidden:true, summary:'固定布宽、齐套衣片、缩短唛架'},
     {id:'demos', name:'功能演示', href:'/demos.html', group:'', summary:'二维场景、服装唛架与一维搭切的统一演示'},
     {id: 'intro', name: '介绍', href: '/intro.html', group: '', summary: '切割能力、行业场景与演示入口总览'},
@@ -20,8 +22,8 @@ export const ENTRIES = Object.freeze([
 
 export const entry = id => ENTRIES.find(item => item.id === id) ?? null;
 
-/** Five primary destinations; legacy demonstrations remain registered for direct links. */
+/** Production management destinations; legacy URLs remain valid. */
 export function navGroups() {
-    return [entry('intro'), {...entry('workbench'), name:'二维裁切'}, {...entry('linear'), name:'一维裁切'},
-        entry('demos'), entry('inspection')].map(item => ({label:'', items:[item]}));
+    return [entry('tasks'), {...entry('inventory'), name:'材料'}, entry('analysis'), entry('settings')]
+        .map(item => ({label:'', items:[item]}));
 }

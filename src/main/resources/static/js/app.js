@@ -150,6 +150,8 @@ bus.on('demands:changed', () => {
 });
 
 bus.on('settings:updated', () => {
+    taskInputChanged();
+    updateUIInfo();
     renderScene();
     drawRulers();
 });
@@ -524,6 +526,8 @@ async function bootstrapApp() {
     } catch (error) { showToast("工作台初始化失败：" + error.message, "error"); }
     finally { document.body.inert = false; }
     if (openInitialView) await openInitialView();
+    const settingsTab=new URLSearchParams(location.search).get('settings');
+    if (!document.getElementById('task-route-error') && ['craft','remnant-cfg','solver-cfg','general'].includes(settingsTab)) {openSettingsModal();switchSettingsTab(settingsTab);}
 }
 
 if (document.readyState === "loading") {

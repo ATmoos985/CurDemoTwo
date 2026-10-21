@@ -113,6 +113,8 @@ export function loadSavedSettings() {
 }
 
 export function saveSettings() {
+    if (state.reportQueue?.length || state.taskExecutions?.some(view=>view.reservationActive))
+        return showToast('当前有有效预约或待报工工位，请先完成执行，再修改工艺参数。', 'warning');
     for (const input of document.querySelectorAll('#settings-modal input[type="number"]')) {
         if (!input.value.trim() || !input.reportValidity()) return showToast('请填写有效的参数范围', 'warning');
     }

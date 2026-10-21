@@ -104,6 +104,17 @@ const server = createServer(async (req,res) => {
    await page.locator('#refresh-tasks').click();await expect(page.locator('#task-list-error')).toContainText('旧列表仅供参考');
    await expect(page.locator('#task-rows tr')).toHaveCount(2);failRead=false;await page.locator('#refresh-tasks').click();await expect(page.locator('#task-list-error')).toBeHidden();
   });
+  await run('saving task process persists a recoverable draft and reload restores it',async page=>{
+   await ready(page,'/index.html');await page.evaluate(async()=>{await (await import('/js/business/cutting/task-workspace.js')).loadTask('task-a');window.camApp.openSettingsModal();window.camApp.switchSettingsTab('craft');});
+   await page.locator('#cfg-trim-start').fill('50');await page.evaluate(()=>window.camApp.saveSettings());
+   await expect(page.locator('#task-state')).toContainText('本机草稿');await page.reload();await expect(page.locator('#inp-trim-start')).toHaveValue('50');
+  });
+  await run('settings deep link preserves draft and active reservations block process changes',async page=>{
+   const before=await draft(page);await page.goto(base+'/index.html?settings=craft');await expect(page.locator('#settings-modal')).toBeVisible();
+   await expect(page.locator('#pane-craft')).toBeVisible();await page.evaluate(()=>{window.camApp.state.taskExecutions=[{reservationActive:true}];});
+   await page.locator('#cfg-trim-start').fill('9');await page.evaluate(()=>window.camApp.saveSettings());await expect(page.locator('#settings-modal')).toBeVisible();
+   assert.deepEqual(await page.evaluate(()=>Object.fromEntries(Object.entries(localStorage).filter(([k])=>k.startsWith('cutting-demand-draft:')).map(([k,v])=>{const {updatedAt,...draft}=JSON.parse(v);return [k,draft];}))),before);
+  });
  }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
- console.log(JSON.stringify({discovered:8,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
+ console.log(JSON.stringify({discovered:10,executed:passed+failed,passed,failed,skipped:0}));if(failed)process.exitCode=1;
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

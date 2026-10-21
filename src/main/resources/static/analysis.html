@@ -1,0 +1,12 @@
+<!DOCTYPE html><html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>分析 · 布料裁切</title><link rel="stylesheet" href="css/base.css"><link rel="stylesheet" href="css/product-navigation.css"><link rel="stylesheet" href="css/management.css"></head>
+<body class="management-page"><header><a class="brand" href="/tasks.html">布料裁切 <span>分析</span></a><div data-product-nav="analysis"></div></header><main>
+<div class="management-heading"><div><h1>实际产出与库存对账</h1><p>仅统计未冲销、面积资料完整的二维报工，良品已扣除复检降级。预览方案不计入。</p></div><button id="refresh-analysis">刷新对账</button></div>
+<p id="analysis-status" role="status">正在读取…</p><p id="analysis-error" role="alert" hidden></p>
+<section class="management-metrics" id="actual-metrics" aria-label="实际报工指标"></section>
+<details class="management-explanation"><summary>指标口径与适用范围</summary><p>实际良品产出率 = 净良品面积总和 ÷ 加工投入面积总和。可回收率 = 确认可用余料面积总和 ÷ 加工投入面积总和。按面积加权，不平均各工单百分比。单位 m²。</p><p>加工投入按每次报工领用计量，料头再次裁切会再次计入投入；它不是独立采购原料消耗。回收面积为报工及复检形成的回收产出，后续再领用不抹去原产出事实。损耗与不良品单独列示，未切尾料不属于投入。</p><p>当前范围为本系统二维报工，不包含旧一维作业或外部 WMS。历史面积缺失或对账异常时不显示汇总百分比，保留逐单证据。</p></details>
+<div id="analysis-issues" role="status"></div>
+<section><h2>逐单面积分解</h2><div class="management-table-wrap"><table><thead><tr><th>报工编号</th><th>投入 m²</th><th>净良品 m²</th><th>回收 m²</th><th>不良 m²</th><th>其他废料与损耗 m²</th></tr></thead><tbody id="area-rows"></tbody></table></div></section>
+<section id="ledger"><div class="management-heading"><div><h2>库存与需求流水</h2><p>按顺序追加。迁移期初是历史余额快照，不表示当时发生过入库或裁切。</p></div><button id="export-ledger" disabled>导出已载入流水 CSV</button></div>
+<form id="ledger-filters" class="management-filters"><label>对象类型<select id="ledger-type"><option value="">全部</option><option value="ROLL">母卷</option><option value="REMNANT">料头</option><option value="DEMAND">需求</option><option value="REPORT">报工</option><option value="CHECKPOINT">迁移检查点</option></select></label><label>对象编号<input id="ledger-id" placeholder="精确匹配对象编号"></label><button type="submit">查询流水</button><span id="ledger-status" role="status"></span></form>
+<p id="ledger-error" role="alert" hidden></p><div class="management-table-wrap"><table><thead><tr><th>序号 / 时间</th><th>业务事件</th><th>对象 / 编号</th><th>业务编号 / 来源报告</th><th>变更证据</th></tr></thead><tbody id="ledger-rows"></tbody></table></div><button id="load-ledger" hidden>加载下一页</button></section>
+</main><script type="module" src="js/product-navigation.js"></script><script type="module" src="js/business/analysis/analysis-page.js"></script></body></html>

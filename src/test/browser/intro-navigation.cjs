@@ -8,9 +8,9 @@ async function verifyIntro(page, base='http://localhost:18090') {
     await page.emulateMedia({reducedMotion:'no-preference'});
     await page.setViewportSize({width:1366,height:900});await page.goto(base+'/intro.html');
     await page.locator('#demo-groups a').first().waitFor();
-    check(JSON.stringify(await page.locator('.product-nav a').allTextContents())===JSON.stringify(['介绍','二维裁切','一维裁切','功能演示','跑布验疵']),'five direct destinations');
+    check(JSON.stringify(await page.locator('.product-nav a').allTextContents())===JSON.stringify(['任务','材料','分析','设置']),'four management destinations');
     check(await page.locator('[data-capabilities],.intro-section').count()===0,'old capability dialog and text accordions removed');
-    check(await page.locator('.story-visual svg').count()===3,'three visual product demonstrations');passed.push('五入口导航与图解首页');
+    check(await page.locator('.story-visual svg').count()===3,'three visual product demonstrations');passed.push('四入口导航与图解首页');
     for(const mode of ['sheet','strip']) {
         await page.locator(`[data-cut-mode="${mode}"]`).click();
         await page.waitForFunction(()=>document.getElementById('cutting-showcase').dataset.phase==='裁片分离',null,{timeout:20000});
@@ -72,11 +72,11 @@ async function verifyIntro(page, base='http://localhost:18090') {
     await marker.locator('#marker-width').fill('1400');
     check(await marker.locator('#marker-length').innerText()==='—' && await marker.locator('#marker-result-export').isDisabled(),'editing invalidates stale marker output');
     await marker.locator('#marker-run').click();await marker.locator('#marker-cancel').click();
-    check((await marker.locator('#marker-state').innerText()).includes('已停止'),'cancellation');
+    check((await marker.locator('#marker-state').innerText()).includes('已请求停止计算'),'cancellation');
     await page.waitForTimeout(500);check(await marker.locator('#marker-result-export').isDisabled(),'late result after cancel not accepted');
     passed.push('键盘切换、输入变更失效与取消计算');
     check(errors.length===0,'browser errors: '+errors.join(';'));
-    check(requests.every(r=>r.startsWith('POST /api/v1/nesting/solve')||r.includes('/api/linear/tasks')),'unexpected business writes '+requests.join(';'));
+    check(requests.every(r=>r.startsWith('POST /api/v1/nesting/solve')||r.includes('/api/linear/tasks')||r.startsWith('POST /api/v2/optimization-jobs')),'unexpected business writes '+requests.join(';'));
     passed.push('浏览器无脚本异常、无库存和报工写入');
     return {discovered:9,executed:passed.length,passed:passed.length,failed:0,skipped:0,checks:passed};
 }
