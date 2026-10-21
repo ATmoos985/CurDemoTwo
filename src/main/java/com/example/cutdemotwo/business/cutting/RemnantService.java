@@ -672,6 +672,32 @@ public class RemnantService {
             item.put("task", task); item.put("total", total); item.put("completed", completed);
             item.put("remaining", Math.max(0, total - completed)); item.put("pendingCount", pending);
             item.put("reportCount", taskReports(task.id()).stream().filter(r -> !"REVERSED".equals(r.get("status"))).count());
+            var taskExecutions=executions.values().stream().filter(e->e.taskId().equals(task.id())).toList();
+            var active=taskExecutions.stream().filter(e->e.reserves(operationTime)).toList();
+            var reserved=reservedQuantities(task.id(),null);
+            int reservedCount=reserved.values().stream().mapToInt(Integer::intValue).sum();
+            int available=task.demands().stream().mapToInt(line->Math.max(0,line.quantity()
+                    -counts.getOrDefault(String.valueOf(line.id()),0)-reserved.getOrDefault(String.valueOf(line.id()),0))).sum();
+            long running=active.stream().filter(e->"RUNNING".equals(e.state())).count();
+            // An expired historical attempt superseded by a new execution is not an outstanding exception.
+            long expired=total==completed?0:taskExecutions.stream().filter(e->"EXPIRED".equals(e.effectiveState(operationTime)))
+                    .filter(e->plans.containsKey(e.planId()) && "PENDING".equals(plans.get(e.planId()).status())
+                            && plans.get(e.planId()).request().getTaskRevision()==task.revision())
+                    .filter(e->taskExecutions.stream().noneMatch(a->a.planId().equals(e.planId())
+                            && !Set.of("EXPIRED","CANCELLED").contains(a.effectiveState(operationTime))))
+                    .map(ExecutionOrder::planId).distinct().count();
+            String status=running>0?"REPORT_PENDING":total==completed?"COMPLETED":expired>0?"ATTENTION":
+                    !active.isEmpty() || pending>0?"EXECUTION_PENDING":"PLAN_PENDING";
+            item.put("status",status);item.put("reserved",reservedCount);item.put("availableToPlan",available);
+            item.put("runningCount",running);item.put("releasedCount",active.size()-running);item.put("expiredCount",expired);
+            item.put("materialReservations",active.stream().map(e->Map.of("executionId",e.id(),"materialId",e.materialId(),
+                    "materialType",e.materialType(),"station",e.station(),"state",e.effectiveState(operationTime))).toList());
+            item.put("nextAction",switch(status) {
+                case "REPORT_PENDING","ATTENTION" -> "executions";
+                case "COMPLETED" -> "reports";
+                case "EXECUTION_PENDING" -> active.isEmpty()?"plans":"executions";
+                default -> "workspace";
+            });
             return item;
         }).toList());
     }

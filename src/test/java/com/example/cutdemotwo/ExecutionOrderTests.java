@@ -50,6 +50,43 @@ class ExecutionOrderTests {
     CutReport report(SolveResponse plan,int good) {
         return new CutReport(plan.getPlanId(),3000,good,plan.getRemnants(),"A");
     }
+    Map<String,Object> summary() {
+        return inventory.taskSummaries().stream().filter(row->((CuttingTask)row.get("task")).id().equals(task.id())).findFirst().orElseThrow();
+    }
+    @Test void taskSummarySeparatesGoodOutputReservationsAndAvailableDemand() {
+        assertEquals("PLAN_PENDING",summary().get("status"));
+        var p=plan(inventory,false,2);
+        assertEquals("EXECUTION_PENDING",summary().get("status"));
+        assertEquals("plans",summary().get("nextAction"));
+        var e=change(inventory,draft(inventory,p),"release",300);
+        var released=summary();
+        assertEquals(0,released.get("completed"));assertEquals(2,released.get("reserved"));
+        assertEquals(1,released.get("availableToPlan"));assertEquals(1L,released.get("releasedCount"));
+        assertEquals("executions",released.get("nextAction"));
+        assertEquals(1,((List<?>)released.get("materialReservations")).size());
+        e=change(inventory,e,"start",0);
+        assertEquals("REPORT_PENDING",summary().get("status"));
+        assertEquals(1L,summary().get("runningCount"));
+        inventory.reportExecution(e.id(),report(p,2));
+        assertEquals(2,summary().get("completed"));assertEquals(0,summary().get("reserved"));
+        assertEquals(1,summary().get("availableToPlan"));assertEquals("PLAN_PENDING",summary().get("status"));
+    }
+    java.util.concurrent.atomic.AtomicLong summaryClock;
+    void clockedSummary() {
+        var file=new FileInventoryStore(temp.resolve("inventory.json").toString());
+        summaryClock=new java.util.concurrent.atomic.AtomicLong(10000);
+        inventory=new RemnantService(new InventoryStore(){
+            public InventorySnapshot load(){return file.load();}
+            public long save(InventorySnapshot snapshot){return file.save(snapshot);}
+            public long now(){return summaryClock.get();}
+        },false);
+    }
+ @Test void reviewMultipleReservations(){var p=plan(inventory,false,1);var q=plan(inventory,true,1);var a=change(inventory,draft(inventory,p),"release",300);change(inventory,draft(inventory,q),"release",300);assertEquals(2,summary().get("reserved"));assertEquals(1,summary().get("availableToPlan"));assertEquals(2,((List<?>)summary().get("materialReservations")).size());change(inventory,a,"start",0);assertEquals("REPORT_PENDING",summary().get("status"));assertEquals(1L,summary().get("runningCount"));}
+ @Test void reviewQualityReopensCompleted(){task=createTask(inventory,1);var p=plan(inventory,false,1);workflow(inventory).confirm(report(p,1));assertEquals("COMPLETED",summary().get("status"));inventory.disposeQuality(p.getPlanId(),new QualityDisposition.Command(UUID.randomUUID().toString(),0,p.getPieces().get(0).getId(),"SCRAP","复检","检验员",null));assertEquals(0,summary().get("completed"));assertEquals(1,summary().get("availableToPlan"));assertEquals("PLAN_PENDING",summary().get("status"));}
+ @Test void reviewReversalReopensCompleted(){task=createTask(inventory,1);var p=plan(inventory,false,1);workflow(inventory).confirm(report(p,1));assertEquals("COMPLETED",summary().get("status"));inventory.reverseReport(p.getPlanId(),"探针撤销");assertEquals(0,summary().get("completed"));assertEquals("PLAN_PENDING",summary().get("status"));}
+ @Test void reviewCompletedViaAlternativeDoesNotRemainAttention(){task=createTask(inventory,1);clockedSummary();var p=plan(inventory,false,1);change(inventory,draft(inventory,p),"release",1);summaryClock.set(11000);var q=plan(inventory,true,1);workflow(inventory).confirm(new CutReport(q.getPlanId(),0,1,List.of(),"A"));assertEquals(1,summary().get("completed"));assertEquals("COMPLETED",summary().get("status"),"旧过期方案不应让已全部完成任务变为待处理");}
+ @Test void reviewReactivatedOldExecutionStillShowsExpiry(){clockedSummary();var p=plan(inventory,false,1);var old=change(inventory,draft(inventory,p),"release",1);summaryClock.set(11000);var replacement=draft(inventory,p);change(inventory,replacement,"cancel",0);old=change(inventory,old,"release",1);summaryClock.set(12000);assertEquals(1L,summary().get("expiredCount"),"较早创建但重新下达的执行单过期应显示");}
+
     @Test void releaseStartReportAndReplaySurviveRestart() {
         var p=plan(inventory,false,2);var e=draft(inventory,p);
         var command=new ExecutionOrder.Command("release-operation",1,300,"下达");
@@ -111,9 +148,14 @@ class ExecutionOrderTests {
         var p=plan(inventory,false,1);var old=change(inventory,draft(inventory,p),"release",1);
         assertEquals(11_000,old.expiresAt());
         clock.set(11_000);
+        assertEquals("ATTENTION",summary().get("status"));
+        assertEquals(0,summary().get("reserved"));assertEquals(3,summary().get("availableToPlan"));
         assertEquals("EXPIRED",inventory.executionOrder(old.id()).get("effectiveState"));
         assertThrows(InventoryConflictException.class,()->change(inventory,old,"start",0));
-        var replacement=change(inventory,draft(inventory,p),"release",300);
+        var replacementDraft=draft(inventory,p);
+        assertEquals("EXECUTION_PENDING",summary().get("status"));assertEquals(0L,summary().get("expiredCount"));
+        var replacement=change(inventory,replacementDraft,"release",300);
+        assertEquals("EXECUTION_PENDING",summary().get("status"));assertEquals(0L,summary().get("expiredCount"));
         assertThrows(InventoryConflictException.class,()->change(inventory,old,"release",300));
         change(inventory,replacement,"start",0);
         inventory.reportExecution(replacement.id(),report(p,1));

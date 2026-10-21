@@ -1,3 +1,4 @@
+import {taskLabels} from './task-list-model.js';
 import {openQualityReview, reviewablePieces} from './quality-review.js';
 import { state } from '../../core/state.js';
 import { getInitialScenarios } from '../../plugins/presets/scenarios.js';
@@ -242,6 +243,7 @@ export async function newCuttingTask(rolls, {skipDraftGuard = false} = {}) {
     renderDemandsUI([]);
     await switchCutMode('roll');
     resetDraftTracking();
+    updateTaskRoute(null);
     el('task-name').focus();
     return true;
     } catch (error) { showToast(error.message, 'error'); return false; }
@@ -309,6 +311,7 @@ async function saveTaskSnapshot() {
     try { await refreshTaskProgress(); }
     catch { showToast('需求已保存，报工进度暂时无法刷新，请稍后重试', 'warning'); }
     resetDraftTracking();
+    updateTaskRoute(task.id);
     el('task-state').textContent = '已保存 · ' + task.id.slice(0, 8);
     if(el('task-save-error'))el('task-save-error').hidden=true;
     return task;
@@ -357,7 +360,7 @@ export async function openTaskList() {
             const query=el('task-list-search').value.trim().toLowerCase(),filter=el('task-list-filter').value;
             const rows=summaries.slice().reverse().filter(s=>(filter==='all' || (filter==='done'?s.remaining===0:s.remaining>0)) && [s.task.id,s.task.name,s.task.materialModel,s.task.externalRef].join(' ').toLowerCase().includes(query));
             el('task-list-results').innerHTML=rows.map(s=>{const t=s.task;
-                return '<button class="task-list-item" data-task="'+escapeText(t.id)+'"><strong>'+escapeText(t.name)+' · '+(s.remaining===0?'已完成':s.completed>0?'进行中':'待裁切')+'</strong><span>'+escapeText(t.materialModel)+' · 合格 '+s.completed+' / '+s.total+' 件 · 剩余 '+s.remaining+' 件</span><span>'+(s.remaining===0?'下一步：查看报工记录':s.pendingCount?'下一步：核对 '+s.pendingCount+' 个待报工方案':'下一步：选择用料并继续排料')+'</span><small>需求版本 '+t.revision+' · '+escapeText(t.externalRef || t.id)+'</small></button>';}).join('') || '<p class="muted">没有符合条件的任务。新需求可在工作台保存后继续。</p>';
+                return '<button class="task-list-item" data-task="'+escapeText(t.id)+'"><strong>'+escapeText(t.name)+' · '+(taskLabels[s.status] || (s.remaining===0?'已完成':s.completed>0?'进行中':'待裁切'))+'</strong><span>'+escapeText(t.materialModel)+' · 合格 '+s.completed+' / '+s.total+' 件 · 剩余 '+s.remaining+' 件</span><span>'+(s.remaining===0?'下一步：查看报工记录':s.pendingCount?'下一步：核对 '+s.pendingCount+' 个待定方案':'下一步：选择用料并继续排料')+'</span><small>需求版本 '+t.revision+' · '+escapeText(t.externalRef || t.id)+'</small></button>';}).join('') || '<p class="muted">没有符合条件的任务。新需求可在工作台保存后继续。</p>';
             el('task-list-results').querySelectorAll('[data-task]').forEach(button=>button.onclick=()=>loadTask(button.dataset.task));
         };
         el('task-list-search').oninput=render;el('task-list-filter').onchange=render;render();
@@ -416,6 +419,7 @@ export async function loadTask(id, {skipDraftGuard = false, detail:loadedDetail,
         el('task-picker').close();
         localStorage.setItem('cutting-task-id', task.id);
         resetDraftTracking();
+        updateTaskRoute(task.id);
         return true;
     } catch (error) { showToast(error.message, 'error'); return false; }
     finally { document.body.inert = wasInert; }
@@ -546,13 +550,42 @@ export async function mountSavedPlan(saved, options = {}) {
     return true;
 }
 
+function updateTaskRoute(id) {
+    const url=new URL(location.href);
+    // Preserve the legacy default entry; explicit task links track the workspace after a switch.
+    if (!url.searchParams.has('taskId') && !url.searchParams.has('newTask')) return;
+    url.searchParams.delete('view');url.searchParams.delete('taskId');url.searchParams.delete('newTask');
+    url.searchParams.set(id?'taskId':'newTask',id || '1');history.replaceState(null,'',url);
+}
+function openTaskRouteError() {
+    const dialog=document.createElement('dialog');dialog.className='action-dialog';dialog.id='task-route-error';
+    dialog.innerHTML='<h2>无法打开指定任务</h2><p role="alert">任务可能不存在，或服务暂时不可用。未切换到其他任务，本机草稿仍保留。</p><div class="dialog-actions"><a href="/tasks.html">返回任务管理</a><a href="">重新加载</a><a href="/index.html">返回原工作台</a></div>';
+    dialog.addEventListener('cancel',event=>event.preventDefault());document.body.append(dialog);dialog.showModal();
+}
+
 export async function initTaskWorkspace() {
     let activeDraft;
     try { activeDraft = localStorage.getItem(DRAFT_ACTIVE); } catch { /* The storage warning appears on first edit. */ }
-    const rolls = await api('/api/rolls');
+    const route = new URLSearchParams(location.search);
+    let rolls;
+    try { rolls=await api('/api/rolls'); }
+    catch(error) { if(route.has('taskId') || route.has('newTask')) return openTaskRouteError; throw error; }
     syncMaterialOptions(rolls, {model:''});
     const saved = localStorage.getItem('cutting-task-id');
-    if (activeDraft && await restoreTaskDraft(activeDraft, true)) { /* The recovered draft is the active workspace. */ }
+    let openInitialView = null;
+    if (route.has('taskId')) {
+        const loaded = route.get('taskId') && await loadTask(route.get('taskId'), {skipDraftGuard:true});
+        if (!loaded) return openTaskRouteError;
+        if (activeDraft) showToast('已打开服务器任务；未保存内容仍在“本机草稿”中。', 'info');
+        openInitialView = async () => {
+            if(route.get('view')==='executions') await (await import('./execution-panel.js')).openTaskExecutions();
+            else if(route.get('view')==='reports') await openTaskReports();
+            else if(route.get('view')==='plans') await openTaskPlans();
+        };
+    } else if (route.get('newTask') === '1') {
+        if (!await newCuttingTask(rolls, {skipDraftGuard:true})) return openTaskRouteError;
+        if (activeDraft) showToast('已新建任务；原未保存内容仍在“本机草稿”中。', 'info');
+    } else if (activeDraft && await restoreTaskDraft(activeDraft, true)) { /* The recovered draft is the active workspace. */ }
     else if (!saved || !await loadTask(saved)) {
         state.getCurrentCaseData().demands = [];
         state.getCurrentCaseData().pieces = [];
@@ -567,4 +600,5 @@ export async function initTaskWorkspace() {
     window.addEventListener('beforeunload', event => {
         if (draftDirty && !persistTaskDraft()) { event.preventDefault(); event.returnValue = ''; }
     });
+    return openInitialView;
 }

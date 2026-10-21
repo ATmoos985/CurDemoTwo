@@ -497,6 +497,7 @@ window.camApp = camApp;
 // 3. 应用程序自启动装配与初始化 (Robust Bootstrap)
 // ==========================================
 async function bootstrapApp() {
+    let openInitialView;
     document.body.inert = true;
     try {
     const savedTheme = localStorage.getItem("cam_theme") || "light";
@@ -518,10 +519,11 @@ async function bootstrapApp() {
     initNestingKeyboardShortcuts();
     // Load real inventory before selecting material; empty databases have no demo rolls.
     initWorkbenchPanels();
-    await initTaskWorkspace();
+    openInitialView = await initTaskWorkspace();
     renderToolpathUI();
     } catch (error) { showToast("工作台初始化失败：" + error.message, "error"); }
     finally { document.body.inert = false; }
+    if (openInitialView) await openInitialView();
 }
 
 if (document.readyState === "loading") {

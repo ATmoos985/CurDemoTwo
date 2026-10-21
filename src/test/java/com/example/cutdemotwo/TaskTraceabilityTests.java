@@ -29,11 +29,12 @@ class TaskTraceabilityTests {
         workflow.confirm(new CutReport(plan.getPlanId(),2000,1,List.of(),"A",List.of(new CutReport.PieceResult(1,"QUALIFIED",""),new CutReport.PieceResult(2,"REJECTED","破损"),new CutReport.PieceResult(3,"UNCUT",""))));
         var after=inventory.taskSummaries().get(0);assertEquals(1,after.get("completed"));assertEquals(2,after.get("remaining"));assertEquals(0L,after.get("pendingCount"));assertEquals(1L,after.get("reportCount"));
         assertEquals("CONFIRMED",inventory.taskPlans(task.id()).get(0).status());
-        inventory.reverseReport(plan.getPlanId(),"误报");var reversed=inventory.taskSummaries().get(0);assertEquals(0,reversed.get("completed"));assertEquals(3,reversed.get("remaining"));assertEquals(0L,reversed.get("reportCount"));
+        inventory.reverseReport(plan.getPlanId(),"误报");var reversed=inventory.taskSummaries().get(0);assertEquals(0,reversed.get("completed"));assertEquals(3,reversed.get("remaining"));assertEquals(0L,reversed.get("reportCount"));assertEquals("PLAN_PENDING",reversed.get("status"));
         assertEquals("REVERSED",inventory.taskPlans(task.id()).get(0).status());
     }
     @Test void printSnapshotRetainsOriginalDemandVersionAndLocalCoordinatesAfterRestart(){
         var plan=solve();workflow.confirm(new CutReport(plan.getPlanId(),3000,3,List.of(),"A"));
+        assertEquals("COMPLETED",inventory.taskSummaries().get(0).get("status"));
         inventory.saveTask(new CuttingTask(task.id(),"更新后的名称",task.materialModel(),task.externalRef(),task.revision(),List.of(new CuttingTask.Line(1,"主帘",2000,1000,4,false))));
         var reopened=new RemnantService(temp.resolve("trace.json").toString());var saved=reopened.planDetail(plan.getPlanId());
         assertEquals(plan.getPlanId(),saved.get("id"));assertEquals("CONFIRMED",saved.get("status"));assertEquals(1, saved.get("version"));
