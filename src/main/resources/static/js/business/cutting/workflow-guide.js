@@ -1,4 +1,5 @@
 import {state} from '../../core/state.js';
+import {executionForPlan} from './execution-client.js';
 import {toggleSidebar, switchRightPanelTab} from '../../plugins/layout/splitter.js';
 import {workflowState} from './workflow-state.js';
 import {openDemandManager, openMaterialDetails, renderDemandEditor} from '../../plugins/layout/workbench-panels.js';
@@ -12,7 +13,8 @@ const remnantConsumed = data => !!state.loadedRemnant?.id && data.lastReceipt?.f
 export function readWorkflowState(plan = {}) {
     const data = state.getCurrentCaseData(), sheet = state.currentCutMode === 'remnant';
     const queue = queuedReports(), staged = queuedQuantities(queue);
-    return workflowState({name:value('task-name'), model:value('task-material'), queued:queue.length, ...plan,
+    return workflowState({name:value('task-name'), model:value('task-material'), queued:queue.length,
+        execution:executionForPlan(state.taskExecutions,state.pendingPlan?.result?.planId), ...plan,
         demands:[...document.querySelectorAll('#demands-container .item-row')].map(row => ({
             id:Number(row.dataset.id), name:row.querySelector('.dem-name').value,
             width:Number(row.querySelector('.dem-w').value), length:Number(row.querySelector('.dem-l').value),
@@ -30,7 +32,11 @@ export function readWorkflowState(plan = {}) {
 export function navigateWorkflowStage(stage, target) {
     if (!target && stage === 0) {openDemandManager();return;}
     if (!target && stage === 1) {openMaterialDetails();return;}
-    if (!target && stage === 3) {window.camApp.openTaskReports();return;}
+    if (!target && stage === 3) {
+        if(state.pendingPlan || state.taskExecutions.some(v=>v.reservationActive || v.effectiveState==='DRAFT'))window.camApp.openTaskExecutions();
+        else window.camApp.openTaskReports();
+        return;
+    }
     const node = document.querySelector(target || ['#card-demands','#card-mother-roll','#card-material-balance','#right-roll-actions'][stage]);
     if (!node) return;
     if (stage === 0) openDemandManager();
@@ -75,6 +81,7 @@ export function renderWorkflowGuide(plan = {}) {
         if (flow.action === 'focus') navigateWorkflowStage(flow.stage, flow.target);
         if (flow.action === 'match') window.camApp.matchTaskMaterials();
         if (flow.action === 'reports') window.camApp.openTaskReports();
+        if (flow.action === 'execution') window.camApp.openTaskExecutions();
         if (flow.action === 'advance') window.camApp.smartAdvanceBed();
     };
     const nextHost = flow.stage >= 2 ? footer : el('left-input-actions');
@@ -85,15 +92,17 @@ export function renderWorkflowGuide(plan = {}) {
     solve.textContent = busy === '正在生成方案…' ? busy : plan.ready || plan.edited ? '重新排料' : '生成排料方案';
     const secondary = el('station-secondary-actions');
     if (plan.ready || plan.edited) secondary.prepend(solve);
-    else footer.insertBefore(solve,el(actions.report));
+    else footer.insertBefore(solve,el(actions.batch));
     const stageAdvance = el(actions.report);
-    stageAdvance.hidden = !plan.ready;
-    stageAdvance.disabled = !!busy || flow.action !== 'report';
-    stageAdvance.textContent = '记录并排下一工位';
+    const execution=executionForPlan(state.taskExecutions,state.pendingPlan?.result?.planId);
+    stageAdvance.hidden = !plan.ready || !!execution;
+    stageAdvance.disabled = !!busy;
+    stageAdvance.textContent = '连续工位暂存并续排';
+    if(flow.action!=='report')secondary.append(stageAdvance);else footer.insertBefore(stageAdvance,el(actions.batch));
     const report = el('btn-confirm-station-cut');
-    report.hidden = !plan.ready;report.disabled = !!busy || flow.action !== 'report';
+    report.hidden = !plan.ready;report.disabled = !!busy || (!!execution && execution.effectiveState!=='RUNNING');
     const queue = queuedReports(), batch = el(actions.batch);
-    batch.hidden = !queue.length && !plan.ready;
+    batch.hidden = !queue.length;
     batch.disabled = !!busy || !!plan.edited;
     batch.textContent = '统一报工 · ' + (queue.length + (plan.ready ? 1 : 0)) + ' 工位';
     el('btn-validate-adjustment').hidden = !plan.edited;

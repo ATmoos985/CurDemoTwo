@@ -3,6 +3,13 @@ import assert from 'node:assert/strict';
 import {workflowState} from '../../main/resources/static/js/business/cutting/workflow-state.js';
 const source = () => ({name:'订单', model:'A', demands:[{id:7,name:'主帘',width:2000,length:1200,quantity:4,completed:1}],
     material:{available:true,sheet:false,model:'A',length:5000,used:5000,total:10000},process:{length:5000,start:5000,trim:0}});
+test('released and running plans require execution actions while existing queues retain batch continuation',()=>{
+    for(const effectiveState of ['RELEASED','RUNNING','EXPIRED']) {
+        const flow=workflowState({...source(),ready:true,execution:{effectiveState}});
+        assert.equal(flow.action,'execution');assert.equal(flow.canSolve,false);
+    }
+    assert.equal(workflowState({...source(),ready:true,queued:1}).action,'report');
+});
 
 test('missing and invalid demand fields identify the field without offering solve', () => {
     for(const [key,value,target] of [['width',0,'w'],['length',NaN,'l'],['quantity',1.5,'count'],['quantity',0,'count'],['name','','name']]) {
@@ -26,7 +33,7 @@ test('viewing consumed stock and invalid process lengths cannot become solve-rea
 test('validated output, manual edits and an empty preview have distinct next actions', () => {
     assert.equal(workflowState(source()).action,'solve');
     assert.equal(workflowState({...source(),edited:true}).action,'validate');
-    assert.equal(workflowState({...source(),ready:true}).action,'report');
+    assert.equal(workflowState({...source(),ready:true}).action,'execution');
     const sheet=source();Object.assign(sheet.material,{sheet:true,length:700,used:99000,total:0});Object.assign(sheet.process,{length:700,start:0});
     assert.equal(workflowState(sheet).action,'solve');
 });

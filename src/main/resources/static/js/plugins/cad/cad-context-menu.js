@@ -1,3 +1,4 @@
+import {executionLocksPlan} from '../../business/cutting/execution-client.js';
 import {rotateOutlinePiece} from './outline-geometry.js';
 /**
  * CAD 实体右键操作上下文菜单插件 (CAD Entity Context Menu Plugin)
@@ -149,7 +150,7 @@ export function makeRemnantInteractive(rGroup, remnant, caseData) {
  * 打开【料头块】右键菜单
  */
 export function openRemnantContextMenu(remnant, clientX, clientY) {
-    if (remnant.queued || remnant.confirmed) return showToast(remnant.queued ? '该料头已记录，待统一报工；修改请从统一报工退回核对。' : '该料头已报工，请从报工记录核对。', 'info');
+    if (remnant.queued || remnant.confirmed || executionLocksPlan(state.taskExecutions,remnant.planId)) return showToast(remnant.queued ? '该料头已记录，待统一报工；修改请从统一报工退回核对。' : '该料头已报工，请从报工记录核对。', 'info');
     currentTarget = { type: 'remnant', data: remnant };
     const data = state.getCurrentCaseData();
     const winStartY = data.windowStartY || 0;
@@ -201,6 +202,7 @@ export function openRemnantContextMenu(remnant, clientX, clientY) {
  * 打开【合格成品裁片】右键菜单
  */
 export function openPieceContextMenu(piece, clientX, clientY) {
+    if(executionLocksPlan(state.taskExecutions,piece.planId))return showToast('所属执行单已下达，方案已锁定。','info');
     if(piece.queued)return showToast('该工位已暂存，请从集中报工退回核对。','info');
     currentTarget = { type: 'piece', data: piece };
     if (piece.confirmed) {
@@ -357,6 +359,7 @@ export function discardRemnant(remnantId) {
     if (!data) return;
     const remnant = (data.remnants || []).find(r => r.id === remnantId);
     if (!remnant) return;
+    if (executionLocksPlan(state.taskExecutions,remnant.planId)) return showToast('所属执行单已下达，方案已锁定。','warning');
     if (remnant.confirmed) return showToast('已报工料头请从报工记录撤回', 'warning');
     if (remnant.queued) return showToast('该料头已记录，请从统一报工退回核对。', 'warning');
 
@@ -444,7 +447,7 @@ export function advanceFromRemnantStart(remnantId) {
     if (!data) return;
     const remnant = (data.remnants || []).find(r => r.id === remnantId);
     if (!remnant) return;
-    if (remnant.confirmed || remnant.queued) return showToast('已记录料头不能作为母卷未切区间接刀。', 'warning');
+    if (remnant.confirmed || remnant.queued || executionLocksPlan(state.taskExecutions,remnant.planId)) return showToast('已记录料头不能作为母卷未切区间接刀。', 'warning');
 
     const targetY = Math.round(remnant.y);
     discardRemnant(remnantId);
@@ -482,7 +485,7 @@ export function discardPiece(pieceId) {
     const piece = (data.pieces || []).find(p => p.id === pieceId);
     if (!piece) return;
 
-    if (piece.confirmed || piece.queued) {
+    if (piece.confirmed || piece.queued || executionLocksPlan(state.taskExecutions,piece.planId)) {
         showToast(piece.queued ? '该工位已暂存，请从集中报工退回核对。' : `裁片 "${piece.name || piece.id}" 已完成实切核销，禁止修改或抛弃。`, 'warning');
         return;
     }
@@ -540,7 +543,7 @@ export function setPieceAsCutEnd(pieceId) {
     const data = state.getCurrentCaseData();
     if (!data) return;
     const piece = (data.pieces || []).find(p => p.id === pieceId);
-    if (!piece || piece.confirmed || piece.queued) return;
+    if (!piece || piece.confirmed || piece.queued || executionLocksPlan(state.taskExecutions,piece.planId)) return;
 
     const cutEndY = piece.y + piece.l;
     const winStartY = data.windowStartY || 0;
@@ -646,7 +649,7 @@ export function rotatePieceById(pieceId) {
     const data = state.getCurrentCaseData();
     if (!data) return;
     const piece = (data.pieces || []).find(p => p.id === pieceId);
-    if (!piece || piece.confirmed || piece.queued) return;
+    if (!piece || piece.confirmed || piece.queued || executionLocksPlan(state.taskExecutions,piece.planId)) return;
 
     if(!rotateOutlinePiece(piece,data.demands)){showToast('该衣片要求固定纱向，不能旋转','warning');return;}
 

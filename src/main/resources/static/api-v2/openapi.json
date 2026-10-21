@@ -2974,12 +2974,89 @@
           },
           "reservationActive": {
             "type": "boolean"
+          },
+          "allowedActions": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "release": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "allowed": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "allowed",
+                  "reason"
+                ]
+              },
+              "start": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "allowed": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "allowed",
+                  "reason"
+                ]
+              },
+              "cancel": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "allowed": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "allowed",
+                  "reason"
+                ]
+              },
+              "report": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "allowed": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "allowed",
+                  "reason"
+                ]
+              }
+            },
+            "required": [
+              "release",
+              "start",
+              "cancel",
+              "report"
+            ]
           }
         },
         "required": [
           "execution",
           "effectiveState",
-          "reservationActive"
+          "reservationActive",
+          "allowedActions"
         ]
       },
       "ExecutionRecoveredRemnant": {

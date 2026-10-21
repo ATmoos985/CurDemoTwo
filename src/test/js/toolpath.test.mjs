@@ -88,6 +88,7 @@ function savedPlanHarness() {
     }
     ctx.state.pendingPlan={result:{planId:'parent'},windowStartY:5000,context:'context',geometry:ctx.planGeometry(),version:1};
     ctx.canUseCurrentPlan=()=>ctx.state.pendingPlan.geometry===ctx.planGeometry();
+    ctx.currentExecution=()=>null;
     return {ctx,data};
 }
 test('saving uses local station coordinates and keeps historical pieces and a usable new version',async()=>{
@@ -109,4 +110,11 @@ test('lost save responses retain the same operation ID and the original scene fo
     assert.equal(JSON.stringify(data),scene);assert.equal(ctx.canUseCurrentPlan(),true);assert.equal(ctx.document.body.inert,false);
     ctx.requestJSON=async(url,body)=>{assert.equal(body.adjustmentId,operation);return {id:operation,version:2,result:{planId:operation,cuts:body.cuts}};};
     assert.equal(await ctx.saveToolpathAdjustment(data.cuts),true);
+});
+test('a released plan refuses toolpath changes before a write or scene mutation',async()=>{
+    const {ctx,data}=savedPlanHarness(),scene=JSON.stringify(data);
+    ctx.currentExecution=()=>({reservationActive:true});
+    ctx.requestJSON=async()=>assert.fail('reserved plan must not submit adjustment');
+    await assert.rejects(ctx.saveToolpathAdjustment(data.cuts),/已下达/);
+    assert.equal(JSON.stringify(data),scene);
 });

@@ -1,3 +1,4 @@
+import {openTaskExecutions} from './business/cutting/execution-panel.js';
 import { initTaskWorkspace, newCuttingTask, startTaskDraft, finishTaskDraft, prepareTaskSwitch, openLocalDrafts, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, taskInputChanged } from './business/cutting/task-workspace.js';
 import {initWorkbenchPanels, openDemandManager, openMaterialDetails} from './plugins/layout/workbench-panels.js';
 import {openDemandImport} from './business/cutting/demand-import.js';
@@ -344,7 +345,7 @@ window.addEventListener('keydown', event => {
 const camApp = {
     openDemandManager, openMaterialDetails, openDemandImport, openNewTask,
     undoPlanEdit, redoPlanEdit, validatePlanAdjustment,
-    newCuttingTask, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, openLocalDrafts, taskInputChanged,
+    newCuttingTask, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, openTaskExecutions, openLocalDrafts, taskInputChanged,
     bus,
     state,
     toggleTheme,

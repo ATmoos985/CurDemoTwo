@@ -238,7 +238,23 @@ public class RemnantService {
     }
     public synchronized Map<String,Object> executionOrder(String id) { return read(()->executionView(requiredExecution(id))); }
     private Map<String,Object> executionView(ExecutionOrder e) {
-        return Map.of("execution",e,"effectiveState",e.effectiveState(operationTime),"reservationActive",e.reserves(operationTime));
+        String effective=e.effectiveState(operationTime);
+        var actions=new LinkedHashMap<String,Object>();
+        for(String action:List.of("release","start","cancel","report")) {
+            boolean allowed=switch(action) {
+                case "release" -> Set.of("DRAFT","EXPIRED").contains(effective);
+                case "start" -> "RELEASED".equals(effective);
+                case "cancel" -> Set.of("DRAFT","RELEASED","EXPIRED").contains(effective);
+                default -> "RUNNING".equals(effective);
+            };
+            String reason=allowed?"":"当前执行状态不支持此操作";
+            if(allowed && Set.of("release","start").contains(action)) {
+                try {validateExecutionRelease(e);}
+                catch(IllegalArgumentException | InventoryConflictException error) {allowed=false;reason=error.getMessage();}
+            }
+            actions.put(action,Map.of("allowed",allowed,"reason",reason));
+        }
+        return Map.of("execution",e,"effectiveState",effective,"reservationActive",e.reserves(operationTime),"allowedActions",actions);
     }
     private ExecutionOrder requiredExecution(String id) {
         var e=executions.get(id);if(e==null)throw new IllegalArgumentException("执行单不存在");return e;
@@ -285,7 +301,8 @@ public class RemnantService {
             throw new InventoryConflictException("同一方案已有其他有效执行单");
         var plan=plans.get(execution.planId());
         if(plan==null || !"PENDING".equals(plan.status()))throw new InventoryConflictException("方案已失效或报工");
-        prepareTaskSolveInternal(plan.request());
+        // Read-side action advice must never normalize the archived request in place.
+        prepareTaskSolveInternal(json.readValue(json.writeValueAsBytes(plan.request()),SolveRequest.class));
         if(!Objects.equals(plan.baseline(),materialFingerprintInternal(plan.request())))throw new InventoryConflictException("方案材料快照已变化，请重新排料");
         ensureMaterialNotReserved(execution.materialType(),execution.materialId(),execution.planId());
         if("roll".equals(execution.materialType()) && !"PASSED".equals(motherRolls.get(execution.materialId()).getInspectionStatus()))
@@ -692,8 +709,6 @@ public class RemnantService {
         String id = input.id() == null || input.id().isBlank() ? UUID.randomUUID().toString() : input.id();
         CuttingTask previous = tasks.get(id);
         if (previous == null && input.id() != null && !input.id().isBlank()) throw new IllegalArgumentException("切割任务不存在");
-        if (previous != null && executions.values().stream().anyMatch(e->e.taskId().equals(id) && e.reserves(operationTime)))
-            throw new InventoryConflictException("任务已有下达或执行中的需求，请完成报工或取消预约后编辑");
         if (previous != null && previous.revision() != input.revision()) throw new IllegalArgumentException("任务已更新，请重新打开后编辑");
         Set<Integer> ids = new HashSet<>();
         CuttingTask.Process process = input.process();
@@ -730,6 +745,8 @@ public class RemnantService {
                     Objects.equals(previous.externalRef(), input.externalRef()) && Objects.equals(previous.process(), process) &&
                     previous.demands().equals(input.demands())) return previous;
         }
+        if (previous != null && executions.values().stream().anyMatch(e->e.taskId().equals(id) && e.reserves(operationTime)))
+            throw new InventoryConflictException("任务已有下达或执行中的需求，请完成报工或取消预约后编辑");
         CuttingTask task = new CuttingTask(id, input.name().trim(), input.materialModel().trim(), input.externalRef(),
                 previous == null ? 1 : previous.revision() + 1, List.copyOf(input.demands()), process);
         tasks.put(id, task);

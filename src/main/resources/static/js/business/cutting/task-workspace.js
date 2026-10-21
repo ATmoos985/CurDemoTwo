@@ -189,6 +189,8 @@ export function startTaskDraft(name = '本次切割') {
     state.activeTask = null;
     state.taskCompleted = {};
     state.taskReports = [];
+    state.taskExecutions = [];
+    state.taskReserved = {};
     state.pendingPlan = null;
     localStorage.removeItem('cutting-task-id');
     el('task-name').value = name;
@@ -324,6 +326,8 @@ export async function refreshTaskProgress() {
     if (state.activeTask?.id !== id) return;
     state.taskCompleted = detail.completed;
     state.taskReports = detail.reports;
+    state.taskExecutions = detail.executions || [];
+    state.taskReserved = detail.reserved || {};
     const data = state.getCurrentCaseData();
     if (data.lastReceipt) data.lastReceipt = detail.reports.find(r => r.planId === data.lastReceipt.planId) || null;
     updateDemandCompletionFromPieces(data);
@@ -366,17 +370,21 @@ async function printSavedTicket(planId) {
 }
 function appendTicketButton(article,planId){const button=document.createElement('button');button.className='tool-btn';button.textContent='查看 / 打印工单';button.onclick=()=>printSavedTicket(planId);article.append(button);}
 
-export async function loadTask(id, {skipDraftGuard = false, detail:loadedDetail} = {}) {
+export async function loadTask(id, {skipDraftGuard = false, detail:loadedDetail, isCurrent = () => true} = {}) {
     if (!skipDraftGuard && !await prepareTaskSwitch()) return false;
+    if (!isCurrent()) return false;
     const wasInert = document.body.inert; document.body.inert = true;
     try {
         const detail = loadedDetail || await api('/api/cutting/tasks/' + encodeURIComponent(id));
         const reportQueue = loadReportQueue(id);
         const rolls = await api('/api/rolls');
+        if (!isCurrent()) return false;
         draftReady = false;
         state.activeTask = detail.task;
         state.taskCompleted = detail.completed;
         state.taskReports = detail.reports;
+        state.taskExecutions = detail.executions || [];
+        state.taskReserved = detail.reserved || {};
         state.reportQueue = reportQueue;
         const task = detail.task;
         el('task-name').value = task.name;
@@ -394,7 +402,7 @@ export async function loadTask(id, {skipDraftGuard = false, detail:loadedDetail}
             if (![...el('sel-mother-roll-id').options].some(o => o.value === roll.rollId)) el('sel-mother-roll-id').add(new Option(roll.rollId, roll.rollId));
             el('sel-mother-roll-id').value = roll.rollId;
         }
-        await switchCutMode('roll');
+        await switchCutMode('roll',null,null,roll);
         if (task.process) {
             const p = task.process;
             Object.assign(data, {bedL: Math.min(p.bedLength, data.stockRemainingLength), trimStart:p.trimStart, pieceGap:p.pieceGap ?? 0, cutOrigin:p.cutOrigin,
@@ -503,23 +511,39 @@ export async function openTaskPlans() {
             if (!await prepareTaskSwitch()) return;
             button.disabled = true;
             try {
-                const saved = await api('/api/cutting/plans/' + encodeURIComponent(button.dataset.restore) + '/restore', {});
-                if (!await loadTask(saved.request.taskId, {skipDraftGuard:true})) return;
-                if (saved.request.feedPortType === 'remnant') {
-                    const stock = await api('/api/remnants/scan', {id:saved.request.sourceRemnantId});
-                    if (!stock) throw new Error('料头已不可用');
-                    await switchCutMode('remnant', stock);
-                } else {
-                    const id = saved.request.rollId;
-                    if (![...el('sel-mother-roll-id').options].some(o => o.value === id)) el('sel-mother-roll-id').add(new Option(id,id));
-                    el('sel-mother-roll-id').value = id;
-                    await switchCutMode('roll');
-                }
-                restoreSavedPlan(saved); el('task-picker').close();
+                let saved = await api('/api/cutting/plans/' + encodeURIComponent(button.dataset.restore));
+                if (saved.status === 'CANCELLED') saved = await api('/api/cutting/plans/' + encodeURIComponent(saved.id) + '/restore', {});
+                if (!await mountSavedPlan(saved, {skipDraftGuard:true})) return;
+                el('task-picker').close();
                 showToast('已恢复原方案，请核对后报工', 'success');
             } catch (error) { showToast(error.message, 'error'); button.disabled = false; }
         });
     } catch (error) { if(!el('task-picker').open || request!==pickerRequest)return;picker('方案记录', `<p role="alert">${escapeText(error.message)}</p>`); }
+}
+
+// Loading a saved preview is a read; only explicitly reviving a cancelled plan uses /restore.
+export async function mountSavedPlan(saved, options = {}) {
+    const isCurrent=options.isCurrent || (()=>true);
+    if (!isCurrent()) return false;
+    if (saved.status !== 'PENDING') throw new Error('方案已结束，请从报工记录查看历史事实。');
+    if (!await loadTask(saved.request.taskId, options)) return false;
+    if (!isCurrent()) return false;
+    if (saved.request.feedPortType === 'remnant') {
+        const stock = await api('/api/remnants/scan', {id:saved.request.sourceRemnantId});
+        if (!isCurrent()) return false;
+        if (!stock) throw new Error('料头已不可用');
+        await switchCutMode('remnant', stock);
+    } else {
+        const id = saved.request.rollId;
+        const roll = await api('/api/rolls/' + encodeURIComponent(id));
+        if (!isCurrent()) return false;
+        if (![...el('sel-mother-roll-id').options].some(o => o.value === id)) el('sel-mother-roll-id').add(new Option(id,id));
+        el('sel-mother-roll-id').value = id;
+        await switchCutMode('roll',null,null,roll);
+    }
+    if (!isCurrent()) return false;
+    restoreSavedPlan(saved);
+    return true;
 }
 
 export async function initTaskWorkspace() {

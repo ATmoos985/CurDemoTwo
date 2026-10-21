@@ -33,7 +33,13 @@ export function workflowState(input) {
     const gap = process.gap ?? 0;
     if (!Number.isFinite(gap) || gap < 0 || gap > 100 || Math.abs(gap * 10 - Math.round(gap * 10)) > .000001)
         return step(2, '核对裁片间距', '裁片间距应为 0–100 mm，精确到 0.1 mm。', 'focus', '修改裁片间距', '#inp-piece-gap');
-    if (ready) return step(3, '本工位待记录', '默认按方案记录合格件和料头。实切有变化时先修改；可连续多轮后统一报工。', 'report', '记录并排下一工位', null, {canSolve:true});
+    if (ready && input.execution) {
+        const status=input.execution.effectiveState;
+        return step(3, status==='RUNNING'?'加工中 · 待实切报工':status==='RELEASED'?'已下达 · 待开工':'核对执行单',
+            '预约不计入完成量。按实际加工结果报工后更新库存与履约。','execution',status==='RUNNING'?'填写实切结果':status==='RELEASED'?'核对并开工':'查看执行与预约');
+    }
+    if (ready && !input.queued) return step(3,'方案待下达','先核对方案，再创建执行单、下达预约并开工。预览尚未扣减库存。','execution','下达当前方案',null,{canSolve:true});
+    if (ready) return step(3, '连续工位待暂存', '已有本机待报工批次；完成统一报工后可使用执行单流程。', 'report', '记录并排下一工位', null, {canSolve:true});
     if (edited) return step(2, '校验手调方案', '手动调整尚未校验，保存调整版后再打印和报工。', 'validate', '校验并保存调整版', null, {canSolve:true});
     return step(2, '生成排料方案', `还有 ${toCut} 件待裁切${input.queued ? `，${input.queued} 个工位待报工` : ''}。预览不扣库存。`, 'solve', '生成排料方案', null, {canSolve:true});
 }

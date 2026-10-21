@@ -48,9 +48,17 @@ class ExecutionApiTests {
         assertEquals(created.body(),call(base,body,"execution-http-123").body());
         assertEquals(409,call(base,body.replace("HTTP 裁床","不同工位"),"execution-http-123").statusCode());
         assertEquals(200,call(base+"/"+id+"/release","{\"operationId\":\"http-release\",\"expectedVersion\":1,\"reservationSeconds\":60,\"reason\":\"下达\"}",null).statusCode());
+        byte[] reservedSnapshot=java.nio.file.Files.readAllBytes(temp.resolve("inventory.json"));
+        var released=json.readTree(call(base+"/"+id,null,null).body()).get("allowedActions");
+        assertTrue(released.get("start").get("allowed").asBoolean());
+        assertFalse(released.get("report").get("allowed").asBoolean());
+        assertArrayEquals(reservedSnapshot,java.nio.file.Files.readAllBytes(temp.resolve("inventory.json")));
         String report=json.writeValueAsString(fixture.report(p,1));
         assertEquals(409,call("/api/cutting/report-confirm",report,null).statusCode());
         assertEquals(200,call(base+"/"+id+"/start","{\"operationId\":\"http-start\",\"expectedVersion\":2,\"reservationSeconds\":0,\"reason\":\"开工\"}",null).statusCode());
+        var running=json.readTree(call(base+"/"+id,null,null).body()).get("allowedActions");
+        assertFalse(running.get("cancel").get("allowed").asBoolean());
+        assertTrue(running.get("report").get("allowed").asBoolean());
         var saved=call(base+"/"+id+"/reports",report,null);assertEquals(200,saved.statusCode(),saved.body());
         assertEquals(saved.body(),call(base+"/"+id+"/reports",report,null).body());
         var view=json.readTree(call(base+"/"+id,null,null).body());

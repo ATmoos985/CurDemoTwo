@@ -76,6 +76,9 @@ class ExecutionOrderTests {
         var p=plan(inventory,false,1);var other=plan(inventory,false,1);
         var e=change(inventory,draft(inventory,p),"release",300);
         var competing=draft(inventory,other);
+        assertEquals(task,inventory.saveTask(task));
+        var advice=(java.util.Map<?,?>)inventory.executionOrder(competing.id()).get("allowedActions");
+        assertEquals(false,((java.util.Map<?,?>)advice.get("release")).get("allowed"));
         assertThrows(InventoryConflictException.class,()->change(inventory,competing,"release",300));
         assertThrows(InventoryConflictException.class,()->workflow(inventory).confirm(report(other,1)));
         assertThrows(InventoryConflictException.class,()->workflow(inventory).confirm(report(p,1)));

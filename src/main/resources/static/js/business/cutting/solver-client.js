@@ -1,4 +1,6 @@
 import {shapeArea, rectangle} from '../../canvas/nesting-scene.js';
+import {currentExecution,openTaskExecutions} from './execution-panel.js';
+import {executionForPlan} from './execution-client.js';
 import { renderTaskRemnants } from '../../plugins/remnant/remnant-modal.js';
 import { saveCurrentTask, refreshTaskProgress, escapeText } from './task-workspace.js';
 import { createPlanHistory, planScene } from './plan-editing.js';
@@ -346,6 +348,7 @@ export function undoPlanEdit() { applyPlanHistory('undo'); }
 export function redoPlanEdit() { applyPlanHistory('redo'); }
 function applyPlanHistory(direction) {
     const pending = state.pendingPlan;
+    if(currentExecution()?.reservationActive)return;
     if (validatingAdjustment || !pending?.history || pending.context !== solveContext()) return;
     const scene = pending.history[direction]();
     if (!scene) return;
@@ -365,6 +368,7 @@ function offsetCuts(cuts, offset) {
 }
 
 export async function saveToolpathAdjustment(cuts) {
+    if(currentExecution()?.reservationActive)throw new Error('当前方案已下达，不能调整刀路。');
     if (validatingAdjustment || !canUseCurrentPlan()) throw new Error('请先生成方案或校验裁片调整，再调整刀路');
     const pending = state.pendingPlan, geometry = planGeometry();
     const localCuts = offsetCuts(cuts, -pending.windowStartY);
@@ -391,6 +395,7 @@ export async function saveToolpathAdjustment(cuts) {
 
 export async function validatePlanAdjustment() {
     const pending = state.pendingPlan;
+    if(currentExecution()?.reservationActive)return showToast('当前方案已下达，不能保存调整版。','warning');
     if (validatingAdjustment || !pending || !currentPlanContext()) return;
     if (canUseCurrentPlan()) return;
     const geometry = planGeometry();
@@ -443,6 +448,7 @@ export function restoreSavedPlan(saved) {
 }
 export async function triggerSolve() {
     if (solving) return;
+    if(currentExecution()?.reservationActive)return showToast('当前方案已经下达；取消未开工预约或完成实切报工后再排料。','warning');
     const flow = updateWorkflowControls();
     if (!flow.canSolve) { showToast(flow.hint, 'warning');navigateWorkflowStage(flow.stage,flow.target);return; }
     solving = true; latestSolveAttempt = null;
@@ -692,7 +698,12 @@ let openingReport = false;
 export async function openCutReport() {
     if (openingReport || document.getElementById('cut-report-modal').open) return;
     openingReport = true;
-    try { await prepareCutReport(); } finally { openingReport = false; }
+    try {
+        await refreshTaskProgress();
+        const execution=currentExecution();
+        if(execution && execution.effectiveState!=='RUNNING' || !execution && !queuedReports().length) {await openTaskExecutions();return;}
+        await prepareCutReport();
+    } catch(error) {showToast(error.message,'error');} finally { openingReport = false; }
 }
 async function prepareCutReport() {
     let pending = state.pendingPlan;
@@ -724,6 +735,7 @@ async function prepareCutReport() {
 
     document.getElementById("cut-report-modal").showModal();
     document.getElementById('report-confirm-button').textContent = queuedReports().length ? '连同待报工一起提交' : '立即报工';
+    document.getElementById('report-stage-button').hidden = !!currentExecution();
     document.querySelector("#cut-report-modal button").focus();
 }
 
@@ -777,6 +789,8 @@ export async function openStationLapConfirmModal() {
 }
 
 async function stageStation(pending, report) {
+    await refreshTaskProgress();
+    if(currentExecution())throw new Error('当前方案已有执行单，请完成实切报工后继续下一工位。');
     const entries = [...queuedReports().filter(r => r.report.planId !== report.planId), queueEntry(pending,report)];
     await requestJSON('/api/cutting/report-batch?preview=true', entries.map(r => r.report));
     saveReportQueue(pending.taskId,entries);
@@ -867,7 +881,13 @@ export async function confirmCutReport(stageOnly = false) {
 }
 
 async function submitReports(entries) {
-    const receipts = await requestJSON('/api/cutting/report-batch',entries.map(r => r.report));
+    await refreshTaskProgress();
+    const execution=executionForPlan(state.taskExecutions,entries[0]?.report.planId);
+    if(entries.slice(1).some(e=>executionForPlan(state.taskExecutions,e.report.planId)))throw new Error('暂存中包含执行单方案，请逐张核对执行记录。');
+    if(execution && (entries.length!==1 || entries[0].report.planId!==execution.execution.planId))throw new Error('执行单须逐工位报工，请先处理已有暂存批次。');
+    const receipts = execution
+        ? [await requestJSON('/api/v2/execution-orders/'+encodeURIComponent(execution.execution.id)+'/reports',entries[0].report)]
+        : await requestJSON('/api/cutting/report-batch',entries.map(r => r.report));
     // Once the server confirms, keep these facts even if a later UI refresh fails.
     const byId = new Map((state.taskReports || []).map(r => [r.planId,r]));
     receipts.forEach(r => byId.set(r.planId,r)); state.taskReports = [...byId.values()];

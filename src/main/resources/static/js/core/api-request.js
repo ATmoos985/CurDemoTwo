@@ -1,9 +1,9 @@
 export class ApiError extends Error {
     constructor(message, code, httpStatus = 0) {super(message);this.code=code;this.httpStatus=httpStatus;}
 }
-export async function requestJSON(url, body) {
+export async function requestJSON(url, body, headers = {}) {
     let response;
-    try {response=await fetch(url,body===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});}
+    try {response=await fetch(url,body===undefined?{cache:'no-store',headers}:{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(body)});}
     catch {throw new ApiError('未收到服务器响应，请检查连接后重试。','NETWORK');}
     let result;
     try {result=await response.json();}
