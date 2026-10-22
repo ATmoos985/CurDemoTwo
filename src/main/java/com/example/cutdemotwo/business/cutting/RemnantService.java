@@ -5,6 +5,7 @@ import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.ExecutionOrder;
 import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
 import com.example.cutdemotwo.business.model.InventoryTransfer;
+import com.example.cutdemotwo.business.model.InventoryEvent;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
 import com.example.cutdemotwo.business.model.RemnantStock;
 import com.example.cutdemotwo.business.model.SolveRequest;
@@ -44,6 +45,7 @@ public class RemnantService {
     private final Map<String,ExecutionOrder> executions = new LinkedHashMap<>();
     private final Map<String,InventoryTransfer> transfers=new LinkedHashMap<>();
     private List<InventoryLedgerEntry> ledger = List.of();
+    private List<InventoryEvent> outbox = List.of();
     private long revision;
     private boolean accessing;
     private long operationTime;
@@ -138,7 +140,7 @@ public class RemnantService {
 
     private InventorySnapshot snapshot() {
         return new InventorySnapshot(new ArrayList<>(motherRolls.values()), new ArrayList<>(remnantPool.values()),
-                receipts, remnantSeq.get(), defectSeq.get(), tasks, plans, revision, executions, ledger, transfers);
+                receipts, remnantSeq.get(), defectSeq.get(), tasks, plans, revision, executions, ledger, transfers, outbox);
     }
 
     private void restore(InventorySnapshot snapshot) {
@@ -149,6 +151,7 @@ public class RemnantService {
         plans.clear(); if (snapshot.plans() != null) plans.putAll(snapshot.plans());
         executions.clear();executions.putAll(snapshot.executions());
         ledger = snapshot.ledger();
+        outbox = snapshot.outbox();
         transfers.clear();transfers.putAll(snapshot.transfers());
         revision = snapshot.revision();
         remnantSeq.set(snapshot.remnantSeq()); defectSeq.set(snapshot.defectSeq());
@@ -169,6 +172,8 @@ public class RemnantService {
             T result = command.get();
             ledger = InventoryJournal.append(json.readValue(before,InventorySnapshot.class),snapshot(),
                     eventType,businessId,actor,operationTime);
+            outbox = InventoryEvent.append(outbox,json.readValue(before,InventorySnapshot.class).ledger().size(),
+                    ledger,eventType,businessId,operationTime,revision+1);
             save();
             return result;
         } catch (RuntimeException error) {
@@ -176,6 +181,9 @@ public class RemnantService {
             throw error;
         } finally { accessing = false; }
     }
+
+    /** Committed immutable facts; reads and external receipts never mutate inventory. */
+    public synchronized List<InventoryEvent> integrationEvents() { return read(() -> outbox); }
 
     private void refresh() {
         if (!accessing && store.shared()) {

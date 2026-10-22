@@ -3,7 +3,7 @@
   "info": {
     "title": "CurDemoTwo Computation and Execution API",
     "version": "2.0.0",
-    "description": "标准计算作业不写库存；文件模式单实例，JDBC 模式支持租约调度。二维、唛架与一维适配能力以 capabilities 为准。执行单接口关联已保存的二维业务任务方案，与库存共享事务；整卷/整块预约、开工、报工和取消已实现。不可变库存/需求流水与内部对账已实现；本机 stdio MCP 适配器调用相同 REST 用例；身份认证、多材料、外部库存对账及远程 MCP 尚待实现。"
+    "description": "标准计算作业不写库存；文件模式单实例，JDBC 模式支持租约调度。二维、唛架与一维适配能力以 capabilities 为准。执行单接口关联已保存的二维业务任务方案，与库存共享事务；整卷/整块预约、开工、报工和取消已实现。不可变库存/需求流水与内部对账已实现；本机 stdio MCP 适配器调用相同 REST 用例；库存事务 Outbox 与独立回执支持单集成方按序拉取，集成接口使用专用 Bearer 凭据且默认关闭；全站身份认证、多材料、外部权威库存预约/对账及远程 MCP 尚待实现。"
   },
   "servers": [
     {
@@ -1316,6 +1316,245 @@
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/integration-deliveries": {
+      "get": {
+        "summary": "Read ordered delivery state without modifying inventory",
+        "security": [
+          {
+            "IntegrationBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationDeliveryPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid fields, types or pagination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid integration bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Busy, rejected, stale attempt, idempotency conflict or stream mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Disabled or temporarily unavailable storage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ]
+      }
+    },
+    "/api/v2/integration-deliveries/claims": {
+      "post": {
+        "summary": "Claim the next unacknowledged committed event",
+        "security": [
+          {
+            "IntegrationBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationLease"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid fields, types or pagination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid integration bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Busy, rejected, stale attempt, idempotency conflict or stream mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Disabled or temporarily unavailable storage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "At-least-once, ordered per configured consumer. Persist requestId before calling; retry unknown responses with the original body. An expired replay returns the old attempt, never grants a new token. Rejected attempts require a new requestId and retryOf equal to the rejected token. An EMPTY requestId is not persisted. Receiver must deduplicate the event ID atomically with its own changes.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntegrationClaim"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/integration-deliveries/{id}/acknowledgements": {
+      "post": {
+        "summary": "Record accepted external receipt or rejected outcome",
+        "security": [
+          {
+            "IntegrationBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationDelivery"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid fields, types or pagination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid integration bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Busy, rejected, stale attempt, idempotency conflict or stream mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Disabled or temporarily unavailable storage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Only latest unexpired attempt may first transition. Exact completed acknowledgement replay is read-only; changed outcome conflicts. Accepted acknowledgement advances the ordered checkpoint, rejection blocks it. Does not book or reverse inventory. Maximum command body 8192 bytes.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntegrationAcknowledgement"
               }
             }
           }
@@ -3696,6 +3935,339 @@
             }
           }
         }
+      },
+      "InventoryEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "schemaVersion": {
+            "const": "1"
+          },
+          "authority": {
+            "const": "INTERNAL"
+          },
+          "action": {
+            "type": "string"
+          },
+          "businessId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "occurredAt": {
+            "type": "integer"
+          },
+          "inventoryRevision": {
+            "type": "integer"
+          },
+          "changes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/InventoryLedgerEntry"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "sequence",
+          "schemaVersion",
+          "authority",
+          "action",
+          "businessId",
+          "occurredAt",
+          "inventoryRevision",
+          "changes"
+        ]
+      },
+      "IntegrationClaim": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "retryOf": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f-]{36}$"
+          }
+        },
+        "required": [
+          "requestId"
+        ]
+      },
+      "IntegrationAcknowledgement": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "type": "string",
+            "pattern": "^[0-9a-f-]{36}$"
+          },
+          "status": {
+            "enum": [
+              "ACCEPTED",
+              "REJECTED"
+            ]
+          },
+          "externalReceipt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "token",
+          "status"
+        ],
+        "oneOf": [
+          {
+            "properties": {
+              "status": {
+                "const": "ACCEPTED"
+              },
+              "externalReceipt": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "externalReceipt"
+            ]
+          },
+          {
+            "properties": {
+              "status": {
+                "const": "REJECTED"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "externalReceipt": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          }
+        ]
+      },
+      "IntegrationDelivery": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "eventId": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "PENDING",
+              "LEASED",
+              "RETRYABLE",
+              "ACKNOWLEDGED",
+              "REJECTED"
+            ]
+          },
+          "attempt": {
+            "type": "integer"
+          },
+          "expiresAt": {
+            "type": "integer"
+          },
+          "externalReceipt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "eventId",
+          "sequence",
+          "state",
+          "attempt",
+          "expiresAt",
+          "externalReceipt",
+          "reason"
+        ]
+      },
+      "IntegrationAttempt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "requestId": {
+            "type": "string"
+          },
+          "retryOf": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "eventId": {
+            "type": "string"
+          },
+          "eventSequence": {
+            "type": "integer"
+          },
+          "number": {
+            "type": "integer"
+          },
+          "token": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "LEASED",
+              "ACKNOWLEDGED",
+              "REJECTED"
+            ]
+          },
+          "externalReceipt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "requestId",
+          "retryOf",
+          "eventId",
+          "eventSequence",
+          "number",
+          "token",
+          "expiresAt",
+          "state",
+          "externalReceipt",
+          "reason"
+        ]
+      },
+      "IntegrationLease": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "consumer": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "EMPTY",
+              "LEASED",
+              "EXPIRED",
+              "ACKNOWLEDGED",
+              "REJECTED"
+            ]
+          },
+          "attempt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IntegrationAttempt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InventoryEvent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "consumer",
+          "state",
+          "attempt",
+          "event"
+        ]
+      },
+      "IntegrationDeliveryPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "consumer": {
+            "type": "string"
+          },
+          "acknowledgedThrough": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IntegrationDelivery"
+            }
+          },
+          "nextCursor": {
+            "type": "integer"
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "consumer",
+          "acknowledgedThrough",
+          "items",
+          "nextCursor",
+          "hasMore"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "IntegrationBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Dedicated host-configured credential for one external consumer. Disabled by default; this is not authentication for the other APIs."
       }
     }
   }

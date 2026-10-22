@@ -3,6 +3,7 @@ package com.example.cutdemotwo.persistence;
 import com.example.cutdemotwo.business.model.CuttingPlan;
 import com.example.cutdemotwo.business.model.ExecutionOrder;
 import com.example.cutdemotwo.business.model.InventoryTransfer;
+import com.example.cutdemotwo.business.model.InventoryEvent;
 import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
@@ -51,8 +52,12 @@ public class JdbcInventoryStore implements InventoryStore {
             Map<String,ExecutionOrder> executions=new LinkedHashMap<>();
             rows("execution_order",ExecutionOrder.class).forEach(e->executions.put(e.id(),e));
             return new InventorySnapshot(rolls, remnants, receipts, ((Number)meta.get("remnant_seq")).intValue(),
-                    ((Number)meta.get("defect_seq")).intValue(), tasks, plans, revision, executions, ledger(), transfers());
+                    ((Number)meta.get("defect_seq")).intValue(), tasks, plans, revision, executions, ledger(), transfers(), outbox());
         });
+    }
+    private List<InventoryEvent> outbox() {
+        return jdbc.query("SELECT data_json FROM inventory_outbox ORDER BY event_sequence",
+                (rs,index)->json.readValue(rs.getString(1),InventoryEvent.class));
     }
     private Map<String,InventoryTransfer> transfers() {
         var result=new LinkedHashMap<String,InventoryTransfer>();
@@ -98,6 +103,11 @@ public class JdbcInventoryStore implements InventoryStore {
                         entry.id(),entry.sequence(),entry.transactionId(),entry.eventType(),entry.aggregateType(),entry.aggregateId(),
                         entry.occurredAt(),json.writeValueAsString(entry));
             }
+            var events=outbox();
+            InventoryEvent.requireAppendOnly(events,snapshot.outbox());
+            for(var event:snapshot.outbox().subList(events.size(),snapshot.outbox().size()))
+                jdbc.update("INSERT INTO inventory_outbox (id,event_sequence,inventory_revision,data_json) VALUES (?,?,?,?)",
+                        event.id(),event.sequence(),event.inventoryRevision(),json.writeValueAsString(event));
             return snapshot.revision() + 1;
         }));
     }
