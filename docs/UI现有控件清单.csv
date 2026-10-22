@@ -1,0 +1,335 @@
+﻿证据编号,静态资源相对路径,行号,控件类型,源码标签,源码属性,证据类型,迁移验收
+CTRL-0001,analysis.html,3,button,刷新对账,"id=""refresh-analysis""",静态页面,待逐项验证
+CTRL-0002,analysis.html,6,summary,指标口径与适用范围,,静态页面,待逐项验证
+CTRL-0003,analysis.html,9,button,导出已载入流水 CSV,"id=""export-ledger"" disabled",静态页面,待逐项验证
+CTRL-0004,analysis.html,10,select,全部 母卷 料头 需求 报工 迁移检查点,"id=""ledger-type""",静态页面,待逐项验证
+CTRL-0005,analysis.html,10,button,查询流水,"type=""submit""",静态页面,待逐项验证
+CTRL-0006,analysis.html,11,button,加载下一页,"id=""load-ledger"" hidden",静态页面,待逐项验证
+CTRL-0007,cloth_cad_nesting.html,344,button,适合视口,"class=""tool-btn"" onclick=""fitView()""",静态页面,待逐项验证
+CTRL-0008,cloth_cad_nesting.html,345,button,1:1 实际比例,"class=""tool-btn"" onclick=""resetZoom()""",静态页面,待逐项验证
+CTRL-0009,cloth_cad_nesting.html,346,button,重新排料计算,"class=""tool-btn active"" onclick=""triggerSolve()""",静态页面,待逐项验证
+CTRL-0010,cloth_cad_nesting.html,356,button,场景一：Word 表1 (L形余料正交拆解) 2m×4m 切 1.5m×3m，拆出右侧0.5m与末端1.5m料头 (面积100%守恒),"class=""preset-btn active"" id=""btn-case-1"" onclick=""loadCase(1)""",静态页面,待逐项验证
+CTRL-0011,cloth_cad_nesting.html,360,button,场景一：左侧0.5m带疵改宽纵切 左侧0.5m带疵，右侧1.5m完好，允许纵切时出成品并保留带疵料头,"class=""preset-btn"" id=""btn-case-2"" onclick=""loadCase(2)""",静态页面,待逐项验证
+CTRL-0012,cloth_cad_nesting.html,364,button,场景一：1.6m短料生成与新订单优先领用 疵点间短料切断贴标入库；新订单到达优先匹配，母卷扣料为0,"class=""preset-btn"" id=""btn-case-3"" onclick=""loadCase(3)""",静态页面,待逐项验证
+CTRL-0013,cloth_cad_nesting.html,368,button,场景二：带多疵点 PackingSolver 2D 排料 2000×5000mm 原布，多规格裁片，避让2处瑕疵，生成13步断刀树,"class=""preset-btn"" id=""btn-case-4"" onclick=""loadCase(4)""",静态页面,待逐项验证
+CTRL-0014,cloth_cad_nesting.html,390,select,支持纵切 (分条+断刀) 仅能横切 (禁止纵切),"class=""prop-input"" id=""sel-allow-longitudinal"" onchange=""toggleLongitudinal()""",静态页面,待逐项验证
+CTRL-0015,cloth_cad_nesting.html,442,button,⏮ 重置,"class=""playback-btn"" onclick=""stepCut(-999)""",静态页面,待逐项验证
+CTRL-0016,cloth_cad_nesting.html,443,button,◀ 上一刀,"class=""playback-btn"" onclick=""stepCut(-1)""",静态页面,待逐项验证
+CTRL-0017,cloth_cad_nesting.html,444,button,▶ 下一刀,"class=""playback-btn"" onclick=""stepCut(1)""",静态页面,待逐项验证
+CTRL-0018,cloth_cad_nesting.html,445,button,⏭ 显示全刀,"class=""playback-btn"" onclick=""stepCut(999)""",静态页面,待逐项验证
+CTRL-0019,demos.html,10,button,二维裁切 窗帘 · 板材 · 避疵 · 料头,"id=""tab-sheet"" role=""tab"" aria-controls=""panel-sheet"" aria-selected=""true"" data-demo=""sheet""",静态页面,待逐项验证
+CTRL-0020,demos.html,11,button,服装唛架 齐套排入 · 固定布宽 · 缩短用布,"id=""tab-marker"" role=""tab"" aria-controls=""panel-marker"" aria-selected=""false"" tabindex=""-1"" data-demo=""marker""",静态页面,待逐项验证
+CTRL-0021,demos.html,12,button,一维搭切对比 逐单分切 · 快速搭切 · 精细优化,"id=""tab-linear"" role=""tab"" aria-controls=""panel-linear"" aria-selected=""false"" tabindex=""-1"" data-demo=""linear""",静态页面,待逐项验证
+CTRL-0022,index.html,40,button,新建任务,"class=""tool-btn"" onclick=""openNewTask()""",静态页面,待逐项验证
+CTRL-0023,index.html,40,button,打开任务,"class=""tool-btn"" onclick=""openTaskList()""",静态页面,待逐项验证
+CTRL-0024,index.html,40,button,保存需求,"class=""tool-btn"" onclick=""saveTaskFromUI()""",静态页面,待逐项验证
+CTRL-0025,index.html,40,button,本机草稿 0,"class=""tool-btn"" id=""btn-local-drafts"" onclick=""openLocalDrafts()""",静态页面,待逐项验证
+CTRL-0026,index.html,40,button,1 需求,"type=""button"" data-workflow-stage=""0""",静态页面,待逐项验证
+CTRL-0027,index.html,40,button,2 材料,"type=""button"" data-workflow-stage=""1""",静态页面,待逐项验证
+CTRL-0028,index.html,40,button,3 排料,"type=""button"" data-workflow-stage=""2""",静态页面,待逐项验证
+CTRL-0029,index.html,40,button,4 报工,"type=""button"" data-workflow-stage=""3""",静态页面,待逐项验证
+CTRL-0030,index.html,40,button,方案记录,"class=""tool-btn"" onclick=""openTaskPlans()""",静态页面,待逐项验证
+CTRL-0031,index.html,40,button,执行与预约,"class=""tool-btn"" onclick=""openTaskExecutions()""",静态页面,待逐项验证
+CTRL-0032,index.html,40,button,报工记录 0,"class=""tool-btn"" onclick=""openTaskReports()""",静态页面,待逐项验证
+CTRL-0033,index.html,41,button,打印工单,"class=""tool-btn"" onclick=""openCutTicketModal()""",静态页面,待逐项验证
+CTRL-0034,index.html,43,summary,工具与设置,"class=""tool-btn""",静态页面,待逐项验证
+CTRL-0035,index.html,46,button,机床代码 / DXF,"class=""tool-btn"" onclick=""openExportModal('gcode')""",静态页面,待逐项验证
+CTRL-0036,index.html,47,button,导出排料结果,"class=""tool-btn"" onclick=""exportCutResult()""",静态页面,待逐项验证
+CTRL-0037,index.html,49,button,清空测量,"class=""tool-btn"" onclick=""clearAllMeasurements()""",静态页面,待逐项验证
+CTRL-0038,index.html,50,button,适合视口,"class=""tool-btn"" onclick=""fitView()""",静态页面,待逐项验证
+CTRL-0039,index.html,51,button,重置缩放,"class=""tool-btn"" onclick=""resetZoom()""",静态页面,待逐项验证
+CTRL-0040,index.html,53,button,切换主题,"class=""tool-btn"" onclick=""toggleTheme()"" id=""btn-theme-toggle""",静态页面,待逐项验证
+CTRL-0041,index.html,54,button,工艺与显示设置,"class=""tool-btn"" onclick=""openSettingsModal()"" id=""btn-settings""",静态页面,待逐项验证
+CTRL-0042,index.html,62,button,本次切割,"id=""current-task-name"" onclick=""openDemandManager()""",静态页面,待逐项验证
+CTRL-0043,index.html,63,button,选择用料,"class=""tool-btn"" onclick=""matchTaskMaterials()""",静态页面,待逐项验证
+CTRL-0044,index.html,63,button,详情,"class=""tool-btn"" id=""btn-material-details""",静态页面,待逐项验证
+CTRL-0045,index.html,73,button,▼ 本次需求 核销对账中,"class=""section-title-wrap section-toggle"" onclick=""toggleSectionCollapse(this)"" aria-expanded=""true""",静态页面,待逐项验证
+CTRL-0046,index.html,79,button,+ 增裁片,"class=""tool-btn btn-add-demand"" onclick=""event.stopPropagation(); addDemandRow()"" title=""添加新裁片需求""",静态页面,待逐项验证
+CTRL-0047,index.html,87,summary,,,静态页面,待逐项验证
+CTRL-0048,index.html,90,button,定位输入,"class=""tool-btn"" data-task-repair",静态页面,待逐项验证
+CTRL-0049,index.html,90,button,重试保存,"class=""tool-btn"" onclick=""saveTaskFromUI()""",静态页面,待逐项验证
+CTRL-0050,index.html,90,button,打开任务核对,"class=""tool-btn"" onclick=""openTaskList()""",静态页面,待逐项验证
+CTRL-0051,index.html,94,select,,"class=""prop-input"" id=""task-material"" onchange=""taskInputChanged()""",静态页面,待逐项验证
+CTRL-0052,index.html,99,select,,"id=""garment-style"" aria-label=""服装案例款式""",静态页面,待逐项验证
+CTRL-0053,index.html,99,button,载入服装需求,"type=""button"" class=""tool-btn"" id=""demand-manager-garment""",静态页面,待逐项验证
+CTRL-0054,index.html,99,button,导入 Excel / JSON,"class=""tool-btn"" id=""demand-manager-import"" onclick=""openDemandImport()""",静态页面,待逐项验证
+CTRL-0055,index.html,99,button,使用 9.28 样例,"class=""tool-btn"" id=""demand-manager-sample"" onclick=""openDemandImport({sample:true})""",静态页面,待逐项验证
+CTRL-0056,index.html,99,button,＋ 添加需求,"class=""tool-btn"" onclick=""addDemandRow()""",静态页面,待逐项验证
+CTRL-0057,index.html,104,summary,关联订单号（可选）,,静态页面,待逐项验证
+CTRL-0058,index.html,108,button,▼ 用料选择与详情,"class=""section-title-wrap section-toggle"" onclick=""toggleSectionCollapse(this)"" aria-expanded=""false""",静态页面,待逐项验证
+CTRL-0059,index.html,112,button,母卷档案 ↗,"class=""tool-btn"" onclick=""event.stopPropagation(); openMaterialModal('rolls')"" title=""进入母卷档案与瑕疵库管理二级页面""",静态页面,待逐项验证
+CTRL-0060,index.html,117,button,选择本次用料,"class=""tool-btn active"" onclick=""matchTaskMaterials()""",静态页面,待逐项验证
+CTRL-0061,index.html,118,button,选择母卷,"class=""tool-btn"" onclick=""matchTaskMaterials({type:'roll'})""",静态页面,待逐项验证
+CTRL-0062,index.html,121,select,正在读取库存…,"id=""sel-mother-roll-id"" hidden disabled",静态页面,待逐项验证
+CTRL-0063,index.html,130,summary,用料与库存详情,,静态页面,待逐项验证
+CTRL-0064,index.html,136,button,选择料头 →,"class=""tool-btn"" onclick=""matchTaskMaterials({type:'remnant'})""",静态页面,待逐项验证
+CTRL-0065,index.html,155,button,▼ 机台与工艺参数,"class=""section-title-wrap section-toggle"" onclick=""toggleSectionCollapse(this)"" aria-expanded=""false""",静态页面,待逐项验证
+CTRL-0066,index.html,164,select,右下角 (靠右导轨 · 落料口自下而上起切 · 推荐) 右上角 (靠右导轨 · 顺流进给) 左下角 (靠左布边 · 落料口自下而上起切) 左上角 (靠左布边 · 顺流进给 · 标准CAM),"class=""prop-input"" id=""sel-cut-origin"" onchange=""onOriginParamChange()""",静态页面,待逐项验证
+CTRL-0067,index.html,190,select,支持纵切 (分条+断刀) 仅能横切 (禁止纵切),"class=""prop-input"" id=""sel-allow-longitudinal"" onchange=""toggleLongitudinal()""",静态页面,待逐项验证
+CTRL-0068,index.html,197,select,禁止旋转 (经向保纹理) 允许旋转 (提升利用率),"class=""prop-input"" id=""sel-allow-rotation"" onchange=""onOriginParamChange()""",静态页面,待逐项验证
+CTRL-0069,index.html,206,button,▼ 疵点记录,"class=""section-title-wrap section-toggle"" onclick=""toggleSectionCollapse(this)"" aria-expanded=""false""",静态页面,待逐项验证
+CTRL-0070,index.html,212,button,+ 增疵点,"class=""tool-btn btn-add-defect"" onclick=""event.stopPropagation(); addDefectRow()""",静态页面,待逐项验证
+CTRL-0071,index.html,239,button,◀,"class=""sidebar-edge-toggle edge-toggle-left"" id=""edge-toggle-left"" onclick=""toggleSidebar('left')"" title=""点击收起左侧面板""",静态页面,待逐项验证
+CTRL-0072,index.html,240,button,▶,"class=""sidebar-edge-toggle edge-toggle-right"" id=""edge-toggle-right"" onclick=""toggleSidebar('right')"" title=""点击收起右侧面板""",静态页面,待逐项验证
+CTRL-0073,index.html,243,button,库存档案,"class=""tool-btn"" onclick=""openMaterialModal()""",静态页面,待逐项验证
+CTRL-0074,index.html,243,button,料头 0 块,"class=""tool-btn remnant-entry-btn"" id=""btn-open-remnants"" onclick=""openRemnantModal()""",静态页面,待逐项验证
+CTRL-0075,index.html,244,summary,更多 ···,"class=""tool-btn"" aria-label=""更多工位操作""",静态页面,待逐项验证
+CTRL-0076,index.html,244,button,清除本工位排料,"class=""tool-btn"" id=""btn-station-clear"" onclick=""handleClearStationClick(); this.closest('details').open=false""",静态页面,待逐项验证
+CTRL-0077,index.html,244,button,清空整卷预览…,"class=""tool-btn"" onclick=""handleClearStationDblClick(); this.closest('details').open=false""",静态页面,待逐项验证
+CTRL-0078,index.html,244,button,重置本卷报工…,"class=""tool-btn"" id=""btn-reset-roll-cutting"" onclick=""resetContinuousCutting(); this.closest('details').open=false""",静态页面,待逐项验证
+CTRL-0079,index.html,247,button,按最长单片,"class=""tool-btn"" id=""btn-feed-fit"" title=""按剩余需求中最长单片的尺寸设置，包含切头量，不含疵点避让；最终以排料结果为准。""",静态页面,待逐项验证
+CTRL-0080,index.html,249,button,,"class=""tool-btn"" id=""btn-station-prev"" onclick=""advanceBed(-1)"" aria-label=""上一工位"" title=""上一工位""",静态页面,待逐项验证
+CTRL-0081,index.html,250,button,,"class=""tool-btn"" id=""btn-station-next"" onclick=""advanceBed(1)"" aria-label=""下一工位"" title=""下一工位""",静态页面,待逐项验证
+CTRL-0082,index.html,251,button,,"class=""tool-btn"" id=""btn-station-smart"" onclick=""smartAdvanceBed()"" aria-label=""待切位置"" title=""跳至接续待切位置""",静态页面,待逐项验证
+CTRL-0083,index.html,252,button,,"class=""tool-btn"" id=""btn-view-station"" onclick=""resetToBedView()"" aria-label=""当前工位"" title=""缩放至当前工位""",静态页面,待逐项验证
+CTRL-0084,index.html,253,button,,"class=""tool-btn"" id=""btn-view-roll"" onclick=""viewFullRoll()"" aria-label=""全卷"" title=""查看全卷""",静态页面,待逐项验证
+CTRL-0085,index.html,259,summary,母卷导航 ⓘ,"class=""radar-title""",静态页面,待逐项验证
+CTRL-0086,index.html,268,button,重置搭切,"class=""tool-btn radar-reset-btn"" id=""btn-radar-reset"" onclick=""resetContinuousCutting()"" title=""重置母卷搭切进度回 0m 起点""",静态页面,待逐项验证
+CTRL-0087,index.html,272,button,测量,"class=""tool-btn"" id=""btn-measure-tool"" aria-pressed=""false"" onclick=""toggleMeasureTool()""",静态页面,待逐项验证
+CTRL-0088,index.html,273,button,标记疵点,"class=""tool-btn"" id=""btn-defect-tool"" aria-pressed=""false"" onclick=""toggleDefectTool()"" title=""移动鼠标查看距基准边的距离；点击标记疵点中心，Esc 退出""",静态页面,待逐项验证
+CTRL-0089,index.html,274,summary,显示,"class=""tool-btn""",静态页面,待逐项验证
+CTRL-0090,index.html,277,button,清空测量,"class=""tool-btn"" onclick=""clearAllMeasurements()""",静态页面,待逐项验证
+CTRL-0091,index.html,281,button,−,"class=""tool-btn"" aria-label=""缩小画布"" onclick=""zoomCanvas(1 / 1.25)""",静态页面,待逐项验证
+CTRL-0092,index.html,281,button,＋,"class=""tool-btn"" aria-label=""放大画布"" onclick=""zoomCanvas(1.25)""",静态页面,待逐项验证
+CTRL-0093,index.html,290,summary,走刀预览 仅演示 · 不保存报工,,静态页面,待逐项验证
+CTRL-0094,index.html,292,button,▶ 连续仿真,"class=""playback-btn"" id=""btn-sim-play-pause"" onclick=""startContinuousSim()""",静态页面,待逐项验证
+CTRL-0095,index.html,293,button,2x 仿真,"class=""playback-btn"" id=""btn-sim-speed"" onclick=""toggleSimSpeed()""",静态页面,待逐项验证
+CTRL-0096,index.html,294,button,重置,"class=""playback-btn"" onclick=""resetContinuousSim()""",静态页面,待逐项验证
+CTRL-0097,index.html,295,button,上一刀,"class=""playback-btn"" onclick=""stepCut(-1)""",静态页面,待逐项验证
+CTRL-0098,index.html,296,button,下一刀,"class=""playback-btn"" onclick=""stepCut(1)""",静态页面,待逐项验证
+CTRL-0099,index.html,297,button,显示全部,"class=""playback-btn"" onclick=""stepCut(999)""",静态页面,待逐项验证
+CTRL-0100,index.html,312,button,刀序明细 2 刀,"class=""sidebar-tab-btn"" id=""tab-right-cut"" aria-pressed=""false"" onclick=""switchRightPanelTab('cut')""",静态页面,待逐项验证
+CTRL-0101,index.html,316,button,排料结果 2 块,"class=""sidebar-tab-btn active"" id=""tab-right-balance"" aria-pressed=""true"" onclick=""switchRightPanelTab('balance')""",静态页面,待逐项验证
+CTRL-0102,index.html,326,button,▼ 走刀顺序,"class=""section-title-wrap section-toggle"" onclick=""toggleSectionCollapse(this)"" aria-expanded=""true""",静态页面,待逐项验证
+CTRL-0103,index.html,355,button,重试排料,"class=""tool-btn"" data-retry",静态页面,待逐项验证
+CTRL-0104,index.html,355,button,核对输入,"class=""tool-btn"" data-review-input",静态页面,待逐项验证
+CTRL-0105,index.html,355,summary,恢复说明与其他操作,,静态页面,待逐项验证
+CTRL-0106,index.html,355,button,核对用料,"class=""tool-btn"" onclick=""matchTaskMaterials()""",静态页面,待逐项验证
+CTRL-0107,index.html,355,button,打开任务核对,"class=""tool-btn"" onclick=""openTaskList()""",静态页面,待逐项验证
+CTRL-0108,index.html,356,summary,位置与手调,,静态页面,待逐项验证
+CTRL-0109,index.html,368,summary,面积对账与剩余用料,,静态页面,待逐项验证
+CTRL-0110,index.html,397,button,完善需求信息,"id=""btn-workflow-next"" class=""tool-btn"" type=""button""",静态页面,待逐项验证
+CTRL-0111,index.html,400,button,撤销调整,"id=""btn-undo-plan"" class=""tool-btn"" onclick=""undoPlanEdit()"" title=""撤销本次方案的上一步调整 (Ctrl+Z)""",静态页面,待逐项验证
+CTRL-0112,index.html,400,button,重做,"id=""btn-redo-plan"" class=""tool-btn"" onclick=""redoPlanEdit()"" title=""重做调整 (Ctrl+Y)""",静态页面,待逐项验证
+CTRL-0113,index.html,401,button,校验并保存调整版,"id=""btn-validate-adjustment"" class=""tool-btn active"" onclick=""validatePlanAdjustment()""",静态页面,待逐项验证
+CTRL-0114,index.html,403,button,生成排料方案,"class=""tool-btn"" id=""btn-trigger-solve-station"" onclick=""triggerSolve()"" title=""在当前红框工位排料并保留其余工位已切成果""",静态页面,待逐项验证
+CTRL-0115,index.html,406,button,记录并排下一工位,"class=""tool-btn"" id=""btn-stage-advance"" hidden onclick=""stageAndAdvanceNextStation()"" title=""按当前方案记录本工位并生成下一工位方案；最后统一报工""",静态页面,待逐项验证
+CTRL-0116,index.html,409,button,统一报工,"class=""tool-btn"" id=""btn-batch-report"" hidden onclick=""openBatchReport()""",静态页面,待逐项验证
+CTRL-0117,index.html,411,button,修改实切结果,"class=""tool-btn"" id=""btn-confirm-station-cut"" onclick=""openStationLapConfirmModal()"" hidden title=""有异常件、未切件或实测尺寸变化时，在这里修改""",静态页面,待逐项验证
+CTRL-0118,index.html,431,button,关闭,"class=""tool-btn"" onclick=""document.getElementById('task-picker').close()""",静态页面,待逐项验证
+CTRL-0119,index.html,445,button,取消,"class=""tool-btn"" type=""button"" data-cancel",静态页面,待逐项验证
+CTRL-0120,index.html,445,button,保存疵点,"class=""tool-btn active"" type=""submit""",静态页面,待逐项验证
+CTRL-0121,index.html,450,button,关闭,"class=""tool-btn"" onclick=""closeCutReport()""",静态页面,待逐项验证
+CTRL-0122,index.html,455,button,全设合格,"id=""report-all-qualified"" class=""tool-btn""",静态页面,待逐项验证
+CTRL-0123,index.html,455,button,全设未切,"id=""report-all-uncut"" class=""tool-btn""",静态页面,待逐项验证
+CTRL-0124,index.html,455,button,长度外标为未切,"id=""report-mark-tail"" class=""tool-btn""",静态页面,待逐项验证
+CTRL-0125,index.html,456,summary,实测与回收规则,,静态页面,待逐项验证
+CTRL-0126,index.html,458,button,暂不报工,"class=""tool-btn"" onclick=""closeCutReport()""",静态页面,待逐项验证
+CTRL-0127,index.html,458,button,暂存，继续裁切,"id=""report-stage-button"" class=""tool-btn active"" onclick=""confirmCutReport(true)""",静态页面,待逐项验证
+CTRL-0128,index.html,458,button,确认报工并保存,"id=""report-confirm-button"" class=""tool-btn"" onclick=""confirmCutReport()""",静态页面,待逐项验证
+CTRL-0129,index.html,463,button,关闭,"class=""tool-btn"" onclick=""closeRemnantModal()""",静态页面,待逐项验证
+CTRL-0130,index.html,465,button,本次产出 0,"id=""remnant-tab-expected"" role=""tab"" aria-selected=""true"" aria-controls=""remnant-panel-expected""",静态页面,待逐项验证
+CTRL-0131,index.html,466,button,当前母卷料头库 —,"id=""remnant-tab-stock"" role=""tab"" aria-selected=""false"" aria-controls=""remnant-panel-stock"" tabindex=""-1""",静态页面,待逐项验证
+CTRL-0132,index.html,476,button,刷新库存,"class=""tool-btn"" id=""remnant-refresh""",静态页面,待逐项验证
+CTRL-0133,index.html,478,button,试排推荐,"class=""tool-btn"" id=""btn-remnant-recommend""",静态页面,待逐项验证
+CTRL-0134,index.html,481,button,关闭,"class=""tool-btn"" onclick=""closeRemnantModal()""",静态页面,待逐项验证
+CTRL-0135,index.html,492,button,关闭,"class=""tool-btn"" onclick=""closeSettingsModal()""",静态页面,待逐项验证
+CTRL-0136,index.html,497,button,显示与常规,"class=""settings-tab-btn active"" id=""tab-btn-general"" onclick=""switchSettingsTab('general')""",静态页面,待逐项验证
+CTRL-0137,index.html,498,button,工艺与切刀,"class=""settings-tab-btn"" id=""tab-btn-craft"" onclick=""switchSettingsTab('craft')""",静态页面,待逐项验证
+CTRL-0138,index.html,499,button,料头管理策略,"class=""settings-tab-btn"" id=""tab-btn-remnant-cfg"" onclick=""switchSettingsTab('remnant-cfg')""",静态页面,待逐项验证
+CTRL-0139,index.html,500,button,求解器内核,"class=""settings-tab-btn"" id=""tab-btn-solver-cfg"" onclick=""switchSettingsTab('solver-cfg')""",静态页面,待逐项验证
+CTRL-0140,index.html,510,select,深色 浅色,"class=""prop-input"" id=""cfg-theme-select"" style=""width: 220px;"" onchange=""setTheme(this.value)""",静态页面,待逐项验证
+CTRL-0141,index.html,517,select,右下角 (靠右导轨 · 落料口自下而上起切 · 推荐) 右上角 (靠右导轨 · 顺流进给) 左下角 (靠左布边 · 落料口自下而上起切) 左上角 (靠左布边 · 顺流进给 · 标准CAM),"class=""prop-input"" id=""cfg-cut-origin"" style=""width: 220px;""",静态页面,待逐项验证
+CTRL-0142,index.html,534,select,,"class=""prop-input"" id=""cfg-industry"" style=""width: 220px;"" onchange=""applyIndustryPreset(this.value)""",静态页面,待逐项验证
+CTRL-0143,index.html,554,select,禁止旋转 (严格经向保纹理) 允许旋转 90° (提升排版利用率),"class=""prop-input"" id=""cfg-allow-rot"" style=""width: 220px;""",静态页面,待逐项验证
+CTRL-0144,index.html,561,select,支持纵切 (分条直刀 + 断刀) 仅能横切 (禁止纵切分条),"class=""prop-input"" id=""cfg-allow-longi"" style=""width: 220px;""",静态页面,待逐项验证
+CTRL-0145,index.html,612,select,横切优先 (Horizontal First) 纵切优先 (Vertical First),"class=""prop-input"" id=""cfg-first-stage"" style=""width: 220px;""",静态页面,待逐项验证
+CTRL-0146,index.html,626,button,填入默认值,"class=""tool-btn"" onclick=""restoreDefaultSettings()""",静态页面,待逐项验证
+CTRL-0147,index.html,628,button,取消,"class=""tool-btn"" onclick=""closeSettingsModal()""",静态页面,待逐项验证
+CTRL-0148,index.html,629,button,保存并应用,"class=""tool-btn active"" onclick=""saveSettings()""",静态页面,待逐项验证
+CTRL-0149,inspection.html,12,select,选择母卷开始验布,"id=""inspection-roll""",静态页面,待逐项验证
+CTRL-0150,inspection.html,13,button,新建母卷,"id=""new-roll""",静态页面,待逐项验证
+CTRL-0151,inspection.html,18,button,定位 / 校准,"id=""set-position"" title=""按现场读数校准累计长度""",静态页面,待逐项验证
+CTRL-0152,inspection.html,21,button,前进一段 ↓,"id=""feed-next""",静态页面,待逐项验证
+CTRL-0153,inspection.html,24,button,▶ 开始自动跑布,"id=""feed-toggle"" aria-pressed=""false""",静态页面,待逐项验证
+CTRL-0154,inspection.html,30,button,＋ 标记疵点,"id=""tool-mark"" aria-pressed=""true"" title=""左键按住拖出范围，松开记录""",静态页面,待逐项验证
+CTRL-0155,inspection.html,31,button,选择 / 调整,"id=""tool-select"" aria-pressed=""false"" title=""选择疵点，拖动位置或四角调整大小""",静态页面,待逐项验证
+CTRL-0156,inspection.html,32,button,↶ 撤销,"id=""undo-mark"" disabled title=""撤销本次尚未保存的操作（Ctrl+Z）""",静态页面,待逐项验证
+CTRL-0157,inspection.html,34,button,回到验布线,"id=""follow-feed""",静态页面,待逐项验证
+CTRL-0158,inspection.html,34,button,全卷,"id=""view-all""",静态页面,待逐项验证
+CTRL-0159,inspection.html,34,button,☷,"id=""toggle-panel"" aria-expanded=""true"" title=""收起或展开疵点面板""",静态页面,待逐项验证
+CTRL-0160,inspection.html,46,button,新标记,"type=""button"" id=""new-mark""",静态页面,待逐项验证
+CTRL-0161,inspection.html,52,select,污渍 / 斑点 破洞 跳纱 粗节 色差 其他疵点,"name=""defectType""",静态页面,待逐项验证
+CTRL-0162,inspection.html,58,button,添加到本次记录,"id=""apply-mark"" type=""submit""",静态页面,待逐项验证
+CTRL-0163,inspection.html,58,button,删除标记,"id=""delete-mark"" type=""button"" hidden",静态页面,待逐项验证
+CTRL-0164,inspection.html,63,button,保存到母卷,"id=""save-inspection"" class=""primary"" disabled",静态页面,待逐项验证
+CTRL-0165,inspection.html,66,button,关闭,"type=""button"" data-close",静态页面,待逐项验证
+CTRL-0166,inspection.html,70,button,登记并开始标记,"class=""primary"" type=""submit""",静态页面,待逐项验证
+CTRL-0167,intro.html,17,button,二维裁切,"type=""button"" data-cut-mode=""sheet"" aria-pressed=""true""",静态页面,待逐项验证
+CTRL-0168,intro.html,17,button,一维分切,"type=""button"" data-cut-mode=""strip"" aria-pressed=""false""",静态页面,待逐项验证
+CTRL-0169,intro.html,47,button,暂停动效,"type=""button"" id=""motion-toggle"" aria-pressed=""false""",静态页面,待逐项验证
+CTRL-0170,js/business/cutting/demand-import.js,29,button,关闭,"class=""tool-btn"" data-close aria-label=""关闭需求导入""",动态模板候选,待逐项验证
+CTRL-0171,js/business/cutting/demand-import.js,32,button,下载标准模板,"class=""tool-btn"" id=""demand-import-template""",动态模板候选,待逐项验证
+CTRL-0172,js/business/cutting/demand-import.js,33,select,,"id=""demand-import-sheet"" class=""prop-input""",动态模板候选,待逐项验证
+CTRL-0173,js/business/cutting/demand-import.js,44,select,,"id=""demand-import-roll"" class=""prop-input""",动态模板候选,待逐项验证
+CTRL-0174,js/business/cutting/demand-import.js,46,button,全选当前布料,"class=""tool-btn"" id=""demand-import-select-all""",动态模板候选,待逐项验证
+CTRL-0175,js/business/cutting/demand-import.js,47,button,清空,"class=""tool-btn"" id=""demand-import-clear-selection""",动态模板候选,待逐项验证
+CTRL-0176,js/business/cutting/demand-import.js,55,summary,,,动态模板候选,待逐项验证
+CTRL-0177,js/business/cutting/demand-import.js,58,button,导入本次任务,"class=""tool-btn active"" id=""demand-import-apply"" disabled",动态模板候选,待逐项验证
+CTRL-0178,js/business/cutting/demand-import.js,81,button,"${escapeText(g.fabricCode || g.materialModel || '布料待定')} ${escapeText(g.materialModel || '型号未填写')} ${g.demands.length} 项 / ${g.demands.reduce((n,d)=>n+d.quantity,0)} 片${g.issues.length ? ` · ${g.issues.length} 行待核对` : ''} ${stock.length ? `${stock.length} 卷可关联 · ${stock.reduce((n,r)=>n+(r.remnantCount || 0),0)} 块料头` : '暂无匹配母卷'}","type=""button"" class=""import-group ${i === active ? 'active' : ''}"" data-group=""${i}"" aria-pressed=""${i === active}""",动态模板候选,待逐项验证
+CTRL-0179,js/business/cutting/execution-panel.js,23,button,关闭,"class=""tool-btn"" data-close",动态模板候选,待逐项验证
+CTRL-0180,js/business/cutting/execution-panel.js,32,button,重试原操作,"class=""tool-btn"" data-retry=""'+escapeText(slot)+'""",动态模板候选,待逐项验证
+CTRL-0181,js/business/cutting/execution-panel.js,36,button,创建执行单,"class=""tool-btn active"" type=""submit""",动态模板候选,待逐项验证
+CTRL-0182,js/business/cutting/execution-panel.js,44,button,查看方案,"class=""tool-btn"" data-view",动态模板候选,待逐项验证
+CTRL-0183,js/business/cutting/quality-review.js,23,button,关闭,"type=""button"" class=""tool-btn"" data-close",动态模板候选,待逐项验证
+CTRL-0184,js/business/cutting/quality-review.js,25,select,,"name=""pieceId"" required",动态模板候选,待逐项验证
+CTRL-0185,js/business/cutting/quality-review.js,26,select,报废 转料头,"name=""disposition""",动态模板候选,待逐项验证
+CTRL-0186,js/business/cutting/quality-review.js,31,select,待检隔离（不能选料） 已验收可用,"name=""quality""",动态模板候选,待逐项验证
+CTRL-0187,js/business/cutting/quality-review.js,32,button,确认处置,"type=""submit"" class=""tool-btn active""",动态模板候选,待逐项验证
+CTRL-0188,js/business/cutting/quota-manager.js,290,button,×,"class=""del-btn"" onclick=""window.camApp.removeDemandRow(this)"" title=""删除此裁片需求"" style=""margin-left:6px;""",动态模板候选,待逐项验证
+CTRL-0189,js/business/cutting/quota-manager.js,313,summary,#'+d.id+' X '+d.x+' / Y '+d.y+' '+d.w+' × '+d.h+' mm 避让 '+(d.margin ?? 20)+' mm 编辑 ▾,,动态模板候选,待逐项验证
+CTRL-0190,js/business/cutting/quota-manager.js,315,button,删除此疵点,"class=""tool-btn"" onclick=""this.closest(\'.item-row\').remove(); window.camApp.onParamChange();""",动态模板候选,待逐项验证
+CTRL-0191,js/business/cutting/quota-manager.js,366,button,×,"class=""del-btn"" onclick=""window.camApp.removeDemandRow(this)"" title=""删除此裁片需求""",动态模板候选,待逐项验证
+CTRL-0192,js/business/cutting/solver-client.js,298,button,关闭,"class=""tool-btn"" data-close",动态模板候选,待逐项验证
+CTRL-0193,js/business/cutting/solver-client.js,298,button,核对需求,"class=""tool-btn"" data-demands",动态模板候选,待逐项验证
+CTRL-0194,js/business/cutting/solver-client.js,298,button,核对加工参数,"class=""tool-btn active"" data-process",动态模板候选,待逐项验证
+CTRL-0195,js/business/cutting/solver-client.js,935,button,关闭,"class=""tool-btn"" data-close",动态模板候选,待逐项验证
+CTRL-0196,js/business/cutting/solver-client.js,936,button,查看工单,"class=""tool-btn"" data-ticket=""'+index+'""",动态模板候选,待逐项验证
+CTRL-0197,js/business/cutting/solver-client.js,936,button,退回核对,"class=""tool-btn"" data-restore",动态模板候选,待逐项验证
+CTRL-0198,js/business/cutting/solver-client.js,937,button,继续裁切,"class=""tool-btn"" data-close",动态模板候选,待逐项验证
+CTRL-0199,js/business/cutting/solver-client.js,937,button,确认'+(entries.length>1?'全部':'本工位')+'报工,"class=""tool-btn active"" data-confirm '+(!entries.length?'disabled':'')+'",动态模板候选,待逐项验证
+CTRL-0200,js/business/cutting/task-workspace.js,117,button,"${escapeText(d.task.name || '未命名需求')} ${d.task.demands.length} 项需求 · ${escapeText(new Date(d.updatedAt).toLocaleString('zh-CN', {hour12:false}))} 恢复草稿","class=""task-list-item"" data-draft=""${escapeText(d.id)}""",动态模板候选,待逐项验证
+CTRL-0201,js/business/cutting/task-workspace.js,358,select,全部任务 未完成 已完成,"id=""task-list-filter""",动态模板候选,待逐项验证
+CTRL-0202,js/business/cutting/task-workspace.js,363,button,'+escapeText(t.name)+' · '+(taskLabels[s.status] || (s.remaining===0?'已完成':s.completed>0?'进行中':'待裁切'))+' '+escapeText(t.materialModel)+' · 合格 '+s.completed+' / '+s.total+' 件 · 剩余 '+s.remaining+' 件 '+(s.remaining===0?'下一步：查看报工记录':s.pendingCount?'下一步：核对 '+s.pendingCount+' 个待定方案':'下一步：选择用料并继续排料')+' 需求版本 '+t.revision+' · '+escapeText(t.externalRef || t.id)+',"class=""task-list-item"" data-task=""'+escapeText(t.id)+'""",动态模板候选,待逐项验证
+CTRL-0203,js/business/cutting/task-workspace.js,367,button,重试读取,"class=""tool-btn"" id=""retry-task-list""",动态模板候选,待逐项验证
+CTRL-0204,js/business/cutting/task-workspace.js,432,summary,需求完成情况 · ${state.getCurrentCaseData().demands.length} 项需求 · ${state.taskReports.length} 条报工记录,,动态模板候选,待逐项验证
+CTRL-0205,js/business/cutting/task-workspace.js,432,summary,回收清单与凭证,,动态模板候选,待逐项验证
+CTRL-0206,js/business/cutting/task-workspace.js,500,button,恢复预览,"class=""tool-btn"" data-restore=""${escapeText(p.id)}""",动态模板候选,待逐项验证
+CTRL-0207,js/business/cutting/task-workspace.js,500,button,查看 / 打印工单,"class=""tool-btn"" data-ticket=""${escapeText(p.id)}""",动态模板候选,待逐项验证
+CTRL-0208,js/business/cutting/task-workspace.js,500,button,取消方案,"class=""tool-btn"" data-cancel=""${escapeText(p.id)}""",动态模板候选,待逐项验证
+CTRL-0209,js/business/inventory/transfer-page.js,52,summary,${escape(new Date(doc.postedAt).toLocaleString())} · ${escape(doc.command.destination)} · ${doc.lines.length} 项 · ${escape(doc.command.operator)},,动态模板候选,待逐项验证
+CTRL-0210,js/linear/linear-demo.js,81,button,${esc(item.name)} ${esc(item.note)},"type=""button"" data-scenario=""${item.key}"" aria-pressed=""${item === state.scenario}""",动态模板候选,待逐项验证
+CTRL-0211,js/linear/linear-demo.js,96,button,重试,"type=""button"" class=""tool-btn"" data-run=""${method.id}""",动态模板候选,待逐项验证
+CTRL-0212,js/linear/linear-demo.js,97,button,运行,"type=""button"" class=""tool-btn"" data-run=""${method.id}""",动态模板候选,待逐项验证
+CTRL-0213,js/linear/linear-demo.js,116,button,${method.name},"type=""button"" class=""tool-btn"" data-view=""${method.id}"" aria-pressed=""${state.view === method.id}""${state.runs[method.id].status === 'done' ? '' : ' disabled'}",动态模板候选,待逐项验证
+CTRL-0214,js/linear/linear-workbench.js,14,button,×,"class=""tool-btn remove"" type=""button"" data-remove=""${i}"" aria-label=""删除第 ${i+1} 条需求""",动态模板候选,待逐项验证
+CTRL-0215,js/linear/linear-workbench.js,72,button,"${segment(params.leftTrim,'trim','左固定切边 '+params.leftTrim+' mm')}${l.widths.map(w=>segment(w,'product','成品 '+w+' mm')).join('')}${segment(l.remaining,'remaining','可切区余边 '+l.remaining+' mm')}${segment(params.rightTrim,'trim','右固定切边 '+params.rightTrim+' mm')} 成品 ${l.product} / 可切区 ${l.available} mm 余边 ${l.remaining} mm · 利用率 ${fmt(l.cuttableRate,2)}%","type=""button"" class=""pattern-select"" data-select=""${num}"" aria-label=""查看组合 ${num}，重复 ${group.usageCount} 卷""",动态模板候选,待逐项验证
+CTRL-0216,js/plugins/export/cut-ticket.js,12,button,关闭,"class=""tool-btn"" data-close",动态模板候选,待逐项验证
+CTRL-0217,js/plugins/export/cut-ticket.js,12,button,打印 / 保存 PDF,"class=""tool-btn active"" data-print",动态模板候选,待逐项验证
+CTRL-0218,js/plugins/export/nc-dxf-exporter.js,331,button,关闭,"class=""tool-btn"" onclick=""window.cutApp.plugins.export.closeExportModal()""",动态模板候选,待逐项验证
+CTRL-0219,js/plugins/export/nc-dxf-exporter.js,334,button,数控代码 (.nc),"class=""settings-tab-btn active"" id=""tab-export-gcode"" onclick=""window.cutApp.plugins.export.switchExportTab('gcode')""",动态模板候选,待逐项验证
+CTRL-0220,js/plugins/export/nc-dxf-exporter.js,335,button,图纸 (.dxf),"class=""settings-tab-btn"" id=""tab-export-dxf"" onclick=""window.cutApp.plugins.export.switchExportTab('dxf')""",动态模板候选,待逐项验证
+CTRL-0221,js/plugins/export/nc-dxf-exporter.js,339,button,复制全部代码,"id=""btn-copy-export-code"" class=""tool-btn"" style=""padding: 2px 10px; font-size: 11px;"" onclick=""window.cutApp.plugins.export.copyExportPreview()""",动态模板候选,待逐项验证
+CTRL-0222,js/plugins/export/nc-dxf-exporter.js,347,button,取消,"class=""tool-btn"" onclick=""window.cutApp.plugins.export.closeExportModal()""",动态模板候选,待逐项验证
+CTRL-0223,js/plugins/export/nc-dxf-exporter.js,348,button,下载文件,"class=""tool-btn active"" id=""btn-download-export-file""",动态模板候选,待逐项验证
+CTRL-0224,js/plugins/layout/workbench-panels.js,11,button,关闭,"class=""tool-btn"" data-close",动态模板候选,待逐项验证
+CTRL-0225,js/plugins/layout/workbench-panels.js,11,button,返回工作台,"class=""tool-btn"" data-close",动态模板候选,待逐项验证
+CTRL-0226,js/plugins/layout/workbench-panels.js,20,button,保存并选择材料,"class=""tool-btn active"" id=""demand-editor-save"" aria-describedby=""demand-editor-hint"" disabled",动态模板候选,待逐项验证
+CTRL-0227,js/plugins/layout/workbench-panels.js,34,button,管理需求 ↗,"class=""tool-btn"" onclick=""openDemandManager()""",动态模板候选,待逐项验证
+CTRL-0228,js/plugins/layout/workbench-panels.js,90,button,"${esc(item.name)} ${esc(item.width)} × ${esc(item.length)} mm ${item.remaining === 0 ? '已满足' : item.toCut===0 ? '待报工 '+item.staged : '待切 '+(item.toCut ?? '—')} 已报工 ${item.completed} / ${item.total || '—'}${item.staged && item.toCut ? ' · 待报工 '+item.staged : ''} 0?Math.min(100,item.completed/item.total*100):0}%""> 0?Math.max(0,Math.min(item.staged,item.total-item.completed)/item.total*100):0}%"">","class=""demand-quick-row"" data-demand=""${item.id}"" data-complete=""${item.remaining === 0}""",动态模板候选,待逐项验证
+CTRL-0229,js/plugins/layout/workbench-panels.js,91,button,为当前任务导入,"class=""tool-btn active"" onclick=""openDemandImport()""",动态模板候选,待逐项验证
+CTRL-0230,js/plugins/layout/workbench-panels.js,91,button,填写需求,"class=""tool-btn"" onclick=""openDemandManager()""",动态模板候选,待逐项验证
+CTRL-0231,js/plugins/material/material-manager.js,110,button,${escapeHtml(r.rollId)},"class=""inventory-item-link"" data-roll=""${escapeHtml(r.rollId)}"" aria-pressed=""${r.rollId === activeRollId}""",动态模板候选,待逐项验证
+CTRL-0232,js/plugins/material/material-manager.js,135,button,为当前任务选用…,"class=""tool-btn inventory-primary"" data-mount=""${escapeHtml(roll.rollId)}""",动态模板候选,待逐项验证
+CTRL-0233,js/plugins/material/material-manager.js,140,summary,面料与验布资料,,动态模板候选,待逐项验证
+CTRL-0234,js/plugins/material/material-manager.js,143,summary,疵点记录 ${(roll.defects || []).length} 处,,动态模板候选,待逐项验证
+CTRL-0235,js/plugins/material/material-manager.js,145,summary,＋ 标定新疵点,,动态模板候选,待逐项验证
+CTRL-0236,js/plugins/material/material-manager.js,154,summary,${escapeHtml(d.typeName || d.defectType || `疵点 ${d.id}`)} Y ${escapeHtml(d.y)} mm,,动态模板候选,待逐项验证
+CTRL-0237,js/plugins/material/material-manager.js,168,select,破洞 抽纱 / 跳纱 油污 / 黄斑 粗节 / 结头,"id=""sel-new-defect-type""",动态模板候选,待逐项验证
+CTRL-0238,js/plugins/material/material-manager.js,170,select,视觉验布机 现场人工标定,"id=""sel-new-defect-src""",动态模板候选,待逐项验证
+CTRL-0239,js/plugins/material/material-manager.js,171,button,保存疵点,"class=""tool-btn inventory-primary inventory-form-wide"" type=""submit""",动态模板候选,待逐项验证
+CTRL-0240,js/plugins/material/material-manager.js,207,button,${escapeHtml(r.id)},"class=""inventory-item-link"" data-remnant=""${escapeHtml(r.id)}"" aria-pressed=""${r.id === activeRemnantId}""",动态模板候选,待逐项验证
+CTRL-0241,js/plugins/material/material-manager.js,222,button,核对当前需求并选用…,"class=""tool-btn inventory-primary"" data-match-remnant=""${escapeHtml(id)}""",动态模板候选,待逐项验证
+CTRL-0242,js/plugins/material/material-manager.js,225,summary,来源与流转,,动态模板候选,待逐项验证
+CTRL-0243,js/plugins/material/material-manager.js,228,summary,疵点记录 ${(remnant.defects || []).length} 处,,动态模板候选,待逐项验证
+CTRL-0244,js/plugins/material/material-manager.js,229,summary,库存处置,,动态模板候选,待逐项验证
+CTRL-0245,js/plugins/material/material-manager.js,229,button,报废此料头,"class=""tool-btn inventory-danger"" data-scrap=""${escapeHtml(id)}""",动态模板候选,待逐项验证
+CTRL-0246,js/plugins/material/material-manager.js,234,button,试排并查看推荐,"class=""tool-btn inventory-primary"" data-recommend",动态模板候选,待逐项验证
+CTRL-0247,js/plugins/material/material-manager.js,237,select,全部${kind === 'rolls' ? '验布状态' : '料头'} ${options},"id=""inventory-${kind}-filter"" aria-label=""筛选${label}""",动态模板候选,待逐项验证
+CTRL-0248,js/plugins/material/material-manager.js,238,button,刷新,"class=""tool-btn"" data-refresh",动态模板候选,待逐项验证
+CTRL-0249,js/plugins/material/material-manager.js,239,summary,＋ 录入母卷,,动态模板候选,待逐项验证
+CTRL-0250,js/plugins/material/material-manager.js,244,button,保存母卷档案,"class=""tool-btn inventory-primary"" type=""submit""",动态模板候选,待逐项验证
+CTRL-0251,js/plugins/material/material-manager.js,258,button,返回工作台,"class=""tool-btn"" data-close autofocus",动态模板候选,待逐项验证
+CTRL-0252,js/plugins/material/material-manager.js,259,button,当前用料与疵点,"id=""tab-mat-current"" data-tab=""current"" aria-pressed=""false"" aria-controls=""pane-mat-current""",动态模板候选,待逐项验证
+CTRL-0253,js/plugins/material/material-manager.js,259,button,母卷库存,"id=""tab-mat-rolls"" data-tab=""rolls"" aria-pressed=""true"" aria-controls=""pane-mat-rolls""",动态模板候选,待逐项验证
+CTRL-0254,js/plugins/material/material-manager.js,259,button,料头库存,"id=""tab-mat-remnants"" data-tab=""remnants"" aria-pressed=""false"" aria-controls=""pane-mat-remnants""",动态模板候选,待逐项验证
+CTRL-0255,js/plugins/material/material-manager.js,259,button,疵点参考,"id=""tab-mat-dict"" data-tab=""dict"" aria-pressed=""false"" aria-controls=""pane-mat-dict""",动态模板候选,待逐项验证
+CTRL-0256,js/plugins/material/material-manager.js,266,summary,${name} ${code},,动态模板候选,待逐项验证
+CTRL-0257,js/plugins/material/material-selection.js,83,button,关闭,"class=""tool-btn"" data-close",动态模板候选,待逐项验证
+CTRL-0258,js/plugins/material/material-selection.js,85,summary,匹配范围与规则,,动态模板候选,待逐项验证
+CTRL-0259,js/plugins/material/material-selection.js,87,button,计算料头推荐,"class=""tool-btn"" id=""material-recommend""",动态模板候选,待逐项验证
+CTRL-0260,js/plugins/material/material-selection.js,89,select,全部材料 仅料头 仅母卷,"id=""material-source-filter"" class=""prop-input""",动态模板候选,待逐项验证
+CTRL-0261,js/plugins/material/material-selection.js,90,button,刷新库存,"class=""tool-btn"" id=""material-refresh""",动态模板候选,待逐项验证
+CTRL-0262,js/plugins/material/material-selection.js,95,button,管理库存档案 ↗,"class=""tool-btn"" id=""material-open-inventory""",动态模板候选,待逐项验证
+CTRL-0263,js/plugins/material/material-selection.js,95,button,确认装载,"class=""tool-btn active"" id=""material-load"" disabled",动态模板候选,待逐项验证
+CTRL-0264,js/plugins/material/remnant-recommendation.js,2,button,?,"type=""button"" class=""help-tip-icon"" aria-label=""${escape(label)}"" aria-description=""${escape(text)}""",动态模板候选,待逐项验证
+CTRL-0265,js/plugins/material/remnant-recommendation.js,12,button,选择并核对,"type=""button"" class=""tool-btn ${i===0?'active':''}"" data-recommend-stock=""${escape(r.stock.id)}""",动态模板候选,待逐项验证
+CTRL-0266,js/plugins/material/remnant-recommendation.js,15,summary,切哪些需求 · 切完还剩多少,,动态模板候选,待逐项验证
+CTRL-0267,js/plugins/material/remnant-recommendation.js,17,summary,${analysis.unavailable.length} 块未形成推荐 · 查看原因,,动态模板候选,待逐项验证
+CTRL-0268,js/plugins/remnant/remnant-modal.js,40,button,定位,"class=""tool-btn"" data-locate=""${i}"" aria-label=""定位料头 ${escapeText(r.id)}""",动态模板候选,待逐项验证
+CTRL-0269,js/plugins/remnant/remnant-modal.js,40,button,报工记录,"class=""tool-btn"" data-report",动态模板候选,待逐项验证
+CTRL-0270,js/plugins/remnant/remnant-modal.js,105,button,选择并核对,"class=""tool-btn"" data-stock-id=""' + escapeText(r.id) + '"" ' + (usable(r) ? '' : 'disabled') + '",动态模板候选,待逐项验证
+CTRL-0271,js/plugins/remnant/remnant-shelf.js,225,button,重新检测,"class=""del-btn"" style=""font-size: 10px; color: var(--text-muted);"" onclick=""window.camApp.checkAllDemandsRemnantMatch()""",动态模板候选,待逐项验证
+CTRL-0272,js/plugins/remnant/remnant-shelf.js,274,button,为当前任务选用…,"class=""tool-btn active"" style=""font-size: 10.5px; padding: 4px 8px;"" onclick=""window.camApp.selectAndMountFromShelf('${r.id}')""",动态模板候选,待逐项验证
+CTRL-0273,js/plugins/toolpath/toolpath-optimizer.js,367,button,优化空走刀,"class=""tool-btn active"" style=""font-size: 10.5px; padding: 2px 8px; background: #0284c7;"" onclick=""window.camApp.toggleToolpathOptimization()""",动态模板候选,待逐项验证
+CTRL-0274,js/plugins/toolpath/toolpath-optimizer.js,379,button,恢复标准,"class=""tool-btn"" style=""font-size: 10px; padding: 2px 6px; background: rgba(239, 68, 68, 0.12); color: #dc2626; border-color: rgba(239, 68, 68, 0.3);"" onclick=""window.camApp.toggleToolpathOptimization()""",动态模板候选,待逐项验证
+CTRL-0275,linear-demo.html,45,button,在分切工作台打开,"type=""button"" class=""tool-btn active"" id=""handoff""",静态页面,待逐项验证
+CTRL-0276,linear.html,7,button,新建需求,"class=""tool-btn"" id=""new-task""",静态页面,待逐项验证
+CTRL-0277,linear.html,7,button,导入 Excel,"class=""tool-btn"" id=""import-excel""",静态页面,待逐项验证
+CTRL-0278,linear.html,7,button,载入示例,"class=""tool-btn"" id=""load-sample""",静态页面,待逐项验证
+CTRL-0279,linear.html,7,button,刷新结果,"class=""tool-btn"" id=""refresh-result"" disabled",静态页面,待逐项验证
+CTRL-0280,linear.html,7,button,切换主题,"class=""tool-btn"" id=""theme""",静态页面,待逐项验证
+CTRL-0281,linear.html,15,button,＋ 添加,"type=""button"" class=""tool-btn"" id=""add-order""",静态页面,待逐项验证
+CTRL-0282,linear.html,16,summary,组合宽度与计算方式,,静态页面,待逐项验证
+CTRL-0283,linear.html,17,select,快速计算 精细优化,"id=""profile""",静态页面,待逐项验证
+CTRL-0284,linear.html,19,button,生成分切方案,"class=""tool-btn active"" id=""solve"" type=""submit""",静态页面,待逐项验证
+CTRL-0285,linear.html,22,select,全部分组,"id=""group-filter"" disabled",静态页面,待逐项验证
+CTRL-0286,linear.html,22,button,重切所选组合,"class=""tool-btn"" id=""recut"" disabled",静态页面,待逐项验证
+CTRL-0287,linear.html,22,button,撤销调整,"class=""tool-btn"" id=""undo"" disabled",静态页面,待逐项验证
+CTRL-0288,linear.html,25,summary,统计口径与保存,,静态页面,待逐项验证
+CTRL-0289,linear.html,25,button,导出方案 Excel,"class=""tool-btn"" id=""export"" disabled",静态页面,待逐项验证
+CTRL-0290,linear.html,27,button,取消,"class=""tool-btn"" value=""cancel""",静态页面,待逐项验证
+CTRL-0291,linear.html,27,button,确认,"class=""tool-btn active"" value=""confirm""",静态页面,待逐项验证
+CTRL-0292,marker-demo.html,9,select,,"id=""marker-style""",静态页面,待逐项验证
+CTRL-0293,marker-demo.html,10,button,齐套排料并缩短长度,"class=""tool-btn active"" id=""marker-run""",静态页面,待逐项验证
+CTRL-0294,marker-demo.html,10,button,停止尝试,"type=""button"" class=""tool-btn"" id=""marker-cancel"" hidden",静态页面,待逐项验证
+CTRL-0295,marker-demo.html,12,summary,工艺与示例范围,,静态页面,待逐项验证
+CTRL-0296,marker-demo.html,13,button,适合画面,"type=""button"" class=""tool-btn"" id=""marker-fit""",静态页面,待逐项验证
+CTRL-0297,marker-demo.html,19,summary,长度尝试记录,,静态页面,待逐项验证
+CTRL-0298,marker-demo.html,20,button,导出示例输入,"class=""tool-btn"" id=""marker-input-export""",静态页面,待逐项验证
+CTRL-0299,marker-demo.html,20,button,导出齐套结果,"class=""tool-btn"" id=""marker-result-export"" disabled",静态页面,待逐项验证
+CTRL-0300,nesting.html,21,select,自定义输入 整幅横切 二维避疵 短料头复用 多规格套裁 连续送料工位 异形排料 上衣裁片 长裤裁片 半裙裁片 衣身袖片密排 木纹板 · 禁止旋转 素色板 · 允许旋转,"id=""scenario-select"" aria-label=""演示场景""",静态页面,待逐项验证
+CTRL-0301,nesting.html,53,select,整块材料 连续送料,"id=""feed-mode""",静态页面,待逐项验证
+CTRL-0302,nesting.html,56,button,＋ 增加需求,"type=""button"" class=""tool-btn"" id=""add-part""",静态页面,待逐项验证
+CTRL-0303,nesting.html,57,select,矩形贯通切割 · 优先裁片面积 整幅横切 · 按需求顺序 轮廓排料 · 优先裁片面积,"id=""process-mode""",静态页面,待逐项验证
+CTRL-0304,nesting.html,58,summary,禁入区域 0 处,,静态页面,待逐项验证
+CTRL-0305,nesting.html,58,button,＋ 增加区域,"type=""button"" class=""tool-btn"" id=""add-exclusion""",静态页面,待逐项验证
+CTRL-0306,nesting.html,59,summary,工艺参数,,静态页面,待逐项验证
+CTRL-0307,nesting.html,60,select,右下角 左下角 右上角 左上角,"id=""start-corner""",静态页面,待逐项验证
+CTRL-0308,nesting.html,61,select,水平 竖直 不适用（轮廓排料）,"id=""first-orientation""",静态页面,待逐项验证
+CTRL-0309,nesting.html,66,summary,标准输入 / 输出,,静态页面,待逐项验证
+CTRL-0310,nesting.html,66,button,编辑输入 JSON,"type=""button"" class=""tool-btn"" id=""open-json""",静态页面,待逐项验证
+CTRL-0311,nesting.html,66,button,导出输入,"type=""button"" class=""tool-btn"" id=""export-input""",静态页面,待逐项验证
+CTRL-0312,nesting.html,66,button,导出结果,"type=""button"" class=""tool-btn"" id=""export-result"" disabled",静态页面,待逐项验证
+CTRL-0313,nesting.html,68,button,开始裁切预览,"class=""tool-btn active"" id=""solve-button"" type=""submit""",静态页面,待逐项验证
+CTRL-0314,nesting.html,71,button,适合材料,"class=""tool-btn"" id=""fit-view""",静态页面,待逐项验证
+CTRL-0315,nesting.html,73,button,测量,"class=""tool-btn"" id=""btn-measure-tool"" aria-pressed=""false""",静态页面,待逐项验证
+CTRL-0316,nesting.html,74,summary,显示,"class=""tool-btn""",静态页面,待逐项验证
+CTRL-0317,nesting.html,77,button,清空测量,"class=""tool-btn"" id=""clear-measurements""",静态页面,待逐项验证
+CTRL-0318,nesting.html,81,button,−,"class=""tool-btn"" id=""zoom-out"" aria-label=""缩小画布""",静态页面,待逐项验证
+CTRL-0319,nesting.html,81,button,＋,"class=""tool-btn"" id=""zoom-in"" aria-label=""放大画布""",静态页面,待逐项验证
+CTRL-0320,nesting.html,98,summary,裁片位置,,静态页面,待逐项验证
+CTRL-0321,nesting.html,99,summary,刀序 / 轮廓明细,,静态页面,待逐项验证
+CTRL-0322,nesting.html,103,button,关闭,"class=""tool-btn""",静态页面,待逐项验证
+CTRL-0323,nesting.html,103,button,应用输入,"id=""apply-json"" class=""tool-btn active""",静态页面,待逐项验证
+CTRL-0324,settings.html,3,button,刷新运行能力,"id=""refresh-capabilities""",静态页面,待逐项验证
+CTRL-0325,settings.html,4,select,浅色 深色,"id=""management-theme""",静态页面,待逐项验证
+CTRL-0326,settings.html,5,summary,现有工艺参考模板,,静态页面,待逐项验证
+CTRL-0327,settings.html,7,summary,接入方式与当前范围,,静态页面,待逐项验证
+CTRL-0328,settings.html,8,summary,接入范围,,静态页面,待逐项验证
+CTRL-0329,tasks.html,11,select,全部状态 待排料 待执行 待报工 需处理 已完成,"id=""task-status""",静态页面,待逐项验证
+CTRL-0330,tasks.html,11,button,刷新,"type=""button"" id=""refresh-tasks""",静态页面,待逐项验证
+CTRL-0331,transfers.html,3,button,刷新库存与单据,"id=""refresh-transfers""",静态页面,待逐项验证
+CTRL-0332,transfers.html,6,button,确认上次提交结果,"id=""retry-transfer""",静态页面,待逐项验证
+CTRL-0333,transfers.html,11,button,确认并登记移库,"id=""post-transfer"" type=""submit"" class=""action-primary""",静态页面,待逐项验证
+CTRL-0334,transfers.html,11,button,清空选择,"id=""clear-transfer-selection"" type=""button""",静态页面,待逐项验证
