@@ -16,7 +16,11 @@ RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPACKINGSOLVER_BUILD_TEST=OF
 FROM node:22-bookworm-slim AS frontend-tests
 WORKDIR /workspace
 COPY src ./src
-RUN node --test src/test/js/*.test.mjs && touch /frontend-tests-passed
+COPY integrations/mcp ./integrations/mcp
+RUN node --test src/test/js/*.test.mjs \
+    && npm ci --ignore-scripts --prefix integrations/mcp \
+    && npm test --prefix integrations/mcp \
+    && touch /frontend-tests-passed
 
 FROM maven:3.9-eclipse-temurin-17-noble AS build
 WORKDIR /workspace

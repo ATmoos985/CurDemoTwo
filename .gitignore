@@ -51,4 +51,4 @@ replay_pid*
 ### OS Generated ###
 .DS_Store
 Thumbs.db
-
+node_modules/

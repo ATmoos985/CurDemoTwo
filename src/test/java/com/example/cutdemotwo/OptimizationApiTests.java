@@ -61,6 +61,17 @@ class OptimizationApiTests {
         var second=call("/api/v2/optimization-jobs",rearranged,key);assertEquals(202,second.statusCode());assertEquals(json.readTree(first.body()).get("id"),json.readTree(second.body()).get("id"));
         var conflict=call("/api/v2/optimization-jobs",body.replace("ERP-001","ERP-002"),key);assertEquals(409,conflict.statusCode());assertEquals("IDEMPOTENCY_CONFLICT",json.readTree(conflict.body()).get("code").asText());
     }
+    @Test void comparisonUsesArchivedResultsAndDoesNotWriteInventory()throws Exception{
+        var response=call("/api/v2/optimization-jobs",json.writeValueAsString(input()),UUID.randomUUID().toString());
+        assertEquals(202,response.statusCode());String id=json.readTree(response.body()).get("id").asString();waitJob(id);
+        var comparison=call("/api/v2/result-comparisons?leftId="+id+"&rightId="+id,null,null);
+        assertEquals(200,comparison.statusCode(),comparison.body());
+        var result=json.readValue(comparison.body(),ResultComparison.class);assertTrue(result.sameHardConstraints());
+        assertTrue(result.metrics().stream().allMatch(m->m.rightMinusLeft()==0));
+        assertEquals(404,call("/api/v2/result-comparisons?leftId=missing&rightId="+id,null,null).statusCode());
+        assertEquals(400,call("/api/v2/result-comparisons",null,null).statusCode());
+        assertFalse(Files.exists(temp.resolve("inventory.json")));
+    }
     @Test void invalidBodyIsBoundedStrictAndErrorsAreStructured()throws Exception{
         String body=json.writeValueAsString(input());
         for(String invalid:List.of(body.replace("\"quantity\":3","\"quantity\":3.5"),body.replace("\"quantity\":3","\"quantity\":\"3\""),body.replace("\"quantity\":3","\"quantity\":null"),body.replace("\"allowFallback\":false,",""),body.replace("\"allowFallback\":false","\"allowFallback\":false,\"allowFallback\":true"),body.replace("\"requireComplete\":true","\"requireComplete\":true,\"tenantId\":\"admin\""),body+" {}")){

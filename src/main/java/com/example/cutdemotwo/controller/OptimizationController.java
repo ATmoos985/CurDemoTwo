@@ -29,6 +29,7 @@ public class OptimizationController {
     @GetMapping("/optimization-jobs/{id}") public OptimizationJob job(@PathVariable String id){return jobs.get(id);}
     @GetMapping("/optimization-jobs/{id}/input") public OptimizationRequest input(@PathVariable String id){return jobs.input(id);}
     @GetMapping("/optimization-results/{id}") public OptimizationResult result(@PathVariable String id){return jobs.result(id);}
+    @GetMapping("/result-comparisons") public ResultComparison compare(@RequestParam(defaultValue="") String leftId,@RequestParam(defaultValue="") String rightId){return jobs.compare(leftId,rightId);}
     @PostMapping("/optimization-jobs/{id}/cancellations") public OptimizationJob cancel(@PathVariable String id){return jobs.cancel(id);}
     private OptimizationRequest decode(InputStream input){
         try {

@@ -165,6 +165,11 @@ public class OptimizationService implements AutoCloseable {
         if (document.result()==null) throw new Failure("RESULT_NOT_AVAILABLE","作业尚无已归档的验证结果，请查看作业状态",409,!document.job().terminal());
         return document.result();
     }
+    public synchronized ResultComparison compare(String leftId,String rightId) {
+        if(leftId==null || leftId.isBlank() || rightId==null || rightId.isBlank())
+            throw new Failure("INVALID_INPUT","请提供两份已归档结果的编号",400,false);
+        return ResultComparisons.compare(input(leftId),result(leftId),input(rightId),result(rightId));
+    }
     private StoredOptimizationJob required(String id) {
         var document=shared==null?documents.get(id):shared.find(id);
         if (document==null) throw new Failure("NOT_FOUND","计算作业或结果不存在",404,false);

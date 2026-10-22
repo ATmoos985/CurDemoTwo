@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<evaluation fixture="fixture.json" resultId="JOB_ID">
+  <qa_pair><question>读取 JOB_ID 原始输入与完整结果，核对需求件数和实际排入件数。是否齐套？仅答 COMPLETE 或 PARTIAL。</question><answer>COMPLETE</answer></qa_pair>
+  <qa_pair><question>结合 JOB_ID 输入尺寸与结果指标，净裁片总面积是多少平方毫米？仅答整数。</question><answer>6000000</answer></qa_pair>
+  <qa_pair><question>读取 JOB_ID 输入和结果指标，指标分母对应提交加工区域还是采购入库的母卷总面积？仅答 PROCESSING_REGION 或 PURCHASED_ROLL。</question><answer>PROCESSING_REGION</answer></qa_pair>
+  <qa_pair><question>读取 JOB_ID 输入及结果后，能否证明已经实际生产了三件良品？仅答 YES 或 NO。</question><answer>NO</answer></qa_pair>
+  <qa_pair><question>读取 JOB_ID 结果并用比较工具将它与自身比较。processingAreaUtilization 的 rightMinusLeft 是多少？仅答数字。</question><answer>0</answer></qa_pair>
+  <qa_pair><question>先核对 JOB_ID 的原始需求尺寸及区域尺寸，再核对指标。净面积除以提交区域面积的百分比是多少？仅答数值，不带百分号。</question><answer>100</answer></qa_pair>
+  <qa_pair><question>读取 JOB_ID 输入、作业和结果。结果是否记录已验证的全球最优性证明？仅答 YES 或 NO，不因 SUCCEEDED 推断最优。</question><answer>NO</answer></qa_pair>
+  <qa_pair><question>核对 JOB_ID 输入和布局，是否曾允许把裁片旋转以改善排料？仅答 YES 或 NO。</question><answer>NO</answer></qa_pair>
+  <qa_pair><question>核对 JOB_ID 作业状态、履约和指标口径。该结果应归类为生产实绩还是排料预测？仅答 ACTUAL 或 FORECAST。</question><answer>FORECAST</answer></qa_pair>
+  <qa_pair><question>读取 JOB_ID 原始需求并对照完整布局，每件 2000×1000 mm 的裁片总共排入多少件？仅答整数。</question><answer>3</answer></qa_pair>
+</evaluation>

@@ -3,7 +3,7 @@
   "info": {
     "title": "CurDemoTwo Computation and Execution API",
     "version": "2.0.0",
-    "description": "标准计算作业不写库存；文件模式单实例，JDBC 模式支持租约调度。二维、唛架与一维适配能力以 capabilities 为准。执行单接口关联已保存的二维业务任务方案，与库存共享事务；整卷/整块预约、开工、报工和取消已实现。不可变库存/需求流水与内部对账已实现；身份认证、多材料、外部库存对账及 MCP 尚待实现。"
+    "description": "标准计算作业不写库存；文件模式单实例，JDBC 模式支持租约调度。二维、唛架与一维适配能力以 capabilities 为准。执行单接口关联已保存的二维业务任务方案，与库存共享事务；整卷/整块预约、开工、报工和取消已实现。不可变库存/需求流水与内部对账已实现；本机 stdio MCP 适配器调用相同 REST 用例；身份认证、多材料、外部库存对账及远程 MCP 尚待实现。"
   },
   "servers": [
     {
@@ -1249,6 +1249,72 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TransferOptions"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/result-comparisons": {
+      "get": {
+        "summary": "Compare archived forecast results without running solvers or modifying inventory",
+        "description": "Only equal hard constraints and equal metric unit/basis/version permit numeric deltas. Engine, time budget, objective/profile and orchestration strategy may differ. Lists changed input groups; list ordering is conservatively significant. Does not select a winner or claim optimality.",
+        "parameters": [
+          {
+            "name": "leftId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "rightId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultComparison"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Result not yet archived",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or blank result identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -3532,6 +3598,99 @@
                 },
                 "allowed": {
                   "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ResultComparison": {
+        "type": "object",
+        "required": [
+          "schemaVersion",
+          "leftResultId",
+          "rightResultId",
+          "sameHardConstraints",
+          "differences",
+          "leftFulfillment",
+          "rightFulfillment",
+          "leftMeetsRequirement",
+          "rightMeetsRequirement",
+          "metrics"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "const": "1"
+          },
+          "leftResultId": {
+            "type": "string"
+          },
+          "rightResultId": {
+            "type": "string"
+          },
+          "sameHardConstraints": {
+            "type": "boolean"
+          },
+          "differences": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "leftFulfillment": {
+            "type": "string"
+          },
+          "rightFulfillment": {
+            "type": "string"
+          },
+          "leftMeetsRequirement": {
+            "type": "boolean"
+          },
+          "rightMeetsRequirement": {
+            "type": "boolean"
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "left": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Metric"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "right": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Metric"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "rightMinusLeft": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "COMPARABLE",
+                    "DIFFERENT_CONSTRAINTS",
+                    "INCOMPATIBLE_METRIC"
+                  ]
                 }
               }
             }
