@@ -16,7 +16,7 @@ if(!base || !process.env.CUT_TEST_ISOLATED || new URL(base).port==='8080')throw 
    assert.ok(roll.ok(),await roll.text());
    await page.goto(base+'/cutting.html');await expect(page).toHaveURL(/index.html$/);
    await expect(page.locator('iframe')).toHaveCount(0);
-   await page.getByRole('button',{name:'新建任务',exact:true}).click();
+   await page.locator('.header-more > summary').filter({hasText:'任务操作'}).click();await page.getByRole('button',{name:'新建任务',exact:true}).click();
    await expect(page.locator('#demand-manager')).toBeVisible();
    await page.selectOption('#garment-style',style);await page.click('#demand-manager-garment');
    await expect(page.locator('#demands-container .item-row')).not.toHaveCount(0);

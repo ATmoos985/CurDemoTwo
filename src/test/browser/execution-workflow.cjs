@@ -27,12 +27,12 @@ async function api(path,body){const r=await fetch(base+path,body?{method:'POST',
   assert.equal((await summary()).status,'REPORT_PENDING');
   pass('开工状态与取消限制、两种屏幕布局');
   await page.keyboard.press('Escape');await page.reload();await page.waitForLoadState('networkidle');
-  await page.getByRole('button',{name:'执行与预约',exact:true}).click();await page.locator('#execution-dialog [data-view]').click();await expect(page.locator('#execution-dialog')).not.toBeVisible();await expect(page.locator('#btn-workflow-next')).toHaveText('填写实切结果');
+  await page.locator('.header-more > summary').filter({hasText:'业务记录'}).click();await page.getByRole('button',{name:'执行与预约',exact:true}).click();await page.locator('#execution-dialog [data-view]').click();await expect(page.locator('#execution-dialog')).not.toBeVisible();await expect(page.locator('#btn-workflow-next')).toHaveText('填写实切结果');
   assert.equal(await page.evaluate(async()=>{const {pieceGroup}=await import('/js/plugins/cad/cad-stage.js');return pieceGroup.getChildren().some(n=>n.draggable());}),false);pass('刷新后只读恢复执行中方案，画布不能拖动');
   await page.locator('#btn-workflow-next').click();await page.locator('#execution-dialog [data-action=report]').click();await expect(page.locator('#cut-report-modal')).toBeVisible();await expect(page.locator('#report-stage-button')).toBeHidden();
   await page.locator('#report-confirm-button').click();await expect(page.locator('#cut-report-modal')).not.toBeVisible();
   views=await api('/api/v2/execution-orders?taskId='+task.id);assert.equal(views[0].effectiveState,'REPORTED');const detail=await api('/api/cutting/tasks/'+task.id);assert.equal(detail.reports.length,1);assert.deepEqual(detail.reserved,{});assert.ok((await api('/api/rolls/'+roll.rollId)).usedLength>before.usedLength);assert.equal((await summary()).reserved,0);assert.equal((await summary()).completed,pending.result.pieces.length);pass('通过执行单报工，仅一次库存扣减并释放预约');
-  await page.getByRole('button',{name:'执行与预约',exact:true}).click();await page.locator('#execution-dialog [data-view]').click();
+  await page.locator('.header-more > summary').filter({hasText:'业务记录'}).click();await page.getByRole('button',{name:'执行与预约',exact:true}).click();await page.locator('#execution-dialog [data-view]').click();
   await expect(page.locator('#cam-cut-ticket-modal')).toBeVisible();pass('已报工执行单查看历史工单，不恢复可编辑预览');
   await page.goto(base+'/tasks.html?q='+encodeURIComponent(task.id));await expect(page.locator('#task-rows tr')).toHaveCount(1);await expect(page.locator('#task-rows tr')).toContainText(task.name);pass('真实任务汇总与管理页显示一致');
   assert.deepEqual(errors,[]);pass('浏览器无未捕获错误');

@@ -202,8 +202,8 @@ async function api(path,body) {
         for(const width of [920,1366,1920]) {
             await page.setViewportSize({width,height:width===920?678:900});
             assert.equal(await page.locator('.workflow-primary:visible').count(),1);
-            assert.equal(await page.getByRole('button',{name:'打印工单',exact:true}).count(),1);
-            assert.equal(await page.locator('.header-more > summary').count(),1);
+            assert.equal(await page.locator('.header-more-menu button').filter({hasText:/^打印工单$/}).count(),1);
+            assert.deepEqual(await page.locator('.header-more > summary').allTextContents(),['任务操作','业务记录','工具与设置']);
             assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
         }
         pass('one primary action and no duplicate global print/tools buttons at 920, 1366 and 1920 widths');

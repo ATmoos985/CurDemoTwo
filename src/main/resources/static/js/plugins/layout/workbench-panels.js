@@ -16,6 +16,32 @@ function panel(id, title, subtitle, actions = '') {
 }
 
 export function initWorkbenchPanels() {
+    const toolbar = document.querySelector('.task-bar');
+    const menus = [...toolbar.querySelectorAll('.header-more')];
+    toolbar.addEventListener('keydown', event => {
+        const menu = menus.find(item => item.open);
+        if (event.key !== 'Escape' || !menu || document.querySelector('dialog[open]')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        menu.open = false;
+        menu.querySelector('summary').focus();
+    });
+    // The workspace bridge consumes internal links at document capture phase.
+    // Close their menu first without cancelling navigation or moving focus.
+    window.addEventListener('click', event => {
+        const link = event.target.closest?.('.task-bar .header-more-menu a');
+        if (link) link.closest('.header-more').open = false;
+    }, true);
+    for (const menu of menus) {
+        menu.querySelector('summary').addEventListener('click', () => {
+            // Keep exclusivity on browsers without native details[name] support.
+            if (!menu.open) menus.forEach(other => { if (other !== menu) other.open = false; });
+        });
+        menu.addEventListener('click', event => {
+            // Commands keep their original handlers. Do not steal focus from a dialog they open.
+            if (event.target.closest('.header-more-menu a, .header-more-menu button')) menu.open = false;
+        });
+    }
     const demand = panel('demand-manager', '新建裁切任务', '填写任务信息，添加需求后选择材料。',
         '<span class="muted" id="demand-editor-hint" role="status"></span><button class="tool-btn active" id="demand-editor-save" aria-describedby="demand-editor-hint" disabled>保存并选择材料</button>');
     const footer = demand.querySelector('.workbench-dialog-footer');

@@ -84,7 +84,7 @@ const server = createServer(async (req,res) => {
    assert.deepEqual(await page.evaluate(()=>Object.fromEntries(Object.entries(localStorage).filter(([k])=>k.startsWith('cutting-demand-draft:')).map(([k,v])=>{const {updatedAt,...draft}=JSON.parse(v);return [k,draft];}))),before);
   });
   await run('successful in-page task switch updates direct URL and reload identity',async page=>{
-   await page.goto(base+'/tasks.html');await ready(page,'/index.html?taskId=task-a');await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task=task-b]').click();
+   await page.goto(base+'/tasks.html');await ready(page,'/index.html?taskId=task-a');await page.locator('.header-more > summary').filter({hasText:'任务操作'}).click();await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task=task-b]').click();
    await expect(page).toHaveURL(/taskId=task-b/);await page.reload();await expect(page.locator('#task-name')).toHaveValue(tasks.get('task-b').name);
    await page.goBack();await expect(page).toHaveURL(base+'/tasks.html');await page.goForward();await expect(page.locator('#task-name')).toHaveValue(tasks.get('task-b').name);
   });

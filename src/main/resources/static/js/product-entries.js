@@ -5,7 +5,7 @@ export const ENTRIES = Object.freeze([
     {id:'tasks', name:'任务', href:'/tasks.html', group:'', navHidden:true, summary:'生产任务、净良品履约与执行预约'},
     {id:'analysis', name:'分析', href:'/analysis.html', group:'', summary:'实际报工面积、库存对账与流水'},
     {id:'settings', name:'设置', href:'/settings.html', group:'', summary:'工艺参数入口、本机显示与服务端运行能力'},
-    {id:'marker', name:'服装唛架', href:'/marker-demo.html', group:'', navHidden:true, summary:'固定布宽、齐套衣片、缩短唛架'},
+    {id:'marker', name:'服装齐套排料演示', href:'/marker-demo.html', group:'', navHidden:true, summary:'二维排料的服装示例：固定布宽、齐套衣片、缩短唛架；仅计算预览'},
     {id:'demos', name:'功能演示', href:'/demos.html', group:'', summary:'二维场景、服装唛架与一维搭切的统一演示'},
     {id: 'intro', name: '介绍', href: '/intro.html', group: '', summary: '切割能力、行业场景与演示入口总览'},
     {id: 'workbench', name: '通用操作台', href: '/index.html', group: '二维',

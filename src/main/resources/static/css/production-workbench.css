@@ -5,8 +5,8 @@
 .remnant-entry p { margin: 5px 0 0; font-size: 11px; color: var(--text-muted); line-height: 1.5; }
 .remnant-entry-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .remnant-entry > .tool-btn { justify-self: start; color: var(--accent-blue); }
-.task-context { display: flex; align-items: baseline; gap: 12px; flex: none; padding: 12px 14px; border-bottom: 1px solid var(--panel-border); }
-.task-context > span { flex: none; font-size: 11px; color: var(--text-muted); }
+.task-context { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.task-context > span { flex: none; font-size: 12px; color: var(--text-muted); }
 #current-task-name { color: var(--text-main); font: inherit; font-size: 15px; font-weight: 600; padding: 0; background: transparent; border: 0; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
 .input-actions { padding: 14px; border-top: 1px solid var(--panel-border); display: grid; gap: 8px; flex: none; background: var(--panel-bg); }
 .input-actions > button { width: 100%; justify-content: center; }
@@ -121,10 +121,6 @@
     #sidebar-left { width: 296px; max-width: min(360px,25vw); min-width: 244px; }
     #sidebar-right { width: 282px; max-width: min(340px,24vw); min-width: 252px; }
     #sidebar-left.collapsed, #sidebar-right.collapsed { min-width: 0; }
-    .task-bar { gap: 8px; padding-inline: 14px; }
-    .task-toolbar { gap: 5px; }
-    .task-toolbar .tool-btn { font-size: 12px; padding-inline: 8px; }
-    #task-state { max-width: 150px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 }
 @media (max-width: 700px) {
     .workbench-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
@@ -337,3 +333,32 @@ body[data-source="remnant"] :is(#btn-station-prev,#btn-station-next,#btn-station
 
 .station-secondary-actions { display: flex; gap: 8px; margin-top: 6px; }
 .station-secondary-actions > button { flex: 1; min-width: 0; min-height: 30px; font-size: 12px; }
+
+/* Task identity stays visible; infrequent commands belong to their object menu. */
+.rectangle-workbench .task-bar { display: grid; grid-template-columns: minmax(180px,1fr) auto auto auto; align-items: center; gap: 8px 16px; padding: 8px 14px; min-width: 0; }
+.task-identity { display: grid; gap: 2px; min-width: 0; }
+.task-identity #current-task-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.task-identity #task-state { display: block; max-width: none; overflow: visible; white-space: normal; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; }
+.rectangle-workbench .task-toolbar { gap: 6px; min-width: 0; }
+.rectangle-workbench .task-toolbar .tool-btn { font-size: 13px; }
+.rectangle-workbench .task-bar > .task-toolbar:last-child { margin-left: 0; }
+.rectangle-workbench .task-bar .workflow-stages { order: initial; width: auto; margin: 0; justify-content: center; gap: 3px; }
+.rectangle-workbench .task-bar .header-more-menu { top: calc(100% + 6px); width: 210px; max-width: calc(100vw - 28px); max-height: min(540px,70dvh); overflow-y: auto; background: var(--panel-bg); }
+.task-bar .header-more[open] > summary { background: var(--panel-header); border-color: var(--accent-blue); }
+.task-bar .header-more > summary::after { content: '⌄'; margin-left: 6px; color: var(--text-muted); }
+@media (max-width: 1100px) {
+    .rectangle-workbench .task-bar { grid-template-columns: minmax(0,1fr) auto; gap: 8px 12px; }
+    .task-primary-actions { justify-self: end; }
+    .task-record-actions { justify-self: end; }
+    .rectangle-workbench .task-bar .workflow-stages { justify-content: flex-start; }
+}
+@media (max-width: 650px) {
+    .rectangle-workbench .task-bar { padding: 8px; gap: 8px; grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+    .task-identity { grid-column: 1 / -1; }
+    .rectangle-workbench .task-toolbar { flex-wrap: wrap; }
+    .task-primary-actions { grid-row: 2; grid-column: 1; justify-self: start; }
+    .task-record-actions { grid-row: 2; grid-column: 2; justify-self: end; justify-content: flex-end; }
+    .rectangle-workbench .task-bar .workflow-stages { grid-column: 1 / -1; grid-row: 3; flex-wrap: wrap; justify-content: center; }
+    .rectangle-workbench .task-toolbar .tool-btn { padding-inline: 7px; }
+    .rectangle-workbench .task-primary-actions .header-more-menu { left: 0; right: auto; }
+}

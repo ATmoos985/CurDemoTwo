@@ -18,7 +18,7 @@ const server = createServer(async (req,res) => {
         requests.push(req.method + ' ' + url.pathname);
         if (url.pathname === '/api/rolls') return json([roll]);
         if (url.pathname === '/api/rolls/' + roll.rollId) return json(roll);
-        if (url.pathname === '/api/remnants') return json([]);
+        if (url.pathname === '/api/remnants' || url.pathname === '/api/cutting/material-candidates') return json([]);
         if(url.pathname==='/api/cutting/task-summaries')return json([...tasks.values()].map(task=>({task,total:task.demands.reduce((n,d)=>n+d.quantity,0),completed:1,remaining:task.demands.reduce((n,d)=>n+d.quantity,0)-1,pendingCount:0,reportCount:0})));
         if (url.pathname === '/api/cutting/tasks' && req.method === 'GET') return json([...tasks.values()]);
         if (url.pathname === '/api/cutting/tasks' && req.method === 'POST') {
@@ -53,7 +53,7 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('body')).not.toHaveAttribute('inert','');
             await verify(page);
             assert.deepEqual(errors, []);
-            assert.ok(requests.every(r => !r.startsWith('POST') || r === 'POST /api/cutting/tasks'), 'no inventory or report writes: '+requests.filter(r=>r.startsWith('POST')).join(', '));
+            assert.ok(requests.every(r => !r.startsWith('POST') || ['POST /api/cutting/tasks','POST /api/cutting/material-candidates'].includes(r)), 'no inventory or report writes: '+requests.filter(r=>r.startsWith('POST')).join(', '));
             passed++; console.log('PASS ' + name);
         } catch(error) {failed++; console.error('FAIL ' + name + '\n' + error.stack);}
         finally {await context.close();}
@@ -64,7 +64,7 @@ const server = createServer(async (req,res) => {
     const closeEditor = async page => {
         if (await page.locator('#demand-manager').evaluate(dialog => dialog.open)) await page.locator('#demand-manager .workbench-dialog-heading [data-close]').click();
     };
-    const newTask = async page => { await closeEditor(page); await page.getByRole('button',{name:'新建任务',exact:true}).click(); };
+    const newTask = async page => { await closeEditor(page); await page.locator('.header-more > summary').filter({hasText:'任务操作'}).click();await page.getByRole('button',{name:'新建任务',exact:true}).click(); };
     const edit = async page => {
         await openEditor(page);
         await page.locator('#task-name').fill('草稿任务');
@@ -76,7 +76,7 @@ const server = createServer(async (req,res) => {
     };
     const openTask = async page => {
         await closeEditor(page);
-        await page.getByRole('button',{name:'打开任务',exact:true}).click();
+        await page.locator('.header-more > summary').filter({hasText:'任务操作'}).click();await page.getByRole('button',{name:'打开任务',exact:true}).click();
         await page.locator('[data-task="task-a"]').click();
         if (!await page.locator('.draft-switch-dialog').count()) {
             await expect(page.locator('#task-picker')).not.toBeVisible(); await openEditor(page);
@@ -100,7 +100,7 @@ const server = createServer(async (req,res) => {
             await newTask(page);
             await page.getByRole('button',{name:'保留草稿并继续',exact:true}).click();
             await expect(page.locator('#demands-container .item-row')).toHaveCount(0);
-            await closeEditor(page); await page.locator('#btn-local-drafts').click(); await page.locator('[data-draft]').click();
+            await closeEditor(page); await page.locator('.header-more > summary').filter({hasText:'任务操作'}).click();await page.locator('#btn-local-drafts').click(); await page.locator('[data-draft]').click();
             await expect(page.locator('.dem-name')).toHaveValue('草稿主帘');
         });
         await run('save and continue persists once and removes the corresponding local draft', async page => {

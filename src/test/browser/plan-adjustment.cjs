@@ -113,7 +113,7 @@ const server = createServer(async (req,res) => {
         finally {await context.close();}
     }
     const loadPlan = async page => {
-        await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();
+        await page.locator('.header-more > summary').filter({hasText:'任务操作'}).click();await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();
         await expect(page.locator('#task-picker')).not.toBeVisible();
         await expect(page.locator('body')).not.toHaveAttribute('inert','');
         await expect(page.locator('#task-state')).toContainText('已保存');
@@ -132,7 +132,7 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('#btn-confirm-station-cut')).toBeEnabled();
             const optimizedId=adjustmentBodies[0].adjustmentId;
             assert.ok(adjustmentBodies[0].cuts.length);assert.equal(adjustmentBodies[0].pieces,undefined);
-            await page.getByRole('button',{name:'打印工单',exact:true}).click();
+            await page.locator('.header-more > summary').filter({hasText:'工具与设置'}).click();await page.getByRole('button',{name:'打印工单',exact:true}).click();
             await expect(page.locator('#ticket-no-val')).toHaveText('WO-'+optimizedId+'-V2');
             await page.evaluate(()=>window.camApp.closeCutTicketModal());
             await page.getByRole('button',{name:'恢复标准',exact:true}).click();
@@ -160,7 +160,7 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('#btn-confirm-station-cut')).toBeDisabled();
             assert.equal(await page.evaluate(()=>window.camApp.state.getCurrentCaseData().pieces[1].y),1505);
             assert.equal(await page.evaluate(()=>window.camApp.state.getCurrentCaseData().cuts.length),0);
-            await page.getByRole('button',{name:'打印工单',exact:true}).click();
+            await page.locator('.header-more > summary').filter({hasText:'工具与设置'}).click();await page.getByRole('button',{name:'打印工单',exact:true}).click();
             await expect(page.locator('#cam-cut-ticket-modal')).toHaveCount(0);
             await page.locator('#btn-undo-plan').click();await expect(page.locator('#btn-confirm-station-cut')).toBeEnabled();
             assert.equal(await page.evaluate(()=>window.camApp.state.getCurrentCaseData().pieces[1].y),1500);
@@ -182,7 +182,7 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('#plan-edit-message')).toHaveText('方案版本 2 · 已校验');
             await expect(page.locator('#btn-confirm-station-cut')).toBeEnabled();await expect(page.locator('#btn-undo-plan')).toBeDisabled();
             assert.equal(adjustmentBodies[0].pieces[1].y,1505);
-            await page.getByRole('button',{name:'打印工单',exact:true}).click();await expect(page.locator('#cam-cut-ticket-modal')).toBeVisible();
+            await page.locator('.header-more > summary').filter({hasText:'工具与设置'}).click();await page.getByRole('button',{name:'打印工单',exact:true}).click();await expect(page.locator('#cam-cut-ticket-modal')).toBeVisible();
             await page.evaluate(()=>window.camApp.closeCutTicketModal());
             await page.locator('#btn-confirm-station-cut').click();await expect(page.locator('#report-actual-len')).toHaveValue('2705');
             await page.locator('#report-confirm-button').click();await expect(page.locator('#report-error')).toContainText('测试仅检查报工绑定');
@@ -241,7 +241,7 @@ const server = createServer(async (req,res) => {
             await page.locator('#report-confirm-button').click();await expect(page.locator('#cut-report-modal')).not.toBeVisible();
             assert.equal(receipts[0].rejectedPieceCount,1);assert.equal(receipts[0].finishedPieceCount,1);
             assert.equal(await page.evaluate(()=>window.camApp.state.getCurrentCaseData().pieces.find(p=>p.sourcePieceId===2).outcome),'REJECTED');
-            await page.getByRole('button',{name:/报工记录/}).click();await expect(page.locator('#task-picker-body')).toContainText('异常 1 件');
+            await page.locator('.header-more > summary').filter({hasText:'业务记录'}).click();await page.getByRole('button',{name:/报工记录/}).click();await expect(page.locator('#task-picker-body')).toContainText('异常 1 件');
             await page.getByText('逐件结果与异常原因',{exact:true}).click();await expect(page.locator('#task-picker-body')).toContainText('右边破损');
             await page.getByRole('button',{name:'撤回报工',exact:true}).click();
             await page.locator('.action-dialog textarea').fill('测试误报');await page.getByRole('button',{name:'确认撤回',exact:true}).click();
@@ -377,7 +377,7 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('#btn-trigger-solve-station')).toBeDisabled();await expect(page.locator('#btn-workflow-next')).toHaveText('匹配料头与母卷');
         });
         await run('compact radar still supports mouse, wheel and keyboard and protects pending work',async page=>{
-            await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();
+            await page.locator('.header-more > summary').filter({hasText:'任务操作'}).click();await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();
             await expect(page.locator('#task-state')).toContainText('已保存');
             await expect(page.locator('#task-picker')).not.toBeVisible();
             await expect(page.locator('body')).not.toHaveAttribute('inert','');
@@ -431,7 +431,7 @@ const server = createServer(async (req,res) => {
             await first.locator('.demand-locate').click();assert.equal(await page.evaluate(()=>window.camApp.getSelectedPieceId()),1);
         });
         await run('an empty solution retains per-demand diagnostics until inputs change',async page=>{
-            await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();await expect(page.locator('#task-picker')).not.toBeVisible();await expect(page.locator('body')).not.toHaveAttribute('inert','');
+            await page.locator('.header-more > summary').filter({hasText:'任务操作'}).click();await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();await expect(page.locator('#task-picker')).not.toBeVisible();await expect(page.locator('body')).not.toHaveAttribute('inert','');
             await page.locator('.dem-l').fill('6000');await page.locator('.dem-l').press('Tab');
             solveResult={success:false,status:'NO_SOLUTION_FOUND',message:'本次没有排入裁片',pieces:[],fulfillment:[{demandId:7,requested:2,placed:0,unplaced:2,reason:'EXCEEDS_PROCESSING_LENGTH'}]};
             await page.locator('#btn-trigger-solve-station').click();await expect(page.locator('#demand-progress-summary')).toContainText('求解反馈');
@@ -443,7 +443,7 @@ const server = createServer(async (req,res) => {
         await run('five demand segments show three satisfied lines and locate their exact remaining rows',async page=>{
             const names=['客厅主帘','主卧主帘','次卧主帘','抱枕套','绑带'];
             tasks.get('task-a').demands=[2,4,1,10,3].map((quantity,i)=>({id:7+i,name:names[i],width:500,length:500,quantity,allowRotation:false}));
-            await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();
+            await page.locator('.header-more > summary').filter({hasText:'任务操作'}).click();await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();
             await expect(page.locator('#task-picker')).not.toBeVisible();
             await page.evaluate(async()=>{
                 window.camApp.state.taskCompleted={7:2,8:4,9:1,10:6};
@@ -471,20 +471,20 @@ const server = createServer(async (req,res) => {
             await expect(page.locator('#cut-report-modal')).not.toBeVisible();await expect(row.locator('.demand-meter')).toHaveAttribute('aria-valuenow','2');await expect(row.locator('.demand-change')).toHaveText('最近报工 +1 件');
             await expect(page.locator('#demand-lines-progress')).toHaveText('已满足 0 / 1 项');await expect(page.locator('#demand-pieces-progress')).toHaveText('合格 2 / 3 件');
             await page.locator('#demand-recent-change summary').click();await expect(page.locator('#demand-recent-change')).toContainText('异常 1、未切 0 件未计入完成');
-            await page.getByRole('button',{name:/报工记录/}).click();await page.getByRole('button',{name:'撤回报工',exact:true}).click();await page.locator('.action-dialog textarea').fill('测试纠错');await page.getByRole('button',{name:'确认撤回',exact:true}).click();await expect(page.locator('#task-picker-body')).toContainText('已撤回');
+            await page.locator('.header-more > summary').filter({hasText:'业务记录'}).click();await page.getByRole('button',{name:/报工记录/}).click();await page.getByRole('button',{name:'撤回报工',exact:true}).click();await page.locator('.action-dialog textarea').fill('测试纠错');await page.getByRole('button',{name:'确认撤回',exact:true}).click();await expect(page.locator('#task-picker-body')).toContainText('已撤回');
             await expect(row.locator('.demand-meter')).toHaveAttribute('aria-valuenow','1');await expect(row.locator('.demand-change')).toHaveText('最近撤回 · 恢复待切 1 件');
             await expect(page.locator('#demand-recent-change summary')).toHaveText('最近撤回 · 恢复待切 1 件');
         });
         await run('report history restores progress explanation after reopening and new drafts clear it',async page=>{
             await loadPlan(page);acceptReport=true;await page.locator('#btn-confirm-station-cut').click();await page.locator('#report-confirm-button').click();await expect(page.locator('#cut-report-modal')).not.toBeVisible();
             await expect(page.locator('#demand-lines-progress')).toHaveText('已满足 1 / 1 项');await expect(page.locator('#demands-container .demand-meter')).toHaveAttribute('data-complete','true');
-            await page.reload();await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();await expect(page.locator('#task-picker')).not.toBeVisible();
+            await page.reload();await page.locator('.header-more > summary').filter({hasText:'任务操作'}).click();await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();await expect(page.locator('#task-picker')).not.toBeVisible();
             await expect(page.locator('#demand-recent-change summary')).toContainText('最近报工 +2 件');await expect(page.locator('#demand-lines-progress')).toHaveText('已满足 1 / 1 项');
-            await page.getByRole('button',{name:'新建任务',exact:true}).click();await expect(page.locator('#demand-overview')).toBeHidden();await expect(page.locator('#demand-recent-change')).toBeHidden();
+            await page.locator('.header-more > summary').filter({hasText:'任务操作'}).click();await page.getByRole('button',{name:'新建任务',exact:true}).click();await expect(page.locator('#demand-overview')).toBeHidden();await expect(page.locator('#demand-recent-change')).toBeHidden();
         });
         await run('many demand rows use a bounded overview and invalid totals never show false completion',async page=>{
             tasks.get('task-a').demands=Array.from({length:20},(_,i)=>({id:7+i,name:'需求'+i,width:500,length:500,quantity:3,allowRotation:false}));
-            await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();await expect(page.locator('#task-picker')).not.toBeVisible();
+            await page.locator('.header-more > summary').filter({hasText:'任务操作'}).click();await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-task="task-a"]').click();await expect(page.locator('#task-picker')).not.toBeVisible();
             await expect(page.locator('#demand-progress-segments')).toBeHidden();await expect(page.locator('#demand-overall-meter')).toBeVisible();await expect(page.locator('#demand-overall-meter')).toHaveAttribute('aria-valuemax','20');
             await page.locator('.dem-count').first().fill('');await expect(page.locator('#demands-container .demand-meter').first()).not.toHaveAttribute('aria-valuenow');await expect(page.locator('#demand-pieces-progress')).toContainText('/ — 件');
             assert.equal(await page.locator('#demand-overview').evaluate(el=>el.getBoundingClientRect().height<100),true);
@@ -663,18 +663,18 @@ const server = createServer(async (req,res) => {
         await run('continuation list shows qualified progress, filters tasks and preserves the active preview',async page=>{
             await loadPlan(page);tasks.set('task-done',{...initialTask(),id:'task-done',name:'已完成的小单',externalRef:'DONE-2',demands:[{...initialTask().demands[0],quantity:1}]});
             const geometry=await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces));
-            await page.getByRole('button',{name:'打开任务',exact:true}).click();await expect(page.locator('[data-task="task-a"]')).toContainText('合格 1 / 3 件 · 剩余 2 件');
+            await page.locator('.header-more > summary').filter({hasText:'任务操作'}).click();await page.getByRole('button',{name:'打开任务',exact:true}).click();await expect(page.locator('[data-task="task-a"]')).toContainText('合格 1 / 3 件 · 剩余 2 件');
             await expect(page.locator('[data-task="task-a"]')).toContainText('核对 1 个待报工方案');await page.locator('#task-list-filter').selectOption('done');await expect(page.locator('[data-task]')).toHaveCount(1);await expect(page.locator('[data-task]')).toContainText('已完成的小单');
             await page.locator('#task-list-filter').selectOption('all');await page.locator('#task-list-search').fill('ORDER-A');await expect(page.locator('[data-task]')).toHaveCount(1);
             assert.equal(await page.evaluate(()=>JSON.stringify(window.camApp.state.getCurrentCaseData().pieces)),geometry);
             fs.mkdirSync('target/task-traceability',{recursive:true});await page.screenshot({path:'target/task-traceability/task-list-1366.png'});
         });
         await run('reopening a ticket retains its saved identity and unreported labels without invented statistics',async page=>{
-            await loadPlan(page);await page.getByRole('button',{name:'打印工单',exact:true}).click();await expect(page.locator('#cam-cut-ticket-modal')).toBeVisible();
+            await loadPlan(page);await page.locator('.header-more > summary').filter({hasText:'工具与设置'}).click();await page.getByRole('button',{name:'打印工单',exact:true}).click();await expect(page.locator('#cam-cut-ticket-modal')).toBeVisible();
             await expect(page.locator('#ticket-no-val')).toHaveText('WO-original-plan-V1');await expect(page.locator('#printable-cut-ticket-area')).toContainText('待报工方案');await expect(page.locator('#printable-cut-ticket-area')).not.toContainText('合格成品');
             await expect(page.locator('#printable-cut-ticket-area')).not.toContainText('65.2');await expect(page.locator('#cam-cut-ticket-modal [data-print]')).toBeInViewport();
             await page.screenshot({path:'target/task-traceability/ticket-1366.png'});await page.locator('#cam-cut-ticket-modal [data-close]').click();
-            await page.getByRole('button',{name:'打印工单',exact:true}).click();await expect(page.locator('#ticket-no-val')).toHaveText('WO-original-plan-V1');await expect(page.locator('#cam-cut-ticket-modal')).toBeVisible();
+            await page.locator('.header-more > summary').filter({hasText:'工具与设置'}).click();await page.getByRole('button',{name:'打印工单',exact:true}).click();await expect(page.locator('#ticket-no-val')).toHaveText('WO-original-plan-V1');await expect(page.locator('#cam-cut-ticket-modal')).toBeVisible();
             const bounds=await page.locator('#cam-cut-ticket-modal').boundingBox();assert.ok(bounds.x>150 && bounds.y>0);await expect(page.locator('#printable-cut-ticket-area h1')).toHaveText('裁切工单 · 待报工');
             await page.locator('.ticket-scroll').evaluate(el=>el.scrollTop=el.scrollHeight);await expect(page.locator('#printable-cut-ticket-area footer')).toBeInViewport();await page.screenshot({path:'target/task-traceability/ticket-tables-1366.png'});await page.locator('.ticket-scroll').evaluate(el=>el.scrollTop=0);
             await page.setViewportSize({width:1920,height:1080});await page.screenshot({path:'target/task-traceability/ticket-1920.png'});
@@ -682,25 +682,25 @@ const server = createServer(async (req,res) => {
         await run('historical partial receipts show real quality and recovered inventory without touching the active task',async page=>{
             await loadPlan(page);receipts.push({planId:'original-plan',status:'CONFIRMED',finishedPieceCount:0,rejectedPieceCount:1,uncutPieceCount:1,confirmedAt:'2026-10-04T12:00:00',actualCutLen:1200,rollId:roll.rollId,feedPortType:'roll',
                 pieceResults:[{pieceId:1,outcome:'REJECTED',reason:'破损'},{pieceId:2,outcome:'UNCUT'}],derivedRemnants:[{id:'REAL-REC',width:2000,length:200,location:'A-02'}],recoveredGeometry:[]});
-            await page.getByRole('button',{name:'报工记录 0',exact:true}).click();await page.locator('#task-picker-body').getByRole('button',{name:'查看 / 打印工单'}).click();
+            await page.locator('.header-more > summary').filter({hasText:'业务记录'}).click();await page.getByRole('button',{name:'报工记录 0',exact:true}).click();await page.locator('#task-picker-body').getByRole('button',{name:'查看 / 打印工单'}).click();
             await expect(page.locator('#printable-cut-ticket-area')).toContainText('已报工记录，仅供追溯');await expect(page.locator('#printable-cut-ticket-area')).toContainText('破损');await expect(page.locator('#printable-cut-ticket-area')).toContainText('REAL-REC');await expect(page.locator('#printable-cut-ticket-area')).toContainText('A-02');
             assert.equal(reportBodies.length,0);await page.screenshot({path:'target/task-traceability/reported-ticket-1366.png'});
         });
         await run('printing rechecks server status and failed rereads cannot print stale content',async page=>{
-            await loadPlan(page);await page.getByRole('button',{name:'打印工单',exact:true}).click();await expect(page.locator('#cam-cut-ticket-modal')).toBeVisible();
+            await loadPlan(page);await page.locator('.header-more > summary').filter({hasText:'工具与设置'}).click();await page.getByRole('button',{name:'打印工单',exact:true}).click();await expect(page.locator('#cam-cut-ticket-modal')).toBeVisible();
             storedPlans.get('original-plan').status='CANCELLED';await page.locator('#cam-cut-ticket-modal [data-print]').click();await expect(page.locator('#ticket-error')).toContainText('记录状态已更新');await expect(page.locator('#printable-cut-ticket-area')).toContainText('已取消');await expect(page.locator('#pure-print-iframe')).toHaveCount(0);
             failTicketRead=true;await page.locator('#cam-cut-ticket-modal [data-print]').click();await expect(page.locator('#ticket-error')).toContainText('工单读取暂不可用');await expect(page.locator('#pure-print-iframe')).toHaveCount(0);
         });
         await run('plan history retains report states and prints a later window in local coordinates',async page=>{
             await loadPlan(page);storedPlans.set('later-plan',{...storedPlans.get('original-plan'),id:'later-plan',version:2,parentPlanId:'original-plan',status:'REVERSED',request:{...planRequest,windowStartY:2700},result:{...planResult,planId:'later-plan'}});
-            await page.getByRole('button',{name:'方案记录',exact:true}).click();const row=page.locator('#task-picker-body article').filter({has:page.locator('[data-ticket="later-plan"]')});
+            await page.locator('.header-more > summary').filter({hasText:'业务记录'}).click();await page.getByRole('button',{name:'方案记录',exact:true}).click();const row=page.locator('#task-picker-body article').filter({has:page.locator('[data-ticket="later-plan"]')});
             await expect(row).toContainText('已撤回');await expect(row.locator('[data-restore]')).toHaveCount(0);await row.locator('[data-ticket]').click();await expect(page.locator('#printable-cut-ticket-area')).toContainText('2,700–7,700 mm');
             const piece=page.locator('#ticket-blueprint-container rect[fill="#e0f2fe"]').first();await expect(piece).toHaveAttribute('y','0');await expect(page.locator('#ticket-no-val')).toHaveText('WO-later-plan-V2');
             const printPage=await page.context().newPage(),html=await page.locator('#printable-cut-ticket-area').evaluate(el=>el.outerHTML);await printPage.setContent('<style>'+fs.readFileSync(path.join(root,'css/cut-ticket.css'),'utf8')+'</style>'+html);
             await printPage.pdf({path:'target/task-traceability/later-window.pdf',format:'A4',printBackground:true,preferCSSPageSize:true});assert.ok(fs.statSync('target/task-traceability/later-window.pdf').size>5000);await printPage.close();
         });
         await run('an old receipt cannot authorize printing unvalidated new geometry',async page=>{
-            await loadPlan(page);await page.evaluate(()=>window.camApp.state.getCurrentCaseData().lastReceipt={planId:'old-receipt'});await page.keyboard.press('ArrowDown');await page.getByRole('button',{name:'打印工单',exact:true}).click();await expect(page.locator('#cam-cut-ticket-modal')).toHaveCount(0);assert.equal(requests.filter(r=>r==='GET /api/cutting/plans/original-plan').length,0);
+            await loadPlan(page);await page.evaluate(()=>window.camApp.state.getCurrentCaseData().lastReceipt={planId:'old-receipt'});await page.keyboard.press('ArrowDown');await page.locator('.header-more > summary').filter({hasText:'工具与设置'}).click();await page.getByRole('button',{name:'打印工单',exact:true}).click();await expect(page.locator('#cam-cut-ticket-modal')).toHaveCount(0);assert.equal(requests.filter(r=>r==='GET /api/cutting/plans/original-plan').length,0);
         });
         await run('settings share dialog controls and preserve inputs on keyboard dismissal',async page=>{
             await loadPlan(page);await page.locator('summary').filter({hasText:'工具与设置'}).click();await page.locator('#btn-settings').click();await expect(page.locator('#settings-modal')).toBeVisible();
