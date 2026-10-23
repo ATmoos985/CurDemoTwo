@@ -362,3 +362,125 @@ body[data-source="remnant"] :is(#btn-station-prev,#btn-station-next,#btn-station
     .rectangle-workbench .task-toolbar .tool-btn { padding-inline: 7px; }
     .rectangle-workbench .task-primary-actions .header-more-menu { left: 0; right: auto; }
 }
+
+/* 工业同屏工作台：左栏内嵌场景与需求、用料、工艺、疵点；右栏内嵌执行锁料闭环 */
+@media (min-width: 1200px) {
+    #sidebar-left { width: 336px; max-width: min(390px, 27vw); min-width: 260px; }
+    #sidebar-right { width: 304px; max-width: min(360px, 25vw); min-width: 256px; }
+}
+.scene-switcher {
+    display: grid;
+    gap: 6px;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    background: var(--panel-header);
+    border: 1px solid var(--panel-border);
+    border-radius: 5px;
+}
+.scene-switcher-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+}
+.scene-switcher-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+}
+.scene-switcher-buttons .tool-btn {
+    justify-content: center;
+    font-size: 11px;
+    min-height: 28px;
+    padding: 4px 6px;
+    text-decoration: none;
+    text-align: center;
+}
+#sidebar-left #demand-editor-content {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--panel-border);
+}
+#sidebar-left #demand-editor-content .task-fields {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+#sidebar-left #demand-editor-content .task-fields label {
+    display: grid;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+#sidebar-left #demand-editor-content .demand-entry-heading {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+#sidebar-left #demand-editor-content .demand-entry-heading > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+#sidebar-left #demand-editor-content #garment-demand-actions {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    width: 100%;
+}
+#sidebar-left #demand-editor-content #garment-style {
+    flex: 1;
+    min-width: 120px;
+    min-height: 28px;
+    font-size: 12px;
+}
+#sidebar-left #demands-container {
+    max-height: 280px;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+#card-station-execution {
+    border-left: 3px solid var(--accent-blue);
+}
+.inline-exec-form, .inline-exec-summary {
+    display: grid;
+    gap: 6px;
+}
+.inline-exec-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+}
+.inline-exec-row label {
+    flex: 1;
+    display: grid;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+.inline-exec-row input {
+    width: 100%;
+    min-height: 30px;
+}
+.inline-exec-summary strong {
+    font-size: 12px;
+    color: var(--text-main);
+}
+.inline-exec-summary span {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+}
+.inline-exec-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+}
+.inline-exec-actions .tool-btn {
+    flex: 1;
+    justify-content: center;
+    min-height: 32px;
+    font-weight: 600;
+}

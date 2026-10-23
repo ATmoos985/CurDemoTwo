@@ -349,7 +349,9 @@ export function removeDemandRow(button) {
 }
 
 export function addDemandRow() {
-    window.camApp?.openDemandManager?.();
+    if (!document.getElementById('demand-editor-content')?.closest('#sidebar-left')) {
+        window.camApp?.openDemandManager?.();
+    }
     const container = document.getElementById("demands-container");
     if (!container.querySelector('.item-row')) container.replaceChildren();
     const id = Math.max(state.nextDemandId, 1, ...[...container.querySelectorAll('.item-row')].map(row => Number(row.dataset.id) + 1));

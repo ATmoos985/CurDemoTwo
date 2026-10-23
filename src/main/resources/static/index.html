@@ -117,8 +117,17 @@
                             <p id="demand-progress-counts" class="demand-progress-counts"></p>
                             <details id="demand-recent-change" class="demand-recent-change" hidden><summary></summary><p></p><div></div></details>
                         </section>
-                        <div class="section-content">
+                        <div class="section-content" id="demand-editor-content">
                             <section id="task-save-error" class="operation-feedback" role="alert" hidden><p></p><div><button class="tool-btn" data-task-repair>定位输入</button><button class="tool-btn" onclick="saveTaskFromUI()">重试保存</button><button class="tool-btn" onclick="openTaskList()">打开任务核对</button></div></section>
+                            <section id="task-scene-switcher" class="scene-switcher" aria-label="业务场景模式">
+                                <span class="scene-switcher-label">业务场景</span>
+                                <div class="scene-switcher-buttons" role="group" aria-label="选择裁切场景">
+                                    <button type="button" class="tool-btn active" data-scene-mode="curtain">窗帘定高定宽</button>
+                                    <button type="button" class="tool-btn" data-scene-mode="garment">服装款式尺码</button>
+                                    <button type="button" class="tool-btn" data-scene-mode="general">通用矩形异形</button>
+                                    <a class="tool-btn" href="/linear.html" data-scene-mode="linear" title="切换至一维母卷分切作业">一维分切 ↗</a>
+                                </div>
+                            </section>
                             <section id="task-details" class="task-metadata" aria-label="任务信息">
                                 <div class="task-fields">
                                     <label>任务名称<input class="prop-input" id="task-name" value="本次切割" maxlength="120" onchange="taskInputChanged()"></label>
@@ -409,6 +418,15 @@
                         </details>
                     </div>
                 </div>
+                <section class="panel-section" id="card-station-execution" aria-label="执行单与机台锁料">
+                    <div class="section-header">
+                        <span class="section-title-wrap">执行单与机台锁料 <span class="badge-rem" id="inline-execution-state">待排料</span></span>
+                        <button class="tool-btn" type="button" onclick="openTaskExecutions()">执行明细 ↗</button>
+                    </div>
+                    <div class="section-content" id="inline-execution-body">
+                        <p class="muted-note">生成排料方案后，在此下达执行单锁料、确认机台开工并填写实切报工。</p>
+                    </div>
+                </section>
                 <section class="panel-section" id="station-work-orders" hidden aria-label="本次工位工单">
                     <div class="section-header"><span class="section-title-wrap">本次工位工单</span><span id="station-work-orders-count" class="badge-rem"></span></div>
                     <p class="muted-note">逐工位记录，最后统一报工；展开可查看工单。</p>

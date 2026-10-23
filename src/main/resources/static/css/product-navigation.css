@@ -46,3 +46,5 @@
 /* The workspace owns global navigation; each embedded application keeps all local tools. */
 .workspace-embedded body > header:has([data-product-nav]) { display:none; }
 .workspace-embedded [data-product-nav] { display:none; }
+.workspace-embedded .management-page main { padding: 14px 20px; }
+.workspace-embedded .inventory-page #material-manager-modal { margin: 10px; width: calc(100% - 20px); }

@@ -53,23 +53,48 @@ export function initWorkbenchPanels() {
             if (creating) window.camApp.matchTaskMaterials();
         }
     };
-    demand.querySelector('.workbench-dialog-body').append(el('card-demands').querySelector('.section-content'));
+    const editorContent = el('demand-editor-content') || el('card-demands').querySelector('.section-content');
+    if (editorContent) editorContent.id = 'demand-editor-content';
     const card = el('card-demands');
     card.classList.remove('collapsible', 'collapsed');
     card.querySelector('.section-header').removeAttribute('title');
     card.querySelector('.section-header').innerHTML = '<strong>本次需求 <span id="demands-summary-badge"></span></strong><button class="tool-btn" onclick="openDemandManager()">管理需求 ↗</button>';
-    const summary = document.createElement('div'); summary.id = 'demand-quick-list';card.append(summary);
+    const summary = document.createElement('div'); summary.id = 'demand-quick-list';
+    card.insertBefore(summary, editorContent);
+    demand.addEventListener('close', () => {
+        if (editorContent && editorContent.parentElement !== card) card.append(editorContent);
+    });
+    const switcher = el('task-scene-switcher');
+    if (switcher) {
+        switcher.querySelectorAll('button[data-scene-mode]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const mode = btn.dataset.sceneMode;
+                switcher.querySelectorAll('[data-scene-mode]').forEach(b => b.classList.toggle('active', b === btn));
+                card.dataset.sceneMode = mode;
+                const presetMap = {curtain:'CURTAIN', garment:'GARMENT', general:'INDUSTRIAL'};
+                if (presetMap[mode] && window.camApp?.applyIndustryPreset) window.camApp.applyIndustryPreset(presetMap[mode]);
+                if (mode === 'garment') {
+                    el('garment-demand-actions').hidden = false;
+                    el('garment-style')?.focus();
+                }
+            });
+        });
+    }
     const body = document.createElement('section');body.id = 'material-details';body.hidden = true;
     document.body.append(body);
     body.innerHTML = '<section id="material-inspection"></section><div id="inspection-radar-slot"></div>';
-    // Keep the existing inputs and IDs: there is still one authoritative editor.
-    body.append(el('card-defects'), el('card-mother-roll'));
+    const rollHome = document.createElement('span'); rollHome.id = 'mother-roll-home'; rollHome.hidden = true;
+    el('card-mother-roll').before(rollHome);
+    const defectsHome = document.createElement('span'); defectsHome.id = 'defects-home'; defectsHome.hidden = true;
+    el('card-defects').before(defectsHome);
     const marker=document.createElement('span');marker.id='radar-home';marker.hidden=true;
     el('roll-radar-bar').before(marker);
     el('card-defects').classList.remove('collapsed');
     el('card-defects').querySelector('.section-toggle').setAttribute('aria-expanded','true');
     el('card-mother-roll').classList.remove('collapsed');
     el('card-mother-roll').querySelector('.section-toggle').setAttribute('aria-expanded','true');
+    el('card-bed-origin')?.classList.remove('collapsed');
+    el('card-bed-origin')?.querySelector('.section-toggle')?.setAttribute('aria-expanded','true');
     el('btn-radar-reset').hidden = true;
     const inputs = el('left-input-actions');
     inputs.append(el('btn-workflow-next'));
@@ -80,6 +105,9 @@ export function initWorkbenchPanels() {
 
 export function openDemandManager(id) {
     const dialog = el('demand-manager'); if (!dialog) return;
+    const editorContent = el('demand-editor-content');
+    const body = dialog.querySelector('.workbench-dialog-body');
+    if (editorContent && body && editorContent.parentElement !== body) body.append(editorContent);
     if (!dialog.open) dialog.showModal();
     if (id != null) {
         const row = [...el('demands-container').querySelectorAll('.item-row')].find(row => Number(row.dataset.id) === Number(id));
@@ -90,18 +118,20 @@ export function openDemandManager(id) {
 export function renderDemandEditor(flow) {
     const dialog = el('demand-manager');if (!dialog) return;
     const creating = !state.activeTask;
+    const sceneMode = el('card-demands')?.dataset.sceneMode;
     dialog.dataset.new = String(creating);
     el('demand-manager-title').textContent = creating ? '新建裁切任务' : '任务需求';
     dialog.querySelector('.workbench-dialog-heading p').textContent = creating
         ? '填写任务信息，添加需求后选择材料。' : '修改当前任务的需求；已报工数量保留。';
-    el('demand-manager-import').hidden = !creating;
-    el('demand-manager-sample').hidden = !creating;
-    el('garment-demand-actions').hidden = !creating;
+    el('demand-manager-import').hidden = !creating && sceneMode !== 'curtain' && sceneMode !== 'general';
+    el('demand-manager-sample').hidden = !creating && sceneMode !== 'curtain';
+    el('garment-demand-actions').hidden = !creating && sceneMode !== 'garment';
     el('demand-editor-save').disabled = flow.stage === 0;
     el('demand-editor-save').textContent = creating ? '保存并选择材料' : '保存修改';
     el('demand-editor-hint').textContent = flow.stage === 0 ? flow.hint : creating ? '需求已齐备，下一步选择母卷或料头。' : '修改自动保留为本机草稿。';
     const queued = queuedReports().length;
-    dialog.querySelectorAll('.workbench-dialog-body input,.workbench-dialog-body select,.workbench-dialog-body button').forEach(node => node.disabled = !!queued);
+    const scope = el('demand-editor-content') || dialog.querySelector('.workbench-dialog-body');
+    scope?.querySelectorAll('input,select,button').forEach(node => node.disabled = !!queued);
     if(queued){el('demand-editor-save').disabled=true;el('demand-editor-hint').textContent=`${queued} 个工位待报工，完成集中报工后可修改需求。`;}
     dialog.querySelector('.workbench-dialog-footer [data-close]').textContent = creating ? '稍后继续' : '返回工作台';
     el('demand-progress-summary').hidden = creating;
@@ -114,8 +144,15 @@ export function renderDemandSummary(progress, rows) {
         width:rows[index].querySelector('.dem-w').value, length:rows[index].querySelector('.dem-l').value}));
     const signature = JSON.stringify(facts);if (list.dataset.facts === signature) return;list.dataset.facts = signature;
     list.innerHTML = facts.length ? facts.map(item => `<button class="demand-quick-row" data-demand="${item.id}" data-complete="${item.remaining === 0}"><span><strong>${esc(item.name)}</strong><small>${esc(item.width)} × ${esc(item.length)} mm</small></span><span><b>${item.remaining === 0 ? '已满足' : item.toCut===0 ? '待报工 '+item.staged : '待切 '+(item.toCut ?? '—')}</b><small>已报工 ${item.completed} / ${item.total || '—'}${item.staged && item.toCut ? ' · 待报工 '+item.staged : ''}</small></span><span class="demand-meter" aria-hidden="true"><span style="width:${item.total>0?Math.min(100,item.completed/item.total*100):0}%"></span><span class="demand-meter-staged" style="width:${item.total>0?Math.max(0,Math.min(item.staged,item.total-item.completed)/item.total*100):0}%"></span></span></button>`).join('')
-        : '<div class="workbench-empty"><strong>当前任务还没有需求</strong><p>导入订单，或在需求窗口填写规格和数量。</p><button class="tool-btn active" onclick="openDemandImport()">为当前任务导入</button><button class="tool-btn" onclick="openDemandManager()">填写需求</button></div>';
-    list.querySelectorAll('[data-demand]').forEach(button => button.onclick = () => openDemandManager(button.dataset.demand));
+        : '<div class="workbench-empty"><strong>当前任务还没有需求</strong><p>导入订单，或在下方需求清单直接填写规格和数量。</p><button class="tool-btn active" onclick="openDemandImport()">为当前任务导入</button><button class="tool-btn" onclick="openDemandManager()">弹窗填写</button></div>';
+    list.querySelectorAll('[data-demand]').forEach(button => button.onclick = () => {
+        const row = [...el('demands-container').querySelectorAll('.item-row')].find(r => Number(r.dataset.id) === Number(button.dataset.demand));
+        if (row && el('demand-editor-content')?.closest('#sidebar-left')) {
+            row.tabIndex = -1; row.focus({preventScroll:true}); row.scrollIntoView({block:'center'});
+        } else {
+            openDemandManager(button.dataset.demand);
+        }
+    });
     if (el('demand-task-caption')) el('demand-task-caption').textContent = el('task-name')?.value || '当前任务';
 }
 
@@ -124,9 +161,16 @@ export function openMaterialDetails() {
 }
 
 export function mountInspectionRadar(active) {
-    const radar=el('roll-radar-bar'), slot=el('inspection-radar-slot');
+    const radar=el('roll-radar-bar'), slot=el('inspection-radar-slot'), details=el('material-details');
     if(!radar || !slot)return;
-    if(active)slot.append(radar);else el('radar-home').after(radar);
+    if(active){
+        if(details && el('card-defects') && el('card-mother-roll')) details.append(el('card-defects'), el('card-mother-roll'));
+        slot.append(radar);
+    }else{
+        el('radar-home')?.after(radar);
+        if(el('mother-roll-home') && el('card-mother-roll')) el('mother-roll-home').after(el('card-mother-roll'));
+        if(el('defects-home') && el('card-defects')) el('defects-home').after(el('card-defects'));
+    }
 }
 
 export function renderMaterialInspection() {

@@ -1,5 +1,6 @@
 import {state} from '../../core/state.js';
 import {executionForPlan} from './execution-client.js';
+import {renderInlineExecutionCard} from './execution-panel.js';
 import {toggleSidebar, switchRightPanelTab} from '../../plugins/layout/splitter.js';
 import {workflowState} from './workflow-state.js';
 import {openDemandManager, openMaterialDetails, renderDemandEditor} from '../../plugins/layout/workbench-panels.js';
@@ -119,6 +120,7 @@ export function renderWorkflowGuide(plan = {}) {
     const receipts = (state.taskReports || []).filter(r => r.status !== 'REVERSED');
     if(el('output-empty'))el('output-empty').hidden = !!plan.ready || !!plan.edited || !!queue.length || !!receipts.length;
     renderStationOrders(queue,receipts);
+    renderInlineExecutionCard();
     scheduleRemnantAvailability();
     return flow;
 }
