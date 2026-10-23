@@ -1,3 +1,4 @@
+import {workspaceReady} from '../workspace/page-bridge.js';
 import {requestJSON} from '../core/api-request.js';
 import {showToast} from '../core/toast.js';
 import {round,clamp,validateDefect,advance} from './inspection-model.js';
@@ -151,3 +152,16 @@ newForm.onsubmit=async event=>{
 };
 try{const rolls=await refreshRolls();const id=new URLSearchParams(location.search).get('roll')||localStorage.getItem('fabric-inspection-current');if(id&&rolls.some(r=>r.rollId===id))await loadRoll(id);else update();}
 catch(e){el('save-error').textContent=e.message+' 请刷新页面重试。';}
+
+window.addEventListener('workspace:visibility',event=>{
+    if(event.detail?.visible===false){stop('已切换工作页签 · 自动跑布暂停，请核对现场读数');canvas.cancel();persist();}
+});
+workspaceReady(async url=>{
+    const id=url.searchParams.get('roll');
+    if(!id||id===roll?.rollId)return true;
+    if(busy)throw Error('验疵正在保存，请稍后再切换母卷。');
+    stop();persist();
+    if(storageFailed)throw Error('验疵草稿保存失败，请先保存当前记录。');
+    if((pending.length||editorDirty)&&!confirm('当前验疵记录保留在本机，切换到另一母卷？'))return false;
+    await loadRoll(id);return roll?.rollId===id;
+});

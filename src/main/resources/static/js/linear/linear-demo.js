@@ -1,3 +1,4 @@
+import {openWorkspacePage} from '../workspace/page-bridge.js';
 import {independentBaseline, planSummary, layout, escapeHtml as esc} from './linear-model.js';
 import {LINEAR_SCENARIOS} from './linear-scenarios.js';
 import {industry} from '../industry/industry-profiles.js';
@@ -148,6 +149,7 @@ document.addEventListener('click', event => {
 
 $('handoff').onclick = () => {
     try {
+        if(openWorkspacePage('/linear.html',{handoff:{...state.scenario.input,profile:'FAST',draftDirty:false}}))return;
         const existing = JSON.parse(sessionStorage.getItem(draftKey) || 'null');
         if (existing?.orderItems?.length && !confirm('分切工作台在本标签页保留了一份需求，打开示例会替换它。继续吗？')) return;
         sessionStorage.setItem(draftKey, JSON.stringify({...state.scenario.input, profile: 'FAST', draftDirty: false}));

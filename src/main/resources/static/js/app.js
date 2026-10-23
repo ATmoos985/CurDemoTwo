@@ -1,5 +1,6 @@
+import {workspaceReady} from './workspace/page-bridge.js';
 import {openTaskExecutions} from './business/cutting/execution-panel.js';
-import { initTaskWorkspace, newCuttingTask, startTaskDraft, finishTaskDraft, prepareTaskSwitch, openLocalDrafts, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, taskInputChanged } from './business/cutting/task-workspace.js';
+import { initTaskWorkspace, loadTask, newCuttingTask, startTaskDraft, finishTaskDraft, prepareTaskSwitch, openLocalDrafts, saveTaskFromUI, matchTaskMaterials, openTaskList, openTaskReports, openTaskPlans, taskInputChanged } from './business/cutting/task-workspace.js';
 import {initWorkbenchPanels, openDemandManager, openMaterialDetails} from './plugins/layout/workbench-panels.js';
 import {openDemandImport} from './business/cutting/demand-import.js';
 import {openNewTask} from './business/cutting/task-creation.js';
@@ -55,7 +56,7 @@ import {
 } from './business/cutting/quota-manager.js';
 
 import {
-    updateUIInfo, loadCase, triggerSolve,
+    updateUIInfo, loadCase, triggerSolve, isCuttingOperationBusy,
     openCutReport, closeCutReport, confirmCutReport, openBatchReport, exportCutResult,
     openStationLapConfirmModal, updateReportPreview, recordPlanEdit, undoPlanEdit, redoPlanEdit, validatePlanAdjustment,
     stageAndAdvanceNextStation, handleClearStationClick, handleClearStationDblClick
@@ -525,6 +526,24 @@ async function bootstrapApp() {
     renderToolpathUI();
     } catch (error) { showToast("工作台初始化失败：" + error.message, "error"); }
     finally { document.body.inert = false; }
+    workspaceReady(async url => {
+        if(document.querySelector('dialog[open]') || state.pendingPlan || isCuttingOperationBusy()) {
+            showToast('请先处理当前对话框、计算或待报工方案，再切换任务。','warning');return false;
+        }
+        const taskId=url.searchParams.get('taskId');
+        if(taskId && taskId!==state.activeTask?.id && !await loadTask(taskId))return false;
+        if(url.searchParams.get('newTask')==='1'){
+            const rolls=await (await import('./core/api-request.js')).requestJSON('/api/rolls');
+            if(!await newCuttingTask(rolls))return false;
+        }
+        if(url.searchParams.get('view')==='executions')await openTaskExecutions();
+        else if(url.searchParams.get('view')==='reports')await openTaskReports();
+        else if(url.searchParams.get('view')==='plans')await openTaskPlans();
+        const tab=url.searchParams.get('settings');
+        if(['craft','remnant-cfg','solver-cfg','general'].includes(tab)){openSettingsModal();switchSettingsTab(tab);}
+        const current=new URL(location.href);current.search=url.search;current.searchParams.set('workspace','1');
+        history.replaceState(null,'',current);return true;
+    });
     if (openInitialView) await openInitialView();
     const settingsTab=new URLSearchParams(location.search).get('settings');
     if (!document.getElementById('task-route-error') && ['craft','remnant-cfg','solver-cfg','general'].includes(settingsTab)) {openSettingsModal();switchSettingsTab(settingsTab);}
@@ -556,4 +575,8 @@ document.addEventListener("keydown", (e) => {
             menu.querySelector('summary').focus();
         });
     }
+});
+
+window.addEventListener('workspace:visibility',event=>{
+    if(event.detail?.visible===false)pauseCuts();
 });

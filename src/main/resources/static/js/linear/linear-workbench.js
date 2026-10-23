@@ -1,3 +1,4 @@
+import {workspaceReady} from '../workspace/page-bridge.js';
 import {defaults,sample,validateInput,layout,totals,demandBalance,groupKey,escapeHtml as esc} from './linear-model.js';
 const $=id=>document.getElementById(id), fields=['motherWidth','leftTrim','rightTrim','minWidth','maxWidth','step','totalOverCap','profile'];
 const state={orders:[],taskId:null,snapshot:null,selected:null,checked:new Set(),busy:false,dirty:false,epoch:0};
@@ -112,3 +113,11 @@ $('export').onclick=async()=>{try{$('export').disabled=true;const response=await
 $('theme').onclick=()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light';};
 try{const draft=JSON.parse(sessionStorage.getItem(draftKey)||'null')||defaults;setInput(draft);state.dirty=!!draft.draftDirty;state.taskId=sessionStorage.getItem(taskKey);}catch{setInput(defaults);feedback('本页草稿无法读取，请重新导入订单。',true);}
 controls();if(state.taskId){state.busy=true;controls();poll(++state.epoch);}
+
+workspaceReady(async (url,handoff)=>{
+    if(!handoff)return true;
+    if(state.busy || document.querySelector('dialog[open]'))throw Error('分切正在计算或等待确认，请处理后再带入订单。');
+    validateInput(handoff);
+    if(state.orders.length && !await confirmAction('带入搭切示例','替换当前分切需求和工艺？取消会完整保留当前订单、方案与本机草稿。'))return false;
+    resetResult();setInput(handoff);store();feedback('已带入订单，核对后可运行真实分切计算。');return true;
+});

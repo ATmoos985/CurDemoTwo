@@ -1,3 +1,4 @@
+import {inWorkspace,workspaceReady} from './workspace/page-bridge.js';
 import {navGroups} from './product-entries.js';
 
 if(document.body.matches('.management-page,.inventory-page')) {
@@ -17,4 +18,13 @@ for (const host of document.querySelectorAll('[data-product-nav]')) {
 if (location.hash === '#protocol-details') {
     const section = document.getElementById('protocol-details');
     if (section) { section.open = true; section.scrollIntoView({block:'nearest'}); }
+}
+
+// Input-heavy applications announce readiness after their own initialization.
+if(inWorkspace && !['/index.html','/inspection.html','/linear.html'].includes(location.pathname))workspaceReady();
+if(!inWorkspace && window.self===window.top){
+    const host=document.querySelector('[data-product-nav]');
+    if(host){const link=document.createElement('a');link.className='product-help';link.textContent='多页签工作台';
+        link.href='/workspace.html#'+encodeURIComponent(location.pathname+location.search+location.hash);
+        link.target='_blank';link.rel='noopener';link.title='进入左侧导航与右侧页签工作区';host.append(link);}
 }

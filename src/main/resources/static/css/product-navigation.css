@@ -42,3 +42,7 @@
 
 .product-help{font-size:12px;color:var(--text-muted);padding:8px 10px;text-decoration:none;border-left:1px solid var(--panel-border);white-space:nowrap}.product-help:focus-visible{outline:2px solid var(--accent-blue)}
 .material-management-links{display:flex;gap:20px;padding:10px 24px;border-bottom:1px solid var(--panel-border)}.material-management-links a{color:var(--accent-blue);text-decoration:none;font-size:13px}
+
+/* The workspace owns global navigation; each embedded application keeps all local tools. */
+.workspace-embedded body > header:has([data-product-nav]) { display:none; }
+.workspace-embedded [data-product-nav] { display:none; }

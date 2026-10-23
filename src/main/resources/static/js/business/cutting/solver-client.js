@@ -321,6 +321,7 @@ function showSolveFailure() {
     }
 }
 let solving = false;
+export function isCuttingOperationBusy() { return solving || reporting || validatingAdjustment; }
 function planGeometry() {
     const {pieces, remnants, cuts} = state.getCurrentCaseData();
     return JSON.stringify({pieces, remnants, cuts});
