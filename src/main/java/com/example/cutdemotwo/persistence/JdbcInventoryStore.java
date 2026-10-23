@@ -4,6 +4,7 @@ import com.example.cutdemotwo.business.model.CuttingPlan;
 import com.example.cutdemotwo.business.model.ExecutionOrder;
 import com.example.cutdemotwo.business.model.InventoryTransfer;
 import com.example.cutdemotwo.business.model.InventoryEvent;
+import com.example.cutdemotwo.business.model.InventoryCount;
 import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
@@ -52,8 +53,15 @@ public class JdbcInventoryStore implements InventoryStore {
             Map<String,ExecutionOrder> executions=new LinkedHashMap<>();
             rows("execution_order",ExecutionOrder.class).forEach(e->executions.put(e.id(),e));
             return new InventorySnapshot(rolls, remnants, receipts, ((Number)meta.get("remnant_seq")).intValue(),
-                    ((Number)meta.get("defect_seq")).intValue(), tasks, plans, revision, executions, ledger(), transfers(), outbox());
+                    ((Number)meta.get("defect_seq")).intValue(), tasks, plans, revision, executions, ledger(), transfers(), outbox(), counts());
         });
+    }
+    private Map<String,InventoryCount> counts() {
+        var result=new LinkedHashMap<String,InventoryCount>();
+        jdbc.query("SELECT id,data_json FROM inventory_count ORDER BY inventory_revision,id", rs -> {
+            result.put(rs.getString(1),json.readValue(rs.getString(2),InventoryCount.class));
+        });
+        return result;
     }
     private List<InventoryEvent> outbox() {
         return jdbc.query("SELECT data_json FROM inventory_outbox ORDER BY event_sequence",
@@ -95,6 +103,11 @@ public class JdbcInventoryStore implements InventoryStore {
             InventoryTransfer.requireAppendOnly(posted,snapshot.transfers());
             for(var document:snapshot.transfers().values())if(!posted.containsKey(document.id()))
                 jdbc.update("INSERT INTO inventory_transfer (id,idempotency_key,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?)",
+                        document.id(),document.idempotencyKey(),document.postedAt(),document.inventoryRevision(),json.writeValueAsString(document));
+            var counted=counts();
+            InventoryCount.requireAppendOnly(counted,snapshot.counts());
+            for(var document:snapshot.counts().values())if(!counted.containsKey(document.id()))
+                jdbc.update("INSERT INTO inventory_count (id,idempotency_key,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?)",
                         document.id(),document.idempotencyKey(),document.postedAt(),document.inventoryRevision(),json.writeValueAsString(document));
             var previous = ledger();
             InventoryLedgerEntry.requireAppendOnly(previous,snapshot.ledger());

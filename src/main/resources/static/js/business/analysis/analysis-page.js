@@ -20,7 +20,7 @@ async function refreshAnalysis(){
  }catch(error){if(request===analysisGeneration){el('analysis-error').textContent='读取失败：'+error.message+' 上次结果可能已过期，请刷新。';el('analysis-error').hidden=false;}}
  finally{if(request===analysisGeneration)el('refresh-analysis').disabled=false;}
 }
-const eventNames={MIGRATION_OPENING:'迁移期初',CUT_REPORT:'实切报工',CUT_REPORT_BATCH:'批量报工',REPORT_REVERSE:'报工冲销',QUALITY_DISPOSITION:'复检处置',DEMAND_ADJUSTMENT:'需求调整',ROLL_RECEIPT:'母卷入库',ROLL_RECEIPT_OR_UPDATE:'母卷入库或维护',REMNANT_RECEIPT:'料头入库',REMNANT_SCRAP:'料头报废',INSPECTION:'检验记录',SYSTEM_UPDATE:'系统更新',DEMO_RECEIPT:'示例入库',DEMO_RESET:'示例重置'};
+const eventNames={INVENTORY_TRANSFER:'材料移库',INVENTORY_COUNT:'库存盘点',MIGRATION_OPENING:'迁移期初',CUT_REPORT:'实切报工',CUT_REPORT_BATCH:'批量报工',REPORT_REVERSE:'报工冲销',QUALITY_DISPOSITION:'复检处置',DEMAND_ADJUSTMENT:'需求调整',ROLL_RECEIPT:'母卷入库',ROLL_RECEIPT_OR_UPDATE:'母卷入库或维护',REMNANT_RECEIPT:'料头入库',REMNANT_SCRAP:'料头报废',INSPECTION:'检验记录',SYSTEM_UPDATE:'系统更新',DEMO_RECEIPT:'示例入库',DEMO_RESET:'示例重置'};
 async function loadLedger(reset=false){
  if(busy && !reset)return;
  const request=++ledgerGeneration;busy=true;el('load-ledger').disabled=true;el('ledger-error').hidden=true;

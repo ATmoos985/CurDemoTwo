@@ -6,6 +6,7 @@ import com.example.cutdemotwo.business.model.ExecutionOrder;
 import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
 import com.example.cutdemotwo.business.model.InventoryTransfer;
 import com.example.cutdemotwo.business.model.InventoryEvent;
+import com.example.cutdemotwo.business.model.InventoryCount;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
 import com.example.cutdemotwo.business.model.RemnantStock;
 import com.example.cutdemotwo.business.model.SolveRequest;
@@ -46,6 +47,7 @@ public class RemnantService {
     private final Map<String,InventoryTransfer> transfers=new LinkedHashMap<>();
     private List<InventoryLedgerEntry> ledger = List.of();
     private List<InventoryEvent> outbox = List.of();
+    private final Map<String,InventoryCount> counts=new LinkedHashMap<>();
     private long revision;
     private boolean accessing;
     private long operationTime;
@@ -140,7 +142,7 @@ public class RemnantService {
 
     private InventorySnapshot snapshot() {
         return new InventorySnapshot(new ArrayList<>(motherRolls.values()), new ArrayList<>(remnantPool.values()),
-                receipts, remnantSeq.get(), defectSeq.get(), tasks, plans, revision, executions, ledger, transfers, outbox);
+                receipts, remnantSeq.get(), defectSeq.get(), tasks, plans, revision, executions, ledger, transfers, outbox, counts);
     }
 
     private void restore(InventorySnapshot snapshot) {
@@ -152,6 +154,7 @@ public class RemnantService {
         executions.clear();executions.putAll(snapshot.executions());
         ledger = snapshot.ledger();
         outbox = snapshot.outbox();
+        counts.clear();counts.putAll(snapshot.counts());
         transfers.clear();transfers.putAll(snapshot.transfers());
         revision = snapshot.revision();
         remnantSeq.set(snapshot.remnantSeq()); defectSeq.set(snapshot.defectSeq());
@@ -163,7 +166,15 @@ public class RemnantService {
     }
 
     private <T> T mutate(String eventType,String businessId,String actor,java.util.function.Supplier<T> command) {
+        return mutate(eventType,businessId,actor,()->null,command);
+    }
+
+    /** A known immutable receipt is a read, even when its original inventory version is stale. */
+    private <T> T mutate(String eventType,String businessId,String actor,java.util.function.Supplier<T> replay,
+            java.util.function.Supplier<T> command) {
         refresh();
+        T previous = replay.get();
+        if (previous != null) return previous;
         operationTime = store.now();
         byte[] before = json.writeValueAsBytes(snapshot());
         restore(json.readValue(before, InventorySnapshot.class));
@@ -273,6 +284,95 @@ public class RemnantService {
             var document=new InventoryTransfer(documentId,key,command,operationTime,revision+1,lines);
             transfers.put(document.id(),document);return document;
         });
+    }
+
+    public synchronized List<InventoryCount> inventoryCounts() {
+        return read(()->counts.values().stream().sorted(Comparator.comparingLong(InventoryCount::inventoryRevision).reversed()).toList());
+    }
+    private long countRevision(String type,String id) {
+        return counts.values().stream().filter(c->c.lines().stream().anyMatch(l->type.equals(l.type())&&id.equals(l.id())))
+                .mapToLong(InventoryCount::inventoryRevision).max().orElse(0);
+    }
+    private String countBlock(String type,String id) {
+        if("roll".equals(type)) {if(!motherRolls.containsKey(id))return "母卷不存在";}
+        else if("remnant".equals(type)) {
+            var r=remnantPool.get(id);if(r==null)return "料头不存在";
+            if(!Set.of("AVAILABLE","QUARANTINED","LOST").contains(r.getStatus()))return "仅在库、隔离或盘亏料头可盘点";
+        } else return "材料类型必须为 roll 或 remnant";
+        if(executions.values().stream().anyMatch(e->e.materialType().equals(type)&&e.materialId().equals(id)&&e.reserves(operationTime)))
+            return "材料已被执行单预约或正在加工";
+        return "";
+    }
+    public synchronized Map<String,Object> countOptions() {
+        return read(()->{
+            var materials=new ArrayList<Map<String,Object>>();
+            for(var r:motherRolls.values())materials.add(countOption("roll",r.getRollId(),r.getWidth(),r.getCurrentRemainingLength(),
+                    r.getInspectionStatus(),r.getStorageLocation(),r.getRollModel()));
+            for(var r:remnantPool.values())materials.add(countOption("remnant",r.getId(),r.getWidth(),r.getLength(),r.getStatus(),r.getLocation(),r.getMaterialBatch()));
+            materials.sort(Comparator.comparing(row->row.get("type")+"/"+row.get("id")));
+            return Map.of("revision",revision,"materials",materials);
+        });
+    }
+    private Map<String,Object> countOption(String type,String id,double width,double length,String status,String location,String model) {
+        String reason=countBlock(type,id);
+        return Map.of("type",type,"id",id,"width",width,"length",length,"status",Objects.toString(status,""),
+                "location",Objects.toString(location,""),"materialModel",Objects.toString(model,""),"allowed",reason.isEmpty(),"reason",reason);
+    }
+    public synchronized InventoryCount countInventory(String key,InventoryCount.Command command) {
+        if(key==null || !key.matches("[A-Za-z0-9._:-]{8,128}") || command==null || command.expectedRevision()<0
+                || command.reason()==null || command.reason().isBlank() || command.reason().length()>500
+                || command.operator()==null || command.operator().isBlank() || command.operator().length()>100
+                || command.materials()==null || command.materials().isEmpty() || command.materials().size()>100)
+            throw new IllegalArgumentException("请填写有效版本、原因、经办人和 1–100 项实测材料");
+        String id=UUID.randomUUID().toString();
+        return mutate("INVENTORY_COUNT",id,"DECLARED:"+command.operator(),()->{
+            for(var previous:counts.values())if(previous.idempotencyKey().equals(key)) {
+                if(!previous.command().equals(command))throw new InventoryConflictException("同一幂等键不能修改盘点内容");
+                return previous;
+            }
+            return null;
+        },()->{
+            if(command.expectedRevision()!=revision)throw new InventoryConflictException("库存版本已变化，请重新核对账面值与实测值");
+            var identities=new HashSet<String>();var lines=new ArrayList<InventoryCount.Line>();
+            for(var observation:command.materials()) {
+                if(observation==null || observation.type()==null || !Set.of("roll","remnant").contains(observation.type()) || observation.id()==null || observation.id().isBlank()
+                        || !identities.add(observation.type()+"/"+observation.id()))throw new IllegalArgumentException("材料身份缺失或重复");
+                String blocked=countBlock(observation.type(),observation.id());
+                if(!blocked.isEmpty())throw new InventoryConflictException(observation.id()+"："+blocked);
+                double w=observation.width(),l=observation.length();
+                if(!Double.isFinite(w) || !Double.isFinite(l) || w<=0 || w>1e9 || l<0 || l>1e9
+                        || (observation.present()?l<=0:l!=0))throw new IllegalArgumentException("实测宽度必须为正数，在场长度为正数，未见实物长度为零；尺寸不超过 10 亿 mm");
+                if("roll".equals(observation.type())) {
+                    var r=motherRolls.get(observation.id());double total=r.getUsedLength()+l;
+                    if(w!=r.getWidth())throw new IllegalArgumentException("母卷盘点只校正未切余长，不能更改幅宽");
+                    if(!Double.isFinite(total) || total>1e9 || r.getUsedLength()<0)throw new IllegalArgumentException("母卷累计长度无效");
+                    for(var report:receipts.values())if(!"REVERSED".equals(report.get("status")) && "roll".equals(report.get("feedPortType")) && r.getRollId().equals(report.get("rollId"))
+                            && report.get("windowStartY") instanceof Number start && report.get("actualCutLen") instanceof Number used
+                            && start.doubleValue()+used.doubleValue()>total+.001)
+                        throw new InventoryConflictException("实测边界覆盖历史已切区域，请先核查跳段报工与材料坐标");
+                    if(observation.present())checkCountDefects(r.getDefects(),w,total);
+                    lines.add(new InventoryCount.Line("roll",r.getRollId(),w,r.getCurrentRemainingLength(),r.getInspectionStatus(),w,l,
+                            r.getInspectionStatus(),w*(l-r.getCurrentRemainingLength())/1e6,r.getUsedLength(),r.getTotalLength(),total));
+                } else {
+                    var r=remnantPool.get(observation.id());
+                    if(observation.present())checkCountDefects(r.getDefects(),w,l);
+                    else if(w!=r.getWidth())throw new IllegalArgumentException("未见实物时保留原幅宽，不能凭空修改几何");
+                    String next=!observation.present()?"LOST":"LOST".equals(r.getStatus())?"QUARANTINED":r.getStatus();
+                    double oldArea="LOST".equals(r.getStatus())?0:r.getArea();
+                    lines.add(new InventoryCount.Line("remnant",r.getId(),r.getWidth(),r.getLength(),r.getStatus(),w,l,next,
+                            (observation.present()?w*l/1e6:0)-oldArea,0,0,0));
+                }
+            }
+            for(var line:lines) {
+                if("roll".equals(line.type())) {var r=motherRolls.get(line.id());r.setCurrentRemainingLength(line.measuredLength());r.setTotalLength(line.afterTotalLength());}
+                else {var r=remnantPool.get(line.id());if(!"LOST".equals(line.afterStatus())){r.setWidth(line.measuredWidth());r.setLength(line.measuredLength());}r.setStatus(line.afterStatus());}
+            }
+            var document=new InventoryCount(id,key,command,operationTime,revision+1,lines);counts.put(id,document);return document;
+        });
+    }
+    private void checkCountDefects(List<Defect> defects,double width,double length) {
+        if(defects!=null && defects.stream().anyMatch(d->d.getX()+d.getW()>width+.001 || d.getY()+d.getH()>length+.001))
+            throw new InventoryConflictException("实测边界小于已登记疵点范围，请核查测量与疵点坐标；盘点不会截掉疵点历史");
     }
 
     public synchronized Map<String,Object> reconcileInventory() {
@@ -446,13 +546,19 @@ public class RemnantService {
         if ("remnant".equalsIgnoreCase(request.getFeedPortType())) {
             RemnantStock item = remnantPool.get(request.getSourceRemnantId());
             if (item == null) throw new IllegalArgumentException("料头不存在，请重新选料");
-            return json.writeValueAsString(Arrays.asList(item.getId(), item.getWidth(), item.getLength(),
+            return countedFingerprint("remnant",item.getId(),Arrays.asList(item.getId(), item.getWidth(), item.getLength(),
                     item.getMaterialBatch(), item.getSourceRollId(), item.isHasDefect(), item.getDefects()));
         }
         MotherRollInfo roll = motherRolls.get(request.getRollId());
         if (roll == null) throw new IllegalArgumentException("母卷不存在，请重新选料");
-        return json.writeValueAsString(Arrays.asList(roll.getRollId(), roll.getWidth(), roll.getTotalLength(),
+        return countedFingerprint("roll",roll.getRollId(),Arrays.asList(roll.getRollId(), roll.getWidth(), roll.getTotalLength(),
                 roll.getRollModel(), roll.getBatchNo(), roll.getColor(), roll.getInspectionStatus(), roll.getDefects()));
+    }
+
+    private String countedFingerprint(String type,String id,List<?> original) {
+        var values=new ArrayList<Object>(original);long counted=countRevision(type,id);
+        if(counted>0)values.add(Map.of("inventoryCountRevision",counted));
+        return json.writeValueAsString(values);
     }
 
     private void save() {
@@ -561,6 +667,9 @@ public class RemnantService {
     private Map<String, Object> qualityProjection(Map<String, Object> receipt) {
         if (receipt == null) return null;
         var result = new LinkedHashMap<>(receipt);
+        // Untyped persisted maps may decode small revisions as Integer; keep the public projection stable.
+        if(receipt.get("inventoryCountRevision") instanceof Number counted)
+            result.put("inventoryCountRevision",counted.longValue());
         var events = qualityEvents(receipt);
         var removed = events.stream().filter(e -> "QUALIFIED".equals(e.originalOutcome())).toList();
         double removedArea = removed.stream().mapToDouble(QualityDisposition::pieceAreaMm2).sum() / 1_000_000;
@@ -665,6 +774,10 @@ public class RemnantService {
             Map<String, Object> receipt = receipts.get(planId);
             if (receipt == null) throw new IllegalArgumentException("报工记录不存在");
             if ("REVERSED".equals(receipt.get("status"))) return receipt;
+            String countedType="remnant".equals(receipt.get("feedPortType"))?"remnant":"roll";
+            String countedId=Objects.toString(receipt.get("remnant".equals(countedType)?"sourceRemnantId":"rollId"),"");
+            long originalCount=receipt.get("inventoryCountRevision") instanceof Number n?n.longValue():0;
+            if(countRevision(countedType,countedId)!=originalCount)throw new InventoryConflictException("材料已有后续盘点，不能用撤回覆盖实测库存");
             if (!qualityEvents(receipt).isEmpty()) throw new IllegalArgumentException("报工已有复检处置，不能撤回原料耗用；请保留实际裁切事实");
             if (!(receipt.get("undo") instanceof Map<?, ?> undo))
                 throw new IllegalArgumentException("历史报工没有撤回快照，请人工核对库存后处理");
@@ -672,6 +785,7 @@ public class RemnantService {
             for (Object item : (List<?>) receipt.get("derivedRemnants")) {
                 RemnantStock original = json.convertValue(item, RemnantStock.class);
                 ensureMaterialNotReserved("remnant",original.getId(),null);
+                if(countRevision("remnant",original.getId())>0)throw new InventoryConflictException("派生料头已有盘点追溯，不能撤回原报工");
                 RemnantStock current = remnantPool.get(original.getId());
                 if (current == null || !json.writeValueAsString(original).equals(json.writeValueAsString(current)))
                     throw new IllegalArgumentException("派生料头 " + original.getId() + " 已流转或修改，请先撤回后续操作");
@@ -1156,6 +1270,7 @@ public class RemnantService {
         receipt.put("utilization", sourceArea == 0 ? 0 : output.qualifiedArea() / sourceArea * 100);
         receipt.put("derivedRemnants", children);
         receipt.put("recoveredGeometry", recoveredGeometry);
+        receipt.put("inventoryCountRevision",countRevision(remnantFeed?"remnant":"roll",remnantFeed?request.getSourceRemnantId():request.getRollId()));
         receipt.put("confirmedAt", LocalDateTime.now().toString());
         receipt.put("reportContent",json.writeValueAsString(report));
         receipts.put(report.planId(), receipt);
@@ -1173,6 +1288,10 @@ public class RemnantService {
 
     private boolean resetRollInternal(String rollId, boolean force) {
         ensureMaterialNotReserved("roll",rollId,null);
+        if(counts.values().stream().flatMap(c->c.lines().stream()).anyMatch(line->
+                "roll".equals(line.type()) && rollId.equals(line.id()) || "remnant".equals(line.type())
+                && remnantPool.containsKey(line.id()) && rollId.equals(remnantPool.get(line.id()).getSourceRollId())))
+            throw new InventoryConflictException("材料已有盘点单追溯，禁止演示重置；请新建盘点单更正");
         if(transfers.values().stream().flatMap(t->t.lines().stream()).anyMatch(line->
                 "roll".equals(line.type()) && rollId.equals(line.id()) || "remnant".equals(line.type())
                 && remnantPool.containsKey(line.id()) && rollId.equals(remnantPool.get(line.id()).getSourceRollId())))
@@ -1544,6 +1663,7 @@ public class RemnantService {
         ensureMaterialNotReserved("remnant",id,null);
         RemnantStock item = remnantPool.get(id);
         if (item == null) return false;
+        if("LOST".equals(item.getStatus()))throw new InventoryConflictException("盘亏料头未见实物，不能报废；找回请登记盘点单");
         item.setStatus("SCRAPPED");
         item.setDefectDesc((item.getDefectDesc() != null ? item.getDefectDesc() + " | " : "") + "已报废: " + reason);
         return true;
@@ -1673,6 +1793,8 @@ public class RemnantService {
         if (id == null) return false;
         RemnantStock item = remnantPool.get(id);
         if (item != null) {
+            if("CONSUMED".equals(item.getStatus()))return true;
+            if(!"AVAILABLE".equals(item.getStatus()))throw new InventoryConflictException("只有可用料头可以领用；盘亏找回后须先完成质量检验");
             item.setStatus("CONSUMED");
             item.setConsumedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
             return true;
@@ -1689,6 +1811,12 @@ public class RemnantService {
         if (id == null) return false;
         RemnantStock item = remnantPool.get(id);
         if (item != null) {
+            if("LOST".equals(item.getStatus()) || "LOST".equals(status))throw new InventoryConflictException("盘亏与找回必须通过盘点单登记");
+            if(status==null || !Set.of("AVAILABLE","QUARANTINED","SCRAPPED").contains(status))
+                throw new IllegalArgumentException("状态调整仅支持可用、隔离或报废");
+            if(!Objects.equals(item.getStatus(),status) && (Set.of("CONSUMED","SCRAPPED").contains(item.getStatus())
+                    || ("QUARANTINED".equals(item.getStatus()) && "AVAILABLE".equals(status))))
+                throw new InventoryConflictException("不能通过状态调整恢复已耗用、报废或待检料头");
             item.setStatus(status);
             return true;
         }

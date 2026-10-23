@@ -1,5 +1,6 @@
 /** 功能入口目录：导航栏与介绍页共用，页面路径只在这里维护。 */
 export const ENTRIES = Object.freeze([
+    {id:'counts', name:'库存盘点', href:'/counts.html', group:'', navHidden:true, summary:'实测差异、盘亏找回与不可变盘点单'},
     {id:'transfers', name:'材料移库', href:'/transfers.html', group:'', navHidden:true, summary:'材料移库单、原目标库位与过账追溯'},
     {id:'tasks', name:'任务', href:'/tasks.html', group:'', navHidden:true, summary:'生产任务、净良品履约与执行预约'},
     {id:'analysis', name:'分析', href:'/analysis.html', group:'', summary:'实际报工面积、库存对账与流水'},

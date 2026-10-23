@@ -18,7 +18,7 @@ function visibility(item,visible){
 }
 function activate(item){
     for(const entry of mounted.values())visibility(entry,entry===item);
-    active=item;menu.querySelectorAll('[data-page]').forEach(button=>{if(button.dataset.page===item.id)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
+    active=item;menu.querySelectorAll('[data-page]').forEach(button=>{if(button.dataset.page===(item.id==='counts'?'transfers':item.id))button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
     item.tab.scrollIntoView({block:'nearest',inline:'nearest'});document.title=item.name+' · 搭切工作台';
     history.replaceState(null,'','#'+encodeURIComponent(item.url));
 }

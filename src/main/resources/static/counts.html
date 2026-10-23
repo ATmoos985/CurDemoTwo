@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>库存盘点 · 布料裁切</title><link rel="stylesheet" href="css/base.css"><link rel="stylesheet" href="css/product-navigation.css"><link rel="stylesheet" href="css/management.css"><link rel="stylesheet" href="css/inventory-count.css"></head>
+<body class="management-page count-page"><header><a class="brand" href="/inventory.html">布料裁切 <span>库存盘点</span></a><div data-product-nav="counts"></div></header><main>
+<div class="management-heading"><div><h1>库存盘点</h1><p>核对实物与账面，差异独立记账，保留生产和材料来源。</p></div><button id="new-count" class="action-primary">新建盘点</button></div>
+<nav class="management-tabs" aria-label="材料单据类型"><a href="/transfers.html">移库单</a><a href="/counts.html" aria-current="page">盘点单</a></nav>
+<p id="count-message" role="status" aria-live="polite">正在读取盘点记录…</p><p id="count-error" role="alert" hidden></p>
+<section id="count-pending" hidden><h2>上次提交的结果待确认</h2><p>提交凭证已保存在本机。确认前不能修改实测或新建盘点；重复确认使用原请求，不重复记账。</p><p id="count-pending-summary"></p><button id="retry-count" class="action-primary">确认上次提交结果</button></section>
+<section id="count-receipt" hidden><h2>盘点已过账</h2><p id="count-receipt-summary"></p><a href="/analysis.html#ledger">查看库存流水与对账</a></section>
+<section id="count-editor" hidden aria-labelledby="count-editor-title">
+<div class="count-section-heading"><h2 id="count-editor-title">录入实测</h2><button id="back-counts">返回记录（保留草稿）</button></div>
+<form id="count-form"><fieldset id="count-fields"><legend class="sr-only">盘点实测</legend>
+<div class="count-context"><p id="count-snapshot"></p><button type="button" id="refresh-count-snapshot">更新账面并重新核对</button></div>
+<p class="scope-note">母卷只测未切余长，幅宽固定。未见实物记为 0；盘亏料头找回后进入隔离，不能直接用于排料。实测草稿自动保存在本机。</p>
+<div class="management-filters"><label for="count-search">查找材料<input type="search" id="count-search" placeholder="编号、型号或库位"></label><span id="count-selection"></span></div>
+<div class="management-table-wrap count-material-picker"><table><thead><tr><th>选择</th><th>材料 / 型号</th><th>账面尺寸 mm</th><th>库位 / 状态</th><th>盘点条件</th></tr></thead><tbody id="count-materials"></tbody></table></div>
+<div id="count-observations"></div>
+<div class="count-metadata"><label for="count-reason">盘点原因<textarea id="count-reason" maxlength="500" required rows="2"></textarea></label><label for="count-operator">经办人<input id="count-operator" maxlength="100" required><small>手工登记，尚未接入账号认证</small></label></div>
+<div class="count-actions"><button type="submit" id="review-count" class="action-primary">核对差异</button><span class="scope-note">核对后再确认过账；无差异也可登记盘点事实。</span></div>
+</fieldset></form>
+<section id="count-review" hidden tabindex="-1" aria-labelledby="count-review-title"><h2 id="count-review-title">核对本次盘点</h2><p id="count-review-summary"></p><div class="management-table-wrap"><table><thead><tr><th>材料</th><th>原账面 mm</th><th>实测 mm</th><th>面积差异 m²</th><th>过账后状态</th></tr></thead><tbody id="count-differences"></tbody></table></div><p class="scope-note">差异按本次账面快照计算，最终由服务端校验预约、版本、疵点和历史已切边界。不会再次扣减生产耗用。</p><button id="post-count" class="action-primary">确认并过账</button></section>
+</section>
+<section id="count-list" aria-labelledby="count-list-title"><div class="count-section-heading"><h2 id="count-list-title">已过账盘点单</h2><button id="refresh-count-history">刷新记录</button></div><p class="scope-note">保留原始账面、实测与差异。更正请新建盘点单，历史不能覆盖或删除。</p><div id="count-history"></div></section>
+</main><script type="module" src="js/product-navigation.js"></script><script type="module" src="js/business/inventory/count-page.js"></script></body></html>

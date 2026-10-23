@@ -1,6 +1,7 @@
 <!DOCTYPE html><html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>材料移库 · 布料裁切</title><link rel="stylesheet" href="css/base.css"><link rel="stylesheet" href="css/product-navigation.css"><link rel="stylesheet" href="css/management.css"></head>
 <body class="management-page"><header><a class="brand" href="/inventory.html">布料裁切 <span>材料移库</span></a><div data-product-nav="transfers"></div></header><main>
 <div class="management-heading"><div><h1>材料移库</h1><p>选择在库材料，核对原库位后登记目标库位。数量、质量状态和来源保持不变。</p></div><button id="refresh-transfers">刷新库存与单据</button></div>
+<nav class="management-filters" aria-label="材料单据类型"><span aria-current="page">移库单</span><a href="/counts.html">盘点单</a></nav>
 <p><a href="/inventory.html" target="_blank" rel="noopener">库存档案</a> · <a href="/analysis.html#ledger" target="_blank" rel="noopener">库存流水与对账</a></p>
 <p id="transfer-message" role="status">正在读取库存…</p><p id="transfer-error" role="alert" hidden></p>
 <section id="transfer-pending" hidden><h2>待确认的移库请求</h2><p>上次请求的结果尚未确认。重试会使用原请求，避免重复过账；确认前不能发起新单。</p><pre id="transfer-pending-summary"></pre><button id="retry-transfer">确认上次提交结果</button></section>

@@ -1096,7 +1096,9 @@
                 "REMNANT",
                 "DEMAND",
                 "REPORT",
-                "CHECKPOINT"
+                "CHECKPOINT",
+                "TRANSFER",
+                "COUNT"
               ]
             }
           },
@@ -1555,6 +1557,100 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/IntegrationAcknowledgement"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/inventory-counts": {
+      "get": {
+        "summary": "List immutable posted physical inventory counts, newest first",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InventoryCount"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Post a physical inventory count with balances, document, ledger and outbox in one transaction",
+        "description": "Body <=262144 bytes. Same key and identical command replays the original receipt without advancing revision. Changed command under the same key conflicts. Reserved/running material and geometry/defect conflicts are blocked. Roll used length, reports and demand fulfillment stay unchanged. A found remnant is quarantined. Correct with a new document; no deletion or rewrite. INTERNAL inventory authority and single-process file mode only. Unknown outcomes must retry the identical key and body.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CountCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryCount"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON, fields, dimensions or idempotency key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision, reservation, geometry, material or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/inventory-counts/options": {
+      "get": {
+        "summary": "Read countable material snapshots and blocked reasons with inventory revision",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountOptions"
+                }
               }
             }
           }
@@ -4261,6 +4357,278 @@
           "nextCursor",
           "hasMore"
         ]
+      },
+      "CountObservation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "id",
+          "present",
+          "width",
+          "length"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "roll",
+              "remnant"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "present": {
+            "type": "boolean"
+          },
+          "width": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000000000.0,
+            "description": "Millimetres",
+            "exclusiveMinimum": 0
+          },
+          "length": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000000000.0,
+            "description": "Millimetres"
+          }
+        },
+        "description": "Measured physical presence. Present requires positive length; absent requires zero length and unchanged width. Roll width is fixed, length is uncut remaining length. A missing remnant retains historical geometry but has zero book area; finding it restores QUARANTINED status."
+      },
+      "CountCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "reason",
+          "operator",
+          "materials"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "operator": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Manually declared; not an authenticated identity."
+          },
+          "materials": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CountObservation"
+            }
+          }
+        }
+      },
+      "CountLine": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "id",
+          "beforeWidth",
+          "beforeLength",
+          "beforeStatus",
+          "measuredWidth",
+          "measuredLength",
+          "afterStatus",
+          "differenceAreaM2",
+          "usedLength",
+          "beforeTotalLength",
+          "afterTotalLength"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "roll",
+              "remnant"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "beforeWidth": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000000000.0,
+            "description": "Millimetres"
+          },
+          "beforeLength": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000000000.0,
+            "description": "Millimetres"
+          },
+          "beforeStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "measuredWidth": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000000000.0,
+            "description": "Millimetres"
+          },
+          "measuredLength": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000000000.0,
+            "description": "Millimetres"
+          },
+          "afterStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "differenceAreaM2": {
+            "type": "number",
+            "description": "Signed change in inventory area, m2; not production output or cutting waste."
+          },
+          "usedLength": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000000000.0,
+            "description": "Millimetres"
+          },
+          "beforeTotalLength": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000000000.0,
+            "description": "Millimetres"
+          },
+          "afterTotalLength": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000000000.0,
+            "description": "Millimetres"
+          }
+        }
+      },
+      "InventoryCount": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "idempotencyKey",
+          "command",
+          "postedAt",
+          "inventoryRevision",
+          "lines"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "command": {
+            "$ref": "#/components/schemas/CountCommand"
+          },
+          "postedAt": {
+            "type": "integer",
+            "description": "Unix milliseconds"
+          },
+          "inventoryRevision": {
+            "type": "integer"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CountLine"
+            }
+          }
+        }
+      },
+      "CountOptions": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revision",
+          "materials"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "materials": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "id",
+                "width",
+                "length",
+                "status",
+                "location",
+                "materialModel",
+                "allowed",
+                "reason"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "roll",
+                    "remnant"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "width": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000.0,
+                  "description": "Millimetres"
+                },
+                "length": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000.0,
+                  "description": "Millimetres"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "location": {
+                  "type": "string"
+                },
+                "materialModel": {
+                  "type": "string"
+                },
+                "allowed": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "description": "One read-only inventory snapshot; includes unavailable and LOST items with eligibility/reason. LOST dimensions are historical geometry, not available stock. Never silently update expectedRevision after physical measurements have been checked."
       }
     },
     "securitySchemes": {
