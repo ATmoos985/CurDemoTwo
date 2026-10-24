@@ -2,14 +2,22 @@
 .viewport-container {
     flex: 1;
     position: relative;
-    background: #0b1120;
+    background-color: #0b1120;
+    background-image:
+        linear-gradient(rgba(148, 163, 184, 0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(148, 163, 184, 0.06) 1px, transparent 1px);
+    background-size: 24px 24px;
     overflow: hidden;
     display: flex;
     flex-direction: column;
 }
 
 [data-theme="light"] .viewport-container {
-    background: #f8fafc;
+    background-color: #f1f5f9;
+    background-image:
+        linear-gradient(rgba(148, 163, 184, 0.16) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(148, 163, 184, 0.16) 1px, transparent 1px);
+    background-size: 24px 24px;
 }
 
 #konva-container {

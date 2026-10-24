@@ -1,8 +1,10 @@
 import {WORKSPACE_GROUPS,workspaceRoute} from './workspace-routes.js';
 const menu=document.getElementById('workspace-menu'),tabs=document.getElementById('workspace-tabs');
 const pages=document.getElementById('workspace-pages'),feedback=document.getElementById('workspace-feedback');
+const brand=document.getElementById('workspace-brand');
 const mounted=new Map();let active=null;
 function say(message){feedback.textContent=message;feedback.hidden=!message;}
+brand?.addEventListener('click',()=>openPage('/intro.html'));
 for(const group of WORKSPACE_GROUPS){
     const section=document.createElement(group.collapsed?'details':'section');
     if(group.collapsed){const summary=document.createElement('summary');summary.textContent=group.name;section.append(summary);}
@@ -18,7 +20,7 @@ function visibility(item,visible){
 }
 function activate(item){
     for(const entry of mounted.values())visibility(entry,entry===item);
-    active=item;menu.querySelectorAll('[data-page]').forEach(button=>{if(button.dataset.page===(item.id==='counts'?'transfers':item.id))button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
+    active=item;document.querySelectorAll('.workspace-navigation [data-page]').forEach(button=>{if(button.dataset.page===(item.id==='counts'?'transfers':item.id))button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
     item.tab.scrollIntoView({block:'nearest',inline:'nearest'});document.title=item.name+' · 搭切工作台';
     history.replaceState(null,'','#'+encodeURIComponent(item.url));
 }

@@ -283,5 +283,6 @@ footer { height: 32px; min-height: 32px; font-size: 11px; gap: 18px; }
 .settings-native-dialog::backdrop { background: #0005; }
 .settings-native-dialog h2 { margin: 0; font-size: 16px; font-weight: 600; }
 
-[data-material="empty"] #konva-container, [data-material="empty"] #roll-radar-bar { visibility: hidden; }
-[data-material="empty"] #viewport::after { content: '暂无已装载材料，请从“物料与库存”录入或选择母卷'; position: absolute; left: 24px; right: 24px; top: 45%; text-align: center; padding: 24px; background: var(--panel-bg); color: var(--text-muted); border: 1px solid var(--panel-border); font-size: 14px; pointer-events: none; }
+[data-material="empty"] #konva-container { visibility: hidden; }
+[data-material="empty"] #roll-radar-bar { display: none !important; }
+[data-material="empty"] #viewport::after { content: '暂无已装载材料，请在左侧“用料选择与详情”或“库存与母卷”中选择母卷'; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(460px, calc(100% - 48px)); text-align: center; padding: 24px 28px; background: var(--panel-bg); color: var(--text-muted); border: 1px solid var(--panel-border); border-top: 3px solid var(--accent-blue); border-radius: 6px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06); font-size: 13px; pointer-events: none; }

@@ -142,7 +142,9 @@ export function renderDemandSummary(progress, rows) {
     // Rebuild only when facts change, keeping focus and scroll stable during canvas navigation.
     const facts = progress.map((item, index) => ({...item, name:rows[index].querySelector('.dem-name').value,
         width:rows[index].querySelector('.dem-w').value, length:rows[index].querySelector('.dem-l').value}));
-    const signature = JSON.stringify(facts);if (list.dataset.facts === signature) return;list.dataset.facts = signature;
+    const inlineEditor = Boolean(el('demand-editor-content')?.closest('#sidebar-left'));
+    list.hidden = inlineEditor && !facts.length;
+    const signature = JSON.stringify({facts, inlineEditor});if (list.dataset.facts === signature) return;list.dataset.facts = signature;
     list.innerHTML = facts.length ? facts.map(item => `<button class="demand-quick-row" data-demand="${item.id}" data-complete="${item.remaining === 0}"><span><strong>${esc(item.name)}</strong><small>${esc(item.width)} × ${esc(item.length)} mm</small></span><span><b>${item.remaining === 0 ? '已满足' : item.toCut===0 ? '待报工 '+item.staged : '待切 '+(item.toCut ?? '—')}</b><small>已报工 ${item.completed} / ${item.total || '—'}${item.staged && item.toCut ? ' · 待报工 '+item.staged : ''}</small></span><span class="demand-meter" aria-hidden="true"><span style="width:${item.total>0?Math.min(100,item.completed/item.total*100):0}%"></span><span class="demand-meter-staged" style="width:${item.total>0?Math.max(0,Math.min(item.staged,item.total-item.completed)/item.total*100):0}%"></span></span></button>`).join('')
         : '<div class="workbench-empty"><strong>当前任务还没有需求</strong><p>导入订单，或在下方需求清单直接填写规格和数量。</p><button class="tool-btn active" onclick="openDemandImport()">为当前任务导入</button><button class="tool-btn" onclick="openDemandManager()">弹窗填写</button></div>';
     list.querySelectorAll('[data-demand]').forEach(button => button.onclick = () => {
