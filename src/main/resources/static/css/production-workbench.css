@@ -397,32 +397,47 @@ body[data-source="remnant"] :is(#btn-station-prev,#btn-station-next,#btn-station
     text-align: center;
 }
 #sidebar-left #demand-editor-content {
-    margin-top: 10px;
-    padding-top: 10px;
+    margin-top: 8px;
+    padding-top: 8px;
     border-top: 1px solid var(--panel-border);
 }
 #sidebar-left #demand-editor-content .task-fields {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 8px;
-    margin-bottom: 10px;
+    gap: 6px;
+    margin-bottom: 8px;
 }
 #sidebar-left #demand-editor-content .task-fields label {
     display: grid;
-    gap: 4px;
+    gap: 3px;
     font-size: 11px;
     color: var(--text-muted);
+}
+#sidebar-left #demand-editor-content .task-fields input,
+#sidebar-left #demand-editor-content .task-fields select {
+    min-height: 28px;
+    height: 28px;
+    padding: 2px 8px;
+    font-size: 12px;
 }
 #sidebar-left #demand-editor-content .demand-entry-heading {
     flex-direction: column;
     align-items: stretch;
-    gap: 8px;
-    margin-bottom: 8px;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+#sidebar-left #demand-editor-content .demand-entry-heading h3 small {
+    margin-top: 2px;
 }
 #sidebar-left #demand-editor-content .demand-entry-heading > div {
     display: flex;
     flex-wrap: wrap;
-    gap: 5px;
+    gap: 4px;
+}
+#sidebar-left #demand-editor-content .demand-entry-heading .tool-btn {
+    min-height: 26px;
+    padding: 3px 7px;
+    font-size: 11.5px;
 }
 #sidebar-left #card-demands:not([data-scene-mode="garment"]) #garment-demand-actions {
     display: none !important;
@@ -448,7 +463,7 @@ body[data-source="remnant"] :is(#btn-station-prev,#btn-station-next,#btn-station
     padding-right: 2px;
 }
 #sidebar-left .demand-entry-empty {
-    padding: 14px 12px;
+    padding: 10px 10px;
 }
 #sidebar-left .demand-entry-empty strong {
     font-size: 12.5px;
