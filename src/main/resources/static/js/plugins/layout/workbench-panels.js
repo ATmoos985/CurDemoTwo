@@ -58,7 +58,7 @@ export function initWorkbenchPanels() {
     const card = el('card-demands');
     card.classList.remove('collapsible', 'collapsed');
     card.querySelector('.section-header').removeAttribute('title');
-    card.querySelector('.section-header').innerHTML = '<strong>本次需求 <span id="demands-summary-badge"></span></strong><button class="tool-btn" onclick="openDemandManager()">管理需求 ↗</button>';
+    card.querySelector('.section-header').innerHTML = '<strong>本次需求 <span id="demands-summary-badge"></span></strong>';
     const summary = document.createElement('div'); summary.id = 'demand-quick-list';
     card.insertBefore(summary, editorContent);
     demand.addEventListener('close', () => {
@@ -89,17 +89,8 @@ export function initWorkbenchPanels() {
     el('card-defects').before(defectsHome);
     const marker=document.createElement('span');marker.id='radar-home';marker.hidden=true;
     el('roll-radar-bar').before(marker);
-    el('card-defects').classList.remove('collapsed');
-    el('card-defects').querySelector('.section-toggle').setAttribute('aria-expanded','true');
-    el('card-mother-roll').classList.remove('collapsed');
-    el('card-mother-roll').querySelector('.section-toggle').setAttribute('aria-expanded','true');
-    el('card-bed-origin')?.classList.remove('collapsed');
-    el('card-bed-origin')?.querySelector('.section-toggle')?.setAttribute('aria-expanded','true');
     el('btn-radar-reset').hidden = true;
-    const inputs = el('left-input-actions');
-    inputs.append(el('btn-workflow-next'));
-    // Demand and material inputs stay left; execution controls stay right.
-    el('input-flow-status').append(el('workflow-current'), el('station-action-hint'));
+    if (el('left-input-actions')) el('left-input-actions').hidden = true;
     el('sidebar-left').querySelector('.sidebar-scroll-body').prepend(el('card-demands'));
 }
 
@@ -166,12 +157,20 @@ export function mountInspectionRadar(active) {
     const radar=el('roll-radar-bar'), slot=el('inspection-radar-slot'), details=el('material-details');
     if(!radar || !slot)return;
     if(active){
+        for(const id of ['card-defects','card-mother-roll']){
+            el(id)?.classList.remove('collapsed');
+            el(id)?.querySelector('.section-toggle')?.setAttribute('aria-expanded','true');
+        }
         if(details && el('card-defects') && el('card-mother-roll')) details.append(el('card-defects'), el('card-mother-roll'));
         slot.append(radar);
     }else{
         el('radar-home')?.after(radar);
         if(el('mother-roll-home') && el('card-mother-roll')) el('mother-roll-home').after(el('card-mother-roll'));
         if(el('defects-home') && el('card-defects')) el('defects-home').after(el('card-defects'));
+        for(const id of ['card-defects','card-mother-roll']){
+            el(id)?.classList.add('collapsed');
+            el(id)?.querySelector('.section-toggle')?.setAttribute('aria-expanded','false');
+        }
     }
 }
 

@@ -101,8 +101,9 @@ export function renderInlineExecutionCard() {
     const host = document.getElementById('inline-execution-body');
     if (!badge || !host) return;
     if (!state.activeTask) {
-        badge.textContent = '待保存任务';
-        host.innerHTML = '<p class="muted-note">先保存任务需求并生成排料方案，再下达执行单锁料。</p>';
+        badge.hidden = true;
+        host.hidden = true;
+        host.innerHTML = '';
         return;
     }
     const writer = executionWriter();
@@ -111,19 +112,21 @@ export function renderInlineExecutionCard() {
     const view = currentExecution() || (state.taskExecutions || []).find(v => ['RUNNING', 'RELEASED', 'DRAFT'].includes(v.effectiveState));
     const canCreate = canUseCurrentPlan() && (!view || ['CANCELLED', 'EXPIRED', 'REPORTED'].includes(view.effectiveState));
     if (!view && !canCreate) {
-        badge.textContent = '待排料';
-        host.innerHTML = '<p class="muted-note">生成排料方案后，在此直接创建执行单锁料、确认机台开工并填写实切报工。</p>';
+        badge.hidden = true;
+        host.hidden = true;
+        host.innerHTML = '';
         return;
     }
+    badge.hidden = false;
+    host.hidden = false;
     if (canCreate && (!view || view.effectiveState === 'REPORTED')) {
-        badge.textContent = '方案待下达';
+        badge.textContent = '方案就绪';
         host.innerHTML = `
             <form class="inline-exec-form" id="inline-exec-create-form">
                 <div class="inline-exec-row">
-                    <label>加工工位<input class="prop-input" name="inlineStation" value="裁床 A-01" required maxlength="100" placeholder="例如：裁床 A-01"></label>
-                    <button class="tool-btn active" type="submit" data-inline-execution-action="create">工位快捷建单</button>
+                    <input class="prop-input" name="inlineStation" aria-label="加工工位" value="裁床 A-01" required maxlength="100" placeholder="加工工位（如：裁床 A-01）">
+                    <button class="tool-btn active" type="submit" data-inline-execution-action="quick-start">一键锁料开工</button>
                 </div>
-                <small class="muted-note">当前方案共 ${pending.result.pieces.length} 件 · 建单后可下达预约锁料</small>
             </form>`;
         const form = host.querySelector('#inline-exec-create-form');
         form.onsubmit = async event => {
@@ -132,7 +135,13 @@ export function renderInlineExecutionCard() {
             if (!station) return;
             try {
                 form.inert = true;
-                await writer.command('create', {taskId: state.activeTask.id, planId: pending.result.planId}, {station});
+                const created = await writer.command('create', {taskId: state.activeTask.id, planId: pending.result.planId}, {station});
+                const execObj = created?.execution || created;
+                if (execObj?.id) {
+                    const released = await writer.command('release', execObj, {reason: '', reservationSeconds: 1800});
+                    const relObj = released?.execution || released;
+                    if (relObj?.id) await writer.command('start', relObj, {reason: '', reservationSeconds: 0});
+                }
                 await refreshTaskProgress();
             } catch (error) {
                 showToast(error.message, 'error');
@@ -176,9 +185,13 @@ export function renderInlineExecutionCard() {
             btn.type = 'button';
             btn.className = 'tool-btn active';
             btn.dataset.inlineExecutionAction = 'release';
-            btn.textContent = '下达并预约锁料 (30m)';
+            btn.textContent = '锁料并开工';
             btn.disabled = !view.allowedActions?.release?.allowed || !!unresolved.length || !!queuedReports().length;
-            btn.onclick = () => runInline(() => writer.command('release', e, {reason: '', reservationSeconds: 1800}));
+            btn.onclick = () => runInline(async () => {
+                const released = await writer.command('release', e, {reason: '', reservationSeconds: 1800});
+                const relObj = released?.execution || released;
+                if (relObj?.id) await writer.command('start', relObj, {reason: '', reservationSeconds: 0});
+            });
             actionsHost.append(btn);
         } else if (view.effectiveState === 'RELEASED') {
             const btn = document.createElement('button');
@@ -194,7 +207,7 @@ export function renderInlineExecutionCard() {
             btn.type = 'button';
             btn.className = 'tool-btn active';
             btn.dataset.inlineExecutionAction = 'report';
-            btn.textContent = '填写实切结果（报工）';
+            btn.textContent = '实切报工';
             btn.disabled = !view.allowedActions?.report?.allowed || !!unresolved.length;
             btn.onclick = () => runInline(async () => {
                 if (state.pendingPlan?.result?.planId !== e.planId || !canUseCurrentPlan()) {

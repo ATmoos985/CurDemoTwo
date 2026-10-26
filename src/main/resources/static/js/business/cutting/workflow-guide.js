@@ -31,7 +31,13 @@ export function readWorkflowState(plan = {}) {
 
 /** Stage buttons reveal existing surfaces. They never save, solve, report or move the cutting window. */
 export function navigateWorkflowStage(stage, target) {
-    if (!target && stage === 0) {openDemandManager();return;}
+    if (!target && stage === 0) {
+        if (el('sidebar-left')?.classList.contains('collapsed')) toggleSidebar('left');
+        const focusEl = el('task-name') || el('card-demands');
+        focusEl?.focus({preventScroll:true});
+        el('card-demands')?.scrollIntoView({block:'nearest'});
+        return;
+    }
     if (!target && stage === 1) {openMaterialDetails();return;}
     if (!target && stage === 3) {
         if(state.pendingPlan || state.taskExecutions.some(v=>v.reservationActive || v.effectiveState==='DRAFT'))window.camApp.openTaskExecutions();
@@ -40,7 +46,7 @@ export function navigateWorkflowStage(stage, target) {
     }
     const node = document.querySelector(target || ['#card-demands','#card-mother-roll','#card-material-balance','#right-roll-actions'][stage]);
     if (!node) return;
-    if (stage === 0) openDemandManager();
+    if (stage === 0 && el('demand-manager')?.open) openDemandManager();
     if (node.closest('#material-details')) openMaterialDetails();
     const side = node.closest('#sidebar-left') ? 'left' : 'right';
     if (!node.closest('dialog') && el('sidebar-'+side)?.classList.contains('collapsed')) toggleSidebar(side);
@@ -49,7 +55,7 @@ export function navigateWorkflowStage(stage, target) {
         if (parent.classList.contains('collapsible')) {parent.classList.remove('collapsed');parent.querySelector('.section-toggle')?.setAttribute('aria-expanded','true');}
         if (parent.tagName === 'DETAILS') parent.open = true;
     }
-    const focus = stage === 0 && !node.closest('#demand-manager') ? el('task-name') : target ? node : node.querySelector('input,select,button') || node;
+    const focus = stage === 0 && !node.closest('#demand-manager') ? (target ? node : el('task-name')) : target ? node : node.querySelector('input,select,button') || node;
     if (!focus.matches('input,select,button,a,[tabindex]')) focus.tabIndex = -1;
     focus.focus({preventScroll:true}); node.scrollIntoView({block:'nearest'});
 }
@@ -85,10 +91,6 @@ export function renderWorkflowGuide(plan = {}) {
         if (flow.action === 'execution') window.camApp.openTaskExecutions();
         if (flow.action === 'advance') window.camApp.smartAdvanceBed();
     };
-    const nextHost = flow.stage >= 2 ? footer : el('left-input-actions');
-    if (next.parentElement !== nextHost) nextHost.prepend(next);
-    const statusHost = flow.stage >= 2 ? footer : el('input-flow-status');
-    if (el('workflow-current').parentElement !== statusHost) statusHost.prepend(el('workflow-current'),el('station-action-hint'));
     const solve = el(actions.solve);solve.disabled = !!busy || !flow.canSolve;solve.hidden = !flow.canSolve;
     solve.textContent = busy === '正在生成方案…' ? busy : plan.ready || plan.edited ? '重新排料' : '生成排料方案';
     const secondary = el('station-secondary-actions');
@@ -118,7 +120,7 @@ export function renderWorkflowGuide(plan = {}) {
     if(el('lbl-current-roll-id'))el('lbl-current-roll-id').textContent=data.materialAvailable?data.rollId:'未装载';
     if(el('current-task-name'))el('current-task-name').textContent = value('task-name') || '未命名任务';
     const receipts = (state.taskReports || []).filter(r => r.status !== 'REVERSED');
-    if(el('output-empty'))el('output-empty').hidden = !!plan.ready || !!plan.edited || !!queue.length || !!receipts.length;
+    if(el('output-empty'))el('output-empty').hidden = true;
     renderStationOrders(queue,receipts);
     renderInlineExecutionCard();
     scheduleRemnantAvailability();

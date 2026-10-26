@@ -125,7 +125,6 @@
                                     <button type="button" class="tool-btn active" data-scene-mode="curtain">窗帘定高定宽</button>
                                     <button type="button" class="tool-btn" data-scene-mode="garment">服装款式尺码</button>
                                     <button type="button" class="tool-btn" data-scene-mode="general">通用矩形异形</button>
-                                    <a class="tool-btn" href="/linear.html" data-scene-mode="linear" title="切换至一维母卷分切作业">一维分切 ↗</a>
                                 </div>
                             </section>
                             <section id="task-details" class="task-metadata" aria-label="任务信息">
@@ -145,16 +144,13 @@
                         </div>
                     </div>
                     <div class="panel-section section-card-blue collapsible collapsed" id="card-mother-roll">
-                        <div class="section-header" title="点击折叠/展开用料选择与详情"><button class="section-title-wrap section-toggle" onclick="toggleSectionCollapse(this)" aria-expanded="false">
+                        <div class="section-header" title="点击折叠/展开用料与库存详情"><button class="section-title-wrap section-toggle" onclick="toggleSectionCollapse(this)" aria-expanded="false">
                                 <span class="collapse-arrow">▼</span>
-                                <span>用料选择与详情</span>
-                            </button>
-                            <button class="tool-btn" onclick="event.stopPropagation(); openMaterialModal('rolls')" title="进入母卷档案与瑕疵库管理二级页面">
-                                母卷档案 ↗
+                                <span>用料与库存详情</span>
                             </button>
                         </div>
                         <div class="section-content">
-                            <div class="material-selection"><button class="tool-btn active" onclick="matchTaskMaterials()">选择本次用料</button><span id="source-kind">母卷</span></div>
+                            <div class="material-selection" hidden><button class="tool-btn active" onclick="matchTaskMaterials()">选择本次用料</button><span id="source-kind">母卷</span></div>
                             <div id="source-remnant-summary" hidden><b id="lbl-shelf-active-id"></b><p id="lbl-shelf-active-size"></p><p id="lbl-shelf-active-loc"></p><span id="lbl-shelf-active-status"></span><button class="tool-btn" onclick="matchTaskMaterials({type:'roll'})">选择母卷</button></div>
                             <div id="source-roll-summary"><div class="prop-row">
                                 <span class="prop-label">母卷批号</span>
@@ -280,7 +276,7 @@
             <button class="sidebar-edge-toggle edge-toggle-right" id="edge-toggle-right" onclick="toggleSidebar('right')" title="点击收起右侧面板">▶</button>
 
             <div class="workspace-heading canvas-heading"><h1>排料画布</h1><div class="canvas-view-actions">
-                <div class="canvas-action-group" role="group" aria-label="库存与料头"><button class="tool-btn" onclick="openMaterialModal()">库存档案</button><button class="tool-btn remnant-entry-btn" id="btn-open-remnants" onclick="openRemnantModal()">料头 <span class="badge-rem" id="remnant-count-badge">0 块</span></button></div>
+                <div class="canvas-action-group" role="group" aria-label="库存与料头"><button class="tool-btn remnant-entry-btn" id="btn-open-remnants" onclick="openRemnantModal()">料头 <span class="badge-rem" id="remnant-count-badge">0 块</span></button></div>
                 <details class="canvas-more"><summary class="tool-btn" aria-label="更多工位操作">更多 ···</summary><div class="canvas-more-menu"><button class="tool-btn" id="btn-station-clear" onclick="handleClearStationClick(); this.closest('details').open=false">清除本工位排料</button><button class="tool-btn" onclick="handleClearStationDblClick(); this.closest('details').open=false">清空整卷预览…</button><button class="tool-btn" id="btn-reset-roll-cutting" onclick="resetContinuousCutting(); this.closest('details').open=false">重置本卷报工…</button></div></details>
             </div></div>
             <div class="canvas-nav-toolbar">
@@ -418,15 +414,6 @@
                         </details>
                     </div>
                 </div>
-                <section class="panel-section" id="card-station-execution" aria-label="执行单与机台锁料">
-                    <div class="section-header">
-                        <span class="section-title-wrap">执行单与机台锁料 <span class="badge-rem" id="inline-execution-state">待排料</span></span>
-                        <button class="tool-btn" type="button" onclick="openTaskExecutions()">执行明细 ↗</button>
-                    </div>
-                    <div class="section-content" id="inline-execution-body">
-                        <p class="muted-note">生成排料方案后，在此下达执行单锁料、确认机台开工并填写实切报工。</p>
-                    </div>
-                </section>
                 <section class="panel-section" id="station-work-orders" hidden aria-label="本次工位工单">
                     <div class="section-header"><span class="section-title-wrap">本次工位工单</span><span id="station-work-orders-count" class="badge-rem"></span></div>
                     <p class="muted-note">逐工位记录，最后统一报工；展开可查看工单。</p>
@@ -440,9 +427,13 @@
             <div class="sidebar-pinned-footer" id="right-sidebar-actions-footer" style="border-top: 1px solid var(--panel-border); background: var(--panel-bg); flex-shrink: 0;">
                 <!-- 母卷开卷工位排料搭切执行控制 -->
                 <div id="right-roll-actions" class="panel-section action-footer-section" style="padding: 10px 14px 12px 14px;">
-                    <p id="output-empty" class="muted">生成方案后在此核对产出</p>
-                    <strong id="workflow-current" role="status">完善需求</strong>
+                    <div class="workflow-status-header">
+                        <strong id="workflow-current" role="status">完善需求</strong>
+                        <span class="badge-rem" id="inline-execution-state">待排料</span>
+                    </div>
+                    <p id="output-empty" class="muted" hidden>生成方案后在此核对产出</p>
                     <p id="station-action-hint" class="station-action-hint" role="status">先生成方案，再核对实切并报工保存。</p>
+                    <div id="inline-execution-body" class="inline-execution-footer" hidden></div>
                     <button id="btn-workflow-next" class="tool-btn" type="button">完善需求信息</button>
                     <div id="plan-edit-controls" class="plan-edit-controls" hidden>
                         <p id="plan-edit-message" role="status"></p>
