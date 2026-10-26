@@ -1,4 +1,6 @@
-package com.example.cutdemotwo.algorithm.solver;
+package com.example.cutdemotwo.algorithm.nesting;
+
+import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
 
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 

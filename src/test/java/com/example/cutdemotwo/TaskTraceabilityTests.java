@@ -5,10 +5,10 @@ import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.PieceDemand;
 import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.business.model.SolveResponse;
-import com.example.cutdemotwo.algorithm.solver.CrossCutSolverService;
+import com.example.cutdemotwo.algorithm.nesting.CrossCutSolverService;
 import com.example.cutdemotwo.business.cutting.CuttingWorkflowService;
 import com.example.cutdemotwo.business.cutting.RemnantService;
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.nesting.SolverFactory;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
@@ -20,7 +20,7 @@ class TaskTraceabilityTests {
     RemnantService inventory;
     CuttingWorkflowService workflow;
     CuttingTask task;
-    @BeforeEach void setup(){inventory=new RemnantService(temp.resolve("trace.json").toString());workflow=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),inventory);
+    @BeforeEach void setup(){inventory=new RemnantService(temp.resolve("trace.json").toString());workflow=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         task=inventory.saveTask(new CuttingTask(null,"追溯任务","TC涤棉-B2026","ORDER-TRACE",0,List.of(new CuttingTask.Line(1,"主帘",2000,1000,3,false))));}
     SolveResponse solve(){var request=new SolveRequest();request.setTaskId(task.id());request.setTaskRevision(task.revision());request.setWindowStartY(5000);request.setRollL(3000);request.setAllowLongitudinal(false);
         request.setDemands(List.of(new PieceDemand(1,"主帘",2000,1000,3,false)));return workflow.solve(request);}

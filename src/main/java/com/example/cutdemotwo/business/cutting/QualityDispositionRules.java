@@ -1,6 +1,6 @@
 package com.example.cutdemotwo.business.cutting;
 
-import com.example.cutdemotwo.algorithm.solver.PolygonGeometry;
+import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
 import com.example.cutdemotwo.business.model.QualityDisposition;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import java.util.Set;

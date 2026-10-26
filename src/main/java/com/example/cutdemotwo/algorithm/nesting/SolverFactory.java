@@ -1,4 +1,11 @@
-package com.example.cutdemotwo.algorithm.solver;
+package com.example.cutdemotwo.algorithm.nesting;
+
+import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
+
+import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
+import com.example.cutdemotwo.algorithm.api.NestingSolver;
+import com.example.cutdemotwo.contracts.jobs.ProblemCheck;
+import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
 
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import com.example.cutdemotwo.contracts.nesting.NestingResult;
@@ -11,7 +18,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Comparator;
 import java.util.HashMap;
-import static com.example.cutdemotwo.algorithm.solver.NestingValidation.*;
+import static com.example.cutdemotwo.algorithm.geometry.NestingValidation.*;
 
 /**
  * 排料求解策略工厂 (Strategy Factory)
@@ -19,7 +26,7 @@ import static com.example.cutdemotwo.algorithm.solver.NestingValidation.*;
  * 原生引擎不可用时只在此处显式降级到已注册的替代引擎，结果始终标注实际运行的引擎和降级原因。
  */
 @Service
-public class SolverFactory {
+public class SolverFactory implements NestingSolver {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SolverFactory.class);
     /** Native engine id → registered stand-in that may run, with a stated reason, while the native one is unavailable. */
     private static final Map<String, String> FALLBACKS = Map.of(
@@ -65,7 +72,6 @@ public class SolverFactory {
     }
 
     /** Validation/selection only: does not execute an engine or mutate business data. */
-    public record ProblemCheck(String status, String message, String requestedEngine, String engine, String fallbackReason) {}
     private record Selection(String requested, ICutSolverEngine engine, String fallbackReason) {}
 
     private Selection select(NestingProblem problem, boolean allowFallback) {
@@ -153,6 +159,22 @@ public class SolverFactory {
         long start = System.nanoTime();
         var result = ManualLayoutValidator.validate(problem, pieces);
         return toResult(problem, result, "manual-guillotine", "1", elapsed(start), "manual-guillotine", null);
+    }
+
+    @Override
+    public List<NestingResult.Placement> validateContourAdjustment(NestingProblem problem, List<PlacedPiece> pieces) {
+        validate(problem);
+        require("CONTOUR".equals(problem.process().mode()), "轮廓调整须使用 CONTOUR 工艺");
+        require(pieces != null, "调整裁片不能为空");
+        var output = new EngineResult();
+        for (var p : pieces) {
+            require(p != null && p.getShape() != null && p.getDemandId() != null, "调整缺少裁片轮廓或需求归属");
+            output.getPlacements().add(new NestingResult.Placement(p.getId(), p.getDemandId(), p.getName(),
+                    p.getX(), p.getY(), p.getShape(), p.getRotationDegrees()));
+        }
+        String error = PolygonResultValidator.validate(problem, output);
+        if (error != null) throw new IllegalArgumentException(error);
+        return List.copyOf(output.getPlacements());
     }
 
     private static void precision(double value, double resolution) {

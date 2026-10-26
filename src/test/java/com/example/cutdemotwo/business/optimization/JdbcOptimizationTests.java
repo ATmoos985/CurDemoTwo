@@ -1,6 +1,6 @@
 package com.example.cutdemotwo.business.optimization;
 
-import com.example.cutdemotwo.algorithm.solver.*;
+import com.example.cutdemotwo.algorithm.nesting.*;
 import com.example.cutdemotwo.contracts.jobs.*;
 import com.example.cutdemotwo.persistence.*;
 import org.flywaydb.core.Flyway;
@@ -168,7 +168,7 @@ class JdbcOptimizationTests {
         assertThrows(IllegalStateException.class,()->new JdbcOptimizationJobStore(source).configure(2,1,100));
     }
     OptimizationService service(ICutSolverEngine engine) {
-        var service=new OptimizationService(new SolverFactory(List.of(engine)),new JdbcOptimizationJobStore(source),1,1,100);
+        var service=new OptimizationService(new SolverFactory(List.of(engine)), new com.example.cutdemotwo.algorithm.slitting.LinearSlittingSolverEngine(),new JdbcOptimizationJobStore(source),1,1,100);
         services.add(service);return service;
     }
     @Test void secondServiceDoesNotFailActiveWorkAndCanQueryAndCancelIt()throws Exception {
@@ -192,7 +192,7 @@ class JdbcOptimizationTests {
         var input=request("crosscut",1,3,false);var job=first.submit("durable-service-key",input);
         assertEquals("SUCCEEDED",finished(first,job.id()).state());
         first.close();
-        var second=new OptimizationService(new SolverFactory(List.of()),new JdbcOptimizationJobStore(source),1,1,100);services.add(second);
+        var second=new OptimizationService(new SolverFactory(List.of()), new com.example.cutdemotwo.algorithm.slitting.LinearSlittingSolverEngine(),new JdbcOptimizationJobStore(source),1,1,100);services.add(second);
         assertEquals(job.id(),second.submit("durable-service-key",input).id());
         assertEquals("PASSED",second.result(job.id()).validationStatus());
         assertEquals(input,second.input(job.id()));

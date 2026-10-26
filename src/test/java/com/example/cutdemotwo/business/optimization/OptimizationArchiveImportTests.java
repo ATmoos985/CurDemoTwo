@@ -1,6 +1,6 @@
 package com.example.cutdemotwo.business.optimization;
 
-import com.example.cutdemotwo.algorithm.solver.*;
+import com.example.cutdemotwo.algorithm.nesting.*;
 import com.example.cutdemotwo.contracts.jobs.*;
 import com.example.cutdemotwo.persistence.*;
 import org.flywaydb.core.Flyway;
@@ -53,7 +53,7 @@ class OptimizationArchiveImportTests {
         assertEquals(new String(original,java.nio.charset.StandardCharsets.UTF_8),
                 sql.queryForObject("SELECT original_json FROM optimization_archive_entry WHERE job_id=?",String.class,interrupted.job().id()));
         assertEquals(2,sql.queryForObject("SELECT COUNT(*) FROM optimization_attempt WHERE token=0 AND outcome='IMPORTED'",Integer.class));
-        try(var service=new OptimizationService(new SolverFactory(List.of()),target,1,1,100)) {
+        try(var service=new OptimizationService(new SolverFactory(List.of()), new com.example.cutdemotwo.algorithm.slitting.LinearSlittingSolverEngine(),target,1,1,100)) {
             assertEquals(finished.job().id(),service.submit(finished.idempotencyKey(),finished.input()).id());
             assertEquals(finished.result(),service.result(finished.job().id()));
             assertEquals("FAILED",service.submit(interrupted.idempotencyKey(),interrupted.input()).state());

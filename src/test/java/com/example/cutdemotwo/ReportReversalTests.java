@@ -6,10 +6,10 @@ import com.example.cutdemotwo.business.model.PieceDemand;
 import com.example.cutdemotwo.business.model.RemnantStock;
 import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.persistence.*;
-import com.example.cutdemotwo.algorithm.solver.CrossCutSolverService;
+import com.example.cutdemotwo.algorithm.nesting.CrossCutSolverService;
 import com.example.cutdemotwo.business.cutting.CuttingWorkflowService;
 import com.example.cutdemotwo.business.cutting.RemnantService;
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.nesting.SolverFactory;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
@@ -28,7 +28,7 @@ class ReportReversalTests {
                 List.of(new CuttingTask.Line(1, "裁片", 2000, 1000, 5, false))));
     }
     CuttingWorkflowService workflow(RemnantService service) {
-        return new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), service);
+        return new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), service, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
     }
     SolveRequest request(double start) {
         var request = new SolveRequest();

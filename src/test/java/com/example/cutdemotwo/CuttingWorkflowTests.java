@@ -9,10 +9,10 @@ import com.example.cutdemotwo.business.model.SolveResponse;
 import com.example.cutdemotwo.contracts.geometry.Defect;
 import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
 import com.example.cutdemotwo.contracts.geometry.RemnantPiece;
-import com.example.cutdemotwo.algorithm.solver.CrossCutSolverService;
+import com.example.cutdemotwo.algorithm.nesting.CrossCutSolverService;
 import com.example.cutdemotwo.business.cutting.CuttingWorkflowService;
 import com.example.cutdemotwo.business.cutting.RemnantService;
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.nesting.SolverFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -28,7 +28,7 @@ class CuttingWorkflowTests {
     @Test
     void expandingFeedWindowCutsOneLongWholePieceAndReportsOnlyActualLength() {
         RemnantService inventory = new RemnantService(temp.resolve("dynamic-feed.json").toString());
-        CuttingWorkflowService workflow = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), inventory);
+        CuttingWorkflowService workflow = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         CuttingTask task = inventory.saveTask(new CuttingTask(null, "动态拉布", "TC涤棉-B2026", "", 0,
                 List.of(new CuttingTask.Line(1, "四米整幅", 2000, 4000, 1, false)),
                 new CuttingTask.Process(2000, 0, "right-bottom", "horizontal", false, false)));
@@ -74,7 +74,7 @@ class CuttingWorkflowTests {
         Path state = temp.resolve("inventory.json");
         RemnantService inventory = new RemnantService(state.toString());
         CuttingWorkflowService workflow = new CuttingWorkflowService(
-                new SolverFactory(List.of(new CrossCutSolverService())), inventory);
+                new SolverFactory(List.of(new CrossCutSolverService())), inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         SolveRequest request = new SolveRequest();
         request.setAllowLongitudinal(false);
         request.setRollW(2000);
@@ -106,7 +106,7 @@ class CuttingWorkflowTests {
     void remnantIsConsumedOnceAndCannotCreateChildrenOrDeductMotherRoll() {
         Path file = temp.resolve("remnant.json");
         RemnantService inventory = new RemnantService(file.toString());
-        CuttingWorkflowService workflow = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), inventory);
+        CuttingWorkflowService workflow = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         double before = inventory.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength();
         String parentId = "REM-202609-001";
         RemnantStock parent = inventory.scanOrGetById(parentId);
@@ -132,7 +132,7 @@ class CuttingWorkflowTests {
         assertEquals(before, inventory.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength());
         RemnantService reopened = new RemnantService(file.toString());
         assertNull(reopened.scanOrGetById(parentId));
-        assertThrows(IllegalArgumentException.class, () -> new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), reopened).solve(request));
+        assertThrows(IllegalArgumentException.class, () -> new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), reopened, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService()).solve(request));
         reopened.reverseReport(plan.getPlanId(), "误报撤回");
         assertNotNull(reopened.scanOrGetById(parentId));
     }
@@ -141,7 +141,7 @@ class CuttingWorkflowTests {
     void unreportedPlansRemainRecoverableAfterMoreThanOneHundredPreviewsAndRestart() {
         RemnantService inventory = new RemnantService(temp.resolve("bounded.json").toString());
         CuttingWorkflowService workflow = new CuttingWorkflowService(
-                new SolverFactory(List.of(new CrossCutSolverService())), inventory);
+                new SolverFactory(List.of(new CrossCutSolverService())), inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         SolveRequest request = new SolveRequest();
         request.setAllowLongitudinal(false);
         request.setRollW(2000);
@@ -151,7 +151,7 @@ class CuttingWorkflowTests {
         SolveResponse latest = first;
         for (int i = 0; i < 100; i++) latest = workflow.solve(request);
         CuttingWorkflowService reopened = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),
-                new RemnantService(temp.resolve("bounded.json").toString()));
+                new RemnantService(temp.resolve("bounded.json").toString()), new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         assertNotNull(reopened.getPlan(first.getPlanId()));
         assertNotNull(reopened.getPlan(latest.getPlanId()));
         assertEquals(1, reopened.confirm(new CutReport(first.getPlanId(), 1600, 1,

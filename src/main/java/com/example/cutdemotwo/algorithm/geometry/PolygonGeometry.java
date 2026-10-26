@@ -1,4 +1,4 @@
-package com.example.cutdemotwo.algorithm.solver;
+package com.example.cutdemotwo.algorithm.geometry;
 
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Point;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Shape;
@@ -9,7 +9,7 @@ import java.awt.geom.PathIterator;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import static com.example.cutdemotwo.algorithm.solver.NestingValidation.*;
+import static com.example.cutdemotwo.algorithm.geometry.NestingValidation.*;
 
 /** Straight-edge geometry in source coordinates. No bounding-box approximation of material area. */
 public final class PolygonGeometry {

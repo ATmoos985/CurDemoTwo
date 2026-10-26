@@ -1,4 +1,4 @@
-package com.example.cutdemotwo.algorithm.solver;
+package com.example.cutdemotwo.contracts.nesting;
 
 import java.util.List;
 

@@ -5,10 +5,10 @@ import com.example.cutdemotwo.business.model.PieceDemand;
 import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.business.model.SolveResponse;
 import com.example.cutdemotwo.persistence.*;
-import com.example.cutdemotwo.algorithm.solver.CrossCutSolverService;
+import com.example.cutdemotwo.algorithm.nesting.CrossCutSolverService;
 import com.example.cutdemotwo.business.cutting.CuttingWorkflowService;
 import com.example.cutdemotwo.business.cutting.RemnantService;
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.nesting.SolverFactory;
 import org.flywaydb.core.Flyway;
 import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.*;
@@ -122,6 +122,6 @@ class JdbcInventoryTests {
         assertEquals(54000,reopened.getMotherRoll(request.getRollId()).getCurrentRemainingLength());
     }
     private CuttingWorkflowService workflow(RemnantService inventory) {
-        return new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), inventory);
+        return new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
     }
 }

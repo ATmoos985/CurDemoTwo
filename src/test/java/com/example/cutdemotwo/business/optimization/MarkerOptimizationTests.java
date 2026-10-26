@@ -1,6 +1,8 @@
 package com.example.cutdemotwo.business.optimization;
 
-import com.example.cutdemotwo.algorithm.solver.*;
+import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
+
+import com.example.cutdemotwo.algorithm.nesting.*;
 import com.example.cutdemotwo.contracts.jobs.*;
 import com.example.cutdemotwo.contracts.nesting.*;
 import com.example.cutdemotwo.persistence.FileOptimizationJobStore;
@@ -71,7 +73,7 @@ class MarkerOptimizationTests {
     @Test void markerJobPersistsHistoryAndUsesOccupiedAreaForItsSeparateMetric() throws Exception {
         var engine=new TrialsEngine();var factory=new SolverFactory(List.of(engine));
         String id;
-        try(var service=new OptimizationService(factory,new FileOptimizationJobStore(temp),1,1,100)){
+        try(var service=new OptimizationService(factory, new com.example.cutdemotwo.algorithm.slitting.LinearSlittingSolverEngine(),new FileOptimizationJobStore(temp),1,1,100)){
             id=service.submit("marker-durable",request("trials")).id();
             assertEquals("SUCCEEDED",OptimizationServiceTests.finished(service,id).state());
             var result=service.result(id);
@@ -80,7 +82,7 @@ class MarkerOptimizationTests {
             assertEquals(30000,metric.denominator());assertEquals(20000,metric.numerator());
             assertEquals(200.0/3,metric.value(),.0001);
         }
-        try(var reopened=new OptimizationService(factory,new FileOptimizationJobStore(temp),1,1,100)){
+        try(var reopened=new OptimizationService(factory, new com.example.cutdemotwo.algorithm.slitting.LinearSlittingSolverEngine(),new FileOptimizationJobStore(temp),1,1,100)){
             assertEquals(3,reopened.result(id).marker().trials().size());
             assertEquals(id,reopened.submit("marker-durable",request("trials")).id());
         }
@@ -112,7 +114,7 @@ class MarkerOptimizationTests {
                 return super.solve(p);
             }
         };
-        try(var service=new OptimizationService(new SolverFactory(List.of(engine)),new FileOptimizationJobStore(temp),1,1,100)){
+        try(var service=new OptimizationService(new SolverFactory(List.of(engine)), new com.example.cutdemotwo.algorithm.slitting.LinearSlittingSolverEngine(),new FileOptimizationJobStore(temp),1,1,100)){
             var job=service.submit("marker-stop",request("trials"));
             assertTrue(entered.await(2,TimeUnit.SECONDS));
             service.cancel(job.id());
@@ -125,7 +127,7 @@ class MarkerOptimizationTests {
     }
     @Test void invalidLaterTrialFailsJobWhileRetainingOnlyEarlierVerifiedResult() throws Exception {
         var engine=new TrialsEngine();engine.invalidSecond=true;
-        try(var service=new OptimizationService(new SolverFactory(List.of(engine)),new FileOptimizationJobStore(temp),1,1,100)){
+        try(var service=new OptimizationService(new SolverFactory(List.of(engine)), new com.example.cutdemotwo.algorithm.slitting.LinearSlittingSolverEngine(),new FileOptimizationJobStore(temp),1,1,100)){
             var job=service.submit("marker-invalid",request("trials"));
             var done=OptimizationServiceTests.finished(service,job.id());
             assertEquals("FAILED",done.state());assertEquals("INVALID_RESULT",done.code());
@@ -139,7 +141,7 @@ class MarkerOptimizationTests {
                 List.of(new NestingProblem.Part(1,"too tall",NestingProblem.Shape.rectangle(100,2000),1,false)),
                 p.process(),p.engine(),p.timeLimitSeconds());
         var input=new OptimizationRequest(r.schemaVersion(),r.problemType(),r.clientRequestId(),impossible,false,true,r.strategy());
-        try(var service=new OptimizationService(new SolverFactory(List.of(new JavaIrregularSolverEngine())),new FileOptimizationJobStore(temp),1,1,100)){
+        try(var service=new OptimizationService(new SolverFactory(List.of(new JavaIrregularSolverEngine())), new com.example.cutdemotwo.algorithm.slitting.LinearSlittingSolverEngine(),new FileOptimizationJobStore(temp),1,1,100)){
             var job=service.submit("marker-incomplete",input);
             assertEquals("SUCCEEDED",OptimizationServiceTests.finished(service,job.id()).state());
             var result=service.result(job.id());

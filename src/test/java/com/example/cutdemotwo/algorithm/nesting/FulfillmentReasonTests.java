@@ -1,9 +1,9 @@
-package com.example.cutdemotwo.algorithm.solver;
+package com.example.cutdemotwo.algorithm.nesting;
 
 import com.example.cutdemotwo.business.model.PieceDemand;
 import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
-import com.example.cutdemotwo.algorithm.solver.CrossCutSolverService;
+import com.example.cutdemotwo.algorithm.nesting.CrossCutSolverService;
 import com.example.cutdemotwo.business.cutting.FabricSolveAdapter;
 import org.junit.jupiter.api.Test;
 import java.util.List;

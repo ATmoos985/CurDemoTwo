@@ -1,6 +1,6 @@
 package com.example.cutdemotwo;
 
-import com.example.cutdemotwo.algorithm.solver.*;
+import com.example.cutdemotwo.algorithm.nesting.*;
 import com.example.cutdemotwo.business.cutting.*;
 import com.example.cutdemotwo.business.model.*;
 import com.example.cutdemotwo.persistence.*;
@@ -25,7 +25,7 @@ class ExecutionOrderTests {
                 List.of(new CuttingTask.Line(1,"裁片",2000,1000,quantity,false))));
     }
     CuttingWorkflowService workflow(RemnantService service) {
-        return new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),service);
+        return new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),service, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
     }
     SolveResponse plan(RemnantService service,boolean remnant,int quantity) {
         var request=new SolveRequest();

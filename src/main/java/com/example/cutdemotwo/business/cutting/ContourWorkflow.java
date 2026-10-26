@@ -6,10 +6,8 @@ import com.example.cutdemotwo.contracts.geometry.CutStep;
 import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import com.example.cutdemotwo.contracts.nesting.NestingResult;
-import com.example.cutdemotwo.algorithm.solver.EngineResult;
-import com.example.cutdemotwo.algorithm.solver.PolygonGeometry;
-import com.example.cutdemotwo.algorithm.solver.PolygonResultValidator;
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
+import com.example.cutdemotwo.algorithm.api.NestingSolver;
 import java.util.*;
 
 /** Uses the same saved task/plan/report lifecycle for true part outlines. */
@@ -52,7 +50,7 @@ public final class ContourWorkflow {
                         "MAXIMIZE_PIECE_AREA", r.getPieceGap()), "auto", r.getTimeLimitSeconds());
     }
 
-    static SolveResponse solve(SolverFactory factory, SolveRequest r) {
+    static SolveResponse solve(NestingSolver factory, SolveRequest r) {
         var input = problem(r, r.getRollL());
         var best = factory.solve(input);
         if (!complete(input, best)) {
@@ -87,19 +85,12 @@ public final class ContourWorkflow {
         return pieces.stream().mapToDouble(p -> p.y()+p.shape().height()).max().orElse(0);
     }
 
-    static SolveResponse adjust(SolveRequest r, List<PlacedPiece> pieces) {
+    static SolveResponse adjust(NestingSolver factory, SolveRequest r, List<PlacedPiece> pieces) {
         var input = problem(r, r.getRollL());
-        var output = new EngineResult();
-        for (var p : pieces) {
-            if (p.getShape() == null || p.getDemandId() == null) throw new IllegalArgumentException("调整缺少裁片轮廓或需求归属");
-            output.getPlacements().add(new NestingResult.Placement(p.getId(), p.getDemandId(), p.getName(), p.getX(), p.getY(),
-                    p.getShape(), p.getRotationDegrees()));
-        }
-        String error = PolygonResultValidator.validate(input, output);
-        if (error != null) throw new IllegalArgumentException(error);
-        for (var d : input.parts()) if (output.getPlacements().stream().filter(p -> p.demandId()==d.id()).count()!=d.quantity())
+        var placements = factory.validateContourAdjustment(input, pieces);
+        for (var d : input.parts()) if (placements.stream().filter(p -> p.demandId()==d.id()).count()!=d.quantity())
             throw new IllegalArgumentException("唛架调整必须保留全部需求裁片，不能漏片");
-        return response(r, output.getPlacements(), "validated-contour");
+        return response(r, placements, "validated-contour");
     }
 
     private static SolveResponse response(SolveRequest r, List<NestingResult.Placement> placements, String engine) {

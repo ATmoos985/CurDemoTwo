@@ -1,30 +1,30 @@
-package com.example.cutdemotwo.algorithm.solver;
+package com.example.cutdemotwo.algorithm.geometry;
 
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import java.util.HashSet;
 import java.util.Set;
 
-final class NestingValidation {
+public final class NestingValidation {
     private NestingValidation() {}
-    static class Rejected extends IllegalArgumentException {
-        final String status;
+    public static class Rejected extends IllegalArgumentException {
+        public final String status;
         Rejected(String status, String message) { super(message); this.status = status; }
     }
-    static void require(boolean condition, String message) {
+    public static void require(boolean condition, String message) {
         if (!condition) throw new Rejected("INVALID_INPUT", message);
     }
-    static void supported(boolean condition, String message) {
+    public static void supported(boolean condition, String message) {
         if (!condition) throw new Rejected("UNSUPPORTED", message);
     }
-    static boolean positive(double n) { return Double.isFinite(n) && n > 0 && n <= 10_000_000; }
-    static boolean nonnegative(double n) { return Double.isFinite(n) && n >= 0 && n <= 10_000_000; }
-    static void rectangle(NestingProblem.Shape shape) {
+    public static boolean positive(double n) { return Double.isFinite(n) && n > 0 && n <= 10_000_000; }
+    public static boolean nonnegative(double n) { return Double.isFinite(n) && n >= 0 && n <= 10_000_000; }
+    public static void rectangle(NestingProblem.Shape shape) {
         require(shape != null && shape.type() != null, "必须提供几何类型");
         supported("RECTANGLE".equals(shape.type()), "当前工艺仅支持 RECTANGLE，多边形请使用 CONTOUR 工艺");
         require(shape.vertices().isEmpty(), "矩形不能同时提供多边形顶点");
         require(positive(shape.width()) && positive(shape.height()), "矩形宽高必须是有效正数");
     }
-    static void validate(NestingProblem p) {
+    public static void validate(NestingProblem p) {
         require(p != null, "求解问题不能为空");
         supported("1".equals(p.schemaVersion()), "仅支持 schemaVersion=1");
         supported("mm".equals(p.unit()), "仅支持 mm；请在业务适配层转换单位");

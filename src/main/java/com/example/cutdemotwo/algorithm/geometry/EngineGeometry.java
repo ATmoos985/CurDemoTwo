@@ -1,4 +1,4 @@
-package com.example.cutdemotwo.algorithm.solver;
+package com.example.cutdemotwo.algorithm.geometry;
 
 import com.example.cutdemotwo.contracts.geometry.Defect;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;

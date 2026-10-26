@@ -7,13 +7,13 @@ import com.example.cutdemotwo.business.model.RemnantStock;
 import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.contracts.geometry.Defect;
 import com.example.cutdemotwo.persistence.*;
-import com.example.cutdemotwo.algorithm.solver.CrossCutSolverService;
-import com.example.cutdemotwo.algorithm.solver.PackingSolverService;
+import com.example.cutdemotwo.algorithm.nesting.CrossCutSolverService;
+import com.example.cutdemotwo.algorithm.nesting.PackingSolverService;
 import com.example.cutdemotwo.business.cutting.CuttingWorkflowService;
 import com.example.cutdemotwo.business.cutting.FabricSolveAdapter;
 import com.example.cutdemotwo.business.cutting.RemnantRecommendationService;
 import com.example.cutdemotwo.business.cutting.RemnantService;
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.nesting.SolverFactory;
 import com.example.cutdemotwo.controller.RemnantRecommendationController;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
@@ -34,7 +34,7 @@ class RemnantRecommendationTests {
         inventory = new RemnantService(new FileInventoryStore(temp.resolve("inventory.json").toString()), false);
         var nativeEngine = new PackingSolverService();
         ReflectionTestUtils.setField(nativeEngine, "solverPath", System.getenv().getOrDefault("PACKINGSOLVER_PATH", "data/solver/packingsolver_rectangleguillotine.exe"));
-        kernel = new SolverFactory(List.of(new CrossCutSolverService(), new com.example.cutdemotwo.algorithm.solver.JavaGuillotineSolverEngine(), nativeEngine));
+        kernel = new SolverFactory(List.of(new CrossCutSolverService(), new com.example.cutdemotwo.algorithm.nesting.JavaGuillotineSolverEngine(), nativeEngine));
         service = new RemnantRecommendationService(inventory, kernel);
     }
     RemnantStock stock(String id, double w, double h) {
@@ -64,7 +64,7 @@ class RemnantRecommendationTests {
         var suggestion=recommend(request).recommendations().get(0);assertEquals(2,suggestion.pieceCount());assertEquals(5,suggestion.lines().get(1).remaining());
         var task=inventory.saveTask(new CuttingTask(null,"需求","MODEL","",0,List.of(new CuttingTask.Line(1,"同名裁片",600,500,2,false),new CuttingTask.Line(2,"同名裁片",200,500,5,false))));
         request.setTaskId(task.id());request.setTaskRevision(task.revision());request.setFeedPortType("remnant");request.setSourceRemnantId("REM");request.setRollId("ROLL");request.setRollW(600);request.setRollL(1000);
-        var result=new CuttingWorkflowService(kernel,inventory).solve(request);assertTrue(result.isSuccess(),result.getMessage());assertEquals(2,result.getPieces().size());
+        var result=new CuttingWorkflowService(kernel,inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService()).solve(request);assertTrue(result.isSuccess(),result.getMessage());assertEquals(2,result.getPieces().size());
         assertEquals("CROSSCUT_WIDTH_MISMATCH",result.getFulfillment().get(1).reason());assertEquals("AVAILABLE",inventory.scanOrGetById("REM").getStatus());
     }
     @Test void defectsAndTrimChangeTheTrueCuttableCountAndUnknownDefectsAreNotRecommended() {
@@ -98,7 +98,7 @@ class RemnantRecommendationTests {
         var task=inventory.saveTask(new CuttingTask(null,"需求","MODEL","",0,List.of(new CuttingTask.Line(1,"裁片",600,500,2,false))));
         var request=input(false,demand(1,600,500,2));request.setTaskId(task.id());request.setTaskRevision(task.revision());
         request.setFeedPortType("remnant");request.setSourceRemnantId("FIRST");request.setRollId("ROLL");request.setRollW(600);request.setRollL(500);
-        var workflow=new CuttingWorkflowService(kernel,inventory);var plan=workflow.solve(request);
+        var workflow=new CuttingWorkflowService(kernel,inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());var plan=workflow.solve(request);
         workflow.confirm(new CutReport(plan.getPlanId(),0,1,List.of(),"A"));
         assertThrows(InventoryConflictException.class,()->recommend(request));
         request.setDemands(List.of(demand(1,600,500,1)));

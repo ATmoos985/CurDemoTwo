@@ -8,7 +8,7 @@ import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.business.model.SolveResponse;
 import com.example.cutdemotwo.contracts.geometry.Defect;
 import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
-import com.example.cutdemotwo.algorithm.solver.PackingSolverService;
+import com.example.cutdemotwo.algorithm.nesting.PackingSolverService;
 import com.example.cutdemotwo.business.cutting.ScenarioOneService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,7 +37,7 @@ class FabricCutBusinessTests {
     private PackingSolverService packingSolverService;
 
     @Autowired
-    private com.example.cutdemotwo.algorithm.solver.SolverFactory solverFactory;
+    private com.example.cutdemotwo.algorithm.nesting.SolverFactory solverFactory;
 
     @Test
     void testWordTableOneLShapeDecomposition() {
@@ -211,7 +211,7 @@ class FabricCutBusinessTests {
         req.setFirstStageOrientation("vertical");
         req.setDemands(List.of(new PieceDemand(1, "窗帘偏幅", 1500, 4000, 1, false)));
         req.setDefects(List.of(new Defect(21, 200, 1500, 150, 600, 50)));
-        SolveResponse result = com.example.cutdemotwo.business.cutting.FabricSolveAdapter.solve(new com.example.cutdemotwo.algorithm.solver.SolverFactory(List.of(packingSolverService)), req);
+        SolveResponse result = com.example.cutdemotwo.business.cutting.FabricSolveAdapter.solve(new com.example.cutdemotwo.algorithm.nesting.SolverFactory(List.of(packingSolverService)), req);
         assertTrue(result.isSuccess());
         assertTrue(result.getCuts().stream().anyMatch(c -> "纵切".equals(c.getType()) && Math.abs(c.getPos() - 500) < 1));
         assertTrue(result.getCuts().stream().anyMatch(c -> "横切".equals(c.getType()) && Math.abs(c.getPos() - 4000) < 1));
@@ -226,7 +226,7 @@ class FabricCutBusinessTests {
         req.setCutOrigin("right-bottom");
         req.setFeedPortType("remnant");
         req.setDemands(List.of(new PieceDemand(1, "窗帘补单", 2000, 1000, 1, false)));
-        SolveResponse result = com.example.cutdemotwo.business.cutting.FabricSolveAdapter.solve(new com.example.cutdemotwo.algorithm.solver.SolverFactory(List.of(packingSolverService)), req);
+        SolveResponse result = com.example.cutdemotwo.business.cutting.FabricSolveAdapter.solve(new com.example.cutdemotwo.algorithm.nesting.SolverFactory(List.of(packingSolverService)), req);
         assertTrue(result.isSuccess());
         assertTrue(result.getCuts().stream().noneMatch(c -> "纵切".equals(c.getType())));
     }
@@ -242,7 +242,7 @@ class FabricCutBusinessTests {
         req.setFirstStageOrientation("vertical");
         req.setDemands(List.of(new PieceDemand(1, "窗帘偏幅", 1500, 4000, 1, false)));
         req.setDefects(List.of(new Defect(21, 200, 1500, 150, 600, 50)));
-        SolveResponse plan = com.example.cutdemotwo.business.cutting.FabricSolveAdapter.solve(new com.example.cutdemotwo.algorithm.solver.SolverFactory(List.of(packingSolverService)), req);
+        SolveResponse plan = com.example.cutdemotwo.business.cutting.FabricSolveAdapter.solve(new com.example.cutdemotwo.algorithm.nesting.SolverFactory(List.of(packingSolverService)), req);
         assertTrue(plan.isSuccess());
         var inventory = new com.example.cutdemotwo.business.cutting.RemnantService(temp.resolve("two-dimensional.json").toString());
         var receipt = inventory.confirm(req, plan,

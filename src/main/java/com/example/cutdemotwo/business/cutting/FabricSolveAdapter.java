@@ -7,14 +7,14 @@ import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
 import com.example.cutdemotwo.contracts.geometry.RemnantPiece;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import com.example.cutdemotwo.contracts.nesting.NestingResult;
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.api.NestingSolver;
 import java.util.List;
 
 /** The only translation between the fabric workflow contract and the stateless nesting kernel. */
 public final class FabricSolveAdapter {
     private FabricSolveAdapter() {}
 
-    public static SolveResponse solve(SolverFactory factory, SolveRequest request) {
+    public static SolveResponse solve(NestingSolver factory, SolveRequest request) {
         if (ContourWorkflow.isContour(request)) return ContourWorkflow.solve(factory, request);
         var problem = toProblem(request);
         double gap = request.getPieceGap();
@@ -41,8 +41,8 @@ public final class FabricSolveAdapter {
         return result;
     }
 
-    public static SolveResponse adjust(SolverFactory factory, SolveRequest request, List<PlacedPiece> pieces) {
-        if (ContourWorkflow.isContour(request)) return ContourWorkflow.adjust(request, pieces);
+    public static SolveResponse adjust(NestingSolver factory, SolveRequest request, List<PlacedPiece> pieces) {
+        if (ContourWorkflow.isContour(request)) return ContourWorkflow.adjust(factory, request, pieces);
         double gap = request.getPieceGap();
         SolveRequest.validatePieceGap(gap);
         for (int i = 0; gap > 0 && i < pieces.size(); i++) for (int j = i + 1; j < pieces.size(); j++) {

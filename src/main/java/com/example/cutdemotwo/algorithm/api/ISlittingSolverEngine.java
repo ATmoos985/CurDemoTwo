@@ -1,4 +1,4 @@
-package com.example.cutdemotwo.algorithm.solver;
+package com.example.cutdemotwo.algorithm.api;
 
 import com.example.cutdemotwo.contracts.slitting.SlittingProblem;
 import com.example.cutdemotwo.contracts.slitting.SlittingResult;

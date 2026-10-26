@@ -9,12 +9,12 @@ import com.example.cutdemotwo.contracts.geometry.CutStep;
 import com.example.cutdemotwo.contracts.geometry.Defect;
 import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
-import com.example.cutdemotwo.algorithm.solver.CrossCutSolverService;
+import com.example.cutdemotwo.algorithm.nesting.CrossCutSolverService;
 import com.example.cutdemotwo.business.cutting.CuttingWorkflowService;
 import com.example.cutdemotwo.business.cutting.FabricSolveAdapter;
 import com.example.cutdemotwo.business.cutting.RemnantService;
-import com.example.cutdemotwo.algorithm.solver.ManualLayoutValidator;
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.nesting.ManualLayoutValidator;
+import com.example.cutdemotwo.algorithm.nesting.SolverFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
@@ -92,7 +92,7 @@ class ManualPlanAdjustmentTests {
     }
     @Test void adjustmentIsAtomicIdempotentVersionedAndReportUsesTheNewLayout() {
         Path file=temp.resolve("plans.json");var inventory=new RemnantService(file.toString());
-        var workflow=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),inventory);
+        var workflow=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         double stock=inventory.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength();
         var original=workflow.solve(request());var input=adjustment(original);
         var changed=workflow.adjust(original.getPlanId(),input);
@@ -101,7 +101,7 @@ class ManualPlanAdjustmentTests {
         assertEquals(stock,inventory.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength());
         assertEquals(changed.id(),workflow.adjust(original.getPlanId(),input).id());
         assertThrows(IllegalArgumentException.class,()->workflow.confirm(new CutReport(original.getPlanId(),2200,2,List.of(),"A")));
-        var reopened=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),new RemnantService(file.toString()));
+        var reopened=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),new RemnantService(file.toString()), new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         assertEquals(2,reopened.getPlan(changed.id()).get("version"));
         var receipt=reopened.confirm(new CutReport(changed.id(),2200,2,changed.result().getRemnants(),"A"));
         assertEquals(2,receipt.get("finishedPieceCount"));
@@ -109,7 +109,7 @@ class ManualPlanAdjustmentTests {
     }
     @Test void rejectedAdjustmentLeavesOriginalPlanAndStockUnchanged() {
         var inventory=new RemnantService(temp.resolve("reject.json").toString());
-        var workflow=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),inventory);
+        var workflow=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         var original=workflow.solve(request());
         var bad=new PlanAdjustment(UUID.randomUUID().toString(),List.of(new PlanAdjustment.Position(999,0.0,0.0,false)));
         assertThrows(IllegalArgumentException.class,()->workflow.adjust(original.getPlanId(),bad));
@@ -121,7 +121,7 @@ class ManualPlanAdjustmentTests {
 
     @Test void toolpathOnlyVersionSurvivesReloadAndRestoreWithoutChangingLayoutOrStock() {
         Path file=temp.resolve("toolpaths.json");var inventory=new RemnantService(file.toString());
-        var workflow=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),inventory);
+        var workflow=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         var original=workflow.solve(request());
         var json=tools.jackson.databind.json.JsonMapper.builder().build();
         String baseline=json.writeValueAsString(original);
@@ -139,10 +139,10 @@ class ManualPlanAdjustmentTests {
         assertEquals(changed.id(),workflow.adjust(original.getPlanId(),input).id());
         var reopened=new RemnantService(file.toString());
         assertEquals(json.writeValueAsString(changed.result().getCuts()),json.writeValueAsString(reopened.getPlan(changed.id()).result().getCuts()));
-        var restored=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),reopened)
+        var restored=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),reopened, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService())
                 .adjust(changed.id(),new PlanAdjustment(UUID.randomUUID().toString(),null,original.getCuts()));
         assertEquals(3,restored.version());assertEquals(original.getCuts().get(0).getStartX(),restored.result().getCuts().get(0).getStartX());
-        var receipt=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),reopened)
+        var receipt=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),reopened, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService())
                 .confirm(new CutReport(restored.id(),original.getDeductLen(),2,restored.result().getRemnants(),"A"));
         assertEquals(2,receipt.get("finishedPieceCount"));
     }

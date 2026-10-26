@@ -14,7 +14,7 @@ import java.util.*;
  * 最小化空刀快移 (Rapid Traverse / Air Cut) 距离，提升下刀效率。
  */
 @Service
-public class ToolpathOptimizerService {
+public class ToolpathOptimizerService implements com.example.cutdemotwo.algorithm.api.ToolpathOptimizer {
 
     private static final double EPS = .000001;
 

@@ -2,8 +2,8 @@ package com.example.cutdemotwo.controller;
 
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import com.example.cutdemotwo.contracts.nesting.NestingResult;
-import com.example.cutdemotwo.algorithm.solver.EngineCapabilities;
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
+import com.example.cutdemotwo.algorithm.api.NestingSolver;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import tools.jackson.databind.DeserializationFeature;
@@ -14,12 +14,12 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/nesting")
 public class NestingController {
-    private final SolverFactory solvers;
+    private final NestingSolver solvers;
     private final JsonMapper json = JsonMapper.builder()
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT).build();
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(NestingController.class);
-    public NestingController(SolverFactory solvers) { this.solvers = solvers; }
+    public NestingController(NestingSolver solvers) { this.solvers = solvers; }
 
     @GetMapping("/engines")
     public List<EngineCapabilities> engines() { return solvers.capabilities(); }

@@ -1,6 +1,6 @@
 package com.example.cutdemotwo.persistence;
 
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.nesting.SolverFactory;
 import com.example.cutdemotwo.business.optimization.*;
 import com.example.cutdemotwo.contracts.jobs.*;
 import org.flywaydb.core.Flyway;
@@ -37,7 +37,7 @@ class OptimizationImportConfigurationTests {
             context.registerBean(InventoryStore.class,()->new JdbcInventoryStore(source));
             context.registerBean(SolverFactory.class,()->new SolverFactory(List.of()));
             context.register(OptimizationConfiguration.class,OptimizationService.class,
-                    com.example.cutdemotwo.algorithm.solver.LinearSlittingSolverEngine.class);
+                    com.example.cutdemotwo.algorithm.slitting.LinearSlittingSolverEngine.class);
             context.refresh();
             var service=context.getBean(OptimizationService.class);
             assertEquals("FAILED",service.get(id).state());

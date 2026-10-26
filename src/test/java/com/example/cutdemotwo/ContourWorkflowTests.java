@@ -11,11 +11,11 @@ import com.example.cutdemotwo.contracts.nesting.NestingResult;
 import com.example.cutdemotwo.business.cutting.CuttingWorkflowService;
 import com.example.cutdemotwo.business.cutting.FabricSolveAdapter;
 import com.example.cutdemotwo.business.cutting.RemnantService;
-import com.example.cutdemotwo.algorithm.solver.EngineCapabilities;
-import com.example.cutdemotwo.algorithm.solver.EngineResult;
-import com.example.cutdemotwo.algorithm.solver.ICutSolverEngine;
-import com.example.cutdemotwo.algorithm.solver.PolygonGeometry;
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
+import com.example.cutdemotwo.algorithm.nesting.EngineResult;
+import com.example.cutdemotwo.algorithm.nesting.ICutSolverEngine;
+import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
+import com.example.cutdemotwo.algorithm.nesting.SolverFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
@@ -48,7 +48,7 @@ class ContourWorkflowTests {
 
     @Test void completeContoursBecomeSavedCutsAndReportNetAreaSurvivesReload(){
         var file=temp.resolve("inventory.json");var inventory=new RemnantService(file.toString());
-        var workflow=new CuttingWorkflowService(factory(),inventory);var task=task(inventory);
+        var workflow=new CuttingWorkflowService(factory(),inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());var task=task(inventory);
         double before=inventory.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength();
         var result=workflow.solve(request(task));
         assertTrue(result.isSuccess());assertNotNull(result.getPlanId());assertEquals(2,result.getPieces().size());
@@ -69,7 +69,7 @@ class ContourWorkflowTests {
         assertTrue(restored.getReceipt(result.getPlanId()).get("pieceResults").toString().contains("POLYGON"));
     }
     @Test void insufficientRegionCannotSaveOrReportAPartialMarker(){
-        var inventory=new RemnantService(temp.resolve("partial.json").toString());var workflow=new CuttingWorkflowService(factory(),inventory);
+        var inventory=new RemnantService(temp.resolve("partial.json").toString());var workflow=new CuttingWorkflowService(factory(),inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         var r=request(task(inventory));r.setRollL(100);var result=workflow.solve(r);
         assertFalse(result.isSuccess());assertNull(result.getPlanId());assertTrue(result.getPieces().isEmpty());
     }
@@ -91,7 +91,7 @@ class ContourWorkflowTests {
     }
     @Test void savedAdjustmentsPreserveHalfTurnsAndRejectInconsistentRotation(){
         var inventory=new RemnantService(temp.resolve("rotation.json").toString());
-        var workflow=new CuttingWorkflowService(factory(),inventory);
+        var workflow=new CuttingWorkflowService(factory(),inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         var t=inventory.saveTask(new CuttingTask(null,"可旋转衣片","TC涤棉-B2026","",0,
                 List.of(new CuttingTask.Line(1,"衣片 M",200,200,2,true,SHAPE))));
         var r=request(t);r.getDemands().get(0).setAllowRotation(true);

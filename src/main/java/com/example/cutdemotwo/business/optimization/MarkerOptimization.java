@@ -1,6 +1,6 @@
 package com.example.cutdemotwo.business.optimization;
 
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.api.NestingSolver;
 import com.example.cutdemotwo.contracts.jobs.OptimizationRequest;
 import com.example.cutdemotwo.contracts.jobs.OptimizationResult.*;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
@@ -25,11 +25,11 @@ final class MarkerOptimization {
             throw new OptimizationService.Failure("UNSUPPORTED_CONSTRAINT", "唛架缩长要求矩形门幅、轮廓工艺及完整齐套", 422, false);
     }
 
-    static Outcome solve(OptimizationRequest input, SolverFactory factory, Consumer<String> progress) {
+    static Outcome solve(OptimizationRequest input, NestingSolver factory, Consumer<String> progress) {
         return solve(input, factory::solve, progress);
     }
 
-    // Test seam uses the same independently validated SolverFactory result contract.
+    // Test seam uses the same independently validated NestingSolver result contract.
     static Outcome solve(OptimizationRequest input, BiFunction<NestingProblem, Boolean, NestingResult> solve,
                          Consumer<String> progress) {
         validate(input);

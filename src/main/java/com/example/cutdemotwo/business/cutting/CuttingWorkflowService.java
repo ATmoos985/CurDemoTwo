@@ -6,7 +6,7 @@ import com.example.cutdemotwo.business.model.PlanAdjustment;
 import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.business.model.SolveResponse;
 import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.api.NestingSolver;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
@@ -17,12 +17,15 @@ import java.util.Set;
 
 @Service
 public class CuttingWorkflowService {
-    private final SolverFactory solverFactory;
+    private final NestingSolver solverFactory;
     private final RemnantService inventory;
+    private final com.example.cutdemotwo.algorithm.api.ToolpathOptimizer toolpaths;
 
-    public CuttingWorkflowService(SolverFactory solverFactory, RemnantService inventory) {
+    public CuttingWorkflowService(NestingSolver solverFactory, RemnantService inventory,
+                                  com.example.cutdemotwo.algorithm.api.ToolpathOptimizer toolpaths) {
         this.solverFactory = solverFactory;
         this.inventory = inventory;
+        this.toolpaths = toolpaths;
     }
 
     public SolveResponse solve(SolveRequest request) {
@@ -51,7 +54,7 @@ public class CuttingWorkflowService {
             var request = original.request();
             double homeX = request.getCutOrigin().startsWith("right") ? request.getRollW() : 0;
             double homeY = request.getCutOrigin().endsWith("bottom") ? request.getRollL() : 0;
-            var cuts = new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService().validateReorderedCuts(
+            var cuts = toolpaths.validateReorderedCuts(
                     original.result().getCuts(), adjustment.cuts(), homeX, homeY, request.isAllowLongitudinal());
             // Copy before changing a saved result: rejected persistence must leave the original intact.
             var result = tools.jackson.databind.json.JsonMapper.builder().build().convertValue(original.result(), SolveResponse.class);
@@ -73,7 +76,7 @@ public class CuttingWorkflowService {
                 int angle = position.rotationDegrees() == null ? (source.getRotationDegrees() + (swap ? 90 : 0)) % 360 : position.rotationDegrees();
                 if (!Set.of(0,90,180,270).contains(angle) || (angle % 180 != 0) != position.rotated())
                     throw new IllegalArgumentException("轮廓旋转角度与尺寸状态不一致");
-                moved.setShape(com.example.cutdemotwo.algorithm.solver.PolygonGeometry.rotate(source.getShape(), (angle-source.getRotationDegrees()+360)%360));
+                moved.setShape(com.example.cutdemotwo.algorithm.geometry.PolygonGeometry.rotate(source.getShape(), (angle-source.getRotationDegrees()+360)%360));
                 moved.setRotationDegrees(angle);
             }
             pieces.add(moved);

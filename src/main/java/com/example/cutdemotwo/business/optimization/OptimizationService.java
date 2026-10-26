@@ -1,6 +1,6 @@
 package com.example.cutdemotwo.business.optimization;
 
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.api.NestingSolver;
 import com.example.cutdemotwo.contracts.jobs.*;
 import com.example.cutdemotwo.contracts.nesting.NestingResult;
 import com.example.cutdemotwo.persistence.*;
@@ -19,8 +19,8 @@ public class OptimizationService implements AutoCloseable {
         public Failure(String code, String message, int status, boolean retryable) { super(message);this.code=code;this.status=status;this.retryable=retryable; }
     }
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(OptimizationService.class);
-    private final SolverFactory solvers;
-    private final com.example.cutdemotwo.algorithm.solver.ISlittingSolverEngine slitting;
+    private final NestingSolver solvers;
+    private final com.example.cutdemotwo.algorithm.api.ISlittingSolverEngine slitting;
     private final OptimizationJobStore store;
     private final LeasedOptimizationJobStore shared;
     private final String owner=UUID.randomUUID().toString();
@@ -40,13 +40,9 @@ public class OptimizationService implements AutoCloseable {
     private final Map<String,Thread> running = new HashMap<>();
     private boolean closing, storageFailed;
 
-    public OptimizationService(SolverFactory solvers, OptimizationJobStore store, int workers, int queueCapacity, int maxStored) {
-        this(solvers, new com.example.cutdemotwo.algorithm.solver.LinearSlittingSolverEngine(), store, workers, queueCapacity, maxStored);
-    }
-
     @Autowired
-    public OptimizationService(SolverFactory solvers,
-            com.example.cutdemotwo.algorithm.solver.ISlittingSolverEngine slitting,
+    public OptimizationService(NestingSolver solvers,
+            com.example.cutdemotwo.algorithm.api.ISlittingSolverEngine slitting,
             OptimizationJobStore store,
             @Value("${cutdemo.jobs.workers:2}") int workers,
             @Value("${cutdemo.jobs.queue-capacity:16}") int queueCapacity,
@@ -87,7 +83,7 @@ public class OptimizationService implements AutoCloseable {
                 "strategies",List.of(Map.of("id","marker-shortening","version","1","maxTrials",12)));
     }
 
-    public SolverFactory.ProblemCheck validate(OptimizationRequest request) {
+    public com.example.cutdemotwo.contracts.jobs.ProblemCheck validate(OptimizationRequest request) {
         if (request == null || request.problem()==null || request.allowFallback()==null || request.requireComplete()==null
                 || request.clientRequestId()==null || request.clientRequestId().isBlank() || request.clientRequestId().length()>128)
             throw new Failure("INVALID_INPUT","必须提供问题、明确的降级/齐套选项及 1–128 字调用方请求编号",400,false);
@@ -100,7 +96,7 @@ public class OptimizationService implements AutoCloseable {
             if(!slitting.isAvailable())throw new Failure("ENGINE_UNAVAILABLE","一维计算运行时不可用",503,true);
             try {
                 com.example.cutdemotwo.contracts.slitting.SlittingValidation.validateProblem(request.slittingProblem());
-                return new SolverFactory.ProblemCheck("VALID", "一维分切问题合法",slitting.getEngineType(),slitting.getEngineType(),null);
+                return new com.example.cutdemotwo.contracts.jobs.ProblemCheck("VALID", "一维分切问题合法",slitting.getEngineType(),slitting.getEngineType(),null);
             } catch (com.example.cutdemotwo.contracts.slitting.SlittingValidation.ValidationException e) {
                 int status = "INVALID_INPUT".equals(e.getCode()) ? 400 : 422;
                 throw new Failure(e.getCode(), e.getMessage(), status, false);
@@ -335,7 +331,7 @@ public class OptimizationService implements AutoCloseable {
     private StoredOptimizationJob executionFailure(StoredOptimizationJob document,Throwable error) {
         boolean stopping="CANCEL_REQUESTED".equals(document.job().state());
         boolean timed="TIMED_OUT".equals(document.job().code())
-                || (!stopping && error instanceof com.example.cutdemotwo.algorithm.solver.LinearSlittingSolverEngine.ComputationTimeout);
+                || (!stopping && error instanceof com.example.cutdemotwo.algorithm.api.ComputationTimeout);
         String state=timed?"TIMED_OUT":stopping?"CANCELLED":"FAILED";
         String code=timed || stopping?state:error instanceof com.example.cutdemotwo.contracts.slitting.SlittingValidation.ValidationException
                 ?"INVALID_RESULT":"EXECUTION_FAILED";

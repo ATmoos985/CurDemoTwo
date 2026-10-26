@@ -1,6 +1,8 @@
 package com.example.cutdemotwo.business.optimization;
 
-import com.example.cutdemotwo.algorithm.solver.*;
+import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
+
+import com.example.cutdemotwo.algorithm.nesting.*;
 import com.example.cutdemotwo.contracts.jobs.*;
 import com.example.cutdemotwo.contracts.nesting.*;
 import com.example.cutdemotwo.persistence.*;
@@ -24,7 +26,7 @@ class OptimizationServiceTests {
         return new OptimizationRequest("2.0","NESTING_2D","client-001",problem,fallback,true);
     }
     OptimizationService service(SolverFactory solvers,OptimizationJobStore store,int queue,int max){
-        var service=new OptimizationService(solvers,store,1,queue,max);services.add(service);return service;
+        var service=new OptimizationService(solvers, new com.example.cutdemotwo.algorithm.slitting.LinearSlittingSolverEngine(),store,1,queue,max);services.add(service);return service;
     }
     OptimizationService service(ICutSolverEngine engine){return service(new SolverFactory(List.of(engine)),new FileOptimizationJobStore(temp.resolve("jobs")),1,100);}
     static OptimizationJob finished(OptimizationService s,String id)throws Exception{

@@ -4,7 +4,7 @@ import com.example.cutdemotwo.business.model.CutReport;
 import com.example.cutdemotwo.business.model.SolveResponse;
 import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
 import com.example.cutdemotwo.contracts.geometry.RemnantPiece;
-import com.example.cutdemotwo.algorithm.solver.EngineGeometry;
+import com.example.cutdemotwo.algorithm.geometry.EngineGeometry;
 import java.util.*;
 
 /** Validated dispositions of saved plan pieces. Does not mutate a plan or inventory. */

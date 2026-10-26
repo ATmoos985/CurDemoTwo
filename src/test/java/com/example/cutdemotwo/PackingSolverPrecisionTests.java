@@ -5,8 +5,8 @@ import com.example.cutdemotwo.business.model.PieceDemand;
 import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import com.example.cutdemotwo.business.cutting.FabricSolveAdapter;
-import com.example.cutdemotwo.algorithm.solver.PackingSolverService;
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.nesting.PackingSolverService;
+import com.example.cutdemotwo.algorithm.nesting.SolverFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 

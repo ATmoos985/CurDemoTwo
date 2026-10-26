@@ -2,7 +2,7 @@ package com.example.cutdemotwo.business.cutting;
 
 import com.example.cutdemotwo.business.model.RemnantStock;
 import com.example.cutdemotwo.business.model.SolveRequest;
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.api.NestingSolver;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 import java.util.*;
@@ -13,11 +13,11 @@ import java.util.concurrent.Semaphore;
 public class RemnantRecommendationService {
     public static final int MAX_CANDIDATES = 8;
     private final RemnantService inventory;
-    private final SolverFactory solver;
+    private final NestingSolver solver;
     private final ObjectMapper json = new ObjectMapper();
     private final Semaphore running = new Semaphore(1);
 
-    public RemnantRecommendationService(RemnantService inventory, SolverFactory solver) {
+    public RemnantRecommendationService(RemnantService inventory, NestingSolver solver) {
         this.inventory = inventory; this.solver = solver;
     }
     public record Request(SolveRequest input, Map<String, Integer> completedBaseline, String sourceRollId) {

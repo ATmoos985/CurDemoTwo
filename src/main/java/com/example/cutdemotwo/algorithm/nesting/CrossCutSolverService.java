@@ -1,4 +1,4 @@
-package com.example.cutdemotwo.algorithm.solver;
+package com.example.cutdemotwo.algorithm.nesting;
 
 import com.example.cutdemotwo.algorithm.ComputationCancellation;
 
@@ -7,10 +7,10 @@ import com.example.cutdemotwo.contracts.geometry.Defect;
 import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
 import com.example.cutdemotwo.contracts.geometry.RemnantPiece;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
-import com.example.cutdemotwo.algorithm.solver.EngineResult;
-import com.example.cutdemotwo.algorithm.solver.EngineCapabilities;
-import com.example.cutdemotwo.algorithm.solver.EngineGeometry;
-import com.example.cutdemotwo.algorithm.solver.ICutSolverEngine;
+import com.example.cutdemotwo.algorithm.nesting.EngineResult;
+import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
+import com.example.cutdemotwo.algorithm.geometry.EngineGeometry;
+import com.example.cutdemotwo.algorithm.nesting.ICutSolverEngine;
 import com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;

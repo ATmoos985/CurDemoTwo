@@ -1,6 +1,8 @@
 package com.example.cutdemotwo.business.optimization;
 
-import com.example.cutdemotwo.algorithm.solver.*;
+import com.example.cutdemotwo.algorithm.api.ISlittingSolverEngine;
+
+import com.example.cutdemotwo.algorithm.nesting.*;
 import com.example.cutdemotwo.contracts.jobs.*;
 import com.example.cutdemotwo.contracts.slitting.*;
 import com.example.cutdemotwo.persistence.*;
@@ -32,7 +34,7 @@ class SlittingOptimizationTests {
     void actualProcessJobPersistsAndReplaysInFileAndJdbc(boolean jdbc)throws Exception {
         OptimizationRequest request=request();String id;OptimizationResult result;
         var store=store(jdbc);
-        try(var service=new OptimizationService(new SolverFactory(List.of(new CrossCutSolverService())),store,1,2,100)) {
+        try(var service=new OptimizationService(new SolverFactory(List.of(new CrossCutSolverService())), new com.example.cutdemotwo.algorithm.slitting.LinearSlittingSolverEngine(),store,1,2,100)) {
             id=service.submit("slitting-real-process",request).id();var job=done(service,id);
             assertEquals("SUCCEEDED",job.state(),job.toString());
             result=service.result(id);assertEquals("COMPLETE",result.fulfillmentStatus());assertTrue(result.meetsRequirement());
@@ -42,7 +44,7 @@ class SlittingOptimizationTests {
             assertEquals(2,result.metrics().size());assertTrue(result.metrics().get(1).value()>result.metrics().get(0).value());
         }
         var reopened=jdbc?store:new FileOptimizationJobStore(temp);
-        try(var next=new OptimizationService(new SolverFactory(List.of(new CrossCutSolverService())),reopened,1,2,100)) {
+        try(var next=new OptimizationService(new SolverFactory(List.of(new CrossCutSolverService())), new com.example.cutdemotwo.algorithm.slitting.LinearSlittingSolverEngine(),reopened,1,2,100)) {
             assertEquals(result,next.result(id));assertEquals(id,next.submit("slitting-real-process",request).id());
         }
     }
@@ -50,7 +52,7 @@ class SlittingOptimizationTests {
     void timeoutCannotBeMisreportedAsEngineFailure(boolean jdbc)throws Exception {
         ISlittingSolverEngine timed=new ISlittingSolverEngine(){
             public String getEngineType(){return "test";}public boolean isAvailable(){return true;}
-            public SlittingResult solve(SlittingProblem p){throw new LinearSlittingSolverEngine.ComputationTimeout();}
+            public SlittingResult solve(SlittingProblem p){throw new com.example.cutdemotwo.algorithm.api.ComputationTimeout();}
         };
         try(var service=new OptimizationService(new SolverFactory(List.of(new CrossCutSolverService())),timed,store(jdbc),1,2,100)) {
             var job=done(service,service.submit("timeout-slitting",request()).id());
@@ -58,7 +60,7 @@ class SlittingOptimizationTests {
         }
     }
     @Test void unsupportedStrategyAndMismatchedPayloadAreRejectedBeforeAcceptance() {
-        try(var service=new OptimizationService(new SolverFactory(List.of(new CrossCutSolverService())),store(false),1,2,100)) {
+        try(var service=new OptimizationService(new SolverFactory(List.of(new CrossCutSolverService())), new com.example.cutdemotwo.algorithm.slitting.LinearSlittingSolverEngine(),store(false),1,2,100)) {
             var r=request();
             assertEquals(422,assertThrows(OptimizationService.Failure.class,()->service.validate(new OptimizationRequest("2.0","SLITTING_1D","x",r.problem(),false,true,
                     new OptimizationRequest.Strategy("marker-shortening","1",2)))).status);

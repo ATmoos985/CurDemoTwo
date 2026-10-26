@@ -1,13 +1,13 @@
-package com.example.cutdemotwo.algorithm.solver;
+package com.example.cutdemotwo.algorithm.nesting;
 
 import com.example.cutdemotwo.contracts.geometry.CutStep;
 import com.example.cutdemotwo.contracts.geometry.Defect;
 import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
 import com.example.cutdemotwo.contracts.geometry.RemnantPiece;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
-import com.example.cutdemotwo.algorithm.solver.EngineResult;
-import com.example.cutdemotwo.algorithm.solver.EngineCapabilities;
-import com.example.cutdemotwo.algorithm.solver.EngineGeometry;
+import com.example.cutdemotwo.algorithm.nesting.EngineResult;
+import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
+import com.example.cutdemotwo.algorithm.geometry.EngineGeometry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,7 +19,7 @@ import java.nio.file.Path;
 import java.util.*;
 
 @Service
-public class PackingSolverService implements com.example.cutdemotwo.algorithm.solver.ICutSolverEngine {
+public class PackingSolverService implements com.example.cutdemotwo.algorithm.nesting.ICutSolverEngine {
     private static final Logger log = LoggerFactory.getLogger(PackingSolverService.class);
     // Native rectangle coordinates are integers; one native unit represents 0.1 mm.
     private static final int UNITS_PER_MM = 10;

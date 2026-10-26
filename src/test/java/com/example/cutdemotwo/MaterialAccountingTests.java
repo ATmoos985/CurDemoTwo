@@ -3,10 +3,10 @@ package com.example.cutdemotwo;
 import com.example.cutdemotwo.business.model.CutReport;
 import com.example.cutdemotwo.business.model.PieceDemand;
 import com.example.cutdemotwo.business.model.SolveRequest;
-import com.example.cutdemotwo.algorithm.solver.CrossCutSolverService;
+import com.example.cutdemotwo.algorithm.nesting.CrossCutSolverService;
 import com.example.cutdemotwo.business.cutting.CuttingWorkflowService;
 import com.example.cutdemotwo.business.cutting.RemnantService;
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.nesting.SolverFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
@@ -17,7 +17,7 @@ class MaterialAccountingTests {
     @TempDir Path temp;
     @Test void receiptRecordsActualDenominatorSeparatelyFromProcessingAreaWithoutRoundingLength() {
         var inventory=new RemnantService(temp.resolve("accounting.json").toString());
-        var workflow=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),inventory);
+        var workflow=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         var request=new SolveRequest();request.setRollW(2000);request.setRollL(5000);request.setAllowLongitudinal(false);
         request.setDemands(List.of(new PieceDemand(1,"主帘",2000,1200.5,2,false)));
         var plan=workflow.solve(request);

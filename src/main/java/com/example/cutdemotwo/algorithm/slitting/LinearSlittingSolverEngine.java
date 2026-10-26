@@ -1,4 +1,7 @@
-package com.example.cutdemotwo.algorithm.solver;
+package com.example.cutdemotwo.algorithm.slitting;
+
+import com.example.cutdemotwo.algorithm.api.ISlittingSolverEngine;
+import com.example.cutdemotwo.algorithm.api.ComputationTimeout;
 
 import changyang.cut.apsmodule.generator.NewSolver.CuttingSolver;
 import changyang.cut.apsmodule.service.*;
@@ -55,9 +58,6 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
             }catch(java.io.IOException cleanup){org.slf4j.LoggerFactory.getLogger(getClass()).warn("Cannot remove computation directory {}",directory);}
             if(interrupted)Thread.currentThread().interrupt();
         }
-    }
-    public static final class ComputationTimeout extends RuntimeException {
-        public ComputationTimeout(){super("一维计算达到时限；计算进程已退出");}
     }
     static List<String> command(Path input,Path output,long parentPid) throws java.io.IOException {
         String cp=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));

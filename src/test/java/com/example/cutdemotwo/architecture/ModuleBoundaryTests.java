@@ -50,6 +50,56 @@ class ModuleBoundaryTests {
         assertBoundary("business", Set.of("business", "algorithm", "contracts", "persistence"));
     }
 
+    private static final Pattern ALGORITHM_REFERENCE = Pattern.compile(
+            "\\bcom\\.example\\.cutdemotwo\\.algorithm\\.([a-z][a-z0-9_]*)\\.");
+
+    private static List<String> algorithmViolations(String source, Set<String> allowed) {
+        String code = source.replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("(?m)//[^\\n]*", "");
+        var errors = new ArrayList<String>();
+        var matcher = ALGORITHM_REFERENCE.matcher(code);
+        while (matcher.find()) if (!allowed.contains(matcher.group(1))) errors.add(matcher.group());
+        return errors;
+    }
+
+    private void assertAlgorithmBoundary(String module, Set<String> allowed) throws IOException {
+        try (var stream = Files.walk(ROOT.resolve(module))) {
+            var files = stream.filter(p -> p.toString().endsWith(".java")).toList();
+            assertFalse(files.isEmpty(), "边界必须覆盖实际源文件");
+            var errors = new ArrayList<String>();
+            for (var file : files) for (var violation : algorithmViolations(Files.readString(file), allowed))
+                errors.add(file + " -> " + violation);
+            assertTrue(errors.isEmpty(), String.join("\n", errors));
+        }
+    }
+
+    @Test void businessAndHttpUseAlgorithmApiOrPureGeometryOnly() throws IOException {
+        assertAlgorithmBoundary("business", Set.of("api", "geometry"));
+        assertAlgorithmBoundary("controller", Set.of("api", "geometry"));
+    }
+
+    @Test void publicAlgorithmApiAndGeometryDoNotDependOnImplementations() throws IOException {
+        assertAlgorithmBoundary("algorithm/api", Set.of("api"));
+        assertAlgorithmBoundary("algorithm/geometry", Set.of("geometry"));
+    }
+
+    @Test void oneAndTwoDimensionalImplementationsStayIndependent() throws IOException {
+        assertAlgorithmBoundary("algorithm/nesting", Set.of("nesting", "api", "geometry", "toolpath"));
+        assertAlgorithmBoundary("algorithm/slitting", Set.of("slitting", "api"));
+        assertAlgorithmBoundary("algorithm/toolpath", Set.of("toolpath", "api", "geometry"));
+    }
+
+    @Test void implementationGuardCatchesWildcardAndInlineConstruction() {
+        for (String source : List.of(
+                "import com.example.cutdemotwo.algorithm.nesting.*;",
+                "new com.example.cutdemotwo.algorithm.slitting.LinearSlittingSolverEngine();",
+                "com.example.cutdemotwo.algorithm.nesting.SolverFactory.ProblemCheck result;"))
+            assertFalse(algorithmViolations(source, Set.of("api", "geometry")).isEmpty());
+        assertTrue(algorithmViolations("import com.example.cutdemotwo.algorithm.api.NestingSolver;",
+                Set.of("api", "geometry")).isEmpty());
+        assertTrue(algorithmViolations("com.example.cutdemotwo.algorithm.ComputationCancellation.check();",
+                Set.of("api", "geometry")).isEmpty());
+    }
+
     @Test void guardDetectsImportsWildcardAndInlineReferences() {
         for (String source : List.of(
                 "import com.example.cutdemotwo.business.model.SolveRequest;",

@@ -4,10 +4,10 @@ import com.example.cutdemotwo.business.model.CutReport;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.PieceDemand;
 import com.example.cutdemotwo.business.model.SolveRequest;
-import com.example.cutdemotwo.algorithm.solver.CrossCutSolverService;
+import com.example.cutdemotwo.algorithm.nesting.CrossCutSolverService;
 import com.example.cutdemotwo.business.cutting.CuttingWorkflowService;
 import com.example.cutdemotwo.business.cutting.RemnantService;
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.nesting.SolverFactory;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
@@ -20,7 +20,7 @@ class BatchReportTests {
     RemnantService stock; CuttingWorkflowService workflow; CuttingTask task;
     @BeforeEach void setup() {
         stock=new RemnantService(temp.resolve("stock.json").toString());
-        workflow=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),stock);
+        workflow=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),stock, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         task=stock.saveTask(new CuttingTask(null,"连续裁切","TC涤棉-B2026","",0,List.of(new CuttingTask.Line(1,"片",2000,1000,3,false))));
     }
     CutReport report(double start,int quantity) {

@@ -1,4 +1,6 @@
-package com.example.cutdemotwo.algorithm.solver;
+package com.example.cutdemotwo.algorithm.nesting;
+
+import com.example.cutdemotwo.algorithm.geometry.NestingValidation;
 
 import com.example.cutdemotwo.contracts.geometry.CutStep;
 import com.example.cutdemotwo.contracts.geometry.PlacedPiece;

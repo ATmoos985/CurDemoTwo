@@ -3,7 +3,6 @@ package com.example.cutdemotwo.controller;
 import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.business.model.QualityDisposition;
 import com.example.cutdemotwo.business.model.SolveResponse;
-import com.example.cutdemotwo.algorithm.solver.PackingSolverService;
 import com.example.cutdemotwo.business.cutting.ScenarioOneService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -28,17 +27,17 @@ public class FabricCutController {
             .disable(tools.jackson.databind.DeserializationFeature.ACCEPT_FLOAT_AS_INT)
             .disable(tools.jackson.databind.MapperFeature.ALLOW_COERCION_OF_SCALARS).build();
 
-    private final com.example.cutdemotwo.algorithm.solver.SolverFactory solverFactory;
+    private final com.example.cutdemotwo.algorithm.api.NestingSolver solverFactory;
     private final ScenarioOneService scenarioOneService;
     private final com.example.cutdemotwo.business.cutting.RemnantService remnantService;
-    private final com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService toolpathOptimizerService;
+    private final com.example.cutdemotwo.algorithm.api.ToolpathOptimizer toolpathOptimizerService;
     private final com.example.cutdemotwo.business.cutting.CuttingWorkflowService workflowService;
 
     @Autowired
-    public FabricCutController(com.example.cutdemotwo.algorithm.solver.SolverFactory solverFactory,
+    public FabricCutController(com.example.cutdemotwo.algorithm.api.NestingSolver solverFactory,
                                 ScenarioOneService scenarioOneService,
                                 com.example.cutdemotwo.business.cutting.RemnantService remnantService,
-                                com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService toolpathOptimizerService,
+                                com.example.cutdemotwo.algorithm.api.ToolpathOptimizer toolpathOptimizerService,
                                 com.example.cutdemotwo.business.cutting.CuttingWorkflowService workflowService) {
         this.solverFactory = solverFactory;
         this.scenarioOneService = scenarioOneService;
@@ -233,12 +232,11 @@ public class FabricCutController {
     public Map<String, Object> health() {
         Map<String, Object> map = new HashMap<>();
         map.put("status", "UP");
-        com.example.cutdemotwo.algorithm.solver.ICutSolverEngine packingEngine = solverFactory.getEngine("packingsolver");
-        map.put("packingsolverAvailable", packingEngine != null && packingEngine.isAvailable());
+        var capabilities = solverFactory.capabilities();
+        map.put("packingsolverAvailable", capabilities.stream().anyMatch(e -> "packingsolver".equals(e.id()) && e.available()));
         // Null unless the native engine is missing and a registered stand-in will run (and be labelled) instead.
         map.put("packingsolverFallback", solverFactory.fallbackFor("packingsolver"));
-        com.example.cutdemotwo.algorithm.solver.ICutSolverEngine irregularEngine = solverFactory.getEngine("packingsolver-irregular");
-        map.put("packingsolverIrregularAvailable", irregularEngine != null && irregularEngine.isAvailable());
+        map.put("packingsolverIrregularAvailable", capabilities.stream().anyMatch(e -> "packingsolver-irregular".equals(e.id()) && e.available()));
         map.put("packingsolverIrregularFallback", solverFactory.fallbackFor("packingsolver-irregular"));
         map.put("remnantsInStock", remnantService.getAvailableRemnants().size());
         return map;

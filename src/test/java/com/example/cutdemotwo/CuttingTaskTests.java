@@ -5,10 +5,10 @@ import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.PieceDemand;
 import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.business.model.SolveResponse;
-import com.example.cutdemotwo.algorithm.solver.CrossCutSolverService;
+import com.example.cutdemotwo.algorithm.nesting.CrossCutSolverService;
 import com.example.cutdemotwo.business.cutting.CuttingWorkflowService;
 import com.example.cutdemotwo.business.cutting.RemnantService;
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.nesting.SolverFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
@@ -40,7 +40,7 @@ class CuttingTaskTests {
     @Test void taskContinuesFromRemnantToRollAndRestoresAfterRestart() {
         Path path = temp.resolve("workflow.json");
         RemnantService inventory = new RemnantService(path.toString());
-        CuttingWorkflowService workflow = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), inventory);
+        CuttingWorkflowService workflow = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         CuttingTask task = create(inventory);
         double before = inventory.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength();
         SolveResponse first = workflow.solve(request(task, true, 3));

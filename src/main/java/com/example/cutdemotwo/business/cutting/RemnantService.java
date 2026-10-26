@@ -936,7 +936,7 @@ public class RemnantService {
             throw new IllegalArgumentException("机台工艺参数无效");
         for (CuttingTask.Line line : input.demands()) {
             if (line != null && line.shape() != null) {
-                com.example.cutdemotwo.algorithm.solver.PolygonGeometry.validate(line.shape());
+                com.example.cutdemotwo.algorithm.geometry.PolygonGeometry.validate(line.shape());
                 if (line.width() != line.shape().width() || line.length() != line.shape().height())
                     throw new IllegalArgumentException("需求尺寸必须与轮廓外接尺寸一致");
             }

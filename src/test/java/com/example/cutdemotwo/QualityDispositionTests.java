@@ -2,7 +2,7 @@ package com.example.cutdemotwo;
 
 import com.example.cutdemotwo.business.model.*;
 import com.example.cutdemotwo.business.cutting.*;
-import com.example.cutdemotwo.algorithm.solver.*;
+import com.example.cutdemotwo.algorithm.nesting.*;
 import com.example.cutdemotwo.controller.FabricCutController;
 import com.example.cutdemotwo.persistence.*;
 import org.junit.jupiter.api.*;
@@ -22,7 +22,7 @@ class QualityDispositionTests {
         var request = new SolveRequest(); request.setTaskId(task.id()); request.setTaskRevision(task.revision());
         request.setAllowLongitudinal(false); request.setRollL(10000); request.setWindowStartY(5000);
         request.setDemands(List.of(new PieceDemand(1,"裁片",2000,1000,10,false)));
-        var workflow = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),inventory);
+        var workflow = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         var result = workflow.solve(request); planId = result.getPlanId(); assertEquals(10,result.getPieces().size());
         workflow.confirm(new CutReport(planId,10000,10,List.of(),"A"));
     }
@@ -97,7 +97,7 @@ class QualityDispositionTests {
     @Test void alreadyRejectedPieceRecoveryDoesNotSubtractGoodQuantityTwice() {
         inventory.reverseReport(planId,"建立另一份逐件记录");
         var request=inventory.getPlan(planId).request();
-        var workflow=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),inventory);
+        var workflow=new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         var result=workflow.solve(request);planId=result.getPlanId();
         var rows=result.getPieces().stream().map(p->new CutReport.PieceResult(p.getId(),p.getId()==1?"REJECTED":"QUALIFIED",p.getId()==1?"破损":"")).toList();
         workflow.confirm(new CutReport(planId,10000,9,List.of(),"A",rows));

@@ -1,4 +1,4 @@
-package com.example.cutdemotwo.algorithm.solver;
+package com.example.cutdemotwo.algorithm.slitting;
 
 import com.example.cutdemotwo.contracts.slitting.SlittingProblem;
 import com.example.cutdemotwo.contracts.slitting.SlittingResult;
@@ -117,7 +117,7 @@ class LinearSlittingSolverEngineTests {
                 new SlittingProblem.Order("group-"+i,500,3000,2,"surface-"+i)).toList();
         var p=new SlittingProblem("1","mm",1200,10,10,1000,1180,10,0,"QUALITY",orders,1);
         long start=System.nanoTime();
-        assertThrows(LinearSlittingSolverEngine.ComputationTimeout.class,()->engine.solve(p));
+        assertThrows(com.example.cutdemotwo.algorithm.api.ComputationTimeout.class,()->engine.solve(p));
         assertTrue(System.nanoTime()-start<java.util.concurrent.TimeUnit.SECONDS.toNanos(8));
         assertTrue(ProcessHandle.current().children().noneMatch(c->c.info().commandLine().orElse("").contains("LinearSlittingSolverEngine")));
     }

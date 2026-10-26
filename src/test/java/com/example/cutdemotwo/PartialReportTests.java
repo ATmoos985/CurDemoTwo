@@ -8,10 +8,10 @@ import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.business.model.SolveResponse;
 import com.example.cutdemotwo.contracts.geometry.RemnantPiece;
 import com.example.cutdemotwo.persistence.*;
-import com.example.cutdemotwo.algorithm.solver.CrossCutSolverService;
+import com.example.cutdemotwo.algorithm.nesting.CrossCutSolverService;
 import com.example.cutdemotwo.business.cutting.CuttingWorkflowService;
 import com.example.cutdemotwo.business.cutting.RemnantService;
-import com.example.cutdemotwo.algorithm.solver.SolverFactory;
+import com.example.cutdemotwo.algorithm.nesting.SolverFactory;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
@@ -27,7 +27,7 @@ class PartialReportTests {
                 new CuttingTask.Line(1,"主帘",2000,1000,4,false),new CuttingTask.Line(9,"同尺寸独立行",2000,1000,1,false))));
         plan=workflow.solve(request(task,5000));assertEquals(4,plan.getPieces().size());
     }
-    CuttingWorkflowService workflow(RemnantService s){return new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),s);}
+    CuttingWorkflowService workflow(RemnantService s){return new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())),s, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());}
     SolveRequest request(CuttingTask t,double start){var r=new SolveRequest();r.setTaskId(t.id());r.setTaskRevision(t.revision());
         r.setAllowLongitudinal(false);r.setRollL(4000);r.setWindowStartY(start);
         r.setDemands(List.of(new PieceDemand(1,"主帘",2000,1000,3,false),new PieceDemand(9,"同尺寸独立行",2000,1000,1,false)));return r;}
