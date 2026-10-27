@@ -9,6 +9,7 @@ const NAV = [
 ];
 const PAGES = {
     tasks: () => import('./pages/tasks.js'),
+    task: () => import('./pages/task-edit.js'),
     workbench: () => import('./pages/workbench.js'),
     execution: () => import('./pages/execution.js'),
     inventory: () => import('./pages/inventory.js'),
@@ -30,6 +31,7 @@ export function parseRoute(hash) {
 export function setStatus(html) { document.getElementById('statusbar').innerHTML = html; }
 
 function renderNav(active) {
+    if (active === 'task') active = 'tasks';
     document.getElementById('nav').innerHTML = NAV.map(([h, items]) => `<h6>${esc(h)}</h6>` +
         items.map(([k, t]) => `<a href="#/${k}" class="${k === active ? 'on' : ''}">${esc(t)}</a>`).join('')).join('');
 }

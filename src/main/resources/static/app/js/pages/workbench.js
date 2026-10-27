@@ -265,7 +265,7 @@ export async function mount(el, [taskId]) {
     function popover(kind, sc, colors) {
         if (kind === 'demand') {
             const done = detail.completed || {}, reserved = detail.reserved || {};
-            return `<div class="pane-h">需求<span class="sub">${task.demands.length} 项</span><span class="sp"></span><span class="sub">${esc(task.externalRef || '')}</span></div>
+            return `<div class="pane-h">需求<span class="sub">${task.demands.length} 项 · ${esc(task.externalRef || '')}</span><span class="sp"></span><a class="btn sm" href="#/task/${encodeURIComponent(task.id)}">编辑需求</a></div>
               <table class="t" style="border:0"><thead><tr><th>需求</th><th class="r">宽 × 长 mm</th><th class="r">数量</th><th class="r">良品</th><th class="r">预约</th></tr></thead><tbody>
               ${task.demands.map(d => `<tr><td class="wrap"><i style="display:inline-block;width:8px;height:8px;margin-right:6px;background:${colors.get(d.id)}"></i>${esc(d.name)}</td><td class="r num">${fmtN(d.width, 1)} × ${fmtN(d.length, 1)}</td><td class="r num">${d.quantity}</td><td class="r num">${done[d.id] || 0}</td><td class="r num">${reserved[d.id] || 0}</td></tr>`).join('')}</tbody></table>`;
         }
@@ -285,7 +285,7 @@ export async function mount(el, [taskId]) {
               ${st.fresh.length ? '<div class="notice">新增疵点保存后，后续工位排料会避让；已有方案需重新核对。</div>' : ''}`;
         }
         const p = task.process || {};
-        return `<div class="pane-h">工艺<span class="sp"></span><span class="sub">在经典工作台修改</span></div>
+        return `<div class="pane-h">工艺<span class="sp"></span><a class="btn sm" href="#/task/${encodeURIComponent(task.id)}">修改工艺</a></div>
           <div class="kv"><div>拉布长度</div><div class="num">${fmtN(p.bedLength)} mm</div><div>切头</div><div class="num">${fmtN(p.trimStart)} mm</div>
           <div>切割基准</div><div>${esc(originText(p.cutOrigin))}</div><div>第一刀方向</div><div>${p.firstStageOrientation === 'vertical' ? '纵向' : '横向'}</div>
           <div>允许旋转</div><div>${p.allowRotation ? '是' : '否'}</div><div>允许纵切</div><div>${p.allowLongitudinal ? '是' : '否'}</div><div>件间距</div><div class="num">${fmtN(p.pieceGap, 1)} mm</div></div>`;

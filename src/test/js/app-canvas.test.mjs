@@ -8,6 +8,7 @@ import {snapPosition, tickStep} from '../../main/resources/static/app/js/canvas/
 import {buildRollScene, planSegment, plansOnRoll, rollsOfPlans, reportedPlans, segmentStatus, cutEnd, sceneMetrics, demandIndex, NEW_STATION} from '../../main/resources/static/app/js/model/roll-scene.js';
 import {buildSolveRequest, remainingDemands, windowProblem, usablePlan} from '../../main/resources/static/app/js/model/solve-request.js';
 import {defaultReport, applyBulk, recoveryCandidates, reportSummary, reportProblems, buildCutReport} from '../../main/resources/static/app/js/model/report.js';
+import {emptyTask, fromTask, addDemand, mergeImport, taskProblems, lineLock, toPayload, demandTemplateCsv} from '../../main/resources/static/app/js/model/task-form.js';
 
 const appRoot = fileURLToPath(new URL('../../main/resources/static/app/', import.meta.url));
 const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
@@ -171,6 +172,29 @@ test('report draft follows backend rules: per-piece outcome, cut length and reco
     assert.deepEqual([payload.planId, payload.actualCutLen, payload.finishedPieceCount], ['p', 2000, 0]);
     assert.deepEqual(payload.pieceResults, [{pieceId: 1, outcome: 'REJECTED', reason: '污渍'}, {pieceId: 2, outcome: 'UNCUT', reason: ''}]);
     assert.deepEqual(payload.actualRemnants.map(x => [x.id, x.w, x.l, x.hasDefect]), [['R1', 2800, 150, true], ['UNCUT-2', 800, 500, false]], '带疵料头保留带疵标记');
+});
+
+test('task form mirrors backend save rules and protects reported demand lines', () => {
+    let f = emptyTask();
+    assert.deepEqual(taskProblems(f).slice(0, 3), ['请填写任务名称', '请填写材料型号', '需求需为 1 至 200 项']);
+    f = {...f, name: '窗帘', materialModel: 'M1'};
+    f = addDemand(addDemand(f, {name: 'A', width: 900, length: 1400, quantity: 2}), {name: 'B', width: 0, length: 1200, quantity: 20000});
+    assert.deepEqual(f.demands.map(d => d.id), [1, 2]);
+    assert.deepEqual(taskProblems(f), ['第 2 行：宽度、长度须大于 0', '第 2 行：件数须为 1–10000 的整数']);
+    const original = {id: 't', revision: 4, name: '窗帘', materialModel: 'M1', demands: [{id: 1, name: 'A', width: 900, length: 1400, quantity: 2}]};
+    const edit = fromTask(original);
+    assert.equal(edit.process.bedLength, 5000, '缺省工艺补默认值');
+    const completed = {1: 2};
+    assert.deepEqual(lineLock(edit.demands[0], completed), {locked: true, minQuantity: 2});
+    assert.match(taskProblems({...edit, demands: []}, {original, completed}).join(), /不能删除/);
+    assert.match(taskProblems({...edit, demands: [{...edit.demands[0], width: 901}]}, {original, completed}).join(), /不能改名或改尺寸/);
+    assert.match(taskProblems({...edit, demands: [{...edit.demands[0], quantity: 1}]}, {original, completed}).join(), /不得小于已报工/);
+    assert.match(taskProblems({...edit, materialModel: 'M2'}, {original, completed}).join(), /不能更改材料型号/);
+    const merged = mergeImport(edit, {name: 'x', materialModel: 'M1', externalRef: 'f.xlsx', demands: [{name: 'C', width: 800, length: 1200, quantity: 3}]}, {replace: true, completed});
+    assert.deepEqual(merged.demands.map(d => [d.id, d.name]), [[1, 'A'], [2, 'C']], '替换导入保留已报工项，新项续号');
+    const payload = toPayload(merged);
+    assert.deepEqual([payload.id, payload.revision, payload.demands.length], ['t', 4, 2]);
+    assert.match(demandTemplateCsv(), /材料型号,裁片名称,宽度\(mm\),长度\(mm\),数量/);
 });
 
 async function files(dir) {
