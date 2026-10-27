@@ -153,6 +153,7 @@ table.t{width:100%;border-collapse:collapse;background:var(--panel);border:1px s
 .rn-seg:hover{filter:brightness(1.25)}
 .rn-seg.rn-on{filter:brightness(1.4)}
 .rn-cut{filter:saturate(.2) brightness(.75)}
+.rn-stale{border:1px dashed #6b747e;border-right:1px dashed #6b747e;z-index:0}
 .rn-def{position:absolute;top:-4px;bottom:-4px;width:2px;background:#ff6b5b;z-index:3}
 .rn-def.rn-fresh{background:#ff9f43}
 .rn-win{position:absolute;top:-4px;bottom:-4px;border:2px solid #7fb3e6;background:rgba(127,179,230,.22);cursor:grab;z-index:4;min-width:6px}
@@ -162,6 +163,12 @@ table.t{width:100%;border-collapse:collapse;background:var(--panel);border:1px s
 .rn-handle{position:absolute;right:-7px;top:-2px;bottom:-2px;width:10px;background:#7fb3e6;color:#1d2125;font-size:8px;display:grid;place-items:center;cursor:ew-resize}
 .rn-tick{position:absolute;top:24px;transform:translateX(-50%);font:10px var(--mono);color:#7d8791;white-space:nowrap}
 .rn-tick:first-of-type{transform:none}
+
+.side-min{align-items:center;padding-top:6px;gap:10px;background:var(--panel-2)}
+.side-min button{width:22px;height:22px;border:1px solid var(--line);background:#fff;border-radius:2px;cursor:pointer;padding:0}
+.side-min span{writing-mode:vertical-rl;color:var(--text-3);font-size:12px;letter-spacing:2px}
+.wb-head .sum .popover{top:34px}
+.t th.r{text-align:right}
 
 /* 跑布验疵 */
 .vtrack{position:relative;flex:1;width:16px;background:#3a4148;border:1px solid #56606b;cursor:pointer;margin:0 auto}

@@ -62,9 +62,9 @@ export function createRollCanvas(host, callbacks = {}) {
         if (roll.used > 0) g += rect(c, 0, 0, Math.min(roll.used, roll.total), W, 'fill="url(#rc-used)"');
         for (const seg of scene.segments) {
             if (seg.start + seg.len < uMin || seg.start > uMax) continue;
-            const cut = seg.status === 'cut', on = seg.id === scene.currentId;
-            const op = cut ? .42 : (opts.view === 'station' && !on ? .5 : 1);
-            g += `<g opacity="${op}">` + rect(c, seg.start, 0, seg.len, W, 'fill="url(#rc-waste)" stroke="#5d6670"');
+            const cut = seg.status === 'cut', stale = seg.status === 'stale', on = seg.id === scene.currentId;
+            const op = stale ? .25 : cut ? .42 : (opts.view === 'station' && !on ? .5 : 1);
+            g += `<g opacity="${op}">` + rect(c, seg.start, 0, seg.len, W, `fill="url(#rc-waste)" stroke="#5d6670" ${stale ? 'stroke-dasharray="6 4"' : ''}`);
             for (const p of seg.pieces) {
                 const r = screenRect(c, opts.vertical, p.u, p.v, p.du, p.dv);
                 g += `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="${p.color}" fill-opacity=".85" stroke="#1d2125" stroke-width="${c.s > .05 ? 1 : .4}"><title>${esc(p.title || p.label)}</title></rect>`;
@@ -78,7 +78,7 @@ export function createRollCanvas(host, callbacks = {}) {
             const [bx1, by1] = toScreen(c, opts.vertical, seg.start, -4), [bx2, by2] = toScreen(c, opts.vertical, seg.start, W + 4);
             g += `<line x1="${bx1}" y1="${by1}" x2="${bx2}" y2="${by2}" stroke="#f0c674"/>`;
             const sr = screenRect(c, opts.vertical, seg.start, 0, seg.len, W);
-            if (cut && Math.min(sr.w, sr.h) > 26) g += text(c, seg.start + seg.len / 2, W / 2, '已切 ✓', 'class="rc-cut"', 0, 4);
+            if ((cut || stale) && Math.min(sr.w, sr.h) > 26) g += text(c, seg.start + seg.len / 2, W / 2, cut ? '已切 ✓' : '已失效', 'class="rc-cut"', 0, 4);
         }
         for (const d of scene.defects) {
             if (d.u + d.du < uMin || d.u > uMax) continue;
@@ -223,7 +223,14 @@ export function createRollCanvas(host, callbacks = {}) {
     ro.observe(host);
 
     return {
-        setScene(next, {refit = false} = {}) { scene = next; if (refit || !cam) fit(); else draw(); },
+        /** follow：工位窗口移动时同步平移相机，让工位框停在屏幕原处、母卷跟着走。 */
+        setScene(next, {refit = false, follow = false} = {}) {
+            if (follow && cam && scene?.window && next?.window) cam = {...cam, a: cam.a - (next.window.start - scene.window.start) * cam.s};
+            scene = next;
+            if (refit || !cam) fit(); else draw();
+        },
+        getCamera: () => cam && {...cam, rows},
+        setCamera(c) { if (!c) return; const {rows: r, ...rest} = c; cam = rest; if (r) rows = r; draw(); },
         setOptions(next) {
             const refit = ['vertical', 'view', 'fullMode'].some(k => k in next && next[k] !== opts[k]);
             opts = {...opts, ...next};

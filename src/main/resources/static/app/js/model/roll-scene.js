@@ -15,12 +15,16 @@ export function demandColors(demands = [], plans = []) {
     return new Map([...demandIndex(demands, plans)].map(([id, v]) => [id, v.color]));
 }
 
-/** 已报工 → 已切（固定）；已确认未报工 → 待切；候选 → 候选。 */
+/**
+ * 有效报工 → 已切（固定）；PENDING → 候选（可报工）；
+ * CONFIRMED 但无报工 → 已失效：后端只在报工时置 CONFIRMED，演示“重置母卷”会删除报工而保留方案状态，这类方案既未切也不能再报工。
+ */
 export function segmentStatus(plan, reportedPlanIds = new Set()) {
     if (reportedPlanIds.has(plan.id)) return 'cut';
-    return plan.status === 'CONFIRMED' ? 'confirmed' : plan.status === 'PENDING' ? 'pending' : 'other';
+    return plan.status === 'PENDING' ? 'pending' : plan.status === 'CONFIRMED' ? 'stale' : 'other';
 }
-export const STATUS_TEXT = {cut: '已切', confirmed: '待切', pending: '候选', other: '—'};
+export const STATUS_TEXT = {cut: '已切', pending: '候选', stale: '已失效', other: '—'};
+const live = s => s.status === 'cut' || s.status === 'pending';
 
 /** 有效报工（未冲销）对应的方案。 */
 export function reportedPlans(reports = []) {
@@ -29,7 +33,7 @@ export function reportedPlans(reports = []) {
 
 /** 某卷上的有效方案（排除已取消），按工位起点排序。 */
 export function plansOnRoll(plans, rollId) {
-    return (plans || []).filter(p => p.status !== 'CANCELLED' && p.request?.rollId === rollId
+    return (plans || []).filter(p => !['CANCELLED', 'REVERSED'].includes(p.status) && p.request?.rollId === rollId
             && p.request?.feedPortType !== 'remnant' && !p.request?.sourceRemnantId)
         .sort((a, b) => (a.request.windowStartY || 0) - (b.request.windowStartY || 0));
 }
@@ -37,7 +41,7 @@ export function plansOnRoll(plans, rollId) {
 /** 任务涉及的母卷，最近的方案在前。 */
 export function rollsOfPlans(plans) {
     const seen = [];
-    for (const p of [...(plans || [])].filter(p => p.status !== 'CANCELLED' && p.request?.feedPortType !== 'remnant' && !p.request?.sourceRemnantId).reverse())
+    for (const p of [...(plans || [])].filter(p => !['CANCELLED', 'REVERSED'].includes(p.status) && p.request?.feedPortType !== 'remnant' && !p.request?.sourceRemnantId).reverse())
         if (p.request?.rollId && !seen.includes(p.request.rollId)) seen.push(p.request.rollId);
     return seen;
 }
@@ -84,6 +88,9 @@ export function cutEnd(segments, used = 0) {
     return segments.filter(s => s.status === 'cut').reduce((m, s) => Math.max(m, s.start + s.len), used);
 }
 
+/** selectedId = NEW_STATION 表示对准最后一段有效拉布之后的新工位。 */
+export const NEW_STATION = '__new__';
+
 export function buildRollScene({roll, plans, reports = [], rollId, demands, process, freshDefects = [], selectedId = null, window: manual = null}) {
     const colors = demandColors(demands, plans);
     const list = plansOnRoll(plans, rollId);
@@ -91,13 +98,16 @@ export function buildRollScene({roll, plans, reports = [], rollId, demands, proc
     const segments = list.map((p, i) => planSegment(p, colors, i, reported));
     const total = Number(roll?.totalLength) || Math.max(...segments.map(s => s.start + s.len), 1);
     const used = Math.min(Number(roll?.usedLength) || 0, total);
-    const lock = cutEnd(segments, 0);
-    const next = segments.find(s => s.status !== 'cut');
-    const current = segments.find(s => s.id === selectedId) || next || segments[segments.length - 1] || null;
-    const bed = Number(process?.bedLength) || current?.bedLength || 5000;
-    let win = manual ? {...manual} : current ? {start: current.start, len: current.len}
-        : {start: Math.max(lock, used), len: bed};
-    if (manual && current) win.adjusted = Math.abs(manual.start - current.start) > .5 || Math.abs(manual.len - current.len) > .5;
+    const lock = Math.max(cutEnd(segments, 0), used);
+    const bed = Number(process?.bedLength) || 5000;
+    const liveEnd = segments.filter(live).reduce((m, s) => Math.max(m, s.start + s.len), 0);
+    const fresh = {start: Math.max(liveEnd, used), len: Math.max(0, Math.min(bed, total - Math.max(liveEnd, used)))};
+    const current = selectedId === NEW_STATION ? null
+        : segments.find(s => s.id === selectedId) || segments.find(s => s.status === 'pending') || null;
+    const base = current ? {start: current.start, len: current.len} : fresh;
+    const win = manual ? {...manual} : {...base};
+    win.adjusted = !!manual && (Math.abs(manual.start - base.start) > .5 || Math.abs(manual.len - base.len) > .5);
+    win.isNew = !current;
     return {
         roll: {id: rollId, width: Number(roll?.width) || Number(list[0]?.request?.rollW) || 0, total, used},
         segments, defects: rollDefects(roll, freshDefects),
@@ -107,15 +117,15 @@ export function buildRollScene({roll, plans, reports = [], rollId, demands, proc
 }
 
 export function sceneMetrics(scene) {
-    const area = scene.segments.reduce((a, s) => a + s.pieceArea, 0);
-    const total = scene.segments.reduce((a, s) => a + s.totalArea, 0);
-    const length = scene.segments.reduce((a, s) => a + s.len, 0);
+    const valid = scene.segments.filter(live);
+    const area = valid.reduce((a, s) => a + s.pieceArea, 0);
+    const total = valid.reduce((a, s) => a + s.totalArea, 0);
     return {
         utilization: total > 0 ? area / total * 100 : 0,
-        length,
-        spreads: scene.segments.length,
+        length: valid.reduce((a, s) => a + s.len, 0),
+        spreads: valid.length,
         cut: scene.segments.filter(s => s.status === 'cut').length,
-        confirmed: scene.segments.filter(s => s.status === 'confirmed').length,
-        pending: scene.segments.filter(s => s.status === 'pending').length
+        pending: scene.segments.filter(s => s.status === 'pending').length,
+        stale: scene.segments.filter(s => s.status === 'stale').length
     };
 }

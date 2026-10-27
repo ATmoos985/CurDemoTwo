@@ -9,15 +9,23 @@ export async function mount(el) {
     try { [rolls, remnants] = await Promise.all([requestJSON('/api/rolls'), requestJSON('/api/remnants')]); }
     catch (e) { el.innerHTML = errorBox(e); return; }
     let tab = 'roll', sel = 0, q = '';
+    const f = {model: '', loc: '', status: ''};
+    // 下拉筛选字段：母卷按型号 / 库位 / 验布状态，料头按批次 / 库位 / 状态
+    const keys = isRoll => isRoll ? {model: 'rollModel', loc: 'storageLocation', status: 'inspectionStatus'} : {model: 'materialBatch', loc: 'location', status: 'status'};
+    const options = (rows, k) => [...new Set(rows.map(x => x[k]).filter(Boolean))].sort();
     function render() {
-        const isRoll = tab === 'roll';
+        const isRoll = tab === 'roll', k = keys(isRoll);
         const all = isRoll ? rolls : remnants;
-        const list = all.filter(x => !q || JSON.stringify([x.rollId, x.id, x.rollModel, x.materialName, x.materialBatch, x.storageLocation, x.location]).toLowerCase().includes(q.toLowerCase()));
+        const list = all.filter(x => (!f.model || x[k.model] === f.model) && (!f.loc || x[k.loc] === f.loc) && (!f.status || x[k.status] === f.status)
+            && (!q || JSON.stringify([x.rollId, x.id, x.rollModel, x.materialName, x.materialBatch, x.storageLocation, x.location, x.sourceRollId]).toLowerCase().includes(q.toLowerCase())));
+        const select = (id, all0, key, map) => `<select class="field" id="${id}"><option value="">${all0}</option>${options(all, k[key]).map(v => `<option value="${esc(v)}" ${f[key] === v ? 'selected' : ''}>${esc(map?.[v]?.[0] || v)}</option>`).join('')}</select>`;
         const cur = list[Math.min(sel, list.length - 1)];
         el.innerHTML = `<div class="ph"><h1>库存</h1><span class="crumb">母卷与料头</span><span class="sp"></span>
             <a class="btn" href="/transfers.html">移库 ↗</a><a class="btn" href="/counts.html">盘点 ↗</a><a class="btn" href="/inventory.html">入库 / 档案 ↗</a></div>
           <div class="toolbar"><div class="seg"><button data-tab="roll" class="${isRoll ? 'on' : ''}">母卷 ${rolls.length}</button><button data-tab="rem" class="${isRoll ? '' : 'on'}">料头 ${remnants.length}</button></div>
-            <span class="sp"></span><input class="field" id="q" placeholder="编号 / 型号 / 批次 / 库位" style="width:220px" value="${esc(q)}"></div>
+            <span class="vsep"></span>${select('f-model', isRoll ? '全部型号' : '全部批次', 'model')}${select('f-loc', '全部库位', 'loc')}${select('f-status', '全部状态', 'status', isRoll ? Q : R)}
+            ${f.model || f.loc || f.status || q ? '<button class="btn sm" id="f-clear">清除筛选</button>' : ''}
+            <span class="sp"></span><span class="muted" style="font-size:12px">${list.length} / ${all.length}</span><input class="field" id="q" placeholder="搜索编号 / 型号 / 批次 / 库位" style="width:220px" value="${esc(q)}"></div>
           <div class="split" style="grid-template-columns:1fr 340px">
             <section class="pane" style="background:var(--bg)"><div class="body">${list.length ? `<table class="t"><thead><tr>${isRoll
                 ? '<th>卷号</th><th>型号 / 材料</th><th class="r">幅宽</th><th class="r">剩余 / 总长</th><th>余量</th><th class="r">疵点</th><th>库位</th><th>验布</th>'
@@ -29,7 +37,9 @@ export async function mount(el) {
                     return `<tr class="click ${x === cur ? 'sel' : ''}" data-i="${i}"><td class="num">${esc(x.id)}</td><td class="num">${esc(x.sourceRollId || '—')}</td><td class="r num">${fmtN(x.width)} × ${fmtN(x.length)}</td><td class="r num">${fmtN(x.area, 2)} m²</td><td>${esc(x.location || '—')}</td><td>${x.hasDefect ? '<span class="tag warn">带疵</span>' : '无'}</td><td><span class="tag ${sc}">${esc(st)}</span></td></tr>`; })()).join('')}
               </tbody></table>` : '<div class="empty">没有匹配的记录</div>'}</div></section>
             <section class="pane">${cur ? (isRoll ? rollDetail(cur) : remDetail(cur)) : ''}</section></div>`;
-        el.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; sel = 0; render(); });
+        el.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; sel = 0; f.model = f.loc = f.status = ''; render(); });
+        for (const key of ['model', 'loc', 'status']) el.querySelector('#f-' + key).onchange = e => { f[key] = e.target.value; sel = 0; render(); };
+        el.querySelector('#f-clear')?.addEventListener('click', () => { f.model = f.loc = f.status = ''; q = ''; sel = 0; render(); });
         el.querySelectorAll('tr[data-i]').forEach(tr => tr.onclick = () => { sel = Number(tr.dataset.i); render(); });
         const qi = el.querySelector('#q'); qi.oninput = () => { q = qi.value; sel = 0; const p = qi.selectionStart; render(); const n = el.querySelector('#q'); n.focus(); n.setSelectionRange(p, p); };
     }

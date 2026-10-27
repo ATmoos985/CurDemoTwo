@@ -34,7 +34,7 @@ export async function mount(el, [rollParam]) {
           <div class="toolbar">
             <span class="muted">当前位置</span><input class="field num" id="pos" style="width:100px;text-align:right" value="${(st.pos / 1000).toFixed(3)}"><span>m</span><button class="btn sm" id="locate">定位 / 校准</button>
             <span class="vsep"></span><span class="muted">每次前进</span><input class="field num" id="step" style="width:60px;text-align:right" value="${st.step}"><span>m</span><button class="btn sm" id="advance">前进一段 ↓</button>
-            <span class="vsep"></span><span class="muted">速度</span><input class="field num" id="speed" style="width:56px;text-align:right" value="${st.speed}"><span>m/min</span><button class="btn sm ${st.running ? 'pri' : ''}" id="run">${st.running ? '❚❚ 暂停' : '▶ 自动跑布'}</button>
+            <span class="vsep"></span><span class="muted">速度</span><input class="field num" id="speed" style="width:56px;text-align:right" value="${st.speed}"><span>m/min</span><button class="btn sm ${st.running ? 'pri' : ''}" id="run">${st.running ? '❚❚ 暂停' : '▶ 自动跑布'}</button><span class="muted" style="font-size:11.5px">空格 启停</span>
             <span class="sp"></span><span class="muted" style="font-size:12px">${st.running ? '自动跑布：位置按速度与时间计算，可随时暂停校准' : '手动模式'}</span></div>
           <div class="split" style="grid-template-columns:56px 1fr 370px">
             <section class="pane" style="background:#23272c;align-items:center;padding:8px 0" title="全卷：点击跳转"><div style="color:#9aa4ae;font-size:10.5px;margin-bottom:4px">全卷</div>
@@ -59,14 +59,16 @@ export async function mount(el, [rollParam]) {
     function editor(list) {
         const d = st.sel != null ? list[st.sel] : null, editable = d && !d.saved, r = st.roll;
         const v = (k, dflt) => d ? (k === 'right' ? round(r.width - d.x - d.w) : d[k]) : dflt;
-        return `<div class="sec">${d ? (editable ? '修改本次标记' : '已入档（只读）') : '精确录入'}</div>
+        return `<div id="editor"><div class="sec">${d ? (editable ? '本次标记 · 可修改 / 删除（Delete）' : '已入档疵点 · 只读') : '精确录入'}</div>
+          ${d ? `<div class="kv"><div>位置</div><div class="num">Y ${(d.y / 1000).toFixed(3)} m · 距右 ${fmtN(r.width - d.x - d.w, 1)} mm</div><div>来源</div><div>${esc(d.detectionSource || '—')}${d.description ? ' · ' + esc(d.description) : ''}</div></div>` : ''}
+          ${d && !editable ? '<div class="notice">已入档疵点可能已被方案避让，删除需要以作废记录的方式处理，本版暂不支持。</div>' : ''}
           <div class="form" style="grid-template-columns:1fr 1fr;gap:6px 10px">
             ${[['right', '距右边缘 mm', 0], ['y', '距卷头 mm', Math.round(st.pos)], ['w', '疵点宽 mm', 50], ['h', '疵点长 mm', 50]].map(([k, t, dv]) =>
               `<label>${t}<input class="field num" data-f="${k}" value="${v(k, dv)}" style="width:100%" ${d && !editable ? 'disabled' : ''}></label>`).join('')}
             <label>类型<select class="field" data-f="defectType" style="width:100%" ${d && !editable ? 'disabled' : ''}>${TYPES.map(([k, t]) => `<option value="${k}" ${(d ? d.defectType : st.type) === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
             <label>避让外扩 mm<input class="field num" data-f="margin" value="${v('margin', st.margin)}" style="width:100%" ${d && !editable ? 'disabled' : ''}></label></div>
           <div style="display:flex;gap:8px;padding:0 12px 10px;justify-content:flex-end">
-            ${d ? `<button class="btn sm" id="new">新标记</button>` : ''}${editable ? '<button class="btn sm" id="del">删除</button><button class="btn sm pri" id="apply">更新</button>' : d ? '' : '<button class="btn sm pri" id="apply">添加到本次记录</button>'}</div>`;
+            ${d ? `<button class="btn sm" id="new">新标记</button>` : ''}${editable ? '<button class="btn sm" id="del">删除</button><button class="btn sm pri" id="apply">更新</button>' : d ? '' : '<button class="btn sm pri" id="apply">添加到本次记录</button>'}</div></div>`;
     }
 
     function view() {
@@ -105,13 +107,17 @@ export async function mount(el, [rollParam]) {
         const host = el.querySelector('#isvg'); if (!host) return;
         const loc = e => { const r = host.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
         host.onmousedown = e => {
+            if (e.button !== 0) return;
             const p = loc(e), v = view();
-            if (st.tool === 'mark') { stop(); st.drag = {a: p, b: p}; draw(); return; }
-            const [x, y] = model(v, p), list = all();
-            const i = list.findIndex(d => x >= d.x && x <= d.x + d.w && y >= d.y && y <= d.y + d.h);
+            // 点到已有疵点（含 4 px 容差）：两种工具下都先选中并在右侧打开，本次标记可直接拖动
+            const [x, y] = model(v, p), list = all(), tol = 4 / v.s;
+            let i = -1;
+            for (let k = list.length - 1; k >= 0; k--) { const d = list[k]; if (x >= d.x - tol && x <= d.x + d.w + tol && y >= d.y - tol && y <= d.y + d.h + tol) { i = k; break; } }
+            if (i < 0 && st.tool === 'mark') { stop(); st.sel = null; st.drag = {a: p, b: p}; draw(); return; }
             st.sel = i < 0 ? null : i;
             if (i >= 0 && !list[i].saved) st.move = {k: i - (list.length - st.pending.length), p, x0: list[i].x, y0: list[i].y};
             render();
+            if (i >= 0) el.querySelector('#editor')?.scrollIntoView({block: 'nearest'});
         };
         host.onmousemove = e => {
             const p = loc(e), v = view();
@@ -184,6 +190,16 @@ export async function mount(el, [rollParam]) {
 
     const onResize = () => draw();
     window.addEventListener('resize', onResize);
+    const typing = t => t && (['INPUT', 'SELECT', 'TEXTAREA'].includes(t.tagName) || t.isContentEditable);
+    const onKey = e => {
+        if (!st.roll || typing(e.target)) return;
+        if (e.code === 'Space') { e.preventDefault(); st.running ? (stop(), render()) : start(); }
+        else if ((e.key === 'Delete' || e.key === 'Backspace') && st.sel != null) {
+            const k = st.sel - (all().length - st.pending.length);
+            if (k >= 0) { e.preventDefault(); st.pending.splice(k, 1); st.sel = null; persist(); render(); }
+        } else if (e.key === 'Escape' && st.sel != null) { st.sel = null; render(); }
+    };
+    document.addEventListener('keydown', onKey);
     await load(rollParam || null);
-    return () => { stop(); window.removeEventListener('resize', onResize); };
+    return () => { stop(); window.removeEventListener('resize', onResize); document.removeEventListener('keydown', onKey); };
 }

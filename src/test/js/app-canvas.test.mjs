@@ -5,7 +5,8 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {toScreen, toWorld, fitCamera, zoomAt, panBy, ratioOf, scaleForRatio, parseRatio, formatRatio, rulerStep} from '../../main/resources/static/app/js/canvas/camera.js';
 import {snapPosition, tickStep} from '../../main/resources/static/app/js/canvas/roll-navigator.js';
-import {buildRollScene, planSegment, plansOnRoll, rollsOfPlans, reportedPlans, segmentStatus, cutEnd, sceneMetrics, demandIndex} from '../../main/resources/static/app/js/model/roll-scene.js';
+import {buildRollScene, planSegment, plansOnRoll, rollsOfPlans, reportedPlans, segmentStatus, cutEnd, sceneMetrics, demandIndex, NEW_STATION} from '../../main/resources/static/app/js/model/roll-scene.js';
+import {buildSolveRequest, remainingDemands, windowProblem, usablePlan} from '../../main/resources/static/app/js/model/solve-request.js';
 
 const appRoot = fileURLToPath(new URL('../../main/resources/static/app/', import.meta.url));
 const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
@@ -83,29 +84,58 @@ test('plan segments use window-relative coordinates and report-based cut status'
     assert.deepEqual([seg.start, seg.len], [3000, 4200]);
     assert.deepEqual(seg.pieces[0], {...seg.pieces[0], u: 3200, v: 100, du: 1400, dv: 900, color: '#123456'});
     assert.deepEqual(seg.cuts[0], {u1: 4600, v1: 2800, u2: 4600, v2: 0, type: '横切', step: undefined});
-    assert.equal(segmentStatus({id: 'b', status: 'CONFIRMED'}), 'confirmed', '确认未报工不是已切');
+    assert.equal(segmentStatus({id: 'b', status: 'CONFIRMED'}), 'stale', '无报工的 CONFIRMED 是重置遗留，不是已切');
     assert.equal(segmentStatus({id: 'c', status: 'PENDING'}), 'pending');
     assert.deepEqual([...reportedPlans([{planId: 'a', status: 'CONFIRMED'}, {planId: 'b', status: 'REVERSED'}])], ['a']);
 });
 
-test('roll scene orders plans, skips cancelled and remnant-fed plans, and locks cut length', () => {
-    const plans = [plan('p2', 'PENDING', 9000, 3000), plan('p1', 'CONFIRMED', 4000, 5000), plan('x', 'CANCELLED', 0, 100),
-        plan('r', 'CONFIRMED', 0, 1000, {feedPortType: 'remnant'}), plan('o', 'CONFIRMED', 0, 1000, {rollId: 'R2'})];
-    assert.deepEqual(plansOnRoll(plans, 'R1').map(p => p.id), ['p1', 'p2']);
+test('roll scene orders plans, skips cancelled/reversed/remnant plans, and locks cut length', () => {
+    const plans = [plan('p2', 'PENDING', 9000, 3000), plan('p1', 'CONFIRMED', 4000, 5000), plan('x', 'CANCELLED', 0, 100), plan('v', 'REVERSED', 0, 100),
+        plan('s', 'CONFIRMED', 20000, 4000), plan('r', 'CONFIRMED', 0, 1000, {feedPortType: 'remnant'}), plan('o', 'CONFIRMED', 0, 1000, {rollId: 'R2'})];
+    assert.deepEqual(plansOnRoll(plans, 'R1').map(p => p.id), ['p1', 'p2', 's']);
     assert.deepEqual(rollsOfPlans(plans), ['R2', 'R1']);
     const roll = {width: 2800, totalLength: 60000, usedLength: 4000, defects: [{id: 1, x: 10, y: 5000, w: 20, h: 30, margin: 5, typeName: '破洞'}]};
     const sc = buildRollScene({roll, plans, reports: [{planId: 'p1', status: 'CONFIRMED'}], rollId: 'R1', demands: [], process: {bedLength: 5000}});
-    assert.deepEqual(sc.segments.map(s => [s.id, s.status]), [['p1', 'cut'], ['p2', 'pending']]);
-    assert.equal(sc.lock, 9000);
-    assert.equal(sc.currentId, 'p2', '默认对准第一个未切段');
-    assert.deepEqual(sc.window, {start: 9000, len: 3000});
+    assert.deepEqual(sc.segments.map(s => [s.id, s.status]), [['p1', 'cut'], ['p2', 'pending'], ['s', 'stale']]);
+    assert.equal(sc.lock, 9000, '已失效段不计入锁定');
+    assert.equal(sc.currentId, 'p2', '默认对准候选段');
+    assert.deepEqual([sc.window.start, sc.window.len, sc.window.isNew, sc.window.adjusted], [9000, 3000, false, false]);
     assert.equal(sc.defects[0].u, 5000);
     assert.equal(cutEnd(sc.segments), 9000);
     const moved = buildRollScene({roll, plans, reports: [], rollId: 'R1', demands: [], selectedId: 'p2', window: {start: 9500, len: 3000}});
     assert.equal(moved.window.adjusted, true);
     const m = sceneMetrics(sc);
-    assert.deepEqual([m.spreads, m.cut, m.pending], [2, 1, 1]);
+    assert.deepEqual([m.spreads, m.cut, m.pending, m.stale], [2, 1, 1, 1]);
     close(m.utilization, 60);
+});
+
+test('new station starts after the last live spread and never before the used length', () => {
+    const roll = {width: 2800, totalLength: 20000, usedLength: 4000, defects: []};
+    const plans = [plan('p1', 'PENDING', 4000, 5000), plan('s', 'CONFIRMED', 15000, 3000)];
+    const sc = buildRollScene({roll, plans, rollId: 'R1', demands: [], process: {bedLength: 6000}, selectedId: NEW_STATION});
+    assert.equal(sc.currentId, null);
+    assert.deepEqual([sc.window.start, sc.window.len, sc.window.isNew], [9000, 6000, true], '已失效段不阻挡新工位');
+    const tail = buildRollScene({roll: {...roll, usedLength: 18000}, plans: [], rollId: 'R1', demands: [], process: {bedLength: 6000}});
+    assert.deepEqual([tail.window.start, tail.window.len], [18000, 2000], '新工位长度受卷尾限制');
+});
+
+test('solve request uses remaining quantities, task process and window-clipped defects', () => {
+    const task = {id: 't', revision: 3, demands: [{id: 1, name: 'A', width: 900, length: 1400, quantity: 5}, {id: 2, name: 'B', width: 800, length: 1200, quantity: 2}],
+        process: {trimStart: 10, pieceGap: 2, cutOrigin: 'right-bottom', allowLongitudinal: true}};
+    assert.deepEqual(remainingDemands(task, {1: 2}, {'1': 1, 2: 2}).map(d => [d.id, d.demand]), [[1, 2]], '扣除已完成与已预约');
+    const roll = {rollId: 'R1', rollModel: 'M', width: 2800, totalLength: 60000, usedLength: 3000, currentRemainingLength: 57000,
+        defects: [{id: 9, x: 100, y: 7000, w: 200, h: 300, margin: 20}, {id: 10, x: 0, y: 30000, w: 10, h: 10, margin: 0}]};
+    const req = buildSolveRequest({task, roll, win: {start: 5000, len: 4000}, completed: {}, reserved: {}, settings: {timeLimitSeconds: 5}});
+    assert.equal(req.taskRevision, 3);
+    assert.deepEqual([req.rollW, req.rollL, req.windowStartY, req.totalRollL, req.feedPortType], [2800, 4000, 5000, 60000, 'roll']);
+    assert.deepEqual([req.trimStart, req.pieceGap, req.cutOrigin, req.timeLimitSeconds], [10, 2, 'right-bottom', 5]);
+    assert.equal(req.defects.length, 1, '只带入与工位重叠的疵点');
+    assert.deepEqual(req.defects[0], {id: 9, x: 80, y: 1980, w: 240, h: 340, margin: 0}, '疵点换算为工位坐标并外扩安全距离');
+    assert.equal(windowProblem(roll, {start: 2000, len: 1000}) !== null, true, '不能早于已用长度');
+    assert.equal(windowProblem(roll, {start: 58000, len: 3000}) !== null, true, '不能超出卷尾');
+    assert.equal(windowProblem(roll, {start: 5000, len: 4000}), null);
+    assert.equal(usablePlan({success: true, planId: 'p', pieces: [{}], cuts: [], remnants: []}), true);
+    assert.equal(usablePlan({success: true, planId: 'p', pieces: [], cuts: [], remnants: []}), false);
 });
 
 test('demand names merge task and plan demands with task taking precedence', () => {

@@ -27,8 +27,8 @@ export function createRollNavigator(host, callbacks = {}) {
         const pct = v => (v / roll.total * 100).toFixed(4) + '%';
         let t = roll.used > 0 ? `<div class="rn-b rn-used" style="left:0;width:${pct(Math.min(roll.used, roll.total))}" title="已用 ${fmtM(roll.used)} m"></div>` : '';
         for (const s of segments) {
-            const cut = s.status === 'cut';
-            t += `<div class="rn-b rn-seg ${cut ? 'rn-cut' : ''} ${s.id === scene.currentId ? 'rn-on' : ''}" data-seg="${esc(s.id)}" style="left:${pct(s.start)};width:${pct(s.len)};background:${s.tint}" title="${esc(s.label)} · Y ${fmtM(s.start)}–${fmtM(s.start + s.len)} m${cut ? ' · 已切（固定）' : ''}"></div>`;
+            const cut = s.status === 'cut', stale = s.status === 'stale';
+            t += `<div class="rn-b rn-seg ${cut ? 'rn-cut' : ''} ${stale ? 'rn-stale' : ''} ${s.id === scene.currentId ? 'rn-on' : ''}" data-seg="${esc(s.id)}" style="left:${pct(s.start)};width:${pct(s.len)};background:${stale ? 'transparent' : s.tint}" title="${esc(s.label)} · Y ${fmtM(s.start)}–${fmtM(s.start + s.len)} m${cut ? ' · 已切（固定）' : stale ? ' · 已失效（母卷重置遗留）' : ''}"></div>`;
         }
         for (const d of defects) t += `<div class="rn-def ${d.fresh ? 'rn-fresh' : ''}" style="left:${pct(d.u)}" title="${esc(d.label)}"></div>`;
         if (win) {

@@ -46,15 +46,14 @@ async function route() {
     cleanup = await mod.mount(main, params) || null;
 }
 
+// 只显示服务是否可用，不对外暴露求解引擎与计算能力细节。
 async function engineStatus() {
     const el = document.getElementById('engine-status');
     try {
-        const engines = await requestJSON('/api/v1/nesting/engines');
-        const list = Array.isArray(engines) ? engines : engines.engines || [];
-        const ok = list.some(e => e.available !== false);
-        el.innerHTML = `<span class="dot ${ok ? 'ok' : 'warn'}"></span>求解引擎 <b>${ok ? '就绪' : '降级'}</b>`;
+        const ok = (await requestJSON('/api/health')).status === 'UP';
+        el.innerHTML = `<span class="dot ${ok ? 'ok' : 'warn'}"></span>服务 <b>${ok ? '正常' : '异常'}</b>`;
     } catch {
-        el.innerHTML = '<span class="dot warn"></span>求解引擎 <b>未知</b>';
+        el.innerHTML = '<span class="dot warn"></span>服务 <b>未连接</b>';
     }
 }
 

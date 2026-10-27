@@ -28,7 +28,7 @@ export async function mount(el) {
                   <td class="r num">${r.pendingCount || 0}</td><td class="r num">${r.reportCount || 0}</td>
                   <td><a class="btn sm" href="#/workbench/${encodeURIComponent(t.id)}">打开</a> <a class="btn sm" href="${esc(taskLink(r))}" title="在经典工作台处理">经典 ↗</a></td></tr>`;
             }).join('')}</tbody></table>` : '<div class="empty">没有符合条件的任务</div>'}
-            <div class="pager"><span>共 ${list.length} 条</span><span>数据来自 /api/cutting/task-summaries</span></div></div>`;
+            <div class="pager"><span>共 ${list.length} 条</span><span>双击行打开工作台</span></div></div>`;
         el.querySelectorAll('[data-status]').forEach(b => b.onclick = () => { status = b.dataset.status; render(); });
         const input = el.querySelector('#task-search');
         input.oninput = () => { search = input.value; const pos = input.selectionStart; render(); const i = el.querySelector('#task-search'); i.focus(); i.setSelectionRange(pos, pos); };

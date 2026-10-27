@@ -3,7 +3,11 @@ export {requestJSON, ApiError} from '../../js/core/api-request.js';
 
 export const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 export const fmtM = (mm, d = 1) => (Number(mm) / 1000).toLocaleString('zh-CN', {maximumFractionDigits: d});
-export const fmtN = (n, d = 0) => Number(n ?? 0).toLocaleString('zh-CN', {maximumFractionDigits: d});
+/** 千分位 + 小数位；舍入后为 0 的负数显示为 0，不出现 “-0”。 */
+export const fmtN = (n, d = 0) => {
+    const v = Number(Number(n ?? 0).toFixed(d));
+    return (v === 0 ? 0 : v).toLocaleString('zh-CN', {maximumFractionDigits: d});
+};
 export const fmtTime = t => {
     if (!t) return '—';
     const d = new Date(typeof t === 'number' ? t : String(t).replace(' ', 'T'));
@@ -21,6 +25,13 @@ export function toast(message, error = false) {
 
 export function errorBox(error) {
     return `<div class="error-box">读取失败：${esc(error?.message || error)}。数据未改动，可刷新重试。</div>`;
+}
+
+/** 求解参数：与经典工作台共用同一组本机设置（回收最小宽 / 长、求解时限）。 */
+export function solverSettings() {
+    return {minRemnantWidth: Number(localStorage.getItem('cam_min_rem_w') ?? 200),
+        minRemnantLength: Number(localStorage.getItem('cam_min_rem_l') ?? 300),
+        timeLimitSeconds: Number(localStorage.getItem('cam_timeout') ?? 3)};
 }
 
 const PREF_KEY = 'cutplan.app.prefs';
