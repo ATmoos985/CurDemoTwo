@@ -110,12 +110,12 @@ table.t{width:100%;border-collapse:collapse;background:var(--panel);border:1px s
 .stage.on{color:var(--accent-ink);font-weight:600;border-bottom-color:var(--accent)} .stage.on .n{background:var(--accent);border-color:var(--accent);color:#fff}
 .stage:not(:last-child):after{content:"";width:24px;height:1px;background:var(--line);margin-left:16px}
 .ctool{white-space:nowrap;overflow:hidden;display:flex;align-items:center;gap:2px;height:32px;padding:0 8px;background:#33393f;border-bottom:1px solid #20252a;flex:none}
-.ctool button{height:24px;min-width:26px;padding:0 7px;background:transparent;border:1px solid transparent;color:#c9d0d7;border-radius:2px;cursor:pointer;font-size:12px}
+.ctool button{flex:none;height:24px;min-width:26px;padding:0 7px;background:transparent;border:1px solid transparent;color:#c9d0d7;border-radius:2px;cursor:pointer;font-size:12px}
 .ctool button:hover{background:#3e454c}
 .ctool button.on{background:#47505a;border-color:#56606b;color:#fff}
 .ctool .div{width:1px;height:16px;background:#4a525b;margin:0 6px}
 .ctool .sp{flex:1}
-.ctool span{color:#9aa4ae;font-size:11.5px;overflow:hidden;text-overflow:ellipsis}
+.ctool span{flex:none;color:#9aa4ae;font-size:11.5px}
 .canvas-wrap{flex:1;position:relative;background:var(--canvas);min-height:0;overflow:hidden}
 .canvas-wrap svg{width:100%;height:100%;display:block}
 .strip{height:112px;flex:none;background:#23272c;border-top:1px solid #1a1d21;display:flex;gap:8px;padding:8px;overflow-x:auto}
@@ -144,10 +144,10 @@ table.t{width:100%;border-collapse:collapse;background:var(--panel);border:1px s
 .notice{margin:0 0 12px;padding:8px 12px;border:1px solid #c9d8e8;background:#f2f6fb;color:var(--accent-ink);font-size:12.5px}
 .proto{position:fixed;left:10px;bottom:30px;background:#fff3cd;border:1px solid #e3c26a;color:#7a5a00;font-size:11.5px;padding:3px 8px;border-radius:2px;z-index:9}
 .strip{display:none}
-.vseg{display:inline-flex;border:1px solid #56606b;border-radius:2px;overflow:hidden}
+.vseg{flex:none;display:inline-flex;border:1px solid #56606b;border-radius:2px;overflow:hidden}
 .vseg button{border:0!important;border-radius:0!important;height:22px!important}
 .vseg button.on{background:#5a7fa6!important;color:#fff}
-.cin{width:62px;height:22px;background:#23282d;border:1px solid #56606b;color:#fff;border-radius:2px;padding:0 6px;text-align:right;margin:0 4px}
+.cin{flex:none;width:62px;height:22px;background:#23282d;border:1px solid #56606b;color:#fff;border-radius:2px;padding:0 6px;text-align:right;margin:0 4px}
 .navroll{flex:none;background:#23272c;border-top:1px solid #1a1d21;padding:6px 12px 8px;color:#aeb7c0;font-size:11.5px}
 .nr-head{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px}
 .nr-head b{color:#e6ebef;font-weight:500}
@@ -288,7 +288,6 @@ function renderLayout(L,{w,h,pad=36,labels=true,dims=true,cuts=true,oneD=false}=
 }
 
 /* ---------------- 画布（纯渲染：只接收 母卷 / 方案块 / 当前段） ---------------- */
-let VERT=false;
 const SVG_DEFS=`<defs><pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="var(--canvas-grid)" stroke-width="1"/></pattern>
 <pattern id="waste" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#5a6068" stroke-width="1"/></pattern>
 <pattern id="usedp" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="#2b3036"/><line x1="0" y1="0" x2="0" y2="5" stroke="#454c54" stroke-width="2"/></pattern>
@@ -322,49 +321,6 @@ function displayBlocks(plan,oneD){
 }
 function defectMarks(R,s,toX,y0){return R.defects.map(d=>`<rect x="${toX(d.pos)}" y="${y0+d.x*s}" width="${Math.max(3,d.len*s)}" height="${Math.max(3,d.w*s)}" fill="none" stroke="#ff6b5b" stroke-width="1.5"/>`).join('')}
 
-/* 工位视图：当前拉布段 + 前后连续的布 */
-function renderStation(R,plan,cur,{w,h,oneD}){
-  /* 一维长度方向只做示意压缩（分条贯穿整车），二维按真实长度 */
-  const seg=plan.segs[cur], db=displayBlocks(plan,oneD), sd=db.find(b=>b.kind==='seg'&&b.idx===cur), ctx=Math.min(sd.dl*.22,2500);
-  const s=Math.min((w-130)/(sd.dl+2*ctx),(h-110)/R.width);
-  const ox=(w-sd.dl*s)/2, oy=(h-R.width*s)/2-6, H=R.width*s;
-  const toX=d=>ox+(d-sd.d0)*s;
-  const near=db.filter(b=>b.d0+b.dl>sd.d0-ctx&&b.d0<sd.d0+sd.dl+ctx);
-  let g=SVG_DEFS+`<rect width="${w}" height="${h}" fill="url(#grid)"/>`;
-  g+=`<clipPath id="ctx"><rect x="${toX(sd.d0-ctx)}" y="${oy-8}" width="${(sd.dl+2*ctx)*s}" height="${H+16}"/></clipPath>`;
-  g+=`<g clip-path="url(#ctx)">${drawBlocks(near,R,s,toX,oy,{cur,dim:true,labels:true,oneD})}${oneD?'':defectMarks(R,s,toX,oy)}</g>`;
-  g+=`<linearGradient id="fl"><stop offset="0" stop-color="var(--canvas)"/><stop offset="1" stop-color="var(--canvas)" stop-opacity="0"/></linearGradient><linearGradient id="fr"><stop offset="0" stop-color="var(--canvas)" stop-opacity="0"/><stop offset="1" stop-color="var(--canvas)"/></linearGradient>`;
-  g+=`<rect x="${toX(sd.d0-ctx)}" y="${oy-8}" width="${ctx*s*.7}" height="${H+16}" fill="url(#fl)"/><rect x="${toX(sd.d0+sd.dl+ctx*.3)}" y="${oy-8}" width="${ctx*s*.7}" height="${H+16}" fill="url(#fr)"/>`;
-  const x1=ox+sd.dl*s, ty=oy-22;
-  g+=`<line x1="${ox}" x2="${x1}" y1="${ty}" y2="${ty}" stroke="#c9d0d7"/><line x1="${ox}" x2="${ox}" y1="${ty-5}" y2="${ty+5}" stroke="#c9d0d7"/><line x1="${x1}" x2="${x1}" y1="${ty-5}" y2="${ty+5}" stroke="#c9d0d7"/>`;
-  g+=`<rect x="${(ox+x1)/2-62}" y="${ty-9}" width="124" height="18" fill="var(--canvas)"/><text class="along" x="${(ox+x1)/2}" y="${ty+4}" fill="#fff" font-size="12" font-family="var(--mono)" text-anchor="middle">${oneD?'每车 '+seg.len+' mm':'拉布 '+seg.len+' mm'}</text>`;
-  g+=`<text class="across" x="${x1+16}" y="${oy+H/2}" fill="#c9d0d7" font-size="11" font-family="var(--mono)" transform="rotate(90 ${x1+16} ${oy+H/2})" text-anchor="middle">幅宽 ${R.width} mm</text>`;
-  g+=`<text x="${ox}" y="${oy+H+20}" fill="#9aa4ae" font-size="11" font-family="var(--mono)">Y ${m(seg.start)} m</text><text x="${x1}" y="${oy+H+20}" fill="#9aa4ae" font-size="11" font-family="var(--mono)" text-anchor="end">${m(seg.start+seg.len)} m</text>`;
-  g+=`<text x="${toX(sd.d0-ctx)+4}" y="${oy+H+38}" fill="#7d8791" font-size="11">进料方向 →${oneD?'（长度示意）':''}</text>`;
-  if(oneD)seg.L.items.forEach((it,i)=>{if(i)g+=`<line x1="${ox-8}" x2="${x1+8}" y1="${oy+it.y*s}" y2="${oy+it.y*s}" stroke="#f0c674" stroke-dasharray="5 3"/>`;g+=`<text x="${ox-12}" y="${oy+(it.y+it.h/2)*s+4}" fill="#9aa4ae" font-size="10" text-anchor="end" font-family="var(--mono)">刀${i+1}</text>`});
-  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">${g}</svg>`;
-}
-
-/* 全卷视图：整卷按行折返展示，所有拉布段、避让、已用、尾料一屏可见 */
-function renderRoll(R,plan,cur,{w,h,oneD}){
-  const db=displayBlocks(plan,oneD), D=db.reduce((a,b)=>a+b.dl,0), padL=58,padR=18,pad=26,gap=30;
-  let best={n:1,s:0};
-  for(let n=1;n<=8;n++){const s=Math.min((w-padL-padR)/(D/n),(h-2*pad-(n-1)*gap)/(n*R.width));if(s>best.s)best={n,s}}
-  const {n,s}=best, rowD=D/n, H=R.width*s;
-  const realAt=d=>{for(const b of db)if(d<=b.d0+b.dl)return b.start+(d-b.d0)/b.dl*b.len;return R.total};
-  let g=SVG_DEFS;
-  for(let r=0;r<n;r++){
-    const y0=pad+r*(H+gap), r0=r*rowD, toX=d=>padL+(d-r0)*s;
-    g+=`<clipPath id="row${r}"><rect x="${padL}" y="${y0-4}" width="${rowD*s}" height="${H+8}"/></clipPath>`;
-    g+=`<text x="${padL-8}" y="${y0+H/2+4}" fill="#9aa4ae" font-size="10.5" text-anchor="end" font-family="var(--mono)">${m(realAt(r0))} m</text>`;
-    g+=`<g clip-path="url(#row${r})">${drawBlocks(db,R,s,toX,y0,{cur,oneD})}${oneD?'':defectMarks(R,s,d=>toX(d),y0)}</g>`;
-    for(const b of db)if(b.kind==='seg'&&!oneD){const x=toX(b.d0);if(b.d0>=r0&&b.d0<r0+rowD&&b.dl*s>30)g+=`<text x="${x+3}" y="${y0-5}" fill="${b.idx===cur?'#cfe3f7':'#8a949e'}" font-size="10">${b.L.name.replace('排法 ','#')}</text>`}
-    if(oneD){let last=-1;for(const b of db)if(b.kind==='seg'&&b.li!==last){last=b.li;if(b.d0>=r0&&b.d0<r0+rowD)g+=`<text x="${toX(b.d0)+3}" y="${y0-5}" fill="#8a949e" font-size="10">${b.L.name.replace('序号组 ','')} ×${plan.count[b.li]}</text>`}}
-  }
-  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">${g}</svg>`;
-}
-
-
 /* 方向只是显示变换：模型坐标不变（X=幅宽，Y=卷长），竖向时整体转置，文字保持正向 */
 function orient(svg,vertical){
   if(!vertical)return svg;
@@ -376,6 +332,97 @@ function orient(svg,vertical){
     return `<text x="${x}" y="${y}" transform="translate(${x} ${y}) matrix(0 1 1 0 0 0)${rot} translate(${-x} ${-y})"${rest}>`;
   }).replace(/→/g,'↓');
   return `<svg viewBox="0 0 ${h} ${w}" preserveAspectRatio="xMidYMid meet"><g transform="matrix(0 1 1 0 0 0)">${inner}</g></svg>`;
+}
+
+/* ---------------- 画布引擎：整卷是一个连续世界，工位 / 全卷只是相机预设 ----------------
+   渲染空间：长度方向 = x，幅宽方向 = y（竖向时由 orient() 整体转置）。
+   相机 cam = {s: 像素/mm, tx, ty}；1 CSS 像素 = 0.2646 mm（96 dpi），据此换算 1:N。 */
+let VERT=false;
+const PX_MM=0.2646, RULER=22;
+const CV={cam:null,drag:null,cursor:null};
+function cvWorld(){const oneD=state.wbKind==='1d',R=oneD?ROLL_1D:ROLL_2D,P=oneD?PLAN_1D:PLAN_2D,db=displayBlocks(P,oneD);
+  return {oneD,R,P,db,D:db.reduce((a,b)=>a+b.dl,0),cur:Math.min(state.seg,P.segs.length-1)}}
+function cvSize(){const el=document.getElementById('cvs');if(!el)return null;const r=el.getBoundingClientRect();return VERT?{w:r.height,h:r.width}:{w:r.width,h:r.height}}
+function realAt(db,d){for(const b of db)if(d<=b.d0+b.dl)return b.start+Math.max(0,d-b.d0)/b.dl*b.len;const l=db[db.length-1];return l.start+l.len}
+function fitCam(u0,u1,v0,v1,w,h,p){const s=Math.min((w-p.l-p.r)/(u1-u0),(h-p.t-p.b)/(v1-v0));
+  return {s,tx:p.l+((w-p.l-p.r)-(u1-u0)*s)/2-u0*s,ty:p.t+((h-p.t-p.b)-(v1-v0)*s)/2-v0*s}}
+function presetCam(){
+  const sz=cvSize();if(!sz)return;const W=cvWorld(),{w,h}=sz,Wd=W.R.width;
+  const pad={l:RULER+44,r:40,t:RULER+46,b:46};
+  let cam;
+  if(state.view==='station'){const sd=W.db.find(b=>b.kind==='seg'&&b.idx===W.cur),ctx=Math.min(sd.dl*.22,2500);cam=fitCam(sd.d0-ctx,sd.d0+sd.dl+ctx,0,Wd,w,h,pad);cam.mode='strip'}
+  else if(state.fullMode==='tile'){
+    let best=null;for(let n=1;n<=10;n++){const rl=W.D/n,gap=Wd*.3,c=fitCam(0,rl,0,n*Wd+(n-1)*gap,w,h,{l:58,r:18,t:24,b:16});if(!best||c.s>best.s)best={...c,rows:{n,rowLen:rl,gap}}}
+    cam={...best,mode:'tile'}}
+  else{cam=fitCam(0,W.D,0,Wd,w,h,pad);cam.mode='strip'}
+  cam.fit=cam.s;CV.cam=cam;
+}
+function rulerStep(s,min=70){const d=min/s,m=10**Math.floor(Math.log10(d));return [1,2,5,10].find(n=>n*m>=d)*m}
+function ratioText(s){const n=1/(s*PX_MM);return '1:'+(n>=10?Math.round(n):n>=1?n.toFixed(1):n.toFixed(2))}
+
+function drawCanvas(){
+  const host=document.getElementById('cvs');if(!host)return;
+  if(!CV.cam)presetCam();
+  const {w,h}=cvSize(),W=cvWorld(),{R,P,db,oneD,cur}=W,c=CV.cam,s=c.s,H=R.width*s;
+  let g=SVG_DEFS+`<rect width="${w}" height="${h}" fill="url(#grid)"/>`;
+  if(c.mode==='tile'){
+    const {n,rowLen,gap}=c.rows;
+    for(let r=0;r<n;r++){
+      const r0=r*rowLen,y0=c.ty+r*(R.width+gap)*s,toX=d=>c.tx+(d-r0)*s;
+      g+=`<clipPath id="row${r}"><rect x="${toX(r0)}" y="${y0-4}" width="${rowLen*s}" height="${H+8}"/></clipPath>`;
+      g+=`<text x="${toX(r0)-8}" y="${y0+H/2+4}" fill="#9aa4ae" font-size="10.5" text-anchor="end" font-family="var(--mono)">${m(realAt(db,r0))} m</text>`;
+      const vis=db.filter(b=>b.d0+b.dl>=r0&&b.d0<=r0+rowLen);
+      g+=`<g clip-path="url(#row${r})">${drawBlocks(vis,R,s,toX,y0,{cur,oneD,labels:true})}${oneD?'':defectMarks(R,s,toX,y0)}</g>`;
+    }
+  }else{
+    const toX=d=>c.tx+d*s,y0=c.ty;
+    const vis=db.filter(b=>toX(b.d0+b.dl)>=-50&&toX(b.d0)<=w+50);
+    g+=drawBlocks(vis,R,s,toX,y0,{cur,dim:state.view==='station',labels:true,oneD});
+    if(!oneD)g+=defectMarks(R,s,toX,y0);
+    /* 当前段标注 */
+    const sd=db.find(b=>b.kind==='seg'&&b.idx===cur),ox=toX(sd.d0),x1=toX(sd.d0+sd.dl),ty=y0-20;
+    if(x1>0&&ox<w&&x1-ox>70){
+      g+=`<line x1="${ox}" x2="${x1}" y1="${ty}" y2="${ty}" stroke="#c9d0d7"/><line x1="${ox}" x2="${ox}" y1="${ty-5}" y2="${ty+5}" stroke="#c9d0d7"/><line x1="${x1}" x2="${x1}" y1="${ty-5}" y2="${ty+5}" stroke="#c9d0d7"/>`;
+      g+=`<rect x="${(ox+x1)/2-60}" y="${ty-9}" width="120" height="18" fill="var(--canvas)"/><text class="along" x="${(ox+x1)/2}" y="${ty+4}" fill="#fff" font-size="12" font-family="var(--mono)" text-anchor="middle">${oneD?'每车 '+sd.len+' mm':'拉布 '+sd.len+' mm'}</text>`;
+      g+=`<text x="${ox}" y="${y0+H+18}" fill="#9aa4ae" font-size="11" font-family="var(--mono)">Y ${m(sd.start)} m</text><text x="${x1}" y="${y0+H+18}" fill="#9aa4ae" font-size="11" font-family="var(--mono)" text-anchor="end">${m(sd.start+sd.len)} m</text>`;
+      if(oneD&&H>60)sd.L.items.forEach((it,i)=>{g+=`<text x="${ox-6}" y="${y0+(it.y+it.h/2)*s+4}" fill="#9aa4ae" font-size="10" text-anchor="end" font-family="var(--mono)">刀${i+1}</text>`});
+    }
+    /* 标尺：长度方向（m，真实 Y）与幅宽方向（mm） */
+    g+=`<rect x="0" y="0" width="${w}" height="${RULER}" fill="#23272c"/><rect x="0" y="0" width="${RULER}" height="${h}" fill="#23272c"/>`;
+    const su=rulerStep(s);
+    for(let d=Math.floor(-c.tx/s/su)*su;toX(d)<=w;d+=su){const x=toX(d);if(x<RULER)continue;
+      g+=`<line x1="${x}" x2="${x}" y1="${RULER-7}" y2="${RULER}" stroke="#6b747e"/><text x="${x+3}" y="${RULER-9}" fill="#9aa4ae" font-size="9.5" font-family="var(--mono)">${m(realAt(db,d))}</text>`;
+      for(let k=1;k<5;k++){const xx=toX(d+su*k/5);g+=`<line x1="${xx}" x2="${xx}" y1="${RULER-3}" y2="${RULER}" stroke="#4a525b"/>`}}
+    const sv=rulerStep(s,40);
+    for(let v=0;v<=R.width;v+=sv){const y=y0+v*s;if(y<RULER||y>h)continue;
+      g+=`<line x1="${RULER-7}" x2="${RULER}" y1="${y}" y2="${y}" stroke="#6b747e"/><text x="${RULER-9}" y="${y+3}" fill="#9aa4ae" font-size="9" font-family="var(--mono)" text-anchor="end">${v}</text>`}
+    g+=`<rect x="0" y="0" width="${RULER}" height="${RULER}" fill="#1d2125"/><text x="4" y="14" fill="#7d8791" font-size="9">${oneD?'m*':'m'}</text>`;
+  }
+  host.innerHTML=orient(`<svg viewBox="0 0 ${w} ${h}">${g}</svg>`,VERT).replace('<svg ','<svg width="100%" height="100%" ');
+  const ri=document.getElementById('ratio');if(ri&&document.activeElement!==ri)ri.value=ratioText(s);
+  const zp=document.getElementById('zoompct');if(zp)zp.textContent=Math.round(s/c.fit*100)+'%';
+}
+function zoomAt(rx,ry,f){const c=CV.cam;if(!c)return;const ns=Math.max(c.fit*.25,Math.min(8,c.s*f));f=ns/c.s;
+  if(c.mode==='tile'){c.tx=rx-(rx-c.tx)*f;c.ty=ry-(ry-c.ty)*f}else{c.tx=rx-(rx-c.tx)*f;c.ty=ry-(ry-c.ty)*f}c.s=ns;drawCanvas()}
+function zoomCenter(f){const sz=cvSize();zoomAt(sz.w/2,sz.h/2,f)}
+function setRatio(text){const n=parseFloat(String(text).replace(/^1\s*[:：]\s*/,''));if(!(n>0))return drawCanvas();zoomCenter(1/(n*PX_MM)/CV.cam.s)}
+function fitNow(){presetCam();drawCanvas()}
+function cursorReadout(rx,ry){
+  const c=CV.cam,W=cvWorld(),el=document.getElementById('cursorpos');if(!el||!c)return;
+  let d,v;
+  if(c.mode==='tile'){const rowH=(W.R.width+c.rows.gap)*c.s,r=Math.floor((ry-c.ty)/rowH);v=(ry-c.ty-r*rowH)/c.s;d=r*c.rows.rowLen+(rx-c.tx)/c.s;if(r<0||r>=c.rows.n)d=NaN}
+  else{d=(rx-c.tx)/c.s;v=(ry-c.ty)/c.s}
+  el.textContent=(d>=0&&d<=W.D&&v>=0&&v<=W.R.width)?`X ${Math.round(v)} mm · Y ${(realAt(W.db,d)/1000).toFixed(3)} m`:'—';
+}
+function bindCanvas(){
+  const el=document.getElementById('cvs');if(!el)return;
+  const local=e=>{const r=el.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;return VERT?[y,x]:[x,y]};
+  el.addEventListener('wheel',e=>{e.preventDefault();const [x,y]=local(e);zoomAt(x,y,e.deltaY<0?1.15:1/1.15)},{passive:false});
+  el.addEventListener('mousedown',e=>{CV.drag=local(e);el.style.cursor='grabbing'});
+  window.onmouseup=()=>{CV.drag=null;el.style.cursor='grab'};
+  el.addEventListener('mousemove',e=>{const [x,y]=local(e);cursorReadout(x,y);
+    if(CV.drag){CV.cam.tx+=x-CV.drag[0];CV.cam.ty+=y-CV.drag[1];CV.drag=[x,y];drawCanvas()}});
+  window.onresize=()=>{if(document.getElementById('cvs'))drawCanvas()};
 }
 
 /* 母卷导航条：整卷比例尺，点击跳到任一拉布段 */
@@ -402,7 +449,7 @@ const NAV=[
   ['质量与分析',[['quality','复检处置','1'],['analysis','生产分析']]],
   ['系统',[['showcase','能力展示'],['settings','设置']]],
 ];
-let state={page:'tasks',wbKind:'2d',seg:0,view:'station',orient:'v',stage:2,matTab:'roll',matSel:0};
+let state={page:'tasks',wbKind:'2d',seg:0,view:'station',orient:'v',fullMode:'strip',stage:2,matTab:'roll',matSel:0};
 
 function nav(){
   document.getElementById('nav').innerHTML=NAV.map(([h,items])=>`<h6>${h}</h6>`+items.map(([k,t,c])=>`<a href="#${k}" onclick="go('${k}');return false" class="${state.page===k?'on':''}">${t}${c?`<span class="cnt">${c}</span>`:''}</a>`).join('')).join('');
@@ -462,13 +509,14 @@ workbench(){
       </section>
       <section class="pane" style="background:var(--canvas)">
         <div class="ctool">
-          <div class="vseg"><button class="${full?'':'on'}" onclick="setView('station')">工位</button><button class="${full?'on':''}" onclick="setView('full')">全卷</button></div>
-          <div class="vseg" title="画布方向（显示偏好，不影响坐标与算法）"><button class="${state.orient==='v'?'on':''}" onclick="setOrient('v')">竖向</button><button class="${state.orient==='h'?'on':''}" onclick="setOrient('h')">横向</button></div>
+          <div class="vseg"><button class="${full?'':'on'}" onclick="setView('station')" title="相机对准当前拉布">工位</button><button class="${full?'on':''}" onclick="setView('full')" title="相机显示整卷">全卷</button></div>
+          ${full?`<div class="vseg" title="全卷显示方式（个人偏好可设默认）"><button class="${state.fullMode==='strip'?'on':''}" onclick="setFullMode('strip')">整条</button><button class="${state.fullMode==='tile'?'on':''}" onclick="setFullMode('tile')">平铺</button></div>`:''}
+          <div class="div"></div><button title="适应视图 F" onclick="fitNow()">适应</button><button title="缩小 −" onclick="zoomCenter(1/1.25)">−</button><input id="ratio" class="cin num" list="ratios" title="精确比例：输入 1:N，回车生效" onchange="setRatio(this.value)" style="width:70px"><datalist id="ratios"><option>1:5</option><option>1:10</option><option>1:20</option><option>1:50</option><option>1:100</option><option>1:200</option><option>1:500</option></datalist><button title="放大 +" onclick="zoomCenter(1.25)">+</button><span id="zoompct" class="num" style="min-width:38px"></span>
           <div class="div"></div><button title="上一段 ←" onclick="pickSeg(${cur-1})">◀</button><span class="num" style="color:#fff">${cur+1} / ${P.segs.length}</span><button title="下一段 →" onclick="pickSeg(${cur+1})">▶</button>
-          <div class="div"></div><button class="on">切割线</button><button class="on">标注</button><button class="on">疵点</button><button>${oneD?'刀位':'刀路'}</button>
-          <div class="sp"></div>${oneD?`<span>${L.name} · 第 ${cur+1} 车</span>`:`<span>拉布</span><input class="cin num" value="${seg.len}"><span>mm</span>`}
+          <div class="div"></div><button title="图层：切割线、标注、疵点、刀路">图层 ▾</button><button title="画布方向：当前${state.orient==='v'?'竖向':'横向'}，点击切换（不影响坐标与算法）" onclick="setOrient('${state.orient==='v'?'h':'v'}')">${state.orient==='v'?'竖向 ⇅':'横向 ⇆'}</button>
+          <div class="sp"></div>${oneD?`<span>${L.name}</span>`:`<span>拉布</span><input class="cin num" value="${seg.len}"><span>mm</span>`}
         </div>
-        <div class="canvas-wrap" id="cv">${(()=>{const v=VERT=state.orient==='v',sz=v?{w:520,h:900}:{w:900,h:520};return orient(full?renderRoll(R,P,cur,{...sz,oneD}):renderStation(R,P,cur,{...sz,oneD}),v)})()}
+        <div class="canvas-wrap" id="cv"><div id="cvs" style="position:absolute;inset:0;cursor:grab"></div>
           <div class="legend">${D.map(d=>`<span><i style="background:${ORDER_COLORS[d[0]]}"></i>${d[1]}</span>`).join('')}<span><i style="border:1px solid #9aa4ae"></i>余料</span>${R.defects.length?'<span><i style="border:1.5px solid #ff6b5b"></i>疵点</span>':''}</div>
         </div>
         <div class="navroll">${renderTrack(R,P,cur,oneD)}</div>
@@ -605,7 +653,7 @@ showcase(){
 },
 
 settings(){
-  const g=[['工艺与设备','工位、切割方式、刀缝、修边、最小分条'],['材料规格','材料主数据、门幅、质量规则'],['求解策略','引擎选择、时间上限、目标权重'],['系统接入','需求来源、库存同步、事件投递'],['个人偏好','单位、主题、画布方向、快捷键']];
+  const g=[['工艺与设备','工位、切割方式、刀缝、修边、最小分条'],['材料规格','材料主数据、门幅、质量规则'],['求解策略','引擎选择、时间上限、目标权重'],['系统接入','需求来源、库存同步、事件投递'],['个人偏好','画布方向、全卷显示、比例、单位']];
   return `<div class="ph"><h1>设置</h1></div><div class="split" style="grid-template-columns:220px 1fr">
   <section class="pane"><div class="pane-b">${g.map((x,i)=>`<div style="padding:10px 14px;border-bottom:1px solid var(--line-2);${i===2?'background:#e8f0f8;border-left:3px solid var(--accent)':''}"><div style="font-weight:${i===2?600:400}">${x[0]}</div><div style="font-size:11.5px;color:var(--text-3)">${x[1]}</div></div>`).join('')}</div></section>
   <section class="pane" style="background:var(--bg)"><div class="body"><div class="box" style="max-width:640px"><div class="pane-h">求解策略</div><div class="form">
@@ -615,7 +663,15 @@ settings(){
     <label>二维异形引擎</label><select class="field"><option>PackingSolver Irregular（C++）</option></select>
     <label>时间上限</label><input class="field num" value="30 s">
     <label>料头优先</label><select class="field"><option>开启</option><option>关闭</option></select>
-  </div><div class="wb-foot" style="background:#fff"><span class="sp"></span><button class="btn">恢复默认</button><button class="btn pri">保存</button></div></div></div></section></div>`;
+  </div><div class="wb-foot" style="background:#fff"><span class="sp"></span><button class="btn">恢复默认</button><button class="btn pri">保存</button></div></div>
+    <div class="box" style="max-width:640px;margin-top:12px"><div class="pane-h">个人偏好 · 画布</div><div class="form">
+    <label>画布方向</label><select class="field"><option>竖向（卷长沿 Y 向下，默认）</option><option>横向</option></select>
+    <label>全卷显示</label><select class="field"><option>整条（连续一条，缩放查看）</option><option>平铺（按列 / 行折返）</option></select>
+    <label>打开时视图</label><select class="field"><option>工位（对准当前拉布）</option><option>全卷</option></select>
+    <label>默认比例</label><select class="field"><option>适应</option><option>1:10</option><option>1:20</option><option>1:50</option></select>
+    <label>显示器校准</label><input class="field num" value="96 dpi（1 px = 0.2646 mm）" title="用于把屏幕比例换算成真实 1:N">
+    <label>标尺单位</label><select class="field"><option>幅宽 mm · 卷长 m</option><option>全部 mm</option></select>
+  </div><div class="wb-foot" style="background:#fff"><span class="sp"></span><button class="btn pri">保存</button></div></div></div></section></div>`;
 },
 };
 
@@ -623,13 +679,16 @@ function render(){
   if(!PAGES[state.page])state.page='tasks';
   nav();
   document.getElementById('main').innerHTML=PAGES[state.page]();
-  status(state.page==='workbench'?`<span>工位 Y <span class="num">${m((state.wbKind==='1d'?PLAN_1D:PLAN_2D).segs[state.seg].start)}</span> m</span><span>引擎 ${state.wbKind==='1d'?'一维内核':'PackingSolver'}</span>`:'');
+  VERT=state.orient==='v';
+  if(state.page==='workbench'){drawCanvas();bindCanvas()}
+  status(state.page==='workbench'?`<span>光标 <span id="cursorpos" class="num">—</span></span><span>工位 Y <span class="num">${m((state.wbKind==='1d'?PLAN_1D:PLAN_2D).segs[state.seg].start)}</span> m</span><span>引擎 ${state.wbKind==='1d'?'一维内核':'PackingSolver'}</span>`:'');
 }
-function go(p,kind){if(kind)state.wbKind=kind;state.seg=0;state.page=p;try{history.replaceState(null,'','#'+p)}catch(e){}render()}
-function setKind(k){state.wbKind=k;state.seg=0;render()}
-function pickSeg(i){const n=(state.wbKind==='1d'?PLAN_1D:PLAN_2D).segs.length;state.seg=Math.max(0,Math.min(n-1,i));render()}
-function setView(v){state.view=v;render()}
-function setOrient(o){state.orient=o;render()}
+function go(p,kind){if(kind)state.wbKind=kind;state.seg=0;CV.cam=null;state.page=p;try{history.replaceState(null,'','#'+p)}catch(e){}render()}
+function setKind(k){state.wbKind=k;state.seg=0;CV.cam=null;render()}
+function pickSeg(i){const n=(state.wbKind==='1d'?PLAN_1D:PLAN_2D).segs.length;state.seg=Math.max(0,Math.min(n-1,i));if(state.view==='station')CV.cam=null;render()}
+function setView(v){state.view=v;CV.cam=null;render()}
+function setFullMode(v){state.fullMode=v;CV.cam=null;render()}
+function setOrient(o){state.orient=o;VERT=o==='v';CV.cam=null;render()}
 function matTab(t){state.matTab=t;state.matSel=0;render()}
 function matSel(i){state.matSel=i;render()}
 state.page=(location.hash.slice(1)||'tasks');
