@@ -17,6 +17,8 @@ class QualityDispositionTests {
     final tools.jackson.databind.ObjectMapper json = new tools.jackson.databind.ObjectMapper();
     @BeforeEach void setup() {
         inventory = new RemnantService(temp.resolve("stock.json").toString());
+        // 任务排料按档案疵点避让；本用例考察复检处置，作废 5–15 m 工位内的两处疵点（留痕）
+        inventory.voidDefect("ROLL-2026-0920",3,"本用例不考察疵点避让"); inventory.voidDefect("ROLL-2026-0920",4,"本用例不考察疵点避让");
         task = inventory.saveTask(new CuttingTask(null,"复检验收","TC涤棉-B2026","",0,
                 List.of(new CuttingTask.Line(1,"裁片",2000,1000,10,false))));
         var request = new SolveRequest(); request.setTaskId(task.id()); request.setTaskRevision(task.revision());

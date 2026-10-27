@@ -23,6 +23,7 @@ class PartialReportTests {
     RemnantService inventory; CuttingWorkflowService workflow; CuttingTask task; SolveResponse plan;
     @BeforeEach void setup() {
         inventory=new RemnantService(temp.resolve("stock.json").toString());workflow=workflow(inventory);
+        inventory.voidDefect("ROLL-2026-0920",3,"本用例考察部分报工，不考察疵点避让"); // 任务排料按档案疵点避让
         task=inventory.saveTask(new CuttingTask(null,"部分报工","TC涤棉-B2026","",0,List.of(
                 new CuttingTask.Line(1,"主帘",2000,1000,4,false),new CuttingTask.Line(9,"同尺寸独立行",2000,1000,1,false))));
         plan=workflow.solve(request(task,5000));assertEquals(4,plan.getPieces().size());

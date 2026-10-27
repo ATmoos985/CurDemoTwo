@@ -113,6 +113,21 @@ class SlittingTaskTests {
         assertEquals(4, inventory.completedQuantities(task.id()).get("1"));
     }
 
+    @Test void planChecksExplainWhyACandidateMustBeRecomputed() {
+        RemnantService inventory = new RemnantService(temp.resolve("checks.json").toString());
+        var workflow = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), inventory, new ToolpathOptimizerService());
+        CuttingTask task = create(inventory);
+        var plan = workflow.slittingCar(car(task, inventory.getMotherRoll("ROLL-2026-0920").getUsedLength(), 2, 1));
+        assertTrue(inventory.planChecks(task.id()).isEmpty());
+        var revised = inventory.saveTask(new CuttingTask(task.id(), task.name(), task.materialModel(), "改版", task.revision(),
+                task.demands(), task.process(), task.problemType(), task.slitting()));
+        assertTrue(inventory.planChecks(task.id()).get(plan.getPlanId()).contains("改版"));
+        inventory.voidDefect("ROLL-2026-0920", 8, "复核为误标");
+        assertTrue(inventory.planChecks(task.id()).get(plan.getPlanId()).contains("疵点"), "材料变化优先提示");
+        assertThrows(IllegalArgumentException.class, () -> workflow.confirm(new CutReport(plan.getPlanId(), 2000, 3, List.of(), "S-01")));
+        assertEquals(revised.revision(), inventory.getTask(task.id()).revision());
+    }
+
     @Test void rejectsInvalidCarsAndTaskTypeMisuse() {
         RemnantService inventory = new RemnantService(temp.resolve("guards.json").toString());
         var workflow = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), inventory, new ToolpathOptimizerService());

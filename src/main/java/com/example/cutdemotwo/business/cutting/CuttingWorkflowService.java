@@ -31,6 +31,11 @@ public class CuttingWorkflowService {
     public SolveResponse solve(SolveRequest request) {
         request.validateSettings();
         inventory.prepareTaskSolve(request);
+        // 任务排料以材料档案中的疵点为准（避让边距外扩并裁到工位内），不信任客户端传入；独立试算接口保持原样。
+        if (request.getTaskId() != null) {
+            boolean remnant = "remnant".equalsIgnoreCase(request.getFeedPortType());
+            request.setDefects(windowDefects(inventory.materialDefects(request), remnant ? 0 : request.getWindowStartY(), request.getRollL(), request.getRollW()));
+        }
         String baseline = inventory.materialFingerprint(request);
         SolveResponse result = FabricSolveAdapter.solve(solverFactory, request);
         if (result.isSuccess() && !result.getPieces().isEmpty()) {
@@ -56,8 +61,7 @@ public class CuttingWorkflowService {
             throw new IllegalArgumentException("一维分切按母卷定长出车，且须允许纵切");
         request.setFirstStageOrientation("vertical"); // 分切先纵向开条，再在车尾横断
         inventory.prepareTaskSolve(request);
-        request.setDefects(windowDefects(inventory.getMotherRoll(request.getRollId()).getDefects(),
-                request.getWindowStartY(), request.getRollL(), request.getRollW()));
+        request.setDefects(windowDefects(inventory.materialDefects(request), request.getWindowStartY(), request.getRollL(), request.getRollW()));
         var demands = new java.util.HashMap<Integer, com.example.cutdemotwo.business.model.PieceDemand>();
         request.getDemands().forEach(d -> demands.put(d.getId(), d));
         var counts = new java.util.HashMap<Integer, Integer>();

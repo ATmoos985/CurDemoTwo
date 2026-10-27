@@ -69,6 +69,10 @@ public class FabricCutController {
     @GetMapping("/cutting/tasks/{id}/plans")
     public java.util.List<com.example.cutdemotwo.business.model.CuttingPlan> taskPlans(@PathVariable String id) { return remnantService.taskPlans(id); }
 
+    /** 待报工候选的有效性：失效的方案编号 → 原因。 */
+    @GetMapping("/cutting/tasks/{id}/plan-checks")
+    public Map<String, String> planChecks(@PathVariable String id) { return remnantService.planChecks(id); }
+
     @PostMapping("/cutting/plans/{id}/cancel")
     public Object cancelPlan(@PathVariable String id) { return remnantService.changePlanStatus(id, false); }
 

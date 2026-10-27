@@ -549,6 +549,17 @@ public class RemnantService {
         return covered;
     }
 
+    /** 排料材料（母卷或料头）档案中的疵点副本，整卷 / 整块坐标。 */
+    public synchronized List<Defect> materialDefects(SolveRequest request) {
+        return read(() -> {
+            boolean remnant = "remnant".equalsIgnoreCase(request.getFeedPortType());
+            List<Defect> source = remnant ? Optional.ofNullable(remnantPool.get(request.getSourceRemnantId())).map(RemnantStock::getDefects).orElse(null)
+                    : Optional.ofNullable(motherRolls.get(request.getRollId())).map(MotherRollInfo::getDefects).orElse(null);
+            if (source == null) throw new IllegalArgumentException("所选材料已不可用，请重新选料");
+            return json.readValue(json.writeValueAsBytes(source), new tools.jackson.core.type.TypeReference<List<Defect>>() {});
+        });
+    }
+
     public synchronized String materialFingerprint(SolveRequest request) {
         return read(() -> materialFingerprintInternal(request));
     }
@@ -618,6 +629,28 @@ public class RemnantService {
 
     public synchronized List<CuttingPlan> taskPlans(String taskId) {
         return read(() -> plans.values().stream().filter(p -> Objects.equals(taskId, p.request().getTaskId())).toList());
+    }
+
+    /**
+     * 任务内待报工候选的有效性（只读，与报工 / 下达时的校验同口径）：失效的候选返回原因，便于界面提前提示“需重算”。
+     */
+    public synchronized Map<String, String> planChecks(String taskId) {
+        return read(() -> {
+            CuttingTask task = tasks.get(taskId);
+            if (task == null) throw new IllegalArgumentException("切割任务不存在");
+            Map<String, String> result = new LinkedHashMap<>();
+            for (CuttingPlan plan : plans.values()) {
+                if (!Objects.equals(taskId, plan.request().getTaskId()) || !"PENDING".equals(plan.status())) continue;
+                String reason = null;
+                try {
+                    if (!Objects.equals(plan.baseline(), materialFingerprintInternal(plan.request())))
+                        reason = "材料或疵点已更新（验疵、作废疵点或盘点），需重新计算";
+                } catch (IllegalArgumentException missing) { reason = "所用材料已不在库存，需重新选料计算"; }
+                if (reason == null && task.revision() != plan.request().getTaskRevision()) reason = "任务需求已改版，需重新计算";
+                if (reason != null) result.put(plan.id(), reason);
+            }
+            return result;
+        });
     }
 
     public synchronized CuttingPlan changePlanStatus(String id, boolean restore) {
@@ -1604,9 +1637,10 @@ public class RemnantService {
             if(!Objects.equals(Objects.toString(existing.getStorageLocation(),""),Objects.toString(roll.getStorageLocation(),"")))
                 throw new IllegalArgumentException("已登记材料请通过移库单变更库位");
             existing.setInspectionStatus(roll.getInspectionStatus());
-            if (roll.getDefects() != null && !roll.getDefects().isEmpty()) {
-                existing.setDefects(roll.getDefects());
-            }
+            // 疵点决定排料避让与方案有效性，只能经跑布验疵追加或作废留痕，档案保存不能整体覆盖；原样回传视为未改动。
+            if (roll.getDefects() != null && !roll.getDefects().isEmpty()
+                    && !json.writeValueAsString(roll.getDefects()).equals(json.writeValueAsString(existing.getDefects())))
+                throw new IllegalArgumentException("已登记母卷的疵点请在跑布验疵中追加或作废（留痕），档案保存不能覆盖疵点");
             return existing;
         } else {
             if (roll.getCreatedAt() == null) {

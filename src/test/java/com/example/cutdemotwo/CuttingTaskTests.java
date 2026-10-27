@@ -70,6 +70,21 @@ class CuttingTaskTests {
         assertEquals(2, restored.taskReports(task.id()).size());
     }
 
+    @Test void taskSolveAvoidsArchivedDefectsEvenWhenClientSendsNone() {
+        RemnantService inventory = new RemnantService(temp.resolve("defects.json").toString());
+        CuttingWorkflowService workflow = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
+        CuttingTask task = inventory.saveTask(new CuttingTask(null, "档案疵点", "TC涤棉-B2026", null, 0,
+                List.of(new CuttingTask.Line(1, "整幅", 2000, 1000, 4, false))));
+        SolveRequest request = new SolveRequest();
+        request.setTaskId(task.id()); request.setTaskRevision(task.revision()); request.setAllowLongitudinal(false);
+        request.setRollL(4000); request.setWindowStartY(5000); request.setDefects(List.of()); // 客户端漏传疵点
+        request.setDemands(List.of(new PieceDemand(1, "整幅", 2000, 1000, 4, false)));
+        SolveResponse result = workflow.solve(request);
+        assertFalse(result.getDefects().isEmpty(), "Y 8500 处油污按档案进入工位");
+        assertEquals(3, result.getPieces().size(), "整幅件避开疵点后本工位只能排 3 件");
+        assertTrue(result.getPieces().stream().noneMatch(p -> p.getY() < 3720 && p.getY() + p.getL() > 3480));
+    }
+
     @Test void rejectsChangedRevisionWrongMaterialAndInvalidDemand() {
         RemnantService inventory = new RemnantService(temp.resolve("guards.json").toString());
         CuttingTask task = create(inventory);

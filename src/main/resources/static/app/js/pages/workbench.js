@@ -33,14 +33,15 @@ const SEG_TAG = {cut: 'ok', pending: 'warn', stale: '', other: ''};
 
 export async function mount(el, [taskId, focusPlan]) {
     if (!taskId) return pickTask(el);
-    let detail, plans, summary, views = [], allRolls, roll = null;
+    let detail, plans, summary, views = [], allRolls, roll = null, checks = {};
     const writer = executionWriter();
     async function loadTask() {
         [detail, plans, summary, views] = await Promise.all([
             requestJSON('/api/cutting/tasks/' + encodeURIComponent(taskId)),
             requestJSON('/api/cutting/tasks/' + encodeURIComponent(taskId) + '/plans'),
             requestJSON('/api/cutting/task-summaries').then(rows => rows.find(r => r.task.id === taskId) || null),
-            requestJSON('/api/v2/execution-orders?taskId=' + encodeURIComponent(taskId))
+            requestJSON('/api/v2/execution-orders?taskId=' + encodeURIComponent(taskId)),
+            requestJSON('/api/cutting/tasks/' + encodeURIComponent(taskId) + '/plan-checks').then(r => { checks = r || {}; }).catch(() => { checks = {}; })
         ]);
     }
     let allRemnants = [];
@@ -90,7 +91,7 @@ export async function mount(el, [taskId, focusPlan]) {
         const sc = buildRollScene({roll, plans, reports: detail.reports, rollId: st.rollId, demands: task.demands,
             process: task.process, freshDefects: st.fresh, selectedId: st.selectedId, window: st.window});
         // 刀路图层原点；手动调整中用草稿位置替换当前段的件
-        for (const s of sc.segments) { const p = planOf(s.id); if (p) s.home = worldHome(p, s.start); }
+        for (const s of sc.segments) { const p = planOf(s.id); if (p) s.home = worldHome(p, s.start); if (s.status === 'pending' && checks[s.id]) s.invalid = checks[s.id]; }
         if (st.adjust) {
             const i = sc.segments.findIndex(s => s.id === st.adjust.planId);
             if (i >= 0) sc.segments[i] = applyPositions(sc.segments[i], planOf(st.adjust.planId), st.adjust.positions);
@@ -156,7 +157,7 @@ export async function mount(el, [taskId, focusPlan]) {
                 <div><small>拉布次数</small><b>${met.spreads}</b></div><div><small>任务完成</small><b>${total ? Math.round(done / total * 100) : 0}<em>%</em></b></div></div>
               ${sidePanel(sc, seg, idx)}
               <div class="sec">拉布段</div>
-              <table class="t" style="border:0"><tbody>${sc.segments.map((s, i) => `<tr class="click ${s.id === sc.currentId ? 'sel' : ''}" data-seg="${esc(s.id)}"><td class="num">${i + 1}</td><td class="num">${fmtM(s.start, 2)} m</td><td class="r num">${fmtN(s.len)} mm</td><td><span class="tag ${SEG_TAG[s.status]}">${STATUS_TEXT[s.status]}</span></td></tr>`).join('')}
+              <table class="t" style="border:0"><tbody>${sc.segments.map((s, i) => `<tr class="click ${s.id === sc.currentId ? 'sel' : ''}" data-seg="${esc(s.id)}"><td class="num">${i + 1}</td><td class="num">${fmtM(s.start, 2)} m</td><td class="r num">${fmtN(s.len)} mm</td><td>${s.invalid ? `<span class="tag warn" title="${esc(s.invalid)}">需重算</span>` : `<span class="tag ${SEG_TAG[s.status]}">${STATUS_TEXT[s.status]}</span>`}</td></tr>`).join('')}
                 <tr class="click ${seg ? '' : 'sel'}" data-seg="${NEW_STATION}"><td class="num">＋</td><td class="muted" colspan="3">新工位</td></tr></tbody></table>
             </div>
           </section>`}
@@ -191,9 +192,9 @@ export async function mount(el, [taskId, focusPlan]) {
           ${seg.status === 'stale' ? '<div class="notice">该方案的报工已在母卷重置时清除，方案既未切也不能再报工，仅作历史参考。</div>' : ''}
           ${seg.status === 'pending' ? (() => {
               const view = executionForPlan(views, seg.id), locked = !!view?.reservationActive;
-              const reportAllowed = !view || view.allowedActions?.report?.allowed;
-              const reportWhy = w.adjusted ? '工位已调整，请先重新计算或还原工位' : !reportAllowed ? (view.allowedActions?.report?.reason || '执行单当前状态不能报工') : '按实际裁切结果报工';
-              return `${w.adjusted ? `<div class="notice">工位已调整为 Y ${fmtM(w.start, 2)} m · ${fmtN(w.len)} mm，重新计算后替换当前候选。</div>` : ''}${problem ? `<div class="notice">${esc(problem)}</div>` : ''}${busy}${failure}
+              const reportAllowed = !seg.invalid && (!view || view.allowedActions?.report?.allowed);
+              const reportWhy = seg.invalid || (w.adjusted ? '工位已调整，请先重新计算或还原工位' : !reportAllowed ? (view.allowedActions?.report?.reason || '执行单当前状态不能报工') : '按实际裁切结果报工');
+              return `${seg.invalid ? `<div class="notice"><b>需重算</b>：${esc(seg.invalid)}。此候选不能报工、下达或调整，请${isSlitting(task) ? '放弃后按剩余需求重新出车' : '重新计算或放弃'}。</div>` : ''}${w.adjusted ? `<div class="notice">工位已调整为 Y ${fmtM(w.start, 2)} m · ${fmtN(w.len)} mm，重新计算后替换当前候选。</div>` : ''}${problem ? `<div class="notice">${esc(problem)}</div>` : ''}${busy}${failure}
             <div style="display:flex;gap:8px;padding:8px 12px;flex-wrap:wrap"><button class="btn pri" id="report-open" ${st.busy || w.adjusted || !reportAllowed ? 'disabled' : ''} title="${esc(reportWhy)}">报工</button>
               ${isSlitting(task) ? '' : `<button class="btn" id="solve" ${st.busy || problem || !need || locked ? 'disabled' : ''} title="${locked ? '已下达或执行中，先取消执行单' : ''}">重新计算</button>`}<button class="btn" id="discard" ${st.busy || locked ? 'disabled' : ''}>放弃候选</button></div>
             ${executionBlock(seg, view)}`; })() : ''}
@@ -211,10 +212,11 @@ export async function mount(el, [taskId, focusPlan]) {
             return `<div class="sec">执行单</div>${unsure}
               ${view ? `<div class="kv"><div>上一张</div><div><span class="tag ${EXEC_TAG[view.effectiveState]}">${esc(executionLabels[view.effectiveState] || view.effectiveState)}</span> <span class="num">${shortId(view.execution.id)}</span></div></div>` : ''}
               <div style="display:flex;gap:6px;padding:8px 12px;align-items:center"><span class="muted">工位</span><input class="field" id="exec-station" value="${esc(st.station)}" style="width:70px">
-                <button class="btn" id="exec-create" ${st.busy || pend.length ? 'disabled' : ''}>创建执行单</button></div>
+                <button class="btn" id="exec-create" ${st.busy || pend.length || seg.invalid ? 'disabled' : ''} title="${esc(seg.invalid || '')}">创建执行单</button></div>
               <div class="muted" style="padding:0 12px 8px;font-size:11.5px">不建执行单也可直接报工；建单后可预约材料、按工位开工报工。</div>`;
         }
-        const e = view.execution, a = view.allowedActions || {}, btn = (k, t, extra = '') => `<button class="btn sm" data-exec="${k}" ${a[k]?.allowed && !st.busy && !pend.length ? '' : 'disabled'} title="${esc(a[k]?.reason || '')}" ${extra}>${t}</button>`;
+        const e = view.execution, a = view.allowedActions || {}, blocked = k => seg.invalid && ['release', 'start'].includes(k);
+        const btn = (k, t, extra = '') => `<button class="btn sm" data-exec="${k}" ${a[k]?.allowed && !blocked(k) && !st.busy && !pend.length ? '' : 'disabled'} title="${esc(blocked(k) ? seg.invalid : a[k]?.reason || '')}" ${extra}>${t}</button>`;
         return `<div class="sec">执行单</div>${unsure}
           <div class="kv"><div>状态</div><div><span class="tag ${EXEC_TAG[view.effectiveState] || ''}">${esc(executionLabels[view.effectiveState] || view.effectiveState)}</span> <span class="num muted">${shortId(e.id)} · v${e.version}</span></div>
             <div>工位</div><div>${esc(e.station)}</div><div>材料</div><div class="num">${esc(e.materialId)}</div>
@@ -228,7 +230,7 @@ export async function mount(el, [taskId, focusPlan]) {
     /** 方案工具：刀路优化、手动调整（仅候选且未下达）、导出与工单（任何状态）。 */
     function toolsBlock(seg) {
         if (!['pending', 'cut', 'stale'].includes(seg.status)) return '';
-        const plan = planOf(seg.id), locked = !!executionForPlan(views, seg.id)?.reservationActive, editable = seg.status === 'pending' && !locked;
+        const plan = planOf(seg.id), locked = !!executionForPlan(views, seg.id)?.reservationActive, editable = seg.status === 'pending' && !locked && !seg.invalid;
         const tp = st.toolpath?.planId === seg.id ? st.toolpath : null;
         return `<div class="sec">方案工具</div>
           ${editable ? `<div style="display:flex;gap:6px;padding:8px 12px 0;flex-wrap:wrap"><button class="btn sm" id="tp-optimize" ${st.busy || !plan?.result?.cuts?.length ? 'disabled' : ''}>优化空走刀</button><button class="btn sm" id="adjust-open" ${st.busy ? 'disabled' : ''}>手动调整</button></div>` : ''}

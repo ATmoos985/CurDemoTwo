@@ -28,6 +28,7 @@ class CuttingWorkflowTests {
     @Test
     void expandingFeedWindowCutsOneLongWholePieceAndReportsOnlyActualLength() {
         RemnantService inventory = new RemnantService(temp.resolve("dynamic-feed.json").toString());
+        inventory.voidDefect("ROLL-2026-0920", 3, "本用例考察动态拉布长度，不考察疵点避让"); // 任务排料按档案疵点避让
         CuttingWorkflowService workflow = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), inventory, new com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService());
         CuttingTask task = inventory.saveTask(new CuttingTask(null, "动态拉布", "TC涤棉-B2026", "", 0,
                 List.of(new CuttingTask.Line(1, "四米整幅", 2000, 4000, 1, false)),

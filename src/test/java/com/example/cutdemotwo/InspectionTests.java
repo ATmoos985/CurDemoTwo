@@ -51,6 +51,17 @@ class InspectionTests {
         assertThrows(IllegalArgumentException.class,()->s.createInspectionRoll(first));
         assertEquals("棉布",inventory().getMotherRoll("INSPECT-1").getRollModel());
     }
+    @Test void archiveSaveCannotReplaceDefectsButMayEchoThemUnchanged() {
+        var s=inventory();roll(s);
+        s.saveInspection("INSPECT-1",input(defect("a",1000)));
+        var json=tools.jackson.databind.json.JsonMapper.builder().build();
+        var echo=json.convertValue(s.getMotherRoll("INSPECT-1"),MotherRollInfo.class);
+        assertDoesNotThrow(()->s.saveOrUpdateMotherRoll(echo),"原样回传疵点视为未改动");
+        var replaced=json.convertValue(s.getMotherRoll("INSPECT-1"),MotherRollInfo.class);
+        replaced.setDefects(List.of(defect("b",5000)));
+        assertThrows(IllegalArgumentException.class,()->s.saveOrUpdateMotherRoll(replaced));
+        assertEquals(1000,inventory().getMotherRoll("INSPECT-1").getDefects().get(0).getY(),.001);
+    }
     @Test void voidingMovesDefectToAuditListSurvivesRestartAndIsIdempotent() {
         var s=inventory();roll(s);
         var saved=s.saveInspection("INSPECT-1",input(defect("a",1000),defect("b",5000)));
