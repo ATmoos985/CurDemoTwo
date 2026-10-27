@@ -143,6 +143,29 @@ table.t{width:100%;border-collapse:collapse;background:var(--panel);border:1px s
 .form label{color:var(--text-2);font-size:12.5px}
 .notice{margin:0 0 12px;padding:8px 12px;border:1px solid #c9d8e8;background:#f2f6fb;color:var(--accent-ink);font-size:12.5px}
 .proto{position:fixed;left:10px;bottom:30px;background:#fff3cd;border:1px solid #e3c26a;color:#7a5a00;font-size:11.5px;padding:3px 8px;border-radius:2px;z-index:9}
+.strip{display:none}
+.vseg{display:inline-flex;border:1px solid #56606b;border-radius:2px;overflow:hidden}
+.vseg button{border:0!important;border-radius:0!important;height:22px!important}
+.vseg button.on{background:#5a7fa6!important;color:#fff}
+.cin{width:62px;height:22px;background:#23282d;border:1px solid #56606b;color:#fff;border-radius:2px;padding:0 6px;text-align:right;margin:0 4px}
+.navroll{flex:none;background:#23272c;border-top:1px solid #1a1d21;padding:6px 12px 8px;color:#aeb7c0;font-size:11.5px}
+.nr-head{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+.nr-head b{color:#e6ebef;font-weight:500}
+.nr-track{position:relative;height:22px;background:#2e343a;border:1px solid #3b434b;margin-bottom:16px}
+.tb{position:absolute;top:0;bottom:0;border-right:1px solid #1d2125;cursor:pointer}
+.tb.used{background:repeating-linear-gradient(45deg,#2b3036 0 3px,#454c54 3px 5px);cursor:default}
+.tb.skip{background:repeating-linear-gradient(-45deg,#3a2a2a 0 3px,#a04a40 3px 4px);cursor:default}
+.tb.tail{border:1px dashed #8a949e;cursor:default}
+.tb.seg:hover{filter:brightness(1.25)}
+.tb.seg.on{outline:2px solid #7fb3e6;outline-offset:-1px;z-index:2;filter:brightness(1.35)}
+.tdef{position:absolute;top:-4px;bottom:-4px;width:2px;background:#ff6b5b;z-index:3}
+.ttick{position:absolute;top:24px;transform:translateX(-50%);font:10px var(--mono);color:#7d8791}
+.ttick:first-child{transform:none}
+.nr-chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{height:20px;padding:0 7px;background:#2e343a;border:1px solid #3b434b;color:#c9d0d7;border-radius:2px;font-size:11px;cursor:pointer}
+.chip:hover{border-color:#6ea3d8}
+.chip i{display:inline-block;width:8px;height:8px;margin-right:5px}
+.chip b{color:#fff;font-weight:500;font-family:var(--mono)}
 </style>
 </head>
 <body>
@@ -190,30 +213,50 @@ const ROLLS=[
   {id:'RM-2610-0118',mat:'阳光面料 300',w:900,len:2.1,full:2.1,loc:'料头架 2',q:['隔离','err'],res:'—',src:'复检转料头',rem:true},
 ];
 
-/* 二维排法：确定性的货架排样（仅用于原型渲染） */
+/* 排法：长度方向 = x（沿进料方向），幅宽方向 = y。二维每个排法的拉布长度不同。 */
 function shelfLayout(W,H,items){
   const out=[];let x=0,y=0,rowH=0;
   for(const it of items){for(let k=0;k<it.n;k++){
     if(x+it.w>W){x=0;y+=rowH;rowH=0}
     if(y+it.h>H)return out;
-    out.push({x,y,w:it.w,h:it.h,o:it.o,label:it.o+'·'+it.w+'×'+it.h});x+=it.w;rowH=Math.max(rowH,it.h)}}
+    out.push({x,y,w:it.w,h:it.h,o:it.o,label:it.o+'·'+it.h+'×'+it.w});x+=it.w;rowH=Math.max(rowH,it.h)}}
   return out;
 }
+function mkLayout(name,len,width,items){const L={name,len,stock:{w:len,h:width},items};L.util=+(items.reduce((a,i)=>a+i.w*i.h,0)/(len*width)*100).toFixed(1);return L}
 const LAYOUTS_2D=[
-  {name:'排法 1',repeat:18,util:91.4,stock:{w:2800,h:3000},items:shelfLayout(2800,3000,[{o:'A',w:900,h:1400,n:3},{o:'D',w:700,h:1500,n:4}])},
-  {name:'排法 2',repeat:12,util:88.7,stock:{w:2800,h:3000},items:shelfLayout(2800,3000,[{o:'B',w:1000,h:1200,n:2},{o:'C',w:800,h:1200,n:1},{o:'D',w:700,h:1500,n:4}])},
-  {name:'排法 3',repeat:6,util:84.2,stock:{w:2800,h:3000},items:shelfLayout(2800,3000,[{o:'E',w:1200,h:1600,n:2},{o:'F',w:600,h:1300,n:4}])},
-  {name:'排法 4',repeat:2,util:72.5,stock:{w:2800,h:3000},items:shelfLayout(2800,3000,[{o:'F',w:600,h:1300,n:3},{o:'E',w:1200,h:1600,n:1}])},
+  mkLayout('排法 1',4200,2800,shelfLayout(4200,2800,[{o:'A',w:1400,h:900,n:3},{o:'D',w:1500,h:700,n:2},{o:'B',w:1200,h:1000,n:1},{o:'C',w:1200,h:800,n:3}])),
+  mkLayout('排法 2',6000,2800,shelfLayout(6000,2800,[{o:'E',w:1600,h:1200,n:3},{o:'B',w:1200,h:1000,n:1},{o:'F',w:1300,h:600,n:4},{o:'A',w:1400,h:900,n:4}])),
+  mkLayout('排法 3',3800,2800,shelfLayout(3800,2800,[{o:'B',w:1200,h:1000,n:3},{o:'C',w:1200,h:800,n:3},{o:'D',w:1500,h:700,n:2}])),
+  mkLayout('排法 4',2600,2800,shelfLayout(2600,2800,[{o:'F',w:1300,h:600,n:2},{o:'E',w:1600,h:1200,n:1}])),
 ];
-/* 一维：一卷 = 门幅 × 卷长；分条是沿卷长方向的条带，序号组 = 同一花型 + 同一订单分配 */
-function slitLayout(slits){let y=0;return slits.map(s=>{const r={x:0,y,w:6000,h:s.w,o:s.o,label:s.o+'·'+s.w};y+=s.w;return r})}
+function slitLayout(name,carLen,width,slits){let y=0;return mkLayout(name,carLen,width,slits.map(s=>{const r={x:0,y,w:carLen,h:s.w,o:s.o,label:s.o+'·'+s.w};y+=s.w;return r}))}
+const CAR=20000;
 const LAYOUTS_1D=[
-  {name:'序号组 G01',repeat:14,util:98.3,stock:{w:6000,h:2400},items:slitLayout([{o:'A',w:600},{o:'A',w:600},{o:'B',w:450},{o:'B',w:450},{o:'C',w:259}])},
-  {name:'序号组 G02',repeat:10,util:97.9,stock:{w:6000,h:2400},items:slitLayout([{o:'D',w:800},{o:'D',w:800},{o:'E',w:350},{o:'E',w:400}])},
-  {name:'序号组 G03',repeat:8,util:99.1,stock:{w:6000,h:2400},items:slitLayout([{o:'A',w:600},{o:'F',w:520},{o:'F',w:520},{o:'C',w:259},{o:'C',w:479}])},
-  {name:'序号组 G04',repeat:4,util:96.0,stock:{w:6000,h:2400},items:slitLayout([{o:'B',w:450},{o:'B',w:450},{o:'B',w:450},{o:'E',w:952}])},
-  {name:'序号组 G05',repeat:2,util:93.5,stock:{w:6000,h:2400},items:slitLayout([{o:'F',w:520},{o:'D',w:800},{o:'A',w:924}])},
+  slitLayout('序号组 G01',CAR,2400,[{o:'A',w:600},{o:'A',w:600},{o:'B',w:450},{o:'B',w:450},{o:'C',w:259}]),
+  slitLayout('序号组 G02',CAR,2400,[{o:'D',w:800},{o:'D',w:800},{o:'E',w:350},{o:'E',w:400}]),
+  slitLayout('序号组 G03',CAR,2400,[{o:'A',w:600},{o:'F',w:520},{o:'F',w:520},{o:'C',w:259},{o:'C',w:479}]),
+  slitLayout('序号组 G04',CAR,2400,[{o:'B',w:450},{o:'B',w:450},{o:'B',w:450},{o:'E',w:952}]),
+  slitLayout('序号组 G05',CAR,2400,[{o:'F',w:520},{o:'D',w:800},{o:'A',w:924}]),
 ];
+/* 母卷：连续材料。方案 = 沿卷长依次排开的拉布段（排法 + 长度），中间可因疵点避让。 */
+const ROLL_2D={id:'R-2610-0921',width:2800,total:60000,used:12000,tick:5000,
+  defects:[{pos:24300,len:200,x:900,w:320,desc:'油污'},{pos:48900,len:300,x:1800,w:500,desc:'破洞'}],
+  plan:[0,0,2,{skip:400},1,1,0,0,2,{skip:500},1,3]};
+const ROLL_1D={id:'R-2610-0933',width:2400,total:1000000,used:200000,tick:100000,defects:[],
+  plan:[...Array(14).fill(0),...Array(10).fill(1),...Array(8).fill(2),...Array(4).fill(3),...Array(2).fill(4)]};
+function buildPlan(R,LS){
+  const blocks=[],segs=[];let pos=R.used;
+  if(R.used)blocks.push({kind:'used',start:0,len:R.used});
+  for(const p of R.plan){
+    if(typeof p==='object'){blocks.push({kind:'skip',start:pos,len:p.skip});pos+=p.skip;continue}
+    const L=LS[p],b={kind:'seg',start:pos,len:L.len,L,li:p,idx:segs.length};blocks.push(b);segs.push(b);pos+=L.len}
+  if(pos<R.total)blocks.push({kind:'tail',start:pos,len:R.total-pos});
+  const count=LS.map((_,i)=>segs.filter(s=>s.li===i).length);
+  return {blocks,segs,count,end:pos};
+}
+const PLAN_2D=buildPlan(ROLL_2D,LAYOUTS_2D), PLAN_1D=buildPlan(ROLL_1D,LAYOUTS_1D);
+const LAYOUT_TINT=['#47627d','#4d6b55','#6b5a43','#5d4f66','#3f6563'];
+const m=v=>(v/1000).toLocaleString(undefined,{maximumFractionDigits:1});
 const DEMANDS_2D=[['A','窗帘 A-01','900 × 1400',60,58],['B','窗帘 B-07','1000 × 1200',60,60],['C','卷帘 C-02','800 × 1200',30,30],['D','窗帘 D-11','700 × 1500',84,84],['E','罗马帘 E-03','1200 × 1600',26,26],['F','窗帘 F-05','600 × 1300',60,60]];
 const DEMANDS_1D=[['A','SO-7781','600',30,30],['B','SO-7782','450',40,40],['C','SO-7790','259 / 479',30,30],['D','SO-7795','800',22,22],['E','SO-7801','350 / 400 / 952',24,24],['F','SO-7805','520',18,18]];
 
@@ -244,6 +287,99 @@ function renderLayout(L,{w,h,pad=36,labels=true,dims=true,cuts=true,oneD=false}=
   return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">${g}</svg>`;
 }
 
+/* ---------------- 画布（纯渲染：只接收 母卷 / 方案块 / 当前段） ---------------- */
+const SVG_DEFS=`<defs><pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="var(--canvas-grid)" stroke-width="1"/></pattern>
+<pattern id="waste" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#5a6068" stroke-width="1"/></pattern>
+<pattern id="usedp" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="#2b3036"/><line x1="0" y1="0" x2="0" y2="5" stroke="#454c54" stroke-width="2"/></pattern>
+<pattern id="skipp" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)"><rect width="6" height="6" fill="#3a2a2a"/><line x1="0" y1="0" x2="0" y2="6" stroke="#a04a40" stroke-width="1.5"/></pattern></defs>`;
+/* 画一组方案块；toX(d) 把显示坐标映射到像素，k 为该块长度方向压缩比 */
+function drawBlocks(blocks,R,s,toX,y0,{cur=-1,dim=false,labels=false,oneD=false}={}){
+  let g='';const H=R.width*s;
+  for(const b of blocks){
+    const x=toX(b.d0),wpx=b.dl*s,k=b.dl/b.len;
+    if(b.kind==='used')g+=`<rect x="${x}" y="${y0}" width="${wpx}" height="${H}" fill="url(#usedp)"/>`;
+    else if(b.kind==='skip')g+=`<rect x="${x}" y="${y0}" width="${wpx}" height="${H}" fill="url(#skipp)"/>`;
+    else if(b.kind==='tail')g+=`<rect x="${x}" y="${y0}" width="${wpx}" height="${H}" fill="#2f353b" stroke="#8a949e" stroke-dasharray="4 3"/>${wpx>60?`<text x="${x+wpx/2}" y="${y0+H/2+4}" fill="#9aa4ae" font-size="11" text-anchor="middle">尾料 ${m(b.len)} m → 料头</text>`:''}`;
+    else{
+      const on=b.idx===cur, op=dim&&!on?.28:1;
+      g+=`<g opacity="${op}"><rect x="${x}" y="${y0}" width="${wpx}" height="${H}" fill="url(#waste)" stroke="#5d6670"/>`;
+      for(const it of b.L.items){
+        const iw=it.w*k*s, ih=it.h*s;
+        g+=`<rect x="${x+it.x*k*s}" y="${y0+it.y*s}" width="${iw}" height="${ih}" fill="${ORDER_COLORS[it.o]}" fill-opacity=".85" stroke="#1d2125" stroke-width="${s>.05?1:.4}"/>`;
+        if(labels&&iw>52&&ih>14)g+=`<text x="${x+(it.x+it.w/2)*k*s}" y="${y0+(it.y+it.h/2)*s+4}" fill="#fff" font-size="11" font-family="var(--mono)" text-anchor="middle">${it.label}</text>`;
+      }
+      g+=`</g>`;
+      if(!oneD||on)g+=`<line x1="${x}" x2="${x}" y1="${y0-3}" y2="${y0+H+3}" stroke="#f0c674" stroke-width="1"/>`;
+      if(on)g+=`<rect x="${x}" y="${y0-1}" width="${wpx}" height="${H+2}" fill="none" stroke="#7fb3e6" stroke-width="2"/>`;
+    }
+  }
+  return g;
+}
+function displayBlocks(plan,oneD){
+  /* 二维按真实长度；一维每车定长，长度方向只做示意压缩 */
+  let d=0;return plan.blocks.filter(b=>!(oneD&&b.kind==='used')).map(b=>{const dl=oneD?(b.kind==='tail'?6000:3000):b.len;const r={...b,d0:d,dl};d+=dl;return r});
+}
+function defectMarks(R,s,toX,y0){return R.defects.map(d=>`<rect x="${toX(d.pos)}" y="${y0+d.x*s}" width="${Math.max(3,d.len*s)}" height="${Math.max(3,d.w*s)}" fill="none" stroke="#ff6b5b" stroke-width="1.5"/>`).join('')}
+
+/* 工位视图：当前拉布段 + 前后连续的布 */
+function renderStation(R,plan,cur,{w,h,oneD}){
+  /* 一维长度方向只做示意压缩（分条贯穿整车），二维按真实长度 */
+  const seg=plan.segs[cur], db=displayBlocks(plan,oneD), sd=db.find(b=>b.kind==='seg'&&b.idx===cur), ctx=Math.min(sd.dl*.22,2500);
+  const s=Math.min((w-130)/(sd.dl+2*ctx),(h-110)/R.width);
+  const ox=(w-sd.dl*s)/2, oy=(h-R.width*s)/2-6, H=R.width*s;
+  const toX=d=>ox+(d-sd.d0)*s;
+  const near=db.filter(b=>b.d0+b.dl>sd.d0-ctx&&b.d0<sd.d0+sd.dl+ctx);
+  let g=SVG_DEFS+`<rect width="${w}" height="${h}" fill="url(#grid)"/>`;
+  g+=`<clipPath id="ctx"><rect x="${toX(sd.d0-ctx)}" y="${oy-8}" width="${(sd.dl+2*ctx)*s}" height="${H+16}"/></clipPath>`;
+  g+=`<g clip-path="url(#ctx)">${drawBlocks(near,R,s,toX,oy,{cur,dim:true,labels:true,oneD})}${oneD?'':defectMarks(R,s,toX,oy)}</g>`;
+  g+=`<linearGradient id="fl"><stop offset="0" stop-color="var(--canvas)"/><stop offset="1" stop-color="var(--canvas)" stop-opacity="0"/></linearGradient><linearGradient id="fr"><stop offset="0" stop-color="var(--canvas)" stop-opacity="0"/><stop offset="1" stop-color="var(--canvas)"/></linearGradient>`;
+  g+=`<rect x="${toX(sd.d0-ctx)}" y="${oy-8}" width="${ctx*s*.7}" height="${H+16}" fill="url(#fl)"/><rect x="${toX(sd.d0+sd.dl+ctx*.3)}" y="${oy-8}" width="${ctx*s*.7}" height="${H+16}" fill="url(#fr)"/>`;
+  const x1=ox+sd.dl*s, ty=oy-22;
+  g+=`<line x1="${ox}" x2="${x1}" y1="${ty}" y2="${ty}" stroke="#c9d0d7"/><line x1="${ox}" x2="${ox}" y1="${ty-5}" y2="${ty+5}" stroke="#c9d0d7"/><line x1="${x1}" x2="${x1}" y1="${ty-5}" y2="${ty+5}" stroke="#c9d0d7"/>`;
+  g+=`<rect x="${(ox+x1)/2-62}" y="${ty-9}" width="124" height="18" fill="var(--canvas)"/><text x="${(ox+x1)/2}" y="${ty+4}" fill="#fff" font-size="12" font-family="var(--mono)" text-anchor="middle">${oneD?'每车 '+seg.len+' mm':'拉布 '+seg.len+' mm'}</text>`;
+  g+=`<text x="${x1+16}" y="${oy+H/2}" fill="#c9d0d7" font-size="11" font-family="var(--mono)" transform="rotate(90 ${x1+16} ${oy+H/2})" text-anchor="middle">幅宽 ${R.width} mm</text>`;
+  g+=`<text x="${ox}" y="${oy+H+20}" fill="#9aa4ae" font-size="11" font-family="var(--mono)">Y ${m(seg.start)} m</text><text x="${x1}" y="${oy+H+20}" fill="#9aa4ae" font-size="11" font-family="var(--mono)" text-anchor="end">${m(seg.start+seg.len)} m</text>`;
+  g+=`<text x="${toX(sd.d0-ctx)+4}" y="${oy+H+38}" fill="#7d8791" font-size="11">进料方向 →${oneD?'（长度示意）':''}</text>`;
+  if(oneD)seg.L.items.forEach((it,i)=>{if(i)g+=`<line x1="${ox-8}" x2="${x1+8}" y1="${oy+it.y*s}" y2="${oy+it.y*s}" stroke="#f0c674" stroke-dasharray="5 3"/>`;g+=`<text x="${ox-12}" y="${oy+(it.y+it.h/2)*s+4}" fill="#9aa4ae" font-size="10" text-anchor="end" font-family="var(--mono)">刀${i+1}</text>`});
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">${g}</svg>`;
+}
+
+/* 全卷视图：整卷按行折返展示，所有拉布段、避让、已用、尾料一屏可见 */
+function renderRoll(R,plan,cur,{w,h,oneD}){
+  const db=displayBlocks(plan,oneD), D=db.reduce((a,b)=>a+b.dl,0), padL=58,padR=18,pad=26,gap=30;
+  let best={n:1,s:0};
+  for(let n=1;n<=8;n++){const s=Math.min((w-padL-padR)/(D/n),(h-2*pad-(n-1)*gap)/(n*R.width));if(s>best.s)best={n,s}}
+  const {n,s}=best, rowD=D/n, H=R.width*s;
+  const realAt=d=>{for(const b of db)if(d<=b.d0+b.dl)return b.start+(d-b.d0)/b.dl*b.len;return R.total};
+  let g=SVG_DEFS;
+  for(let r=0;r<n;r++){
+    const y0=pad+r*(H+gap), r0=r*rowD, toX=d=>padL+(d-r0)*s;
+    g+=`<clipPath id="row${r}"><rect x="${padL}" y="${y0-4}" width="${rowD*s}" height="${H+8}"/></clipPath>`;
+    g+=`<text x="${padL-8}" y="${y0+H/2+4}" fill="#9aa4ae" font-size="10.5" text-anchor="end" font-family="var(--mono)">${m(realAt(r0))} m</text>`;
+    g+=`<g clip-path="url(#row${r})">${drawBlocks(db,R,s,toX,y0,{cur,oneD})}${oneD?'':defectMarks(R,s,d=>toX(d),y0)}</g>`;
+    for(const b of db)if(b.kind==='seg'&&!oneD){const x=toX(b.d0);if(b.d0>=r0&&b.d0<r0+rowD&&b.dl*s>30)g+=`<text x="${x+3}" y="${y0-5}" fill="${b.idx===cur?'#cfe3f7':'#8a949e'}" font-size="10">${b.L.name.replace('排法 ','#')}</text>`}
+    if(oneD){let last=-1;for(const b of db)if(b.kind==='seg'&&b.li!==last){last=b.li;if(b.d0>=r0&&b.d0<r0+rowD)g+=`<text x="${toX(b.d0)+3}" y="${y0-5}" fill="#8a949e" font-size="10">${b.L.name.replace('序号组 ','')} ×${plan.count[b.li]}</text>`}}
+  }
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">${g}</svg>`;
+}
+
+/* 母卷导航条：整卷比例尺，点击跳到任一拉布段 */
+function renderTrack(R,plan,cur,oneD){
+  const pct=v=>(v/R.total*100).toFixed(3)+'%';
+  let t='';
+  for(const b of plan.blocks){
+    const st=`left:${pct(b.start)};width:${pct(b.len)}`;
+    if(b.kind==='seg')t+=`<div class="tb seg ${b.idx===cur?'on':''}" style="${st};background:${LAYOUT_TINT[b.li]}" title="${b.L.name} · Y ${m(b.start)}–${m(b.start+b.len)} m" onclick="pickSeg(${b.idx})"></div>`;
+    else t+=`<div class="tb ${b.kind}" style="${st}" title="${{used:'已用',skip:'疵点避让',tail:'尾料'}[b.kind]} ${m(b.len)} m"></div>`;
+  }
+  for(const d of R.defects)t+=`<div class="tdef" style="left:${pct(d.pos)}" title="疵点 ${d.desc} · Y ${m(d.pos)} m"></div>`;
+  for(let p=0;p<=R.total;p+=R.tick)t+=`<div class="ttick" style="left:${pct(p)}">${m(p)}</div>`;
+  const used=R.used, planLen=plan.end-R.used, skip=plan.blocks.filter(b=>b.kind==='skip').reduce((a,b)=>a+b.len,0), tail=R.total-plan.end;
+  const chips=(oneD?LAYOUTS_1D:LAYOUTS_2D).map((L,i)=>`<button class="chip" onclick="pickSeg(${plan.segs.findIndex(s=>s.li===i)})"><i style="background:${LAYOUT_TINT[i]}"></i>${L.name}${oneD?'':' · '+m(L.len)+' m'} <b>×${plan.count[i]}</b></button>`).join('');
+  return `<div class="nr-head"><span>母卷 <b class="num">${R.id}</b></span><span>幅宽 <b class="num">${R.width}</b> mm</span><span>总长 <b class="num">${m(R.total)}</b> m</span><span>已用 <b class="num">${m(used)}</b> m</span><span>本方案 <b class="num">${plan.segs.length}</b> ${oneD?'车':'次拉布'} · <b class="num">${m(planLen)}</b> m</span>${skip?`<span>避让 <b class="num" style="color:#ff8a7a">${m(skip)}</b> m</span>`:''}<span>尾料 <b class="num">${m(tail)}</b> m</span></div>
+  <div class="nr-track">${t}</div><div class="nr-chips">${chips}</div>`;
+}
+
 /* ---------------- 页面 ---------------- */
 const NAV=[
   ['生产',[['tasks','任务','8'],['workbench','排料工作台'],['execution','执行与报工','3']]],
@@ -251,7 +387,7 @@ const NAV=[
   ['质量与分析',[['quality','复检处置','1'],['analysis','生产分析']]],
   ['系统',[['showcase','能力展示'],['settings','设置']]],
 ];
-let state={page:'tasks',wbKind:'2d',layout:0,stage:2,matTab:'roll',matSel:0};
+let state={page:'tasks',wbKind:'2d',seg:0,view:'station',stage:2,matTab:'roll',matSel:0};
 
 function nav(){
   document.getElementById('nav').innerHTML=NAV.map(([h,items])=>`<h6>${h}</h6>`+items.map(([k,t,c])=>`<a href="#${k}" onclick="go('${k}');return false" class="${state.page===k?'on':''}">${t}${c?`<span class="cnt">${c}</span>`:''}</a>`).join('')).join('');
@@ -281,11 +417,15 @@ tasks(){
 
 workbench(){
   const oneD=state.wbKind==='1d';
-  const LS=oneD?LAYOUTS_1D:LAYOUTS_2D, L=LS[state.layout]||LS[0];
+  const R=oneD?ROLL_1D:ROLL_2D, P=oneD?PLAN_1D:PLAN_2D, LS=oneD?LAYOUTS_1D:LAYOUTS_2D;
+  const cur=Math.min(state.seg,P.segs.length-1), seg=P.segs[cur], L=seg.L;
   const D=oneD?DEMANDS_1D:DEMANDS_2D;
   const t=oneD?TASKS[1]:TASKS[0];
   const stages=['需求','材料','排料','执行','报工'];
-  const totalRepeat=LS.reduce((a,b)=>a+b.repeat,0);
+  const skip=P.blocks.filter(b=>b.kind==='skip').reduce((a,b)=>a+b.len,0);
+  const planLen=P.end-R.used, area=P.segs.reduce((a,s)=>a+s.L.items.reduce((x,i)=>x+i.w*i.h,0),0);
+  const util=(area/(planLen*R.width)*100).toFixed(1);
+  const full=state.view==='full';
   return `<div class="wb-head">
       <h1 class="num">${t.id}</h1><span>${t.name}</span><span class="tag kind">${t.kind}</span><span class="tag warn">方案候选 · 未下达</span>
       <div class="sp" style="flex:1"></div>
@@ -300,42 +440,42 @@ workbench(){
         ${D.map(d=>`<tr><td><i style="display:inline-block;width:8px;height:8px;margin-right:6px;background:${ORDER_COLORS[d[0]]}"></i>${d[1]}</td><td class="num">${d[2]}</td><td class="r num">${d[3]}</td><td class="r num" style="color:${d[4]<d[3]?'var(--warn)':'inherit'}">${d[4]}</td></tr>`).join('')}
         </tbody></table>
         <div class="sec">材料</div>
-        <div class="kv"><div>${oneD?'母卷':'母卷'}</div><div class="num">${oneD?'R-2610-0933':'R-2610-0921'}</div><div>规格</div><div class="num">${oneD?'门幅 2400 mm':'2800 mm × 48 m'}</div><div>可用</div><div class="num">${oneD?'800 m':'48 m'}</div><div>料头</div><div>${oneD?'不适用':'优先使用 1 块'}</div></div>
+        <div class="kv"><div>母卷</div><div class="num">${R.id}</div><div>幅宽</div><div class="num">${R.width} mm</div><div>剩余</div><div class="num">${m(R.total-R.used)} m（已用 ${m(R.used)} m）</div><div>疵点</div><div>${R.defects.length?R.defects.length+' 处 · 自动避让':'无'}</div></div>
         <div class="sec">工艺</div>
-        <div class="kv"><div>切割方式</div><div>${oneD?'分条 · 4 工位':'直刀 · 一刀切'}</div><div>修边</div><div class="num">${oneD?'两侧 12 mm':'10 mm'}</div><div>${oneD?'最小分条':'刀缝'}</div><div class="num">${oneD?'200 mm':'2 mm'}</div><div>目标</div><div>${oneD?'序号组最少':'利用率优先'}</div></div>
+        <div class="kv"><div>切割方式</div><div>${oneD?'分条 · 4 工位':'裁床 · 连续拉布'}</div><div>${oneD?'每车长度':'拉布长度'}</div><div class="num">${oneD?m(CAR)+' m（定长）':'2.0 – 6.0 m（按排法）'}</div><div>修边</div><div class="num">${oneD?'两侧 12 mm':'10 mm'}</div><div>目标</div><div>${oneD?'序号组最少':'用料最短'}</div></div>
         </div>
       </section>
       <section class="pane" style="background:var(--canvas)">
         <div class="ctool">
-          <button class="on" title="选择 V">选择</button><button title="平移 H">平移</button><button title="测量 M">测量</button>
-          <div class="div"></div><button>适应</button><button>−</button><span class="num">100%</span><button>+</button>
-          <div class="div"></div><button class="on">切割线</button><button class="on">标注</button><button>疵点</button><button>${oneD?'刀位':'刀路'}</button>
-          <div class="sp"></div><span>${L.name} × ${L.repeat}</span>
+          <div class="vseg"><button class="${full?'':'on'}" onclick="setView('station')">工位</button><button class="${full?'on':''}" onclick="setView('full')">全卷</button></div>
+          <div class="div"></div><button title="上一段 ←" onclick="pickSeg(${cur-1})">◀</button><span class="num" style="color:#fff">${cur+1} / ${P.segs.length}</span><button title="下一段 →" onclick="pickSeg(${cur+1})">▶</button>
+          <div class="div"></div><button class="on">切割线</button><button class="on">标注</button><button class="on">疵点</button><button>${oneD?'刀位':'刀路'}</button>
+          <div class="sp"></div>${oneD?`<span>${L.name} · 第 ${cur+1} 车</span>`:`<span>拉布</span><input class="cin num" value="${seg.len}"><span>mm</span>`}
         </div>
-        <div class="canvas-wrap" id="cv">${renderLayout(L,{w:900,h:560,oneD})}
-          <div class="legend">${D.map(d=>`<span><i style="background:${ORDER_COLORS[d[0]]}"></i>${d[1]}</span>`).join('')}<span><i style="background:url(#);border:1px solid #9aa4ae"></i>余料</span></div>
+        <div class="canvas-wrap" id="cv">${full?renderRoll(R,P,cur,{w:900,h:520,oneD}):renderStation(R,P,cur,{w:900,h:520,oneD})}
+          <div class="legend">${D.map(d=>`<span><i style="background:${ORDER_COLORS[d[0]]}"></i>${d[1]}</span>`).join('')}<span><i style="border:1px solid #9aa4ae"></i>余料</span>${R.defects.length?'<span><i style="border:1.5px solid #ff6b5b"></i>疵点</span>':''}</div>
         </div>
-        <div class="strip">${LS.map((l,i)=>`<div class="thumb ${i===state.layout?'on':''}" onclick="pick(${i})">${renderLayout(l,{w:146,h:76,pad:6,labels:false,dims:false,cuts:false})}<div class="cap"><span>${l.name}</span><b>×${l.repeat}</b></div></div>`).join('')}</div>
+        <div class="navroll">${renderTrack(R,P,cur,oneD)}</div>
       </section>
       <section class="pane">
         <div class="pane-h">方案指标<span class="sp"></span><span class="sub">候选 v3</span></div>
         <div class="metric">
-          <div><small>利用率</small><b>${oneD?'98.1':'89.6'}<em>%</em></b></div>
-          <div><small>${oneD?'用卷':'用料'}</small><b>${oneD?'38':'114.0'}<em>${oneD?'车':'m'}</em></b></div>
-          <div><small>${oneD?'序号组':'排法数'}</small><b>${LS.length}</b></div>
+          <div><small>利用率</small><b>${oneD?'98.1':util}<em>%</em></b></div>
+          <div><small>${oneD?'用卷':'用布长度'}</small><b>${oneD?P.segs.length:m(planLen)}<em>${oneD?'车':'m'}</em></b></div>
+          <div><small>${oneD?'序号组':'拉布次数'}</small><b>${oneD?LS.length:P.segs.length}</b></div>
           <div><small>履约</small><b style="color:${oneD?'var(--ok)':'var(--warn)'}">${oneD?'100':'99.5'}<em>%</em></b></div>
         </div>
-        <div class="sec">当前${oneD?'序号组':'排法'}</div>
-        <div class="kv"><div>名称</div><div>${L.name}</div><div>重复</div><div class="num">${L.repeat} ${oneD?'车':'次'}</div><div>件数</div><div class="num">${L.items.length} × ${L.repeat} = ${L.items.length*L.repeat}</div><div>利用率</div><div class="num">${L.util}%</div><div>${oneD?'刀数':'切割长'}</div><div class="num">${oneD?L.items.length-1+' 刀':'18.4 m'}</div></div>
+        <div class="sec">当前${oneD?'车':'拉布'} · ${cur+1} / ${P.segs.length}</div>
+        <div class="kv"><div>${oneD?'序号组':'排法'}</div><div>${L.name}${oneD?'':' · 共 '+P.count[seg.li]+' 次'}</div><div>位置</div><div class="num">Y ${m(seg.start)} → ${m(seg.start+seg.len)} m</div><div>${oneD?'长度':'拉布长'}</div><div class="num">${seg.len} mm</div><div>件数</div><div class="num">${L.items.length}</div><div>利用率</div><div class="num">${L.util}%</div><div>${oneD?'刀数':'刀路长'}</div><div class="num">${oneD?L.items.length-1+' 刀':'21.6 m'}</div></div>
+        ${oneD?'':`<div class="sec">疵点与避让</div><div class="kv">${R.defects.map(d=>`<div class="num">Y ${m(d.pos)} m</div><div>${d.desc} · 避让 ${m(P.blocks.find(b=>b.kind==='skip'&&b.start<=d.pos&&b.start+b.len>=d.pos)?.len||0)} m</div>`).join('')}</div>`}
         <div class="sec">未满足</div>
-        ${oneD?`<div class="empty" style="padding:14px">需求全部满足</div>`:`<div class="kv"><div>窗帘 A-01</div><div class="num" style="color:var(--warn)">缺 2 件 · 余料不足</div></div>`}
+        ${oneD?`<div class="empty" style="padding:14px">需求全部满足</div>`:`<div class="kv"><div>窗帘 A-01</div><div class="num" style="color:var(--warn)">缺 2 件 · 本卷剩余不足</div></div>`}
         <div class="sec">计算记录</div>
         <div class="kv"><div class="num">10:41</div><div>v3 · ${oneD?'一维内核':'PackingSolver'} · 6.2 s</div><div class="num">10:37</div><div>v2 · 已作废（需求变更）</div></div>
       </section>
     </div>
     <div class="wb-foot"><button class="btn">返回材料</button><button class="btn">手动调整</button><span class="sp"></span><span style="color:var(--text-3);font-size:12px">候选方案不占用库存</span><button class="btn">重新计算</button><button class="btn pri">确认方案并生成执行单</button></div>`;
 },
-
 execution(){
   const st=[['切割 1 号机','run','CT-20261026-021','卷帘 定高定宽','R-2610-0921','排法 2 · 7/12'],['切割 2 号机','idle','—','空闲','—','—'],['分条 A 线','warn','CT-20261026-017','PE 膜分切 A 线','R-2610-0950','完成 · 待报工'],['分条 B 线','idle','CT-20261027-011','无纺布分条 B 线','R-2610-0933','已预约 · 待开工']];
   return `<div class="ph"><h1>执行与报工</h1><span class="crumb">按工位查看执行单</span><div class="sp"></div><button class="btn">报工记录</button><button class="btn pri">报工</button></div>
@@ -467,11 +607,12 @@ function render(){
   if(!PAGES[state.page])state.page='tasks';
   nav();
   document.getElementById('main').innerHTML=PAGES[state.page]();
-  status(state.page==='workbench'?`<span>X <span class="num">1240</span>  Y <span class="num">860</span> mm</span><span>引擎 ${state.wbKind==='1d'?'一维内核':'PackingSolver'}</span>`:'');
+  status(state.page==='workbench'?`<span>工位 Y <span class="num">${m((state.wbKind==='1d'?PLAN_1D:PLAN_2D).segs[state.seg].start)}</span> m</span><span>引擎 ${state.wbKind==='1d'?'一维内核':'PackingSolver'}</span>`:'');
 }
-function go(p,kind){if(kind)state.wbKind=kind;state.layout=0;state.page=p;try{history.replaceState(null,'','#'+p)}catch(e){}render()}
-function setKind(k){state.wbKind=k;state.layout=0;render()}
-function pick(i){state.layout=i;render()}
+function go(p,kind){if(kind)state.wbKind=kind;state.seg=0;state.page=p;try{history.replaceState(null,'','#'+p)}catch(e){}render()}
+function setKind(k){state.wbKind=k;state.seg=0;render()}
+function pickSeg(i){const n=(state.wbKind==='1d'?PLAN_1D:PLAN_2D).segs.length;state.seg=Math.max(0,Math.min(n-1,i));render()}
+function setView(v){state.view=v;render()}
 function matTab(t){state.matTab=t;state.matSel=0;render()}
 function matSel(i){state.matSel=i;render()}
 state.page=(location.hash.slice(1)||'tasks');
