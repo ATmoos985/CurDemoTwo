@@ -6,6 +6,7 @@ import { state } from '../../core/state.js';
 import { getHomeCoordinates } from '../toolpath/toolpath-optimizer.js';
 import { canUseCurrentPlan } from '../../business/cutting/solver-client.js';
 import { showToast } from '../../core/toast.js';
+import { gcodeText, dxfText } from './cam-format.js';
 
 function requireValidatedPlan() {
     if (canUseCurrentPlan()) return true;
@@ -14,212 +15,19 @@ function requireValidatedPlan() {
 }
 
 /**
- * 生成标准 Fanuc / ISO 格式工业数控 G-Code (.nc)
+ * 生成标准 Fanuc / ISO 格式工业数控 G-Code (.nc)。文本由纯函数 cam-format.gcodeText 生成，这里只补经典页面的全局输入。
  */
 export function generateGCode(caseData = null, options = {}) {
     const data = caseData || state.getCurrentCaseData();
-    const cuts = data.cuts || [];
-    const rollId = data.rollId || "ROLL-2026-0920";
-    const rollW = data.rollW || 2000;
-    const bedL = data.bedL || 5000;
-    const winStartY = data.windowStartY || 0;
-    const originStr = (data.cutOrigin || "right-bottom").toLowerCase();
-    const home = getHomeCoordinates(data);
-
-    const cutFeed = options.cutFeed || 4000;      // 切削进给速度 4000 mm/min
-    const rapidFeed = options.rapidFeed || 15000;  // 空刀快移速度 15000 mm/min
-    const plungeDelay = options.plungeDelay || 200; // 落刀延时 200 ms
-    const retractDelay = options.retractDelay || 100; // 提刀延时 100 ms
-
-    const dateStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
-
-    let gcode = [];
-    gcode.push("(------------------------------------------------------------------)");
-    gcode.push("( CAD/CAM FABRIC CUTTING PROGRAM - CNC G-CODE                      )");
-    gcode.push(`( DATE CREATED  : ${dateStr}                              )`);
-    gcode.push(`( MOTHER ROLL   : ${rollId} (Width: ${rollW} mm)                 )`);
-    gcode.push(`( BED STATION   : 0 ~ ${bedL} mm (Global Y: ${winStartY} ~ ${winStartY + bedL} mm) )`);
-    gcode.push(`( ORIGIN DATUM  : ${data.cutOrigin || 'right-bottom'}                                  )`);
-    gcode.push(`( TOTAL CUTS    : ${cuts.length} STEPS                                   )`);
-    gcode.push(`( OPTIMIZED     : ${state.isToolpathOptimized ? 'YES (Segment-TSP 2-Opt)' : 'NO (Sequential)'}            )`);
-    gcode.push("( CONTROL TYPE  : 2D CUTTING - VERIFY MACHINE POSTPROCESSOR BEFORE USE )");
-    gcode.push("(------------------------------------------------------------------)");
-    gcode.push("");
-    gcode.push("G21          (Metric Units: Millimeters)");
-    gcode.push("G90          (Absolute Coordinate System)");
-    gcode.push("G17          (XY Plane Selection)");
-    gcode.push("G94          (Feed Rate: mm per minute)");
-    gcode.push("M08          (Auxiliary: Bed Vacuum Absorption ON)");
-    gcode.push("G04 P500     (Dwell 500ms for Vacuum Bed Stabilization)");
-    gcode.push("");
-    gcode.push(`(--- INITIAL RAPID TO HOME POSITION ---)`);
-    gcode.push(`G00 X${home.x.toFixed(3)} Y${home.y.toFixed(3)} Z50.000 F${rapidFeed}`);
-    gcode.push("");
-
-    let lastX = home.x;
-    let lastY = home.y;
-    let totalCutDist = 0;
-    let totalAirDist = 0;
-
-    cuts.forEach((c) => {
-        const isHoriz = (c.type === "横切");
-        let startX, startY, endX, endY;
-
-        if (c.startX !== undefined && c.endX !== undefined) {
-            startX = c.startX; startY = c.startY;
-            endX = c.endX; endY = c.endY;
-        } else {
-            startX = isHoriz ? c.start : c.pos;
-            startY = isHoriz ? c.pos : c.start;
-            endX = isHoriz ? c.end : c.pos;
-            endY = isHoriz ? c.pos : c.end;
-        }
-
-        const airDist = Math.hypot(startX - lastX, startY - lastY);
-        const cutDist = Math.hypot(endX - startX, endY - startY);
-        totalAirDist += airDist;
-        totalCutDist += cutDist;
-
-        gcode.push(`(--- STEP ${c.step}: ${c.type} L=${Math.round(cutDist)}mm | ${c.info || ''} ---)`);
-        // 1. 空走快移到下刀点
-        gcode.push(`G00 X${startX.toFixed(3)} Y${startY.toFixed(3)} Z10.000 (Rapid Air Move)`);
-        // 2. 落刀 / 开启刀具 / 延时稳定
-        gcode.push(`M03 S1        (Tool Down / Laser ON)`);
-        gcode.push(`G04 P${plungeDelay}     (Plunge Dwell)`);
-        // 3. 工艺进给直线裁切
-        gcode.push(`G01 X${endX.toFixed(3)} Y${endY.toFixed(3)} Z0.000 F${cutFeed} (Cutting Feed)`);
-        // 4. 提刀 / 关闭刀具 / 延时稳定
-        gcode.push(`M05          (Tool Up / Laser OFF)`);
-        gcode.push(`G04 P${retractDelay}     (Retract Dwell)`);
-        gcode.push("");
-
-        lastX = endX;
-        lastY = endY;
-    });
-
-    // 返回停靠原点并停机
-    gcode.push("(--- RETURN TO HOME AND FINISH ---)");
-    gcode.push(`G00 X${home.x.toFixed(3)} Y${home.y.toFixed(3)} Z50.000 F${rapidFeed}`);
-    gcode.push("M09          (Vacuum Bed OFF)");
-    gcode.push("M30          (End of Program / Rewind)");
-    gcode.push(`(TOTAL CUT DISTANCE: ${Math.round(totalCutDist)} mm | TOTAL AIR DISTANCE: ${Math.round(totalAirDist)} mm)`);
-
-    return gcode.join("\n");
+    return gcodeText(data, {...options, optimized: state.isToolpathOptimized, home: getHomeCoordinates(data)});
 }
 
 /**
- * 生成标准 AutoCAD R12/2000 ASCII DXF 图纸
- * 包含 6 个专业图层：0_BORDER, 1_PIECES, 2_REMNANTS, 3_DEFECTS, 4_CUT_LINES, 5_RAPID_TRAVERSE
+ * 生成标准 AutoCAD R12/2000 ASCII DXF 图纸（6 个图层），文本由 cam-format.dxfText 生成。
  */
 export function generateDXF(caseData = null) {
     const data = caseData || state.getCurrentCaseData();
-    const rollW = data.rollW || 2000;
-    const bedL = data.bedL || 5000;
-    const pieces = data.pieces || [];
-    const remnants = data.remnants || [];
-    const defects = data.globalDefects || data.defects || [];
-    const cuts = data.cuts || [];
-    const home = getHomeCoordinates(data);
-
-    let dxf = [];
-
-    // DXF HEADER
-    dxf.push("0\nSECTION\n2\nHEADER");
-    dxf.push("9\n$ACADVER\n1\nAC1009"); // AutoCAD R12 ASCII Standard
-    dxf.push("9\n$INSUNITS\n70\n4");   // 4 = Millimeters
-    dxf.push("0\nENDSEC");
-
-    // DXF TABLES (LAYERS)
-    dxf.push("0\nSECTION\n2\nTABLES");
-    dxf.push("0\nTABLE\n2\nLAYER\n70\n6");
-
-    // 图层定义: 0_BORDER (7: 白/黑), 1_PIECES (3: 绿), 2_REMNANTS (4: 青蓝), 3_DEFECTS (1: 红), 4_CUT_LINES (6: 洋红), 5_RAPID_TRAVERSE (5: 蓝)
-    const layers = [
-        { name: "0_FABRIC_BORDER", color: 7 },
-        { name: "1_PIECES", color: 3 },
-        { name: "2_REMNANTS", color: 4 },
-        { name: "3_DEFECTS", color: 1 },
-        { name: "4_CUT_LINES", color: 6 },
-        { name: "5_RAPID_TRAVERSE", color: 5 }
-    ];
-    layers.forEach(l => {
-        dxf.push(`0\nLAYER\n2\n${l.name}\n70\n0\n62\n${l.color}\n6\nCONTINUOUS`);
-    });
-    dxf.push("0\nENDTAB");
-    dxf.push("0\nENDSEC");
-
-    // DXF ENTITIES
-    dxf.push("0\nSECTION\n2\nENTITIES");
-
-    // 辅助函数：绘制矩形框
-    function addRect(layer, x1, y1, x2, y2) {
-        addLine(layer, x1, y1, x2, y1);
-        addLine(layer, x2, y1, x2, y2);
-        addLine(layer, x2, y2, x1, y2);
-        addLine(layer, x1, y2, x1, y1);
-    }
-
-    // 辅助函数：绘制线段
-    function addLine(layer, x1, y1, x2, y2) {
-        dxf.push(`0\nLINE\n8\n${layer}\n10\n${x1.toFixed(3)}\n20\n${y1.toFixed(3)}\n30\n0.0\n11\n${x2.toFixed(3)}\n21\n${y2.toFixed(3)}\n31\n0.0`);
-    }
-
-    // 辅助函数：绘制文本
-    function addText(layer, x, y, height, text) {
-        dxf.push(`0\nTEXT\n8\n${layer}\n10\n${x.toFixed(3)}\n20\n${y.toFixed(3)}\n30\n0.0\n40\n${height.toFixed(1)}\n1\n${text}`);
-    }
-
-    // 1. 布料边界 (Layer: 0_FABRIC_BORDER)
-    addRect("0_FABRIC_BORDER", 0, 0, rollW, bedL);
-    addText("0_FABRIC_BORDER", 20, 20, 40, `BED STATION: ${rollW}x${bedL}mm`);
-
-    // 2. 成品裁片 (Layer: 1_PIECES)
-    pieces.forEach(p => {
-        if(p.shape?.type==='POLYGON')p.shape.vertices.forEach((v,i)=>{const next=p.shape.vertices[(i+1)%p.shape.vertices.length];addLine('1_PIECES',p.x+v.x,p.y+v.y,p.x+next.x,p.y+next.y);});
-        else addRect("1_PIECES", p.x, p.y, p.x + p.w, p.y + p.l);
-        addText("1_PIECES", p.x + 15, p.y + p.l / 2 - 10, 30, `${p.name || 'Piece'}`);
-        addText("1_PIECES", p.x + 15, p.y + p.l / 2 + 30, 24, `${p.w}x${p.l}mm`);
-    });
-
-    // 3. 回收料头 (Layer: 2_REMNANTS)
-    remnants.forEach(r => {
-        addRect("2_REMNANTS", r.x, r.y, r.x + r.w, r.y + r.l);
-        addText("2_REMNANTS", r.x + 15, r.y + 35, 26, `REMNANT: ${r.id}`);
-        addText("2_REMNANTS", r.x + 15, r.y + 70, 20, `${r.w}x${r.l}mm`);
-    });
-
-    // 4. 瑕疵区与安全避让区 (Layer: 3_DEFECTS)
-    defects.forEach(d => {
-        addRect("3_DEFECTS", d.x, d.y, d.x + d.w, d.y + d.h);
-        const m = d.margin !== undefined ? d.margin : 20;
-        addRect("3_DEFECTS", d.x - m, d.y - m, d.x + d.w + m, d.y + d.h + m);
-        addText("3_DEFECTS", d.x, Math.max(10, d.y - 10), 20, `DEFECT #${d.id} (${d.desc || 'Flaw'})`);
-    });
-
-    // 5. 下刀切线与空走虚线 (Layer: 4_CUT_LINES & 5_RAPID_TRAVERSE)
-    let lastX = home.x;
-    let lastY = home.y;
-    cuts.forEach(c => {
-        const isHoriz = (c.type === "横切");
-        let startX = c.startX !== undefined ? c.startX : (isHoriz ? c.start : c.pos);
-        let startY = c.startY !== undefined ? c.startY : (isHoriz ? c.pos : c.start);
-        let endX = c.endX !== undefined ? c.endX : (isHoriz ? c.end : c.pos);
-        let endY = c.endY !== undefined ? c.endY : (isHoriz ? c.pos : c.end);
-
-        // 空刀移动
-        addLine("5_RAPID_TRAVERSE", lastX, lastY, startX, startY);
-        // 切割下刀
-        addLine("4_CUT_LINES", startX, startY, endX, endY);
-        addText("4_CUT_LINES", startX + 5, startY + 5, 20, `CUT #${c.step}`);
-
-        lastX = endX;
-        lastY = endY;
-    });
-
-    dxf.push("0\nENDSEC");
-    dxf.push("0\nEOF");
-
-    return dxf.join("\n");
+    return dxfText(data, {home: getHomeCoordinates(data)});
 }
 
 /**

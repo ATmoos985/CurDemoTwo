@@ -13,6 +13,10 @@ import {findForwardPlan} from '../../../js/business/cutting/forward-search.js';
 import {OUTCOMES, defaultReport, applyBulk, recoveryCandidates, reportSummary, reportProblems, buildCutReport} from '../model/report.js';
 import {reviewablePieces, effectivePieceResults, DISPOSITIONS, emptyQualityForm, qualityProblems, buildQualityCommand, receiptSummary} from '../model/quality.js';
 import {executionWriter, executionForPlan, executionLabels} from '../../../js/business/cutting/execution-client.js';
+import {camData, localHome, worldHome, initialPositions, movePiece, rotatePiece, changedPieces, adjustPayload, applyPositions, sizeOf} from '../model/plan-tools.js';
+import {gcodeText, dxfText} from '../../../js/plugins/export/cam-format.js';
+import {createPlanHistory} from '../../../js/business/cutting/plan-editing.js';
+import {ticketModel, ticketHTML} from '../../../js/plugins/export/cut-ticket-model.js';
 
 const EXEC_TAG = {DRAFT: '', RELEASED: 'run', RUNNING: 'run', EXPIRED: 'warn', CANCELLED: '', REPORTED: 'ok', REVERSED: 'err'};
 
@@ -79,6 +83,13 @@ export async function mount(el, [taskId, focusPlan]) {
     const scene = () => {
         const sc = buildRollScene({roll, plans, reports: detail.reports, rollId: st.rollId, demands: task.demands,
             process: task.process, freshDefects: st.fresh, selectedId: st.selectedId, window: st.window});
+        // 刀路图层原点；手动调整中用草稿位置替换当前段的件
+        for (const s of sc.segments) { const p = planOf(s.id); if (p) s.home = worldHome(p, s.start); }
+        if (st.adjust) {
+            const i = sc.segments.findIndex(s => s.id === st.adjust.planId);
+            if (i >= 0) sc.segments[i] = applyPositions(sc.segments[i], planOf(st.adjust.planId), st.adjust.positions);
+            sc.selectedPiece = st.adjust.selected;
+        }
         // 报工中：画布按逐件结果着色（异常红、未切灰）
         const seg = st.report && sc.segments.find(s => s.id === st.report.planId);
         if (seg) seg.pieces = seg.pieces.map(p => {
@@ -88,6 +99,7 @@ export async function mount(el, [taskId, focusPlan]) {
         return sc;
     };
     const remaining = () => remainingDemands(task, detail.completed, detail.reserved);
+    const planOf = id => plans.find(p => p.id === id);
 
     /** keepCamera：重绘外壳但保留画布视角（拖动工位结束、切换右栏等）。 */
     function shell(keepCamera = false) {
@@ -96,6 +108,8 @@ export async function mount(el, [taskId, focusPlan]) {
         const seg = sc?.segments.find(s => s.id === sc.currentId) || null;
         if (st.report && (seg?.id !== st.report.planId || seg?.status !== 'pending')) st.report = null; // 选中别的段时关闭报工
         if (st.quality && seg?.id !== st.quality.report.planId && !st.quality.uncertain) st.quality = null;
+        if (st.adjust && seg?.id !== st.adjust.planId) { st.adjust = null; st.tool = 'pan'; }
+        if (st.toolpath && seg?.id !== st.toolpath.planId) st.toolpath = null;
         const order = sc ? [...sc.segments.map(s => s.id), NEW_STATION] : [], idx = sc ? (seg ? order.indexOf(seg.id) : order.length - 1) : -1;
         const total = summary?.total ?? task.demands.reduce((a, d) => a + d.quantity, 0), done = summary?.completed ?? 0;
         const stage = STAGE_OF[summary?.status] ?? (st.rollId ? 2 : 1);
@@ -108,7 +122,7 @@ export async function mount(el, [taskId, focusPlan]) {
           <span class="vsep"></span><a class="btn" href="#/tasks">返回任务</a>${summary ? `<a class="btn" href="${esc(taskLink(summary))}">经典工作台 ↗</a>` : ''}</div>
         <div class="stages">${STAGES.map((s, i) => `<div class="stage ${i < stage ? 'done' : i === stage ? 'on' : ''}"><span class="n">${i < stage ? '✓' : i + 1}</span>${s}</div>`).join('')}</div>
         ${!sc ? pickRollHtml() : `
-        <div class="split" style="grid-template-columns:1fr ${st.report ? '420px' : st.quality ? '380px' : prefs.sideCollapsed ? '28px' : '300px'}">
+        <div class="split" style="grid-template-columns:1fr ${st.report ? '420px' : st.quality || st.adjust ? '340px' : prefs.sideCollapsed ? '28px' : '300px'}">
           <section class="pane" style="background:var(--canvas)">
             <div class="ctool">
               <div class="vseg"><button data-view="station" class="${st.view === 'station' ? 'on' : ''}" title="对准当前工位">工位</button><button data-view="full" class="${st.view === 'full' ? 'on' : ''}" title="显示整卷">全卷</button></div>
@@ -117,7 +131,8 @@ export async function mount(el, [taskId, focusPlan]) {
               <input id="z-ratio" class="cin num" list="ratios" title="精确比例：输入 1:N 回车"><datalist id="ratios">${[5, 10, 20, 50, 100, 200, 500].map(n => `<option>1:${n}</option>`).join('')}</datalist>
               <button id="z-in" title="放大">+</button><span id="z-pct" class="num" style="min-width:40px"></span>
               <div class="div"></div><button id="seg-prev" title="上一段" ${idx <= 0 ? 'disabled' : ''}>◀</button><span class="num" style="color:#fff">${seg ? `${idx + 1} / ${sc.segments.length}` : '新工位'}</span><button id="seg-next" title="下一段 / 新工位" ${idx >= order.length - 1 ? 'disabled' : ''}>▶</button>
-              <div class="div"></div><div class="vseg">${[['pan', '平移'], ['measure', '测量'], ...(sc.fixed ? [] : [['defect', '标疵点']])].map(([k, t]) => `<button data-tool="${k}" class="${st.tool === k ? 'on' : ''}">${t}</button>`).join('')}</div>
+              <div class="div"></div><div class="vseg">${[['pan', '平移'], ...(st.adjust ? [['move', '移动件']] : []), ['measure', '测量'], ...(sc.fixed || st.adjust ? [] : [['defect', '标疵点']])].map(([k, t]) => `<button data-tool="${k}" class="${st.tool === k ? 'on' : ''}">${t}</button>`).join('')}</div>
+              <button id="path-toggle" class="${st.showPath ? 'on' : ''}" title="显示当前段刀序与空走线">刀路</button>
               <button id="clear-measure" title="清除测量">✕ 测量</button>
               <button id="orient" title="画布方向（不影响坐标与算法）">${prefs.vertical ? '竖向 ⇅' : '横向 ⇆'}</button>
               <span class="sp"></span><span>拉布</span><input id="bed-len" class="cin num" value="${Math.round(sc.window.len)}" title="${sc.fixed ? '料头整块投料，长度固定' : '本次拉布长度（mm）'}" ${sc.fixed ? 'disabled' : ''}><span>mm</span>
@@ -128,7 +143,7 @@ export async function mount(el, [taskId, focusPlan]) {
             <div class="navroll"><div class="nr-head"><span>${roll.remnant ? '料头' : '母卷'} <b class="num">${esc(st.rollId)}</b>${roll.remnant ? ` <span class="muted">来源 ${esc(roll.remnant.sourceRollId || '—')}</span>` : ''}</span><span>幅宽 <b class="num">${fmtN(sc.roll.width)}</b> mm</span><span>总长 <b class="num">${fmtM(sc.roll.total)}</b> m</span><span>已用 <b class="num">${fmtM(sc.roll.used)}</b> m</span>
               <span>本任务 已切 <b class="num">${met.cut}</b> · 候选 <b class="num">${met.pending}</b>${met.stale ? ` · 已失效 <b class="num">${met.stale}</b>` : ''}</span></div><div id="rn"></div></div>
           </section>
-          ${st.report && seg ? reportPanel(seg, idx, sc) : st.quality && seg ? qualityPanel(seg) : prefs.sideCollapsed ? `<section class="pane side-min"><button id="side-toggle" title="展开右栏">«</button><span>方案指标</span></section>` : `<section class="pane">
+          ${st.report && seg ? reportPanel(seg, idx, sc) : st.quality && seg ? qualityPanel(seg) : st.adjust && seg ? adjustPanel(seg) : prefs.sideCollapsed ? `<section class="pane side-min"><button id="side-toggle" title="展开右栏">«</button><span>方案指标</span></section>` : `<section class="pane">
             <div class="pane-h">方案指标<span class="sub">本卷</span><span class="sp"></span><button class="btn sm" id="side-toggle" title="收起右栏">»</button></div>
             <div class="pane-b">
               <div class="metric"><div><small>利用率</small><b>${met.utilization.toFixed(1)}<em>%</em></b></div><div><small>用布长度</small><b>${fmtM(met.length, 2)}<em>m</em></b></div>
@@ -175,6 +190,7 @@ export async function mount(el, [taskId, focusPlan]) {
               <button class="btn" id="solve" ${st.busy || problem || !need || locked ? 'disabled' : ''} title="${locked ? '已下达或执行中，先取消执行单' : ''}">重新计算</button><button class="btn" id="discard" ${st.busy || locked ? 'disabled' : ''}>放弃候选</button></div>
             ${executionBlock(seg, view)}`; })() : ''}
           ${seg.status === 'cut' ? recordsBlock(seg) : ''}
+          ${toolsBlock(seg)}
           <div class="sec">本次未排入</div>
           ${unplaced.length ? `<table class="t" style="border:0"><tbody>${unplaced.map(f => `<tr><td class="wrap">${esc(names.get(f.demandId)?.name || `需求 ${f.demandId}`)}</td><td class="r num" style="color:var(--warn)">缺 ${f.unplaced}</td></tr>`).join('')}</tbody></table>` : '<div class="empty" style="padding:12px">本段需求全部排入</div>'}`;
     }
@@ -199,6 +215,112 @@ export async function mount(el, [taskId, focusPlan]) {
             ${a.release?.allowed ? `<span class="muted">预约</span><input class="field num" id="exec-reserve" value="${st.reserveMin}" style="width:56px;text-align:right"><span class="muted">分钟</span>` : ''}
             ${btn('release', '下达')}${btn('start', '开工')}${btn('cancel', '取消')}</div>
           ${st.cancelling ? `<div style="display:flex;gap:6px;padding:0 12px 10px"><input class="field" id="exec-cancel-reason" placeholder="取消原因（必填）" style="flex:1"><button class="btn sm pri" id="exec-cancel-submit">确认取消</button></div>` : ''}`;
+    }
+
+    /** 方案工具：刀路优化、手动调整（仅候选且未下达）、导出与工单（任何状态）。 */
+    function toolsBlock(seg) {
+        if (!['pending', 'cut', 'stale'].includes(seg.status)) return '';
+        const plan = planOf(seg.id), locked = !!executionForPlan(views, seg.id)?.reservationActive, editable = seg.status === 'pending' && !locked;
+        const tp = st.toolpath?.planId === seg.id ? st.toolpath : null;
+        return `<div class="sec">方案工具</div>
+          ${editable ? `<div style="display:flex;gap:6px;padding:8px 12px 0;flex-wrap:wrap"><button class="btn sm" id="tp-optimize" ${st.busy || !plan?.result?.cuts?.length ? 'disabled' : ''}>优化空走刀</button><button class="btn sm" id="adjust-open" ${st.busy ? 'disabled' : ''}>手动调整</button></div>` : ''}
+          ${tp?.result ? `<div class="kv" style="margin-top:6px"><div>空走</div><div class="num">${fmtN(tp.result.originalAirDistance)} → ${fmtN(tp.result.optimizedAirDistance)} mm</div><div>节省</div><div class="num">${fmtN(tp.result.savedAirDistance)} mm · ${fmtN((tp.result.savingRatio || 0) * (tp.result.savingRatio <= 1 ? 100 : 1), 1)}%</div></div>
+            <div style="display:flex;gap:6px;padding:6px 12px"><button class="btn sm pri" id="tp-save" ${st.busy || !(tp.result.savedAirDistance > 0) ? 'disabled' : ''}>保存刀序为新版本</button><button class="btn sm" id="tp-drop">放弃</button></div>` : ''}
+          ${tp?.error ? `<div class="notice">${esc(tp.error)}</div>` : ''}
+          <div style="display:flex;gap:6px;padding:8px 12px;flex-wrap:wrap"><button class="btn sm" data-export="nc">G-Code</button><button class="btn sm" data-export="dxf">DXF</button><button class="btn sm" id="ticket-print">打印工单</button></div>`;
+    }
+
+    /** 手动调整：拖动件（“移动件”工具）、旋转、撤销 / 重做，后端校验后另存为新版本。 */
+    function adjustPanel(seg) {
+        const a = st.adjust, plan = planOf(a.planId), changed = changedPieces(a.positions, plan);
+        const p = plan.result.pieces.find(x => x.id === a.selected), q = p && a.positions[p.id], size = p && sizeOf(p, q.rotated);
+        return `<section class="pane" id="adjust"><div class="pane-h">手动调整<span class="sub num">${shortId(seg.id)} · v${seg.version}</span><span class="sp"></span><button class="btn sm" id="adjust-close" ${st.busy ? 'disabled' : ''}>放弃调整</button></div>
+          <div class="pane-b"><div class="muted" style="padding:10px 12px;font-size:12px">在画布用“移动件”拖动裁片；后端会校验重叠、疵点避让与件间距，并重新生成刀序。保存后原候选作废，生成新版本。</div>
+            <div class="kv"><div>已改动</div><div class="num">${changed} 件</div>
+              ${p ? `<div>选中</div><div>#${p.id} · ${esc(String(p.name || '').slice(0, 16))}</div><div>位置</div><div class="num">X ${fmtN(q.x, 1)} · Y ${fmtN(q.y, 1)} mm</div><div>尺寸</div><div class="num">${fmtN(size.w)} × ${fmtN(size.l)}${q.rotated !== !!p.rotated ? ' · 已旋转' : ''}</div>` : '<div>选中</div><div class="muted">点选画布中的裁片</div>'}</div>
+            <div style="display:flex;gap:6px;padding:8px 12px;flex-wrap:wrap"><button class="btn sm" id="adj-undo" ${a.history.canUndo ? '' : 'disabled'}>撤销</button><button class="btn sm" id="adj-redo" ${a.history.canRedo ? '' : 'disabled'}>重做</button>
+              <button class="btn sm" id="adj-rotate" ${p && !p.shape ? '' : 'disabled'}>旋转选中件</button><button class="btn sm" id="adj-reset" ${changed ? '' : 'disabled'}>恢复原位</button></div>
+            ${a.error ? `<div class="notice">${esc(a.error)}</div>` : ''}
+            <div style="display:flex;gap:8px;padding:8px 12px"><button class="btn pri" id="adj-save" ${changed && !st.busy ? '' : 'disabled'}>校验并保存为新版本</button></div></div></section>`;
+    }
+
+    /** 只重绘调整面板并重新绑定其按钮；画布实例保持不变。 */
+    function patchAdjust() {
+        const box = el.querySelector('#adjust'), sc = scene(), seg = sc.segments.find(s => s.id === sc.currentId);
+        if (!box || !seg) return;
+        box.outerHTML = adjustPanel(seg);
+        bindAdjust();
+    }
+
+    function download(name, text, type) {
+        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], {type}));
+        a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+
+    function bindTools(sc) {
+        const seg = sc.segments.find(s => s.id === sc.currentId); if (!seg) return;
+        const plan = planOf(seg.id);
+        el.querySelector('#path-toggle')?.addEventListener('click', () => { st.showPath = !st.showPath; el.querySelector('#path-toggle').classList.toggle('on', st.showPath); canvas.setOptions({showPath: st.showPath}); });
+        el.querySelectorAll('[data-export]').forEach(b => b.onclick = () => {
+            const {data, home} = camData(plan), tag = `${shortId(plan.id)}-v${plan.version || 1}`;
+            b.dataset.export === 'nc' ? download(`cut-${tag}.nc`, gcodeText(data, {home}), 'text/plain;charset=utf-8')
+                : download(`cut-${tag}.dxf`, dxfText(data, {home}), 'application/dxf');
+        });
+        el.querySelector('#ticket-print')?.addEventListener('click', async () => {
+            try {
+                const saved = await requestJSON('/api/cutting/plans/' + encodeURIComponent(seg.id));
+                const html = ticketHTML(ticketModel(saved, saved.status !== 'PENDING'));
+                const frame = document.createElement('iframe'); frame.style.cssText = 'position:fixed;width:0;height:0;border:0'; document.body.append(frame);
+                frame.onload = () => { frame.contentWindow.addEventListener('afterprint', () => frame.remove(), {once: true}); frame.contentWindow.focus(); frame.contentWindow.print(); };
+                const d = frame.contentDocument; d.open();
+                d.write(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>裁切工单</title><link rel="stylesheet" href="${location.origin}/css/cut-ticket.css"></head><body><article class="cut-ticket">${html}</article></body></html>`); d.close();
+            } catch (e) { toast('工单生成失败：' + e.message, true); }
+        });
+        el.querySelector('#tp-optimize')?.addEventListener('click', async () => {
+            const home = localHome(plan); st.busy = '正在优化刀路…'; shell(true);
+            try { st.toolpath = {planId: seg.id, result: await requestJSON('/api/toolpath/optimize', {cuts: plan.result.cuts, homeX: home.x, homeY: home.y, respectPrecedence: true}), opId: crypto.randomUUID()}; }
+            catch (e) { st.toolpath = {planId: seg.id, error: '刀路优化未完成：' + e.message}; }
+            st.busy = ''; shell(true);
+        });
+        el.querySelector('#tp-drop')?.addEventListener('click', () => { st.toolpath = null; shell(true); });
+        el.querySelector('#tp-save')?.addEventListener('click', () => saveAdjustment({adjustmentId: st.toolpath.opId, cuts: st.toolpath.result.optimizedCuts}, '刀序已保存为新版本'));
+        el.querySelector('#adjust-open')?.addEventListener('click', () => {
+            const positions = initialPositions(plan);
+            st.adjust = {planId: seg.id, positions, history: createPlanHistory(positions), selected: null, error: null};
+            st.tool = 'move'; st.view = 'station'; full(); // 进入调整时对准当前工位
+        });
+        bindAdjust();
+    }
+
+    function bindAdjust() {
+        const box = el.querySelector('#adjust'); if (!box || !st.adjust) return;
+        const a = st.adjust, plan = planOf(a.planId);
+        const redraw = () => { canvas.setScene(scene()); patchAdjust(); };
+        box.querySelector('#adjust-close').onclick = () => { st.adjust = null; st.tool = 'pan'; shell(true); };
+        box.querySelector('#adj-undo').onclick = () => { const p = a.history.undo(); if (p) { a.positions = p; a.error = null; redraw(); } };
+        box.querySelector('#adj-redo').onclick = () => { const p = a.history.redo(); if (p) { a.positions = p; a.error = null; redraw(); } };
+        box.querySelector('#adj-rotate').onclick = () => { a.positions = rotatePiece(a.positions, plan, a.selected); a.history.record(a.positions); a.error = null; redraw(); };
+        box.querySelector('#adj-reset').onclick = () => { a.positions = initialPositions(plan); a.history.record(a.positions); a.error = null; redraw(); };
+        box.querySelector('#adj-save').onclick = () => {
+            const body = adjustPayload(a.positions, a.opId && a.opBody === JSON.stringify(a.positions) ? a.opId : (a.opId = crypto.randomUUID()));
+            a.opBody = JSON.stringify(a.positions);
+            saveAdjustment(body, '调整版已校验并保存为新版本');
+        };
+    }
+
+    /** 保存调整版（件位置或刀序）：后端校验通过后原候选作废、新版本成为候选。同一内容重试使用同一操作编号。 */
+    async function saveAdjustment(body, okText) {
+        const id = st.adjust?.planId || st.toolpath?.planId;
+        st.busy = '正在校验并保存…'; shell(true);
+        try {
+            const saved = await requestJSON('/api/cutting/plans/' + encodeURIComponent(id) + '/adjust', body);
+            st.adjust = null; st.toolpath = null; st.tool = 'pan';
+            await reload(); st.selectedId = saved.id; st.window = null; toast(okText + `（v${saved.version}）`);
+            st.busy = ''; full(); return;
+        } catch (e) {
+            if (st.adjust) st.adjust.error = '校验未通过：' + e.message; else if (st.toolpath) st.toolpath.error = '保存未完成：' + e.message;
+        }
+        st.busy = ''; shell(true);
     }
 
     /** 报工记录：回执摘要、复检处置、冲销。 */
@@ -508,6 +630,7 @@ export async function mount(el, [taskId, focusPlan]) {
         el.querySelector('#report-open')?.addEventListener('click', () => { const seg = sc.segments.find(s => s.id === sc.currentId); if (seg) openReport(seg); });
         bindReport();
         bindExecution(sc);
+        bindTools(sc);
         el.querySelector('#solve')?.addEventListener('click', solve);
         el.querySelector('#discard')?.addEventListener('click', discard);
         el.querySelector('#forward')?.addEventListener('click', forward);
@@ -516,9 +639,18 @@ export async function mount(el, [taskId, focusPlan]) {
         canvas = createRollCanvas(host, {
             onCursor: c => { st.cursor = c; status(sc); },
             onCamera: ({ratio, percent}) => { const i = el.querySelector('#z-ratio'); if (i && document.activeElement !== i) i.value = formatRatio(ratio); const p = el.querySelector('#z-pct'); if (p) p.textContent = Math.round(percent) + '%'; },
-            onDefectDraw: d => addFresh(d, sc)
+            onDefectDraw: d => addFresh(d, sc),
+            // 选中 / 拖动只更新画布场景与调整面板，不重建画布（重建会中断正在进行的拖动）
+            onPieceSelect: id => { if (!st.adjust) return; st.adjust.selected = id; canvas.setScene(scene()); patchAdjust(); },
+            onPieceMove: (id, du, dv, done) => {
+                const a = st.adjust; if (!a) return;
+                a.dragBase ||= a.positions;
+                a.positions = movePiece(a.dragBase, planOf(a.planId), id, du, dv, a.dragBase);
+                canvas.setScene(scene());
+                if (done) { a.dragBase = null; a.history.record(a.positions); a.error = null; patchAdjust(); }
+            }
         });
-        canvas.setOptions({vertical: prefs.vertical, view: st.view, fullMode: prefs.fullMode, tool: st.tool, mmPerPx: prefs.mmPerPx});
+        canvas.setOptions({vertical: prefs.vertical, view: st.view, fullMode: prefs.fullMode, tool: st.tool, mmPerPx: prefs.mmPerPx, showPath: !!st.showPath});
         canvas.setScene(sc, {refit: !savedCam});
         if (savedCam) canvas.setCamera(savedCam);
         nav = createRollNavigator(el.querySelector('#rn'), {

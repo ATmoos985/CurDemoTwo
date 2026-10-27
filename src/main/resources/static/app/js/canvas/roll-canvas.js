@@ -14,8 +14,8 @@ const DEFS = `<defs>
 <pattern id="rc-used" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="#2b3036"/><line x1="0" y1="0" x2="0" y2="5" stroke="#454c54" stroke-width="2"/></pattern></defs>`;
 
 export function createRollCanvas(host, callbacks = {}) {
-    let scene = null, cam = null, rows = null, drag = null, measure = null, draft = null;
-    let opts = {vertical: true, view: 'station', fullMode: 'strip', tool: 'pan', mmPerPx: DEFAULT_MM_PER_PX};
+    let scene = null, cam = null, rows = null, drag = null, measure = null, draft = null, pieceDrag = null;
+    let opts = {vertical: true, view: 'station', fullMode: 'strip', tool: 'pan', mmPerPx: DEFAULT_MM_PER_PX, showPath: false};
     host.classList.add('rc-host');
 
     const size = () => ({width: host.clientWidth, height: host.clientHeight});
@@ -105,8 +105,28 @@ export function createRollCanvas(host, callbacks = {}) {
         }
         return g;
     }
+    /** 刀路图层：当前段的刀序编号与空走线（宿主提供 seg.home 与按顺序的 cuts）。 */
+    function drawToolpath(c) {
+        const seg = scene.segments.find(s => s.id === scene.currentId);
+        if (!opts.showPath || !seg?.home || !seg.cuts?.length) return '';
+        let g = '', last = seg.home;
+        const [hx, hy] = toScreen(c, opts.vertical, last.u, last.v);
+        g += `<circle cx="${hx}" cy="${hy}" r="5" fill="none" stroke="#7fb3e6" stroke-width="2"/><text x="${hx + 7}" y="${hy - 6}" class="rc-sub">原点</text>`;
+        seg.cuts.forEach((k, i) => {
+            const [ax, ay] = toScreen(c, opts.vertical, last.u, last.v), [sx, sy] = toScreen(c, opts.vertical, k.u1, k.v1), [ex, ey] = toScreen(c, opts.vertical, k.u2, k.v2);
+            g += `<line x1="${ax}" y1="${ay}" x2="${sx}" y2="${sy}" stroke="#7fb3e6" stroke-width="1" stroke-dasharray="2 4" opacity=".8"/>`;
+            g += `<line x1="${sx}" y1="${sy}" x2="${ex}" y2="${ey}" stroke="#f0c674" stroke-width="2"/>`;
+            g += `<circle cx="${sx}" cy="${sy}" r="8" fill="#1d2125" stroke="#f0c674"/><text x="${sx}" y="${sy + 3.5}" fill="#f0c674" font-size="9.5" text-anchor="middle" font-family="var(--mono)">${k.step ?? i + 1}</text>`;
+            last = {u: k.u2, v: k.v2};
+        });
+        return g;
+    }
     function drawOverlays(c) {
-        let g = '';
+        let g = drawToolpath(c);
+        if (scene.selectedPiece) {
+            const seg = scene.segments.find(s => s.id === scene.currentId), p = seg?.pieces.find(x => x.id === scene.selectedPiece);
+            if (p) g += rect(c, p.u, p.v, p.du, p.dv, 'fill="none" stroke="#fff" stroke-width="2"');
+        }
         if (draft) {
             const u = Math.min(draft.a[0], draft.b[0]), v = Math.min(draft.a[1], draft.b[1]);
             g += rect(c, u, v, Math.abs(draft.a[0] - draft.b[0]), Math.abs(draft.a[1] - draft.b[1]), 'fill="#ff9f43" fill-opacity=".25" stroke="#ff9f43" stroke-dasharray="4 2"');
@@ -165,7 +185,7 @@ export function createRollCanvas(host, callbacks = {}) {
     const local = e => { const r = host.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
     const world = p => toWorld(cam, opts.vertical, ...p);
     const clampV = ([u, v]) => [u, Math.max(0, Math.min(scene.roll.width, v))];
-    const toolActive = () => mode() === 'strip' && opts.tool !== 'pan';
+    const toolActive = () => mode() === 'strip' && opts.tool !== 'pan' && opts.tool !== 'move';
     function cursorAt(p) {
         if (!cam || !scene) return null;
         if (mode() === 'tile') {
@@ -179,9 +199,20 @@ export function createRollCanvas(host, callbacks = {}) {
         const [u, v] = world(p);
         return u >= 0 && u <= scene.roll.total && v >= 0 && v <= scene.roll.width ? {u, v} : null;
     }
+    /** 当前段内命中的裁片（世界坐标）。 */
+    function pieceAt(w) {
+        const seg = scene.segments.find(s => s.id === scene.currentId);
+        return seg?.pieces.slice().reverse().find(x => w[0] >= x.u && w[0] <= x.u + x.du && w[1] >= x.v && w[1] <= x.v + x.dv) || null;
+    }
     function onDown(e) {
         if (!cam || e.button !== 0) return;
         const p = local(e);
+        if (opts.tool === 'move' && mode() === 'strip') {
+            const w = world(p), hit = pieceAt(w);
+            callbacks.onPieceSelect?.(hit?.id ?? null);
+            if (hit) pieceDrag = {id: hit.id, start: w};
+            return;
+        }
         if (toolActive()) {
             const w = clampV(world(p));
             if (opts.tool === 'measure') measure = {a: w, b: w, live: true}; else draft = {a: w, b: w};
@@ -193,11 +224,16 @@ export function createRollCanvas(host, callbacks = {}) {
         if (!cam) return;
         const p = local(e);
         callbacks.onCursor?.(cursorAt(p));
+        if (pieceDrag) { const w = world(p); callbacks.onPieceMove?.(pieceDrag.id, w[0] - pieceDrag.start[0], w[1] - pieceDrag.start[1], false); return; }
         if (measure?.live) { measure.b = clampV(world(p)); draw(); return; }
         if (draft) { draft.b = clampV(world(p)); draw(); return; }
         if (drag) { cam = panBy(cam, opts.vertical, p[0] - drag[0], p[1] - drag[1]); drag = p; draw(); }
     }
-    function onUp() {
+    function onUp(e) {
+        if (pieceDrag) {
+            const w = e && host.contains(e.target) ? world(local(e)) : pieceDrag.start, d = pieceDrag; pieceDrag = null;
+            callbacks.onPieceMove?.(d.id, w[0] - d.start[0], w[1] - d.start[1], true); return;
+        }
         if (measure?.live) measure.live = false;
         if (draft) {
             const u = Math.min(draft.a[0], draft.b[0]), v = Math.min(draft.a[1], draft.b[1]);
@@ -235,7 +271,7 @@ export function createRollCanvas(host, callbacks = {}) {
             const refit = ['vertical', 'view', 'fullMode'].some(k => k in next && next[k] !== opts[k]);
             opts = {...opts, ...next};
             if (next.tool && next.tool !== 'measure') measure = null;
-            host.style.cursor = toolActive() ? 'crosshair' : 'grab';
+            host.style.cursor = opts.tool === 'move' ? 'move' : toolActive() ? 'crosshair' : 'grab';
             refit ? fit() : draw();
         },
         fit,

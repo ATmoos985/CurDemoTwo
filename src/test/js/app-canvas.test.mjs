@@ -9,6 +9,8 @@ import {buildRollScene, planSegment, plansOnRoll, rollsOfPlans, reportedPlans, s
 import {buildSolveRequest, remainingDemands, windowProblem, usablePlan} from '../../main/resources/static/app/js/model/solve-request.js';
 import {defaultReport, applyBulk, recoveryCandidates, reportSummary, reportProblems, buildCutReport} from '../../main/resources/static/app/js/model/report.js';
 import {reviewablePieces, effectivePieceResults, emptyQualityForm, qualityProblems, buildQualityCommand, receiptSummary} from '../../main/resources/static/app/js/model/quality.js';
+import {camData, localHome, worldHome, initialPositions, movePiece, rotatePiece, changedPieces, adjustPayload, applyPositions, sizeOf} from '../../main/resources/static/app/js/model/plan-tools.js';
+import {gcodeText} from '../../main/resources/static/js/plugins/export/cam-format.js';
 import {emptyTask, fromTask, addDemand, mergeImport, taskProblems, lineLock, toPayload, demandTemplateCsv} from '../../main/resources/static/app/js/model/task-form.js';
 
 const appRoot = fileURLToPath(new URL('../../main/resources/static/app/', import.meta.url));
@@ -239,6 +241,28 @@ test('remnant feed: whole-piece window, remnant plans only, solve and report fol
     assert.deepEqual(recoveryCandidates(seg, rep), []);
     const payload = buildCutReport(seg, rep);
     assert.deepEqual([payload.actualCutLen, payload.actualRemnants], [0, []]);
+});
+
+test('plan tools: local CAM origin, clamped piece moves, rotation and adjustment payload', () => {
+    const p = {id: 'pl', version: 2, request: {rollId: 'R1', rollW: 2800, rollL: 4000, windowStartY: 9000, cutOrigin: 'right-bottom', feedPortType: 'roll', defects: []},
+        result: {cuts: [{step: 1, type: '横切', startX: 2800, startY: 1400, endX: 0, endY: 1400}], remnants: [],
+            pieces: [{id: 1, x: 0, y: 0, w: 900, l: 1400, rotated: false, name: 'A'}, {id: 2, x: 900, y: 0, w: 500, l: 700, rotated: true, name: 'B'}]}};
+    assert.deepEqual(localHome(p), {x: 2800, y: 4000}, '原点为工位局部坐标，不叠加工位起点');
+    const {data, home} = camData(p);
+    assert.equal(data.windowStartY, 9000);
+    assert.match(gcodeText(data, {home}), /G00 X2800\.000 Y4000\.000 Z50\.000/);
+    assert.deepEqual(worldHome(p, 9000), {u: 13000, v: 2800});
+    let pos = initialPositions(p);
+    pos = movePiece(pos, p, 1, 100.04, 50, pos);
+    assert.deepEqual(pos[1], {x: 50, y: 100, rotated: false});
+    pos = movePiece(pos, p, 1, 99999, -99999, pos);
+    assert.deepEqual([pos[1].x, pos[1].y], [0, 2600], '限制在工位内');
+    pos = rotatePiece(pos, p, 2);
+    assert.deepEqual(sizeOf(p.result.pieces[1], pos[2].rotated), {w: 700, l: 500}, '旋转后宽长互换');
+    assert.equal(changedPieces(pos, p), 2);
+    assert.deepEqual(adjustPayload(pos, 'op-1234567890abcdef').pieces[1], {id: 2, x: 900, y: 0, rotated: false});
+    const seg = applyPositions({id: 'pl', start: 9000, cuts: [1], pieces: [{id: 1, u: 9000, v: 0, du: 1400, dv: 900}, {id: 2, u: 9000, v: 900, du: 700, dv: 500}]}, p, pos);
+    assert.deepEqual([seg.pieces[0].u, seg.pieces[0].v, seg.pieces[1].du, seg.pieces[1].dv, seg.cuts.length], [11600, 0, 500, 700, 0], '调整中刀序失效、件按新位置显示');
 });
 
 async function files(dir) {
