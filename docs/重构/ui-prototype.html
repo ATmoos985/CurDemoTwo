@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>搭切系统 · UI 原型 v1</title>
+<style>
+:root{
+  --bg:#eef0f3; --panel:#fff; --panel-2:#f7f8fa; --line:#d8dce2; --line-2:#e7e9ed;
+  --text:#1d2329; --text-2:#4b5560; --text-3:#7d8791;
+  --accent:#2c6aa8; --accent-2:#e8f0f8; --accent-ink:#1f4f80;
+  --ok:#2f8a57; --ok-bg:#e6f3ec; --warn:#b7791f; --warn-bg:#fbf1df; --err:#c0392b; --err-bg:#f9e5e2; --run:#2c6aa8; --run-bg:#e8f0f8; --idle:#6b7580; --idle-bg:#eceef1;
+  --bar:#1f2429; --bar-2:#2a3036; --bar-text:#c9d0d7;
+  --canvas:#2a2f35; --canvas-grid:#343a41;
+  --mono:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --row:28px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font:13px/1.45 -apple-system,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;color:var(--text);background:var(--bg);overflow:hidden}
+button,input,select{font:inherit;color:inherit}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.r{text-align:right}
+
+/* app frame */
+.app{display:grid;grid-template-rows:36px 1fr 24px;grid-template-columns:184px 1fr;height:100vh}
+.topbar{grid-column:1/3;background:var(--bar);color:var(--bar-text);display:flex;align-items:center;padding:0 12px;gap:16px}
+.brand{display:flex;align-items:center;gap:8px;color:#fff;font-weight:600;letter-spacing:.5px;width:160px}
+.brand i{width:16px;height:16px;border:2px solid #8fb3d9;display:inline-block;position:relative}
+.brand i:after{content:"";position:absolute;left:4px;top:-2px;bottom:-2px;border-left:2px solid #8fb3d9}
+.topbar .search{flex:0 0 320px;background:var(--bar-2);border:1px solid #39414a;border-radius:2px;height:24px;padding:0 8px;color:var(--bar-text)}
+.topbar .sp{flex:1}
+.topbar .meta{display:flex;gap:14px;font-size:12px}
+.topbar .meta b{color:#fff;font-weight:500}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:1px}
+.nav{background:var(--panel-2);border-right:1px solid var(--line);padding:8px 0;overflow:auto}
+.nav h6{margin:12px 14px 4px;font-size:11px;font-weight:500;color:var(--text-3);letter-spacing:1px}
+.nav a{display:flex;align-items:center;gap:8px;height:30px;padding:0 14px;color:var(--text-2);text-decoration:none;border-left:3px solid transparent}
+.nav a:hover{background:#eceff3}
+.nav a.on{background:#e3e9f0;color:var(--accent-ink);border-left-color:var(--accent);font-weight:600}
+.nav a .cnt{margin-left:auto;font-size:11px;color:var(--text-3)}
+.nav .ico{width:14px;height:14px;opacity:.7}
+.main{overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.statusbar{grid-column:1/3;background:var(--panel-2);border-top:1px solid var(--line);display:flex;align-items:center;gap:18px;padding:0 12px;font-size:11.5px;color:var(--text-2)}
+.statusbar .sp{flex:1}
+
+/* page header */
+.ph{display:flex;align-items:center;gap:12px;height:48px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line);flex:none}
+.ph h1{font-size:15px;margin:0;font-weight:600}
+.ph .crumb{color:var(--text-3);font-size:12px}
+.ph .sp{flex:1}
+.btn{height:26px;padding:0 12px;border:1px solid var(--line);background:#fff;border-radius:2px;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:#b8bfc8;background:#fafbfc}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+.btn.pri:hover{background:#255d94}
+.btn.sm{height:22px;padding:0 8px;font-size:12px}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.ghost:hover{background:#eceff3}
+.toolbar{display:flex;align-items:center;gap:8px;padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--line-2);flex:none}
+.field{height:26px;border:1px solid var(--line);border-radius:2px;padding:0 8px;background:#fff}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:2px;overflow:hidden}
+.seg button{border:0;background:#fff;height:24px;padding:0 10px;cursor:pointer;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--accent-2);color:var(--accent-ink);font-weight:600}
+.body{flex:1;overflow:auto;padding:12px 16px}
+
+/* table */
+table.t{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line)}
+.t th{height:30px;background:var(--panel-2);color:var(--text-2);font-weight:500;font-size:12px;text-align:left;padding:0 8px;border-bottom:1px solid var(--line);white-space:nowrap;position:sticky;top:0}
+.t td{height:var(--row);padding:0 8px;border-bottom:1px solid var(--line-2);white-space:nowrap}
+.t tr:hover td{background:#f5f8fb}
+.t tr.sel td{background:#e8f0f8}
+.t td.link{color:var(--accent);cursor:pointer}
+.t td.link:hover{text-decoration:underline}
+.tag{display:inline-block;height:18px;line-height:18px;padding:0 6px;font-size:11.5px;border-radius:2px;background:var(--idle-bg);color:var(--idle)}
+.tag.ok{background:var(--ok-bg);color:var(--ok)} .tag.warn{background:var(--warn-bg);color:var(--warn)}
+.tag.err{background:var(--err-bg);color:var(--err)} .tag.run{background:var(--run-bg);color:var(--run)}
+.tag.kind{background:#fff;border:1px solid var(--line);color:var(--text-2)}
+.bar{display:inline-block;width:64px;height:6px;background:var(--line-2);vertical-align:middle;margin-right:6px}
+.bar i{display:block;height:100%;background:var(--accent)}
+.pager{display:flex;justify-content:space-between;align-items:center;color:var(--text-3);font-size:12px;padding:8px 2px}
+
+/* split layouts */
+.split{flex:1;display:grid;min-height:0}
+.pane{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;min-width:0}
+.pane:last-child{border-right:0}
+.pane-h{height:32px;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--line-2);font-weight:600;font-size:12.5px;flex:none}
+.pane-h .sp{flex:1}
+.pane-h .sub{color:var(--text-3);font-weight:400}
+.pane-b{flex:1;overflow:auto;min-height:0}
+.kv{display:grid;grid-template-columns:96px 1fr;gap:0;font-size:12.5px}
+.kv div{padding:5px 12px;border-bottom:1px solid var(--line-2)}
+.kv div:nth-child(odd){color:var(--text-3)}
+.sec{padding:8px 12px 4px;font-size:11px;letter-spacing:1px;color:var(--text-3);background:var(--panel-2);border-bottom:1px solid var(--line-2);border-top:1px solid var(--line-2)}
+.metric{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--line-2)}
+.metric div{padding:8px 12px;border-right:1px solid var(--line-2)}
+.metric div:nth-child(2n){border-right:0}
+.metric div:nth-child(n+3){border-top:1px solid var(--line-2)}
+.metric small{display:block;color:var(--text-3);font-size:11.5px}
+.metric b{font:600 17px var(--mono)}
+.metric b em{font-style:normal;font-size:11px;color:var(--text-3);font-weight:400;margin-left:2px}
+
+/* workbench */
+.wb-head{display:flex;align-items:center;gap:12px;height:44px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line);flex:none}
+.wb-head h1{font-size:14px;margin:0}
+.stages{display:flex;height:34px;background:var(--panel);border-bottom:1px solid var(--line);padding:0 16px;flex:none}
+.stage{display:flex;align-items:center;gap:7px;padding:0 16px 0 0;margin-right:16px;color:var(--text-3);cursor:pointer;position:relative;border-bottom:2px solid transparent}
+.stage .n{width:18px;height:18px;border-radius:50%;border:1px solid var(--line);display:grid;place-items:center;font-size:11px}
+.stage.done{color:var(--text-2)} .stage.done .n{background:var(--ok);border-color:var(--ok);color:#fff}
+.stage.on{color:var(--accent-ink);font-weight:600;border-bottom-color:var(--accent)} .stage.on .n{background:var(--accent);border-color:var(--accent);color:#fff}
+.stage:not(:last-child):after{content:"";width:24px;height:1px;background:var(--line);margin-left:16px}
+.ctool{white-space:nowrap;overflow:hidden;display:flex;align-items:center;gap:2px;height:32px;padding:0 8px;background:#33393f;border-bottom:1px solid #20252a;flex:none}
+.ctool button{height:24px;min-width:26px;padding:0 7px;background:transparent;border:1px solid transparent;color:#c9d0d7;border-radius:2px;cursor:pointer;font-size:12px}
+.ctool button:hover{background:#3e454c}
+.ctool button.on{background:#47505a;border-color:#56606b;color:#fff}
+.ctool .div{width:1px;height:16px;background:#4a525b;margin:0 6px}
+.ctool .sp{flex:1}
+.ctool span{color:#9aa4ae;font-size:11.5px;overflow:hidden;text-overflow:ellipsis}
+.canvas-wrap{flex:1;position:relative;background:var(--canvas);min-height:0;overflow:hidden}
+.canvas-wrap svg{width:100%;height:100%;display:block}
+.strip{height:112px;flex:none;background:#23272c;border-top:1px solid #1a1d21;display:flex;gap:8px;padding:8px;overflow-x:auto}
+.thumb{flex:none;width:148px;background:#2e343a;border:1px solid #3b434b;border-radius:2px;cursor:pointer;display:flex;flex-direction:column}
+.thumb.on{border-color:#6ea3d8;box-shadow:0 0 0 1px #6ea3d8}
+.thumb svg{flex:1}
+.thumb .cap{display:flex;justify-content:space-between;font-size:11px;color:#aeb7c0;padding:3px 6px;border-top:1px solid #3b434b}
+.thumb .cap b{color:#fff;font-family:var(--mono);font-weight:500}
+.legend{position:absolute;left:10px;bottom:10px;display:flex;gap:10px;background:rgba(30,34,39,.85);padding:4px 8px;border-radius:2px;font-size:11px;color:#c9d0d7}
+.legend i{display:inline-block;width:9px;height:9px;margin-right:4px;vertical-align:-1px}
+.wb-foot{display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;border-top:1px solid var(--line);background:var(--panel-2);flex:none}
+.wb-foot .sp{flex:1}
+
+/* misc */
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px}
+.card{background:var(--panel);border:1px solid var(--line);padding:10px 12px}
+.card small{color:var(--text-3);font-size:12px}
+.card b{display:block;font:600 22px var(--mono);margin-top:2px}
+.card .d{font-size:11.5px;color:var(--text-3)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.box{background:var(--panel);border:1px solid var(--line)}
+.box .pane-h{border-bottom:1px solid var(--line-2)}
+.empty{padding:28px;text-align:center;color:var(--text-3)}
+.form{display:grid;grid-template-columns:110px 1fr;gap:8px 12px;padding:12px;align-items:center}
+.form label{color:var(--text-2);font-size:12.5px}
+.notice{margin:0 0 12px;padding:8px 12px;border:1px solid #c9d8e8;background:#f2f6fb;color:var(--accent-ink);font-size:12.5px}
+.proto{position:fixed;left:10px;bottom:30px;background:#fff3cd;border:1px solid #e3c26a;color:#7a5a00;font-size:11.5px;padding:3px 8px;border-radius:2px;z-index:9}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><i></i>搭切 CutPlan</div>
+    <input class="search" placeholder="搜索任务号 / 卷号 / 订单号   ⌘K">
+    <div class="sp"></div>
+    <div class="meta">
+      <span><span class="dot" style="background:#4cc38a"></span>求解引擎 <b>就绪</b></span>
+      <span>车间 <b>一车间</b></span>
+      <span>班次 <b>白班</b></span>
+      <span>计划员 <b>张工</b></span>
+    </div>
+  </header>
+
+  <nav class="nav" id="nav"></nav>
+  <main class="main" id="main"></main>
+
+  <footer class="statusbar" id="statusbar"></footer>
+</div>
+<div class="proto">UI 原型 v1 · 示例数据</div>
+
+<script>
+/* ---------------- 原型数据（仅原型使用） ---------------- */
+const ORDER_COLORS={A:'#5f87b0',B:'#7f9d6e',C:'#b8925a',D:'#9a7aa0',E:'#5f9a96',F:'#a8735f'};
+const TASKS=[
+  {id:'CT-20261027-012',name:'窗帘 10 月第 4 批',kind:'二维·矩形',mat:'遮光布 280',orders:6,dem:420,done:0,st:['待排料','idle'],next:'排料',due:'10-29'},
+  {id:'CT-20261027-011',name:'无纺布分条 B 线',kind:'一维·分条',mat:'无纺布 2400',orders:9,dem:96,done:0,st:['计算中','run'],next:'查看进度',due:'10-28'},
+  {id:'CT-20261027-009',name:'服装款 S26-118 齐套',kind:'二维·异形',mat:'弹力牛津 150',orders:3,dem:180,done:0,st:['待执行','run'],next:'下达',due:'10-30'},
+  {id:'CT-20261026-021',name:'卷帘 定高定宽',kind:'二维·矩形',mat:'阳光面料 300',orders:4,dem:120,done:84,st:['执行中','run'],next:'报工',due:'10-27'},
+  {id:'CT-20261026-017',name:'PE 膜分切 A 线',kind:'一维·分条',mat:'PE 膜 1800',orders:12,dem:240,done:240,st:['待报工','warn'],next:'报工',due:'10-27'},
+  {id:'CT-20261026-014',name:'窗帘 10 月第 3 批',kind:'二维·矩形',mat:'遮光布 280',orders:5,dem:360,done:352,st:['需处理','err'],next:'处理不良',due:'10-26'},
+  {id:'CT-20261025-030',name:'无纺布分条 A 线',kind:'一维·分条',mat:'无纺布 2400',orders:7,dem:72,done:72,st:['已完成','ok'],next:'查看',due:'10-25'},
+  {id:'CT-20261025-022',name:'沙发套 SF-07',kind:'二维·异形',mat:'雪尼尔 145',orders:2,dem:64,done:64,st:['已完成','ok'],next:'查看',due:'10-25'},
+];
+const ROLLS=[
+  {id:'R-2610-0920',mat:'遮光布 280',w:2800,len:55,full:60,loc:'A-01-03',q:['合格','ok'],res:'—',src:'采购 PO-8812'},
+  {id:'R-2610-0921',mat:'遮光布 280',w:2800,len:48,full:60,loc:'A-02-01',q:['合格','ok'],res:'CT-…-012',src:'采购 PO-8812'},
+  {id:'R-2610-0933',mat:'无纺布 2400',w:2400,len:800,full:1000,loc:'B-03-02',q:['合格','ok'],res:'CT-…-011',src:'采购 PO-8830'},
+  {id:'R-2610-0934',mat:'无纺布 2400',w:2400,len:1000,full:1000,loc:'B-03-03',q:['待检','warn'],res:'—',src:'采购 PO-8830'},
+  {id:'R-2610-0941',mat:'弹力牛津 150',w:1500,len:120,full:120,loc:'C-01-01',q:['有疵点','warn'],res:'CT-…-009',src:'采购 PO-8841'},
+  {id:'R-2610-0950',mat:'PE 膜 1800',w:1800,len:0,full:2000,loc:'D-01-01',q:['已耗尽','idle'],res:'—',src:'采购 PO-8850'},
+  {id:'RM-2610-0117',mat:'遮光布 280',w:1260,len:3.4,full:3.4,loc:'料头架 2',q:['合格','ok'],res:'—',src:'CT-…-014 产出',rem:true},
+  {id:'RM-2610-0118',mat:'阳光面料 300',w:900,len:2.1,full:2.1,loc:'料头架 2',q:['隔离','err'],res:'—',src:'复检转料头',rem:true},
+];
+
+/* 二维排法：确定性的货架排样（仅用于原型渲染） */
+function shelfLayout(W,H,items){
+  const out=[];let x=0,y=0,rowH=0;
+  for(const it of items){for(let k=0;k<it.n;k++){
+    if(x+it.w>W){x=0;y+=rowH;rowH=0}
+    if(y+it.h>H)return out;
+    out.push({x,y,w:it.w,h:it.h,o:it.o,label:it.o+'·'+it.w+'×'+it.h});x+=it.w;rowH=Math.max(rowH,it.h)}}
+  return out;
+}
+const LAYOUTS_2D=[
+  {name:'排法 1',repeat:18,util:91.4,stock:{w:2800,h:3000},items:shelfLayout(2800,3000,[{o:'A',w:900,h:1400,n:3},{o:'D',w:700,h:1500,n:4}])},
+  {name:'排法 2',repeat:12,util:88.7,stock:{w:2800,h:3000},items:shelfLayout(2800,3000,[{o:'B',w:1000,h:1200,n:2},{o:'C',w:800,h:1200,n:1},{o:'D',w:700,h:1500,n:4}])},
+  {name:'排法 3',repeat:6,util:84.2,stock:{w:2800,h:3000},items:shelfLayout(2800,3000,[{o:'E',w:1200,h:1600,n:2},{o:'F',w:600,h:1300,n:4}])},
+  {name:'排法 4',repeat:2,util:72.5,stock:{w:2800,h:3000},items:shelfLayout(2800,3000,[{o:'F',w:600,h:1300,n:3},{o:'E',w:1200,h:1600,n:1}])},
+];
+/* 一维：一卷 = 门幅 × 卷长；分条是沿卷长方向的条带，序号组 = 同一花型 + 同一订单分配 */
+function slitLayout(slits){let y=0;return slits.map(s=>{const r={x:0,y,w:6000,h:s.w,o:s.o,label:s.o+'·'+s.w};y+=s.w;return r})}
+const LAYOUTS_1D=[
+  {name:'序号组 G01',repeat:14,util:98.3,stock:{w:6000,h:2400},items:slitLayout([{o:'A',w:600},{o:'A',w:600},{o:'B',w:450},{o:'B',w:450},{o:'C',w:259}])},
+  {name:'序号组 G02',repeat:10,util:97.9,stock:{w:6000,h:2400},items:slitLayout([{o:'D',w:800},{o:'D',w:800},{o:'E',w:350},{o:'E',w:400}])},
+  {name:'序号组 G03',repeat:8,util:99.1,stock:{w:6000,h:2400},items:slitLayout([{o:'A',w:600},{o:'F',w:520},{o:'F',w:520},{o:'C',w:259},{o:'C',w:479}])},
+  {name:'序号组 G04',repeat:4,util:96.0,stock:{w:6000,h:2400},items:slitLayout([{o:'B',w:450},{o:'B',w:450},{o:'B',w:450},{o:'E',w:952}])},
+  {name:'序号组 G05',repeat:2,util:93.5,stock:{w:6000,h:2400},items:slitLayout([{o:'F',w:520},{o:'D',w:800},{o:'A',w:924}])},
+];
+const DEMANDS_2D=[['A','窗帘 A-01','900 × 1400',60,58],['B','窗帘 B-07','1000 × 1200',60,60],['C','卷帘 C-02','800 × 1200',30,30],['D','窗帘 D-11','700 × 1500',84,84],['E','罗马帘 E-03','1200 × 1600',26,26],['F','窗帘 F-05','600 × 1300',60,60]];
+const DEMANDS_1D=[['A','SO-7781','600',30,30],['B','SO-7782','450',40,40],['C','SO-7790','259 / 479',30,30],['D','SO-7795','800',22,22],['E','SO-7801','350 / 400 / 952',24,24],['F','SO-7805','520',18,18]];
+
+/* ---------------- 画布（纯渲染：只接收 stock / items） ---------------- */
+function renderLayout(L,{w,h,pad=36,labels=true,dims=true,cuts=true,oneD=false}={}){
+  const sw=L.stock.w,sh=L.stock.h;
+  const s=Math.min((w-pad*2)/sw,(h-pad*2)/sh),ox=(w-sw*s)/2,oy=(h-sh*s)/2;
+  let g=`<defs><pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="var(--canvas-grid)" stroke-width="1"/></pattern>
+  <pattern id="waste" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#5a6068" stroke-width="1"/></pattern></defs>`;
+  if(pad>20)g+=`<rect width="${w}" height="${h}" fill="url(#grid)"/>`;
+  g+=`<rect x="${ox}" y="${oy}" width="${sw*s}" height="${sh*s}" fill="url(#waste)" stroke="#9aa4ae" stroke-width="1"/>`;
+  for(const it of L.items){
+    const c=ORDER_COLORS[it.o];
+    g+=`<rect x="${ox+it.x*s}" y="${oy+it.y*s}" width="${it.w*s}" height="${it.h*s}" fill="${c}" fill-opacity=".82" stroke="#1d2125" stroke-width="${pad>20?1:.5}"/>`;
+    if(labels&&it.w*s>46&&it.h*s>14)g+=`<text x="${ox+(it.x+it.w/2)*s}" y="${oy+(it.y+it.h/2)*s+4}" fill="#fff" font-size="11" font-family="var(--mono)" text-anchor="middle">${it.label}</text>`;
+  }
+  if(cuts&&pad>20){
+    if(oneD){const ys=[...new Set(L.items.map(i=>i.y+i.h))];ys.pop();
+      for(const y of ys)g+=`<line x1="${ox-10}" x2="${ox+sw*s+10}" y1="${oy+y*s}" y2="${oy+y*s}" stroke="#f0c674" stroke-width="1" stroke-dasharray="5 3"/>`;
+      L.items.forEach((it,i)=>g+=`<text x="${ox-14}" y="${oy+(it.y+it.h/2)*s+4}" fill="#9aa4ae" font-size="10" text-anchor="end" font-family="var(--mono)">刀${i+1}</text>`);
+    }else{const ys=[...new Set(L.items.map(i=>i.y+i.h))].filter(y=>y<sh);
+      for(const y of ys)g+=`<line x1="${ox}" x2="${ox+sw*s}" y1="${oy+y*s}" y2="${oy+y*s}" stroke="#f0c674" stroke-width="1" stroke-dasharray="5 3"/>`}
+  }
+  if(dims&&pad>20){
+    g+=`<text x="${ox+sw*s/2}" y="${oy-12}" fill="#c9d0d7" font-size="11" text-anchor="middle" font-family="var(--mono)">${oneD?'卷长方向 →':sw+' mm'}</text>`;
+    g+=`<text x="${ox+sw*s+14}" y="${oy+sh*s/2}" fill="#c9d0d7" font-size="11" font-family="var(--mono)" transform="rotate(90 ${ox+sw*s+14} ${oy+sh*s/2})" text-anchor="middle">${oneD?'门幅 '+sh+' mm':sh+' mm'}</text>`;
+  }
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">${g}</svg>`;
+}
+
+/* ---------------- 页面 ---------------- */
+const NAV=[
+  ['生产',[['tasks','任务','8'],['workbench','排料工作台'],['execution','执行与报工','3']]],
+  ['材料',[['materials','库存'],['documents','库存单据']]],
+  ['质量与分析',[['quality','复检处置','1'],['analysis','生产分析']]],
+  ['系统',[['showcase','能力展示'],['settings','设置']]],
+];
+let state={page:'tasks',wbKind:'2d',layout:0,stage:2,matTab:'roll',matSel:0};
+
+function nav(){
+  document.getElementById('nav').innerHTML=NAV.map(([h,items])=>`<h6>${h}</h6>`+items.map(([k,t,c])=>`<a href="#${k}" onclick="go('${k}');return false" class="${state.page===k?'on':''}">${t}${c?`<span class="cnt">${c}</span>`:''}</a>`).join('')).join('');
+}
+function status(extra){
+  document.getElementById('statusbar').innerHTML=`<span>数据源：本地库存 · 已同步 10:42</span><span>库存对账 <b style="color:var(--ok)">平衡</b></span><span class="sp"></span>${extra||''}<span>v2.0 原型</span>`;
+}
+
+const PAGES={
+tasks(){
+  const rows=TASKS.map((t,i)=>`<tr>
+    <td class="link num" onclick="go('workbench','${t.kind.startsWith('一维')?'1d':'2d'}')">${t.id}</td><td>${t.name}</td><td><span class="tag kind">${t.kind}</span></td>
+    <td>${t.mat}</td><td class="r num">${t.orders}</td>
+    <td class="r num">${t.done} / ${t.dem}</td><td><span class="bar"><i style="width:${t.done/t.dem*100}%"></i></span></td>
+    <td><span class="tag ${t.st[1]}">${t.st[0]}</span></td><td class="num">${t.due}</td>
+    <td><button class="btn sm" onclick="go('${t.next==='报工'||t.next==='下达'?'execution':t.next==='处理不良'?'quality':'workbench'}','${t.kind.startsWith('一维')?'1d':'2d'}')">${t.next}</button></td></tr>`).join('');
+  return `<div class="ph"><h1>任务</h1><span class="crumb">一维、二维统一管理</span><div class="sp"></div><button class="btn">导入需求</button><button class="btn pri">新建任务</button></div>
+  <div class="toolbar">
+    <div class="seg"><button class="on">全部 8</button><button>待排料 1</button><button>计算中 1</button><button>待执行 1</button><button>执行中 1</button><button>待报工 1</button><button>需处理 1</button><button>已完成 2</button></div>
+    <div class="sp" style="flex:1"></div>
+    <select class="field"><option>全部类型</option><option>一维·分条</option><option>二维·矩形</option><option>二维·异形</option></select>
+    <input class="field" placeholder="任务号 / 名称 / 订单号" style="width:200px">
+  </div>
+  <div class="body"><table class="t"><thead><tr><th>任务号</th><th>名称</th><th>类型</th><th>材料</th><th class="r">订单</th><th class="r">良品 / 需求</th><th>进度</th><th>状态</th><th>交期</th><th>下一步</th></tr></thead><tbody>${rows}</tbody></table>
+  <div class="pager"><span>共 8 条</span><span>每页 50 条</span></div></div>`;
+},
+
+workbench(){
+  const oneD=state.wbKind==='1d';
+  const LS=oneD?LAYOUTS_1D:LAYOUTS_2D, L=LS[state.layout]||LS[0];
+  const D=oneD?DEMANDS_1D:DEMANDS_2D;
+  const t=oneD?TASKS[1]:TASKS[0];
+  const stages=['需求','材料','排料','执行','报工'];
+  const totalRepeat=LS.reduce((a,b)=>a+b.repeat,0);
+  return `<div class="wb-head">
+      <h1 class="num">${t.id}</h1><span>${t.name}</span><span class="tag kind">${t.kind}</span><span class="tag warn">方案候选 · 未下达</span>
+      <div class="sp" style="flex:1"></div>
+      <div class="seg" title="原型切换：同一套画布渲染一维 / 二维"><button class="${oneD?'':'on'}" onclick="setKind('2d')">二维任务</button><button class="${oneD?'on':''}" onclick="setKind('1d')">一维任务</button></div>
+      <button class="btn">方案版本 ▾</button><button class="btn">更多 ▾</button>
+    </div>
+    <div class="stages">${stages.map((s,i)=>`<div class="stage ${i<state.stage?'done':i===state.stage?'on':''}"><span class="n">${i<state.stage?'✓':i+1}</span>${s}</div>`).join('')}</div>
+    <div class="split" style="grid-template-columns:300px 1fr 280px">
+      <section class="pane">
+        <div class="pane-h">需求<span class="sub">${D.length} 项</span><span class="sp"></span><button class="btn ghost sm">导入</button></div>
+        <div class="pane-b"><table class="t" style="border:0"><thead><tr><th>${oneD?'订单':'款号'}</th><th>${oneD?'宽度':'尺寸'}</th><th class="r">需求</th><th class="r">已排</th></tr></thead><tbody>
+        ${D.map(d=>`<tr><td><i style="display:inline-block;width:8px;height:8px;margin-right:6px;background:${ORDER_COLORS[d[0]]}"></i>${d[1]}</td><td class="num">${d[2]}</td><td class="r num">${d[3]}</td><td class="r num" style="color:${d[4]<d[3]?'var(--warn)':'inherit'}">${d[4]}</td></tr>`).join('')}
+        </tbody></table>
+        <div class="sec">材料</div>
+        <div class="kv"><div>${oneD?'母卷':'母卷'}</div><div class="num">${oneD?'R-2610-0933':'R-2610-0921'}</div><div>规格</div><div class="num">${oneD?'门幅 2400 mm':'2800 mm × 48 m'}</div><div>可用</div><div class="num">${oneD?'800 m':'48 m'}</div><div>料头</div><div>${oneD?'不适用':'优先使用 1 块'}</div></div>
+        <div class="sec">工艺</div>
+        <div class="kv"><div>切割方式</div><div>${oneD?'分条 · 4 工位':'直刀 · 一刀切'}</div><div>修边</div><div class="num">${oneD?'两侧 12 mm':'10 mm'}</div><div>${oneD?'最小分条':'刀缝'}</div><div class="num">${oneD?'200 mm':'2 mm'}</div><div>目标</div><div>${oneD?'序号组最少':'利用率优先'}</div></div>
+        </div>
+      </section>
+      <section class="pane" style="background:var(--canvas)">
+        <div class="ctool">
+          <button class="on" title="选择 V">选择</button><button title="平移 H">平移</button><button title="测量 M">测量</button>
+          <div class="div"></div><button>适应</button><button>−</button><span class="num">100%</span><button>+</button>
+          <div class="div"></div><button class="on">切割线</button><button class="on">标注</button><button>疵点</button><button>${oneD?'刀位':'刀路'}</button>
+          <div class="sp"></div><span>${L.name} × ${L.repeat}</span>
+        </div>
+        <div class="canvas-wrap" id="cv">${renderLayout(L,{w:900,h:560,oneD})}
+          <div class="legend">${D.map(d=>`<span><i style="background:${ORDER_COLORS[d[0]]}"></i>${d[1]}</span>`).join('')}<span><i style="background:url(#);border:1px solid #9aa4ae"></i>余料</span></div>
+        </div>
+        <div class="strip">${LS.map((l,i)=>`<div class="thumb ${i===state.layout?'on':''}" onclick="pick(${i})">${renderLayout(l,{w:146,h:76,pad:6,labels:false,dims:false,cuts:false})}<div class="cap"><span>${l.name}</span><b>×${l.repeat}</b></div></div>`).join('')}</div>
+      </section>
+      <section class="pane">
+        <div class="pane-h">方案指标<span class="sp"></span><span class="sub">候选 v3</span></div>
+        <div class="metric">
+          <div><small>利用率</small><b>${oneD?'98.1':'89.6'}<em>%</em></b></div>
+          <div><small>${oneD?'用卷':'用料'}</small><b>${oneD?'38':'114.0'}<em>${oneD?'车':'m'}</em></b></div>
+          <div><small>${oneD?'序号组':'排法数'}</small><b>${LS.length}</b></div>
+          <div><small>履约</small><b style="color:${oneD?'var(--ok)':'var(--warn)'}">${oneD?'100':'99.5'}<em>%</em></b></div>
+        </div>
+        <div class="sec">当前${oneD?'序号组':'排法'}</div>
+        <div class="kv"><div>名称</div><div>${L.name}</div><div>重复</div><div class="num">${L.repeat} ${oneD?'车':'次'}</div><div>件数</div><div class="num">${L.items.length} × ${L.repeat} = ${L.items.length*L.repeat}</div><div>利用率</div><div class="num">${L.util}%</div><div>${oneD?'刀数':'切割长'}</div><div class="num">${oneD?L.items.length-1+' 刀':'18.4 m'}</div></div>
+        <div class="sec">未满足</div>
+        ${oneD?`<div class="empty" style="padding:14px">需求全部满足</div>`:`<div class="kv"><div>窗帘 A-01</div><div class="num" style="color:var(--warn)">缺 2 件 · 余料不足</div></div>`}
+        <div class="sec">计算记录</div>
+        <div class="kv"><div class="num">10:41</div><div>v3 · ${oneD?'一维内核':'PackingSolver'} · 6.2 s</div><div class="num">10:37</div><div>v2 · 已作废（需求变更）</div></div>
+      </section>
+    </div>
+    <div class="wb-foot"><button class="btn">返回材料</button><button class="btn">手动调整</button><span class="sp"></span><span style="color:var(--text-3);font-size:12px">候选方案不占用库存</span><button class="btn">重新计算</button><button class="btn pri">确认方案并生成执行单</button></div>`;
+},
+
+execution(){
+  const st=[['切割 1 号机','run','CT-20261026-021','卷帘 定高定宽','R-2610-0921','排法 2 · 7/12'],['切割 2 号机','idle','—','空闲','—','—'],['分条 A 线','warn','CT-20261026-017','PE 膜分切 A 线','R-2610-0950','完成 · 待报工'],['分条 B 线','idle','CT-20261027-011','无纺布分条 B 线','R-2610-0933','已预约 · 待开工']];
+  return `<div class="ph"><h1>执行与报工</h1><span class="crumb">按工位查看执行单</span><div class="sp"></div><button class="btn">报工记录</button><button class="btn pri">报工</button></div>
+  <div class="body">
+    <div class="cards">${st.map(s=>`<div class="card"><small>${s[0]}</small><b style="font-size:15px;font-family:inherit">${s[3]}</b><div class="d"><span class="tag ${s[1]}">${s[1]==='run'?'执行中':s[1]==='warn'?'待报工':'空闲'}</span> <span class="num">${s[2]}</span></div><div class="d" style="margin-top:4px">材料 <span class="num">${s[4]}</span> · ${s[5]}</div></div>`).join('')}</div>
+    <div class="grid2" style="grid-template-columns:3fr 2fr">
+      <div class="box"><div class="pane-h">执行单<span class="sp"></span><div class="seg"><button class="on">未完成</button><button>全部</button></div></div>
+      <table class="t" style="border:0"><thead><tr><th>执行单</th><th>任务</th><th>工位</th><th>材料</th><th class="r">计划</th><th class="r">已报</th><th>状态</th></tr></thead><tbody>
+      <tr class="sel"><td class="num">EX-1026-031</td><td class="num">CT-20261026-017</td><td>分条 A 线</td><td class="num">R-2610-0950</td><td class="r num">240</td><td class="r num">0</td><td><span class="tag warn">待报工</span></td></tr>
+      <tr><td class="num">EX-1026-028</td><td class="num">CT-20261026-021</td><td>切割 1 号机</td><td class="num">R-2610-0921</td><td class="r num">120</td><td class="r num">84</td><td><span class="tag run">执行中</span></td></tr>
+      <tr><td class="num">EX-1027-002</td><td class="num">CT-20261027-011</td><td>分条 B 线</td><td class="num">R-2610-0933</td><td class="r num">96</td><td class="r num">0</td><td><span class="tag">已预约</span></td></tr>
+      <tr><td class="num">EX-1027-004</td><td class="num">CT-20261027-009</td><td>—</td><td class="num">R-2610-0941</td><td class="r num">180</td><td class="r num">0</td><td><span class="tag">草稿</span></td></tr>
+      </tbody></table></div>
+      <div class="box"><div class="pane-h">报工 · EX-1026-031<span class="sp"></span><span class="tag warn">未提交</span></div>
+        <div class="form">
+          <label>实际耗用</label><input class="field num" value="2000 m">
+          <label>良品</label><input class="field num" value="238 卷">
+          <label>不良</label><input class="field num" value="2 卷">
+          <label>余料</label><select class="field"><option>无余料（已耗尽）</option><option>登记料头</option></select>
+          <label>操作人</label><input class="field" value="李师傅">
+        </div>
+        <div class="sec">影响</div>
+        <div class="kv"><div>任务进度</div><div class="num">0 → 238 / 240，剩余 2 卷待补排</div><div>库存</div><div class="num">R-2610-0950 扣减 2000 m</div><div>外部同步</div><div>提交后生成 1 条库存事件</div></div>
+        <div class="wb-foot" style="background:#fff"><span class="sp"></span><button class="btn">保存草稿</button><button class="btn pri">提交报工</button></div>
+      </div>
+    </div>
+  </div>`;
+},
+
+materials(){
+  const list=ROLLS.filter(r=>state.matTab==='rem'?r.rem:!r.rem);
+  const sel=list[Math.min(state.matSel,list.length-1)];
+  return `<div class="ph"><h1>库存</h1><span class="crumb">母卷与料头</span><div class="sp"></div><button class="btn">移库</button><button class="btn">盘点</button><button class="btn pri">入库</button></div>
+  <div class="toolbar"><div class="seg"><button class="${state.matTab==='roll'?'on':''}" onclick="matTab('roll')">母卷 6</button><button class="${state.matTab==='rem'?'on':''}" onclick="matTab('rem')">料头 2</button></div>
+  <select class="field"><option>全部材料</option></select><select class="field"><option>全部质量状态</option></select><select class="field"><option>全部库位</option></select><div style="flex:1"></div><input class="field" placeholder="卷号 / 批次" style="width:180px"></div>
+  <div class="split" style="grid-template-columns:1fr 320px">
+    <section class="pane" style="background:var(--bg)"><div class="body" style="padding:12px 16px">
+      <table class="t"><thead><tr><th>编号</th><th>材料</th><th class="r">${state.matTab==='rem'?'宽 × 长':'门幅'}</th><th class="r">剩余</th><th>余量</th><th>库位</th><th>质量</th><th>预约</th></tr></thead><tbody>
+      ${list.map((r,i)=>`<tr class="${r===sel?'sel':''}" onclick="matSel(${i})" style="cursor:pointer"><td class="num">${r.id}</td><td>${r.mat}</td><td class="r num">${r.rem?r.w+' × '+r.len+' m':r.w+' mm'}</td><td class="r num">${r.len} m</td><td><span class="bar"><i style="width:${r.len/r.full*100}%"></i></span></td><td class="num">${r.loc}</td><td><span class="tag ${r.q[1]}">${r.q[0]}</span></td><td class="num">${r.res}</td></tr>`).join('')}
+      </tbody></table></div></section>
+    <section class="pane">
+      <div class="pane-h num">${sel.id}<span class="sp"></span><span class="tag ${sel.q[1]}">${sel.q[0]}</span></div>
+      <div class="pane-b">
+        <div class="metric"><div><small>剩余</small><b>${sel.len}<em>m</em></b></div><div><small>${sel.rem?'宽度':'门幅'}</small><b>${sel.w}<em>mm</em></b></div></div>
+        <div class="kv"><div>材料</div><div>${sel.mat}</div><div>库位</div><div class="num">${sel.loc}</div><div>原始长度</div><div class="num">${sel.full} m</div><div>来源</div><div>${sel.src}</div><div>预约</div><div class="num">${sel.res}</div></div>
+        <div class="sec">流水</div>
+        <table class="t" style="border:0"><tbody>
+          <tr><td class="num">10-26 15:02</td><td>报工扣减</td><td class="r num">−5 m</td></tr>
+          <tr><td class="num">10-24 09:10</td><td>移库 A-01-01 → ${sel.loc}</td><td class="r num">0</td></tr>
+          <tr><td class="num">10-20 14:30</td><td>入库</td><td class="r num">+${sel.full} m</td></tr>
+        </tbody></table>
+      </div>
+    </section>
+  </div>`;
+},
+
+documents(){
+  const d=[['IN-1027-004','入库','R-2610-0934','+1000 m','已过账','ok','10-27 08:40'],['MV-1026-012','移库','R-2610-0920','A-01-01 → A-01-03','已过账','ok','10-26 16:20'],['RP-1026-031','报工扣减','R-2610-0950','−2000 m','待提交','warn','—'],['CC-1025-002','盘点','R-2610-0921','−0.4 m','已过账','ok','10-25 17:55'],['SC-1025-001','报废','RM-2610-0112','−1.2 m','已过账','ok','10-25 11:03']];
+  return `<div class="ph"><h1>库存单据</h1><span class="crumb">所有库存变化都有单据</span><div class="sp"></div><button class="btn">导出</button></div>
+  <div class="toolbar"><div class="seg"><button class="on">全部</button><button>入库</button><button>移库</button><button>盘点</button><button>报废</button><button>报工扣减</button></div><div style="flex:1"></div><input class="field" type="date" value="2026-10-27"></div>
+  <div class="body"><table class="t"><thead><tr><th>单据号</th><th>类型</th><th>材料</th><th class="r">变化</th><th>状态</th><th>过账时间</th><th>外部同步</th></tr></thead><tbody>
+  ${d.map(r=>`<tr><td class="link num">${r[0]}</td><td>${r[1]}</td><td class="num">${r[2]}</td><td class="r num">${r[3]}</td><td><span class="tag ${r[5]}">${r[4]}</span></td><td class="num">${r[6]}</td><td>${r[5]==='ok'?'<span class="tag ok">已确认</span>':'—'}</td></tr>`).join('')}
+  </tbody></table></div>`;
+},
+
+quality(){
+  return `<div class="ph"><h1>复检处置</h1><span class="crumb">已报良品发现不良时在这里处理</span><div class="sp"></div></div>
+  <div class="body"><table class="t"><thead><tr><th>报工单</th><th>任务</th><th>裁片</th><th class="r">数量</th><th>发现</th><th>处置</th><th>材料去向</th><th>状态</th></tr></thead><tbody>
+  <tr class="sel"><td class="num">RP-1026-018</td><td class="num">CT-20261026-014</td><td>窗帘 A-01 · 900×1400</td><td class="r num">8</td><td>边缘污渍</td><td><select class="field" style="height:22px"><option>转料头</option><option>报废</option></select></td><td>RM-2610-0119（隔离）</td><td><span class="tag err">待处置</span></td></tr>
+  </tbody></table>
+  <div class="notice" style="margin-top:12px">处置后：净良品 352 → 344，补产需求 +8；已消耗母卷不恢复。</div>
+  <div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn">取消</button><button class="btn pri">提交处置</button></div></div>`;
+},
+
+analysis(){
+  const days=['10-21','10-22','10-23','10-24','10-25','10-26','10-27'],u=[86.2,88.1,87.4,90.3,91.0,89.2,89.6];
+  const pts=u.map((v,i)=>`${40+i*80},${200-(v-80)*14}`).join(' ');
+  return `<div class="ph"><h1>生产分析</h1><div class="sp"></div><div class="seg"><button>今日</button><button class="on">近 7 天</button><button>近 30 天</button></div></div>
+  <div class="body">
+    <div class="cards">
+      <div class="card"><small>平均利用率</small><b>89.1%</b><div class="d">较上周 +1.4</div></div>
+      <div class="card"><small>完成任务</small><b>23</b><div class="d">一维 9 · 二维 14</div></div>
+      <div class="card"><small>耗用母卷</small><b>41</b><div class="d">折合 4,820 m</div></div>
+      <div class="card"><small>料头复用</small><b>12</b><div class="d">节约 38.6 m</div></div>
+    </div>
+    <div class="grid2">
+      <div class="box"><div class="pane-h">利用率趋势</div><svg viewBox="0 0 560 230" style="width:100%;height:230px">
+        ${[80,85,90,95].map(v=>`<line x1="30" x2="550" y1="${200-(v-80)*14}" y2="${200-(v-80)*14}" stroke="#e7e9ed"/><text x="24" y="${204-(v-80)*14}" font-size="10" fill="#7d8791" text-anchor="end">${v}</text>`).join('')}
+        <polyline points="${pts}" fill="none" stroke="#2c6aa8" stroke-width="2"/>${u.map((v,i)=>`<circle cx="${40+i*80}" cy="${200-(v-80)*14}" r="3" fill="#2c6aa8"/><text x="${40+i*80}" y="222" font-size="10" fill="#7d8791" text-anchor="middle">${days[i]}</text>`).join('')}</svg></div>
+      <div class="box"><div class="pane-h">按材料</div><table class="t" style="border:0"><thead><tr><th>材料</th><th class="r">任务</th><th class="r">利用率</th><th class="r">余料</th></tr></thead><tbody>
+        <tr><td>遮光布 280</td><td class="r num">8</td><td class="r num">90.4%</td><td class="r num">62.1 m²</td></tr>
+        <tr><td>无纺布 2400</td><td class="r num">6</td><td class="r num">98.2%</td><td class="r num">18.3 m²</td></tr>
+        <tr><td>弹力牛津 150</td><td class="r num">4</td><td class="r num">82.7%</td><td class="r num">44.0 m²</td></tr>
+        <tr><td>PE 膜 1800</td><td class="r num">5</td><td class="r num">97.5%</td><td class="r num">22.9 m²</td></tr>
+      </tbody></table></div>
+    </div>
+  </div>`;
+},
+
+showcase(){
+  const cases=[['一维搭切 · 序号组','9 个订单 · 门幅 2400','1d'],['二维矩形 · 窗帘','6 款 · 含料头','2d'],['二维异形 · 服装齐套','3 款 S–XL · 有疵点','2d'],['刀路优化','42 件 · 一刀切','2d']];
+  return `<div class="ph"><h1>能力展示</h1><span class="crumb">用内置示例数据展示求解能力，不写入任务和库存</span><div class="sp"></div><button class="btn">上传自有数据试算</button></div>
+  <div class="body">
+    <div class="cards">${cases.map((c,i)=>`<div class="card" style="cursor:pointer"><small>${c[1]}</small><b style="font-size:14px;font-family:inherit;margin:4px 0 8px">${c[0]}</b>${renderLayout((c[2]==='1d'?LAYOUTS_1D:LAYOUTS_2D)[i%3],{w:240,h:120,pad:6,labels:false,dims:false,cuts:false}).replace('<svg','<svg style="width:100%;height:110px;background:var(--canvas)"')}<div class="d" style="margin-top:6px">运行示例 →</div></div>`).join('')}</div>
+    <div class="box"><div class="pane-h">引擎对比 · 二维矩形 · 窗帘示例</div><table class="t" style="border:0"><thead><tr><th>引擎</th><th class="r">利用率</th><th class="r">用料</th><th class="r">排法数</th><th class="r">耗时</th></tr></thead><tbody>
+      <tr><td>PackingSolver（C++）</td><td class="r num">89.6%</td><td class="r num">114.0 m</td><td class="r num">4</td><td class="r num">6.2 s</td></tr>
+      <tr><td>Java 直刀</td><td class="r num">86.1%</td><td class="r num">118.6 m</td><td class="r num">5</td><td class="r num">1.8 s</td></tr>
+      <tr><td>横切贪心</td><td class="r num">81.3%</td><td class="r num">125.7 m</td><td class="r num">7</td><td class="r num">0.1 s</td></tr>
+    </tbody></table></div>
+  </div>`;
+},
+
+settings(){
+  const g=[['工艺与设备','工位、切割方式、刀缝、修边、最小分条'],['材料规格','材料主数据、门幅、质量规则'],['求解策略','引擎选择、时间上限、目标权重'],['系统接入','需求来源、库存同步、事件投递'],['个人偏好','单位、主题、快捷键']];
+  return `<div class="ph"><h1>设置</h1></div><div class="split" style="grid-template-columns:220px 1fr">
+  <section class="pane"><div class="pane-b">${g.map((x,i)=>`<div style="padding:10px 14px;border-bottom:1px solid var(--line-2);${i===2?'background:#e8f0f8;border-left:3px solid var(--accent)':''}"><div style="font-weight:${i===2?600:400}">${x[0]}</div><div style="font-size:11.5px;color:var(--text-3)">${x[1]}</div></div>`).join('')}</div></section>
+  <section class="pane" style="background:var(--bg)"><div class="body"><div class="box" style="max-width:640px"><div class="pane-h">求解策略</div><div class="form">
+    <label>一维引擎</label><select class="field"><option>自研一维搭切内核</option></select>
+    <label>一维目标</label><select class="field"><option>序号组最少 → 余料最少</option><option>余料最少</option></select>
+    <label>二维矩形引擎</label><select class="field"><option>PackingSolver（C++） · 失败时降级 Java</option></select>
+    <label>二维异形引擎</label><select class="field"><option>PackingSolver Irregular（C++）</option></select>
+    <label>时间上限</label><input class="field num" value="30 s">
+    <label>料头优先</label><select class="field"><option>开启</option><option>关闭</option></select>
+  </div><div class="wb-foot" style="background:#fff"><span class="sp"></span><button class="btn">恢复默认</button><button class="btn pri">保存</button></div></div></div></section></div>`;
+},
+};
+
+function render(){
+  if(!PAGES[state.page])state.page='tasks';
+  nav();
+  document.getElementById('main').innerHTML=PAGES[state.page]();
+  status(state.page==='workbench'?`<span>X <span class="num">1240</span>  Y <span class="num">860</span> mm</span><span>引擎 ${state.wbKind==='1d'?'一维内核':'PackingSolver'}</span>`:'');
+}
+function go(p,kind){if(kind)state.wbKind=kind;state.layout=0;state.page=p;try{history.replaceState(null,'','#'+p)}catch(e){}render()}
+function setKind(k){state.wbKind=k;state.layout=0;render()}
+function pick(i){state.layout=i;render()}
+function matTab(t){state.matTab=t;state.matSel=0;render()}
+function matSel(i){state.matSel=i;render()}
+state.page=(location.hash.slice(1)||'tasks');
+render();
+</script>
+</body>
+</html>
