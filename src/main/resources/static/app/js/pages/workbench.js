@@ -11,6 +11,10 @@ import {taskLabels, taskLink} from '../../../js/business/cutting/task-list-model
 import {validateDefect, round} from '../../../js/inspection/inspection-model.js';
 import {findForwardPlan} from '../../../js/business/cutting/forward-search.js';
 import {OUTCOMES, defaultReport, applyBulk, recoveryCandidates, reportSummary, reportProblems, buildCutReport} from '../model/report.js';
+import {reviewablePieces, effectivePieceResults, DISPOSITIONS, emptyQualityForm, qualityProblems, buildQualityCommand, receiptSummary} from '../model/quality.js';
+import {executionWriter, executionForPlan, executionLabels} from '../../../js/business/cutting/execution-client.js';
+
+const EXEC_TAG = {DRAFT: '', RELEASED: 'run', RUNNING: 'run', EXPIRED: 'warn', CANCELLED: '', REPORTED: 'ok', REVERSED: 'err'};
 
 const REPORT_KEY = id => 'cutplan.app.report.' + id;
 const OUTCOME_COLOR = {REJECTED: '#c0392b', UNCUT: '#59616a'};
@@ -20,22 +24,25 @@ const STAGE_OF = {PLAN_PENDING: 2, EXECUTION_PENDING: 3, REPORT_PENDING: 4, ATTE
 const TAG = {PLAN_PENDING: 'idle', EXECUTION_PENDING: 'run', REPORT_PENDING: 'warn', ATTENTION: 'err', COMPLETED: 'ok'};
 const SEG_TAG = {cut: 'ok', pending: 'warn', stale: '', other: ''};
 
-export async function mount(el, [taskId]) {
+export async function mount(el, [taskId, focusPlan]) {
     if (!taskId) return pickTask(el);
-    let detail, plans, summary, allRolls, roll = null;
+    let detail, plans, summary, views = [], allRolls, roll = null;
+    const writer = executionWriter();
     async function loadTask() {
-        [detail, plans, summary] = await Promise.all([
+        [detail, plans, summary, views] = await Promise.all([
             requestJSON('/api/cutting/tasks/' + encodeURIComponent(taskId)),
             requestJSON('/api/cutting/tasks/' + encodeURIComponent(taskId) + '/plans'),
-            requestJSON('/api/cutting/task-summaries').then(rows => rows.find(r => r.task.id === taskId) || null)
+            requestJSON('/api/cutting/task-summaries').then(rows => rows.find(r => r.task.id === taskId) || null),
+            requestJSON('/api/v2/execution-orders?taskId=' + encodeURIComponent(taskId))
         ]);
     }
     try { await Promise.all([loadTask(), requestJSON('/api/rolls').then(r => { allRolls = r; })]); }
     catch (e) { el.innerHTML = errorBox(e); return; }
     let task = detail.task, names = demandIndex(task.demands, plans);
     const prefs = loadPrefs();
-    const st = {rollId: rollsOfPlans(plans)[0] || null, selectedId: null, window: null, fresh: [], tool: 'pan', view: prefs.view,
-        pop: null, cursor: null, saving: false, busy: '', failure: null};
+    const focus = focusPlan && plans.find(p => p.id === focusPlan);
+    const st = {rollId: focus?.request?.rollId || rollsOfPlans(plans)[0] || null, selectedId: focus ? focus.id : null, window: null, fresh: [], tool: 'pan', view: focus ? 'station' : prefs.view,
+        pop: null, cursor: null, saving: false, busy: '', failure: null, quality: null, station: '1', reserveMin: 30};
     let canvas = null, nav = null, undismiss = null;
 
     /** 可选母卷：任务方案用过的母卷 + 同型号且有余量的母卷。 */
@@ -75,6 +82,7 @@ export async function mount(el, [taskId]) {
         const sc = st.rollId && roll ? scene() : null, met = sc ? sceneMetrics(sc) : null;
         const seg = sc?.segments.find(s => s.id === sc.currentId) || null;
         if (st.report && (seg?.id !== st.report.planId || seg?.status !== 'pending')) st.report = null; // 选中别的段时关闭报工
+        if (st.quality && seg?.id !== st.quality.report.planId && !st.quality.uncertain) st.quality = null;
         const order = sc ? [...sc.segments.map(s => s.id), NEW_STATION] : [], idx = sc ? (seg ? order.indexOf(seg.id) : order.length - 1) : -1;
         const total = summary?.total ?? task.demands.reduce((a, d) => a + d.quantity, 0), done = summary?.completed ?? 0;
         const stage = STAGE_OF[summary?.status] ?? (st.rollId ? 2 : 1);
@@ -87,7 +95,7 @@ export async function mount(el, [taskId]) {
           <span class="vsep"></span><a class="btn" href="#/tasks">返回任务</a>${summary ? `<a class="btn" href="${esc(taskLink(summary))}">经典工作台 ↗</a>` : ''}</div>
         <div class="stages">${STAGES.map((s, i) => `<div class="stage ${i < stage ? 'done' : i === stage ? 'on' : ''}"><span class="n">${i < stage ? '✓' : i + 1}</span>${s}</div>`).join('')}</div>
         ${!sc ? pickRollHtml() : `
-        <div class="split" style="grid-template-columns:1fr ${st.report ? '420px' : prefs.sideCollapsed ? '28px' : '300px'}">
+        <div class="split" style="grid-template-columns:1fr ${st.report ? '420px' : st.quality ? '380px' : prefs.sideCollapsed ? '28px' : '300px'}">
           <section class="pane" style="background:var(--canvas)">
             <div class="ctool">
               <div class="vseg"><button data-view="station" class="${st.view === 'station' ? 'on' : ''}" title="对准当前工位">工位</button><button data-view="full" class="${st.view === 'full' ? 'on' : ''}" title="显示整卷">全卷</button></div>
@@ -107,7 +115,7 @@ export async function mount(el, [taskId]) {
             <div class="navroll"><div class="nr-head"><span>母卷 <b class="num">${esc(st.rollId)}</b></span><span>幅宽 <b class="num">${fmtN(sc.roll.width)}</b> mm</span><span>总长 <b class="num">${fmtM(sc.roll.total)}</b> m</span><span>已用 <b class="num">${fmtM(sc.roll.used)}</b> m</span>
               <span>本任务 已切 <b class="num">${met.cut}</b> · 候选 <b class="num">${met.pending}</b>${met.stale ? ` · 已失效 <b class="num">${met.stale}</b>` : ''}</span></div><div id="rn"></div></div>
           </section>
-          ${st.report && seg ? reportPanel(seg, idx, sc) : prefs.sideCollapsed ? `<section class="pane side-min"><button id="side-toggle" title="展开右栏">«</button><span>方案指标</span></section>` : `<section class="pane">
+          ${st.report && seg ? reportPanel(seg, idx, sc) : st.quality && seg ? qualityPanel(seg) : prefs.sideCollapsed ? `<section class="pane side-min"><button id="side-toggle" title="展开右栏">«</button><span>方案指标</span></section>` : `<section class="pane">
             <div class="pane-h">方案指标<span class="sub">本卷</span><span class="sp"></span><button class="btn sm" id="side-toggle" title="收起右栏">»</button></div>
             <div class="pane-b">
               <div class="metric"><div><small>利用率</small><b>${met.utilization.toFixed(1)}<em>%</em></b></div><div><small>用布长度</small><b>${fmtM(met.length, 2)}<em>m</em></b></div>
@@ -145,11 +153,95 @@ export async function mount(el, [taskId]) {
             <div>件数</div><div class="num">${seg.pieces.length}</div>
             <div>利用率</div><div class="num">${seg.totalArea ? (seg.pieceArea / seg.totalArea * 100).toFixed(1) : '—'}%</div></div>
           ${seg.status === 'stale' ? '<div class="notice">该方案的报工已在母卷重置时清除，方案既未切也不能再报工，仅作历史参考。</div>' : ''}
-          ${seg.status === 'pending' ? `${w.adjusted ? `<div class="notice">工位已调整为 Y ${fmtM(w.start, 2)} m · ${fmtN(w.len)} mm，重新计算后替换当前候选。</div>` : ''}${problem ? `<div class="notice">${esc(problem)}</div>` : ''}${busy}${failure}
-            <div style="display:flex;gap:8px;padding:8px 12px;flex-wrap:wrap"><button class="btn pri" id="report-open" ${st.busy || w.adjusted ? 'disabled' : ''} title="${w.adjusted ? '工位已调整，请先重新计算或还原工位' : '按实际裁切结果报工'}">报工</button>
-              <button class="btn" id="solve" ${st.busy || problem || !need ? 'disabled' : ''}>重新计算</button><button class="btn" id="discard" ${st.busy ? 'disabled' : ''}>放弃候选</button></div>` : ''}
+          ${seg.status === 'pending' ? (() => {
+              const view = executionForPlan(views, seg.id), locked = !!view?.reservationActive;
+              const reportAllowed = !view || view.allowedActions?.report?.allowed;
+              const reportWhy = w.adjusted ? '工位已调整，请先重新计算或还原工位' : !reportAllowed ? (view.allowedActions?.report?.reason || '执行单当前状态不能报工') : '按实际裁切结果报工';
+              return `${w.adjusted ? `<div class="notice">工位已调整为 Y ${fmtM(w.start, 2)} m · ${fmtN(w.len)} mm，重新计算后替换当前候选。</div>` : ''}${problem ? `<div class="notice">${esc(problem)}</div>` : ''}${busy}${failure}
+            <div style="display:flex;gap:8px;padding:8px 12px;flex-wrap:wrap"><button class="btn pri" id="report-open" ${st.busy || w.adjusted || !reportAllowed ? 'disabled' : ''} title="${esc(reportWhy)}">报工</button>
+              <button class="btn" id="solve" ${st.busy || problem || !need || locked ? 'disabled' : ''} title="${locked ? '已下达或执行中，先取消执行单' : ''}">重新计算</button><button class="btn" id="discard" ${st.busy || locked ? 'disabled' : ''}>放弃候选</button></div>
+            ${executionBlock(seg, view)}`; })() : ''}
+          ${seg.status === 'cut' ? recordsBlock(seg) : ''}
           <div class="sec">本次未排入</div>
           ${unplaced.length ? `<table class="t" style="border:0"><tbody>${unplaced.map(f => `<tr><td class="wrap">${esc(names.get(f.demandId)?.name || `需求 ${f.demandId}`)}</td><td class="r num" style="color:var(--warn)">缺 ${f.unplaced}</td></tr>`).join('')}</tbody></table>` : '<div class="empty" style="padding:12px">本段需求全部排入</div>'}`;
+    }
+
+    /** 执行单：创建 → 下达（预约）→ 开工 → 报工；按钮可用性与原因全部来自后端 allowedActions。 */
+    function executionBlock(seg, view) {
+        const pend = writer.pending(task.id).filter(([slot]) => slot.endsWith(seg.id) || (view && slot.endsWith(view.execution.id)));
+        const unsure = pend.length ? `<div class="notice">上次执行单操作结果未确认（${esc(pend.map(([, v]) => v.action).join('、'))}），请重试原操作，避免重复登记。<div style="margin-top:6px">${pend.map(([slot]) => `<button class="btn sm" data-retry="${esc(slot)}">重试</button>`).join(' ')}</div></div>` : '';
+        if (!view || ['CANCELLED', 'EXPIRED'].includes(view.effectiveState) && !view.reservationActive) {
+            return `<div class="sec">执行单</div>${unsure}
+              ${view ? `<div class="kv"><div>上一张</div><div><span class="tag ${EXEC_TAG[view.effectiveState]}">${esc(executionLabels[view.effectiveState] || view.effectiveState)}</span> <span class="num">${shortId(view.execution.id)}</span></div></div>` : ''}
+              <div style="display:flex;gap:6px;padding:8px 12px;align-items:center"><span class="muted">工位</span><input class="field" id="exec-station" value="${esc(st.station)}" style="width:70px">
+                <button class="btn" id="exec-create" ${st.busy || pend.length ? 'disabled' : ''}>创建执行单</button></div>
+              <div class="muted" style="padding:0 12px 8px;font-size:11.5px">不建执行单也可直接报工；建单后可预约材料、按工位开工报工。</div>`;
+        }
+        const e = view.execution, a = view.allowedActions || {}, btn = (k, t, extra = '') => `<button class="btn sm" data-exec="${k}" ${a[k]?.allowed && !st.busy && !pend.length ? '' : 'disabled'} title="${esc(a[k]?.reason || '')}" ${extra}>${t}</button>`;
+        return `<div class="sec">执行单</div>${unsure}
+          <div class="kv"><div>状态</div><div><span class="tag ${EXEC_TAG[view.effectiveState] || ''}">${esc(executionLabels[view.effectiveState] || view.effectiveState)}</span> <span class="num muted">${shortId(e.id)} · v${e.version}</span></div>
+            <div>工位</div><div>${esc(e.station)}</div><div>材料</div><div class="num">${esc(e.materialId)}</div>
+            ${e.expiresAt ? `<div>预约至</div><div class="num">${new Date(e.expiresAt).toLocaleString('zh-CN', {hour12: false})}</div>` : ''}</div>
+          <div style="display:flex;gap:6px;padding:8px 12px;align-items:center;flex-wrap:wrap">
+            ${a.release?.allowed ? `<span class="muted">预约</span><input class="field num" id="exec-reserve" value="${st.reserveMin}" style="width:56px;text-align:right"><span class="muted">分钟</span>` : ''}
+            ${btn('release', '下达')}${btn('start', '开工')}${btn('cancel', '取消')}</div>
+          ${st.cancelling ? `<div style="display:flex;gap:6px;padding:0 12px 10px"><input class="field" id="exec-cancel-reason" placeholder="取消原因（必填）" style="flex:1"><button class="btn sm pri" id="exec-cancel-submit">确认取消</button></div>` : ''}`;
+    }
+
+    /** 报工记录：回执摘要、复检处置、冲销。 */
+    function recordsBlock(seg) {
+        const report = (detail.reports || []).find(r => r.planId === seg.id);
+        if (!report) return '';
+        const s = receiptSummary(report, effectivePieceResults), reviewable = reviewablePieces(report).length;
+        return `<div class="sec">报工回执</div>
+          <div class="kv"><div>状态</div><div><span class="tag ${report.status === 'REVERSED' ? 'err' : 'ok'}">${report.status === 'REVERSED' ? '已冲销' : '已记账'}</span></div>
+            <div>实切</div><div class="num">${fmtN(report.actualCutLen, 1)} mm · 利用率 ${fmtN(report.netUtilization ?? report.utilization, 1)}%</div>
+            <div>结果</div><div class="num">合格 ${s.qualified} · 异常 ${s.rejected} · 未切 ${s.uncut}</div>
+            <div>料头</div><div class="num">${(report.derivedRemnants || []).length} 块${(report.derivedRemnants || []).length ? ' · ' + (report.derivedRemnants || []).map(r => esc(r.id || '')).join('、') : ''}</div>
+            <div>复检</div><div class="num">${s.dispositions} 次</div>
+            <div>时间</div><div class="num">${esc(String(report.confirmedAt || '').replace('T', ' ').slice(0, 16))}</div></div>
+          ${report.status !== 'REVERSED' ? `<div style="display:flex;gap:8px;padding:8px 12px"><button class="btn" id="quality-open" ${reviewable ? '' : 'disabled title="没有可复检的已切裁片"'}>复检处置</button>
+            <button class="btn" id="reverse-open">冲销报工</button></div>
+            ${st.reversing ? `<div style="display:flex;gap:6px;padding:0 12px 10px"><input class="field" id="reverse-reason" placeholder="冲销原因（必填）" style="flex:1"><button class="btn sm pri" id="reverse-submit" ${st.busy ? 'disabled' : ''}>确认冲销</button></div>
+              <div class="muted" style="padding:0 12px 8px;font-size:11.5px">冲销恢复母卷用量、撤回本次产出料头与完成量；已有复检或料头已被使用时后端会拒绝。</div>` : ''}` : ''}`;
+    }
+
+    /** 复检处置面板：一次处置一件；结果不确定时原样重发同一命令。 */
+    function qualityPanel(seg) {
+        const q = st.quality, report = q.report, pieces = reviewablePieces(report), piece = pieces.find(p => p.pieceId === Number(q.pieceId));
+        const problems = qualityProblems(q, piece);
+        return `<section class="pane" id="quality"><div class="pane-h">复检处置<span class="sub num">${shortId(seg.id)}</span><span class="sp"></span><button class="btn sm" id="quality-close" ${q.uncertain ? 'disabled' : ''}>关闭</button></div>
+          <div class="pane-b"><div class="muted" style="padding:10px 12px;font-size:12px">原报工与母卷耗用保留；良品处置后扣回完成量，形成补产需求。</div>
+            <div class="form" style="grid-template-columns:90px 1fr">
+              <label>裁片</label><select class="field" data-q="pieceId" ${q.command ? 'disabled' : ''}>${pieces.map(p => `<option value="${p.pieceId}" ${p.pieceId === Number(q.pieceId) ? 'selected' : ''}>#${p.pieceId} · ${esc(String(p.name).slice(0, 18))} · ${p.w}×${p.l} · 原${p.outcome === 'QUALIFIED' ? '良品' : '异常'}</option>`).join('')}</select>
+              <label>处置方式</label><select class="field" data-q="disposition" ${q.command ? 'disabled' : ''}>${Object.entries(DISPOSITIONS).map(([k, t]) => `<option value="${k}" ${q.disposition === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+              <label>检验人</label><input class="field" data-q="inspector" value="${esc(q.inspector)}" ${q.command ? 'disabled' : ''}>
+              <label>复检原因</label><input class="field" data-q="reason" value="${esc(q.reason)}" ${q.command ? 'disabled' : ''}>
+              ${q.disposition === 'REMNANT' ? `<label>回收矩形</label><div class="muted" style="font-size:11.5px">相对裁片左上角 · mm</div>
+                ${[['x', '起点 X'], ['y', '起点 Y'], ['width', '宽度'], ['length', '长度']].map(([k, t]) => `<label>${t}</label><input class="field num" data-q="${k}" value="${esc(q[k])}" ${q.command ? 'disabled' : ''}>`).join('')}
+                <label>库位</label><input class="field" data-q="location" value="${esc(q.location)}" ${q.command ? 'disabled' : ''}>
+                <label>质量</label><select class="field" data-q="quality" ${q.command ? 'disabled' : ''}><option value="QUARANTINED" ${q.quality === 'QUARANTINED' ? 'selected' : ''}>待检隔离（不能选料）</option><option value="RECOVERABLE" ${q.quality === 'RECOVERABLE' ? 'selected' : ''}>已验收可用</option></select>` : ''}
+            </div>
+            ${problems.length && !q.command ? `<div class="notice">${problems.map(esc).join('<br>')}</div>` : ''}
+            ${q.error ? `<div class="notice">${esc(q.error)}</div>` : ''}
+            <div style="display:flex;gap:8px;padding:8px 12px"><button class="btn pri" id="quality-submit" ${(problems.length && !q.command) || st.busy ? 'disabled' : ''}>${q.uncertain ? '重试同一处置' : '确认处置'}</button></div>
+          </div></section>`;
+    }
+
+    async function execAction(action, view, seg) {
+        try {
+            const values = action === 'create' ? {station: (el.querySelector('#exec-station')?.value || '').trim() || '1'}
+                : action === 'release' ? {reservationSeconds: Math.round((Number(el.querySelector('#exec-reserve')?.value) || 30) * 60)}
+                : action === 'cancel' ? {reason: (el.querySelector('#exec-cancel-reason')?.value || '').trim()} : {};
+            if (action === 'cancel' && !values.reason) return toast('请填写取消原因', true);
+            st.cancelling = false;
+            if (action === 'create') st.station = values.station;
+            if (action === 'release') st.reserveMin = values.reservationSeconds / 60;
+            st.busy = {create: '正在创建执行单…', release: '正在下达…', start: '正在开工…', cancel: '正在取消…'}[action]; shell(true);
+            await writer.command(action, {taskId: task.id, planId: seg.id, id: view?.execution.id, version: view?.execution.version}, values);
+            await reload(); toast({create: '执行单已创建', release: '已下达并预约材料', start: '已开工，可报工', cancel: '执行单已取消'}[action]);
+        } catch (e) { toast((e.httpStatus ? '' : '结果未确认，可重试：') + e.message, true); try { await reload(); } catch { /* 刷新失败保留当前视图 */ } }
+        st.busy = ''; shell(true);
     }
 
     /** 报工面板：逐件结果、实切长度、料头回收、库位；提交前就地校验。 */
@@ -197,7 +289,11 @@ export async function mount(el, [taskId]) {
         localStorage.setItem(REPORT_KEY(seg.id), JSON.stringify(st.report)); // 提交前落盘：结果未知或失败时刷新也能找回
         st.busy = '正在提交报工…'; shell(true);
         try {
-            const receipt = await requestJSON('/api/cutting/report-confirm', payload);
+            // 有执行中的执行单时按执行单报工，否则直接报工（后端两条路径同一校验）
+            const view = executionForPlan(views, seg.id);
+            const receipt = view && view.effectiveState === 'RUNNING'
+                ? await requestJSON('/api/v2/execution-orders/' + encodeURIComponent(view.execution.id) + '/reports', payload)
+                : await requestJSON('/api/cutting/report-confirm', payload);
             localStorage.removeItem(REPORT_KEY(seg.id));
             st.report = null; await reload();
             st.selectedId = NEW_STATION; st.window = null; st.busy = '';
@@ -223,6 +319,51 @@ export async function mount(el, [taskId]) {
         box.querySelectorAll('[data-use]').forEach(c => c.onchange = () => editReport(r => { const k = c.dataset.use, cur = r.rem[k] || {w: cand(k).w, l: cand(k).l}; return {...r, rem: {...r.rem, [k]: {...cur, use: c.checked}}}; }));
         box.querySelectorAll('[data-rw]').forEach(i => i.onchange = () => editReport(r => ({...r, rem: {...r.rem, [i.dataset.rw]: {...r.rem[i.dataset.rw], w: Number(i.value)}}})));
         box.querySelectorAll('[data-rl]').forEach(i => i.onchange = () => editReport(r => ({...r, rem: {...r.rem, [i.dataset.rl]: {...r.rem[i.dataset.rl], l: Number(i.value)}}})));
+    }
+
+    function bindExecution(sc) {
+        const seg = sc.segments.find(s => s.id === sc.currentId); if (!seg) return;
+        const view = executionForPlan(views, seg.id);
+        el.querySelector('#exec-create')?.addEventListener('click', () => execAction('create', null, seg));
+        el.querySelectorAll('[data-exec]').forEach(b => b.onclick = () => b.dataset.exec === 'cancel' ? (st.cancelling = true, shell(true)) : execAction(b.dataset.exec, view, seg));
+        el.querySelector('#exec-cancel-submit')?.addEventListener('click', () => execAction('cancel', view, seg));
+        el.querySelectorAll('[data-retry]').forEach(b => b.onclick = async () => {
+            st.busy = '正在重试…'; shell(true);
+            try { await writer.retry(b.dataset.retry); await reload(); toast('原操作已确认完成'); }
+            catch (e) { toast(e.message, true); try { await reload(); } catch { /* 保留当前视图 */ } }
+            st.busy = ''; shell(true);
+        });
+        // 报工记录：冲销与复检
+        el.querySelector('#reverse-open')?.addEventListener('click', () => { st.reversing = !st.reversing; shell(true); });
+        el.querySelector('#reverse-submit')?.addEventListener('click', async () => {
+            const reason = el.querySelector('#reverse-reason').value.trim();
+            if (!reason) return toast('请填写冲销原因', true);
+            st.busy = '正在冲销…'; shell(true);
+            try { await requestJSON('/api/cutting/reports/' + encodeURIComponent(seg.id) + '/reverse', {reason}); st.reversing = false; await reload(); st.selectedId = null; toast('报工已冲销，母卷用量与完成量已恢复'); }
+            catch (e) { toast('冲销未完成：' + e.message, true); }
+            st.busy = ''; full();
+        });
+        el.querySelector('#quality-open')?.addEventListener('click', () => {
+            const report = (detail.reports || []).find(r => r.planId === seg.id);
+            st.quality = emptyQualityForm(report, reviewablePieces(report)[0]?.pieceId); shell(true);
+        });
+        const qbox = el.querySelector('#quality'); if (!qbox) return;
+        qbox.querySelector('#quality-close').onclick = () => { st.quality = null; shell(true); };
+        qbox.querySelectorAll('[data-q]').forEach(i => i.onchange = () => { st.quality = {...st.quality, [i.dataset.q]: i.value}; shell(true); });
+        qbox.querySelector('#quality-submit').onclick = async () => {
+            const q = st.quality, piece = reviewablePieces(q.report).find(p => p.pieceId === Number(q.pieceId));
+            if (!q.command) { const p = qualityProblems(q, piece); if (p.length) return toast(p[0], true); q.command = buildQualityCommand(q, crypto.randomUUID()); }
+            st.busy = '正在提交复检…'; shell(true);
+            try {
+                await requestJSON('/api/cutting/reports/' + encodeURIComponent(q.report.planId) + '/quality-dispositions', q.command);
+                st.quality = null; await reload(); toast(`复检已登记：${DISPOSITIONS[q.command.disposition]}，完成量已按结果调整`);
+            } catch (e) {
+                if (e.httpStatus === 400) st.quality = {...q, command: null, uncertain: false, error: e.message};
+                else if (e.httpStatus === 409) st.quality = {...q, uncertain: false, error: e.message + '。请关闭后刷新报工记录再处理。'};
+                else st.quality = {...q, uncertain: true, error: e.message + ' 结果尚未确认，输入已保留，请重试同一处置。'};
+            }
+            st.busy = ''; shell(true);
+        };
     }
 
     function pickRollHtml() {
@@ -317,6 +458,7 @@ export async function mount(el, [taskId]) {
         el.querySelector('#side-toggle')?.addEventListener('click', () => { prefs.sideCollapsed = !prefs.sideCollapsed; savePrefs(prefs); shell(true); });
         el.querySelector('#report-open')?.addEventListener('click', () => { const seg = sc.segments.find(s => s.id === sc.currentId); if (seg) openReport(seg); });
         bindReport();
+        bindExecution(sc);
         el.querySelector('#solve')?.addEventListener('click', solve);
         el.querySelector('#discard')?.addEventListener('click', discard);
         el.querySelector('#forward')?.addEventListener('click', forward);

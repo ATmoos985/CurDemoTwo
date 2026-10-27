@@ -8,6 +8,7 @@ import {snapPosition, tickStep} from '../../main/resources/static/app/js/canvas/
 import {buildRollScene, planSegment, plansOnRoll, rollsOfPlans, reportedPlans, segmentStatus, cutEnd, sceneMetrics, demandIndex, NEW_STATION} from '../../main/resources/static/app/js/model/roll-scene.js';
 import {buildSolveRequest, remainingDemands, windowProblem, usablePlan} from '../../main/resources/static/app/js/model/solve-request.js';
 import {defaultReport, applyBulk, recoveryCandidates, reportSummary, reportProblems, buildCutReport} from '../../main/resources/static/app/js/model/report.js';
+import {reviewablePieces, effectivePieceResults, emptyQualityForm, qualityProblems, buildQualityCommand, receiptSummary} from '../../main/resources/static/app/js/model/quality.js';
 import {emptyTask, fromTask, addDemand, mergeImport, taskProblems, lineLock, toPayload, demandTemplateCsv} from '../../main/resources/static/app/js/model/task-form.js';
 
 const appRoot = fileURLToPath(new URL('../../main/resources/static/app/', import.meta.url));
@@ -195,6 +196,23 @@ test('task form mirrors backend save rules and protects reported demand lines', 
     const payload = toPayload(merged);
     assert.deepEqual([payload.id, payload.revision, payload.demands.length], ['t', 4, 2]);
     assert.match(demandTemplateCsv(), /材料型号,裁片名称,宽度\(mm\),长度\(mm\),数量/);
+});
+
+test('quality disposition form validates recovery rectangle and builds an immutable command', () => {
+    const report = {planId: 'p', status: 'CONFIRMED', qualityRevision: 2, qualityDispositions: [{command: {pieceId: 3, disposition: 'SCRAP', reason: '污'}}],
+        pieceResults: [{pieceId: 1, outcome: 'QUALIFIED', w: 900, l: 1400, name: 'A'}, {pieceId: 2, outcome: 'UNCUT', w: 1, l: 1}, {pieceId: 3, outcome: 'QUALIFIED', w: 5, l: 5}]};
+    assert.deepEqual(reviewablePieces(report).map(p => p.pieceId), [1], '未切与已处置的件不可再复检');
+    assert.deepEqual(receiptSummary(report, effectivePieceResults), {qualified: 1, rejected: 1, uncut: 1, dispositions: 1}, '复检后原良品按异常统计');
+    let f = emptyQualityForm(report, 1);
+    assert.deepEqual(qualityProblems(f, reviewablePieces(report)[0]), ['请填写检验人', '请填写复检原因']);
+    f = {...f, inspector: '王', reason: '边缘破损', disposition: 'REMNANT', width: 950, length: 100, location: ''};
+    assert.match(qualityProblems(f, reviewablePieces(report)[0]).join(), /超出裁片 900×1400.*库位/s);
+    f = {...f, width: 900, location: '料头架 1'};
+    assert.deepEqual(qualityProblems(f, reviewablePieces(report)[0]), []);
+    const cmd = buildQualityCommand(f, 'op-1');
+    assert.deepEqual(cmd, {operationId: 'op-1', expectedRevision: 2, pieceId: 1, disposition: 'REMNANT', inspector: '王', reason: '边缘破损',
+        recovery: {x: 0, y: 0, width: 900, length: 100, location: '料头架 1', quality: 'QUARANTINED'}});
+    assert.equal(buildQualityCommand({...f, disposition: 'SCRAP'}, 'op-2').recovery, null);
 });
 
 async function files(dir) {

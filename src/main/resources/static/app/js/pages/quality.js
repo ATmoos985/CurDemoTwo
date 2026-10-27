@@ -1,14 +1,28 @@
-// 复检处置：列出有报工的任务，进入经典工作台的复检处置（本版只读入口）。
+// 复检处置：汇总各任务的报工回执，列出仍可复检的裁片；处置在工作台对应拉布段的“报工回执”中完成。
 import {requestJSON, esc, shortId, errorBox} from '../util.js';
-import {taskLabels} from '../../../js/business/cutting/task-list-model.js';
+import {reviewablePieces, effectivePieceResults, receiptSummary} from '../model/quality.js';
 
 export async function mount(el) {
     let rows;
-    try { rows = await requestJSON('/api/cutting/task-summaries'); } catch (e) { el.innerHTML = errorBox(e); return; }
-    const list = rows.filter(r => r.reportCount > 0).reverse();
-    el.innerHTML = `<div class="ph"><h1>复检处置</h1><span class="crumb">已报良品发现不良时：转料头、报废或待检隔离；已消耗母卷不恢复</span></div>
-      <div class="body"><div class="notice" style="margin:0 0 12px">本版先提供入口：选择任务后在经典工作台的“报工记录”中发起复检处置。</div>
-      ${list.length ? `<table class="t"><thead><tr><th>任务</th><th>名称</th><th>状态</th><th class="r">报工单</th><th class="r">良品 / 需求</th><th></th></tr></thead><tbody>
-      ${list.map(r => `<tr><td class="num">${shortId(r.task.id)}</td><td>${esc(r.task.name)}</td><td>${esc(taskLabels[r.status] || r.status)}</td><td class="r num">${r.reportCount}</td><td class="r num">${r.completed} / ${r.total}</td>
-        <td><a class="btn sm" href="/index.html?taskId=${encodeURIComponent(r.task.id)}&view=reports">报工记录 ↗</a></td></tr>`).join('')}</tbody></table>` : '<div class="empty">没有已报工的任务</div>'}</div>`;
+    try {
+        const summaries = (await requestJSON('/api/cutting/task-summaries')).filter(r => r.reportCount > 0);
+        const details = await Promise.all(summaries.map(s => requestJSON('/api/cutting/tasks/' + encodeURIComponent(s.task.id))));
+        rows = details.flatMap(d => (d.reports || []).map(r => ({task: d.task, report: r})));
+    } catch (e) { el.innerHTML = errorBox(e); return; }
+    let onlyOpen = true;
+    function render() {
+        const list = rows.filter(x => x.report.status !== 'REVERSED' && (!onlyOpen || reviewablePieces(x.report).length))
+            .sort((a, b) => String(b.report.confirmedAt).localeCompare(String(a.report.confirmedAt)));
+        el.innerHTML = `<div class="ph"><h1>复检处置</h1><span class="crumb">已报良品发现不良时：报废或转料头；原报工与母卷耗用保留，完成量扣回形成补产</span></div>
+          <div class="toolbar"><label class="muted"><input type="checkbox" id="open" ${onlyOpen ? 'checked' : ''}> 只看仍可复检的报工</label><span class="sp"></span><span class="muted">${list.length} 张报工单</span></div>
+          <div class="body">${list.length ? `<table class="t"><thead><tr><th>报工单</th><th>任务</th><th>母卷</th><th class="r">实切 mm</th><th class="r">合格</th><th class="r">异常</th><th class="r">可复检</th><th class="r">已复检</th><th>时间</th><th></th></tr></thead><tbody>
+            ${list.map(({task, report}) => { const s = receiptSummary(report, effectivePieceResults);
+              return `<tr><td class="num">${shortId(report.planId)}</td><td>${esc(task.name)}</td><td class="num">${esc(report.rollId || report.sourceRemnantId || '—')}</td><td class="r num">${Math.round(report.actualCutLen || 0)}</td>
+                <td class="r num">${s.qualified}</td><td class="r num">${s.rejected}</td><td class="r num">${reviewablePieces(report).length}</td><td class="r num">${s.dispositions}</td>
+                <td class="num">${esc(String(report.confirmedAt || '').replace('T', ' ').slice(5, 16))}</td>
+                <td><a class="btn sm" href="#/workbench/${encodeURIComponent(task.id)}/${encodeURIComponent(report.planId)}">打开处置</a></td></tr>`; }).join('')}</tbody></table>`
+            : '<div class="empty">没有需要复检的报工</div>'}</div>`;
+        el.querySelector('#open').onchange = e => { onlyOpen = e.target.checked; render(); };
+    }
+    render();
 }
