@@ -131,6 +131,24 @@ restrict,command="/opt/cutdemo/actions-ssh-command.sh" ssh-ed25519 <Actions公�
 - 部署前后母卷、料头、任务接口内容的摘要完全一致，当时分别为 6 卷、5 块、1 个任务。该记录只表示部署时核验结果，不是固定库存。
 - 公网 HTTPS 验证 5 项通过：匿名接口返回 401、认证后健康接口返回 200、异形试验台页面可用、原生异形引擎就绪、标准异形输入实际排入 14 件。此次求解只调用无状态接口，没有报工或修改业务库存。
 
+## macOS 原生求解器
+
+本机直接运行 JAR 不会自动获得 Docker 镜像中的 Linux 求解器；缺少 `data/solver` 时，矩形直刀和异形排料会显式降级到 Java 引擎。Mac 必须使用本机架构编译的 Mach-O 程序，不能复制 Windows `.exe` 或 Linux 二进制。
+
+安装 Xcode Command Line Tools 和 CMake 后，在仓库根目录运行：
+
+```bash
+brew install cmake
+bash scripts/prepare-macos-solver.sh
+sh mvnw verify
+```
+
+脚本读取 Dockerfile 固定的 PackingSolver 提交，只编译矩形直刀和异形两个目标，使用与 Linux 镜像相同的 CLP/HiGHS 配置。源码及构建缓存在 `data/solver-build`，可执行文件和许可证放在 `data/solver`，均不提交到 Git。默认使用两个并行编译进程，可通过 `SOLVER_BUILD_JOBS` 调整。遇到已有且内容不同的程序会停止，须先保留旧程序后再安装。
+
+为兼容现有应用和原生测试的默认路径，安装后的文件名仍为 `packingsolver_rectangleguillotine.exe`、`packingsolver_irregular.exe`；它们实际是 macOS 程序，扩展名不决定二进制格式。从仓库根目录启动服务即可加载，无须额外设置环境变量；从其他目录启动时，分别设置 `PACKINGSOLVER_PATH`、`PACKINGSOLVER_IRREGULAR_PATH` 为绝对路径。
+
+脚本安装前会分别执行一次小规模原生排料并检查结果文件，记录保留在构建目录的 `smoke.*` 中。安装后还应确认 `/api/health` 中两个 `Available` 字段均为 `true`、两个 `Fallback` 字段均为 `null`，并通过 `/api/v1/nesting/solve` 分别执行矩形和异形试算，核对返回的 `engine` 与 `fallbackReason`。文件存在检查不能替代应用层真实求解验收。测试中的原生用例不应再因程序缺失而跳过。
+
 ## Windows 原生求解器
 
 通过环境变量 `PACKINGSOLVER_PATH` 指定可执行文件。WinLibs 构建通常需要同编译器版本的三份 DLL，与 exe 放在同一目录：`libgcc_s_seh-1.dll`、`libstdc++-6.dll`、`libwinpthread-1.dll`。仓库提供复制脚本，保留源文件且拒绝覆盖内容不同的目标文件：
