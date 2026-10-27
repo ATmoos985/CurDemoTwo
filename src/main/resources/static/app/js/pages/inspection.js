@@ -49,7 +49,9 @@ export async function mount(el, [rollParam]) {
               <div class="pane-b">${editor(list)}
                 <div class="sec">全部疵点 · 点击定位</div>
                 <table class="t" style="border:0"><thead><tr><th>Y m</th><th class="r">距右</th><th class="r">宽×长</th><th>类型</th><th></th></tr></thead><tbody>
-                ${list.map((d, i) => `<tr class="click ${st.sel === i ? 'sel' : ''}" data-i="${i}"><td class="num">${(d.y / 1000).toFixed(2)}</td><td class="r num">${fmtN(r.width - d.x - d.w, 1)}</td><td class="r num">${fmtN(d.w, 1)}×${fmtN(d.h, 1)}</td><td>${esc(d.typeName || d.defectType)}</td><td>${d.saved ? '<span class="tag">已入档</span>' : '<span class="tag warn">待保存</span>'}</td></tr>`).join('')}</tbody></table></div>
+                ${list.map((d, i) => `<tr class="click ${st.sel === i ? 'sel' : ''}" data-i="${i}"><td class="num">${(d.y / 1000).toFixed(2)}</td><td class="r num">${fmtN(r.width - d.x - d.w, 1)}</td><td class="r num">${fmtN(d.w, 1)}×${fmtN(d.h, 1)}</td><td>${esc(d.typeName || d.defectType)}</td><td>${d.saved ? '<span class="tag">已入档</span>' : '<span class="tag warn">待保存</span>'}</td></tr>`).join('')}</tbody></table>
+                ${(r.voidedDefects || []).length ? `<div class="sec">已作废 ${r.voidedDefects.length} 处 · 留痕</div>
+                <table class="t" style="border:0"><tbody>${r.voidedDefects.slice().reverse().map(v => `<tr><td class="num muted">${(v.defect.y / 1000).toFixed(2)} m</td><td class="muted">${esc(v.defect.typeName || v.defect.defectType)}</td><td class="wrap muted" title="${esc(v.voidedAt)}">${esc(v.reason)}</td></tr>`).join('')}</tbody></table>` : ''}</div>
               <div class="foot" style="background:#fff;font-size:11.5px;color:var(--text-3)">本次记录保存在本机；入档后用于裁切避让，已有方案需重新核对</div></section></div>`}`;
         bind();
         draw();
@@ -59,9 +61,12 @@ export async function mount(el, [rollParam]) {
     function editor(list) {
         const d = st.sel != null ? list[st.sel] : null, editable = d && !d.saved, r = st.roll;
         const v = (k, dflt) => d ? (k === 'right' ? round(r.width - d.x - d.w) : d[k]) : dflt;
-        return `<div id="editor"><div class="sec">${d ? (editable ? '本次标记 · 可修改 / 删除（Delete）' : '已入档疵点 · 只读') : '精确录入'}</div>
+        const cutArea = d && d.saved && d.y + d.h <= (r.usedLength || 0);
+        return `<div id="editor"><div class="sec">${d ? (editable ? '本次标记 · 可修改 / 删除（Delete）' : '已入档疵点') : '精确录入'}</div>
           ${d ? `<div class="kv"><div>位置</div><div class="num">Y ${(d.y / 1000).toFixed(3)} m · 距右 ${fmtN(r.width - d.x - d.w, 1)} mm</div><div>来源</div><div>${esc(d.detectionSource || '—')}${d.description ? ' · ' + esc(d.description) : ''}</div></div>` : ''}
-          ${d && !editable ? '<div class="notice">已入档疵点可能已被方案避让，删除需要以作废记录的方式处理，本版暂不支持。</div>' : ''}
+          ${d && !editable ? (cutArea ? '<div class="notice">该疵点位于已切区域，属于历史记录，不能作废。</div>'
+            : `<div style="padding:8px 12px;display:flex;gap:6px;align-items:center"><input class="field" id="void-reason" placeholder="作废原因（必填，如：复核为误检）" style="flex:1"><button class="btn sm" id="void" ${st.saving ? 'disabled' : ''}>作废</button></div>
+               <div class="muted" style="padding:0 12px 8px;font-size:11.5px">作废后不再避让，原记录与原因留痕；该卷上未报工的候选方案需重新计算。</div>`) : ''}
           <div class="form" style="grid-template-columns:1fr 1fr;gap:6px 10px">
             ${[['right', '距右边缘 mm', 0], ['y', '距卷头 mm', Math.round(st.pos)], ['w', '疵点宽 mm', 50], ['h', '疵点长 mm', 50]].map(([k, t, dv]) =>
               `<label>${t}<input class="field num" data-f="${k}" value="${v(k, dv)}" style="width:100%" ${d && !editable ? 'disabled' : ''}></label>`).join('')}
@@ -154,6 +159,16 @@ export async function mount(el, [rollParam]) {
         el.querySelector('#undo').onclick = () => { st.pending.pop(); st.sel = null; persist(); render(); };
         el.querySelectorAll('tr[data-i]').forEach(tr => tr.onclick = () => { st.sel = Number(tr.dataset.i); st.pos = all()[st.sel].y + 300; render(); });
         el.querySelector('#new')?.addEventListener('click', () => { st.sel = null; render(); });
+        el.querySelector('#void')?.addEventListener('click', async () => {
+            const d = all()[st.sel], reason = el.querySelector('#void-reason').value.trim();
+            if (!reason) return toast('请填写作废原因', true);
+            st.saving = true; render();
+            try {
+                st.roll = await requestJSON(`/api/rolls/${encodeURIComponent(st.roll.rollId)}/defects/${encodeURIComponent(d.id)}/void`, {reason});
+                st.sel = null; toast('疵点已作废并留痕；该卷候选方案需重新计算');
+            } catch (e) { toast('作废失败：' + e.message, true); }
+            st.saving = false; render();
+        });
         el.querySelector('#del')?.addEventListener('click', () => { st.pending.splice(st.sel - (all().length - st.pending.length), 1); st.sel = null; persist(); render(); });
         el.querySelector('#apply')?.addEventListener('click', () => {
             const f = k => el.querySelector(`[data-f="${k}"]`).value, num = k => Number(f(k));

@@ -7,6 +7,7 @@ import {toScreen, toWorld, fitCamera, zoomAt, panBy, ratioOf, scaleForRatio, par
 import {snapPosition, tickStep} from '../../main/resources/static/app/js/canvas/roll-navigator.js';
 import {buildRollScene, planSegment, plansOnRoll, rollsOfPlans, reportedPlans, segmentStatus, cutEnd, sceneMetrics, demandIndex, NEW_STATION} from '../../main/resources/static/app/js/model/roll-scene.js';
 import {buildSolveRequest, remainingDemands, windowProblem, usablePlan} from '../../main/resources/static/app/js/model/solve-request.js';
+import {defaultReport, applyBulk, recoveryCandidates, reportSummary, reportProblems, buildCutReport} from '../../main/resources/static/app/js/model/report.js';
 
 const appRoot = fileURLToPath(new URL('../../main/resources/static/app/', import.meta.url));
 const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
@@ -143,6 +144,33 @@ test('demand names merge task and plan demands with task taking precedence', () 
     assert.equal(idx.get(1).name, '任务需求');
     assert.equal(idx.get(2).name, '方案需求');
     assert.notEqual(idx.get(1).color, idx.get(2).color);
+});
+
+test('report draft follows backend rules: per-piece outcome, cut length and recoverable remnants', () => {
+    // 工位起点 1000；件 1 在 0–1400，件 2 在 1500–3000（相对工位）
+    const seg = {id: 'p', start: 1000, len: 3200, remnants: [{id: 'R1', x: 0, y: 3000, w: 2800, l: 200, hasDefect: true}],
+        pieces: [{id: 1, demandId: 7, u: 1000, v: 0, du: 1400, dv: 900}, {id: 2, demandId: 8, u: 2500, v: 900, du: 1500, dv: 800}]};
+    let r = defaultReport(seg);
+    assert.equal(r.len, 3200);
+    assert.deepEqual(reportProblems(seg, r), []);
+    assert.deepEqual(reportSummary(seg, r), {qualified: 2, rejected: 0, uncut: 0, cutEnd: 3000});
+    r = {...r, len: 2000};
+    assert.match(reportProblems(seg, r).join(), /短于已切裁片末端/);
+    r = applyBulk(r, 'beyond-uncut', seg);
+    assert.equal(r.rows[2].outcome, 'UNCUT', '末端超出实切长度的件标为未切');
+    assert.equal(r.rows[1].outcome, 'QUALIFIED');
+    const cands = recoveryCandidates(seg, r);
+    assert.deepEqual(cands.find(c => c.id === 'UNCUT-2'), {id: 'UNCUT-2', x: 900, y: 1500, w: 800, l: 500, hasDefect: false, source: '未切区域'}, '未切区域只取实切长度以内');
+    r = {...r, rows: {...r.rows, 1: {outcome: 'REJECTED', reason: ''}}};
+    assert.match(reportProblems(seg, r).join(), /须填写原因/);
+    r = {...r, rows: {...r.rows, 1: {outcome: 'REJECTED', reason: '污渍'}}, rem: {...r.rem, R1: {use: true, w: 2900, l: 200}}};
+    assert.match(reportProblems(seg, r).join(), /不能大于/);
+    r = {...r, rem: {R1: {use: true, w: 2800, l: 150}, 'UNCUT-2': {use: true, w: 800, l: 500}}};
+    assert.deepEqual(reportProblems(seg, r), []);
+    const payload = buildCutReport(seg, r);
+    assert.deepEqual([payload.planId, payload.actualCutLen, payload.finishedPieceCount], ['p', 2000, 0]);
+    assert.deepEqual(payload.pieceResults, [{pieceId: 1, outcome: 'REJECTED', reason: '污渍'}, {pieceId: 2, outcome: 'UNCUT', reason: ''}]);
+    assert.deepEqual(payload.actualRemnants.map(x => [x.id, x.w, x.l, x.hasDefect]), [['R1', 2800, 150, true], ['UNCUT-2', 800, 500, false]], '带疵料头保留带疵标记');
 });
 
 async function files(dir) {

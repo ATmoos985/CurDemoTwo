@@ -37,6 +37,7 @@ public class MotherRollInfo {
 
     // 疵点集与派生料头统计
     private List<Defect> defects = new ArrayList<>();     // 本卷所有检出的瑕疵全集
+    private List<VoidedDefect> voidedDefects = new ArrayList<>(); // 已作废疵点（留痕，不参与避让）
     private int remnantCount;                             // 从本卷切下并入库的料头数量
     private double remnantTotalArea;                      // 在库料头总面积 (m²)
 
@@ -131,6 +132,10 @@ public class MotherRollInfo {
 
     public List<Defect> getDefects() { return defects; }
     public void setDefects(List<Defect> defects) { this.defects = defects; }
+    /** 空列表不序列化：未作废过疵点的母卷 JSON 与历史流水完全一致，避免对账误判。 */
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
+    public List<VoidedDefect> getVoidedDefects() { return voidedDefects; }
+    public void setVoidedDefects(List<VoidedDefect> voidedDefects) { this.voidedDefects = voidedDefects == null ? new ArrayList<>() : voidedDefects; }
 
     public int getRemnantCount() { return remnantCount; }
     public void setRemnantCount(int remnantCount) { this.remnantCount = remnantCount; }

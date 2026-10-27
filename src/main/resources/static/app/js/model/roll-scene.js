@@ -68,6 +68,7 @@ export function planSegment(plan, colors = new Map(), index = 0, reported = new 
         })),
         cuts: (res.cuts || []).filter(c => [c.startX, c.startY, c.endX, c.endY].every(Number.isFinite))
             .map(c => ({u1: start + c.startY, v1: c.startX, u2: start + c.endY, v2: c.endX, type: c.type, step: c.step})),
+        remnants: (res.remnants || []).map(r => ({id: r.id, x: r.x, y: r.y, w: r.w, l: r.l, hasDefect: !!r.hasDefect, status: r.status})),
         pieceArea: Number(res.pieceArea) || 0,
         totalArea: Number(res.totalArea) || 0,
         fulfillment: res.fulfillment || [],

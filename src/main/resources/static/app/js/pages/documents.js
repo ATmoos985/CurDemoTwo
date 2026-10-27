@@ -6,7 +6,8 @@ import {requestJSON, esc, fmtTime, shortId, errorBox} from '../util.js';
 const EVENT = {MIGRATION_OPENING: '期初迁移', CUT_REPORT: '报工记账', CUT_REPORT_BATCH: '批量报工', REPORT_REVERSE: '报工冲销',
     DEMAND_ADJUSTMENT: '需求调整', INSPECTION: '验布入档', INVENTORY_COUNT: '盘点', INVENTORY_TRANSFER: '移库', QUALITY_DISPOSITION: '复检处置',
     REMNANT_ISSUE: '料头领用', REMNANT_RECEIPT: '料头入库', REMNANT_SCRAP: '料头报废', REMNANT_STATUS_ADJUSTMENT: '料头状态调整',
-    ROLL_RECEIPT: '母卷入库', ROLL_RECEIPT_OR_UPDATE: '母卷入库 / 更新', DEMO_RECEIPT: '演示入库', DEMO_RESET: '演示重置', SYSTEM_UPDATE: '系统更新'};
+    ROLL_RECEIPT: '母卷入库', ROLL_RECEIPT_OR_UPDATE: '母卷入库 / 更新', DEMO_RECEIPT: '演示入库', DEMO_RESET: '演示重置', SYSTEM_UPDATE: '系统更新',
+    DEFECT_VOID: '疵点作废'};
 const AGG = {DEMAND: '需求', ROLL: '母卷', MOTHER_ROLL: '母卷', REMNANT: '料头', REPORT: '报工单', TASK: '任务', PLAN: '方案', EXECUTION: '执行单',
     CHECKPOINT: '检查点', TRANSFER: '移库单', COUNT: '盘点单', QUALITY: '复检'};
 const label = (map, k) => map[k] || k;

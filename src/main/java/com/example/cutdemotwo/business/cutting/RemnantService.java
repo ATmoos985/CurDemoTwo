@@ -1586,6 +1586,31 @@ public class RemnantService {
 
     public record InspectionInput(double width, double totalLength, List<Defect> defects) {}
 
+    /**
+     * 作废已入档疵点：从避让集合移出并留痕。疵点集合属于材料指纹，作废后该卷上未报工的方案自动失效，须重新计算。
+     * 已切区域内的疵点属于历史事实，不能作废；材料被执行单预约时不能修改。重复作废同一疵点按已完成返回。
+     */
+    public synchronized MotherRollInfo voidDefect(String rollId, int defectId, String reason) {
+        return mutate("DEFECT_VOID", rollId, "UNAUTHENTICATED_LOCAL", () -> {
+            MotherRollInfo roll = motherRolls.get(rollId);
+            if (roll == null) throw new IllegalArgumentException("未找到母卷，请重新选择");
+            String why = reason == null ? "" : reason.trim();
+            if (why.isEmpty() || why.length() > 200) throw new IllegalArgumentException("请填写作废原因（200 字以内）");
+            var defect = roll.getDefects().stream().filter(d -> d.getId() == defectId).findFirst().orElse(null);
+            if (defect == null) {
+                if (roll.getVoidedDefects().stream().anyMatch(v -> v.defect() != null && v.defect().getId() == defectId))
+                    return roll;
+                throw new IllegalArgumentException("疵点不存在，请刷新后核对");
+            }
+            if (defect.getY() + defect.getH() <= roll.getUsedLength())
+                throw new IllegalArgumentException("疵点位于已切区域，属于历史记录，不能作废");
+            ensureMaterialNotReserved("roll", rollId, null);
+            roll.getDefects().remove(defect);
+            roll.getVoidedDefects().add(new com.example.cutdemotwo.business.model.VoidedDefect(defect, why, LocalDateTime.now().toString(), "UNAUTHENTICATED_LOCAL"));
+            return roll;
+        });
+    }
+
     public synchronized MotherRollInfo createInspectionRoll(MotherRollInfo input) {
         return mutate("ROLL_RECEIPT",input == null ? null : input.getRollId(),"UNAUTHENTICATED_LOCAL",() -> {
             if (input == null || input.getRollId() == null || input.getRollId().isBlank())

@@ -51,6 +51,42 @@ class InspectionTests {
         assertThrows(IllegalArgumentException.class,()->s.createInspectionRoll(first));
         assertEquals("棉布",inventory().getMotherRoll("INSPECT-1").getRollModel());
     }
+    @Test void voidingMovesDefectToAuditListSurvivesRestartAndIsIdempotent() {
+        var s=inventory();roll(s);
+        var saved=s.saveInspection("INSPECT-1",input(defect("a",1000),defect("b",5000)));
+        int id=saved.getDefects().get(0).getId();
+        var request=new com.example.cutdemotwo.business.model.SolveRequest();request.setRollId("INSPECT-1");request.setFeedPortType("roll");
+        String before=s.materialFingerprint(request);
+        var after=s.voidDefect("INSPECT-1",id,"复核为误检");
+        assertEquals(1,after.getDefectsCount());
+        assertEquals(1,after.getVoidedDefects().size());
+        assertEquals("复核为误检",after.getVoidedDefects().get(0).reason());
+        assertEquals(id,after.getVoidedDefects().get(0).defect().getId());
+        assertNotEquals(before,s.materialFingerprint(request),"作废改变材料指纹，未报工方案随之失效");
+        assertEquals(1,s.voidDefect("INSPECT-1",id,"重复提交").getVoidedDefects().size(),"重复作废按已完成返回，不重复留痕");
+        var restarted=inventory().getMotherRoll("INSPECT-1");
+        assertEquals(1,restarted.getDefectsCount());assertEquals(1,restarted.getVoidedDefects().size());
+    }
+    @Test void voidingRequiresReasonKnownDefectAndUncutArea() {
+        var s=inventory();
+        var r=new MotherRollInfo();r.setRollId("USED-1");r.setRollModel("棉布");r.setWidth(2000);r.setTotalLength(100000);
+        r.setUsedLength(2000);r.setCurrentRemainingLength(98000);
+        s.saveOrUpdateMotherRoll(r);
+        var saved=s.saveInspection("USED-1",new RemnantService.InspectionInput(2000,100000,List.of(defect("a",1000),defect("b",50000))));
+        int early=saved.getDefects().get(0).getId(), late=saved.getDefects().get(1).getId();
+        assertThrows(IllegalArgumentException.class,()->s.voidDefect("USED-1",late," "));
+        assertThrows(IllegalArgumentException.class,()->s.voidDefect("USED-1",9999,"不存在"));
+        assertThrows(IllegalArgumentException.class,()->s.voidDefect("NO-ROLL",late,"原因"));
+        assertThrows(IllegalArgumentException.class,()->s.voidDefect("USED-1",early,"已切区域"),"已切区域的疵点是历史记录");
+        assertEquals(2,s.getMotherRoll("USED-1").getDefectsCount());
+        assertEquals(1,s.voidDefect("USED-1",late,"误检").getDefectsCount());
+    }
+    @Test void rollWithoutVoidedDefectsSerializesExactlyAsBefore() {
+        var json=new tools.jackson.databind.ObjectMapper();
+        var roll=new MotherRollInfo();roll.setRollId("R");
+        assertFalse(json.writeValueAsString(roll).contains("voidedDefects"),"未作废的母卷 JSON 不变，历史流水对账不受影响");
+        assertTrue(json.readValue("{\"rollId\":\"R\"}",MotherRollInfo.class).getVoidedDefects().isEmpty());
+    }
     @Test void oldDefectJsonDoesNotGainNullCaptureFieldOrInvalidateSavedPlanFingerprint() {
         var json=new tools.jackson.databind.ObjectMapper();
         assertFalse(json.writeValueAsString(new Defect(1,0,0,50,50,20)).contains("captureId"));

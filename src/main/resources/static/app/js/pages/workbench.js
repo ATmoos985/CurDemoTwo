@@ -10,6 +10,10 @@ import {buildSolveRequest, windowProblem, usablePlan, remainingDemands} from '..
 import {taskLabels, taskLink} from '../../../js/business/cutting/task-list-model.js';
 import {validateDefect, round} from '../../../js/inspection/inspection-model.js';
 import {findForwardPlan} from '../../../js/business/cutting/forward-search.js';
+import {OUTCOMES, defaultReport, applyBulk, recoveryCandidates, reportSummary, reportProblems, buildCutReport} from '../model/report.js';
+
+const REPORT_KEY = id => 'cutplan.app.report.' + id;
+const OUTCOME_COLOR = {REJECTED: '#c0392b', UNCUT: '#59616a'};
 
 const STAGES = ['需求', '材料', '排料', '执行', '报工'];
 const STAGE_OF = {PLAN_PENDING: 2, EXECUTION_PENDING: 3, REPORT_PENDING: 4, ATTENTION: 4, COMPLETED: 5};
@@ -52,8 +56,17 @@ export async function mount(el, [taskId]) {
     }
     await loadRoll();
 
-    const scene = () => buildRollScene({roll, plans, reports: detail.reports, rollId: st.rollId, demands: task.demands,
-        process: task.process, freshDefects: st.fresh, selectedId: st.selectedId, window: st.window});
+    const scene = () => {
+        const sc = buildRollScene({roll, plans, reports: detail.reports, rollId: st.rollId, demands: task.demands,
+            process: task.process, freshDefects: st.fresh, selectedId: st.selectedId, window: st.window});
+        // 报工中：画布按逐件结果着色（异常红、未切灰）
+        const seg = st.report && sc.segments.find(s => s.id === st.report.planId);
+        if (seg) seg.pieces = seg.pieces.map(p => {
+            const o = st.report.rows[p.id]?.outcome;
+            return OUTCOME_COLOR[o] ? {...p, color: OUTCOME_COLOR[o], label: `${OUTCOMES[o]} · ${p.label}`} : p;
+        });
+        return sc;
+    };
     const remaining = () => remainingDemands(task, detail.completed, detail.reserved);
 
     /** keepCamera：重绘外壳但保留画布视角（拖动工位结束、切换右栏等）。 */
@@ -61,6 +74,7 @@ export async function mount(el, [taskId]) {
         const savedCam = keepCamera ? canvas?.getCamera() : null;
         const sc = st.rollId && roll ? scene() : null, met = sc ? sceneMetrics(sc) : null;
         const seg = sc?.segments.find(s => s.id === sc.currentId) || null;
+        if (st.report && (seg?.id !== st.report.planId || seg?.status !== 'pending')) st.report = null; // 选中别的段时关闭报工
         const order = sc ? [...sc.segments.map(s => s.id), NEW_STATION] : [], idx = sc ? (seg ? order.indexOf(seg.id) : order.length - 1) : -1;
         const total = summary?.total ?? task.demands.reduce((a, d) => a + d.quantity, 0), done = summary?.completed ?? 0;
         const stage = STAGE_OF[summary?.status] ?? (st.rollId ? 2 : 1);
@@ -73,7 +87,7 @@ export async function mount(el, [taskId]) {
           <span class="vsep"></span><a class="btn" href="#/tasks">返回任务</a>${summary ? `<a class="btn" href="${esc(taskLink(summary))}">经典工作台 ↗</a>` : ''}</div>
         <div class="stages">${STAGES.map((s, i) => `<div class="stage ${i < stage ? 'done' : i === stage ? 'on' : ''}"><span class="n">${i < stage ? '✓' : i + 1}</span>${s}</div>`).join('')}</div>
         ${!sc ? pickRollHtml() : `
-        <div class="split" style="grid-template-columns:1fr ${prefs.sideCollapsed ? '28px' : '300px'}">
+        <div class="split" style="grid-template-columns:1fr ${st.report ? '420px' : prefs.sideCollapsed ? '28px' : '300px'}">
           <section class="pane" style="background:var(--canvas)">
             <div class="ctool">
               <div class="vseg"><button data-view="station" class="${st.view === 'station' ? 'on' : ''}" title="对准当前工位">工位</button><button data-view="full" class="${st.view === 'full' ? 'on' : ''}" title="显示整卷">全卷</button></div>
@@ -93,7 +107,7 @@ export async function mount(el, [taskId]) {
             <div class="navroll"><div class="nr-head"><span>母卷 <b class="num">${esc(st.rollId)}</b></span><span>幅宽 <b class="num">${fmtN(sc.roll.width)}</b> mm</span><span>总长 <b class="num">${fmtM(sc.roll.total)}</b> m</span><span>已用 <b class="num">${fmtM(sc.roll.used)}</b> m</span>
               <span>本任务 已切 <b class="num">${met.cut}</b> · 候选 <b class="num">${met.pending}</b>${met.stale ? ` · 已失效 <b class="num">${met.stale}</b>` : ''}</span></div><div id="rn"></div></div>
           </section>
-          ${prefs.sideCollapsed ? `<section class="pane side-min"><button id="side-toggle" title="展开右栏">«</button><span>方案指标</span></section>` : `<section class="pane">
+          ${st.report && seg ? reportPanel(seg, idx, sc) : prefs.sideCollapsed ? `<section class="pane side-min"><button id="side-toggle" title="展开右栏">«</button><span>方案指标</span></section>` : `<section class="pane">
             <div class="pane-h">方案指标<span class="sub">本卷</span><span class="sp"></span><button class="btn sm" id="side-toggle" title="收起右栏">»</button></div>
             <div class="pane-b">
               <div class="metric"><div><small>利用率</small><b>${met.utilization.toFixed(1)}<em>%</em></b></div><div><small>用布长度</small><b>${fmtM(met.length, 2)}<em>m</em></b></div>
@@ -132,10 +146,83 @@ export async function mount(el, [taskId]) {
             <div>利用率</div><div class="num">${seg.totalArea ? (seg.pieceArea / seg.totalArea * 100).toFixed(1) : '—'}%</div></div>
           ${seg.status === 'stale' ? '<div class="notice">该方案的报工已在母卷重置时清除，方案既未切也不能再报工，仅作历史参考。</div>' : ''}
           ${seg.status === 'pending' ? `${w.adjusted ? `<div class="notice">工位已调整为 Y ${fmtM(w.start, 2)} m · ${fmtN(w.len)} mm，重新计算后替换当前候选。</div>` : ''}${problem ? `<div class="notice">${esc(problem)}</div>` : ''}${busy}${failure}
-            <div style="display:flex;gap:8px;padding:8px 12px;flex-wrap:wrap"><button class="btn pri" id="solve" ${st.busy || problem || !need ? 'disabled' : ''}>重新计算</button><button class="btn" id="discard" ${st.busy ? 'disabled' : ''}>放弃候选</button>
-              ${summary ? `<a class="btn" href="${esc(taskLink(summary))}">报工 ↗</a>` : ''}</div>` : ''}
+            <div style="display:flex;gap:8px;padding:8px 12px;flex-wrap:wrap"><button class="btn pri" id="report-open" ${st.busy || w.adjusted ? 'disabled' : ''} title="${w.adjusted ? '工位已调整，请先重新计算或还原工位' : '按实际裁切结果报工'}">报工</button>
+              <button class="btn" id="solve" ${st.busy || problem || !need ? 'disabled' : ''}>重新计算</button><button class="btn" id="discard" ${st.busy ? 'disabled' : ''}>放弃候选</button></div>` : ''}
           <div class="sec">本次未排入</div>
           ${unplaced.length ? `<table class="t" style="border:0"><tbody>${unplaced.map(f => `<tr><td class="wrap">${esc(names.get(f.demandId)?.name || `需求 ${f.demandId}`)}</td><td class="r num" style="color:var(--warn)">缺 ${f.unplaced}</td></tr>`).join('')}</tbody></table>` : '<div class="empty" style="padding:12px">本段需求全部排入</div>'}`;
+    }
+
+    /** 报工面板：逐件结果、实切长度、料头回收、库位；提交前就地校验。 */
+    function reportPanel(seg, idx, sc) {
+        const r = st.report, s = reportSummary(seg, r), problems = reportProblems(seg, r), cands = recoveryCandidates(seg, r);
+        const rec = cands.filter(c => r.rem[c.id]?.use);
+        return `<section class="pane" id="report"><div class="pane-h">报工 · 第 ${idx + 1} 次拉布<span class="sub num">${shortId(seg.id)}</span><span class="sp"></span><button class="btn sm" id="report-close">取消</button></div>
+          <div class="pane-b">
+            <div class="form" style="grid-template-columns:90px 1fr;padding:10px 12px 6px">
+              <label>实切长度</label><div style="display:flex;gap:6px;align-items:center"><input class="field num" data-r="len" value="${r.len}" style="width:110px;text-align:right"><span class="muted">mm · 方案 ${fmtN(seg.len, 1)}</span></div>
+              <label>料头库位</label><input class="field" data-r="location" value="${esc(r.location)}">
+            </div>
+            <div class="sec">逐件结果 · 合格 ${s.qualified} · 异常 ${s.rejected} · 未切 ${s.uncut}</div>
+            <div style="display:flex;gap:6px;padding:6px 12px"><button class="btn sm" data-bulk="all-qualified">全设合格</button><button class="btn sm" data-bulk="all-uncut">全设未切</button><button class="btn sm" data-bulk="beyond-uncut" title="末端超出实切长度的裁片标为未切">长度外标为未切</button></div>
+            <table class="t" style="border:0"><thead><tr><th>#</th><th>裁片</th><th class="r">宽×长</th><th>结果</th></tr></thead><tbody>
+            ${seg.pieces.map(p => { const row = r.rows[p.id]; return `<tr><td class="num">${p.id}</td><td class="wrap" style="max-width:150px">${esc((names.get(p.demandId)?.name || '').slice(0, 20))}</td><td class="r num">${fmtN(p.dv)}×${fmtN(p.du)}</td>
+              <td><select class="field" data-o="${p.id}" style="height:22px">${Object.entries(OUTCOMES).map(([k, t]) => `<option value="${k}" ${row.outcome === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+              ${row.outcome === 'REJECTED' ? `<input class="field" data-why="${p.id}" value="${esc(row.reason)}" placeholder="异常原因" style="height:22px;width:100%;margin-top:3px">` : ''}</td></tr>`; }).join('')}</tbody></table>
+            <div class="sec">料头回收 · ${rec.length} 块</div>
+            ${cands.length ? `<table class="t" style="border:0"><thead><tr><th></th><th>料头</th><th class="r">实测宽</th><th class="r">实测长</th></tr></thead><tbody>
+            ${cands.map(c => { const m = r.rem[c.id] || {use: false, w: c.w, l: c.l}; return `<tr><td><input type="checkbox" data-use="${esc(c.id)}" ${m.use ? 'checked' : ''}></td>
+              <td>${esc(c.source)}${c.hasDefect ? ' <span class="tag warn">带疵</span>' : ''}<div class="muted num" style="font-size:11px">≤ ${fmtN(c.w)}×${fmtN(c.l)}</div></td>
+              <td class="r"><input class="field num" data-rw="${esc(c.id)}" value="${m.w}" style="width:72px;height:22px;text-align:right" ${m.use ? '' : 'disabled'}></td>
+              <td class="r"><input class="field num" data-rl="${esc(c.id)}" value="${m.l}" style="width:72px;height:22px;text-align:right" ${m.use ? '' : 'disabled'}></td></tr>`; }).join('')}</tbody></table>`
+              : '<div class="empty" style="padding:10px">本方案没有可回收料头</div>'}
+            ${problems.length ? `<div class="notice">${problems.map(esc).join('<br>')}</div>` : ''}
+            <div class="muted" style="padding:8px 12px;font-size:11.5px">确认后记账：母卷扣减 ${fmtN(r.len, 1)} mm，合格件计入任务完成；如需更正请冲销后重报，不能直接修改。</div>
+            <div style="display:flex;gap:8px;padding:0 12px 12px"><button class="btn pri" id="report-submit" ${problems.length || st.busy ? 'disabled' : ''}>确认报工</button><button class="btn" id="report-reset">恢复默认</button></div>
+          </div></section>`;
+    }
+
+    function openReport(seg) {
+        const saved = JSON.parse(localStorage.getItem(REPORT_KEY(seg.id)) || 'null');
+        st.report = saved?.planId === seg.id ? saved : defaultReport(seg);
+        st.pop = null; shell(true);
+    }
+    function editReport(change) { st.report = change(st.report); localStorage.setItem(REPORT_KEY(st.report.planId), JSON.stringify(st.report)); shell(true); }
+    function closeReport() { st.report = null; shell(true); }
+    async function submitReport() {
+        const sc = scene(), seg = sc.segments.find(s => s.id === st.report?.planId);
+        if (!seg) return;
+        const problems = reportProblems(seg, st.report);
+        if (problems.length) return toast(problems[0], true);
+        const payload = buildCutReport(seg, st.report), s = reportSummary(seg, st.report);
+        localStorage.setItem(REPORT_KEY(seg.id), JSON.stringify(st.report)); // 提交前落盘：结果未知或失败时刷新也能找回
+        st.busy = '正在提交报工…'; shell(true);
+        try {
+            const receipt = await requestJSON('/api/cutting/report-confirm', payload);
+            localStorage.removeItem(REPORT_KEY(seg.id));
+            st.report = null; await reload();
+            st.selectedId = NEW_STATION; st.window = null; st.busy = '';
+            toast(`报工完成：合格 ${s.qualified} 件，回收料头 ${(receipt.derivedRemnants || []).length} 块，母卷扣减 ${fmtM(payload.actualCutLen, 2)} m`);
+            full();
+        } catch (e) {
+            st.busy = ''; shell(true);
+            toast('报工未完成，草稿已保留：' + e.message, true);
+        }
+    }
+    function bindReport() {
+        const box = el.querySelector('#report'); if (!box) return;
+        const sc = scene(), seg = sc.segments.find(s => s.id === st.report.planId);
+        box.querySelector('#report-close').onclick = closeReport;
+        box.querySelector('#report-reset').onclick = () => { localStorage.removeItem(REPORT_KEY(seg.id)); st.report = defaultReport(seg); shell(true); };
+        box.querySelector('#report-submit').onclick = submitReport;
+        box.querySelector('[data-r="len"]').onchange = e => editReport(r => ({...r, len: Number(e.target.value) || 0}));
+        box.querySelector('[data-r="location"]').onchange = e => editReport(r => ({...r, location: e.target.value}));
+        box.querySelectorAll('[data-bulk]').forEach(b => b.onclick = () => editReport(r => applyBulk(r, b.dataset.bulk, seg)));
+        box.querySelectorAll('[data-o]').forEach(s => s.onchange = () => editReport(r => ({...r, rows: {...r.rows, [s.dataset.o]: {outcome: s.value, reason: r.rows[s.dataset.o]?.reason || ''}}})));
+        box.querySelectorAll('[data-why]').forEach(i => i.onchange = () => editReport(r => ({...r, rows: {...r.rows, [i.dataset.why]: {...r.rows[i.dataset.why], reason: i.value}}})));
+        const cand = id => recoveryCandidates(seg, st.report).find(c => c.id === id);
+        box.querySelectorAll('[data-use]').forEach(c => c.onchange = () => editReport(r => { const k = c.dataset.use, cur = r.rem[k] || {w: cand(k).w, l: cand(k).l}; return {...r, rem: {...r.rem, [k]: {...cur, use: c.checked}}}; }));
+        box.querySelectorAll('[data-rw]').forEach(i => i.onchange = () => editReport(r => ({...r, rem: {...r.rem, [i.dataset.rw]: {...r.rem[i.dataset.rw], w: Number(i.value)}}})));
+        box.querySelectorAll('[data-rl]').forEach(i => i.onchange = () => editReport(r => ({...r, rem: {...r.rem, [i.dataset.rl]: {...r.rem[i.dataset.rl], l: Number(i.value)}}})));
     }
 
     function pickRollHtml() {
@@ -227,7 +314,9 @@ export async function mount(el, [taskId]) {
         bindChrome(sc);
         el.querySelectorAll('[data-roll]').forEach(b => b.onclick = () => chooseRoll(b.dataset.roll));
         if (!sc) return;
-        el.querySelector('#side-toggle').onclick = () => { prefs.sideCollapsed = !prefs.sideCollapsed; savePrefs(prefs); shell(true); };
+        el.querySelector('#side-toggle')?.addEventListener('click', () => { prefs.sideCollapsed = !prefs.sideCollapsed; savePrefs(prefs); shell(true); });
+        el.querySelector('#report-open')?.addEventListener('click', () => { const seg = sc.segments.find(s => s.id === sc.currentId); if (seg) openReport(seg); });
+        bindReport();
         el.querySelector('#solve')?.addEventListener('click', solve);
         el.querySelector('#discard')?.addEventListener('click', discard);
         el.querySelector('#forward')?.addEventListener('click', forward);
