@@ -1,17 +1,21 @@
 // 适配层：任务编辑表单（新建 / 编辑 / 导入）。纯函数，不发请求。
 // 校验与后端 RemnantService.saveTask 一致：名称与型号必填；1–200 项需求；编号唯一为正；尺寸为正；单项 1–10000 件；
 // 已报工需求不能删除、不能改名改尺寸，总件数不得小于已报工件数。
+// 任务类型：二维排料（NESTING_2D）或一维分切（SLITTING_1D，需求为分切宽度 × 整米卷长 × 卷数）。
+import {SLITTING, DEFAULT_SLITTING, slittingProblems} from './slitting.js';
 
 export const DEFAULT_PROCESS = {bedLength: 5000, trimStart: 0, pieceGap: 0, cutOrigin: 'right-bottom', firstStageOrientation: 'horizontal',
     allowRotation: false, allowLongitudinal: true};
 
 export function emptyTask() {
-    return {id: null, revision: 0, name: '', materialModel: '', externalRef: '', process: {...DEFAULT_PROCESS}, demands: []};
+    return {id: null, revision: 0, name: '', materialModel: '', externalRef: '', problemType: 'NESTING_2D', slitting: {...DEFAULT_SLITTING},
+        process: {...DEFAULT_PROCESS}, demands: []};
 }
 
 /** 从后端任务转为表单（深拷贝，补齐工艺默认值）。 */
 export function fromTask(task) {
     return {id: task.id, revision: task.revision, name: task.name || '', materialModel: task.materialModel || '', externalRef: task.externalRef || '',
+        problemType: task.problemType || 'NESTING_2D', slitting: {...DEFAULT_SLITTING, ...(task.slitting || {})},
         process: {...DEFAULT_PROCESS, ...(task.process || {})},
         demands: (task.demands || []).map(d => ({id: d.id, name: d.name, width: d.width, length: d.length, quantity: d.quantity,
             allowRotation: !!d.allowRotation, ...(d.shape ? {shape: d.shape} : {})}))};
@@ -46,6 +50,12 @@ export function taskProblems(form, {original = null, completed = {}} = {}) {
     if (!(pr.bedLength > 0)) p.push('拉布长度须大于 0');
     if (!(pr.trimStart >= 0)) p.push('切头不能为负数');
     if (!(pr.pieceGap >= 0)) p.push('件间距不能为负数');
+    const slit = form.problemType === SLITTING;
+    if (slit) {
+        const problem = slittingProblems(form.slitting, form.demands);
+        if (problem) p.push(problem);
+        if (form.demands.some(d => d.allowRotation || d.shape)) p.push('一维分切需求不能旋转或使用轮廓');
+    }
     const ids = new Set();
     form.demands.forEach((d, i) => {
         const at = `第 ${i + 1} 行`;
@@ -57,6 +67,7 @@ export function taskProblems(form, {original = null, completed = {}} = {}) {
     });
     if (original) {
         if (Object.keys(completed).length && original.materialModel !== form.materialModel) p.push('已有报工的任务不能更改材料型号');
+        if (Object.keys(completed).length && (original.problemType || 'NESTING_2D') !== form.problemType) p.push('已有报工的任务不能更改任务类型');
         for (const old of original.demands || []) {
             const count = done(completed, old.id);
             if (!count) continue;
@@ -78,6 +89,7 @@ export function lineLock(line, completed = {}) {
 export function toPayload(form) {
     return {id: form.id || undefined, revision: form.revision || 0, name: form.name.trim(), materialModel: form.materialModel.trim(),
         externalRef: form.externalRef.trim(), process: {...form.process},
+        ...(form.problemType === SLITTING ? {problemType: SLITTING, slitting: Object.fromEntries(Object.entries(form.slitting).map(([k, v]) => [k, Number(v)]))} : {}),
         demands: form.demands.map(d => ({id: d.id, name: String(d.name).trim(), width: Number(d.width), length: Number(d.length),
             quantity: Number(d.quantity), allowRotation: !!d.allowRotation, ...(d.shape ? {shape: d.shape} : {})}))};
 }
@@ -85,4 +97,17 @@ export function toPayload(form) {
 /** 标准需求模板（CSV，可用 Excel 打开），列名与 parseDemandSheet 一致。 */
 export function demandTemplateCsv() {
     return '﻿材料型号,裁片名称,宽度(mm),长度(mm),数量,订单编号,允许旋转\n2#A3A-Cream,示例窗帘,2170,3250,2,SO-0001,否\n';
+}
+
+/** 切换为一维分切时按母卷幅宽给出组合宽度初值（可切区宽度向下取整到步长，下限为其 90%）。 */
+export function withProblemType(form, type, rollWidth = 0) {
+    if (type !== SLITTING) return {...form, problemType: 'NESTING_2D'};
+    const s = {...DEFAULT_SLITTING, ...form.slitting};
+    if (!s.maxWidth && rollWidth > 0) {
+        const usable = Math.floor(rollWidth) - s.leftTrim - s.rightTrim;
+        s.maxWidth = Math.floor(usable / s.widthStep) * s.widthStep;
+        s.minWidth = Math.floor(s.maxWidth * 0.9 / s.widthStep) * s.widthStep;
+    }
+    return {...form, problemType: SLITTING, slitting: s,
+        demands: form.demands.map(d => ({...d, allowRotation: false}))};
 }

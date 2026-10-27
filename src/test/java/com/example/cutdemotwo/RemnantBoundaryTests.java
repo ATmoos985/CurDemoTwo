@@ -48,7 +48,9 @@ class RemnantBoundaryTests {
         var child = (RemnantStock) ((List<?>) receipt.get("derivedRemnants")).get(0);
         assertEquals(614.7, child.getWidth());
         assertEquals(450, child.getLength());
-        assertEquals(before - 5000, reopened.getMotherRoll(request.getRollId()).getCurrentRemainingLength());
+        // 工位从 4870 起而母卷已用 0：跳过的 4870 mm 不能再拉回，一并计为消耗
+        double skipped = request.getWindowStartY() - 0;
+        assertEquals(before - skipped - 5000, reopened.getMotherRoll(request.getRollId()).getCurrentRemainingLength());
         assertEquals(receipt, reopened.confirmPlan(report), "Retry must not deduct stock twice");
         assertEquals(x, reopened.getPlan(plan.getPlanId()).result().getRemnants().get(0).getX(), "Saved plan stays unchanged");
         assertEquals(y, reopened.getPlan(plan.getPlanId()).result().getRemnants().get(0).getY(), "Saved plan stays unchanged");

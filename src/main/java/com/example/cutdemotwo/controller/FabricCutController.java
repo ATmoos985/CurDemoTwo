@@ -84,6 +84,12 @@ public class FabricCutController {
     @ResponseStatus(HttpStatus.CONFLICT)
     public Map<String, String> conflict(RuntimeException error) { return Map.of("message", error.getMessage()); }
 
+    /** 一维分切出车：按分切组合把一车条位置保存为待报工候选。 */
+    @PostMapping("/cutting/slitting-cars")
+    public SolveResponse slittingCar(@RequestBody com.example.cutdemotwo.business.model.SlittingCar car) {
+        return workflowService.slittingCar(car);
+    }
+
     @PostMapping("/solve")
     public SolveResponse solve(@RequestBody SolveRequest request) {
         return workflowService.solve(request);

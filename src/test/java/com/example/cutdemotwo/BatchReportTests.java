@@ -92,7 +92,9 @@ class BatchReportTests {
             assertEquals("PENDING",stock.getPlan(a.planId()).status());
         }
         assertEquals(2,stock.reportBatch(List.of(a,b),false).size());
-        assertEquals(55000-2597.9-2210.2,stock.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength(),1e-8);
+        // 连续母卷按位置消耗：已用推进到最远工位末端（26949.8+2210.2），5000 起跳过的区段一并扣减
+        assertEquals(60000-(26949.8+2210.2),stock.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength(),1e-8);
+        assertEquals(26949.8+2210.2,stock.getMotherRoll("ROLL-2026-0920").getUsedLength(),1e-8);
         assertEquals(Map.of("1",2),stock.completedQuantities(task.id()));
     }
     @Test void decimalEndpointCanContinueAfterAnAlreadyReportedStation() {

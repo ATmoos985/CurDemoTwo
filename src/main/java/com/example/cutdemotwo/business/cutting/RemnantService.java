@@ -538,6 +538,17 @@ public class RemnantService {
         if(hash!=null && !hash.equals(json.writeValueAsString(report)))throw new InventoryConflictException("该方案已报工，重复提交的内容不同");
     }
 
+    /** 区间 [from, to) 落在本卷已报工回执记入的“跳过区段”内的长度。 */
+    private double skippedCoverage(String rollId, double from, double to) {
+        double covered = 0;
+        for (Map<String, Object> receipt : receipts.values()) {
+            if ("REVERSED".equals(receipt.get("status")) || !"roll".equals(receipt.get("feedPortType")) || !Objects.equals(rollId, receipt.get("rollId"))) continue;
+            if (!(receipt.get("undo") instanceof Map<?, ?> undo) || !(undo.get("skippedFrom") instanceof Number a) || !(undo.get("skipped") instanceof Number n)) continue;
+            covered += Math.max(0, Math.min(to, a.doubleValue() + n.doubleValue()) - Math.max(from, a.doubleValue()));
+        }
+        return covered;
+    }
+
     public synchronized String materialFingerprint(SolveRequest request) {
         return read(() -> materialFingerprintInternal(request));
     }
@@ -848,6 +859,14 @@ public class RemnantService {
         return counts;
     }
 
+    public synchronized CuttingTask getTask(String id) {
+        return read(() -> {
+            CuttingTask task = tasks.get(id);
+            if (task == null) throw new IllegalArgumentException("切割任务不存在");
+            return task;
+        });
+    }
+
     public synchronized List<CuttingTask> listTasks() { return read(() -> new ArrayList<>(tasks.values())); }
 
     /** Summaries and print snapshots are read from one inventory revision. */
@@ -934,6 +953,19 @@ public class RemnantService {
                 !Set.of("left-top", "right-top", "left-bottom", "right-bottom").contains(String.valueOf(process.cutOrigin())) ||
                 !Set.of("horizontal", "vertical").contains(String.valueOf(process.firstStageOrientation()))))
             throw new IllegalArgumentException("机台工艺参数无效");
+        String type = input.problemType() == null || CuttingTask.NESTING_2D.equals(input.problemType()) ? null : input.problemType();
+        if (type != null && !CuttingTask.SLITTING_1D.equals(type)) throw new IllegalArgumentException("任务类型只支持二维排料或一维分切");
+        if (previous != null && !Objects.equals(previous.problemType(), type) && !completedQuantities(id).isEmpty())
+            throw new IllegalArgumentException("已有报工的任务不能更改任务类型");
+        CuttingTask.Slitting slitting = type == null ? null : input.slitting();
+        if (type != null) {
+            if (slitting == null) throw new IllegalArgumentException("一维分切任务须填写切边与组合宽度");
+            slitting.validate();
+            for (CuttingTask.Line line : input.demands())
+                if (line != null && (line.shape() != null || line.allowRotation() || line.width() != Math.rint(line.width())
+                        || line.length() % 1000 != 0 || line.width() > slitting.maxWidth() || line.length() > 1_000_000))
+                    throw new IllegalArgumentException("一维需求为整数 mm 的分切宽度 × 整米卷长（1000 的倍数），不能旋转或使用轮廓，宽度不超过组合上限");
+        }
         for (CuttingTask.Line line : input.demands()) {
             if (line != null && line.shape() != null) {
                 com.example.cutdemotwo.algorithm.geometry.PolygonGeometry.validate(line.shape());
@@ -959,12 +991,13 @@ public class RemnantService {
             }
             if (Objects.equals(previous.name(), input.name()) && Objects.equals(previous.materialModel(), input.materialModel()) &&
                     Objects.equals(previous.externalRef(), input.externalRef()) && Objects.equals(previous.process(), process) &&
+                    Objects.equals(previous.problemType(), type) && Objects.equals(previous.slitting(), slitting) &&
                     previous.demands().equals(input.demands())) return previous;
         }
         if (previous != null && executions.values().stream().anyMatch(e->e.taskId().equals(id) && e.reserves(operationTime)))
             throw new InventoryConflictException("任务已有下达或执行中的需求，请完成报工或取消预约后编辑");
         CuttingTask task = new CuttingTask(id, input.name().trim(), input.materialModel().trim(), input.externalRef(),
-                previous == null ? 1 : previous.revision() + 1, List.copyOf(input.demands()), process);
+                previous == null ? 1 : previous.revision() + 1, List.copyOf(input.demands()), process, type, slitting);
         tasks.put(id, task);
         return task;
     }
@@ -1133,7 +1166,13 @@ public class RemnantService {
         }
 
         double len = report.actualCutLen();
-        if (remnantFeed ? len != 0 : (!Double.isFinite(len) || len <= 0 || len > request.getRollL() || len > roll.getCurrentRemainingLength())) {
+        // 连续母卷不能倒拉：工位起点在已用长度之后时，中间为避让疵点等跳过的区段一并计为消耗并记入回执；
+        // 之后若报工落在已计入的跳过区段内（例如先报后一工位），只抵扣该区段，不重复扣减。其余情况按实切长度扣减。
+        double used = remnantFeed ? 0 : roll.getUsedLength(), start0 = request.getWindowStartY();
+        double skipped = remnantFeed ? 0 : Math.max(0, start0 - used);
+        double consumed = remnantFeed ? 0 : start0 >= used - 0.001 ? skipped + len
+                : Math.max(0, len - skippedCoverage(request.getRollId(), start0, start0 + len));
+        if (remnantFeed ? len != 0 : (!Double.isFinite(len) || len <= 0 || len > request.getRollL() || consumed > roll.getCurrentRemainingLength() + 0.001)) {
             throw new IllegalArgumentException("实切长度无效或超过母卷剩余长度");
         }
         if (!remnantFeed) {
@@ -1204,8 +1243,9 @@ public class RemnantService {
         } else {
             undo.put("remainingBefore", roll.getCurrentRemainingLength());
             undo.put("usedBefore", roll.getUsedLength());
-            roll.setCurrentRemainingLength(roll.getCurrentRemainingLength() - len);
-            roll.setUsedLength(roll.getUsedLength() + len);
+            if (skipped > 0.001) { undo.put("skippedFrom", used); undo.put("skipped", skipped); }
+            roll.setCurrentRemainingLength(roll.getCurrentRemainingLength() - consumed);
+            roll.setUsedLength(roll.getUsedLength() + consumed);
             undo.put("remainingAfter", roll.getCurrentRemainingLength());
             undo.put("usedAfter", roll.getUsedLength());
         }

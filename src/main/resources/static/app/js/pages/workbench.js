@@ -1,6 +1,6 @@
 // 排料工作台：读取任务、方案、报工与母卷档案，交给画布与导航条渲染。
 // 本页可选料、按工位计算（/api/solve）、重新计算与放弃候选；报工仍在经典工作台完成。画布标记的疵点可保存到母卷。
-import {requestJSON, esc, fmtM, fmtN, shortId, errorBox, toast, loadPrefs, savePrefs, dismissOnOutside, solverSettings} from '../util.js';
+import {requestJSON, esc, fmtM, fmtN, shortId, errorBox, toast, loadPrefs, savePrefs, dismissOnOutside, solverSettings, loadSheetLib} from '../util.js';
 import {setStatus} from '../main.js';
 import {createRollCanvas} from '../canvas/roll-canvas.js';
 import {createRollNavigator} from '../canvas/roll-navigator.js';
@@ -17,10 +17,13 @@ import {camData, localHome, worldHome, initialPositions, movePiece, rotatePiece,
 import {gcodeText, dxfText} from '../../../js/plugins/export/cam-format.js';
 import {createPlanHistory} from '../../../js/business/cutting/plan-editing.js';
 import {ticketModel, ticketHTML} from '../../../js/plugins/export/cut-ticket-model.js';
+import {OptimizationSession} from '../../../js/business/optimization/job-client.js';
+import {isSlitting, openDemands, slittingJob, assignCar, usefulCars, carStart, carRequest, patternRows, compositionText, spareWidth} from '../model/slitting.js';
 
 const EXEC_TAG = {DRAFT: '', RELEASED: 'run', RUNNING: 'run', EXPIRED: 'warn', CANCELLED: '', REPORTED: 'ok', REVERSED: 'err'};
 
 const REPORT_KEY = id => 'cutplan.app.report.' + id;
+const SLIT_KEY = id => 'cutplan.app.slit.' + id;
 const OUTCOME_COLOR = {REJECTED: '#c0392b', UNCUT: '#59616a'};
 
 const STAGES = ['需求', '材料', '排料', '执行', '报工'];
@@ -41,7 +44,10 @@ export async function mount(el, [taskId, focusPlan]) {
         ]);
     }
     let allRemnants = [];
-    const loadStocks = () => Promise.all([requestJSON('/api/rolls').then(r => { allRolls = r; }), requestJSON('/api/remnants').then(r => { allRemnants = r; })]);
+    let occupied = new Map(); // 材料编号 → 其他任务正在预约/执行的执行单
+    const loadStocks = () => Promise.all([requestJSON('/api/rolls').then(r => { allRolls = r; }), requestJSON('/api/remnants').then(r => { allRemnants = r; }),
+        requestJSON('/api/v2/execution-orders').then(r => { occupied = new Map((r.items || r).filter(v => v.reservationActive && v.execution.taskId !== taskId).map(v => [v.execution.materialId, v])); }).catch(() => {})]);
+    const occupiedText = id => { const v = occupied.get(id); return v ? `被其他任务的执行单 ${shortId(v.execution.id)}（${executionLabels[v.effectiveState] || v.effectiveState}）占用` : ''; };
     try { await Promise.all([loadTask(), loadStocks()]); }
     catch (e) { el.innerHTML = errorBox(e); return; }
     let task = detail.task, names = demandIndex(task.demands, plans);
@@ -116,10 +122,10 @@ export async function mount(el, [taskId, focusPlan]) {
         const colors = demandColors(task.demands, plans);
         el.innerHTML = `
         <div class="wb-head"><h1>${esc(task.name)}</h1><span class="num muted">${shortId(task.id)}</span>
-          <span class="tag kind">二维 · ${esc(task.materialModel || '—')}</span>
+          <span class="tag kind">${isSlitting(task) ? '一维分切' : '二维'} · ${esc(task.materialModel || '—')}</span>
           ${summary ? `<span class="tag ${TAG[summary.status] || ''}">${esc(taskLabels[summary.status] || summary.status)}</span>` : ''}
           <span class="sp"></span><div class="sum" id="sum">${sumHtml(sc, colors)}</div>
-          <span class="vsep"></span><a class="btn" href="#/tasks">返回任务</a>${summary ? `<a class="btn" href="${esc(taskLink(summary))}">经典工作台 ↗</a>` : ''}</div>
+          <span class="vsep"></span><a class="btn" href="#/tasks">返回任务</a>${summary && !isSlitting(task) ? `<a class="btn" href="${esc(taskLink(summary))}">经典工作台 ↗</a>` : ''}</div>
         <div class="stages">${STAGES.map((s, i) => `<div class="stage ${i < stage ? 'done' : i === stage ? 'on' : ''}"><span class="n">${i < stage ? '✓' : i + 1}</span>${s}</div>`).join('')}</div>
         ${!sc ? pickRollHtml() : `
         <div class="split" style="grid-template-columns:1fr ${st.report ? '420px' : st.quality || st.adjust ? '340px' : prefs.sideCollapsed ? '28px' : '300px'}">
@@ -164,7 +170,9 @@ export async function mount(el, [taskId, focusPlan]) {
         const w = sc.window, rem = remaining(), need = rem.reduce((a, d) => a + d.demand, 0), problem = windowProblem(roll, w);
         const failure = st.failure ? `<div class="notice"><b>${esc(st.failure.title || '本次未得到可用方案')}</b><br>${esc(st.failure.message || '')}
             ${st.failure.canForward ? '<div style="margin-top:6px"><button class="btn sm" id="forward">向后查找可裁位置</button></div>' : ''}</div>` : '';
-        const busy = st.busy ? `<div class="notice" style="border-color:#c9d8e8;background:#f2f6fb;color:var(--accent-ink)">${esc(st.busy)}</div>` : '';
+        const busy = (st.busy ? `<div class="notice" style="border-color:#c9d8e8;background:#f2f6fb;color:var(--accent-ink)">${esc(st.busy)}</div>` : '')
+            + (occupied.has(roll.remnant ? roll.remnant.id : st.rollId) ? `<div class="notice">该材料${esc(occupiedText(roll.remnant ? roll.remnant.id : st.rollId))}，可以先排料，但须等对方报工或取消后才能报工。</div>` : '');
+        if (!seg && isSlitting(task)) return slitBlock(sc) + busy + failure;
         if (!seg) {
             return `<div class="sec">新工位</div>
               <div class="kv"><div>位置</div><div class="num">Y ${fmtM(w.start, 2)} → ${fmtM(w.start + w.len, 2)} m</div><div>拉布长</div><div class="num">${fmtN(w.len, 1)} mm</div>
@@ -187,7 +195,7 @@ export async function mount(el, [taskId, focusPlan]) {
               const reportWhy = w.adjusted ? '工位已调整，请先重新计算或还原工位' : !reportAllowed ? (view.allowedActions?.report?.reason || '执行单当前状态不能报工') : '按实际裁切结果报工';
               return `${w.adjusted ? `<div class="notice">工位已调整为 Y ${fmtM(w.start, 2)} m · ${fmtN(w.len)} mm，重新计算后替换当前候选。</div>` : ''}${problem ? `<div class="notice">${esc(problem)}</div>` : ''}${busy}${failure}
             <div style="display:flex;gap:8px;padding:8px 12px;flex-wrap:wrap"><button class="btn pri" id="report-open" ${st.busy || w.adjusted || !reportAllowed ? 'disabled' : ''} title="${esc(reportWhy)}">报工</button>
-              <button class="btn" id="solve" ${st.busy || problem || !need || locked ? 'disabled' : ''} title="${locked ? '已下达或执行中，先取消执行单' : ''}">重新计算</button><button class="btn" id="discard" ${st.busy || locked ? 'disabled' : ''}>放弃候选</button></div>
+              ${isSlitting(task) ? '' : `<button class="btn" id="solve" ${st.busy || problem || !need || locked ? 'disabled' : ''} title="${locked ? '已下达或执行中，先取消执行单' : ''}">重新计算</button>`}<button class="btn" id="discard" ${st.busy || locked ? 'disabled' : ''}>放弃候选</button></div>
             ${executionBlock(seg, view)}`; })() : ''}
           ${seg.status === 'cut' ? recordsBlock(seg) : ''}
           ${toolsBlock(seg)}
@@ -404,11 +412,17 @@ export async function mount(el, [taskId, focusPlan]) {
               <td class="r"><input class="field num" data-rl="${esc(c.id)}" value="${m.l}" style="width:72px;height:22px;text-align:right" ${m.use ? '' : 'disabled'}></td></tr>`; }).join('')}</tbody></table>`
               : '<div class="empty" style="padding:10px">本方案没有可回收料头</div>'}
             ${problems.length ? `<div class="notice">${problems.map(esc).join('<br>')}</div>` : ''}
-            <div class="muted" style="padding:8px 12px;font-size:11.5px">确认后记账：母卷扣减 ${fmtN(r.len, 1)} mm，合格件计入任务完成；如需更正请冲销后重报，不能直接修改。</div>
+            <div class="muted" style="padding:8px 12px;font-size:11.5px">确认后记账：${r.remnant ? '料头整块消耗' : (() => { const d = rollDeduction(seg.start, Number(r.len));
+                return `母卷扣减 ${fmtN(d.total, 1)} mm${d.skipped > .05 ? `（含工位前避让疵点跳过的 ${fmtN(d.skipped, 1)} mm）` : ''}`; })()}，合格件计入任务完成；如需更正请冲销后重报，不能直接修改。</div>
             <div style="display:flex;gap:8px;padding:0 12px 12px"><button class="btn pri" id="report-submit" ${problems.length || st.busy ? 'disabled' : ''}>确认报工</button><button class="btn" id="report-reset">恢复默认</button></div>
           </div></section>`;
     }
 
+    /** 与后端一致的位置消耗：已用长度推进到工位末端，工位前跳过的区段一并扣减。 */
+    function rollDeduction(start, len) {
+        const used = roll?.usedLength || 0, total = Math.max(0, start + len - used);
+        return {total, skipped: Math.max(0, Math.min(start - used, total))};
+    }
     function openReport(seg) {
         const saved = JSON.parse(localStorage.getItem(REPORT_KEY(seg.id)) || 'null');
         st.report = saved?.planId === seg.id ? saved : defaultReport(seg, {remnant: !!roll?.remnant});
@@ -421,7 +435,7 @@ export async function mount(el, [taskId, focusPlan]) {
         if (!seg) return;
         const problems = reportProblems(seg, st.report);
         if (problems.length) return toast(problems[0], true);
-        const payload = buildCutReport(seg, st.report), s = reportSummary(seg, st.report);
+        const payload = buildCutReport(seg, st.report), s = reportSummary(seg, st.report), deduction = rollDeduction(seg.start, payload.actualCutLen);
         localStorage.setItem(REPORT_KEY(seg.id), JSON.stringify(st.report)); // 提交前落盘：结果未知或失败时刷新也能找回
         st.busy = '正在提交报工…'; shell(true);
         try {
@@ -434,7 +448,7 @@ export async function mount(el, [taskId, focusPlan]) {
             st.report = null; await reload();
             st.selectedId = NEW_STATION; st.window = null; st.busy = '';
             toast(roll?.remnant ? `报工完成：合格 ${s.qualified} 件，料头 ${roll.remnant.id} 已整块消耗`
-                : `报工完成：合格 ${s.qualified} 件，回收料头 ${(receipt.derivedRemnants || []).length} 块，母卷扣减 ${fmtM(payload.actualCutLen, 2)} m`);
+                : `报工完成：合格 ${s.qualified} 件，回收料头 ${(receipt.derivedRemnants || []).length} 块，母卷扣减 ${fmtM(deduction.total, 2)} m${deduction.skipped > .05 ? `（含跳过 ${fmtM(deduction.skipped, 2)} m）` : ''}`);
             full();
         } catch (e) {
             st.busy = ''; shell(true);
@@ -511,7 +525,7 @@ export async function mount(el, [taskId, focusPlan]) {
           <div class="pane-h">选择母卷<span class="sub">型号 ${esc(task.materialModel)} · 待排 ${remaining().reduce((a, d) => a + d.demand, 0)} 件</span></div>
           ${choices.length ? `<table class="t" style="border:0"><thead><tr><th>卷号</th><th>材料</th><th class="r">幅宽</th><th class="r">剩余 / 总长</th><th class="r">疵点</th><th>库位</th><th></th></tr></thead><tbody>
           ${choices.map(id => { const r = allRolls.find(x => x.rollId === id) || {rollId: id}; const rem = r.currentRemainingLength ?? (r.totalLength - r.usedLength);
-              return `<tr><td class="num">${esc(id)}</td><td>${esc(r.materialName || r.rollModel || '—')}</td><td class="r num">${fmtN(r.width)}</td><td class="r num">${fmtM(rem)} / ${fmtM(r.totalLength)} m</td><td class="r num">${r.defectsCount ?? (r.defects || []).length}</td><td>${esc(r.storageLocation || '—')}</td><td><button class="btn sm pri" data-roll="${esc(id)}">选用</button></td></tr>`; }).join('')}</tbody></table>`
+              return `<tr><td class="num">${esc(id)}</td><td>${esc(r.materialName || r.rollModel || '—')}</td><td class="r num">${fmtN(r.width)}</td><td class="r num">${fmtM(rem)} / ${fmtM(r.totalLength)} m</td><td class="r num">${r.defectsCount ?? (r.defects || []).length}</td><td>${esc(r.storageLocation || '—')}${occupied.has(id) ? ` <span class="tag warn" title="${esc(occupiedText(id))}">占用中</span>` : ''}</td><td><button class="btn sm ${occupied.has(id) ? '' : 'pri'}" data-roll="${esc(id)}">选用</button></td></tr>`; }).join('')}</tbody></table>`
             : `<div class="empty">没有型号为 ${esc(task.materialModel)} 且有余量的母卷。</div>`}</div>
           <div class="box" style="max-width:920px;margin:0 auto 24px">
           <div class="pane-h">在库料头<span class="sub">同型号可用 ${rems.length} 块 · 整块投料、优先消化余料</span><span class="sp"></span>
@@ -548,16 +562,16 @@ export async function mount(el, [taskId, focusPlan]) {
         return `<button class="sumb ${st.pop === 'demand' ? 'on' : ''}" data-pop="demand"><small>需求</small>${task.demands.length} 项 · 良品 ${done}/${total} ▾</button>
             <button class="sumb ${st.pop === 'material' ? 'on' : ''}" data-pop="material"><small>材料</small><span class="num">${esc(st.rollId || '未选')}</span>${roll ? ` · 余 ${fmtM(roll.currentRemainingLength ?? (roll.totalLength - roll.usedLength))} m` : ''} ▾</button>
             <button class="sumb ${fresh ? 'warn' : ''} ${st.pop === 'defect' ? 'on' : ''}" data-pop="defect"><small>疵点</small>${defects} 处${fresh ? ` · 新增 ${fresh}` : ''} ▾</button>
-            <button class="sumb ${st.pop === 'process' ? 'on' : ''}" data-pop="process"><small>工艺</small>拉布 ${fmtM(task.process?.bedLength || 0)} m · 基准 ${esc(originText(task.process?.cutOrigin))} ▾</button>
+            <button class="sumb ${st.pop === 'process' ? 'on' : ''}" data-pop="process"><small>工艺</small>${isSlitting(task) ? `分切 ${task.slitting?.minWidth}–${task.slitting?.maxWidth} mm` : `拉布 ${fmtM(task.process?.bedLength || 0)} m`} · 基准 ${esc(originText(task.process?.cutOrigin))} ▾</button>
             ${st.pop ? `<div class="popover" id="popover">${popover(st.pop, sc, colors)}</div>` : ''}`;
     }
     function footHtml(sc) {
         const fresh = st.fresh.length, seg = sc?.segments.find(s => s.id === sc.currentId);
-        const canSolve = sc && (!seg || seg.status === 'pending');
+        const canSolve = sc && (!seg || seg.status === 'pending') && !isSlitting(task);
         return `${fresh ? `<span class="tag warn">画布新增疵点 ${fresh} 处未保存</span><button class="btn" id="save-defects" ${st.saving ? 'disabled' : ''}>保存疵点到母卷</button><button class="btn" id="drop-defects">放弃</button>` : ''}
           <span class="sp"></span>${st.busy ? `<span class="muted" style="font-size:12px">${esc(st.busy)}</span>` : '<span class="muted" style="font-size:12px">候选方案不占用库存；报工在经典工作台完成</span>'}
           ${canSolve && prefs.sideCollapsed ? `<button class="btn pri" id="solve-foot" ${st.busy ? 'disabled' : ''}>${seg ? '重新计算' : '计算本工位'}</button>` : ''}
-          ${summary ? `<a class="btn" href="${esc(taskLink(summary))}">经典工作台继续 ↗</a>` : ''}`;
+          ${summary && !isSlitting(task) ? `<a class="btn" href="${esc(taskLink(summary))}">经典工作台继续 ↗</a>` : ''}`;
     }
     /** 只刷新摘要条、页脚和画布数据，保留相机。 */
     function chrome() {
@@ -593,7 +607,10 @@ export async function mount(el, [taskId, focusPlan]) {
                 : '<div class="empty">本卷没有疵点记录</div>'}
               ${st.fresh.length ? '<div class="notice">新增疵点保存后，后续工位排料会避让；已有方案需重新核对。</div>' : ''}`;
         }
-        const p = task.process || {};
+        const p = task.process || {}, sp = task.slitting;
+        if (isSlitting(task) && sp) return `<div class="pane-h">分切工艺<span class="sp"></span><a class="btn sm" href="#/task/${encodeURIComponent(task.id)}">修改参数</a></div>
+          <div class="kv"><div>左 / 右切边</div><div class="num">${sp.leftTrim} / ${sp.rightTrim} mm</div><div>组合宽度</div><div class="num">${sp.minWidth}–${sp.maxWidth} mm · 步长 ${sp.widthStep}</div>
+          <div>超产上限</div><div class="num">${sp.totalOverCap} 卷</div><div>切头</div><div class="num">${fmtN(p.trimStart)} mm</div><div>切割基准</div><div>${esc(originText(p.cutOrigin))}</div></div>`;
         return `<div class="pane-h">工艺<span class="sp"></span><a class="btn sm" href="#/task/${encodeURIComponent(task.id)}">修改工艺</a></div>
           <div class="kv"><div>拉布长度</div><div class="num">${fmtN(p.bedLength)} mm</div><div>切头</div><div class="num">${fmtN(p.trimStart)} mm</div>
           <div>切割基准</div><div>${esc(originText(p.cutOrigin))}</div><div>第一刀方向</div><div>${p.firstStageOrientation === 'vertical' ? '纵向' : '横向'}</div>
@@ -634,6 +651,9 @@ export async function mount(el, [taskId, focusPlan]) {
         el.querySelector('#solve')?.addEventListener('click', solve);
         el.querySelector('#discard')?.addEventListener('click', discard);
         el.querySelector('#forward')?.addEventListener('click', forward);
+        el.querySelector('#slit-solve')?.addEventListener('click', slitSolve);
+        el.querySelector('#slit-export')?.addEventListener('click', slitExport);
+        el.querySelectorAll('[data-car]').forEach(b => b.onclick = () => slitCar(b.dataset.car));
         const host = el.querySelector('#rc');
         canvas?.destroy(); nav?.destroy();
         canvas = createRollCanvas(host, {
@@ -738,6 +758,82 @@ export async function mount(el, [taskId, focusPlan]) {
         st.busy = ''; full();
     }
 
+    // ---- 一维分切：计算分切组合（v2 计算作业）→ 按组合逐车出车（校验后成为候选）→ 报工同二维 ----
+    const session = new OptimizationSession();
+    function slitBlock(sc) {
+        const open = openDemands(remaining(), plans), need = open.reduce((a, d) => a + d.demand, 0), s = st.slit, r = s?.result;
+        const head = `<div class="sec">一维分切 · 出车</div>
+          <div class="kv"><div>待出</div><div class="num">${open.length} 项 · ${need} 卷</div><div>母卷幅宽</div><div class="num">${fmtN(roll.width)} mm</div>
+            <div>下一车起点</div><div class="num">Y ${fmtM(sc.window.start, 2)} m</div></div>`;
+        if (roll.remnant) return head + '<div class="notice">一维分切按母卷定长出车，请在“材料”中改选母卷。</div>';
+        const solveBtn = `<button class="btn ${r ? '' : 'pri'}" id="slit-solve" ${st.busy || !need ? 'disabled' : ''}>${r ? '按剩余需求重新计算' : '计算分切组合'}</button>`;
+        if (!r) return head + `<div style="display:flex;gap:8px;padding:8px 12px">${solveBtn}</div>
+          <div class="muted" style="padding:0 12px 8px;font-size:11.5px">按所选母卷幅宽与任务分切参数计算组合；之后逐车出车，每车是母卷上一段“切头 + 卷长”的工位，报工后扣减母卷。</div>`;
+        const missing = (r.fulfillment || []).reduce((a, f) => a + f.missing, 0), over = r.totalOverproduced || 0;
+        const rows = (r.patterns || []).map(p => ({p, cars: usefulCars(p, open)}));
+        return head + `${s.width !== Math.floor(roll.width) ? `<div class="notice">组合按幅宽 ${fmtN(s.width)} mm 计算，与当前母卷不一致，请重新计算。</div>` : ''}
+          <div class="muted" style="padding:6px 12px;font-size:11.5px">${r.patterns.length} 个组合 · 计划 ${r.patterns.reduce((a, p) => a + p.repetitions, 0)} 车${missing ? ` · <span style="color:var(--warn)">缺 ${missing} 卷</span>` : ''}${over ? ` · 超产 ${over} 卷` : ''}</div>
+          <table class="t" style="border:0"><thead><tr><th>组合（宽×条）</th><th class="r">卷长</th><th class="r">车</th><th></th></tr></thead><tbody>
+          ${rows.map(({p, cars}) => `<tr><td class="wrap num">${esc(compositionText(p))}<div class="muted" style="font-size:11px">条宽 ${fmtN(p.patternWidthMm)} · 余宽 ${fmtN(spareWidth(p, s.width, task.slitting))} mm</div></td><td class="r num">${fmtM(p.lengthMm)} m</td>
+            <td class="r num" title="可出 / 计划">${cars} / ${p.repetitions}</td><td><button class="btn sm ${cars ? 'pri' : ''}" data-car="${esc(p.id)}" ${cars && !st.busy && s.width === Math.floor(roll.width) ? '' : 'disabled'}>出一车</button></td></tr>`).join('')}</tbody></table>
+          <div style="display:flex;gap:8px;padding:8px 12px;flex-wrap:wrap">${solveBtn}<button class="btn" id="slit-export">导出方案</button></div>`;
+    }
+    async function slitSolve() {
+        const open = openDemands(remaining(), plans);
+        if (!open.length) return toast('没有待出的需求（候选已占用的条不重复计算）', true);
+        st.busy = '正在计算分切组合…'; st.failure = null; shell(true);
+        try {
+            const width = Math.floor(roll.width);
+            const {job, result} = await session.solve(slittingJob(task, width, open), {onProgress: j => { st.busy = `正在计算分切组合 · ${j.phase || j.state}`; }});
+            if (!result.slitting?.patterns?.length) throw new Error(result.slitting?.status === 'NO_SOLUTION_FOUND' ? '在当前组合宽度范围内找不到可行组合，请调整分切参数' : (job.message || '未得到可用组合'));
+            st.slit = {jobId: job.id, width, revision: task.revision, result: result.slitting};
+            localStorage.setItem(SLIT_KEY(task.id), JSON.stringify({jobId: job.id, width, revision: task.revision}));
+        } catch (e) { if (e.name !== 'AbortError') st.failure = {title: '分切计算未完成', message: e.message}; }
+        st.busy = ''; shell(true);
+    }
+    async function slitCar(patternId) {
+        const pattern = st.slit?.result?.patterns.find(p => p.id === patternId); if (!pattern) return;
+        const {strips} = assignCar(pattern, openDemands(remaining(), plans), task.slitting?.leftTrim || 0);
+        if (!strips.length) return toast('该组合已无剩余需求可出', true);
+        const from = scene().window.start, len = (task.process?.trimStart || 0) + pattern.lengthMm;
+        const start = carStart(roll, from, len, strips);
+        if (start == null) return toast(from + len > roll.totalLength + .001 ? `母卷剩余长度不足一车（需 ${fmtM(len, 2)} m），请换卷`
+            : `Y ${fmtM(from, 2)} m 之后没有连续 ${fmtM(len, 2)} m 且条区无疵点的区段，请换卷或调整卷长`, true);
+        st.busy = '正在校验并出车…'; st.failure = null; shell(true);
+        try {
+            const result = await requestJSON('/api/cutting/slitting-cars', carRequest({task, roll, start, pattern, strips, settings: solverSettings()}));
+            await reload(); st.selectedId = result.planId; st.window = null; st.busy = '';
+            toast(`已出车 · ${strips.length} 条 · Y ${fmtM(start, 2)} m${start > from + .001 ? '（已避让疵点）' : ''}`);
+            return full();
+        } catch (e) { st.failure = {title: '出车未通过校验', message: e.message}; }
+        st.busy = ''; shell(true);
+    }
+    async function slitExport() {
+        try {
+            const XLSX = await loadSheetLib(), r = st.slit.result, rows = patternRows(r, names, st.slit.width, task.slitting);
+            const book = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['序号', '卷长(mm)', '组合(宽×条)', '条宽合计(mm)', '组合宽(mm)', '母卷幅宽(mm)', '余宽(mm)', '计划车数', '订单分配(卷)'],
+                ...rows.map(x => [x.no, x.length, x.composition, x.patternWidth, x.comboWidth, x.motherWidth, x.spare, x.repetitions, x.allocations])]), '分切组合');
+            XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['需求', '分切宽(mm)', '卷长(mm)', '需求卷数', '计划产出', '缺', '超产'],
+                ...(r.fulfillment || []).map(f => { const d = task.demands.find(x => String(x.id) === String(f.orderId)) || {}; return [d.name || f.orderId, d.width, d.length, f.requested, f.produced, f.missing, f.overproduced]; })]), '履约');
+            const cars = plans.filter(p => p.request?.taskId === task.id && p.status !== 'CANCELLED').map(p => [shortId(p.id), p.status === 'CONFIRMED' ? '已报工' : '候选', p.request.rollId, p.request.windowStartY / 1000, p.request.rollL,
+                (p.result.pieces || []).map(x => `${x.w}`).join(' + ')]);
+            XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['方案', '状态', '母卷', '起点(m)', '车长(mm)', '条宽(mm)'], ...cars]), '已出车');
+            XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['任务', task.name], ['材料型号', task.materialModel], ['计算母卷幅宽(mm)', st.slit.width],
+                ['方案性质', '计划分切组合；按车出车并报工后才扣减母卷与计入完成'], ['计算作业', st.slit.jobId]]), '说明');
+            XLSX.writeFile(book, `分切方案-${shortId(task.id)}.xlsx`);
+        } catch (e) { toast('导出失败：' + e.message, true); }
+    }
+    /** 恢复上次分切计算（同一任务版本）；结果在服务端保存，只记作业号。 */
+    async function restoreSlit() {
+        const saved = JSON.parse(localStorage.getItem(SLIT_KEY(task.id)) || 'null');
+        if (!saved || saved.revision !== task.revision) return;
+        try {
+            const result = await requestJSON('/api/v2/optimization-results/' + encodeURIComponent(saved.jobId));
+            if (result.slitting?.patterns?.length) { st.slit = {...saved, result: result.slitting}; if (!st.busy) shell(true); }
+        } catch { localStorage.removeItem(SLIT_KEY(task.id)); }
+    }
+
     function status(sc) {
         const c = st.cursor, w = sc.window;
         setStatus(`<span>光标 <span class="num">${c ? `X ${fmtN(c.v, 1)} mm · Y ${(c.u / 1000).toFixed(3)} m` : '—'}</span></span>
@@ -772,7 +868,8 @@ export async function mount(el, [taskId, focusPlan]) {
     function refresh() { chrome(); }
     function full() { shell(); }
     full();
-    return () => { canvas?.destroy(); nav?.destroy(); undismiss?.(); };
+    if (isSlitting(task)) restoreSlit();
+    return () => { canvas?.destroy(); nav?.destroy(); undismiss?.(); session.cancel(); };
 }
 
 function originText(o) { return {'right-bottom': '右下', 'left-bottom': '左下', 'right-top': '右上', 'left-top': '左上'}[o] || o || '—'; }

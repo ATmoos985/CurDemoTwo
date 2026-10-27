@@ -41,6 +41,62 @@ public class CuttingWorkflowService {
         return result;
     }
 
+    /**
+     * 一维分切出车：前端按分切组合给出条的位置，这里核对任务、材料与需求后，用二维同一套校验
+     * （越界、重叠、疵点避让）生成刀序和料头，保存为待报工候选。之后的执行、报工、复检与二维一致。
+     */
+    public SolveResponse slittingCar(com.example.cutdemotwo.business.model.SlittingCar car) {
+        if (car == null || car.request() == null || car.pieces() == null || car.pieces().isEmpty() || car.pieces().size() > 500)
+            throw new IllegalArgumentException("请提供本车的分切条（1–500 条）");
+        SolveRequest request = car.request();
+        request.validateSettings();
+        if (request.getTaskId() == null || !inventory.getTask(request.getTaskId()).slittingTask())
+            throw new IllegalArgumentException("只有一维分切任务可以按分切组合出车");
+        if (!"roll".equals(request.getFeedPortType()) || !request.isAllowLongitudinal())
+            throw new IllegalArgumentException("一维分切按母卷定长出车，且须允许纵切");
+        request.setFirstStageOrientation("vertical"); // 分切先纵向开条，再在车尾横断
+        inventory.prepareTaskSolve(request);
+        request.setDefects(windowDefects(inventory.getMotherRoll(request.getRollId()).getDefects(),
+                request.getWindowStartY(), request.getRollL(), request.getRollW()));
+        var demands = new java.util.HashMap<Integer, com.example.cutdemotwo.business.model.PieceDemand>();
+        request.getDemands().forEach(d -> demands.put(d.getId(), d));
+        var counts = new java.util.HashMap<Integer, Integer>();
+        Set<Integer> ids = new HashSet<>();
+        var pieces = new ArrayList<PlacedPiece>();
+        for (var p : car.pieces()) {
+            var line = p == null || p.getDemandId() == null ? null : demands.get(p.getDemandId());
+            if (line == null || !ids.add(p.getId()) || p.isRotated() || p.getShape() != null
+                    || Math.abs(p.getW() - line.getWidth()) > .001 || Math.abs(p.getL() - line.getLength()) > .001
+                    || p.getY() < request.getTrimStart() - .001)
+                throw new IllegalArgumentException("分切条须属于本车需求、编号唯一、不旋转，尺寸与需求一致且位于切头之后");
+            counts.merge(line.getId(), 1, Integer::sum);
+            pieces.add(new PlacedPiece(p.getId(), line.getName(), p.getX(), p.getY(), line.getWidth(), line.getLength(), false, line.getId()));
+        }
+        if (demands.values().stream().anyMatch(d -> counts.getOrDefault(d.getId(), 0) != d.getDemand()))
+            throw new IllegalArgumentException("本车分切条数与需求数量不一致");
+        String baseline = inventory.materialFingerprint(request);
+        SolveResponse result = FabricSolveAdapter.adjust(solverFactory, request, pieces);
+        if (!result.isSuccess() || result.getPieces().isEmpty())
+            throw new IllegalArgumentException(result.getMessage() == null || result.getMessage().isBlank() ? "本车分切位置未通过校验" : result.getMessage());
+        String id = UUID.randomUUID().toString();
+        result.setPlanId(id);
+        inventory.rememberPlan(new CuttingPlan(id, request, result, baseline, "PENDING", java.time.LocalDateTime.now().toString()));
+        return result;
+    }
+
+    /** 疵点以母卷档案为准（不信任客户端）：按避让边距外扩后裁到工位内，换算为工位局部坐标。 */
+    static java.util.List<com.example.cutdemotwo.contracts.geometry.Defect> windowDefects(
+            java.util.List<com.example.cutdemotwo.contracts.geometry.Defect> defects, double start, double length, double width) {
+        var result = new ArrayList<com.example.cutdemotwo.contracts.geometry.Defect>();
+        for (var d : defects == null ? java.util.List.<com.example.cutdemotwo.contracts.geometry.Defect>of() : defects) {
+            double m = d.getMargin(), x = Math.max(0, d.getX() - m), y = Math.max(start, d.getY() - m);
+            double w = Math.min(width, d.getX() + d.getW() + m) - x, h = Math.min(start + length, d.getY() + d.getH() + m) - y;
+            if (w <= 0 || h <= 0) continue;
+            result.add(new com.example.cutdemotwo.contracts.geometry.Defect(d.getId(), x, y - start, w, h, 0));
+        }
+        return result;
+    }
+
     public synchronized Map<String, Object> confirm(CutReport report) {
         return inventory.confirmPlan(report);
     }

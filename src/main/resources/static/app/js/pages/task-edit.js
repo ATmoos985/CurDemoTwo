@@ -1,20 +1,12 @@
 // 任务编辑：新建 / 编辑任务与需求，导入 Excel / CSV / JSON 需求（复用经典 demand-import-model 解析）。
 // 本机草稿防丢失；保存走 /api/cutting/tasks（带 revision，冲突时提示重新载入）。
-import {requestJSON, esc, fmtN, errorBox, toast} from '../util.js';
-import {emptyTask, fromTask, addDemand, mergeImport, taskProblems, lineLock, toPayload, demandTemplateCsv} from '../model/task-form.js';
+import {requestJSON, esc, fmtN, errorBox, toast, loadSheetLib} from '../util.js';
+import {emptyTask, fromTask, addDemand, mergeImport, taskProblems, lineLock, toPayload, demandTemplateCsv, withProblemType} from '../model/task-form.js';
+import {SLITTING} from '../model/slitting.js';
 import {parseDemandSheet, parseDemandJSON, importedTask, importGroups} from '../../../js/business/cutting/demand-import-model.js';
 
 const ORIGINS = [['right-bottom', '右下'], ['left-bottom', '左下'], ['right-top', '右上'], ['left-top', '左上']];
 const draftKey = id => 'cutplan.app.taskdraft.' + (id || 'new');
-let sheetLib;
-function loadSheetLib() {
-    sheetLib ||= new Promise((resolve, reject) => {
-        const s = document.createElement('script'); s.src = '/vendor/sheetjs/xlsx.mini.min.js';
-        s.onload = () => resolve(window.XLSX); s.onerror = () => { sheetLib = null; s.remove(); reject(new Error('表格读取组件加载失败，请重试')); };
-        document.head.append(s);
-    });
-    return sheetLib;
-}
 
 export async function mount(el, [taskId]) {
     let original = null, completed = {}, rolls = [];
@@ -33,7 +25,8 @@ export async function mount(el, [taskId]) {
     const dirty = () => !original || JSON.stringify(toPayload(form)) !== JSON.stringify(toPayload(fromTask(original)));
 
     function render() {
-        const problems = taskProblems(form, {original, completed}), p = form.process;
+        const problems = taskProblems(form, {original, completed}), p = form.process, slit = form.problemType === SLITTING, sp = form.slitting;
+        const typeLocked = original && Object.keys(completed).length;
         const total = form.demands.reduce((a, d) => a + (Number(d.quantity) || 0), 0);
         el.innerHTML = `<div class="ph"><h1>${original ? '编辑任务' : '新建任务'}</h1><span class="crumb">${original ? esc(original.name) + ' · 版本 ' + original.revision : '填写需求后保存，再进入工作台选料排料'}</span>
             ${draft && dirty() ? '<span class="tag warn">本机草稿</span>' : ''}<span class="sp"></span>
@@ -45,12 +38,22 @@ export async function mount(el, [taskId]) {
             <div>
               <div class="box"><div class="pane-h">基本信息</div><div class="form" style="grid-template-columns:80px 1fr">
                 <label>任务名称</label><input class="field" data-f="name" value="${esc(form.name)}">
+                <label>任务类型</label><select class="field" id="ptype" ${typeLocked ? 'disabled title="已有报工，不能更改类型"' : ''}><option value="NESTING_2D">二维排料（裁片）</option><option value="${SLITTING}" ${slit ? 'selected' : ''}>一维分切（分条）</option></select>
                 <label>材料型号</label><div><input class="field" data-f="materialModel" list="models" value="${esc(form.materialModel)}" style="width:100%" ${original && Object.keys(completed).length ? 'disabled title="已有报工，不能更改型号"' : ''}>
                   <datalist id="models">${models.map(m => `<option>${esc(m)}</option>`).join('')}</datalist>
                   <div class="muted" style="font-size:11.5px;margin-top:3px">在库同型号母卷 ${rolls.filter(r => r.rollModel === form.materialModel).length} 卷</div></div>
                 <label>来源</label><input class="field" data-f="externalRef" value="${esc(form.externalRef)}" placeholder="订单文件 / 外部单号">
               </div></div>
-              <div class="box"><div class="pane-h">工艺参数</div><div class="form" style="grid-template-columns:100px 1fr">
+              ${slit ? `<div class="box"><div class="pane-h">分切参数<span class="sub">整数 mm · 每车长度 = 切头 + 卷长</span></div><div class="form" style="grid-template-columns:110px 1fr">
+                <label>左切边 mm</label><input class="field num" data-s="leftTrim" value="${sp.leftTrim}">
+                <label>右切边 mm</label><input class="field num" data-s="rightTrim" value="${sp.rightTrim}">
+                <label>组合宽度下限</label><input class="field num" data-s="minWidth" value="${sp.minWidth}">
+                <label>组合宽度上限</label><input class="field num" data-s="maxWidth" value="${sp.maxWidth}">
+                <label>宽度步长</label><input class="field num" data-s="widthStep" value="${sp.widthStep}">
+                <label>超产上限 卷</label><input class="field num" data-s="totalOverCap" value="${sp.totalOverCap}">
+                <label>切头 mm</label><input class="field num" data-p="trimStart" value="${p.trimStart}">
+                <label>切割基准</label><select class="field" data-p="cutOrigin">${ORIGINS.map(([k, t]) => `<option value="${k}" ${p.cutOrigin === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+              </div></div>` : `<div class="box"><div class="pane-h">工艺参数</div><div class="form" style="grid-template-columns:100px 1fr">
                 <label>拉布长度 mm</label><input class="field num" data-p="bedLength" value="${p.bedLength}">
                 <label>切头 mm</label><input class="field num" data-p="trimStart" value="${p.trimStart}">
                 <label>件间距 mm</label><input class="field num" data-p="pieceGap" value="${p.pieceGap}">
@@ -58,21 +61,21 @@ export async function mount(el, [taskId]) {
                 <label>第一刀方向</label><select class="field" data-p="firstStageOrientation"><option value="horizontal" ${p.firstStageOrientation === 'horizontal' ? 'selected' : ''}>横向</option><option value="vertical" ${p.firstStageOrientation === 'vertical' ? 'selected' : ''}>纵向</option></select>
                 <label>允许旋转</label><select class="field" data-p="allowRotation"><option value="0">否</option><option value="1" ${p.allowRotation ? 'selected' : ''}>是</option></select>
                 <label>允许纵切</label><select class="field" data-p="allowLongitudinal"><option value="1">是</option><option value="0" ${p.allowLongitudinal ? '' : 'selected'}>否</option></select>
-              </div></div>
+              </div></div>`}
               ${problems.length ? `<div class="notice" style="margin:0">${problems.slice(0, 8).map(esc).join('<br>')}${problems.length > 8 ? `<br>… 共 ${problems.length} 项` : ''}</div>` : ''}
             </div>
             <div class="box" style="margin:0"><div class="pane-h">需求<span class="sub">${form.demands.length} 项 · ${fmtN(total)} 件</span><span class="sp"></span>
                 <label class="btn sm" style="cursor:pointer">导入 Excel / CSV / JSON<input type="file" id="file" accept=".xlsx,.xls,.csv,.json" hidden></label>
                 <button class="btn sm" id="template">下载模板</button><button class="btn sm" id="add">＋ 添加需求</button></div>
               ${imp ? importHtml() : ''}
-              ${form.demands.length ? `<table class="t" style="border:0"><thead><tr><th class="r">编号</th><th>名称</th><th class="r">宽 mm</th><th class="r">长 mm</th><th class="r">件数</th><th>可旋转</th><th class="r">已报工</th><th></th></tr></thead><tbody>
+              ${form.demands.length ? `<table class="t" style="border:0"><thead><tr><th class="r">编号</th><th>${slit ? '订单 / 规格' : '名称'}</th><th class="r">${slit ? '分切宽 mm' : '宽 mm'}</th><th class="r">${slit ? '卷长 mm' : '长 mm'}</th><th class="r">${slit ? '卷数' : '件数'}</th>${slit ? '' : '<th>可旋转</th>'}<th class="r">已报工</th><th></th></tr></thead><tbody>
               ${form.demands.map((d, i) => { const l = lineLock(d, completed); return `<tr>
                 <td class="r num">${d.id}</td>
                 <td><input class="field" data-d="${i}" data-k="name" value="${esc(d.name)}" style="width:100%;height:22px" ${l.locked ? 'disabled' : ''}></td>
                 <td class="r"><input class="field num" data-d="${i}" data-k="width" value="${d.width}" style="width:80px;height:22px;text-align:right" ${l.locked || d.shape ? 'disabled' : ''}></td>
                 <td class="r"><input class="field num" data-d="${i}" data-k="length" value="${d.length}" style="width:80px;height:22px;text-align:right" ${l.locked || d.shape ? 'disabled' : ''}></td>
                 <td class="r"><input class="field num" data-d="${i}" data-k="quantity" value="${d.quantity}" style="width:64px;height:22px;text-align:right" title="${l.locked ? '不得少于已报工 ' + l.minQuantity + ' 件' : ''}"></td>
-                <td><input type="checkbox" data-d="${i}" data-k="allowRotation" ${d.allowRotation ? 'checked' : ''}></td>
+                ${slit ? '' : `<td><input type="checkbox" data-d="${i}" data-k="allowRotation" ${d.allowRotation ? 'checked' : ''}></td>`}
                 <td class="r num">${completed[d.id] || completed[String(d.id)] || 0}</td>
                 <td>${l.locked ? '<span class="tag">已报工</span>' : `<button class="btn sm" data-del="${i}">删除</button>`}</td></tr>`; }).join('')}</tbody></table>`
                 : '<div class="empty">还没有需求。添加需求，或导入订单表（9.28 订单格式 / 标准模板 / 任务 JSON）。</div>'}
@@ -103,6 +106,11 @@ export async function mount(el, [taskId]) {
             const v = ['allowRotation', 'allowLongitudinal'].includes(k) ? raw === '1' : ['cutOrigin', 'firstStageOrientation'].includes(k) ? raw : Number(raw);
             form = {...form, process: {...form.process, [k]: v}}; persist(); render();
         });
+        on('#ptype', 'change', e => {
+            const width = Math.max(0, ...rolls.filter(r => r.rollModel === form.materialModel).map(r => r.width));
+            form = withProblemType(form, e.target.value, width); persist(); render();
+        });
+        on('[data-s]', 'change', e => { form = {...form, slitting: {...form.slitting, [e.target.dataset.s]: Number(e.target.value)}}; persist(); render(); });
         on('[data-d]', 'change', e => {
             const i = Number(e.target.dataset.d), k = e.target.dataset.k;
             const v = k === 'allowRotation' ? e.target.checked : k === 'name' ? e.target.value : k === 'quantity' ? Math.round(Number(e.target.value)) : Number(e.target.value);

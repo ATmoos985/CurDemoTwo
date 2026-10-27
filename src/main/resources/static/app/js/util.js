@@ -75,3 +75,14 @@ export function dismissOnOutside(el, close) {
     document.addEventListener('keydown', key);
     return () => { document.removeEventListener('mousedown', click); document.removeEventListener('keydown', key); };
 }
+
+/** 按需加载本地 SheetJS（Excel 读写），失败可重试。 */
+let sheetLib;
+export function loadSheetLib() {
+    sheetLib ||= new Promise((resolve, reject) => {
+        const s = document.createElement('script'); s.src = '/vendor/sheetjs/xlsx.mini.min.js';
+        s.onload = () => resolve(window.XLSX); s.onerror = () => { sheetLib = null; s.remove(); reject(new Error('表格组件加载失败，请重试')); };
+        document.head.append(s);
+    });
+    return sheetLib;
+}
