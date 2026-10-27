@@ -288,6 +288,7 @@ function renderLayout(L,{w,h,pad=36,labels=true,dims=true,cuts=true,oneD=false}=
 }
 
 /* ---------------- 画布（纯渲染：只接收 母卷 / 方案块 / 当前段） ---------------- */
+let VERT=false;
 const SVG_DEFS=`<defs><pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="var(--canvas-grid)" stroke-width="1"/></pattern>
 <pattern id="waste" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#5a6068" stroke-width="1"/></pattern>
 <pattern id="usedp" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="#2b3036"/><line x1="0" y1="0" x2="0" y2="5" stroke="#454c54" stroke-width="2"/></pattern>
@@ -306,7 +307,7 @@ function drawBlocks(blocks,R,s,toX,y0,{cur=-1,dim=false,labels=false,oneD=false}
       for(const it of b.L.items){
         const iw=it.w*k*s, ih=it.h*s;
         g+=`<rect x="${x+it.x*k*s}" y="${y0+it.y*s}" width="${iw}" height="${ih}" fill="${ORDER_COLORS[it.o]}" fill-opacity=".85" stroke="#1d2125" stroke-width="${s>.05?1:.4}"/>`;
-        if(labels&&iw>52&&ih>14)g+=`<text x="${x+(it.x+it.w/2)*k*s}" y="${y0+(it.y+it.h/2)*s+4}" fill="#fff" font-size="11" font-family="var(--mono)" text-anchor="middle">${it.label}</text>`;
+        if(labels&&(VERT?ih:iw)>52&&(VERT?iw:ih)>14)g+=`<text x="${x+(it.x+it.w/2)*k*s}" y="${y0+(it.y+it.h/2)*s+4}" fill="#fff" font-size="11" font-family="var(--mono)" text-anchor="middle">${it.label}</text>`;
       }
       g+=`</g>`;
       if(!oneD||on)g+=`<line x1="${x}" x2="${x}" y1="${y0-3}" y2="${y0+H+3}" stroke="#f0c674" stroke-width="1"/>`;
@@ -336,8 +337,8 @@ function renderStation(R,plan,cur,{w,h,oneD}){
   g+=`<rect x="${toX(sd.d0-ctx)}" y="${oy-8}" width="${ctx*s*.7}" height="${H+16}" fill="url(#fl)"/><rect x="${toX(sd.d0+sd.dl+ctx*.3)}" y="${oy-8}" width="${ctx*s*.7}" height="${H+16}" fill="url(#fr)"/>`;
   const x1=ox+sd.dl*s, ty=oy-22;
   g+=`<line x1="${ox}" x2="${x1}" y1="${ty}" y2="${ty}" stroke="#c9d0d7"/><line x1="${ox}" x2="${ox}" y1="${ty-5}" y2="${ty+5}" stroke="#c9d0d7"/><line x1="${x1}" x2="${x1}" y1="${ty-5}" y2="${ty+5}" stroke="#c9d0d7"/>`;
-  g+=`<rect x="${(ox+x1)/2-62}" y="${ty-9}" width="124" height="18" fill="var(--canvas)"/><text x="${(ox+x1)/2}" y="${ty+4}" fill="#fff" font-size="12" font-family="var(--mono)" text-anchor="middle">${oneD?'每车 '+seg.len+' mm':'拉布 '+seg.len+' mm'}</text>`;
-  g+=`<text x="${x1+16}" y="${oy+H/2}" fill="#c9d0d7" font-size="11" font-family="var(--mono)" transform="rotate(90 ${x1+16} ${oy+H/2})" text-anchor="middle">幅宽 ${R.width} mm</text>`;
+  g+=`<rect x="${(ox+x1)/2-62}" y="${ty-9}" width="124" height="18" fill="var(--canvas)"/><text class="along" x="${(ox+x1)/2}" y="${ty+4}" fill="#fff" font-size="12" font-family="var(--mono)" text-anchor="middle">${oneD?'每车 '+seg.len+' mm':'拉布 '+seg.len+' mm'}</text>`;
+  g+=`<text class="across" x="${x1+16}" y="${oy+H/2}" fill="#c9d0d7" font-size="11" font-family="var(--mono)" transform="rotate(90 ${x1+16} ${oy+H/2})" text-anchor="middle">幅宽 ${R.width} mm</text>`;
   g+=`<text x="${ox}" y="${oy+H+20}" fill="#9aa4ae" font-size="11" font-family="var(--mono)">Y ${m(seg.start)} m</text><text x="${x1}" y="${oy+H+20}" fill="#9aa4ae" font-size="11" font-family="var(--mono)" text-anchor="end">${m(seg.start+seg.len)} m</text>`;
   g+=`<text x="${toX(sd.d0-ctx)+4}" y="${oy+H+38}" fill="#7d8791" font-size="11">进料方向 →${oneD?'（长度示意）':''}</text>`;
   if(oneD)seg.L.items.forEach((it,i)=>{if(i)g+=`<line x1="${ox-8}" x2="${x1+8}" y1="${oy+it.y*s}" y2="${oy+it.y*s}" stroke="#f0c674" stroke-dasharray="5 3"/>`;g+=`<text x="${ox-12}" y="${oy+(it.y+it.h/2)*s+4}" fill="#9aa4ae" font-size="10" text-anchor="end" font-family="var(--mono)">刀${i+1}</text>`});
@@ -361,6 +362,20 @@ function renderRoll(R,plan,cur,{w,h,oneD}){
     if(oneD){let last=-1;for(const b of db)if(b.kind==='seg'&&b.li!==last){last=b.li;if(b.d0>=r0&&b.d0<r0+rowD)g+=`<text x="${toX(b.d0)+3}" y="${y0-5}" fill="#8a949e" font-size="10">${b.L.name.replace('序号组 ','')} ×${plan.count[b.li]}</text>`}}
   }
   return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">${g}</svg>`;
+}
+
+
+/* 方向只是显示变换：模型坐标不变（X=幅宽，Y=卷长），竖向时整体转置，文字保持正向 */
+function orient(svg,vertical){
+  if(!vertical)return svg;
+  const [,w,h]=svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
+  let inner=svg.slice(svg.indexOf('>')+1,svg.lastIndexOf('</svg>'));
+  inner=inner.replace(/<text( class="(\w+)")? x="([^"]+)" y="([^"]+)"([^>]*)>/g,(all,c,cls,x,y,rest)=>{
+    rest=rest.replace(/ transform="[^"]*"/,'');
+    const rot=cls==='along'?' rotate(-90)':'';
+    return `<text x="${x}" y="${y}" transform="translate(${x} ${y}) matrix(0 1 1 0 0 0)${rot} translate(${-x} ${-y})"${rest}>`;
+  }).replace(/→/g,'↓');
+  return `<svg viewBox="0 0 ${h} ${w}" preserveAspectRatio="xMidYMid meet"><g transform="matrix(0 1 1 0 0 0)">${inner}</g></svg>`;
 }
 
 /* 母卷导航条：整卷比例尺，点击跳到任一拉布段 */
@@ -387,7 +402,7 @@ const NAV=[
   ['质量与分析',[['quality','复检处置','1'],['analysis','生产分析']]],
   ['系统',[['showcase','能力展示'],['settings','设置']]],
 ];
-let state={page:'tasks',wbKind:'2d',seg:0,view:'station',stage:2,matTab:'roll',matSel:0};
+let state={page:'tasks',wbKind:'2d',seg:0,view:'station',orient:'v',stage:2,matTab:'roll',matSel:0};
 
 function nav(){
   document.getElementById('nav').innerHTML=NAV.map(([h,items])=>`<h6>${h}</h6>`+items.map(([k,t,c])=>`<a href="#${k}" onclick="go('${k}');return false" class="${state.page===k?'on':''}">${t}${c?`<span class="cnt">${c}</span>`:''}</a>`).join('')).join('');
@@ -448,11 +463,12 @@ workbench(){
       <section class="pane" style="background:var(--canvas)">
         <div class="ctool">
           <div class="vseg"><button class="${full?'':'on'}" onclick="setView('station')">工位</button><button class="${full?'on':''}" onclick="setView('full')">全卷</button></div>
+          <div class="vseg" title="画布方向（显示偏好，不影响坐标与算法）"><button class="${state.orient==='v'?'on':''}" onclick="setOrient('v')">竖向</button><button class="${state.orient==='h'?'on':''}" onclick="setOrient('h')">横向</button></div>
           <div class="div"></div><button title="上一段 ←" onclick="pickSeg(${cur-1})">◀</button><span class="num" style="color:#fff">${cur+1} / ${P.segs.length}</span><button title="下一段 →" onclick="pickSeg(${cur+1})">▶</button>
           <div class="div"></div><button class="on">切割线</button><button class="on">标注</button><button class="on">疵点</button><button>${oneD?'刀位':'刀路'}</button>
           <div class="sp"></div>${oneD?`<span>${L.name} · 第 ${cur+1} 车</span>`:`<span>拉布</span><input class="cin num" value="${seg.len}"><span>mm</span>`}
         </div>
-        <div class="canvas-wrap" id="cv">${full?renderRoll(R,P,cur,{w:900,h:520,oneD}):renderStation(R,P,cur,{w:900,h:520,oneD})}
+        <div class="canvas-wrap" id="cv">${(()=>{const v=VERT=state.orient==='v',sz=v?{w:520,h:900}:{w:900,h:520};return orient(full?renderRoll(R,P,cur,{...sz,oneD}):renderStation(R,P,cur,{...sz,oneD}),v)})()}
           <div class="legend">${D.map(d=>`<span><i style="background:${ORDER_COLORS[d[0]]}"></i>${d[1]}</span>`).join('')}<span><i style="border:1px solid #9aa4ae"></i>余料</span>${R.defects.length?'<span><i style="border:1.5px solid #ff6b5b"></i>疵点</span>':''}</div>
         </div>
         <div class="navroll">${renderTrack(R,P,cur,oneD)}</div>
@@ -589,7 +605,7 @@ showcase(){
 },
 
 settings(){
-  const g=[['工艺与设备','工位、切割方式、刀缝、修边、最小分条'],['材料规格','材料主数据、门幅、质量规则'],['求解策略','引擎选择、时间上限、目标权重'],['系统接入','需求来源、库存同步、事件投递'],['个人偏好','单位、主题、快捷键']];
+  const g=[['工艺与设备','工位、切割方式、刀缝、修边、最小分条'],['材料规格','材料主数据、门幅、质量规则'],['求解策略','引擎选择、时间上限、目标权重'],['系统接入','需求来源、库存同步、事件投递'],['个人偏好','单位、主题、画布方向、快捷键']];
   return `<div class="ph"><h1>设置</h1></div><div class="split" style="grid-template-columns:220px 1fr">
   <section class="pane"><div class="pane-b">${g.map((x,i)=>`<div style="padding:10px 14px;border-bottom:1px solid var(--line-2);${i===2?'background:#e8f0f8;border-left:3px solid var(--accent)':''}"><div style="font-weight:${i===2?600:400}">${x[0]}</div><div style="font-size:11.5px;color:var(--text-3)">${x[1]}</div></div>`).join('')}</div></section>
   <section class="pane" style="background:var(--bg)"><div class="body"><div class="box" style="max-width:640px"><div class="pane-h">求解策略</div><div class="form">
@@ -613,6 +629,7 @@ function go(p,kind){if(kind)state.wbKind=kind;state.seg=0;state.page=p;try{histo
 function setKind(k){state.wbKind=k;state.seg=0;render()}
 function pickSeg(i){const n=(state.wbKind==='1d'?PLAN_1D:PLAN_2D).segs.length;state.seg=Math.max(0,Math.min(n-1,i));render()}
 function setView(v){state.view=v;render()}
+function setOrient(o){state.orient=o;render()}
 function matTab(t){state.matTab=t;state.matSel=0;render()}
 function matSel(i){state.matSel=i;render()}
 state.page=(location.hash.slice(1)||'tasks');
