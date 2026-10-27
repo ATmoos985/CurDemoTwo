@@ -144,6 +144,14 @@ table.t{width:100%;border-collapse:collapse;background:var(--panel);border:1px s
 .notice{margin:0 0 12px;padding:8px 12px;border:1px solid #c9d8e8;background:#f2f6fb;color:var(--accent-ink);font-size:12.5px}
 .proto{position:fixed;left:10px;bottom:30px;background:#fff3cd;border:1px solid #e3c26a;color:#7a5a00;font-size:11.5px;padding:3px 8px;border-radius:2px;z-index:9}
 .strip{display:none}
+.stages{align-items:stretch}
+.sum{position:relative;display:flex;align-items:center;gap:6px}
+.sumb{height:26px;border:1px solid var(--line);background:#fff;border-radius:2px;padding:0 10px;cursor:pointer;font-size:12.5px;white-space:nowrap}
+.sumb small{color:var(--text-3);margin-right:6px;font-size:11.5px}
+.sumb:hover{border-color:#b8bfc8}
+.sumb.on{border-color:var(--accent);background:var(--accent-2)}
+.sumb.warn{border-color:#e3c26a;background:var(--warn-bg)}
+.popover{position:absolute;right:0;top:32px;width:420px;max-height:460px;overflow:auto;background:#fff;border:1px solid var(--line);box-shadow:0 6px 20px rgba(20,30,40,.18);z-index:20}
 .vseg{flex:none;display:inline-flex;border:1px solid #56606b;border-radius:2px;overflow:hidden}
 .vseg button{border:0!important;border-radius:0!important;height:22px!important}
 .vseg button.on{background:#5a7fa6!important;color:#fff}
@@ -157,7 +165,13 @@ table.t{width:100%;border-collapse:collapse;background:var(--panel);border:1px s
 .tb.skip{background:repeating-linear-gradient(-45deg,#3a2a2a 0 3px,#a04a40 3px 4px);cursor:default}
 .tb.tail{border:1px dashed #8a949e;cursor:default}
 .tb.seg:hover{filter:brightness(1.25)}
-.tb.seg.on{outline:2px solid #7fb3e6;outline-offset:-1px;z-index:2;filter:brightness(1.35)}
+.tb.cut{filter:saturate(.2) brightness(.75);background-image:linear-gradient(transparent 40%,rgba(255,255,255,.08) 40% 60%,transparent 60%)!important}
+.twin{position:absolute;top:-4px;bottom:-4px;border:2px solid #7fb3e6;background:rgba(127,179,230,.22);cursor:grab;z-index:4;min-width:6px}
+.twin.ro{border-style:dashed;cursor:default}
+.twin:active{cursor:grabbing}
+.twl{position:absolute;bottom:100%;left:-2px;margin-bottom:3px;white-space:nowrap;font:11px var(--mono);color:#cfe3f7;background:#23272c;padding:0 4px}
+.twh{position:absolute;right:-7px;top:-2px;bottom:-2px;width:10px;background:#7fb3e6;color:#1d2125;font-size:8px;display:grid;place-items:center;cursor:ew-resize;border-radius:1px}
+.nr-head{margin-bottom:20px!important}
 .tdef{position:absolute;top:-4px;bottom:-4px;width:2px;background:#ff6b5b;z-index:3}
 .ttick{position:absolute;top:24px;transform:translateX(-50%);font:10px var(--mono);color:#7d8791}
 .ttick:first-child{transform:none}
@@ -239,10 +253,10 @@ const LAYOUTS_1D=[
   slitLayout('序号组 G05',CAR,2400,[{o:'F',w:520},{o:'D',w:800},{o:'A',w:924}]),
 ];
 /* 母卷：连续材料。方案 = 沿卷长依次排开的拉布段（排法 + 长度），中间可因疵点避让。 */
-const ROLL_2D={id:'R-2610-0921',width:2800,total:60000,used:12000,tick:5000,
+const ROLL_2D={id:'R-2610-0921',width:2800,total:60000,used:12000,tick:5000,cutSegs:3,bedMin:1000,bedMax:6000,
   defects:[{pos:24300,len:200,x:900,w:320,desc:'油污'},{pos:48900,len:300,x:1800,w:500,desc:'破洞'}],
   plan:[0,0,2,{skip:400},1,1,0,0,2,{skip:500},1,3]};
-const ROLL_1D={id:'R-2610-0933',width:2400,total:1000000,used:200000,tick:100000,defects:[],
+const ROLL_1D={id:'R-2610-0933',width:2400,total:1000000,used:200000,tick:100000,cutSegs:13,defects:[],
   plan:[...Array(14).fill(0),...Array(10).fill(1),...Array(8).fill(2),...Array(4).fill(3),...Array(2).fill(4)]};
 function buildPlan(R,LS){
   const blocks=[],segs=[];let pos=R.used;
@@ -255,6 +269,13 @@ function buildPlan(R,LS){
   return {blocks,segs,count,end:pos};
 }
 const PLAN_2D=buildPlan(ROLL_2D,LAYOUTS_2D), PLAN_1D=buildPlan(ROLL_1D,LAYOUTS_1D);
+/* 工位窗口：已切段固定；窗口可点击跳转、拖动移动（吸附段边界）、拖右端改拉布长度 */
+function curRoll(){return state.wbKind==='1d'?ROLL_1D:ROLL_2D}
+function curPlan(){return state.wbKind==='1d'?PLAN_1D:PLAN_2D}
+function cutEnd(R,P){return R.cutSegs?P.segs[R.cutSegs-1].start+P.segs[R.cutSegs-1].len:R.used}
+function getWin(){if(state.win)return state.win;const s=curPlan().segs[state.seg];return {start:s.start,len:s.len}}
+function segAt(P,pos){return P.segs.findIndex(s=>pos>=s.start-1&&pos<s.start+s.len-1)}
+function dispAt(db,real){for(const b of db)if(real<=b.start+b.len&&real>=b.start)return b.d0+(real-b.start)/b.len*b.dl;return real<db[0].start?0:db[db.length-1].d0+db[db.length-1].dl}
 const LAYOUT_TINT=['#47627d','#4d6b55','#6b5a43','#5d4f66','#3f6563'];
 const m=v=>(v/1000).toLocaleString(undefined,{maximumFractionDigits:1});
 const DEMANDS_2D=[['A','窗帘 A-01','900 × 1400',60,58],['B','窗帘 B-07','1000 × 1200',60,60],['C','卷帘 C-02','800 × 1200',30,30],['D','窗帘 D-11','700 × 1500',84,84],['E','罗马帘 E-03','1200 × 1600',26,26],['F','窗帘 F-05','600 × 1300',60,60]];
@@ -301,7 +322,7 @@ function drawBlocks(blocks,R,s,toX,y0,{cur=-1,dim=false,labels=false,oneD=false}
     else if(b.kind==='skip')g+=`<rect x="${x}" y="${y0}" width="${wpx}" height="${H}" fill="url(#skipp)"/>`;
     else if(b.kind==='tail')g+=`<rect x="${x}" y="${y0}" width="${wpx}" height="${H}" fill="#2f353b" stroke="#8a949e" stroke-dasharray="4 3"/>${wpx>60?`<text x="${x+wpx/2}" y="${y0+H/2+4}" fill="#9aa4ae" font-size="11" text-anchor="middle">尾料 ${m(b.len)} m → 料头</text>`:''}`;
     else{
-      const on=b.idx===cur, op=dim&&!on?.28:1;
+      const on=b.idx===cur, cut=b.idx<R.cutSegs, op=cut?.38:dim&&!on?.28:1;
       g+=`<g opacity="${op}"><rect x="${x}" y="${y0}" width="${wpx}" height="${H}" fill="url(#waste)" stroke="#5d6670"/>`;
       for(const it of b.L.items){
         const iw=it.w*k*s, ih=it.h*s;
@@ -310,7 +331,7 @@ function drawBlocks(blocks,R,s,toX,y0,{cur=-1,dim=false,labels=false,oneD=false}
       }
       g+=`</g>`;
       if(!oneD||on)g+=`<line x1="${x}" x2="${x}" y1="${y0-3}" y2="${y0+H+3}" stroke="#f0c674" stroke-width="1"/>`;
-      if(on)g+=`<rect x="${x}" y="${y0-1}" width="${wpx}" height="${H+2}" fill="none" stroke="#7fb3e6" stroke-width="2"/>`;
+      if(cut&&wpx>34&&H>24)g+=`<text x="${x+wpx/2}" y="${y0+14}" fill="#e6ebef" font-size="10.5" text-anchor="middle">已切 ✓</text>`;
     }
   }
   return g;
@@ -350,7 +371,7 @@ function presetCam(){
   const sz=cvSize();if(!sz)return;const W=cvWorld(),{w,h}=sz,Wd=W.R.width;
   const pad={l:RULER+44,r:40,t:RULER+46,b:46};
   let cam;
-  if(state.view==='station'){const sd=W.db.find(b=>b.kind==='seg'&&b.idx===W.cur),ctx=Math.min(sd.dl*.22,2500);cam=fitCam(sd.d0-ctx,sd.d0+sd.dl+ctx,0,Wd,w,h,pad);cam.mode='strip'}
+  if(state.view==='station'){const wn=getWin(),d0=dispAt(W.db,wn.start),d1=dispAt(W.db,wn.start+wn.len),ctx=Math.min((d1-d0)*.22,2500);cam=fitCam(d0-ctx,d1+ctx,0,Wd,w,h,pad);cam.mode='strip'}
   else if(state.fullMode==='tile'){
     let best=null;for(let n=1;n<=10;n++){const rl=W.D/n,gap=Wd*.3,c=fitCam(0,rl,0,n*Wd+(n-1)*gap,w,h,{l:58,r:18,t:24,b:16});if(!best||c.s>best.s)best={...c,rows:{n,rowLen:rl,gap}}}
     cam={...best,mode:'tile'}}
@@ -379,12 +400,13 @@ function drawCanvas(){
     const vis=db.filter(b=>toX(b.d0+b.dl)>=-50&&toX(b.d0)<=w+50);
     g+=drawBlocks(vis,R,s,toX,y0,{cur,dim:state.view==='station',labels:true,oneD});
     if(!oneD)g+=defectMarks(R,s,toX,y0);
-    /* 当前段标注 */
-    const sd=db.find(b=>b.kind==='seg'&&b.idx===cur),ox=toX(sd.d0),x1=toX(sd.d0+sd.dl),ty=y0-20;
+    /* 工位窗口：框 + 拉布长度 + 起止 Y */
+    const wn=getWin(),sd=P.segs[cur],ox=toX(dispAt(db,wn.start)),x1=toX(dispAt(db,wn.start+wn.len)),ty=y0-20;
+    g+=`<rect x="${ox}" y="${y0-6}" width="${x1-ox}" height="${H+12}" fill="none" stroke="#7fb3e6" stroke-width="2" stroke-dasharray="6 3"/>`;
     if(x1>0&&ox<w&&x1-ox>70){
       g+=`<line x1="${ox}" x2="${x1}" y1="${ty}" y2="${ty}" stroke="#c9d0d7"/><line x1="${ox}" x2="${ox}" y1="${ty-5}" y2="${ty+5}" stroke="#c9d0d7"/><line x1="${x1}" x2="${x1}" y1="${ty-5}" y2="${ty+5}" stroke="#c9d0d7"/>`;
-      g+=`<rect x="${(ox+x1)/2-60}" y="${ty-9}" width="120" height="18" fill="var(--canvas)"/><text class="along" x="${(ox+x1)/2}" y="${ty+4}" fill="#fff" font-size="12" font-family="var(--mono)" text-anchor="middle">${oneD?'每车 '+sd.len+' mm':'拉布 '+sd.len+' mm'}</text>`;
-      g+=`<text x="${ox}" y="${y0+H+18}" fill="#9aa4ae" font-size="11" font-family="var(--mono)">Y ${m(sd.start)} m</text><text x="${x1}" y="${y0+H+18}" fill="#9aa4ae" font-size="11" font-family="var(--mono)" text-anchor="end">${m(sd.start+sd.len)} m</text>`;
+      g+=`<rect x="${(ox+x1)/2-64}" y="${ty-9}" width="128" height="18" fill="var(--canvas)"/><text class="along" x="${(ox+x1)/2}" y="${ty+4}" fill="#cfe3f7" font-size="12" font-family="var(--mono)" text-anchor="middle">${oneD?'每车 '+wn.len+' mm':'拉布 '+wn.len+' mm'}</text>`;
+      g+=`<text x="${ox}" y="${y0+H+20}" fill="#9aa4ae" font-size="11" font-family="var(--mono)">Y ${m(wn.start)} m</text><text x="${x1}" y="${y0+H+20}" fill="#9aa4ae" font-size="11" font-family="var(--mono)" text-anchor="end">${m(wn.start+wn.len)} m</text>`;
       if(oneD&&H>60)sd.L.items.forEach((it,i)=>{g+=`<text x="${ox-6}" y="${y0+(it.y+it.h/2)*s+4}" fill="#9aa4ae" font-size="10" text-anchor="end" font-family="var(--mono)">刀${i+1}</text>`});
     }
     /* 标尺：长度方向（m，真实 Y）与幅宽方向（mm） */
@@ -431,14 +453,16 @@ function renderTrack(R,plan,cur,oneD){
   let t='';
   for(const b of plan.blocks){
     const st=`left:${pct(b.start)};width:${pct(b.len)}`;
-    if(b.kind==='seg')t+=`<div class="tb seg ${b.idx===cur?'on':''}" style="${st};background:${LAYOUT_TINT[b.li]}" title="${b.L.name} · Y ${m(b.start)}–${m(b.start+b.len)} m" onclick="pickSeg(${b.idx})"></div>`;
+    if(b.kind==='seg'){const cut=b.idx<R.cutSegs;t+=`<div class="tb seg ${cut?'cut':''}" style="${st};background:${LAYOUT_TINT[b.li]}" title="${b.L.name} · Y ${m(b.start)}–${m(b.start+b.len)} m${cut?' · 已切（固定）':''}" onclick="pickSeg(${b.idx})"></div>`}
     else t+=`<div class="tb ${b.kind}" style="${st}" title="${{used:'已用',skip:'疵点避让',tail:'尾料'}[b.kind]} ${m(b.len)} m"></div>`;
   }
+  const wn=getWin(),wcut=wn.start<cutEnd(R,plan)-1;
+  t+=`<div class="twin ${wcut?'ro':''}" id="twin" style="left:${pct(wn.start)};width:${pct(wn.len)}" title="${wcut?'已切段（只读查看）':'拖动移动工位，吸附拉布段边界'}"><span class="twl">${wcut?'已切 · ':''}工位 ${m(wn.start)}–${m(wn.start+wn.len)} m${oneD?'':' · 拉布 '+wn.len+' mm'}</span>${oneD||wcut?'':'<div class="twh" id="twh" title="拖动调整拉布长度">Ⅱ</div>'}</div>`;
   for(const d of R.defects)t+=`<div class="tdef" style="left:${pct(d.pos)}" title="疵点 ${d.desc} · Y ${m(d.pos)} m"></div>`;
   for(let p=0;p<=R.total;p+=R.tick)t+=`<div class="ttick" style="left:${pct(p)}">${m(p)}</div>`;
   const used=R.used, planLen=plan.end-R.used, skip=plan.blocks.filter(b=>b.kind==='skip').reduce((a,b)=>a+b.len,0), tail=R.total-plan.end;
   const chips=(oneD?LAYOUTS_1D:LAYOUTS_2D).map((L,i)=>`<button class="chip" onclick="pickSeg(${plan.segs.findIndex(s=>s.li===i)})"><i style="background:${LAYOUT_TINT[i]}"></i>${L.name}${oneD?'':' · '+m(L.len)+' m'} <b>×${plan.count[i]}</b></button>`).join('');
-  return `<div class="nr-head"><span>母卷 <b class="num">${R.id}</b></span><span>幅宽 <b class="num">${R.width}</b> mm</span><span>总长 <b class="num">${m(R.total)}</b> m</span><span>已用 <b class="num">${m(used)}</b> m</span><span>本方案 <b class="num">${plan.segs.length}</b> ${oneD?'车':'次拉布'} · <b class="num">${m(planLen)}</b> m</span>${skip?`<span>避让 <b class="num" style="color:#ff8a7a">${m(skip)}</b> m</span>`:''}<span>尾料 <b class="num">${m(tail)}</b> m</span></div>
+  return `<div class="nr-head"><span>母卷 <b class="num">${R.id}</b></span><span>幅宽 <b class="num">${R.width}</b> mm</span><span>总长 <b class="num">${m(R.total)}</b> m</span><span>已用 <b class="num">${m(used)}</b> m</span><span>已切 <b class="num">${R.cutSegs}</b> ${oneD?'车':'次'}（固定）</span><span>本方案 <b class="num">${plan.segs.length}</b> ${oneD?'车':'次拉布'} · <b class="num">${m(planLen)}</b> m</span>${skip?`<span>避让 <b class="num" style="color:#ff8a7a">${m(skip)}</b> m</span>`:''}<span>尾料 <b class="num">${m(tail)}</b> m</span></div>
   <div class="nr-track">${t}</div><div class="nr-chips">${chips}</div>`;
 }
 
@@ -449,7 +473,7 @@ const NAV=[
   ['质量与分析',[['quality','复检处置','1'],['analysis','生产分析']]],
   ['系统',[['showcase','能力展示'],['settings','设置']]],
 ];
-let state={page:'tasks',wbKind:'2d',seg:0,view:'station',orient:'v',fullMode:'strip',stage:2,matTab:'roll',matSel:0};
+let state={pop:null,page:'tasks',wbKind:'2d',seg:3,win:null,view:'station',orient:'v',fullMode:'strip',stage:2,matTab:'roll',matSel:0};
 
 function nav(){
   document.getElementById('nav').innerHTML=NAV.map(([h,items])=>`<h6>${h}</h6>`+items.map(([k,t,c])=>`<a href="#${k}" onclick="go('${k}');return false" class="${state.page===k?'on':''}">${t}${c?`<span class="cnt">${c}</span>`:''}</a>`).join('')).join('');
@@ -488,25 +512,28 @@ workbench(){
   const planLen=P.end-R.used, area=P.segs.reduce((a,s)=>a+s.L.items.reduce((x,i)=>x+i.w*i.h,0),0);
   const util=(area/(planLen*R.width)*100).toFixed(1);
   const full=state.view==='full';
+  const need=D.reduce((a,d)=>a+d[3],0),done=D.reduce((a,d)=>a+Math.min(d[3],d[4]),0),short=need-done,pct=Math.round(done/need*100);
   return `<div class="wb-head">
       <h1 class="num">${t.id}</h1><span>${t.name}</span><span class="tag kind">${t.kind}</span><span class="tag warn">方案候选 · 未下达</span>
       <div class="sp" style="flex:1"></div>
       <div class="seg" title="原型切换：同一套画布渲染一维 / 二维"><button class="${oneD?'':'on'}" onclick="setKind('2d')">二维任务</button><button class="${oneD?'on':''}" onclick="setKind('1d')">一维任务</button></div>
       <button class="btn">方案版本 ▾</button><button class="btn">更多 ▾</button>
     </div>
-    <div class="stages">${stages.map((s,i)=>`<div class="stage ${i<state.stage?'done':i===state.stage?'on':''}"><span class="n">${i<state.stage?'✓':i+1}</span>${s}</div>`).join('')}</div>
-    <div class="split" style="grid-template-columns:300px 1fr 280px">
-      <section class="pane">
-        <div class="pane-h">需求<span class="sub">${D.length} 项</span><span class="sp"></span><button class="btn ghost sm">导入</button></div>
-        <div class="pane-b"><table class="t" style="border:0"><thead><tr><th>${oneD?'订单':'款号'}</th><th>${oneD?'宽度':'尺寸'}</th><th class="r">需求</th><th class="r">已排</th></tr></thead><tbody>
+    <div class="stages">${stages.map((s,i)=>`<div class="stage ${i<state.stage?'done':i===state.stage?'on':''}"><span class="n">${i<state.stage?'✓':i+1}</span>${s}</div>`).join('')}
+      <div class="sp" style="flex:1"></div>
+      <div class="sum">
+        <button class="sumb ${short?'warn':''} ${state.pop==='demand'?'on':''}" onclick="togglePop('demand',event)"><small>需求</small>${D.length} 项 · 已排 ${pct}%${short?` · 缺 ${short}`:''} ▾</button>
+        <button class="sumb ${state.pop==='material'?'on':''}" onclick="togglePop('material',event)"><small>材料</small><span class="num">${R.id}</span> · 余 ${m(R.total-R.used)} m ▾</button>
+        <button class="sumb ${state.pop==='process'?'on':''}" onclick="togglePop('process',event)"><small>工艺</small>${oneD?'分条 · 4 工位':'裁床 · 连续拉布'} ▾</button>
+        ${state.pop?`<div class="popover" onclick="event.stopPropagation()">${{
+          demand:`<div class="pane-h">需求<span class="sub">${D.length} 项</span><span class="sp"></span><button class="btn sm">导入</button><button class="btn sm">编辑</button></div><table class="t" style="border:0"><thead><tr><th>${oneD?'订单':'款号'}</th><th>${oneD?'宽度':'尺寸'}</th><th class="r">需求</th><th class="r">已排</th></tr></thead><tbody>
         ${D.map(d=>`<tr><td><i style="display:inline-block;width:8px;height:8px;margin-right:6px;background:${ORDER_COLORS[d[0]]}"></i>${d[1]}</td><td class="num">${d[2]}</td><td class="r num">${d[3]}</td><td class="r num" style="color:${d[4]<d[3]?'var(--warn)':'inherit'}">${d[4]}</td></tr>`).join('')}
-        </tbody></table>
-        <div class="sec">材料</div>
-        <div class="kv"><div>母卷</div><div class="num">${R.id}</div><div>幅宽</div><div class="num">${R.width} mm</div><div>剩余</div><div class="num">${m(R.total-R.used)} m（已用 ${m(R.used)} m）</div><div>疵点</div><div>${R.defects.length?R.defects.length+' 处 · 自动避让':'无'}</div></div>
-        <div class="sec">工艺</div>
-        <div class="kv"><div>切割方式</div><div>${oneD?'分条 · 4 工位':'裁床 · 连续拉布'}</div><div>${oneD?'每车长度':'拉布长度'}</div><div class="num">${oneD?m(CAR)+' m（定长）':'2.0 – 6.0 m（按排法）'}</div><div>修边</div><div class="num">${oneD?'两侧 12 mm':'10 mm'}</div><div>目标</div><div>${oneD?'序号组最少':'用料最短'}</div></div>
-        </div>
-      </section>
+        </tbody></table>`,
+          material:`<div class="pane-h">材料<span class="sp"></span><button class="btn sm">更换母卷</button></div><div class="kv"><div>母卷</div><div class="num">${R.id}</div><div>幅宽</div><div class="num">${R.width} mm</div><div>剩余</div><div class="num">${m(R.total-R.used)} m（已用 ${m(R.used)} m）</div><div>疵点</div><div>${R.defects.length?R.defects.length+' 处 · 自动避让':'无'}</div></div>`,
+          process:`<div class="pane-h">工艺<span class="sp"></span><button class="btn sm">修改</button></div><div class="kv"><div>切割方式</div><div>${oneD?'分条 · 4 工位':'裁床 · 连续拉布'}</div><div>${oneD?'每车长度':'拉布长度'}</div><div class="num">${oneD?m(CAR)+' m（定长）':'2.0 – 6.0 m（按排法）'}</div><div>修边</div><div class="num">${oneD?'两侧 12 mm':'10 mm'}</div><div>目标</div><div>${oneD?'序号组最少':'用料最短'}</div></div>`}[state.pop]}</div>`:''}
+      </div>
+    </div>
+    <div class="split" style="grid-template-columns:1fr 280px">
       <section class="pane" style="background:var(--canvas)">
         <div class="ctool">
           <div class="vseg"><button class="${full?'':'on'}" onclick="setView('station')" title="相机对准当前拉布">工位</button><button class="${full?'on':''}" onclick="setView('full')" title="相机显示整卷">全卷</button></div>
@@ -514,7 +541,7 @@ workbench(){
           <div class="div"></div><button title="适应视图 F" onclick="fitNow()">适应</button><button title="缩小 −" onclick="zoomCenter(1/1.25)">−</button><input id="ratio" class="cin num" list="ratios" title="精确比例：输入 1:N，回车生效" onchange="setRatio(this.value)" style="width:70px"><datalist id="ratios"><option>1:5</option><option>1:10</option><option>1:20</option><option>1:50</option><option>1:100</option><option>1:200</option><option>1:500</option></datalist><button title="放大 +" onclick="zoomCenter(1.25)">+</button><span id="zoompct" class="num" style="min-width:38px"></span>
           <div class="div"></div><button title="上一段 ←" onclick="pickSeg(${cur-1})">◀</button><span class="num" style="color:#fff">${cur+1} / ${P.segs.length}</span><button title="下一段 →" onclick="pickSeg(${cur+1})">▶</button>
           <div class="div"></div><button title="图层：切割线、标注、疵点、刀路">图层 ▾</button><button title="画布方向：当前${state.orient==='v'?'竖向':'横向'}，点击切换（不影响坐标与算法）" onclick="setOrient('${state.orient==='v'?'h':'v'}')">${state.orient==='v'?'竖向 ⇅':'横向 ⇆'}</button>
-          <div class="sp"></div>${oneD?`<span>${L.name}</span>`:`<span>拉布</span><input class="cin num" value="${seg.len}"><span>mm</span>`}
+          <div class="sp"></div>${oneD?`<span>${L.name}</span>`:`<span>拉布</span><input class="cin num" value="${getWin().len}" title="本次拉布长度 ${curRoll().bedMin}–${curRoll().bedMax} mm" onchange="setWinLen(this.value)"><span>mm</span>`}
         </div>
         <div class="canvas-wrap" id="cv"><div id="cvs" style="position:absolute;inset:0;cursor:grab"></div>
           <div class="legend">${D.map(d=>`<span><i style="background:${ORDER_COLORS[d[0]]}"></i>${d[1]}</span>`).join('')}<span><i style="border:1px solid #9aa4ae"></i>余料</span>${R.defects.length?'<span><i style="border:1.5px solid #ff6b5b"></i>疵点</span>':''}</div>
@@ -530,7 +557,7 @@ workbench(){
           <div><small>履约</small><b style="color:${oneD?'var(--ok)':'var(--warn)'}">${oneD?'100':'99.5'}<em>%</em></b></div>
         </div>
         <div class="sec">当前${oneD?'车':'拉布'} · ${cur+1} / ${P.segs.length}</div>
-        <div class="kv"><div>${oneD?'序号组':'排法'}</div><div>${L.name}${oneD?'':' · 共 '+P.count[seg.li]+' 次'}</div><div>位置</div><div class="num">Y ${m(seg.start)} → ${m(seg.start+seg.len)} m</div><div>${oneD?'长度':'拉布长'}</div><div class="num">${seg.len} mm</div><div>件数</div><div class="num">${L.items.length}</div><div>利用率</div><div class="num">${L.util}%</div><div>${oneD?'刀数':'刀路长'}</div><div class="num">${oneD?L.items.length-1+' 刀':'21.6 m'}</div></div>
+        <div class="kv"><div>${oneD?'序号组':'排法'}</div><div>${L.name}${oneD?'':' · 共 '+P.count[seg.li]+' 次'}</div><div>状态</div><div>${cur<R.cutSegs?'<span class="tag ok">已切 · 固定</span>':state.win&&(state.win.start!==seg.start||state.win.len!==seg.len)?'<span class="tag warn">工位已手动调整</span>':'<span class="tag run">待切</span>'}</div><div>工位</div><div class="num">Y ${m(getWin().start)} → ${m(getWin().start+getWin().len)} m</div><div>${oneD?'长度':'拉布长'}</div><div class="num">${seg.len} mm</div><div>件数</div><div class="num">${L.items.length}</div><div>利用率</div><div class="num">${L.util}%</div><div>${oneD?'刀数':'刀路长'}</div><div class="num">${oneD?L.items.length-1+' 刀':'21.6 m'}</div></div>
         ${oneD?'':`<div class="sec">疵点与避让</div><div class="kv">${R.defects.map(d=>`<div class="num">Y ${m(d.pos)} m</div><div>${d.desc} · 避让 ${m(P.blocks.find(b=>b.kind==='skip'&&b.start<=d.pos&&b.start+b.len>=d.pos)?.len||0)} m</div>`).join('')}</div>`}
         <div class="sec">未满足</div>
         ${oneD?`<div class="empty" style="padding:14px">需求全部满足</div>`:`<div class="kv"><div>窗帘 A-01</div><div class="num" style="color:var(--warn)">缺 2 件 · 本卷剩余不足</div></div>`}
@@ -680,12 +707,36 @@ function render(){
   nav();
   document.getElementById('main').innerHTML=PAGES[state.page]();
   VERT=state.orient==='v';
-  if(state.page==='workbench'){drawCanvas();bindCanvas()}
-  status(state.page==='workbench'?`<span>光标 <span id="cursorpos" class="num">—</span></span><span>工位 Y <span class="num">${m((state.wbKind==='1d'?PLAN_1D:PLAN_2D).segs[state.seg].start)}</span> m</span><span>引擎 ${state.wbKind==='1d'?'一维内核':'PackingSolver'}</span>`:'');
+  if(state.page==='workbench'){drawCanvas();bindCanvas();bindTrack()}
+  status(state.page==='workbench'?`<span>光标 <span id="cursorpos" class="num">—</span></span><span>工位 Y <span class="num">${m(getWin().start)}–${m(getWin().start+getWin().len)}</span> m</span><span>引擎 ${state.wbKind==='1d'?'一维内核':'PackingSolver'}</span>`:'');
 }
-function go(p,kind){if(kind)state.wbKind=kind;state.seg=0;CV.cam=null;state.page=p;try{history.replaceState(null,'','#'+p)}catch(e){}render()}
-function setKind(k){state.wbKind=k;state.seg=0;CV.cam=null;render()}
-function pickSeg(i){const n=(state.wbKind==='1d'?PLAN_1D:PLAN_2D).segs.length;state.seg=Math.max(0,Math.min(n-1,i));if(state.view==='station')CV.cam=null;render()}
+function go(p,kind){if(kind)state.wbKind=kind;state.seg=curRoll().cutSegs;state.win=null;CV.cam=null;state.page=p;try{history.replaceState(null,'','#'+p)}catch(e){}render()}
+function setKind(k){state.wbKind=k;state.seg=curRoll().cutSegs;state.win=null;CV.cam=null;render()}
+function pickSeg(i){const n=(state.wbKind==='1d'?PLAN_1D:PLAN_2D).segs.length;state.seg=Math.max(0,Math.min(n-1,i));state.win=null;if(state.view==='station')CV.cam=null;render()}
+function setWinLen(v){const R=curRoll(),w=getWin();v=Math.round(+v);if(!(v>0))return render();state.win={start:w.start,len:Math.max(R.bedMin,Math.min(R.bedMax,v))};CV.cam=null;render()}
+function bindTrack(){
+  const tw=document.getElementById('twin');if(!tw||tw.classList.contains('ro'))return;
+  const track=tw.parentElement;
+  tw.onmousedown=e=>{
+    const resize=e.target.id==='twh',R=curRoll(),P=curPlan(),oneD=state.wbKind==='1d',x0=e.clientX,w0={...getWin()},mmPx=R.total/track.getBoundingClientRect().width,lo=cutEnd(R,P);
+    const snaps=[lo,...P.segs.filter(s=>s.idx>=R.cutSegs).map(s=>s.start)],thr=12*mmPx;
+    e.preventDefault();e.stopPropagation();
+    const mv=ev=>{
+      const dmm=(ev.clientX-x0)*mmPx;
+      if(resize){state.win={start:w0.start,len:Math.round(Math.max(R.bedMin,Math.min(R.bedMax,w0.len+dmm))/100)*100}}
+      else{let st=Math.max(lo,Math.min(R.total-w0.len,w0.start+dmm));const sn=snaps.reduce((a,b)=>Math.abs(b-st)<Math.abs(a-st)?b:a,snaps[0]);
+        if(oneD||Math.abs(sn-st)<thr)st=sn;else st=Math.round(st/100)*100;
+        const i=segAt(P,st);const aligned=i>=0&&Math.abs(P.segs[i].start-st)<1;
+        if(aligned){state.seg=i;state.win=oneD?null:{start:st,len:w0.len}}else state.win={start:st,len:w0.len}}
+      CV.cam=null;render();
+    };
+    const up=()=>{window.removeEventListener('mousemove',mv);window.removeEventListener('mouseup',up)};
+    window.addEventListener('mousemove',mv);window.addEventListener('mouseup',up);
+  };
+}
+function togglePop(k,e){e.stopPropagation();state.pop=state.pop===k?null:k;render()}
+document.addEventListener('click',()=>{if(state.pop){state.pop=null;render()}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&state.pop){state.pop=null;render()}});
 function setView(v){state.view=v;CV.cam=null;render()}
 function setFullMode(v){state.fullMode=v;CV.cam=null;render()}
 function setOrient(o){state.orient=o;VERT=o==='v';CV.cam=null;render()}
