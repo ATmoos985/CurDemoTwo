@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>搭切 CutPlan</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <a class="brand" href="#/tasks"><i></i>搭切 CutPlan</a>
+    <span class="topbar-sp"></span>
+    <div class="topbar-meta">
+      <span id="engine-status"><span class="dot"></span>求解引擎 <b>检测中</b></span>
+      <a href="/workspace.html" title="打开现有版本的工作台">经典版本 ↗</a>
+    </div>
+  </header>
+  <nav class="nav" id="nav" aria-label="功能导航"></nav>
+  <main class="main" id="main"></main>
+  <footer class="statusbar" id="statusbar"></footer>
+</div>
+<div id="toast" class="toast" role="status" hidden></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
