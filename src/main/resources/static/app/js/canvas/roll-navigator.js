@@ -32,9 +32,9 @@ export function createRollNavigator(host, callbacks = {}) {
         }
         for (const d of defects) t += `<div class="rn-def ${d.fresh ? 'rn-fresh' : ''}" style="left:${pct(d.u)}" title="${esc(d.label)}"></div>`;
         if (win) {
-            const ro = win.start < lock - 1;
+            const ro = win.start < lock - 1 || scene.fixed;
             t += `<div class="rn-win ${ro ? 'rn-ro' : ''} ${win.adjusted ? 'rn-adj' : ''}" style="left:${pct(win.start)};width:${pct(win.len)}">
-              <span class="rn-wl">${ro ? '已切 · ' : ''}工位 ${fmtM(win.start)}–${fmtM(win.start + win.len)} m · 拉布 ${Math.round(win.len)} mm</span>
+              <span class="rn-wl">${scene.fixed ? '整块投料 · ' : ro ? '已切 · ' : ''}工位 ${fmtM(win.start)}–${fmtM(win.start + win.len)} m · 拉布 ${Math.round(win.len)} mm</span>
               ${ro || !scene.bed ? '' : '<div class="rn-handle" title="拖动调整拉布长度">Ⅱ</div>'}</div>`;
         }
         const width = host.clientWidth || 800, step = tickStep(roll.total, width);

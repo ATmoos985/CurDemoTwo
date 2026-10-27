@@ -34,6 +34,32 @@ export function solverSettings() {
         timeLimitSeconds: Number(localStorage.getItem('cam_timeout') ?? 3)};
 }
 
+/**
+ * 幂等写入：先落盘（含 Idempotency-Key）再发送；成功或确定被拒（400/401/403/409/422）后清除，
+ * 网络中断等结果未知时保留，页面可用 pendingWrite + retryWrite 原样重发，避免重复记账。
+ */
+export async function idempotentPost(slot, url, body) {
+    const key = 'cutplan.app.pending.' + slot;
+    const old = JSON.parse(localStorage.getItem(key) || 'null');
+    if (old && JSON.stringify(old.body) !== JSON.stringify(body)) throw new Error('上次提交结果尚未确认，请先重试原操作或放弃后再提交新内容');
+    const intent = old || {url, body, idempotencyKey: crypto.randomUUID()};
+    localStorage.setItem(key, JSON.stringify(intent));
+    return sendIntent(key, intent);
+}
+export const pendingWrite = slot => JSON.parse(localStorage.getItem('cutplan.app.pending.' + slot) || 'null');
+export function retryWrite(slot) { const key = 'cutplan.app.pending.' + slot, intent = JSON.parse(localStorage.getItem(key) || 'null'); return intent ? sendIntent(key, intent) : Promise.resolve(null); }
+export function dropWrite(slot) { localStorage.removeItem('cutplan.app.pending.' + slot); }
+async function sendIntent(key, intent) {
+    const {requestJSON: send} = await import('../../js/core/api-request.js');
+    try {
+        const result = await send(intent.url, intent.body, {'Idempotency-Key': intent.idempotencyKey});
+        localStorage.removeItem(key); return result;
+    } catch (e) {
+        if ([400, 401, 403, 409, 422].includes(e.httpStatus)) localStorage.removeItem(key);
+        throw e;
+    }
+}
+
 const PREF_KEY = 'cutplan.app.prefs';
 export const DEFAULT_PREFS = {vertical: true, fullMode: 'strip', view: 'station', mmPerPx: 25.4 / 96};
 export function loadPrefs() {

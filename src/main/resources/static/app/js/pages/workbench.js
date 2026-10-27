@@ -5,7 +5,7 @@ import {setStatus} from '../main.js';
 import {createRollCanvas} from '../canvas/roll-canvas.js';
 import {createRollNavigator} from '../canvas/roll-navigator.js';
 import {parseRatio, formatRatio} from '../canvas/camera.js';
-import {buildRollScene, rollsOfPlans, sceneMetrics, demandColors, demandIndex, STATUS_TEXT, NEW_STATION} from '../model/roll-scene.js';
+import {buildRollScene, rollsOfPlans, sceneMetrics, demandColors, demandIndex, STATUS_TEXT, NEW_STATION, remnantAsRoll} from '../model/roll-scene.js';
 import {buildSolveRequest, windowProblem, usablePlan, remainingDemands} from '../model/solve-request.js';
 import {taskLabels, taskLink} from '../../../js/business/cutting/task-list-model.js';
 import {validateDefect, round} from '../../../js/inspection/inspection-model.js';
@@ -36,13 +36,18 @@ export async function mount(el, [taskId, focusPlan]) {
             requestJSON('/api/v2/execution-orders?taskId=' + encodeURIComponent(taskId))
         ]);
     }
-    try { await Promise.all([loadTask(), requestJSON('/api/rolls').then(r => { allRolls = r; })]); }
+    let allRemnants = [];
+    const loadStocks = () => Promise.all([requestJSON('/api/rolls').then(r => { allRolls = r; }), requestJSON('/api/remnants').then(r => { allRemnants = r; })]);
+    try { await Promise.all([loadTask(), loadStocks()]); }
     catch (e) { el.innerHTML = errorBox(e); return; }
     let task = detail.task, names = demandIndex(task.demands, plans);
     const prefs = loadPrefs();
     const focus = focusPlan && plans.find(p => p.id === focusPlan);
-    const st = {rollId: focus?.request?.rollId || rollsOfPlans(plans)[0] || null, selectedId: focus ? focus.id : null, window: null, fresh: [], tool: 'pan', view: focus ? 'station' : prefs.view,
-        pop: null, cursor: null, saving: false, busy: '', failure: null, quality: null, station: '1', reserveMin: 30};
+    const focusRemnant = focus?.request?.sourceRemnantId || null;
+    // st.source：'roll' 母卷连续投料 / 'remnant' 料头整块投料；st.rollId 存对应编号
+    const st = {source: focusRemnant ? 'remnant' : 'roll', rollId: focusRemnant || focus?.request?.rollId || rollsOfPlans(plans)[0] || null,
+        selectedId: focus ? focus.id : null, window: null, fresh: [], tool: 'pan', view: focus ? 'station' : prefs.view,
+        pop: null, cursor: null, saving: false, busy: '', failure: null, quality: null, station: '1', reserveMin: 30, recommend: null};
     let canvas = null, nav = null, undismiss = null;
 
     /** 可选母卷：任务方案用过的母卷 + 同型号且有余量的母卷。 */
@@ -54,11 +59,19 @@ export async function mount(el, [taskId, focusPlan]) {
     async function loadRoll() {
         roll = null;
         if (!st.rollId) return;
-        try { roll = await requestJSON('/api/rolls/' + encodeURIComponent(st.rollId)); }
-        catch (e) { toast('母卷档案读取失败：' + e.message, true); }
+        try {
+            if (st.source === 'remnant') {
+                allRemnants = await requestJSON('/api/remnants');
+                const stock = allRemnants.find(r => r.id === st.rollId);
+                roll = stock ? remnantAsRoll(stock) : null;
+                if (!stock) toast('料头已不在库存中', true);
+            } else roll = await requestJSON('/api/rolls/' + encodeURIComponent(st.rollId));
+        } catch (e) { toast('材料档案读取失败：' + e.message, true); }
     }
+    /** 同型号可投料料头：在库可用、批次型号一致。 */
+    const remnantChoices = () => allRemnants.filter(r => r.status === 'AVAILABLE' && r.materialBatch === task.materialModel);
     async function reload() {
-        await Promise.all([loadTask(), loadRoll()]);
+        await Promise.all([loadTask(), loadRoll(), loadStocks()]);
         task = detail.task; names = demandIndex(task.demands, plans);
     }
     await loadRoll();
@@ -104,15 +117,15 @@ export async function mount(el, [taskId, focusPlan]) {
               <input id="z-ratio" class="cin num" list="ratios" title="精确比例：输入 1:N 回车"><datalist id="ratios">${[5, 10, 20, 50, 100, 200, 500].map(n => `<option>1:${n}</option>`).join('')}</datalist>
               <button id="z-in" title="放大">+</button><span id="z-pct" class="num" style="min-width:40px"></span>
               <div class="div"></div><button id="seg-prev" title="上一段" ${idx <= 0 ? 'disabled' : ''}>◀</button><span class="num" style="color:#fff">${seg ? `${idx + 1} / ${sc.segments.length}` : '新工位'}</span><button id="seg-next" title="下一段 / 新工位" ${idx >= order.length - 1 ? 'disabled' : ''}>▶</button>
-              <div class="div"></div><div class="vseg">${[['pan', '平移'], ['measure', '测量'], ['defect', '标疵点']].map(([k, t]) => `<button data-tool="${k}" class="${st.tool === k ? 'on' : ''}">${t}</button>`).join('')}</div>
+              <div class="div"></div><div class="vseg">${[['pan', '平移'], ['measure', '测量'], ...(sc.fixed ? [] : [['defect', '标疵点']])].map(([k, t]) => `<button data-tool="${k}" class="${st.tool === k ? 'on' : ''}">${t}</button>`).join('')}</div>
               <button id="clear-measure" title="清除测量">✕ 测量</button>
               <button id="orient" title="画布方向（不影响坐标与算法）">${prefs.vertical ? '竖向 ⇅' : '横向 ⇆'}</button>
-              <span class="sp"></span><span>拉布</span><input id="bed-len" class="cin num" value="${Math.round(sc.window.len)}" title="本次拉布长度（mm）"><span>mm</span>
+              <span class="sp"></span><span>拉布</span><input id="bed-len" class="cin num" value="${Math.round(sc.window.len)}" title="${sc.fixed ? '料头整块投料，长度固定' : '本次拉布长度（mm）'}" ${sc.fixed ? 'disabled' : ''}><span>mm</span>
             </div>
             <div class="canvas-wrap"><div id="rc"></div>
               <div class="legend">${task.demands.slice(0, 6).map(d => `<span><i style="background:${colors.get(d.id)}"></i>${esc(String(d.name).slice(0, 18))}</span>`).join('')}${task.demands.length > 6 ? `<span>… 共 ${task.demands.length} 项</span>` : ''}<span><i style="border:1.5px solid #ff6b5b"></i>疵点</span></div>
             </div>
-            <div class="navroll"><div class="nr-head"><span>母卷 <b class="num">${esc(st.rollId)}</b></span><span>幅宽 <b class="num">${fmtN(sc.roll.width)}</b> mm</span><span>总长 <b class="num">${fmtM(sc.roll.total)}</b> m</span><span>已用 <b class="num">${fmtM(sc.roll.used)}</b> m</span>
+            <div class="navroll"><div class="nr-head"><span>${roll.remnant ? '料头' : '母卷'} <b class="num">${esc(st.rollId)}</b>${roll.remnant ? ` <span class="muted">来源 ${esc(roll.remnant.sourceRollId || '—')}</span>` : ''}</span><span>幅宽 <b class="num">${fmtN(sc.roll.width)}</b> mm</span><span>总长 <b class="num">${fmtM(sc.roll.total)}</b> m</span><span>已用 <b class="num">${fmtM(sc.roll.used)}</b> m</span>
               <span>本任务 已切 <b class="num">${met.cut}</b> · 候选 <b class="num">${met.pending}</b>${met.stale ? ` · 已失效 <b class="num">${met.stale}</b>` : ''}</span></div><div id="rn"></div></div>
           </section>
           ${st.report && seg ? reportPanel(seg, idx, sc) : st.quality && seg ? qualityPanel(seg) : prefs.sideCollapsed ? `<section class="pane side-min"><button id="side-toggle" title="展开右栏">«</button><span>方案指标</span></section>` : `<section class="pane">
@@ -251,7 +264,8 @@ export async function mount(el, [taskId, focusPlan]) {
         return `<section class="pane" id="report"><div class="pane-h">报工 · 第 ${idx + 1} 次拉布<span class="sub num">${shortId(seg.id)}</span><span class="sp"></span><button class="btn sm" id="report-close">取消</button></div>
           <div class="pane-b">
             <div class="form" style="grid-template-columns:90px 1fr;padding:10px 12px 6px">
-              <label>实切长度</label><div style="display:flex;gap:6px;align-items:center"><input class="field num" data-r="len" value="${r.len}" style="width:110px;text-align:right"><span class="muted">mm · 方案 ${fmtN(seg.len, 1)}</span></div>
+              ${r.remnant ? '<label>投料</label><div class="muted">料头整块投料：不扣母卷长度，剩余部分不再回收</div>'
+                : `<label>实切长度</label><div style="display:flex;gap:6px;align-items:center"><input class="field num" data-r="len" value="${r.len}" style="width:110px;text-align:right"><span class="muted">mm · 方案 ${fmtN(seg.len, 1)}</span></div>`}
               <label>料头库位</label><input class="field" data-r="location" value="${esc(r.location)}">
             </div>
             <div class="sec">逐件结果 · 合格 ${s.qualified} · 异常 ${s.rejected} · 未切 ${s.uncut}</div>
@@ -275,7 +289,7 @@ export async function mount(el, [taskId, focusPlan]) {
 
     function openReport(seg) {
         const saved = JSON.parse(localStorage.getItem(REPORT_KEY(seg.id)) || 'null');
-        st.report = saved?.planId === seg.id ? saved : defaultReport(seg);
+        st.report = saved?.planId === seg.id ? saved : defaultReport(seg, {remnant: !!roll?.remnant});
         st.pop = null; shell(true);
     }
     function editReport(change) { st.report = change(st.report); localStorage.setItem(REPORT_KEY(st.report.planId), JSON.stringify(st.report)); shell(true); }
@@ -297,7 +311,8 @@ export async function mount(el, [taskId, focusPlan]) {
             localStorage.removeItem(REPORT_KEY(seg.id));
             st.report = null; await reload();
             st.selectedId = NEW_STATION; st.window = null; st.busy = '';
-            toast(`报工完成：合格 ${s.qualified} 件，回收料头 ${(receipt.derivedRemnants || []).length} 块，母卷扣减 ${fmtM(payload.actualCutLen, 2)} m`);
+            toast(roll?.remnant ? `报工完成：合格 ${s.qualified} 件，料头 ${roll.remnant.id} 已整块消耗`
+                : `报工完成：合格 ${s.qualified} 件，回收料头 ${(receipt.derivedRemnants || []).length} 块，母卷扣减 ${fmtM(payload.actualCutLen, 2)} m`);
             full();
         } catch (e) {
             st.busy = ''; shell(true);
@@ -308,9 +323,9 @@ export async function mount(el, [taskId, focusPlan]) {
         const box = el.querySelector('#report'); if (!box) return;
         const sc = scene(), seg = sc.segments.find(s => s.id === st.report.planId);
         box.querySelector('#report-close').onclick = closeReport;
-        box.querySelector('#report-reset').onclick = () => { localStorage.removeItem(REPORT_KEY(seg.id)); st.report = defaultReport(seg); shell(true); };
+        box.querySelector('#report-reset').onclick = () => { localStorage.removeItem(REPORT_KEY(seg.id)); st.report = defaultReport(seg, {remnant: !!roll?.remnant}); shell(true); };
         box.querySelector('#report-submit').onclick = submitReport;
-        box.querySelector('[data-r="len"]').onchange = e => editReport(r => ({...r, len: Number(e.target.value) || 0}));
+        box.querySelector('[data-r="len"]')?.addEventListener('change', e => editReport(r => ({...r, len: Number(e.target.value) || 0})));
         box.querySelector('[data-r="location"]').onchange = e => editReport(r => ({...r, location: e.target.value}));
         box.querySelectorAll('[data-bulk]').forEach(b => b.onclick = () => editReport(r => applyBulk(r, b.dataset.bulk, seg)));
         box.querySelectorAll('[data-o]').forEach(s => s.onchange = () => editReport(r => ({...r, rows: {...r.rows, [s.dataset.o]: {outcome: s.value, reason: r.rows[s.dataset.o]?.reason || ''}}})));
@@ -367,14 +382,42 @@ export async function mount(el, [taskId, focusPlan]) {
     }
 
     function pickRollHtml() {
-        const choices = rollChoices();
-        return `<div class="body"><div class="box" style="max-width:860px;margin:24px auto">
+        const choices = rollChoices(), rems = remnantChoices(), rec = st.recommend;
+        const recBy = new Map((rec?.result?.recommendations || []).map(x => [x.stock.id, x]));
+        const remRows = [...rems].sort((a, b) => (recBy.get(b.id)?.pieceCount || 0) - (recBy.get(a.id)?.pieceCount || 0) || b.area - a.area);
+        return `<div class="body"><div class="box" style="max-width:920px;margin:24px auto 12px">
           <div class="pane-h">选择母卷<span class="sub">型号 ${esc(task.materialModel)} · 待排 ${remaining().reduce((a, d) => a + d.demand, 0)} 件</span></div>
           ${choices.length ? `<table class="t" style="border:0"><thead><tr><th>卷号</th><th>材料</th><th class="r">幅宽</th><th class="r">剩余 / 总长</th><th class="r">疵点</th><th>库位</th><th></th></tr></thead><tbody>
           ${choices.map(id => { const r = allRolls.find(x => x.rollId === id) || {rollId: id}; const rem = r.currentRemainingLength ?? (r.totalLength - r.usedLength);
               return `<tr><td class="num">${esc(id)}</td><td>${esc(r.materialName || r.rollModel || '—')}</td><td class="r num">${fmtN(r.width)}</td><td class="r num">${fmtM(rem)} / ${fmtM(r.totalLength)} m</td><td class="r num">${r.defectsCount ?? (r.defects || []).length}</td><td>${esc(r.storageLocation || '—')}</td><td><button class="btn sm pri" data-roll="${esc(id)}">选用</button></td></tr>`; }).join('')}</tbody></table>`
-            : `<div class="empty">没有型号为 ${esc(task.materialModel)} 且有余量的母卷。</div>`}
-          <div class="foot" style="background:#fff"><span class="muted" style="font-size:12px">料头投料仍在经典工作台进行</span></div></div></div>`;
+            : `<div class="empty">没有型号为 ${esc(task.materialModel)} 且有余量的母卷。</div>`}</div>
+          <div class="box" style="max-width:920px;margin:0 auto 24px">
+          <div class="pane-h">在库料头<span class="sub">同型号可用 ${rems.length} 块 · 整块投料、优先消化余料</span><span class="sp"></span>
+            <button class="btn sm" id="recommend" ${rems.length && !st.busy ? '' : 'disabled'}>${rec?.loading ? '试排中…' : '试排推荐'}</button></div>
+          ${rec?.error ? `<div class="notice">${esc(rec.error)}</div>` : ''}
+          ${rec?.result ? `<div class="muted" style="padding:6px 12px;font-size:12px">已评估 ${rec.result.evaluatedCount} / ${rec.result.candidateCount} 块${rec.result.deferredCount ? `，${rec.result.deferredCount} 块未评估` : ''}；推荐不扣库存、不保存方案，选用后重新计算。</div>` : ''}
+          ${remRows.length ? `<table class="t" style="border:0"><thead><tr><th>料头</th><th class="r">宽 × 长</th><th class="r">面积</th><th>疵点</th><th>库位</th><th>来源</th><th class="r">试排</th><th></th></tr></thead><tbody>
+          ${remRows.map(r => { const x = recBy.get(r.id); return `<tr><td class="num">${esc(r.id)}</td><td class="r num">${fmtN(r.width)} × ${fmtN(r.length)}</td><td class="r num">${fmtN(r.area, 2)} m²</td>
+            <td>${r.hasDefect ? '<span class="tag warn">带疵</span>' : '无'}</td><td>${esc(r.location || '—')}</td><td class="num">${esc(r.sourceRollId || '—')}</td>
+            <td class="r num">${x ? `${x.pieceCount} 件 · ${fmtN(x.utilization * (x.utilization <= 1 ? 100 : 1), 1)}%` : rec?.result ? '—' : ''}</td>
+            <td><button class="btn sm ${x ? 'pri' : ''}" data-remnant="${esc(r.id)}">选用</button></td></tr>`; }).join('')}</tbody></table>`
+            : '<div class="empty">没有同型号可用料头。报工时回收的料头会出现在这里。</div>'}</div></div>`;
+    }
+
+    /** 料头试排推荐：与计算同一请求（以首个同型号母卷作上下文），后端逐块试排并排序；不扣库存、不保存方案。 */
+    async function recommend() {
+        const ctxRoll = allRolls.find(r => rollChoices().includes(r.rollId)) || null;
+        const rem = remnantChoices()[0];
+        const base = ctxRoll ? {rollId: ctxRoll.rollId, rollModel: ctxRoll.rollModel, width: ctxRoll.width, totalLength: ctxRoll.totalLength, usedLength: ctxRoll.usedLength, defects: []}
+            : remnantAsRoll(rem);
+        const win = ctxRoll ? {start: ctxRoll.usedLength || 0, len: Math.min(task.process?.bedLength || 5000, ctxRoll.totalLength - (ctxRoll.usedLength || 0))} : {start: 0, len: rem.length};
+        st.recommend = {loading: true}; shell(true);
+        try {
+            const input = buildSolveRequest({task, roll: base, win, completed: detail.completed, reserved: detail.reserved, settings: solverSettings()});
+            if (!input.demands.length) throw new Error('需求已全部完成或已预约，没有待排件');
+            st.recommend = {result: await requestJSON('/api/cutting/remnant-recommendations', {input, completedBaseline: detail.completed || {}, sourceRollId: null})};
+        } catch (e) { st.recommend = {error: '推荐未完成：' + e.message}; }
+        shell(true);
     }
 
     function sumHtml(sc, colors) {
@@ -412,8 +455,11 @@ export async function mount(el, [taskId, focusPlan]) {
         }
         if (kind === 'material') {
             const choices = rollChoices();
-            return `<div class="pane-h">材料<span class="sp"></span>${choices.length > 1 ? `<select class="field" id="roll-pick">${choices.map(r => `<option ${r === st.rollId ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>` : ''}</div>
-              ${roll ? `<div class="kv"><div>母卷</div><div class="num">${esc(roll.rollId)}</div><div>型号</div><div>${esc(roll.rollModel || '—')}</div><div>材料</div><div>${esc(roll.materialName || '—')}</div>
+            return `<div class="pane-h">材料<span class="sp"></span>${!roll?.remnant && choices.length > 1 ? `<select class="field" id="roll-pick">${choices.map(r => `<option ${r === st.rollId ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>` : ''}<button class="btn sm" id="change-material">更换材料 / 用料头</button></div>
+              ${roll?.remnant ? `<div class="kv"><div>料头</div><div class="num">${esc(roll.remnant.id)}</div><div>批次</div><div>${esc(roll.remnant.materialBatch || '—')}</div>
+                <div>尺寸</div><div class="num">${fmtN(roll.width)} × ${fmtN(roll.totalLength)} mm</div><div>来源母卷</div><div class="num">${esc(roll.remnant.sourceRollId || '—')}</div>
+                <div>库位</div><div>${esc(roll.remnant.location || '—')}</div><div>状态</div><div>${esc(roll.remnant.status)}</div><div>代数</div><div class="num">${roll.remnant.generation ?? 1}</div></div>`
+              : roll ? `<div class="kv"><div>母卷</div><div class="num">${esc(roll.rollId)}</div><div>型号</div><div>${esc(roll.rollModel || '—')}</div><div>材料</div><div>${esc(roll.materialName || '—')}</div>
                 <div>幅宽</div><div class="num">${fmtN(roll.width)} mm</div><div>总长 / 已用</div><div class="num">${fmtM(roll.totalLength)} m / ${fmtM(roll.usedLength)} m</div>
                 <div>库位</div><div>${esc(roll.storageLocation || '—')}</div><div>批次</div><div>${esc(roll.batchNo || '—')}</div><div>验布</div><div>${esc(roll.inspectionStatus || '—')}</div></div>`
                 : '<div class="empty">未选择母卷</div>'}`;
@@ -432,8 +478,8 @@ export async function mount(el, [taskId, focusPlan]) {
           <div>允许旋转</div><div>${p.allowRotation ? '是' : '否'}</div><div>允许纵切</div><div>${p.allowLongitudinal ? '是' : '否'}</div><div>件间距</div><div class="num">${fmtN(p.pieceGap, 1)} mm</div></div>`;
     }
 
-    async function chooseRoll(id) {
-        st.rollId = id; st.selectedId = null; st.window = null; st.fresh = []; st.failure = null;
+    async function chooseRoll(id, source = 'roll') {
+        st.source = source; st.rollId = id; st.selectedId = null; st.window = null; st.fresh = []; st.failure = null; st.recommend = null;
         await loadRoll(); full();
     }
 
@@ -443,6 +489,7 @@ export async function mount(el, [taskId, focusPlan]) {
         undismiss?.(); undismiss = null;
         if (pop) undismiss = dismissOnOutside(el.querySelector('#sum'), () => { st.pop = null; refresh(); });
         el.querySelector('#roll-pick')?.addEventListener('change', e => { st.pop = null; chooseRoll(e.target.value); });
+        el.querySelector('#change-material')?.addEventListener('click', () => { st.pop = null; st.rollId = null; roll = null; st.selectedId = null; st.window = null; full(); });
         el.querySelectorAll('[data-goto]').forEach(tr => tr.onclick = () => {
             const u = Number(tr.dataset.goto), s = sc.segments.find(x => u >= x.start && u < x.start + x.len);
             st.pop = null; if (s) { st.selectedId = s.id; st.window = null; } st.view = 'station'; full();
@@ -454,6 +501,8 @@ export async function mount(el, [taskId, focusPlan]) {
     function bind(sc, savedCam = null) {
         bindChrome(sc);
         el.querySelectorAll('[data-roll]').forEach(b => b.onclick = () => chooseRoll(b.dataset.roll));
+        el.querySelectorAll('[data-remnant]').forEach(b => b.onclick = () => chooseRoll(b.dataset.remnant, 'remnant'));
+        el.querySelector('#recommend')?.addEventListener('click', recommend);
         if (!sc) return;
         el.querySelector('#side-toggle')?.addEventListener('click', () => { prefs.sideCollapsed = !prefs.sideCollapsed; savePrefs(prefs); shell(true); });
         el.querySelector('#report-open')?.addEventListener('click', () => { const seg = sc.segments.find(s => s.id === sc.currentId); if (seg) openReport(seg); });
@@ -494,6 +543,7 @@ export async function mount(el, [taskId, focusPlan]) {
         el.querySelector('#seg-next').onclick = () => step(1);
         el.querySelector('#bed-len').onchange = e => {
             const v = Number(e.target.value);
+            if (!sc.bed) return;
             if (!(v >= sc.bed.min && v <= sc.bed.max)) { toast(`拉布长度须在 ${sc.bed.min}–${sc.bed.max} mm`, true); e.target.value = Math.round(sc.window.len); return; }
             st.window = {start: sc.window.start, len: v}; st.failure = null; shell(true);
         };

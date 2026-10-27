@@ -40,7 +40,7 @@ export async function mount(el) {
     }
     function render() {
         const tr = asList(transfers), ct = asList(counts), list = filtered();
-        el.innerHTML = `<div class="ph"><h1>库存单据</h1><span class="crumb">库存流水记录每一次库存、需求与报工变化，用于追溯和对账</span><span class="sp"></span><a class="btn" href="/transfers.html">新建移库 ↗</a><a class="btn" href="/counts.html">新建盘点 ↗</a></div>
+        el.innerHTML = `<div class="ph"><h1>库存单据</h1><span class="crumb">库存流水记录每一次库存、需求与报工变化，用于追溯和对账</span><span class="sp"></span><a class="btn" href="#/inventory">去库存勾选材料移库 / 盘点</a></div>
           <div class="toolbar"><div class="seg"><button data-tab="ledger" class="${f.tab === 'ledger' ? 'on' : ''}">库存流水</button><button data-tab="transfer" class="${f.tab === 'transfer' ? 'on' : ''}">移库 ${tr.length}</button><button data-tab="count" class="${f.tab === 'count' ? 'on' : ''}">盘点 ${ct.length}</button></div>
             ${f.tab === 'ledger' ? `<span class="vsep"></span>
             <select class="field" id="f-event"><option value="">全部事件</option>${events.map(e => `<option value="${esc(e)}" ${f.event === e ? 'selected' : ''}>${esc(label(EVENT, e))}</option>`).join('')}</select>

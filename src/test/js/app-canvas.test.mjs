@@ -5,7 +5,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {toScreen, toWorld, fitCamera, zoomAt, panBy, ratioOf, scaleForRatio, parseRatio, formatRatio, rulerStep} from '../../main/resources/static/app/js/canvas/camera.js';
 import {snapPosition, tickStep} from '../../main/resources/static/app/js/canvas/roll-navigator.js';
-import {buildRollScene, planSegment, plansOnRoll, rollsOfPlans, reportedPlans, segmentStatus, cutEnd, sceneMetrics, demandIndex, NEW_STATION} from '../../main/resources/static/app/js/model/roll-scene.js';
+import {buildRollScene, planSegment, plansOnRoll, rollsOfPlans, reportedPlans, segmentStatus, cutEnd, sceneMetrics, demandIndex, NEW_STATION, remnantAsRoll} from '../../main/resources/static/app/js/model/roll-scene.js';
 import {buildSolveRequest, remainingDemands, windowProblem, usablePlan} from '../../main/resources/static/app/js/model/solve-request.js';
 import {defaultReport, applyBulk, recoveryCandidates, reportSummary, reportProblems, buildCutReport} from '../../main/resources/static/app/js/model/report.js';
 import {reviewablePieces, effectivePieceResults, emptyQualityForm, qualityProblems, buildQualityCommand, receiptSummary} from '../../main/resources/static/app/js/model/quality.js';
@@ -213,6 +213,32 @@ test('quality disposition form validates recovery rectangle and builds an immuta
     assert.deepEqual(cmd, {operationId: 'op-1', expectedRevision: 2, pieceId: 1, disposition: 'REMNANT', inspector: '王', reason: '边缘破损',
         recovery: {x: 0, y: 0, width: 900, length: 100, location: '料头架 1', quality: 'QUARANTINED'}});
     assert.equal(buildQualityCommand({...f, disposition: 'SCRAP'}, 'op-2').recovery, null);
+});
+
+test('remnant feed: whole-piece window, remnant plans only, solve and report follow remnant rules', () => {
+    const stock = {id: 'REM-1', status: 'AVAILABLE', materialBatch: 'M1', sourceRollId: 'R1', width: 2000, length: 1500, area: 3,
+        defects: [{id: 1, x: 100, y: 200, w: 50, h: 60, margin: 10}]};
+    const r = remnantAsRoll(stock);
+    const plans = [plan('rp', 'PENDING', 0, 1500, {feedPortType: 'remnant', sourceRemnantId: 'REM-1'}), plan('p', 'PENDING', 0, 3000)];
+    const sc = buildRollScene({roll: r, plans, rollId: 'REM-1', demands: [], process: {bedLength: 5000}});
+    assert.deepEqual(sc.segments.map(s => s.id), ['rp'], '料头模式只显示该料头的方案');
+    assert.deepEqual([sc.window.start, sc.window.len, sc.fixed, sc.bed], [0, 1500, true, null]);
+    const moved = buildRollScene({roll: r, plans, rollId: 'REM-1', demands: [], window: {start: 200, len: 800}});
+    assert.deepEqual([moved.window.start, moved.window.len], [0, 1500], '料头工位不可移动');
+    assert.equal(windowProblem(r, {start: 0, len: 1500}), null);
+    assert.match(windowProblem({...r, remnant: {...stock, status: 'CONSUMED'}}, {start: 0, len: 1500}), /不可用/);
+    const task = {id: 't', revision: 1, demands: [{id: 1, name: 'A', width: 900, length: 1400, quantity: 1}], process: {}};
+    const req = buildSolveRequest({task, roll: r, win: {start: 0, len: 1500}, completed: {}, reserved: {}});
+    assert.deepEqual([req.feedPortType, req.sourceRemnantId, req.rollId, req.rollModel, req.rollW, req.rollL, req.totalRollL, req.windowStartY],
+        ['remnant', 'REM-1', 'R1', 'M1', 2000, 1500, 1500, 0]);
+    assert.deepEqual(req.defects[0], {id: 1, x: 90, y: 190, w: 70, h: 80, margin: 0});
+    const seg = {id: 'rp', start: 0, len: 1500, remnants: [{id: 'X', x: 0, y: 0, w: 10, l: 10}], pieces: [{id: 1, u: 0, v: 0, du: 1400, dv: 900}]};
+    const rep = defaultReport(seg, {remnant: true});
+    assert.deepEqual([rep.len, rep.rem], [0, {}]);
+    assert.deepEqual(reportProblems(seg, rep), [], '料头报工不校验实切长度');
+    assert.deepEqual(recoveryCandidates(seg, rep), []);
+    const payload = buildCutReport(seg, rep);
+    assert.deepEqual([payload.actualCutLen, payload.actualRemnants], [0, []]);
 });
 
 async function files(dir) {

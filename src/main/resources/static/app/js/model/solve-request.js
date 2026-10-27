@@ -12,6 +12,10 @@ export function remainingDemands(task, completed = {}, reserved = {}) {
 /** 工位窗口是否落在母卷可用范围内；返回问题说明，合法时返回 null。 */
 export function windowProblem(roll, win) {
     if (!roll || !win) return '未选择母卷或工位';
+    if (roll.remnant) {
+        if (roll.remnant.status !== 'AVAILABLE') return '该料头已不可用（已使用、报废或隔离）';
+        return win.start === 0 && Math.abs(win.len - roll.totalLength) < .001 ? null : '料头须整块投料';
+    }
     if (!(win.len > 0)) return '拉布长度须大于 0';
     if (win.start < (roll.usedLength || 0) - .001) return `工位起点不能早于已用长度 ${(roll.usedLength / 1000).toFixed(2)} m`;
     if (win.start + win.len > roll.totalLength + .001) return '工位超出卷尾';
@@ -21,7 +25,11 @@ export function windowProblem(roll, win) {
 }
 
 export function buildSolveRequest({task, roll, win, completed, reserved, settings = {}}) {
-    const p = task.process || {};
+    const p = task.process || {}, stock = roll.remnant;
+    // 料头投料：整块为一个工位，母卷编号取料头来源母卷，型号取料头批次（后端据此核对）
+    const feed = stock ? {rollId: stock.sourceRollId, rollModel: stock.materialBatch, rollW: stock.width, rollL: stock.length,
+        totalRollL: stock.length, windowStartY: 0, feedPortType: 'remnant', sourceRemnantId: stock.id,
+        defects: windowDefects(stock.defects || [], 0, stock.length, stock.width)} : null;
     return {
         minRemnantWidth: settings.minRemnantWidth ?? 200,
         minRemnantLength: settings.minRemnantLength ?? 300,
@@ -34,7 +42,8 @@ export function buildSolveRequest({task, roll, win, completed, reserved, setting
         allowRotation: !!p.allowRotation, allowLongitudinal: p.allowLongitudinal !== false,
         feedPortType: 'roll', sourceRemnantId: null, solver: 'packingsolver',
         defects: windowDefects(roll.defects || [], win.start, win.len, roll.width),
-        demands: remainingDemands(task, completed, reserved)
+        demands: remainingDemands(task, completed, reserved),
+        ...(feed || {})
     };
 }
 

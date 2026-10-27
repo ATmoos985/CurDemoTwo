@@ -38,6 +38,17 @@ export function plansOnRoll(plans, rollId) {
         .sort((a, b) => (a.request.windowStartY || 0) - (b.request.windowStartY || 0));
 }
 
+/** 某块料头上的有效方案（料头整块投料，只有一段）。 */
+export function plansOnRemnant(plans, remnantId) {
+    return (plans || []).filter(p => !['CANCELLED', 'REVERSED'].includes(p.status) && p.request?.sourceRemnantId === remnantId);
+}
+
+/** 料头视为一段短“母卷”：幅宽 × 长度，疵点为料头自身坐标，整块一个工位。 */
+export function remnantAsRoll(stock) {
+    return {rollId: stock.id, rollModel: stock.materialBatch, width: stock.width, totalLength: stock.length, usedLength: 0,
+        currentRemainingLength: stock.status === 'AVAILABLE' ? stock.length : 0, defects: stock.defects || [], remnant: stock};
+}
+
 /** 任务涉及的母卷，最近的方案在前。 */
 export function rollsOfPlans(plans) {
     const seen = [];
@@ -94,7 +105,8 @@ export const NEW_STATION = '__new__';
 
 export function buildRollScene({roll, plans, reports = [], rollId, demands, process, freshDefects = [], selectedId = null, window: manual = null}) {
     const colors = demandColors(demands, plans);
-    const list = plansOnRoll(plans, rollId);
+    const isRemnant = !!roll?.remnant;
+    const list = isRemnant ? plansOnRemnant(plans, roll.remnant.id) : plansOnRoll(plans, rollId);
     const reported = reportedPlans(reports);
     const segments = list.map((p, i) => planSegment(p, colors, i, reported));
     const total = Number(roll?.totalLength) || Math.max(...segments.map(s => s.start + s.len), 1);
@@ -105,15 +117,17 @@ export function buildRollScene({roll, plans, reports = [], rollId, demands, proc
     const fresh = {start: Math.max(liveEnd, used), len: Math.max(0, Math.min(bed, total - Math.max(liveEnd, used)))};
     const current = selectedId === NEW_STATION ? null
         : segments.find(s => s.id === selectedId) || segments.find(s => s.status === 'pending') || null;
-    const base = current ? {start: current.start, len: current.len} : fresh;
-    const win = manual ? {...manual} : {...base};
+    // 料头整块投料：工位固定为 0 → 料头长度，不可拖动或改长度
+    const base = isRemnant ? {start: 0, len: total} : current ? {start: current.start, len: current.len} : fresh;
+    const win = manual && !isRemnant ? {...manual} : {...base};
     win.adjusted = !!manual && (Math.abs(manual.start - base.start) > .5 || Math.abs(manual.len - base.len) > .5);
     win.isNew = !current;
     return {
         roll: {id: rollId, width: Number(roll?.width) || Number(list[0]?.request?.rollW) || 0, total, used},
         segments, defects: rollDefects(roll, freshDefects),
         currentId: current?.id || null, window: win, lock,
-        bed: {min: 500, max: Math.max(bed, 6000)}
+        bed: isRemnant ? null : {min: 500, max: Math.max(bed, 6000)},
+        fixed: isRemnant, remnant: isRemnant ? roll.remnant : null
     };
 }
 
