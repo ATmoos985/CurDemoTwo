@@ -85,6 +85,17 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
             await page.locator('[data-tool="mark"]').click(); await frames(page);
             assert.equal(await page.evaluate(() => Konva.stages[0].find('.roll-measure').length), 0);
         });
+        await check('zoomed drawing retains valid defects smaller than five millimetres', async () => {
+            await locate(5); const before = (await draft()).pending.length;
+            const anchor = await point(1000, 5000); await page.mouse.move(anchor.x, anchor.y);
+            for (let i = 0; i < 20; i++) { await page.mouse.wheel(0, -100); await frames(page); }
+            await drag(await point(1000, 5000), await point(1002, 5003));
+            const pending = (await draft()).pending; assert.equal(pending.length, before + 1);
+            const tiny = pending.at(-1); assert.ok(tiny.w >= .1 && tiny.w < 5); assert.ok(tiny.h >= .1 && tiny.h < 5);
+            assert.ok(Math.abs(tiny.w - 2) <= .2 && Math.abs(tiny.h - 3) <= .2);
+            await page.locator('#undo').click(); assert.equal((await draft()).pending.length, before);
+            await page.locator('#follow').click(); await frames(page);
+        });
         await check('automatic feed follows elapsed time, pauses, and updates the roll navigator', async () => {
             await locate(5); await page.locator('#speed').fill('60'); await page.locator('#speed').dispatchEvent('change');
             await page.locator('#run').click();

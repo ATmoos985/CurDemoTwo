@@ -139,7 +139,8 @@ export async function mount(el, [taskId, focusPlan]) {
               <button id="z-in" title="放大">+</button><span id="z-pct" class="num" style="min-width:40px"></span>
               <div class="div"></div><button id="seg-prev" title="上一段" ${idx <= 0 ? 'disabled' : ''}>◀</button><span class="num" style="color:#fff">${seg ? `${idx + 1} / ${sc.segments.length}` : '新工位'}</span><button id="seg-next" title="下一段 / 新工位" ${idx >= order.length - 1 ? 'disabled' : ''}>▶</button>
               <div class="div"></div><div class="vseg">${[['pan', '平移'], ...(st.adjust ? [['move', '移动件']] : []), ['measure', '测量'], ...(sc.fixed || st.adjust ? [] : [['defect', '标疵点']])].map(([k, t]) => `<button data-tool="${k}" class="${st.tool === k ? 'on' : ''}">${t}</button>`).join('')}</div>
-              <button id="path-toggle" class="${st.showPath ? 'on' : ''}" title="显示当前段刀序与空走线">刀路</button>
+              <button id="path-toggle" class="${st.showPath ? 'on' : ''}" aria-pressed="${!!st.showPath}" title="显示当前段刀序与空走线">刀路</button>
+              <button id="dimensions-toggle" class="${prefs.showDimensions !== false ? 'on' : ''}" aria-pressed="${prefs.showDimensions !== false}" title="显示或隐藏工位尺寸">尺寸</button>
               <button id="clear-measure" title="清除测量">✕ 测量</button>
               <button id="orient" title="画布方向（不影响坐标与算法）">${prefs.vertical ? '竖向 ⇅' : '横向 ⇆'}</button>
               <span class="sp"></span><span>拉布</span><input id="bed-len" class="cin num" value="${Math.round(sc.window.len)}" title="${sc.fixed ? '料头整块投料，长度固定' : '本次拉布长度（mm）'}" ${sc.fixed ? 'disabled' : ''}><span>mm</span>
@@ -245,11 +246,11 @@ export async function mount(el, [taskId, focusPlan]) {
         const a = st.adjust, plan = planOf(a.planId), changed = changedPieces(a.positions, plan);
         const p = plan.result.pieces.find(x => x.id === a.selected), q = p && a.positions[p.id], size = p && sizeOf(p, q.rotated);
         return `<section class="pane" id="adjust"><div class="pane-h">手动调整<span class="sub num">${shortId(seg.id)} · v${seg.version}</span><span class="sp"></span><button class="btn sm" id="adjust-close" ${st.busy ? 'disabled' : ''}>放弃调整</button></div>
-          <div class="pane-b"><div class="muted" style="padding:10px 12px;font-size:12px">在画布用“移动件”拖动裁片；后端会校验重叠、疵点避让与件间距，并重新生成刀序。保存后原候选作废，生成新版本。</div>
+          <div class="pane-b"><div class="muted" style="padding:10px 12px;font-size:12px">在画布用“移动件”拖动裁片；方向键微调 5 mm，Shift 为 20 mm，R 旋转，F 定位，Ctrl/⌘+Z 撤销。后端校验后保存为新版本。</div>
             <div class="kv"><div>已改动</div><div class="num">${changed} 件</div>
               ${p ? `<div>选中</div><div>#${p.id} · ${esc(String(p.name || '').slice(0, 16))}</div><div>位置</div><div class="num">X ${fmtN(q.x, 1)} · Y ${fmtN(q.y, 1)} mm</div><div>尺寸</div><div class="num">${fmtN(size.w)} × ${fmtN(size.l)}${q.rotated !== !!p.rotated ? ' · 已旋转' : ''}</div>` : '<div>选中</div><div class="muted">点选画布中的裁片</div>'}</div>
             <div style="display:flex;gap:6px;padding:8px 12px;flex-wrap:wrap"><button class="btn sm" id="adj-undo" ${a.history.canUndo ? '' : 'disabled'}>撤销</button><button class="btn sm" id="adj-redo" ${a.history.canRedo ? '' : 'disabled'}>重做</button>
-              <button class="btn sm" id="adj-rotate" ${p && !p.shape ? '' : 'disabled'}>旋转选中件</button><button class="btn sm" id="adj-reset" ${changed ? '' : 'disabled'}>恢复原位</button></div>
+              <button class="btn sm" id="adj-rotate" ${p && !p.shape ? '' : 'disabled'}>旋转选中件</button><button class="btn sm" id="adj-fit" ${p ? '' : 'disabled'}>定位选中件</button><button class="btn sm" id="adj-reset" ${changed ? '' : 'disabled'}>恢复原位</button></div>
             ${a.error ? `<div class="notice">${esc(a.error)}</div>` : ''}
             <div style="display:flex;gap:8px;padding:8px 12px"><button class="btn pri" id="adj-save" ${changed && !st.busy ? '' : 'disabled'}>校验并保存为新版本</button></div></div></section>`;
     }
@@ -270,7 +271,7 @@ export async function mount(el, [taskId, focusPlan]) {
     function bindTools(sc) {
         const seg = sc.segments.find(s => s.id === sc.currentId); if (!seg) return;
         const plan = planOf(seg.id);
-        el.querySelector('#path-toggle')?.addEventListener('click', () => { st.showPath = !st.showPath; el.querySelector('#path-toggle').classList.toggle('on', st.showPath); canvas.setOptions({showPath: st.showPath}); });
+        el.querySelector('#path-toggle')?.addEventListener('click', e => { st.showPath = !st.showPath; e.currentTarget.classList.toggle('on', st.showPath); e.currentTarget.setAttribute('aria-pressed', String(st.showPath)); canvas.setOptions({showPath: st.showPath}); });
         el.querySelectorAll('[data-export]').forEach(b => b.onclick = () => {
             const {data, home} = camData(plan), tag = `${shortId(plan.id)}-v${plan.version || 1}`;
             b.dataset.export === 'nc' ? download(`cut-${tag}.nc`, gcodeText(data, {home}), 'text/plain;charset=utf-8')
@@ -310,6 +311,7 @@ export async function mount(el, [taskId, focusPlan]) {
         box.querySelector('#adj-undo').onclick = () => { const p = a.history.undo(); if (p) { a.positions = p; a.error = null; redraw(); } };
         box.querySelector('#adj-redo').onclick = () => { const p = a.history.redo(); if (p) { a.positions = p; a.error = null; redraw(); } };
         box.querySelector('#adj-rotate').onclick = () => { a.positions = rotatePiece(a.positions, plan, a.selected); a.history.record(a.positions); a.error = null; redraw(); };
+        box.querySelector('#adj-fit').onclick = () => canvas.fitSelection();
         box.querySelector('#adj-reset').onclick = () => { a.positions = initialPositions(plan); a.history.record(a.positions); a.error = null; redraw(); };
         box.querySelector('#adj-save').onclick = () => {
             const body = adjustPayload(a.positions, a.opId && a.opBody === JSON.stringify(a.positions) ? a.opId : (a.opId = crypto.randomUUID()));
@@ -665,14 +667,22 @@ export async function mount(el, [taskId, focusPlan]) {
             // 选中 / 拖动只更新画布场景与调整面板，不重建画布（重建会中断正在进行的拖动）
             onPieceSelect: id => { if (!st.adjust) return; st.adjust.selected = id; canvas.setScene(scene()); patchAdjust(); },
             onPieceMove: (id, du, dv, done) => {
-                const a = st.adjust; if (!a) return;
+                const a = st.adjust; if (!a || st.busy) return;
                 a.dragBase ||= a.positions;
                 a.positions = movePiece(a.dragBase, planOf(a.planId), id, du, dv, a.dragBase);
                 canvas.setScene(scene());
                 if (done) { a.dragBase = null; a.history.record(a.positions); a.error = null; patchAdjust(); }
+            },
+            onEditCommand: command => {
+                const a = st.adjust; if (!a || st.busy || checks[a.planId] || executionForPlan(views, a.planId)?.reservationActive) return;
+                if (command.type === 'nudge') {
+                    a.positions = movePiece(a.positions, planOf(a.planId), command.pieceId, command.du, command.dv, a.positions);
+                    a.history.record(a.positions); a.error = null; canvas.setScene(scene()); patchAdjust();
+                } else if (['undo', 'redo', 'rotate'].includes(command.type)) el.querySelector('#adj-' + command.type)?.click();
             }
         });
-        canvas.setOptions({vertical: prefs.vertical, view: st.view, fullMode: prefs.fullMode, tool: st.tool, mmPerPx: prefs.mmPerPx, showPath: !!st.showPath});
+        canvas.setOptions({vertical: prefs.vertical, view: st.view, fullMode: prefs.fullMode, tool: st.tool, mmPerPx: prefs.mmPerPx,
+            showPath: !!st.showPath, showDimensions: prefs.showDimensions !== false, editable: !st.busy});
         canvas.setScene(sc, {refit: !savedCam});
         if (savedCam) canvas.setCamera(savedCam);
         nav = createRollNavigator(el.querySelector('#rn'), {
@@ -686,6 +696,11 @@ export async function mount(el, [taskId, focusPlan]) {
         el.querySelectorAll('[data-full]').forEach(b => b.onclick = () => { prefs.fullMode = b.dataset.full; savePrefs(prefs); full(); });
         el.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => { st.tool = b.dataset.tool; el.querySelectorAll('[data-tool]').forEach(x => x.classList.toggle('on', x === b)); canvas.setOptions({tool: st.tool}); });
         el.querySelector('#clear-measure').onclick = () => canvas.clearMeasure();
+        el.querySelector('#dimensions-toggle').onclick = e => {
+            prefs.showDimensions = prefs.showDimensions === false; savePrefs(prefs);
+            e.currentTarget.classList.toggle('on', prefs.showDimensions); e.currentTarget.setAttribute('aria-pressed', String(prefs.showDimensions));
+            canvas.setOptions({showDimensions: prefs.showDimensions});
+        };
         el.querySelector('#orient').onclick = () => { prefs.vertical = !prefs.vertical; savePrefs(prefs); full(); };
         el.querySelector('#z-fit').onclick = () => canvas.fit();
         el.querySelector('#z-in').onclick = () => canvas.zoom(1.25);

@@ -68,6 +68,30 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
             assert.ok(await page.locator('#adj-save').isDisabled());
             await page.locator('#adjust-close').click();
         });
+        await check('workbench view switches and keyboard edits use the shared canvas and existing history', async () => {
+            await page.locator('#path-toggle').click(); await frames(page);
+            assert.ok(await page.evaluate(() => Konva.stages[0].find('.roll-cut').length > 0));
+            await page.locator('#path-toggle').click(); await frames(page);
+            assert.equal(await page.evaluate(() => Konva.stages[0].find('.roll-cut').length + Konva.stages[0].find('.roll-path').length), 0);
+            await page.locator('#dimensions-toggle').click(); await frames(page);
+            assert.equal(await page.evaluate(() => Konva.stages[0].find('.roll-dimension').length), 0);
+            await page.locator('#dimensions-toggle').click();
+            await page.locator('#adjust-open').click(); await frames(page);
+            const selected = await page.evaluate(() => {
+                const s = Konva.stages[0], n = s.findOne('.roll-piece'), p = n.getAbsoluteTransform().point({x: 20, y: 20}), b = s.container().getBoundingClientRect();
+                return {id: n.getAttr('pieceId'), x: n.x(), y: n.y(), sx: p.x + b.x, sy: p.y + b.y, horizontal: n.getParent().getParent().rotation() === 90};
+            });
+            await page.mouse.click(selected.sx, selected.sy);
+            const position = () => page.evaluate(id => { const n = Konva.stages[0].find('.roll-piece').find(p => p.getAttr('pieceId') === id); return {x: n.x(), y: n.y()}; }, selected.id);
+            await page.keyboard.press('ArrowRight'); await frames(page);
+            assert.deepEqual(await position(), {x: selected.x + (selected.horizontal ? 0 : 5), y: selected.y + (selected.horizontal ? 5 : 0)});
+            await page.keyboard.press('Control+z'); await frames(page); assert.deepEqual(await position(), {x: selected.x, y: selected.y});
+            await page.keyboard.press('Control+Shift+z'); await frames(page); assert.ok(await page.locator('#adj-save').isEnabled());
+            const moved = await position(); await page.keyboard.press('r'); assert.deepEqual(await position(), moved, 'polygon rotation remains unsupported by the existing adjustment contract');
+            await page.keyboard.press('f'); await frames(page); await page.keyboard.press('Escape');
+            assert.ok(await page.locator('#adj-fit').isDisabled());
+            await page.locator('#adjust-close').click();
+        });
         await check('1366 and 1920 desktop toolbar actions remain reachable', async () => {
             for (const [width, height] of [[1366, 768], [1920, 1080]]) {
                 await page.setViewportSize({width, height}); await frames(page);

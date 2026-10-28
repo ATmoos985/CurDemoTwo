@@ -32,10 +32,11 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
             const seg = planSegment(plan); seg.home = {u: 2000, v: 0};
             window.sc = {roll: {id: 'ROLL-TEST', width: 1500, total: 10000, used: 1000}, currentId: 'p', segments: [seg],
                 defects: [{u: 3500, v: 50, du: 100, dv: 80, margin: 20}], window: {start: 2000, len: 1500}};
-            window.events = {a: {selected: [], moved: [], defects: [], cursor: [], camera: []}, b: {selected: [], moved: [], defects: [], cursor: [], camera: []}};
+            window.events = {a: {selected: [], moved: [], defects: [], cursor: [], camera: [], commands: []}, b: {selected: [], moved: [], defects: [], cursor: [], camera: [], commands: []}};
             window.make = id => createRollCanvas(document.getElementById(id), {
                 onPieceSelect: x => events[id].selected.push(x), onPieceMove: (...x) => events[id].moved.push(x),
-                onDefectDraw: x => events[id].defects.push(x), onCursor: x => events[id].cursor.push(x), onCamera: x => events[id].camera.push(x)
+                onDefectDraw: x => events[id].defects.push(x), onCursor: x => events[id].cursor.push(x), onCamera: x => events[id].camera.push(x),
+                onEditCommand: x => events[id].commands.push(x)
             });
             window.views = {a: make('a'), b: make('b')};
             views.a.setScene(sc); views.b.setOptions({vertical: false}); views.b.setScene(sc);
@@ -92,6 +93,54 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
             assert.equal(await page.evaluate(() => events.a.moved.length), before);
             await page.evaluate(() => views.a.setOptions({editable: true}));
             await page.evaluate(() => views.a.setScene(sc));
+        });
+        await check('path and dimension switches hide their geometry and remain instance-local', async () => {
+            await page.evaluate(() => { views.a.setOptions({showPath: true}); views.b.setOptions({showPath: true}); }); await frames(page);
+            assert.equal(await page.evaluate(() => stageFor('a').find('.roll-cut').length), 1);
+            assert.ok(await page.evaluate(() => stageFor('a').find('.roll-path').length > 0));
+            await page.evaluate(() => views.a.setOptions({showPath: false, showDimensions: false})); await frames(page);
+            assert.equal(await page.evaluate(() => stageFor('a').find('.roll-cut').length + stageFor('a').find('.roll-path').length + stageFor('a').find('.roll-dimension').length), 0);
+            assert.equal(await page.evaluate(() => stageFor('b').find('.roll-cut').length), 1);
+            assert.ok(await page.evaluate(() => stageFor('b').find('.roll-dimension').length > 0));
+            await page.evaluate(() => { views.a.setOptions({showDimensions: true}); views.b.setOptions({showPath: false}); }); await frames(page);
+            assert.ok(await page.evaluate(() => stageFor('a').find('.roll-dimension').length > 0));
+        });
+        await check('keyboard edit intents require canvas focus and preserve screen direction in either orientation', async () => {
+            await page.evaluate(() => { views.a.setTool('move'); views.a.setSelection(1); document.getElementById('a').focus(); });
+            await page.keyboard.press('ArrowRight'); await page.keyboard.press('Shift+ArrowDown'); await page.keyboard.press('r');
+            await page.keyboard.press('Control+z'); await page.keyboard.press('Control+Shift+z');
+            assert.deepEqual(await page.evaluate(() => events.a.commands), [
+                {type: 'nudge', pieceId: 1, du: 0, dv: 5}, {type: 'nudge', pieceId: 1, du: 20, dv: 0},
+                {type: 'rotate', pieceId: 1}, {type: 'undo'}, {type: 'redo'}
+            ]);
+            assert.deepEqual(await page.evaluate(() => events.b.commands), []);
+            await page.evaluate(() => { views.b.setTool('move'); views.b.setSelection(1); document.getElementById('b').focus(); });
+            await page.keyboard.press('ArrowRight');
+            assert.deepEqual(await page.evaluate(() => events.b.commands.at(-1)), {type: 'nudge', pieceId: 1, du: 5, dv: 0});
+            const before = await page.evaluate(() => events.a.commands.length);
+            for (const attrs of [{status: 'cut'}, {invalid: '材料变化'}]) {
+                await page.evaluate(attrs => { views.a.setScene({...sc, selectedPiece: 1, segments: sc.segments.map(s => ({...s, ...attrs}))}); document.getElementById('a').focus(); }, attrs);
+                await page.keyboard.press('ArrowRight'); await page.keyboard.press('Control+z');
+            }
+            await page.evaluate(() => { views.a.setScene({...sc, selectedPiece: 1}); views.a.setOptions({editable: false}); });
+            await page.keyboard.press('r');
+            await page.evaluate(() => { views.a.setOptions({editable: true}); views.a.setVisible(false); });
+            await page.keyboard.press('ArrowRight');
+            await page.evaluate(() => { views.a.setVisible(true); const input = document.createElement('input'); input.id = 'keyboard-field'; document.body.append(input); input.focus(); });
+            await page.keyboard.type('r'); await page.keyboard.press('Control+z');
+            assert.equal(await page.evaluate(() => events.a.commands.length), before);
+            await page.evaluate(() => { document.getElementById('keyboard-field').remove(); views.a.setScene(sc); views.b.setScene(sc); views.b.setTool('pan'); });
+        });
+        await check('fit selected contour changes only its owner viewport and Escape clears selection', async () => {
+            const before = await page.evaluate(() => { views.a.setSelection(1); document.getElementById('a').focus(); return {a: views.a.getView(), b: views.b.getView()}; });
+            await page.keyboard.press('f'); await frames(page);
+            const fitted = await page.evaluate(() => views.a.getView()); assert.ok(fitted.s > before.a.s);
+            for (const [u, v] of [[2100, 100], [3000, 700]]) {
+                const p = await point('a', u, v); assert.ok(p.x >= 20 && p.x <= 580 && p.y >= 20 && p.y <= 680);
+            }
+            assert.deepEqual(await page.evaluate(() => views.b.getView()), before.b);
+            await page.keyboard.press('Escape'); assert.equal(await page.evaluate(() => events.a.selected.at(-1)), null);
+            await page.evaluate(c => { views.a.setScene(sc); views.a.setView(c); }, before.a); await frames(page);
         });
         await check('panning beyond the retained viewport restores every newly visible contour', async () => {
             await page.evaluate(() => {
@@ -171,6 +220,31 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
                 await page.setViewportSize({width, height: 768});
                 await page.evaluate(w => document.getElementById('a').style.width = Math.min(600, w - 2) + 'px', width);
                 await frames(page); assert.deepEqual(await page.evaluate(() => views.a.getView()), before);
+            }
+        });
+        await check('device pixel ratios 1, 1.25 and 2 preserve physical picking and backing resolution', async () => {
+            const scene = await page.evaluate(() => sc);
+            let firstScale;
+            for (const dpr of [1, 1.25, 2]) {
+                const p = await browser.newPage({viewport: {width: 1366, height: 768}, deviceScaleFactor: dpr});
+                try {
+                    await p.route('**/__roll_dpr', r => r.fulfill({contentType: 'text/html', body: '<script src="/konva.min.js"></script><style>body{margin:0}#host{width:600px;height:700px}</style><div id="host"></div>'}));
+                    await p.goto(base + '/__roll_dpr');
+                    await p.evaluate(async scene => {
+                        const {createRollCanvas} = await import('/js/canvas/roll-canvas.js');
+                        window.view = createRollCanvas(document.getElementById('host'), {onPieceSelect: id => window.picked = id});
+                        view.setScene(scene); view.setTool('move');
+                    }, scene); await frames(p);
+                    const point = await p.evaluate(() => {
+                        const stage = Konva.stages[0], n = stage.findOne('.roll-piece'), q = n.getAbsoluteTransform().point({x: 30, y: 30});
+                        return {...q, backingWidth: stage.getLayers()[0].getCanvas()._canvas.width, ratio: devicePixelRatio};
+                    });
+                    assert.equal(point.ratio, dpr); assert.equal(point.backingWidth, 600 * dpr);
+                    await p.mouse.click(point.x, point.y); assert.equal(await p.evaluate(() => picked), 1);
+                    const scale = await p.evaluate(() => view.getCamera().s); firstScale ??= scale;
+                    assert.equal(scale, firstScale, 'DPR changes backing resolution, not the physical viewport');
+                    await p.evaluate(() => view.destroy()); assert.equal(await p.evaluate(() => Konva.stages.length), 0);
+                } finally { await p.close(); }
             }
         });
         await check('all view gestures produce no business requests or browser errors', async () => {

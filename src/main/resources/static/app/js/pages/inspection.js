@@ -102,7 +102,7 @@ export async function mount(el, [rollParam]) {
         if (!canvas || !st.roll || disposed) return;
         const d = all()[st.sel];
         canvas.setOptions({view: st.overview ? 'full' : 'inspection', tool: st.tool === 'mark' ? 'defect' : st.tool,
-            editDefects: true, editable: !st.saving});
+            editDefects: true, editable: !st.saving, minDefectSize: .1});
         canvas.setScene(buildInspectionScene(st.roll, st.pending, st.pos, d ? defectKey(d) : null), {follow: !st.overview});
     }
     function mountCanvas(host) {

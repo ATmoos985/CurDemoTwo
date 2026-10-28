@@ -28,7 +28,7 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
     if (!Konva) throw new Error('画布组件未加载，请刷新页面');
     let scene = null, cam = null, rows = null, gesture = null, measure = null, draft = null, defectPreview = null;
     let destroyed = false, visible = true, frame = null, dirty = true, worlds = [], coverage = null;
-    let opts = {vertical: true, view: 'station', fullMode: 'strip', tool: 'pan', mmPerPx: DEFAULT_MM_PER_PX, showPath: false};
+    let opts = {vertical: true, view: 'station', fullMode: 'strip', tool: 'pan', mmPerPx: DEFAULT_MM_PER_PX, showPath: false, showDimensions: true};
     const oldTabIndex = host.getAttribute('tabindex'), oldTouchAction = host.style.touchAction;
     const oldCursor = host.style.cursor, oldTitle = host.getAttribute('title'), hadClass = host.classList.contains('rc-host');
     host.classList.add('rc-host'); host.tabIndex = 0; host.style.touchAction = 'none';
@@ -137,7 +137,7 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
                         ...(p.dash?.length ? {dash: p.dash} : {})})}));
                 for (const r of seg.remnants || []) addShape(node, r.shape || rectangle(r.w, r.l), r.x, seg.start + r.y,
                     {name: 'roll-remnant', remnantId: r.id, segmentId: seg.id, fill: r.color || '#3d4549', stroke: r.stroke || (r.hasDefect ? '#b68d48' : '#8b9ba7'), dash: [6, 4]});
-                for (const k of seg.cuts || []) line(node, [k.v1, k.u1, k.v2, k.u2], {dash: [5, 3]});
+                if (opts.showPath) for (const k of seg.cuts || []) line(node, [k.v1, k.u1, k.v2, k.u2], {name: 'roll-cut', dash: [5, 3]});
                 line(node, [0, seg.start, W, seg.start]);
                 segments.push({seg, node, pieces});
             }
@@ -177,24 +177,24 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
         const w = scene.window, W = scene.roll.width, seg = current();
         if (w) {
             rectScreen(cam, w.start, -6 / cam.s, w.len, W + 12 / cam.s, {stroke: w.adjusted ? '#f5b971' : '#7fb3e6', strokeWidth: 2, dash: [6, 3]});
-            if (w.len * cam.s > 80) {
+            if (opts.showDimensions && w.len * cam.s > 80) {
                 const a = screen(cam, w.start, -22 / cam.s), b = screen(cam, w.start + w.len, -22 / cam.s);
                 line(annotations, [...a, ...b], {stroke: '#c9d0d7'});
                 const x = (a[0] + b[0]) / 2, y = (a[1] + b[1]) / 2;
                 annotations.add(new Konva.Rect({x: x - 68, y: y - 8, width: 136, height: 18, fill: '#2a2f35'}));
-                label(x, y - 6, seg?.caption || `拉布 ${n1(w.len)} mm`, {fill: '#cfe3f7', fontSize: 12});
+                label(x, y - 6, seg?.caption || `拉布 ${n1(w.len)} mm`, {name: 'roll-dimension', fill: '#cfe3f7', fontSize: 12});
                 for (const u of [w.start, w.start + w.len]) { const p = screen(cam, u, W); text(p[0] + (opts.vertical ? 8 : 0), p[1] + (opts.vertical ? -4 : 8), `Y ${fmtM(u)} m`); }
             }
         }
         if (opts.showPath && seg?.home) {
             let last = seg.home;
             const h = screen(cam, last.u, last.v);
-            annotations.add(new Konva.Circle({x: h[0], y: h[1], radius: 5, stroke: '#7fb3e6', strokeWidth: 2})); text(h[0] + 7, h[1] - 12, '原点');
+            annotations.add(new Konva.Circle({name: 'roll-path', x: h[0], y: h[1], radius: 5, stroke: '#7fb3e6', strokeWidth: 2})); text(h[0] + 7, h[1] - 12, '原点', {name: 'roll-path'});
             (seg.cuts || []).forEach((k, i) => {
                 const a = screen(cam, last.u, last.v), s = screen(cam, k.u1, k.v1), e = screen(cam, k.u2, k.v2);
-                line(annotations, [...a, ...s], {stroke: '#7fb3e6', dash: [2, 4]}); line(annotations, [...s, ...e], {strokeWidth: 2});
-                annotations.add(new Konva.Circle({x: s[0], y: s[1], radius: 8, fill: '#1d2125', stroke: '#f0c674'}));
-                label(s[0], s[1] - 5, k.step ?? i + 1, {fill: '#f0c674', fontSize: 9.5}); last = {u: k.u2, v: k.v2};
+                line(annotations, [...a, ...s], {name: 'roll-path', stroke: '#7fb3e6', dash: [2, 4]}); line(annotations, [...s, ...e], {name: 'roll-path', strokeWidth: 2});
+                annotations.add(new Konva.Circle({name: 'roll-path', x: s[0], y: s[1], radius: 8, fill: '#1d2125', stroke: '#f0c674'}));
+                label(s[0], s[1] - 5, k.step ?? i + 1, {name: 'roll-path', fill: '#f0c674', fontSize: 9.5}); last = {u: k.u2, v: k.v2};
             });
         }
         const selected = seg?.pieces.find(p => p.id === scene.selectedPiece);
@@ -384,8 +384,8 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
         if (measure) measure.live = false;
         if (draft) {
             const d = draft; draft = null;
-            const du = Math.abs(d.a[0] - d.b[0]), dv = Math.abs(d.a[1] - d.b[1]);
-            if (du >= 5 && dv >= 5) callbacks.onDefectDraw?.({u: n1(Math.min(d.a[0], d.b[0])), v: n1(Math.min(d.a[1], d.b[1])), du: n1(du), dv: n1(dv)});
+            const du = n1(Math.abs(d.a[0] - d.b[0])), dv = n1(Math.abs(d.a[1] - d.b[1])), min = opts.minDefectSize ?? 5;
+            if (du >= min && dv >= min) callbacks.onDefectDraw?.({u: n1(Math.min(d.a[0], d.b[0])), v: n1(Math.min(d.a[1], d.b[1])), du, dv});
         }
         host.style.cursor = toolCursor(); requestDraw();
     }
@@ -394,10 +394,34 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
         e.preventDefault(); callbacks.onInteract?.('zoom'); const p = local(e);
         cam = zoomAt(cam, opts.vertical, ...p, e.deltaY < 0 ? 1.15 : 1 / 1.15, cam.fit * .2, 8); requestDraw();
     }
+    function onKey(e) {
+        if (!visible || !scene || e.target !== host || e.isComposing) return;
+        if (e.key === 'Escape') {
+            cancelGesture(); measure = null;
+            if (opts.tool === 'move') callbacks.onPieceSelect?.(null);
+            requestDraw(); e.stopPropagation(); return;
+        }
+        if (gesture || e.altKey) return;
+        const seg = current(), editable = opts.tool === 'move' && !tiled() && opts.editable !== false && seg?.status === 'pending' && !seg.invalid;
+        const key = e.key.toLowerCase(), ctrl = e.ctrlKey || e.metaKey;
+        if (ctrl) {
+            if (editable && (key === 'z' || key === 'y')) {
+                e.preventDefault(); callbacks.onEditCommand?.({type: key === 'y' || e.shiftKey ? 'redo' : 'undo'});
+            }
+            return;
+        }
+        if (key === 'f') { e.preventDefault(); if (!api.fitSelection()) fit(); return; }
+        if (!editable || !seg.pieces.some(p => p.id === scene.selectedPiece)) return;
+        const step = e.shiftKey ? 20 : 5, dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+        if (dx || dy) {
+            e.preventDefault(); callbacks.onEditCommand?.({type: 'nudge', pieceId: scene.selectedPiece, du: opts.vertical ? dy : dx, dv: opts.vertical ? dx : dy});
+        } else if (key === 'r') { e.preventDefault(); callbacks.onEditCommand?.({type: 'rotate', pieceId: scene.selectedPiece}); }
+    }
     for (const [type, handler] of Object.entries({pointerdown: onDown, pointermove: onMove, pointerup: onUp,
         pointercancel: cancelGesture, lostpointercapture: () => { if (gesture) cancelGesture(); },
         pointerleave: () => callbacks.onCursor?.(null), wheel: onWheel,
-        keydown: e => { if (e.key === 'Escape' && e.target === host) { cancelGesture(); measure = null; requestDraw(); e.stopPropagation(); } }}))
+        keydown: onKey}))
         host.addEventListener(type, handler, {signal: listeners.signal, ...(type === 'wheel' ? {passive: false} : {})});
     const observer = new ResizeObserver(() => {
         if (destroyed || !visible) return;
@@ -425,11 +449,20 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
             if (destroyed) return;
             const refit = ['vertical', 'view', 'fullMode'].some(k => k in next && next[k] !== opts[k]);
             if (refit || next.tool && next.tool !== opts.tool) cancelGesture();
+            if ('showPath' in next && next.showPath !== opts.showPath) dirty = true;
             opts = {...opts, ...next}; if (next.tool && next.tool !== 'measure') measure = null;
             host.style.cursor = toolCursor();
             if (refit) fit(); else requestDraw();
         },
         fit,
+        fitSelection() {
+            if (destroyed || !scene || tiled()) return false;
+            const p = current()?.pieces.find(p => p.id === scene.selectedPiece);
+            if (!p) return false;
+            cam = fitCamera({u0: p.u, u1: p.u + p.du, v0: p.v, v1: p.v + p.dv}, size(), opts.vertical,
+                {start: 48, end: 48, near: 48, far: 48});
+            cam.fit = cam.s; dirty = true; requestDraw(); return true;
+        },
         zoom(factor) {
             if (destroyed || !cam || !(factor > 0)) return;
             const sz = size(); cam = zoomAt(cam, opts.vertical, sz.width / 2, sz.height / 2, factor, cam.fit * .2, 8); requestDraw();
