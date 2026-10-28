@@ -8,6 +8,11 @@ import {buildInspectionScene} from '../model/roll-scene.js';
 
 const TYPES = [['STAIN', '污渍 / 斑点'], ['HOLE', '破洞'], ['WEFT_DEFECT', '跳纱'], ['SLUB', '粗节'], ['SHADING', '色差'], ['MANUAL_MARK', '其他疵点']];
 const draftKey = id => 'cutplan.app.inspection.' + id;
+const savedEvent = 'cutplan:inspection-saved';
+function withoutSubmitted(items, submitted) {
+    const signatures = new Map(submitted.map(d => [d.captureId, JSON.stringify(d)]));
+    return items.filter(d => !d.captureId || signatures.get(d.captureId) !== JSON.stringify(d));
+}
 
 export async function mount(el, [rollParam]) {
     let rolls;
@@ -199,13 +204,16 @@ export async function mount(el, [rollParam]) {
     async function save() {
         if (!st.roll || !st.pending.length || st.saving) return;
         stop();
+        const rollId = st.roll.rollId, submitted = structuredClone(st.pending);
         st.saving = true; render();
         try {
-            const saved = await requestJSON('/api/rolls/' + encodeURIComponent(st.roll.rollId) + '/inspection-defects', {width: st.roll.width, totalLength: st.roll.totalLength, defects: st.pending});
-            if (disposed) return; // 切页后的迟到响应不能覆盖新页面恢复的本机草稿。
-            st.roll = saved;
-            st.pending = []; st.history = []; st.sel = null; persist(); toast('本次疵点已保存到母卷');
-        } catch (e) { toast('保存失败，记录仍保留在本机：' + e.message, true); }
+            const saved = await requestJSON('/api/rolls/' + encodeURIComponent(rollId) + '/inspection-defects', {width: st.roll.width, totalLength: st.roll.totalLength, defects: submitted});
+            // 确认属于提交快照；迟到响应不能清空后来新增或修改的本机记录、位置。
+            const latest = JSON.parse(localStorage.getItem(draftKey(rollId)) || 'null');
+            if (latest) localStorage.setItem(draftKey(rollId), JSON.stringify({...latest, pending: withoutSubmitted(latest.pending, submitted)}));
+            window.dispatchEvent(new CustomEvent(savedEvent, {detail: {saved, submitted}}));
+            if (!disposed) toast('本次疵点已保存到母卷');
+        } catch (e) { if (!disposed) toast('保存失败，记录仍保留在本机：' + e.message, true); }
         st.saving = false; render();
     }
     function status() { setStatus(`<span>${st.roll ? `母卷 ${esc(st.roll.rollId)} · 位置 <span class="num">${(st.pos / 1000).toFixed(3)} m</span>` : '未选择母卷'}</span><span class="sp"></span><span>CutPlan v2 · 第一版</span>`); }
@@ -216,6 +224,17 @@ export async function mount(el, [rollParam]) {
         if (!document.hidden) render();
     };
     document.addEventListener('visibilitychange', onVisibility);
+    const onSaved = ({detail: {saved, submitted}}) => {
+        if (disposed || st.roll?.rollId !== saved.rollId) return;
+        const captures = new Set(submitted.map(d => d.captureId));
+        const known = new Set([...(st.roll.defects || []).map(d => d.id), ...(st.roll.voidedDefects || []).map(d => d.defect.id)]);
+        st.roll = {...st.roll, defects: [...(st.roll.defects || []), ...saved.defects.filter(d => captures.has(d.captureId) && !known.has(d.id))]};
+        st.pending = withoutSubmitted(st.pending, submitted);
+        st.history = st.history.map(items => withoutSubmitted(items, submitted));
+        while (st.history.length && JSON.stringify(st.history.at(-1)) === JSON.stringify(st.pending)) st.history.pop();
+        st.sel = null; persist(); render();
+    };
+    window.addEventListener(savedEvent, onSaved);
     const typing = t => t && (['INPUT', 'SELECT', 'TEXTAREA'].includes(t.tagName) || t.isContentEditable);
     const onKey = e => {
         if (!st.roll || st.saving || typing(e.target)) return;
@@ -232,5 +251,6 @@ export async function mount(el, [rollParam]) {
         if (disposed) return;
         stop(); disposed = true; canvas?.destroy(); canvas = null;
         document.removeEventListener('visibilitychange', onVisibility); document.removeEventListener('keydown', onKey);
+        window.removeEventListener(savedEvent, onSaved);
     };
 }

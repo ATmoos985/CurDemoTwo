@@ -566,7 +566,9 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
         fitBounds(bounds) {
             if (destroyed || !scene || tiled() || !['u0', 'u1', 'v0', 'v1'].every(k => Number.isFinite(bounds?.[k]))
                 || bounds.u1 < bounds.u0 || bounds.v1 < bounds.v0) return false;
-            cam = fitCamera(bounds, size(), opts.vertical, {start: 48, end: 48, near: 48, far: 48});
+            const sz = size();
+            cam = fitCamera(bounds, sz, opts.vertical, {start: 48, end: 48, near: 48, far: 48});
+            cam = zoomAt(cam, opts.vertical, sz.width / 2, sz.height / 2, 1, 1e-9, 8);
             cam.fit = cam.s; dirty = true; requestDraw(); return true;
         },
         zoom(factor) {

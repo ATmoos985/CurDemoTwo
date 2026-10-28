@@ -164,6 +164,51 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
             assert.equal(await page.evaluate(() => Konva.stages.length), 0);
             assert.ok(!(await page.locator('#statusbar').textContent()).includes(id));
         });
+        await check('a save acknowledged after leaving clears only its submitted local marks', async () => {
+            await page.evaluate(id => location.hash = '#/inspection/' + id, id); await page.waitForSelector('#apply');
+            await page.locator('[data-f="y"]').fill('6000'); await page.locator('#apply').click();
+            const submitted = (await draft()).pending;
+            let release, arrived;
+            const waiting = new Promise(resolve => { arrived = resolve; });
+            await page.route('**/api/rolls/' + id + '/inspection-defects', async route => {
+                const response = await route.fetch(); release = () => route.fulfill({response}); arrived();
+            }, {times: 1});
+            await page.locator('#save').click(); await waiting;
+            await page.locator('#nav a[href="#/tasks"]').click(); await page.waitForFunction(() => Konva.stages.length === 0);
+            await release();
+            await page.waitForFunction(key => JSON.parse(localStorage.getItem(key)).pending.length === 0, key);
+            await page.evaluate(id => location.hash = '#/inspection/' + id, id); await page.waitForSelector('#save');
+            assert.ok(await page.locator('#save').isDisabled());
+            assert.equal((await api('/api/rolls/' + id)).defects.filter(d => d.captureId === submitted[0].captureId).length, 1);
+        });
+        await check('a late acknowledgement reconciles a remounted page without erasing newer draft marks or undoing them into saved marks', async () => {
+            await page.evaluate(id => location.hash = '#/inspection/' + id, id); await page.waitForSelector('#apply');
+            if (await page.locator('#new').count()) await page.locator('#new').click();
+            await page.locator('[data-f="y"]').fill('7000'); await page.locator('#apply').click();
+            const submitted = (await draft()).pending;
+            let release, arrived;
+            const waiting = new Promise(resolve => { arrived = resolve; });
+            await page.route('**/api/rolls/' + id + '/inspection-defects', route => {
+                release = async () => { const response = await route.fetch(); await route.fulfill({response}); }; arrived();
+            }, {times: 1});
+            await page.locator('#save').click(); await waiting;
+            await page.locator('#nav a[href="#/tasks"]').click(); await page.waitForFunction(() => Konva.stages.length === 0);
+            await page.evaluate(id => location.hash = '#/inspection/' + id, id); await page.waitForSelector('#apply');
+            if (await page.locator('#new').count()) await page.locator('#new').click();
+            await page.locator('[data-f="y"]').fill('8000'); await page.locator('#apply').click();
+            const fresh = (await draft()).pending.at(-1), pos = (await draft()).pos;
+            await release(); await page.waitForFunction(({key, captureId}) => {
+                const pending = JSON.parse(localStorage.getItem(key)).pending;
+                return pending.length === 1 && pending[0].captureId === captureId;
+            }, {key, captureId: fresh.captureId});
+            assert.deepEqual((await draft()).pending, [fresh]); assert.equal((await draft()).pos, pos);
+            await frames(page);
+            const nodes = await page.evaluate(() => Konva.stages[0].find('.roll-defect').map(n => n.getAttr('defectId')));
+            assert.ok(nodes.includes(fresh.captureId)); assert.ok(!nodes.includes(submitted[0].captureId));
+            await page.locator('#undo').click(); assert.equal((await draft()).pending.length, 0);
+            assert.equal((await api('/api/rolls/' + id)).defects.filter(d => d.captureId === submitted[0].captureId).length, 1);
+            assert.equal((await api('/api/rolls/' + id)).usedLength, 0); assert.deepEqual(errors, []);
+        });
         if (process.env.SCREENSHOT_PATH) {
             await page.evaluate(id => location.hash = '#/inspection/' + id, id);
             await page.waitForFunction(() => Konva.stages.length === 1); await locate(5);

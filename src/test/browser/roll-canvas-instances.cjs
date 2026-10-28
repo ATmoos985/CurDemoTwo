@@ -356,6 +356,23 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
             await page.evaluate(() => views.a.setVisible(true)); await frames(page);
             assert.deepEqual(await page.evaluate(() => views.a.getView()), saved);
         });
+        await check('focusing tiny bounds respects the wheel zoom limit and keeps the target centered', async () => {
+            const sibling = await page.evaluate(() => views.b.getView());
+            for (const vertical of [true, false]) {
+                const fitted = await page.evaluate(async vertical => {
+                    const {toScreen} = await import('/js/canvas/roll-camera.js');
+                    views.a.setOptions({vertical}); views.a.fitBounds({u0: 2200, u1: 2201, v0: 100, v1: 101});
+                    const c = views.a.getCamera(), e = document.getElementById('a');
+                    return {c, center: toScreen(c, vertical, 2200.5, 100.5), size: [e.clientWidth, e.clientHeight]};
+                }, vertical);
+                assert.equal(fitted.c.s, 8); assert.equal(fitted.c.fit, 8);
+                fitted.center.forEach((v, i) => assert.ok(Math.abs(v - fitted.size[i] / 2) < .001));
+                await page.evaluate(() => views.a.zoom(1.15)); assert.equal(await page.evaluate(() => views.a.getCamera().s), 8);
+                await page.evaluate(() => views.a.zoom(1 / 1.15)); assert.ok(Math.abs(await page.evaluate(() => views.a.getCamera().s) - 8 / 1.15) < 1e-9);
+            }
+            assert.deepEqual(await page.evaluate(() => views.b.getView()), sibling);
+            await page.evaluate(() => { views.a.setOptions({vertical: true}); views.a.fit(); }); await frames(page);
+        });
         await check('destroy is idempotent and remount does not duplicate event handlers', async () => {
             const before = await page.evaluate(() => { const c = views.b.getCamera(); views.a.destroy(); views.a.destroy(); return c; });
             assert.equal(await page.evaluate(() => Konva.stages.length), 1);

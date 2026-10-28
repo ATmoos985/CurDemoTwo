@@ -86,6 +86,23 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
             assert.equal(await page.evaluate(() => events.a.moves.length), 0); assert.equal(await page.evaluate(() => events.a.ends), 0);
             assert.equal(await page.locator('#a .rn-handle').count(), 0); assert.match(await page.locator('#a .rn-wl').innerText(), /范围固定/);
         });
+        await check('blur and hiding finish a moved window once and keep late events detached', async () => {
+            for (const event of ['blur', 'hidden']) {
+                await page.evaluate(() => reset('a')); const p = await begin('a'); await page.mouse.move(p.x - 40, p.y);
+                const moved = await page.evaluate(() => scenes.a.window);
+                await page.evaluate(event => {
+                    if (event === 'blur') window.dispatchEvent(new Event('blur'));
+                    else { Object.defineProperty(document, 'hidden', {configurable: true, value: true}); document.dispatchEvent(new Event('visibilitychange')); }
+                }, event);
+                try {
+                    assert.equal(await page.evaluate(() => events.a.ends), 1);
+                    await page.mouse.move(p.x - 80, p.y); await page.mouse.up();
+                    assert.deepEqual(await page.evaluate(() => scenes.a.window), moved);
+                    assert.equal(await page.evaluate(() => events.a.ends), 1);
+                    assert.equal(await page.evaluate(() => events.b.ends), 0);
+                } finally { await page.mouse.up(); await page.evaluate(() => { delete document.hidden; }); }
+            }
+        });
         await check('navigator gestures have no business writes or browser errors', async () => {
             assert.deepEqual(writes, []); assert.deepEqual(errors, []);
             await page.evaluate(() => { views.a.destroy(); views.b.destroy(); });

@@ -22,14 +22,18 @@ export function createRollNavigator(host, callbacks = {}) {
     const listeners = new AbortController(), hadClass = host.classList.contains('rn-host');
     host.classList.add('rn-host');
     const cancelDrag = () => { drag?.abort(); drag = null; };
+    const finishDrag = () => {
+        if (!drag || destroyed) return;
+        cancelDrag(); callbacks.onWindowEnd?.();
+    };
     host.addEventListener('click', e => {
         if (destroyed || document.hidden) return;
         const segment = e.target.closest('.rn-seg');
         if (segment && host.contains(segment)) { e.stopPropagation(); callbacks.onPick?.(segment.dataset.seg); }
     }, {signal: listeners.signal});
     host.addEventListener('mousedown', beginDrag, {signal: listeners.signal});
-    document.addEventListener('visibilitychange', () => { if (document.hidden) cancelDrag(); }, {signal: listeners.signal});
-    window.addEventListener('blur', cancelDrag, {signal: listeners.signal});
+    document.addEventListener('visibilitychange', () => { if (document.hidden) finishDrag(); }, {signal: listeners.signal});
+    window.addEventListener('blur', finishDrag, {signal: listeners.signal});
 
     function render() {
         if (!scene) { host.innerHTML = ''; return; }
@@ -77,7 +81,7 @@ export function createRollNavigator(host, callbacks = {}) {
         }, {signal: drag.signal});
         window.addEventListener('mouseup', ev => {
             if (ev.button !== 0) return;
-            cancelDrag(); callbacks.onWindowEnd?.();
+            finishDrag();
         }, {signal: drag.signal});
     }
 

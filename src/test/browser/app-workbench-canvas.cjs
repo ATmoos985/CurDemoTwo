@@ -124,6 +124,29 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
             assert.deepEqual(await api('/api/rolls/' + id), before);
             assert.equal(before.usedLength, 0);
         });
+        await check('interrupted navigator dragging refreshes the right panel and cursor status to the retained position', async () => {
+            for (const event of ['blur', 'hidden']) {
+                await page.goto(base + '/app/#/workbench/' + task.id + '/' + result.planId); await page.waitForSelector('#rn .rn-win');
+                const start = await page.locator('#rn .rn-win').boundingBox(), p = {x: start.x + start.width / 2, y: start.y + start.height / 2};
+                await page.mouse.move(p.x, p.y); await page.mouse.down(); await page.mouse.move(p.x + 60, p.y);
+                const position = await page.locator('#rn .rn-wl').innerText();
+                const expectedStart = await page.locator('#rn .rn-win').evaluate((e, total) =>
+                    (parseFloat(e.style.left) * total / 100000).toLocaleString('zh-CN', {maximumFractionDigits: 2}), roll.totalLength);
+                await page.evaluate(event => {
+                    if (event === 'blur') window.dispatchEvent(new Event('blur'));
+                    else { Object.defineProperty(document, 'hidden', {configurable: true, value: true}); document.dispatchEvent(new Event('visibilitychange')); }
+                }, event);
+                try {
+                    assert.match(await page.locator('.split > .pane:last-child').innerText(), /工位已调整/);
+                    assert.ok(await page.locator('#report-open').isDisabled());
+                    await page.mouse.up(); assert.equal(await page.locator('#rn .rn-wl').innerText(), position);
+                    await page.evaluate(() => { delete document.hidden; document.dispatchEvent(new Event('visibilitychange')); });
+                    await page.locator('#rc').hover();
+                    assert.ok((await page.locator('#statusbar').innerText()).replace(/\s/g, '').includes('工位' + expectedStart + '–'));
+                    assert.deepEqual(writes, []); assert.deepEqual(await api('/api/rolls/' + id), before);
+                } finally { await page.mouse.up(); await page.evaluate(() => { delete document.hidden; document.dispatchEvent(new Event('visibilitychange')); }); }
+            }
+        });
     } finally {
         await browser.close();
         const failed = results.filter(r => !r.success).length;
