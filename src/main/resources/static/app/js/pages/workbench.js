@@ -966,8 +966,9 @@ export async function mount(el, [taskId, focusPlan]) {
     }
 
     function status(sc) {
-        const c = st.cursor, w = sc.window;
+        const c = st.cursor, w = sc.window, o = sc.origin;
         setStatus(`<span>光标 <span class="num">${c ? `X ${fmtN(c.v, 1)} mm · Y ${(c.u / 1000).toFixed(3)} m` : '—'}</span></span>
+          ${o ? `<span>距${esc(o.label)}基准 <span class="num">${c ? `X ${fmtN((c.v - o.v) * o.dv, 1)} · Y ${fmtN((c.u - o.u) * o.du, 1)} mm` : '—'}</span></span>` : ''}
           <span>工位 <span class="num">${fmtM(w.start, 2)}–${fmtM(w.start + w.len, 2)} m</span></span><span class="sp"></span>
           <span>母卷 ${esc(st.rollId)}</span><span>CutPlan v2</span>`);
     }

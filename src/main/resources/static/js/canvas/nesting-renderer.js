@@ -6,6 +6,14 @@ export function shapeNode(Konva, shape, attributes = {}) {
         : new Konva.Rect({ width: shape.width, height: shape.height, ...attributes });
 }
 
+/** Material reference lines; the optional half-open range only clips display work. */
+export function materialGrid(shape, start = 0, end = shape.height) {
+    if (shape.type !== 'RECTANGLE') return [];
+    const step = Math.max(1000, Math.ceil(shape.height / 200000) * 1000), lines = [];
+    for (let y = Math.max(step, Math.ceil(start / step) * step); y < Math.min(end, shape.height); y += step) lines.push(y);
+    return lines;
+}
+
 /** Shared geometric drawing. Completion styling and interactions are supplied by the host. */
 export function renderNestingGeometry(Konva, groups, scene, options = {}) {
     const { material, region, process } = scene;
@@ -17,8 +25,7 @@ export function renderNestingGeometry(Konva, groups, scene, options = {}) {
     background.add(shapeNode(Konva, material.shape, { fill: dark ? '#19232e' : '#ffffff',
         stroke: dark ? '#607183' : '#a8b5c1', strokeWidth: 1, strokeScaleEnabled: false }));
     // Limit subdivisions for large materials; this grid has no geometric meaning.
-    const grid = Math.max(1000, Math.ceil(height / 200000) * 1000);
-    for (let y = grid; material.shape.type === 'RECTANGLE' && y < height; y += grid) background.add(new Konva.Line({
+    for (const y of materialGrid(material.shape)) background.add(new Konva.Line({
         points: [0, y, width, y], stroke: dark ? '#2c3947' : '#e7edf1',
         strokeWidth: 1, strokeScaleEnabled: false, listening: false }));
     if (overlay.completedLength > 0) {

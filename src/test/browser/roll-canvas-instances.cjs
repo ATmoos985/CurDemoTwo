@@ -55,6 +55,59 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
             const a = await point(id, u, v), b = await point(id, u + du, v + dv);
             await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, {steps: 5}); await page.mouse.up(); await frames(page);
         };
+        await check('material reference grid uses global millimetres across orientations, tiles and nonrectangular material', async () => {
+            const grids = await page.evaluate(() => ['a', 'b'].map(id => stageFor(id).find('.roll-grid').map(n => n.points())));
+            for (const grid of grids) {
+                assert.ok(grid.some(p => p[1] === 2000)); assert.ok(grid.some(p => p[1] === 3000));
+                for (const p of grid) assert.deepEqual(p, [0, p[1], 1500, p[1]]);
+            }
+            await page.evaluate(() => views.a.setOptions({view: 'full', fullMode: 'tile'})); await frames(page);
+            assert.deepEqual(await page.evaluate(() => stageFor('a').find('.roll-grid').map(n => n.points()[1]).sort((a, b) => a - b)),
+                [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000]);
+            await page.evaluate(() => {
+                views.a.setOptions({view: 'station'});
+                views.a.setScene({...sc, roll: {...sc.roll, shape: {type: 'POLYGON', width: 1500, height: 10000,
+                    vertices: [{x: 0, y: 0}, {x: 1500, y: 0}, {x: 700, y: 10000}, {x: 0, y: 10000}]}}});
+            }); await frames(page);
+            assert.equal(await page.evaluate(() => stageFor('a').find('.roll-grid').length), 0);
+            assert.ok(await page.evaluate(() => stageFor('b').find('.roll-grid').length) > 0);
+            await page.evaluate(() => views.a.setScene(sc)); await frames(page);
+        });
+        await check('four process datums stay independent of path visibility and transform only their display axes', async () => {
+            for (const corner of ['left-top', 'right-top', 'left-bottom', 'right-bottom']) {
+                await page.evaluate(corner => {
+                    const origin = {u: corner.endsWith('bottom') ? 3474.5 : 2025.5, v: corner.startsWith('right') ? 1500 : 0,
+                        du: corner.endsWith('bottom') ? -1 : 1, dv: corner.startsWith('right') ? -1 : 1};
+                    for (const v of Object.values(views)) { v.setOptions({showPath: false}); v.setScene({...sc, origin}); }
+                }, corner); await frames(page);
+                for (const id of ['a', 'b']) {
+                    const actual = await page.evaluate(id => {
+                        const s = stageFor(id), o = s.findOne('.roll-origin'), piece = s.findOne('.roll-piece');
+                        return {origin: o && [o.x(), o.y()], x: s.findOne('.roll-origin-x')?.points(), y: s.findOne('.roll-origin-y')?.points(),
+                            path: s.find('.roll-path').length, camera: views[id].getCamera(), piece: [piece.x(), piece.y(), piece.points()]};
+                    }, id);
+                    const u = corner.endsWith('bottom') ? 3474.5 : 2025.5, v = corner.startsWith('right') ? 1500 : 0;
+                    const du = corner.endsWith('bottom') ? -1 : 1, dv = corner.startsWith('right') ? -1 : 1, c = actual.camera;
+                    const p = id === 'a' ? [c.c + v * c.s, c.a + u * c.s] : [c.a + u * c.s, c.c + v * c.s];
+                    assert.ok(actual.origin, 'process datum is drawn without paths');
+                    actual.origin.forEach((n, i) => assert.ok(Math.abs(n - p[i]) < 1e-6));
+                    const xp = id === 'a' ? [p[0] + dv * 38, p[1]] : [p[0], p[1] + dv * 38];
+                    const yp = id === 'a' ? [p[0], p[1] + du * 38] : [p[0] + du * 38, p[1]];
+                    actual.x.forEach((n, i) => assert.ok(Math.abs(n - [...p, ...xp][i]) < 1e-6));
+                    actual.y.forEach((n, i) => assert.ok(Math.abs(n - [...p, ...yp][i]) < 1e-6));
+                    assert.equal(actual.path, 0); assert.deepEqual(actual.piece, [100, 2100, [0, 0, 600, 0, 600, 300, 200, 300, 200, 900, 0, 900]]);
+                }
+            }
+            await page.evaluate(() => views.a.setScene({...sc, window: {start: 2000, len: 500}, origin: {u: 6974.5, v: 1500, du: -1, dv: -1}}, {refit: true})); await frames(page);
+            const fitted = await page.evaluate(() => {
+                const s = stageFor('a'), o = s.findOne('.roll-origin'); return {y: o?.y(), h: s.height()};
+            });
+            assert.ok(fitted.y > 22 && fitted.y < fitted.h, 'fit includes the original bed datum when planned consumption is shorter');
+            await page.evaluate(() => { views.a.setOptions({view: 'full'}); views.b.setScene(sc); }); await frames(page);
+            assert.equal(await page.evaluate(() => stageFor('a').find('.roll-origin').length), 0);
+            assert.equal(await page.evaluate(() => stageFor('b').find('.roll-origin').length), 0);
+            await page.evaluate(() => { views.a.setOptions({view: 'station'}); views.a.setScene(sc); }); await frames(page);
+        });
         await check('both instances render the exact rotated concave polygon', async () => {
             const shapes = await page.evaluate(() => ['a', 'b'].map(id => {
                 const p = stageFor(id).findOne('.roll-piece');

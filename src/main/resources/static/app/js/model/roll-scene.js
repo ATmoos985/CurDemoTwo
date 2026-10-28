@@ -1,6 +1,7 @@
 // 适配层：把任务的方案版本与母卷档案转换为画布场景。纯函数，不发请求。
 // 方案坐标：件与疵点的 y 相对工位起点（request.windowStartY），x 为幅宽方向；母卷疵点 y 为整卷坐标。
 import {effectivePieceResults} from './quality.js';
+import {stationOrigin} from '../../../js/canvas/cad-view.js';
 
 export const PIECE_PALETTE = ['#5f87b0', '#7f9d6e', '#b8925a', '#9a7aa0', '#5f9a96', '#a8735f', '#7a86b8', '#8f9a5a', '#b07a8f', '#5a8fb0'];
 export const SEGMENT_TINTS = ['#47627d', '#4d6b55', '#6b5a43', '#5d4f66', '#3f6563'];
@@ -62,6 +63,11 @@ export function rollsOfPlans(plans) {
     return seen;
 }
 
+const processOrigin = (width, start, length, process) => {
+    const o = stationOrigin({rollW: width, windowStartY: start, bedL: length, cutOrigin: process?.cutOrigin, trimStart: process?.trimStart});
+    return {u: o.y, v: o.x, du: o.dy, dv: o.dx, label: o.label};
+};
+
 export function planSegment(plan, colors = new Map(), index = 0, reported = new Set()) {
     const req = plan.request || {}, res = plan.result || {};
     const start = Number(req.windowStartY) || 0;
@@ -75,6 +81,7 @@ export function planSegment(plan, colors = new Map(), index = 0, reported = new 
         label: `第 ${index + 1} 次拉布 · v${plan.version ?? 1}`,
         tint: SEGMENT_TINTS[index % SEGMENT_TINTS.length],
         bedLength: Number(req.rollL) || len,
+        origin: processOrigin(Number(req.rollW) || 0, start, Number(req.rollL) || len, req),
         pieces: (res.pieces || []).map(p => ({
             id: p.id, demandId: p.demandId,
             u: start + p.y, v: p.x, du: p.l, dv: p.w,
@@ -186,10 +193,12 @@ export function buildRollScene({roll, plans, reports = [], rollId, demands, proc
     const win = manual && !isRemnant ? {...manual} : {...base};
     win.adjusted = !!manual && (Math.abs(manual.start - base.start) > .5 || Math.abs(manual.len - base.len) > .5);
     win.isNew = !current;
+    const width = Number(roll?.width) || Number(list[0]?.request?.rollW) || 0;
     return {
-        roll: {id: rollId, width: Number(roll?.width) || Number(list[0]?.request?.rollW) || 0, total, used,
+        roll: {id: rollId, width, total, used,
             shape: roll?.remnant?.shape ? structuredClone(roll.remnant.shape) : null},
         segments, defects: rollDefects(roll, freshDefects),
+        origin: current?.origin || processOrigin(width, win.start, win.len, process),
         currentId: current?.id || null, window: win, lock,
         bed: isRemnant ? null : {min: 500, max: Math.max(bed, 6000)},
         fixed: isRemnant, remnant: isRemnant ? roll.remnant : null

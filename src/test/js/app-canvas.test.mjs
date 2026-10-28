@@ -58,6 +58,29 @@ test('camera maps world to screen and back in both orientations', () => {
     assert.deepEqual(toScreen(cam, true, 100, 40), [40, 60], '竖向时卷长沿 y 方向');
 });
 
+test('all four process datums preserve request length, trim and world offset without transforming result geometry', () => {
+    for (const cutOrigin of ['left-top', 'right-top', 'left-bottom', 'right-bottom']) {
+        const plan = {id: 'p', status: 'PENDING', request: {rollId: 'R', rollW: 2000, rollL: 5000, windowStartY: 15000, trimStart: 25.5, cutOrigin},
+            result: {deductLen: 1200, pieces: [{id: 1, x: 200, y: 100, w: 300, l: 400}]}};
+        const before = JSON.stringify(plan), scene = buildRollScene({roll: {width: 2000, totalLength: 30000}, rollId: 'R', plans: [plan],
+            process: {cutOrigin: 'left-top', trimStart: 0, bedLength: 500}, selectedId: 'p'});
+        assert.deepEqual(scene.origin, {u: cutOrigin.endsWith('bottom') ? 19974.5 : 15025.5, v: cutOrigin.startsWith('right') ? 2000 : 0,
+            du: cutOrigin.endsWith('bottom') ? -1 : 1, dv: cutOrigin.startsWith('right') ? -1 : 1,
+            label: `${cutOrigin.startsWith('right') ? '右' : '左'}${cutOrigin.endsWith('bottom') ? '下' : '上'}`});
+        assert.deepEqual([scene.segments[0].pieces[0].u, scene.segments[0].pieces[0].v], [15100, 200]);
+        assert.equal(JSON.stringify(plan), before);
+    }
+});
+
+test('new stations and remnant material use their own process datum extent', () => {
+    const process = {cutOrigin: 'right-bottom', trimStart: 20, bedLength: 5000};
+    const fresh = buildRollScene({roll: {width: 2000, totalLength: 30000}, rollId: 'R', plans: [], process, window: {start: 12000, len: 3000}});
+    assert.deepEqual(fresh.origin, {u: 14980, v: 2000, du: -1, dv: -1, label: '右下'});
+    const remnant = buildRollScene({roll: remnantAsRoll({id: 'rem', width: 800, length: 600, status: 'AVAILABLE'}), plans: [], process});
+    assert.deepEqual(remnant.origin, {u: 580, v: 800, du: -1, dv: -1, label: '右下'});
+    assert.equal(buildInspectionScene({width: 2000, totalLength: 30000}, [], 1000).origin, undefined);
+});
+
 test('polygon hit detection excludes concave gaps and includes contour boundaries', () => {
     const p = {u: 4000, v: 100, du: 900, dv: 600, shape: {type: 'POLYGON', vertices: [
         {x: 0, y: 0}, {x: 600, y: 0}, {x: 600, y: 300}, {x: 200, y: 300}, {x: 200, y: 900}, {x: 0, y: 900}

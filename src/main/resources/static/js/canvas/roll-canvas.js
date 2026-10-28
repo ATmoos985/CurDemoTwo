@@ -1,5 +1,5 @@
 // 独立母卷画布。场景与相机属于实例，几何复用现有 Konva renderer；宿主处理业务命令。
-import {shapeNode} from './nesting-renderer.js';
+import {shapeNode, materialGrid} from './nesting-renderer.js';
 import {rectangle, shapeVertices} from './nesting-scene.js';
 import {toScreen, toWorld, screenRect, fitCamera, zoomAt, panBy, ratioOf, scaleForRatio, rulerStep, DEFAULT_MM_PER_PX} from './roll-camera.js';
 
@@ -80,6 +80,9 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
             rows = null;
             const w = scene.window, ctx = w ? Math.min(w.len * .2, 2500) : 0;
             const range = opts.view === 'station' && w ? {u0: w.start - ctx, u1: w.start + w.len + ctx} : {u0: 0, u1: scene.roll.total};
+            if (opts.view === 'station' && scene.origin) {
+                range.u0 = Math.min(range.u0, scene.origin.u); range.u1 = Math.max(range.u1, scene.origin.u);
+            }
             cam = fitCamera({...range, v0: 0, v1: W}, sz, opts.vertical, {start: 68, end: 40, near: 78, far: 40});
         }
         cam.fit = cam.s; dirty = true; requestDraw();
@@ -159,6 +162,8 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
             const group = new Konva.Group(tiled() ? {clipX: 0, clipY: start, clipWidth: W, clipHeight: rows.rowLen} : {});
             geometry.add(group);
             addShape(group, scene.roll.shape || rectangle(W, scene.roll.total), 0, 0, {fill: '#353b42', stroke: '#6b747e'});
+            for (const u of materialGrid(scene.roll.shape || rectangle(W, scene.roll.total), Math.max(start, coverage.start), Math.min(end, coverage.end)))
+                line(group, [0, u, W, u], {name: 'roll-grid', stroke: '#46515c'});
             if (scene.roll.used > 0) addShape(group, rectangle(W, Math.min(scene.roll.used, scene.roll.total)), 0, 0,
                 {name: 'roll-hatch', fillPatternImage: usedPattern});
             const segments = [];
@@ -222,6 +227,15 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
                 label(x, y - 6, seg?.caption || `拉布 ${n1(w.len)} mm`, {name: 'roll-dimension', fill: '#cfe3f7', fontSize: 12});
                 for (const u of [w.start, w.start + w.len]) { const p = screen(cam, u, W); text(p[0] + (opts.vertical ? 8 : 0), p[1] + (opts.vertical ? -4 : 8), `Y ${fmtM(u)} m`); }
             }
+        }
+        const o = scene.origin;
+        if (o && w && opts.view === 'station' && W * cam.s >= 80 && Math.max(w.len, Math.abs(o.u - w.start)) * cam.s >= 110) {
+            const p = screen(cam, o.u, o.v), x = screen(cam, o.u, o.v + o.dv * 38 / cam.s), y = screen(cam, o.u + o.du * 38 / cam.s, o.v);
+            line(annotations, [...p, ...x], {name: 'roll-origin-x', stroke: '#8fc2d7', strokeWidth: 1.5});
+            line(annotations, [...p, ...y], {name: 'roll-origin-y', stroke: '#8fc2d7', strokeWidth: 1.5});
+            annotations.add(new Konva.Circle({name: 'roll-origin', x: p[0], y: p[1], radius: 3, fill: '#23272c', stroke: '#8fc2d7', strokeWidth: 1.5}));
+            const tx = screen(cam, o.u, o.v + o.dv * 47 / cam.s), ty = screen(cam, o.u + o.du * 47 / cam.s, o.v);
+            text(tx[0] - 4, tx[1] - 6, 'X', {fill: '#8fc2d7'}); text(ty[0] - 4, ty[1] - 6, 'Y', {fill: '#8fc2d7'});
         }
         if (opts.showPath && seg?.home) {
             let last = seg.home;

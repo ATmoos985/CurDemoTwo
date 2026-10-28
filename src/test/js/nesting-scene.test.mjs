@@ -3,7 +3,16 @@ import assert from 'node:assert/strict';
 import { createNestingScene, rectangle, polygon, shapeArea, sceneOrigin } from '../../main/resources/static/js/canvas/nesting-scene.js';
 import { createWorkspaceScene } from '../../main/resources/static/js/business/cutting/workspace-scene.js';
 import { NestingSession, dispatchedEngine } from '../../main/resources/static/js/nesting/nesting-client.js';
-import { renderNestingGeometry, setNestingCutStep } from '../../main/resources/static/js/canvas/nesting-renderer.js';
+import { renderNestingGeometry, setNestingCutStep, materialGrid } from '../../main/resources/static/js/canvas/nesting-renderer.js';
+
+test('material grid retains classic spacing, bounds long rolls and clips tiles without duplicate boundaries', () => {
+    assert.deepEqual(materialGrid(rectangle(2000, 5000)), [1000, 2000, 3000, 4000]);
+    assert.deepEqual(materialGrid(rectangle(2000, 5000), 1500, 3000), [2000]);
+    assert.deepEqual(materialGrid(rectangle(2000, 5000), 3000, 5000), [3000, 4000]);
+    const long = materialGrid(rectangle(2000, 1000000));
+    assert.equal(long.length, 199); assert.equal(long[0], 5000); assert.equal(long.at(-1), 995000);
+    assert.deepEqual(materialGrid({type: 'POLYGON', width: 2000, height: 5000}), []);
+});
 
 const input = { schemaVersion: '1', unit: 'mm', engine: 'crosscut', timeLimitSeconds: 3,
     material: { id: 'sheet-A', shape: rectangle(2000, 3000), exclusions: [], continuesAfterRegion: false },
