@@ -60,6 +60,8 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
         await page.goto(base + '/app/#/workbench/' + task.id + '/' + plan.id);
         await page.locator('#adjust-open').click(); await frames(page);
         await check('invalid drag shows real outlines, returns to the original and adds no history or write', async () => {
+            assert.ok(await page.locator('#bed-len').isDisabled());
+            assert.equal(await page.locator('#rn .rn-handle').count(), 0, 'editing keeps the saved processing region fixed');
             const start = await point(first), end = await point(first, 570, 20);
             await page.mouse.move(start.x, start.y); await page.mouse.down(); await page.mouse.move(end.x, end.y, {steps: 4}); await frames(page);
             assert.equal(await page.evaluate(() => Konva.stages[0].find('.roll-diagnostic').length), 2);

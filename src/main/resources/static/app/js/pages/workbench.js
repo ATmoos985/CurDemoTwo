@@ -90,6 +90,7 @@ export async function mount(el, [taskId, focusPlan]) {
     const scene = () => {
         const sc = buildRollScene({roll, plans, reports: detail.reports, rollId: st.rollId, demands: task.demands,
             process: task.process, freshDefects: st.fresh, selectedId: st.selectedId, window: st.window});
+        sc.window.readOnly = !!(st.adjust || st.busy);
         // 刀路图层原点；手动调整中用草稿位置替换当前段的件
         for (const s of sc.segments) { const p = planOf(s.id); if (p) s.home = worldHome(p, s.start); if (s.status === 'pending' && checks[s.id]) s.invalid = checks[s.id]; }
         if (st.adjust) {
@@ -149,7 +150,7 @@ export async function mount(el, [taskId, focusPlan]) {
               <button id="dimensions-toggle" class="${prefs.showDimensions !== false ? 'on' : ''}" aria-pressed="${prefs.showDimensions !== false}" title="显示或隐藏工位尺寸">尺寸</button>
               <button id="clear-measure" title="清除测量">✕ 测量</button>
               <button id="orient" title="画布方向（不影响坐标与算法）">${prefs.vertical ? '竖向 ⇅' : '横向 ⇆'}</button>
-              <span class="sp"></span><span>拉布</span><input id="bed-len" class="cin num" value="${Math.round(sc.window.len)}" title="${sc.fixed ? '料头整块投料，长度固定' : '本次拉布长度（mm）'}" ${sc.fixed ? 'disabled' : ''}><span>mm</span>
+              <span class="sp"></span><span>拉布</span><input id="bed-len" class="cin num" value="${Math.round(sc.window.len)}" title="${sc.fixed ? '料头整块投料，长度固定' : sc.window.readOnly ? '调整或提交期间保持工位范围' : '本次拉布长度（mm）'}" ${sc.fixed || sc.window.readOnly ? 'disabled' : ''}><span>mm</span>
             </div>
             <div class="canvas-wrap"><div id="rc"></div>
               <div class="legend">${sc.segments.some(s => s.pieces.some(p => p.outcome)) ? Object.values(OUTPUT_STYLES).map(s => `<span><i style="background:${s.color}"></i>${s.label}</span>`).join('') : ''}${st.view === 'full' || seg?.status !== 'cut' ? task.demands.slice(0, 6).map(d => `<span><i style="background:${colors.get(d.id)}"></i>计划 · ${esc(String(d.name).slice(0, 18))}</span>`).join('') : ''}<span><i style="border:1.5px solid #ff6b5b"></i>疵点</span></div>
@@ -737,7 +738,7 @@ export async function mount(el, [taskId, focusPlan]) {
         el.querySelector('#seg-next').onclick = () => step(1);
         el.querySelector('#bed-len').onchange = e => {
             const v = Number(e.target.value);
-            if (!sc.bed) return;
+            if (!sc.bed || sc.window.readOnly) return;
             if (!(v >= sc.bed.min && v <= sc.bed.max)) { toast(`拉布长度须在 ${sc.bed.min}–${sc.bed.max} mm`, true); e.target.value = Math.round(sc.window.len); return; }
             st.window = {start: sc.window.start, len: v}; st.failure = null; shell(true);
         };
