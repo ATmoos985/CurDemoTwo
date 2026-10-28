@@ -13,7 +13,7 @@ import {findForwardPlan} from '../../../js/business/cutting/forward-search.js';
 import {OUTCOMES, defaultReport, applyBulk, recoveryCandidates, reportSummary, reportProblems, buildCutReport} from '../model/report.js';
 import {reviewablePieces, effectivePieceResults, DISPOSITIONS, emptyQualityForm, qualityProblems, buildQualityCommand, receiptSummary} from '../model/quality.js';
 import {executionWriter, executionForPlan, executionLabels} from '../../../js/business/cutting/execution-client.js';
-import {camData, localHome, worldHome, initialPositions, movePiece, rotatePiece, changedPieces, adjustPayload, applyPositions, sizeOf} from '../model/plan-tools.js';
+import {camData, localHome, worldHome, initialPositions, movePiece, rotatePiece, rotationAllowed, placementProblem, changedPieces, adjustPayload, applyPositions, sizeOf} from '../model/plan-tools.js';
 import {gcodeText, dxfText} from '../../../js/plugins/export/cam-format.js';
 import {createPlanHistory} from '../../../js/business/cutting/plan-editing.js';
 import {ticketModel, ticketHTML} from '../../../js/plugins/export/cut-ticket-model.js';
@@ -94,8 +94,14 @@ export async function mount(el, [taskId, focusPlan]) {
         for (const s of sc.segments) { const p = planOf(s.id); if (p) s.home = worldHome(p, s.start); if (s.status === 'pending' && checks[s.id]) s.invalid = checks[s.id]; }
         if (st.adjust) {
             const i = sc.segments.findIndex(s => s.id === st.adjust.planId);
-            if (i >= 0) sc.segments[i] = applyPositions(sc.segments[i], planOf(st.adjust.planId), st.adjust.positions);
+            if (i >= 0) {
+                sc.segments[i] = applyPositions(sc.segments[i], planOf(st.adjust.planId), st.adjust.positions);
+                sc.window = {...sc.window, start: sc.segments[i].start, len: sc.segments[i].len};
+            }
             sc.selectedPiece = st.adjust.selected;
+            const problem = st.adjust.problem;
+            if (i >= 0 && problem?.subject) sc.diagnostics = [{message: problem.message,
+                shapes: [problem.subject, ...problem.related].map(p => ({u: sc.segments[i].start + p.y, v: p.x, du: p.l, dv: p.w, shape: p.shape}))}];
         }
         // 报工中：画布按逐件结果着色（异常红、未切灰）
         const seg = st.report && sc.segments.find(s => s.id === st.report.planId);
@@ -246,11 +252,13 @@ export async function mount(el, [taskId, focusPlan]) {
         const a = st.adjust, plan = planOf(a.planId), changed = changedPieces(a.positions, plan);
         const p = plan.result.pieces.find(x => x.id === a.selected), q = p && a.positions[p.id], size = p && sizeOf(p, q.rotated);
         return `<section class="pane" id="adjust"><div class="pane-h">手动调整<span class="sub num">${shortId(seg.id)} · v${seg.version}</span><span class="sp"></span><button class="btn sm" id="adjust-close" ${st.busy ? 'disabled' : ''}>放弃调整</button></div>
-          <div class="pane-b"><div class="muted" style="padding:10px 12px;font-size:12px">在画布用“移动件”拖动裁片；方向键微调 5 mm，Shift 为 20 mm，R 旋转，F 定位，Ctrl/⌘+Z 撤销。后端校验后保存为新版本。</div>
+          <div class="pane-b"><div class="muted" style="padding:10px 12px;font-size:12px">方向键微调 5 mm，Shift 为 20 mm，R 旋转，F 定位，Ctrl/⌘+Z 撤销。位置按当前工位计算；前端预检后，仍须由后端校验刀路并保存新版本。</div>
             <div class="kv"><div>已改动</div><div class="num">${changed} 件</div>
-              ${p ? `<div>选中</div><div>#${p.id} · ${esc(String(p.name || '').slice(0, 16))}</div><div>位置</div><div class="num">X ${fmtN(q.x, 1)} · Y ${fmtN(q.y, 1)} mm</div><div>尺寸</div><div class="num">${fmtN(size.w)} × ${fmtN(size.l)}${q.rotated !== !!p.rotated ? ' · 已旋转' : ''}</div>` : '<div>选中</div><div class="muted">点选画布中的裁片</div>'}</div>
+              ${p ? `<div>选中</div><div>#${p.id} · ${esc(String(p.name || '').slice(0, 16))}</div><div>位置</div><div class="num">X ${fmtN(q.x, 1)} · Y ${fmtN(q.y, 1)} mm</div><div>尺寸</div><div class="num">${fmtN(size.w)} × ${fmtN(size.l)}${q.rotationDegrees != null ? ` · ${q.rotationDegrees}°` : q.rotated !== !!p.rotated ? ' · 已旋转' : ''}</div>` : '<div>选中</div><div class="muted">点选画布中的裁片</div>'}</div>
+            ${p ? `<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:6px;align-items:end;padding:8px 12px"><label>X mm<input style="width:100%" class="field num" id="adj-x" type="number" step="0.1" value="${q.x}" ${st.busy ? 'disabled' : ''}></label><label>Y mm<input style="width:100%" class="field num" id="adj-y" type="number" step="0.1" value="${q.y}" ${st.busy ? 'disabled' : ''}></label><button class="btn sm" id="adj-position" ${st.busy ? 'disabled' : ''}>应用位置</button></div>` : ''}
             <div style="display:flex;gap:6px;padding:8px 12px;flex-wrap:wrap"><button class="btn sm" id="adj-undo" ${a.history.canUndo ? '' : 'disabled'}>撤销</button><button class="btn sm" id="adj-redo" ${a.history.canRedo ? '' : 'disabled'}>重做</button>
-              <button class="btn sm" id="adj-rotate" ${p && !p.shape ? '' : 'disabled'}>旋转选中件</button><button class="btn sm" id="adj-fit" ${p ? '' : 'disabled'}>定位选中件</button><button class="btn sm" id="adj-reset" ${changed ? '' : 'disabled'}>恢复原位</button></div>
+              <button class="btn sm" id="adj-rotate" ${p && rotationAllowed(plan, p) && !st.busy ? '' : 'disabled'}>旋转 90°</button><button class="btn sm" id="adj-fit" ${p ? '' : 'disabled'}>定位选中件</button><button class="btn sm" id="adj-reset" ${changed ? '' : 'disabled'}>恢复原位</button></div>
+            ${a.problem ? `<div class="notice" id="adj-problem" role="status">${esc(a.problem.message)}${a.problem.subject ? `<br>尝试位置 X ${fmtN(a.problem.subject.x, 1)} · Y ${fmtN(a.problem.subject.y, 1)} mm<br><button class="btn sm" id="adj-problem-fit">定位冲突区域</button>` : ''}</div>` : ''}
             ${a.error ? `<div class="notice">${esc(a.error)}</div>` : ''}
             <div style="display:flex;gap:8px;padding:8px 12px"><button class="btn pri" id="adj-save" ${changed && !st.busy ? '' : 'disabled'}>校验并保存为新版本</button></div></div></section>`;
     }
@@ -261,6 +269,17 @@ export async function mount(el, [taskId, focusPlan]) {
         if (!box || !seg) return;
         box.outerHTML = adjustPanel(seg);
         bindAdjust();
+    }
+
+    const mayAdjust = () => st.adjust && !st.busy && !checks[st.adjust.planId] && !executionForPlan(views, st.adjust.planId)?.reservationActive;
+    function proposePiece(id, next, {done = true, base = st.adjust?.positions} = {}) {
+        if (!mayAdjust()) return;
+        const a = st.adjust, previousMessage = a.problem?.message;
+        a.problem = placementProblem(next, planOf(a.planId), id); a.error = null;
+        a.positions = done && a.problem ? base : next;
+        if (done) a.history.record(a.positions);
+        canvas.setScene(scene());
+        if (done || previousMessage !== a.problem?.message) patchAdjust();
     }
 
     function download(name, text, type) {
@@ -308,12 +327,20 @@ export async function mount(el, [taskId, focusPlan]) {
         const a = st.adjust, plan = planOf(a.planId);
         const redraw = () => { canvas.setScene(scene()); patchAdjust(); };
         box.querySelector('#adjust-close').onclick = () => { st.adjust = null; st.tool = 'pan'; shell(true); };
-        box.querySelector('#adj-undo').onclick = () => { const p = a.history.undo(); if (p) { a.positions = p; a.error = null; redraw(); } };
-        box.querySelector('#adj-redo').onclick = () => { const p = a.history.redo(); if (p) { a.positions = p; a.error = null; redraw(); } };
-        box.querySelector('#adj-rotate').onclick = () => { a.positions = rotatePiece(a.positions, plan, a.selected); a.history.record(a.positions); a.error = null; redraw(); };
+        box.querySelector('#adj-undo').onclick = () => { if (!mayAdjust()) return; const p = a.history.undo(); if (p) { a.positions = p; a.error = null; a.problem = null; redraw(); } };
+        box.querySelector('#adj-redo').onclick = () => { if (!mayAdjust()) return; const p = a.history.redo(); if (p) { a.positions = p; a.error = null; a.problem = null; redraw(); } };
+        box.querySelector('#adj-rotate').onclick = () => proposePiece(a.selected, rotatePiece(a.positions, plan, a.selected));
+        box.querySelector('#adj-position')?.addEventListener('click', () => proposePiece(a.selected, {...a.positions, [a.selected]: {...a.positions[a.selected],
+            x: box.querySelector('#adj-x').valueAsNumber, y: box.querySelector('#adj-y').valueAsNumber}}));
         box.querySelector('#adj-fit').onclick = () => canvas.fitSelection();
-        box.querySelector('#adj-reset').onclick = () => { a.positions = initialPositions(plan); a.history.record(a.positions); a.error = null; redraw(); };
+        box.querySelector('#adj-problem-fit')?.addEventListener('click', () => {
+            const shapes = scene().diagnostics?.[0]?.shapes; if (!shapes?.length) return;
+            canvas.fitBounds({u0: Math.min(...shapes.map(p => p.u)), u1: Math.max(...shapes.map(p => p.u + p.du)),
+                v0: Math.min(...shapes.map(p => p.v)), v1: Math.max(...shapes.map(p => p.v + p.dv))});
+        });
+        box.querySelector('#adj-reset').onclick = () => { if (!mayAdjust()) return; a.positions = initialPositions(plan); a.history.record(a.positions); a.error = null; a.problem = null; redraw(); };
         box.querySelector('#adj-save').onclick = () => {
+            if (!mayAdjust()) return;
             const body = adjustPayload(a.positions, a.opId && a.opBody === JSON.stringify(a.positions) ? a.opId : (a.opId = crypto.randomUUID()));
             a.opBody = JSON.stringify(a.positions);
             saveAdjustment(body, '调整版已校验并保存为新版本');
@@ -330,7 +357,7 @@ export async function mount(el, [taskId, focusPlan]) {
             await reload(); st.selectedId = saved.id; st.window = null; toast(okText + `（v${saved.version}）`);
             st.busy = ''; full(); return;
         } catch (e) {
-            if (st.adjust) st.adjust.error = '校验未通过：' + e.message; else if (st.toolpath) st.toolpath.error = '保存未完成：' + e.message;
+            if (st.adjust) st.adjust.error = '校验或保存未完成：' + e.message; else if (st.toolpath) st.toolpath.error = '保存未完成：' + e.message;
         }
         st.busy = ''; shell(true);
     }
@@ -665,19 +692,17 @@ export async function mount(el, [taskId, focusPlan]) {
             onCamera: ({ratio, percent}) => { const i = el.querySelector('#z-ratio'); if (i && document.activeElement !== i) i.value = formatRatio(ratio); const p = el.querySelector('#z-pct'); if (p) p.textContent = Math.round(percent) + '%'; },
             onDefectDraw: d => addFresh(d, sc),
             // 选中 / 拖动只更新画布场景与调整面板，不重建画布（重建会中断正在进行的拖动）
-            onPieceSelect: id => { if (!st.adjust) return; st.adjust.selected = id; canvas.setScene(scene()); patchAdjust(); },
+            onPieceSelect: id => { if (!st.adjust) return; st.adjust.selected = id; st.adjust.problem = null; canvas.setScene(scene()); patchAdjust(); },
             onPieceMove: (id, du, dv, done) => {
-                const a = st.adjust; if (!a || st.busy) return;
+                const a = st.adjust; if (!mayAdjust()) return;
                 a.dragBase ||= a.positions;
-                a.positions = movePiece(a.dragBase, planOf(a.planId), id, du, dv, a.dragBase);
-                canvas.setScene(scene());
-                if (done) { a.dragBase = null; a.history.record(a.positions); a.error = null; patchAdjust(); }
+                proposePiece(id, movePiece(a.dragBase, planOf(a.planId), id, du, dv, a.dragBase), {done, base: a.dragBase});
+                if (done) a.dragBase = null;
             },
             onEditCommand: command => {
                 const a = st.adjust; if (!a || st.busy || checks[a.planId] || executionForPlan(views, a.planId)?.reservationActive) return;
                 if (command.type === 'nudge') {
-                    a.positions = movePiece(a.positions, planOf(a.planId), command.pieceId, command.du, command.dv, a.positions);
-                    a.history.record(a.positions); a.error = null; canvas.setScene(scene()); patchAdjust();
+                    proposePiece(command.pieceId, movePiece(a.positions, planOf(a.planId), command.pieceId, command.du, command.dv, a.positions));
                 } else if (['undo', 'redo', 'rotate'].includes(command.type)) el.querySelector('#adj-' + command.type)?.click();
             }
         });

@@ -202,6 +202,13 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
             const group = new Konva.Group(); annotations.add(group); transform(group, cam);
             addShape(group, selected.shape || rectangle(selected.dv, selected.du), selected.v, selected.u, {stroke: '#fff', strokeWidth: 2});
         }
+        for (const diagnostic of scene.diagnostics || []) {
+            const group = new Konva.Group(); annotations.add(group); transform(group, cam);
+            for (const p of diagnostic.shapes) addShape(group, p.shape || rectangle(p.dv, p.du), p.v, p.u,
+                {name: 'roll-diagnostic', fill: '#ef444430', stroke: '#ff6b5b', strokeWidth: 2, dash: [4, 3]});
+            const p = diagnostic.shapes[0];
+            if (p) { const [x, y] = screen(cam, p.u, p.v); text(Math.max(RULER + 8, x), Math.max(RULER + 8, y - 20), diagnostic.message, {name: 'roll-diagnostic-label', fill: '#ff9b91'}); }
+        }
         const defect = selectedDefect();
         if (defect) {
             rectScreen(cam, defect.u, defect.v, defect.du, defect.dv, {stroke: '#fff', strokeWidth: 2});
@@ -459,8 +466,12 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
             if (destroyed || !scene || tiled()) return false;
             const p = current()?.pieces.find(p => p.id === scene.selectedPiece);
             if (!p) return false;
-            cam = fitCamera({u0: p.u, u1: p.u + p.du, v0: p.v, v1: p.v + p.dv}, size(), opts.vertical,
-                {start: 48, end: 48, near: 48, far: 48});
+            return api.fitBounds({u0: p.u, u1: p.u + p.du, v0: p.v, v1: p.v + p.dv});
+        },
+        fitBounds(bounds) {
+            if (destroyed || !scene || tiled() || !['u0', 'u1', 'v0', 'v1'].every(k => Number.isFinite(bounds?.[k]))
+                || bounds.u1 < bounds.u0 || bounds.v1 < bounds.v0) return false;
+            cam = fitCamera(bounds, size(), opts.vertical, {start: 48, end: 48, near: 48, far: 48});
             cam.fit = cam.s; dirty = true; requestDraw(); return true;
         },
         zoom(factor) {

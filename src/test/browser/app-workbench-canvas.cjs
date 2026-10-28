@@ -59,10 +59,12 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
             const stagePoint = await page.evaluate(() => {
                 const s = Konva.stages.find(s => s.container().id === 'rc'), p = s.findOne('.roll-piece');
                 const point = p.getAbsoluteTransform().point({x: 20, y: 20}), box = s.container().getBoundingClientRect();
-                return {x: point.x + box.x, y: point.y + box.y};
+                const end = p.getAbsoluteTransform().point({x: 20, y: 520});
+                return {x: point.x + box.x, y: point.y + box.y, endX: end.x + box.x, endY: end.y + box.y};
             });
             await page.mouse.move(stagePoint.x, stagePoint.y); await page.mouse.down();
-            await page.mouse.move(stagePoint.x + 25, stagePoint.y + 12, {steps: 5}); await page.mouse.up(); await frames(page);
+            // The native packing is tight: move into the known empty tail, not into the neighbouring piece.
+            await page.mouse.move(stagePoint.endX, stagePoint.endY, {steps: 5}); await page.mouse.up(); await frames(page);
             assert.ok(await page.locator('#adj-save').isEnabled());
             await page.locator('#adj-undo').click(); await frames(page);
             assert.ok(await page.locator('#adj-save').isDisabled());
@@ -82,12 +84,18 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
                 return {id: n.getAttr('pieceId'), x: n.x(), y: n.y(), sx: p.x + b.x, sy: p.y + b.y, horizontal: n.getParent().getParent().rotation() === 90};
             });
             await page.mouse.click(selected.sx, selected.sy);
+            await page.locator('#adj-x').fill('100'); await page.locator('#adj-y').fill('500');
+            await page.locator('#adj-position').click(); await frames(page);
+            selected.x = 100; selected.y = 2500;
+            await page.locator('#rc').focus();
             const position = () => page.evaluate(id => { const n = Konva.stages[0].find('.roll-piece').find(p => p.getAttr('pieceId') === id); return {x: n.x(), y: n.y()}; }, selected.id);
             await page.keyboard.press('ArrowRight'); await frames(page);
             assert.deepEqual(await position(), {x: selected.x + (selected.horizontal ? 0 : 5), y: selected.y + (selected.horizontal ? 5 : 0)});
             await page.keyboard.press('Control+z'); await frames(page); assert.deepEqual(await position(), {x: selected.x, y: selected.y});
             await page.keyboard.press('Control+Shift+z'); await frames(page); assert.ok(await page.locator('#adj-save').isEnabled());
-            const moved = await position(); await page.keyboard.press('r'); assert.deepEqual(await position(), moved, 'polygon rotation remains unsupported by the existing adjustment contract');
+            const points = () => page.evaluate(id => Konva.stages[0].find('.roll-piece').find(p => p.getAttr('pieceId') === id).points(), selected.id);
+            const prior = await points(); await page.keyboard.press('r'); await frames(page);
+            assert.notDeepEqual(await points(), prior, 'permitted contour rotation uses the saved adjustment contract');
             await page.keyboard.press('f'); await frames(page); await page.keyboard.press('Escape');
             assert.ok(await page.locator('#adj-fit').isDisabled());
             await page.locator('#adjust-close').click();

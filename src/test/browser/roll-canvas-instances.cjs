@@ -199,6 +199,19 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
             assert.ok(Math.abs(cursor.u - value.rows.rowLen * 1.5) < .1); assert.ok(Math.abs(cursor.v - 200) < .1);
             await page.evaluate(() => views.a.setOptions({view: 'station'})); await frames(page);
         });
+        await check('diagnostic overlays and focused bounds belong to only their canvas instance', async () => {
+            const other = await page.evaluate(() => {
+                const camera = views.b.getView();
+                views.a.setScene({...sc, diagnostics: [{message: '裁片 #1 与疵点 #9 干涉', shapes: [{u: 2200, v: 100, du: 900, dv: 600, shape: sc.segments[0].pieces[0].shape}]}]});
+                views.a.fitBounds({u0: 2200, u1: 3100, v0: 100, v1: 700}); return camera;
+            }); await frames(page);
+            assert.equal(await page.evaluate(() => stageFor('a').find('.roll-diagnostic').length), 1);
+            assert.equal(await page.evaluate(() => stageFor('b').find('.roll-diagnostic').length), 0);
+            assert.deepEqual(await page.evaluate(() => views.b.getView()), other);
+            assert.equal(await page.evaluate(() => views.a.fitBounds({u0: NaN, u1: 10, v0: 0, v1: 10})), false);
+            await page.evaluate(() => { views.a.setScene(sc); views.a.fit(); }); await frames(page);
+            assert.equal(await page.evaluate(() => stageFor('a').find('.roll-diagnostic').length), 0);
+        });
         await check('hide and restore preserve camera without consuming hidden gestures', async () => {
             const saved = await page.evaluate(() => { const c = views.a.getView(); views.a.setVisible(false); return c; });
             await page.mouse.move(250, 400); await page.mouse.wheel(0, -100);

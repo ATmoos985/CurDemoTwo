@@ -351,7 +351,7 @@ test('remnant feed: whole-piece window, remnant plans only, solve and report fol
 });
 
 test('plan tools: local CAM origin, clamped piece moves, rotation and adjustment payload', () => {
-    const p = {id: 'pl', version: 2, request: {rollId: 'R1', rollW: 2800, rollL: 4000, windowStartY: 9000, cutOrigin: 'right-bottom', feedPortType: 'roll', defects: []},
+    const p = {id: 'pl', version: 2, request: {rollId: 'R1', rollW: 2800, rollL: 4000, windowStartY: 9000, cutOrigin: 'right-bottom', feedPortType: 'roll', defects: [], allowRotation: true},
         result: {cuts: [{step: 1, type: '横切', startX: 2800, startY: 1400, endX: 0, endY: 1400}], remnants: [],
             pieces: [{id: 1, x: 0, y: 0, w: 900, l: 1400, rotated: false, name: 'A'}, {id: 2, x: 900, y: 0, w: 500, l: 700, rotated: true, name: 'B'}]}};
     assert.deepEqual(localHome(p), {x: 2800, y: 4000}, '原点为工位局部坐标，不叠加工位起点');
