@@ -18,6 +18,7 @@ import {gcodeText, dxfText} from '../../../js/plugins/export/cam-format.js';
 import {createPlanHistory} from '../../../js/business/cutting/plan-editing.js';
 import {ticketModel, ticketHTML} from '../../../js/plugins/export/cut-ticket-model.js';
 import {OptimizationSession} from '../../../js/business/optimization/job-client.js';
+import {shapeArea, rectangle} from '../../../js/canvas/nesting-scene.js';
 import {isSlitting, openDemands, slittingJob, assignCar, usefulCars, carStart, carRequest, patternRows, compositionText, spareWidth} from '../model/slitting.js';
 
 const EXEC_TAG = {DRAFT: '', RELEASED: 'run', RUNNING: 'run', EXPIRED: 'warn', CANCELLED: '', REPORTED: 'ok', REVERSED: 'err'};
@@ -58,7 +59,7 @@ export async function mount(el, [taskId, focusPlan]) {
     // st.source：'roll' 母卷连续投料 / 'remnant' 料头整块投料；st.rollId 存对应编号
     const st = {source: focusRemnant ? 'remnant' : 'roll', rollId: focusRemnant || focus?.request?.rollId || rollsOfPlans(plans)[0] || null,
         selectedId: focus ? focus.id : null, window: null, fresh: [], tool: 'pan', view: focus ? 'station' : prefs.view,
-        pop: null, cursor: null, saving: false, busy: '', failure: null, quality: null, station: '1', reserveMin: 30, recommend: null};
+        pop: null, cursor: null, saving: false, busy: '', failure: null, quality: null, station: '1', reserveMin: 30, recommend: null, remnantSelection: null};
     let canvas = null, nav = null, undismiss = null, closeContext = () => {};
 
     /** 可选母卷：任务方案用过的母卷 + 同型号且有余量的母卷。 */
@@ -110,6 +111,11 @@ export async function mount(el, [taskId, focusPlan]) {
             const o = st.report.rows[p.id]?.outcome;
             return {...p, color: OUTCOME_COLOR[o] || p.color, label: `草稿${OUTCOMES[o] || ''} · ${p.label}`};
         });
+        const selection = st.remnantSelection;
+        if (selection && selection.materialId === sc.roll.id && selection.viewId === sc.currentId
+            && sc.segments.find(s => s.id === selection.segmentId)?.remnants.some(r => r.id === selection.remnantId))
+            sc.selectedRemnant = {segmentId: selection.segmentId, remnantId: selection.remnantId};
+        else st.remnantSelection = null;
         return sc;
     };
     const remaining = () => remainingDemands(task, detail.completed, detail.reserved);
@@ -209,8 +215,60 @@ export async function mount(el, [taskId, focusPlan]) {
             ${executionBlock(seg, view)}`; })() : ''}
           ${seg.status === 'cut' ? recordsBlock(seg) : ''}
           ${toolsBlock(seg)}
+          ${remnantsBlock(seg)}
           <div class="sec">本次未排入</div>
           ${unplaced.length ? `<table class="t" style="border:0"><tbody>${unplaced.map(f => `<tr><td class="wrap">${esc(names.get(f.demandId)?.name || `需求 ${f.demandId}`)}</td><td class="r num" style="color:var(--warn)">缺 ${f.unplaced}</td></tr>`).join('')}</tbody></table>` : '<div class="empty" style="padding:12px">本段需求全部排入</div>'}`;
+    }
+
+    const remnantArea = r => shapeArea(r.shape || rectangle(r.w, r.l)) / 1_000_000;
+    function remnantsBlock(seg) {
+        if (!seg.remnants.length) return '';
+        return `<div class="sec">${seg.status === 'cut' ? '实际回收登记' : '计划余料'} · ${seg.remnants.length} 块</div>
+          <table class="t" style="border:0"><thead><tr><th>区域</th><th class="r">面积 m²</th><th></th></tr></thead><tbody>${seg.remnants.map(r =>
+            `<tr><td class="num wrap">${esc(r.id)}</td><td class="r num">${fmtN(remnantArea(r), 3)}</td><td><button class="btn sm" data-remnant-select="${esc(r.id)}" data-remnant-plan="${esc(seg.id)}" aria-pressed="false">查看</button></td></tr>`).join('')}</tbody></table>`;
+    }
+    function selectRemnant(selection) {
+        if (!selection && !st.remnantSelection) return;
+        const next = scene();
+        const seg = selection && next.segments.find(s => s.id === selection.segmentId), r = seg?.remnants.find(r => r.id === selection.remnantId);
+        st.remnantSelection = r ? {segmentId: seg.id, remnantId: r.id, materialId: next.roll.id, viewId: next.currentId} : null;
+        next.selectedRemnant = r ? {segmentId: seg.id, remnantId: r.id} : null;
+        if (next.selectedRemnant && prefs.sideCollapsed && !st.report && !st.quality && !st.adjust) {
+            prefs.sideCollapsed = false; savePrefs(prefs); shell(true);
+        } else { canvas.setScene(next); patchRemnantDetails(next); }
+    }
+    function patchRemnantDetails(sc) {
+        const body = el.querySelector('.split > .pane:last-child .pane-b'), editing = !!(st.report || st.quality || st.adjust);
+        const anchor = editing && body?.scrollTop > 0 ? [...body.children].find(n => n.id !== 'remnant-details') : null;
+        const anchorY = anchor?.getBoundingClientRect().top;
+        const restoreScroll = () => {
+            if (anchor?.isConnected) body.scrollTop += anchor.getBoundingClientRect().top - anchorY;
+            else if (body && !editing) body.scrollTop = 0;
+        };
+        el.querySelector('#remnant-details')?.remove();
+        const selected = sc.selectedRemnant, seg = selected && sc.segments.find(s => s.id === selected.segmentId), r = seg?.remnants.find(r => r.id === selected.remnantId);
+        el.querySelectorAll('[data-remnant-select]').forEach(b => {
+            const active = !!r && b.dataset.remnantSelect === String(r.id) && b.dataset.remnantPlan === seg.id;
+            b.setAttribute('aria-pressed', String(active)); b.closest('tr').classList.toggle('sel', active);
+        });
+        if (!r || !body) { restoreScroll(); return; }
+        const note = seg.status === 'cut' ? '回执中的实际回收登记；当前可用性请以库存档案为准。'
+            : seg.status === 'pending' ? '方案中的预计回收区域，尚未入库。' : '历史计划区域，不能作为当前可用库存。';
+        body.insertAdjacentHTML('afterbegin', `<section id="remnant-details" role="region" aria-label="余料属性">
+          <div class="pane-h">${seg.status === 'cut' ? '回收区域' : '余料属性'}<span class="sp"></span><button class="btn sm" id="remnant-close" aria-label="关闭余料属性">×</button></div>
+          <div class="kv"><div>编号</div><div class="num wrap">${esc(r.id)}</div><div>方案</div><div class="num">${shortId(seg.id)} · v${seg.version ?? 1}</div>
+            <div>位置</div><div class="num">X ${fmtN(r.x, 1)} · Y ${fmtN(seg.start + r.y, 1)} mm</div>
+            <div>外接尺寸</div><div class="num">${fmtN(r.w, 1)} × ${fmtN(r.l, 1)} mm</div>
+            <div>轮廓面积</div><div class="num">${fmtN(remnantArea(r), 3)} m²${r.shape?.type === 'POLYGON' ? ' · 异形' : ''}</div>
+            <div>疵点标记</div><div>${r.hasDefect === true ? '带疵' : r.hasDefect === false ? '无疵标记' : '未记录'}</div>
+            ${r.label ? `<div>来源</div><div class="wrap">${esc(r.label)}</div>` : ''}</div>
+          <div class="notice">${note}</div><div style="padding:0 12px 10px"><button class="btn sm" id="remnant-fit">定位选中区域</button></div></section>`);
+        restoreScroll();
+        el.querySelector('#remnant-close').onclick = () => { selectRemnant(null); el.querySelector('#rc')?.focus({preventScroll: true}); };
+        el.querySelector('#remnant-fit').onclick = () => {
+            if (st.view === 'full' && prefs.fullMode === 'tile') { st.view = 'station'; full(); }
+            canvas.fitBounds({u0: seg.start + r.y, u1: seg.start + r.y + r.l, v0: r.x, v1: r.x + r.w});
+        };
     }
 
     /** 执行单：创建 → 下达（预约）→ 开工 → 报工；按钮可用性与原因全部来自后端 allowedActions。 */
@@ -395,6 +453,7 @@ export async function mount(el, [taskId, focusPlan]) {
         } else if (remnant) {
             heading = `${seg.status === 'cut' ? '实际回收' : '计划余料'} · ${remnant.id}`;
             detailText = `X ${fmtN(remnant.x, 1)} · Y ${fmtN(seg.start + remnant.y, 1)} mm（全卷） · ${fmtN(remnant.w, 1)} × ${fmtN(remnant.l, 1)} mm`;
+            add('properties', '查看余料属性', () => selectRemnant({segmentId: seg.id, remnantId: remnant.id}));
             add('locate', '定位余料', () => locate({u0: seg.start + remnant.y, u1: seg.start + remnant.y + remnant.l, v0: remnant.x, v1: remnant.x + remnant.w}));
         } else {
             add('adjust', '手动调整当前工位', () => startAdjustment(plan), reason);
@@ -765,6 +824,7 @@ export async function mount(el, [taskId, focusPlan]) {
         bindReport();
         bindExecution(sc);
         bindTools(sc);
+        el.querySelectorAll('[data-remnant-select]').forEach(b => b.onclick = () => selectRemnant({segmentId: b.dataset.remnantPlan, remnantId: b.dataset.remnantSelect}));
         el.querySelector('#solve')?.addEventListener('click', solve);
         el.querySelector('#discard')?.addEventListener('click', discard);
         el.querySelector('#forward')?.addEventListener('click', forward);
@@ -775,6 +835,7 @@ export async function mount(el, [taskId, focusPlan]) {
         canvas?.destroy(); nav?.destroy();
         canvas = createRollCanvas(host, {
             onContextMenu: openCanvasMenu,
+            onRemnantSelect: selectRemnant,
             onInteract: () => closeContext(),
             onCursor: c => { st.cursor = c; status(sc); },
             onCamera: ({ratio, percent}) => { const i = el.querySelector('#z-ratio'); if (i && document.activeElement !== i) i.value = formatRatio(ratio); const p = el.querySelector('#z-pct'); if (p) p.textContent = Math.round(percent) + '%'; },
@@ -799,6 +860,7 @@ export async function mount(el, [taskId, focusPlan]) {
             showPath: !!st.showPath, showDimensions: prefs.showDimensions !== false, editable: !st.busy});
         canvas.setScene(sc, {refit: !savedCam});
         if (savedCam) canvas.setCamera(savedCam);
+        patchRemnantDetails(sc);
         nav = createRollNavigator(el.querySelector('#rn'), {
             onPick: id => { st.selectedId = id; st.window = null; st.failure = null; full(); },
             // 拖动时画布跟随：工位框停在屏幕原处，母卷随之移动

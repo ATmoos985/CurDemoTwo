@@ -333,6 +333,13 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
                 if (['cut', 'stale'].includes(seg.status) && Math.min(r.w, r.h) > 26 && !(opts.view === 'station' && seg.id === scene.currentId))
                     label(r.x + r.w / 2, r.y - 16, seg.caption || (seg.status === 'cut' ? '已切 ✓' : '已失效'), {fill: '#e6ebef'}, labelGroup);
             }
+            const selected = selectedRemnant();
+            if (selected && selected.seg.start + selected.remnant.y + selected.remnant.l >= item.start && selected.seg.start + selected.remnant.y <= item.end) {
+                const {seg, remnant: r} = selected, highlight = new Konva.Group(tiled() ? {clipX: 0, clipY: item.start, clipWidth: scene.roll.width, clipHeight: rows.rowLen} : {});
+                annotations.add(highlight); transform(highlight, c);
+                addShape(highlight, r.shape || rectangle(r.w, r.l), r.x, seg.start + r.y,
+                    {name: 'roll-remnant-selection', stroke: '#8fd6d2', strokeWidth: 2, dash: [4, 3]});
+            }
             if (opts.editDefects) for (const original of scene.defects) {
                 const d = defectPreview?.id === original.id ? {...original, ...defectPreview} : original;
                 if (d.u + d.du < min || d.u > max) continue;
@@ -358,6 +365,11 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
     function selectedDefect() {
         const d = scene?.defects.find(d => d.id === scene.selectedDefect);
         return d && defectPreview?.id === d.id ? {...d, ...defectPreview} : d;
+    }
+    function selectedRemnant() {
+        const selection = scene?.selectedRemnant, seg = selection && scene.segments.find(s => s.id === selection.segmentId);
+        const remnant = seg?.remnants?.find(r => r.id === selection.remnantId);
+        return remnant ? {seg, remnant} : null;
     }
     const defectCorners = d => [[d.u, d.v], [d.u, d.v + d.dv], [d.u + d.du, d.v], [d.u + d.du, d.v + d.dv]];
     function editDefect(g, w) {
@@ -412,7 +424,7 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
             gesture = {kind: opts.tool, pointer: e.pointerId};
             const q = {a: clamp(w), b: clamp(w), live: true};
             if (opts.tool === 'measure') measure = q; else draft = q;
-        } else { gesture = {kind: 'pan', last: p, pointer: e.pointerId}; host.style.cursor = 'grabbing'; }
+        } else { gesture = {kind: 'pan', last: p, down: p, moved: false, pointer: e.pointerId}; host.style.cursor = 'grabbing'; }
         host.setPointerCapture(e.pointerId); requestDraw();
     }
     function onMove(e) {
@@ -429,7 +441,10 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
         else if (gesture.kind === 'defect-edit') { defectPreview = editDefect(gesture, w); dirty = true; requestDraw(); }
         else if (gesture.kind === 'measure') { measure.b = clamp(w); requestDraw(); }
         else if (gesture.kind === 'defect') { draft.b = clamp(w); requestDraw(); }
-        else { cam = panBy(cam, opts.vertical, p[0] - gesture.last[0], p[1] - gesture.last[1]); gesture.last = p; requestDraw(); }
+        else {
+            gesture.moved ||= Math.hypot(p[0] - gesture.down[0], p[1] - gesture.down[1]) > 4;
+            cam = panBy(cam, opts.vertical, p[0] - gesture.last[0], p[1] - gesture.last[1]); gesture.last = p; requestDraw();
+        }
     }
     function onUp(e) {
         if (!gesture || gesture.pointer !== e.pointerId) return;
@@ -439,6 +454,10 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
         if (g.kind === 'defect-edit') {
             const next = editDefect(g, world(local(e))); defectPreview = null; dirty = true;
             callbacks.onDefectEdit?.(g.id, {u: next.u, v: next.v, du: next.du, dv: next.dv});
+        }
+        if (g.kind === 'pan' && !g.moved && callbacks.onRemnantSelect) {
+            const cursor = cursorAt(local(e)), hit = cursor && hitAt(cursor);
+            callbacks.onRemnantSelect(hit?.kind === 'remnant' ? {segmentId: hit.segmentId, remnantId: hit.entityId} : null);
         }
         if (measure) measure.live = false;
         if (draft) {
@@ -453,11 +472,7 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
         e.preventDefault(); callbacks.onInteract?.('zoom'); const p = local(e);
         cam = zoomAt(cam, opts.vertical, ...p, e.deltaY < 0 ? 1.15 : 1 / 1.15, cam.fit * .2, 8); requestDraw();
     }
-    function onContextMenu(e) {
-        if (!visible || !cam || !scene || !callbacks.onContextMenu) return;
-        const cursor = cursorAt(local(e));
-        if (!cursor) return;
-        e.preventDefault(); cancelGesture(); host.focus({preventScroll: true});
+    function hitAt(cursor) {
         let target = {kind: 'station', segmentId: null};
         // Reverse drawing order, using actual outlines rather than bounding rectangles.
         for (const seg of [...scene.segments].reverse()) {
@@ -467,13 +482,21 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
             if (remnant || piece) { target = {kind: remnant ? 'remnant' : 'piece', segmentId: seg.id, entityId: (remnant || piece).id}; break; }
             if (cursor.u >= seg.start && cursor.u <= seg.start + seg.len) { target = {kind: 'station', segmentId: seg.id}; break; }
         }
-        callbacks.onContextMenu({...target, ...cursor, clientX: e.clientX, clientY: e.clientY});
+        return target;
+    }
+    function onContextMenu(e) {
+        if (!visible || !cam || !scene || !callbacks.onContextMenu) return;
+        const cursor = cursorAt(local(e));
+        if (!cursor) return;
+        e.preventDefault(); cancelGesture(); host.focus({preventScroll: true});
+        callbacks.onContextMenu({...hitAt(cursor), ...cursor, clientX: e.clientX, clientY: e.clientY});
     }
     function onKey(e) {
         if (!visible || !scene || e.target !== host || e.isComposing) return;
         if (e.key === 'Escape') {
             cancelGesture(); measure = null;
             if (opts.tool === 'move') callbacks.onPieceSelect?.(null);
+            if (scene.selectedRemnant) callbacks.onRemnantSelect?.(null);
             requestDraw(); e.stopPropagation(); return;
         }
         if (gesture || e.altKey) return;
@@ -535,8 +558,10 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
         fitSelection() {
             if (destroyed || !scene || tiled()) return false;
             const p = current()?.pieces.find(p => p.id === scene.selectedPiece);
-            if (!p) return false;
-            return api.fitBounds({u0: p.u, u1: p.u + p.du, v0: p.v, v1: p.v + p.dv});
+            if (p) return api.fitBounds({u0: p.u, u1: p.u + p.du, v0: p.v, v1: p.v + p.dv});
+            const r = selectedRemnant();
+            return r ? api.fitBounds({u0: r.seg.start + r.remnant.y, u1: r.seg.start + r.remnant.y + r.remnant.l,
+                v0: r.remnant.x, v1: r.remnant.x + r.remnant.w}) : false;
         },
         fitBounds(bounds) {
             if (destroyed || !scene || tiled() || !['u0', 'u1', 'v0', 'v1'].every(k => Number.isFinite(bounds?.[k]))

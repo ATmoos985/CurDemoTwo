@@ -34,10 +34,11 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
             window.sc = {roll: {id: 'ROLL-TEST', width: 1500, total: 10000, used: 1000}, currentId: 'p', segments: [seg],
                 defects: [{u: 3500, v: 50, du: 100, dv: 80, margin: 20}], window: {start: 2000, len: 1500}};
             window.events = {a: {selected: [], moved: [], defects: [], cursor: [], camera: [], commands: [], contexts: []}, b: {selected: [], moved: [], defects: [], cursor: [], camera: [], commands: [], contexts: []}};
+            events.a.remnants = []; events.b.remnants = [];
             window.make = id => createRollCanvas(document.getElementById(id), {
                 onPieceSelect: x => events[id].selected.push(x), onPieceMove: (...x) => events[id].moved.push(x),
                 onDefectDraw: x => events[id].defects.push(x), onCursor: x => events[id].cursor.push(x), onCamera: x => events[id].camera.push(x),
-                onEditCommand: x => events[id].commands.push(x), onContextMenu: x => events[id].contexts.push(x)
+                onEditCommand: x => events[id].commands.push(x), onContextMenu: x => events[id].contexts.push(x), onRemnantSelect: x => events[id].remnants.push(x)
             });
             window.views = {a: make('a'), b: make('b')};
             views.a.setScene(sc); views.b.setOptions({vertical: false}); views.b.setScene(sc);
@@ -107,6 +108,38 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
             assert.equal(await page.evaluate(() => stageFor('a').find('.roll-origin').length), 0);
             assert.equal(await page.evaluate(() => stageFor('b').find('.roll-origin').length), 0);
             await page.evaluate(() => { views.a.setOptions({view: 'station'}); views.a.setScene(sc); }); await frames(page);
+        });
+        await check('remnant picking, true-outline highlight, tiled selection and pan threshold are instance-local', async () => {
+            await page.evaluate(() => { views.a.setTool('pan'); events.a.remnants = []; events.b.remnants = []; });
+            const p = await point('a', 2200, 850); await page.mouse.click(p.x, p.y); await frames(page);
+            assert.deepEqual(await page.evaluate(() => events.a.remnants.at(-1)), {segmentId: 'p', remnantId: 'r'});
+            assert.equal(await page.evaluate(() => events.b.remnants.length), 0);
+            await page.evaluate(() => views.a.setScene({...sc, selectedRemnant: events.a.remnants.at(-1)})); await frames(page);
+            assert.deepEqual(await page.evaluate(() => stageFor('a').findOne('.roll-remnant-selection').points()), [0, 0, 200, 0, 200, 300, 100, 300, 100, 900, 0, 900]);
+            assert.equal(await page.evaluate(() => stageFor('b').find('.roll-remnant-selection').length), 0);
+            const gap = await point('a', 2600, 950); await page.mouse.click(gap.x, gap.y); await frames(page);
+            assert.equal(await page.evaluate(() => events.a.remnants.at(-1)), null, 'concave gap is not material');
+            const count = await page.evaluate(() => events.a.remnants.length);
+            await drag('a', 2200, 850, 100, 0);
+            assert.equal(await page.evaluate(() => events.a.remnants.length), count, 'pan is not a click');
+            await page.evaluate(() => { views.a.fit(); views.a.setTool('measure'); });
+            await drag('a', 2200, 850, 100, 0);
+            assert.equal(await page.evaluate(() => events.a.remnants.length), count, 'measurement owns the gesture');
+            await page.evaluate(() => { views.a.clearMeasure(); views.a.setTool('pan'); views.a.setOptions({view: 'full', fullMode: 'tile'}); }); await frames(page);
+            const tilePoint = await page.evaluate(() => {
+                const s = stageFor('a'), n = s.find('.roll-remnant').find(n => {
+                    const row = n.getParent().getParent(); return row.clipY() <= 2200 && row.clipY() + row.clipHeight() > 2200;
+                });
+                const p = n.getAbsoluteTransform().point({x: 50, y: 100}), b = s.container().getBoundingClientRect();
+                return {x: p.x + b.x + 1, y: p.y + b.y + 1};
+            });
+            await page.mouse.click(tilePoint.x, tilePoint.y); await frames(page);
+            assert.deepEqual(await page.evaluate(() => events.a.remnants.at(-1)), {segmentId: 'p', remnantId: 'r'});
+            assert.ok(await page.evaluate(() => stageFor('a').find('.roll-remnant-selection').length) > 0);
+            await page.locator('#a').focus(); await page.keyboard.press('Escape');
+            assert.equal(await page.evaluate(() => events.a.remnants.at(-1)), null);
+            await page.evaluate(() => { views.a.setOptions({view: 'station'}); views.a.setScene(sc); views.a.fit(); }); await frames(page);
+            assert.equal(await page.evaluate(() => stageFor('a').find('.roll-remnant-selection').length), 0);
         });
         await check('both instances render the exact rotated concave polygon', async () => {
             const shapes = await page.evaluate(() => ['a', 'b'].map(id => {
