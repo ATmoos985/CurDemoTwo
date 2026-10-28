@@ -65,12 +65,29 @@ class LinearSlittingSolverEngineTests {
         Thread worker=new Thread(()->{try{engine.solve(p);}catch(Throwable e){error.set(e);}});
         var existing=ProcessHandle.current().children().map(ProcessHandle::pid).collect(java.util.stream.Collectors.toSet());
         worker.start();ProcessHandle child=null;
-        for(int i=0;i<200 && child==null;i++) {
-            child=ProcessHandle.current().children().filter(c->!existing.contains(c.pid()) && c.info().commandLine().orElse("").contains("LinearSlittingSolverEngine")).findFirst().orElse(null);
-            if(child==null)Thread.sleep(10);
+        try {
+            long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while(child==null && worker.isAlive() && System.nanoTime()<deadline) {
+                child=newJavaChildren(existing).findFirst().orElse(null);
+                if(child==null)Thread.sleep(2);
+            }
+            assertNotNull(child,"must observe the actual solver JVM; worker failure="+error.get());
+            assertTrue(child.isAlive());
+            worker.interrupt();worker.join(5000);
+            assertFalse(worker.isAlive());assertFalse(child.isAlive());assertInstanceOf(java.util.concurrent.CancellationException.class,error.get());
+        } finally {
+            // An observation/assertion failure must not leave the solver running into the next test.
+            worker.interrupt();worker.join(5000);
+            if(child!=null && child.isAlive())child.destroyForcibly();
         }
-        assertNotNull(child,"must observe the actual solver JVM");worker.interrupt();worker.join(5000);
-        assertFalse(worker.isAlive());assertFalse(child.isAlive());assertInstanceOf(java.util.concurrent.CancellationException.class,error.get());
+    }
+
+    private static java.util.stream.Stream<ProcessHandle> newJavaChildren(java.util.Set<Long> existing) {
+        // Linux JDK 17 only reads one page of argv. The test classpath exceeds that page,
+        // so the main class after -cp is absent from commandLine(). Use owned PID + executable.
+        return ProcessHandle.current().children().filter(c->!existing.contains(c.pid()) && c.isAlive()
+                && c.info().command().map(command->java.nio.file.Path.of(command).getFileName().toString())
+                .filter(name->name.equals("java") || name.equals("java.exe")).isPresent());
     }
     @Test @org.junit.jupiter.api.Timeout(15)
     void childSelfTerminatesWhenParentNoLongerExists(@org.junit.jupiter.api.io.TempDir java.nio.file.Path temp) throws Exception {
@@ -116,9 +133,10 @@ class LinearSlittingSolverEngineTests {
         var orders=java.util.stream.IntStream.range(0,500).mapToObj(i->
                 new SlittingProblem.Order("group-"+i,500,3000,2,"surface-"+i)).toList();
         var p=new SlittingProblem("1","mm",1200,10,10,1000,1180,10,0,"QUALITY",orders,1);
+        var existing=ProcessHandle.current().children().map(ProcessHandle::pid).collect(java.util.stream.Collectors.toSet());
         long start=System.nanoTime();
         assertThrows(com.example.cutdemotwo.algorithm.api.ComputationTimeout.class,()->engine.solve(p));
         assertTrue(System.nanoTime()-start<java.util.concurrent.TimeUnit.SECONDS.toNanos(8));
-        assertTrue(ProcessHandle.current().children().noneMatch(c->c.info().commandLine().orElse("").contains("LinearSlittingSolverEngine")));
+        assertTrue(newJavaChildren(existing).findAny().isEmpty(),"timeout must leave no owned solver JVM alive");
     }
 }
