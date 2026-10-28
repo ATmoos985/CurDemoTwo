@@ -1,11 +1,11 @@
 // 排料工作台：读取任务、方案、报工与母卷档案，交给画布与导航条渲染。
-// 本页可选料、按工位计算（/api/solve）、重新计算与放弃候选；报工仍在经典工作台完成。画布标记的疵点可保存到母卷。
+// 本页选料、计算、执行、报工与复检；画布只展示场景并发出操作意图。
 import {requestJSON, esc, fmtM, fmtN, shortId, errorBox, toast, loadPrefs, savePrefs, dismissOnOutside, solverSettings, loadSheetLib} from '../util.js';
 import {setStatus} from '../main.js';
 import {createRollCanvas} from '../canvas/roll-canvas.js';
 import {createRollNavigator} from '../canvas/roll-navigator.js';
 import {parseRatio, formatRatio} from '../canvas/camera.js';
-import {buildRollScene, rollsOfPlans, sceneMetrics, demandColors, demandIndex, STATUS_TEXT, NEW_STATION, remnantAsRoll} from '../model/roll-scene.js';
+import {buildRollScene, rollsOfPlans, sceneMetrics, demandColors, demandIndex, STATUS_TEXT, NEW_STATION, remnantAsRoll, OUTPUT_STYLES} from '../model/roll-scene.js';
 import {buildSolveRequest, windowProblem, usablePlan, remainingDemands} from '../model/solve-request.js';
 import {taskLabels, taskLink} from '../../../js/business/cutting/task-list-model.js';
 import {validateDefect, round} from '../../../js/inspection/inspection-model.js';
@@ -101,7 +101,7 @@ export async function mount(el, [taskId, focusPlan]) {
         const seg = st.report && sc.segments.find(s => s.id === st.report.planId);
         if (seg) seg.pieces = seg.pieces.map(p => {
             const o = st.report.rows[p.id]?.outcome;
-            return OUTCOME_COLOR[o] ? {...p, color: OUTCOME_COLOR[o], label: `${OUTCOMES[o]} · ${p.label}`} : p;
+            return {...p, color: OUTCOME_COLOR[o] || p.color, label: `草稿${OUTCOMES[o] || ''} · ${p.label}`};
         });
         return sc;
     };
@@ -145,7 +145,7 @@ export async function mount(el, [taskId, focusPlan]) {
               <span class="sp"></span><span>拉布</span><input id="bed-len" class="cin num" value="${Math.round(sc.window.len)}" title="${sc.fixed ? '料头整块投料，长度固定' : '本次拉布长度（mm）'}" ${sc.fixed ? 'disabled' : ''}><span>mm</span>
             </div>
             <div class="canvas-wrap"><div id="rc"></div>
-              <div class="legend">${task.demands.slice(0, 6).map(d => `<span><i style="background:${colors.get(d.id)}"></i>${esc(String(d.name).slice(0, 18))}</span>`).join('')}${task.demands.length > 6 ? `<span>… 共 ${task.demands.length} 项</span>` : ''}<span><i style="border:1.5px solid #ff6b5b"></i>疵点</span></div>
+              <div class="legend">${sc.segments.some(s => s.pieces.some(p => p.outcome)) ? Object.values(OUTPUT_STYLES).map(s => `<span><i style="background:${s.color}"></i>${s.label}</span>`).join('') : ''}${st.view === 'full' || seg?.status !== 'cut' ? task.demands.slice(0, 6).map(d => `<span><i style="background:${colors.get(d.id)}"></i>计划 · ${esc(String(d.name).slice(0, 18))}</span>`).join('') : ''}<span><i style="border:1.5px solid #ff6b5b"></i>疵点</span></div>
             </div>
             <div class="navroll"><div class="nr-head"><span>${roll.remnant ? '料头' : '母卷'} <b class="num">${esc(st.rollId)}</b>${roll.remnant ? ` <span class="muted">来源 ${esc(roll.remnant.sourceRollId || '—')}</span>` : ''}</span><span>幅宽 <b class="num">${fmtN(sc.roll.width)}</b> mm</span><span>总长 <b class="num">${fmtM(sc.roll.total)}</b> m</span><span>已用 <b class="num">${fmtM(sc.roll.used)}</b> m</span>
               <span>本任务 已切 <b class="num">${met.cut}</b> · 候选 <b class="num">${met.pending}</b>${met.stale ? ` · 已失效 <b class="num">${met.stale}</b>` : ''}</span></div><div id="rn"></div></div>
@@ -335,10 +335,10 @@ export async function mount(el, [taskId, focusPlan]) {
 
     /** 报工记录：回执摘要、复检处置、冲销。 */
     function recordsBlock(seg) {
-        const report = (detail.reports || []).find(r => r.planId === seg.id);
+        const report = (detail.reports || []).find(r => r.planId === seg.id && r.status !== 'REVERSED');
         if (!report) return '';
         const s = receiptSummary(report, effectivePieceResults), reviewable = reviewablePieces(report).length;
-        return `<div class="sec">报工回执</div>
+        return `<div class="sec">报工回执</div><div class="notice">${esc(seg.outputNote || '')}</div>
           <div class="kv"><div>状态</div><div><span class="tag ${report.status === 'REVERSED' ? 'err' : 'ok'}">${report.status === 'REVERSED' ? '已冲销' : '已记账'}</span></div>
             <div>实切</div><div class="num">${fmtN(report.actualCutLen, 1)} mm · 利用率 ${fmtN(report.netUtilization ?? report.utilization, 1)}%</div>
             <div>结果</div><div class="num">合格 ${s.qualified} · 异常 ${s.rejected} · 未切 ${s.uncut}</div>
@@ -571,7 +571,7 @@ export async function mount(el, [taskId, focusPlan]) {
         const fresh = st.fresh.length, seg = sc?.segments.find(s => s.id === sc.currentId);
         const canSolve = sc && (!seg || seg.status === 'pending') && !isSlitting(task);
         return `${fresh ? `<span class="tag warn">画布新增疵点 ${fresh} 处未保存</span><button class="btn" id="save-defects" ${st.saving ? 'disabled' : ''}>保存疵点到母卷</button><button class="btn" id="drop-defects">放弃</button>` : ''}
-          <span class="sp"></span>${st.busy ? `<span class="muted" style="font-size:12px">${esc(st.busy)}</span>` : '<span class="muted" style="font-size:12px">候选方案不占用库存；报工在经典工作台完成</span>'}
+          <span class="sp"></span>${st.busy ? `<span class="muted" style="font-size:12px">${esc(st.busy)}</span>` : '<span class="muted" style="font-size:12px">候选方案不扣减库存；确认报工后记账</span>'}
           ${canSolve && prefs.sideCollapsed ? `<button class="btn pri" id="solve-foot" ${st.busy ? 'disabled' : ''}>${seg ? '重新计算' : '计算本工位'}</button>` : ''}
           ${summary && !isSlitting(task) ? `<a class="btn" href="${esc(taskLink(summary))}">经典工作台继续 ↗</a>` : ''}`;
     }

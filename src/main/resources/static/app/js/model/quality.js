@@ -1,6 +1,6 @@
 // 适配层：报工回执的复检处置。复用经典 quality-review 的口径（可复检件、复检后的有效结果），纯函数。
 // 后端 QualityDisposition.Command：每次处置一件；转料头须给出相对裁片左上角的回收矩形与库位。
-export {reviewablePieces, effectivePieceResults} from '../../../js/business/cutting/quality-review.js';
+export {reviewablePieces, effectivePieceResults} from '../../../js/business/cutting/quality-projection.js';
 
 export const DISPOSITIONS = {SCRAP: '报废', REMNANT: '转料头'};
 

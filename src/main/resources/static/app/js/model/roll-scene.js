@@ -1,8 +1,13 @@
 // 适配层：把任务的方案版本与母卷档案转换为画布场景。纯函数，不发请求。
 // 方案坐标：件与疵点的 y 相对工位起点（request.windowStartY），x 为幅宽方向；母卷疵点 y 为整卷坐标。
+import {effectivePieceResults} from './quality.js';
 
 export const PIECE_PALETTE = ['#5f87b0', '#7f9d6e', '#b8925a', '#9a7aa0', '#5f9a96', '#a8735f', '#7a86b8', '#8f9a5a', '#b07a8f', '#5a8fb0'];
 export const SEGMENT_TINTS = ['#47627d', '#4d6b55', '#6b5a43', '#5d4f66', '#3f6563'];
+export const OUTPUT_STYLES = {
+    QUALIFIED: {label: '合格', color: '#4c956c'}, REJECTED: {label: '异常', color: '#c0392b'},
+    SCRAP: {label: '复检报废', color: '#a4504a'}, REMNANT: {label: '复检转料头', color: '#bd9454'}
+};
 
 /** 需求名称与颜色：方案请求里的需求可能与任务当前版本不同，两者合并（任务优先）。 */
 export function demandIndex(demands = [], plans = []) {
@@ -90,6 +95,46 @@ export function planSegment(plan, colors = new Map(), index = 0, reported = new 
     };
 }
 
+const located = p => [p.x, p.y, p.w, p.l].every(Number.isFinite) && p.w > 0 && p.l > 0;
+const outline = p => p.shape ? structuredClone(p.shape) : {type: 'RECTANGLE', width: p.w, height: p.l};
+
+/** 已记账段只投影回执；原始报工与复检事件保持不变，未切裁片不是已生产的裁片。 */
+function recordedSegment(seg, report) {
+    const start = Number.isFinite(report.windowStartY) ? report.windowStartY : seg.start;
+    const len = Number.isFinite(report.actualCutLen) ? report.actualCutLen : seg.len;
+    const hasDetails = Array.isArray(report.pieceResults);
+    const events = new Map((report.qualityDispositions || []).map(e => [e.command.pieceId, e]));
+    const original = new Map((report.pieceResults || []).map(p => [p.pieceId, p]));
+    const cut = effectivePieceResults(report).filter(p => p.outcome !== 'UNCUT');
+    const pieces = hasDetails ? cut.filter(located).map(p => {
+        const disposition = events.get(p.pieceId)?.command.disposition;
+        const style = OUTPUT_STYLES[disposition || p.outcome] || {label: '结果未知', color: '#69737d'};
+        return {id: p.pieceId, demandId: p.demandId, u: start + p.y, v: p.x, du: p.l, dv: p.w, shape: outline(p),
+            originalOutcome: original.get(p.pieceId)?.outcome, outcome: p.outcome, disposition,
+            label: `${style.label} · ${Math.round(p.w)}×${Math.round(p.l)}`, color: style.color,
+            title: `${p.name || '裁片'} · ${style.label}${p.reason ? ' · ' + p.reason : ''}`};
+    }) : seg.pieces.map(p => ({...p, label: `计划 · ${p.label}`, title: `历史回执缺少逐件记录 · ${p.title}`,
+        color: '#69737d', dash: [5, 4], opacity: .4}));
+    const recovered = (report.recoveredGeometry || []).filter(located).map(r => ({...r, shape: outline(r),
+        label: `报工回收 ${r.id}`, color: '#405950', stroke: r.hasDefect ? '#e1b86e' : '#8fbea5'}));
+    for (const event of events.values()) {
+        const r = event.command.recovery, p = original.get(event.command.pieceId);
+        if (event.command.disposition !== 'REMNANT' || !event.remnantId || !r || !p || !located(p)) continue;
+        recovered.push({id: event.remnantId, x: p.x + r.x, y: p.y + r.y, w: r.width, l: r.length,
+            shape: {type: 'RECTANGLE', width: r.width, height: r.length},
+            label: `复检回收 ${event.remnantId}${r.quality === 'QUARANTINED' ? ' · 待检' : ''}`,
+            color: '#6b573b', stroke: '#e1b86e'});
+    }
+    const missing = cut.length - pieces.length;
+    return {...seg, start, len, pieces, remnants: recovered, cuts: [], opacity: .95,
+        caption: `实切 ${len} mm`,
+        outputNote: !hasDetails ? '历史回执缺少逐件记录，虚线裁片仅为原计划。'
+            : missing > 0 ? `${missing} 条裁片缺少定位信息，未绘制；未切裁片仅在回执中计数。`
+                : '画布显示当前产出与回收登记；未切裁片仅在回执中计数。',
+        pieceArea: report.netPieceArea ?? report.pieceArea ?? seg.pieceArea,
+        totalArea: report.usedArea ?? seg.totalArea};
+}
+
 export function rollDefects(roll, fresh = []) {
     const base = (roll?.defects || []).map(d => ({
         id: d.id, u: d.y, v: d.x, du: d.h, dv: d.w, margin: d.margin || 0,
@@ -123,7 +168,11 @@ export function buildRollScene({roll, plans, reports = [], rollId, demands, proc
     const isRemnant = !!roll?.remnant;
     const list = isRemnant ? plansOnRemnant(plans, roll.remnant.id) : plansOnRoll(plans, rollId);
     const reported = reportedPlans(reports);
-    const segments = list.map((p, i) => planSegment(p, colors, i, reported));
+    const receipts = new Map(reports.filter(r => r.status !== 'REVERSED').map(r => [r.planId, r]));
+    const segments = list.map((p, i) => {
+        const seg = planSegment(p, colors, i, reported);
+        return receipts.has(p.id) ? recordedSegment(seg, receipts.get(p.id)) : seg;
+    });
     const total = Number(roll?.totalLength) || Math.max(...segments.map(s => s.start + s.len), 1);
     const used = Math.min(Number(roll?.usedLength) || 0, total);
     const lock = Math.max(cutEnd(segments, 0), used);

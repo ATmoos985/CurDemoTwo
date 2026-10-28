@@ -1,17 +1,6 @@
 import {requestJSON} from '../../core/api-request.js';
-
-export function reviewablePieces(report) {
-    if (report.status === 'REVERSED') return [];
-    const disposed = new Set((report.qualityDispositions || []).map(e => e.command.pieceId));
-    return (report.pieceResults || []).filter(p => ['QUALIFIED','REJECTED'].includes(p.outcome) && !disposed.has(p.pieceId));
-}
-export function effectivePieceResults(report) {
-    const events = new Map((report.qualityDispositions || []).map(e => [e.command.pieceId,e]));
-    return (report.pieceResults || []).map(p => {
-        const e = events.get(p.pieceId);
-        return e ? {...p,outcome:'REJECTED',reason:`复检${e.command.disposition === 'REMNANT' ? '转料头' : '报废'}：${e.command.reason}`} : {...p};
-    });
-}
+import {reviewablePieces} from './quality-projection.js';
+export {reviewablePieces, effectivePieceResults} from './quality-projection.js';
 
 /** Local form owns an immutable command while a request's outcome is uncertain. */
 export function openQualityReview(report, onSaved) {

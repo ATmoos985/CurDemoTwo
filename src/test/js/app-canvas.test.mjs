@@ -174,6 +174,63 @@ test('new station starts after the last live spread and never before the used le
     assert.deepEqual([tail.window.start, tail.window.len], [18000, 2000], '新工位长度受卷尾限制');
 });
 
+const outputScene = (receipt, savedPlan = plan('output', 'CONFIRMED', 4000, 5000)) => buildRollScene({
+    roll: {width: 2800, totalLength: 20000, usedLength: 6000}, rollId: 'R1', plans: [savedPlan], reports: [receipt], selectedId: 'output'
+});
+const outputReceipt = () => ({planId: 'output', status: 'CONFIRMED', windowStartY: 4000, actualCutLen: 2000,
+    pieceArea: .4, usedArea: 5.6, recoveredGeometry: [], pieceResults: [
+        {pieceId: 1, demandId: 7, name: '实际裁片', x: 30, y: 50, w: 600, l: 900, outcome: 'QUALIFIED', reason: '', rotationDegrees: 90,
+            shape: {type: 'POLYGON', width: 600, height: 900, vertices: [{x: 0, y: 0}, {x: 600, y: 0}, {x: 0, y: 900}]}},
+        {pieceId: 2, demandId: 7, x: 700, y: 50, w: 300, l: 500, outcome: 'REJECTED', reason: '破损'},
+        {pieceId: 3, demandId: 7, x: 0, y: 2500, w: 1000, l: 1000, outcome: 'UNCUT', reason: ''}
+    ]});
+
+test('recorded canvas uses actual length, contour and outcomes; uncut pieces and planned remnants are not outputs', () => {
+    const receipt = outputReceipt(), p = plan('output', 'CONFIRMED', 4000, 5000);
+    p.result.remnants = [{id: 'planned', x: 0, y: 4000, w: 2800, l: 1000}];
+    const original = JSON.stringify({receipt, p}), scene = outputScene(receipt, p), s = scene.segments[0];
+    assert.deepEqual([s.start, s.len, scene.lock, scene.window.len], [4000, 2000, 6000, 2000]);
+    assert.deepEqual(s.pieces.map(p => [p.id, p.u, p.v, p.outcome]), [[1, 4050, 30, 'QUALIFIED'], [2, 4050, 700, 'REJECTED']]);
+    assert.deepEqual(s.pieces[0].shape, receipt.pieceResults[0].shape);
+    assert.match(s.pieces[0].label, /合格/); assert.match(s.pieces[1].title, /破损/);
+    assert.deepEqual(s.remnants, []); assert.deepEqual(s.cuts, [], 'planned toolpaths are not recorded execution');
+    close(sceneMetrics(scene).utilization, .4 / 5.6 * 100);
+    s.pieces[0].shape.vertices[0].x = 100;
+    assert.equal(JSON.stringify({receipt, p}), original, 'projection must not rewrite production facts or candidate geometry');
+});
+
+test('quality projection preserves original results and places recovery relative to the produced contour', () => {
+    const receipt = outputReceipt();
+    receipt.netPieceArea = 0;
+    receipt.recoveredGeometry = [{id: 'booked', x: 1100, y: 20, w: 200, l: 300, hasDefect: true}];
+    receipt.qualityDispositions = [
+        {remnantId: 'quality-remnant', command: {pieceId: 1, disposition: 'REMNANT', reason: '局部回收',
+            recovery: {x: 20, y: 30, width: 200, length: 300, quality: 'QUARANTINED'}}},
+        {command: {pieceId: 2, disposition: 'SCRAP', reason: '无法复用'}}
+    ];
+    const before = JSON.stringify(receipt), s = outputScene(receipt).segments[0];
+    assert.deepEqual(s.pieces.map(p => [p.originalOutcome, p.outcome, p.disposition]), [['QUALIFIED', 'REJECTED', 'REMNANT'], ['REJECTED', 'REJECTED', 'SCRAP']]);
+    assert.match(s.pieces[0].label, /复检转料头/); assert.match(s.pieces[1].label, /复检报废/);
+    assert.deepEqual(s.remnants.map(r => [r.id, r.x, r.y, r.w, r.l]), [['booked', 1100, 20, 200, 300], ['quality-remnant', 50, 80, 200, 300]]);
+    assert.match(s.remnants[1].label, /待检/); assert.equal(s.pieceArea, 0); assert.equal(s.len, 2000);
+    assert.equal(JSON.stringify(receipt), before);
+});
+
+test('legacy reports identify planned geometry and reversed reports do not create actual output', () => {
+    const legacy = outputScene({planId: 'output', status: 'CONFIRMED', actualCutLen: 1800}).segments[0];
+    assert.match(legacy.outputNote, /缺少逐件/); assert.match(legacy.pieces[0].label, /计划/);
+    assert.deepEqual(legacy.remnants, []); assert.equal(legacy.len, 1800);
+    const reversed = outputScene({...outputReceipt(), status: 'REVERSED'}, plan('output', 'PENDING', 4000, 5000)).segments[0];
+    assert.equal(reversed.status, 'pending'); assert.equal(reversed.len, 5000);
+    assert.equal(reversed.pieces[0].outcome, undefined); assert.equal(reversed.pieces[0].u, 4200);
+});
+
+test('incomplete historical piece locations are disclosed instead of fabricated from the plan', () => {
+    const receipt = outputReceipt(); receipt.pieceResults[0].x = undefined;
+    const s = outputScene(receipt).segments[0];
+    assert.deepEqual(s.pieces.map(p => p.id), [2]); assert.match(s.outputNote, /1.*缺少.*未绘制/);
+});
+
 test('solve request uses remaining quantities, task process and window-clipped defects', () => {
     const task = {id: 't', revision: 3, demands: [{id: 1, name: 'A', width: 900, length: 1400, quantity: 5}, {id: 2, name: 'B', width: 800, length: 1200, quantity: 2}],
         process: {trimStart: 10, pieceGap: 2, cutOrigin: 'right-bottom', allowLongitudinal: true}};
@@ -336,10 +393,19 @@ test('new app canvas imports only application or shared canvas core and never lo
     }
 });
 
-test('scene adapter stays pure: no transport, storage or DOM access', async () => {
-    const code = await readFile(path.join(appRoot, 'js', 'model', 'roll-scene.js'), 'utf8');
-    assert.doesNotMatch(code, /\b(fetch|XMLHttpRequest|localStorage|sessionStorage)\b|\b(document|window)\.|\/api\//);
-    assert.equal(refs(code).length, 0);
+test('scene adapter and its transitive dependencies stay pure: no transport, storage or DOM access', async () => {
+    const seen = new Set();
+    async function visit(file) {
+        if (seen.has(file)) return;
+        seen.add(file);
+        const code = await readFile(file, 'utf8');
+        assert.doesNotMatch(code, /\b(fetch|XMLHttpRequest|localStorage|sessionStorage)\b|\b(document|window)\.|\/api\//, file);
+        for (const ref of refs(code)) {
+            assert.ok(ref.startsWith('.'), `uninspected dependency: ${file} -> ${ref}`);
+            await visit(path.resolve(path.dirname(file), ref));
+        }
+    }
+    await visit(path.join(appRoot, 'js', 'model', 'roll-scene.js'));
 });
 
 test('every new app module resolves its relative imports', async () => {

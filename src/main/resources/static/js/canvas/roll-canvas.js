@@ -128,14 +128,15 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
             for (const seg of scene.segments) {
                 if (seg.start + seg.len < Math.max(start, coverage.start) || seg.start > Math.min(end, coverage.end)) continue;
                 const cut = seg.status === 'cut', stale = seg.status === 'stale';
-                const node = new Konva.Group({opacity: stale ? .25 : cut ? .42 : opts.view === 'station' && seg.id !== scene.currentId ? .5 : 1});
+                const node = new Konva.Group({opacity: seg.opacity ?? (stale ? .25 : cut ? .42 : opts.view === 'station' && seg.id !== scene.currentId ? .5 : 1)});
                 group.add(node);
                 addShape(node, rectangle(W, seg.len), 0, seg.start,
                     {name: 'roll-hatch', fillPatternImage: wastePattern, stroke: '#5d6670', dash: stale ? [6, 4] : []});
-                for (const r of seg.remnants || []) addShape(node, r.shape || rectangle(r.w, r.l), r.x, seg.start + r.y,
-                    {name: 'roll-remnant', remnantId: r.id, fill: '#3d4549', stroke: r.hasDefect ? '#b68d48' : '#8b9ba7', dash: [6, 4]});
                 const pieces = seg.pieces.map(p => ({piece: p, node: addShape(node, p.shape || rectangle(p.dv, p.du), p.v, p.u,
-                    {name: 'roll-piece', pieceId: p.id, segmentId: seg.id, fill: p.color, stroke: '#1d2125', opacity: .85})}));
+                    {name: 'roll-piece', pieceId: p.id, segmentId: seg.id, fill: p.color, stroke: '#1d2125', opacity: p.opacity ?? .85,
+                        ...(p.dash?.length ? {dash: p.dash} : {})})}));
+                for (const r of seg.remnants || []) addShape(node, r.shape || rectangle(r.w, r.l), r.x, seg.start + r.y,
+                    {name: 'roll-remnant', remnantId: r.id, segmentId: seg.id, fill: r.color || '#3d4549', stroke: r.stroke || (r.hasDefect ? '#b68d48' : '#8b9ba7'), dash: [6, 4]});
                 for (const k of seg.cuts || []) line(node, [k.v1, k.u1, k.v2, k.u2], {dash: [5, 3]});
                 line(node, [0, seg.start, W, seg.start]);
                 segments.push({seg, node, pieces});
@@ -181,7 +182,7 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
                 line(annotations, [...a, ...b], {stroke: '#c9d0d7'});
                 const x = (a[0] + b[0]) / 2, y = (a[1] + b[1]) / 2;
                 annotations.add(new Konva.Rect({x: x - 68, y: y - 8, width: 136, height: 18, fill: '#2a2f35'}));
-                label(x, y - 6, `拉布 ${n1(w.len)} mm`, {fill: '#cfe3f7', fontSize: 12});
+                label(x, y - 6, seg?.caption || `拉布 ${n1(w.len)} mm`, {fill: '#cfe3f7', fontSize: 12});
                 for (const u of [w.start, w.start + w.len]) { const p = screen(cam, u, W); text(p[0] + (opts.vertical ? 8 : 0), p[1] + (opts.vertical ? -4 : 8), `Y ${fmtM(u)} m`); }
             }
         }
@@ -264,8 +265,14 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
                     if (inView && r.w > 56 && r.h > 16) label(r.x + r.w / 2, r.y + r.h / 2 - 5, p.label, {fill: '#fff'}, labelGroup);
                 }
                 const r = screenRect(c, opts.vertical, seg.start, 0, seg.len, scene.roll.width);
-                if (['cut', 'stale'].includes(seg.status) && Math.min(r.w, r.h) > 26)
-                    label(r.x + r.w / 2, r.y + r.h / 2 - 5, seg.status === 'cut' ? '已切 ✓' : '已失效', {fill: '#e6ebef'}, labelGroup);
+                for (const rem of seg.remnants || []) {
+                    if (!rem.label) continue;
+                    const rr = screenRect(c, opts.vertical, seg.start + rem.y, rem.x, rem.l, rem.w);
+                    if (rr.w > 56 && rr.h > 16 && rr.y + rr.h >= 0 && rr.y <= sz.height && rr.x + rr.w >= 0 && rr.x <= sz.width)
+                        label(rr.x + rr.w / 2, rr.y + 3, rem.label, {fill: '#e7d6b4', fontSize: 10}, labelGroup);
+                }
+                if (['cut', 'stale'].includes(seg.status) && Math.min(r.w, r.h) > 26 && !(opts.view === 'station' && seg.id === scene.currentId))
+                    label(r.x + r.w / 2, r.y - 16, seg.caption || (seg.status === 'cut' ? '已切 ✓' : '已失效'), {fill: '#e6ebef'}, labelGroup);
             }
             if (opts.editDefects) for (const original of scene.defects) {
                 const d = defectPreview?.id === original.id ? {...original, ...defectPreview} : original;
