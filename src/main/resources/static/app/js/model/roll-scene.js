@@ -98,6 +98,18 @@ export function rollDefects(roll, fresh = []) {
     return base.concat(fresh.map(d => ({...d, fresh: true})));
 }
 
+/** 验疵仍使用同一母卷毫米坐标；已入档记录只读，本机草稿允许画布编辑。 */
+export function buildInspectionScene(roll, pending = [], position = 0, selected = null) {
+    const defects = [
+        ...(roll.defects || []).map(d => ({...d, key: `saved-${d.id}`, editable: false})),
+        ...pending.map(d => ({...d, key: d.captureId, editable: true}))
+    ].map(d => ({id: d.key, u: d.y, v: d.x, du: d.h, dv: d.w, margin: d.margin || 0,
+        label: d.typeName || d.defectType || '疵点', fresh: d.editable, editable: d.editable}));
+    return {roll: {id: roll.rollId, width: roll.width, total: roll.totalLength, used: roll.usedLength || 0},
+        segments: [], defects, currentId: null, window: null, selectedDefect: selected,
+        feed: {u: position, fromRight: true}};
+}
+
 /** 已切段末端：工位不能移入此前区域。 */
 export function cutEnd(segments, used = 0) {
     return segments.filter(s => s.status === 'cut').reduce((m, s) => Math.max(m, s.start + s.len), used);

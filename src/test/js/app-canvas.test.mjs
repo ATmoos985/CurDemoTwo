@@ -5,7 +5,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {toScreen, toWorld, fitCamera, zoomAt, panBy, ratioOf, scaleForRatio, parseRatio, formatRatio, rulerStep} from '../../main/resources/static/app/js/canvas/camera.js';
 import {snapPosition, tickStep} from '../../main/resources/static/app/js/canvas/roll-navigator.js';
-import {buildRollScene, planSegment, plansOnRoll, rollsOfPlans, reportedPlans, segmentStatus, cutEnd, sceneMetrics, demandIndex, NEW_STATION, remnantAsRoll} from '../../main/resources/static/app/js/model/roll-scene.js';
+import {buildRollScene, buildInspectionScene, planSegment, plansOnRoll, rollsOfPlans, reportedPlans, segmentStatus, cutEnd, sceneMetrics, demandIndex, NEW_STATION, remnantAsRoll} from '../../main/resources/static/app/js/model/roll-scene.js';
 import {buildSolveRequest, remainingDemands, windowProblem, usablePlan} from '../../main/resources/static/app/js/model/solve-request.js';
 import {defaultReport, applyBulk, recoveryCandidates, reportSummary, reportProblems, buildCutReport} from '../../main/resources/static/app/js/model/report.js';
 import {reviewablePieces, effectivePieceResults, emptyQualityForm, qualityProblems, buildQualityCommand, receiptSummary} from '../../main/resources/static/app/js/model/quality.js';
@@ -16,6 +16,20 @@ import {containsRollPiece} from '../../main/resources/static/js/canvas/roll-canv
 
 const appRoot = fileURLToPath(new URL('../../main/resources/static/app/', import.meta.url));
 const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
+
+test('inspection adapts saved and draft defects to global millimetres without changing the archive', () => {
+    const roll = {rollId: 'I-1', width: 2000, totalLength: 80000, usedLength: 1000,
+        defects: [{id: 7, x: 100.1, y: 5050.2, w: 30.3, h: 40.4, margin: 20, typeName: '破洞'}]};
+    const pending = [{captureId: 'new-mark', x: 800, y: 5010, w: 50, h: 70, margin: 10}];
+    const original = JSON.stringify({roll, pending});
+    const scene = buildInspectionScene(roll, pending, 5075, 'new-mark');
+    assert.deepEqual(scene.defects.map(d => [d.id, d.u, d.v, d.du, d.dv, d.editable]),
+        [['saved-7', 5050.2, 100.1, 40.4, 30.3, false], ['new-mark', 5010, 800, 70, 50, true]]);
+    assert.deepEqual(scene.feed, {u: 5075, fromRight: true});
+    assert.equal(scene.selectedDefect, 'new-mark'); assert.deepEqual(scene.segments, []);
+    scene.defects[0].u = 1;
+    assert.equal(JSON.stringify({roll, pending}), original);
+});
 
 test('roll scene preserves the already rotated polygon instead of its bounding box', () => {
     const shape = {type: 'POLYGON', width: 600, height: 900, vertices: [

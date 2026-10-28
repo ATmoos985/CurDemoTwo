@@ -45,7 +45,12 @@ async function route() {
     setStatus('<span class="sp"></span><span>CutPlan v2 · 第一版</span>');
     const mod = await PAGES[page]();
     if (my !== token) return;
-    cleanup = await mod.mount(main, params) || null;
+    // 每次路由拥有自己的宿主。迟到的 mount 只能写入已脱离页面的节点，不能覆盖当前页面。
+    const host = document.createElement('div'); host.className = 'main page-host';
+    main.replaceChildren(host);
+    const dispose = await mod.mount(host, params) || null;
+    if (my !== token) { dispose?.(); return; }
+    cleanup = dispose;
 }
 
 // 只显示服务是否可用，不对外暴露求解引擎与计算能力细节。

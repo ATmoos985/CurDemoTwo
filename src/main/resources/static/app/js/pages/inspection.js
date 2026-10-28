@@ -3,6 +3,8 @@
 import {requestJSON, esc, fmtM, fmtN, errorBox, toast} from '../util.js';
 import {setStatus} from '../main.js';
 import {validateDefect, advance, round} from '../../../js/inspection/inspection-model.js';
+import {createRollCanvas} from '../../../js/canvas/roll-canvas.js';
+import {buildInspectionScene} from '../model/roll-scene.js';
 
 const TYPES = [['STAIN', '污渍 / 斑点'], ['HOLE', '破洞'], ['WEFT_DEFECT', '跳纱'], ['SLUB', '粗节'], ['SHADING', '色差'], ['MANUAL_MARK', '其他疵点']];
 const draftKey = id => 'cutplan.app.inspection.' + id;
@@ -10,8 +12,8 @@ const draftKey = id => 'cutplan.app.inspection.' + id;
 export async function mount(el, [rollParam]) {
     let rolls;
     try { rolls = await requestJSON('/api/rolls'); } catch (e) { el.innerHTML = errorBox(e); return; }
-    const st = {roll: null, pending: [], pos: 0, step: 1, speed: 3, running: false, tool: 'mark', sel: null, drag: null, move: null, margin: 20, type: 'STAIN', saving: false};
-    let timer = 0, last = 0;
+    const st = {roll: null, pending: [], history: [], pos: 0, step: 1, speed: 3, running: false, tool: 'mark', sel: null, overview: false, panelCollapsed: false, margin: 20, type: 'STAIN', saving: false};
+    let timer = 0, last = 0, canvas = null, disposed = false;
 
     async function load(id) {
         stop();
@@ -22,10 +24,22 @@ export async function mount(el, [rollParam]) {
     }
     const persist = () => st.roll && localStorage.setItem(draftKey(st.roll.rollId), JSON.stringify({pending: st.pending, pos: st.pos}));
     const all = () => [...(st.roll?.defects || []).map(d => ({...d, saved: true})), ...st.pending.map(d => ({...d, saved: false}))];
+    const checkpoint = () => { st.history.push(structuredClone(st.pending)); if (st.history.length > 50) st.history.shift(); };
+    function undo() { if (st.saving || !st.history.length) return; st.pending = st.history.pop(); st.sel = null; persist(); render(); }
+    function removeSelected() {
+        const k = st.sel == null ? -1 : st.sel - (all().length - st.pending.length);
+        if (st.saving || k < 0) return;
+        checkpoint(); st.pending.splice(k, 1); st.sel = null; persist(); render();
+    }
 
     function render() {
+        if (disposed || !el.isConnected) return;
         const r = st.roll, list = all(), pend = st.pending.length;
-        el.innerHTML = `<div class="ph"><h1>跑布验疵</h1>
+        // 保留同一实例与 DOM 节点；更新表单不能在拖动中销毁舞台。
+        const canvasHost = canvas ? el.querySelector('#isvg') : null;
+        const focused = canvasHost && document.activeElement === canvasHost;
+        canvasHost?.remove();
+        el.innerHTML = `<div class="ph inspection-head"><h1>跑布验疵</h1>
             <select class="field" id="roll" style="width:300px"><option value="">选择母卷开始验布</option>${rolls.map(x => `<option value="${esc(x.rollId)}" ${r && r.rollId === x.rollId ? 'selected' : ''}>${esc(x.rollId)} · ${esc(x.rollModel || '')} · ${fmtN(x.width)} mm × ${fmtM(x.totalLength)} m</option>`).join('')}</select>
             ${r ? `<span class="tag ${r.inspectionStatus === 'PASSED' ? 'ok' : 'warn'}">${esc(r.inspectionStatus || '待检')}</span>` : ''}
             <a class="btn" href="/inspection.html" title="新建母卷等完整功能">新建母卷 ↗</a><span class="sp"></span>
@@ -36,16 +50,18 @@ export async function mount(el, [rollParam]) {
             <span class="vsep"></span><span class="muted">每次前进</span><input class="field num" id="step" style="width:60px;text-align:right" value="${st.step}"><span>m</span><button class="btn sm" id="advance">前进一段 ↓</button>
             <span class="vsep"></span><span class="muted">速度</span><input class="field num" id="speed" style="width:56px;text-align:right" value="${st.speed}"><span>m/min</span><button class="btn sm ${st.running ? 'pri' : ''}" id="run">${st.running ? '❚❚ 暂停' : '▶ 自动跑布'}</button><span class="muted" style="font-size:11.5px">空格 启停</span>
             <span class="sp"></span><span class="muted" style="font-size:12px">${st.running ? '自动跑布：位置按速度与时间计算，可随时暂停校准' : '手动模式'}</span></div>
-          <div class="split" style="grid-template-columns:56px 1fr 370px">
+          <div class="split" style="grid-template-columns:56px minmax(0,1fr) ${st.panelCollapsed ? '0px' : '370px'}">
             <section class="pane" style="background:#23272c;align-items:center;padding:8px 0" title="全卷：点击跳转"><div style="color:#9aa4ae;font-size:10.5px;margin-bottom:4px">全卷</div>
               <div class="vtrack" id="vtrack">${list.map(d => `<i class="${d.saved ? '' : 'new'}" style="top:${d.y / r.totalLength * 100}%"></i>`).join('')}<b style="height:${st.pos / r.totalLength * 100}%"></b><em style="top:${st.pos / r.totalLength * 100}%"></em></div>
               <div class="num" style="color:#9aa4ae;font-size:10px;margin-top:4px">${fmtM(r.totalLength)} m</div></section>
             <section class="pane" style="background:var(--canvas)">
               <div class="ctool"><div class="vseg"><button data-tool="mark" class="${st.tool === 'mark' ? 'on' : ''}">＋ 标记疵点</button><button data-tool="select" class="${st.tool === 'select' ? 'on' : ''}">选择 / 调整</button></div>
-                <button id="undo" ${pend ? '' : 'disabled'}>↶ 撤销</button><div class="div"></div><span class="sp"></span><span>坐标：距右边缘 / 距卷头 · mm</span></div>
+                <button data-tool="measure" class="${st.tool === 'measure' ? 'on' : ''}">测距</button><button id="follow">跟随验布线</button><button id="overview" class="${st.overview ? 'on' : ''}">全卷</button>
+                <button id="undo" title="撤销本次未保存的操作（Ctrl+Z）" ${st.history.length && !st.saving ? '' : 'disabled'}>↶ 撤销</button>
+                <button id="toggle-panel" aria-expanded="${!st.panelCollapsed}" title="收起或展开疵点记录">记录</button><div class="div"></div><span class="sp"></span><span id="pointer-position">距右 / 距卷头 · mm</span></div>
               <div class="canvas-wrap"><div id="isvg" style="position:absolute;inset:0;cursor:${st.tool === 'mark' ? 'crosshair' : 'default'}"></div></div>
             </section>
-            <section class="pane"><div class="pane-h">疵点记录<span class="sp"></span><span class="sub">已入档 ${list.length - pend} · 本次待保存 ${pend}</span></div>
+            <section class="pane" ${st.panelCollapsed ? 'style="display:none"' : ''}><div class="pane-h">疵点记录<span class="sp"></span><span class="sub">已入档 ${list.length - pend} · 本次待保存 ${pend}</span></div>
               <div class="pane-b">${editor(list)}
                 <div class="sec">全部疵点 · 点击定位</div>
                 <table class="t" style="border:0"><thead><tr><th>Y m</th><th class="r">距右</th><th class="r">宽×长</th><th>类型</th><th></th></tr></thead><tbody>
@@ -53,9 +69,14 @@ export async function mount(el, [rollParam]) {
                 ${(r.voidedDefects || []).length ? `<div class="sec">已作废 ${r.voidedDefects.length} 处 · 留痕</div>
                 <table class="t" style="border:0"><tbody>${r.voidedDefects.slice().reverse().map(v => `<tr><td class="num muted">${(v.defect.y / 1000).toFixed(2)} m</td><td class="muted">${esc(v.defect.typeName || v.defect.defectType)}</td><td class="wrap muted" title="${esc(v.voidedAt)}">${esc(v.reason)}</td></tr>`).join('')}</tbody></table>` : ''}</div>
               <div class="foot" style="background:#fff;font-size:11.5px;color:var(--text-3)">本次记录保存在本机；入档后用于裁切避让，已有方案需重新核对</div></section></div>`}`;
+        if (r) {
+            const host = el.querySelector('#isvg');
+            if (canvasHost) host.replaceWith(canvasHost); else mountCanvas(host);
+        } else { canvas?.destroy(); canvas = null; }
         bind();
         draw();
         status();
+        if (focused) canvasHost.focus({preventScroll: true});
     }
 
     function editor(list) {
@@ -69,78 +90,49 @@ export async function mount(el, [rollParam]) {
                <div class="muted" style="padding:0 12px 8px;font-size:11.5px">作废后不再避让，原记录与原因留痕；该卷上未报工的候选方案需重新计算。</div>`) : ''}
           <div class="form" style="grid-template-columns:1fr 1fr;gap:6px 10px">
             ${[['right', '距右边缘 mm', 0], ['y', '距卷头 mm', Math.round(st.pos)], ['w', '疵点宽 mm', 50], ['h', '疵点长 mm', 50]].map(([k, t, dv]) =>
-              `<label>${t}<input class="field num" data-f="${k}" value="${v(k, dv)}" style="width:100%" ${d && !editable ? 'disabled' : ''}></label>`).join('')}
+              `<label>${t}<input class="field num" data-f="${k}" value="${v(k, dv)}" style="width:100%" ${st.saving || d && !editable ? 'disabled' : ''}></label>`).join('')}
             <label>类型<select class="field" data-f="defectType" style="width:100%" ${d && !editable ? 'disabled' : ''}>${TYPES.map(([k, t]) => `<option value="${k}" ${(d ? d.defectType : st.type) === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
             <label>避让外扩 mm<input class="field num" data-f="margin" value="${v('margin', st.margin)}" style="width:100%" ${d && !editable ? 'disabled' : ''}></label></div>
           <div style="display:flex;gap:8px;padding:0 12px 10px;justify-content:flex-end">
             ${d ? `<button class="btn sm" id="new">新标记</button>` : ''}${editable ? '<button class="btn sm" id="del">删除</button><button class="btn sm pri" id="apply">更新</button>' : d ? '' : '<button class="btn sm pri" id="apply">添加到本次记录</button>'}</div></div>`;
     }
 
-    function view() {
-        const host = el.querySelector('#isvg'); if (!host || !st.roll) return null;
-        const r = host.getBoundingClientRect(), W = st.roll.width, pad = {l: 54, r: 70, t: 26};
-        const s = Math.max(.02, (r.width - pad.l - pad.r) / W), lineY = r.height * .62;
-        return {host, r, s, pad, lineY, W, y0: st.pos - (lineY - pad.t) / s};
-    }
+    const defectKey = d => d.saved ? `saved-${d.id}` : d.captureId;
     function draw() {
-        const v = view(); if (!v) return;
-        const {r, s, pad, lineY, W, y0} = v, sx = x => pad.l + x * s, sy = y => pad.t + (y - y0) * s, y1 = y0 + (r.height - pad.t) / s, list = all();
-        let g = `<defs><pattern id="ig" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="#343a41"/></pattern></defs><rect width="${r.width}" height="${r.height}" fill="url(#ig)"/>`;
-        const top = Math.max(pad.t, sy(0)), bottom = Math.min(r.height, sy(st.roll.totalLength));
-        g += `<rect x="${sx(0)}" y="${top}" width="${W * s}" height="${Math.max(0, bottom - top)}" fill="#3a4148" stroke="#6b747e"/>`;
-        g += `<rect x="${sx(0)}" y="${top}" width="${W * s}" height="${Math.max(0, lineY - top)}" fill="#fff" fill-opacity=".04"/>`;
-        list.forEach((d, i) => {
-            if (d.y + d.h < y0 || d.y > y1) return;
-            const L = sx(d.x), T = sy(d.y), m = (d.margin || 0) * s, on = st.sel === i;
-            g += `<rect x="${L - m}" y="${T - m}" width="${d.w * s + 2 * m}" height="${d.h * s + 2 * m}" fill="none" stroke="#ff6b5b" stroke-opacity=".45" stroke-dasharray="3 3"/>`;
-            g += `<rect x="${L}" y="${T}" width="${Math.max(3, d.w * s)}" height="${Math.max(3, d.h * s)}" fill="${d.saved ? '#ff6b5b' : '#ff9f43'}" fill-opacity=".35" stroke="${on ? '#fff' : d.saved ? '#ff6b5b' : '#ff9f43'}" stroke-width="${on ? 2 : 1.2}"/>`;
-            g += `<text x="${L + d.w * s + 5}" y="${T + 10}" fill="#ffc2b8" font-size="10.5">${esc(d.typeName || d.defectType)} ${fmtN(d.w, 1)}×${fmtN(d.h, 1)}</text>`;
-        });
-        if (st.drag) { const [a, b] = [st.drag.a, st.drag.b]; g += `<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(a[0] - b[0])}" height="${Math.abs(a[1] - b[1])}" fill="#ff9f43" fill-opacity=".25" stroke="#ff9f43" stroke-dasharray="4 2"/>`; }
-        g += `<line x1="${sx(0) - 8}" x2="${sx(W) + 8}" y1="${lineY}" y2="${lineY}" stroke="#4cc38a" stroke-width="2"/>`;
-        const tick = W > 3000 ? 500 : 200;
-        for (let x = 0; x <= W; x += tick) { const X = sx(W - x); g += `<line x1="${X}" x2="${X}" y1="${lineY - (x % 1000 ? 4 : 8)}" y2="${lineY}" stroke="#4cc38a"/>${x % (tick * 2) ? '' : `<text x="${X}" y="${lineY - 11}" fill="#8fe0b5" font-size="9.5" text-anchor="middle" font-family="var(--mono)">${x}</text>`}`; }
-        g += `<rect x="${sx(W) + 6}" y="${lineY - 9}" width="62" height="18" fill="#1d2125"/><text x="${sx(W) + 10}" y="${lineY + 4}" fill="#8fe0b5" font-size="11.5" font-family="var(--mono)">${(st.pos / 1000).toFixed(2)} m</text>`;
-        g += `<rect x="0" y="0" width="${pad.l - 8}" height="${r.height}" fill="#23272c"/>`;
-        const step = [100, 200, 500, 1000, 2000, 5000].find(n => n * s >= 50) || 10000;
-        for (let y = Math.ceil(y0 / step) * step; y < y1; y += step) { const Y = sy(y); if (Y < pad.t) continue; g += `<line x1="${pad.l - 16}" x2="${pad.l - 8}" y1="${Y}" y2="${Y}" stroke="#6b747e"/><text x="${pad.l - 18}" y="${Y + 3}" fill="#9aa4ae" font-size="9.5" text-anchor="end" font-family="var(--mono)">${(y / 1000).toFixed(step < 1000 ? 1 : 0)}</text>`; }
-        g += `<rect x="${pad.l - 8}" y="0" width="${r.width}" height="${pad.t - 4}" fill="#23272c"/><text x="${sx(W)}" y="${pad.t - 9}" fill="#7d8791" font-size="9.5" text-anchor="end">右边缘 →</text><text x="${sx(0)}" y="${pad.t - 9}" fill="#7d8791" font-size="9.5">${fmtN(W)} mm</text>`;
-        v.host.innerHTML = `<svg width="${r.width}" height="${r.height}">${g}</svg>`;
+        if (!canvas || !st.roll || disposed) return;
+        const d = all()[st.sel];
+        canvas.setOptions({view: st.overview ? 'full' : 'inspection', tool: st.tool === 'mark' ? 'defect' : st.tool,
+            editDefects: true, editable: !st.saving});
+        canvas.setScene(buildInspectionScene(st.roll, st.pending, st.pos, d ? defectKey(d) : null), {follow: !st.overview});
     }
-    const model = (v, p) => [round(Math.max(0, Math.min(v.W, (p[0] - v.pad.l) / v.s))), round(Math.max(0, v.y0 + (p[1] - v.pad.t) / v.s))];
-    function bindCanvas() {
-        const host = el.querySelector('#isvg'); if (!host) return;
-        const loc = e => { const r = host.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
-        host.onmousedown = e => {
-            if (e.button !== 0) return;
-            const p = loc(e), v = view();
-            // 点到已有疵点（含 4 px 容差）：两种工具下都先选中并在右侧打开，本次标记可直接拖动
-            const [x, y] = model(v, p), list = all(), tol = 4 / v.s;
-            let i = -1;
-            for (let k = list.length - 1; k >= 0; k--) { const d = list[k]; if (x >= d.x - tol && x <= d.x + d.w + tol && y >= d.y - tol && y <= d.y + d.h + tol) { i = k; break; } }
-            if (i < 0 && st.tool === 'mark') { stop(); st.sel = null; st.drag = {a: p, b: p}; draw(); return; }
-            st.sel = i < 0 ? null : i;
-            if (i >= 0 && !list[i].saved) st.move = {k: i - (list.length - st.pending.length), p, x0: list[i].x, y0: list[i].y};
-            render();
-            if (i >= 0) el.querySelector('#editor')?.scrollIntoView({block: 'nearest'});
-        };
-        host.onmousemove = e => {
-            const p = loc(e), v = view();
-            if (st.drag) { st.drag.b = p; draw(); }
-            else if (st.move) { const d = st.pending[st.move.k]; d.x = round(Math.max(0, Math.min(v.W - d.w, st.move.x0 + (p[0] - st.move.p[0]) / v.s))); d.y = round(Math.max(0, st.move.y0 + (p[1] - st.move.p[1]) / v.s)); draw(); }
-        };
-        host.onmouseup = () => {
-            const v = view();
-            if (st.drag) {
-                const [x1, y1] = model(v, st.drag.a), [x2, y2] = model(v, st.drag.b); st.drag = null;
+    function mountCanvas(host) {
+        canvas = createRollCanvas(host, {
+            onInteract: () => { if (st.running) { stop(); render(); } },
+            onCursor: p => { const label = el.querySelector('#pointer-position'); if (label) label.textContent = p
+                ? `距右 ${round(st.roll.width - p.v)} · 距卷头 ${round(p.u)} mm` : '距右 / 距卷头 · mm'; },
+            onDefectSelect: key => {
+                const i = all().findIndex(d => defectKey(d) === key);
+                st.sel = i < 0 ? null : i; render();
+            },
+            onDefectDraw: box => {
+                if (st.saving) return;
                 try {
-                    const d = validateDefect({x: Math.min(x1, x2), y: Math.min(y1, y2), w: round(Math.abs(x1 - x2)), h: round(Math.abs(y1 - y2)), margin: st.margin}, st.roll);
-                    st.pending.push({...d, ...attrs(st.type), captureId: crypto.randomUUID()}); st.sel = all().length - 1; persist();
-                } catch (e) { if (Math.abs(x1 - x2) > 2) toast(e.message, true); }
-                render();
+                    const d = validateDefect({x: box.v, y: box.u, w: box.dv, h: box.du, margin: st.margin}, st.roll);
+                    checkpoint();
+                    st.pending.push({...d, ...attrs(st.type), captureId: crypto.randomUUID()});
+                    st.sel = all().length - 1; persist(); render();
+                } catch (e) { toast(e.message, true); }
+            },
+            onDefectEdit: (key, box) => {
+                const k = st.pending.findIndex(d => d.captureId === key);
+                if (k < 0 || st.saving) return;
+                try {
+                    const next = validateDefect({...st.pending[k], x: box.v, y: box.u, w: box.dv, h: box.du}, st.roll);
+                    if (JSON.stringify(next) !== JSON.stringify(st.pending[k])) { checkpoint(); st.pending[k] = next; }
+                    persist(); render();
+                } catch (e) { toast(e.message, true); draw(); }
             }
-            if (st.move) { st.move = null; persist(); render(); }
-        };
+        });
     }
     const attrs = type => ({defectType: type, typeName: TYPES.find(t => t[0] === type)?.[1] || '其他疵点', detectionSource: 'MANUAL_INSPECT', avoidanceStrategy: 'MUST_AVOID', description: '跑布验疵人工标记'});
 
@@ -148,16 +140,21 @@ export async function mount(el, [rollParam]) {
         el.querySelector('#roll').onchange = e => { location.hash = '#/inspection/' + encodeURIComponent(e.target.value); };
         el.querySelector('#save')?.addEventListener('click', save);
         if (!st.roll) return;
-        bindCanvas();
         el.querySelector('#locate').onclick = () => { const m = Number(el.querySelector('#pos').value); if (!(m >= 0)) return toast('请输入有效米数', true); st.pos = Math.min(st.roll.totalLength, round(m * 1000)); persist(); render(); };
         el.querySelector('#step').onchange = e => { st.step = Math.max(.1, Number(e.target.value) || 1); };
         el.querySelector('#advance').onclick = () => { st.pos = Math.min(st.roll.totalLength, st.pos + st.step * 1000); persist(); render(); };
         el.querySelector('#speed').onchange = e => { st.speed = Math.max(.1, Number(e.target.value) || 3); };
         el.querySelector('#run').onclick = () => st.running ? (stop(), render()) : start();
+        el.querySelector('#follow').onclick = () => { st.overview = false; render(); canvas.fit(); };
+        el.querySelector('#overview').onclick = () => { stop(); st.overview = true; render(); canvas.fit(); };
+        el.querySelector('#toggle-panel').onclick = () => { st.panelCollapsed = !st.panelCollapsed; render(); };
         el.querySelector('#vtrack').onclick = e => { const r = e.currentTarget.getBoundingClientRect(); st.pos = round((e.clientY - r.top) / r.height * st.roll.totalLength); persist(); render(); };
         el.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => { st.tool = b.dataset.tool; render(); });
-        el.querySelector('#undo').onclick = () => { st.pending.pop(); st.sel = null; persist(); render(); };
-        el.querySelectorAll('tr[data-i]').forEach(tr => tr.onclick = () => { st.sel = Number(tr.dataset.i); st.pos = all()[st.sel].y + 300; render(); });
+        el.querySelector('#undo').onclick = undo;
+        el.querySelectorAll('tr[data-i]').forEach(tr => tr.onclick = () => {
+            stop(); st.sel = Number(tr.dataset.i); st.pos = Math.min(st.roll.totalLength, all()[st.sel].y + 300);
+            st.overview = false; persist(); render(); canvas.fit();
+        });
         el.querySelector('#new')?.addEventListener('click', () => { st.sel = null; render(); });
         el.querySelector('#void')?.addEventListener('click', async () => {
             const d = all()[st.sel], reason = el.querySelector('#void-reason').value.trim();
@@ -169,12 +166,14 @@ export async function mount(el, [rollParam]) {
             } catch (e) { toast('作废失败：' + e.message, true); }
             st.saving = false; render();
         });
-        el.querySelector('#del')?.addEventListener('click', () => { st.pending.splice(st.sel - (all().length - st.pending.length), 1); st.sel = null; persist(); render(); });
+        el.querySelector('#del')?.addEventListener('click', removeSelected);
         el.querySelector('#apply')?.addEventListener('click', () => {
+            if (st.saving) return;
             const f = k => el.querySelector(`[data-f="${k}"]`).value, num = k => Number(f(k));
             try {
                 const w = num('w'), d = validateDefect({x: round(st.roll.width - num('right') - w), y: num('y'), w, h: num('h'), margin: num('margin')}, st.roll);
                 const item = {...d, ...attrs(f('defectType'))};
+                checkpoint();
                 if (st.sel != null) { const k = st.sel - (all().length - st.pending.length); st.pending[k] = {...st.pending[k], ...item}; }
                 else { st.pending.push({...item, captureId: crypto.randomUUID()}); st.sel = all().length - 1; }
                 st.margin = d.margin; st.type = item.defectType; persist(); render();
@@ -182,39 +181,56 @@ export async function mount(el, [rollParam]) {
         });
     }
     function start() {
+        if (disposed || st.running) return;
+        st.overview = false;
         st.running = true; last = performance.now();
         timer = setInterval(() => {
             const now = performance.now();
             try { st.pos = advance(st.pos, st.speed, (now - last) / 1000, st.roll.totalLength); } catch (e) { toast(e.message, true); stop(); }
-            last = now; draw(); const i = el.querySelector('#pos'); if (i && document.activeElement !== i) i.value = (st.pos / 1000).toFixed(3);
+            last = now; draw(); status(); const i = el.querySelector('#pos'); if (i && document.activeElement !== i) i.value = (st.pos / 1000).toFixed(3);
+            const progress = el.querySelector('#vtrack b'), pointer = el.querySelector('#vtrack em');
+            if (progress) progress.style.height = st.pos / st.roll.totalLength * 100 + '%';
+            if (pointer) pointer.style.top = st.pos / st.roll.totalLength * 100 + '%';
             if (st.pos >= st.roll.totalLength) { stop(); render(); toast('已到卷尾（仅表示位置到达末端）'); }
         }, 100);
-        render();
+        render(); canvas?.fit();
     }
     function stop() { if (st.running) persist(); st.running = false; clearInterval(timer); }
     async function save() {
-        if (!st.roll || !st.pending.length) return;
+        if (!st.roll || !st.pending.length || st.saving) return;
+        stop();
         st.saving = true; render();
         try {
-            st.roll = await requestJSON('/api/rolls/' + encodeURIComponent(st.roll.rollId) + '/inspection-defects', {width: st.roll.width, totalLength: st.roll.totalLength, defects: st.pending});
-            st.pending = []; st.sel = null; persist(); toast('本次疵点已保存到母卷');
+            const saved = await requestJSON('/api/rolls/' + encodeURIComponent(st.roll.rollId) + '/inspection-defects', {width: st.roll.width, totalLength: st.roll.totalLength, defects: st.pending});
+            if (disposed) return; // 切页后的迟到响应不能覆盖新页面恢复的本机草稿。
+            st.roll = saved;
+            st.pending = []; st.history = []; st.sel = null; persist(); toast('本次疵点已保存到母卷');
         } catch (e) { toast('保存失败，记录仍保留在本机：' + e.message, true); }
         st.saving = false; render();
     }
     function status() { setStatus(`<span>${st.roll ? `母卷 ${esc(st.roll.rollId)} · 位置 <span class="num">${(st.pos / 1000).toFixed(3)} m</span>` : '未选择母卷'}</span><span class="sp"></span><span>CutPlan v2 · 第一版</span>`); }
 
-    const onResize = () => draw();
-    window.addEventListener('resize', onResize);
+    const onVisibility = () => {
+        if (document.hidden) stop();
+        canvas?.setVisible(!document.hidden);
+        if (!document.hidden) render();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
     const typing = t => t && (['INPUT', 'SELECT', 'TEXTAREA'].includes(t.tagName) || t.isContentEditable);
     const onKey = e => {
-        if (!st.roll || typing(e.target)) return;
+        if (!st.roll || st.saving || typing(e.target)) return;
         if (e.code === 'Space') { e.preventDefault(); st.running ? (stop(), render()) : start(); }
+        else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
         else if ((e.key === 'Delete' || e.key === 'Backspace') && st.sel != null) {
             const k = st.sel - (all().length - st.pending.length);
-            if (k >= 0) { e.preventDefault(); st.pending.splice(k, 1); st.sel = null; persist(); render(); }
+            if (k >= 0) { e.preventDefault(); removeSelected(); }
         } else if (e.key === 'Escape' && st.sel != null) { st.sel = null; render(); }
     };
     document.addEventListener('keydown', onKey);
     await load(rollParam || null);
-    return () => { stop(); window.removeEventListener('resize', onResize); document.removeEventListener('keydown', onKey); };
+    return () => {
+        if (disposed) return;
+        stop(); disposed = true; canvas?.destroy(); canvas = null;
+        document.removeEventListener('visibilitychange', onVisibility); document.removeEventListener('keydown', onKey);
+    };
 }

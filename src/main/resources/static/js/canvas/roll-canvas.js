@@ -26,7 +26,7 @@ export function containsRollPiece(piece, u, v) {
 
 export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva} = {}) {
     if (!Konva) throw new Error('画布组件未加载，请刷新页面');
-    let scene = null, cam = null, rows = null, gesture = null, measure = null, draft = null;
+    let scene = null, cam = null, rows = null, gesture = null, measure = null, draft = null, defectPreview = null;
     let destroyed = false, visible = true, frame = null, dirty = true, worlds = [], coverage = null;
     let opts = {vertical: true, view: 'station', fullMode: 'strip', tool: 'pan', mmPerPx: DEFAULT_MM_PER_PX, showPath: false};
     const oldTabIndex = host.getAttribute('tabindex'), oldTouchAction = host.style.touchAction;
@@ -63,7 +63,11 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
         if (destroyed || !scene) return;
         const sz = size(), W = scene.roll.width;
         if (!sz.width || !sz.height || !(W > 0) || !(scene.roll.total > 0)) return;
-        if (tiled()) {
+        if (opts.view === 'inspection' && scene.feed) {
+            rows = null;
+            const s = Math.max(.002, (sz.width - 124) / W);
+            cam = {s, a: sz.height * .62 - scene.feed.u * s, c: 54};
+        } else if (tiled()) {
             let best = null;
             for (let n = 1; n <= 12; n++) {
                 const rowLen = scene.roll.total / n, gap = W * .3;
@@ -136,12 +140,14 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
                 line(node, [0, seg.start, W, seg.start]);
                 segments.push({seg, node, pieces});
             }
-            for (const d of scene.defects) {
+            for (const original of scene.defects) {
+                const d = defectPreview?.id === original.id ? {...original, ...defectPreview} : original;
                 if (d.u + d.du < start || d.u > end) continue;
                 const color = d.fresh ? '#ff9f43' : '#ff6b5b';
                 if (d.margin > 0) addShape(group, rectangle(d.dv + 2 * d.margin, d.du + 2 * d.margin), d.v - d.margin, d.u - d.margin,
                     {stroke: color, opacity: .5, dash: [3, 3]});
-                addShape(group, rectangle(d.dv, d.du), d.v, d.u, {fill: color, opacity: .5, stroke: color, strokeWidth: 1.5});
+                addShape(group, rectangle(d.dv, d.du), d.v, d.u,
+                    {name: 'roll-defect', defectId: d.id, fill: color, opacity: .5, stroke: color, strokeWidth: 1.5});
             }
             worlds.push({group, start, end, segments, hatches: group.find('.roll-hatch'), index: i});
         }
@@ -195,6 +201,26 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
             const group = new Konva.Group(); annotations.add(group); transform(group, cam);
             addShape(group, selected.shape || rectangle(selected.dv, selected.du), selected.v, selected.u, {stroke: '#fff', strokeWidth: 2});
         }
+        const defect = selectedDefect();
+        if (defect) {
+            rectScreen(cam, defect.u, defect.v, defect.du, defect.dv, {stroke: '#fff', strokeWidth: 2});
+            if (opts.editDefects && opts.editable !== false && defect.editable && opts.tool === 'select')
+                for (const [u, v] of defectCorners(defect)) {
+                    const [x, y] = screen(cam, u, v);
+                    annotations.add(new Konva.Rect({name: 'roll-defect-handle', x: x - 4, y: y - 4, width: 8, height: 8, fill: '#fff', stroke: '#ff9f43'}));
+                }
+        }
+        if (scene.feed) {
+            const u = scene.feed.u, a = screen(cam, u, 0), b = screen(cam, u, W);
+            line(annotations, [...a, ...b], {name: 'roll-feed-line', stroke: '#4cc38a', strokeWidth: 2});
+            const step = rulerStep(cam.s, 80);
+            for (let d = 0; d <= W; d += step) {
+                const p = screen(cam, u, scene.feed.fromRight ? W - d : d);
+                line(annotations, opts.vertical ? [p[0], p[1] - 6, p[0], p[1] + 3] : [p[0] - 6, p[1], p[0] + 3, p[1]], {stroke: '#4cc38a'});
+                label(p[0], p[1] - 19, n1(d), {fill: '#8fe0b5', fontSize: 9.5});
+            }
+            text(b[0] + 8, b[1] - 5, `${fmtM(u)} m`, {name: 'roll-feed-label', fill: '#8fe0b5'});
+        }
         if (draft) rectScreen(cam, Math.min(draft.a[0], draft.b[0]), Math.min(draft.a[1], draft.b[1]),
             Math.abs(draft.a[0] - draft.b[0]), Math.abs(draft.a[1] - draft.b[1]), {fill: '#ff9f4340', stroke: '#ff9f43', dash: [4, 2]});
         if (measure) {
@@ -241,6 +267,12 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
                 if (['cut', 'stale'].includes(seg.status) && Math.min(r.w, r.h) > 26)
                     label(r.x + r.w / 2, r.y + r.h / 2 - 5, seg.status === 'cut' ? '已切 ✓' : '已失效', {fill: '#e6ebef'}, labelGroup);
             }
+            if (opts.editDefects) for (const original of scene.defects) {
+                const d = defectPreview?.id === original.id ? {...original, ...defectPreview} : original;
+                if (d.u + d.du < min || d.u > max) continue;
+                const r = screenRect(c, opts.vertical, d.u, d.v, d.du, d.dv);
+                if (r.w > 32 && r.h > 18) text(r.x + 4, r.y + 4, d.label || '疵点', {fill: '#ffd3c9', fontSize: 10.5}, labelGroup);
+            }
             if (tiled()) { const p = screen(c, item.start, 0); text(p[0], p[1] - 14, `${fmtM(item.start)} m`); }
         }
         if (!tiled()) { overlays(); drawRulers(sz); }
@@ -257,18 +289,51 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
         }
         return u >= 0 && u <= scene.roll.total && v >= 0 && v <= scene.roll.width ? {u, v} : null;
     }
+    function selectedDefect() {
+        const d = scene?.defects.find(d => d.id === scene.selectedDefect);
+        return d && defectPreview?.id === d.id ? {...d, ...defectPreview} : d;
+    }
+    const defectCorners = d => [[d.u, d.v], [d.u, d.v + d.dv], [d.u + d.du, d.v], [d.u + d.du, d.v + d.dv]];
+    function editDefect(g, w) {
+        const d = g.original;
+        if (g.corner == null) return {...d,
+            u: n1(Math.max(0, Math.min(scene.roll.total - d.du, d.u + w[0] - g.start[0]))),
+            v: n1(Math.max(0, Math.min(scene.roll.width - d.dv, d.v + w[1] - g.start[1])))};
+        const anchor = defectCorners(d)[3 - g.corner], q = clamp(w);
+        const u = n1(g.corner < 2 ? Math.min(q[0], anchor[0] - .1) : Math.max(q[0], anchor[0] + .1));
+        const v = n1(g.corner % 2 === 0 ? Math.min(q[1], anchor[1] - .1) : Math.max(q[1], anchor[1] + .1));
+        return {...d, u: Math.min(u, anchor[0]), v: Math.min(v, anchor[1]), du: n1(Math.abs(u - anchor[0])), dv: n1(Math.abs(v - anchor[1]))};
+    }
+    const toolCursor = () => ['measure', 'defect'].includes(opts.tool) ? 'crosshair' : opts.tool === 'move' ? 'move' : opts.tool === 'select' ? 'default' : 'grab';
     function cancelGesture() {
         const g = gesture;
-        gesture = null; draft = null; if (measure?.live) measure = null;
+        gesture = null; draft = null;
+        if (defectPreview) { defectPreview = null; dirty = true; }
+        if (measure?.live) measure = null;
         if (g && host.hasPointerCapture?.(g.pointer)) host.releasePointerCapture(g.pointer);
         if (g?.kind === 'piece') callbacks.onPieceMove?.(g.id, 0, 0, true);
-        host.style.cursor = ['measure', 'defect'].includes(opts.tool) ? 'crosshair' : opts.tool === 'move' ? 'move' : 'grab';
+        host.style.cursor = toolCursor(); requestDraw();
     }
     function onDown(e) {
         if (!visible || !cam || !scene || e.button !== 0 || gesture) return;
         e.preventDefault(); host.focus({preventScroll: true});
         const p = local(e), w = world(p);
-        if (!tiled() && opts.tool === 'move') {
+        callbacks.onInteract?.(opts.tool);
+        if (!tiled() && opts.editDefects && ['defect', 'select'].includes(opts.tool)) {
+            const selected = selectedDefect();
+            const corner = selected?.editable && opts.tool === 'select'
+                ? defectCorners(selected).findIndex(q => { const s = screen(cam, ...q); return Math.hypot(s[0] - p[0], s[1] - p[1]) <= 7; }) : -1;
+            const tol = 4 / cam.s;
+            const hit = corner >= 0 ? selected : scene.defects.slice().reverse().find(d =>
+                w[0] >= d.u - tol && w[0] <= d.u + d.du + tol && w[1] >= d.v - tol && w[1] <= d.v + d.dv + tol);
+            callbacks.onDefectSelect?.(hit?.id ?? null);
+            if (hit) {
+                if (!hit.editable || opts.editable === false) return;
+                gesture = {kind: 'defect-edit', id: hit.id, original: {...hit}, start: w, corner: corner >= 0 ? corner : null, pointer: e.pointerId};
+            }
+        }
+        if (gesture) { /* Editable defect already selected above. */ }
+        else if (!tiled() && opts.tool === 'move') {
             const seg = current();
             const hit = seg?.status === 'pending' && !seg.invalid && opts.editable !== false
                 ? seg.pieces.slice().reverse().find(x => containsRollPiece(x, ...w)) : null;
@@ -276,6 +341,7 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
             if (!hit) return;
             gesture = {kind: 'piece', id: hit.id, start: w, pointer: e.pointerId};
         } else if (!tiled() && ['measure', 'defect'].includes(opts.tool)) {
+            if (opts.tool === 'defect' && opts.editable === false) return;
             if (!cursorAt(p)) return;
             gesture = {kind: opts.tool, pointer: e.pointerId};
             const q = {a: clamp(w), b: clamp(w), live: true};
@@ -289,10 +355,12 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
         const segment = cursor && scene.segments.find(s => cursor.u >= s.start && cursor.u <= s.start + s.len
             && s.pieces.some(x => containsRollPiece(x, cursor.u, cursor.v)));
         const piece = segment?.pieces.find(x => containsRollPiece(x, cursor.u, cursor.v));
-        host.title = piece?.title || '';
+        const defect = cursor && scene.defects.find(d => cursor.u >= d.u && cursor.u <= d.u + d.du && cursor.v >= d.v && cursor.v <= d.v + d.dv);
+        host.title = piece?.title || defect?.label || '';
         if (!gesture || gesture.pointer !== e.pointerId) return;
         const w = world(p);
         if (gesture.kind === 'piece') callbacks.onPieceMove?.(gesture.id, w[0] - gesture.start[0], w[1] - gesture.start[1], false);
+        else if (gesture.kind === 'defect-edit') { defectPreview = editDefect(gesture, w); dirty = true; requestDraw(); }
         else if (gesture.kind === 'measure') { measure.b = clamp(w); requestDraw(); }
         else if (gesture.kind === 'defect') { draft.b = clamp(w); requestDraw(); }
         else { cam = panBy(cam, opts.vertical, p[0] - gesture.last[0], p[1] - gesture.last[1]); gesture.last = p; requestDraw(); }
@@ -302,17 +370,21 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
         const g = gesture; gesture = null;
         if (host.hasPointerCapture(e.pointerId)) host.releasePointerCapture(e.pointerId);
         if (g.kind === 'piece') { const w = world(local(e)); callbacks.onPieceMove?.(g.id, w[0] - g.start[0], w[1] - g.start[1], true); }
+        if (g.kind === 'defect-edit') {
+            const next = editDefect(g, world(local(e))); defectPreview = null; dirty = true;
+            callbacks.onDefectEdit?.(g.id, {u: next.u, v: next.v, du: next.du, dv: next.dv});
+        }
         if (measure) measure.live = false;
         if (draft) {
             const d = draft; draft = null;
             const du = Math.abs(d.a[0] - d.b[0]), dv = Math.abs(d.a[1] - d.b[1]);
             if (du >= 5 && dv >= 5) callbacks.onDefectDraw?.({u: n1(Math.min(d.a[0], d.b[0])), v: n1(Math.min(d.a[1], d.b[1])), du: n1(du), dv: n1(dv)});
         }
-        host.style.cursor = ['measure', 'defect'].includes(opts.tool) ? 'crosshair' : opts.tool === 'move' ? 'move' : 'grab'; requestDraw();
+        host.style.cursor = toolCursor(); requestDraw();
     }
     function onWheel(e) {
         if (!visible || !cam || gesture) return;
-        e.preventDefault(); const p = local(e);
+        e.preventDefault(); callbacks.onInteract?.('zoom'); const p = local(e);
         cam = zoomAt(cam, opts.vertical, ...p, e.deltaY < 0 ? 1.15 : 1 / 1.15, cam.fit * .2, 8); requestDraw();
     }
     for (const [type, handler] of Object.entries({pointerdown: onDown, pointermove: onMove, pointerup: onUp,
@@ -320,13 +392,17 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
         pointerleave: () => callbacks.onCursor?.(null), wheel: onWheel,
         keydown: e => { if (e.key === 'Escape' && e.target === host) { cancelGesture(); measure = null; requestDraw(); e.stopPropagation(); } }}))
         host.addEventListener(type, handler, {signal: listeners.signal, ...(type === 'wheel' ? {passive: false} : {})});
-    const observer = new ResizeObserver(() => { if (!destroyed && visible) cam ? requestDraw() : fit(); }); observer.observe(host);
+    const observer = new ResizeObserver(() => {
+        if (destroyed || !visible) return;
+        if (!cam || opts.view === 'inspection') fit(); else requestDraw();
+    }); observer.observe(host);
 
     const api = {
         setScene(next, {refit = false, follow = false} = {}) {
             if (destroyed) return;
             if (scene && (scene.currentId !== next?.currentId || scene.roll.id !== next?.roll.id)) { cancelGesture(); measure = null; }
             if (follow && cam && scene?.window && next?.window) cam = {...cam, a: cam.a - (next.window.start - scene.window.start) * cam.s};
+            if (follow && cam && scene?.feed && next?.feed) cam = {...cam, a: cam.a - (next.feed.u - scene.feed.u) * cam.s};
             scene = next; dirty = true;
             if (!scene) { geometry.destroyChildren(); annotations.destroyChildren(); for (const t of textPool) t.destroy(); textPool.length = 0; return; }
             if (refit || !cam) fit(); else requestDraw();
@@ -343,7 +419,7 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
             const refit = ['vertical', 'view', 'fullMode'].some(k => k in next && next[k] !== opts[k]);
             if (refit || next.tool && next.tool !== opts.tool) cancelGesture();
             opts = {...opts, ...next}; if (next.tool && next.tool !== 'measure') measure = null;
-            host.style.cursor = ['measure', 'defect'].includes(opts.tool) ? 'crosshair' : opts.tool === 'move' ? 'move' : 'grab';
+            host.style.cursor = toolCursor();
             if (refit) fit(); else requestDraw();
         },
         fit,
