@@ -13,7 +13,7 @@ import {findForwardPlan} from '../../../js/business/cutting/forward-search.js';
 import {OUTCOMES, defaultReport, applyBulk, recoveryCandidates, reportSummary, reportProblems, buildCutReport} from '../model/report.js';
 import {reviewablePieces, effectivePieceResults, DISPOSITIONS, emptyQualityForm, qualityProblems, buildQualityCommand, receiptSummary} from '../model/quality.js';
 import {executionWriter, executionForPlan, executionLabels} from '../../../js/business/cutting/execution-client.js';
-import {camData, localHome, worldHome, initialPositions, movePiece, rotatePiece, rotationAllowed, placementProblem, changedPieces, adjustPayload, applyPositions, sizeOf} from '../model/plan-tools.js';
+import {camData, localHome, worldHome, initialPositions, movePiece, rotatePiece, rotationAllowed, removalProblem, removePiece, placementProblem, changedPieces, adjustPayload, applyPositions, sizeOf} from '../model/plan-tools.js';
 import {gcodeText, dxfText} from '../../../js/plugins/export/cam-format.js';
 import {createPlanHistory} from '../../../js/business/cutting/plan-editing.js';
 import {ticketModel, ticketHTML} from '../../../js/plugins/export/cut-ticket-model.js';
@@ -59,7 +59,7 @@ export async function mount(el, [taskId, focusPlan]) {
     const st = {source: focusRemnant ? 'remnant' : 'roll', rollId: focusRemnant || focus?.request?.rollId || rollsOfPlans(plans)[0] || null,
         selectedId: focus ? focus.id : null, window: null, fresh: [], tool: 'pan', view: focus ? 'station' : prefs.view,
         pop: null, cursor: null, saving: false, busy: '', failure: null, quality: null, station: '1', reserveMin: 30, recommend: null};
-    let canvas = null, nav = null, undismiss = null;
+    let canvas = null, nav = null, undismiss = null, closeContext = () => {};
 
     /** 可选母卷：任务方案用过的母卷 + 同型号且有余量的母卷。 */
     const rollChoices = () => {
@@ -117,6 +117,7 @@ export async function mount(el, [taskId, focusPlan]) {
 
     /** keepCamera：重绘外壳但保留画布视角（拖动工位结束、切换右栏等）。 */
     function shell(keepCamera = false) {
+        closeContext();
         const savedCam = keepCamera ? canvas?.getCamera() : null;
         const sc = st.rollId && roll ? scene() : null, met = sc ? sceneMetrics(sc) : null;
         const seg = sc?.segments.find(s => s.id === sc.currentId) || null;
@@ -251,14 +252,17 @@ export async function mount(el, [taskId, focusPlan]) {
     /** 手动调整：拖动件（“移动件”工具）、旋转、撤销 / 重做，后端校验后另存为新版本。 */
     function adjustPanel(seg) {
         const a = st.adjust, plan = planOf(a.planId), changed = changedPieces(a.positions, plan);
-        const p = plan.result.pieces.find(x => x.id === a.selected), q = p && a.positions[p.id], size = p && sizeOf(p, q.rotated);
+        const p = plan.result.pieces.find(x => x.id === a.selected && a.positions[x.id]), q = p && a.positions[p.id], size = p && sizeOf(p, q.rotated);
+        const removeReason = removalProblem(a.positions, plan, a.selected), removed = plan.result.pieces.length - Object.keys(a.positions).length;
         return `<section class="pane" id="adjust"><div class="pane-h">手动调整<span class="sub num">${shortId(seg.id)} · v${seg.version}</span><span class="sp"></span><button class="btn sm" id="adjust-close" ${st.busy ? 'disabled' : ''}>放弃调整</button></div>
-          <div class="pane-b"><div class="muted" style="padding:10px 12px;font-size:12px">方向键微调 5 mm，Shift 为 20 mm，R 旋转，F 定位，Ctrl/⌘+Z 撤销。位置按当前工位计算；前端预检后，仍须由后端校验刀路并保存新版本。</div>
-            <div class="kv"><div>已改动</div><div class="num">${changed} 件</div>
+          <div class="pane-b"><div class="muted" style="padding:10px 12px;font-size:12px">方向键微调 5 mm，Shift 为 20 mm，R 旋转，Delete 移除，F 定位，Ctrl/⌘+Z 撤销。位置按当前工位计算；前端预检后，仍须由后端校验刀路并保存新版本。</div>
+            <div class="kv"><div>已改动</div><div class="num">${changed} 件${removed ? ` · 移除 ${removed} 件` : ''}</div>
               ${p ? `<div>选中</div><div>#${p.id} · ${esc(String(p.name || '').slice(0, 16))}</div><div>位置</div><div class="num">X ${fmtN(q.x, 1)} · Y ${fmtN(q.y, 1)} mm</div><div>尺寸</div><div class="num">${fmtN(size.w)} × ${fmtN(size.l)}${q.rotationDegrees != null ? ` · ${q.rotationDegrees}°` : q.rotated !== !!p.rotated ? ' · 已旋转' : ''}</div>` : '<div>选中</div><div class="muted">点选画布中的裁片</div>'}</div>
             ${p ? `<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:6px;align-items:end;padding:8px 12px"><label>X mm<input style="width:100%" class="field num" id="adj-x" type="number" step="0.1" value="${q.x}" ${st.busy ? 'disabled' : ''}></label><label>Y mm<input style="width:100%" class="field num" id="adj-y" type="number" step="0.1" value="${q.y}" ${st.busy ? 'disabled' : ''}></label><button class="btn sm" id="adj-position" ${st.busy ? 'disabled' : ''}>应用位置</button></div>` : ''}
             <div style="display:flex;gap:6px;padding:8px 12px;flex-wrap:wrap"><button class="btn sm" id="adj-undo" ${a.history.canUndo ? '' : 'disabled'}>撤销</button><button class="btn sm" id="adj-redo" ${a.history.canRedo ? '' : 'disabled'}>重做</button>
-              <button class="btn sm" id="adj-rotate" ${p && rotationAllowed(plan, p) && !st.busy ? '' : 'disabled'}>旋转 90°</button><button class="btn sm" id="adj-fit" ${p ? '' : 'disabled'}>定位选中件</button><button class="btn sm" id="adj-reset" ${changed ? '' : 'disabled'}>恢复原位</button></div>
+              <button class="btn sm" id="adj-rotate" ${p && rotationAllowed(plan, p) && !st.busy ? '' : 'disabled'}>旋转 90°</button><button class="btn sm" id="adj-remove" title="${esc(removeReason || '仅从调整草稿移除，可撤销；保存后由服务端重建刀路')}" ${removeReason || st.busy ? 'disabled' : ''}>移除选中件</button><button class="btn sm" id="adj-fit" ${p ? '' : 'disabled'}>定位选中件</button><button class="btn sm" id="adj-menu" aria-haspopup="menu" ${p ? '' : 'disabled'}>裁片菜单</button><button class="btn sm" id="adj-reset" ${changed ? '' : 'disabled'}>恢复原方案</button></div>
+            ${removed ? '<div class="notice">移除仅影响当前草稿，需求良品量和库存尚未变化。保存后重新核对用料与回收区域。</div>' : ''}
+            ${p && removeReason ? `<div class="muted" style="padding:0 12px 8px;font-size:12px">${esc(removeReason)}</div>` : ''}
             ${a.problem ? `<div class="notice" id="adj-problem" role="status">${esc(a.problem.message)}${a.problem.subject ? `<br>尝试位置 X ${fmtN(a.problem.subject.x, 1)} · Y ${fmtN(a.problem.subject.y, 1)} mm<br><button class="btn sm" id="adj-problem-fit">定位冲突区域</button>` : ''}</div>` : ''}
             ${a.error ? `<div class="notice">${esc(a.error)}</div>` : ''}
             <div style="display:flex;gap:8px;padding:8px 12px"><button class="btn pri" id="adj-save" ${changed && !st.busy ? '' : 'disabled'}>校验并保存为新版本</button></div></div></section>`;
@@ -273,6 +277,27 @@ export async function mount(el, [taskId, focusPlan]) {
     }
 
     const mayAdjust = () => st.adjust && !st.busy && !checks[st.adjust.planId] && !executionForPlan(views, st.adjust.planId)?.reservationActive;
+    function editReason(plan) {
+        return st.busy ? '当前操作尚未结束' : st.report || st.quality ? '请先结束报工或复检操作' : !plan ? '当前窗口尚未生成候选方案' : plan.status !== 'PENDING' ? '该方案已报工或失效，只能查看'
+            : checks[plan.id] ? '材料或任务已变化，请重新排料' : executionForPlan(views, plan.id)?.reservationActive ? '执行单已下达，方案已锁定'
+            : st.adjust && st.adjust.planId !== plan.id ? '请先保存或放弃当前调整' : null;
+    }
+    function startAdjustment(plan, selected = null) {
+        const reason = editReason(plan); if (reason) { toast(reason, true); return false; }
+        if (st.adjust) { st.adjust.selected = selected; st.adjust.problem = null; canvas.setScene(scene()); patchAdjust(); return true; }
+        const positions = initialPositions(plan);
+        st.selectedId = plan.id; st.window = null;
+        st.adjust = {planId: plan.id, positions, history: createPlanHistory(positions), selected, error: null};
+        st.tool = 'move'; st.view = 'station'; full(); return true;
+    }
+    function removeSelected() {
+        if (!mayAdjust()) return;
+        const a = st.adjust, plan = planOf(a.planId), reason = removalProblem(a.positions, plan, a.selected);
+        if (reason) { toast(reason, true); return; }
+        a.positions = removePiece(a.positions, plan, a.selected); a.history.record(a.positions);
+        a.selected = null; a.error = null; a.problem = null;
+        canvas.setScene(scene()); patchAdjust();
+    }
     function proposePiece(id, next, {done = true, base = st.adjust?.positions} = {}) {
         if (!mayAdjust()) return;
         const a = st.adjust, previousMessage = a.problem?.message;
@@ -315,11 +340,7 @@ export async function mount(el, [taskId, focusPlan]) {
         });
         el.querySelector('#tp-drop')?.addEventListener('click', () => { st.toolpath = null; shell(true); });
         el.querySelector('#tp-save')?.addEventListener('click', () => saveAdjustment({adjustmentId: st.toolpath.opId, cuts: st.toolpath.result.optimizedCuts}, '刀序已保存为新版本'));
-        el.querySelector('#adjust-open')?.addEventListener('click', () => {
-            const positions = initialPositions(plan);
-            st.adjust = {planId: seg.id, positions, history: createPlanHistory(positions), selected: null, error: null};
-            st.tool = 'move'; st.view = 'station'; full(); // 进入调整时对准当前工位
-        });
+        el.querySelector('#adjust-open')?.addEventListener('click', () => startAdjustment(plan));
         bindAdjust();
     }
 
@@ -331,6 +352,11 @@ export async function mount(el, [taskId, focusPlan]) {
         box.querySelector('#adj-undo').onclick = () => { if (!mayAdjust()) return; const p = a.history.undo(); if (p) { a.positions = p; a.error = null; a.problem = null; redraw(); } };
         box.querySelector('#adj-redo').onclick = () => { if (!mayAdjust()) return; const p = a.history.redo(); if (p) { a.positions = p; a.error = null; a.problem = null; redraw(); } };
         box.querySelector('#adj-rotate').onclick = () => proposePiece(a.selected, rotatePiece(a.positions, plan, a.selected));
+        box.querySelector('#adj-remove').onclick = removeSelected;
+        box.querySelector('#adj-menu').onclick = e => {
+            const r = e.currentTarget.getBoundingClientRect();
+            openCanvasMenu({kind: 'piece', segmentId: plan.id, entityId: a.selected, clientX: r.left, clientY: r.bottom});
+        };
         box.querySelector('#adj-position')?.addEventListener('click', () => proposePiece(a.selected, {...a.positions, [a.selected]: {...a.positions[a.selected],
             x: box.querySelector('#adj-x').valueAsNumber, y: box.querySelector('#adj-y').valueAsNumber}}));
         box.querySelector('#adj-fit').onclick = () => canvas.fitSelection();
@@ -346,6 +372,65 @@ export async function mount(el, [taskId, focusPlan]) {
             a.opBody = JSON.stringify(a.positions);
             saveAdjustment(body, '调整版已校验并保存为新版本');
         };
+    }
+
+    /** Instance-owned menu. Geometry picking is generic; permissions and mutations remain in this host. */
+    function openCanvasMenu(hit) {
+        closeContext();
+        const plan = planOf(hit.segmentId), sc = scene(), seg = sc.segments.find(s => s.id === hit.segmentId);
+        const piece = hit.kind === 'piece' && seg?.pieces.find(p => p.id === hit.entityId);
+        const source = piece && plan?.result.pieces.find(p => p.id === piece.id);
+        const remnant = hit.kind === 'remnant' && seg?.remnants.find(r => r.id === hit.entityId);
+        const reason = editReason(plan), positions = st.adjust && st.adjust.planId === plan?.id ? st.adjust.positions : plan ? initialPositions(plan) : {};
+        const entries = [], add = (id, label, action, disabled = null) => entries.push({id, label, action, disabled});
+        const locate = bounds => { if (st.view === 'full' && prefs.fullMode === 'tile') { st.view = 'station'; full(); } canvas.fitBounds(bounds); };
+        let heading = seg ? `工位 · ${shortId(seg.id)} · ${STATUS_TEXT[seg.status]}` : '母卷 · 当前窗口', detailText = '';
+        if (piece && source) {
+            heading = `裁片 #${piece.id} · ${source.name || ''}`;
+            detailText = `X ${fmtN(piece.v, 1)} · Y ${fmtN(piece.u, 1)} mm（全卷） · ${fmtN(piece.dv, 1)} × ${fmtN(piece.du, 1)} mm`;
+            add('select', '选中并调整', () => startAdjustment(plan, piece.id), reason);
+            add('rotate', '旋转 90°', () => { if (startAdjustment(plan, piece.id)) el.querySelector('#adj-rotate')?.click(); }, reason || (!rotationAllowed(plan, source) ? '该需求不允许旋转' : null));
+            add('remove', '从调整草稿移除', () => { if (startAdjustment(plan, piece.id)) removeSelected(); }, reason || removalProblem(positions, plan, piece.id));
+            add('locate', '定位裁片', () => locate({u0: piece.u, u1: piece.u + piece.du, v0: piece.v, v1: piece.v + piece.dv}));
+        } else if (remnant) {
+            heading = `${seg.status === 'cut' ? '实际回收' : '计划余料'} · ${remnant.id}`;
+            detailText = `X ${fmtN(remnant.x, 1)} · Y ${fmtN(seg.start + remnant.y, 1)} mm（全卷） · ${fmtN(remnant.w, 1)} × ${fmtN(remnant.l, 1)} mm`;
+            add('locate', '定位余料', () => locate({u0: seg.start + remnant.y, u1: seg.start + remnant.y + remnant.l, v0: remnant.x, v1: remnant.x + remnant.w}));
+        } else {
+            add('adjust', '手动调整当前工位', () => startAdjustment(plan), reason);
+            add('fit', '适合当前窗口', () => canvas.fit());
+        }
+        const menu = document.createElement('div'), events = new AbortController();
+        menu.className = 'canvas-menu'; menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', heading);
+        menu.innerHTML = `<div class="canvas-menu-head">${esc(heading)}</div>${detailText ? `<div class="canvas-menu-detail num">${esc(detailText)}</div>` : ''}${entries.map(e => `<button role="menuitem" data-canvas-action="${e.id}" ${e.disabled ? 'disabled' : ''}>${esc(e.label)}${e.disabled ? `<small>${esc(e.disabled)}</small>` : ''}</button>`).join('')}`;
+        document.body.append(menu);
+        const bounds = menu.getBoundingClientRect();
+        menu.style.left = Math.max(6, Math.min(hit.clientX, innerWidth - bounds.width - 6)) + 'px';
+        menu.style.top = Math.max(6, Math.min(hit.clientY, innerHeight - bounds.height - 6)) + 'px';
+        const close = (restoreFocus = false) => {
+            events.abort(); menu.remove(); closeContext = () => {};
+            if (restoreFocus) el.querySelector('#rc')?.focus({preventScroll: true});
+        };
+        closeContext = close;
+        menu.addEventListener('click', e => {
+            const button = e.target.closest('[data-canvas-action]');
+            const entry = button && entries.find(x => x.id === button.dataset.canvasAction);
+            if (!entry || entry.disabled) return;
+            close(); entry.action(); el.querySelector('#rc')?.focus({preventScroll: true});
+        }, {signal: events.signal});
+        menu.addEventListener('keydown', e => {
+            const buttons = [...menu.querySelectorAll('button:not(:disabled)')], index = buttons.indexOf(document.activeElement);
+            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); }
+            else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
+                e.preventDefault(); buttons[e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (index + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]?.focus();
+            } else if (e.key === 'Tab') close();
+        }, {signal: events.signal});
+        document.addEventListener('pointerdown', e => { if (!menu.contains(e.target)) close(); }, {capture: true, signal: events.signal});
+        document.addEventListener('scroll', e => { if (!menu.contains(e.target)) close(); }, {capture: true, signal: events.signal});
+        document.addEventListener('visibilitychange', () => { if (document.hidden) close(); }, {signal: events.signal});
+        window.addEventListener('blur', () => close(), {signal: events.signal});
+        window.addEventListener('resize', () => close(), {signal: events.signal});
+        menu.querySelector('button:not(:disabled)')?.focus({preventScroll: true});
     }
 
     /** 保存调整版（件位置或刀序）：后端校验通过后原候选作废、新版本成为候选。同一内容重试使用同一操作编号。 */
@@ -689,6 +774,8 @@ export async function mount(el, [taskId, focusPlan]) {
         const host = el.querySelector('#rc');
         canvas?.destroy(); nav?.destroy();
         canvas = createRollCanvas(host, {
+            onContextMenu: openCanvasMenu,
+            onInteract: () => closeContext(),
             onCursor: c => { st.cursor = c; status(sc); },
             onCamera: ({ratio, percent}) => { const i = el.querySelector('#z-ratio'); if (i && document.activeElement !== i) i.value = formatRatio(ratio); const p = el.querySelector('#z-pct'); if (p) p.textContent = Math.round(percent) + '%'; },
             onDefectDraw: d => addFresh(d, sc),
@@ -704,7 +791,8 @@ export async function mount(el, [taskId, focusPlan]) {
                 const a = st.adjust; if (!a || st.busy || checks[a.planId] || executionForPlan(views, a.planId)?.reservationActive) return;
                 if (command.type === 'nudge') {
                     proposePiece(command.pieceId, movePiece(a.positions, planOf(a.planId), command.pieceId, command.du, command.dv, a.positions));
-                } else if (['undo', 'redo', 'rotate'].includes(command.type)) el.querySelector('#adj-' + command.type)?.click();
+                } else if (command.type === 'remove') removeSelected();
+                else if (['undo', 'redo', 'rotate'].includes(command.type)) el.querySelector('#adj-' + command.type)?.click();
             }
         });
         canvas.setOptions({vertical: prefs.vertical, view: st.view, fullMode: prefs.fullMode, tool: st.tool, mmPerPx: prefs.mmPerPx,
@@ -912,7 +1000,7 @@ export async function mount(el, [taskId, focusPlan]) {
     function full() { shell(); }
     full();
     if (isSlitting(task)) restoreSlit();
-    return () => { canvas?.destroy(); nav?.destroy(); undismiss?.(); session.cancel(); };
+    return () => { closeContext(); canvas?.destroy(); nav?.destroy(); undismiss?.(); session.cancel(); };
 }
 
 function originText(o) { return {'right-bottom': '右下', 'left-bottom': '左下', 'right-top': '右上', 'left-top': '左上'}[o] || o || '—'; }

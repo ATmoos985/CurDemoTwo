@@ -105,6 +105,12 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
             await page.locator('#z-fit').click(); await frames(page); await pick(fixed.id);
             assert.ok(await page.locator('#adj-rotate').isDisabled()); const unchanged = await node(fixed.id);
             await page.keyboard.press('r'); await frames(page); assert.deepEqual(await node(fixed.id), unchanged);
+            await page.locator('#adj-menu').click();
+            assert.ok(await page.locator('[data-canvas-action="rotate"]').isDisabled());
+            assert.ok(await page.locator('[data-canvas-action="remove"]').isDisabled());
+            assert.match(await page.locator('.canvas-menu').innerText(), /齐套/);
+            await page.keyboard.press('Escape'); await page.keyboard.press('Delete'); await frames(page);
+            assert.deepEqual(await node(fixed.id), unchanged, 'shortcut cannot bypass contour completeness');
             await pick(first); await page.keyboard.press('r'); await frames(page); await page.keyboard.press('r'); await frames(page);
             const points = shape.vertices.flatMap(v => [300 - v.x, 400 - v.y]);
             assert.deepEqual((await node(first)).points, points); assert.ok(await page.locator('#adj-save').isEnabled());

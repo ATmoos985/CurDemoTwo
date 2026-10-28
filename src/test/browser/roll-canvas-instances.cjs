@@ -28,15 +28,16 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
             const plan = {id: 'p', status: 'PENDING', request: {windowStartY: 2000, rollL: 1500}, result: {
                 pieces: [{id: 1, x: 100, y: 100, w: 600, l: 900, shape, rotated: true, rotationDegrees: 90}],
                 cuts: [{step: 1, startX: 100, startY: 100, endX: 700, endY: 100}],
-                remnants: [{id: 'r', x: 800, y: 100, w: 200, l: 900, shape: {type: 'RECTANGLE', width: 200, height: 900}}]}};
+                remnants: [{id: 'r', x: 800, y: 100, w: 200, l: 900, shape: {type: 'POLYGON', width: 200, height: 900,
+                    vertices: [{x: 0, y: 0}, {x: 200, y: 0}, {x: 200, y: 300}, {x: 100, y: 300}, {x: 100, y: 900}, {x: 0, y: 900}]}}]}};
             const seg = planSegment(plan); seg.home = {u: 2000, v: 0};
             window.sc = {roll: {id: 'ROLL-TEST', width: 1500, total: 10000, used: 1000}, currentId: 'p', segments: [seg],
                 defects: [{u: 3500, v: 50, du: 100, dv: 80, margin: 20}], window: {start: 2000, len: 1500}};
-            window.events = {a: {selected: [], moved: [], defects: [], cursor: [], camera: [], commands: []}, b: {selected: [], moved: [], defects: [], cursor: [], camera: [], commands: []}};
+            window.events = {a: {selected: [], moved: [], defects: [], cursor: [], camera: [], commands: [], contexts: []}, b: {selected: [], moved: [], defects: [], cursor: [], camera: [], commands: [], contexts: []}};
             window.make = id => createRollCanvas(document.getElementById(id), {
                 onPieceSelect: x => events[id].selected.push(x), onPieceMove: (...x) => events[id].moved.push(x),
                 onDefectDraw: x => events[id].defects.push(x), onCursor: x => events[id].cursor.push(x), onCamera: x => events[id].camera.push(x),
-                onEditCommand: x => events[id].commands.push(x)
+                onEditCommand: x => events[id].commands.push(x), onContextMenu: x => events[id].contexts.push(x)
             });
             window.views = {a: make('a'), b: make('b')};
             views.a.setScene(sc); views.b.setOptions({vertical: false}); views.b.setScene(sc);
@@ -80,6 +81,20 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
             const e = await page.evaluate(() => ({a: events.a.moved.at(-1), b: events.b.moved.length, original: sc.segments[0].pieces[0].u}));
             assert.equal(e.a[0], 1); assert.ok(Math.abs(e.a[1] - 120) < .1); assert.ok(Math.abs(e.a[2] - 30) < .1); assert.equal(e.a[3], true);
             assert.equal(e.b, 0); assert.equal(e.original, 2100);
+        });
+        await check('context picking respects concave gaps, remnant outlines and instance isolation in both orientations', async () => {
+            for (const id of ['a', 'b']) {
+                for (const [u, v, kind, entityId] of [[2700, 600, 'station', undefined], [2600, 150, 'piece', 1], [2500, 850, 'remnant', 'r'], [2700, 950, 'station', undefined]]) {
+                    const p = await point(id, u, v); await page.mouse.click(p.x, p.y, {button: 'right'});
+                    const hit = await page.evaluate(id => events[id].contexts.at(-1), id);
+                    assert.equal(hit.kind, kind); assert.equal(hit.segmentId, 'p'); assert.equal(hit.entityId, entityId);
+                    // Native contextmenu MouseEvent rounds client coordinates to CSS pixels; verify its exact inverse.
+                    const screen = await point(id, hit.u, hit.v);
+                    assert.ok(Math.abs(screen.x - hit.clientX) < .01 && Math.abs(screen.y - hit.clientY) < .01);
+                    assert.ok(Math.abs(screen.x - p.x) < 1 && Math.abs(screen.y - p.y) < 1);
+                }
+                assert.equal(await page.evaluate(id => events[id].contexts.length, id), 4);
+            }
         });
         await check('locked and invalid scenes cannot emit placement changes', async () => {
             const before = await page.evaluate(() => events.a.moved.length);
@@ -221,7 +236,12 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
         await check('destroy is idempotent and remount does not duplicate event handlers', async () => {
             const before = await page.evaluate(() => { const c = views.b.getCamera(); views.a.destroy(); views.a.destroy(); return c; });
             assert.equal(await page.evaluate(() => Konva.stages.length), 1);
+            const count = await page.evaluate(() => events.a.contexts.length);
+            await page.locator('#a').dispatchEvent('contextmenu', {clientX: 200, clientY: 300});
+            assert.equal(await page.evaluate(() => events.a.contexts.length), count);
             await page.evaluate(() => { views.a = make('a'); views.a.setScene(sc); }); await frames(page);
+            const p = await point('a', 2600, 150); await page.mouse.click(p.x, p.y, {button: 'right'});
+            assert.equal(await page.evaluate(() => events.a.contexts.length), count + 1);
             const n = await page.evaluate(() => { views.a.setTool('defect'); return events.a.defects.length; });
             await drag('a', 2500, 300, 100, 80);
             assert.equal(await page.evaluate(() => events.a.defects.length), n + 1);

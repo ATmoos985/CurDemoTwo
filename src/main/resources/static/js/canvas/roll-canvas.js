@@ -401,6 +401,22 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
         e.preventDefault(); callbacks.onInteract?.('zoom'); const p = local(e);
         cam = zoomAt(cam, opts.vertical, ...p, e.deltaY < 0 ? 1.15 : 1 / 1.15, cam.fit * .2, 8); requestDraw();
     }
+    function onContextMenu(e) {
+        if (!visible || !cam || !scene || !callbacks.onContextMenu) return;
+        const cursor = cursorAt(local(e));
+        if (!cursor) return;
+        e.preventDefault(); cancelGesture(); host.focus({preventScroll: true});
+        let target = {kind: 'station', segmentId: null};
+        // Reverse drawing order, using actual outlines rather than bounding rectangles.
+        for (const seg of [...scene.segments].reverse()) {
+            const remnant = [...(seg.remnants || [])].reverse().find(r => containsRollPiece(
+                {u: seg.start + r.y, v: r.x, du: r.l, dv: r.w, shape: r.shape}, cursor.u, cursor.v));
+            const piece = [...seg.pieces].reverse().find(p => containsRollPiece(p, cursor.u, cursor.v));
+            if (remnant || piece) { target = {kind: remnant ? 'remnant' : 'piece', segmentId: seg.id, entityId: (remnant || piece).id}; break; }
+            if (cursor.u >= seg.start && cursor.u <= seg.start + seg.len) { target = {kind: 'station', segmentId: seg.id}; break; }
+        }
+        callbacks.onContextMenu({...target, ...cursor, clientX: e.clientX, clientY: e.clientY});
+    }
     function onKey(e) {
         if (!visible || !scene || e.target !== host || e.isComposing) return;
         if (e.key === 'Escape') {
@@ -423,12 +439,14 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
         const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
         if (dx || dy) {
             e.preventDefault(); callbacks.onEditCommand?.({type: 'nudge', pieceId: scene.selectedPiece, du: opts.vertical ? dy : dx, dv: opts.vertical ? dx : dy});
-        } else if (key === 'r') { e.preventDefault(); callbacks.onEditCommand?.({type: 'rotate', pieceId: scene.selectedPiece}); }
+        } else if (['r', 'delete', 'backspace'].includes(key)) {
+            e.preventDefault(); callbacks.onEditCommand?.({type: key === 'r' ? 'rotate' : 'remove', pieceId: scene.selectedPiece});
+        }
     }
     for (const [type, handler] of Object.entries({pointerdown: onDown, pointermove: onMove, pointerup: onUp,
         pointercancel: cancelGesture, lostpointercapture: () => { if (gesture) cancelGesture(); },
         pointerleave: () => callbacks.onCursor?.(null), wheel: onWheel,
-        keydown: onKey}))
+        keydown: onKey, contextmenu: onContextMenu}))
         host.addEventListener(type, handler, {signal: listeners.signal, ...(type === 'wheel' ? {passive: false} : {})});
     const observer = new ResizeObserver(() => {
         if (destroyed || !visible) return;

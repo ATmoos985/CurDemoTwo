@@ -31,7 +31,7 @@ export function initialPositions(plan) {
 /** 移动一件：du 沿卷长、dv 沿幅宽（世界增量）→ 局部 y、x；限制在工位内，精度 0.1 mm。 */
 export function movePiece(positions, plan, id, du, dv, base = positions) {
     const p = (plan.result.pieces || []).find(x => x.id === Number(id) || x.id === id);
-    if (!p) return positions;
+    if (!p || !base[p.id] || !positions[p.id]) return positions;
     const pos = base[p.id], {w, l} = sizeOf(p, pos.rotated);
     const x = Math.max(0, Math.min(plan.request.rollW - w, r1(pos.x + dv)));
     const y = Math.max(0, Math.min(plan.request.rollL - l, r1(pos.y + du)));
@@ -40,7 +40,7 @@ export function movePiece(positions, plan, id, du, dv, base = positions) {
 
 export function rotatePiece(positions, plan, id) {
     const p = (plan.result.pieces || []).find(x => x.id === id);
-    if (!p || !rotationAllowed(plan, p)) return positions;
+    if (!p || !positions[id] || !rotationAllowed(plan, p)) return positions;
     return {...positions, [id]: {...positions[id], rotated: !positions[id].rotated,
         ...(p.shape ? {rotationDegrees: (positions[id].rotationDegrees + 90) % 360} : {})}};
 }
@@ -51,11 +51,24 @@ export function rotationAllowed(plan, piece) {
     return !!(contourMode(plan) ? demand?.allowRotation : plan.request.allowRotation || demand?.allowRotation);
 }
 
+/** Match the existing adjustment contract: contour sets stay complete; rectangle plans retain at least one piece. */
+export function removalProblem(positions, plan, id) {
+    if (!positions[id] || !plan.result.pieces.some(p => p.id === id)) return '请先选中待移除裁片';
+    if (contourMode(plan)) return '异形方案须保持齐套，不能单独移除裁片';
+    if (Object.keys(positions).length <= 1) return '至少保留一件裁片；整单放弃请退出调整后使用“放弃候选”';
+    return null;
+}
+
+export function removePiece(positions, plan, id) {
+    if (removalProblem(positions, plan, id)) return positions;
+    const next = {...positions}; delete next[id]; return next;
+}
+
 /** 件的当前外形尺寸：旋转状态与原方案不同则宽长互换。 */
 export function sizeOf(p, rotated) { return rotated === !!p.rotated ? {w: p.w, l: p.l} : {w: p.l, l: p.w}; }
 
 export function changedPieces(positions, plan) {
-    return (plan.result.pieces || []).filter(p => { const q = positions[p.id]; return q && (Math.abs(q.x - p.x) > .05 || Math.abs(q.y - p.y) > .05 || q.rotated !== !!p.rotated
+    return (plan.result.pieces || []).filter(p => { const q = positions[p.id]; return !q || (Math.abs(q.x - p.x) > .05 || Math.abs(q.y - p.y) > .05 || q.rotated !== !!p.rotated
         || p.shape && q.rotationDegrees !== (p.rotationDegrees || 0)); }).length;
 }
 
@@ -101,7 +114,11 @@ export function placementProblem(positions, plan, id) {
     const gap = request.pieceGap || 0;
     for (const other of plan.result.pieces) {
         if (other.id === id) continue;
-        if (!positions[other.id] || other.shape && !['RECTANGLE', 'POLYGON'].includes(other.shape.type)) return issue('SHAPE', `无法校验裁片 #${other.id} 的轮廓`, p);
+        if (!positions[other.id]) {
+            if (contour) return issue('SET', '异形方案须保持齐套', p);
+            continue;
+        }
+        if (other.shape && !['RECTANGLE', 'POLYGON'].includes(other.shape.type)) return issue('SHAPE', `无法校验裁片 #${other.id} 的轮廓`, p);
         const b = positioned(other, positions[other.id]);
         if (overlaps(p, b, gap) && (!contour || outlinesConflict(vertices, pieceVertices(b), gap)))
             return issue('PIECE', `与裁片 #${b.id} 重叠或间距不足（至少 ${gap} mm）`, p, [b]);
@@ -111,7 +128,7 @@ export function placementProblem(positions, plan, id) {
 
 /** 把调整中的位置套到画布段上（只改当前段的件）。 */
 export function applyPositions(seg, plan, positions) {
-    return {...seg, len: plan.request?.rollL ?? seg.len, cuts: [], remnants: [], pieces: seg.pieces.map(piece => {
+    return {...seg, len: plan.request?.rollL ?? seg.len, cuts: [], remnants: [], pieces: seg.pieces.filter(piece => positions[piece.id]).map(piece => {
         const p = plan.result.pieces.find(x => x.id === piece.id), q = positions[piece.id];
         if (!p || !q) return piece;
         const moved = positioned(p, q), {w, l} = moved;

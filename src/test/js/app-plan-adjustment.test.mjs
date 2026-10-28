@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {initialPositions, rotatePiece, rotationAllowed, changedPieces, adjustPayload, applyPositions, placementProblem} from '../../main/resources/static/app/js/model/plan-tools.js';
+import {initialPositions, rotatePiece, rotationAllowed, removalProblem, removePiece, movePiece, changedPieces, adjustPayload, applyPositions, placementProblem} from '../../main/resources/static/app/js/model/plan-tools.js';
+import {createPlanHistory} from '../../main/resources/static/js/business/cutting/plan-editing.js';
 
 const outline = {type: 'POLYGON', width: 200, height: 200, vertices: [
     {x: 0, y: 0}, {x: 200, y: 0}, {x: 200, y: 100}, {x: 100, y: 100}, {x: 100, y: 200}, {x: 0, y: 200}]};
@@ -89,4 +90,28 @@ test('half-turns survive payloads and rendering; an already rotated result is tr
     assert.deepEqual(unchanged.shape, piece.shape, 'saved result already contains the rotated contour');
     pos = rotatePiece(rotatePiece(pos, original, 1), original, 1);
     assert.equal(changedPieces(pos, original), 0, 'four quarter-turns return to the original');
+});
+
+test('rectangle removal is reversible, omitted from saved positions and cannot reappear through a late drag', () => {
+    const plan = fixture(); delete plan.request.demands[0].shape; delete plan.result.pieces[0].shape;
+    const before = structuredClone(plan), positions = initialPositions(plan), history = createPlanHistory(positions);
+    const next = removePiece(positions, plan, 1); history.record(next);
+    assert.equal(changedPieces(next, plan), 1);
+    assert.equal(placementProblem(next, plan, 2), null, 'removed piece no longer blocks the remaining layout');
+    assert.deepEqual(adjustPayload(next, 'remove-test').pieces.map(p => p.id), [2]);
+    assert.deepEqual(applyPositions({start: 0, pieces: [{id: 1}, {id: 2}]}, plan, next).pieces.map(p => p.id), [2]);
+    assert.strictEqual(movePiece(next, plan, 1, 5, 5, positions), next);
+    assert.strictEqual(rotatePiece(next, plan, 1), next);
+    assert.deepEqual(history.undo(), positions); assert.deepEqual(history.redo(), next);
+    assert.deepEqual(plan, before);
+});
+
+test('removal guards preserve the last rectangular piece and every member of a contour set', () => {
+    const plan = fixture(), positions = initialPositions(plan);
+    assert.match(removalProblem(positions, plan, 1), /齐套/);
+    assert.strictEqual(removePiece(positions, plan, 1), positions);
+    delete plan.request.demands[0].shape; const one = removePiece(positions, plan, 1);
+    assert.match(removalProblem(one, plan, 2), /至少保留一件/);
+    assert.strictEqual(removePiece(one, plan, 2), one);
+    assert.match(removalProblem(one, plan, 1), /选中/);
 });
