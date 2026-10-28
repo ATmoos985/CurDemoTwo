@@ -1,6 +1,6 @@
 // 独立母卷画布。场景与相机属于实例，几何复用现有 Konva renderer；宿主处理业务命令。
 import {shapeNode} from './nesting-renderer.js';
-import {rectangle} from './nesting-scene.js';
+import {rectangle, shapeVertices} from './nesting-scene.js';
 import {toScreen, toWorld, screenRect, fitCamera, zoomAt, panBy, ratioOf, scaleForRatio, rulerStep, DEFAULT_MM_PER_PX} from './roll-camera.js';
 
 const RULER = 22;
@@ -27,7 +27,7 @@ export function containsRollPiece(piece, u, v) {
 export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva} = {}) {
     if (!Konva) throw new Error('画布组件未加载，请刷新页面');
     let scene = null, cam = null, rows = null, gesture = null, measure = null, draft = null, defectPreview = null;
-    let destroyed = false, visible = true, frame = null, dirty = true, worlds = [], coverage = null;
+    let destroyed = false, visible = true, frame = null, dirty = true, worlds = [], coverage = null, geometryKey = null;
     let opts = {vertical: true, view: 'station', fullMode: 'strip', tool: 'pan', mmPerPx: DEFAULT_MM_PER_PX, showPath: false, showDimensions: true};
     const oldTabIndex = host.getAttribute('tabindex'), oldTouchAction = host.style.touchAction;
     const oldCursor = host.style.cursor, oldTitle = host.getAttribute('title'), hadClass = host.classList.contains('rc-host');
@@ -35,7 +35,7 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
     const stage = new Konva.Stage({container: host, width: Math.max(1, host.clientWidth), height: Math.max(1, host.clientHeight)});
     const geometry = new Konva.Layer({listening: false});
     const annotations = new Konva.Layer({listening: false});
-    const textPool = []; let textCursor = 0;
+    const textPool = [], linePool = []; let textCursor = 0, lineCursor = 0;
     stage.add(geometry, annotations);
     const listeners = new AbortController();
     const size = () => ({width: host.clientWidth, height: host.clientHeight});
@@ -90,6 +90,12 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
         group.add(node); return node;
     }
     function line(group, points, attrs = {}) {
+        if (group === annotations) {
+            const node = linePool[lineCursor] || (linePool[lineCursor] = new Konva.Line({strokeScaleEnabled: false, listening: false})); lineCursor++;
+            node.setAttrs({points, name: '', stroke: '#f0c674', strokeWidth: 1, opacity: 1, ...attrs});
+            if (!attrs.dash && node.dash()?.length) node.dash([]);
+            group.add(node); return node;
+        }
         const node = new Konva.Line({points, stroke: '#f0c674', strokeWidth: 1, strokeScaleEnabled: false, listening: false, ...attrs});
         group.add(node); return node;
     }
@@ -110,6 +116,37 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
     function visibleRange() {
         const sz = size(), along = opts.vertical ? sz.height : sz.width;
         return {start: Math.max(0, -cam.a / cam.s), end: Math.min(scene.roll.total, (along - cam.a) / cam.s)};
+    }
+    // Cache values, not caller object identities: callers may update an existing scene in place.
+    const sceneGeometryKey = s => JSON.stringify([s.roll, s.currentId, s.defects, s.segments.map(({pieces, ...rest}) => rest)]);
+    const pieceGeometryKey = p => JSON.stringify([p.u, p.v, p.du, p.dv, p.shape, p.color, p.opacity, p.dash]);
+    function updateRetainedPieces(next) {
+        if (dirty || !next || !worlds.length || sceneGeometryKey(next) !== geometryKey) return false;
+        const segments = new Map(next.segments.map(s => [s.id, s]));
+        for (const world of worlds) for (const retained of world.segments) {
+            const seg = segments.get(retained.seg.id);
+            if (!seg || seg.pieces.length !== retained.pieces.length) return false;
+            for (let i = 0; i < seg.pieces.length; i++) {
+                const p = seg.pieces[i], entry = retained.pieces[i];
+                if (p.id !== entry.node.getAttr('pieceId') || (p.shape?.type === 'POLYGON') !== (entry.node.getClassName() === 'Line')) return false;
+            }
+        }
+        for (const world of worlds) for (const retained of world.segments) {
+            const seg = segments.get(retained.seg.id); retained.seg = seg;
+            for (let i = 0; i < seg.pieces.length; i++) {
+                const p = seg.pieces[i], entry = retained.pieces[i], key = pieceGeometryKey(p);
+                entry.piece = p;
+                if (entry.key === key) continue;
+                const shape = p.shape || rectangle(p.dv, p.du), node = entry.node;
+                node.setAttrs({x: p.v, y: p.u, fill: p.color, opacity: p.opacity ?? .85});
+                if (shape.type === 'POLYGON') node.points(shapeVertices(shape).flatMap(v => [v.x, v.y]));
+                else node.size({width: shape.width, height: shape.height});
+                // Do not set an empty dash on every solid piece; Konva otherwise pays setLineDash on every draw.
+                if (p.dash?.length || node.dash()?.length) node.dash(p.dash?.length ? p.dash : []);
+                entry.key = key;
+            }
+        }
+        return true;
     }
     function rebuild() {
         geometry.destroyChildren(); worlds = [];
@@ -132,7 +169,7 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
                 group.add(node);
                 addShape(node, rectangle(W, seg.len), 0, seg.start,
                     {name: 'roll-hatch', fillPatternImage: wastePattern, stroke: '#5d6670', dash: stale ? [6, 4] : []});
-                const pieces = seg.pieces.map(p => ({piece: p, node: addShape(node, p.shape || rectangle(p.dv, p.du), p.v, p.u,
+                const pieces = seg.pieces.map(p => ({piece: p, key: pieceGeometryKey(p), node: addShape(node, p.shape || rectangle(p.dv, p.du), p.v, p.u,
                     {name: 'roll-piece', pieceId: p.id, segmentId: seg.id, fill: p.color, stroke: '#1d2125', opacity: p.opacity ?? .85,
                         ...(p.dash?.length ? {dash: p.dash} : {})})}));
                 for (const r of seg.remnants || []) addShape(node, r.shape || rectangle(r.w, r.l), r.x, seg.start + r.y,
@@ -152,7 +189,7 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
             }
             worlds.push({group, start, end, segments, hatches: group.find('.roll-hatch'), index: i});
         }
-        dirty = false;
+        geometryKey = sceneGeometryKey(scene); dirty = false;
     }
     function drawRulers(sz) {
         annotations.add(new Konva.Rect({width: sz.width, height: RULER, fill: '#23272c'}));
@@ -252,7 +289,8 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
         // 工位只保留视口及两侧缓冲区的节点；相机越出缓冲范围立即重建，不省略可见几何。
         if (dirty || !coverage || !tiled() && (range.start < coverage.start || range.end > coverage.end)) rebuild();
         for (const t of textPool) t.remove();
-        textCursor = 0; annotations.destroyChildren();
+        for (const l of linePool) l.remove();
+        textCursor = 0; lineCursor = 0; annotations.destroyChildren();
         for (const item of worlds) {
             const c = tiled() ? {...cam, a: cam.a - item.index * rows.rowLen * cam.s, c: cam.c + item.index * (scene.roll.width + rows.gap) * cam.s} : cam;
             transform(item.group, c);
@@ -459,8 +497,8 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
             if (scene && (scene.currentId !== next?.currentId || scene.roll.id !== next?.roll.id)) { cancelGesture(); measure = null; }
             if (follow && cam && scene?.window && next?.window) cam = {...cam, a: cam.a - (next.window.start - scene.window.start) * cam.s};
             if (follow && cam && scene?.feed && next?.feed) cam = {...cam, a: cam.a - (next.feed.u - scene.feed.u) * cam.s};
-            scene = next; dirty = true;
-            if (!scene) { geometry.destroyChildren(); annotations.destroyChildren(); for (const t of textPool) t.destroy(); textPool.length = 0; return; }
+            dirty = !updateRetainedPieces(next); scene = next;
+            if (!scene) { geometry.destroyChildren(); annotations.destroyChildren(); worlds = []; geometryKey = null; coverage = null; for (const node of [...textPool, ...linePool]) node.destroy(); textPool.length = linePool.length = 0; return; }
             if (refit || !cam) fit(); else requestDraw();
         },
         getCamera: () => cam && {...cam, rows: rows && {...rows}},
@@ -513,8 +551,9 @@ export function createRollCanvas(host, callbacks = {}, {Konva = globalThis.Konva
             destroyed = true; listeners.abort(); observer.disconnect();
             if (frame !== null) cancelAnimationFrame(frame);
             if (gesture && host.hasPointerCapture(gesture.pointer)) host.releasePointerCapture(gesture.pointer);
-            gesture = null; scene = null; worlds = []; stage.destroy();
+            gesture = null; scene = null; worlds = []; geometryKey = null; stage.destroy();
             for (const t of textPool) t.destroy(); textPool.length = 0;
+            for (const l of linePool) l.destroy(); linePool.length = 0;
             if (!hadClass) host.classList.remove('rc-host');
             if (oldTabIndex === null) host.removeAttribute('tabindex'); else host.setAttribute('tabindex', oldTabIndex);
             host.style.touchAction = oldTouchAction; host.style.cursor = oldCursor;

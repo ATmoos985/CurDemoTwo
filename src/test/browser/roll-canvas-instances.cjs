@@ -109,6 +109,43 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
             await page.evaluate(() => views.a.setOptions({editable: true}));
             await page.evaluate(() => views.a.setScene(sc));
         });
+        await check('retained geometry updates positions, contours and styles even when the caller reuses scene objects', async () => {
+            await frames(page);
+            const other = await page.evaluate(() => {
+                window.kept = stageFor('a').findOne('.roll-piece'); window.changed = structuredClone(sc);
+                Object.assign(changed.segments[0].pieces[0], {u: 2140, v: 120, color: '#aa5500', opacity: .6, dash: [3, 2]});
+                changed.segments[0].pieces[0].shape.vertices[2].x = 500;
+                views.a.setScene(changed);
+                return stageFor('b').findOne('.roll-piece').points();
+            }); await frames(page);
+            const state = await page.evaluate(() => {
+                const n = stageFor('a').findOne('.roll-piece');
+                return {same: n === kept, x: n.x(), y: n.y(), fill: n.fill(), opacity: n.opacity(), dash: n.dash(), points: n.points()};
+            });
+            assert.deepEqual(state, {same: true, x: 120, y: 2140, fill: '#aa5500', opacity: .6, dash: [3, 2], points: [0, 0, 600, 0, 500, 300, 200, 300, 200, 900, 0, 900]});
+            await page.evaluate(() => {
+                const p = changed.segments[0].pieces[0]; p.shape.vertices[2].x = 450; p.dash = []; p.color = '#0055aa';
+                views.a.setScene(changed);
+            }); await frames(page);
+            assert.deepEqual(await page.evaluate(() => ({same: stageFor('a').findOne('.roll-piece') === kept, x: kept.points()[4], dash: kept.dash(), fill: kept.fill()})),
+                {same: true, x: 450, dash: [], fill: '#0055aa'});
+            assert.deepEqual(await page.evaluate(() => stageFor('b').findOne('.roll-piece').points()), other);
+            await page.evaluate(() => { views.a.setScene(sc); views.a.fit(); }); await frames(page);
+        });
+        await check('shape type, piece removal and defect changes invalidate the retained geometry correctly', async () => {
+            await page.evaluate(() => {
+                window.changed = structuredClone(sc); changed.segments[0].pieces[0].shape = {type: 'RECTANGLE', width: 600, height: 900};
+                views.a.setScene(changed);
+            }); await frames(page);
+            assert.equal(await page.evaluate(() => stageFor('a').findOne('.roll-piece').getClassName()), 'Rect');
+            await page.evaluate(() => { changed.segments[0].pieces = []; views.a.setScene(changed); }); await frames(page);
+            assert.equal(await page.evaluate(() => stageFor('a').find('.roll-piece').length), 0);
+            await page.evaluate(() => { changed.defects[0].u = 2500; views.a.setScene(changed); }); await frames(page);
+            assert.equal(await page.evaluate(() => stageFor('a').findOne('.roll-defect').y()), 2500);
+            await page.evaluate(() => { views.a.setScene(null); views.a.setScene(sc); }); await frames(page);
+            assert.equal(await page.evaluate(() => stageFor('a').findOne('.roll-piece').getClassName()), 'Line');
+            assert.equal(await page.evaluate(() => stageFor('a').findOne('.roll-defect').y()), 3500);
+        });
         await check('path and dimension switches hide their geometry and remain instance-local', async () => {
             await page.evaluate(() => { views.a.setOptions({showPath: true}); views.b.setOptions({showPath: true}); }); await frames(page);
             assert.equal(await page.evaluate(() => stageFor('a').find('.roll-cut').length), 1);
