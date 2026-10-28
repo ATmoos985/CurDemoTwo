@@ -12,9 +12,26 @@ import {reviewablePieces, effectivePieceResults, emptyQualityForm, qualityProble
 import {camData, localHome, worldHome, initialPositions, movePiece, rotatePiece, changedPieces, adjustPayload, applyPositions, sizeOf} from '../../main/resources/static/app/js/model/plan-tools.js';
 import {gcodeText} from '../../main/resources/static/js/plugins/export/cam-format.js';
 import {emptyTask, fromTask, addDemand, mergeImport, taskProblems, lineLock, toPayload, demandTemplateCsv} from '../../main/resources/static/app/js/model/task-form.js';
+import {containsRollPiece} from '../../main/resources/static/js/canvas/roll-canvas.js';
 
 const appRoot = fileURLToPath(new URL('../../main/resources/static/app/', import.meta.url));
 const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
+
+test('roll scene preserves the already rotated polygon instead of its bounding box', () => {
+    const shape = {type: 'POLYGON', width: 600, height: 900, vertices: [
+        {x: 0, y: 0}, {x: 600, y: 0}, {x: 600, y: 300}, {x: 200, y: 300}, {x: 200, y: 900}, {x: 0, y: 900}
+    ]};
+    const plan = {id: 'contour', status: 'PENDING', request: {windowStartY: 4000, rollL: 2000},
+        result: {pieces: [{id: 7, x: 30, y: 40, w: 600, l: 900, rotated: true, rotationDegrees: 90, shape}]}};
+    const before = JSON.stringify(plan);
+    const seg = planSegment(plan);
+    assert.deepEqual(seg.pieces[0].shape, shape);
+    assert.deepEqual([seg.pieces[0].u, seg.pieces[0].v], [4040, 30]);
+    const moved = applyPositions(seg, plan, {7: {x: 80, y: 140, rotated: true}});
+    assert.deepEqual(moved.pieces[0].shape, shape, 'translation must not rotate an already transformed contour');
+    assert.deepEqual([moved.pieces[0].u, moved.pieces[0].v], [4140, 80]);
+    assert.equal(JSON.stringify(plan), before);
+});
 
 test('camera maps world to screen and back in both orientations', () => {
     const cam = {s: 0.5, a: 10, c: 20};
@@ -25,6 +42,25 @@ test('camera maps world to screen and back in both orientations', () => {
     }
     assert.deepEqual(toScreen(cam, false, 100, 40), [60, 40]);
     assert.deepEqual(toScreen(cam, true, 100, 40), [40, 60], '竖向时卷长沿 y 方向');
+});
+
+test('polygon hit detection excludes concave gaps and includes contour boundaries', () => {
+    const p = {u: 4000, v: 100, du: 900, dv: 600, shape: {type: 'POLYGON', vertices: [
+        {x: 0, y: 0}, {x: 600, y: 0}, {x: 600, y: 300}, {x: 200, y: 300}, {x: 200, y: 900}, {x: 0, y: 900}
+    ]}};
+    assert.equal(containsRollPiece(p, 4500, 550), false, 'inside bounding box but outside physical contour');
+    assert.equal(containsRollPiece(p, 4500, 150), true);
+    assert.equal(containsRollPiece(p, 4500, 300), true, 'edge belongs to the piece');
+    assert.equal(containsRollPiece(p, 3900, 150), false);
+});
+
+test('rectangular adjustment updates the rendered dimensions when rotation changes', () => {
+    const plan = {result: {pieces: [{id: 1, x: 0, y: 0, w: 200, l: 800, rotated: false,
+        shape: {type: 'RECTANGLE', width: 200, height: 800}}]}};
+    const seg = {start: 1200, pieces: [{id: 1, shape: {type: 'RECTANGLE', width: 200, height: 800}}]};
+    const result = applyPositions(seg, plan, {1: {x: 10, y: 20, rotated: true}}).pieces[0];
+    assert.deepEqual(result.shape, {type: 'RECTANGLE', width: 800, height: 200});
+    assert.deepEqual([result.u, result.v, result.du, result.dv], [1220, 10, 200, 800]);
 });
 
 test('fitCamera centres the requested range and respects padding', () => {
@@ -271,14 +307,16 @@ async function files(dir) {
 }
 const refs = code => [...code.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)(['"])([^'"]+)\1/g)].map(m => m[2]);
 
-test('new app canvas imports only its own canvas modules and never loads business data', async () => {
+test('new app canvas imports only application or shared canvas core and never loads business data', async () => {
     const dir = path.join(appRoot, 'js', 'canvas'), all = await files(dir);
+    const shared = path.resolve(appRoot, '../js/canvas');
     assert.ok(all.length >= 3);
     for (const file of all) {
         const code = await readFile(file, 'utf8');
         for (const ref of refs(code)) {
-            const rel = path.relative(dir, path.resolve(path.dirname(file), ref));
-            assert.ok(ref.startsWith('.') && !rel.startsWith('..'), `${file} -> ${ref}`);
+            const target = path.resolve(path.dirname(file), ref);
+            const inside = root => { const rel = path.relative(root, target); return !rel.startsWith('..') && !path.isAbsolute(rel); };
+            assert.ok(ref.startsWith('.') && (inside(dir) || inside(shared)), `${file} -> ${ref}`);
         }
         assert.doesNotMatch(code, /\b(fetch|XMLHttpRequest|localStorage|sessionStorage)\b|\/api\//, file);
     }

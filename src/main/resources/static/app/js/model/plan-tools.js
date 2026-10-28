@@ -59,6 +59,7 @@ export function applyPositions(seg, plan, positions) {
         const p = plan.result.pieces.find(x => x.id === piece.id), q = positions[piece.id];
         if (!p || !q) return piece;
         const {w, l} = sizeOf(p, q.rotated);
-        return {...piece, u: seg.start + q.y, v: q.x, du: l, dv: w, label: `${Math.round(w)}×${Math.round(l)}`};
+        return {...piece, u: seg.start + q.y, v: q.x, du: l, dv: w,
+            shape: p.shape?.type === 'POLYGON' ? structuredClone(p.shape) : {type: 'RECTANGLE', width: w, height: l}, label: `${Math.round(w)}×${Math.round(l)}`};
     })};
 }

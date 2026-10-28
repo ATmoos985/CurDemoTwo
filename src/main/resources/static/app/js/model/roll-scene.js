@@ -73,13 +73,16 @@ export function planSegment(plan, colors = new Map(), index = 0, reported = new 
         pieces: (res.pieces || []).map(p => ({
             id: p.id, demandId: p.demandId,
             u: start + p.y, v: p.x, du: p.l, dv: p.w,
+            // 结果轮廓已经旋转，保持局部毫米坐标，不再次应用 rotated。
+            shape: p.shape ? structuredClone(p.shape) : {type: 'RECTANGLE', width: p.w, height: p.l},
             label: `${Math.round(p.w)}×${Math.round(p.l)}`,
             title: `${p.name || '裁片'} · ${p.w}×${p.l} mm${p.rotated ? ' · 旋转' : ''}`,
             color: colors.get(p.demandId) || PIECE_PALETTE[0]
         })),
         cuts: (res.cuts || []).filter(c => [c.startX, c.startY, c.endX, c.endY].every(Number.isFinite))
             .map(c => ({u1: start + c.startY, v1: c.startX, u2: start + c.endY, v2: c.endX, type: c.type, step: c.step})),
-        remnants: (res.remnants || []).map(r => ({id: r.id, x: r.x, y: r.y, w: r.w, l: r.l, hasDefect: !!r.hasDefect, status: r.status})),
+        remnants: (res.remnants || []).map(r => ({id: r.id, x: r.x, y: r.y, w: r.w, l: r.l, hasDefect: !!r.hasDefect, status: r.status,
+            shape: r.shape ? structuredClone(r.shape) : {type: 'RECTANGLE', width: r.w, height: r.l}})),
         pieceArea: Number(res.pieceArea) || 0,
         totalArea: Number(res.totalArea) || 0,
         fulfillment: res.fulfillment || [],
@@ -123,7 +126,8 @@ export function buildRollScene({roll, plans, reports = [], rollId, demands, proc
     win.adjusted = !!manual && (Math.abs(manual.start - base.start) > .5 || Math.abs(manual.len - base.len) > .5);
     win.isNew = !current;
     return {
-        roll: {id: rollId, width: Number(roll?.width) || Number(list[0]?.request?.rollW) || 0, total, used},
+        roll: {id: rollId, width: Number(roll?.width) || Number(list[0]?.request?.rollW) || 0, total, used,
+            shape: roll?.remnant?.shape ? structuredClone(roll.remnant.shape) : null},
         segments, defects: rollDefects(roll, freshDefects),
         currentId: current?.id || null, window: win, lock,
         bed: isRemnant ? null : {min: 500, max: Math.max(bed, 6000)},

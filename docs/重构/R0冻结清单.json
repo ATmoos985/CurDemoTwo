@@ -1,0 +1,290 @@
+{
+  "baseline": "61b62f54bc5ebf10efbf92bdd94c3f46f36b1b9b",
+  "note": "源码与样本 SHA-256；当前阶段不得修改 HTTP、存储和求解策略。运行数据备份仅保存在本机 data/refactor-baselines。",
+  "files": [
+    {
+      "path": "benchmark/problems.mjs",
+      "sha256": "66052eefb08ea2faee17715759c6d4c8cf8463abde0dec9c255368e4a306d8f7"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/CutReport.java",
+      "sha256": "f5f88d83b38480b3801421a6f9536b6782c56ed426f571eac593bee1adc8d4c1"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/CuttingPlan.java",
+      "sha256": "e0bbe002596b3f67fed1979f713eb74bd116ebf8178e974779c91da4fa9b8c60"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/CuttingTask.java",
+      "sha256": "8b835cf805e55e62e741fba8d86b1f5df186cd0e14e26829447c23db290cb436"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/ExecutionOrder.java",
+      "sha256": "d67608490e22f4684aa38584ab7f50ccc49af9e0c51d96ed5ff56f8345ee8b97"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/IntegrationProgress.java",
+      "sha256": "a399bbb2ec6ce8cb30dc3ddd421d510941a1a9f8c83625ce3e86efc5c6e8dde1"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/InventoryCount.java",
+      "sha256": "ea04352d8743b65e24d5ec65679934181498b81442fb71d63a441d1c07859bb6"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/InventoryEvent.java",
+      "sha256": "ac5e25c709b63a05b20ea553ff9d7a50ce5ecd8e59363674feecec625dc8f55a"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/InventoryLedgerEntry.java",
+      "sha256": "090b6137373a14500020fea205a0deb60afaa274f1085bb2f583781cbd2ab590"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/InventoryTransfer.java",
+      "sha256": "8cccbd353fe1f45e4838eaf6b3d071dbf84e38b46fdca8e85f22ccf45464c084"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/MotherRollInfo.java",
+      "sha256": "1b47fe21551b6eb8ff1af60973361f860de6c2f60b9423fd9327383dbdb8ecba"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/PieceDemand.java",
+      "sha256": "5acecf5c8c9218b3f66b1f4a95b80a9b71204f9683496c8d64477d86560bfcff"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/PlanAdjustment.java",
+      "sha256": "44501dd5c4151d33a58491730ab1d0e98a1329dab035ec0a22ffc0281e92ebce"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/QualityDisposition.java",
+      "sha256": "c3546beaf66210f1f756c119972e404333e273c02db913da2a6567e6c4463379"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/RemnantStock.java",
+      "sha256": "242d0d3bee94c22051fadd3c39c801aaeab0e8d8e1b1c802691c601b0a81d3d1"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/SlittingCar.java",
+      "sha256": "d4998b25fbfd8a91d8e5d32252e4d33034653ae881b74ec5b58abdd19a0528d3"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/SolveRequest.java",
+      "sha256": "e3bcd1d93acc56115313ed6d3dfbf9b3766f7ef46f85cf5f7362921c8621f82d"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/SolveResponse.java",
+      "sha256": "22e5fd3322b9c43a3399decb2ba264321e4b38deffbc87fa5a6746c6d2b10483"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/ToolpathRequest.java",
+      "sha256": "f18259752e949cad8a3fa1bf1edf98e958771f6b394f2981dfeafe6c028d72c7"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/business/model/VoidedDefect.java",
+      "sha256": "93ba23af590883f126cfae9468c3b13761798d407e70736fee5da5980d69b7e1"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/contracts/geometry/CutStep.java",
+      "sha256": "32fa8aefd0f7a016a9669f4c13949c7250b758628f9543f82d73641ffcb6f390"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/contracts/geometry/Defect.java",
+      "sha256": "102ecc04b624c28b5f90ad895e5de2055e51e6c779bdee431c0171be1f06cfd5"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/contracts/geometry/PlacedPiece.java",
+      "sha256": "7240cec8f0026557681488467ea1e827d34c964c2e9d4545f3c7007b36061af0"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/contracts/geometry/RemnantPiece.java",
+      "sha256": "a70f6291afb630daa7edaca026745e72c59c72340314ea9a5beee3b8e115cb73"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/contracts/geometry/ToolpathResult.java",
+      "sha256": "6a41034ca476e5d7985df95d7cb8efdffd8c44f8b92f1972d3f8b29d5dd4edbb"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/contracts/jobs/OptimizationJob.java",
+      "sha256": "1c07f86d5f237a040b9256930d8d87bdd94b6234ab810d3abfc4ff6198912d5c"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/contracts/jobs/OptimizationProblem.java",
+      "sha256": "799dc3bbc62bf6c5e46861a86e4bda6d53aaf27612bd5efe8535179bf2b1528d"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/contracts/jobs/OptimizationRequest.java",
+      "sha256": "eba9b75caee2ee54b46240ca3993cc84bfd1005126298e4c185881b15d0f1014"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/contracts/jobs/OptimizationResult.java",
+      "sha256": "3e4639f66322bd490ae595fe8cf60a8f327335a0b0e76d61f62416dc3f437eae"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/contracts/jobs/ProblemCheck.java",
+      "sha256": "c054a0ccfd5ac3c63fcebf75185c94a2f8b5bfd7c91c7fe081fecb49ae32b8e9"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/contracts/jobs/ResultComparison.java",
+      "sha256": "bd178fc0038659a678bbba4b36f6f6a2a49b0124271fe87f51d4d64b27e31f1e"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/contracts/nesting/EngineCapabilities.java",
+      "sha256": "a19b0b9a9508f0fba0b0932c1156cd709341f7eba994e974b8945dfdc32949e6"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/contracts/nesting/NestingProblem.java",
+      "sha256": "7794eb8f8ddf299efab45ebd549e1148c8117881673857507b31acce1e9e32e5"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/contracts/nesting/NestingResult.java",
+      "sha256": "203c404a1ca714f6eeef85328ff86d0e156267525546b3600dff7ddde2033a9b"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/contracts/slitting/SlittingProblem.java",
+      "sha256": "b8506bae65c92d0fcabea01933f18092d46a1229a0cc630ce5ec81967d43bf29"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/contracts/slitting/SlittingResult.java",
+      "sha256": "2ac1d8fa3a43780fcada88c230ac386c697e8f804dd658664f5a767378b4ccf2"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/contracts/slitting/SlittingValidation.java",
+      "sha256": "5b0a7384753f8488ae0fdfc9da8a0dbaa4ce95a796ee13e9743474afef6b2c5c"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/controller/ExecutionController.java",
+      "sha256": "4edcaab4eb79aaaade5c571d479e92935a487e34b8ed500f4393a2cecefa3272"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/controller/FabricCutController.java",
+      "sha256": "9c5cca8473de200fddc46e73ac2deb847248d949304df109f94c36a1cfcd91c1"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/controller/IntegrationController.java",
+      "sha256": "41a3f76344c06adc9afc69c4e493cd577eaa0fa3ae4c18d52731162a252fc9cf"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/controller/InventoryCountController.java",
+      "sha256": "a06e483a8a2ce4817478126d91ad822fcda812f910440458667c64312884e3c6"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/controller/InventoryLedgerController.java",
+      "sha256": "186f83f2d1b70975090e622834a87d0f659abdc78824e3f84004b44556bcbdaf"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/controller/InventoryTransferController.java",
+      "sha256": "699c96cc2b1565d717f5aa897bb1b3ae6815af046568e2cf37c0110c286e00ca"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/controller/NestingController.java",
+      "sha256": "559f0a7c8630cb4f235ea7a6d45b05f28bdcbb0c16e56fa591b5dff935dc9c92"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/controller/OptimizationController.java",
+      "sha256": "2444868452e6e62da4bea900d30eeb9cfd1053b83655c39cb4f41e3b9a621471"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/controller/RemnantRecommendationController.java",
+      "sha256": "2c4af18a672d481b11803a533a2fb0fbaea142f71be130ce76c988115c89ce86"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/controller/SiteConfiguration.java",
+      "sha256": "e3f1babe4df0ab434730764e1feacfda9290dccc6a3e8302c4db5aa510e0b741"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/linear/LinearCutController.java",
+      "sha256": "d4c8e83d53b34c2c5bdfb3a2dcdec3ade78bfd180c422f25f7dcd930c1bbad4b"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/persistence/FileIntegrationDeliveryStore.java",
+      "sha256": "1b53ccf2758ad649541d7cdc98501c426c7fcd15289cd2e55061c37a32b6bc04"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/persistence/FileInventoryStore.java",
+      "sha256": "ec10733893ba8e2e3aa22dffaa13734a1401a462c223419847a619353ca852c9"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/persistence/FileOptimizationJobStore.java",
+      "sha256": "70b0714031189181c25f99ba32baf13e8c91e0d181d85092dfbada1f67956243"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/persistence/IntegrationConfiguration.java",
+      "sha256": "b19639a2010da22a97cfc78783339d4d57d01fb6a9e000eb3c6cc944e1fc66c2"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/persistence/IntegrationDeliveryStore.java",
+      "sha256": "f229fafc335ab418ba25b097b861874ff50b846be4873632d1da5a62d21eb943"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/persistence/InventoryConfiguration.java",
+      "sha256": "33f537a89f609bdfc78b81eaa4ea2e91f6bc7145287bb5d0f27c7ac76d08dd94"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/persistence/InventoryConflictException.java",
+      "sha256": "5874650c735c29d001511388882e09507c14b89d807b477efc1a0675782f2dce"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/persistence/InventoryImport.java",
+      "sha256": "a839723d0a81a6db79192f10842f6761e1b1f37614936e5c600515b9aa96431c"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/persistence/InventorySnapshot.java",
+      "sha256": "da9d34be2e24dae703bb79b9aefc4850dff777936335f3d08b0fded550e50c5f"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/persistence/InventoryStore.java",
+      "sha256": "1949b5ac3ac0ec48c47d5ab26f56694012099d307b3dc133b54801711a396215"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/persistence/JdbcIntegrationDeliveryStore.java",
+      "sha256": "fb5949d2b2fe50b16d1ece85c9fa335e2dc865d0fc6fbbc7c207b1378e5edb99"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/persistence/JdbcInventoryStore.java",
+      "sha256": "56c4422dee067ce9e76a1fdc9a3f374ced7e366c954275ac8ef8298236ff8bc5"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/persistence/JdbcOptimizationJobStore.java",
+      "sha256": "87f9d07e218d263900137cefc2933dc0e88e8a34a80d3585a259b4fb79825474"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/persistence/LeasedOptimizationJobStore.java",
+      "sha256": "ba43c009c5e850994ef95d652c8545bbc968f2fc3e33a3f679e58257b34250aa"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/persistence/OptimizationArchiveImport.java",
+      "sha256": "0051fc124703e41df59e3cd13ef83fcfc714a620f3557224f95d5b149ca11981"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/persistence/OptimizationConfiguration.java",
+      "sha256": "d779b633d290eaadc12406e09a930d73fa346e27fcce3a7c757e26c76fb56029"
+    },
+    {
+      "path": "src/main/java/com/example/cutdemotwo/persistence/OptimizationJobStore.java",
+      "sha256": "38011d2a673725d8b7cbe0332496399f6fa295340c457161f021e64cc0f63332"
+    },
+    {
+      "path": "src/main/resources/static/api-v2/example-marker-request.json",
+      "sha256": "96957d39ec6f425432a2c84cc5aa9ff177a1c912bd54d9d456b0546070bbab92"
+    },
+    {
+      "path": "src/main/resources/static/api-v2/example-request.json",
+      "sha256": "7ebf423b2539475141e56649b889c9325d4ca67537912cd7d9cdeac5ecdce602"
+    },
+    {
+      "path": "src/main/resources/static/api-v2/example-slitting-request.json",
+      "sha256": "6b72c915729f8cc24b6d256cec9f69085f21acfd78b1d3d00703328910cfbf73"
+    },
+    {
+      "path": "src/main/resources/static/api-v2/openapi.json",
+      "sha256": "85d45ab4abbb9c9dfa48d1ddffd483d5a6269eedd6b3d1a17b72c5cec7b57b1a"
+    },
+    {
+      "path": "src/main/resources/static/api-v2/optimization-request.schema.json",
+      "sha256": "21d2d2b210807241037d2810be2f47a417e7b4d9b709b393a4e48310bc6c2085"
+    },
+    {
+      "path": "src/test/fixtures/9.28-orders.json",
+      "sha256": "f7b70e6d121fdde4621a703c0a4a19c480cade3d660b785e7cefa036c167f1de"
+    }
+  ]
+}

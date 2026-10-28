@@ -2,7 +2,7 @@
 // Presets come from the front-end scenario data; the lab examples are copied because nesting-lab.js needs a DOM.
 import { createHash } from 'node:crypto';
 import { scenarioExample } from '../src/main/resources/static/js/nesting/scenario-examples.js';
-import { rectangle, polygon, shapeArea } from '../src/main/resources/static/js/nesting/nesting-scene.js';
+import { rectangle, polygon, shapeArea } from '../src/main/resources/static/js/canvas/nesting-scene.js';
 import { getInitialScenarios } from '../src/main/resources/static/js/plugins/presets/scenarios.js';
 
 const MAX_PIECES = 10000; // NestingValidation: 单次求解最多支持 10000 件

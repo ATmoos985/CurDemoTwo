@@ -1,0 +1,186 @@
+// 构造场景只存在于隔离测试页面；使用仓库真实 Konva、相机、场景适配及画布模块。
+const assert = require('node:assert/strict');
+const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const base = process.env.BASE_URL || 'http://127.0.0.1:18191';
+const frames = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+
+(async () => {
+    assert.ok(['127.0.0.1', 'localhost'].includes(new URL(base).hostname));
+    assert.notEqual(new URL(base).port, '8080', 'use an isolated test server');
+    const browser = await chromium.launch({headless: true, ...(process.env.CHROME_PATH ? {executablePath: process.env.CHROME_PATH} : {})});
+    const page = await browser.newPage({viewport: {width: 1366, height: 768}}), errors = [], writes = [], results = [];
+    page.on('pageerror', e => errors.push(e.message));
+    page.on('request', r => { if (r.method() !== 'GET') writes.push(r.url()); });
+    async function check(name, action) {
+        try { await action(); results.push({name, success: true}); console.log('PASS', name); }
+        catch (e) { results.push({name, success: false, error: e.message}); console.error('FAIL', name, e.stack); }
+    }
+    try {
+        await page.route('**/__roll_canvas_test', route => route.fulfill({contentType: 'text/html', body: `<!doctype html><html><meta charset="utf-8">
+          <script src="/konva.min.js"></script><style>body{margin:0;display:flex;background:#23282d}.host{position:relative;width:600px;height:700px;border:1px solid #777}.rc-host{touch-action:none}</style>
+          <div id="a" class="host"></div><div id="b" class="host"></div></html>`}));
+        await page.goto(base + '/__roll_canvas_test');
+        await page.evaluate(async () => {
+            const {createRollCanvas} = await import('/js/canvas/roll-canvas.js');
+            const {planSegment} = await import('/app/js/model/roll-scene.js');
+            const shape = {type: 'POLYGON', width: 600, height: 900, vertices: [
+                {x: 0, y: 0}, {x: 600, y: 0}, {x: 600, y: 300}, {x: 200, y: 300}, {x: 200, y: 900}, {x: 0, y: 900}]};
+            const plan = {id: 'p', status: 'PENDING', request: {windowStartY: 2000, rollL: 1500}, result: {
+                pieces: [{id: 1, x: 100, y: 100, w: 600, l: 900, shape, rotated: true, rotationDegrees: 90}],
+                cuts: [{step: 1, startX: 100, startY: 100, endX: 700, endY: 100}],
+                remnants: [{id: 'r', x: 800, y: 100, w: 200, l: 900, shape: {type: 'RECTANGLE', width: 200, height: 900}}]}};
+            const seg = planSegment(plan); seg.home = {u: 2000, v: 0};
+            window.sc = {roll: {id: 'ROLL-TEST', width: 1500, total: 10000, used: 1000}, currentId: 'p', segments: [seg],
+                defects: [{u: 3500, v: 50, du: 100, dv: 80, margin: 20}], window: {start: 2000, len: 1500}};
+            window.events = {a: {selected: [], moved: [], defects: [], cursor: [], camera: []}, b: {selected: [], moved: [], defects: [], cursor: [], camera: []}};
+            window.make = id => createRollCanvas(document.getElementById(id), {
+                onPieceSelect: x => events[id].selected.push(x), onPieceMove: (...x) => events[id].moved.push(x),
+                onDefectDraw: x => events[id].defects.push(x), onCursor: x => events[id].cursor.push(x), onCamera: x => events[id].camera.push(x)
+            });
+            window.views = {a: make('a'), b: make('b')};
+            views.a.setScene(sc); views.b.setOptions({vertical: false}); views.b.setScene(sc);
+            window.stageFor = id => Konva.stages.find(s => s.container().id === id);
+            window.point = (id, u, v) => {
+                const cam = views[id].getCamera(), host = document.getElementById(id), box = host.getBoundingClientRect();
+                const x = box.x + host.clientLeft, y = box.y + host.clientTop;
+                return id === 'a' ? {x: x + cam.c + v * cam.s, y: y + cam.a + u * cam.s}
+                    : {x: x + cam.a + u * cam.s, y: y + cam.c + v * cam.s};
+            };
+        });
+        await frames(page);
+        const point = (id, u, v) => page.evaluate(([id, u, v]) => window.point(id, u, v), [id, u, v]);
+        const drag = async (id, u, v, du, dv) => {
+            const a = await point(id, u, v), b = await point(id, u + du, v + dv);
+            await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, {steps: 5}); await page.mouse.up(); await frames(page);
+        };
+        await check('both instances render the exact rotated concave polygon', async () => {
+            const shapes = await page.evaluate(() => ['a', 'b'].map(id => {
+                const p = stageFor(id).findOne('.roll-piece');
+                return {kind: p.getClassName(), points: p.points(), count: stageFor(id).find('.roll-piece').length};
+            }));
+            for (const p of shapes) { assert.equal(p.kind, 'Line'); assert.equal(p.count, 1); assert.deepEqual(p.points, [0, 0, 600, 0, 600, 300, 200, 300, 200, 900, 0, 900]); }
+        });
+        await check('horizontal transform swaps display axes without rotating source geometry twice', async () => {
+            const vertices = await page.evaluate(() => ['a', 'b'].map(id => {
+                const node = stageFor(id).findOne('.roll-piece'), m = node.getAbsoluteTransform();
+                const host = document.getElementById(id), box = host.getBoundingClientRect();
+                return {p: m.point({x: 200, y: 900}), expected: point(id, 3000, 300), box: {x: box.x + host.clientLeft, y: box.y + host.clientTop}};
+            }));
+            for (const v of vertices) { assert.ok(Math.abs(v.p.x + v.box.x - v.expected.x) < .01); assert.ok(Math.abs(v.p.y + v.box.y - v.expected.y) < .01); }
+        });
+        await check('concave gap does not select or move a piece', async () => {
+            await page.evaluate(() => views.a.setTool('move'));
+            const p = await point('a', 2700, 600); await page.mouse.click(p.x, p.y);
+            assert.equal(await page.evaluate(() => events.a.selected.at(-1)), null);
+            assert.equal(await page.evaluate(() => events.a.moved.length), 0);
+        });
+        await check('moving a real polygon emits world deltas only to its owner', async () => {
+            await drag('a', 2600, 150, 120, 30);
+            const e = await page.evaluate(() => ({a: events.a.moved.at(-1), b: events.b.moved.length, original: sc.segments[0].pieces[0].u}));
+            assert.equal(e.a[0], 1); assert.ok(Math.abs(e.a[1] - 120) < .1); assert.ok(Math.abs(e.a[2] - 30) < .1); assert.equal(e.a[3], true);
+            assert.equal(e.b, 0); assert.equal(e.original, 2100);
+        });
+        await check('locked and invalid scenes cannot emit placement changes', async () => {
+            const before = await page.evaluate(() => events.a.moved.length);
+            for (const attrs of [{status: 'cut'}, {invalid: '材料已变化'}]) {
+                await page.evaluate(attrs => views.a.setScene({...sc, segments: sc.segments.map(s => ({...s, ...attrs}))}), attrs);
+                await drag('a', 2600, 150, 100, 20);
+                assert.equal(await page.evaluate(() => events.a.moved.length), before);
+            }
+            await page.evaluate(() => { views.a.setScene(sc); views.a.setOptions({editable: false}); });
+            await drag('a', 2600, 150, 100, 20);
+            assert.equal(await page.evaluate(() => events.a.moved.length), before);
+            await page.evaluate(() => views.a.setOptions({editable: true}));
+            await page.evaluate(() => views.a.setScene(sc));
+        });
+        await check('panning beyond the retained viewport restores every newly visible contour', async () => {
+            await page.evaluate(() => {
+                const far = structuredClone(sc.segments[0]); far.id = 'far'; far.start += 50000;
+                far.pieces = far.pieces.map(p => ({...p, id: 'far-piece', u: p.u + 50000}));
+                views.a.setScene({...sc, roll: {...sc.roll, total: 100000}, segments: [...sc.segments, far]}, {refit: true});
+                const c = views.a.getView(); views.a.setView({...c, a: c.a - 50000 * c.s});
+            }); await frames(page);
+            assert.ok(await page.evaluate(() => stageFor('a').find('.roll-piece').some(p => p.getAttr('pieceId') === 'far-piece' && p.isVisible())));
+            await page.evaluate(() => views.a.setOptions({view: 'full'})); await frames(page);
+            assert.equal(await page.evaluate(() => stageFor('a').find('.roll-piece').length), 2);
+            await page.evaluate(() => { views.a.setOptions({view: 'station'}); views.a.setScene(sc, {refit: true}); }); await frames(page);
+        });
+        await check('measurement persists through zoom and remains isolated', async () => {
+            await page.evaluate(() => views.a.setTool('measure')); await drag('a', 2500, 300, 300, 400);
+            const textBefore = await page.evaluate(() => stageFor('a').findOne('.roll-measure').text());
+            assert.match(textBefore, /^500 mm/);
+            await page.evaluate(() => views.a.zoom(1.15)); await frames(page);
+            assert.equal(await page.evaluate(() => stageFor('a').findOne('.roll-measure').text()), textBefore);
+            assert.equal(await page.evaluate(() => views.b.hasMeasure()), false);
+        });
+        await check('tool switch cancels measurement and defect gestures do not pan', async () => {
+            const camera = await page.evaluate(() => { views.a.setTool('defect'); return views.a.getCamera(); });
+            await drag('a', 2500, 300, 100, 80);
+            const e = await page.evaluate(() => ({m: views.a.hasMeasure(), camera: views.a.getCamera(), defect: events.a.defects.at(-1)}));
+            assert.equal(e.m, false); assert.deepEqual(e.camera, camera); assert.deepEqual(e.defect, {u: 2500, v: 300, du: 100, dv: 80});
+        });
+        await check('cursor anchored wheel zoom does not affect the other instance', async () => {
+            await page.evaluate(() => views.a.setTool('pan'));
+            const before = await page.evaluate(() => ({a: views.a.getCamera(), b: views.b.getCamera()}));
+            const p = {x: 240, y: 350};
+            const anchor = await page.evaluate(p => {
+                const host = document.getElementById('a'), r = host.getBoundingClientRect(), c = views.a.getCamera();
+                return {u: (p.y - r.y - host.clientTop - c.a) / c.s, v: (p.x - r.x - host.clientLeft - c.c) / c.s};
+            }, p);
+            await page.mouse.move(p.x, p.y); await page.mouse.wheel(0, -100);
+            await page.waitForFunction(s => views.a.getCamera().s > s, before.a.s); await frames(page);
+            const next = await point('a', anchor.u, anchor.v);
+            assert.ok(Math.abs(p.x - next.x) < .01 && Math.abs(p.y - next.y) < .01);
+            assert.deepEqual(await page.evaluate(() => views.b.getCamera()), before.b);
+        });
+        await check('exact ratio and view snapshot restore retain scale and offsets', async () => {
+            const value = await page.evaluate(() => { const saved = views.a.getView(); views.a.setRatio(20); const scaled = views.a.getView(); views.a.setView(saved); return {saved, scaled, restored: views.a.getView()}; });
+            assert.ok(Math.abs(value.scaled.s - 96 / 25.4 / 20) < 1e-9); assert.deepEqual(value.saved, value.restored);
+        });
+        await check('tiled whole roll clips each column and exposes physical global coordinates', async () => {
+            await page.evaluate(() => { views.a.setOptions({view: 'full', fullMode: 'tile'}); }); await frames(page);
+            const value = await page.evaluate(() => { const c = views.a.getCamera(); return {rows: c.rows, clips: stageFor('a').find('Group').filter(g => g.clipHeight()).length}; });
+            assert.ok(value.rows.n > 1); assert.equal(value.clips, value.rows.n * 2);
+            const p = await page.evaluate(() => {
+                const c = views.a.getCamera(), r = c.rows;
+                return point('a', r.rowLen / 2, sc.roll.width + r.gap + 200);
+            });
+            await page.mouse.move(p.x, p.y);
+            const cursor = await page.evaluate(() => events.a.cursor.at(-1));
+            assert.ok(Math.abs(cursor.u - value.rows.rowLen * 1.5) < .1); assert.ok(Math.abs(cursor.v - 200) < .1);
+            await page.evaluate(() => views.a.setOptions({view: 'station'})); await frames(page);
+        });
+        await check('hide and restore preserve camera without consuming hidden gestures', async () => {
+            const saved = await page.evaluate(() => { const c = views.a.getView(); views.a.setVisible(false); return c; });
+            await page.mouse.move(250, 400); await page.mouse.wheel(0, -100);
+            await page.evaluate(() => views.a.setVisible(true)); await frames(page);
+            assert.deepEqual(await page.evaluate(() => views.a.getView()), saved);
+        });
+        await check('destroy is idempotent and remount does not duplicate event handlers', async () => {
+            const before = await page.evaluate(() => { const c = views.b.getCamera(); views.a.destroy(); views.a.destroy(); return c; });
+            assert.equal(await page.evaluate(() => Konva.stages.length), 1);
+            await page.evaluate(() => { views.a = make('a'); views.a.setScene(sc); }); await frames(page);
+            const n = await page.evaluate(() => { views.a.setTool('defect'); return events.a.defects.length; });
+            await drag('a', 2500, 300, 100, 80);
+            assert.equal(await page.evaluate(() => events.a.defects.length), n + 1);
+            assert.deepEqual(await page.evaluate(() => views.b.getCamera()), before);
+        });
+        await check('resize at both desktop sizes and narrow entry preserves the manual view', async () => {
+            const before = await page.evaluate(() => views.a.getView());
+            for (const width of [1920, 390, 1366]) {
+                await page.setViewportSize({width, height: 768});
+                await page.evaluate(w => document.getElementById('a').style.width = Math.min(600, w - 2) + 'px', width);
+                await frames(page); assert.deepEqual(await page.evaluate(() => views.a.getView()), before);
+            }
+        });
+        await check('all view gestures produce no business requests or browser errors', async () => {
+            assert.deepEqual(writes, []); assert.deepEqual(errors, []);
+        });
+        if (process.env.SCREENSHOT_PATH) await page.screenshot({path: process.env.SCREENSHOT_PATH});
+    } finally {
+        await browser.close();
+        const failed = results.filter(r => !r.success).length;
+        console.log(JSON.stringify({executed: results.length, passed: results.length - failed, failed, skipped: 0, results}, null, 2));
+        if (failed) process.exitCode = 1;
+    }
+})().catch(e => { console.error(e); process.exitCode = 1; });

@@ -118,7 +118,7 @@ table.t{width:100%;border-collapse:collapse;background:var(--panel);border:1px s
 .sumb.on{border-color:var(--accent);background:var(--accent-2)}
 .sumb.warn{border-color:#e3c26a;background:var(--warn-bg)}
 .popover{position:absolute;right:0;top:32px;width:460px;max-height:480px;overflow:auto;background:#fff;border:1px solid var(--line);box-shadow:0 6px 20px rgba(20,30,40,.18);z-index:30}
-.ctool{display:flex;align-items:center;gap:2px;height:34px;padding:0 8px;background:#33393f;border-bottom:1px solid #20252a;flex:none;white-space:nowrap;overflow:hidden}
+.ctool{display:flex;align-items:center;gap:2px;height:34px;padding:0 8px;background:#33393f;border-bottom:1px solid #20252a;flex:none;white-space:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
 .ctool button{flex:none;height:24px;min-width:26px;padding:0 7px;background:transparent;border:1px solid transparent;color:#c9d0d7;border-radius:2px;cursor:pointer;font-size:12px}
 .ctool button:hover{background:#3e454c}
 .ctool button.on{background:#47505a;border-color:#56606b;color:#fff}
@@ -132,6 +132,15 @@ table.t{width:100%;border-collapse:collapse;background:var(--panel);border:1px s
 .canvas-wrap{flex:1;position:relative;background:var(--canvas);min-height:0;overflow:hidden}
 .rc-host{position:absolute;inset:0;cursor:grab;user-select:none}
 .rc-host svg{display:block}
+/* 窄屏保留工作台操作面积；滚动到属性栏，不能把画布挤成零宽。 */
+@media(max-width:900px){
+  .app{grid-template-columns:112px minmax(0,1fr)}
+  .nav a{padding:0 8px}
+  .main:has(.wb-head){overflow-x:auto}
+  .main:has(.wb-head)>*{min-width:920px}
+  .statusbar{overflow-x:auto;white-space:nowrap}
+  .topbar-meta{gap:8px;white-space:nowrap}
+}
 .rc-piece{fill:#fff;font:11px var(--mono);text-anchor:middle;pointer-events:none}
 .rc-cut{fill:#e6ebef;font-size:11px;text-anchor:middle}
 .rc-dim{fill:#cfe3f7;font:12px var(--mono);text-anchor:middle}
