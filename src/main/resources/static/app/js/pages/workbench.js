@@ -36,14 +36,16 @@ export async function mount(el, [taskId, focusPlan]) {
     if (!taskId) return pickTask(el);
     let detail, plans, summary, views = [], allRolls, roll = null, checks = {};
     const writer = executionWriter();
-    async function loadTask() {
-        [detail, plans, summary, views] = await Promise.all([
+    async function loadTask({strictChecks = false, apply = true} = {}) {
+        const snapshot = await Promise.all([
             requestJSON('/api/cutting/tasks/' + encodeURIComponent(taskId)),
             requestJSON('/api/cutting/tasks/' + encodeURIComponent(taskId) + '/plans'),
             requestJSON('/api/cutting/task-summaries').then(rows => rows.find(r => r.task.id === taskId) || null),
             requestJSON('/api/v2/execution-orders?taskId=' + encodeURIComponent(taskId)),
-            requestJSON('/api/cutting/tasks/' + encodeURIComponent(taskId) + '/plan-checks').then(r => { checks = r || {}; }).catch(() => { checks = {}; })
+            requestJSON('/api/cutting/tasks/' + encodeURIComponent(taskId) + '/plan-checks').then(r => r || {}).catch(e => { if (strictChecks) throw e; return {}; })
         ]);
+        if (apply) [detail, plans, summary, views, checks] = snapshot;
+        return snapshot;
     }
     let allRemnants = [];
     let occupied = new Map(); // 材料编号 → 其他任务正在预约/执行的执行单
@@ -59,8 +61,9 @@ export async function mount(el, [taskId, focusPlan]) {
     // st.source：'roll' 母卷连续投料 / 'remnant' 料头整块投料；st.rollId 存对应编号
     const st = {source: focusRemnant ? 'remnant' : 'roll', rollId: focusRemnant || focus?.request?.rollId || rollsOfPlans(plans)[0] || null,
         selectedId: focus ? focus.id : null, window: null, fresh: [], tool: 'pan', view: focus ? 'station' : prefs.view,
-        pop: null, cursor: null, saving: false, busy: '', failure: null, quality: null, station: '1', reserveMin: 30, recommend: null, remnantSelection: null};
-    let canvas = null, nav = null, undismiss = null, closeContext = () => {};
+        pop: null, cursor: null, saving: false, busy: '', failure: null, quality: null, station: '1', reserveMin: 30, recommend: null, remnantSelection: null,
+        clearedPreviews: new Map()};
+    let canvas = null, nav = null, undismiss = null, closeContext = () => {}, disposed = false;
 
     /** 可选母卷：任务方案用过的母卷 + 同型号且有余量的母卷。 */
     const rollChoices = () => {
@@ -85,6 +88,7 @@ export async function mount(el, [taskId, focusPlan]) {
     async function reload() {
         await Promise.all([loadTask(), loadRoll(), loadStocks()]);
         task = detail.task; names = demandIndex(task.demands, plans);
+        st.clearedPreviews.clear();
     }
     await loadRoll();
 
@@ -94,6 +98,16 @@ export async function mount(el, [taskId, focusPlan]) {
         sc.window.readOnly = !!(st.adjust || st.busy);
         // 刀路图层原点；手动调整中用草稿位置替换当前段的件
         for (const s of sc.segments) { const p = planOf(s.id); if (p) s.home = worldHome(p, s.start); if (s.status === 'pending' && checks[s.id]) s.invalid = checks[s.id]; }
+        // 清空只投影到本次场景；归档方案、回执和其他工位仍使用原数据。
+        for (const [id, saved] of st.clearedPreviews) {
+            const s = sc.segments.find(s => s.id === id);
+            if (!s || s.status !== 'pending' || s.invalid || s.version !== saved.version || task.revision !== saved.taskRevision
+                || st.source !== saved.source || st.rollId !== saved.materialId || executionForPlan(views, id)?.reservationActive) {
+                st.clearedPreviews.delete(id); continue;
+            }
+            s.previewCleared = true; s.pieces = []; s.cuts = []; s.remnants = [];
+            s.caption = '预览已清空，方案仍保留';
+        }
         if (st.adjust) {
             const i = sc.segments.findIndex(s => s.id === st.adjust.planId);
             if (i >= 0) {
@@ -120,6 +134,82 @@ export async function mount(el, [taskId, focusPlan]) {
     };
     const remaining = () => remainingDemands(task, detail.completed, detail.reserved);
     const planOf = id => plans.find(p => p.id === id);
+
+    const previewHidden = id => st.clearedPreviews.has(id);
+    const previewBusyReason = () => st.busy || st.saving ? '当前操作尚未结束'
+        : st.report || st.quality ? '请先结束报工或复检操作'
+            : st.adjust || st.toolpath ? '请先保存或放弃当前调整' : null;
+    function previewReason(plan, allowEmpty = false) {
+        return previewBusyReason() || (writer.pending(task.id).length ? '执行单操作结果未确认，请先重试原操作' : null)
+            || (plan && localStorage.getItem(REPORT_KEY(plan.id)) ? '存在报工草稿，请先完成报工，或恢复默认后关闭报工面板' : null)
+            || (!plan ? (allowEmpty ? null : '当前窗口尚未生成候选方案') : plan.status !== 'PENDING' ? '该方案已报工或失效，只能查看'
+                : checks[plan.id] ? '材料或任务已变化，请重新排料' : executionForPlan(views, plan.id)?.reservationActive ? '执行单已下达，方案已锁定' : null);
+    }
+    function hidePreview(plan) {
+        st.clearedPreviews.set(plan.id, {source: st.source, materialId: st.rollId, version: plan.version, taskRevision: task.revision});
+        st.remnantSelection = null;
+    }
+    function clearPreview(id) {
+        const sc = scene(), plan = planOf(id), reason = previewReason(plan);
+        if (reason || sc.currentId !== id) return toast(reason || '请先切换到该工位', true);
+        hidePreview(plan); shell(true);
+    }
+    // 恢复/重装先重新读取档案与许可；GET 失败保留原预览，不调用取消、恢复或调整接口。
+    async function refreshPreviewMaterial() {
+        const id = st.rollId, source = st.source;
+        const [material, snapshot] = await Promise.all([
+            requestJSON(source === 'remnant' ? '/api/remnants' : '/api/rolls/' + encodeURIComponent(id)),
+            loadTask({strictChecks: true, apply: false})
+        ]);
+        if (disposed || id !== st.rollId || source !== st.source) return false;
+        [detail, plans, summary, views, checks] = snapshot;
+        if (source === 'remnant') {
+            allRemnants = material;
+            const stock = material.find(r => r.id === id);
+            // 可用列表不含已消耗/隔离料头；旧几何只用于展示最新回执，不再作为可投料库存。
+            roll = stock ? remnantAsRoll(stock) : roll?.remnant ? remnantAsRoll({...roll.remnant, status: 'UNAVAILABLE'}) : null;
+        }
+        else roll = material;
+        task = detail.task; names = demandIndex(task.demands, plans);
+        return true;
+    }
+    async function restorePreview(id) {
+        const reason = previewBusyReason();
+        if (reason || !previewHidden(id)) return reason && toast(reason, true);
+        st.busy = '正在读取方案与材料…'; shell(true);
+        try {
+            if (!await refreshPreviewMaterial()) return;
+            st.clearedPreviews.delete(id); st.selectedId = id; st.window = null;
+        } catch (e) { if (!disposed) toast('恢复预览未完成：' + e.message, true); }
+        if (disposed) return;
+        st.busy = ''; full();
+    }
+    async function reloadRemnant() {
+        if (st.source !== 'remnant' || !roll) return;
+        const sc = scene(), reason = previewReason(planOf(sc.currentId), true);
+        if (reason) return toast(reason, true);
+        st.busy = '正在重新装载料头…'; shell(true);
+        try {
+            if (!await refreshPreviewMaterial()) return;
+            st.busy = ''; st.clearedPreviews.clear();
+            const next = roll && scene(), plan = next && planOf(next.currentId);
+            const problem = windowProblem(roll, next?.window) || previewReason(plan, true);
+            if (problem) throw new Error(problem);
+            st.selectedId = plan?.id || NEW_STATION; st.window = null; st.view = 'station'; st.tool = 'pan'; st.failure = null;
+            if (plan) hidePreview(plan);
+            toast('料头已重新装载，任务需求与归档方案保留');
+        } catch (e) { if (!disposed) toast('重新装载未完成：' + e.message, true); }
+        if (disposed) return;
+        st.busy = ''; full();
+    }
+    function previewControls(seg) {
+        if (seg?.status !== 'pending' && !roll?.remnant) return '';
+        const plan = seg && planOf(seg.id), reason = previewReason(plan), hidden = seg?.previewCleared;
+        const button = (id, label, why, primary = false) => `<button class="btn sm${primary ? ' pri' : ''}" id="${id}" ${why ? 'disabled' : ''} title="${esc(why || label)}">${label}</button>`;
+        return `<div style="display:flex;gap:6px;padding:8px 12px;flex-wrap:wrap">
+          ${seg?.status === 'pending' ? hidden ? button('preview-restore', '恢复方案预览', previewBusyReason(), true) : button('preview-clear', '清空当前预览', reason) : ''}
+          ${roll?.remnant ? button('remnant-reload', '重新装载料头', previewReason(plan, true) || windowProblem(roll, {start: 0, len: roll.totalLength})) : ''}</div>`;
+    }
 
     /** keepCamera：重绘外壳但保留画布视角（拖动工位结束、切换右栏等）。 */
     function shell(keepCamera = false) {
@@ -194,7 +284,7 @@ export async function mount(el, [taskId, focusPlan]) {
               <div class="kv"><div>位置</div><div class="num">Y ${fmtM(w.start, 2)} → ${fmtM(w.start + w.len, 2)} m</div><div>拉布长</div><div class="num">${fmtN(w.len, 1)} mm</div>
                 <div>待排需求</div><div class="num">${rem.length} 项 · ${need} 件</div></div>
               ${problem ? `<div class="notice">${esc(problem)}</div>` : ''}${busy}${failure}
-              <div style="display:flex;gap:8px;padding:8px 12px"><button class="btn pri" id="solve" ${st.busy || problem || !need ? 'disabled' : ''}>计算本工位</button></div>`;
+              <div style="display:flex;gap:8px;padding:8px 12px"><button class="btn pri" id="solve" ${st.busy || problem || !need ? 'disabled' : ''}>计算本工位</button></div>${roll.remnant ? previewControls(null) : ''}`;
         }
         const unplaced = seg.fulfillment.filter(f => f.unplaced > 0);
         return `<div class="sec">当前拉布 · ${idx + 1} / ${sc.segments.length}</div>
@@ -202,13 +292,14 @@ export async function mount(el, [taskId, focusPlan]) {
             <div>方案</div><div class="num">${shortId(seg.id)} · v${seg.version ?? 1}</div>
             <div>位置</div><div class="num">Y ${fmtM(seg.start, 2)} → ${fmtM(seg.start + seg.len, 2)} m</div>
             <div>拉布长</div><div class="num">${fmtN(seg.len, 1)} mm</div>
-            <div>件数</div><div class="num">${seg.pieces.length}</div>
+            <div>件数</div><div class="num">${seg.previewCleared ? `预览已清空（方案 ${planOf(seg.id).result.pieces.length} 件）` : seg.pieces.length}</div>
             <div>利用率</div><div class="num">${seg.totalArea ? (seg.pieceArea / seg.totalArea * 100).toFixed(1) : '—'}%</div></div>
+          ${seg.previewCleared ? '<div class="notice" id="preview-notice" role="status"><b>预览已清空，方案仍保留</b><br>指标仍按归档方案统计。恢复预览后才能报工、下达、调整或导出加工文件。</div>' : ''}
           ${seg.status === 'stale' ? '<div class="notice">该方案的报工已在母卷重置时清除，方案既未切也不能再报工，仅作历史参考。</div>' : ''}
           ${seg.status === 'pending' ? (() => {
               const view = executionForPlan(views, seg.id), locked = !!view?.reservationActive;
-              const reportAllowed = !seg.invalid && (!view || view.allowedActions?.report?.allowed);
-              const reportWhy = seg.invalid || (w.adjusted ? '工位已调整，请先重新计算或还原工位' : !reportAllowed ? (view.allowedActions?.report?.reason || '执行单当前状态不能报工') : '按实际裁切结果报工');
+              const reportAllowed = !seg.previewCleared && !seg.invalid && (!view || view.allowedActions?.report?.allowed);
+              const reportWhy = seg.previewCleared ? '请先恢复方案预览' : seg.invalid || (w.adjusted ? '工位已调整，请先重新计算或还原工位' : !reportAllowed ? (view.allowedActions?.report?.reason || '执行单当前状态不能报工') : '按实际裁切结果报工');
               return `${seg.invalid ? `<div class="notice"><b>需重算</b>：${esc(seg.invalid)}。此候选不能报工、下达或调整，请${isSlitting(task) ? '放弃后按剩余需求重新出车' : '重新计算或放弃'}。</div>` : ''}${w.adjusted ? `<div class="notice">工位已调整为 Y ${fmtM(w.start, 2)} m · ${fmtN(w.len)} mm，重新计算后替换当前候选。</div>` : ''}${problem ? `<div class="notice">${esc(problem)}</div>` : ''}${busy}${failure}
             <div style="display:flex;gap:8px;padding:8px 12px;flex-wrap:wrap"><button class="btn pri" id="report-open" ${st.busy || w.adjusted || !reportAllowed ? 'disabled' : ''} title="${esc(reportWhy)}">报工</button>
               ${isSlitting(task) ? '' : `<button class="btn" id="solve" ${st.busy || problem || !need || locked ? 'disabled' : ''} title="${locked ? '已下达或执行中，先取消执行单' : ''}">重新计算</button>`}<button class="btn" id="discard" ${st.busy || locked ? 'disabled' : ''}>放弃候选</button></div>
@@ -279,11 +370,11 @@ export async function mount(el, [taskId, focusPlan]) {
             return `<div class="sec">执行单</div>${unsure}
               ${view ? `<div class="kv"><div>上一张</div><div><span class="tag ${EXEC_TAG[view.effectiveState]}">${esc(executionLabels[view.effectiveState] || view.effectiveState)}</span> <span class="num">${shortId(view.execution.id)}</span></div></div>` : ''}
               <div style="display:flex;gap:6px;padding:8px 12px;align-items:center"><span class="muted">工位</span><input class="field" id="exec-station" value="${esc(st.station)}" style="width:70px">
-                <button class="btn" id="exec-create" ${st.busy || pend.length || seg.invalid ? 'disabled' : ''} title="${esc(seg.invalid || '')}">创建执行单</button></div>
+                <button class="btn" id="exec-create" ${st.busy || pend.length || seg.invalid || seg.previewCleared ? 'disabled' : ''} title="${esc(seg.previewCleared ? '请先恢复方案预览' : seg.invalid || '')}">创建执行单</button></div>
               <div class="muted" style="padding:0 12px 8px;font-size:11.5px">不建执行单也可直接报工；建单后可预约材料、按工位开工报工。</div>`;
         }
-        const e = view.execution, a = view.allowedActions || {}, blocked = k => seg.invalid && ['release', 'start'].includes(k);
-        const btn = (k, t, extra = '') => `<button class="btn sm" data-exec="${k}" ${a[k]?.allowed && !blocked(k) && !st.busy && !pend.length ? '' : 'disabled'} title="${esc(blocked(k) ? seg.invalid : a[k]?.reason || '')}" ${extra}>${t}</button>`;
+        const e = view.execution, a = view.allowedActions || {}, blocked = k => (seg.invalid || seg.previewCleared) && ['release', 'start'].includes(k);
+        const btn = (k, t, extra = '') => `<button class="btn sm" data-exec="${k}" ${a[k]?.allowed && !blocked(k) && !st.busy && !pend.length ? '' : 'disabled'} title="${esc(blocked(k) ? seg.invalid || '请先恢复方案预览' : a[k]?.reason || '')}" ${extra}>${t}</button>`;
         return `<div class="sec">执行单</div>${unsure}
           <div class="kv"><div>状态</div><div><span class="tag ${EXEC_TAG[view.effectiveState] || ''}">${esc(executionLabels[view.effectiveState] || view.effectiveState)}</span> <span class="num muted">${shortId(e.id)} · v${e.version}</span></div>
             <div>工位</div><div>${esc(e.station)}</div><div>材料</div><div class="num">${esc(e.materialId)}</div>
@@ -297,14 +388,14 @@ export async function mount(el, [taskId, focusPlan]) {
     /** 方案工具：刀路优化、手动调整（仅候选且未下达）、导出与工单（任何状态）。 */
     function toolsBlock(seg) {
         if (!['pending', 'cut', 'stale'].includes(seg.status)) return '';
-        const plan = planOf(seg.id), locked = !!executionForPlan(views, seg.id)?.reservationActive, editable = seg.status === 'pending' && !locked && !seg.invalid;
+        const plan = planOf(seg.id), locked = !!executionForPlan(views, seg.id)?.reservationActive, editable = seg.status === 'pending' && !locked && !seg.invalid && !seg.previewCleared;
         const tp = st.toolpath?.planId === seg.id ? st.toolpath : null;
-        return `<div class="sec">方案工具</div>
+        return `<div class="sec">方案工具</div>${previewControls(seg)}
           ${editable ? `<div style="display:flex;gap:6px;padding:8px 12px 0;flex-wrap:wrap"><button class="btn sm" id="tp-optimize" ${st.busy || !plan?.result?.cuts?.length ? 'disabled' : ''}>优化空走刀</button><button class="btn sm" id="adjust-open" ${st.busy ? 'disabled' : ''}>手动调整</button></div>` : ''}
           ${tp?.result ? `<div class="kv" style="margin-top:6px"><div>空走</div><div class="num">${fmtN(tp.result.originalAirDistance)} → ${fmtN(tp.result.optimizedAirDistance)} mm</div><div>节省</div><div class="num">${fmtN(tp.result.savedAirDistance)} mm · ${fmtN((tp.result.savingRatio || 0) * (tp.result.savingRatio <= 1 ? 100 : 1), 1)}%</div></div>
             <div style="display:flex;gap:6px;padding:6px 12px"><button class="btn sm pri" id="tp-save" ${st.busy || !(tp.result.savedAirDistance > 0) ? 'disabled' : ''}>保存刀序为新版本</button><button class="btn sm" id="tp-drop">放弃</button></div>` : ''}
           ${tp?.error ? `<div class="notice">${esc(tp.error)}</div>` : ''}
-          <div style="display:flex;gap:6px;padding:8px 12px;flex-wrap:wrap"><button class="btn sm" data-export="nc">G-Code</button><button class="btn sm" data-export="dxf">DXF</button><button class="btn sm" id="ticket-print">打印工单</button></div>`;
+          <div style="display:flex;gap:6px;padding:8px 12px;flex-wrap:wrap"><button class="btn sm" data-export="nc" ${seg.previewCleared ? 'disabled' : ''}>G-Code</button><button class="btn sm" data-export="dxf" ${seg.previewCleared ? 'disabled' : ''}>DXF</button><button class="btn sm" id="ticket-print" ${seg.previewCleared ? 'disabled' : ''}>打印工单</button></div>`;
     }
 
     /** 手动调整：拖动件（“移动件”工具）、旋转、撤销 / 重做，后端校验后另存为新版本。 */
@@ -334,10 +425,10 @@ export async function mount(el, [taskId, focusPlan]) {
         bindAdjust();
     }
 
-    const mayAdjust = () => st.adjust && !st.busy && !checks[st.adjust.planId] && !executionForPlan(views, st.adjust.planId)?.reservationActive;
+    const mayAdjust = () => st.adjust && !st.busy && !previewHidden(st.adjust.planId) && !checks[st.adjust.planId] && !executionForPlan(views, st.adjust.planId)?.reservationActive;
     function editReason(plan) {
         return st.busy ? '当前操作尚未结束' : st.report || st.quality ? '请先结束报工或复检操作' : !plan ? '当前窗口尚未生成候选方案' : plan.status !== 'PENDING' ? '该方案已报工或失效，只能查看'
-            : checks[plan.id] ? '材料或任务已变化，请重新排料' : executionForPlan(views, plan.id)?.reservationActive ? '执行单已下达，方案已锁定'
+            : previewHidden(plan.id) ? '请先恢复方案预览' : checks[plan.id] ? '材料或任务已变化，请重新排料' : executionForPlan(views, plan.id)?.reservationActive ? '执行单已下达，方案已锁定'
             : st.adjust && st.adjust.planId !== plan.id ? '请先保存或放弃当前调整' : null;
     }
     function startAdjustment(plan, selected = null) {
@@ -376,11 +467,13 @@ export async function mount(el, [taskId, focusPlan]) {
         const plan = planOf(seg.id);
         el.querySelector('#path-toggle')?.addEventListener('click', e => { st.showPath = !st.showPath; e.currentTarget.classList.toggle('on', st.showPath); e.currentTarget.setAttribute('aria-pressed', String(st.showPath)); canvas.setOptions({showPath: st.showPath}); });
         el.querySelectorAll('[data-export]').forEach(b => b.onclick = () => {
+            if (previewHidden(plan.id)) return toast('请先恢复方案预览', true);
             const {data, home} = camData(plan), tag = `${shortId(plan.id)}-v${plan.version || 1}`;
             b.dataset.export === 'nc' ? download(`cut-${tag}.nc`, gcodeText(data, {home}), 'text/plain;charset=utf-8')
                 : download(`cut-${tag}.dxf`, dxfText(data, {home}), 'application/dxf');
         });
         el.querySelector('#ticket-print')?.addEventListener('click', async () => {
+            if (previewHidden(plan.id)) return toast('请先恢复方案预览', true);
             try {
                 const saved = await requestJSON('/api/cutting/plans/' + encodeURIComponent(seg.id));
                 const html = ticketHTML(ticketModel(saved, saved.status !== 'PENDING'));
@@ -391,6 +484,7 @@ export async function mount(el, [taskId, focusPlan]) {
             } catch (e) { toast('工单生成失败：' + e.message, true); }
         });
         el.querySelector('#tp-optimize')?.addEventListener('click', async () => {
+            const reason = editReason(plan); if (reason) return toast(reason, true);
             const home = localHome(plan); st.busy = '正在优化刀路…'; shell(true);
             try { st.toolpath = {planId: seg.id, result: await requestJSON('/api/toolpath/optimize', {cuts: plan.result.cuts, homeX: home.x, homeY: home.y, respectPrecedence: true}), opId: crypto.randomUUID()}; }
             catch (e) { st.toolpath = {planId: seg.id, error: '刀路优化未完成：' + e.message}; }
@@ -456,7 +550,12 @@ export async function mount(el, [taskId, focusPlan]) {
             add('properties', '查看余料属性', () => selectRemnant({segmentId: seg.id, remnantId: remnant.id}));
             add('locate', '定位余料', () => locate({u0: seg.start + remnant.y, u1: seg.start + remnant.y + remnant.l, v0: remnant.x, v1: remnant.x + remnant.w}));
         } else {
+            const current = seg || sc.segments.find(s => s.id === sc.currentId), currentPlan = current && planOf(current.id);
+            const switchReason = current && current.id !== sc.currentId ? '请先切换到该工位' : null;
             add('adjust', '手动调整当前工位', () => startAdjustment(plan), reason);
+            if (current?.previewCleared) add('restore-preview', '恢复方案预览', () => restorePreview(current.id), switchReason || previewBusyReason());
+            else add('clear-preview', '清空当前预览', () => clearPreview(current?.id), switchReason || previewReason(currentPlan));
+            if (roll?.remnant) add('reload-remnant', '重新装载料头', reloadRemnant, previewReason(currentPlan, true) || windowProblem(roll, sc.window));
             add('fit', '适合当前窗口', () => canvas.fit());
         }
         const menu = document.createElement('div'), events = new AbortController();
@@ -495,6 +594,7 @@ export async function mount(el, [taskId, focusPlan]) {
     /** 保存调整版（件位置或刀序）：后端校验通过后原候选作废、新版本成为候选。同一内容重试使用同一操作编号。 */
     async function saveAdjustment(body, okText) {
         const id = st.adjust?.planId || st.toolpath?.planId;
+        const reason = editReason(planOf(id)); if (reason) return toast(reason, true);
         st.busy = '正在校验并保存…'; shell(true);
         try {
             const saved = await requestJSON('/api/cutting/plans/' + encodeURIComponent(id) + '/adjust', body);
@@ -548,6 +648,7 @@ export async function mount(el, [taskId, focusPlan]) {
     }
 
     async function execAction(action, view, seg) {
+        if (st.busy || previewHidden(seg.id) && ['create', 'release', 'start'].includes(action)) return toast('当前操作尚未结束，或需先恢复方案预览', true);
         try {
             const values = action === 'create' ? {station: (el.querySelector('#exec-station')?.value || '').trim() || '1'}
                 : action === 'release' ? {reservationSeconds: Math.round((Number(el.querySelector('#exec-reserve')?.value) || 30) * 60)}
@@ -600,6 +701,7 @@ export async function mount(el, [taskId, focusPlan]) {
         return {total, skipped: Math.max(0, Math.min(start - used, total))};
     }
     function openReport(seg) {
+        if (previewHidden(seg.id) || st.busy || checks[seg.id] || scene().window.adjusted) return toast('当前方案不能报工，请先恢复预览并核对工位与状态', true);
         const saved = JSON.parse(localStorage.getItem(REPORT_KEY(seg.id)) || 'null');
         st.report = saved?.planId === seg.id ? saved : defaultReport(seg, {remnant: !!roll?.remnant});
         st.pop = null; shell(true);
@@ -608,7 +710,7 @@ export async function mount(el, [taskId, focusPlan]) {
     function closeReport() { st.report = null; shell(true); }
     async function submitReport() {
         const sc = scene(), seg = sc.segments.find(s => s.id === st.report?.planId);
-        if (!seg) return;
+        if (!seg || seg.previewCleared || st.busy) return;
         const problems = reportProblems(seg, st.report);
         if (problems.length) return toast(problems[0], true);
         const payload = buildCutReport(seg, st.report), s = reportSummary(seg, st.report), deduction = rollDeduction(seg.start, payload.actualCutLen);
@@ -655,6 +757,7 @@ export async function mount(el, [taskId, focusPlan]) {
         el.querySelectorAll('[data-exec]').forEach(b => b.onclick = () => b.dataset.exec === 'cancel' ? (st.cancelling = true, shell(true)) : execAction(b.dataset.exec, view, seg));
         el.querySelector('#exec-cancel-submit')?.addEventListener('click', () => execAction('cancel', view, seg));
         el.querySelectorAll('[data-retry]').forEach(b => b.onclick = async () => {
+            if (st.busy || previewHidden(seg.id)) return toast('请先恢复方案预览并结束当前操作', true);
             st.busy = '正在重试…'; shell(true);
             try { await writer.retry(b.dataset.retry); await reload(); toast('原操作已确认完成'); }
             catch (e) { toast(e.message, true); try { await reload(); } catch { /* 保留当前视图 */ } }
@@ -794,6 +897,8 @@ export async function mount(el, [taskId, focusPlan]) {
     }
 
     async function chooseRoll(id, source = 'roll') {
+        const reason = previewBusyReason(); if (reason) return toast(reason, true);
+        st.clearedPreviews.clear();
         st.source = source; st.rollId = id; st.selectedId = null; st.window = null; st.fresh = []; st.failure = null; st.recommend = null;
         await loadRoll(); full();
     }
@@ -804,8 +909,12 @@ export async function mount(el, [taskId, focusPlan]) {
         undismiss?.(); undismiss = null;
         if (pop) undismiss = dismissOnOutside(el.querySelector('#sum'), () => { st.pop = null; refresh(); });
         el.querySelector('#roll-pick')?.addEventListener('change', e => { st.pop = null; chooseRoll(e.target.value); });
-        el.querySelector('#change-material')?.addEventListener('click', () => { st.pop = null; st.rollId = null; roll = null; st.selectedId = null; st.window = null; full(); });
+        el.querySelector('#change-material')?.addEventListener('click', () => {
+            const reason = previewBusyReason(); if (reason) return toast(reason, true);
+            st.clearedPreviews.clear(); st.pop = null; st.rollId = null; roll = null; st.selectedId = null; st.window = null; full();
+        });
         el.querySelectorAll('[data-goto]').forEach(tr => tr.onclick = () => {
+            if (st.busy || st.saving) return;
             const u = Number(tr.dataset.goto), s = sc.segments.find(x => u >= x.start && u < x.start + x.len);
             st.pop = null; if (s) { st.selectedId = s.id; st.window = null; } st.view = 'station'; full();
         });
@@ -819,6 +928,9 @@ export async function mount(el, [taskId, focusPlan]) {
         el.querySelectorAll('[data-remnant]').forEach(b => b.onclick = () => chooseRoll(b.dataset.remnant, 'remnant'));
         el.querySelector('#recommend')?.addEventListener('click', recommend);
         if (!sc) return;
+        el.querySelector('#preview-clear')?.addEventListener('click', () => clearPreview(sc.currentId));
+        el.querySelector('#preview-restore')?.addEventListener('click', () => restorePreview(sc.currentId));
+        el.querySelector('#remnant-reload')?.addEventListener('click', reloadRemnant);
         el.querySelector('#side-toggle')?.addEventListener('click', () => { prefs.sideCollapsed = !prefs.sideCollapsed; savePrefs(prefs); shell(true); });
         el.querySelector('#report-open')?.addEventListener('click', () => { const seg = sc.segments.find(s => s.id === sc.currentId); if (seg) openReport(seg); });
         bindReport();
@@ -861,8 +973,9 @@ export async function mount(el, [taskId, focusPlan]) {
         canvas.setScene(sc, {refit: !savedCam});
         if (savedCam) canvas.setCamera(savedCam);
         patchRemnantDetails(sc);
+        const pickSegment = id => { if (st.busy || st.saving) return; st.selectedId = id; st.window = null; st.failure = null; full(); };
         nav = createRollNavigator(el.querySelector('#rn'), {
-            onPick: id => { st.selectedId = id; st.window = null; st.failure = null; full(); },
+            onPick: pickSegment,
             // 拖动时画布跟随：工位框停在屏幕原处，母卷随之移动
             onWindow: w => { st.window = w; const next = scene(); canvas.setScene(next, {follow: true}); nav.setScene(next); const i = el.querySelector('#bed-len'); if (i) i.value = Math.round(w.len); status(next); },
             onWindowEnd: () => { st.failure = null; shell(true); }
@@ -883,7 +996,7 @@ export async function mount(el, [taskId, focusPlan]) {
         el.querySelector('#z-out').onclick = () => canvas.zoom(1 / 1.25);
         el.querySelector('#z-ratio').onchange = e => { const n = parseRatio(e.target.value); n ? canvas.setRatio(n) : toast('比例格式示例：1:20', true); };
         const order = [...sc.segments.map(s => s.id), NEW_STATION];
-        const step = d => { const i = (sc.currentId ? order.indexOf(sc.currentId) : order.length - 1) + d; if (order[i]) { st.selectedId = order[i]; st.window = null; st.failure = null; full(); } };
+        const step = d => { const i = (sc.currentId ? order.indexOf(sc.currentId) : order.length - 1) + d; if (order[i]) pickSegment(order[i]); };
         el.querySelector('#seg-prev').onclick = () => step(-1);
         el.querySelector('#seg-next').onclick = () => step(1);
         el.querySelector('#bed-len').onchange = e => {
@@ -892,13 +1005,15 @@ export async function mount(el, [taskId, focusPlan]) {
             if (!(v >= sc.bed.min && v <= sc.bed.max)) { toast(`拉布长度须在 ${sc.bed.min}–${sc.bed.max} mm`, true); e.target.value = Math.round(sc.window.len); return; }
             st.window = {start: sc.window.start, len: v}; st.failure = null; shell(true);
         };
-        el.querySelectorAll('tr[data-seg]').forEach(tr => tr.onclick = () => { st.selectedId = tr.dataset.seg; st.window = null; st.failure = null; full(); });
+        el.querySelectorAll('tr[data-seg]').forEach(tr => tr.onclick = () => pickSegment(tr.dataset.seg));
         status(sc);
     }
 
     // ---- 计算 / 放弃 / 向后查找 ----
     function currentRequest() {
         const sc = scene(), w = sc.window;
+        const reason = previewBusyReason(); if (reason) throw new Error(reason);
+        if (executionForPlan(views, sc.currentId)?.reservationActive) throw new Error('执行单已下达，方案已锁定');
         const problem = windowProblem(roll, w);
         if (problem) throw new Error(problem);
         if (st.fresh.length) throw new Error('画布有未保存的疵点，请先保存到母卷或放弃，再计算');
@@ -1063,7 +1178,7 @@ export async function mount(el, [taskId, focusPlan]) {
     function full() { shell(); }
     full();
     if (isSlitting(task)) restoreSlit();
-    return () => { closeContext(); canvas?.destroy(); nav?.destroy(); undismiss?.(); session.cancel(); };
+    return () => { disposed = true; st.clearedPreviews.clear(); closeContext(); canvas?.destroy(); nav?.destroy(); undismiss?.(); session.cancel(); };
 }
 
 function originText(o) { return {'right-bottom': '右下', 'left-bottom': '左下', 'right-top': '右上', 'left-top': '左上'}[o] || o || '—'; }

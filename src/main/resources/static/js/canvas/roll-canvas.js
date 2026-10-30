@@ -4,7 +4,8 @@ import {rectangle, shapeVertices} from './nesting-scene.js';
 import {toScreen, toWorld, screenRect, fitCamera, zoomAt, panBy, ratioOf, scaleForRatio, rulerStep, DEFAULT_MM_PER_PX} from './roll-camera.js';
 
 const RULER = 22;
-const fmtM = mm => (mm / 1000).toLocaleString('zh-CN', {maximumFractionDigits: 2});
+const meterFormat = new Intl.NumberFormat('zh-CN', {maximumFractionDigits: 2});
+const fmtM = mm => meterFormat.format(mm / 1000);
 const n1 = n => Math.round(n * 10) / 10;
 
 /** 输入为全卷坐标；多边形凹口不属于裁片，轮廓上的点属于裁片。 */
