@@ -6,7 +6,7 @@ const Q = {PASSED: ['合格', 'ok'], PENDING: ['待检', 'warn'], FAILED: ['不�
 const R = {AVAILABLE: ['可用', 'ok'], RESERVED: ['已预约', 'run'], CONSUMED: ['已消耗', ''], SCRAPPED: ['已报废', ''], QUARANTINED: ['隔离', 'err']};
 const ACTIONS = {receive: '母卷入库', transfer: '移库', count: '盘点', scrap: '料头报废'};
 
-export async function mount(el) {
+export async function mount(el, [intent] = []) {
     let rolls, remnants;
     const load = async () => { [rolls, remnants] = await Promise.all([requestJSON('/api/rolls'), requestJSON('/api/remnants')]); };
     try { await load(); } catch (e) { el.innerHTML = errorBox(e); return; }
@@ -169,4 +169,5 @@ export async function mount(el) {
             ${x.consumedByOrder ? `<div>消耗于</div><div class="num">${esc(x.consumedByOrder)}</div>` : ''}</div></div>`;
     }
     render();
+    if (intent === 'receive') await openAction('receive');
 }

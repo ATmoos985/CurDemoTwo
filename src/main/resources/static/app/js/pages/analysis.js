@@ -1,24 +1,31 @@
-// 生产分析：内部库存对账与报工面积汇总（只读）。
-import {requestJSON, esc, fmtN, shortId, errorBox} from '../util.js';
+// 新版分析宿主：与经典入口共用只读对账、分页和导出用例。
+import {requestJSON, esc} from '../util.js';
+import {mountAnalysis} from '../../../js/business/analysis/analysis-view.js';
 
-export async function mount(el) {
-    let rec, rows;
-    try { [rec, rows] = await Promise.all([requestJSON('/api/v2/inventory-ledger/reconciliation'), requestJSON('/api/cutting/task-summaries')]); }
-    catch (e) { el.innerHTML = errorBox(e); return; }
-    const areas = rec.areas || [], sum = k => areas.reduce((a, x) => a + (Number(x[k]) || 0), 0);
-    const consumed = sum('consumed'), qualified = sum('qualified');
-    const done = rows.filter(r => r.status === 'COMPLETED').length;
-    el.innerHTML = `<div class="ph"><h1>生产分析</h1><span class="crumb">来自报工记账与库存流水</span><span class="sp"></span><a class="btn" href="/analysis.html">完整对账 ↗</a></div>
+export function mount(el) {
+    el.innerHTML = `<div class="ph"><h1>生产分析</h1><span class="crumb">实际产出与库存对账</span><span class="sp"></span><button class="btn" id="refresh-analysis">刷新对账</button></div>
       <div class="body">
-        <div class="cards">
-          <div class="card"><small>库存对账</small><b style="color:${(rec.issues || []).length ? 'var(--err)' : 'var(--ok)'}">${(rec.issues || []).length ? (rec.issues.length + ' 项异常') : '平衡'}</b><div class="d">流水 ${fmtN(rec.entryCount)} 条</div></div>
-          <div class="card"><small>报工面积利用率</small><b>${consumed ? (qualified / consumed * 100).toFixed(1) : '—'}%</b><div class="d">良品 ${fmtN(qualified, 2)} / 耗用 ${fmtN(consumed, 2)} m²</div></div>
-          <div class="card"><small>已完成任务</small><b>${done}</b><div class="d">共 ${rows.length} 个任务</div></div>
-          <div class="card"><small>报工单</small><b>${areas.length}</b><div class="d">回收 ${fmtN(sum('recovered'), 2)} m² · 报废 ${fmtN(sum('rejected'), 2)} m²</div></div>
-        </div>
-        ${(rec.issues || []).length ? `<div class="box"><div class="pane-h">对账异常</div><table class="t" style="border:0"><tbody>${rec.issues.map(i => `<tr><td class="wrap">${esc(JSON.stringify(i))}</td></tr>`).join('')}</tbody></table></div>` : ''}
-        <div class="box"><div class="pane-h">报工面积明细<span class="sub">单位 m²</span></div>
-          ${areas.length ? `<table class="t" style="border:0"><thead><tr><th>报工单</th><th class="r">耗用</th><th class="r">良品</th><th class="r">回收</th><th class="r">报废</th><th class="r">其他损耗</th><th class="r">差异</th><th class="r">利用率</th></tr></thead><tbody>
-          ${areas.map(a => `<tr><td class="num">${shortId(a.reportId)}</td><td class="r num">${fmtN(a.consumed, 3)}</td><td class="r num">${fmtN(a.qualified, 3)}</td><td class="r num">${fmtN(a.recovered, 3)}</td><td class="r num">${fmtN(a.rejected, 3)}</td><td class="r num">${fmtN(a.otherWasteAndLoss, 3)}</td><td class="r num" style="color:${Math.abs(a.difference) > 1e-6 ? 'var(--err)' : 'inherit'}">${fmtN(a.difference, 3)}</td><td class="r num">${a.consumed ? (a.qualified / a.consumed * 100).toFixed(1) : '—'}%</td></tr>`).join('')}</tbody></table>` : '<div class="empty">暂无报工</div>'}</div>
+        <div id="analysis-status" role="status"></div><div id="analysis-error" class="notice" role="alert" hidden></div>
+        <div class="cards" id="actual-metrics" aria-label="实际报工指标"></div>
+        <div class="muted" id="task-summary" role="status">正在读取任务汇总…</div>
+        <details class="box"><summary class="pane-h">指标口径与适用范围</summary><div class="pane-b">
+          <p>只统计未冲销、面积资料完整的二维报工，良品已扣除复检降级。实际良品产出率 = 净良品面积总和 ÷ 加工投入面积总和；可回收率 = 回收面积总和 ÷ 加工投入面积总和。按面积加权，单位 m²。</p>
+          <p>料头再次裁切会再次计入加工投入；回收后再领用不抹去原回收产出。未切尾料不计入投入。预览方案、旧一维作业与外部 WMS 不计入；历史面积缺失或对账异常时不显示汇总百分比。</p></div></details>
+        <div id="analysis-issues" role="status"></div>
+        <div class="box"><div class="pane-h">逐单面积分解<span class="sub">单位 m²</span></div><div style="overflow:auto">
+          <table class="t"><thead><tr><th>报工编号</th><th>投入</th><th>净良品</th><th>回收</th><th>不良</th><th>其他废料与损耗</th><th>差异</th><th>良品产出率</th></tr></thead><tbody id="area-rows"></tbody></table></div></div>
+        <section class="box" id="ledger"><div class="pane-h">库存与需求流水<span class="sp"></span><button class="btn sm" id="export-ledger" disabled>导出已载入流水 CSV</button></div>
+          <div class="notice">流水按顺序追加。迁移期初是历史余额快照，不代表当时发生过入库或裁切。</div>
+          <form id="ledger-filters" class="toolbar" style="flex-wrap:wrap">
+            <label for="ledger-type">对象类型</label><select class="field" id="ledger-type"><option value="">全部</option>${[['ROLL','母卷'],['REMNANT','料头'],['DEMAND','需求'],['REPORT','报工'],['TRANSFER','移库单'],['COUNT','盘点单'],['CHECKPOINT','迁移检查点']].map(([v,t]) => `<option value="${v}">${t}</option>`).join('')}</select>
+            <label for="ledger-id">对象编号</label><input class="field" id="ledger-id" placeholder="精确匹配对象编号"><button class="btn" type="submit">查询流水</button><span id="ledger-status" role="status"></span></form>
+          <div id="ledger-error" class="notice" role="alert" hidden></div><div style="overflow:auto"><table class="t"><thead><tr><th>序号 / 时间</th><th>业务事件</th><th>对象 / 编号</th><th>业务编号 / 来源报告</th><th>变更证据</th></tr></thead><tbody id="ledger-rows"></tbody></table></div>
+          <button class="btn" style="margin:8px 12px" id="load-ledger" hidden>加载下一页</button></section>
       </div>`;
+    const dispose = mountAnalysis(el, {extended: true});
+    let disposed = false;
+    requestJSON('/api/cutting/task-summaries').then(rows => {
+        if (!disposed) el.querySelector('#task-summary').textContent = `已完成任务 ${rows.filter(r => r.status === 'COMPLETED').length} / ${rows.length}`;
+    }).catch(e => { if (!disposed) el.querySelector('#task-summary').innerHTML = `任务汇总读取失败：${esc(e.message)}`; });
+    return () => { disposed = true; dispose(); };
 }

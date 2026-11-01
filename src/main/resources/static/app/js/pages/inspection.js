@@ -47,7 +47,7 @@ export async function mount(el, [rollParam]) {
         el.innerHTML = `<div class="ph inspection-head"><h1>跑布验疵</h1>
             <select class="field" id="roll" style="width:300px"><option value="">选择母卷开始验布</option>${rolls.map(x => `<option value="${esc(x.rollId)}" ${r && r.rollId === x.rollId ? 'selected' : ''}>${esc(x.rollId)} · ${esc(x.rollModel || '')} · ${fmtN(x.width)} mm × ${fmtM(x.totalLength)} m</option>`).join('')}</select>
             ${r ? `<span class="tag ${r.inspectionStatus === 'PASSED' ? 'ok' : 'warn'}">${esc(r.inspectionStatus || '待检')}</span>` : ''}
-            <a class="btn" href="/inspection.html" title="新建母卷等完整功能">新建母卷 ↗</a><span class="sp"></span>
+            <a class="btn" href="#/inventory/receive" title="登记母卷后返回跑布验疵">新建母卷</a><span class="sp"></span>
             <button class="btn pri" id="save" ${pend && !st.saving ? '' : 'disabled'}>保存到母卷${pend ? ` (${pend})` : ''}</button></div>
           ${!r ? '<div class="empty">选择母卷后开始标记。整卷连续跑布，所有疵点按距卷头的累计位置记录。</div>' : `
           <div class="toolbar">
