@@ -438,3 +438,18 @@ test('every new app module resolves its relative imports', async () => {
     const html = await readFile(path.join(appRoot, 'index.html'), 'utf8');
     for (const m of html.matchAll(/(?:src|href)="([^"#:]+\.(?:js|css))"/g)) await assert.doesNotReject(access(path.join(appRoot, m[1])), m[1]);
 });
+
+test('overlapping candidates display separately while every plan remains available to navigation', async () => {
+    const {canvasScene} = await import('../../main/resources/static/app/js/model/roll-scene.js');
+    const segments = [
+        {id:'cut',status:'cut',start:0,len:1000},
+        {id:'a',status:'pending',start:2000,len:1752},
+        {id:'b',status:'pending',start:2000,len:1588.9},
+        {id:'next',status:'pending',start:3752,len:1000}
+    ];
+    const scene = {segments,currentId:'a',window:{start:2000,len:1752}}, before=structuredClone(scene);
+    assert.deepEqual(canvasScene(scene).segments.map(s=>s.id), ['cut','a','next']);
+    assert.deepEqual(canvasScene({...scene,currentId:'b'}).segments.map(s=>s.id), ['cut','b','next']);
+    assert.deepEqual(canvasScene({...scene,currentId:null}).segments.map(s=>s.id), ['cut','a','next']);
+    assert.deepEqual(scene,before);
+});

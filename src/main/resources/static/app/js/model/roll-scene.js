@@ -205,6 +205,22 @@ export function buildRollScene({roll, plans, reports = [], rollId, demands, proc
     };
 }
 
+/** 同区间候选是替代方案，不能叠成一套排料。只投影画布，导航/许可保留完整方案。 */
+export function canvasScene(scene) {
+    const candidates = scene.segments.filter(s => s.status === 'pending');
+    if (candidates.length < 2) return scene;
+    const selected = candidates.find(s => s.id === scene.currentId);
+    const ordered = selected ? [selected, ...candidates.filter(s => s !== selected)] : candidates;
+    const shown = [];
+    for (const s of ordered)
+        if (!shown.some(p => s.start < p.start + p.len && p.start < s.start + s.len)) shown.push(s);
+    if (shown.length === candidates.length) return scene;
+    const ids = new Set(shown.map(s => s.id));
+    return {...scene, segments: scene.segments.filter(s => s.status !== 'pending' || ids.has(s.id)),
+        selectedRemnant: scene.selectedRemnant && candidates.some(s => s.id === scene.selectedRemnant.segmentId) && !ids.has(scene.selectedRemnant.segmentId)
+            ? null : scene.selectedRemnant};
+}
+
 export function sceneMetrics(scene) {
     const valid = scene.segments.filter(live);
     const area = valid.reduce((a, s) => a + s.pieceArea, 0);

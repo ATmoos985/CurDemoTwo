@@ -5,7 +5,7 @@ import {setStatus} from '../main.js';
 import {createRollCanvas} from '../canvas/roll-canvas.js';
 import {createRollNavigator} from '../canvas/roll-navigator.js';
 import {parseRatio, formatRatio} from '../canvas/camera.js';
-import {buildRollScene, rollsOfPlans, sceneMetrics, demandColors, demandIndex, STATUS_TEXT, NEW_STATION, remnantAsRoll, OUTPUT_STYLES} from '../model/roll-scene.js';
+import {buildRollScene, canvasScene, rollsOfPlans, sceneMetrics, demandColors, demandIndex, STATUS_TEXT, NEW_STATION, remnantAsRoll, OUTPUT_STYLES} from '../model/roll-scene.js';
 import {buildSolveRequest, windowProblem, usablePlan, remainingDemands} from '../model/solve-request.js';
 import {taskLabels, taskLink} from '../../../js/business/cutting/task-list-model.js';
 import {validateDefect, round} from '../../../js/inspection/inspection-model.js';
@@ -64,6 +64,7 @@ export async function mount(el, [taskId, focusPlan]) {
         pop: null, cursor: null, saving: false, busy: '', failure: null, quality: null, station: '1', reserveMin: 30, recommend: null, remnantSelection: null,
         previewOverrides: new Map()};
     let canvas = null, nav = null, undismiss = null, closeContext = () => {}, disposed = false;
+    const paintScene = (sc, options) => canvas.setScene(canvasScene(sc), options);
 
     /** 可选母卷：任务方案用过的母卷 + 同型号且有余量的母卷。 */
     const rollChoices = () => {
@@ -231,6 +232,7 @@ export async function mount(el, [taskId, focusPlan]) {
         const savedCam = keepCamera ? canvas?.getCamera() : null;
         const sc = st.rollId && roll ? scene() : null, met = sc ? sceneMetrics(sc) : null;
         const seg = sc?.segments.find(s => s.id === sc.currentId) || null;
+        const hiddenCandidates = sc ? sc.segments.length - canvasScene(sc).segments.length : 0;
         if (st.report && (seg?.id !== st.report.planId || seg?.status !== 'pending')) st.report = null; // 选中别的段时关闭报工
         if (st.quality && seg?.id !== st.quality.report.planId && !st.quality.uncertain) st.quality = null;
         if (st.adjust && seg?.id !== st.adjust.planId) { st.adjust = null; st.tool = 'pan'; }
@@ -263,6 +265,7 @@ export async function mount(el, [taskId, focusPlan]) {
               <button id="orient" title="画布方向（不影响坐标与算法）">${prefs.vertical ? '竖向 ⇅' : '横向 ⇆'}</button>
               <span class="sp"></span><span>拉布</span><input id="bed-len" class="cin num" value="${Math.round(sc.window.len)}" title="${sc.fixed ? '料头整块投料，长度固定' : sc.window.readOnly ? '调整或提交期间保持工位范围' : '本次拉布长度（mm）'}" ${sc.fixed || sc.window.readOnly ? 'disabled' : ''}><span>mm</span>
             </div>
+            ${hiddenCandidates ? `<div class="nr-head" id="candidate-overlap-notice" style="padding:4px 10px;margin-bottom:0;color:#ced7e0;font-size:12px" role="status">重叠候选分开显示；另 ${hiddenCandidates} 个暂不叠画，可用 ◀ / ▶ 切换。方案均保留。</div>` : ''}
             <div class="canvas-wrap"><div id="rc"></div>
               <div class="legend">${sc.segments.some(s => s.pieces.some(p => p.outcome)) ? Object.values(OUTPUT_STYLES).map(s => `<span><i style="background:${s.color}"></i>${s.label}</span>`).join('') : ''}${st.view === 'full' || seg?.status !== 'cut' ? task.demands.slice(0, 6).map(d => `<span><i style="background:${colors.get(d.id)}"></i>计划 · ${esc(String(d.name).slice(0, 18))}</span>`).join('') : ''}<span><i style="border:1.5px solid #ff6b5b"></i>疵点</span></div>
             </div>
@@ -340,7 +343,7 @@ export async function mount(el, [taskId, focusPlan]) {
         next.selectedRemnant = r ? {segmentId: seg.id, remnantId: r.id} : null;
         if (next.selectedRemnant && prefs.sideCollapsed && !st.report && !st.quality && !st.adjust) {
             prefs.sideCollapsed = false; savePrefs(prefs); shell(true);
-        } else { canvas.setScene(next); patchRemnantDetails(next); }
+        } else { paintScene(next); patchRemnantDetails(next); }
     }
     function patchRemnantDetails(sc) {
         const body = el.querySelector('.split > .pane:last-child .pane-b'), editing = !!(st.report || st.quality || st.adjust);
@@ -450,7 +453,7 @@ export async function mount(el, [taskId, focusPlan]) {
     }
     function startAdjustment(plan, selected = null) {
         const reason = editReason(plan); if (reason) { toast(reason, true); return false; }
-        if (st.adjust) { st.adjust.selected = selected; st.adjust.problem = null; canvas.setScene(scene()); patchAdjust(); return true; }
+        if (st.adjust) { st.adjust.selected = selected; st.adjust.problem = null; paintScene(scene()); patchAdjust(); return true; }
         const positions = initialPositions(plan);
         st.selectedId = plan.id; st.window = null;
         st.adjust = {planId: plan.id, positions, history: createPlanHistory(positions), selected, error: null};
@@ -462,7 +465,7 @@ export async function mount(el, [taskId, focusPlan]) {
         if (reason) { toast(reason, true); return; }
         a.positions = removePiece(a.positions, plan, a.selected); a.history.record(a.positions);
         a.selected = null; a.error = null; a.problem = null;
-        canvas.setScene(scene()); patchAdjust();
+        paintScene(scene()); patchAdjust();
     }
     function proposePiece(id, next, {done = true, base = st.adjust?.positions} = {}) {
         if (!mayAdjust()) return;
@@ -470,7 +473,7 @@ export async function mount(el, [taskId, focusPlan]) {
         a.problem = placementProblem(next, planOf(a.planId), id); a.error = null;
         a.positions = done && a.problem ? base : next;
         if (done) a.history.record(a.positions);
-        canvas.setScene(scene());
+        paintScene(scene());
         if (done || previousMessage !== a.problem?.message) patchAdjust();
     }
 
@@ -516,7 +519,7 @@ export async function mount(el, [taskId, focusPlan]) {
     function bindAdjust() {
         const box = el.querySelector('#adjust'); if (!box || !st.adjust) return;
         const a = st.adjust, plan = planOf(a.planId);
-        const redraw = () => { canvas.setScene(scene()); patchAdjust(); };
+        const redraw = () => { paintScene(scene()); patchAdjust(); };
         box.querySelector('#adjust-close').onclick = () => { st.adjust = null; st.tool = 'pan'; shell(true); };
         box.querySelector('#adj-undo').onclick = () => { if (!mayAdjust()) return; const p = a.history.undo(); if (p) { a.positions = p; a.error = null; a.problem = null; redraw(); } };
         box.querySelector('#adj-redo').onclick = () => { if (!mayAdjust()) return; const p = a.history.redo(); if (p) { a.positions = p; a.error = null; a.problem = null; redraw(); } };
@@ -971,7 +974,7 @@ export async function mount(el, [taskId, focusPlan]) {
             onCamera: ({ratio, percent}) => { const i = el.querySelector('#z-ratio'); if (i && document.activeElement !== i) i.value = formatRatio(ratio); const p = el.querySelector('#z-pct'); if (p) p.textContent = Math.round(percent) + '%'; },
             onDefectDraw: d => addFresh(d, sc),
             // 选中 / 拖动只更新画布场景与调整面板，不重建画布（重建会中断正在进行的拖动）
-            onPieceSelect: id => { if (!st.adjust) return; st.adjust.selected = id; st.adjust.problem = null; canvas.setScene(scene()); patchAdjust(); },
+            onPieceSelect: id => { if (!st.adjust) return; st.adjust.selected = id; st.adjust.problem = null; paintScene(scene()); patchAdjust(); },
             onPieceMove: (id, du, dv, done) => {
                 const a = st.adjust; if (!mayAdjust()) return;
                 a.dragBase ||= a.positions;
@@ -988,14 +991,14 @@ export async function mount(el, [taskId, focusPlan]) {
         });
         canvas.setOptions({vertical: prefs.vertical, view: st.view, fullMode: prefs.fullMode, tool: st.tool, mmPerPx: prefs.mmPerPx,
             showPath: !!st.showPath, showDimensions: prefs.showDimensions !== false, editable: !st.busy});
-        canvas.setScene(sc, {refit: !savedCam});
+        paintScene(sc, {refit: !savedCam});
         if (savedCam) canvas.setCamera(savedCam);
         patchRemnantDetails(sc);
         const pickSegment = id => { if (st.busy || st.saving) return; st.selectedId = id; st.window = null; st.failure = null; full(); };
         nav = createRollNavigator(el.querySelector('#rn'), {
             onPick: pickSegment,
             // 拖动时画布跟随：工位框停在屏幕原处，母卷随之移动
-            onWindow: w => { st.window = w; const next = scene(); canvas.setScene(next, {follow: true}); nav.setScene(next); const i = el.querySelector('#bed-len'); if (i) i.value = Math.round(w.len); status(next); },
+            onWindow: w => { st.window = w; const next = scene(); paintScene(next, {follow: true}); nav.setScene(next); const i = el.querySelector('#bed-len'); if (i) i.value = Math.round(w.len); status(next); },
             onWindowEnd: () => { st.failure = null; shell(true); }
         });
         nav.setScene(sc);
