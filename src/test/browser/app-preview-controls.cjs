@@ -260,16 +260,56 @@ const shape = {type: 'POLYGON', width: 300, height: 400, vertices: [
                 assert.equal(await page.locator('#preview-restore').count(), 0); assert.equal(await page.locator('#report-open').count(), 0);
             });
         });
-        for (const remnant of [false, true]) await check(`${remnant ? 'remnant' : 'roll'} rectangular plans restore nonempty remnants and exact ordered cuts`, async () => {
+        for (const remnant of [false, true]) {
             const f = await fixture(remnant, false); await goto(f); await page.locator('#path-toggle').click(); await frames(page);
             const before = await scene(), drawn = await geometry(), seg = await current();
-            assert.ok(seg.remnants.length > 0); assert.ok(drawn.remnants.length > 0); assert.ok(drawn.cuts.length > 0);
-            await readOnly(f, async () => {
-                await clear(); assert.equal((await current()).remnants.length, 0);
-                assert.ok(!(await geometry()).remnants.some(r => r.segment === f.plan.id));
-                await restore(); assert.deepEqual(await scene(), before); assert.deepEqual(await geometry(), drawn);
+            await check(`${remnant ? 'remnant' : 'roll'} rectangular plans restore nonempty remnants and exact ordered cuts`, async () => {
+                assert.ok(seg.remnants.length > 0); assert.ok(drawn.remnants.length > 0); assert.ok(drawn.cuts.length > 0);
+                await readOnly(f, async () => {
+                    await clear(); assert.equal((await current()).remnants.length, 0);
+                    assert.ok(!(await geometry()).remnants.some(r => r.segment === f.plan.id));
+                    await restore(); assert.deepEqual(await scene(), before); assert.deepEqual(await geometry(), drawn);
+                });
             });
-        });
+            await check(`${remnant ? 'remnant' : 'roll'} discard remains preview-only, protects drafts and restores the saved geometry`, async () => {
+                await readOnly(f, async () => {
+                    const first = seg.remnants[0];
+                    await page.locator(`[data-remnant-select="${first.id}"]`).click();
+                    await page.locator('#remnant-discard').click(); await frames(page);
+                    assert.equal(await page.locator('#remnant-details').count(), 0);
+                    assert.deepEqual((await current()).pieces, seg.pieces);
+                    assert.ok(!(await current()).remnants.some(r => r.id === first.id));
+                    assert.ok(!(await geometry()).remnants.some(r => r.segment === seg.id && r.id === first.id));
+                    for (const selector of ['#report-open', '#exec-create', '[data-export="nc"]', '[data-export="dxf"]', '#ticket-print'])
+                        assert.ok(await page.locator(selector).isDisabled());
+                    await page.locator('#report-open').evaluate(b => { b.disabled = false; b.click(); });
+                    assert.equal(await page.locator('#report').count(), 0);
+                    assert.deepEqual((await scene()).segments.filter(s => s.id !== seg.id), before.segments.filter(s => s.id !== seg.id));
+                    await restore(); assert.deepEqual(await scene(), before); assert.deepEqual(await geometry(), drawn);
+                    // The canvas menu uses the same guarded action; refresh drops its memory-only override.
+                    const point = await page.evaluate(id => {
+                        const s = Konva.stages.find(s => s.container().id === 'rc'), b = s.container().getBoundingClientRect();
+                        const n = s.find('.roll-remnant').find(n => n.getAttr('remnantId') === id);
+                        const p = n.getAbsoluteTransform().point({x: n.width() / 2, y: n.height() / 2});
+                        return {x: b.x + p.x, y: b.y + p.y};
+                    }, first.id);
+                    await page.mouse.click(point.x, point.y, {button: 'right'});
+                    await page.locator('[data-canvas-action="discard-remnant"]').click(); await frames(page);
+                    assert.ok(!(await current()).remnants.some(r => r.id === first.id));
+                    await page.reload(); await page.waitForSelector('#rc canvas'); await frames(page);
+                    assert.equal(await page.locator('#preview-notice').count(), 0);
+                    assert.deepEqual((await current()).remnants, seg.remnants);
+                    assert.deepEqual((await current()).cuts, seg.cuts);
+                    // A retained property action must recheck the active report, even if invoked programmatically.
+                    await page.locator(`[data-remnant-select="${first.id}"]`).click();
+                    await page.locator('#report-open').click();
+                    assert.ok(await page.locator('#remnant-discard').isDisabled());
+                    await page.locator('#remnant-discard').evaluate(b => { b.disabled = false; b.click(); });
+                    assert.equal(await page.locator('#report').count(), 1); assert.equal(await page.locator('#preview-notice').count(), 0);
+                    await page.locator('#report-close').click();
+                });
+            });
+        }
         await check('a report awaiting its response cannot be cleared or reloaded and a failure retains its draft', async () => {
             const f = await fixture(true); await goto(f); const before = await archive(f), count = writes.length;
             await page.locator('#report-open').click();

@@ -136,3 +136,19 @@ export function applyPositions(seg, plan, positions) {
             shape: moved.shape || {type: 'RECTANGLE', width: w, height: l}, label: `${Math.round(w)}×${Math.round(l)}`};
     })};
 }
+
+/** 经典余料抛弃的显示投影；只处理本工位，不能作为保存或加工数据。 */
+export function discardPreviewRemnant(seg, id, width) {
+    const r = seg.remnants.find(r => r.id === id);
+    if (!r) return seg;
+    const remnants = seg.remnants.filter(r => r.id !== id);
+    const maxPiece = Math.max(seg.start, ...seg.pieces.map(p => p.u + p.du));
+    const tail = seg.start + r.y + r.l >= seg.start + seg.bedLength - 50 || seg.start + r.y >= maxPiece - 5;
+    if (!tail) return {...seg, remnants};
+    const edge = seg.start + r.y;
+    let cuts = seg.cuts.filter(c => c.type === '横切' ? c.u1 <= edge : Math.min(c.u1, c.u2) < edge);
+    const end = Math.max(maxPiece, ...remnants.map(r => seg.start + r.y + r.l));
+    if (end > seg.start && !cuts.some(c => c.type === '横切' && Math.abs(c.u1 - end) < 5))
+        cuts = [...cuts, {u1: end, v1: 0, u2: end, v2: width, type: '横切'}];
+    return {...seg, remnants, cuts: cuts.map((c, i) => ({...c, step: i + 1}))};
+}

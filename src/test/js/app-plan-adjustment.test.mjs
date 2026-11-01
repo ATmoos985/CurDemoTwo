@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {initialPositions, rotatePiece, rotationAllowed, removalProblem, removePiece, movePiece, changedPieces, adjustPayload, applyPositions, placementProblem} from '../../main/resources/static/app/js/model/plan-tools.js';
+import {initialPositions, rotatePiece, rotationAllowed, removalProblem, removePiece, movePiece, changedPieces, adjustPayload, applyPositions, placementProblem, discardPreviewRemnant} from '../../main/resources/static/app/js/model/plan-tools.js';
 import {createPlanHistory} from '../../main/resources/static/js/business/cutting/plan-editing.js';
 
 const outline = {type: 'POLYGON', width: 200, height: 200, vertices: [
@@ -114,4 +114,28 @@ test('removal guards preserve the last rectangular piece and every member of a c
     assert.match(removalProblem(one, plan, 2), /至少保留一件/);
     assert.strictEqual(removePiece(one, plan, 2), one);
     assert.match(removalProblem(one, plan, 1), /选中/);
+});
+
+const preview = () => ({start: 5000, len: 1000, bedLength: 1000, pieces: [{u: 5000, du: 400}],
+    remnants: [{id: 'side', x: 600, y: 0, w: 400, l: 300}, {id: 'tail', x: 0, y: 400, w: 1000, l: 600}],
+    cuts: [{type: '横切', u1: 5400, u2: 5400, v1: 0, v2: 1000, step: 1},
+        {type: '纵切', u1: 5400, u2: 6000, v1: 600, v2: 600, step: 2},
+        {type: '横切', u1: 6000, u2: 6000, v1: 0, v2: 1000, step: 3}]});
+test('side remnant discard leaves pieces and ordered cuts intact without changing the input', () => {
+    const seg = preview(), before = structuredClone(seg), next = discardPreviewRemnant(seg, 'side', 1000);
+    assert.deepEqual(next.remnants.map(r => r.id), ['tail']); assert.deepEqual(next.cuts, seg.cuts);
+    assert.deepEqual(next.pieces, seg.pieces); assert.deepEqual(seg, before);
+    assert.strictEqual(discardPreviewRemnant(seg, 'missing', 1000), seg);
+});
+test('tail remnant discard uses world coordinates and keeps the existing end cut exactly once', () => {
+    const seg = preview(), before = structuredClone(seg), next = discardPreviewRemnant(seg, 'tail', 1000);
+    assert.deepEqual(next.cuts, [seg.cuts[0]]); assert.deepEqual(next.remnants.map(r => r.id), ['side']);
+    assert.equal(next.len, 1000); assert.deepEqual(seg, before);
+});
+test('tail discard adds an end cut at remaining geometry and renumbers only the preview', () => {
+    const seg = preview(); seg.cuts = []; seg.remnants[0].l = 450;
+    const next = discardPreviewRemnant(seg, 'tail', 1000);
+    assert.deepEqual(next.cuts, [{u1: 5450, u2: 5450, v1: 0, v2: 1000, type: '横切', step: 1}]);
+    assert.deepEqual(discardPreviewRemnant(next, 'side', 1000).remnants, []);
+    assert.deepEqual(seg.cuts, []);
 });
