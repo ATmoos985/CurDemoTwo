@@ -110,6 +110,32 @@ class IrregularNestingTests {
         var c = new NestingProblem.Process("CONTOUR","CONTINUOUS","left-top","none",0,0,0,0,"MAXIMIZE_PIECE_AREA");
         assertEquals("UNSUPPORTED",kernel.solve(new NestingProblem("1","mm",p.material(),p.parts(),c,"auto",2)).status());
     }
+    @Test void nativeCertificateSnapsOnlyNegativeRoundoffAtTheSheetOrigin() {
+        var shape = Shape.rectangle(20,10);
+        var input = problem(Shape.rectangle(100,100), List.of(new Part(42,"panel",shape,1,false)), List.of());
+        var vertices = PolygonGeometry.vertices(shape);
+        var json = new JsonMapper();
+        java.util.function.Function<Point, EngineResult> parse = origin -> {
+            var edges = new ArrayList<Map<String,Object>>();
+            for (int i = 0; i < vertices.size(); i++) {
+                var a = vertices.get(i);
+                var b = vertices.get((i + 1) % vertices.size());
+                edges.add(Map.of("type","LineSegment","xs",a.x()+origin.x(),"ys",a.y()+origin.y(),
+                        "xe",b.x()+origin.x(),"ye",b.y()+origin.y()));
+            }
+            var item = Map.of("id",0,"angle",0,"mirror",false,"item_shapes",List.of(Map.of("shape",edges)));
+            var certificate = Map.of("bins",List.of(Map.of("id",0,"copies",1,"items",List.of(item))));
+            return IrregularPackingSolverService.parseCertificate(json.valueToTree(certificate),input);
+        };
+        var result = parse.apply(new Point(-4.97e-14,-5.79e-13));
+        assertNull(PolygonResultValidator.validate(input,result));
+        var p = result.getPlacements().get(0);
+        assertEquals(0,p.x()); assertEquals(0,p.y());
+        assertEquals(200,p.shape().areaMm2(),1e-10);
+        assertTrue(p.shape().vertices().stream().allMatch(v -> v.x()+p.x() >= 0 && v.y()+p.y() >= 0));
+        assertEquals(5e-13,parse.apply(new Point(5e-13,0)).getPlacements().get(0).x());
+        assertThrows(IllegalArgumentException.class, () -> parse.apply(new Point(0,-1e-8)));
+    }
     @Test void malformedNativeCertificateCannotBecomeSuccessfulEmptyResult() {
         var json = new JsonMapper();
         for (String bad : List.of("{}", "{\"bins\":[{\"id\":1,\"copies\":1,\"items\":[]}]}", "{\"bins\":[{\"id\":0,\"copies\":2,\"items\":[]}]}"))

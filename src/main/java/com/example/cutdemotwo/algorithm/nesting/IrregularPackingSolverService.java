@@ -129,12 +129,18 @@ public class IrregularPackingSolverService implements ICutSolverEngine {
                 double w = points.stream().mapToDouble(NestingProblem.Point::x).max().orElseThrow() - x, h = points.stream().mapToDouble(NestingProblem.Point::y).max().orElseThrow() - y;
                 var shape = new NestingProblem.Shape("POLYGON", w, h, points.stream().map(v -> new NestingProblem.Point(v.x() - x, v.y() - y)).toList());
                 var part = problem.parts().get(type);
-                result.getPlacements().add(new NestingResult.Placement(result.getPlacements().size() + 1, part.id(), part.name(), x, y, shape, (int) angle));
+                result.getPlacements().add(new NestingResult.Placement(result.getPlacements().size() + 1, part.id(), part.name(),
+                        worldOrigin(x), worldOrigin(y), shape, (int) angle));
             }
         }
         return result;
     }
     private static void check(boolean ok) { if (!ok) throw new IllegalArgumentException("Invalid irregular certificate"); }
+    /** Coordinates at a sheet edge can be a few floating-point ulps below zero after rotation. */
+    private static double worldOrigin(double coordinate) {
+        check(coordinate >= -1e-9);
+        return Math.max(0, coordinate);
+    }
     private static double number(JsonNode node, String name) {
         var field = node.path(name); check(field.isNumber() && Double.isFinite(field.asDouble())); return field.asDouble();
     }
