@@ -26,7 +26,7 @@ export async function mount(el, [id]) {
     el.innerHTML = `<div class="ph"><a class="btn" href="#/showcase">← 用例库</a><h1>${esc(selected.name)}</h1><span class="sp"></span><span class="tag">计算预览 · 不扣库存</span></div>
       <div class="toolbar"><span>${esc(selected.note)}</span></div>
       <div class="split demo-split"><section class="pane"><div class="pane-h">输入与演示步骤</div><div class="pane-b" id="demo-input"></div></section>
-        <section class="pane"><div class="pane-h">${slit ? '条宽视图 · 截取卷首' : '排料图'}<span class="sp"></span><button class="btn sm" id="demo-fit">适合窗口</button><button class="btn sm" id="demo-rotate">横 / 竖</button><button class="btn sm" id="demo-path" aria-pressed="false" ${slit || request.problem.process?.mode === 'CONTOUR' ? 'disabled title="此演示没有可执行刀序"' : ''}>刀序</button></div><div id="demo-canvas" class="demo-canvas" tabindex="0" aria-label="演示排料画布"></div><div class="foot" id="demo-selection">滚轮缩放，拖动平移；右键查看裁片尺寸。</div></section>
+        <section class="pane"><div class="pane-h">${slit ? '定长横切示意' : '排料图'}<span class="sp"></span><button class="btn sm" id="demo-fit">适合窗口</button><button class="btn sm" id="demo-rotate">横 / 竖</button><button class="btn sm" id="demo-path" aria-pressed="false" ${slit || request.problem.process?.mode === 'CONTOUR' ? 'disabled title="此演示没有可执行刀序"' : ''}>刀序</button></div><div id="demo-canvas" class="demo-canvas" tabindex="0" aria-label="演示排料画布"></div><div class="foot" id="demo-selection">滚轮缩放，拖动平移；右键查看裁片尺寸。</div></section>
         <section class="pane"><div class="pane-h">计算结果</div><div class="pane-b" id="demo-result"><div class="empty">尚未计算</div></div></section></div>
       <div class="foot"><span id="demo-state" role="status">待计算</span><span class="sp"></span><button class="btn" id="demo-input-export">导出输入</button><button class="btn" id="demo-result-export" disabled>导出结果</button><button class="btn" id="demo-cancel" hidden>停止计算</button><button class="btn pri" id="demo-run">${slit ? '快速搭切' : '开始计算'}</button>${slit ? '<button class="btn" id="demo-quality">精细优化</button>' : ''}</div>`;
     const $ = selector => el.querySelector(selector);
@@ -42,7 +42,7 @@ export async function mount(el, [id]) {
             : p.parts.map(o => [o.name, o.shape.width, o.shape.height, o.quantity]);
         $('#demo-input').innerHTML = `<div class="kv"><div>材料幅宽</div><div class="num">${fmtN(slit ? p.motherWidthMm : p.material.shape.width)} mm</div>
           <div>${slit ? '切边 左 / 右' : '加工长度'}</div><div class="num">${slit ? `${p.leftTrimMm} / ${p.rightTrimMm}` : fmtN(p.material.shape.height)} mm</div></div>
-          <table class="t"><thead><tr><th>需求</th><th>宽×长 mm</th><th>数量</th></tr></thead><tbody>${rows.map(r => `<tr><td class="wrap">${esc(r[0])}</td><td class="num">${fmtN(r[1])}×${fmtN(r[2])}</td><td class="num">${r[3]}</td></tr>`).join('')}</tbody></table>
+          ${slit ? `<div class="demo-note">图示段长 ${fmtN(showcaseScene(request, result, patternIndex).roll.total)} mm；订单卷长见下表，图示不展开整卷。</div>` : ''}<table class="t"><thead><tr><th>需求</th><th>宽×长 mm</th><th>数量</th></tr></thead><tbody>${rows.map(r => `<tr><td class="wrap">${esc(r[0])}</td><td class="num">${fmtN(r[1])}×${fmtN(r[2])}</td><td class="num">${r[3]}</td></tr>`).join('')}</tbody></table>
           <div class="sec">操作与验收</div><ol class="demo-steps"><li>核对材料、需求和工艺；点击计算。</li><li>${slit ? '查看组合、重复车数、缺口与超产；切换组合查看条宽。' : '查看裁片、禁入区与未排原因；矩形方案可打开刀序。'}</li><li>${selected.kind === 'marker' ? '核对每种衣片是否齐套及各轮试排记录；搜索结果不保证全局最优。' : id === '6' ? '这里只计算一个工位；多工位报工接续请使用用例库中的业务演示路线。' : slit ? '运行精细优化与快速结果对比；基线逐规格开卷，不受组合下限约束。' : '预览不扣库存。未排入并不等同于证明无解。'}</li></ol>
           ${selected.kind === 'marker' || id.startsWith('GARMENT') ? '<p class="demo-note">服装曲边为折线近似，未包含对条对格、缝份及任意角度旋转。</p>' : ''}
           <details class="demo-note"><summary>查看输入 JSON</summary><pre>${esc(JSON.stringify(request, null, 2))}</pre></details>`;
@@ -63,7 +63,7 @@ export async function mount(el, [id]) {
             const rows = [['逐规格独立分切', baseline.rolls, 0, 0], ...[...runs].map(([profile, r]) => [profile === 'FAST' ? '快速搭切' : '精细优化', r.slitting.patterns.reduce((n, p) => n + p.repetitions, 0), r.slitting.fulfillment.reduce((n, f) => n + f.missing, 0), r.slitting.totalOverproduced])];
             $('#demo-compare').innerHTML = `<div class="sec">同一输入对比</div><table class="t"><thead><tr><th>方法</th><th>车数</th><th>缺口</th><th>超产</th></tr></thead><tbody>${rows.map(r => `<tr>${r.map(v => `<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
         }
-        el.querySelectorAll('[data-pattern]').forEach(b => b.onclick = () => { patternIndex = Number(b.dataset.pattern); paint(); });
+        el.querySelectorAll('[data-pattern]').forEach(b => b.onclick = () => { patternIndex = Number(b.dataset.pattern); input(); paint(); });
     }
     function buttons() {
         $('#demo-run').disabled = busy; if (slit) $('#demo-quality').disabled = busy;
@@ -82,7 +82,7 @@ export async function mount(el, [id]) {
             $('#demo-state').textContent = `${result.fulfillmentStatus === 'COMPLETE' ? '计算完成 · 齐套' : '计算结束 · 未齐套'}${response.job.state !== 'SUCCEEDED' ? ' · 搜索提前结束' : ''}`;
         } catch (e) {
             if (disposed || mine !== token) return;
-            $('#demo-state').textContent = selected.expectedError && e.message.includes(selected.expectedError) ? '限制校验符合预期 · 未对长度取整' : e.name === 'AbortError' ? '已停止计算' : '计算未完成，可重试';
+            $('#demo-state').textContent = e.name === 'AbortError' ? '已停止计算' : '计算未完成，可重试';
             $('#demo-result').innerHTML = `<div class="error-box" role="alert">${esc(e.message)}</div>`;
         } finally { if (!disposed && mine === token) { busy = false; buttons(); } }
     }

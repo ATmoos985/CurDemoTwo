@@ -87,6 +87,7 @@ class OptimizationApiTests {
         assertEquals(404,call("/api/v2/optimization-jobs/unknown",null,null).statusCode());assertEquals(404,call("/api/v2/optimization-results/unknown",null,null).statusCode());
         var capability=call("/api/v2/capabilities",null,null);assertEquals(200,capability.statusCode());
         var c=json.readTree(capability.body());assertEquals("nesting-v1",c.get("inputProfile").asText());assertFalse(c.get("features").get("distributedWorkers").asBoolean());assertFalse(c.get("features").get("inventoryWrites").asBoolean());
+        assertEquals(1,c.get("slittingEngine").get("lengthResolutionMm").asInt());
     }
     @Test void publishedOpenApiSchemaAndExampleAreAvailableAndExampleCanBeValidated()throws Exception{
         var openapi=call("/api-v2/openapi.json",null,null);assertEquals(200,openapi.statusCode());assertEquals("3.1.0",json.readTree(openapi.body()).get("openapi").asText());
@@ -97,7 +98,8 @@ class OptimizationApiTests {
     @Test void slittingExampleIsStrictAndReturnsVerifiedStringOrderFulfillment()throws Exception {
         String body=call("/api-v2/example-slitting-request.json",null,null).body();
         assertEquals(200,call("/api/v2/problem-validations",body,null).statusCode());
-        assertEquals(422,call("/api/v2/problem-validations",body.replace("3000","3001"),null).statusCode());
+        assertEquals(200,call("/api/v2/problem-validations",body.replace("3000","2440"),null).statusCode());
+        assertEquals(400,call("/api/v2/problem-validations",body.replace("3000","2440.5"),null).statusCode());
         assertEquals(400,call("/api/v2/problem-validations",body.replace("\"leftTrimMm\": 10,", ""),null).statusCode());
         assertEquals(400,call("/api/v2/problem-validations",body.replace("\"widthMm\": 500","\"widthMm\": 500.5"),null).statusCode());
         assertEquals(400,call("/api/v2/problem-validations",body.replace("\"profile\": \"FAST\"","\"profile\": \"FAST\", \"unknown\": true"),null).statusCode());

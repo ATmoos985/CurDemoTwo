@@ -5,11 +5,11 @@ import {INDUSTRIES} from '../../../js/industry/industry-profiles.js';
 import {LINEAR_SCENARIOS} from '../../../js/linear/linear-scenarios.js';
 import {createNestingScene, rectangle, shapeArea, sceneOrigin} from '../../../js/canvas/nesting-scene.js';
 import {PIECE_PALETTE} from './roll-scene.js';
+import {DEFAULT_PROCESS} from './task-form.js';
 
 export const SHOWCASE_CASES = [
     ...INDUSTRIES.flatMap(industry => industry.scenarios.map(s => ({id: s.key, name: s.name, group: industry.name,
-        note: s.key === 'board' ? '2440 mm 非整米长度；标准一维接口应明确拒绝，不取整。' : s.note,
-        ...(s.key === 'board' ? {name: '板条 2440 mm · 限制校验', expectedError: '1000 mm'} : {}),
+        note: ({board: '2440 mm 整板定长分条，精确保留板长。', GARMENT_SHIRT: 'M / L 两个尺码的批量前后片、袖片、领片与袋布，填充一个加工区。', GARMENT_PANTS: 'M / L 批量裤片、裤袋、腰头与门襟，同场搭配。', GUILLOTINE: '主片避开左侧疵点，上方长条与边角辅件共同套裁。', '3': '短料上混排主帘、长条、抱枕与绑带，充分利用余料。'})[s.key] || s.note,
         kind: industry.dimension === '一维' ? 'slitting' : 'nesting'}))),
     {id: 'board-2m', name: '板条 2000 mm · 整米对照', group: '卷材 · 薄膜', kind: 'slitting', note: '同一组条宽改为明确的 2000 mm 示例，比较逐规格分切与搭切。'},
     ...MARKER_STYLES.map(s => ({id: 'marker-' + s.id, name: s.name + ' M / L 齐套唛架', group: '服装齐套',
@@ -38,7 +38,12 @@ export function showcaseRequest(id, profile = 'FAST') {
         return {...envelope, requireComplete: true, problem: {...problem, timeLimitSeconds: 10}, strategy: {id: 'marker-shortening', version: '1', maxTrials: 5}};
     }
     if (['CROSSCUT', 'GUILLOTINE', 'CONTOUR'].includes(id)) problem = basicExample(id);
-    else if (id.startsWith('GARMENT_')) problem = garmentExample(id);
+    else if (['GARMENT_SHIRT', 'GARMENT_PANTS'].includes(id)) {
+        problem = markerExample(1500, id);
+        problem.material.shape = rectangle(1500, id === 'GARMENT_SHIRT' ? 2400 : 3600);
+        problem.parts.forEach(p => { p.quantity *= 2; });
+        problem.timeLimitSeconds = 10;
+    } else if (id.startsWith('GARMENT_')) problem = garmentExample(id);
     else if (id.startsWith('BOARD_')) problem = boardExample(id);
     else if (id.startsWith('rotation-')) {
         problem = basicExample('GUILLOTINE'); problem.material = {id, shape: rectangle(800, 1200), exclusions: [], continuesAfterRegion: false};
@@ -46,6 +51,20 @@ export function showcaseRequest(id, profile = 'FAST') {
     } else if (id === 'gap') {
         problem = garmentExample('GARMENT_SHIRT'); problem.process.pieceGap = 10;
     } else problem = scenarioExample(id);
+    if (id === 'GUILLOTINE') {
+        problem.process.startCorner = 'left-bottom';
+        problem.parts = [
+            {id:1, name:'避疵主帘', shape:rectangle(1500,3000), quantity:1, allowRotation:false},
+            {id:2, name:'顶部通幅长条', shape:rectangle(2000,900), quantity:1, allowRotation:false},
+            {id:3, name:'侧边辅片', shape:rectangle(450,1300), quantity:2, allowRotation:false},
+            {id:4, name:'窄幅挂带', shape:rectangle(120,600), quantity:4, allowRotation:false}
+        ];
+    }
+    if (id === '3') {
+        problem.parts[1].quantity = 4;
+        problem.parts[2].quantity = 4;
+        problem.parts.push({id:4, name:'通幅窗幔长条', shape:rectangle(2000,300), quantity:1, allowRotation:false});
+    }
     return {...envelope, problem};
 }
 
@@ -55,7 +74,7 @@ export function showcaseScene(request, result = null, patternIndex = 0) {
     let width, length, outline, home, pieces = [], cuts = [], remnants = [], defects = [];
     if (request.problemType === 'SLITTING_1D') {
         const pattern = result?.slitting?.patterns?.[patternIndex];
-        width = p.motherWidthMm; length = pattern?.lengthMm || p.orders[0].lengthMm;
+        width = p.motherWidthMm; length = Math.min(pattern?.lengthMm || p.orders[0].lengthMm, DEFAULT_PROCESS.bedLength);
         let x = p.leftTrimMm;
         for (const station of pattern?.stations || []) for (let i = 0; i < station.countPerRepetition; i++) {
             pieces.push({id: pieces.length + 1, u: 0, v: x, du: length, dv: station.widthMm,
@@ -77,8 +96,8 @@ export function showcaseScene(request, result = null, patternIndex = 0) {
     return {roll: {id: '演示材料', width, total: length, used: 0, shape: outline},
         segments: [{id: 'demo', start: 0, len: length, bedLength: length, status: 'pending', label: '计算预览',
             home, pieces, cuts, remnants, pieceArea: pieces.reduce((n, v) => n + shapeArea(v.shape), 0), totalArea: width * length}],
-        // 长卷只放大卷首观察条宽，真实卷长与几何保持不变。
-        defects, currentId: 'demo', window: {start: 0, len: request.problemType === 'SLITTING_1D' ? Math.min(length, width * 1.5) : length, readOnly: true}, lock: 0, fixed: true};
+        // 一维只投影默认拉布长度内的定长横切示意；原始请求、结果、面积指标保持真实卷长。
+        defects, currentId: 'demo', window: {start: 0, len: length, readOnly: true}, lock: 0, fixed: true};
 }
 
 export const WORKFLOW_GUIDES = [

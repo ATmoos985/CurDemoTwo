@@ -94,9 +94,10 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
         var config=new SolverConfig(p.minWidthMm(),p.maxWidthMm(),p.widthStepMm(),p.motherWidthMm());
         config.setTotalOverCap(p.totalOverCap());config.setTimeoutMs(p.timeLimitSeconds()*1000L);config.setUseNewSolver(true);
         var items=new ArrayList<SolverOrderItem>();
+        long lengthUnit=lengthUnitMm(p);
         for(var o:p.orders()) {
             var item=new SolverOrderItem();item.setMessageText(o.id());item.setWidth(o.widthMm());item.setDemand(o.quantity());
-            item.setLength(Math.toIntExact(o.lengthMm()/1000));item.setSurfaceTreatment(o.surfaceTreatment());
+            item.setLength(Math.toIntExact(o.lengthMm()/lengthUnit));item.setSurfaceTreatment(o.surfaceTreatment());
             item.setGroupKey(item.getLength()+"m+"+o.surfaceTreatment());items.add(item);
         }
         boolean fast="FAST".equals(p.profile());
@@ -115,10 +116,20 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
             throw new IllegalStateException("内核未返回候选结果："+raw.status());
         return convert(p,raw.instructions());
     }
+    // 内核按整数长度分组并透传；共用精确尺度，不改变整米请求原有编码，不舍入非整米长度。
+    private static long lengthUnitMm(SlittingProblem p) {
+        long unit=1000;
+        for(var order:p.orders()) {
+            long value=order.lengthMm();
+            while(value!=0) {long remainder=unit%value;unit=value;value=remainder;}
+        }
+        return unit;
+    }
     static SlittingResult convert(SlittingProblem p,List<CuttingInstruction> instructions) {
         var orders=new LinkedHashMap<String,SlittingProblem.Order>();p.orders().forEach(o->orders.put(o.id(),o));
         var patterns=new ArrayList<SlittingResult.Pattern>();var counts=new HashMap<String,Integer>();
         long mother=0,usable=0,piece=0;
+        long lengthUnit=lengthUnitMm(p);
         for(var i:instructions) {
             var allocations=new LinkedHashMap<String,Integer>();
             for(var a:i.getStationAssignments()) {
@@ -129,7 +140,7 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
             var stations=i.getSubRolls().entrySet().stream().sorted(Map.Entry.comparingByKey())
                     .map(e->new SlittingResult.Station(e.getKey(),e.getValue())).toList();
             int width=Math.toIntExact(stations.stream().mapToLong(s->Math.multiplyExact((long)s.widthMm(),s.countPerRepetition())).sum());
-            long length=Math.multiplyExact((long)i.getLength(),1000);
+            long length=Math.multiplyExact((long)i.getLength(),lengthUnit);
             patterns.add(new SlittingResult.Pattern("PAT-"+(patterns.size()+1),i.getRollWidth(),width,length,
                     i.getSurfaceTreatment(),i.getUsageCount(),stations,
                     allocations.entrySet().stream().map(e->new SlittingResult.Allocation(e.getKey(),e.getValue())).toList()));

@@ -58,11 +58,11 @@ class SlittingValidationTests {
         assertThrows(SlittingValidation.ValidationException.class, () -> SlittingValidation.validateResult(p, r));
     }
 
-    @Test void fractionalMetresAndOverflowingTrimsAreRejected() {
+    @Test void millimetreLengthsAreAcceptedButOverflowingTrimsAreRejected() {
         var p=validProblem();
         assertThrows(SlittingValidation.ValidationException.class,()->SlittingValidation.validateProblem(
                 new SlittingProblem("1","mm",1200,Integer.MAX_VALUE,Integer.MAX_VALUE,1000,1180,10,20,"FAST",p.orders(),5)));
-        assertThrows(SlittingValidation.ValidationException.class,()->SlittingValidation.validateProblem(
+        assertDoesNotThrow(()->SlittingValidation.validateProblem(
                 new SlittingProblem("1","mm",1200,10,10,1000,1180,10,20,"FAST",
                         List.of(new SlittingProblem.Order("O1",500,3001,2,"素色")),5)));
     }

@@ -68,10 +68,7 @@ public final class SlittingValidation {
                 throw new ValidationException("INVALID_INPUT", "订单幅宽须为正数且不超过组合上限 " + maxWidth + " mm");
             }
             if (order.lengthMm() <= 0 || order.lengthMm() > 1_000_000_000L) {
-                throw new ValidationException("INVALID_INPUT", "订单卷长须在 1000–1000000000 mm 之间");
-            }
-            if (order.lengthMm() % 1000 != 0) {
-                throw new ValidationException("UNSUPPORTED_CONSTRAINT", "当前内核卷长分辨率为 1000 mm，不能舍入卷长");
+                throw new ValidationException("INVALID_INPUT", "订单卷长须在 1–1000000000 mm 之间");
             }
             if (order.quantity() <= 0 || order.quantity() > 100_000) {
                 throw new ValidationException("INVALID_INPUT", "订单需求件数须在 1–100000 之间");
@@ -107,8 +104,7 @@ public final class SlittingValidation {
         int usable=p.motherWidthMm()-p.leftTrimMm()-p.rightTrimMm();
         for(var pattern:r.patterns()) {
             check(pattern.id()!=null && !pattern.id().isBlank() && ids.add(pattern.id()), "排刀标识无效或重复");
-            check(pattern.repetitions()>0 && pattern.lengthMm()>0 && pattern.lengthMm()<=1_000_000_000L
-                    && pattern.lengthMm()%1000==0, "重复数或卷长无效");
+            check(pattern.repetitions()>0 && pattern.lengthMm()>0 && pattern.lengthMm()<=1_000_000_000L, "重复数或卷长无效");
             check(pattern.rollWidthMm()>=p.minWidthMm() && pattern.rollWidthMm()<=p.maxWidthMm()
                     && (pattern.rollWidthMm()-p.minWidthMm())%p.widthStepMm()==0, "排刀候选幅宽不符合区间/步长");
             long width=0;

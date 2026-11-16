@@ -1,7 +1,7 @@
 // 适配层：任务编辑表单（新建 / 编辑 / 导入）。纯函数，不发请求。
 // 校验与后端 RemnantService.saveTask 一致：名称与型号必填；1–200 项需求；编号唯一为正；尺寸为正；单项 1–10000 件；
 // 已报工需求不能删除、不能改名改尺寸，总件数不得小于已报工件数。
-// 任务类型：二维排料（NESTING_2D）或一维分切（SLITTING_1D，需求为分切宽度 × 整米卷长 × 卷数）。
+// 任务类型：二维排料（NESTING_2D）或一维分切（SLITTING_1D，需求为分切宽度 × 整数 mm 卷长 × 卷数）。
 import {SLITTING, DEFAULT_SLITTING, slittingProblems} from './slitting.js';
 
 export const DEFAULT_PROCESS = {bedLength: 5000, trimStart: 0, pieceGap: 0, cutOrigin: 'right-bottom', firstStageOrientation: 'horizontal',

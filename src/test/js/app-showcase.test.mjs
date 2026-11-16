@@ -17,11 +17,11 @@ test('all examples have independent inputs and fit the shared canvas without bus
     }
 });
 
-test('slitting preserves units and keeps unsupported 2440 mm explicit, with a separate 2000 mm example', () => {
+test('slitting preserves exact millimetres for 2440 mm boards and metre-based roll orders', () => {
     assert.equal(showcaseRequest('film').problem.orders[0].lengthMm, 6000000);
     assert.equal(showcaseRequest('curtain').problem.orders[0].lengthMm, 50000);
     assert.equal(showcaseRequest('board').problem.orders[0].lengthMm, 2440);
-    assert.ok(SHOWCASE_CASES.find(c => c.id === 'board').expectedError);
+    assert.equal(SHOWCASE_CASES.find(c => c.id === 'board').expectedError, undefined);
     assert.equal(showcaseRequest('board-2m').problem.orders[0].lengthMm, 2000);
     assert.equal(showcaseRequest('film','QUALITY').problem.profile, 'QUALITY');
 });
@@ -34,12 +34,16 @@ test('same dimensions compare rotation rules without changing requested shapes',
     assert.equal(showcaseRequest('gap').problem.process.pieceGap, 10);
 });
 
-test('slitting renders one selected repetition at real mm dimensions, not all repetitions on top', () => {
+test('slitting shows one finite default-length crosscut with true strip widths, leaving source lengths unchanged', () => {
     const r = showcaseRequest('curtain');
     const result = {slitting: {patterns: [{lengthMm: 50000, repetitions: 8, stations: [{widthMm: 900, countPerRepetition: 3}]}]}};
     const sc = showcaseScene(r, result);
     assert.equal(sc.segments[0].pieces.length, 3);
-    assert.deepEqual(sc.segments[0].pieces.map(p => [p.v,p.du,p.dv]), [[20,50000,900],[920,50000,900],[1820,50000,900]]);
+    assert.equal(sc.roll.total, 5000);
+    assert.equal(sc.window.len, 5000);
+    assert.equal(result.slitting.patterns[0].lengthMm, 50000);
+    assert.equal(showcaseScene(showcaseRequest('board')).roll.total, 2440);
+    assert.deepEqual(sc.segments[0].pieces.map(p => [p.v,p.du,p.dv]), [[20,5000,900],[920,5000,900],[1820,5000,900]]);
 });
 
 test('historical demo links retain scenario and style in new routes without iframes', () => {
@@ -61,4 +65,16 @@ test('workflow templates supply matching material and valid tasks with enough de
         fixture.task.demands[0].quantity = 0;
         assert.ok(workflowTemplate(t.id).task.demands[0].quantity > 0);
     }
+});
+
+// 需求数量和面积足以支持密排；实际密度由真实求解浏览器验收，不伪造布局。
+test('garment batches and remnant examples provide enough varied pieces to fill the region', () => {
+    for (const id of ['GARMENT_SHIRT', 'GARMENT_PANTS']) {
+        const p = showcaseRequest(id).problem;
+        assert.ok(p.parts.length >= 10);
+        assert.ok(p.parts.reduce((n, part) => n + part.quantity, 0) >= 30);
+    }
+    const p = showcaseRequest('3').problem;
+    assert.ok(p.parts.reduce((n, part) => n + part.shape.width * part.shape.height * part.quantity, 0) > p.material.shape.width * p.material.shape.height * .9);
+    assert.ok(showcaseRequest('GUILLOTINE').problem.parts.some(p => p.name.includes('长条') && p.shape.width === 2000));
 });

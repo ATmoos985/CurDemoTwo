@@ -13,12 +13,13 @@ const pattern = {id: 'p1', rollWidthMm: 2000, patternWidthMm: 1900, lengthMm: 20
     stations: [{widthMm: 600, countPerRepetition: 2}, {widthMm: 700, countPerRepetition: 1}],
     allocations: [{orderId: '1', quantity: 4}, {orderId: '2', quantity: 2}]};
 
-test('slitting parameters mirror backend rules, including whole-metre roll lengths', () => {
+test('slitting parameters mirror backend rules, including exact millimetre roll lengths', () => {
     assert.equal(slittingProblems(params, task.demands), null);
     assert.match(slittingProblems({...params, maxWidth: 1700}), /下限/);
     assert.match(slittingProblems({...params, widthStep: 0}), /步长/);
     assert.match(slittingProblems({...params, leftTrim: 1.5}), /整数/);
-    assert.match(slittingProblems(params, [{id: 1, name: 'A', width: 600, length: 2500}]), /整米/);
+    assert.equal(slittingProblems(params, [{id: 1, name: 'A', width: 600, length: 2440}]), null);
+    assert.match(slittingProblems(params, [{id: 1, name: 'A', width: 600, length: 2440.5}]), /整数/);
     assert.match(slittingProblems(params, [{id: 1, name: 'A', width: 2100, length: 2000}]), /组合上限/);
 });
 
@@ -32,7 +33,7 @@ test('task form switches type, keeps 2D payload unchanged and validates 1D lines
     assert.deepEqual(toPayload(slit).slitting, {...DEFAULT_SLITTING, maxWidth: 1980, minWidth: 1780});
     assert.equal(toPayload(slit).problemType, 'SLITTING_1D');
     assert.deepEqual(taskProblems(slit), []);
-    assert.match(taskProblems({...slit, demands: [{...slit.demands[0], length: 2300}]}).join(), /整米/);
+    assert.deepEqual(taskProblems({...slit, demands: [{...slit.demands[0], length: 2440}]}), []);
     assert.deepEqual(fromTask(task).slitting, params);
     const original = {...task, problemType: undefined};
     assert.match(taskProblems(fromTask(task), {original, completed: {1: 1}}).join(), /不能更改任务类型/);

@@ -1,5 +1,6 @@
 // All computation and temporary fixtures target an isolated service, never port 8080.
 const assert = require('node:assert/strict');
+const {readFileSync, writeFileSync} = require('node:fs');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const base = process.env.BASE_URL;
 assert.ok(base && ['localhost','127.0.0.1'].includes(new URL(base).hostname) && new URL(base).port && new URL(base).port !== '8080');
@@ -10,6 +11,22 @@ assert.ok(base && ['localhost','127.0.0.1'].includes(new URL(base).hostname) && 
     page.on('pageerror', e => errors.push(e.message));
     page.on('request', r => {if(r.method() !== 'GET') writes.push(new URL(r.url()).pathname);});
     page.setDefaultTimeout(10000);
+    async function resizeAndFit(width, height) {
+        await page.setViewportSize({width,height});
+        await page.waitForFunction(({width,height}) => {
+            const host=document.querySelector('#demo-canvas'),stage=Konva.stages[0];
+            return innerWidth===width && innerHeight===height && stage.width()===host.clientWidth && stage.height()===host.clientHeight;
+        }, {width,height});
+        await page.locator('#demo-fit').click();
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        await page.waitForFunction(() => {
+            const stage=Konva.stages[0];
+            return stage.find('.roll-piece').every(n => {
+                const r=n.getClientRect();
+                return r.x>=21 && r.y>=21 && r.x+r.width<=stage.width()+1 && r.y+r.height<=stage.height()+1;
+            });
+        });
+    }
     async function check(name, fn) {
         try {await fn();results.push({name,success:true});console.log('PASS',name);}
         catch(e) {results.push({name,success:false,error:e.stack});console.error('FAIL',name,e.message);}
@@ -29,15 +46,41 @@ assert.ok(base && ['localhost','127.0.0.1'].includes(new URL(base).hostname) && 
             await page.goto(base+'/app/#/showcase/'+item.id);await page.locator('#demo-run').click();
             await page.waitForFunction(()=>!document.querySelector('#demo-run')?.disabled,null,{timeout:90000});
             const state=await page.locator('#demo-state').innerText();
-            if(item.expectedError) {assert.match(state,/限制校验符合预期/);assert.match(await page.locator('#demo-result').innerText(),/1000 mm/);return;}
             assert.match(state,/计算完成|计算结束/,await page.locator('#demo-result').innerText());
             assert.ok(await page.locator('#demo-result-export').isEnabled());
             assert.equal(await page.evaluate(()=>Konva.stages.length),1);
             if(item.id==='rotation-off') assert.equal(await page.evaluate(()=>Konva.stages[0].find('.roll-piece').length),0);
             if(item.id==='rotation-on') assert.equal(await page.evaluate(()=>Konva.stages[0].find('.roll-piece').length),1);
+            if(['GARMENT_SHIRT','GARMENT_PANTS','GUILLOTINE','3','film','board'].includes(item.id)) {
+                const download=page.waitForEvent('download');await page.locator('#demo-result-export').click();
+                const result=JSON.parse(readFileSync(await (await download).path(),'utf8'));
+                if(result.layout) {
+                    const min={GARMENT_SHIRT:80,GARMENT_PANTS:70,GUILLOTINE:80,'3':80}[item.id];
+                    assert.ok(result.metrics.find(m=>m.name==='processingAreaUtilization').value>=min,JSON.stringify(result.metrics));
+                    if(item.id.startsWith('GARMENT')) assert.ok(result.layout.placements.length>=20);
+                    if(item.id==='GUILLOTINE') {
+                        const long=result.layout.placements.find(p=>p.demandId===2),main=result.layout.placements.find(p=>p.demandId===1);
+                        assert.ok(long && main);assert.ok(long.y+long.shape.height<=main.y+.01,'long strip belongs above the main panel');
+                    }
+                } else {
+                    const length=item.id==='film'?6000000:2440,display=Math.min(length,5000);
+                    assert.ok(result.slitting.patterns.every(p=>p.lengthMm===length));
+                    assert.equal(result.fulfillmentStatus,'COMPLETE');
+                    const heights=await page.evaluate(()=>Konva.stages[0].find('.roll-piece').map(n=>n.height()));
+                    assert.ok(heights.length>0 && heights.every(h=>h===display));
+                    assert.match(await page.locator('#demo-input').innerText(),new RegExp('图示段长 '+display.toLocaleString('en-US')+' mm'));
+                }
+                if(process.env.SCREENSHOT_DIR) {
+                    writeFileSync(process.env.SCREENSHOT_DIR+'/result-'+item.id+'.json',JSON.stringify(result,null,2));
+                    for(const [width,height] of [[1366,768],[1920,1080]]) {
+                        await resizeAndFit(width,height);
+                        await page.screenshot({path:process.env.SCREENSHOT_DIR+'/'+item.id+'-'+width+'.png'});
+                    }
+                }
+            }
             if(item.id==='GUILLOTINE') {await page.locator('#demo-path').click();await page.waitForFunction(()=>Konva.stages[0].find('.roll-path').length>0);}
             if(item.id==='4') for(const [w,h] of [[1366,768],[1920,1080]]) {
-                await page.setViewportSize({width:w,height:h});await page.locator('#demo-fit').click();
+                await resizeAndFit(w,h);
                 const button=await page.locator('#demo-run').boundingBox();assert.ok(button.y+button.height<=h);
                 if(process.env.SCREENSHOT_DIR) await page.screenshot({path:process.env.SCREENSHOT_DIR+'/showcase-'+w+'.png'});
             }

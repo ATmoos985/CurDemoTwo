@@ -400,9 +400,8 @@
               },
               "lengthMm": {
                 "type": "integer",
-                "minimum": 1000,
-                "maximum": 1000000000,
-                "multipleOf": 1000
+                "minimum": 1,
+                "maximum": 1000000000
               },
               "quantity": {
                 "type": "integer",
@@ -446,7 +445,7 @@
         "orders",
         "timeLimitSeconds"
       ],
-      "description": "整数 mm；当前内核卷长必须整除1000。ID唯一，候选宽度不超过扣边可用幅宽；需求总卷数+超产上限<=100000。跨字段约束由服务验证。"
+      "description": "宽度与卷长为整数 mm，非整米卷长保持精确值。ID唯一，候选宽度不超过扣边可用幅宽；需求总卷数+超产上限<=100000。跨字段约束由服务验证。"
     }
   },
   "allOf": [

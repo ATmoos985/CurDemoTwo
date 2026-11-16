@@ -22,15 +22,17 @@ const api=async(path,body,headers={})=>{const r=await fetch(base+path,body?{meth
   });
   const {workflowTemplate}=await import('../../main/resources/static/app/js/model/showcase.js');
   const fixture=workflowTemplate('slitting'),key='FLOW-'+randomUUID();
+  fixture.task.demands.forEach(d=>{d.length=2440;});fixture.task.process.bedLength=2490;
   const roll={rollId:key,rollModel:key,width:2000,totalLength:30000,usedLength:0,inspectionStatus:'PASSED',defects:[]};await api('/api/rolls',roll);
   const task=await api('/api/cutting/tasks',{...fixture.task,materialModel:key});
   const plans=()=>api('/api/cutting/tasks/'+task.id+'/plans');
-  await check('new workbench computes combinations and places two nonoverlapping cars without stock consumption',async()=>{
+  await check('new workbench computes exact 2440 mm combinations and places two nonoverlapping cars without stock consumption',async()=>{
    await page.goto(base+'/app/#/workbench/'+task.id);await page.locator('[data-roll="'+key+'"]').click();await page.locator('#slit-solve').click();
    await page.locator('[data-car]').first().waitFor({timeout:40000});await page.locator('[data-car]').first().click();
    await page.locator('#report-open').waitFor();await page.locator('[data-seg="__new__"]').click();
    await page.locator('[data-car]').first().click();await page.locator('#report-open').waitFor();
-   const rows=await plans();assert.equal(rows.length,2);const sorted=rows.sort((a,b)=>a.request.windowStartY-b.request.windowStartY);
+   const rows=await plans();assert.equal(rows.length,2);
+   assert.ok(rows.every(p=>p.request.rollL===2490 && p.result.pieces.every(v=>v.l===2440)));const sorted=rows.sort((a,b)=>a.request.windowStartY-b.request.windowStartY);
    assert.ok(sorted[1].request.windowStartY>=sorted[0].request.windowStartY+sorted[0].request.rollL);
    assert.equal((await api('/api/rolls/'+key)).usedLength,0);
   });

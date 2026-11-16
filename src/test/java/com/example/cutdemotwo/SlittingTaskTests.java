@@ -154,7 +154,27 @@ class SlittingTaskTests {
         assertThrows(IllegalArgumentException.class, () -> inventory.saveTask(new CuttingTask(null, "x", "TC涤棉-B2026", null, 0,
                 List.of(new CuttingTask.Line(1, "A", 600, 2000, 1, false)), null, "OTHER", PARAMS)));
         assertThrows(IllegalArgumentException.class, () -> inventory.saveTask(new CuttingTask(null, "x", "TC涤棉-B2026", null, 0,
-                List.of(new CuttingTask.Line(1, "A", 600, 2500, 1, false)), null, CuttingTask.SLITTING_1D, PARAMS)), "卷长须为整米");
+                List.of(new CuttingTask.Line(1, "A", 600, 2440.5, 1, false)), null, CuttingTask.SLITTING_1D, PARAMS)), "卷长须为整数毫米");
+    }
+
+    @Test void millimetreLengthPersistsAndReportsWithoutRounding() {
+        var inventory = new RemnantService(temp.resolve("millimetres.json").toString());
+        var workflow = new CuttingWorkflowService(new SolverFactory(List.of(new CrossCutSolverService())), inventory, new ToolpathOptimizerService());
+        var original = create(inventory);
+        var task = inventory.saveTask(new CuttingTask(original.id(), original.name(), original.materialModel(), original.externalRef(), original.revision(),
+                List.of(new CuttingTask.Line(1, "订单 A", 600, 2440, 4, false)),
+                new CuttingTask.Process(2440, 0, "right-bottom", "horizontal", false, true), CuttingTask.SLITTING_1D, PARAMS));
+        assertEquals(2440, inventory.getTask(task.id()).demands().get(0).length());
+        double used = inventory.getMotherRoll("ROLL-2026-0920").getUsedLength();
+        var car = car(task, used, 2, 0);
+        car.request().setRollL(2440);
+        car.request().setDemands(List.of(new PieceDemand(1, "订单 A", 600, 2440, 2, false)));
+        car.pieces().forEach(p -> p.setL(2440));
+        var plan = workflow.slittingCar(car);
+        assertEquals(used, inventory.getMotherRoll("ROLL-2026-0920").getUsedLength());
+        workflow.confirm(new CutReport(plan.getPlanId(), 2440, 2, List.of(), "S-01"));
+        assertEquals(used + 2440, inventory.getMotherRoll("ROLL-2026-0920").getUsedLength(), .001);
+        assertEquals(2, inventory.completedQuantities(task.id()).get("1"));
     }
 
     @Test void nestingTaskSerializesWithoutSlittingFields() {

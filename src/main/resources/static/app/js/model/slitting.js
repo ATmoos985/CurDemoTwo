@@ -15,8 +15,8 @@ export function slittingProblems(s, demands = []) {
     if (!(s.minWidth > 0) || s.maxWidth < s.minWidth) return '组合宽度下限须大于 0 且不大于上限';
     if (!(s.widthStep > 0) || (s.maxWidth - s.minWidth) / s.widthStep > 1000) return '步长须为正，候选宽度不超过 1001 个';
     if (s.totalOverCap < 0 || s.totalOverCap > 10000) return '超产上限须在 0–10000 卷';
-    const bad = demands.find(d => !int(d.width) || d.width > s.maxWidth || !int(d.length) || d.length % 1000 !== 0 || d.length > 1_000_000);
-    return bad ? `需求「${bad.name || bad.id}」：分切宽度须为整数且不超过组合上限，卷长须为整米（1000 mm 的倍数）` : null;
+    const bad = demands.find(d => !int(d.width) || d.width > s.maxWidth || !int(d.length) || d.length > 1_000_000);
+    return bad ? `需求「${bad.name || bad.id}」：分切宽度须为整数且不超过组合上限，卷长须为整数 mm 且不超过 1000000 mm` : null;
 }
 
 /** 候选方案中已占用的条数（未报工的候选也算，避免重复出车）。 */

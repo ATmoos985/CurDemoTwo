@@ -42,6 +42,21 @@ class LinearSlittingSolverEngineTests {
     }
 
     @Test
+    void millimetreLengthsRemainExactAcrossGroupsAndLargeLengths() {
+        for (String profile : List.of("FAST", "QUALITY")) {
+            var lengths = List.of(2440L, 2441L, 1L, 1_000_000_000L);
+            var orders = lengths.stream().map(length -> new SlittingProblem.Order("L" + length, 500, length, 2, "plain")).toList();
+            var p = new SlittingProblem("1", "mm", 1000, 0, 0, 1000, 1000, 1, 0, profile, orders, 20);
+            var r = engine.solve(p);
+            assertEquals("FEASIBLE", r.status());
+            assertTrue(r.fulfillment().stream().allMatch(f -> f.produced() == 2 && f.missing() == 0));
+            assertEquals(new java.util.HashSet<>(lengths), r.patterns().stream().map(SlittingResult.Pattern::lengthMm).collect(java.util.stream.Collectors.toSet()));
+            assertEquals(lengths.stream().mapToLong(l -> l * 1000).sum(), r.motherAreaMm2());
+            assertEquals(r.motherAreaMm2(), r.pieceAreaMm2());
+        }
+    }
+
+    @Test
     void malformedKernelOutputNeverGuessesAssignmentsOrSubstitutesRollLength() {
         var p=new SlittingProblem("1","mm",1000,0,0,1000,1000,1,0,"FAST",
                 List.of(new SlittingProblem.Order("external-A",500,1000,2,"A")),10);

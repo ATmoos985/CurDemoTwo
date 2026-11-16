@@ -996,8 +996,8 @@ public class RemnantService {
             slitting.validate();
             for (CuttingTask.Line line : input.demands())
                 if (line != null && (line.shape() != null || line.allowRotation() || line.width() != Math.rint(line.width())
-                        || line.length() % 1000 != 0 || line.width() > slitting.maxWidth() || line.length() > 1_000_000))
-                    throw new IllegalArgumentException("一维需求为整数 mm 的分切宽度 × 整米卷长（1000 的倍数），不能旋转或使用轮廓，宽度不超过组合上限");
+                        || line.length() != Math.rint(line.length()) || line.width() > slitting.maxWidth() || line.length() > 1_000_000))
+                    throw new IllegalArgumentException("一维需求为整数 mm 的分切宽度 × 卷长，不能旋转或使用轮廓，宽度不超过组合上限");
         }
         for (CuttingTask.Line line : input.demands()) {
             if (line != null && line.shape() != null) {

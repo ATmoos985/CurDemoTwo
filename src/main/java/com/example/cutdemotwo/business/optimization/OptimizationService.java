@@ -74,7 +74,7 @@ public class OptimizationService implements AutoCloseable {
         return Map.of("schemaVersion","2.0","problemTypes",List.of("NESTING_2D","SLITTING_1D"),"inputProfile","nesting-v1",
                 "inputProfiles",List.of("nesting-v1","slitting-v1"),
                 "slittingEngine",Map.of("id",slitting.getEngineType(),"available",slitting.isAvailable(),"cancellation","isolated-process",
-                        "maxOrders",500,"maxTotalProducedRolls",100000,"lengthResolutionMm",1000,"maxHeapMiB",512),
+                        "maxOrders",500,"maxTotalProducedRolls",100000,"lengthResolutionMm",1,"maxHeapMiB",512),
                 "engines",solvers.capabilities(),"limits",Map.of("workers",workers,"queueCapacity",queueCapacity,"maxStoredJobs",maxStored,
                         "maxRequestBytes",262144,"maxPieces",10000,"maxContourPieces",200,"maxTimeLimitSeconds",60),
                 "features",Map.of("polling",true,"cancellation","cooperative-request","hardPreemption",false,"progress","phase-only",
