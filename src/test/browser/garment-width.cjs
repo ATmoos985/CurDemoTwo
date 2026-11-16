@@ -13,6 +13,26 @@ before(async () => {
 });
 after(async () => { await browser?.close(); });
 
+test('the rotation control is visible above the inputs and shows its mouse and keyboard state', async () => {
+    const toggle = page.getByRole('checkbox', {name:'允许 180° 旋转'});
+    const row = page.locator('label[for="garment-half-turn"]');
+    const off = row.getByText('未启用', {exact:true}), on = row.getByText('已启用', {exact:true});
+    await expect(toggle).toBeInViewport({ratio:1});
+    const box = await row.boundingBox(), example = await page.getByLabel('试算示例').boundingBox();
+    assert.ok(box.y + box.height <= example.y);
+    await expect(toggle).not.toBeChecked();
+    await expect(off).toBeVisible();
+    await expect(on).toBeHidden();
+    await off.click();
+    await expect(toggle).toBeChecked();
+    await expect(on).toBeVisible();
+    await expect(off).toBeHidden();
+    await toggle.press('Space');
+    await expect(toggle).not.toBeChecked();
+    await expect(off).toBeVisible();
+    await expect(on).toBeHidden();
+});
+
 test('invalid per-marker garment count blocks submission', async () => {
     await expect(page.getByRole('button', {name:'停止', exact:true})).toHaveCount(0);
     await page.getByLabel('M 码（件/版）').fill('0');
@@ -102,6 +122,14 @@ test('each named example fills the form without submitting and produces a comple
         assert.deepEqual(submissions.slice(before).map(req => req.problem.material.shape.width), example.widths);
         assert.equal(await rows.count(), example.widths.length);
         assert.ok(await rows.filter({hasText:'当前最低单耗'}).count() > 0);
+        if (example.id === 'gathered-skirt') {
+            const fullWidth = rows.filter({has:page.getByRole('cell', {name:'1,400', exact:true})});
+            await expect(fullWidth.locator('td').nth(2)).toHaveText('1,360');
+            await expect(fullWidth.locator('td').nth(3)).toHaveText('100');
+            await fullWidth.getByRole('button').click();
+            await expect(page.locator('#garment-view')).toContainText('1,400 mm');
+            if (process.env.SCREENSHOT_PATH) await page.screenshot({path:process.env.SCREENSHOT_PATH});
+        }
         console.log(example.name, await rows.locator('td:nth-child(2)').allTextContents());
         await page.getByLabel('克重（g/m²）').fill(String(example.gsm + 1));
         assert.equal(await exampleSelect.inputValue(), '');
@@ -114,30 +142,54 @@ test('half turns are compared against fixed grain at each width and the best com
     const toggle = page.getByRole('checkbox', {name:'允许 180° 旋转'});
     await expect(toggle).not.toBeChecked();
     await toggle.check();
-    const results = [], requests = [];
+    const results = [], submissions = [];
     page.on('response', response => {
-        if (new URL(response.url()).pathname.startsWith('/api/v2/optimization-results/')) results.push(response.json());
-    });
-    page.on('request', req => {
-        if (req.method() === 'POST' && new URL(req.url()).pathname === '/api/v2/optimization-jobs') requests.push(req.postDataJSON());
+        const path = new URL(response.url()).pathname, req = response.request();
+        if (path.startsWith('/api/v2/optimization-results/')) results.push(response.json());
+        if (path === '/api/v2/optimization-jobs' && req.method() === 'POST')
+            submissions.push({req:req.postDataJSON(), accepted:response.json()});
     });
     await page.getByRole('button', {name:'试算幅宽'}).click();
     await expect(page.getByRole('status').filter({hasText:'试算结束'})).toBeVisible({timeout:150000});
-    assert.equal(requests.length, 6);
-    const solved = await Promise.all(results);
-    assert.equal(solved.length, 6);
+    const solved = new Map((await Promise.all(results)).map(r => [r.jobId, r]));
+    const attempts = await Promise.all(submissions.map(async ({req,accepted}) => {
+        const {id} = await accepted;
+        const job = await (await page.request.get(base + '/api/v2/optimization-jobs/' + id)).json();
+        assert.ok(['SUCCEEDED','TIMED_OUT'].includes(job.state));
+        return {req, result:solved.get(id), state:job.state};
+    }));
     const rows = page.locator('tbody tr');
     const metrics = [];
-    for (let i = 0; i < solved.length; i++) {
-        const r = solved[i], req = requests[i], turn = i % 2 === 1;
-        assert.ok(req.problem.parts.every(p => !p.allowRotation && Boolean(p.allowHalfTurn) === turn));
-        assert.equal(req.problem.material.shape.width, [1600,1850,1950][Math.floor(i / 2)]);
-        if (turn && solved[i - 1].meetsRequirement)
-            assert.equal(req.problem.material.shape.height, Math.ceil(solved[i - 1].marker.occupiedLengthMm * 10) / 10);
-        assert.ok(r.layout.placements.every(p => p.rotationDegrees === 0 || (turn && p.rotationDegrees === 180)));
-        if (r.meetsRequirement) {
-            const actual = r.metrics.find(m => m.name === 'markerAreaUtilization').value;
-            metrics.push({i, actual, turned:r.layout.placements.filter(p => p.rotationDegrees === 180).length});
+    assert.equal(await rows.count(), 6);
+    assert.ok(attempts.every(a => [1600,1850,1950].includes(a.req.problem.material.shape.width)));
+    for (const [n, width] of [1600,1850,1950].entries()) {
+        const group = attempts.filter(a => a.req.problem.material.shape.width === width);
+        const [baseRun, firstTurn] = group;
+        const original = baseRun.req.problem.material.shape.height, fixed = baseRun.result;
+        const tight = fixed?.meetsRequirement ? Math.min(original, Math.ceil(fixed.marker.occupiedLengthMm * 10) / 10) : original;
+        assert.equal(firstTurn.req.problem.material.shape.height, tight);
+        const retry = tight < original && !firstTurn.result?.meetsRequirement;
+        assert.equal(group.length, retry ? 3 : 2);
+        const turnRow = rows.nth(n * 2 + 1);
+        if (retry) {
+            assert.equal(group[2].req.problem.material.shape.height, original);
+            await expect(turnRow).toContainText('原起长复试');
+        }
+        for (const [j, run] of group.entries()) {
+            assert.ok(run.req.problem.parts.every(p => !p.allowRotation && Boolean(p.allowHalfTurn) === (j > 0)));
+            if (run.result) assert.ok(run.result.layout.placements.every(p => p.rotationDegrees === 0 || (j > 0 && p.rotationDegrees === 180)));
+        }
+        const rawTurn = group.at(-1).result;
+        const retainFixed = fixed?.meetsRequirement && (!rawTurn?.meetsRequirement || fixed.marker.occupiedLengthMm < rawTurn.marker.occupiedLengthMm);
+        if (retainFixed) {
+            await expect(turnRow).toContainText('沿用固定方向 · 掉头 0 片');
+            await expect(turnRow).toContainText(rawTurn?.meetsRequirement ? '掉头原试排' : '掉头试排未齐套');
+        }
+        for (const [j, chosen] of [fixed, retainFixed ? fixed : rawTurn].entries()) {
+            if (!chosen?.meetsRequirement) continue;
+            const i = n * 2 + j;
+            const actual = chosen.metrics.find(m => m.name === 'markerAreaUtilization').value;
+            metrics.push({i, actual, turned:chosen.layout.placements.filter(p => p.rotationDegrees === 180).length});
             assert.ok(Math.abs(Number(await rows.nth(i).locator('td').nth(3).innerText()) - actual) <= 0.0051);
         }
     }

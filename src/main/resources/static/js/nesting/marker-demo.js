@@ -7,7 +7,9 @@ export const MARKER_STYLES = Object.freeze([
     {id:'GARMENT_SKIRT', name:'半裙', description:'裙片、贴袋与腰头'},
     {id:'GARMENT_TANK', name:'背心', description:'前后身片、领口包条与袖窿包条'},
     {id:'GARMENT_SHORTS', name:'短裤', description:'前后裤片、松紧腰头与贴袋'},
-    {id:'GARMENT_APRON', name:'围裙', description:'围裙身片、前贴袋、挂颈带与腰系带'}
+    {id:'GARMENT_APRON', name:'围裙', description:'围裙身片、前贴袋、挂颈带与腰系带'},
+    {id:'GARMENT_GORED_SKIRT', name:'六片裙', description:'六片梯形裙片与分段腰头'},
+    {id:'GARMENT_GATHERED_SKIRT', name:'直裁抽褶裙', description:'两片直裁裙身与分段腰头'}
 ]);
 
 /** Two sizes of a simplified garment; every named part is required, including small pieces. */

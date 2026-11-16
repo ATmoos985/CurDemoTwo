@@ -21,7 +21,8 @@ test('one missing piece or substituting another size cannot qualify as a complet
     assert.equal(markerSummary(p,partial).complete,false);
 });
 test('all garment cases include both sizes and small parts within the fixed fabric width', () => {
-    const counts = {GARMENT_SHIRT:18, GARMENT_PANTS:18, GARMENT_SKIRT:14, GARMENT_TANK:10, GARMENT_SHORTS:14, GARMENT_APRON:10};
+    const counts = {GARMENT_SHIRT:18, GARMENT_PANTS:18, GARMENT_SKIRT:14, GARMENT_TANK:10, GARMENT_SHORTS:14,
+        GARMENT_APRON:10, GARMENT_GORED_SKIRT:16, GARMENT_GATHERED_SKIRT:8};
     for (const style of MARKER_STYLES) for (const width of [1200,1500,2000]) {
         const p=markerExample(width,style.id);
         assert.equal(p.parts.reduce((sum,part)=>sum+part.quantity,0),counts[style.id]);

@@ -7,15 +7,18 @@ export const GARMENT_EXAMPLES = [
     {id:'skirt-light', name:'半裙 · 双码轻薄料', style:'GARMENT_SKIRT', M:1, L:1, widths:[1400,1500], edge:20, gsm:135},
     {id:'tank-knit', name:'背心 · 针织包条', style:'GARMENT_TANK', M:1, L:1, widths:[1500,1750], edge:30, gsm:165},
     {id:'shorts-pair', name:'短裤 · 同码双件', style:'GARMENT_SHORTS', M:2, L:0, widths:[1450,1600], edge:20, gsm:220},
-    {id:'apron-canvas', name:'围裙 · 帆布长系带', style:'GARMENT_APRON', M:1, L:1, widths:[1200,1500], edge:25, gsm:280}
+    {id:'apron-canvas', name:'围裙 · 帆布长系带', style:'GARMENT_APRON', M:1, L:1, widths:[1200,1500], edge:25, gsm:280},
+    {id:'gored-skirt', name:'六片裙 · 梯形裙片交错密排', style:'GARMENT_GORED_SKIRT', M:2, L:0, widths:[1270,1400], edge:20, gsm:180},
+    {id:'gathered-skirt', name:'抽褶裙 · 直裁满幅对照', style:'GARMENT_GATHERED_SKIRT', M:2, L:0, widths:[1400,1500], edge:20, gsm:150},
+    {id:'tank-six', name:'背心 · 混码六件合排', style:'GARMENT_TANK', M:3, L:3, widths:[1750], edge:30, gsm:165}
 ];
 
 export function markerRequest(style, width, sizeCounts, clientRequestId, allowHalfTurn = false) {
     const problem = markerExample(width, style, sizeCounts);
     if (allowHalfTurn) problem.parts.forEach(part => { part.allowHalfTurn = true; });
     return {schemaVersion: '2.0', clientRequestId, problemType: 'NESTING_2D', allowFallback: true,
-        requireComplete: true, problem: {...problem, timeLimitSeconds: 10},
-        strategy: {id: 'marker-shortening', version: '1', maxTrials: 5}};
+        requireComplete: true, problem: {...problem, timeLimitSeconds: 14},
+        strategy: {id: 'marker-shortening', version: '2', maxTrials: 7}};
 }
 
 export function candidateWidths(input) {
@@ -33,4 +36,43 @@ export function fabricConsumption(result, width, edge, gsm, garmentCount) {
     const lengthPerGarment = length / garmentCount;
     return {length, utilization, lengthPerGarment,
         gramsPerGarment: (width + edge) * lengthPerGarment * gsm / 1_000_000};
+}
+
+export function compactionSavingMm(trials = []) {
+    const index = trials.findIndex(trial => trial.phase === 'COMPACTION');
+    if (index < 1) return 0;
+    const occupied = trial => trial.complete && Number.isFinite(trial.occupiedLengthMm) && trial.occupiedLengthMm > 0;
+    const before = trials.slice(0, index).filter(occupied);
+    if (!before.length || !occupied(trials[index])) return 0;
+    const shortest = Math.min(...before.map(trial => trial.occupiedLengthMm));
+    return Math.max(0, shortest - trials[index].occupiedLengthMm);
+}
+
+export function selectMarkerTrial(jobState, trial, fixed) {
+    const canCompare = jobState === 'SUCCEEDED' || jobState === 'TIMED_OUT';
+    if (canCompare && fixed?.use && (!trial.use || fixed.use.length < trial.use.length)) return fixed;
+    return trial;
+}
+
+export async function solveMarkerDirection(request, fixed, solve, isActive, onRetry) {
+    const originalLength = request.problem.material.shape.height;
+    const tightLength = fixed?.use && Math.ceil(fixed.use.length * 10) / 10;
+    if (!tightLength || tightLength >= originalLength) return {trial:await solve(request)};
+    const tightRequest = structuredClone(request);
+    tightRequest.problem.material.shape.height = tightLength;
+    const first = await solve(tightRequest);
+    if (!isActive() || first.use || !['SUCCEEDED', 'TIMED_OUT'].includes(first.job.state)) return {trial:first};
+
+    onRetry();
+    let label = first.job.state === 'TIMED_OUT' ? '紧窗限时未齐套 · 原起长复试' : '紧窗未齐套 · 原起长复试';
+    try {
+        const retry = await solve({...request, clientRequestId:crypto.randomUUID()});
+        if (retry.job.state === 'FAILED' || retry.job.state === 'CANCELLED') {
+            label += retry.job.state === 'FAILED' ? '失败' : '已取消';
+            return {trial:first, retryNote:label};
+        }
+        return {trial:retry, retryNote:label};
+    } catch (error) {
+        return {trial:first, retryNote:`${label}失败 · ${error.message}`};
+    }
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {candidateWidths, fabricConsumption, markerRequest} from '../../main/resources/static/app/js/model/garment.js';
+import {candidateWidths, compactionSavingMm, fabricConsumption, markerRequest, selectMarkerTrial, solveMarkerDirection} from '../../main/resources/static/app/js/model/garment.js';
 import {markerExample} from '../../main/resources/static/js/nesting/marker-demo.js';
 
 test('width trials preserve the same single-size or mixed-size bill of pieces, including small parts', () => {
@@ -12,6 +12,8 @@ test('width trials preserve the same single-size or mixed-size bill of pieces, i
             assert.deepEqual(req.problem.parts, expected);
             assert.equal(req.problem.material.shape.width, width);
             assert.equal(req.requireComplete, true);
+            assert.deepEqual(req.strategy, {id:'marker-shortening', version:'2', maxTrials:7});
+            assert.equal(req.problem.timeLimitSeconds, 14);
         }
     }
 });
@@ -31,4 +33,76 @@ test('mass uses total fabric width, occupied length and garment count only for v
     assert.deepEqual(calculate({}), {length:2400, utilization:81.5, lengthPerGarment:800, gramsPerGarment:264});
     for (const change of [{validationStatus:'FAILED'}, {fulfillmentStatus:'PARTIAL'}, {meetsRequirement:false},
         {marker:{occupiedLengthMm:null}}, {metrics:[]}]) assert.equal(calculate(change), null);
+});
+
+test('compaction savings use the shortest preceding complete occupied length', () => {
+    const trials = [
+        {complete:true, occupiedLengthMm:1300},
+        {complete:false, occupiedLengthMm:800},
+        {complete:true, occupiedLengthMm:1110.5, lengthMm:1200}
+    ];
+    const compact = {phase:'COMPACTION', complete:true, occupiedLengthMm:1100};
+    assert.equal(compactionSavingMm([...trials, compact]), 10.5);
+    assert.equal(compactionSavingMm(trials), 0);
+    assert.equal(compactionSavingMm([compact]), 0);
+    assert.equal(compactionSavingMm([trials[1], compact]), 0);
+    for (const change of [{complete:false}, {occupiedLengthMm:null}, {occupiedLengthMm:1110.5}, {occupiedLengthMm:1200}])
+        assert.equal(compactionSavingMm([...trials, {...compact, ...change}]), 0);
+});
+
+test('the allowed direction keeps the verified fixed marker when its normal or timed search falls short', () => {
+    const fixed = {request:{id:'fixed'}, result:{id:'fixed'}, use:{length:1200}};
+    const worse = {request:{id:'turned'}, result:{id:'turned'}, use:{length:1201}};
+    const partial = {...worse, use:null};
+    const missing = {...partial, result:null};
+    for (const state of ['SUCCEEDED','TIMED_OUT']) {
+        for (const trial of [worse, partial, missing]) assert.equal(selectMarkerTrial(state, trial, fixed), fixed);
+        for (const length of [1190,1200]) {
+            const trial = {...worse, use:{length}};
+            assert.equal(selectMarkerTrial(state, trial, fixed), trial);
+        }
+    }
+    for (const state of ['FAILED','CANCELLED']) assert.equal(selectMarkerTrial(state, partial, fixed), partial);
+    assert.equal(selectMarkerTrial('SUCCEEDED', worse, {...fixed, use:null}), worse);
+});
+
+test('only a shortened incomplete directional search retries once at the original height', async () => {
+    const request = markerRequest('GARMENT_SKIRT', 1500, {M:1,L:1}, 'trial', true);
+    const original = request.problem.material.shape.height, fixed = {use:{length:2988.45}};
+    const partial = {job:{state:'SUCCEEDED'}, use:null};
+    const complete = {job:{state:'SUCCEEDED'}, use:{length:2982.63}};
+    async function run(first, retry, active = true, base = fixed) {
+        const calls = [];
+        let notices = 0;
+        const solve = async input => {
+            calls.push(input);
+            const result = calls.length === 1 ? first : retry;
+            if (result instanceof Error) throw result;
+            return result;
+        };
+        const outcome = await solveMarkerDirection(request, base, solve, () => active, () => { notices++; });
+        return {...outcome, calls, notices};
+    }
+    for (const state of ['SUCCEEDED','TIMED_OUT']) {
+        const both = await run({...partial, job:{state}}, complete);
+        assert.equal(both.trial, complete);
+        assert.equal(both.notices, 1);
+        assert.deepEqual(both.calls.map(c => c.problem.material.shape.height), [2988.5, original]);
+        assert.notEqual(both.calls[0].clientRequestId, both.calls[1].clientRequestId);
+        assert.deepEqual(both.calls[1].problem, request.problem);
+        assert.match(both.retryNote, /原起长复试/);
+    }
+    for (const retry of [new Error('HTTP 503'), {job:{state:'FAILED'}}]) {
+        const failed = await run(partial, retry);
+        assert.equal(failed.calls.length, 2);
+        assert.equal(failed.trial, partial);
+        assert.match(failed.retryNote, /原起长复试失败/);
+        assert.equal(selectMarkerTrial(failed.trial.job.state, failed.trial, fixed), fixed);
+    }
+    for (const first of [complete, {job:{state:'FAILED'}}, {job:{state:'CANCELLED'}}])
+        assert.equal((await run(first, null)).calls.length, 1);
+    assert.equal((await run(partial, null, false)).calls.length, 1);
+    assert.equal((await run(partial, null, true, {use:{length:original}})).calls.length, 1);
+    assert.equal((await run(partial, null, true, null)).calls.length, 1);
+    await assert.rejects(run(new Error('HTTP 503'), complete), /HTTP 503/);
 });

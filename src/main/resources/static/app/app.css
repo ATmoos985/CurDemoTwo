@@ -11,7 +11,14 @@
 .demo-split{grid-template-columns:250px minmax(280px,1fr) 290px}
 .garment-split{grid-template-columns:minmax(280px,320px) minmax(0,1fr)}
 .garment-split .field{width:100%;min-width:0}
-#garment-half-turn{justify-self:start;width:18px;height:18px;margin:0}
+.garment-direction{grid-column:1/-1;border:1px solid var(--line-2);border-radius:4px;background:var(--panel-2)}
+.garment-direction label{display:flex;align-items:center;gap:9px;min-height:40px;padding:0 10px;cursor:pointer}
+.garment-direction strong{color:var(--text);font-size:14px}
+.garment-direction small{display:block;margin:0 10px 9px;color:var(--text-2);line-height:1.45}
+#garment-half-turn{width:20px;height:20px;margin:0;flex:none;accent-color:var(--accent)}
+.garment-angle-state{margin-left:auto;color:var(--text-2)}
+.garment-angle-state .angle-on,#garment-half-turn:checked~.garment-angle-state .angle-off{display:none}
+#garment-half-turn:checked~.garment-angle-state .angle-on{display:inline;color:var(--accent-ink);font-weight:600}
 .garment-results{max-height:42%;overflow:auto}
 #garment-stop[hidden]{display:none}
 .demo-canvas.rc-host{flex:1;min-height:240px;position:relative;inset:auto;background:var(--canvas);overflow:hidden}

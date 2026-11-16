@@ -1,7 +1,7 @@
 import {esc, fmtN} from '../util.js';
 import {MARKER_STYLES} from '../../../js/nesting/marker-demo.js';
 import {OptimizationSession} from '../../../js/business/optimization/job-client.js';
-import {GARMENT_EXAMPLES, candidateWidths, fabricConsumption, markerRequest} from '../model/garment.js';
+import {GARMENT_EXAMPLES, candidateWidths, compactionSavingMm, fabricConsumption, markerRequest, selectMarkerTrial, solveMarkerDirection} from '../model/garment.js';
 import {createRollCanvas} from '../canvas/roll-canvas.js';
 import {showcaseScene} from '../model/showcase.js';
 
@@ -9,16 +9,19 @@ export function mount(el) {
     el.innerHTML = `<div class="ph"><h1>唛架幅宽试算</h1><span class="crumb">服装 · 单层用料</span></div>
       <div class="split garment-split"><section class="pane"><div class="pane-h">试算条件</div>
       <div class="pane-b"><form id="garment-form" class="form">
+      <div class="garment-direction"><label for="garment-half-turn">
+        <input id="garment-half-turn" name="halfTurn" type="checkbox" aria-labelledby="garment-angle-label" aria-describedby="angle-help">
+        <strong id="garment-angle-label">允许 180° 旋转</strong>
+        <span class="garment-angle-state" aria-hidden="true"><span class="angle-off">未启用</span><span class="angle-on">已启用</span></span>
+      </label><small id="angle-help">面料允许倒顺排时启用，可对比固定方向与允许掉头的利用率。</small></div>
       <label for="garment-example">试算示例</label><select class="field" id="garment-example" name="example"><option value="" disabled>自定义参数</option>${GARMENT_EXAMPLES.map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select>
       <label for="garment-style">内置样板</label><select class="field" id="garment-style" name="style">${MARKER_STYLES.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
-      <label for="garment-half-turn">允许 180° 旋转</label><input id="garment-half-turn" name="halfTurn" type="checkbox" aria-describedby="angle-help">
       <label for="garment-m">M 码（件/版）</label><input class="field" id="garment-m" name="M" type="number" min="0" max="12" required>
       <label for="garment-l">L 码（件/版）</label><input class="field" id="garment-l" name="L" type="number" min="0" max="12" required>
       <label for="garment-widths">有效幅宽（mm）</label><input class="field" id="garment-widths" name="widths" aria-describedby="width-help" required>
       <label for="garment-edge">两侧布边合计（mm）</label><input class="field" id="garment-edge" name="edge" type="number" min="0" step="0.1" required>
       <label for="garment-gsm">克重（g/m²）</label><input class="field" id="garment-gsm" name="gsm" type="number" min="0.1" step="0.1" required></form>
       <p class="demo-note" id="width-help">每版合计 1–12 件。有效幅宽可填 1–8 个值，范围 1200–2000 mm，用逗号或空格分隔。</p>
-      <p class="demo-note" id="angle-help">面料允许倒顺排时可启用掉头。每个幅宽各算一版固定方向和一版允许掉头的唛架，保持纱向轴线。</p>
       <p class="demo-note">克重单耗按含布边幅宽和实际唛架长度估算，未计布头、布尾及备损。</p></div></section>
       <section class="pane"><div class="pane-h">候选幅宽比较</div><div class="garment-results"><table class="t">
       <thead><tr>${['有效幅宽 mm','试算状态','唛架长 mm','利用率 %','mm/件','g/件','排料图'].map(v => `<th>${v}</th>`).join('')}</tr></thead><tbody></tbody></table></div>
@@ -32,29 +35,36 @@ export function mount(el) {
     function select(row) {
         selected = row;
         canvas ??= createRollCanvas($('#garment-canvas'));
-        canvas.setScene(showcaseScene(row.request, row.result), {refit:true});
+        canvas.setScene(showcaseScene(row.layoutRequest, row.result), {refit:true});
         $('#garment-view').textContent = `排料图 · ${fmtN(row.width, 1)} mm · ${row.direction} · ${row.state}`;
     }
     function render() {
         const lowest = Math.min(...rows.filter(r => r.use).map(r => r.use.gramsPerGarment));
         const highest = Math.max(...rows.filter(r => r.use).map(r => r.use.utilization));
         const comparison = form.elements.halfTurn.checked;
-        function rotationDetail(row) {
-            if (!comparison) return '';
-            let info = row.direction;
+        function trialDetail(row) {
+            const info = comparison ? [row.direction] : [];
+            if (row.retryNote) info.push(row.retryNote);
             if (row.halfTurn && row.result?.layout) {
+                if (row.usedFixed) info.push('沿用固定方向');
                 const turned = row.result.layout.placements.filter(p => p.rotationDegrees === 180).length;
-                info += ` · 掉头 ${turned} 片`;
+                info.push(`掉头 ${turned} 片`);
+                if (row.usedFixed) {
+                    const raw = row.trial.use;
+                    info.push(raw ? `掉头原试排 ${fmtN(raw.length, 2)} mm / ${fmtN(raw.utilization, 2)}%` : '掉头试排未齐套');
+                }
                 const base = rows.find(r => r.width === row.width && !r.halfTurn);
                 if (row.use && base?.use) {
                     const delta = row.use.utilization - base.use.utilization;
-                    info += ` · 较固定 ${delta > 0 ? '+' : ''}${fmtN(delta, 2)} 个百分点`;
+                    info.push(`较固定 ${delta > 0 ? '+' : ''}${fmtN(delta, 2)} 个百分点`);
                 }
             }
-            return `<br><small>${esc(info)}</small>`;
+            const saved = row.use && compactionSavingMm(row.result.marker.trials);
+            if (saved > 0) info.push(`${row.usedFixed ? '固定方案' : ''}压紧节省 ${saved < 0.01 ? '不足 0.01' : fmtN(saved, 2)} mm`);
+            return info.length ? `<br><small>${esc(info.join(' · '))}</small>` : '';
         }
         $('tbody').innerHTML = rows.map((r, i) => `<tr><td class="num">${fmtN(r.width, 1)}</td>
-          <td class="wrap">${esc(r.state)}${r.use?.utilization === highest ? ' · 最高利用率' : ''}${r.use?.gramsPerGarment === lowest ? ' · 当前最低单耗' : ''}${rotationDetail(r)}</td>
+          <td class="wrap">${esc(r.state)}${r.use?.utilization === highest ? ' · 最高利用率' : ''}${r.use?.gramsPerGarment === lowest ? ' · 当前最低单耗' : ''}${trialDetail(r)}</td>
           ${['length','utilization','lengthPerGarment','gramsPerGarment'].map(k => `<td class="num">${r.use ? fmtN(r.use[k], 2) : '—'}</td>`).join('')}
           <td>${r.result?.layout ? `<button class="btn sm" type="button" data-index="${i}" aria-label="查看 ${r.width} mm ${r.direction}排料图" aria-pressed="${selected === r}">查看</button>` : '—'}</td></tr>`).join('');
     }
@@ -118,23 +128,36 @@ export function mount(el) {
         busy(true);
         try {
             for (const row of rows) {
-                if (row.halfTurn) {
-                    const baseline = rows.find(r => r.width === row.width && !r.halfTurn);
-                    if (baseline.use) {
-                        // The fixed marker is already feasible. Spend the second search on this length or shorter.
-                        row.request.problem.material.shape.height = Math.ceil(baseline.use.length * 10) / 10;
-                    }
-                }
+                const baseline = row.halfTurn ? rows.find(r => r.width === row.width && !r.halfTurn) : null;
                 row.state = '计算中'; render();
                 status.textContent = `正在试排 ${row.width} mm · ${row.direction}`;
+                async function solve(request) {
+                    let lastJob;
+                    const {job, result} = await session.solve(request, {onProgress:job => { lastJob = job; }}).catch(error => {
+                        // A terminal timeout can have no result to fetch. Transport errors still surface as failures.
+                        if (lastJob?.state === 'TIMED_OUT' && !lastJob.resultRef) return {job:lastJob, result:null};
+                        throw error;
+                    });
+                    return {job, request, result, use:result && fabricConsumption(result, row.width, edge, gsm, count)};
+                }
                 try {
-                    const {job, result} = await session.solve(row.request);
+                    const outcome = await solveMarkerDirection(row.request, baseline?.trial, solve, () => mine === revision, () => {
+                        row.state = '原起长复试中'; render();
+                        status.textContent = `正在试排 ${row.width} mm · 允许掉头 · 原起长复试`;
+                    });
                     if (mine !== revision) return;
-                    row.result = result;
-                    row.use = fabricConsumption(result, row.width, edge, gsm, count);
+                    row.trial = outcome.trial;
+                    row.retryNote = outcome.retryNote;
+                    const job = row.trial.job;
+                    const chosen = selectMarkerTrial(job.state, row.trial, baseline?.trial);
+                    row.usedFixed = chosen !== row.trial;
+                    row.layoutRequest = chosen.request;
+                    row.result = chosen.result;
+                    row.use = chosen.use;
                     row.state = row.use ? '齐套' : '未取得齐套结果';
-                    if (job.state !== 'SUCCEEDED') row.state += '（提前结束）';
-                    if (!manualView && result.layout && (!selected || row.use && row.use.utilization > (selected.use?.utilization ?? -1))) select(row);
+                    if (job.state === 'TIMED_OUT') row.state += '（试排限时结束）';
+                    if (job.state === 'FAILED' || job.state === 'CANCELLED') row.state = `${job.state === 'FAILED' ? '试算失败' : '已停止'} · ${row.state}`;
+                    if (!manualView && row.result?.layout && (!selected || row.use && row.use.utilization > (selected.use?.utilization ?? -1))) select(row);
                 } catch (e) {
                     if (mine !== revision) return;
                     row.state = '试算失败 · ' + e.message;
