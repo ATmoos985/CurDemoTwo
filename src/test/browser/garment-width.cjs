@@ -79,3 +79,32 @@ test('a failed width stays visible while the next real width can still qualify',
     assert.equal(await rows.first().locator('td').nth(5).textContent(), '—');
     await expect(rows.last()).toContainText('当前最低单耗');
 });
+
+test('each named example fills the form without submitting and produces a complete marker', async t => {
+    const {GARMENT_EXAMPLES} = await import('../../main/resources/static/app/js/model/garment.js');
+    const submissions = [];
+    page.on('request', req => {
+        if (req.method() === 'POST' && new URL(req.url()).pathname === '/api/v2/optimization-jobs') submissions.push(req.postDataJSON());
+    });
+    const exampleSelect = page.getByLabel('试算示例');
+    for (const example of GARMENT_EXAMPLES) await t.test(example.name, async () => {
+        const before = submissions.length;
+        await exampleSelect.selectOption(example.id);
+        const inputs = await page.locator('#garment-form').evaluate(form => Object.fromEntries(new FormData(form)));
+        assert.equal(inputs.style, example.style);
+        for (const key of ['M','L','edge','gsm']) assert.equal(Number(inputs[key]), example[key]);
+        assert.equal(inputs.widths, example.widths.join(', '));
+        assert.equal(await page.locator('tbody tr').count(), 0);
+        assert.equal(submissions.length, before);
+        await page.getByRole('button', {name:'试算幅宽'}).click();
+        await expect(page.getByRole('status').filter({hasText:'试算结束'})).toBeVisible({timeout:90000});
+        const rows = page.locator('tbody tr');
+        assert.deepEqual(submissions.slice(before).map(req => req.problem.material.shape.width), example.widths);
+        assert.equal(await rows.count(), example.widths.length);
+        assert.ok(await rows.filter({hasText:'当前最低单耗'}).count() > 0);
+        console.log(example.name, await rows.locator('td:nth-child(2)').allTextContents());
+        await page.getByLabel('克重（g/m²）').fill(String(example.gsm + 1));
+        assert.equal(await exampleSelect.inputValue(), '');
+        assert.equal(await rows.count(), 0);
+    });
+});

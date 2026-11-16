@@ -4,7 +4,10 @@ import {polygon, rectangle, shapeArea} from '../canvas/nesting-scene.js';
 export const MARKER_STYLES = Object.freeze([
     {id:'GARMENT_SHIRT', name:'上衣', description:'前片、后片、袖片、领片、贴边与袋布'},
     {id:'GARMENT_PANTS', name:'长裤', description:'前裤片、后裤片、裤袋、腰头与门襟'},
-    {id:'GARMENT_SKIRT', name:'半裙', description:'裙片、贴袋与腰头'}
+    {id:'GARMENT_SKIRT', name:'半裙', description:'裙片、贴袋与腰头'},
+    {id:'GARMENT_TANK', name:'背心', description:'前后身片、领口包条与袖窿包条'},
+    {id:'GARMENT_SHORTS', name:'短裤', description:'前后裤片、松紧腰头与贴袋'},
+    {id:'GARMENT_APRON', name:'围裙', description:'围裙身片、前贴袋、挂颈带与腰系带'}
 ]);
 
 /** Two sizes of a simplified garment; every named part is required, including small pieces. */
@@ -22,7 +25,7 @@ export function markerExample(width = 1500, style = 'GARMENT_SHIRT', sizeCounts 
     ] : style === 'GARMENT_PANTS' ? [
         {name:'腰头', quantity:1, shape:rectangle(760,90)},
         {name:'门襟', quantity:2, shape:rectangle(65,240)}
-    ] : [{name:'腰头', quantity:1, shape:rectangle(720,90)}];
+    ] : style === 'GARMENT_SKIRT' ? [{name:'腰头', quantity:1, shape:rectangle(720,90)}] : [];
     const parts = ['M','L'].flatMap((size, index) => [...base.parts, ...small].map(part => {
         const scale = index ? 1.08 : 1;
         const shape = part.shape.type === 'RECTANGLE' ? rectangle(Math.round(part.shape.width * scale), Math.round(part.shape.height * scale))

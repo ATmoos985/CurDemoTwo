@@ -1,7 +1,7 @@
 import {esc, fmtN} from '../util.js';
 import {MARKER_STYLES} from '../../../js/nesting/marker-demo.js';
 import {OptimizationSession} from '../../../js/business/optimization/job-client.js';
-import {candidateWidths, fabricConsumption, markerRequest} from '../model/garment.js';
+import {GARMENT_EXAMPLES, candidateWidths, fabricConsumption, markerRequest} from '../model/garment.js';
 import {createRollCanvas} from '../canvas/roll-canvas.js';
 import {showcaseScene} from '../model/showcase.js';
 
@@ -9,12 +9,13 @@ export function mount(el) {
     el.innerHTML = `<div class="ph"><h1>唛架幅宽试算</h1><span class="crumb">服装 · 单层用料</span></div>
       <div class="split garment-split"><section class="pane"><div class="pane-h">试算条件</div>
       <div class="pane-b"><form id="garment-form" class="form">
+      <label for="garment-example">试算示例</label><select class="field" id="garment-example" name="example"><option value="" disabled>自定义参数</option>${GARMENT_EXAMPLES.map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select>
       <label for="garment-style">内置样板</label><select class="field" id="garment-style" name="style">${MARKER_STYLES.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
-      <label for="garment-m">M 码（件/版）</label><input class="field" id="garment-m" name="M" type="number" min="0" max="12" value="1" required>
-      <label for="garment-l">L 码（件/版）</label><input class="field" id="garment-l" name="L" type="number" min="0" max="12" value="1" required>
-      <label for="garment-widths">有效幅宽（mm）</label><input class="field" id="garment-widths" name="widths" value="1600, 1850, 1950" aria-describedby="width-help" required>
-      <label for="garment-edge">两侧布边合计（mm）</label><input class="field" id="garment-edge" name="edge" type="number" min="0" step="0.1" value="0" required>
-      <label for="garment-gsm">克重（g/m²）</label><input class="field" id="garment-gsm" name="gsm" type="number" min="0.1" step="0.1" value="200" required></form>
+      <label for="garment-m">M 码（件/版）</label><input class="field" id="garment-m" name="M" type="number" min="0" max="12" required>
+      <label for="garment-l">L 码（件/版）</label><input class="field" id="garment-l" name="L" type="number" min="0" max="12" required>
+      <label for="garment-widths">有效幅宽（mm）</label><input class="field" id="garment-widths" name="widths" aria-describedby="width-help" required>
+      <label for="garment-edge">两侧布边合计（mm）</label><input class="field" id="garment-edge" name="edge" type="number" min="0" step="0.1" required>
+      <label for="garment-gsm">克重（g/m²）</label><input class="field" id="garment-gsm" name="gsm" type="number" min="0.1" step="0.1" required></form>
       <p class="demo-note" id="width-help">每版合计 1–12 件。有效幅宽可填 1–8 个值，范围 1200–2000 mm，用逗号或空格分隔。</p>
       <p class="demo-note">样板使用固定纱向的简化轮廓。克重单耗按含布边幅宽和实际唛架长度估算，未计布头、布尾及备损。</p></div></section>
       <section class="pane"><div class="pane-h">候选幅宽比较</div><div class="garment-results"><table class="t">
@@ -55,9 +56,24 @@ export function mount(el) {
         for (const field of form.elements) field.disabled = value;
         run.disabled = value; stop.hidden = !value;
     }
-    form.oninput = () => {
+    function resetResults() {
         for (const field of form.querySelectorAll('input')) field.setCustomValidity('');
         clear();
+    }
+    const fields = form.elements;
+    function loadExample(example) {
+        fields.example.value = example.id;
+        for (const key of ['style', 'M', 'L', 'edge', 'gsm']) fields[key].value = example[key];
+        fields.widths.value = example.widths.join(', ');
+        resetResults();
+    }
+    fields.example.onchange = () => loadExample(GARMENT_EXAMPLES.find(e => e.id === fields.example.value));
+    loadExample(GARMENT_EXAMPLES[0]);
+    form.oninput = event => {
+        if (event.target !== fields.example) {
+            fields.example.value = '';
+            resetResults();
+        }
     };
     stop.onclick = () => {
         revision++; session.cancel();
