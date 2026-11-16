@@ -20,7 +20,10 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
     private static final JsonMapper JSON=JsonMapper.builder().build();
     @Override public String getEngineType(){return "ortools-1d";}
     @Override public boolean isAvailable(){return Files.isExecutable(javaExecutable());}
-    private static Path javaExecutable(){return Path.of(System.getProperty("java.home"),"bin","java");}
+    private static Path javaExecutable() {
+        String launcher = System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java";
+        return Path.of(System.getProperty("java.home"), "bin", launcher);
+    }
 
     @Override public SlittingResult solve(SlittingProblem problem) {
         SlittingValidation.validateProblem(problem);
