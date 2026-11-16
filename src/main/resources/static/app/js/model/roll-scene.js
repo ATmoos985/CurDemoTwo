@@ -2,6 +2,7 @@
 // 方案坐标：件与疵点的 y 相对工位起点（request.windowStartY），x 为幅宽方向；母卷疵点 y 为整卷坐标。
 import {effectivePieceResults} from './quality.js';
 import {stationOrigin} from '../../../js/canvas/cad-view.js';
+import {feedLengthLimits} from '../../../js/business/cutting/feed-length.js';
 
 export const PIECE_PALETTE = ['#5f87b0', '#7f9d6e', '#b8925a', '#9a7aa0', '#5f9a96', '#a8735f', '#7a86b8', '#8f9a5a', '#b07a8f', '#5a8fb0'];
 export const SEGMENT_TINTS = ['#47627d', '#4d6b55', '#6b5a43', '#5d4f66', '#3f6563'];
@@ -200,7 +201,8 @@ export function buildRollScene({roll, plans, reports = [], rollId, demands, proc
         segments, defects: rollDefects(roll, freshDefects),
         origin: current?.origin || processOrigin(width, win.start, win.len, process),
         currentId: current?.id || null, window: win, lock,
-        bed: isRemnant ? null : {min: 500, max: Math.max(bed, 6000)},
+        bed: isRemnant ? null : feedLengthLimits({totalRollL: total, windowStartY: win.start,
+            stockRemainingLength: roll?.currentRemainingLength ?? total - used, trimStart: process?.trimStart}),
         fixed: isRemnant, remnant: isRemnant ? roll.remnant : null
     };
 }

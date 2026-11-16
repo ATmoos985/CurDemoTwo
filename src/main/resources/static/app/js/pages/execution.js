@@ -20,7 +20,7 @@ export async function mount(el) {
         const cur = list.find(r => r.execution.id === sel) || list[0] || null;
         const stations = [...new Set(rows.filter(r => r.reservationActive).map(r => r.execution.station))].sort();
         const pending = [...new Set(rows.map(r => r.execution.taskId))].flatMap(t => writer.pending(t));
-        el.innerHTML = `<div class="ph"><h1>执行与报工</h1><span class="crumb">按工位查看执行单；创建执行单与报工在工作台方案上进行</span><span class="sp"></span><button class="btn" id="refresh">刷新</button></div>
+        el.innerHTML = `<div class="ph"><h1>执行与报工</h1><span class="crumb">工位与执行单</span><span class="sp"></span><button class="btn" id="refresh">刷新</button></div>
           <div class="body">
             ${pending.length ? `<div class="notice" style="margin:0 0 12px">有 ${pending.length} 个执行单操作结果未确认。${pending.map(([slot, v]) => `<button class="btn sm" data-retry="${esc(slot)}">重试 ${esc(v.action)}</button>`).join(' ')}</div>` : ''}
             <div class="cards">${stations.length ? stations.map(s => {
@@ -34,7 +34,7 @@ export async function mount(el) {
                 ${list.map(r => { const e = r.execution, qty = Object.values(e.demandQuantities || {}).reduce((a, b) => a + b, 0);
                     return `<tr class="click ${cur && e.id === cur.execution.id ? 'sel' : ''}" data-id="${esc(e.id)}"><td class="num">${shortId(e.id)}</td><td>${esc(tasks.get(e.taskId)?.name || shortId(e.taskId))}</td><td>${esc(e.station)}</td><td class="num">${esc(e.materialId)}</td><td class="r num">${qty}</td>
                       <td><span class="tag ${TAG[r.effectiveState] || ''}">${esc(executionLabels[r.effectiveState] || r.effectiveState)}</span></td><td class="num">${fmtTime(e.createdAt)}</td></tr>`; }).join('')}</tbody></table>`
-                : '<div class="empty">没有执行单。在工作台的候选方案上“创建执行单”。</div>'}</div>
+                : `<div class="empty"><strong>暂无${filter === 'open' ? '未完成的' : ''}执行单</strong><p>从任务方案开始安排执行</p><a class="btn" href="#/workbench">选择任务方案</a></div>`}</div>
               <div class="box" style="margin:0">${cur ? detail(cur) : '<div class="empty">选择执行单查看详情</div>'}</div>
             </div></div>`;
         bind(cur);

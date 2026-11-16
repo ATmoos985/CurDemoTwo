@@ -33,7 +33,7 @@ export function setStatus(html) { document.getElementById('statusbar').innerHTML
 function renderNav(active) {
     if (active === 'task') active = 'tasks';
     document.getElementById('nav').innerHTML = NAV.map(([h, items]) => `<h6>${esc(h)}</h6>` +
-        items.map(([k, t]) => `<a href="#/${k}" class="${k === active ? 'on' : ''}">${esc(t)}</a>`).join('')).join('');
+        items.map(([k, t]) => `<a href="#/${k}" class="${k === active ? 'on' : ''}" ${k === active ? 'aria-current="page"' : ''}>${esc(t)}</a>`).join('')).join('');
 }
 
 async function route() {

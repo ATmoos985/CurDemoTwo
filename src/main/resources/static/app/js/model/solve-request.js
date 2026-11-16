@@ -1,5 +1,6 @@
 // 适配层：由任务、母卷与工位窗口组装排料请求（与经典工作台同一接口 /api/solve）。纯函数，不发请求。
 import {windowDefects} from '../../../js/business/cutting/forward-search.js';
+import {suggestedFeedLength, demandFeedLength, feedLengthLimits} from '../../../js/business/cutting/feed-length.js';
 
 /** 每项需求的剩余待排数量 = 需求数 − 已完成 − 已预约。 */
 export function remainingDemands(task, completed = {}, reserved = {}) {
@@ -50,4 +51,28 @@ export function buildSolveRequest({task, roll, win, completed, reserved, setting
 /** 求解结果是否为可用方案（与经典工作台同一判定）。 */
 export function usablePlan(result) {
     return !!(result?.success && result.planId && result.pieces?.length && Array.isArray(result.cuts) && Array.isArray(result.remnants));
+}
+
+/** 与经典版共用最长单片规则；只建议窗口，不生成方案、不改库存。 */
+export function suggestFeedWindow(input) {
+    if (input.roll.remnant) return {length: null, problem: '料头须整块投料'};
+    const request = buildSolveRequest(input), length = suggestedFeedLength(request);
+    const problem = !request.demands.length ? '没有待排需求'
+        : !length ? '剩余需求不符合当前幅宽或工艺'
+            : windowProblem(input.roll, {...input.win, len: length});
+    return {length, problem};
+}
+
+/** 主计算入口的有限拉布尝试：先容纳需求，失败后按疵点安全边界延长；起点不变。 */
+export function autoFeedRequests(request, roll) {
+    if (request.feedPortType !== 'roll') return [request];
+    const {max} = feedLengthLimits({...request, stockRemainingLength: roll.currentRemainingLength});
+    const suggested = suggestedFeedLength(request);
+    const initial = suggested > request.rollL && suggested <= max ? suggested : request.rollL;
+    const sizes = [...new Set(request.demands.filter(d => d.demand > 0).map(d => demandFeedLength(d, request)).filter(Number.isFinite))];
+    const lengths = (roll.defects || []).flatMap(d => sizes.map(length =>
+        Math.ceil((d.y + d.h + (d.margin ?? 20) - request.windowStartY + length + (request.trimStart || 0)) * 10) / 10));
+    const candidates = [initial, ...[...new Set(lengths)].filter(n => n > initial && n <= max).sort((a, b) => a - b)];
+    return candidates.map(rollL => ({...request, rollL,
+        defects: windowDefects(roll.defects || [], request.windowStartY, rollL, request.rollW)}));
 }

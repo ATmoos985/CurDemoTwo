@@ -6,7 +6,8 @@ import {createRollCanvas} from '../canvas/roll-canvas.js';
 import {createRollNavigator} from '../canvas/roll-navigator.js';
 import {parseRatio, formatRatio} from '../canvas/camera.js';
 import {buildRollScene, canvasScene, rollsOfPlans, sceneMetrics, demandColors, demandIndex, STATUS_TEXT, NEW_STATION, remnantAsRoll, OUTPUT_STYLES} from '../model/roll-scene.js';
-import {buildSolveRequest, windowProblem, usablePlan, remainingDemands} from '../model/solve-request.js';
+import {buildSolveRequest, windowProblem, usablePlan, remainingDemands, suggestFeedWindow, autoFeedRequests} from '../model/solve-request.js';
+import {solveDiagnostics} from '../../../js/business/cutting/solve-diagnostics.js';
 import {taskLabels} from '../../../js/business/cutting/task-list-model.js';
 import {validateDefect, round} from '../../../js/inspection/inspection-model.js';
 import {findForwardPlan} from '../../../js/business/cutting/forward-search.js';
@@ -146,6 +147,28 @@ export async function mount(el, [taskId, focusPlan]) {
     const previewBusyReason = () => st.busy || st.saving ? '当前操作尚未结束'
         : st.report || st.quality ? '请先结束报工或复检操作'
             : st.adjust || st.toolpath ? '请先保存或放弃当前调整' : null;
+    function feedReason(sc) {
+        const plan = planOf(sc.currentId);
+        return previewBusyReason() || (sc.fixed ? '料头须整块投料' : isSlitting(task) ? '一维分切按定长出车' : null)
+            || (plan && plan.status !== 'PENDING' ? '已报工或失效记录不能调整拉布，请选择新工位' : null)
+            || (executionForPlan(views, sc.currentId)?.reservationActive ? '执行单已下达，方案已锁定' : null)
+            || (writer.pending(task.id).length ? '执行单操作结果未确认，请先重试原操作' : null)
+            || (plan && localStorage.getItem(REPORT_KEY(plan.id)) ? '请先完成或清除报工草稿' : null);
+    }
+    const feedSuggestion = sc => suggestFeedWindow({task, roll, win: sc.window, completed: detail.completed, reserved: detail.reserved});
+    function feedControl(sc) {
+        if (sc.fixed || isSlitting(task)) return '';
+        const suggestion = feedSuggestion(sc), reason = feedReason(sc) || suggestion.problem;
+        return `<button class="btn sm feed-fit" id="feed-fit" ${reason ? 'disabled' : ''} title="${esc(reason || '按剩余需求中最长单片设置，含切头；疵点避让仍需计算验证')}">按需求拉布${suggestion.length ? ` · <span class="num">${fmtN(suggestion.length, 1)}</span> mm` : ''}</button>`;
+    }
+    function resizeFeed(length) {
+        const sc = scene(), reason = feedReason(sc) || windowProblem(roll, {...sc.window, len: length});
+        if (reason) { toast(reason, true); return false; }
+        if (!Number.isFinite(length) || length < sc.bed.min || length > sc.bed.max) {
+            toast(`拉布长度须在 ${fmtN(sc.bed.min, 1)}–${fmtN(sc.bed.max, 1)} mm`, true); return false;
+        }
+        st.window = {start: sc.window.start, len: length}; st.failure = null; shell(true); return true;
+    }
     function previewReason(plan, allowEmpty = false) {
         return previewBusyReason() || (writer.pending(task.id).length ? '执行单操作结果未确认，请先重试原操作' : null)
             || (plan && localStorage.getItem(REPORT_KEY(plan.id)) ? '存在报工草稿，请先完成报工，或恢复默认后关闭报工面板' : null)
@@ -239,15 +262,18 @@ export async function mount(el, [taskId, focusPlan]) {
         if (st.toolpath && seg?.id !== st.toolpath.planId) st.toolpath = null;
         const order = sc ? [...sc.segments.map(s => s.id), NEW_STATION] : [], idx = sc ? (seg ? order.indexOf(seg.id) : order.length - 1) : -1;
         const total = summary?.total ?? task.demands.reduce((a, d) => a + d.quantity, 0), done = summary?.completed ?? 0;
-        const stage = STAGE_OF[summary?.status] ?? (st.rollId ? 2 : 1);
+        const stage = seg?.invalid ? 2 : STAGE_OF[summary?.status] ?? (st.rollId ? 2 : 1);
+        const alternatives = seg?.status === 'pending' ? sc.segments.filter(s => s.status === 'pending' && s.start < seg.start + seg.len && seg.start < s.start + s.len) : [];
+        const currentLabel = seg?.invalid ? '需重算' : seg?.previewModified ? '预览已修改' : seg?.status === 'cut' ? '已报工' : seg?.status === 'pending' ? '候选预览' : seg ? STATUS_TEXT[seg.status] : '待排料';
         const colors = demandColors(task.demands, plans);
         el.innerHTML = `
-        <div class="wb-head"><h1>${esc(task.name)}</h1><span class="num muted">${shortId(task.id)}</span>
-          <span class="tag kind">${isSlitting(task) ? '一维分切' : '二维'} · ${esc(task.materialModel || '—')}</span>
-          ${summary ? `<span class="tag ${TAG[summary.status] || ''}">${esc(taskLabels[summary.status] || summary.status)}</span>` : ''}
-          <span class="sp"></span><div class="sum" id="sum">${sumHtml(sc, colors)}</div>
-          <span class="vsep"></span><a class="btn" href="#/tasks">返回任务</a></div>
-        <div class="stages">${STAGES.map((s, i) => `<div class="stage ${i < stage ? 'done' : i === stage ? 'on' : ''}"><span class="n">${i < stage ? '✓' : i + 1}</span>${s}</div>`).join('')}</div>
+        <div class="wb-head"><div class="wb-identity"><h1 title="${esc(task.name)}">${esc(task.name)}</h1><div class="wb-meta"><span class="num">${shortId(task.id)}</span><span>${isSlitting(task) ? '一维分切' : '二维排料'} · ${esc(task.materialModel || '—')}</span>${summary ? `<span>任务：${esc(taskLabels[summary.status] || summary.status)}</span>` : ''}</div></div>
+          <span class="tag ${seg?.invalid || seg?.previewModified ? 'warn' : seg?.status === 'cut' ? 'ok' : 'run'}">${currentLabel}</span>
+          <span class="sp"></span><a class="btn" href="#/tasks">返回任务</a></div>
+        <div class="wb-context">
+        <div class="stages" aria-label="${seg?.invalid ? '当前方案需要重新排料' : '任务进度'}">${STAGES.map((s, i) => `<div class="stage ${i < stage ? 'done' : i === stage ? 'on' : ''}" ${i === stage ? 'aria-current="step"' : ''}><span class="n">${i < stage ? '✓' : i + 1}</span>${s}${seg?.invalid && i === 2 ? ' · 需重算' : ''}</div>`).join('')}</div>
+        <div class="wb-inputs"><div class="sum" id="sum">${sumHtml(sc, colors)}</div></div>
+        </div>
         ${!sc ? pickRollHtml() : `
         <div class="split" style="grid-template-columns:1fr ${st.report ? '420px' : st.quality || st.adjust ? '340px' : prefs.sideCollapsed ? '28px' : '300px'}">
           <section class="pane" style="background:var(--canvas)">
@@ -257,34 +283,37 @@ export async function mount(el, [taskId, focusPlan]) {
               <div class="div"></div><button id="z-fit" title="适应视图">适应</button><button id="z-out" title="缩小">−</button>
               <input id="z-ratio" class="cin num" list="ratios" title="精确比例：输入 1:N 回车"><datalist id="ratios">${[5, 10, 20, 50, 100, 200, 500].map(n => `<option>1:${n}</option>`).join('')}</datalist>
               <button id="z-in" title="放大">+</button><span id="z-pct" class="num" style="min-width:40px"></span>
-              <div class="div"></div><button id="seg-prev" title="上一段" ${idx <= 0 ? 'disabled' : ''}>◀</button><span class="num" style="color:#fff">${seg ? `${idx + 1} / ${sc.segments.length}` : '新工位'}</span><button id="seg-next" title="下一段 / 新工位" ${idx >= order.length - 1 ? 'disabled' : ''}>▶</button>
+              <div class="div"></div><button id="seg-prev" title="上一条方案 / 报工记录" ${idx <= 0 ? 'disabled' : ''}>◀</button><span class="num" style="color:#fff">${seg ? `记录 ${idx + 1} / ${sc.segments.length}` : '新工位'}</span><button id="seg-next" title="下一条方案 / 新工位" ${idx >= order.length - 1 ? 'disabled' : ''}>▶</button>
               <div class="div"></div><div class="vseg">${[['pan', '平移'], ...(st.adjust ? [['move', '移动件']] : []), ['measure', '测量'], ...(sc.fixed || st.adjust ? [] : [['defect', '标疵点']])].map(([k, t]) => `<button data-tool="${k}" class="${st.tool === k ? 'on' : ''}">${t}</button>`).join('')}</div>
               <button id="path-toggle" class="${st.showPath ? 'on' : ''}" aria-pressed="${!!st.showPath}" title="显示当前段刀序与空走线">刀路</button>
               <button id="dimensions-toggle" class="${prefs.showDimensions !== false ? 'on' : ''}" aria-pressed="${prefs.showDimensions !== false}" title="显示或隐藏工位尺寸">尺寸</button>
               <button id="clear-measure" title="清除测量">✕ 测量</button>
               <button id="orient" title="画布方向（不影响坐标与算法）">${prefs.vertical ? '竖向 ⇅' : '横向 ⇆'}</button>
-              <span class="sp"></span><span>拉布</span><input id="bed-len" class="cin num" value="${Math.round(sc.window.len)}" title="${sc.fixed ? '料头整块投料，长度固定' : sc.window.readOnly ? '调整或提交期间保持工位范围' : '本次拉布长度（mm）'}" ${sc.fixed || sc.window.readOnly ? 'disabled' : ''}><span>mm</span>
+              <span class="bed-control"><span>拉布</span><input id="bed-len" class="cin num" value="${round(sc.window.len)}" title="${sc.fixed ? '料头整块投料，长度固定' : sc.window.readOnly ? '调整或提交期间保持工位范围' : '本次拉布长度（mm）'}" ${sc.fixed || sc.window.readOnly ? 'disabled' : ''}><span>mm</span></span>
             </div>
-            ${hiddenCandidates ? `<div class="nr-head" id="candidate-overlap-notice" style="padding:4px 10px;margin-bottom:0;color:#ced7e0;font-size:12px" role="status">重叠候选分开显示；另 ${hiddenCandidates} 个暂不叠画，可用 ◀ / ▶ 切换。方案均保留。</div>` : ''}
-            <div class="canvas-wrap"><div id="rc"></div>
+             ${alternatives.length > 1 ? `<div class="candidate-switch" id="candidate-overlap-notice" role="group" aria-label="同区间候选方案"><span>候选对比</span>${alternatives.map((s, i) => `<button class="candidate-option ${s.id === seg.id ? 'on' : ''}" data-candidate="${esc(s.id)}" aria-pressed="${s.id === seg.id}" ${st.busy || st.saving || st.report || st.quality || st.adjust ? 'disabled' : ''} title="${esc(s.invalid || '切换预览，不保存、不记账')}"><strong>方案 ${i + 1}</strong><span>${fmtM(s.len, 2)} m · ${s.totalArea ? (s.pieceArea / s.totalArea * 100).toFixed(1) : '—'}%</span>${s.invalid ? '<small>需重算</small>' : ''}</button>`).join('')}</div>` : hiddenCandidates ? `<div class="candidate-switch" id="candidate-overlap-notice"><span>另有 ${hiddenCandidates} 个重叠候选 · 从方案记录切换</span></div>` : ''}
+             <div class="canvas-wrap"><div id="rc"></div>
               <div class="legend">${sc.segments.some(s => s.pieces.some(p => p.outcome)) ? Object.values(OUTPUT_STYLES).map(s => `<span><i style="background:${s.color}"></i>${s.label}</span>`).join('') : ''}${st.view === 'full' || seg?.status !== 'cut' ? task.demands.slice(0, 6).map(d => `<span><i style="background:${colors.get(d.id)}"></i>计划 · ${esc(String(d.name).slice(0, 18))}</span>`).join('') : ''}<span><i style="border:1.5px solid #ff6b5b"></i>疵点</span></div>
             </div>
             <div class="navroll"><div class="nr-head"><span>${roll.remnant ? '料头' : '母卷'} <b class="num">${esc(st.rollId)}</b>${roll.remnant ? ` <span class="muted">来源 ${esc(roll.remnant.sourceRollId || '—')}</span>` : ''}</span><span>幅宽 <b class="num">${fmtN(sc.roll.width)}</b> mm</span><span>总长 <b class="num">${fmtM(sc.roll.total)}</b> m</span><span>已用 <b class="num">${fmtM(sc.roll.used)}</b> m</span>
-              <span>本任务 已切 <b class="num">${met.cut}</b> · 候选 <b class="num">${met.pending}</b>${met.stale ? ` · 已失效 <b class="num">${met.stale}</b>` : ''}</span></div><div id="rn"></div></div>
+              <span>本任务 已切 <b class="num">${met.cut}</b> · 候选 <b class="num">${met.pending}</b>${met.stale ? ` · 已失效 <b class="num">${met.stale}</b>` : ''}</span>${feedControl(sc)}</div><div id="rn"></div></div>
           </section>
           ${st.report && seg ? reportPanel(seg, idx, sc) : st.quality && seg ? qualityPanel(seg) : st.adjust && seg ? adjustPanel(seg) : prefs.sideCollapsed ? `<section class="pane side-min"><button id="side-toggle" title="展开右栏">«</button><span>方案指标</span></section>` : `<section class="pane">
-            <div class="pane-h">方案指标<span class="sub">本卷</span><span class="sp"></span><button class="btn sm" id="side-toggle" title="收起右栏">»</button></div>
+            <div class="pane-h">${seg?.status === 'cut' ? '报工结果' : '方案概览'}<span class="sub">${seg ? '当前记录' : '本卷记录汇总'}</span><span class="sp"></span><button class="btn sm" id="side-toggle" title="收起右栏">»</button></div>
             <div class="pane-b">
-              <div class="metric"><div><small>利用率</small><b>${met.utilization.toFixed(1)}<em>%</em></b></div><div><small>用布长度</small><b>${fmtM(met.length, 2)}<em>m</em></b></div>
-                <div><small>拉布次数</small><b>${met.spreads}</b></div><div><small>任务完成</small><b>${total ? Math.round(done / total * 100) : 0}<em>%</em></b></div></div>
+              <div class="metric"><div><small>利用率</small><b>${seg ? (seg.totalArea ? (seg.pieceArea / seg.totalArea * 100).toFixed(1) : '—') : '—'}<em>%</em></b></div><div><small>${seg?.status === 'cut' ? '实切长度' : '预计用布'}</small><b>${seg ? fmtM(seg.len, 2) : '—'}<em>m</em></b></div>
+                <div><small>${seg ? '图示件数' : '方案记录'}</small><b>${seg ? seg.pieces.length : met.spreads}</b></div><div><small>任务良品进度</small><b>${total ? Math.round(done / total * 100) : 0}<em>%</em></b></div></div>
               ${sidePanel(sc, seg, idx)}
-              <div class="sec">拉布段</div>
+              <div class="sec">方案与报工记录</div>
               <table class="t" style="border:0"><tbody>${sc.segments.map((s, i) => `<tr class="click ${s.id === sc.currentId ? 'sel' : ''}" data-seg="${esc(s.id)}"><td class="num">${i + 1}</td><td class="num">${fmtM(s.start, 2)} m</td><td class="r num">${fmtN(s.len)} mm</td><td>${s.invalid ? `<span class="tag warn" title="${esc(s.invalid)}">需重算</span>` : `<span class="tag ${SEG_TAG[s.status]}">${STATUS_TEXT[s.status]}</span>`}</td></tr>`).join('')}
                 <tr class="click ${seg ? '' : 'sel'}" data-seg="${NEW_STATION}"><td class="num">＋</td><td class="muted" colspan="3">新工位</td></tr></tbody></table>
             </div>
           </section>`}
         </div>`}
         <div class="foot" id="foot">${footHtml(sc)}</div>`;
+        // 当前操作独立于详情滚动；保留原按钮、处理器与许可判断。
+        const actionBar = el.querySelector('.wb-actions');
+        if (actionBar) actionBar.closest('.pane').append(actionBar);
         bind(sc, savedCam);
     }
 
@@ -292,7 +321,8 @@ export async function mount(el, [taskId, focusPlan]) {
     function sidePanel(sc, seg, idx) {
         const w = sc.window, rem = remaining(), need = rem.reduce((a, d) => a + d.demand, 0), problem = windowProblem(roll, w);
         const failure = st.failure ? `<div class="notice"><b>${esc(st.failure.title || '本次未得到可用方案')}</b><br>${esc(st.failure.message || '')}
-            ${st.failure.canForward ? '<div style="margin-top:6px"><button class="btn sm" id="forward">向后查找可裁位置</button></div>' : ''}</div>` : '';
+            ${st.failure.suggestedLength ? `<div style="margin-top:6px"><button class="btn sm" id="feed-retry" ${st.busy ? 'disabled' : ''}>拉布至 ${fmtN(st.failure.suggestedLength, 1)} mm 并重排</button></div>` : ''}
+            ${st.failure.canForward ? `<div style="margin-top:6px"><button class="btn sm" id="forward" ${st.busy ? 'disabled' : ''}>向后查找可裁位置</button></div>` : ''}</div>` : '';
         const busy = (st.busy ? `<div class="notice" style="border-color:#c9d8e8;background:#f2f6fb;color:var(--accent-ink)">${esc(st.busy)}</div>` : '')
             + (occupied.has(roll.remnant ? roll.remnant.id : st.rollId) ? `<div class="notice">该材料${esc(occupiedText(roll.remnant ? roll.remnant.id : st.rollId))}，可以先排料，但须等对方报工或取消后才能报工。</div>` : '');
         if (!seg && isSlitting(task)) return slitBlock(sc) + busy + failure;
@@ -301,25 +331,23 @@ export async function mount(el, [taskId, focusPlan]) {
               <div class="kv"><div>位置</div><div class="num">Y ${fmtM(w.start, 2)} → ${fmtM(w.start + w.len, 2)} m</div><div>拉布长</div><div class="num">${fmtN(w.len, 1)} mm</div>
                 <div>待排需求</div><div class="num">${rem.length} 项 · ${need} 件</div></div>
               ${problem ? `<div class="notice">${esc(problem)}</div>` : ''}${busy}${failure}
-              <div style="display:flex;gap:8px;padding:8px 12px"><button class="btn pri" id="solve" ${st.busy || problem || !need ? 'disabled' : ''}>计算本工位</button></div>${roll.remnant ? previewControls(null) : ''}`;
+              <div class="wb-actions"><button class="btn pri" id="solve" ${st.busy || problem || !need ? 'disabled' : ''}>计算本工位</button></div>${roll.remnant ? previewControls(null) : ''}`;
         }
         const unplaced = seg.fulfillment.filter(f => f.unplaced > 0);
-        return `<div class="sec">当前拉布 · ${idx + 1} / ${sc.segments.length}</div>
-          <div class="kv"><div>状态</div><div><span class="tag ${SEG_TAG[seg.status]}">${STATUS_TEXT[seg.status]}</span>${w.adjusted ? ' <span class="tag warn">工位已调整</span>' : ''}</div>
+        return `<div class="sec">当前${seg.status === 'cut' ? '报工' : '方案'} · ${idx + 1} / ${sc.segments.length}</div>
+          <div class="kv"><div>状态</div><div><span class="tag ${seg.invalid ? 'warn' : SEG_TAG[seg.status]}">${seg.invalid ? '需重算' : STATUS_TEXT[seg.status]}</span>${w.adjusted ? ' <span class="tag warn">工位已调整</span>' : ''}</div>
             <div>方案</div><div class="num">${shortId(seg.id)} · v${seg.version ?? 1}</div>
             <div>位置</div><div class="num">Y ${fmtM(seg.start, 2)} → ${fmtM(seg.start + seg.len, 2)} m</div>
-            <div>拉布长</div><div class="num">${fmtN(seg.len, 1)} mm</div>
-            <div>件数</div><div class="num">${seg.previewCleared ? `预览已清空（方案 ${planOf(seg.id).result.pieces.length} 件）` : seg.pieces.length}</div>
-            <div>利用率</div><div class="num">${seg.totalArea ? (seg.pieceArea / seg.totalArea * 100).toFixed(1) : '—'}%</div></div>
+            </div>
           ${seg.previewModified ? `<div class="notice" id="preview-notice" role="status"><b>${seg.previewCleared ? '预览已清空，方案仍保留' : '余料预览已修改，方案仍保留'}</b><br>指标仍按归档方案统计。恢复预览后才能报工、下达、调整或导出加工文件。</div>` : ''}
           ${seg.status === 'stale' ? '<div class="notice">该方案的报工已在母卷重置时清除，方案既未切也不能再报工，仅作历史参考。</div>' : ''}
           ${seg.status === 'pending' ? (() => {
               const view = executionForPlan(views, seg.id), locked = !!view?.reservationActive;
               const reportAllowed = !seg.previewModified && !seg.invalid && (!view || view.allowedActions?.report?.allowed);
               const reportWhy = seg.previewModified ? '请先恢复方案预览' : seg.invalid || (w.adjusted ? '工位已调整，请先重新计算或还原工位' : !reportAllowed ? (view.allowedActions?.report?.reason || '执行单当前状态不能报工') : '按实际裁切结果报工');
-              return `${seg.invalid ? `<div class="notice"><b>需重算</b>：${esc(seg.invalid)}。此候选不能报工、下达或调整，请${isSlitting(task) ? '放弃后按剩余需求重新出车' : '重新计算或放弃'}。</div>` : ''}${w.adjusted ? `<div class="notice">工位已调整为 Y ${fmtM(w.start, 2)} m · ${fmtN(w.len)} mm，重新计算后替换当前候选。</div>` : ''}${problem ? `<div class="notice">${esc(problem)}</div>` : ''}${busy}${failure}
-            <div style="display:flex;gap:8px;padding:8px 12px;flex-wrap:wrap"><button class="btn pri" id="report-open" ${st.busy || w.adjusted || !reportAllowed ? 'disabled' : ''} title="${esc(reportWhy)}">报工</button>
-              ${isSlitting(task) ? '' : `<button class="btn" id="solve" ${st.busy || problem || !need || locked ? 'disabled' : ''} title="${locked ? '已下达或执行中，先取消执行单' : ''}">重新计算</button>`}<button class="btn" id="discard" ${st.busy || locked ? 'disabled' : ''}>放弃候选</button></div>
+              return `${seg.invalid ? `<div class="notice" role="status"><b>方案已失效</b><div>${esc(seg.invalid)}</div>${isSlitting(task) ? '<div>放弃后按剩余需求重新出车</div>' : ''}</div>` : ''}${w.adjusted ? `<div class="notice">工位已调整为 Y ${fmtM(w.start, 2)} m · ${fmtN(w.len)} mm，重新计算后替换当前候选。</div>` : ''}${problem ? `<div class="notice">${esc(problem)}</div>` : ''}${busy}${failure}
+            <div class="wb-actions"><button class="btn ${seg.invalid ? '' : 'pri'}" id="report-open" ${st.busy || w.adjusted || !reportAllowed ? 'disabled' : ''} title="${esc(reportWhy)}">报工</button>
+              ${isSlitting(task) ? '' : `<button class="btn ${seg.invalid ? 'pri' : ''}" id="solve" ${st.busy || problem || !need || locked ? 'disabled' : ''} title="${locked ? '已下达或执行中，先取消执行单' : ''}">重新计算</button>`}<button class="btn" id="discard" ${st.busy || locked ? 'disabled' : ''}>放弃候选</button></div>
             ${executionBlock(seg, view)}`; })() : ''}
           ${seg.status === 'cut' ? recordsBlock(seg) : ''}
           ${toolsBlock(seg)}
@@ -391,7 +419,7 @@ export async function mount(el, [taskId, focusPlan]) {
               ${view ? `<div class="kv"><div>上一张</div><div><span class="tag ${EXEC_TAG[view.effectiveState]}">${esc(executionLabels[view.effectiveState] || view.effectiveState)}</span> <span class="num">${shortId(view.execution.id)}</span></div></div>` : ''}
               <div style="display:flex;gap:6px;padding:8px 12px;align-items:center"><span class="muted">工位</span><input class="field" id="exec-station" value="${esc(st.station)}" style="width:70px">
                 <button class="btn" id="exec-create" ${st.busy || pend.length || seg.invalid || seg.previewModified ? 'disabled' : ''} title="${esc(seg.previewModified ? '请先恢复方案预览' : seg.invalid || '')}">创建执行单</button></div>
-              <div class="muted" style="padding:0 12px 8px;font-size:11.5px">不建执行单也可直接报工；建单后可预约材料、按工位开工报工。</div>`;
+              <div class="muted" style="padding:0 12px 8px;font-size:11.5px">执行单：预约材料 → 开工 → 报工</div>`;
         }
         const e = view.execution, a = view.allowedActions || {}, blocked = k => (seg.invalid || seg.previewModified) && ['release', 'start'].includes(k);
         const btn = (k, t, extra = '') => `<button class="btn sm" data-exec="${k}" ${a[k]?.allowed && !blocked(k) && !st.busy && !pend.length ? '' : 'disabled'} title="${esc(blocked(k) ? seg.invalid || '请先恢复方案预览' : a[k]?.reason || '')}" ${extra}>${t}</button>`;
@@ -869,7 +897,7 @@ export async function mount(el, [taskId, focusPlan]) {
         const fresh = st.fresh.length, seg = sc?.segments.find(s => s.id === sc.currentId);
         const canSolve = sc && (!seg || seg.status === 'pending') && !isSlitting(task);
         return `${fresh ? `<span class="tag warn">画布新增疵点 ${fresh} 处未保存</span><button class="btn" id="save-defects" ${st.saving ? 'disabled' : ''}>保存疵点到母卷</button><button class="btn" id="drop-defects">放弃</button>` : ''}
-          <span class="sp"></span>${st.busy ? `<span class="muted" style="font-size:12px">${esc(st.busy)}</span>` : '<span class="muted" style="font-size:12px">候选方案不扣减库存；确认报工后记账</span>'}
+          <span class="sp"></span>${st.busy ? `<span class="muted" style="font-size:12px">${esc(st.busy)}</span>` : `<span class="tag ${seg?.status === 'cut' ? 'ok' : ''}">${seg?.status === 'cut' ? '已报工 · 实绩' : '方案预览 · 未记账'}</span>`}
           ${canSolve && prefs.sideCollapsed ? `<button class="btn pri" id="solve-foot" ${st.busy ? 'disabled' : ''}>${seg ? '重新计算' : '计算本工位'}</button>` : ''}
           `;
     }
@@ -998,7 +1026,7 @@ export async function mount(el, [taskId, focusPlan]) {
         nav = createRollNavigator(el.querySelector('#rn'), {
             onPick: pickSegment,
             // 拖动时画布跟随：工位框停在屏幕原处，母卷随之移动
-            onWindow: w => { st.window = w; const next = scene(); paintScene(next, {follow: true}); nav.setScene(next); const i = el.querySelector('#bed-len'); if (i) i.value = Math.round(w.len); status(next); },
+            onWindow: w => { st.window = w; const next = scene(); paintScene(next, {follow: true}); nav.setScene(next); const i = el.querySelector('#bed-len'); if (i) i.value = round(w.len); status(next); },
             onWindowEnd: () => { st.failure = null; shell(true); }
         });
         nav.setScene(sc);
@@ -1022,10 +1050,21 @@ export async function mount(el, [taskId, focusPlan]) {
         el.querySelector('#seg-next').onclick = () => step(1);
         el.querySelector('#bed-len').onchange = e => {
             const v = Number(e.target.value);
-            if (!sc.bed || sc.window.readOnly) return;
-            if (!(v >= sc.bed.min && v <= sc.bed.max)) { toast(`拉布长度须在 ${sc.bed.min}–${sc.bed.max} mm`, true); e.target.value = Math.round(sc.window.len); return; }
-            st.window = {start: sc.window.start, len: v}; st.failure = null; shell(true);
+            if (!resizeFeed(v)) e.target.value = round(scene().window.len);
         };
+        el.querySelector('#feed-fit')?.addEventListener('click', () => {
+            const suggestion = feedSuggestion(scene());
+            if (suggestion.problem) return toast(suggestion.problem, true);
+            resizeFeed(suggestion.length);
+        });
+        el.querySelector('#feed-retry')?.addEventListener('click', () => {
+            const length = st.failure?.suggestedLength;
+            if (length && resizeFeed(length)) solve();
+        });
+        el.querySelectorAll('[data-candidate]').forEach(b => b.onclick = () => {
+            if (st.report || st.quality || st.adjust) return;
+            pickSegment(b.dataset.candidate);
+        });
         el.querySelectorAll('tr[data-seg]').forEach(tr => tr.onclick = () => pickSegment(tr.dataset.seg));
         status(sc);
     }
@@ -1058,12 +1097,23 @@ export async function mount(el, [taskId, focusPlan]) {
         try { job = currentRequest(); } catch (e) { toast(e.message, true); return; }
         st.busy = '正在计算本工位…'; st.failure = null; shell(true);
         try {
-            const result = await requestJSON('/api/solve', job.req);
-            if (usablePlan(result)) return accept(result, job.replace);
+            let result;
+            const attempts = autoFeedRequests(job.req, roll);
+            for (const req of attempts) {
+                if (disposed) return;
+                job.req = req;
+                if (req.feedPortType === 'roll') st.window = {start: req.windowStartY, len: req.rollL};
+                st.busy = `正在计算 · 拉布 ${fmtN(req.rollL, 1)} mm`; shell(true);
+                result = await requestJSON('/api/solve', req);
+                if (disposed) return;
+                if (usablePlan(result)) return accept(result, job.replace);
+                if (result.status !== 'NO_SOLUTION_FOUND') break;
+            }
+            const info = solveDiagnostics({...job.req, remainingLength: roll.currentRemainingLength}, result);
             st.failure = {title: result.status === 'NO_SOLUTION_FOUND' ? '本工位未找到方案' : '本次未得到可用方案',
-                message: result.message || '请检查需求、工艺或调整工位后重试。',
+                message: info.summary, suggestedLength: result.status === 'NO_SOLUTION_FOUND' ? info.suggestedLength : null,
                 canForward: result.status === 'NO_SOLUTION_FOUND' && (roll.defects || []).length > 0, job};
-        } catch (e) { st.failure = {title: '计算未完成', message: e.message}; }
+        } catch (e) { if (disposed) return; st.failure = {title: '计算未完成', message: e.message}; }
         st.busy = ''; shell(true);
     }
     async function forward() {
