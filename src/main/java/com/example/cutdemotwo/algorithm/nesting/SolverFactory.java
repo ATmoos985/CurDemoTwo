@@ -15,6 +15,8 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.function.Function;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -111,7 +113,32 @@ public class SolverFactory implements NestingSolver {
 
     public NestingResult solve(NestingProblem problem) { return solve(problem, true); }
 
+    @Override
+    public Optional<Function<NestingProblem, NestingResult>> stripSearch(NestingProblem problem, boolean allowFallback) {
+        var engine = select(problem, allowFallback).engine();
+        if (!(engine instanceof IrregularPackingSolverService) || !engine.isAvailable()) return Optional.empty();
+        return Optional.of(candidate -> solve(candidate, false, true));
+    }
+
+    @Override
+    public Optional<NestingResult> compactMarker(NestingProblem problem, NestingResult incumbent, long deadlineNanos) {
+        long start = System.nanoTime();
+        if (start >= deadlineNanos || !MarkerCompactor.supports(problem, incumbent.placements())) return Optional.empty();
+        var placements = MarkerCompactor.compact(problem, incumbent.placements(), deadlineNanos);
+        if (placements == incumbent.placements()) return Optional.of(incumbent);
+        var candidate = new EngineResult();
+        candidate.setSuccess(true);
+        candidate.setPlacements(placements);
+        if (PolygonResultValidator.validate(problem, candidate) != null) return Optional.of(incumbent);
+        return Optional.of(toResult(problem, candidate, incumbent.engine(), incumbent.engineVersion(), elapsed(start),
+                incumbent.requestedEngine(), incumbent.fallbackReason()));
+    }
+
     public NestingResult solve(NestingProblem problem, boolean allowFallback) {
+        return solve(problem, allowFallback, false);
+    }
+
+    private NestingResult solve(NestingProblem problem, boolean allowFallback, boolean stripSearch) {
         long start = System.nanoTime();
         String selected = problem == null ? null : problem.engine();
         String requested = selected, fallbackReason = null;
@@ -124,7 +151,8 @@ public class SolverFactory implements NestingSolver {
             var capabilities = engine.capabilities();
             if (!engine.isAvailable())
                 return NestingResult.failure("UNAVAILABLE", "求解引擎尚未就绪", selected, requested, fallbackReason, elapsed(start));
-            EngineResult result = engine.solve(problem);
+            EngineResult result = stripSearch && engine instanceof IrregularPackingSolverService irregular
+                    ? irregular.solveStripCandidate(problem) : engine.solve(problem);
             com.example.cutdemotwo.algorithm.ComputationCancellation.check();
             if (!result.isSuccess() && !"NO_SOLUTION_FOUND".equals(result.getFailureStatus()))
                 return NestingResult.failure(result.getFailureStatus(), result.getMessage(), selected, requested, fallbackReason, elapsed(start));

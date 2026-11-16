@@ -80,7 +80,8 @@ public class OptimizationService implements AutoCloseable {
                 "features",Map.of("polling",true,"cancellation","cooperative-request","hardPreemption",false,"progress","phase-only",
                         "storage",shared==null?"single-dispatcher-local-files":"jdbc-leases","distributedWorkers",shared!=null,"sse",false,"inventoryWrites",false),
                 "units",Map.of("length","mm","area","mm2"),
-                "strategies",List.of(Map.of("id","marker-shortening","version","1","maxTrials",12)));
+                "strategies",List.of(Map.of("id","marker-shortening","version","1","maxTrials",12),
+                        Map.of("id","marker-shortening","version","2","maxTrials",12)));
     }
 
     public com.example.cutdemotwo.contracts.jobs.ProblemCheck validate(OptimizationRequest request) {

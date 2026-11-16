@@ -94,7 +94,7 @@ class IrregularNestingTests {
         var javaResult = new JavaIrregularSolverEngine().solve(input);
         assertNull(PolygonResultValidator.validate(input, javaResult));
         assertEquals(Set.of(0,180), javaResult.getPlacements().stream().map(NestingResult.Placement::rotationDegrees).collect(java.util.stream.Collectors.toSet()));
-        var rotations = new JsonMapper().valueToTree(IrregularPackingSolverService.nativeInput(input))
+        var rotations = new JsonMapper().valueToTree(IrregularPackingSolverService.nativeInput(input, "knapsack"))
                 .path("item_types").get(0).path("allowed_rotations");
         assertEquals(2, rotations.size());
         for (int i = 0; i < 2; i++) {
@@ -115,6 +115,18 @@ class IrregularNestingTests {
         for (String bad : List.of("{}", "{\"bins\":[{\"id\":1,\"copies\":1,\"items\":[]}]}", "{\"bins\":[{\"id\":0,\"copies\":2,\"items\":[]}]}"))
             assertThrows(IllegalArgumentException.class, () -> IrregularPackingSolverService.parseCertificate(json.readTree(bad),sample()));
         assertTrue(IrregularPackingSolverService.parseCertificate(json.readTree("null"), sample()).getPlacements().isEmpty());
+    }
+    @Test void nativeStripCandidateKeepsKitWidthAndFixedGrain() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(nativeEngine.isAvailable(), "Install the irregular native engine");
+        var input = problem(Shape.rectangle(300,500), List.of(
+                new Part(42, "panel", Shape.rectangle(150,200), 2, false)), List.of());
+        var candidate = nativeEngine.solveStripCandidate(input);
+        assertTrue(candidate.isSuccess(), candidate.getMessage());
+        assertNull(PolygonResultValidator.validate(input, candidate));
+        assertEquals(2, candidate.getPlacements().size());
+        assertTrue(candidate.getPlacements().stream().allMatch(p -> p.demandId() == 42 && p.rotationDegrees() == 0));
+        double length = candidate.getPlacements().stream().mapToDouble(p -> p.y() + p.shape().height()).max().orElseThrow();
+        assertEquals(200, length, .001);
     }
     @Test void nativeConcaveMaterialAvoidsDefectsAndReportsActualAreaWithoutInventingRemnants() {
         org.junit.jupiter.api.Assumptions.assumeTrue(nativeEngine.isAvailable(), "Install the irregular native engine; this test must execute, not skip");

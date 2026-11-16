@@ -53,6 +53,48 @@ class MarkerOptimizationTests {
         assertFalse(result.marker().optimalityProven());
         assertEquals(1000,input.nestingProblem().height());
     }
+    @Test void versionTwoCompactsTheBestCompleteTrialAndArchivesItsPhase() {
+        var r = request("trials");
+        var input = new OptimizationRequest(r.schemaVersion(), r.problemType(), r.clientRequestId(), r.problem(),
+                r.allowFallback(), r.requireComplete(), new OptimizationRequest.Strategy("marker-shortening","2",6));
+        var result = MarkerOptimization.solve(input, new SolverFactory(List.of(new TrialsEngine())), message -> {});
+        assertEquals("2", result.marker().strategyVersion());
+        assertEquals(200, result.marker().occupiedLengthMm());
+        assertTrue(MarkerOptimization.complete(result.layout()));
+        var trials = result.marker().trials();
+        assertEquals("COMPACTION", trials.get(trials.size() - 1).phase());
+        assertEquals(300, trials.get(trials.size() - 2).occupiedLengthMm());
+        assertNull(trials.get(0).phase());
+    }
+    @Test void stripSearchCanPublishTheFirstCompleteKitAfterAnOrdinaryPartialTrial() {
+        var original = request("packingsolver-irregular");
+        var input = new OptimizationRequest(original.schemaVersion(), original.problemType(), original.clientRequestId(),
+                original.problem(), false, true, new OptimizationRequest.Strategy("marker-shortening","2",7));
+        var nativeEngine = new IrregularPackingSolverService() {
+            @Override public boolean isAvailable() { return true; }
+            @Override public EngineResult solve(NestingProblem p) {
+                var result = new EngineResult();
+                result.setSuccess(true);
+                result.getPlacements().add(new NestingResult.Placement(1,1,"front",0,0,p.parts().get(0).shape(),0));
+                return result;
+            }
+            @Override public EngineResult solveStripCandidate(NestingProblem p) {
+                assertEquals(original.nestingProblem().height(), p.height());
+                var result = solve(p);
+                result.getPlacements().add(new NestingResult.Placement(2,1,"front",0,100,p.parts().get(0).shape(),0));
+                return result;
+            }
+        };
+        var result = MarkerOptimization.solve(input, new SolverFactory(List.of(nativeEngine)), message -> {});
+        var trials = result.marker().trials();
+        assertFalse(trials.get(0).complete());
+        assertEquals("STRIP_SEARCH", trials.get(1).phase());
+        assertTrue(trials.get(1).complete());
+        assertEquals(200, result.marker().firstOccupiedLengthMm());
+        assertEquals(200, result.marker().occupiedLengthMm());
+        assertEquals(original.nestingProblem().height(), result.marker().trialLengthMm());
+        assertTrue(MarkerOptimization.complete(result.layout()));
+    }
     @Test void cancellationRetainsOnlyThePreviouslyValidatedCompleteKit() {
         var engine=new TrialsEngine();engine.interruptSecond=true;
         try {

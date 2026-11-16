@@ -39,5 +39,13 @@ public record OptimizationResult(String id, String jobId, String inputHash, Stri
         public MarkerReport { trials = List.copyOf(trials); }
     }
     public record Trial(int index, double lengthMm, Double occupiedLengthMm, String status, boolean complete,
-                        int placed, int timeLimitSeconds, long elapsedMillis, String engine, String engineVersion) {}
+                        int placed, int timeLimitSeconds, long elapsedMillis, String engine, String engineVersion,
+                        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                        String phase) {
+        public Trial(int index, double lengthMm, Double occupiedLengthMm, String status, boolean complete,
+                     int placed, int timeLimitSeconds, long elapsedMillis, String engine, String engineVersion) {
+            this(index, lengthMm, occupiedLengthMm, status, complete, placed, timeLimitSeconds, elapsedMillis,
+                    engine, engineVersion, null);
+        }
+    }
 }

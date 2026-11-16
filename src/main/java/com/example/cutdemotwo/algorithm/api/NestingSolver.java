@@ -6,6 +6,8 @@ import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import com.example.cutdemotwo.contracts.nesting.NestingResult;
 import java.util.List;
+import java.util.Optional;
+import java.util.function.Function;
 
 /** 二维算法公共入口；调用方只使用标准输入输出，不取得引擎实例或内部候选解。 */
 public interface NestingSolver {
@@ -13,6 +15,14 @@ public interface NestingSolver {
     String fallbackFor(String engine);
     ProblemCheck validateProblem(NestingProblem problem, boolean allowFallback);
     NestingResult solve(NestingProblem problem, boolean allowFallback);
+    /** The selected engine may also search directly for a minimum occupied sheet length. */
+    default Optional<Function<NestingProblem, NestingResult>> stripSearch(NestingProblem problem, boolean allowFallback) {
+        return Optional.empty();
+    }
+    /** Improve a validated complete strip layout within the remaining computation budget. */
+    default Optional<NestingResult> compactMarker(NestingProblem problem, NestingResult incumbent, long deadlineNanos) {
+        return Optional.empty();
+    }
     default NestingResult solve(NestingProblem problem) { return solve(problem, true); }
     NestingResult validateAdjustment(NestingProblem problem, List<PlacedPiece> pieces);
     List<NestingResult.Placement> validateContourAdjustment(NestingProblem problem, List<PlacedPiece> pieces);

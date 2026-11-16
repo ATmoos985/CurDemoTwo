@@ -8,15 +8,17 @@ import com.example.cutdemotwo.contracts.nesting.NestingResult;
 import java.util.*;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /** Bounded fixed-width contour trials; misses are heuristics, never infeasibility proofs. */
 final class MarkerOptimization {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(MarkerOptimization.class);
     record Outcome(NestingResult layout, MarkerReport marker, String failureCode) {}
 
     static void validate(OptimizationRequest input) {
         var strategy = input.strategy();
         if (strategy == null) return;
-        if (!"marker-shortening".equals(strategy.id()) || !"1".equals(strategy.version()))
+        if (!"marker-shortening".equals(strategy.id()) || !("1".equals(strategy.version()) || "2".equals(strategy.version())))
             throw new OptimizationService.Failure("UNSUPPORTED_CONSTRAINT", "不支持的编排策略或版本", 422, false);
         if (strategy.maxTrials() < 1 || strategy.maxTrials() > 12)
             throw new OptimizationService.Failure("INVALID_INPUT", "唛架试排次数必须为 1–12", 400, false);
@@ -26,15 +28,28 @@ final class MarkerOptimization {
     }
 
     static Outcome solve(OptimizationRequest input, NestingSolver factory, Consumer<String> progress) {
-        return solve(input, factory::solve, progress);
+        return solve(input, factory::solve, factory, progress);
     }
 
     // Test seam uses the same independently validated NestingSolver result contract.
     static Outcome solve(OptimizationRequest input, BiFunction<NestingProblem, Boolean, NestingResult> solve,
                          Consumer<String> progress) {
+        return solve(input, solve, null, progress);
+    }
+
+    private static Outcome solve(OptimizationRequest input, BiFunction<NestingProblem, Boolean, NestingResult> solve,
+                                 NestingSolver refiner, Consumer<String> progress) {
         validate(input);
         var original = input.nestingProblem();
-        long started = System.nanoTime(), budget = original.timeLimitSeconds() * 1_000_000_000L;
+        long started = System.nanoTime();
+        boolean compact = "2".equals(input.strategy().version()) && refiner != null
+                && input.strategy().maxTrials() > 1 && original.timeLimitSeconds() > 1;
+        Optional<Function<NestingProblem, NestingResult>> strip = Optional.empty();
+        if (compact && input.strategy().maxTrials() >= 3 && original.timeLimitSeconds() >= 5)
+            strip = refiner.stripSearch(original, input.allowFallback());
+        long deadline = started + original.timeLimitSeconds() * 1_000_000_000L;
+        long budget = (original.timeLimitSeconds() - (compact ? 1 : 0) - (strip.isPresent() ? 3 : 0)) * 1_000_000_000L;
+        int searchTrials = input.strategy().maxTrials() - (compact ? 1 : 0) - (strip.isPresent() ? 1 : 0);
         double high = original.height();
         // Rotated parts may use their shorter dimension along the feed direction.
         double low = Math.max(original.parts().stream().mapToDouble(p ->
@@ -44,15 +59,16 @@ final class MarkerOptimization {
         low = Math.max(low, original.material().exclusions().stream()
                 .mapToDouble(e -> e.y() + .1).max().orElse(0));
         NestingResult best = null, latest = null;
+        NestingProblem bestProblem = null;
         Double firstLength = null;
         double bestLength = Double.POSITIVE_INFINITY;
         String failureCode = null;
         var history = new ArrayList<Trial>();
-        for (int i = 0; i < input.strategy().maxTrials(); i++) {
+        for (int i = 0; i < searchTrials; i++) {
             if (Thread.currentThread().isInterrupted() || System.nanoTime() - started >= budget) break;
             double length = i == 0 ? high : Math.ceil((low + high) / 2 * 10) / 10;
             int seconds = Math.max(1, (int)((budget - (System.nanoTime() - started)) / 1_000_000_000L
-                    / (input.strategy().maxTrials() - i)));
+                    / (searchTrials - i)));
             var candidate = new NestingProblem(original.schemaVersion(), original.unit(),
                     new NestingProblem.Material(original.material().id(), NestingProblem.Shape.rectangle(original.width(), length),
                             original.material().exclusions(), original.material().continuesAfterRegion()),
@@ -66,7 +82,7 @@ final class MarkerOptimization {
             if (!Set.of("FEASIBLE", "NO_SOLUTION_FOUND", "CANCELLED").contains(latest.status())) failureCode = latest.status();
             if (complete) {
                 if (firstLength == null) firstLength = occupied;
-                if (best == null || occupied < bestLength) { best = latest; bestLength = occupied; }
+                if (best == null || occupied < bestLength) { best = latest; bestLength = occupied; bestProblem = candidate; }
                 high = Math.min(length, occupied);
             } else {
                 if (best == null || !"FEASIBLE".equals(latest.status()) && !"NO_SOLUTION_FOUND".equals(latest.status())) break;
@@ -74,9 +90,44 @@ final class MarkerOptimization {
             }
             if (high - low <= 10) break;
         }
+        int stripSeconds = (int)Math.min(3, (deadline - System.nanoTime() - 1_000_000_000L) / 1_000_000_000L);
+        if (strip.isPresent() && latest != null && !"CANCELLED".equals(latest.status()) && failureCode == null
+                && !Thread.currentThread().isInterrupted() && stripSeconds >= 1) {
+            var candidate = new NestingProblem(original.schemaVersion(), original.unit(), original.material(), original.parts(),
+                    original.process(), original.engine(), stripSeconds);
+            progress.accept("固定门幅，直接搜索更短的齐套唛架");
+            var direct = strip.get().apply(candidate);
+            boolean all = complete(direct);
+            Double occupied = all ? direct.placements().stream().mapToDouble(p -> p.y() + p.shape().height()).max().orElse(0) : null;
+            history.add(new Trial(history.size() + 1, candidate.height(), occupied, direct.status(), all,
+                    direct.placements().size(), stripSeconds, direct.elapsedMs(), direct.engine(), direct.engineVersion(), "STRIP_SEARCH"));
+            if (all && occupied < bestLength) {
+                if (firstLength == null) firstLength = occupied;
+                best = direct; bestLength = occupied; bestProblem = candidate;
+            }
+        }
+        if (compact && best != null && failureCode == null && !Thread.currentThread().isInterrupted() && System.nanoTime() < deadline) {
+            progress.accept("压紧齐套裁片，复核实际唛架长度");
+            long start = System.nanoTime();
+            try {
+                var refinement = refiner.compactMarker(bestProblem, best, Math.min(deadline, start + 1_000_000_000L));
+                if (refinement.isPresent()) {
+                    var refined = refinement.get();
+                    double occupied = refined.placements().stream().mapToDouble(p -> p.y() + p.shape().height()).max().orElse(0);
+                    if (complete(refined) && occupied < bestLength) { best = refined; bestLength = occupied; }
+                    history.add(new Trial(history.size() + 1, bestProblem.height(), bestLength, best.status(), true,
+                            best.placements().size(), 1, (System.nanoTime() - start) / 1_000_000, best.engine(), best.engineVersion(), "COMPACTION"));
+                }
+            } catch (java.util.concurrent.CancellationException stopped) {
+                // Preserve the complete validated incumbent when the refinement is interrupted.
+                Thread.currentThread().interrupt();
+            } catch (RuntimeException failed) {
+                log.warn("Marker compaction failed; keeping the verified incumbent", failed);
+            }
+        }
         var chosen = best != null ? best : latest;
         if (chosen == null) chosen = NestingResult.failure("CANCELLED", "试排开始前已停止", original.engine(), original.engine(), null, 0);
-        return new Outcome(chosen, new MarkerReport("1", firstLength, best == null ? null : bestLength,
+        return new Outcome(chosen, new MarkerReport(input.strategy().version(), firstLength, best == null ? null : bestLength,
                 chosen.processingRegion() == null ? original.height() : chosen.processingRegion().height(), history, false), failureCode);
     }
 

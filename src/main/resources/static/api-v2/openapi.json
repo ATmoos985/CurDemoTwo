@@ -2871,7 +2871,7 @@
           },
           "version": {
             "type": "string",
-            "const": "1"
+            "enum": ["1", "2"]
           },
           "maxTrials": {
             "type": "integer",
@@ -2889,6 +2889,11 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "phase": {
+            "type": "string",
+            "enum": ["STRIP_SEARCH", "COMPACTION"],
+            "description": "Identifies a fixed-width strip search or contour compaction attempt. Omitted for ordinary length-search trials."
+          },
           "index": {
             "type": "integer"
           },

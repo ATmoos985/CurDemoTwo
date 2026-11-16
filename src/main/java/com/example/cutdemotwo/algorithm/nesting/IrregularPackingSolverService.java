@@ -16,7 +16,7 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
-/** Stateless adapter for PackingSolver's straight-edge irregular knapsack engine. */
+/** Stateless adapter for PackingSolver's straight-edge irregular packing engine. */
 @Service
 public class IrregularPackingSolverService implements ICutSolverEngine {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(IrregularPackingSolverService.class);
@@ -33,12 +33,21 @@ public class IrregularPackingSolverService implements ICutSolverEngine {
                 List.of("MAXIMIZE_PIECE_AREA"), .1, isAvailable());
     }
     @Override public EngineResult solve(NestingProblem problem) {
+        return solveNative(problem, "knapsack");
+    }
+
+    /** Seek a short complete strip at a fixed width. The caller validates it against the finite trial material. */
+    public EngineResult solveStripCandidate(NestingProblem problem) {
+        return solveNative(problem, "open-dimension-y");
+    }
+
+    private EngineResult solveNative(NestingProblem problem, String objective) {
         if (!isAvailable()) return failure("UNAVAILABLE", "异形引擎尚未安装或不可执行");
         Path temp = null; Process process = null;
         try {
             temp = Files.createTempDirectory("ps_irregular_");
             Path input = temp.resolve("input.json"), certificate = temp.resolve("certificate.json");
-            Files.writeString(input, json.writeValueAsString(nativeInput(problem)));
+            Files.writeString(input, json.writeValueAsString(nativeInput(problem, objective)));
             process = new ProcessBuilder(Path.of(solverPath).toAbsolutePath().toString(), "--input", input.toString(),
                     "--certificate", certificate.toString(), "--time-limit", Integer.toString(problem.timeLimitSeconds()),
                     "--verbosity-level", "0", "--only-write-at-the-end", "--memory-limit", "512")
@@ -80,7 +89,7 @@ public class IrregularPackingSolverService implements ICutSolverEngine {
         result.put("vertices", points.stream().map(p -> Map.of("x", p.x() + x, "y", p.y() + y)).toList());
         return result;
     }
-    static Map<String, Object> nativeInput(NestingProblem p) {
+    static Map<String, Object> nativeInput(NestingProblem p, String objective) {
         var bin = polygon(p.material().shape(), 0, 0); bin.put("copies", 1);
         bin.put("defects", p.material().exclusions().stream().map(d -> {
             var shape = d.clearance() == 0 ? d.shape() : NestingProblem.Shape.rectangle(d.shape().width() + 2*d.clearance(), d.shape().height() + 2*d.clearance());
@@ -93,7 +102,7 @@ public class IrregularPackingSolverService implements ICutSolverEngine {
                     .map(angle -> Map.of("start", angle, "end", angle, "mirror", false)).toList());
             return item;
         }).toList();
-        return Map.of("objective", "knapsack", "bin_types", List.of(bin), "item_types", items, "parameters", Map.of("item_item_minimum_spacing", p.process().pieceGap()));
+        return Map.of("objective", objective, "bin_types", List.of(bin), "item_types", items, "parameters", Map.of("item_item_minimum_spacing", p.process().pieceGap()));
     }
     static EngineResult parseCertificate(JsonNode root, NestingProblem problem) {
         var result = new EngineResult(); result.setSuccess(true);
