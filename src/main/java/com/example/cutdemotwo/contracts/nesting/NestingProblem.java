@@ -32,7 +32,17 @@ public record NestingProblem(
         public Material { exclusions = exclusions == null ? List.of() : List.copyOf(exclusions); }
     }
     public record Exclusion(int id, double x, double y, Shape shape, double clearance) {}
-    public record Part(int id, String name, Shape shape, int quantity, boolean allowRotation) {}
+    public record Part(int id, String name, Shape shape, int quantity, boolean allowRotation,
+                       @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                       Boolean allowHalfTurn) {
+        public Part(int id, String name, Shape shape, int quantity, boolean allowRotation) {
+            this(id, name, shape, quantity, allowRotation, null);
+        }
+        public List<Integer> contourAngles() {
+            if (allowRotation) return List.of(0, 90, 180, 270);
+            return Boolean.TRUE.equals(allowHalfTurn) ? List.of(0, 180) : List.of(0);
+        }
+    }
     public record Process(String mode, String feedMode, String startCorner, String firstStageOrientation,
                           double trimStart, double minReusableWidth, double minReusableHeight,
                           double kerf, String objective, Double pieceGap) {

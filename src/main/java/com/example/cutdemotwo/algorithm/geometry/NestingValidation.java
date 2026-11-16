@@ -59,6 +59,7 @@ public final class NestingValidation {
         long vertices = 0;
         for (var part : p.parts()) {
             require(part != null && ids.add(part.id()), "需求标识重复或为空");
+            supported(contour || !Boolean.TRUE.equals(part.allowHalfTurn()), "180° 掉头仅适用于轮廓排料");
             shape(part.shape(), contour);
             require(part.quantity() > 0, "需求数量必须为正整数");
             quantity += part.quantity();

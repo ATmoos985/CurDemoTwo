@@ -10,8 +10,9 @@ export const GARMENT_EXAMPLES = [
     {id:'apron-canvas', name:'围裙 · 帆布长系带', style:'GARMENT_APRON', M:1, L:1, widths:[1200,1500], edge:25, gsm:280}
 ];
 
-export function markerRequest(style, width, sizeCounts, clientRequestId) {
+export function markerRequest(style, width, sizeCounts, clientRequestId, allowHalfTurn = false) {
     const problem = markerExample(width, style, sizeCounts);
+    if (allowHalfTurn) problem.parts.forEach(part => { part.allowHalfTurn = true; });
     return {schemaVersion: '2.0', clientRequestId, problemType: 'NESTING_2D', allowFallback: true,
         requireComplete: true, problem: {...problem, timeLimitSeconds: 10},
         strategy: {id: 'marker-shortening', version: '1', maxTrials: 5}};

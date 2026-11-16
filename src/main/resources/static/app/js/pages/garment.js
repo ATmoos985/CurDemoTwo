@@ -11,13 +11,15 @@ export function mount(el) {
       <div class="pane-b"><form id="garment-form" class="form">
       <label for="garment-example">试算示例</label><select class="field" id="garment-example" name="example"><option value="" disabled>自定义参数</option>${GARMENT_EXAMPLES.map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select>
       <label for="garment-style">内置样板</label><select class="field" id="garment-style" name="style">${MARKER_STYLES.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
+      <label for="garment-half-turn">允许 180° 旋转</label><input id="garment-half-turn" name="halfTurn" type="checkbox" aria-describedby="angle-help">
       <label for="garment-m">M 码（件/版）</label><input class="field" id="garment-m" name="M" type="number" min="0" max="12" required>
       <label for="garment-l">L 码（件/版）</label><input class="field" id="garment-l" name="L" type="number" min="0" max="12" required>
       <label for="garment-widths">有效幅宽（mm）</label><input class="field" id="garment-widths" name="widths" aria-describedby="width-help" required>
       <label for="garment-edge">两侧布边合计（mm）</label><input class="field" id="garment-edge" name="edge" type="number" min="0" step="0.1" required>
       <label for="garment-gsm">克重（g/m²）</label><input class="field" id="garment-gsm" name="gsm" type="number" min="0.1" step="0.1" required></form>
       <p class="demo-note" id="width-help">每版合计 1–12 件。有效幅宽可填 1–8 个值，范围 1200–2000 mm，用逗号或空格分隔。</p>
-      <p class="demo-note">样板使用固定纱向的简化轮廓。克重单耗按含布边幅宽和实际唛架长度估算，未计布头、布尾及备损。</p></div></section>
+      <p class="demo-note" id="angle-help">面料允许倒顺排时可启用掉头。每个幅宽各算一版固定方向和一版允许掉头的唛架，保持纱向轴线。</p>
+      <p class="demo-note">克重单耗按含布边幅宽和实际唛架长度估算，未计布头、布尾及备损。</p></div></section>
       <section class="pane"><div class="pane-h">候选幅宽比较</div><div class="garment-results"><table class="t">
       <thead><tr>${['有效幅宽 mm','试算状态','唛架长 mm','利用率 %','mm/件','g/件','排料图'].map(v => `<th>${v}</th>`).join('')}</tr></thead><tbody></tbody></table></div>
       <div class="pane-h" id="garment-view">排料图</div><div id="garment-canvas" class="demo-canvas" aria-label="当前候选唛架"></div></section></div>
@@ -26,29 +28,46 @@ export function mount(el) {
     const $ = selector => el.querySelector(selector);
     const form = $('form'), status = $('[role=status]'), run = $('[type=submit]'), stop = $('#garment-stop');
     const session = new OptimizationSession();
-    let rows = [], revision = 0, canvas, selected = null;
+    let rows = [], revision = 0, canvas, selected = null, manualView = false;
     function select(row) {
         selected = row;
         canvas ??= createRollCanvas($('#garment-canvas'));
         canvas.setScene(showcaseScene(row.request, row.result), {refit:true});
-        $('#garment-view').textContent = `排料图 · ${fmtN(row.width, 1)} mm · ${row.state}`;
+        $('#garment-view').textContent = `排料图 · ${fmtN(row.width, 1)} mm · ${row.direction} · ${row.state}`;
     }
     function render() {
         const lowest = Math.min(...rows.filter(r => r.use).map(r => r.use.gramsPerGarment));
+        const highest = Math.max(...rows.filter(r => r.use).map(r => r.use.utilization));
+        const comparison = form.elements.halfTurn.checked;
+        function rotationDetail(row) {
+            if (!comparison) return '';
+            let info = row.direction;
+            if (row.halfTurn && row.result?.layout) {
+                const turned = row.result.layout.placements.filter(p => p.rotationDegrees === 180).length;
+                info += ` · 掉头 ${turned} 片`;
+                const base = rows.find(r => r.width === row.width && !r.halfTurn);
+                if (row.use && base?.use) {
+                    const delta = row.use.utilization - base.use.utilization;
+                    info += ` · 较固定 ${delta > 0 ? '+' : ''}${fmtN(delta, 2)} 个百分点`;
+                }
+            }
+            return `<br><small>${esc(info)}</small>`;
+        }
         $('tbody').innerHTML = rows.map((r, i) => `<tr><td class="num">${fmtN(r.width, 1)}</td>
-          <td class="wrap">${esc(r.state)}${r.use?.gramsPerGarment === lowest ? ' · 当前最低单耗' : ''}</td>
+          <td class="wrap">${esc(r.state)}${r.use?.utilization === highest ? ' · 最高利用率' : ''}${r.use?.gramsPerGarment === lowest ? ' · 当前最低单耗' : ''}${rotationDetail(r)}</td>
           ${['length','utilization','lengthPerGarment','gramsPerGarment'].map(k => `<td class="num">${r.use ? fmtN(r.use[k], 2) : '—'}</td>`).join('')}
-          <td>${r.result?.layout ? `<button class="btn sm" type="button" data-index="${i}" aria-label="查看 ${r.width} mm 排料图" aria-pressed="${selected === r}">查看</button>` : '—'}</td></tr>`).join('');
+          <td>${r.result?.layout ? `<button class="btn sm" type="button" data-index="${i}" aria-label="查看 ${r.width} mm ${r.direction}排料图" aria-pressed="${selected === r}">查看</button>` : '—'}</td></tr>`).join('');
     }
     $('tbody').onclick = event => {
         const button = event.target.closest('button[data-index]');
         if (button) {
+            manualView = true;
             select(rows[Number(button.dataset.index)]);
             $('tbody').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === button)));
         }
     };
     function clear() {
-        rows = []; selected = null;
+        rows = []; selected = null; manualView = false;
         canvas?.destroy(); canvas = null;
         $('#garment-view').textContent = '排料图'; render(); status.textContent = '待试算';
     }
@@ -71,7 +90,7 @@ export function mount(el) {
     loadExample(GARMENT_EXAMPLES[0]);
     form.oninput = event => {
         if (event.target !== fields.example) {
-            fields.example.value = '';
+            if (event.target !== fields.halfTurn) fields.example.value = '';
             resetResults();
         }
     };
@@ -91,12 +110,23 @@ export function mount(el) {
         catch (e) { f.widths.setCustomValidity(e.message); f.widths.reportValidity(); return; }
         const mine = ++revision;
         clear();
-        rows = widths.map(width => ({width, request:markerRequest(f.style.value, width, sizes, crypto.randomUUID()), state:'待计算'}));
+        const compare = f.halfTurn.checked;
+        rows = widths.flatMap(width => (compare ? [false, true] : [false]).map(halfTurn => ({
+            width, halfTurn, direction:halfTurn ? '允许掉头' : '固定方向', state:'待计算',
+            request:markerRequest(f.style.value, width, sizes, crypto.randomUUID(), halfTurn)
+        })));
         busy(true);
         try {
             for (const row of rows) {
+                if (row.halfTurn) {
+                    const baseline = rows.find(r => r.width === row.width && !r.halfTurn);
+                    if (baseline.use) {
+                        // The fixed marker is already feasible. Spend the second search on this length or shorter.
+                        row.request.problem.material.shape.height = Math.ceil(baseline.use.length * 10) / 10;
+                    }
+                }
                 row.state = '计算中'; render();
-                status.textContent = `正在试排 ${row.width} mm`;
+                status.textContent = `正在试排 ${row.width} mm · ${row.direction}`;
                 try {
                     const {job, result} = await session.solve(row.request);
                     if (mine !== revision) return;
@@ -104,7 +134,7 @@ export function mount(el) {
                     row.use = fabricConsumption(result, row.width, edge, gsm, count);
                     row.state = row.use ? '齐套' : '未取得齐套结果';
                     if (job.state !== 'SUCCEEDED') row.state += '（提前结束）';
-                    if (!selected && result.layout) select(row);
+                    if (!manualView && result.layout && (!selected || row.use && row.use.utilization > (selected.use?.utilization ?? -1))) select(row);
                 } catch (e) {
                     if (mine !== revision) return;
                     row.state = '试算失败 · ' + e.message;
@@ -112,7 +142,7 @@ export function mount(el) {
                 row.finished = true; render();
             }
             const complete = rows.filter(r => r.use);
-            status.textContent = `试算结束 · ${complete.length} / ${rows.length} 个幅宽齐套`;
+            status.textContent = `试算结束 · ${complete.length} / ${rows.length} 个${compare ? '方案' : '幅宽'}齐套`;
         } finally { if (mine === revision) busy(false); }
     };
     return () => { revision++; session.cancel(); canvas?.destroy(); };

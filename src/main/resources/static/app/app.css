@@ -11,6 +11,7 @@
 .demo-split{grid-template-columns:250px minmax(280px,1fr) 290px}
 .garment-split{grid-template-columns:minmax(280px,320px) minmax(0,1fr)}
 .garment-split .field{width:100%;min-width:0}
+#garment-half-turn{justify-self:start;width:18px;height:18px;margin:0}
 .garment-results{max-height:42%;overflow:auto}
 #garment-stop[hidden]{display:none}
 .demo-canvas.rc-host{flex:1;min-height:240px;position:relative;inset:auto;background:var(--canvas);overflow:hidden}

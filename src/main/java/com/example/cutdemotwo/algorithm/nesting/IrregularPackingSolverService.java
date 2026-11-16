@@ -89,7 +89,7 @@ public class IrregularPackingSolverService implements ICutSolverEngine {
         }).toList());
         var items = p.parts().stream().map(part -> {
             var item = polygon(part.shape(), 0, 0); item.put("copies", part.quantity()); item.put("profit", PolygonGeometry.area(part.shape()));
-            item.put("allowed_rotations", (part.allowRotation() ? List.of(0, 90, 180, 270) : List.of(0)).stream()
+            item.put("allowed_rotations", part.contourAngles().stream()
                     .map(angle -> Map.of("start", angle, "end", angle, "mirror", false)).toList());
             return item;
         }).toList();

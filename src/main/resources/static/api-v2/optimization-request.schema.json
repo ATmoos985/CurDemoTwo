@@ -180,6 +180,10 @@
         },
         "allowRotation": {
           "type": "boolean"
+        },
+        "allowHalfTurn": {
+          "type": "boolean",
+          "description": "CONTOUR only. With allowRotation false, true permits 0 and 180 degrees. Full rotation permission still permits all four quarter turns."
         }
       },
       "required": [

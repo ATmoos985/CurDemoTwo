@@ -108,3 +108,43 @@ test('each named example fills the form without submitting and produces a comple
         assert.equal(await rows.count(), 0);
     });
 });
+
+test('half turns are compared against fixed grain at each width and the best complete marker opens', async () => {
+    await page.getByLabel('试算示例').selectOption('shirt-mixed');
+    const toggle = page.getByRole('checkbox', {name:'允许 180° 旋转'});
+    await expect(toggle).not.toBeChecked();
+    await toggle.check();
+    const results = [], requests = [];
+    page.on('response', response => {
+        if (new URL(response.url()).pathname.startsWith('/api/v2/optimization-results/')) results.push(response.json());
+    });
+    page.on('request', req => {
+        if (req.method() === 'POST' && new URL(req.url()).pathname === '/api/v2/optimization-jobs') requests.push(req.postDataJSON());
+    });
+    await page.getByRole('button', {name:'试算幅宽'}).click();
+    await expect(page.getByRole('status').filter({hasText:'试算结束'})).toBeVisible({timeout:150000});
+    assert.equal(requests.length, 6);
+    const solved = await Promise.all(results);
+    assert.equal(solved.length, 6);
+    const rows = page.locator('tbody tr');
+    const metrics = [];
+    for (let i = 0; i < solved.length; i++) {
+        const r = solved[i], req = requests[i], turn = i % 2 === 1;
+        assert.ok(req.problem.parts.every(p => !p.allowRotation && Boolean(p.allowHalfTurn) === turn));
+        assert.equal(req.problem.material.shape.width, [1600,1850,1950][Math.floor(i / 2)]);
+        if (turn && solved[i - 1].meetsRequirement)
+            assert.equal(req.problem.material.shape.height, Math.ceil(solved[i - 1].marker.occupiedLengthMm * 10) / 10);
+        assert.ok(r.layout.placements.every(p => p.rotationDegrees === 0 || (turn && p.rotationDegrees === 180)));
+        if (r.meetsRequirement) {
+            const actual = r.metrics.find(m => m.name === 'markerAreaUtilization').value;
+            metrics.push({i, actual, turned:r.layout.placements.filter(p => p.rotationDegrees === 180).length});
+            assert.ok(Math.abs(Number(await rows.nth(i).locator('td').nth(3).innerText()) - actual) <= 0.0051);
+        }
+    }
+    const best = metrics.reduce((a,b) => a.actual >= b.actual ? a : b);
+    await expect(rows.nth(best.i)).toContainText('最高利用率');
+    await expect(rows.nth(best.i).getByRole('button')).toHaveAttribute('aria-pressed', 'true');
+    console.log('上衣同幅宽对照（固定 / 掉头）', JSON.stringify(metrics));
+    await toggle.uncheck();
+    assert.equal(await rows.count(), 0);
+});

@@ -63,18 +63,15 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
     private static class PartItem {
         final int demandId;
         final String name;
-        final boolean allowRotation;
         final List<OrientedShape> orientations;
         final double maxArea;
 
         PartItem(Part part) {
             this.demandId = part.id();
             this.name = part.name();
-            this.allowRotation = part.allowRotation();
-            List<Integer> angles = part.allowRotation() ? List.of(0, 90, 180, 270) : List.of(0);
             List<OrientedShape> list = new ArrayList<>();
             double maxA = 0;
-            for (int angle : angles) {
+            for (int angle : part.contourAngles()) {
                 ComputationCancellation.check();
                 Shape rotShape = PolygonGeometry.rotate(part.shape(), angle);
                 double a = PolygonGeometry.area(rotShape);

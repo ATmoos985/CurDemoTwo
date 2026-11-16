@@ -82,6 +82,27 @@ class IrregularNestingTests {
         assertNotNull(PolygonResultValidator.validate(p,candidate(placed(1,0,0,PolygonGeometry.rotate(lShape(),90),90))));
         assertNotNull(PolygonResultValidator.validate(p,candidate(new NestingResult.Placement(1,99,"x",0,0,lShape(),0))));
     }
+    @Test void halfTurnOnlyUsesComplementaryTrianglesAndRejectsQuarterTurns() {
+        var triangle = polygon(0,0, 200,0, 0,100);
+        var part = new Part(42, "triangle", triangle, 2, false, true);
+        var input = problem(Shape.rectangle(200,100), List.of(part), List.of());
+        assertEquals(List.of(0,180), part.contourAngles());
+        for (int angle : List.of(90,270)) {
+            assertEquals("异形结果违反旋转约束", PolygonResultValidator.validate(input,
+                    candidate(placed(1,0,0,PolygonGeometry.rotate(triangle,angle),angle))));
+        }
+        var javaResult = new JavaIrregularSolverEngine().solve(input);
+        assertNull(PolygonResultValidator.validate(input, javaResult));
+        assertEquals(Set.of(0,180), javaResult.getPlacements().stream().map(NestingResult.Placement::rotationDegrees).collect(java.util.stream.Collectors.toSet()));
+        var rotations = new JsonMapper().valueToTree(IrregularPackingSolverService.nativeInput(input))
+                .path("item_types").get(0).path("allowed_rotations");
+        assertEquals(2, rotations.size());
+        for (int i = 0; i < 2; i++) {
+            assertEquals(i * 180, rotations.get(i).path("start").asInt());
+            assertEquals(i * 180, rotations.get(i).path("end").asInt());
+            assertFalse(rotations.get(i).path("mirror").asBoolean());
+        }
+    }
     @Test void unsupportedClearancePrecisionAndProcessNeverSilentlyDisappear() {
         var p = sample();
         assertEquals("UNSUPPORTED", kernel.solve(problem(p.material().shape(),p.parts(),List.of(new Exclusion(1,0,0,lShape(),2)))).status());

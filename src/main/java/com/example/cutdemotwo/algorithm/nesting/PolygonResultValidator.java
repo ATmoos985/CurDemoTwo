@@ -9,7 +9,6 @@ import java.awt.geom.Area;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Set;
 
 public final class PolygonResultValidator {
     // Boolean area tolerance only; it is not a user-configurable cutting allowance.
@@ -25,7 +24,7 @@ public final class PolygonResultValidator {
             ComputationCancellation.check();
             var demand = input.parts().stream().filter(d -> d.id() == p.demandId()).findFirst().orElse(null);
             if (demand == null || !ids.add(p.id()) || counts.merge(demand.id(), 1, Integer::sum) > demand.quantity()) return "异形结果的需求归属、标识或数量无效";
-            if (!Set.of(0, 90, 180, 270).contains(p.rotationDegrees()) || (!demand.allowRotation() && p.rotationDegrees() != 0)) return "异形结果违反旋转约束";
+            if (!demand.contourAngles().contains(p.rotationDegrees())) return "异形结果违反旋转约束";
             if (!Double.isFinite(p.x()) || !Double.isFinite(p.y())) return "异形结果坐标无效";
             try { PolygonGeometry.validate(p.shape()); } catch (RuntimeException e) { return "异形结果轮廓无效"; }
             var expected = PolygonGeometry.region(PolygonGeometry.rotate(demand.shape(), p.rotationDegrees()), 0, 0);
