@@ -3,6 +3,7 @@ import {esc, requestJSON} from './util.js';
 
 const NAV = [
     ['生产', [['tasks', '任务'], ['workbench', '排料工作台'], ['execution', '执行与报工']]],
+    ['服装', [['garment', '唛架幅宽试算']]],
     ['材料', [['inventory', '库存'], ['inspection', '跑布验疵'], ['documents', '库存单据']]],
     ['质量与分析', [['quality', '复检处置'], ['analysis', '生产分析']]],
     ['系统', [['showcase', '能力展示'], ['settings', '设置']]]
@@ -11,6 +12,7 @@ const PAGES = {
     tasks: () => import('./pages/tasks.js'),
     task: () => import('./pages/task-edit.js'),
     workbench: () => import('./pages/workbench.js'),
+    garment: () => import('./pages/garment.js'),
     execution: () => import('./pages/execution.js'),
     inventory: () => import('./pages/inventory.js'),
     inspection: () => import('./pages/inspection.js'),

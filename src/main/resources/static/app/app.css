@@ -9,6 +9,10 @@
 .demo-card b{font-weight:600;font-family:inherit;font-size:14px}
 .demo-card p{color:var(--text-2);font-size:12px;line-height:1.65}
 .demo-split{grid-template-columns:250px minmax(280px,1fr) 290px}
+.garment-split{grid-template-columns:minmax(280px,320px) minmax(0,1fr)}
+.garment-split .field{width:100%;min-width:0}
+.garment-results{max-height:42%;overflow:auto}
+#garment-stop[hidden]{display:none}
 .demo-canvas.rc-host{flex:1;min-height:240px;position:relative;inset:auto;background:var(--canvas);overflow:hidden}
 .demo-steps{padding:0 14px 0 30px;line-height:1.8;color:var(--text-2)}
 .demo-note{padding:8px 12px;overflow-wrap:anywhere}

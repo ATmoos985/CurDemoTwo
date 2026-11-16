@@ -6,6 +6,7 @@ import {LINEAR_SCENARIOS} from '../../../js/linear/linear-scenarios.js';
 import {createNestingScene, rectangle, shapeArea, sceneOrigin} from '../../../js/canvas/nesting-scene.js';
 import {PIECE_PALETTE} from './roll-scene.js';
 import {DEFAULT_PROCESS} from './task-form.js';
+import {markerRequest} from './garment.js';
 
 export const SHOWCASE_CASES = [
     ...INDUSTRIES.flatMap(industry => industry.scenarios.map(s => ({id: s.key, name: s.name, group: industry.name,
@@ -34,8 +35,7 @@ export function showcaseRequest(id, profile = 'FAST') {
     }
     let problem;
     if (item.kind === 'marker') {
-        problem = markerExample(1500, id.replace('marker-', ''));
-        return {...envelope, requireComplete: true, problem: {...problem, timeLimitSeconds: 10}, strategy: {id: 'marker-shortening', version: '1', maxTrials: 5}};
+        return markerRequest(id.replace('marker-', ''), 1500, undefined, envelope.clientRequestId);
     }
     if (['CROSSCUT', 'GUILLOTINE', 'CONTOUR'].includes(id)) problem = basicExample(id);
     else if (['GARMENT_SHIRT', 'GARMENT_PANTS'].includes(id)) {

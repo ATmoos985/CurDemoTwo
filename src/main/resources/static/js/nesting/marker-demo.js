@@ -8,9 +8,12 @@ export const MARKER_STYLES = Object.freeze([
 ]);
 
 /** Two sizes of a simplified garment; every named part is required, including small pieces. */
-export function markerExample(width = 1500, style = 'GARMENT_SHIRT') {
+export function markerExample(width = 1500, style = 'GARMENT_SHIRT', sizeCounts = {M:1, L:1}) {
     if (!Number.isFinite(width) || width < 1200 || width > 2000) throw new Error('示例布宽应在 1200–2000 mm 之间');
     if (!MARKER_STYLES.some(item => item.id === style)) throw new Error('唛架款式不存在');
+    if (![sizeCounts.M, sizeCounts.L].every(n => Number.isInteger(n) && n >= 0)
+        || sizeCounts.M + sizeCounts.L < 1 || sizeCounts.M + sizeCounts.L > 12)
+        throw new Error('每版 M、L 码合计须为 1–12 件成衣');
     const base = garmentExample(style);
     const small = style === 'GARMENT_SHIRT' ? [
         {name:'领片', quantity:1, shape:polygon([{x:0,y:0},{x:340,y:0},{x:320,y:70},{x:20,y:70}])},
@@ -24,8 +27,8 @@ export function markerExample(width = 1500, style = 'GARMENT_SHIRT') {
         const scale = index ? 1.08 : 1;
         const shape = part.shape.type === 'RECTANGLE' ? rectangle(Math.round(part.shape.width * scale), Math.round(part.shape.height * scale))
             : polygon(part.shape.vertices.map(p => ({x:Math.round(p.x * scale), y:Math.round(p.y * scale)})));
-        return {name:`${size}码 · ${part.name}`, quantity:part.quantity, shape, allowRotation:false};
-    })).map((part, index) => ({...part, id:index + 1}));
+        return {name:`${size}码 · ${part.name}`, quantity:part.quantity * sizeCounts[size], shape, allowRotation:false};
+    })).map((part, index) => ({...part, id:index + 1})).filter(part => part.quantity > 0);
     // A deterministic row layout supplies a generous starting length, not an asserted optimum.
     let x = 0, y = 0, rowHeight = 0;
     for (const part of parts) for (let i = 0; i < part.quantity; i++) {
