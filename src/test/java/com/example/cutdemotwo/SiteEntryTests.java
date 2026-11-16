@@ -28,10 +28,11 @@ class SiteEntryTests {
                 HttpResponse.BodyHandlers.ofString());
     }
 
-    @Test void rootShowsTheIntroPageWhileTheWorkbenchStaysAtIndexHtml() throws Exception {
+    @Test void rootEntersNewAppWhileHistoricalWorkbenchRemainsAvailable() throws Exception {
         var root = get("/");
-        assertEquals(200, root.statusCode());
-        assertTrue(root.body().contains("data-product-nav=\"intro\""), "根路径应是介绍页");
+        assertEquals(302, root.statusCode());
+        assertEquals("/app/", URI.create(root.headers().firstValue("location").orElseThrow()).getPath());
+        assertTrue(get("/app/").body().contains("js/main.js"));
         var workbench = get("/index.html");
         assertEquals(200, workbench.statusCode());
         assertTrue(workbench.body().contains("data-product-nav=\"workbench\""), "通用操作台应保留在 /index.html");

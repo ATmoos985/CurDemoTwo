@@ -1,7 +1,7 @@
 import { rectangle, polygon, shapeArea, createNestingScene } from '../canvas/nesting-scene.js';
 import { mountNestingViewer } from './nesting-viewer.js';
 import { NestingSession, dispatchedEngine } from './nesting-client.js';
-import {scenarioExample, garmentExample, boardExample} from './scenario-examples.js';
+import {basicExample as example, scenarioExample, garmentExample, boardExample} from './scenario-examples.js';
 import {industryOfScenario, scenarioRules} from '../industry/industry-profiles.js';
 import { toggleMeasureTool, clearAllMeasurements } from '../plugins/cad/cad-measure.js';
 import { fallbackPresentation } from '../core/api-request.js';
@@ -17,23 +17,6 @@ const viewer = mountNestingViewer(byId('nesting-canvas'), {
     }
 });
 
-function example(mode) {
-    if (mode === 'CONTOUR') return { schemaVersion: '1', unit: 'mm', engine: 'auto', timeLimitSeconds: 3,
-        material: { id: 'POLYGON-1', shape: polygon([{x:0,y:0},{x:1600,y:0},{x:1600,y:900},{x:1000,y:900},{x:1000,y:1600},{x:0,y:1600}]), continuesAfterRegion: false,
-            exclusions: [{ id: 1, x: 300, y: 300, shape: rectangle(120,120), clearance: 0 }] },
-        parts: [{ id: 1, name: 'L 形裁片', shape: polygon([{x:0,y:0},{x:500,y:0},{x:500,y:200},{x:200,y:200},{x:200,y:500},{x:0,y:500}]), quantity: 8, allowRotation: true },
-            { id: 2, name: '三角裁片', shape: polygon([{x:0,y:0},{x:400,y:0},{x:0,y:400}]), quantity: 6, allowRotation: true }],
-        process: { mode, feedMode: 'SHEET', startCorner: 'left-top', firstStageOrientation: 'none', trimStart: 0,
-            minReusableWidth: 0, minReusableHeight: 0, kerf: 0, objective: 'MAXIMIZE_PIECE_AREA' } };
-    const crosscut = mode === 'CROSSCUT';
-    return { schemaVersion: '1', unit: 'mm', engine: 'auto', timeLimitSeconds: 3,
-        material: { id: 'MATERIAL-1', shape: rectangle(2000, crosscut ? 3000 : 4000), continuesAfterRegion: false,
-            exclusions: crosscut ? [] : [{ id: 1, x: 200, y: 1500, shape: rectangle(150, 600), clearance: 50 }] },
-        parts: [{ id: 1, name: crosscut ? '整幅裁片' : '矩形裁片', shape: rectangle(crosscut ? 2000 : 1500, crosscut ? 1200 : 3000), quantity: crosscut ? 3 : 1, allowRotation: false }],
-        process: { mode, feedMode: 'SHEET', startCorner: 'right-bottom', firstStageOrientation: 'horizontal',
-            trimStart: 0, minReusableWidth: 100, minReusableHeight: 100, kerf: 0,
-            objective: crosscut ? 'INPUT_ORDER' : 'MAXIMIZE_PIECE_AREA' } };
-}
 const fieldMap = { 'material-id': p => p.material.id, 'material-width': p => p.material.shape.width,
     'material-height': p => p.material.shape.height, 'feed-mode': p => p.process.feedMode,
     'process-mode': p => p.process.mode, 'start-corner': p => p.process.startCorner,

@@ -3,21 +3,23 @@
 import {requestJSON, esc, fmtN, errorBox, toast, loadSheetLib} from '../util.js';
 import {emptyTask, fromTask, addDemand, mergeImport, taskProblems, lineLock, toPayload, demandTemplateCsv, withProblemType} from '../model/task-form.js';
 import {SLITTING} from '../model/slitting.js';
+import {workflowTemplate} from '../model/showcase.js';
 import {parseDemandSheet, parseDemandJSON, importedTask, importGroups} from '../../../js/business/cutting/demand-import-model.js';
 
 const ORIGINS = [['right-bottom', '右下'], ['left-bottom', '左下'], ['right-top', '右上'], ['left-top', '左上']];
 const draftKey = id => 'cutplan.app.taskdraft.' + (id || 'new');
 
-export async function mount(el, [taskId]) {
+export async function mount(el, [taskId, templateId]) {
+    const template = taskId === 'new' && workflowTemplate(templateId);
     let original = null, completed = {}, rolls = [];
     try {
         const [detail, r] = await Promise.all([taskId && taskId !== 'new' ? requestJSON('/api/cutting/tasks/' + encodeURIComponent(taskId)) : null, requestJSON('/api/rolls')]);
         rolls = r;
         if (detail) { original = detail.task; completed = detail.completed || {}; }
     } catch (e) { el.innerHTML = errorBox(e); return; }
-    const key = draftKey(original?.id);
+    const key = draftKey(original?.id || (template ? 'demo-' + templateId : null));
     const draft = JSON.parse(localStorage.getItem(key) || 'null');
-    let form = draft && (!original || draft.revision === original.revision) ? draft : original ? fromTask(original) : emptyTask();
+    let form = draft && (!original || draft.revision === original.revision) ? draft : original ? fromTask(original) : template ? fromTask(template.task) : emptyTask();
     let imp = null; // {result, groups, gi, selected:Set, source}
     let saving = false, conflict = false;
     const models = [...new Set(rolls.map(r => r.rollModel).filter(Boolean))].sort();
@@ -33,6 +35,7 @@ export async function mount(el, [taskId]) {
             <a class="btn" href="${original ? '#/workbench/' + encodeURIComponent(original.id) : '#/tasks'}">${original ? '返回工作台' : '返回任务'}</a>
             ${dirty() ? '<button class="btn" id="discard">放弃修改</button>' : ''}
             <button class="btn pri" id="save" ${problems.length || saving || !dirty() ? 'disabled' : ''}>${saving ? '保存中…' : original ? '保存修改' : '保存并进入工作台'}</button></div>
+          ${template ? `<div class="notice">演示模板 · 型号 ${esc(template.task.materialModel)}。请先<a href="#/inventory/receive/${encodeURIComponent(templateId)}">登记对应演示母卷</a>并完成检验；保存任务及后续报工会写入业务数据。</div>` : ''}
           ${conflict ? `<div class="notice" style="margin:12px 16px 0;display:flex;align-items:center;gap:10px"><span>任务已在别处被修改（版本已更新）。你的修改仍保留在本页，可对照后再载入最新版本重新编辑。</span><span class="sp"></span><button class="btn sm pri" id="reload-latest">载入最新版本（放弃本页修改）</button></div>` : ''}
           <div class="body"><div style="display:grid;grid-template-columns:340px 1fr;gap:12px;align-items:start">
             <div>

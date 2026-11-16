@@ -1,7 +1,8 @@
 <!doctype html>
 <html lang="zh-CN" data-theme="light">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>搭切对比</title>
-<link rel="stylesheet" href="css/base.css"><link rel="stylesheet" href="css/product-navigation.css"><link rel="stylesheet" href="css/linear-demo.css"></head>
+<link rel="stylesheet" href="css/base.css"><link rel="stylesheet" href="css/product-navigation.css"><link rel="stylesheet" href="css/linear-demo.css"><script type="module" src="/js/showcase-redirect.js"></script>
+</head>
 <body class="compare-page">
 <header class="compare-header"><div><span class="app-mark" aria-hidden="true">▥</span><strong>搭切对比</strong><span class="compare-subtitle">一维 · 逐单独立分切 与 搭切求解器</span></div><div data-product-nav="compare"></div></header>
 <main class="compare-main">
@@ -57,5 +58,5 @@
 </section>
 </main>
 <footer class="compare-footer">搭切解决方案 · 一维搭切对比 · 方案为预计值，不扣减库存</footer>
-<script type="module" src="js/product-navigation.js"></script><script type="module" src="js/linear/linear-demo.js"></script>
+<script type="module" src="js/product-navigation.js"></script><script type="module">if (new URLSearchParams(location.search).get("classic") === "1") await import("./js/linear/linear-demo.js");</script>
 </body></html>

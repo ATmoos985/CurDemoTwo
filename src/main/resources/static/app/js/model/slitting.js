@@ -20,16 +20,18 @@ export function slittingProblems(s, demands = []) {
 }
 
 /** 候选方案中已占用的条数（未报工的候选也算，避免重复出车）。 */
-export function pendingCounts(plans = []) {
+export function pendingCounts(plans = [], views = []) {
+    const reserved = new Set(views.filter(v => v.reservationActive).map(v => v.execution.planId));
     const out = {};
-    for (const p of plans) if (p.status === 'PENDING')
+    for (const p of plans) if (p.status === 'PENDING' && !reserved.has(p.id))
         for (const piece of p.result?.pieces || []) if (piece.demandId != null) out[piece.demandId] = (out[piece.demandId] || 0) + 1;
     return out;
 }
 
 /** 剩余待出条数 = 剩余需求 − 候选已占用。 */
-export function openDemands(remaining, plans) {
-    const used = pendingCounts(plans);
+export function openDemands(remaining, plans, views = []) {
+    // remaining 已扣执行预约；只再扣未预约候选，避免同一车被扣两次。
+    const used = pendingCounts(plans, views);
     return remaining.map(d => ({...d, demand: Math.max(0, d.demand - (used[d.id] || 0))})).filter(d => d.demand > 0);
 }
 
@@ -82,9 +84,12 @@ export function usefulCars(pattern, open) {
  * 车的起点：从 from 起向后避让疵点（含避让边距），直到所有条覆盖的幅宽区间内整车长度无疵点。
  * 返回起点；卷尾放不下时返回 null。
  */
-export function carStart(roll, from, length, strips) {
+export function carStart(roll, from, length, strips, plans = []) {
     const defects = (roll.defects || []).map(d => ({x0: d.x - (d.margin ?? 20), x1: d.x + d.w + (d.margin ?? 20), y0: d.y - (d.margin ?? 20), y1: d.y + d.h + (d.margin ?? 20)}));
-    let start = from;
+    // 连续出车从已用长度及本卷候选末端接续，不能复用当前选中车的起点。
+    let start = plans.filter(p => p.status === 'PENDING' && p.request?.rollId === roll.rollId
+        && p.request.feedPortType !== 'remnant' && !p.request.sourceRemnantId)
+        .reduce((end, p) => Math.max(end, (p.request.windowStartY || 0) + p.request.rollL), Math.max(from, roll.usedLength || 0));
     for (let guard = 0; guard <= defects.length; guard++) {
         if (start + length > roll.totalLength + .001) return null;
         const hit = defects.filter(d => d.y0 < start + length && d.y1 > start && strips.some(s => d.x0 < s.x + s.width && d.x1 > s.x));

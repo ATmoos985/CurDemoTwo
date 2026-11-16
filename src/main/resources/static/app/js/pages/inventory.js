@@ -1,12 +1,13 @@
 // 库存：母卷与料头档案、筛选，以及入库 / 移库 / 盘点 / 料头报废。
 // 移库与盘点按后端 options 给出的可操作材料与库存版本提交（幂等键 + 本机留存，结果未知时可重试原操作）。
 import {requestJSON, esc, fmtM, fmtN, errorBox, toast, idempotentPost, pendingWrite, retryWrite, dropWrite} from '../util.js';
+import {workflowTemplate} from '../model/showcase.js';
 
 const Q = {PASSED: ['合格', 'ok'], PENDING: ['待检', 'warn'], FAILED: ['不合格', 'err'], QUARANTINED: ['隔离', 'err']};
 const R = {AVAILABLE: ['可用', 'ok'], RESERVED: ['已预约', 'run'], CONSUMED: ['已消耗', ''], SCRAPPED: ['已报废', ''], QUARANTINED: ['隔离', 'err']};
 const ACTIONS = {receive: '母卷入库', transfer: '移库', count: '盘点', scrap: '料头报废'};
 
-export async function mount(el, [intent] = []) {
+export async function mount(el, [intent, templateId] = []) {
     let rolls, remnants;
     const load = async () => { [rolls, remnants] = await Promise.all([requestJSON('/api/rolls'), requestJSON('/api/remnants')]); };
     try { await load(); } catch (e) { el.innerHTML = errorBox(e); return; }
@@ -169,5 +170,8 @@ export async function mount(el, [intent] = []) {
             ${x.consumedByOrder ? `<div>消耗于</div><div class="num">${esc(x.consumedByOrder)}</div>` : ''}</div></div>`;
     }
     render();
-    if (intent === 'receive') await openAction('receive');
+    if (intent === 'receive') {
+        const template = workflowTemplate(templateId);
+        await openAction('receive', template ? {...template.material, rollId: 'DEMO-' + crypto.randomUUID().slice(0, 8)} : {});
+    }
 }

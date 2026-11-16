@@ -329,6 +329,7 @@
         .legend-item { display: flex; align-items: center; gap: 5px; color: var(--text-muted); }
         .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
     </style>
+<script type="module" src="/js/showcase-redirect.js"></script>
 </head>
 <body>
 
@@ -1123,6 +1124,7 @@
 
         // 页面初始化
         window.onload = () => {
+            if (new URLSearchParams(location.search).get("classic") !== "1") return;
             initKonva();
             loadCase(1);
         };

@@ -16,7 +16,12 @@ test('every entry points at a real page and every nav host names a known entry',
     const hosts = new Map();
     for (const page of pages) for (const [, id] of read(page).matchAll(/data-product-nav="([^"]+)"/g)) hosts.set(id, page);
     for (const [id, page] of hosts) assert.ok(ENTRIES.some(e => e.id === id), `${page} 的导航标识 ${id} 未登记`);
-    for (const item of ENTRIES) assert.equal(hosts.get(item.id), item.href.slice(1), `${item.id} 页面缺少对应导航宿主`);
+    for (const item of ENTRIES) {
+        if (item.id === 'demos') {
+            assert.match(read('demos.html'), /href="\/app\/#\/showcase"/);
+            assert.doesNotMatch(read('demos.html'), /iframe|demo-panel/);
+        } else assert.equal(hosts.get(item.id), item.href.slice(1), `${item.id} 页面缺少对应导航宿主`);
+    }
 });
 
 test('navigation exposes four production management destinations on every page', () => {

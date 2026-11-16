@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>服装唛架演示</title>
-<link rel="stylesheet" href="css/base.css"><link rel="stylesheet" href="css/product-navigation.css"><link rel="stylesheet" href="css/marker-demo.css"><script src="konva.min.js"></script></head>
+<link rel="stylesheet" href="css/base.css"><link rel="stylesheet" href="css/product-navigation.css"><link rel="stylesheet" href="css/marker-demo.css"><script src="konva.min.js"></script><script type="module" src="/js/showcase-redirect.js"></script>
+</head>
 <body class="marker-page"><header class="marker-header"><strong>服装齐套排料演示</strong><div data-product-nav="marker"></div></header>
 <main class="marker-main">
 <div class="marker-lead"><div><h1>一片不漏，再把布用短。</h1><p>同一张唛架混排 M / L 两个尺码。固定门幅，先核对衣片齐套，再尝试缩短长度。</p></div><span class="marker-preview">演示纸样 · 仅排料预览</span></div>
@@ -19,4 +20,4 @@
 <p id="marker-error" role="alert" hidden></p><p class="marker-formula">利用率 = 全部衣片净面积 ÷（固定门幅 × 实际唛架长度）。齐套后，绿色虚线标出唛架终止位置，灰色区域为未使用尾料；该线为长度标记，不代表设备刀路。</p>
 <details><summary>长度尝试记录</summary><ol id="marker-trials"></ol></details>
 <div class="marker-exports"><button class="tool-btn" id="marker-input-export">导出示例输入</button><button class="tool-btn" id="marker-result-export" disabled>导出齐套结果</button></div>
-</section></div></main><script type="module" src="js/product-navigation.js"></script><script type="module" src="js/nesting/marker-page.js"></script></body></html>
+</section></div></main><script type="module" src="js/product-navigation.js"></script><script type="module">if (new URLSearchParams(location.search).get("classic") === "1") await import("./js/nesting/marker-page.js");</script></body></html>

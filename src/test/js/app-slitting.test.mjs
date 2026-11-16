@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {slittingProblems, pendingCounts, openDemands, slittingJob, patternStrips, compositionText, assignCar, usefulCars, carStart, carRequest, patternRows, DEFAULT_SLITTING}
     from '../../main/resources/static/app/js/model/slitting.js';
 import {emptyTask, fromTask, toPayload, taskProblems, withProblemType} from '../../main/resources/static/app/js/model/task-form.js';
+import {remainingDemands} from '../../main/resources/static/app/js/model/solve-request.js';
 
 const params = {leftTrim: 10, rightTrim: 10, minWidth: 1800, maxWidth: 1980, widthStep: 10, totalOverCap: 2};
 const task = {id: 't1', revision: 3, name: '分切', materialModel: 'M1', problemType: 'SLITTING_1D', slitting: params,
@@ -60,6 +61,30 @@ test('a car assigns strips left to right from the left trim and skips strips wit
     assert.equal(usefulCars(pattern, open), 2);
     assert.equal(usefulCars(pattern, [{id: 2, width: 700, length: 2000, demand: 1}]), 1);
     assert.equal(usefulCars(pattern, [{id: 3, width: 500, length: 2000, demand: 5}]), 0);
+});
+
+test('released car demand is deducted once, while unreserved candidates remain occupied', () => {
+    const plans = [
+        {id: 'released', status: 'PENDING', result: {pieces: [{demandId: 1}, {demandId: 1}]}},
+        {id: 'draft', status: 'PENDING', result: {pieces: [{demandId: 1}]} }
+    ];
+    const views = [{reservationActive: true, execution: {planId: 'released'}}];
+    const left = remainingDemands(task, {}, {1: 2});
+    assert.equal(openDemands(left, plans, views).find(d => d.id === 1).demand, 1);
+    assert.equal(openDemands(remainingDemands(task), plans, [{...views[0], reservationActive: false}]).find(d => d.id === 1).demand, 1);
+});
+
+test('repeated cars advance beyond pending cars on this roll, then avoid defects and the roll end', () => {
+    const roll = {rollId: 'R1', usedLength: 1000, totalLength: 8000, defects: [{x: 0, y: 3100, w: 600, h: 100, margin: 20}]};
+    const plans = [
+        {status: 'PENDING', request: {rollId: 'R1', windowStartY: 1000, rollL: 2050}},
+        {status: 'CANCELLED', request: {rollId: 'R1', windowStartY: 5000, rollL: 2050}},
+        {status: 'PENDING', request: {rollId: 'OTHER', windowStartY: 10000, rollL: 2050}}
+    ];
+    const strips = [{x: 10, width: 600}];
+    assert.equal(carStart(roll, 1000, 2050, strips, plans), 3220);
+    assert.equal(carStart({...roll, defects: []}, 0, 2050, strips, []), 1000);
+    assert.equal(carStart({...roll, totalLength: 5000}, 1000, 2050, strips, plans), null);
 });
 
 test('car start steps past defects that touch the strips, and returns null at the roll end', () => {

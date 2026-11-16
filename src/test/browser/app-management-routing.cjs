@@ -112,7 +112,7 @@ const waitText = (page, selector, text) => page.waitForFunction(({selector, text
                 assert.deepEqual(await page.locator('.page-host a[href$=".html"]').evaluateAll(a=>a.map(x=>x.getAttribute('href'))), []);
             }
             await go(page,'showcase'); assert.equal(await page.locator('a[href="/linear.html"]').count(),0);
-            assert.ok((await page.locator('.page-host').innerText()).includes('独立演示')); assert.equal(await page.locator('.topbar a[href="/workspace.html"]').count(),1);
+            assert.ok((await page.locator('.page-host').innerText()).includes('计算演示不扣库存')); assert.equal(await page.locator('.topbar a[href="/workspace.html"]').count(),1);
         });
     } finally { await browser.close(); }
     const failed=results.filter(r=>!r.success).length; console.log(JSON.stringify({executed:results.length,passed:results.length-failed,failed,skipped:0,results},null,2)); if(failed)process.exitCode=1;

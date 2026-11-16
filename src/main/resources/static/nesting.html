@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="css/product-navigation.css">
     <script src="konva.min.js"></script>
     <link rel="stylesheet" href="css/ui-consistency.css">
+<script type="module" src="/js/showcase-redirect.js"></script>
 </head>
 <body class="nesting-lab">
     <header class="lab-header"><div><span class="app-mark">▥</span><strong>场景演示</strong><span class="lab-subtitle">二维 · 窗帘 / 服装 / 板材 · 不写入业务库存</span></div><div data-product-nav="lab"></div></header>
@@ -101,7 +102,7 @@
         </aside>
     </main>
     <dialog id="json-dialog" aria-labelledby="json-dialog-title"><form method="dialog"><div class="lab-heading"><h2 id="json-dialog-title">标准输入 JSON</h2><button class="tool-btn">关闭</button></div></form><label for="json-input">表单未列出的约束也会提交；不支持的内容将明确提示。</label><textarea id="json-input" spellcheck="false"></textarea><p id="json-error" role="alert"></p><button id="apply-json" class="tool-btn active">应用输入</button></dialog>
-    <script type="module" src="js/nesting/nesting-lab.js"></script>
+    <script type="module">if (new URLSearchParams(location.search).get("classic") === "1") await import("./js/nesting/nesting-lab.js");</script>
     <script type="module" src="js/product-navigation.js"></script>
 </body>
 </html>

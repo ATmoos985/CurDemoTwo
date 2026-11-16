@@ -7,7 +7,7 @@ import {createRollNavigator} from '../canvas/roll-navigator.js';
 import {parseRatio, formatRatio} from '../canvas/camera.js';
 import {buildRollScene, canvasScene, rollsOfPlans, sceneMetrics, demandColors, demandIndex, STATUS_TEXT, NEW_STATION, remnantAsRoll, OUTPUT_STYLES} from '../model/roll-scene.js';
 import {buildSolveRequest, windowProblem, usablePlan, remainingDemands} from '../model/solve-request.js';
-import {taskLabels, taskLink} from '../../../js/business/cutting/task-list-model.js';
+import {taskLabels} from '../../../js/business/cutting/task-list-model.js';
 import {validateDefect, round} from '../../../js/inspection/inspection-model.js';
 import {findForwardPlan} from '../../../js/business/cutting/forward-search.js';
 import {OUTCOMES, defaultReport, applyBulk, recoveryCandidates, reportSummary, reportProblems, buildCutReport} from '../model/report.js';
@@ -246,7 +246,7 @@ export async function mount(el, [taskId, focusPlan]) {
           <span class="tag kind">${isSlitting(task) ? '一维分切' : '二维'} · ${esc(task.materialModel || '—')}</span>
           ${summary ? `<span class="tag ${TAG[summary.status] || ''}">${esc(taskLabels[summary.status] || summary.status)}</span>` : ''}
           <span class="sp"></span><div class="sum" id="sum">${sumHtml(sc, colors)}</div>
-          <span class="vsep"></span><a class="btn" href="#/tasks">返回任务</a>${summary && !isSlitting(task) ? `<a class="btn" href="${esc(taskLink(summary))}">经典工作台 ↗</a>` : ''}</div>
+          <span class="vsep"></span><a class="btn" href="#/tasks">返回任务</a></div>
         <div class="stages">${STAGES.map((s, i) => `<div class="stage ${i < stage ? 'done' : i === stage ? 'on' : ''}"><span class="n">${i < stage ? '✓' : i + 1}</span>${s}</div>`).join('')}</div>
         ${!sc ? pickRollHtml() : `
         <div class="split" style="grid-template-columns:1fr ${st.report ? '420px' : st.quality || st.adjust ? '340px' : prefs.sideCollapsed ? '28px' : '300px'}">
@@ -871,7 +871,7 @@ export async function mount(el, [taskId, focusPlan]) {
         return `${fresh ? `<span class="tag warn">画布新增疵点 ${fresh} 处未保存</span><button class="btn" id="save-defects" ${st.saving ? 'disabled' : ''}>保存疵点到母卷</button><button class="btn" id="drop-defects">放弃</button>` : ''}
           <span class="sp"></span>${st.busy ? `<span class="muted" style="font-size:12px">${esc(st.busy)}</span>` : '<span class="muted" style="font-size:12px">候选方案不扣减库存；确认报工后记账</span>'}
           ${canSolve && prefs.sideCollapsed ? `<button class="btn pri" id="solve-foot" ${st.busy ? 'disabled' : ''}>${seg ? '重新计算' : '计算本工位'}</button>` : ''}
-          ${summary && !isSlitting(task) ? `<a class="btn" href="${esc(taskLink(summary))}">经典工作台继续 ↗</a>` : ''}`;
+          `;
     }
     /** 只刷新摘要条、页脚和画布数据，保留相机。 */
     function chrome() {
@@ -1090,7 +1090,7 @@ export async function mount(el, [taskId, focusPlan]) {
     // ---- 一维分切：计算分切组合（v2 计算作业）→ 按组合逐车出车（校验后成为候选）→ 报工同二维 ----
     const session = new OptimizationSession();
     function slitBlock(sc) {
-        const open = openDemands(remaining(), plans), need = open.reduce((a, d) => a + d.demand, 0), s = st.slit, r = s?.result;
+        const open = openDemands(remaining(), plans, views), need = open.reduce((a, d) => a + d.demand, 0), s = st.slit, r = s?.result;
         const head = `<div class="sec">一维分切 · 出车</div>
           <div class="kv"><div>待出</div><div class="num">${open.length} 项 · ${need} 卷</div><div>母卷幅宽</div><div class="num">${fmtN(roll.width)} mm</div>
             <div>下一车起点</div><div class="num">Y ${fmtM(sc.window.start, 2)} m</div></div>`;
@@ -1108,7 +1108,7 @@ export async function mount(el, [taskId, focusPlan]) {
           <div style="display:flex;gap:8px;padding:8px 12px;flex-wrap:wrap">${solveBtn}<button class="btn" id="slit-export">导出方案</button></div>`;
     }
     async function slitSolve() {
-        const open = openDemands(remaining(), plans);
+        const open = openDemands(remaining(), plans, views);
         if (!open.length) return toast('没有待出的需求（候选已占用的条不重复计算）', true);
         st.busy = '正在计算分切组合…'; st.failure = null; shell(true);
         try {
@@ -1122,10 +1122,11 @@ export async function mount(el, [taskId, focusPlan]) {
     }
     async function slitCar(patternId) {
         const pattern = st.slit?.result?.patterns.find(p => p.id === patternId); if (!pattern) return;
-        const {strips} = assignCar(pattern, openDemands(remaining(), plans), task.slitting?.leftTrim || 0);
+        const reason = previewBusyReason(); if (reason) return toast(reason, true);
+        const {strips} = assignCar(pattern, openDemands(remaining(), plans, views), task.slitting?.leftTrim || 0);
         if (!strips.length) return toast('该组合已无剩余需求可出', true);
         const from = scene().window.start, len = (task.process?.trimStart || 0) + pattern.lengthMm;
-        const start = carStart(roll, from, len, strips);
+        const start = carStart(roll, from, len, strips, plans);
         if (start == null) return toast(from + len > roll.totalLength + .001 ? `母卷剩余长度不足一车（需 ${fmtM(len, 2)} m），请换卷`
             : `Y ${fmtM(from, 2)} m 之后没有连续 ${fmtM(len, 2)} m 且条区无疵点的区段，请换卷或调整卷长`, true);
         st.busy = '正在校验并出车…'; st.failure = null; shell(true);

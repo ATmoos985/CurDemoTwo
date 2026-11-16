@@ -7,6 +7,7 @@ const explanations = {
     NOT_INCLUDED_IN_MANUAL_LAYOUT:'当前手调方案未包含这些数量，仍需在后续方案中排料。',
     NOT_PLACED_IN_THIS_SOLUTION:'本次搜索未排入这些数量，不能据此判定无法裁切。可在下一工位续排，或核对加工区、疵点和工艺后重新求解。'
 };
+export const fulfillmentReason = reason => explanations[reason] || explanations.NOT_PLACED_IN_THIS_SOLUTION;
 
 export function demandProgress(demands, completed, {pending, pieces = [], edited = false, attempt, queued = {}} = {}) {
     const current = pending ? pieces.filter(p => p.planId === pending.result.planId && !p.confirmed) : [];
