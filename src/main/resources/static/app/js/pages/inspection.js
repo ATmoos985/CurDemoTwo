@@ -1,7 +1,7 @@
 // 跑布验疵：验布线固定，布面随位置滚动。坐标沿用母卷档案：x 自左边缘、y 自卷头（mm）；界面显示距右边缘。
 // 本次标记保存在本机，点「保存到母卷」一次入档（与现有验疵页同一接口）。
 import {requestJSON, esc, fmtM, fmtN, errorBox, toast} from '../util.js';
-import {setStatus} from '../main.js';
+import {setStatus} from '../status-bar.js';
 import {validateDefect, advance, round} from '../../../js/inspection/inspection-model.js';
 import {createRollCanvas} from '../../../js/canvas/roll-canvas.js';
 import {buildInspectionScene} from '../model/roll-scene.js';

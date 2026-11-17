@@ -44,8 +44,8 @@ public class OptimizationService implements AutoCloseable {
     public OptimizationService(NestingSolver solvers,
             com.example.cutdemotwo.algorithm.api.ISlittingSolverEngine slitting,
             OptimizationJobStore store,
-            @Value("${cutdemo.jobs.workers:2}") int workers,
-            @Value("${cutdemo.jobs.queue-capacity:16}") int queueCapacity,
+            @Value("${cutdemo.jobs.workers:6}") int workers,
+            @Value("${cutdemo.jobs.queue-capacity:32}") int queueCapacity,
             @Value("${cutdemo.jobs.max-stored:1000}") int maxStored) {
         this.solvers=solvers;this.slitting=slitting;this.store=store;this.workers=workers;this.queueCapacity=queueCapacity;this.maxStored=maxStored;
         this.shared=store instanceof LeasedOptimizationJobStore leased?leased:null;

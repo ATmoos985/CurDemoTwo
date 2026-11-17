@@ -1,7 +1,7 @@
 // 排料工作台：读取任务、方案、报工与母卷档案，交给画布与导航条渲染。
 // 本页选料、计算、执行、报工与复检；画布只展示场景并发出操作意图。
 import {requestJSON, esc, fmtM, fmtN, shortId, errorBox, toast, loadPrefs, savePrefs, dismissOnOutside, solverSettings, loadSheetLib} from '../util.js';
-import {setStatus} from '../main.js';
+import {setStatus} from '../status-bar.js';
 import {createRollCanvas} from '../canvas/roll-canvas.js';
 import {createRollNavigator} from '../canvas/roll-navigator.js';
 import {parseRatio, formatRatio} from '../canvas/camera.js';
