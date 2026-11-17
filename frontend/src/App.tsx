@@ -9,6 +9,8 @@ import { TaskEditPage } from './pages/TaskEditPage';
 import { QualityPage } from './pages/QualityPage';
 import { InventoryPage } from './pages/InventoryPage';
 import { DocumentsPage } from './pages/DocumentsPage';
+import { AnalysisPage } from './pages/AnalysisPage';
+import { InspectionPage } from './pages/InspectionPage';
 import { LegacyPageHost } from './components/LegacyPageHost';
 import { requestJSON } from '@static/app/js/util.js';
 import { useStudioStore } from './store/useStudioStore';
@@ -131,25 +133,13 @@ export const App: React.FC = () => {
       case 'inventory':
         return <InventoryPage params={route.params} />;
       case 'inspection':
-        return (
-          <LegacyPageHost
-            routeKey={route.rawKey}
-            loader={() => import('@static/app/js/pages/inspection.js')}
-            params={route.params}
-          />
-        );
+        return <InspectionPage params={route.params} />;
       case 'documents':
         return <DocumentsPage />;
       case 'quality':
         return <QualityPage />;
       case 'analysis':
-        return (
-          <LegacyPageHost
-            routeKey={route.rawKey}
-            loader={() => import('@static/app/js/pages/analysis.js')}
-            params={route.params}
-          />
-        );
+        return <AnalysisPage />;
       case 'showcase':
         return (
           <LegacyPageHost
