@@ -6,6 +6,7 @@ import { ExecutionCenterPage } from './pages/ExecutionCenterPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TasksPage } from './pages/TasksPage';
 import { TaskEditPage } from './pages/TaskEditPage';
+import { QualityPage } from './pages/QualityPage';
 import { LegacyPageHost } from './components/LegacyPageHost';
 import { requestJSON } from '@static/app/js/util.js';
 import { useStudioStore } from './store/useStudioStore';
@@ -104,7 +105,13 @@ export const App: React.FC = () => {
       case 'slitting':
         return <SlittingStudio1DPage />;
       case 'execution':
-        return <ExecutionCenterPage taskId={route.params[0] || undefined} />;
+        return (
+          <ExecutionCenterPage
+            taskId={route.params[0] || undefined}
+            planId={route.params[1] || undefined}
+            intent={route.params[2] || undefined}
+          />
+        );
       case 'settings':
         return <SettingsPage />;
       case 'garment':
@@ -144,13 +151,7 @@ export const App: React.FC = () => {
           />
         );
       case 'quality':
-        return (
-          <LegacyPageHost
-            routeKey={route.rawKey}
-            loader={() => import('@static/app/js/pages/quality.js')}
-            params={route.params}
-          />
-        );
+        return <QualityPage />;
       case 'analysis':
         return (
           <LegacyPageHost

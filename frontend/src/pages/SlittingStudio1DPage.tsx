@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useStudioStore, SlittingSchemeRun } from '../store/useStudioStore';
 import { OptimizationSession } from '@static/js/business/optimization/job-client.js';
 import { independentBaseline, planSummary } from '@static/js/linear/linear-model.js';
-import { carStart, assignCar, patternStrips } from '@static/app/js/model/slitting.js';
+import { carStart, assignCar, patternStrips, carRequest } from '@static/app/js/model/slitting.js';
 import { requestJSON, toast, fmtN, loadSheetLib } from '@static/app/js/util.js';
 
 const STRIP_COLORS = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#4f46e5'];
@@ -424,6 +424,53 @@ export const SlittingStudio1DPage: React.FC = () => {
           allowRotation: false
         }))
       });
+      try {
+        localStorage.setItem(
+          'cutplan.app.slit.scheme.' + task.id,
+          JSON.stringify(activeScheme)
+        );
+      } catch {}
+
+      // If a matching roll is available in stock, automatically dispatch the first car as a pending CuttingPlan
+      const candidateRoll =
+        rolls.find(
+          (r) =>
+            r.inspectionStatus === 'PASSED' &&
+            Math.abs(r.width - slitMotherWidthMm) < 1 &&
+            (r.currentRemainingLength ?? r.totalLength) >= slitFixedLengthMm
+        ) ||
+        rolls.find(
+          (r) =>
+            r.inspectionStatus === 'PASSED' &&
+            r.width >= slitMaxWidthMm + slitLeftTrimMm + slitRightTrimMm &&
+            (r.currentRemainingLength ?? r.totalLength) >= slitFixedLengthMm
+        );
+      if (candidateRoll && activeScheme.patterns.length > 0) {
+        const firstPat = activeScheme.patterns[0];
+        const open = task.demands.map((d: any) => ({
+          id: d.id,
+          name: d.name,
+          width: d.width,
+          length: d.length,
+          demand: d.quantity
+        }));
+        const { strips } = assignCar(firstPat, open, slitLeftTrimMm);
+        const start = carStart(candidateRoll, candidateRoll.usedLength || 0, slitFixedLengthMm, strips, []);
+        if (strips.length > 0 && start != null) {
+          await requestJSON(
+            '/api/cutting/slitting-cars',
+            carRequest({
+              task,
+              roll: candidateRoll,
+              start,
+              pattern: firstPat,
+              strips,
+              settings: {}
+            })
+          ).catch(() => {});
+        }
+      }
+
       markSlitSchemeDispatched(activeScheme.id, task.id);
       toast(`一维分切方案已建立生产单并移交！`);
       location.hash = `#/execution/${encodeURIComponent(task.id)}`;

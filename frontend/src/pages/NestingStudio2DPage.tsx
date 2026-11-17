@@ -637,37 +637,35 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
     try {
       const modelName = activeScheme.materialModel || `STUDIO-${activeScheme.widthMm}`;
       const allRolls: any[] = await requestJSON('/api/rolls');
-      let targetRoll = allRolls.find(
-        (r) =>
-          r.rollModel === modelName &&
-          Math.abs(r.width - activeScheme.widthMm) < 1 &&
-          (r.currentRemainingLength ?? r.totalLength) >= activeScheme.occupiedLengthMm
-      );
-      if (!targetRoll) {
-        const newRollId = `ROLL-${modelName.replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase() || 'STUDIO'}-${activeScheme.widthMm}`;
-        targetRoll = allRolls.find((r) => r.rollId === newRollId);
-        if (!targetRoll) {
-          targetRoll = await requestJSON('/api/rolls', {
-            rollId: newRollId,
-            rollModel: modelName,
-            materialName: `${modelName} (${activeScheme.widthMm}mm)`,
-            width: activeScheme.widthMm,
-            rawWidth: activeScheme.widthMm,
-            totalLength: 50000,
-            currentRemainingLength: 50000,
-            usedLength: 0,
-            inspectionStatus: 'PASSED',
-            inspector: '排料工作台移交建档',
-            storageLocation: '裁床备料区 A-01'
-          });
-        }
-      }
+      const targetRoll =
+        (activeScheme.rollId
+          ? allRolls.find((r) => r.rollId === activeScheme.rollId)
+          : null) ||
+        allRolls.find(
+          (r) =>
+            r.inspectionStatus === 'PASSED' &&
+            r.rollModel === modelName &&
+            Math.abs(r.width - activeScheme.widthMm) < 1 &&
+            (r.currentRemainingLength ?? r.totalLength) >= activeScheme.occupiedLengthMm
+        ) ||
+        allRolls.find(
+          (r) =>
+            r.inspectionStatus === 'PASSED' &&
+            Math.abs(r.width - activeScheme.widthMm) < 1 &&
+            (r.currentRemainingLength ?? r.totalLength) >= activeScheme.occupiedLengthMm
+        );
 
-      const bedL = Math.max(1200, Math.ceil(activeScheme.occupiedLengthMm + 150));
+      const reqParts: any[] = activeScheme.request?.problem?.parts || [];
+      const allowRotAny = reqParts.some((p) => p.allowRotation || p.allowHalfTurn);
+      const bedL = Math.max(
+        500,
+        Math.ceil(activeScheme.occupiedLengthMm + trimStartMm)
+      );
+
       const task = await requestJSON('/api/cutting/tasks', {
         revision: 0,
         name: `选定方案移交 · ${activeScheme.title}`,
-        materialModel: targetRoll.rollModel,
+        materialModel: targetRoll?.rollModel || modelName,
         externalRef: `${activeScheme.strategyName} · 利用率 ${activeScheme.utilizationPct}%`,
         process: {
           bedLength: bedL,
@@ -675,55 +673,75 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
           pieceGap: pieceGapMm,
           cutOrigin: 'left-top',
           firstStageOrientation: 'horizontal',
-          allowRotation: false,
+          allowRotation: allowRotAny,
           allowLongitudinal: true
         },
-        demands: activeScheme.demands.map((d, idx) => ({
-          id: idx + 1,
-          name: d.name,
-          width: d.width,
-          length: d.length,
-          quantity: d.quantity,
-          allowRotation: Boolean(d.allowRotation),
-          ...(d.shape ? { shape: d.shape } : {})
-        }))
+        demands: activeScheme.demands.map((d, idx) => {
+          const rp = reqParts[idx];
+          return {
+            id: idx + 1,
+            name: d.name,
+            width: d.width,
+            length: d.length,
+            quantity: d.quantity,
+            allowRotation: Boolean(d.allowRotation || rp?.allowRotation || rp?.allowHalfTurn),
+            ...(d.shape ? { shape: d.shape } : {})
+          };
+        })
       });
 
-      await requestJSON('/api/solve', {
-        minRemnantWidth: 200,
-        minRemnantLength: 300,
-        timeLimitSeconds: 4,
-        taskId: task.id,
-        taskRevision: task.revision,
-        rollId: targetRoll.rollId,
-        rollModel: targetRoll.rollModel,
-        rollW: targetRoll.width,
-        rollL: bedL,
-        totalRollL: targetRoll.totalLength,
-        windowStartY: targetRoll.usedLength || 0,
-        trimStart: trimStartMm,
-        pieceGap: pieceGapMm,
-        cutOrigin: 'left-top',
-        firstStageOrientation: 'horizontal',
-        allowRotation: false,
-        allowLongitudinal: true,
-        feedPortType: 'roll',
-        sourceRemnantId: null,
-        solver: 'packingsolver',
-        defects: [],
-        demands: task.demands.map((d: any) => ({
-          id: d.id,
-          name: d.name,
-          width: d.width,
-          length: d.length,
-          shape: d.shape ?? null,
-          allowRotation: Boolean(d.allowRotation),
-          demand: d.quantity
-        }))
-      });
+      try {
+        localStorage.setItem(
+          'cutplan.app.2d.scheme.' + task.id,
+          JSON.stringify(activeScheme)
+        );
+      } catch {}
+
+      if (targetRoll) {
+        const startY = targetRoll.usedLength || 0;
+        const winDefects = (targetRoll.defects || []).filter(
+          (d: any) => d.y < startY + bedL && d.y + d.h > startY
+        );
+        await requestJSON('/api/solve', {
+          minRemnantWidth: 200,
+          minRemnantLength: 300,
+          timeLimitSeconds: Math.min(10, activeScheme.request?.problem?.timeLimitSeconds || 6),
+          taskId: task.id,
+          taskRevision: task.revision,
+          rollId: targetRoll.rollId,
+          rollModel: targetRoll.rollModel,
+          rollW: targetRoll.width,
+          rollL: bedL,
+          totalRollL: targetRoll.totalLength,
+          windowStartY: startY,
+          trimStart: trimStartMm,
+          pieceGap: pieceGapMm,
+          cutOrigin: 'left-top',
+          firstStageOrientation: 'horizontal',
+          allowRotation: allowRotAny,
+          allowLongitudinal: true,
+          feedPortType: 'roll',
+          sourceRemnantId: null,
+          solver: activeScheme.request?.problem?.engine === 'javaguillotine' || activeScheme.request?.problem?.engine === 'javairregular' ? activeScheme.request.problem.engine : 'packingsolver',
+          defects: winDefects,
+          demands: task.demands.map((d: any) => ({
+            id: d.id,
+            name: d.name,
+            width: d.width,
+            length: d.length,
+            shape: d.shape ?? null,
+            allowRotation: Boolean(d.allowRotation),
+            demand: d.quantity
+          }))
+        });
+      }
 
       markSchemeDispatched(activeScheme.id, task.id);
-      toast(`已将方案「${activeScheme.title}」移交至生产报工中心！`);
+      toast(
+        targetRoll
+          ? `已将方案「${activeScheme.title}」关联实卷 ${targetRoll.rollId} 移交至生产报工中心！`
+          : `已创建生产任务「${task.name}」并移交方案快照（请在报工中心选用在库实卷投产）`
+      );
       location.hash = `#/execution/${encodeURIComponent(task.id)}`;
     } catch (e: any) {
       toast('方案移交失败：' + e.message, true);
