@@ -7,28 +7,33 @@ import {showcaseScene} from '../model/showcase.js';
 
 export function mount(el) {
     el.innerHTML = `<div class="ph"><h1>唛架幅宽试算</h1><span class="crumb">服装 · 单层用料</span></div>
-      <div class="split garment-split"><section class="pane"><div class="pane-h">试算条件</div>
-      <div class="pane-b"><form id="garment-form" class="form">
-      <div class="garment-direction"><label for="garment-half-turn">
-        <input id="garment-half-turn" name="halfTurn" type="checkbox" aria-labelledby="garment-angle-label" aria-describedby="angle-help">
-        <strong id="garment-angle-label">允许 180° 旋转</strong>
-        <span class="garment-angle-state" aria-hidden="true"><span class="angle-off">未启用</span><span class="angle-on">已启用</span></span>
-      </label><small id="angle-help">面料允许倒顺排时启用，可对比固定方向与允许掉头的利用率。</small></div>
+      <div class="split garment-split"><section class="pane"><div class="pane-b">
+      <details id="garment-help"><summary class="pane-h" role="button" aria-label="试算条件帮助">试算条件<span class="help-mark" aria-hidden="true">?</span></summary>
+        <div class="garment-help-text">
+          <p id="angle-help">面料允许倒顺排时，可勾选旋转，比较同幅宽下两种方向的利用率。</p>
+          <p id="width-help">M、L 码每版合计 1–12 件。有效幅宽可填 1–8 个值，范围 1200–2000 mm，用逗号或空格分隔。</p>
+          <p id="weight-help">每件用布重量按含布边的幅宽、实际唛架长度和克重估算，未计布头、布尾及备损。</p>
+        </div>
+      </details>
+      <form id="garment-form" class="form">
+      <label for="garment-half-turn">允许 180° 旋转</label><input id="garment-half-turn" name="halfTurn" type="checkbox" aria-describedby="angle-help">
       <label for="garment-example">试算示例</label><select class="field" id="garment-example" name="example"><option value="" disabled>自定义参数</option>${GARMENT_EXAMPLES.map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select>
       <label for="garment-style">内置样板</label><select class="field" id="garment-style" name="style">${MARKER_STYLES.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
       <label for="garment-m">M 码（件/版）</label><input class="field" id="garment-m" name="M" type="number" min="0" max="12" required>
       <label for="garment-l">L 码（件/版）</label><input class="field" id="garment-l" name="L" type="number" min="0" max="12" required>
       <label for="garment-widths">有效幅宽（mm）</label><input class="field" id="garment-widths" name="widths" aria-describedby="width-help" required>
       <label for="garment-edge">两侧布边合计（mm）</label><input class="field" id="garment-edge" name="edge" type="number" min="0" step="0.1" required>
-      <label for="garment-gsm">克重（g/m²）</label><input class="field" id="garment-gsm" name="gsm" type="number" min="0.1" step="0.1" required></form>
-      <p class="demo-note" id="width-help">每版合计 1–12 件。有效幅宽可填 1–8 个值，范围 1200–2000 mm，用逗号或空格分隔。</p>
-      <p class="demo-note">克重单耗按含布边幅宽和实际唛架长度估算，未计布头、布尾及备损。</p></div></section>
+      <label for="garment-gsm">克重（g/m²）</label><input class="field" id="garment-gsm" name="gsm" type="number" min="0.1" step="0.1" aria-describedby="weight-help" required></form></div></section>
       <section class="pane"><div class="pane-h">候选幅宽比较</div><div class="garment-results"><table class="t">
       <thead><tr>${['有效幅宽 mm','试算状态','唛架长 mm','利用率 %','mm/件','g/件','排料图'].map(v => `<th>${v}</th>`).join('')}</tr></thead><tbody></tbody></table></div>
       <div class="pane-h" id="garment-view">排料图</div><div id="garment-canvas" class="demo-canvas" aria-label="当前候选唛架"></div></section></div>
       <div class="foot"><span role="status">待试算</span><span class="sp"></span><button type="button" class="btn" id="garment-stop" hidden>停止</button>
       <button class="btn pri" type="submit" form="garment-form">试算幅宽</button></div>`;
     const $ = selector => el.querySelector(selector);
+    const help = $('#garment-help');
+    help.onkeydown = event => {
+        if (event.key === 'Escape' && help.open) help.open = false;
+    };
     const form = $('form'), status = $('[role=status]'), run = $('[type=submit]'), stop = $('#garment-stop');
     const session = new OptimizationSession();
     let rows = [], revision = 0, canvas, selected = null, manualView = false;

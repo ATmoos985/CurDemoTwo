@@ -13,24 +13,33 @@ before(async () => {
 });
 after(async () => { await browser?.close(); });
 
-test('the rotation control is visible above the inputs and shows its mouse and keyboard state', async () => {
-    const toggle = page.getByRole('checkbox', {name:'允许 180° 旋转'});
-    const row = page.locator('label[for="garment-half-turn"]');
-    const off = row.getByText('未启用', {exact:true}), on = row.getByText('已启用', {exact:true});
+test('the rotation checkbox works with mouse and keyboard and parameter help preserves the selection', async () => {
+    const form = page.locator('#garment-form');
+    const label = form.getByText('允许 180° 旋转', {exact:true});
+    const toggle = form.getByRole('checkbox', {name:'允许 180° 旋转', exact:true});
+    const example = form.getByLabel('试算示例');
+    const help = page.getByRole('button', {name:'试算条件帮助', exact:true});
+    const notes = [/倒顺排/, /1200–2000 mm/, /布头、布尾/].map(text => page.getByText(text));
+    await example.selectOption('shirt-three');
     await expect(toggle).toBeInViewport({ratio:1});
-    const box = await row.boundingBox(), example = await page.getByLabel('试算示例').boundingBox();
-    assert.ok(box.y + box.height <= example.y);
+    const checkboxBox = await toggle.boundingBox(), exampleBox = await example.boundingBox();
+    assert.ok(checkboxBox.y + checkboxBox.height <= exampleBox.y);
+    assert.ok(Math.abs(checkboxBox.x - exampleBox.x) <= 5);
     await expect(toggle).not.toBeChecked();
-    await expect(off).toBeVisible();
-    await expect(on).toBeHidden();
-    await off.click();
+    await expect(form).not.toContainText(/已启用|未启用/);
+    for (const note of notes) await expect(note).toBeHidden();
+
+    await label.click();
     await expect(toggle).toBeChecked();
-    await expect(on).toBeVisible();
-    await expect(off).toBeHidden();
+    await help.press('Enter');
+    for (const note of notes) await expect(note).toBeVisible();
+    await page.keyboard.press('Escape');
+    for (const note of notes) await expect(note).toBeHidden();
+    await expect(help).toBeFocused();
+    await expect(example).toHaveValue('shirt-three');
+    await expect(toggle).toBeChecked();
     await toggle.press('Space');
     await expect(toggle).not.toBeChecked();
-    await expect(off).toBeVisible();
-    await expect(on).toBeHidden();
 });
 
 test('invalid per-marker garment count blocks submission', async () => {
