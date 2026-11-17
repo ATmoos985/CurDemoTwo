@@ -1,6 +1,7 @@
 import {esc, fmtN} from '../util.js';
 import {GARMENT_TRIAL_STYLES, markerSizeLabels} from '../../../js/nesting/marker-demo.js';
 import {fourPieceReference} from '../../../js/nesting/dxf-reference.js';
+import {fourPieceOptimized} from '../../../js/nesting/four-piece-seed.js';
 import {OptimizationSession} from '../../../js/business/optimization/job-client.js';
 import {GARMENT_EXAMPLES, candidateWidths, compactionSavingMm, effectiveUtilization, fabricConsumption, markerRequest, selectMarkerTrial, solveMarkerDirection} from '../model/garment.js';
 import {createRollCanvas} from '../canvas/roll-canvas.js';
@@ -28,7 +29,8 @@ export function mount(el, [exampleId] = []) {
       <label for="garment-edge">两侧布边合计（mm）</label><input class="field" id="garment-edge" name="edge" type="number" min="0" step="0.1" required>
       <label for="garment-gsm">克重（g/m²）</label><input class="field" id="garment-gsm" name="gsm" type="number" min="0.1" step="0.1" aria-describedby="weight-help" required></form></div></section>
       <section class="pane"><div class="pane-h">候选幅宽比较</div>
-      <div id="garment-reference" hidden><span id="garment-benchmark"></span><button class="btn sm" id="garment-replay" type="button" aria-pressed="false"></button></div>
+      <div id="garment-reference" hidden><span id="garment-benchmark"></span><span role="group" aria-label="排料方案">
+      <button class="btn sm" id="garment-optimum" type="button" aria-pressed="false"></button> <button class="btn sm" id="garment-replay" type="button" aria-pressed="false"></button></span></div>
       <div class="garment-results"><table class="t">
       <thead><tr>${['有效幅宽 mm','试算状态','唛架长 mm','齐套利用率 %','mm/件','g/件'].map(v => `<th>${v}</th>`).join('')}<th id="garment-fill-column">含补片利用率 %</th><th>排料图</th></tr></thead><tbody></tbody></table></div>
       <div class="pane-h" id="garment-view">排料图</div><div id="garment-canvas" class="demo-canvas" aria-label="当前候选唛架"></div></section></div>
@@ -41,20 +43,24 @@ export function mount(el, [exampleId] = []) {
     };
     const form = $('form'), status = $('[role=status]'), run = $('[type=submit]'), stop = $('#garment-stop');
     const session = new OptimizationSession();
-    let rows = [], revision = 0, canvas, selected = null, manualView = false, reference = null;
-    const replay = $('#garment-replay');
+    let rows = [], revision = 0, canvas, selected = null, manualView = false, reference = null, optimized = null;
+    const replay = $('#garment-replay'), optimizedButton = $('#garment-optimum');
+    function preview(layout, direction, button) {
+        const {request, result, verified} = layout;
+        button.textContent = `${direction} · ${verified.occupiedLengthMm.toFixed(2)} mm · ${verified.utilizationPercent.toFixed(2)}%`;
+        return {width:verified.widthMm, layoutRequest:request, result, direction, state:`${verified.pieceCount} 片 · 掉头 ${verified.rotatedCount} 片`,
+            use:{length:verified.occupiedLengthMm, utilization:verified.utilizationPercent}};
+    }
     function updateReference(example) {
         const data = example?.benchmark;
         $('#garment-reference').hidden = !data;
-        reference = null;
+        reference = null; optimized = null;
         if (!data) return;
-        const {request, result, verified} = fourPieceReference();
         const {width, length, counts, utilization, dxfUtilization} = data;
         const mix = Object.entries(counts).map(([size, qty]) => `${size} 码 ${qty} 件`).join('、');
         $('#garment-benchmark').textContent = `原报告 ${utilization.toFixed(2)}% · DXF 同版长换算 ${dxfUtilization.toFixed(2)}%（${width} × ${length} mm，${mix}）`;
-        replay.textContent = `按图复排 · ${fmtN(verified.occupiedLengthMm, 2)} mm · ${verified.utilizationPercent.toFixed(2)}%`;
-        reference = {width, layoutRequest:request, result, direction:'按图复排', state:`${verified.pieceCount} 片 · 掉头 ${verified.rotatedCount} 片`,
-            use:{length:verified.occupiedLengthMm, utilization:verified.utilizationPercent}};
+        reference = preview(fourPieceReference(), '按图复排', replay);
+        optimized = preview(fourPieceOptimized(), '优化排料', optimizedButton);
     }
     function select(row) {
         selected = row;
@@ -64,10 +70,13 @@ export function mount(el, [exampleId] = []) {
         }), {refit:true});
         $('#garment-view').textContent = `排料图 · ${fmtN(row.width, 1)} mm · ${row.usedFixed ? '沿用固定方向' : row.direction} · ${row.state}`;
         replay.setAttribute('aria-pressed', String(row === reference));
+        optimizedButton.setAttribute('aria-pressed', String(row === optimized));
+        optimizedButton.classList.toggle('pri', row === optimized);
         for (const button of $('tbody').querySelectorAll('button[data-index]'))
             button.setAttribute('aria-pressed', String(rows[Number(button.dataset.index)] === row));
     }
     replay.onclick = () => { if (reference) { manualView = true; select(reference); } };
+    optimizedButton.onclick = () => { if (optimized) { manualView = true; select(optimized); } };
     function render() {
         const lowest = Math.min(...rows.map(r => r.use?.gramsPerGarment).filter(Number.isFinite));
         const highest = Math.max(...rows.filter(r => r.use).map(r => effectiveUtilization(r.use)));
@@ -76,6 +85,15 @@ export function mount(el, [exampleId] = []) {
         $('#garment-fill-column').hidden = !filling;
         function trialDetail(row) {
             const info = comparison ? [row.direction] : [];
+            if (reference && row.use) {
+                const delta = row.use.utilization - reference.use.utilization;
+                info.push(`较按图复排 ${delta > 0 ? '+' : ''}${fmtN(delta, 2)} 个百分点`);
+            }
+            const seed = row.result?.marker?.trials?.find(t => t.phase === 'SEED');
+            if (seed && row.use) {
+                const improvement = seed.occupiedLengthMm - row.use.length;
+                info.push(improvement > .005 ? `较初排缩短 ${fmtN(improvement, 2)} mm` : '沿用已验初排');
+            }
             if (row.retryNote) info.push(row.retryNote);
             if (row.halfTurn && row.result?.layout) {
                 if (row.usedFixed) info.push('沿用固定方向');
@@ -96,7 +114,7 @@ export function mount(el, [exampleId] = []) {
                 }
             }
             const saved = row.use && compactionSavingMm(row.result.marker.trials);
-            if (saved > 0) info.push(`${row.usedFixed ? '固定方案' : ''}压紧节省 ${saved < 0.01 ? '不足 0.01' : fmtN(saved, 2)} mm`);
+            if (saved > 0 && !seed) info.push(`${row.usedFixed ? '固定方案' : ''}压紧节省 ${saved < 0.01 ? '不足 0.01' : fmtN(saved, 2)} mm`);
             return info.length ? `<br><small>${esc(info.join(' · '))}</small>` : '';
         }
         $('tbody').innerHTML = rows.map((r, i) => `<tr><td class="num">${fmtN(r.width, 1)}</td>
@@ -116,7 +134,7 @@ export function mount(el, [exampleId] = []) {
         rows = []; selected = null; manualView = false;
         canvas?.destroy(); canvas = null;
         $('#garment-view').textContent = '排料图';
-        if (reference) select(reference);
+        if (optimized) select(optimized);
         render(); status.textContent = '待试算';
     }
     function busy(value) {
@@ -238,7 +256,7 @@ export function mount(el, [exampleId] = []) {
                     row.state = row.use ? '齐套' : '未取得齐套结果';
                     if (chosen.job.state === 'TIMED_OUT') row.state += '（试排限时结束）';
                     if (job.state === 'FAILED' || job.state === 'CANCELLED') row.state = `${job.state === 'FAILED' ? '试算失败' : '已停止'} · ${row.state}`;
-                    const preferTrial = !selected || (selected === reference && row.use)
+                    const preferTrial = !selected || ((selected === optimized || selected === reference) && row.use)
                         || effectiveUtilization(row.use) > effectiveUtilization(selected.use);
                     if (!manualView && row.result?.layout && preferTrial) select(row);
                 } catch (e) {

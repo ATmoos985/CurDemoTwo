@@ -32,9 +32,15 @@ export function fourPieceReference() {
     const problem = markerExample(widthMm, style.id, counts);
     // The report reference retains the imported cutting vertices. A solve request uses the 0.1 mm engine grid.
     problem.parts = dxfParts(style, counts, false);
+    return fourPiecePreview(problem, POSITIONS, 'reference-1226-shell', 0.05975);
+}
+
+// Only used to draw independently audited stored markers. Live jobs use the server verifier.
+export function fourPiecePreview(problem, positions, clientRequestId, minGapMm) {
+    const widthMm = problem.material.shape.width;
     const byName = new Map(problem.parts.map(part => [part.name, part]));
     for (const part of problem.parts) part.allowHalfTurn = true;
-    const placements = POSITIONS.map(([name, x, y, rotationDegrees], index) => {
+    const placements = positions.map(([name, x, y, rotationDegrees], index) => {
         const part = byName.get(name);
         return {id:index + 1, demandId:part.id, name, x, y, rotationDegrees, shape:rotateShape(part.shape, rotationDegrees)};
     });
@@ -43,7 +49,7 @@ export function fourPieceReference() {
     const utilizationPercent = 100 * cuttingAreaMm2 / (widthMm * occupiedLengthMm);
     const processingRegion = rectangle(widthMm, occupiedLengthMm);
     problem.material.shape = processingRegion;
-    const request = {schemaVersion:'2.0', clientRequestId:'reference-1226-shell', problemType:'NESTING_2D',
+    const request = {schemaVersion:'2.0', clientRequestId, problemType:'NESTING_2D',
         requireComplete:true, allowFallback:true, problem};
     const result = {
         validationStatus:'PASSED', fulfillmentStatus:'COMPLETE', meetsRequirement:true,
@@ -53,6 +59,6 @@ export function fourPieceReference() {
     };
     // Shortest edge-to-edge distance across all 120 pairs, checked against the displayed vertices.
     const verified = {widthMm, occupiedLengthMm, cuttingAreaMm2, utilizationPercent, pieceCount:placements.length,
-        rotatedCount:placements.filter(p => p.rotationDegrees === 180).length, minGapMm:0.05975};
+        rotatedCount:placements.filter(p => p.rotationDegrees === 180).length, minGapMm};
     return {request, result, verified};
 }

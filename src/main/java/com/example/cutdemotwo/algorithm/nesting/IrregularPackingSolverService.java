@@ -45,13 +45,13 @@ public class IrregularPackingSolverService implements ICutSolverEngine {
         if (!isAvailable()) return failure("UNAVAILABLE", "异形引擎尚未安装或不可执行");
         Path temp = null; Process process = null;
         try {
-            temp = Files.createTempDirectory("ps_irregular_");
+            temp = Files.createTempDirectory("ps_irregular_").toAbsolutePath();
             Path input = temp.resolve("input.json"), certificate = temp.resolve("certificate.json");
             Files.writeString(input, json.writeValueAsString(nativeInput(problem, objective)));
             process = new ProcessBuilder(Path.of(solverPath).toAbsolutePath().toString(), "--input", input.toString(),
                     "--certificate", certificate.toString(), "--time-limit", Integer.toString(problem.timeLimitSeconds()),
                     "--verbosity-level", "0", "--only-write-at-the-end", "--memory-limit", "512")
-                    .redirectErrorStream(true).redirectOutput(temp.resolve("solver.log").toFile()).start();
+                    .directory(temp.toFile()).redirectErrorStream(true).redirectOutput(temp.resolve("solver.log").toFile()).start();
             if (!process.waitFor(problem.timeLimitSeconds() + 5L, TimeUnit.SECONDS))
                 return failure("FAILED", "异形求解超过时限，已终止");
             if (process.exitValue() != 0 || !Files.isRegularFile(certificate)) {

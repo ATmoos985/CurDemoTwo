@@ -114,6 +114,8 @@ public class OptimizationService implements AutoCloseable {
             default -> new Failure("UNSUPPORTED_CONSTRAINT",check.message(),422,false);
         };
         MarkerOptimization.validate(request);
+        if (request.strategy()!=null && request.strategy().initialPlacements()!=null)
+            MarkerOptimization.validatedSeed(request, solvers);
         return check;
     }
 

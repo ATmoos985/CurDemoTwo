@@ -245,7 +245,7 @@ test('half turns are compared against fixed grain at each width and the best com
     assert.equal(await rows.count(), 0);
 });
 
-test('四大件直链直接展示报告基准和十六片按图复排，切换材料后隐藏', async () => {
+test('四大件直链直接展示十六片优化排料，可切换按图复排且不提交', async () => {
     const submissions = [];
     const capture = req => {
         if (req.method() === 'POST' && req.url().endsWith('/api/v2/optimization-jobs')) submissions.push(req);
@@ -256,8 +256,16 @@ test('四大件直链直接展示报告基准和十六片按图复排，切换�
         await expect(page.getByLabel('试算示例')).toHaveValue('four-piece-130-140');
         await expect(page.locator('#garment-benchmark')).toContainText('原报告 83.40% · DXF 同版长换算 83.55%');
         await expect(page.locator('#garment-benchmark')).toContainText('1780 × 1825.1 mm');
-        await expect(page.getByRole('button', {name:/按图复排/})).toHaveAttribute('aria-pressed', 'true');
+        const optimized = page.getByRole('button', {name:/优化排料/}), replay = page.getByRole('button', {name:/按图复排/});
+        await expect(optimized).toContainText('1806.90 mm · 84.39%');
+        await expect(optimized).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.locator('#garment-view')).toContainText('优化排料 · 16 片');
+        await expect(replay).toHaveAttribute('aria-pressed', 'false');
+        await replay.click();
         await expect(page.locator('#garment-view')).toContainText('按图复排 · 16 片');
+        await expect(optimized).toHaveAttribute('aria-pressed', 'false');
+        await optimized.click();
+        await expect(page.locator('#garment-view')).toContainText('优化排料 · 16 片');
         await expect(page.locator('#garment-canvas canvas').first()).toBeVisible();
         await expect(page.locator('tbody tr')).toHaveCount(0);
         await expect(page.getByRole('status')).toHaveText('待试算');
@@ -286,6 +294,7 @@ test('四大件按 130、140 配码实算 16 片，展示固定与掉头方案�
     };
     page.on('response', capture);
     try {
+        await page.goto('about:blank');
         await page.goto(base + '/app/#/garment/four-piece-130-140');
         await expect(page.getByLabel('试算示例')).toHaveValue('four-piece-130-140');
         for (const size of ['130','140']) await expect(page.getByLabel(size + ' 码（件/版）')).toHaveValue('2');
@@ -314,6 +323,12 @@ test('四大件按 130、140 配码实算 16 片，展示固定与掉头方案�
         const fixed = solved.get((await problems[0].accepted).id);
         const turned = solved.get((await problems.at(-1).accepted).id);
         console.log('四大件试算状态', await page.locator('tbody tr td:nth-child(2)').allTextContents());
+        const seed = turned?.marker?.trials?.find(trial => trial.phase === 'SEED');
+        assert.equal(seed?.placed, 16);
+        assert.ok(turned.marker.occupiedLengthMm <= seed.occupiedLengthMm + 1e-6);
+        const compacted = turned.marker.trials.find(trial => trial.phase === 'COMPACTION');
+        console.log('允许掉头后端初排与压紧', {seed, compacted, occupiedLengthMm:turned.marker.occupiedLengthMm,
+            utilization:turned.metrics.find(metric => metric.name === 'markerAreaUtilization')?.value});
         const {shapeArea} = await import('../../main/resources/static/js/canvas/nesting-scene.js');
         const area = problems[0].request.problem.parts.reduce((sum,p) => sum + p.quantity * shapeArea(p.shape), 0);
         const rows = page.locator('tbody tr');
@@ -322,6 +337,7 @@ test('四大件按 130、140 配码实算 16 片，展示固定与掉头方案�
         for (const i of [0,1]) {
             const row = rows.nth(i);
             await expect(row).toContainText(i ? '允许掉头' : '固定方向');
+            await expect(row).toContainText('较按图复排');
             const usesFixed = i === 0 || (await row.textContent()).includes('沿用固定方向');
             const chosen = usesFixed ? fixed : turned;
             assert.equal(chosen?.validationStatus, 'PASSED');
@@ -344,13 +360,16 @@ test('四大件按 130、140 配码实算 16 片，展示固定与掉头方案�
                 rotated:chosen.layout.placements.filter(p => p.rotationDegrees === 180).length});
         }
         assert.ok(numbers[1].utilization >= numbers[0].utilization);
+        assert.ok(numbers[1].utilization >= 84.39);
+        if (!numbers[1].usedFixed)
+            await expect(rows.nth(1)).toContainText(seed.occupiedLengthMm - turned.marker.occupiedLengthMm > .005 ? '较初排缩短' : '沿用已验初排');
+        if (process.env.FOUR_PIECE_SCREENSHOT_PATH) await page.screenshot({path:process.env.FOUR_PIECE_SCREENSHOT_PATH});
         await expect(replay).toHaveAttribute('aria-pressed', 'false');
         await replay.click();
         await expect(replay).toHaveAttribute('aria-pressed', 'true');
         await expect(page.locator('#garment-view')).toContainText('按图复排 · 16 片');
         await expect(rows.getByRole('button', {pressed:true})).toHaveCount(0);
         console.log('四大件 1780 mm（原报告 1825.1 mm / 83.4%）', JSON.stringify(numbers));
-        if (process.env.FOUR_PIECE_SCREENSHOT_PATH) await page.screenshot({path:process.env.FOUR_PIECE_SCREENSHOT_PATH});
     } finally {
         page.off('response', capture);
     }

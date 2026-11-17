@@ -1,5 +1,6 @@
 import {DXF_TRIAL_STYLES, markerExample, markerSizeLabels} from '../../../js/nesting/marker-demo.js';
 import {dxfParts} from '../../../js/nesting/dxf-patterns.js';
+import {fourPieceSeed} from '../../../js/nesting/four-piece-seed.js';
 import {shapeArea} from '../../../js/canvas/nesting-scene.js';
 
 function reportComparison(style) {
@@ -33,6 +34,10 @@ export function markerRequest(style, width, sizeCounts, clientRequestId, allowHa
     const problem = markerExample(width, style, sizeCounts);
     if (allowHalfTurn) problem.parts.forEach(part => { part.allowHalfTurn = true; });
     const strategy = {id:'marker-shortening', version:'2', maxTrials:7};
+    if (allowHalfTurn && style === 'GARMENT_FOUR_PIECE') {
+        const seed = fourPieceSeed(problem);
+        if (seed) strategy.initialPlacements = seed;
+    }
     if (gapFill) {
         // Spare stock is capped at two garments of each requested size regardless of the order quantity.
         const counts = sizeCounts ?? DXF_TRIAL_STYLES.find(item => item.id === style)?.defaultCounts ?? {M:1, L:1};
@@ -94,6 +99,16 @@ export async function solveMarkerDirection(request, fixed, solve, isActive, onRe
     if (!tightLength || tightLength >= originalLength) return {trial:await solve(request)};
     const tightRequest = structuredClone(request);
     tightRequest.problem.material.shape.height = tightLength;
+    const seed = tightRequest.strategy?.initialPlacements;
+    if (seed) {
+        const parts = new Map(request.problem.parts.map(part => [part.id, part.shape]));
+        const exceedsWindow = seed.some(p => {
+            const shape = parts.get(p.demandId);
+            const height = p.rotationDegrees % 180 === 0 ? shape.height : shape.width;
+            return p.y + height > tightLength + 1e-8;
+        });
+        if (exceedsWindow) delete tightRequest.strategy.initialPlacements;
+    }
     const first = await solve(tightRequest);
     if (!isActive() || first.use || !['SUCCEEDED', 'TIMED_OUT'].includes(first.job.state)) return {trial:first};
 

@@ -30,12 +30,21 @@ public record OptimizationRequest(String schemaVersion, String problemType, Stri
     }
     private record Wire(String schemaVersion,String problemType,String clientRequestId,
                         tools.jackson.databind.JsonNode problem,Boolean allowFallback,Boolean requireComplete,Strategy strategy) {}
+    /** Source-local pose only. The solver reconstructs every outline from the request's demands. */
+    public record InitialPlacement(Integer demandId, Double x, Double y, Integer rotationDegrees) {}
     public record Strategy(String id, String version, int maxTrials,
                            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-                           java.util.Map<Integer, Integer> gapFillLimits) {
+                           java.util.Map<Integer, Integer> gapFillLimits,
+                           @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                           java.util.List<InitialPlacement> initialPlacements) {
         public Strategy {
             if (gapFillLimits != null)
                 gapFillLimits = java.util.Collections.unmodifiableSortedMap(new java.util.TreeMap<>(gapFillLimits));
+            if (initialPlacements != null)
+                initialPlacements = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(initialPlacements));
+        }
+        public Strategy(String id, String version, int maxTrials, java.util.Map<Integer,Integer> gapFillLimits) {
+            this(id, version, maxTrials, gapFillLimits, null);
         }
         public Strategy(String id, String version, int maxTrials) {
             this(id, version, maxTrials, null);

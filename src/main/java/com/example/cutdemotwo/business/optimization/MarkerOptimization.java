@@ -26,12 +26,23 @@ final class MarkerOptimization {
                 || !"RECTANGLE".equals(input.nestingProblem().material().shape().type()))
             throw new OptimizationService.Failure("UNSUPPORTED_CONSTRAINT", "唛架缩长要求矩形门幅、轮廓工艺及完整齐套", 422, false);
         var limits = strategy.gapFillLimits();
+        if (strategy.initialPlacements() != null && (!"2".equals(strategy.version())
+                || strategy.initialPlacements().isEmpty() || strategy.initialPlacements().size() > 200))
+            throw new OptimizationService.Failure("INVALID_INPUT", "初始排法须使用策略 2，并提供 1–200 片", 400, false);
         if (limits != null) {
             var ids = new HashSet<Integer>();
             input.nestingProblem().parts().forEach(part -> ids.add(part.id()));
             if (!"2".equals(strategy.version()) || limits.isEmpty() || limits.size() > 80 ||
                     !ids.containsAll(limits.keySet()) || limits.values().stream().anyMatch(n -> n == null || n < 1 || n > 80))
                 throw new OptimizationService.Failure("INVALID_INPUT", "补片限额须使用策略 2 的现有裁片，每种为 1–80 片，最多 80 种", 400, false);
+        }
+    }
+
+    static NestingResult validatedSeed(OptimizationRequest input, NestingSolver solver) {
+        try {
+            return solver.validateMarkerSeed(input.nestingProblem(), input.strategy().initialPlacements());
+        } catch (IllegalArgumentException invalid) {
+            throw new OptimizationService.Failure("INVALID_INPUT", invalid.getMessage(), 400, false);
         }
     }
 
@@ -74,6 +85,15 @@ final class MarkerOptimization {
         double bestLength = Double.POSITIVE_INFINITY;
         String failureCode = null;
         var history = new ArrayList<Trial>();
+        if (input.strategy().initialPlacements() != null) {
+            best = validatedSeed(input, Objects.requireNonNull(refiner));
+            bestLength = best.placements().stream().mapToDouble(p -> p.y() + p.shape().height()).max().orElseThrow();
+            firstLength = bestLength; bestProblem = original;
+            high = Math.max(low, Math.min(high, Math.ceil(bestLength * 10) / 10));
+            history.add(new Trial(1, original.height(), bestLength, best.status(), true, best.placements().size(),
+                    0, best.elapsedMs(), best.engine(), best.engineVersion(), "SEED"));
+            searchTrials = Math.max(0, searchTrials - 1);
+        }
         for (int i = 0; i < searchTrials; i++) {
             if (Thread.currentThread().isInterrupted() || System.nanoTime() - started >= budget) break;
             double length = i == 0 ? high : Math.ceil((low + high) / 2 * 10) / 10;
@@ -83,11 +103,11 @@ final class MarkerOptimization {
                     new NestingProblem.Material(original.material().id(), NestingProblem.Shape.rectangle(original.width(), length),
                             original.material().exclusions(), original.material().continuesAfterRegion()),
                     original.parts(), original.process(), original.engine(), seconds);
-            progress.accept("试排 " + (i + 1) + " / " + input.strategy().maxTrials() + "，长度 " + length + " mm");
+            progress.accept("试排 " + (history.size() + 1) + " / " + input.strategy().maxTrials() + "，长度 " + length + " mm");
             latest = solve.apply(candidate, input.allowFallback());
             boolean complete = complete(latest);
             double occupied = latest.placements().stream().mapToDouble(p -> p.y() + p.shape().height()).max().orElse(0);
-            history.add(new Trial(i+1, length, complete ? occupied : null, latest.status(), complete,
+            history.add(new Trial(history.size()+1, length, complete ? occupied : null, latest.status(), complete,
                     latest.placements().size(), seconds, latest.elapsedMs(), latest.engine(), latest.engineVersion()));
             if (!Set.of("FEASIBLE", "NO_SOLUTION_FOUND", "CANCELLED").contains(latest.status())) failureCode = latest.status();
             if (complete) {
