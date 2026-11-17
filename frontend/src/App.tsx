@@ -11,7 +11,8 @@ import { InventoryPage } from './pages/InventoryPage';
 import { DocumentsPage } from './pages/DocumentsPage';
 import { AnalysisPage } from './pages/AnalysisPage';
 import { InspectionPage } from './pages/InspectionPage';
-import { LegacyPageHost } from './components/LegacyPageHost';
+import { GarmentWidthPage } from './pages/GarmentWidthPage';
+import { ShowcasePage } from './pages/ShowcasePage';
 import { requestJSON } from '@static/app/js/util.js';
 import { useStudioStore } from './store/useStudioStore';
 
@@ -119,13 +120,7 @@ export const App: React.FC = () => {
       case 'settings':
         return <SettingsPage />;
       case 'garment':
-        return (
-          <LegacyPageHost
-            routeKey={route.rawKey}
-            loader={() => import('@static/app/js/pages/garment.js')}
-            params={route.params}
-          />
-        );
+        return <GarmentWidthPage />;
       case 'tasks':
         return <TasksPage />;
       case 'task':
@@ -141,13 +136,7 @@ export const App: React.FC = () => {
       case 'analysis':
         return <AnalysisPage />;
       case 'showcase':
-        return (
-          <LegacyPageHost
-            routeKey={route.rawKey}
-            loader={() => import('@static/app/js/pages/showcase.js')}
-            params={route.params}
-          />
-        );
+        return <ShowcasePage params={route.params} />;
       default:
         return <NestingStudio2DPage />;
     }

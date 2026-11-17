@@ -16,8 +16,11 @@ RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPACKINGSOLVER_BUILD_TEST=OF
 FROM node:22-bookworm-slim AS frontend-tests
 WORKDIR /workspace
 COPY src ./src
+COPY frontend ./frontend
 COPY integrations/mcp ./integrations/mcp
-RUN node --test src/test/js/*.test.mjs \
+RUN npm ci --ignore-scripts --prefix frontend \
+    && npm run build --prefix frontend \
+    && node --test src/test/js/*.test.mjs \
     && npm ci --ignore-scripts --prefix integrations/mcp \
     && npm test --prefix integrations/mcp \
     && touch /frontend-tests-passed
@@ -30,6 +33,7 @@ ENV PACKINGSOLVER_PATH=/opt/solver/packingsolver_rectangleguillotine
 ENV PACKINGSOLVER_IRREGULAR_PATH=/opt/solver/packingsolver_irregular
 COPY pom.xml .
 COPY src ./src
+COPY --from=frontend-tests /workspace/src/main/resources/static/app/dist ./src/main/resources/static/app/dist
 RUN mvn -B verify
 
 FROM eclipse-temurin:17-jre-noble

@@ -55,3 +55,18 @@ test('import guard recognizes static imports, exports and dynamic imports', () =
     assert.deepEqual(references(`import {x} from './a.js'; export * from './b.js';
         import('./c.js'); import './d.js';`), ['./a.js','./b.js','./c.js','./d.js']);
 });
+test('React frontend sources have completely replaced LegacyPageHost and imperative page scripts', async () => {
+    const frontendSrc = fileURLToPath(new URL('../../../frontend/src/', import.meta.url));
+    async function tsFiles(dir) {
+        const entries = await readdir(dir, {withFileTypes:true});
+        return (await Promise.all(entries.map(e => e.isDirectory() ? tsFiles(path.join(dir,e.name))
+            : /\.(ts|tsx)$/.test(e.name) ? [path.join(dir,e.name)] : []))).flat();
+    }
+    const allTs = await tsFiles(frontendSrc);
+    assert.ok(allTs.length >= 13, 'expected full suite of native React pages');
+    for (const file of allTs) {
+        const code = await readFile(file, 'utf8');
+        assert.doesNotMatch(code, /LegacyPageHost|@static\/app\/js\/pages\//, `${file} still references legacy page host`);
+    }
+    await assert.doesNotReject(access(path.resolve(root, '../app/dist/react-app.js')));
+});
