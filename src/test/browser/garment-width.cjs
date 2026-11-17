@@ -144,7 +144,7 @@ test('each named example fills the form without submitting and produces a comple
         const rows = page.locator('tbody tr');
         assert.deepEqual(submissions.slice(before).map(req => req.problem.material.shape.width), example.widths);
         assert.equal(await rows.count(), example.widths.length);
-        assert.equal(await rows.filter({hasText:'齐套'}).count(), example.widths.length);
+        for (const row of await rows.all()) await expect(row.locator('td').nth(1)).toHaveText(/^齐套/);
         if (example.gsm != null) assert.ok(await rows.filter({hasText:'当前最低单耗'}).count() > 0);
         if (example.id === 'gathered-skirt') {
             const fullWidth = rows.filter({has:page.getByRole('cell', {name:'1,400', exact:true})});
@@ -245,6 +245,36 @@ test('half turns are compared against fixed grain at each width and the best com
     assert.equal(await rows.count(), 0);
 });
 
+test('四大件直链直接展示报告基准和十六片按图复排，切换材料后隐藏', async () => {
+    const submissions = [];
+    const capture = req => {
+        if (req.method() === 'POST' && req.url().endsWith('/api/v2/optimization-jobs')) submissions.push(req);
+    };
+    page.on('request', capture);
+    try {
+        await page.goto(base + '/app/#/garment/four-piece-130-140');
+        await expect(page.getByLabel('试算示例')).toHaveValue('four-piece-130-140');
+        await expect(page.locator('#garment-benchmark')).toContainText('原报告 83.40% · DXF 同版长换算 83.55%');
+        await expect(page.locator('#garment-benchmark')).toContainText('1780 × 1825.1 mm');
+        await expect(page.getByRole('button', {name:/按图复排/})).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.locator('#garment-view')).toContainText('按图复排 · 16 片');
+        await expect(page.locator('#garment-canvas canvas').first()).toBeVisible();
+        await expect(page.locator('tbody tr')).toHaveCount(0);
+        await expect(page.getByRole('status')).toHaveText('待试算');
+        const styles = await page.getByLabel('试算示例').locator('option').allTextContents();
+        assert.ok(styles.some(text => text.includes('20148D')));
+        assert.ok(styles.some(text => text.includes('3129')));
+        console.log('原报告、同长换算和独立复排', await page.locator('#garment-reference').innerText());
+        if (process.env.REFERENCE_SCREENSHOT_PATH) await page.screenshot({path:process.env.REFERENCE_SCREENSHOT_PATH});
+        await page.getByLabel('试算示例').selectOption('dxf-20148d-shell');
+        await expect(page.locator('#garment-reference')).toBeHidden();
+        await expect(page.locator('#garment-canvas canvas')).toHaveCount(0);
+        assert.equal(submissions.length, 0);
+    } finally {
+        page.off('request', capture);
+    }
+});
+
 test('四大件按 130、140 配码实算 16 片，展示固定与掉头方案及独立的报告参考值', async () => {
     const problems = [], results = [];
     const capture = response => {
@@ -263,12 +293,7 @@ test('四大件按 130、140 配码实算 16 片，展示固定与掉头方案�
         await expect(page.getByLabel('克重（g/m²）')).toHaveValue('');
         await expect(page.getByLabel('允许 180° 旋转')).toBeChecked();
         await expect(page.getByLabel('同款裁片补空')).not.toBeChecked();
-        const help = page.getByRole('button', {name:'试算条件帮助'}), report = page.locator('#garment-report');
-        await expect(report).toBeHidden();
-        await help.click();
-        await expect(report).toContainText(/1,?825\.1/);
-        await expect(report).toContainText('83.4%');
-        await help.click();
+        const replay = page.getByRole('button', {name:/按图复排/});
         assert.equal(problems.length, 0);
         await expect(page.locator('tbody tr')).toHaveCount(0);
         await page.getByRole('button', {name:'试算幅宽'}).click();
@@ -288,6 +313,7 @@ test('四大件按 130、140 配码实算 16 片，展示固定与掉头方案�
         }
         const fixed = solved.get((await problems[0].accepted).id);
         const turned = solved.get((await problems.at(-1).accepted).id);
+        console.log('四大件试算状态', await page.locator('tbody tr td:nth-child(2)').allTextContents());
         const {shapeArea} = await import('../../main/resources/static/js/canvas/nesting-scene.js');
         const area = problems[0].request.problem.parts.reduce((sum,p) => sum + p.quantity * shapeArea(p.shape), 0);
         const rows = page.locator('tbody tr');
@@ -318,9 +344,42 @@ test('四大件按 130、140 配码实算 16 片，展示固定与掉头方案�
                 rotated:chosen.layout.placements.filter(p => p.rotationDegrees === 180).length});
         }
         assert.ok(numbers[1].utilization >= numbers[0].utilization);
+        await expect(replay).toHaveAttribute('aria-pressed', 'false');
+        await replay.click();
+        await expect(replay).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.locator('#garment-view')).toContainText('按图复排 · 16 片');
+        await expect(rows.getByRole('button', {pressed:true})).toHaveCount(0);
         console.log('四大件 1780 mm（原报告 1825.1 mm / 83.4%）', JSON.stringify(numbers));
         if (process.env.FOUR_PIECE_SCREENSHOT_PATH) await page.screenshot({path:process.env.FOUR_PIECE_SCREENSHOT_PATH});
     } finally {
         page.off('response', capture);
     }
+});
+
+test('manual DXF style selection shows its graded sizes and submits only the selected fabric and size', async () => {
+    const {GARMENT_EXAMPLES, markerRequest} = await import('../../main/resources/static/app/js/model/garment.js');
+    const shell = GARMENT_EXAMPLES.find(e => e.source === '20148D' && e.fabric === '面布');
+    const rib = GARMENT_EXAMPLES.find(e => e.source === '20148D' && e.fabric === '罗纹');
+    await page.goto(base + '/app/#/garment/' + shell.id);
+    const form = page.locator('#garment-form');
+    await expect(form.getByLabel('试算示例')).toHaveValue(shell.id);
+    await expect(page.locator('#garment-reference')).toBeHidden();
+    const sizeInputs = form.locator('#garment-sizes input');
+    assert.deepEqual(await sizeInputs.evaluateAll(inputs => inputs.map(i => i.name)), ['130','140','110','120','150','160']);
+    await form.getByLabel('内置样板').selectOption(rib.style);
+    await expect(form.getByLabel('试算示例')).toHaveValue('');
+    await expect(form.getByLabel('克重（g/m²）')).toHaveJSProperty('required', false);
+    await form.getByLabel('130 码（件/版）').fill('0');
+    await form.getByLabel('140 码（件/版）').fill('0');
+    await form.getByLabel('160 码（件/版）').fill('1');
+    await form.getByLabel('允许 180° 旋转').uncheck();
+    const submission = page.waitForRequest(req => req.method() === 'POST' && req.url().endsWith('/api/v2/optimization-jobs'));
+    await page.getByRole('button', {name:'试算幅宽'}).click();
+    const actual = (await submission).postDataJSON();
+    assert.deepEqual(actual.problem.parts, markerRequest(rib.style, 1780, {160:1}, 'expected').problem.parts);
+    await expect(page.getByRole('status')).toContainText('1 / 1 个幅宽齐套', {timeout:90000});
+    await expect(page.locator('tbody tr td').nth(5)).toHaveText('—');
+    await form.getByLabel('内置样板').selectOption('GARMENT_SKIRT');
+    assert.deepEqual(await sizeInputs.evaluateAll(inputs => inputs.map(i => i.name)), ['M','L']);
+    await expect(form.getByLabel('克重（g/m²）')).toHaveJSProperty('required', true);
 });

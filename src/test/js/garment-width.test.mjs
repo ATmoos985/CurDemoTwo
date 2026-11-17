@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {GARMENT_EXAMPLES, candidateWidths, compactionSavingMm, fabricConsumption, markerRequest, selectMarkerTrial, solveMarkerDirection} from '../../main/resources/static/app/js/model/garment.js';
-import {markerExample} from '../../main/resources/static/js/nesting/marker-demo.js';
+import {DXF_TRIAL_STYLES, markerExample, markerSizeLabels} from '../../main/resources/static/js/nesting/marker-demo.js';
 
 test('width trials preserve the same single-size or mixed-size bill of pieces, including small parts', () => {
     const style = 'GARMENT_SHIRT', base = markerExample(1500, style);
@@ -57,6 +57,10 @@ test('the four-piece report compares the same sixteen pieces in each direction a
     assert.deepEqual(example.widths, [1780]);
     assert.equal(example.gapFill, false);
     assert.equal(example.halfTurn, true);
+    assert.equal(GARMENT_EXAMPLES.filter(e => e.benchmark).length, 1);
+    assert.equal(example.benchmark.utilization, 83.4);
+    assert.equal(example.benchmark.dxfUtilization.toFixed(2), '83.55');
+    assert.equal(example.benchmark.length, 1825.1);
     const sizes = {130:example[130], 140:example[140]};
     const fixed = markerRequest(example.style, 1780, sizes, 'fixed');
     const turned = markerRequest(example.style, 1780, sizes, 'turned', true);
@@ -81,6 +85,45 @@ test('missing fabric weight preserves measured utilization and linear consumptio
         marker:{occupiedLengthMm:2000}, metrics:[{name:'markerAreaUtilization',value:74.5}]};
     const use = fabricConsumption(result, 1780, 0, NaN, 4);
     assert.deepEqual(use, {length:2000, utilization:74.5, lengthPerGarment:500, gramsPerGarment:null});
+});
+
+test('DXF presets register every material with real graded sizes and distinct fixed and half-turn trials', () => {
+    const presets = GARMENT_EXAMPLES.filter(example => example.source);
+    assert.deepEqual(new Set(presets.map(e => e.source)), new Set(['1226','20148D','3129']));
+    assert.equal(new Set(GARMENT_EXAMPLES.map(e => e.id)).size, GARMENT_EXAMPLES.length);
+    assert.equal(presets.length, DXF_TRIAL_STYLES.length);
+    for (const style of DXF_TRIAL_STYLES) {
+        const example = presets.find(e => e.id === style.exampleId);
+        assert.equal(example.style, style.id);
+        assert.ok(example.fabric);
+        assert.equal(example.gapFill, false);
+        assert.equal(example.halfTurn, true);
+        assert.equal(example.gsm, null);
+        assert.deepEqual(example.widths, [1780]);
+        const counts = Object.fromEntries(markerSizeLabels(style.id).map(size => [size, example[size]]));
+        assert.ok(Object.values(counts).every(Number.isInteger));
+        const fixed = markerRequest(style.id, 1780, counts, 'fixed');
+        const turned = markerRequest(style.id, 1780, counts, 'turned', true);
+        assert.deepEqual(fixed.problem.parts, markerExample(1780, style.id).parts);
+        assert.equal(fixed.strategy.gapFillLimits, undefined);
+        assert.ok(fixed.problem.parts.every(p => !p.allowRotation && !p.allowHalfTurn));
+        assert.deepEqual(turned.problem.parts, fixed.problem.parts.map(p => ({...p, allowHalfTurn:true})));
+        const filled = markerRequest(style.id, 1780, undefined, 'spares', true, true);
+        assert.deepEqual(Object.keys(filled.strategy.gapFillLimits).sort(), fixed.problem.parts.map(p => String(p.id)).sort());
+    }
+});
+
+test('20148D separates shell and rib requirements for an individual graded size', () => {
+    const presets = GARMENT_EXAMPLES.filter(e => e.source === '20148D');
+    const count = fabric => {
+        const example = presets.find(e => e.fabric === fabric);
+        const request = markerRequest(example.style, 1780, {160:1}, '160-only', true, true);
+        assert.ok(request.problem.parts.every(p => p.name.startsWith('160码')));
+        assert.deepEqual(request.strategy.gapFillLimits, Object.fromEntries(request.problem.parts.map(p => [p.id, 2*p.quantity])));
+        return request.problem.parts.reduce((sum, p) => sum + p.quantity, 0);
+    };
+    assert.equal(count('面布'), 4);
+    assert.equal(count('罗纹'), 1);
 });
 
 test('compaction savings use the shortest preceding complete occupied length', () => {

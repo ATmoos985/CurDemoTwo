@@ -1,5 +1,6 @@
 import {esc, fmtN} from '../util.js';
 import {GARMENT_TRIAL_STYLES, markerSizeLabels} from '../../../js/nesting/marker-demo.js';
+import {fourPieceReference} from '../../../js/nesting/dxf-reference.js';
 import {OptimizationSession} from '../../../js/business/optimization/job-client.js';
 import {GARMENT_EXAMPLES, candidateWidths, compactionSavingMm, effectiveUtilization, fabricConsumption, markerRequest, selectMarkerTrial, solveMarkerDirection} from '../model/garment.js';
 import {createRollCanvas} from '../canvas/roll-canvas.js';
@@ -14,7 +15,6 @@ export function mount(el, [exampleId] = []) {
           <p id="fill-help">同款裁片补空在齐套唛架内加排备片，每个已选尺码最多备两件成衣所需的裁片。含补片利用率计入实补面积，每件单耗仍按原配码计算。</p>
           <p><a href="./examples/garment-shirt-gap-fill.png" target="_blank" rel="noopener">查看 1950 mm 上衣补片前后对照图</a></p>
           <p id="width-help">每版合计 1–12 件。有效幅宽可填 1–8 个值，范围 1200–2000 mm，用逗号或空格分隔。</p>
-          <p id="garment-report" hidden></p>
           <p id="weight-help">每件用布重量按含布边的幅宽、实际唛架长度和克重估算，未计布头、布尾及备损。</p>
         </div>
       </details>
@@ -23,12 +23,13 @@ export function mount(el, [exampleId] = []) {
       <label for="garment-gap-fill">同款裁片补空</label><input id="garment-gap-fill" name="gapFill" type="checkbox" aria-describedby="fill-help" checked>
       <label for="garment-example">试算示例</label><select class="field" id="garment-example" name="example"><option value="" disabled>自定义参数</option>${GARMENT_EXAMPLES.map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select>
       <label for="garment-style">内置样板</label><select class="field" id="garment-style" name="style">${GARMENT_TRIAL_STYLES.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
-      <label for="garment-m">M 码（件/版）</label><input class="field" id="garment-m" name="M" type="number" min="0" max="12" required>
-      <label for="garment-l">L 码（件/版）</label><input class="field" id="garment-l" name="L" type="number" min="0" max="12" required>
+      <div id="garment-sizes"></div>
       <label for="garment-widths">有效幅宽（mm）</label><input class="field" id="garment-widths" name="widths" aria-describedby="width-help" required>
       <label for="garment-edge">两侧布边合计（mm）</label><input class="field" id="garment-edge" name="edge" type="number" min="0" step="0.1" required>
       <label for="garment-gsm">克重（g/m²）</label><input class="field" id="garment-gsm" name="gsm" type="number" min="0.1" step="0.1" aria-describedby="weight-help" required></form></div></section>
-      <section class="pane"><div class="pane-h">候选幅宽比较</div><div class="garment-results"><table class="t">
+      <section class="pane"><div class="pane-h">候选幅宽比较</div>
+      <div id="garment-reference" hidden><span id="garment-benchmark"></span><button class="btn sm" id="garment-replay" type="button" aria-pressed="false"></button></div>
+      <div class="garment-results"><table class="t">
       <thead><tr>${['有效幅宽 mm','试算状态','唛架长 mm','齐套利用率 %','mm/件','g/件'].map(v => `<th>${v}</th>`).join('')}<th id="garment-fill-column">含补片利用率 %</th><th>排料图</th></tr></thead><tbody></tbody></table></div>
       <div class="pane-h" id="garment-view">排料图</div><div id="garment-canvas" class="demo-canvas" aria-label="当前候选唛架"></div></section></div>
       <div class="foot"><span role="status">待试算</span><span class="sp"></span><button type="button" class="btn" id="garment-stop" hidden>停止</button>
@@ -40,7 +41,21 @@ export function mount(el, [exampleId] = []) {
     };
     const form = $('form'), status = $('[role=status]'), run = $('[type=submit]'), stop = $('#garment-stop');
     const session = new OptimizationSession();
-    let rows = [], revision = 0, canvas, selected = null, manualView = false;
+    let rows = [], revision = 0, canvas, selected = null, manualView = false, reference = null;
+    const replay = $('#garment-replay');
+    function updateReference(example) {
+        const data = example?.benchmark;
+        $('#garment-reference').hidden = !data;
+        reference = null;
+        if (!data) return;
+        const {request, result, verified} = fourPieceReference();
+        const {width, length, counts, utilization, dxfUtilization} = data;
+        const mix = Object.entries(counts).map(([size, qty]) => `${size} 码 ${qty} 件`).join('、');
+        $('#garment-benchmark').textContent = `原报告 ${utilization.toFixed(2)}% · DXF 同版长换算 ${dxfUtilization.toFixed(2)}%（${width} × ${length} mm，${mix}）`;
+        replay.textContent = `按图复排 · ${fmtN(verified.occupiedLengthMm, 2)} mm · ${verified.utilizationPercent.toFixed(2)}%`;
+        reference = {width, layoutRequest:request, result, direction:'按图复排', state:`${verified.pieceCount} 片 · 掉头 ${verified.rotatedCount} 片`,
+            use:{length:verified.occupiedLengthMm, utilization:verified.utilizationPercent}};
+    }
     function select(row) {
         selected = row;
         canvas ??= createRollCanvas($('#garment-canvas'));
@@ -48,7 +63,11 @@ export function mount(el, [exampleId] = []) {
             occupiedLengthMm:row.use?.length, gapFillPlacements:row.result?.marker?.gapFillPlacements
         }), {refit:true});
         $('#garment-view').textContent = `排料图 · ${fmtN(row.width, 1)} mm · ${row.usedFixed ? '沿用固定方向' : row.direction} · ${row.state}`;
+        replay.setAttribute('aria-pressed', String(row === reference));
+        for (const button of $('tbody').querySelectorAll('button[data-index]'))
+            button.setAttribute('aria-pressed', String(rows[Number(button.dataset.index)] === row));
     }
+    replay.onclick = () => { if (reference) { manualView = true; select(reference); } };
     function render() {
         const lowest = Math.min(...rows.map(r => r.use?.gramsPerGarment).filter(Number.isFinite));
         const highest = Math.max(...rows.filter(r => r.use).map(r => effectiveUtilization(r.use)));
@@ -91,13 +110,14 @@ export function mount(el, [exampleId] = []) {
         if (button) {
             manualView = true;
             select(rows[Number(button.dataset.index)]);
-            $('tbody').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === button)));
         }
     };
     function clear() {
         rows = []; selected = null; manualView = false;
         canvas?.destroy(); canvas = null;
-        $('#garment-view').textContent = '排料图'; render(); status.textContent = '待试算';
+        $('#garment-view').textContent = '排料图';
+        if (reference) select(reference);
+        render(); status.textContent = '待试算';
     }
     function busy(value) {
         for (const field of form.elements) field.disabled = value;
@@ -108,22 +128,28 @@ export function mount(el, [exampleId] = []) {
         clear();
     }
     const fields = form.elements;
-    const sizeFields = [$('#garment-m'), $('#garment-l')];
+    const sizeGroup = $('#garment-sizes');
+    let sizeFields = [];
     let previousOptions = null;
-    function updateStyle() {
+    function updateStyle(example) {
         const style = fields.style.value;
-        markerSizeLabels(style).forEach((size, i) => {
-            sizeFields[i].name = size;
-            sizeFields[i].labels[0].textContent = size + ' 码（件/版）';
-        });
-        const report = GARMENT_EXAMPLES.find(e => e.style === style && e.reference);
-        $('#garment-report').textContent = report?.reference ?? '';
-        $('#garment-report').hidden = !report;
-        fields.gsm.required = !report;
-        if (report) {
+        const dxf = GARMENT_EXAMPLES.find(e => e.style === style && e.source);
+        const previousCounts = Object.fromEntries(sizeFields.map(field => [field.name, field.value]));
+        const counts = example ?? {...dxf, ...previousCounts};
+        const sizes = markerSizeLabels(style);
+        // Keep the order's active sizes at the top when a graded pattern includes other sizes.
+        const ordered = dxf ? [...sizes.filter(s => dxf[s] > 0), ...sizes.filter(s => !dxf[s])] : sizes;
+        sizeGroup.innerHTML = ordered.map(size => {
+            const id = 'garment-' + esc(size.toLowerCase());
+            return `<label for="${id}">${esc(size)} 码（件/版）</label><input class="field" id="${id}" name="${esc(size)}" type="number" min="0" max="12" required>`;
+        }).join('');
+        sizeFields = [...sizeGroup.querySelectorAll('input')];
+        for (const field of sizeFields) field.value = counts[field.name] ?? 1;
+        fields.gsm.required = !dxf;
+        if (dxf) {
             previousOptions ??= {halfTurn:fields.halfTurn.checked, gapFill:fields.gapFill.checked};
-            fields.halfTurn.checked = report.halfTurn;
-            fields.gapFill.checked = report.gapFill;
+            fields.halfTurn.checked = dxf.halfTurn;
+            fields.gapFill.checked = dxf.gapFill;
         } else if (previousOptions) {
             fields.halfTurn.checked = previousOptions.halfTurn;
             fields.gapFill.checked = previousOptions.gapFill;
@@ -133,11 +159,11 @@ export function mount(el, [exampleId] = []) {
     function loadExample(example) {
         fields.example.value = example.id;
         fields.style.value = example.style;
-        updateStyle();
-        for (const field of sizeFields) field.value = example[field.name];
+        updateStyle(example);
         fields.edge.value = example.edge;
         fields.gsm.value = example.gsm ?? '';
         fields.widths.value = example.widths.join(', ');
+        updateReference(example);
         resetResults();
     }
     fields.example.onchange = () => loadExample(GARMENT_EXAMPLES.find(e => e.id === fields.example.value));
@@ -145,7 +171,10 @@ export function mount(el, [exampleId] = []) {
     form.oninput = event => {
         if (event.target !== fields.example) {
             if (event.target === fields.style) updateStyle();
-            if (event.target !== fields.halfTurn && event.target !== fields.gapFill) fields.example.value = '';
+            if (event.target !== fields.halfTurn && event.target !== fields.gapFill) {
+                fields.example.value = '';
+                updateReference(null);
+            }
             resetResults();
         }
     };
@@ -160,7 +189,12 @@ export function mount(el, [exampleId] = []) {
         const f = form.elements, sizes = Object.fromEntries(sizeFields.map(field => [field.name, field.valueAsNumber]));
         const count = Object.values(sizes).reduce((total, quantity) => total + quantity, 0);
         const gsm = f.gsm.valueAsNumber, edge = f.edge.valueAsNumber;
-        if (count < 1 || count > 12) { sizeFields[1].setCustomValidity('每版合计须在 1–12 件之间'); sizeFields[1].reportValidity(); return; }
+        if (count < 1 || count > 12) {
+            const field = sizeFields.find(input => input === document.activeElement) ?? sizeFields.at(-1);
+            field.setCustomValidity('每版合计须在 1–12 件之间');
+            field.reportValidity();
+            return;
+        }
         let widths;
         try { widths = candidateWidths(f.widths.value); }
         catch (e) { f.widths.setCustomValidity(e.message); f.widths.reportValidity(); return; }
@@ -204,7 +238,9 @@ export function mount(el, [exampleId] = []) {
                     row.state = row.use ? '齐套' : '未取得齐套结果';
                     if (chosen.job.state === 'TIMED_OUT') row.state += '（试排限时结束）';
                     if (job.state === 'FAILED' || job.state === 'CANCELLED') row.state = `${job.state === 'FAILED' ? '试算失败' : '已停止'} · ${row.state}`;
-                    if (!manualView && row.result?.layout && (!selected || effectiveUtilization(row.use) > effectiveUtilization(selected.use))) select(row);
+                    const preferTrial = !selected || (selected === reference && row.use)
+                        || effectiveUtilization(row.use) > effectiveUtilization(selected.use);
+                    if (!manualView && row.result?.layout && preferTrial) select(row);
                 } catch (e) {
                     if (mine !== revision) return;
                     row.state = '试算失败 · ' + e.message;

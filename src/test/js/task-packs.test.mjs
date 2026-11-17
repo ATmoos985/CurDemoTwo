@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {TASK_PACK_GROUPS, taskPackForm} from '../../main/resources/static/app/js/model/task-packs.js';
 import {emptyTask, taskProblems, toPayload} from '../../main/resources/static/app/js/model/task-form.js';
 import {workflowTemplate} from '../../main/resources/static/app/js/model/showcase.js';
-import {markerExample} from '../../main/resources/static/js/nesting/marker-demo.js';
+import {DXF_TRIAL_STYLES, markerExample} from '../../main/resources/static/js/nesting/marker-demo.js';
 
 test('garment task packs preserve M/L contours, quantities and process in the save payload', () => {
     for (const {id} of TASK_PACK_GROUPS[0].packs) {
@@ -21,7 +21,7 @@ test('garment task packs preserve M/L contours, quantities and process in the sa
 });
 
 test('general task packs use seeded stock and retain order dimensions and slitting parameters', () => {
-    for (const {id} of TASK_PACK_GROUPS[1].packs) {
+    for (const {id} of TASK_PACK_GROUPS.find(group => group.name === '通用业务').packs) {
         const form = taskPackForm(id);
         const template = workflowTemplate(id);
         assert.deepEqual(taskProblems(form), [], id);
@@ -31,6 +31,23 @@ test('general task packs use seeded stock and retain order dimensions and slitti
         assert.deepEqual(payload.demands, template.task.demands);
         assert.equal(payload.problemType, template.task.problemType);
         assert.deepEqual(payload.slitting, template.task.slitting);
+    }
+});
+
+test('DXF task packs retain the source file, fabric, handed contours, and size quantities of the trial', () => {
+    assert.ok(DXF_TRIAL_STYLES.length > 0);
+    const packs = TASK_PACK_GROUPS.find(group => group.name === '服装 · DXF 纸样').packs;
+    assert.deepEqual(packs.map(pack => pack.id), DXF_TRIAL_STYLES.map(style => style.id));
+    for (const {id, source, fabric, defaultCounts} of packs) {
+        const form = taskPackForm(id);
+        assert.deepEqual(taskProblems(form), [], id);
+        const payload = toPayload(form);
+        assert.equal(payload.materialModel, fabric);
+        assert.equal(payload.externalRef, source + '.dxf');
+        const expected = markerExample(1780, id, defaultCounts).parts;
+        assert.deepEqual(payload.demands, expected.map(({id, name, shape, quantity}) => ({
+            id, name, width: shape.width, length: shape.height, quantity, allowRotation: false, shape
+        })));
     }
 });
 

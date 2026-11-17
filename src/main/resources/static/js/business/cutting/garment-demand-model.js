@@ -1,7 +1,7 @@
 import {markerExample} from '../../nesting/marker-demo.js';
 
-export function garmentDemands(style) {
-    return markerExample(1500, style).parts.map(({id, name, shape, quantity, allowRotation}) => ({
+export function garmentDemands(style, width = 1500, sizeCounts) {
+    return markerExample(width, style, sizeCounts).parts.map(({id, name, shape, quantity, allowRotation}) => ({
         id, name, width: shape.width, length: shape.height, quantity, allowRotation, shape
     }));
 }

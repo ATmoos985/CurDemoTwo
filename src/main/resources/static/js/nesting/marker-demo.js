@@ -1,5 +1,6 @@
 import {garmentContourProblem, garmentExample} from './scenario-examples.js';
-import {fourPieceParts} from './four-piece-pattern.js';
+import {dxfParts, DXF_TRIAL_STYLES} from './dxf-patterns.js';
+export {DXF_TRIAL_STYLES};
 import {polygon, rectangle, shapeArea} from '../canvas/nesting-scene.js';
 
 export const MARKER_STYLES = Object.freeze([
@@ -13,8 +14,7 @@ export const MARKER_STYLES = Object.freeze([
     {id:'GARMENT_GATHERED_SKIRT', name:'直裁抽褶裙', description:'两片直裁裙身与分段腰头'}
 ]);
 
-const FOUR_PIECE = {id:'GARMENT_FOUR_PIECE', name:'四大件', sizes:['130','140']};
-export const GARMENT_TRIAL_STYLES = Object.freeze([...MARKER_STYLES, FOUR_PIECE]);
+export const GARMENT_TRIAL_STYLES = Object.freeze([...MARKER_STYLES, ...DXF_TRIAL_STYLES]);
 
 export function markerSizeLabels(style) {
     const entry = GARMENT_TRIAL_STYLES.find(item => item.id === style);
@@ -44,11 +44,14 @@ function gradedParts(style, sizeCounts) {
 export function markerExample(width = 1500, style = 'GARMENT_SHIRT', sizeCounts) {
     if (!Number.isFinite(width) || width < 1200 || width > 2000) throw new Error('示例布宽应在 1200–2000 mm 之间');
     const sizes = markerSizeLabels(style);
-    const counts = sizeCounts ?? (style === FOUR_PIECE.id ? {'130':2,'140':2} : {M:1,L:1});
+    const dxf = DXF_TRIAL_STYLES.find(item => item.id === style);
+    const supplied = sizeCounts ?? dxf?.defaultCounts ?? {M:1,L:1};
+    if (Object.keys(supplied).some(size => !sizes.includes(size))) throw new Error('请求包含样板没有的尺码');
+    const counts = Object.fromEntries(sizes.map(size => [size, supplied[size] ?? 0]));
     const total = sizes.reduce((sum, size) => sum + counts[size], 0);
     if (!sizes.every(size => Number.isInteger(counts[size]) && counts[size] >= 0) || total < 1 || total > 12)
         throw new Error(`每版 ${sizes.join('、')} 码合计须为 1–12 件成衣`);
-    const parts = style === FOUR_PIECE.id ? fourPieceParts(counts) : gradedParts(style, counts);
+    const parts = dxf ? dxfParts(dxf, counts) : gradedParts(style, counts);
     // A deterministic row layout supplies a generous starting length, not an asserted optimum.
     let x = 0, y = 0, rowHeight = 0;
     for (const part of parts) for (let i = 0; i < part.quantity; i++) {

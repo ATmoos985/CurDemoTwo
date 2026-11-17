@@ -1,14 +1,20 @@
-import {MARKER_STYLES} from '../../../js/nesting/marker-demo.js';
+import {DXF_TRIAL_STYLES, MARKER_STYLES} from '../../../js/nesting/marker-demo.js';
 import {garmentDemands} from '../../../js/business/cutting/garment-demand-model.js';
 import {WORKFLOW_TEMPLATES, workflowTemplate} from './showcase.js';
 import {emptyTask, fromTask} from './task-form.js';
 
 export const TASK_PACK_GROUPS = [
     {name: '服装 · M/L 齐套', packs: MARKER_STYLES},
+    {name: '服装 · DXF 纸样', packs: DXF_TRIAL_STYLES},
     {name: '通用业务', packs: WORKFLOW_TEMPLATES}
 ];
 
 export function taskPackForm(id) {
+    const dxf = DXF_TRIAL_STYLES.find(style => style.id === id);
+    if (dxf) return fromTask({
+        name: dxf.name + ' · 齐套裁切', materialModel: dxf.fabric, externalRef: dxf.source + '.dxf',
+        demands: garmentDemands(id, 1780, dxf.defaultCounts)
+    });
     const style = MARKER_STYLES.find(s => s.id === id);
     if (style) return fromTask({
         name: style.name + ' · M/L 齐套裁切', materialModel: 'TC涤棉-B2026',
