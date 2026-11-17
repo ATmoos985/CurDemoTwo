@@ -2,26 +2,17 @@
 import {esc, requestJSON} from './util.js';
 
 const NAV_MAIN = [
-    ['生产闭环', [
-        ['tasks', '任务'],
-        ['workbench', '排料工作台'],
-        ['execution', '执行与报工', 'sub'],
-        ['quality', '复检处置', 'sub']
-    ]],
-    ['工艺试算', [
-        ['garment', '唛架幅宽试算']
-    ]],
-    ['材料与台账', [
-        ['inventory', '库存'],
-        ['inspection', '跑布验疵'],
-        ['documents', '库存单据', 'sub'],
-        ['analysis', '生产分析', 'sub']
+    ['核心工作区', [
+        ['tasks', '生产作业中心', 'main', ['tasks', 'task', 'execution', 'quality']],
+        ['workbench', '排料工作台', 'main', ['workbench']],
+        ['garment', '服装工艺试算', 'main', ['garment']],
+        ['inventory', '材料与台账', 'main', ['inventory', 'inspection', 'documents', 'analysis']]
     ]]
 ];
 const NAV_FOOT = [
-    ['沙盒与配置', [
-        ['showcase', '能力展示', 'sandbox'],
-        ['settings', '设置']
+    ['沙盒与系统', [
+        ['showcase', '算法演示沙盒', 'sandbox', ['showcase']],
+        ['settings', '系统设置', 'main', ['settings']]
     ]]
 ];
 const PAGES = {
@@ -56,13 +47,13 @@ export function parseRoute(hash) {
 export function setStatus(html) { document.getElementById('statusbar').innerHTML = html; }
 
 function renderGroup([h, items], active) {
-    return `<h6>${esc(h)}</h6>` + items.map(([k, t, kind]) =>
-        `<a href="#/${k}" class="${k === active ? 'on' : ''}${kind === 'sub' ? ' nav-sub' : ''}" ${k === active ? 'aria-current="page"' : ''}><span>${esc(t)}</span>${kind === 'sandbox' ? '<span class="cnt">沙盒</span>' : ''}</a>`
-    ).join('');
+    return `<h6>${esc(h)}</h6>` + items.map(([k, t, kind, matches]) => {
+        const isCurrent = (matches || [k]).includes(active);
+        return `<a href="#/${k}" class="${isCurrent ? 'on' : ''}" ${isCurrent ? 'aria-current="page"' : ''}><span>${esc(t)}</span>${kind === 'sandbox' ? '<span class="cnt">DEMO</span>' : ''}</a>`;
+    }).join('');
 }
 
 function renderNav(active) {
-    if (active === 'task') active = 'tasks';
     document.getElementById('nav').innerHTML =
         `<div class="nav-main">${NAV_MAIN.map(g => renderGroup(g, active)).join('')}</div>` +
         `<div class="nav-foot">${NAV_FOOT.map(g => renderGroup(g, active)).join('')}</div>`;

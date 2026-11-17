@@ -67,7 +67,7 @@ export async function mount(el, [taskId, rawFocusPlan, rawIntent] = []) {
     const st = {source: focusRemnant ? 'remnant' : 'roll', rollId: focusRemnant || focus?.request?.rollId || rollsOfPlans(plans)[0] || null,
         selectedId: focus ? focus.id : null, window: null, fresh: [], tool: 'pan', view: focus ? 'station' : prefs.view,
         pop: null, cursor: null, saving: false, busy: '', failure: null, quality: null, station: '1', reserveMin: 30, recommend: null, remnantSelection: null,
-        sideTab: 'all', previewOverrides: new Map()};
+        sideTab: 'plan', leftCollapsed: Boolean(prefs.leftCollapsed), previewOverrides: new Map()};
     let canvas = null, nav = null, undismiss = null, closeContext = () => {}, disposed = false;
     const paintScene = (sc, options) => canvas.setScene(canvasScene(sc), options);
 
@@ -251,6 +251,61 @@ export async function mount(el, [taskId, rawFocusPlan, rawIntent] = []) {
         return `${seg?.status === 'pending' ? hidden ? button('preview-restore', '恢复方案预览', previewBusyReason(), true) : button('preview-clear', '清空当前预览', reason) : ''}${roll?.remnant ? button('remnant-reload', '重新装载料头', previewReason(plan, true) || windowProblem(roll, {start: 0, len: roll.totalLength})) : ''}`;
     }
 
+    function leftDockHtml(sc, colors) {
+        if (st.leftCollapsed) {
+            return `<section class="pane side-min wb-left-min"><button id="left-toggle" title="展开左栏（材料与需求）">»</button><span>材料与需求</span></section>`;
+        }
+        const doneMap = detail.completed || {}, resMap = detail.reserved || {};
+        const choices = rollChoices();
+        const remLen = roll ? (roll.currentRemainingLength ?? (roll.totalLength - roll.usedLength)) : 0;
+        const remPct = roll?.totalLength ? Math.min(100, Math.max(0, remLen / roll.totalLength * 100)) : 0;
+        const p = task.process || {}, sp = task.slitting;
+        return `<section class="pane wb-left">
+          <div class="pane-h">材料与需求<span class="sub">${task.demands.length} 项</span><span class="sp"></span><button class="btn sm" id="left-toggle" title="收起左栏">«</button></div>
+          <div class="pane-b">
+            <div class="dock-card">
+              <div class="dock-card-h">
+                <span>${roll?.remnant ? '当前料头' : '当前母卷'} <b class="num">${esc(st.rollId || '未选')}</b></span>
+                <button class="btn sm" id="change-material-dock">换料</button>
+              </div>
+              ${!roll?.remnant && choices.length > 1 ? `<div style="padding:0 10px 6px"><select class="field" id="roll-pick-dock" style="width:100%;height:26px;font-size:12px">${choices.map(r => `<option ${r === st.rollId ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select></div>` : ''}
+              <div class="kv">
+                <div>幅宽 / 型号</div><div class="num">${fmtN(sc.roll.width)} mm · ${esc(task.materialModel || '—')}</div>
+                <div>剩余 / 总长</div><div class="num">${fmtM(remLen)} / ${fmtM(sc.roll.total)} m <span class="bar" style="width:48px;margin-left:4px"><i style="width:${remPct}%"></i></span></div>
+              </div>
+            </div>
+            <div class="sec" style="display:flex;align-items:center;justify-content:space-between">
+              <span>需求完成进度</span>
+              <a href="#/task/${encodeURIComponent(task.id)}" style="font-size:11px;letter-spacing:0">编辑需求 ↗</a>
+            </div>
+            <table class="t dock-table" style="border:0">
+              <thead><tr><th>裁片 / 规格</th><th class="r">宽×长</th><th class="r">良/需</th></tr></thead>
+              <tbody>
+                ${task.demands.map(d => {
+                    const c = doneMap[d.id] || 0, r = resMap[d.id] || 0, ok = c >= d.quantity;
+                    return `<tr class="${ok ? 'muted' : ''}">
+                      <td class="wrap"><i class="swatch" style="background:${colors.get(d.id)}"></i>${esc(d.name)}</td>
+                      <td class="r num">${fmtN(d.width, 0)}×${fmtN(d.length, 0)}</td>
+                      <td class="r num"><b style="color:${ok ? 'var(--ok)' : 'var(--text)'}">${c}</b>/${d.quantity}${r ? `<small class="tag run" style="margin-left:2px">预${r}</small>` : ''}</td>
+                    </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+            <details class="dock-details" open>
+              <summary class="sec">工艺与基准参数</summary>
+              ${isSlitting(task) && sp ? `<div class="kv"><div>切边 左/右</div><div class="num">${sp.leftTrim} / ${sp.rightTrim} mm</div><div>组合宽</div><div class="num">${sp.minWidth}–${sp.maxWidth} mm</div><div>基准</div><div>${esc(originText(p.cutOrigin))}</div></div>`
+                : `<div class="kv"><div>默认拉布</div><div class="num">${fmtN(p.bedLength)} mm</div><div>切头 / 间距</div><div class="num">${fmtN(p.trimStart)} / ${fmtN(p.pieceGap, 1)} mm</div><div>基准 / 首刀</div><div>${esc(originText(p.cutOrigin))} · ${p.firstStageOrientation === 'vertical' ? '纵' : '横'}</div><div>允许旋转</div><div>${p.allowRotation ? '允许' : '禁止'}</div></div>`}
+            </details>
+            <details class="dock-details" ${sc.defects.length ? 'open' : ''}>
+              <summary class="sec">本卷疵点 (${sc.defects.length})</summary>
+              ${sc.defects.length ? `<table class="t dock-table" style="border:0"><tbody>
+                ${sc.defects.map(d => `<tr class="click" data-goto="${d.u}"><td class="num">Y ${(d.u / 1000).toFixed(2)}m</td><td class="r num">X ${fmtN(d.v, 0)}</td><td>${esc(d.label.split(' · ')[0])}</td></tr>`).join('')}
+              </tbody></table>` : '<div class="muted" style="padding:8px 12px;font-size:12px">本卷暂无登记疵点</div>'}
+            </details>
+          </div>
+        </section>`;
+    }
+
     /** keepCamera：重绘外壳但保留画布视角（拖动工位结束、切换右栏等）。 */
     function shell(keepCamera = false) {
         closeContext();
@@ -268,20 +323,21 @@ export async function mount(el, [taskId, rawFocusPlan, rawIntent] = []) {
         const alternatives = seg?.status === 'pending' ? sc.segments.filter(s => s.status === 'pending' && s.start < seg.start + seg.len && seg.start < s.start + s.len) : [];
         const currentLabel = seg?.invalid ? '需重算' : seg?.previewModified ? '预览已修改' : seg?.status === 'cut' ? '已报工' : seg?.status === 'pending' ? '候选预览' : seg ? STATUS_TEXT[seg.status] : '待排料';
         const colors = demandColors(task.demands, plans);
-        const hideRecords = st.sideTab !== 'all' && st.sideTab !== 'records';
+        const hideRecords = st.sideTab !== 'plan' && st.sideTab !== 'all' && st.sideTab !== 'records';
+        const leftWidth = st.leftCollapsed ? '28px' : '264px';
+        const rightWidth = st.report ? '420px' : st.quality || st.adjust ? '350px' : prefs.sideCollapsed ? '28px' : '316px';
         el.innerHTML = `
         <div class="wb-head">
-          <a class="btn sm" href="#/tasks" title="返回生产任务队列">返回任务</a>
+          <a class="btn sm" href="#/tasks" title="返回生产任务队列">← 任务队列</a>
           <div class="wb-identity"><h1 title="${esc(task.name)}">${esc(task.name)}</h1><div class="wb-meta"><span class="num">${shortId(task.id)}</span><span>${isSlitting(task) ? '一维分切' : '二维排料'} · ${esc(task.materialModel || '—')}</span>${summary ? `<span>${esc(taskLabels[summary.status] || summary.status)}</span>` : ''}</div></div>
           <span class="tag ${seg?.invalid || seg?.previewModified ? 'warn' : seg?.status === 'cut' ? 'ok' : 'run'}">${currentLabel}</span>
+          <div class="wb-inputs"><div class="sum" id="sum">${sumHtml(sc, colors)}</div></div>
           <span class="sp"></span>
           <div class="stages" aria-label="${seg?.invalid ? '当前方案需要重新排料' : '任务进度'}">${STAGES.map((s, i) => `<button type="button" class="stage ${i < stage ? 'done' : i === stage ? 'on' : ''}" data-stage-step="${i}" ${i === stage ? 'aria-current="step"' : ''} title="定位到${s}阶段（无后台写操作）"><span class="n">${i < stage ? '✓' : i + 1}</span>${s}${seg?.invalid && i === 2 ? ' · 需重算' : ''}</button>`).join('')}</div>
         </div>
-        <div class="wb-context">
-          <div class="wb-inputs"><div class="sum" id="sum">${sumHtml(sc, colors)}</div></div>
-        </div>
         ${!sc ? pickRollHtml() : `
-        <div class="split" style="grid-template-columns:1fr ${st.report ? '420px' : st.quality || st.adjust ? '340px' : prefs.sideCollapsed ? '28px' : '300px'}">
+        <div class="split wb-split" style="grid-template-columns:${leftWidth} minmax(0,1fr) ${rightWidth}">
+          ${leftDockHtml(sc, colors)}
           <section class="pane" style="background:var(--canvas)">
             <div class="ctool">
               <div class="vseg"><button data-view="station" class="${st.view === 'station' ? 'on' : ''}" title="对准当前工位">工位</button><button data-view="full" class="${st.view === 'full' ? 'on' : ''}" title="显示整卷">全卷</button></div>
@@ -304,21 +360,21 @@ export async function mount(el, [taskId, rawFocusPlan, rawIntent] = []) {
             <div class="navroll"><div class="nr-head"><span>${roll.remnant ? '料头' : '母卷'} <b class="num">${esc(st.rollId)}</b>${roll.remnant ? ` <span class="muted">来源 ${esc(roll.remnant.sourceRollId || '—')}</span>` : ''}</span><span>幅宽 <b class="num">${fmtN(sc.roll.width)}</b> mm</span><span>总长 <b class="num">${fmtM(sc.roll.total)}</b> m</span><span>已用 <b class="num">${fmtM(sc.roll.used)}</b> m</span>
               <span>本任务 已切 <b class="num">${met.cut}</b> · 候选 <b class="num">${met.pending}</b>${met.stale ? ` · 已失效 <b class="num">${met.stale}</b>` : ''}</span>${feedControl(sc)}</div><div id="rn"></div></div>
           </section>
-          ${st.report && seg ? reportPanel(seg, idx, sc) : st.quality && seg ? qualityPanel(seg) : st.adjust && seg ? adjustPanel(seg) : prefs.sideCollapsed ? `<section class="pane side-min"><button id="side-toggle" title="展开右栏">«</button><span>方案指标</span></section>` : `<section class="pane">
-            <div class="pane-h">${seg?.status === 'cut' ? '报工结果' : '方案概览'}<span class="sub">${seg ? '当前记录' : '本卷记录汇总'}</span><span class="sp"></span><button class="btn sm" id="side-toggle" title="收起右栏">»</button></div>
+          ${st.report && seg ? reportPanel(seg, idx, sc) : st.quality && seg ? qualityPanel(seg) : st.adjust && seg ? adjustPanel(seg) : prefs.sideCollapsed ? `<section class="pane side-min"><button id="side-toggle" title="展开右栏">«</button><span>方案指标</span></section>` : `<section class="pane wb-right">
+            <div class="pane-h">${seg?.status === 'cut' ? '实绩与复检' : '工位控制台'}<span class="sub">${seg ? `记录 ${idx + 1}/${sc.segments.length}` : '新工位'}</span><span class="sp"></span><button class="btn sm" id="side-toggle" title="收起右栏">»</button></div>
             <div class="pane-b">
               <div class="metric"><div><small>利用率</small><b>${seg ? (seg.totalArea ? (seg.pieceArea / seg.totalArea * 100).toFixed(1) : '—') : '—'}<em>%</em></b></div><div><small>${seg?.status === 'cut' ? '实切长度' : '预计用布'}</small><b>${seg ? fmtM(seg.len, 2) : '—'}<em>m</em></b></div>
                 <div><small>${seg ? '图示件数' : '方案记录'}</small><b>${seg ? seg.pieces.length : met.spreads}</b></div><div><small>任务良品进度</small><b>${total ? Math.round(done / total * 100) : 0}<em>%</em></b></div></div>
-              ${seg ? `<div class="side-tabs" role="tablist" aria-label="右栏视图过滤">
-                ${[['all', '全部'], ['tools', '微调与工具'], ['exec', '执行与缺口'], ['records', `记录 (${sc.segments.length})`]].map(([k, t]) =>
+              ${seg ? `<div class="side-tabs" role="tablist" aria-label="右栏阶段切换">
+                ${[['plan', '排料工位'], ['tools', '微调与工具'], ['exec', '执行锁料'], ['all', '全览']].map(([k, t]) =>
                     `<button type="button" role="tab" class="${st.sideTab === k ? 'on' : ''}" data-side-tab="${k}" aria-selected="${st.sideTab === k}">${t}</button>`
                 ).join('')}
               </div>` : ''}
               ${sidePanel(sc, seg, idx)}
               <div data-side-sec="records" ${hideRecords ? 'hidden' : ''}>
-                <div class="sec">方案与报工记录</div>
+                <div class="sec">本卷工位记录 (${sc.segments.length})</div>
                 <table class="t" style="border:0"><tbody>${sc.segments.map((s, i) => `<tr class="click ${s.id === sc.currentId ? 'sel' : ''}" data-seg="${esc(s.id)}"><td class="num">${i + 1}</td><td class="num">${fmtM(s.start, 2)} m</td><td class="r num">${fmtN(s.len)} mm</td><td>${s.invalid ? `<span class="tag warn" title="${esc(s.invalid)}">需重算</span>` : `<span class="tag ${SEG_TAG[s.status]}">${STATUS_TEXT[s.status]}</span>`}</td></tr>`).join('')}
-                  <tr class="click ${seg ? '' : 'sel'}" data-seg="${NEW_STATION}"><td class="num">＋</td><td class="muted" colspan="3">新工位</td></tr></tbody></table>
+                  <tr class="click ${seg ? '' : 'sel'}" data-seg="${NEW_STATION}"><td class="num">＋</td><td class="muted" colspan="3">新工位（向后拉布）</td></tr></tbody></table>
               </div>
             </div>
           </section>`}
@@ -340,19 +396,18 @@ export async function mount(el, [taskId, rawFocusPlan, rawIntent] = []) {
             + (occupied.has(roll.remnant ? roll.remnant.id : st.rollId) ? `<div class="notice">该材料${esc(occupiedText(roll.remnant ? roll.remnant.id : st.rollId))}，可以先排料，但须等对方报工或取消后才能报工。</div>` : '');
         if (!seg && isSlitting(task)) return slitBlock(sc) + busy + failure;
         if (!seg) {
-            return `<div class="sec">新工位</div>
+            return `<div class="sec">新工位待排</div>
               <div class="kv"><div>位置</div><div class="num">Y ${fmtM(w.start, 2)} → ${fmtM(w.start + w.len, 2)} m</div><div>拉布长</div><div class="num">${fmtN(w.len, 1)} mm</div>
                 <div>待排需求</div><div class="num">${rem.length} 项 · ${need} 件</div></div>
               ${problem ? `<div class="notice">${esc(problem)}</div>` : ''}${busy}${failure}
               <div class="wb-actions"><button class="btn pri" id="solve" ${st.busy || problem || !need ? 'disabled' : ''}>计算本工位</button></div>${roll.remnant ? `<div class="tool-grid">${previewControls(null)}</div>` : ''}`;
         }
         const unplaced = seg.fulfillment.filter(f => f.unplaced > 0);
-        const showTools = st.sideTab === 'all' || st.sideTab === 'tools';
-        const showExec = st.sideTab === 'all' || st.sideTab === 'exec';
-        return `<div class="sec">当前${seg.status === 'cut' ? '报工' : '方案'} · ${idx + 1} / ${sc.segments.length}</div>
-          <div class="kv"><div>状态</div><div><span class="tag ${seg.invalid ? 'warn' : SEG_TAG[seg.status]}">${seg.invalid ? '需重算' : STATUS_TEXT[seg.status]}</span>${w.adjusted ? ' <span class="tag warn">工位已调整</span>' : ''}</div>
-            <div>方案</div><div class="num">${shortId(seg.id)} · v${seg.version ?? 1}</div>
-            <div>位置</div><div class="num">Y ${fmtM(seg.start, 2)} → ${fmtM(seg.start + seg.len, 2)} m</div>
+        const showPlan = st.sideTab === 'plan' || st.sideTab === 'all';
+        const showTools = st.sideTab === 'tools' || st.sideTab === 'all';
+        const showExec = st.sideTab === 'exec' || st.sideTab === 'all';
+        return `<div class="kv"><div>状态</div><div><span class="tag ${seg.invalid ? 'warn' : SEG_TAG[seg.status]}">${seg.invalid ? '需重算' : STATUS_TEXT[seg.status]}</span>${w.adjusted ? ' <span class="tag warn">工位已调整</span>' : ''} <span class="num muted" style="margin-left:4px">${shortId(seg.id)} · v${seg.version ?? 1}</span></div>
+            <div>位置</div><div class="num">Y ${fmtM(seg.start, 2)} → ${fmtM(seg.start + seg.len, 2)} m (${fmtN(seg.len, 1)} mm)</div>
             </div>
           ${seg.previewModified ? `<div class="notice" id="preview-notice" role="status"><b>${seg.previewCleared ? '预览已清空，方案仍保留' : '余料预览已修改，方案仍保留'}</b><br>恢复预览后可继续报工、下达、调整或导出。</div>` : ''}
           ${seg.status === 'stale' ? '<div class="notice">该方案为母卷重置前历史参考，不可报工。</div>' : ''}
@@ -364,14 +419,14 @@ export async function mount(el, [taskId, rawFocusPlan, rawIntent] = []) {
             <div class="wb-actions"><button class="btn ${seg.invalid ? '' : 'pri'}" id="report-open" ${st.busy || w.adjusted || !reportAllowed ? 'disabled' : ''} title="${esc(reportWhy)}">报工</button>
               ${isSlitting(task) ? '' : `<button class="btn ${seg.invalid ? 'pri' : ''}" id="solve" ${st.busy || problem || !need || locked ? 'disabled' : ''} title="${locked ? '已下达或执行中，先取消执行单' : ''}">重新计算</button>`}<button class="btn" id="discard" ${st.busy || locked ? 'disabled' : ''}>放弃候选</button></div>
             <div data-side-sec="exec" ${showExec ? '' : 'hidden'}>${executionBlock(seg, view)}</div>`; })() : ''}
-          ${seg.status === 'cut' ? `<div data-side-sec="exec" ${showExec ? '' : 'hidden'}>${recordsBlock(seg)}</div>` : ''}
+          ${seg.status === 'cut' ? `<div data-side-sec="exec" ${showPlan || showExec ? '' : 'hidden'}>${recordsBlock(seg)}</div>` : ''}
           <div data-side-sec="tools" ${showTools ? '' : 'hidden'}>
             ${toolsBlock(seg)}
             ${remnantsBlock(seg)}
           </div>
-          <div data-side-sec="exec" ${showExec ? '' : 'hidden'}>
-            ${unplaced.length ? `<div class="sec">本次未排入 · 缺 ${unplaced.reduce((n, f) => n + f.unplaced, 0)}</div><table class="t" style="border:0"><tbody>${unplaced.map(f => `<tr><td class="wrap">${esc(names.get(f.demandId)?.name || `需求 ${f.demandId}`)}</td><td class="r num" style="color:var(--warn)">缺 ${f.unplaced}</td></tr>`).join('')}</tbody></table>`
-              : `<div class="sec-inline"><span>本次未排入</span><span class="tag ok">本段需求全部排入</span></div>`}
+          <div data-side-sec="plan" ${showPlan ? '' : 'hidden'}>
+            ${unplaced.length ? `<div class="sec">本段未排入 · 缺 ${unplaced.reduce((n, f) => n + f.unplaced, 0)} 件</div><table class="t" style="border:0"><tbody>${unplaced.map(f => `<tr><td class="wrap">${esc(names.get(f.demandId)?.name || `需求 ${f.demandId}`)}</td><td class="r num" style="color:var(--warn)">缺 ${f.unplaced}</td></tr>`).join('')}</tbody></table>`
+              : `<div class="sec-inline"><span>本段需求排入状态</span><span class="tag ok">全部排入 (0 缺口)</span></div>`}
           </div>`;
     }
 
@@ -978,9 +1033,15 @@ export async function mount(el, [taskId, rawFocusPlan, rawIntent] = []) {
         undismiss?.(); undismiss = null;
         if (pop) undismiss = dismissOnOutside(el.querySelector('#sum'), () => { st.pop = null; refresh(); });
         el.querySelector('#roll-pick')?.addEventListener('change', e => { st.pop = null; chooseRoll(e.target.value); });
-        el.querySelector('#change-material')?.addEventListener('click', () => {
+        el.querySelector('#roll-pick-dock')?.addEventListener('change', e => { st.pop = null; chooseRoll(e.target.value); });
+        const changeMat = () => {
             const reason = previewBusyReason(); if (reason) return toast(reason, true);
             st.previewOverrides.clear(); st.pop = null; st.rollId = null; roll = null; st.selectedId = null; st.window = null; full();
+        };
+        el.querySelector('#change-material')?.addEventListener('click', changeMat);
+        el.querySelector('#change-material-dock')?.addEventListener('click', changeMat);
+        el.querySelector('#left-toggle')?.addEventListener('click', () => {
+            st.leftCollapsed = !st.leftCollapsed; prefs.leftCollapsed = st.leftCollapsed; savePrefs(prefs); shell(true);
         });
         el.querySelectorAll('[data-goto]').forEach(tr => tr.onclick = () => {
             if (st.busy || st.saving) return;

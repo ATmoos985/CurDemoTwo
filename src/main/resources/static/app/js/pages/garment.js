@@ -17,6 +17,9 @@ export function mount(el) {
           <p id="weight-help">每件用布重量按含布边的幅宽、实际唛架长度和克重估算，未计布头、布尾及备损。</p>
         </div>
       </details>
+      <div class="style-pills" id="garment-style-pills" aria-label="快捷样板选择">
+        ${MARKER_STYLES.map(s => `<button type="button" class="style-pill" data-style-pill="${esc(s.id)}">${esc(s.name)}</button>`).join('')}
+      </div>
       <form id="garment-form" class="form">
       <label for="garment-half-turn">允许 180° 旋转</label><input id="garment-half-turn" name="halfTurn" type="checkbox" aria-describedby="angle-help">
       <label for="garment-gap-fill">同款裁片补空</label><input id="garment-gap-fill" name="gapFill" type="checkbox" aria-describedby="fill-help" checked>
@@ -134,17 +137,30 @@ export function mount(el) {
         clear();
     }
     const fields = form.elements;
+    function syncStylePills() {
+        const cur = fields.style.value;
+        el.querySelectorAll('[data-style-pill]').forEach(b => b.classList.toggle('on', b.dataset.stylePill === cur));
+    }
     function loadExample(example) {
         fields.example.value = example.id;
         for (const key of ['style', 'M', 'L', 'edge', 'gsm']) fields[key].value = example[key];
         fields.widths.value = example.widths.join(', ');
+        syncStylePills();
         resetResults();
     }
     fields.example.onchange = () => loadExample(GARMENT_EXAMPLES.find(e => e.id === fields.example.value));
+    el.querySelectorAll('[data-style-pill]').forEach(b => b.onclick = () => {
+        if (run.disabled) return;
+        fields.style.value = b.dataset.stylePill;
+        fields.example.value = '';
+        syncStylePills();
+        resetResults();
+    });
     loadExample(GARMENT_EXAMPLES[0]);
     form.oninput = event => {
         if (event.target !== fields.example) {
             if (event.target !== fields.halfTurn && event.target !== fields.gapFill) fields.example.value = '';
+            syncStylePills();
             resetResults();
         }
     };
