@@ -26,7 +26,7 @@ export const nextDemandId = demands => demands.reduce((m, d) => Math.max(m, Numb
 export function addDemand(form, line = {}) {
     const id = nextDemandId(form.demands);
     return {...form, demands: [...form.demands, {id, name: line.name ?? `需求 ${id}`, width: line.width ?? 0, length: line.length ?? 0,
-        quantity: line.quantity ?? 1, allowRotation: !!line.allowRotation}]};
+        quantity: line.quantity ?? 1, allowRotation: !!line.allowRotation, ...(line.shape ? {shape: line.shape} : {})}]};
 }
 
 /** 导入结果合并：replace=true 替换全部需求（已报工项保留），否则追加并重新编号。 */

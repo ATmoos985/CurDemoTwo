@@ -1,5 +1,6 @@
 import {esc, fmtN} from '../util.js';
 import {MARKER_STYLES} from '../../../js/nesting/marker-demo.js';
+import {DXF_GARMENT_STYLES} from '../../../js/nesting/dxf-garment-samples.js';
 import {OptimizationSession} from '../../../js/business/optimization/job-client.js';
 import {GARMENT_EXAMPLES, candidateWidths, compactionSavingMm, effectiveUtilization, fabricConsumption, markerRequest, selectMarkerTrial, solveMarkerDirection} from '../model/garment.js';
 import {createRollCanvas} from '../canvas/roll-canvas.js';
@@ -179,12 +180,14 @@ export function mount(el) {
     toTaskBtn.onclick = () => {
         if (!selected?.layoutRequest?.problem) return;
         const prob = selected.layoutRequest.problem;
-        const styleName = MARKER_STYLES.find(s => s.id === form.elements.style.value)?.name || '服装唛架';
+        const styleId = form.elements.style.value;
+        const styleName = MARKER_STYLES.find(s => s.id === styleId)?.name || '服装唛架';
+        const dxfMeta = DXF_GARMENT_STYLES[styleId];
         const draft = {
             name: `${styleName} · ${fmtN(selected.width, 0)}mm 幅宽试算转排产`,
             problemType: 'NESTING_2D',
-            materialModel: `GARMENT-${Math.round(selected.width)}`,
-            externalRef: `唛架试算 ${fmtN(selected.width, 1)}mm (${selected.direction})`,
+            materialModel: dxfMeta?.materialModel || `GARMENT-${Math.round(selected.width)}`,
+            externalRef: dxfMeta ? `CAD纸样 ${dxfMeta.file} · ${fmtN(selected.width, 1)}mm` : `唛架试算 ${fmtN(selected.width, 1)}mm (${selected.direction})`,
             process: {
                 bedLength: Math.ceil(selected.use?.length || prob.material?.shape?.height || 5000),
                 trimStart: 0,

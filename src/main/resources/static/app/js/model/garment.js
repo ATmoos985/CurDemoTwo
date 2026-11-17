@@ -1,6 +1,10 @@
 import {markerExample} from '../../../js/nesting/marker-demo.js';
 
 export const GARMENT_EXAMPLES = [
+    {id:'dxf-1226-mixed', name:'[DXF] 1226 卫衣大货版 · 120/140码三门幅对比', style:'DXF_1226', M:1, L:1, widths:[1550,1650,1800], edge:30, gsm:280},
+    {id:'dxf-20148d-mixed', name:'[DXF] 20148D 二套版 T恤 · 120/140码门幅试算', style:'DXF_20148D', M:1, L:1, widths:[1500,1650,1800], edge:25, gsm:200},
+    {id:'dxf-3129-suit', name:'[DXF] 3129 连帽套装 · 120/140码全套面布搭切', style:'DXF_3129', M:1, L:1, widths:[1650,1750,1850], edge:30, gsm:320},
+    {id:'dxf-1226-batch', name:'[DXF] 1226 卫衣大货版 · 2件120搭1件140密排', style:'DXF_1226', M:2, L:1, widths:[1650,1850], edge:30, gsm:280},
     {id:'shirt-mixed', name:'上衣 · 三种门幅对比', style:'GARMENT_SHIRT', M:1, L:1, widths:[1600,1850,1950], edge:0, gsm:200},
     {id:'shirt-three', name:'上衣 · 两件 M 搭一件 L', style:'GARMENT_SHIRT', M:2, L:1, widths:[1600,1850], edge:0, gsm:200},
     {id:'pants-denim', name:'长裤 · 单码厚牛仔', style:'GARMENT_PANTS', M:0, L:1, widths:[1450,1550], edge:40, gsm:360},

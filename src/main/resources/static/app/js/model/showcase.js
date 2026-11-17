@@ -1,6 +1,7 @@
 // 演示数据与场景投影：复用正式计算契约和共享画布，不创建业务方案或库存。
 import {basicExample, scenarioExample, garmentExample, boardExample} from '../../../js/nesting/scenario-examples.js';
 import {markerExample, MARKER_STYLES} from '../../../js/nesting/marker-demo.js';
+import {DXF_GARMENT_STYLES, buildDxfStyleParts} from '../../../js/nesting/dxf-garment-samples.js';
 import {INDUSTRIES} from '../../../js/industry/industry-profiles.js';
 import {LINEAR_SCENARIOS} from '../../../js/linear/linear-scenarios.js';
 import {createNestingScene, rectangle, shapeArea, sceneOrigin} from '../../../js/canvas/nesting-scene.js';
@@ -132,6 +133,12 @@ export const WORKFLOW_GUIDES = [
 
 // 仅预填表单；用户点击保存后才创建材料或任务。
 export const WORKFLOW_TEMPLATES = [
+    {id:'dxf-1226', name:'1226 卫衣大货版 DXF 搭切', width:1650, totalLength:20000, bedLength:3600, dxfStyle:'DXF_1226', sizeCounts:{M:2, L:2},
+        demands:buildDxfStyleParts('DXF_1226', {sizeCounts:{M:2, L:2}, fabricFilter:'面布', splitMirrorPairs:true}).map(p => [p.name, p.shape.width, p.shape.height, p.quantity, p.shape])},
+    {id:'dxf-20148d', name:'20148D 二套版 T恤 DXF 搭切', width:1600, totalLength:20000, bedLength:3200, dxfStyle:'DXF_20148D', sizeCounts:{M:2, L:2},
+        demands:buildDxfStyleParts('DXF_20148D', {sizeCounts:{M:2, L:2}, fabricFilter:'面布', splitMirrorPairs:true}).map(p => [p.name, p.shape.width, p.shape.height, p.quantity, p.shape])},
+    {id:'dxf-3129', name:'3129 连帽卫衣套装 DXF 搭切', width:1750, totalLength:25000, bedLength:4500, dxfStyle:'DXF_3129', sizeCounts:{M:1, L:1},
+        demands:buildDxfStyleParts('DXF_3129', {sizeCounts:{M:1, L:1}, fabricFilter:'面布', splitMirrorPairs:true}).map(p => [p.name, p.shape.width, p.shape.height, p.quantity, p.shape])},
     {id:'continuous', name:'多工位窗帘搭切', width:2000, totalLength:24000, bedLength:3000, demands:[['主帘',1200,1600,8],['短帘',600,800,16],['抱枕',450,450,20]]},
     {id:'slitting', name:'一维连续出车', width:2000, totalLength:30000, bedLength:2050, demands:[['订单 A',600,2000,10],['订单 B',700,2000,5]]},
     {id:'quality', name:'回收复用与复检补产', width:1500, totalLength:12000, bedLength:2000, demands:[['主体裁片',900,1000,4],['配件',300,400,10]]}
@@ -139,10 +146,11 @@ export const WORKFLOW_TEMPLATES = [
 export function workflowTemplate(id) {
     const t = WORKFLOW_TEMPLATES.find(t => t.id === id);
     if (!t) return null;
-    const materialModel = 'DEMO-' + id.toUpperCase();
+    const dxfMeta = t.dxfStyle && DXF_GARMENT_STYLES[t.dxfStyle];
+    const materialModel = dxfMeta ? dxfMeta.materialModel : 'DEMO-' + id.toUpperCase();
     return {material:{rollModel:materialModel,width:t.width,length:t.totalLength/1000},
-        task:{name:'演示 · '+t.name,materialModel,externalRef:'新版业务演示模板',revision:0,
-            demands:t.demands.map(([name,width,length,quantity],i)=>({id:i+1,name,width,length,quantity,allowRotation:false})),
+        task:{name:dxfMeta ? `DXF排料 · ${t.name}` : '演示 · '+t.name,materialModel,externalRef:dxfMeta ? `CAD纸样 ${dxfMeta.file}` : '新版业务演示模板',revision:0,
+            demands:t.demands.map(([name,width,length,quantity,shape],i)=>({id:i+1,name,width,length,quantity,allowRotation:false,...(shape?{shape:structuredClone(shape)}:{})})),
             process:{bedLength:t.bedLength,trimStart:id==='slitting'?50:0,cutOrigin:'left-top',firstStageOrientation:'horizontal',allowRotation:false,allowLongitudinal:true,pieceGap:0},
             ...(id==='slitting'?{problemType:'SLITTING_1D',slitting:{leftTrim:10,rightTrim:10,minWidth:1800,maxWidth:1980,widthStep:10,totalOverCap:2}}:{})}};
 }

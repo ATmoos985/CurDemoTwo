@@ -1,7 +1,18 @@
 import {getInitialScenarios} from '../plugins/presets/scenarios.js';
 import {rectangle, polygon} from '../canvas/nesting-scene.js';
+import {isDxfStyle, buildDxfStyleParts} from './dxf-garment-samples.js';
 
 export function garmentExample(id) {
+    if (isDxfStyle(id)) {
+        const parts = buildDxfStyleParts(id, {sizeCounts: {M: 1, L: 0}, fabricFilter: '面布', splitMirrorPairs: false})
+            .map((p, i) => ({id: i + 1, name: p.name.replace(/^M码\(\d+\)\s*·\s*/, ''), quantity: p.quantity, allowRotation: false, shape: p.shape}));
+        const height = id === 'DXF_3129' ? 2400 : 1200;
+        return {schemaVersion:'1', unit:'mm', engine:'auto', timeLimitSeconds:id === 'DXF_3129' ? 8 : 4,
+            material:{id:`DEMO-${id}`, shape:rectangle(1500, height), continuesAfterRegion:false, exclusions:[]},
+            parts,
+            process:{mode:'CONTOUR',feedMode:'SHEET',startCorner:'left-top',firstStageOrientation:'none',trimStart:0,
+                minReusableWidth:0,minReusableHeight:0,kerf:0,objective:'MAXIMIZE_PIECE_AREA',pieceGap:0}};
+    }
     // shortcut: 用折线近似服装曲边；接入生产纸样时需真实曲线、缝份与丝缕校验。
     const samples = {
         GARMENT_SHIRT: {height:1600, parts:[

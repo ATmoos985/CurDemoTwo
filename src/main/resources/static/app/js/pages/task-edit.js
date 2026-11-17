@@ -5,6 +5,7 @@ import {emptyTask, fromTask, addDemand, mergeImport, taskProblems, lineLock, toP
 import {SLITTING} from '../model/slitting.js';
 import {workflowTemplate} from '../model/showcase.js';
 import {parseDemandSheet, parseDemandJSON, importedTask, importGroups} from '../../../js/business/cutting/demand-import-model.js';
+import {DXF_GARMENT_STYLES, buildDxfStyleParts, parseDxfGarmentText} from '../../../js/nesting/dxf-garment-samples.js';
 
 const ORIGINS = [['right-bottom', '右下'], ['left-bottom', '左下'], ['right-top', '右上'], ['left-top', '左上']];
 const draftKey = id => 'cutplan.app.taskdraft.' + (id || 'new');
@@ -68,7 +69,12 @@ export async function mount(el, [taskId, templateId]) {
               ${problems.length ? `<div class="notice" style="margin:0">${problems.slice(0, 8).map(esc).join('<br>')}${problems.length > 8 ? `<br>… 共 ${problems.length} 项` : ''}</div>` : ''}
             </div>
             <div class="box" style="margin:0"><div class="pane-h">需求<span class="sub">${form.demands.length} 项 · ${fmtN(total)} 件</span><span class="sp"></span>
-                <label class="btn sm" style="cursor:pointer">导入 Excel / CSV / JSON<input type="file" id="file" accept=".xlsx,.xls,.csv,.json" hidden></label>
+                ${slit ? '' : `<div class="seg" style="margin-right:6px" title="一键载入真实 CAD DXF 服装纸样裁片">
+                  <button type="button" class="btn sm" data-dxf-preset="DXF_1226">DXF 1226卫衣</button>
+                  <button type="button" class="btn sm" data-dxf-preset="DXF_20148D">DXF 20148D</button>
+                  <button type="button" class="btn sm" data-dxf-preset="DXF_3129">DXF 3129套装</button>
+                </div>`}
+                <label class="btn sm" style="cursor:pointer">导入 Excel / CSV / JSON / DXF<input type="file" id="file" accept=".xlsx,.xls,.csv,.json,.dxf" hidden></label>
                 <button class="btn sm" id="template">下载模板</button><button class="btn sm" id="add">＋ 添加需求</button></div>
               ${imp ? importHtml() : ''}
               ${form.demands.length ? `<table class="t" style="border:0"><thead><tr><th class="r">编号</th><th>${slit ? '订单 / 规格' : '名称'}</th><th class="r">${slit ? '分切宽 mm' : '宽 mm'}</th><th class="r">${slit ? '卷长 mm' : '长 mm'}</th><th class="r">${slit ? '卷数' : '件数'}</th>${slit ? '' : '<th>可旋转</th>'}<th class="r">已报工</th><th></th></tr></thead><tbody>
@@ -121,6 +127,22 @@ export async function mount(el, [taskId, templateId]) {
         });
         on('[data-del]', 'click', e => { const i = Number(e.target.dataset.del); form = {...form, demands: form.demands.filter((_, j) => j !== i)}; persist(); render(); });
         on('#add', 'click', () => { form = addDemand(form); persist(); render(); });
+        on('[data-dxf-preset]', 'click', e => {
+            const styleId = e.currentTarget.dataset.dxfPreset, style = DXF_GARMENT_STYLES[styleId];
+            if (!style) return;
+            const sizeCounts = styleId === 'DXF_3129' ? {M: 1, L: 1} : {M: 2, L: 2};
+            const parts = buildDxfStyleParts(styleId, {sizeCounts, fabricFilter: '面布', splitMirrorPairs: true});
+            const imported = {
+                name: `${style.name} · 120/140码齐套搭切`,
+                materialModel: style.materialModel,
+                externalRef: `CAD纸样 ${style.file}`,
+                demands: parts.map(p => ({name: p.name, width: p.shape.width, length: p.shape.height, quantity: p.quantity, allowRotation: false, shape: p.shape}))
+            };
+            form = mergeImport({...form, name: imported.name, materialModel: imported.materialModel, externalRef: imported.externalRef,
+                process: {...form.process, bedLength: styleId === 'DXF_3129' ? 4500 : 3600, cutOrigin: 'left-top'}}, imported, {replace: true, completed});
+            persist(); render();
+            toast(`已载入 ${style.file} (${parts.length} 项异形裁片轮廓)`);
+        });
         on('#template', 'click', () => {
             const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([demandTemplateCsv()], {type: 'text/csv;charset=utf-8'}));
             a.download = '需求导入模板.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -159,7 +181,14 @@ export async function mount(el, [taskId, templateId]) {
         try {
             let result;
             if (/\.json$/i.test(file.name)) result = parseDemandJSON(JSON.parse(await file.text()));
-            else {
+            else if (/\.dxf$/i.test(file.name)) {
+                const buf = await file.arrayBuffer();
+                let text = new TextDecoder('utf-8', {fatal: false}).decode(buf);
+                if (!text.includes('Piece Name:') || text.includes('\uFFFD')) {
+                    try { text = new TextDecoder('gb18030').decode(buf); } catch {}
+                }
+                result = parseDxfGarmentText(text, file.name);
+            } else {
                 const XLSX = await loadSheetLib();
                 const book = XLSX.read(await file.arrayBuffer(), {type: 'array'});
                 const sheet = book.Sheets[book.SheetNames[0]];

@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {MARKER_STYLES, markerExample, markerSummary} from '../../main/resources/static/js/nesting/marker-demo.js';
+import {DXF_GARMENT_STYLES, buildDxfStyleParts, parseDxfGarmentText} from '../../main/resources/static/js/nesting/dxf-garment-samples.js';
 import {cuttingFrame, CUT_PATHS} from '../../main/resources/static/js/intro/cutting-timeline.js';
+import fs from 'node:fs';
+import {fileURLToPath} from 'node:url';
 
 const sceneFor = (problem, length, complete = true) => ({status:'FEASIBLE', placements:problem.parts.flatMap(part =>
     Array.from({length:part.quantity}, () => ({demandId:part.id, y:length-part.shape.height, shape:part.shape}))).slice(0, complete ? undefined : -1)});
@@ -21,7 +24,7 @@ test('one missing piece or substituting another size cannot qualify as a complet
     assert.equal(markerSummary(p,partial).complete,false);
 });
 test('all garment cases include both sizes and small parts within the fixed fabric width', () => {
-    const counts = {GARMENT_SHIRT:18, GARMENT_PANTS:18, GARMENT_SKIRT:14, GARMENT_TANK:10, GARMENT_SHORTS:14,
+    const counts = {DXF_1226:8, DXF_20148D:8, DXF_3129:44, GARMENT_SHIRT:18, GARMENT_PANTS:18, GARMENT_SKIRT:14, GARMENT_TANK:10, GARMENT_SHORTS:14,
         GARMENT_APRON:10, GARMENT_GORED_SKIRT:16, GARMENT_GATHERED_SKIRT:8};
     for (const style of MARKER_STYLES) for (const width of [1200,1500,2000]) {
         const p=markerExample(width,style.id);
@@ -64,4 +67,21 @@ test('2D crosscut finishes before all remaining edges advance together', () => {
     assert.equal(cuttingFrame(2100,'sheet').complete,1);
     assert.equal(cuttingFrame(2600,'sheet').complete,6);
     assert.deepEqual(cuttingFrame(1700,'strip').progress,[.5,.5,.5,.5]);
+});
+
+test('DXF garment styles preserve 6 sizes (110-160), left-right mirrored pairs, and valid AAMA DXF parsing', () => {
+    for (const id of ['DXF_1226', 'DXF_20148D', 'DXF_3129']) {
+        const style = DXF_GARMENT_STYLES[id];
+        assert.ok(style, id);
+        assert.deepEqual(style.sizes, ['110', '120', '130', '140', '150', '160']);
+        const parts = buildDxfStyleParts(id, {sizeCounts: {M: 1, L: 1}, fabricFilter: '面布', splitMirrorPairs: true});
+        assert.ok(parts.length >= 8, id);
+        assert.ok(parts.some(p => p.name.includes('(左)')) && parts.some(p => p.name.includes('(右)')), id);
+        const dxfPath = fileURLToPath(new URL('../../main/resources/static/examples/dxf/' + style.file, import.meta.url));
+        const buf = fs.readFileSync(dxfPath);
+        const text = new TextDecoder('gb18030').decode(buf);
+        const parsed = parseDxfGarmentText(text, style.file);
+        assert.ok(parsed.groups.length >= 6, style.file);
+        assert.ok(parsed.groups[0].demands.every(d => d.shape?.type === 'POLYGON' && d.width > 0 && d.length > 0));
+    }
 });

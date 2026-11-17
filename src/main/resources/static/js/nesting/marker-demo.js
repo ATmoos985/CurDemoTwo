@@ -1,7 +1,11 @@
 import {garmentExample} from './scenario-examples.js';
 import {polygon, rectangle, shapeArea} from '../canvas/nesting-scene.js';
+import {DXF_GARMENT_STYLES, isDxfStyle, buildDxfStyleParts} from './dxf-garment-samples.js';
 
 export const MARKER_STYLES = Object.freeze([
+    {id:'DXF_1226', name:'1226 卫衣 (DXF)', description:'1226.dxf 真实纸样：前片、后片、左右袖片（120/140 码面布齐套）', dxf:true, file:'1226.dxf'},
+    {id:'DXF_20148D', name:'20148D T恤 (DXF)', description:'20148D.dxf 真实纸样：前片、后片、左右短袖（120/140 码面布齐套）', dxf:true, file:'20148D.dxf'},
+    {id:'DXF_3129', name:'3129 套装 (DXF)', description:'3129.dxf 真实纸样：连帽开衫衣片 + 长裤前后片/裤腰/袋布（120/140 码面布齐套）', dxf:true, file:'3129.dxf'},
     {id:'GARMENT_SHIRT', name:'上衣', description:'前片、后片、袖片、领片、贴边与袋布'},
     {id:'GARMENT_PANTS', name:'长裤', description:'前裤片、后裤片、裤袋、腰头与门襟'},
     {id:'GARMENT_SKIRT', name:'半裙', description:'裙片、贴袋与腰头'},
@@ -12,13 +16,25 @@ export const MARKER_STYLES = Object.freeze([
     {id:'GARMENT_GATHERED_SKIRT', name:'直裁抽褶裙', description:'两片直裁裙身与分段腰头'}
 ]);
 
-/** Two sizes of a simplified garment; every named part is required, including small pieces. */
+/** Two sizes of a simplified or real DXF garment; every named part is required, including small pieces. */
 export function markerExample(width = 1500, style = 'GARMENT_SHIRT', sizeCounts = {M:1, L:1}) {
     if (!Number.isFinite(width) || width < 1200 || width > 2000) throw new Error('示例布宽应在 1200–2000 mm 之间');
     if (!MARKER_STYLES.some(item => item.id === style)) throw new Error('唛架款式不存在');
     if (![sizeCounts.M, sizeCounts.L].every(n => Number.isInteger(n) && n >= 0)
         || sizeCounts.M + sizeCounts.L < 1 || sizeCounts.M + sizeCounts.L > 12)
         throw new Error('每版 M、L 码合计须为 1–12 件成衣');
+    if (isDxfStyle(style)) {
+        const parts = buildDxfStyleParts(style, {sizeCounts, fabricFilter:'面布', splitMirrorPairs:true})
+            .map(({id, name, quantity, shape, allowRotation}) => ({id, name, quantity, shape, allowRotation}));
+        let x = 0, y = 0, rowHeight = 0;
+        for (const part of parts) for (let i = 0; i < part.quantity; i++) {
+            if (x + part.shape.width > width) { y += rowHeight; x = 0; rowHeight = 0; }
+            x += part.shape.width; rowHeight = Math.max(rowHeight, part.shape.height);
+        }
+        const base = garmentExample(style);
+        return {...base, timeLimitSeconds:style === 'DXF_3129' ? 4 : 2,
+            material:{...base.material, id:`DEMO-MARKER-${style}-ML`, shape:rectangle(width, Math.ceil(y + rowHeight + 120))}, parts};
+    }
     const base = garmentExample(style);
     const small = style === 'GARMENT_SHIRT' ? [
         {name:'领片', quantity:1, shape:polygon([{x:0,y:0},{x:340,y:0},{x:320,y:70},{x:20,y:70}])},

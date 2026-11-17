@@ -929,7 +929,7 @@ export async function mount(el, [taskId, rawFocusPlan, rawIntent] = []) {
           ${choices.length ? `<table class="t" style="border:0"><thead><tr><th>卷号</th><th>材料</th><th class="r">幅宽</th><th class="r">剩余 / 总长</th><th class="r">疵点</th><th>库位</th><th></th></tr></thead><tbody>
           ${choices.map(id => { const r = allRolls.find(x => x.rollId === id) || {rollId: id}; const rem = r.currentRemainingLength ?? (r.totalLength - r.usedLength);
               return `<tr><td class="num">${esc(id)}</td><td>${esc(r.materialName || r.rollModel || '—')}</td><td class="r num">${fmtN(r.width)}</td><td class="r num">${fmtM(rem)} / ${fmtM(r.totalLength)} m</td><td class="r num">${r.defectsCount ?? (r.defects || []).length}</td><td>${esc(r.storageLocation || '—')}${occupied.has(id) ? ` <span class="tag warn" title="${esc(occupiedText(id))}">占用中</span>` : ''}</td><td><button class="btn sm ${occupied.has(id) ? '' : 'pri'}" data-roll="${esc(id)}">选用</button></td></tr>`; }).join('')}</tbody></table>`
-            : `<div class="empty">没有型号为 ${esc(task.materialModel)} 且有余量的母卷。</div>`}</div>
+            : `<div class="empty">没有型号为 ${esc(task.materialModel)} 且有余量的母卷。<div style="margin-top:10px;display:flex;gap:8px;justify-content:center"><button type="button" class="btn pri" id="quick-register-roll">一键登记并检验同型号母卷</button><a class="btn" href="#/inventory">前往库存管理</a></div></div>`}</div>
           <div class="box" style="max-width:920px;margin:0 auto 24px">
           <div class="pane-h">在库料头<span class="sub">同型号可用 ${rems.length} 块 · 整块投料、优先消化余料</span><span class="sp"></span>
             <button class="btn sm" id="recommend" ${rems.length && !st.busy ? '' : 'disabled'}>${rec?.loading ? '试排中…' : '试排推荐'}</button></div>
@@ -1057,6 +1057,34 @@ export async function mount(el, [taskId, rawFocusPlan, rawIntent] = []) {
         el.querySelectorAll('[data-roll]').forEach(b => b.onclick = () => chooseRoll(b.dataset.roll));
         el.querySelectorAll('[data-remnant]').forEach(b => b.onclick = () => chooseRoll(b.dataset.remnant, 'remnant'));
         el.querySelector('#recommend')?.addEventListener('click', recommend);
+        el.querySelector('#quick-register-roll')?.addEventListener('click', async () => {
+            if (st.busy) return;
+            st.busy = '正在登记并检验母卷…'; shell(true);
+            try {
+                const maxDemandW = Math.max(0, ...task.demands.map(d => Number(d.width) || 0));
+                const defaultW = task.materialModel.includes('1226') ? 1650 : task.materialModel.includes('20148') ? 1600 : task.materialModel.includes('3129') ? 1750 : Math.max(1650, Math.ceil((maxDemandW + 100) / 50) * 50);
+                const newRollId = 'ROLL-' + task.materialModel.replace(/[^A-Za-z0-9]/g, '').slice(0, 10).toUpperCase() + '-' + crypto.randomUUID().slice(0, 4).toUpperCase();
+                await requestJSON('/api/rolls', {
+                    rollId: newRollId,
+                    rollModel: task.materialModel,
+                    materialName: task.name || task.materialModel,
+                    width: defaultW,
+                    rawWidth: defaultW,
+                    totalLength: 50000,
+                    currentRemainingLength: 50000,
+                    usedLength: 0,
+                    inspectionStatus: 'PASSED',
+                    inspector: '工作台快速入库',
+                    storageLocation: '现场备料区 A-01'
+                });
+                await loadStocks();
+                st.busy = '';
+                toast(`已登记合格母卷 ${newRollId}（幅宽 ${defaultW} mm × 50 m）`);
+                await chooseRoll(newRollId);
+            } catch (e) {
+                st.busy = ''; shell(true); toast('登记母卷失败：' + e.message, true);
+            }
+        });
         if (!sc) return;
         el.querySelector('#preview-clear')?.addEventListener('click', () => clearPreview(sc.currentId));
         el.querySelector('#preview-restore')?.addEventListener('click', () => restorePreview(sc.currentId));
