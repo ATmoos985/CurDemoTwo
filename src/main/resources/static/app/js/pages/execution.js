@@ -20,7 +20,13 @@ export async function mount(el) {
         const cur = list.find(r => r.execution.id === sel) || list[0] || null;
         const stations = [...new Set(rows.filter(r => r.reservationActive).map(r => r.execution.station))].sort();
         const pending = [...new Set(rows.map(r => r.execution.taskId))].flatMap(t => writer.pending(t));
-        el.innerHTML = `<div class="ph"><h1>执行与报工</h1><span class="crumb">工位与执行单</span><span class="sp"></span><button class="btn" id="refresh">刷新</button></div>
+        el.innerHTML = `<div class="ph"><h1>执行与报工</h1><span class="crumb">工位与执行单</span>
+            <div class="hub-tabs" role="navigation" aria-label="生产作业视图">
+              <a href="#/tasks">任务队列</a>
+              <a class="on" href="#/execution">工位执行单</a>
+              <a href="#/quality">异常复检</a>
+            </div>
+            <span class="sp"></span><button class="btn" id="refresh">刷新</button></div>
           <div class="body">
             ${pending.length ? `<div class="notice" style="margin:0 0 12px">有 ${pending.length} 个执行单操作结果未确认。${pending.map(([slot, v]) => `<button class="btn sm" data-retry="${esc(slot)}">重试 ${esc(v.action)}</button>`).join(' ')}</div>` : ''}
             <div class="cards">${stations.length ? stations.map(s => {
@@ -49,7 +55,7 @@ export async function mount(el) {
           <div style="display:flex;gap:6px;padding:8px 12px;align-items:center;flex-wrap:wrap">
             ${a.release?.allowed ? '<span class="muted">预约</span><input class="field num" id="reserve" value="30" style="width:56px;text-align:right"><span class="muted">分钟</span>' : ''}
             ${btn('release', '下达')}${btn('start', '开工')}${btn('cancel', '取消')}
-            <a class="btn sm pri" href="#/workbench/${encodeURIComponent(e.taskId)}/${encodeURIComponent(e.planId)}">${a.report?.allowed ? '去报工' : '查看方案'}</a></div>
+            <a class="btn sm pri" href="#/workbench/${encodeURIComponent(e.taskId)}/${encodeURIComponent(e.planId)}${a.report?.allowed ? '?intent=report' : ''}">${a.report?.allowed ? '去报工' : '查看方案'}</a></div>
           ${cancelling ? '<div style="display:flex;gap:6px;padding:0 12px 10px"><input class="field" id="cancel-reason" placeholder="取消原因（必填）" style="flex:1"><button class="btn sm pri" id="cancel-submit">确认取消</button></div>' : ''}
           <div class="sec">需求数量</div><div class="kv">${Object.entries(e.demandQuantities || {}).map(([k, v]) => `<div>需求 ${esc(k)}</div><div class="num">${v} 件</div>`).join('')}</div>
           <div class="sec">操作记录</div><table class="t" style="border:0"><tbody>${(e.events || []).map(ev => `<tr><td class="num">${fmtTime(ev.at)}</td><td>${esc({release: '下达', start: '开工', cancel: '取消', report: '报工', reported: '报工', reversed: '冲销'}[ev.action] || ev.action)}</td><td class="muted">${esc(ev.reason || '')}</td></tr>`).join('')}</tbody></table>`;

@@ -3,7 +3,14 @@ import {requestJSON, esc} from '../util.js';
 import {mountAnalysis} from '../../../js/business/analysis/analysis-view.js';
 
 export function mount(el) {
-    el.innerHTML = `<div class="ph"><h1>生产分析</h1><span class="crumb">实际产出与库存对账</span><span class="sp"></span><button class="btn" id="refresh-analysis">刷新对账</button></div>
+    el.innerHTML = `<div class="ph"><h1>生产分析</h1><span class="crumb">实际产出与库存对账</span>
+        <div class="hub-tabs" role="navigation" aria-label="材料与台账视图">
+          <a href="#/inventory">实物库存</a>
+          <a href="#/inspection">跑布验疵</a>
+          <a href="#/documents">移库与盘点单</a>
+          <a class="on" href="#/analysis">产出对账</a>
+        </div>
+        <span class="sp"></span><button class="btn" id="refresh-analysis">刷新对账</button></div>
       <div class="body">
         <div id="analysis-status" role="status"></div><div id="analysis-error" class="notice" role="alert" hidden></div>
         <div class="cards" id="actual-metrics" aria-label="实际报工指标"></div>

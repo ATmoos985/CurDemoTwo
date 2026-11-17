@@ -26,7 +26,14 @@ export async function mount(el, [intent, templateId] = []) {
         const select = (id, all0, key, map) => `<select class="field" id="${id}"><option value="">${all0}</option>${options(all, k[key]).map(v => `<option value="${esc(v)}" ${f[key] === v ? 'selected' : ''}>${esc(map?.[v]?.[0] || v)}</option>`).join('')}</select>`;
         const cur = list[Math.min(sel, list.length - 1)];
         const pendings = ['transfer', 'count'].map(s => [s, pendingWrite(s)]).filter(([, v]) => v);
-        el.innerHTML = `<div class="ph"><h1>库存</h1><span class="crumb">母卷与料头 · 勾选材料后可移库 / 盘点</span><span class="sp"></span>
+        el.innerHTML = `<div class="ph"><h1>库存</h1><span class="crumb">母卷与料头档案</span>
+            <div class="hub-tabs" role="navigation" aria-label="材料与台账视图">
+              <a class="on" href="#/inventory">实物库存</a>
+              <a href="#/inspection">跑布验疵</a>
+              <a href="#/documents">移库与盘点单</a>
+              <a href="#/analysis">产出对账</a>
+            </div>
+            <span class="sp"></span>
             <button class="btn" data-action="transfer" ${picked.size ? '' : 'disabled title="先在列表中勾选材料"'}>移库${picked.size ? ` (${picked.size})` : ''}</button>
             <button class="btn" data-action="count" ${picked.size ? '' : 'disabled title="先在列表中勾选材料"'}>盘点${picked.size ? ` (${picked.size})` : ''}</button>
             <button class="btn pri" data-action="receive">母卷入库</button></div>

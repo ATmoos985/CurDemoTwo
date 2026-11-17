@@ -13,14 +13,19 @@ export async function mount(el) {
     function render() {
         const list = rows.filter(x => x.report.status !== 'REVERSED' && (!onlyOpen || reviewablePieces(x.report).length))
             .sort((a, b) => String(b.report.confirmedAt).localeCompare(String(a.report.confirmedAt)));
-        el.innerHTML = `<div class="ph"><h1>复检处置</h1><span class="crumb">已报良品发现不良时：报废或转料头；原报工与母卷耗用保留，完成量扣回形成补产</span></div>
+        el.innerHTML = `<div class="ph"><h1>复检处置</h1><span class="crumb" title="已报良品发现不良时可报废或转料头；原报工与母卷耗用保留，完成量扣回形成补产">已报工产出质量重分类</span>
+            <div class="hub-tabs" role="navigation" aria-label="生产作业视图">
+              <a href="#/tasks">任务队列</a>
+              <a href="#/execution">工位执行单</a>
+              <a class="on" href="#/quality">异常复检</a>
+            </div></div>
           <div class="toolbar"><label class="muted"><input type="checkbox" id="open" ${onlyOpen ? 'checked' : ''}> 只看仍可复检的报工</label><span class="sp"></span><span class="muted">${list.length} 张报工单</span></div>
           <div class="body">${list.length ? `<table class="t"><thead><tr><th>报工单</th><th>任务</th><th>母卷</th><th class="r">实切 mm</th><th class="r">合格</th><th class="r">异常</th><th class="r">可复检</th><th class="r">已复检</th><th>时间</th><th></th></tr></thead><tbody>
             ${list.map(({task, report}) => { const s = receiptSummary(report, effectivePieceResults);
               return `<tr><td class="num">${shortId(report.planId)}</td><td>${esc(task.name)}</td><td class="num">${esc(report.rollId || report.sourceRemnantId || '—')}</td><td class="r num">${Math.round(report.actualCutLen || 0)}</td>
                 <td class="r num">${s.qualified}</td><td class="r num">${s.rejected}</td><td class="r num">${reviewablePieces(report).length}</td><td class="r num">${s.dispositions}</td>
                 <td class="num">${esc(String(report.confirmedAt || '').replace('T', ' ').slice(5, 16))}</td>
-                <td><a class="btn sm" href="#/workbench/${encodeURIComponent(task.id)}/${encodeURIComponent(report.planId)}">打开处置</a></td></tr>`; }).join('')}</tbody></table>`
+                <td><a class="btn sm pri" href="#/workbench/${encodeURIComponent(task.id)}/${encodeURIComponent(report.planId)}?intent=quality">打开处置</a></td></tr>`; }).join('')}</tbody></table>`
             : '<div class="empty">没有需要复检的报工</div>'}</div>`;
         el.querySelector('#open').onchange = e => { onlyOpen = e.target.checked; render(); };
     }

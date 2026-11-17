@@ -1,12 +1,28 @@
 // 应用外壳：导航、路由、状态栏。页面模块各自负责数据读取与渲染。
 import {esc, requestJSON} from './util.js';
 
-const NAV = [
-    ['生产', [['tasks', '任务'], ['workbench', '排料工作台'], ['execution', '执行与报工']]],
-    ['服装', [['garment', '唛架幅宽试算']]],
-    ['材料', [['inventory', '库存'], ['inspection', '跑布验疵'], ['documents', '库存单据']]],
-    ['质量与分析', [['quality', '复检处置'], ['analysis', '生产分析']]],
-    ['系统', [['showcase', '能力展示'], ['settings', '设置']]]
+const NAV_MAIN = [
+    ['生产闭环', [
+        ['tasks', '任务'],
+        ['workbench', '排料工作台'],
+        ['execution', '执行与报工', 'sub'],
+        ['quality', '复检处置', 'sub']
+    ]],
+    ['工艺试算', [
+        ['garment', '唛架幅宽试算']
+    ]],
+    ['材料与台账', [
+        ['inventory', '库存'],
+        ['inspection', '跑布验疵'],
+        ['documents', '库存单据', 'sub'],
+        ['analysis', '生产分析', 'sub']
+    ]]
+];
+const NAV_FOOT = [
+    ['沙盒与配置', [
+        ['showcase', '能力展示', 'sandbox'],
+        ['settings', '设置']
+    ]]
 ];
 const PAGES = {
     tasks: () => import('./pages/tasks.js'),
@@ -26,16 +42,30 @@ const PAGES = {
 let cleanup = null, token = 0;
 
 export function parseRoute(hash) {
-    const [page = 'tasks', ...rest] = String(hash || '').replace(/^#\/?/, '').split('/').filter(Boolean);
-    return {page: PAGES[page] ? page : 'tasks', params: rest.map(decodeURIComponent)};
+    const [rawPath = '', query = ''] = String(hash || '').replace(/^#\/?/, '').split('?');
+    const [page = 'tasks', ...rest] = rawPath.split('/').filter(Boolean);
+    const params = rest.map(decodeURIComponent);
+    const intent = new URLSearchParams(query).get('intent');
+    if (intent && params.length < 3) {
+        while (params.length < 2) params.push('');
+        params.push(intent);
+    }
+    return {page: PAGES[page] ? page : 'tasks', params};
 }
 
 export function setStatus(html) { document.getElementById('statusbar').innerHTML = html; }
 
+function renderGroup([h, items], active) {
+    return `<h6>${esc(h)}</h6>` + items.map(([k, t, kind]) =>
+        `<a href="#/${k}" class="${k === active ? 'on' : ''}${kind === 'sub' ? ' nav-sub' : ''}" ${k === active ? 'aria-current="page"' : ''}><span>${esc(t)}</span>${kind === 'sandbox' ? '<span class="cnt">沙盒</span>' : ''}</a>`
+    ).join('');
+}
+
 function renderNav(active) {
     if (active === 'task') active = 'tasks';
-    document.getElementById('nav').innerHTML = NAV.map(([h, items]) => `<h6>${esc(h)}</h6>` +
-        items.map(([k, t]) => `<a href="#/${k}" class="${k === active ? 'on' : ''}" ${k === active ? 'aria-current="page"' : ''}>${esc(t)}</a>`).join('')).join('');
+    document.getElementById('nav').innerHTML =
+        `<div class="nav-main">${NAV_MAIN.map(g => renderGroup(g, active)).join('')}</div>` +
+        `<div class="nav-foot">${NAV_FOOT.map(g => renderGroup(g, active)).join('')}</div>`;
 }
 
 async function route() {

@@ -6,7 +6,7 @@ import {createRollCanvas} from '../canvas/roll-canvas.js';
 import {showcaseScene} from '../model/showcase.js';
 
 export function mount(el) {
-    el.innerHTML = `<div class="ph"><h1>唛架幅宽试算</h1><span class="crumb">服装 · 单层用料</span></div>
+    el.innerHTML = `<div class="ph"><h1>唛架幅宽试算</h1><span class="crumb">服装工艺测算 · 多门幅单耗与齐套排料对比</span></div>
       <div class="split garment-split"><section class="pane"><div class="pane-b">
       <details id="garment-help"><summary class="pane-h" role="button" aria-label="试算条件帮助">试算条件<span class="help-mark" aria-hidden="true">?</span></summary>
         <div class="garment-help-text">
@@ -27,9 +27,14 @@ export function mount(el) {
       <label for="garment-widths">有效幅宽（mm）</label><input class="field" id="garment-widths" name="widths" aria-describedby="width-help" required>
       <label for="garment-edge">两侧布边合计（mm）</label><input class="field" id="garment-edge" name="edge" type="number" min="0" step="0.1" required>
       <label for="garment-gsm">克重（g/m²）</label><input class="field" id="garment-gsm" name="gsm" type="number" min="0.1" step="0.1" aria-describedby="weight-help" required></form></div></section>
-      <section class="pane"><div class="pane-h">候选幅宽比较</div><div class="garment-results"><table class="t">
+      <section class="pane">
+      <div class="garment-kpis" id="garment-kpis"></div>
+      <div class="pane-h">候选幅宽比较<span class="sub">按实算齐套结果对比单耗与利用率</span></div><div class="garment-results"><table class="t">
       <thead><tr>${['有效幅宽 mm','试算状态','唛架长 mm','齐套利用率 %','mm/件','g/件'].map(v => `<th>${v}</th>`).join('')}<th id="garment-fill-column">含补片利用率 %</th><th>排料图</th></tr></thead><tbody></tbody></table></div>
-      <div class="pane-h" id="garment-view">排料图</div><div id="garment-canvas" class="demo-canvas" aria-label="当前候选唛架"></div></section></div>
+      <div class="pane-h"><span id="garment-view">排料图</span><span class="sp"></span>
+        <button type="button" class="btn sm" id="garment-export" disabled>导出唛架 JSON</button>
+        <button type="button" class="btn sm pri" id="garment-to-task" disabled title="将当前选中的门幅与样板裁片带入新建二维生产任务">转入生产任务 ↗</button>
+      </div><div id="garment-canvas" class="demo-canvas" aria-label="当前候选唛架"></div></section></div>
       <div class="foot"><span role="status">待试算</span><span class="sp"></span><button type="button" class="btn" id="garment-stop" hidden>停止</button>
       <button class="btn pri" type="submit" form="garment-form">试算幅宽</button></div>`;
     const $ = selector => el.querySelector(selector);
@@ -38,8 +43,14 @@ export function mount(el) {
         if (event.key === 'Escape' && help.open) help.open = false;
     };
     const form = $('form'), status = $('[role=status]'), run = $('[type=submit]'), stop = $('#garment-stop');
+    const expBtn = $('#garment-export'), toTaskBtn = $('#garment-to-task'), kpiBox = $('#garment-kpis');
     const session = new OptimizationSession();
     let rows = [], revision = 0, canvas, selected = null, manualView = false;
+    function syncActions() {
+        const hasLayout = Boolean(selected?.result?.layout);
+        expBtn.disabled = !hasLayout;
+        toTaskBtn.disabled = !hasLayout;
+    }
     function select(row) {
         selected = row;
         canvas ??= createRollCanvas($('#garment-canvas'));
@@ -47,13 +58,29 @@ export function mount(el) {
             occupiedLengthMm:row.use?.length, gapFillPlacements:row.result?.marker?.gapFillPlacements
         }), {refit:true});
         $('#garment-view').textContent = `排料图 · ${fmtN(row.width, 1)} mm · ${row.usedFixed ? '沿用固定方向' : row.direction} · ${row.state}`;
+        syncActions();
+    }
+    function renderKpis(lowestRow, highestRow) {
+        const m = Number(form.elements.M?.value) || 0, l = Number(form.elements.L?.value) || 0;
+        const done = rows.filter(r => r.use);
+        kpiBox.innerHTML = `<div class="metric garment-metric">
+          <div><small>最低单件克重</small><b>${lowestRow ? fmtN(lowestRow.use.gramsPerGarment, 2) : '—'}<em>g/件</em></b></div>
+          <div><small>推荐最优门幅</small><b>${lowestRow ? fmtN(lowestRow.width, 1) : '—'}<em>mm</em></b></div>
+          <div><small>最高利用率</small><b>${highestRow ? fmtN(effectiveUtilization(highestRow.use), 2) : '—'}<em>%</em></b></div>
+          <div><small>本版配码 / 已齐套</small><b>${m + l}<em>件 · ${done.length}/${rows.length || 0}</em></b></div>
+        </div>`;
     }
     function render() {
-        const lowest = Math.min(...rows.filter(r => r.use).map(r => r.use.gramsPerGarment));
-        const highest = Math.max(...rows.filter(r => r.use).map(r => effectiveUtilization(r.use)));
+        const validRows = rows.filter(r => r.use);
+        const lowest = Math.min(...validRows.map(r => r.use.gramsPerGarment));
+        const highest = Math.max(...validRows.map(r => effectiveUtilization(r.use)));
+        const lowestRow = validRows.find(r => r.use.gramsPerGarment === lowest) || null;
+        const highestRow = validRows.find(r => effectiveUtilization(r.use) === highest) || null;
         const comparison = form.elements.halfTurn.checked;
         const filling = form.elements.gapFill.checked;
         $('#garment-fill-column').hidden = !filling;
+        renderKpis(lowestRow, highestRow);
+        syncActions();
         function trialDetail(row) {
             const info = comparison ? [row.direction] : [];
             if (row.retryNote) info.push(row.retryNote);
@@ -125,6 +152,44 @@ export function mount(el) {
         revision++; session.cancel();
         for (const r of rows) if (!r.finished) r.state = '已停止';
         render(); busy(false); status.textContent = '已停止，保留已返回的幅宽结果';
+    };
+    expBtn.onclick = () => {
+        if (!selected?.result) return;
+        const blob = new Blob([JSON.stringify({request: selected.layoutRequest, result: selected.result, consumption: selected.use}, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob), a = document.createElement('a');
+        a.href = url; a.download = `marker-${selected.width}mm.json`; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+    toTaskBtn.onclick = () => {
+        if (!selected?.layoutRequest?.problem) return;
+        const prob = selected.layoutRequest.problem;
+        const styleName = MARKER_STYLES.find(s => s.id === form.elements.style.value)?.name || '服装唛架';
+        const draft = {
+            name: `${styleName} · ${fmtN(selected.width, 0)}mm 幅宽试算转排产`,
+            problemType: 'NESTING_2D',
+            materialModel: `GARMENT-${Math.round(selected.width)}`,
+            externalRef: `唛架试算 ${fmtN(selected.width, 1)}mm (${selected.direction})`,
+            process: {
+                bedLength: Math.ceil(selected.use?.length || prob.material?.shape?.height || 5000),
+                trimStart: 0,
+                pieceGap: prob.process?.pieceGap ?? 0,
+                cutOrigin: 'left-top',
+                firstStageOrientation: 'horizontal',
+                allowRotation: false,
+                allowLongitudinal: true
+            },
+            demands: (prob.parts || []).map((p, i) => ({
+                id: i + 1,
+                name: p.name || p.id,
+                width: p.shape?.width || 0,
+                length: p.shape?.height || 0,
+                quantity: p.quantity || 1,
+                allowRotation: Boolean(p.allowRotation || p.allowHalfTurn),
+                shape: p.shape
+            }))
+        };
+        localStorage.setItem('cutplan.app.taskdraft.new', JSON.stringify(draft));
+        location.hash = '#/task/new';
     };
     form.onsubmit = async event => {
         event.preventDefault();

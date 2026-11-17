@@ -10,15 +10,45 @@ const METRICS = {processingAreaUtilization: ['加工区占用率', '裁片净面
 export async function mount(el, [id]) {
     const selected = SHOWCASE_CASES.find(c => c.id === id);
     if (!selected) {
-        el.innerHTML = `<div class="ph"><h1>能力展示</h1><span class="crumb">${SHOWCASE_CASES.length} 个计算用例 · 6 条业务演示路线</span></div>
-          <div class="toolbar"><label>查找用例 <input class="field" id="case-search" type="search" placeholder="行业、规则或异常"></label><span class="muted">计算演示不扣库存；业务流程使用实际任务。</span></div>
-          <div class="body"><div id="case-catalogue">${[...new Set(SHOWCASE_CASES.map(c => c.group))].map(group => `<section data-case-group><h3>${esc(group)}</h3><div class="cards">${SHOWCASE_CASES.filter(c => c.group === group).map(c => `<a class="card demo-card" data-case="${esc(c.id)}" href="#/showcase/${encodeURIComponent(c.id)}"><small>${esc(c.kind === 'marker' ? '齐套与用布优化' : c.kind === 'slitting' ? '独立分切 / 快速 / 精细' : '二维计算')}</small><b>${esc(c.name)}</b><p>${esc(c.note)}</p><span>打开用例 →</span></a>`).join('')}</div></section>`).join('')}</div>
-          <section><h3>业务演示数据</h3><p class="muted">先登记演示母卷并完成检验，再创建匹配任务。按钮只预填表单；点击保存才写入数据。</p><div class="cards">${WORKFLOW_TEMPLATES.map(t => `<article class="card demo-card"><b>${esc(t.name)}</b><p>母卷 ${t.width} mm × ${t.totalLength / 1000} m · 拉布 ${t.bedLength} mm · ${t.demands.reduce((n,d)=>n+d[3],0)} 件 / 卷</p><a class="btn" href="#/inventory/receive/${t.id}">① 登记演示母卷</a> <a class="btn" href="#/task/new/${t.id}">② 创建演示任务</a></article>`).join('')}</div></section><section><h3>完整业务流程</h3><p class="muted">以下步骤使用新版实际业务页面，报工会记账。建议使用单独登记的演示材料和任务。</p><div class="cards">${WORKFLOW_GUIDES.map(([title, steps, acceptance, route]) => `<article class="card demo-card"><b>${esc(title)}</b><p>${esc(steps)}</p><p><strong>验收：</strong>${esc(acceptance)}</p><a class="btn" href="#/${route}">进入${esc(title)}</a></article>`).join('')}</div></section></div>`;
-        el.querySelector('#case-search').oninput = e => {
-            const query = e.target.value.trim().toLowerCase();
-            el.querySelectorAll('[data-case]').forEach(a => { a.hidden = !(a.textContent + SHOWCASE_CASES.find(c => c.id === a.dataset.case).group).toLowerCase().includes(query); });
-            el.querySelectorAll('[data-case-group]').forEach(s => { s.hidden = !s.querySelector('[data-case]:not([hidden])'); });
-        };
+        const groups = [...new Set(SHOWCASE_CASES.map(c => c.group))];
+        el.innerHTML = `<div class="ph"><h1>能力展示</h1><span class="crumb">算法基准与业务演练沙盒 · ${SHOWCASE_CASES.length} 个计算用例 · 6 条业务演示路线</span></div>
+          <div class="toolbar">
+            <div class="seg" id="case-tabs" role="group" aria-label="沙盒分类">
+              <button type="button" class="on" data-group-filter="all">全部 (${SHOWCASE_CASES.length})</button>
+              ${groups.map(g => `<button type="button" data-group-filter="${esc(g)}">${esc(g)}</button>`).join('')}
+              <button type="button" data-group-filter="__workflow__">业务流程演练 (6)</button>
+            </div>
+            <span class="sp"></span>
+            <label>查找用例 <input class="field" id="case-search" type="search" placeholder="行业、规则或异常"></label>
+            <span class="muted">计算演示不扣库存；业务流程使用实际任务。</span>
+          </div>
+          <div class="body"><div id="case-catalogue">${groups.map(group => `<section data-case-group="${esc(group)}"><h3>${esc(group)}</h3><div class="cards">${SHOWCASE_CASES.filter(c => c.group === group).map(c => `<a class="card demo-card" data-case="${esc(c.id)}" href="#/showcase/${encodeURIComponent(c.id)}"><small>${esc(c.kind === 'marker' ? '齐套与用布优化' : c.kind === 'slitting' ? '独立分切 / 快速 / 精细' : '二维计算')}</small><b>${esc(c.name)}</b><p>${esc(c.note)}</p><span>打开用例 →</span></a>`).join('')}</div></section>`).join('')}</div>
+          <div id="workflow-sandbox">
+            <section><h3>业务演示数据 <span class="tag warn">写入演练库</span></h3><p class="muted">先登记演示母卷并完成检验，再创建匹配任务。按钮只预填表单；点击保存才写入数据。</p><div class="cards">${WORKFLOW_TEMPLATES.map(t => `<article class="card demo-card"><b>${esc(t.name)}</b><p>母卷 ${t.width} mm × ${t.totalLength / 1000} m · 拉布 ${t.bedLength} mm · ${t.demands.reduce((n,d)=>n+d[3],0)} 件 / 卷</p><a class="btn sm" href="#/inventory/receive/${t.id}">① 登记演示母卷</a> <a class="btn sm" href="#/task/new/${t.id}">② 创建演示任务</a></article>`).join('')}</div></section>
+            <section><h3>完整业务流程</h3><p class="muted">以下步骤使用新版实际业务页面，报工会记账。建议使用单独登记的演示材料和任务。</p><div class="cards">${WORKFLOW_GUIDES.map(([title, steps, acceptance, route]) => `<article class="card demo-card"><b>${esc(title)}</b><p>${esc(steps)}</p><p><strong>验收：</strong>${esc(acceptance)}</p><a class="btn sm" href="#/${route}">进入${esc(title)}</a></article>`).join('')}</div></section>
+          </div></div>`;
+        let activeGroup = 'all';
+        function applyFilter() {
+            const query = el.querySelector('#case-search').value.trim().toLowerCase();
+            const onlyWorkflow = activeGroup === '__workflow__';
+            el.querySelector('#case-catalogue').hidden = onlyWorkflow;
+            el.querySelector('#workflow-sandbox').hidden = activeGroup !== 'all' && !onlyWorkflow;
+            if (!onlyWorkflow) {
+                el.querySelectorAll('[data-case]').forEach(a => {
+                    const c = SHOWCASE_CASES.find(x => x.id === a.dataset.case);
+                    const groupMatch = activeGroup === 'all' || c.group === activeGroup;
+                    const textMatch = !query || (a.textContent + c.group).toLowerCase().includes(query);
+                    a.hidden = !(groupMatch && textMatch);
+                });
+                el.querySelectorAll('[data-case-group]').forEach(s => { s.hidden = !s.querySelector('[data-case]:not([hidden])'); });
+            }
+        }
+        el.querySelector('#case-search').oninput = applyFilter;
+        el.querySelectorAll('[data-group-filter]').forEach(b => b.onclick = () => {
+            activeGroup = b.dataset.groupFilter;
+            el.querySelectorAll('[data-group-filter]').forEach(x => x.classList.toggle('on', x === b));
+            applyFilter();
+        });
         return;
     }
     let request = showcaseRequest(id), result = null, disposed = false, busy = false, token = 0, patternIndex = 0;

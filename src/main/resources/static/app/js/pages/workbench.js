@@ -33,8 +33,12 @@ const STAGE_OF = {PLAN_PENDING: 2, EXECUTION_PENDING: 3, REPORT_PENDING: 4, ATTE
 const TAG = {PLAN_PENDING: 'idle', EXECUTION_PENDING: 'run', REPORT_PENDING: 'warn', ATTENTION: 'err', COMPLETED: 'ok'};
 const SEG_TAG = {cut: 'ok', pending: 'warn', stale: '', other: ''};
 
-export async function mount(el, [taskId, focusPlan]) {
+export async function mount(el, [taskId, rawFocusPlan, rawIntent] = []) {
     if (!taskId) return pickTask(el);
+    let focusPlan = rawFocusPlan, intent = rawIntent;
+    if (['report', 'quality', 'adjust'].includes(focusPlan) && !intent) {
+        intent = focusPlan; focusPlan = '';
+    }
     let detail, plans, summary, views = [], allRolls, roll = null, checks = {};
     const writer = executionWriter();
     async function loadTask({strictChecks = false, apply = true} = {}) {
@@ -63,7 +67,7 @@ export async function mount(el, [taskId, focusPlan]) {
     const st = {source: focusRemnant ? 'remnant' : 'roll', rollId: focusRemnant || focus?.request?.rollId || rollsOfPlans(plans)[0] || null,
         selectedId: focus ? focus.id : null, window: null, fresh: [], tool: 'pan', view: focus ? 'station' : prefs.view,
         pop: null, cursor: null, saving: false, busy: '', failure: null, quality: null, station: '1', reserveMin: 30, recommend: null, remnantSelection: null,
-        previewOverrides: new Map()};
+        sideTab: 'all', previewOverrides: new Map()};
     let canvas = null, nav = null, undismiss = null, closeContext = () => {}, disposed = false;
     const paintScene = (sc, options) => canvas.setScene(canvasScene(sc), options);
 
@@ -244,9 +248,7 @@ export async function mount(el, [taskId, focusPlan]) {
         if (seg?.status !== 'pending' && !roll?.remnant) return '';
         const plan = seg && planOf(seg.id), reason = previewReason(plan), hidden = seg?.previewModified;
         const button = (id, label, why, primary = false) => `<button class="btn sm${primary ? ' pri' : ''}" id="${id}" ${why ? 'disabled' : ''} title="${esc(why || label)}">${label}</button>`;
-        return `<div style="display:flex;gap:6px;padding:8px 12px;flex-wrap:wrap">
-          ${seg?.status === 'pending' ? hidden ? button('preview-restore', '恢复方案预览', previewBusyReason(), true) : button('preview-clear', '清空当前预览', reason) : ''}
-          ${roll?.remnant ? button('remnant-reload', '重新装载料头', previewReason(plan, true) || windowProblem(roll, {start: 0, len: roll.totalLength})) : ''}</div>`;
+        return `${seg?.status === 'pending' ? hidden ? button('preview-restore', '恢复方案预览', previewBusyReason(), true) : button('preview-clear', '清空当前预览', reason) : ''}${roll?.remnant ? button('remnant-reload', '重新装载料头', previewReason(plan, true) || windowProblem(roll, {start: 0, len: roll.totalLength})) : ''}`;
     }
 
     /** keepCamera：重绘外壳但保留画布视角（拖动工位结束、切换右栏等）。 */
@@ -266,13 +268,17 @@ export async function mount(el, [taskId, focusPlan]) {
         const alternatives = seg?.status === 'pending' ? sc.segments.filter(s => s.status === 'pending' && s.start < seg.start + seg.len && seg.start < s.start + s.len) : [];
         const currentLabel = seg?.invalid ? '需重算' : seg?.previewModified ? '预览已修改' : seg?.status === 'cut' ? '已报工' : seg?.status === 'pending' ? '候选预览' : seg ? STATUS_TEXT[seg.status] : '待排料';
         const colors = demandColors(task.demands, plans);
+        const hideRecords = st.sideTab !== 'all' && st.sideTab !== 'records';
         el.innerHTML = `
-        <div class="wb-head"><div class="wb-identity"><h1 title="${esc(task.name)}">${esc(task.name)}</h1><div class="wb-meta"><span class="num">${shortId(task.id)}</span><span>${isSlitting(task) ? '一维分切' : '二维排料'} · ${esc(task.materialModel || '—')}</span>${summary ? `<span>任务：${esc(taskLabels[summary.status] || summary.status)}</span>` : ''}</div></div>
+        <div class="wb-head">
+          <a class="btn sm" href="#/tasks" title="返回生产任务队列">返回任务</a>
+          <div class="wb-identity"><h1 title="${esc(task.name)}">${esc(task.name)}</h1><div class="wb-meta"><span class="num">${shortId(task.id)}</span><span>${isSlitting(task) ? '一维分切' : '二维排料'} · ${esc(task.materialModel || '—')}</span>${summary ? `<span>${esc(taskLabels[summary.status] || summary.status)}</span>` : ''}</div></div>
           <span class="tag ${seg?.invalid || seg?.previewModified ? 'warn' : seg?.status === 'cut' ? 'ok' : 'run'}">${currentLabel}</span>
-          <span class="sp"></span><a class="btn" href="#/tasks">返回任务</a></div>
+          <span class="sp"></span>
+          <div class="stages" aria-label="${seg?.invalid ? '当前方案需要重新排料' : '任务进度'}">${STAGES.map((s, i) => `<button type="button" class="stage ${i < stage ? 'done' : i === stage ? 'on' : ''}" data-stage-step="${i}" ${i === stage ? 'aria-current="step"' : ''} title="定位到${s}阶段（无后台写操作）"><span class="n">${i < stage ? '✓' : i + 1}</span>${s}${seg?.invalid && i === 2 ? ' · 需重算' : ''}</button>`).join('')}</div>
+        </div>
         <div class="wb-context">
-        <div class="stages" aria-label="${seg?.invalid ? '当前方案需要重新排料' : '任务进度'}">${STAGES.map((s, i) => `<div class="stage ${i < stage ? 'done' : i === stage ? 'on' : ''}" ${i === stage ? 'aria-current="step"' : ''}><span class="n">${i < stage ? '✓' : i + 1}</span>${s}${seg?.invalid && i === 2 ? ' · 需重算' : ''}</div>`).join('')}</div>
-        <div class="wb-inputs"><div class="sum" id="sum">${sumHtml(sc, colors)}</div></div>
+          <div class="wb-inputs"><div class="sum" id="sum">${sumHtml(sc, colors)}</div></div>
         </div>
         ${!sc ? pickRollHtml() : `
         <div class="split" style="grid-template-columns:1fr ${st.report ? '420px' : st.quality || st.adjust ? '340px' : prefs.sideCollapsed ? '28px' : '300px'}">
@@ -303,10 +309,17 @@ export async function mount(el, [taskId, focusPlan]) {
             <div class="pane-b">
               <div class="metric"><div><small>利用率</small><b>${seg ? (seg.totalArea ? (seg.pieceArea / seg.totalArea * 100).toFixed(1) : '—') : '—'}<em>%</em></b></div><div><small>${seg?.status === 'cut' ? '实切长度' : '预计用布'}</small><b>${seg ? fmtM(seg.len, 2) : '—'}<em>m</em></b></div>
                 <div><small>${seg ? '图示件数' : '方案记录'}</small><b>${seg ? seg.pieces.length : met.spreads}</b></div><div><small>任务良品进度</small><b>${total ? Math.round(done / total * 100) : 0}<em>%</em></b></div></div>
+              ${seg ? `<div class="side-tabs" role="tablist" aria-label="右栏视图过滤">
+                ${[['all', '全部'], ['tools', '微调与工具'], ['exec', '执行与缺口'], ['records', `记录 (${sc.segments.length})`]].map(([k, t]) =>
+                    `<button type="button" role="tab" class="${st.sideTab === k ? 'on' : ''}" data-side-tab="${k}" aria-selected="${st.sideTab === k}">${t}</button>`
+                ).join('')}
+              </div>` : ''}
               ${sidePanel(sc, seg, idx)}
-              <div class="sec">方案与报工记录</div>
-              <table class="t" style="border:0"><tbody>${sc.segments.map((s, i) => `<tr class="click ${s.id === sc.currentId ? 'sel' : ''}" data-seg="${esc(s.id)}"><td class="num">${i + 1}</td><td class="num">${fmtM(s.start, 2)} m</td><td class="r num">${fmtN(s.len)} mm</td><td>${s.invalid ? `<span class="tag warn" title="${esc(s.invalid)}">需重算</span>` : `<span class="tag ${SEG_TAG[s.status]}">${STATUS_TEXT[s.status]}</span>`}</td></tr>`).join('')}
-                <tr class="click ${seg ? '' : 'sel'}" data-seg="${NEW_STATION}"><td class="num">＋</td><td class="muted" colspan="3">新工位</td></tr></tbody></table>
+              <div data-side-sec="records" ${hideRecords ? 'hidden' : ''}>
+                <div class="sec">方案与报工记录</div>
+                <table class="t" style="border:0"><tbody>${sc.segments.map((s, i) => `<tr class="click ${s.id === sc.currentId ? 'sel' : ''}" data-seg="${esc(s.id)}"><td class="num">${i + 1}</td><td class="num">${fmtM(s.start, 2)} m</td><td class="r num">${fmtN(s.len)} mm</td><td>${s.invalid ? `<span class="tag warn" title="${esc(s.invalid)}">需重算</span>` : `<span class="tag ${SEG_TAG[s.status]}">${STATUS_TEXT[s.status]}</span>`}</td></tr>`).join('')}
+                  <tr class="click ${seg ? '' : 'sel'}" data-seg="${NEW_STATION}"><td class="num">＋</td><td class="muted" colspan="3">新工位</td></tr></tbody></table>
+              </div>
             </div>
           </section>`}
         </div>`}
@@ -331,16 +344,18 @@ export async function mount(el, [taskId, focusPlan]) {
               <div class="kv"><div>位置</div><div class="num">Y ${fmtM(w.start, 2)} → ${fmtM(w.start + w.len, 2)} m</div><div>拉布长</div><div class="num">${fmtN(w.len, 1)} mm</div>
                 <div>待排需求</div><div class="num">${rem.length} 项 · ${need} 件</div></div>
               ${problem ? `<div class="notice">${esc(problem)}</div>` : ''}${busy}${failure}
-              <div class="wb-actions"><button class="btn pri" id="solve" ${st.busy || problem || !need ? 'disabled' : ''}>计算本工位</button></div>${roll.remnant ? previewControls(null) : ''}`;
+              <div class="wb-actions"><button class="btn pri" id="solve" ${st.busy || problem || !need ? 'disabled' : ''}>计算本工位</button></div>${roll.remnant ? `<div class="tool-grid">${previewControls(null)}</div>` : ''}`;
         }
         const unplaced = seg.fulfillment.filter(f => f.unplaced > 0);
+        const showTools = st.sideTab === 'all' || st.sideTab === 'tools';
+        const showExec = st.sideTab === 'all' || st.sideTab === 'exec';
         return `<div class="sec">当前${seg.status === 'cut' ? '报工' : '方案'} · ${idx + 1} / ${sc.segments.length}</div>
           <div class="kv"><div>状态</div><div><span class="tag ${seg.invalid ? 'warn' : SEG_TAG[seg.status]}">${seg.invalid ? '需重算' : STATUS_TEXT[seg.status]}</span>${w.adjusted ? ' <span class="tag warn">工位已调整</span>' : ''}</div>
             <div>方案</div><div class="num">${shortId(seg.id)} · v${seg.version ?? 1}</div>
             <div>位置</div><div class="num">Y ${fmtM(seg.start, 2)} → ${fmtM(seg.start + seg.len, 2)} m</div>
             </div>
-          ${seg.previewModified ? `<div class="notice" id="preview-notice" role="status"><b>${seg.previewCleared ? '预览已清空，方案仍保留' : '余料预览已修改，方案仍保留'}</b><br>指标仍按归档方案统计。恢复预览后才能报工、下达、调整或导出加工文件。</div>` : ''}
-          ${seg.status === 'stale' ? '<div class="notice">该方案的报工已在母卷重置时清除，方案既未切也不能再报工，仅作历史参考。</div>' : ''}
+          ${seg.previewModified ? `<div class="notice" id="preview-notice" role="status"><b>${seg.previewCleared ? '预览已清空，方案仍保留' : '余料预览已修改，方案仍保留'}</b><br>恢复预览后可继续报工、下达、调整或导出。</div>` : ''}
+          ${seg.status === 'stale' ? '<div class="notice">该方案为母卷重置前历史参考，不可报工。</div>' : ''}
           ${seg.status === 'pending' ? (() => {
               const view = executionForPlan(views, seg.id), locked = !!view?.reservationActive;
               const reportAllowed = !seg.previewModified && !seg.invalid && (!view || view.allowedActions?.report?.allowed);
@@ -348,12 +363,16 @@ export async function mount(el, [taskId, focusPlan]) {
               return `${seg.invalid ? `<div class="notice" role="status"><b>方案已失效</b><div>${esc(seg.invalid)}</div>${isSlitting(task) ? '<div>放弃后按剩余需求重新出车</div>' : ''}</div>` : ''}${w.adjusted ? `<div class="notice">工位已调整为 Y ${fmtM(w.start, 2)} m · ${fmtN(w.len)} mm，重新计算后替换当前候选。</div>` : ''}${problem ? `<div class="notice">${esc(problem)}</div>` : ''}${busy}${failure}
             <div class="wb-actions"><button class="btn ${seg.invalid ? '' : 'pri'}" id="report-open" ${st.busy || w.adjusted || !reportAllowed ? 'disabled' : ''} title="${esc(reportWhy)}">报工</button>
               ${isSlitting(task) ? '' : `<button class="btn ${seg.invalid ? 'pri' : ''}" id="solve" ${st.busy || problem || !need || locked ? 'disabled' : ''} title="${locked ? '已下达或执行中，先取消执行单' : ''}">重新计算</button>`}<button class="btn" id="discard" ${st.busy || locked ? 'disabled' : ''}>放弃候选</button></div>
-            ${executionBlock(seg, view)}`; })() : ''}
-          ${seg.status === 'cut' ? recordsBlock(seg) : ''}
-          ${toolsBlock(seg)}
-          ${remnantsBlock(seg)}
-          <div class="sec">本次未排入</div>
-          ${unplaced.length ? `<table class="t" style="border:0"><tbody>${unplaced.map(f => `<tr><td class="wrap">${esc(names.get(f.demandId)?.name || `需求 ${f.demandId}`)}</td><td class="r num" style="color:var(--warn)">缺 ${f.unplaced}</td></tr>`).join('')}</tbody></table>` : '<div class="empty" style="padding:12px">本段需求全部排入</div>'}`;
+            <div data-side-sec="exec" ${showExec ? '' : 'hidden'}>${executionBlock(seg, view)}</div>`; })() : ''}
+          ${seg.status === 'cut' ? `<div data-side-sec="exec" ${showExec ? '' : 'hidden'}>${recordsBlock(seg)}</div>` : ''}
+          <div data-side-sec="tools" ${showTools ? '' : 'hidden'}>
+            ${toolsBlock(seg)}
+            ${remnantsBlock(seg)}
+          </div>
+          <div data-side-sec="exec" ${showExec ? '' : 'hidden'}>
+            ${unplaced.length ? `<div class="sec">本次未排入 · 缺 ${unplaced.reduce((n, f) => n + f.unplaced, 0)}</div><table class="t" style="border:0"><tbody>${unplaced.map(f => `<tr><td class="wrap">${esc(names.get(f.demandId)?.name || `需求 ${f.demandId}`)}</td><td class="r num" style="color:var(--warn)">缺 ${f.unplaced}</td></tr>`).join('')}</tbody></table>`
+              : `<div class="sec-inline"><span>本次未排入</span><span class="tag ok">本段需求全部排入</span></div>`}
+          </div>`;
     }
 
     const remnantArea = r => shapeArea(r.shape || rectangle(r.w, r.l)) / 1_000_000;
@@ -415,20 +434,18 @@ export async function mount(el, [taskId, focusPlan]) {
         const pend = writer.pending(task.id).filter(([slot]) => slot.endsWith(seg.id) || (view && slot.endsWith(view.execution.id)));
         const unsure = pend.length ? `<div class="notice">上次执行单操作结果未确认（${esc(pend.map(([, v]) => v.action).join('、'))}），请重试原操作，避免重复登记。<div style="margin-top:6px">${pend.map(([slot]) => `<button class="btn sm" data-retry="${esc(slot)}">重试</button>`).join(' ')}</div></div>` : '';
         if (!view || ['CANCELLED', 'EXPIRED'].includes(view.effectiveState) && !view.reservationActive) {
-            return `<div class="sec">执行单</div>${unsure}
-              ${view ? `<div class="kv"><div>上一张</div><div><span class="tag ${EXEC_TAG[view.effectiveState]}">${esc(executionLabels[view.effectiveState] || view.effectiveState)}</span> <span class="num">${shortId(view.execution.id)}</span></div></div>` : ''}
-              <div style="display:flex;gap:6px;padding:8px 12px;align-items:center"><span class="muted">工位</span><input class="field" id="exec-station" value="${esc(st.station)}" style="width:70px">
-                <button class="btn" id="exec-create" ${st.busy || pend.length || seg.invalid || seg.previewModified ? 'disabled' : ''} title="${esc(seg.previewModified ? '请先恢复方案预览' : seg.invalid || '')}">创建执行单</button></div>
-              <div class="muted" style="padding:0 12px 8px;font-size:11.5px">执行单：预约材料 → 开工 → 报工</div>`;
+            return `<div class="sec">执行单${view ? ` · 上一张 <span class="tag ${EXEC_TAG[view.effectiveState]}">${esc(executionLabels[view.effectiveState] || view.effectiveState)}</span>` : ''}</div>${unsure}
+              <div class="exec-inline"><span class="muted">工位</span><input class="field" id="exec-station" value="${esc(st.station)}" style="width:68px;height:28px">
+                <button class="btn sm" id="exec-create" ${st.busy || pend.length || seg.invalid || seg.previewModified ? 'disabled' : ''} title="${esc(seg.previewModified ? '请先恢复方案预览' : seg.invalid || '预约材料 → 开工 → 报工')}">创建执行单</button></div>`;
         }
         const e = view.execution, a = view.allowedActions || {}, blocked = k => (seg.invalid || seg.previewModified) && ['release', 'start'].includes(k);
         const btn = (k, t, extra = '') => `<button class="btn sm" data-exec="${k}" ${a[k]?.allowed && !blocked(k) && !st.busy && !pend.length ? '' : 'disabled'} title="${esc(blocked(k) ? seg.invalid || '请先恢复方案预览' : a[k]?.reason || '')}" ${extra}>${t}</button>`;
         return `<div class="sec">执行单</div>${unsure}
           <div class="kv"><div>状态</div><div><span class="tag ${EXEC_TAG[view.effectiveState] || ''}">${esc(executionLabels[view.effectiveState] || view.effectiveState)}</span> <span class="num muted">${shortId(e.id)} · v${e.version}</span></div>
-            <div>工位</div><div>${esc(e.station)}</div><div>材料</div><div class="num">${esc(e.materialId)}</div>
+            <div>工位</div><div>${esc(e.station)} · 材料 <span class="num">${esc(e.materialId)}</span></div>
             ${e.expiresAt ? `<div>预约至</div><div class="num">${new Date(e.expiresAt).toLocaleString('zh-CN', {hour12: false})}</div>` : ''}</div>
-          <div style="display:flex;gap:6px;padding:8px 12px;align-items:center;flex-wrap:wrap">
-            ${a.release?.allowed ? `<span class="muted">预约</span><input class="field num" id="exec-reserve" value="${st.reserveMin}" style="width:56px;text-align:right"><span class="muted">分钟</span>` : ''}
+          <div class="exec-inline">
+            ${a.release?.allowed ? `<span class="muted">预约</span><input class="field num" id="exec-reserve" value="${st.reserveMin}" style="width:52px;height:28px;text-align:right"><span class="muted">分</span>` : ''}
             ${btn('release', '下达')}${btn('start', '开工')}${btn('cancel', '取消')}</div>
           ${st.cancelling ? `<div style="display:flex;gap:6px;padding:0 12px 10px"><input class="field" id="exec-cancel-reason" placeholder="取消原因（必填）" style="flex:1"><button class="btn sm pri" id="exec-cancel-submit">确认取消</button></div>` : ''}`;
     }
@@ -438,12 +455,15 @@ export async function mount(el, [taskId, focusPlan]) {
         if (!['pending', 'cut', 'stale'].includes(seg.status)) return '';
         const plan = planOf(seg.id), locked = !!executionForPlan(views, seg.id)?.reservationActive, editable = seg.status === 'pending' && !locked && !seg.invalid && !seg.previewModified;
         const tp = st.toolpath?.planId === seg.id ? st.toolpath : null;
-        return `<div class="sec">方案工具</div>${previewControls(seg)}
-          ${editable ? `<div style="display:flex;gap:6px;padding:8px 12px 0;flex-wrap:wrap"><button class="btn sm" id="tp-optimize" ${st.busy || !plan?.result?.cuts?.length ? 'disabled' : ''}>优化空走刀</button><button class="btn sm" id="adjust-open" ${st.busy ? 'disabled' : ''}>手动调整</button></div>` : ''}
-          ${tp?.result ? `<div class="kv" style="margin-top:6px"><div>空走</div><div class="num">${fmtN(tp.result.originalAirDistance)} → ${fmtN(tp.result.optimizedAirDistance)} mm</div><div>节省</div><div class="num">${fmtN(tp.result.savedAirDistance)} mm · ${fmtN((tp.result.savingRatio || 0) * (tp.result.savingRatio <= 1 ? 100 : 1), 1)}%</div></div>
+        return `<div class="sec">方案工具与导出</div>
+          <div class="tool-grid">
+            ${editable ? `<button class="btn sm" id="adjust-open" ${st.busy ? 'disabled' : ''}>手动调整</button><button class="btn sm" id="tp-optimize" ${st.busy || !plan?.result?.cuts?.length ? 'disabled' : ''}>优化空走刀</button>` : ''}
+            ${previewControls(seg)}
+            <button class="btn sm" data-export="nc" ${seg.previewModified ? 'disabled' : ''}>G-Code</button><button class="btn sm" data-export="dxf" ${seg.previewModified ? 'disabled' : ''}>DXF</button><button class="btn sm" id="ticket-print" ${seg.previewModified ? 'disabled' : ''}>打印工单</button>
+          </div>
+          ${tp?.result ? `<div class="kv" style="margin-top:4px"><div>空走</div><div class="num">${fmtN(tp.result.originalAirDistance)} → ${fmtN(tp.result.optimizedAirDistance)} mm</div><div>节省</div><div class="num">${fmtN(tp.result.savedAirDistance)} mm · ${fmtN((tp.result.savingRatio || 0) * (tp.result.savingRatio <= 1 ? 100 : 1), 1)}%</div></div>
             <div style="display:flex;gap:6px;padding:6px 12px"><button class="btn sm pri" id="tp-save" ${st.busy || !(tp.result.savedAirDistance > 0) ? 'disabled' : ''}>保存刀序为新版本</button><button class="btn sm" id="tp-drop">放弃</button></div>` : ''}
-          ${tp?.error ? `<div class="notice">${esc(tp.error)}</div>` : ''}
-          <div style="display:flex;gap:6px;padding:8px 12px;flex-wrap:wrap"><button class="btn sm" data-export="nc" ${seg.previewModified ? 'disabled' : ''}>G-Code</button><button class="btn sm" data-export="dxf" ${seg.previewModified ? 'disabled' : ''}>DXF</button><button class="btn sm" id="ticket-print" ${seg.previewModified ? 'disabled' : ''}>打印工单</button></div>`;
+          ${tp?.error ? `<div class="notice">${esc(tp.error)}</div>` : ''}`;
     }
 
     /** 手动调整：拖动件（“移动件”工具）、旋转、撤销 / 重做，后端校验后另存为新版本。 */
@@ -1065,6 +1085,24 @@ export async function mount(el, [taskId, focusPlan]) {
             if (st.report || st.quality || st.adjust) return;
             pickSegment(b.dataset.candidate);
         });
+        el.querySelectorAll('[data-side-tab]').forEach(b => b.onclick = () => {
+            st.sideTab = b.dataset.sideTab;
+            shell(true);
+        });
+        el.querySelectorAll('[data-stage-step]').forEach(b => b.onclick = e => {
+            e.stopPropagation();
+            const stepIdx = Number(b.dataset.stageStep);
+            if (stepIdx === 0) { st.pop = st.pop === 'demand' ? null : 'demand'; refresh(); }
+            else if (stepIdx === 1) { st.pop = st.pop === 'material' ? null : 'material'; refresh(); }
+            else if (stepIdx === 2) { st.pop = null; st.sideTab = 'all'; shell(true); }
+            else if (stepIdx === 3) { st.pop = null; st.sideTab = 'exec'; shell(true); }
+            else if (stepIdx === 4) {
+                st.pop = null;
+                const cur = sc.segments.find(s => s.id === sc.currentId);
+                if (cur?.status === 'pending' && !cur.invalid && !cur.previewModified) openReport(cur);
+                else { st.sideTab = 'records'; shell(true); }
+            }
+        });
         el.querySelectorAll('tr[data-seg]').forEach(tr => tr.onclick = () => pickSegment(tr.dataset.seg));
         status(sc);
     }
@@ -1249,6 +1287,28 @@ export async function mount(el, [taskId, focusPlan]) {
     function refresh() { chrome(); }
     function full() { shell(); }
     full();
+    if (intent && roll) {
+        const sc = scene();
+        if (intent === 'report') {
+            const target = sc.segments.find(s => s.id === sc.currentId && s.status === 'pending' && !s.invalid)
+                || sc.segments.find(s => s.status === 'pending' && !s.invalid);
+            if (target) { st.selectedId = target.id; st.window = null; openReport(target); }
+        } else if (intent === 'quality') {
+            const findReport = id => (detail.reports || []).find(r => r.planId === id && r.status !== 'REVERSED' && reviewablePieces(r).length > 0);
+            const target = sc.segments.find(s => s.id === sc.currentId && s.status === 'cut' && findReport(s.id))
+                || sc.segments.find(s => s.status === 'cut' && findReport(s.id));
+            if (target) {
+                const report = findReport(target.id);
+                st.selectedId = target.id; st.window = null;
+                st.quality = emptyQualityForm(report, reviewablePieces(report)[0]?.pieceId);
+                shell(true);
+            }
+        } else if (intent === 'adjust') {
+            const target = sc.segments.find(s => s.id === sc.currentId && s.status === 'pending')
+                || sc.segments.find(s => s.status === 'pending');
+            if (target) startAdjustment(planOf(target.id));
+        }
+    }
     if (isSlitting(task)) restoreSlit();
     return () => { disposed = true; st.previewOverrides.clear(); closeContext(); canvas?.destroy(); nav?.destroy(); undismiss?.(); session.cancel(); };
 }

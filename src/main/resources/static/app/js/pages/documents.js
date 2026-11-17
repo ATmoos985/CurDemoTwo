@@ -40,7 +40,14 @@ export async function mount(el) {
     }
     function render() {
         const tr = asList(transfers), ct = asList(counts), list = filtered();
-        el.innerHTML = `<div class="ph"><h1>库存单据</h1><span class="crumb">库存流水记录每一次库存、需求与报工变化，用于追溯和对账</span><span class="sp"></span><a class="btn" href="#/inventory">去库存勾选材料移库 / 盘点</a></div>
+        el.innerHTML = `<div class="ph"><h1>库存单据</h1><span class="crumb">移库单、盘点单与变更流水</span>
+            <div class="hub-tabs" role="navigation" aria-label="材料与台账视图">
+              <a href="#/inventory">实物库存</a>
+              <a href="#/inspection">跑布验疵</a>
+              <a class="on" href="#/documents">移库与盘点单</a>
+              <a href="#/analysis">产出对账</a>
+            </div>
+            <span class="sp"></span><a class="btn" href="#/inventory">去库存勾选材料移库 / 盘点</a></div>
           <div class="toolbar"><div class="seg"><button data-tab="ledger" class="${f.tab === 'ledger' ? 'on' : ''}">库存流水</button><button data-tab="transfer" class="${f.tab === 'transfer' ? 'on' : ''}">移库 ${tr.length}</button><button data-tab="count" class="${f.tab === 'count' ? 'on' : ''}">盘点 ${ct.length}</button></div>
             ${f.tab === 'ledger' ? `<span class="vsep"></span>
             <select class="field" id="f-event"><option value="">全部事件</option>${events.map(e => `<option value="${esc(e)}" ${f.event === e ? 'selected' : ''}>${esc(label(EVENT, e))}</option>`).join('')}</select>
@@ -51,8 +58,8 @@ export async function mount(el) {
               ${list.slice().reverse().map(i => `<tr><td class="r num">${i.sequence}</td><td class="num">${fmtTime(i.occurredAt)}</td><td>${esc(label(EVENT, i.eventType))}</td><td>${esc(label(AGG, i.aggregateType))}</td>
                 <td class="num" title="${esc(i.aggregateId)}">${esc(String(i.aggregateId).length > 24 ? shortId(i.aggregateId) : i.aggregateId)}</td><td class="num">${(i.sourceReportIds || []).map(shortId).join(', ') || '—'}</td>
                 <td>${esc(i.actor || '—')}</td><td class="r num">${i.beforeVersion} → ${i.afterVersion}</td></tr>`).join('')}</tbody></table>
-              <div class="pager"><span>显示 ${list.length} / 共 ${items.length} 条</span><span>最新在前</span></div>` : '<div class="empty">没有符合条件的流水</div>')
-            : docs(f.tab === 'transfer' ? tr : ct)}</div>`;
+              <div class="pager"><span>显示 ${list.length} / 共 ${items.length} 条</span><span>完整面积核对与 CSV 导出请见 <a href="#/analysis">产出对账</a></span></div>` : '<div class="empty">没有符合条件的流水</div>')
+            : docs(f.tab === 'transfer' ? tr : ct, f.tab)}</div>`;
         el.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { f.tab = b.dataset.tab; render(); });
         const on = (id, ev, fn) => el.querySelector(id)?.addEventListener(ev, fn);
         on('#f-event', 'change', e => { f.event = e.target.value; render(); });
@@ -60,9 +67,28 @@ export async function mount(el) {
         on('#f-open', 'change', e => { f.opening = e.target.checked; render(); });
         on('#f-q', 'input', e => { f.q = e.target.value; const p = e.target.selectionStart; render(); const n = el.querySelector('#f-q'); n.focus(); n.setSelectionRange(p, p); });
     }
-    function docs(rows) {
+    function docs(rows, kind) {
         if (!rows.length) return '<div class="empty">暂无单据</div>';
-        return `<table class="t"><thead><tr><th>单据</th><th>时间</th><th>内容</th></tr></thead><tbody>${rows.slice().reverse().map(r => `<tr><td class="num">${shortId(r.id || r.documentId)}</td><td class="num">${fmtTime(r.postedAt || r.createdAt || r.at)}</td><td class="wrap muted">${esc(JSON.stringify(r).slice(0, 160))}</td></tr>`).join('')}</tbody></table>`;
+        if (kind === 'transfer') {
+            return `<table class="t"><thead><tr><th>移库单号</th><th>过账时间</th><th>目标库位</th><th class="r">项数</th><th>移库材料明细</th><th>原因</th><th>经办人</th><th class="r">版本</th></tr></thead><tbody>
+              ${rows.slice().reverse().map(r => {
+                  const mats = r.items || r.materials || [];
+                  const summary = mats.map(m => `${m.id || m.materialId || '—'}${m.fromLocation ? ` (${m.fromLocation}→${r.destination || m.toLocation || ''})` : ''}`).join('、');
+                  return `<tr><td class="num">${shortId(r.id || r.documentId)}</td><td class="num">${fmtTime(r.postedAt || r.createdAt || r.at)}</td>
+                    <td><span class="tag ok">${esc(r.destination || '—')}</span></td><td class="r num">${mats.length}</td>
+                    <td class="wrap num">${esc(summary || '—')}</td><td class="wrap">${esc(r.reason || '—')}</td>
+                    <td>${esc(r.operator || '—')}</td><td class="r num">${r.beforeRevision != null && r.afterRevision != null ? `${r.beforeRevision} → ${r.afterRevision}` : (r.revision ?? '—')}</td></tr>`;
+              }).join('')}</tbody></table>`;
+        }
+        return `<table class="t"><thead><tr><th>盘点单号</th><th>过账时间</th><th class="r">盘点项数</th><th>实测与差异明细</th><th>盘点原因</th><th>经办人</th><th class="r">版本</th></tr></thead><tbody>
+          ${rows.slice().reverse().map(r => {
+              const mats = r.items || r.materials || [];
+              const summary = mats.map(m => `${m.id || m.materialId || '—'}: ${m.present === false ? '未见实物' : `${m.actualWidth ?? m.width ?? '—'}×${m.actualLength ?? m.length ?? '—'} mm`}`).join('；');
+              return `<tr><td class="num">${shortId(r.id || r.documentId)}</td><td class="num">${fmtTime(r.postedAt || r.createdAt || r.at)}</td>
+                <td class="r num">${mats.length}</td><td class="wrap num">${esc(summary || '—')}</td>
+                <td class="wrap">${esc(r.reason || '—')}</td><td>${esc(r.operator || '—')}</td>
+                <td class="r num">${r.beforeRevision != null && r.afterRevision != null ? `${r.beforeRevision} → ${r.afterRevision}` : (r.revision ?? '—')}</td></tr>`;
+          }).join('')}</tbody></table>`;
     }
     render();
 }
