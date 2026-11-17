@@ -252,22 +252,49 @@ button,a,input,select{touch-action:manipulation}
 .candidate-option:hover:not(:disabled){background:#3b4652}
 .candidate-option:disabled{cursor:default;opacity:.65}
 .candidate-option:focus-visible{outline-color:#b2d7ff;outline-offset:2px}
-.task-filters{border:0;border-radius:0;gap:4px;flex-wrap:wrap}
-.task-filters button{height:34px;border:0;border-radius:3px;background:var(--panel-2);display:flex;align-items:center;gap:8px}
+/* 任务队列 */
+.task-page{--task-content-width:1180px;background:var(--panel)}
+.task-page>.ph,.task-page>.toolbar{padding-inline-end:max(16px,calc(100% - var(--task-content-width) - 16px))}
+.task-page>.body{width:min(100%,calc(var(--task-content-width) + 32px));padding-block:8px}
+.task-page>.body:focus-visible{outline-offset:-2px}
+.task-page #task-search{width:224px;max-width:100%;min-width:0}
+.task-filters{border:0;border-radius:0;gap:3px;flex-wrap:wrap}
+.task-filters button{height:30px;border:0;border-radius:2px;background:var(--panel-2);display:flex;align-items:center;gap:6px}
 .task-filters button.on{background:var(--accent-2);box-shadow:inset 0 -2px var(--accent)}
-.filter-count{font-size:11px;opacity:.85}
-.task-table .task-identity{white-space:normal;min-width:200px;max-width:320px;padding:10px 12px}
-.task-identity>a{font-size:14px;font-weight:600;color:var(--text)}
-.task-identity>a:hover{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
-.task-identity small{display:block;color:var(--text-3);font-size:11px;margin-top:4px;overflow-wrap:anywhere}
-.task-progress{display:flex;flex-direction:column;gap:6px;min-width:104px}
-.task-progress .bar{width:104px;height:4px}
-.task-table td:last-child{white-space:nowrap}
-.task-table .btn{background:transparent}
+.task-filters .filter-count{font-size:11px;opacity:.85}
+table.task-table{min-width:1010px;table-layout:fixed}
+.task-table th,.task-table td{padding-inline:8px}
+.task-table th.r{text-align:right}
+.task-name-col{width:23%}
+.task-status-col{width:70px}
+.task-source-col{width:14%}
+.task-count-col{width:50px}
+.task-progress-col{width:144px}
+.task-action-col{width:122px}
+.task-table .task-identity,.task-material,.task-progress{display:flex;align-items:center;gap:8px}
+.task-table .task-identity a{font-weight:600;color:var(--text)}
+.task-table .task-identity a:hover,.task-table .task-identity a:focus-visible{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
+.task-table .task-identity small{flex:none;color:var(--text-3);font-size:11px}
+.task-material .tag{flex:none}
+.task-table .task-clip{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-progress .bar{width:32px;height:4px;flex:none}
+.task-table .btn.sm{height:26px;padding:0 6px}
+@media(max-width:1230px){
+  .task-page>.body{padding-inline-end:0}
+  table.task-table{min-width:920px}
+  .task-table .task-name-col{width:200px}
+  .task-table .task-status-col{width:64px}
+  .task-table .task-progress-col{width:124px}
+  .task-table .task-count-col{width:46px}
+  .task-table .task-action-col{width:116px}
+  .task-table th:last-child,.task-table td:last-child{position:sticky;right:0;box-shadow:-1px 0 var(--line)}
+  .task-table th:last-child{background:var(--panel-2);z-index:2}
+  .task-table td:last-child{background:var(--panel)}
+}
 .empty strong{font-size:15px;color:var(--text-2)}
 .empty p{margin:8px 0 16px}
 .demo-card b{font:600 15px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--text)}
-@media(max-width:1100px){.wb-meta{gap:8px}.wb-inputs{padding-left:12px}.task-table{min-width:940px}}
+@media(max-width:1100px){.wb-meta{gap:8px}.wb-inputs{padding-left:12px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important}}
 
 .ctool{height:auto;min-height:36px;flex-wrap:wrap;padding:5px 8px;row-gap:5px;overflow:visible}
