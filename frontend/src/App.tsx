@@ -4,6 +4,8 @@ import { NestingStudio2DPage } from './pages/NestingStudio2DPage';
 import { SlittingStudio1DPage } from './pages/SlittingStudio1DPage';
 import { ExecutionCenterPage } from './pages/ExecutionCenterPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { TasksPage } from './pages/TasksPage';
+import { TaskEditPage } from './pages/TaskEditPage';
 import { LegacyPageHost } from './components/LegacyPageHost';
 import { requestJSON } from '@static/app/js/util.js';
 import { useStudioStore } from './store/useStudioStore';
@@ -114,21 +116,9 @@ export const App: React.FC = () => {
           />
         );
       case 'tasks':
-        return (
-          <LegacyPageHost
-            routeKey={route.rawKey}
-            loader={() => import('@static/app/js/pages/tasks.js')}
-            params={route.params}
-          />
-        );
+        return <TasksPage />;
       case 'task':
-        return (
-          <LegacyPageHost
-            routeKey={route.rawKey}
-            loader={() => import('@static/app/js/pages/task-edit.js')}
-            params={route.params}
-          />
-        );
+        return <TaskEditPage params={route.params} />;
       case 'inventory':
         return (
           <LegacyPageHost
