@@ -1,7 +1,8 @@
 // 任务编辑：新建 / 编辑任务与需求，导入 Excel / CSV / JSON 需求（复用经典 demand-import-model 解析）。
 // 本机草稿防丢失；保存走 /api/cutting/tasks（带 revision，冲突时提示重新载入）。
 import {requestJSON, esc, fmtN, errorBox, toast, loadSheetLib} from '../util.js';
-import {emptyTask, fromTask, addDemand, mergeImport, taskProblems, lineLock, toPayload, demandTemplateCsv, withProblemType} from '../model/task-form.js';
+import {fromTask, addDemand, mergeImport, taskProblems, lineLock, toPayload, demandTemplateCsv, withProblemType} from '../model/task-form.js';
+import {TASK_PACK_GROUPS, taskPackForm} from '../model/task-packs.js';
 import {SLITTING} from '../model/slitting.js';
 import {workflowTemplate} from '../model/showcase.js';
 import {parseDemandSheet, parseDemandJSON, importedTask, importGroups} from '../../../js/business/cutting/demand-import-model.js';
@@ -10,41 +11,54 @@ const ORIGINS = [['right-bottom', '右下'], ['left-bottom', '左下'], ['right-
 const draftKey = id => 'cutplan.app.taskdraft.' + (id || 'new');
 
 export async function mount(el, [taskId, templateId]) {
-    const template = taskId === 'new' && workflowTemplate(templateId);
+    const routeTemplate = taskId === 'new' && workflowTemplate(templateId);
+    const routePackId = routeTemplate ? 'showcase-' + templateId : '';
+    const newForm = id => routeTemplate && id === routePackId ? fromTask(routeTemplate.task) : taskPackForm(id);
     let original = null, completed = {}, rolls = [];
     try {
         const [detail, r] = await Promise.all([taskId && taskId !== 'new' ? requestJSON('/api/cutting/tasks/' + encodeURIComponent(taskId)) : null, requestJSON('/api/rolls')]);
         rolls = r;
         if (detail) { original = detail.task; completed = detail.completed || {}; }
     } catch (e) { el.innerHTML = errorBox(e); return; }
-    const key = draftKey(original?.id || (template ? 'demo-' + templateId : null));
+    const key = draftKey(original?.id || (routeTemplate ? 'demo-' + templateId : null));
     const draft = JSON.parse(localStorage.getItem(key) || 'null');
-    let form = draft && (!original || draft.revision === original.revision) ? draft : original ? fromTask(original) : template ? fromTask(template.task) : emptyTask();
+    let hasDraft = Boolean(draft && (!original || draft.revision === original.revision));
+    let packId = original ? '' : draft?.taskPackId ?? routePackId;
+    let baseline = original ? fromTask(original) : newForm(packId);
+    let form = hasDraft ? fromTask(draft) : baseline;
     let imp = null; // {result, groups, gi, selected:Set, source}
     let saving = false, conflict = false;
     const models = [...new Set(rolls.map(r => r.rollModel).filter(Boolean))].sort();
-    const persist = () => localStorage.setItem(key, JSON.stringify(form));
-    const dirty = () => !original || JSON.stringify(toPayload(form)) !== JSON.stringify(toPayload(fromTask(original)));
+    const persist = () => {
+        localStorage.setItem(key, JSON.stringify(original ? form : {...form, taskPackId: packId}));
+        hasDraft = true;
+    };
+    const changed = () => JSON.stringify(toPayload(form)) !== JSON.stringify(toPayload(baseline));
+    const dirty = () => !original || changed();
 
     function render() {
         const problems = taskProblems(form, {original, completed}), p = form.process, slit = form.problemType === SLITTING, sp = form.slitting;
         const typeLocked = original && Object.keys(completed).length;
         const total = form.demands.reduce((a, d) => a + (Number(d.quantity) || 0), 0);
-        el.innerHTML = `<div class="ph"><h1>${original ? '编辑任务' : '新建任务'}</h1><span class="crumb">${original ? esc(original.name) + ' · 版本 ' + original.revision : '填写需求后保存，再进入工作台选料排料'}</span>
-            ${draft && dirty() ? '<span class="tag warn">本机草稿</span>' : ''}<span class="sp"></span>
+        const showStockLink = routeTemplate && packId === routePackId && routeTemplate.task.materialModel === form.materialModel;
+        el.innerHTML = `<div class="ph"><h1>${original ? '编辑任务' : '新建任务'}</h1>${original ? '<span class="crumb">' + esc(original.name) + ' · 版本 ' + original.revision + '</span>' : ''}
+            ${hasDraft && dirty() ? '<span class="tag warn">本机草稿</span>' : ''}<span class="sp"></span>
             <a class="btn" href="${original ? '#/workbench/' + encodeURIComponent(original.id) : '#/tasks'}">${original ? '返回工作台' : '返回任务'}</a>
             ${dirty() ? '<button class="btn" id="discard">放弃修改</button>' : ''}
             <button class="btn pri" id="save" ${problems.length || saving || !dirty() ? 'disabled' : ''}>${saving ? '保存中…' : original ? '保存修改' : '保存并进入工作台'}</button></div>
-          ${template ? `<div class="notice">演示模板 · 型号 ${esc(template.task.materialModel)}。请先<a href="#/inventory/receive/${encodeURIComponent(templateId)}">登记对应演示母卷</a>并完成检验；保存任务及后续报工会写入业务数据。</div>` : ''}
           ${conflict ? `<div class="notice" style="margin:12px 16px 0;display:flex;align-items:center;gap:10px"><span>任务已在别处被修改（版本已更新）。你的修改仍保留在本页，可对照后再载入最新版本重新编辑。</span><span class="sp"></span><button class="btn sm pri" id="reload-latest">载入最新版本（放弃本页修改）</button></div>` : ''}
           <div class="body"><div style="display:grid;grid-template-columns:340px 1fr;gap:12px;align-items:start">
             <div>
               <div class="box"><div class="pane-h">基本信息</div><div class="form" style="grid-template-columns:80px 1fr">
+                ${original ? '' : `<label for="task-pack">示例包</label><select class="field" id="task-pack" ${saving ? 'disabled' : ''}><option value="">空白任务</option>
+                  ${routeTemplate ? `<optgroup label="能力展示"><option value="${esc(routePackId)}" ${packId === routePackId ? 'selected' : ''}>${esc(routeTemplate.task.name)}</option></optgroup>` : ''}
+                  ${TASK_PACK_GROUPS.map(group => `<optgroup label="${esc(group.name)}">${group.packs.map(pack => `<option value="${esc(pack.id)}" ${pack.id === packId ? 'selected' : ''}>${esc(pack.name)}</option>`).join('')}</optgroup>`).join('')}</select>`}
                 <label>任务名称</label><input class="field" data-f="name" value="${esc(form.name)}">
                 <label>任务类型</label><select class="field" id="ptype" ${typeLocked ? 'disabled title="已有报工，不能更改类型"' : ''}><option value="NESTING_2D">二维排料（裁片）</option><option value="${SLITTING}" ${slit ? 'selected' : ''}>一维分切（分条）</option></select>
                 <label>材料型号</label><div><input class="field" data-f="materialModel" list="models" value="${esc(form.materialModel)}" style="width:100%" ${original && Object.keys(completed).length ? 'disabled title="已有报工，不能更改型号"' : ''}>
                   <datalist id="models">${models.map(m => `<option>${esc(m)}</option>`).join('')}</datalist>
-                  <div class="muted" style="font-size:11.5px;margin-top:3px">在库同型号母卷 ${rolls.filter(r => r.rollModel === form.materialModel).length} 卷</div></div>
+                  <div class="muted" style="font-size:11.5px;margin-top:3px">在库同型号母卷 ${rolls.filter(r => r.rollModel === form.materialModel).length} 卷
+                    ${showStockLink ? `<a href="#/inventory/receive/${encodeURIComponent(templateId)}">登记示例母卷</a>` : ''}</div></div>
                 <label>来源</label><input class="field" data-f="externalRef" value="${esc(form.externalRef)}" placeholder="订单文件 / 外部单号">
               </div></div>
               ${slit ? `<div class="box"><div class="pane-h">分切参数<span class="sub">整数 mm · 每车长度 = 切头 + 卷长</span></div><div class="form" style="grid-template-columns:110px 1fr">
@@ -67,7 +81,7 @@ export async function mount(el, [taskId, templateId]) {
               </div></div>`}
               ${problems.length ? `<div class="notice" style="margin:0">${problems.slice(0, 8).map(esc).join('<br>')}${problems.length > 8 ? `<br>… 共 ${problems.length} 项` : ''}</div>` : ''}
             </div>
-            <div class="box" style="margin:0"><div class="pane-h">需求<span class="sub">${form.demands.length} 项 · ${fmtN(total)} 件</span><span class="sp"></span>
+            <div class="box" style="margin:0"><div class="pane-h">需求<span class="sub">${form.demands.length} 项 · ${fmtN(total)} ${slit ? '卷' : '件'}</span><span class="sp"></span>
                 <label class="btn sm" style="cursor:pointer">导入 Excel / CSV / JSON<input type="file" id="file" accept=".xlsx,.xls,.csv,.json" hidden></label>
                 <button class="btn sm" id="template">下载模板</button><button class="btn sm" id="add">＋ 添加需求</button></div>
               ${imp ? importHtml() : ''}
@@ -103,6 +117,17 @@ export async function mount(el, [taskId, templateId]) {
 
     function bind() {
         const on = (sel, ev, fn) => el.querySelectorAll(sel).forEach(x => x.addEventListener(ev, fn));
+        on('#task-pack', 'change', e => {
+            if ((changed() || imp) && !confirm('切换示例包会替换当前草稿，继续切换？')) {
+                e.target.value = packId;
+                return;
+            }
+            packId = e.target.value;
+            form = baseline = newForm(packId);
+            imp = null;
+            persist();
+            render();
+        });
         on('[data-f]', 'change', e => { form = {...form, [e.target.dataset.f]: e.target.value}; persist(); render(); });
         on('[data-p]', 'change', e => {
             const k = e.target.dataset.p, raw = e.target.value;
@@ -126,13 +151,18 @@ export async function mount(el, [taskId, templateId]) {
             a.download = '需求导入模板.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
         });
         on('#file', 'change', e => readFile(e.target.files[0]));
-        on('#discard', 'click', () => { localStorage.removeItem(key); form = original ? fromTask(original) : emptyTask(); render(); });
+        on('#discard', 'click', () => {
+            localStorage.removeItem(key); hasDraft = false;
+            packId = routePackId;
+            form = baseline = original ? fromTask(original) : newForm(packId);
+            imp = null; render();
+        });
         on('#save', 'click', save);
         on('#reload-latest', 'click', async () => {
             try {
                 const d = await requestJSON('/api/cutting/tasks/' + encodeURIComponent(original.id));
-                original = d.task; completed = d.completed || {}; form = fromTask(original); conflict = false;
-                localStorage.removeItem(key); render(); toast('已载入最新版本');
+                original = d.task; completed = d.completed || {}; form = baseline = fromTask(original); conflict = false;
+                localStorage.removeItem(key); hasDraft = false; render(); toast('已载入最新版本');
             } catch (e) { toast(e.message, true); }
         });
         if (imp) {

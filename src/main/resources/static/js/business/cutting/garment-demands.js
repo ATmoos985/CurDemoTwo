@@ -1,13 +1,11 @@
-import {MARKER_STYLES, markerExample} from '../../nesting/marker-demo.js';
+import {MARKER_STYLES} from '../../nesting/marker-demo.js';
+import {garmentDemands} from './garment-demand-model.js';
 import {state} from '../../core/state.js';
 import {importDemandTask, taskInputChanged} from './task-workspace.js';
 import {updateUIInfo} from './solver-client.js';
 import {showToast} from '../../core/toast.js';
 
-export function garmentDemands(style) {
-    return markerExample(1500,style).parts.map(p=>({id:p.id,name:p.name,width:p.shape.width,length:p.shape.height,
-        quantity:p.quantity,allowRotation:p.allowRotation,shape:p.shape}));
-}
+export {garmentDemands};
 
 const select=document.getElementById('garment-style');
 if(select){
