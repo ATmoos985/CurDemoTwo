@@ -122,6 +122,7 @@ test('a failed width stays visible while the next real width can still qualify',
 
 test('each named example fills the form without submitting and produces a complete marker', async t => {
     const {GARMENT_EXAMPLES} = await import('../../main/resources/static/app/js/model/garment.js');
+    const {markerSizeLabels} = await import('../../main/resources/static/js/nesting/marker-demo.js');
     const submissions = [];
     page.on('request', req => {
         if (req.method() === 'POST' && new URL(req.url()).pathname === '/api/v2/optimization-jobs') submissions.push(req.postDataJSON());
@@ -132,16 +133,19 @@ test('each named example fills the form without submitting and produces a comple
         await exampleSelect.selectOption(example.id);
         const inputs = await page.locator('#garment-form').evaluate(form => Object.fromEntries(new FormData(form)));
         assert.equal(inputs.style, example.style);
-        for (const key of ['M','L','edge','gsm']) assert.equal(Number(inputs[key]), example[key]);
+        for (const key of [...markerSizeLabels(example.style), 'edge']) assert.equal(Number(inputs[key]), example[key]);
+        assert.equal(inputs.gsm, example.gsm == null ? '' : String(example.gsm));
         assert.equal(inputs.widths, example.widths.join(', '));
         assert.equal(await page.locator('tbody tr').count(), 0);
         assert.equal(submissions.length, before);
+        await page.getByRole('checkbox', {name:'允许 180° 旋转'}).uncheck();
         await page.getByRole('button', {name:'试算幅宽'}).click();
         await expect(page.getByRole('status').filter({hasText:'试算结束'})).toBeVisible({timeout:90000});
         const rows = page.locator('tbody tr');
         assert.deepEqual(submissions.slice(before).map(req => req.problem.material.shape.width), example.widths);
         assert.equal(await rows.count(), example.widths.length);
-        assert.ok(await rows.filter({hasText:'当前最低单耗'}).count() > 0);
+        assert.equal(await rows.filter({hasText:'齐套'}).count(), example.widths.length);
+        if (example.gsm != null) assert.ok(await rows.filter({hasText:'当前最低单耗'}).count() > 0);
         if (example.id === 'gathered-skirt') {
             const fullWidth = rows.filter({has:page.getByRole('cell', {name:'1,400', exact:true})});
             await expect(fullWidth.locator('td').nth(2)).toHaveText('1,360');
@@ -151,7 +155,7 @@ test('each named example fills the form without submitting and produces a comple
             if (process.env.SCREENSHOT_PATH) await page.screenshot({path:process.env.SCREENSHOT_PATH});
         }
         console.log(example.name, await rows.locator('td:nth-child(2)').allTextContents());
-        await page.getByLabel('克重（g/m²）').fill(String(example.gsm + 1));
+        await page.getByLabel('克重（g/m²）').fill(String((example.gsm ?? 200) + 1));
         assert.equal(await exampleSelect.inputValue(), '');
         assert.equal(await rows.count(), 0);
     });
@@ -239,4 +243,84 @@ test('half turns are compared against fixed grain at each width and the best com
     console.log('上衣同幅宽对照（固定 / 掉头）', JSON.stringify(metrics));
     await toggle.uncheck();
     assert.equal(await rows.count(), 0);
+});
+
+test('四大件按 130、140 配码实算 16 片，展示固定与掉头方案及独立的报告参考值', async () => {
+    const problems = [], results = [];
+    const capture = response => {
+        const path = new URL(response.url()).pathname;
+        if (path === '/api/v2/optimization-jobs' && response.request().method() === 'POST') {
+            problems.push({request:response.request().postDataJSON(), accepted:response.json()});
+        }
+        if (path.startsWith('/api/v2/optimization-results/')) results.push(response.json());
+    };
+    page.on('response', capture);
+    try {
+        await page.goto(base + '/app/#/garment/four-piece-130-140');
+        await expect(page.getByLabel('试算示例')).toHaveValue('four-piece-130-140');
+        for (const size of ['130','140']) await expect(page.getByLabel(size + ' 码（件/版）')).toHaveValue('2');
+        await expect(page.getByLabel('有效幅宽（mm）')).toHaveValue('1780');
+        await expect(page.getByLabel('克重（g/m²）')).toHaveValue('');
+        await expect(page.getByLabel('允许 180° 旋转')).toBeChecked();
+        await expect(page.getByLabel('同款裁片补空')).not.toBeChecked();
+        const help = page.getByRole('button', {name:'试算条件帮助'}), report = page.locator('#garment-report');
+        await expect(report).toBeHidden();
+        await help.click();
+        await expect(report).toContainText(/1,?825\.1/);
+        await expect(report).toContainText('83.4%');
+        await help.click();
+        assert.equal(problems.length, 0);
+        await expect(page.locator('tbody tr')).toHaveCount(0);
+        await page.getByRole('button', {name:'试算幅宽'}).click();
+        await expect(page.getByRole('status').filter({hasText:'试算结束'})).toBeVisible({timeout:120000});
+
+        assert.ok(problems.length === 2 || problems.length === 3);
+        const solved = new Map((await Promise.all(results)).map(result => [result.jobId,result]));
+        for (const [i,{request}] of problems.entries()) {
+            assert.equal(request.problem.material.shape.width, 1780);
+            assert.equal(request.strategy.gapFillLimits, undefined);
+            assert.equal(request.problem.parts.reduce((n,p) => n + p.quantity, 0), 16);
+            for (const size of ['130','140']) {
+                const pieces = request.problem.parts.filter(p => p.name.startsWith(size));
+                assert.equal(pieces.reduce((n,p) => n + p.quantity, 0), 8);
+            }
+            assert.ok(request.problem.parts.every(p => p.shape.type === 'POLYGON' && !p.allowRotation && !!p.allowHalfTurn === (i > 0)));
+        }
+        const fixed = solved.get((await problems[0].accepted).id);
+        const turned = solved.get((await problems.at(-1).accepted).id);
+        const {shapeArea} = await import('../../main/resources/static/js/canvas/nesting-scene.js');
+        const area = problems[0].request.problem.parts.reduce((sum,p) => sum + p.quantity * shapeArea(p.shape), 0);
+        const rows = page.locator('tbody tr');
+        await expect(rows).toHaveCount(2);
+        const numbers = [];
+        for (const i of [0,1]) {
+            const row = rows.nth(i);
+            await expect(row).toContainText(i ? '允许掉头' : '固定方向');
+            const usesFixed = i === 0 || (await row.textContent()).includes('沿用固定方向');
+            const chosen = usesFixed ? fixed : turned;
+            assert.equal(chosen?.validationStatus, 'PASSED');
+            assert.equal(chosen.fulfillmentStatus, 'COMPLETE');
+            assert.equal(chosen.layout.placements.length, 16);
+            assert.ok(chosen.layout.placements.every(p => p.rotationDegrees === 0 || (!usesFixed && p.rotationDegrees === 180)));
+            const length = chosen.marker.occupiedLengthMm;
+            const utilization = chosen.metrics.find(m => m.name === 'markerAreaUtilization').value;
+            assert.ok(utilization > 0 && utilization <= 100);
+            assert.ok(Math.abs(utilization - area / (1780 * length) * 100) < .001);
+            const numbersInRow = (await row.locator('td.num').allTextContents()).map(text => Number(text.replaceAll(',', '')));
+            assert.ok(Math.abs(numbersInRow[1] - length) <= .0051);
+            assert.ok(Math.abs(numbersInRow[2] - utilization) <= .0051);
+            assert.ok(Math.abs(numbersInRow[3] - length / 4) <= .0051);
+            await expect(row.locator('td').nth(5)).toHaveText('—');
+            await row.getByRole('button').click();
+            await expect(page.locator('#garment-view')).toContainText('1,780 mm');
+            assert.ok(await page.locator('#garment-canvas canvas').count() > 0);
+            numbers.push({direction:i ? '允许180°' : '固定',lengthMm:length,utilization,usedFixed:usesFixed,
+                rotated:chosen.layout.placements.filter(p => p.rotationDegrees === 180).length});
+        }
+        assert.ok(numbers[1].utilization >= numbers[0].utilization);
+        console.log('四大件 1780 mm（原报告 1825.1 mm / 83.4%）', JSON.stringify(numbers));
+        if (process.env.FOUR_PIECE_SCREENSHOT_PATH) await page.screenshot({path:process.env.FOUR_PIECE_SCREENSHOT_PATH});
+    } finally {
+        page.off('response', capture);
+    }
 });

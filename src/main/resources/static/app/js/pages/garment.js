@@ -1,11 +1,11 @@
 import {esc, fmtN} from '../util.js';
-import {MARKER_STYLES} from '../../../js/nesting/marker-demo.js';
+import {GARMENT_TRIAL_STYLES, markerSizeLabels} from '../../../js/nesting/marker-demo.js';
 import {OptimizationSession} from '../../../js/business/optimization/job-client.js';
 import {GARMENT_EXAMPLES, candidateWidths, compactionSavingMm, effectiveUtilization, fabricConsumption, markerRequest, selectMarkerTrial, solveMarkerDirection} from '../model/garment.js';
 import {createRollCanvas} from '../canvas/roll-canvas.js';
 import {showcaseScene} from '../model/showcase.js';
 
-export function mount(el) {
+export function mount(el, [exampleId] = []) {
     el.innerHTML = `<div class="ph"><h1>唛架幅宽试算</h1><span class="crumb">服装 · 单层用料</span></div>
       <div class="split garment-split"><section class="pane"><div class="pane-b">
       <details id="garment-help"><summary class="pane-h" role="button" aria-label="试算条件帮助">试算条件<span class="help-mark" aria-hidden="true">?</span></summary>
@@ -13,7 +13,8 @@ export function mount(el) {
           <p id="angle-help">面料允许倒顺排时，可勾选旋转，比较同幅宽下两种方向的利用率。</p>
           <p id="fill-help">同款裁片补空在齐套唛架内加排备片，每个已选尺码最多备两件成衣所需的裁片。含补片利用率计入实补面积，每件单耗仍按原配码计算。</p>
           <p><a href="./examples/garment-shirt-gap-fill.png" target="_blank" rel="noopener">查看 1950 mm 上衣补片前后对照图</a></p>
-          <p id="width-help">M、L 码每版合计 1–12 件。有效幅宽可填 1–8 个值，范围 1200–2000 mm，用逗号或空格分隔。</p>
+          <p id="width-help">每版合计 1–12 件。有效幅宽可填 1–8 个值，范围 1200–2000 mm，用逗号或空格分隔。</p>
+          <p id="garment-report" hidden></p>
           <p id="weight-help">每件用布重量按含布边的幅宽、实际唛架长度和克重估算，未计布头、布尾及备损。</p>
         </div>
       </details>
@@ -21,7 +22,7 @@ export function mount(el) {
       <label for="garment-half-turn">允许 180° 旋转</label><input id="garment-half-turn" name="halfTurn" type="checkbox" aria-describedby="angle-help">
       <label for="garment-gap-fill">同款裁片补空</label><input id="garment-gap-fill" name="gapFill" type="checkbox" aria-describedby="fill-help" checked>
       <label for="garment-example">试算示例</label><select class="field" id="garment-example" name="example"><option value="" disabled>自定义参数</option>${GARMENT_EXAMPLES.map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select>
-      <label for="garment-style">内置样板</label><select class="field" id="garment-style" name="style">${MARKER_STYLES.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
+      <label for="garment-style">内置样板</label><select class="field" id="garment-style" name="style">${GARMENT_TRIAL_STYLES.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
       <label for="garment-m">M 码（件/版）</label><input class="field" id="garment-m" name="M" type="number" min="0" max="12" required>
       <label for="garment-l">L 码（件/版）</label><input class="field" id="garment-l" name="L" type="number" min="0" max="12" required>
       <label for="garment-widths">有效幅宽（mm）</label><input class="field" id="garment-widths" name="widths" aria-describedby="width-help" required>
@@ -49,7 +50,7 @@ export function mount(el) {
         $('#garment-view').textContent = `排料图 · ${fmtN(row.width, 1)} mm · ${row.usedFixed ? '沿用固定方向' : row.direction} · ${row.state}`;
     }
     function render() {
-        const lowest = Math.min(...rows.filter(r => r.use).map(r => r.use.gramsPerGarment));
+        const lowest = Math.min(...rows.map(r => r.use?.gramsPerGarment).filter(Number.isFinite));
         const highest = Math.max(...rows.filter(r => r.use).map(r => effectiveUtilization(r.use)));
         const comparison = form.elements.halfTurn.checked;
         const filling = form.elements.gapFill.checked;
@@ -81,7 +82,7 @@ export function mount(el) {
         }
         $('tbody').innerHTML = rows.map((r, i) => `<tr><td class="num">${fmtN(r.width, 1)}</td>
           <td class="wrap">${esc(r.state)}${r.use && effectiveUtilization(r.use) === highest ? (r.use.fillCount != null ? ' · 最高含补片利用率' : ' · 最高齐套利用率') : ''}${r.use?.gramsPerGarment === lowest ? ' · 当前最低单耗' : ''}${trialDetail(r)}</td>
-          ${['length','utilization','lengthPerGarment','gramsPerGarment'].map(k => `<td class="num">${r.use ? fmtN(r.use[k], 2) : '—'}</td>`).join('')}
+          ${['length','utilization','lengthPerGarment','gramsPerGarment'].map(k => `<td class="num">${Number.isFinite(r.use?.[k]) ? fmtN(r.use[k], 2) : '—'}</td>`).join('')}
           ${filling ? `<td class="num">${r.use?.fillCount != null ? `${fmtN(r.use.utilizationWithFill, 2)}<br><small>实补 ${r.use.fillCount} 片</small>` : '—'}</td>` : ''}
           <td>${r.result?.layout ? `<button class="btn sm" type="button" data-index="${i}" aria-label="查看 ${r.width} mm ${r.direction}排料图" aria-pressed="${selected === r}">查看</button>` : '—'}</td></tr>`).join('');
     }
@@ -107,16 +108,43 @@ export function mount(el) {
         clear();
     }
     const fields = form.elements;
+    const sizeFields = [$('#garment-m'), $('#garment-l')];
+    let previousOptions = null;
+    function updateStyle() {
+        const style = fields.style.value;
+        markerSizeLabels(style).forEach((size, i) => {
+            sizeFields[i].name = size;
+            sizeFields[i].labels[0].textContent = size + ' 码（件/版）';
+        });
+        const report = GARMENT_EXAMPLES.find(e => e.style === style && e.reference);
+        $('#garment-report').textContent = report?.reference ?? '';
+        $('#garment-report').hidden = !report;
+        fields.gsm.required = !report;
+        if (report) {
+            previousOptions ??= {halfTurn:fields.halfTurn.checked, gapFill:fields.gapFill.checked};
+            fields.halfTurn.checked = report.halfTurn;
+            fields.gapFill.checked = report.gapFill;
+        } else if (previousOptions) {
+            fields.halfTurn.checked = previousOptions.halfTurn;
+            fields.gapFill.checked = previousOptions.gapFill;
+            previousOptions = null;
+        }
+    }
     function loadExample(example) {
         fields.example.value = example.id;
-        for (const key of ['style', 'M', 'L', 'edge', 'gsm']) fields[key].value = example[key];
+        fields.style.value = example.style;
+        updateStyle();
+        for (const field of sizeFields) field.value = example[field.name];
+        fields.edge.value = example.edge;
+        fields.gsm.value = example.gsm ?? '';
         fields.widths.value = example.widths.join(', ');
         resetResults();
     }
     fields.example.onchange = () => loadExample(GARMENT_EXAMPLES.find(e => e.id === fields.example.value));
-    loadExample(GARMENT_EXAMPLES[0]);
+    loadExample(GARMENT_EXAMPLES.find(e => e.id === exampleId) ?? GARMENT_EXAMPLES[0]);
     form.oninput = event => {
         if (event.target !== fields.example) {
+            if (event.target === fields.style) updateStyle();
             if (event.target !== fields.halfTurn && event.target !== fields.gapFill) fields.example.value = '';
             resetResults();
         }
@@ -129,9 +157,10 @@ export function mount(el) {
     form.onsubmit = async event => {
         event.preventDefault();
         if (run.disabled) return;
-        const f = form.elements, sizes = {M:f.M.valueAsNumber, L:f.L.valueAsNumber};
-        const count = sizes.M + sizes.L, gsm = f.gsm.valueAsNumber, edge = f.edge.valueAsNumber;
-        if (count < 1 || count > 12) { f.L.setCustomValidity('每版合计须在 1–12 件之间'); f.L.reportValidity(); return; }
+        const f = form.elements, sizes = Object.fromEntries(sizeFields.map(field => [field.name, field.valueAsNumber]));
+        const count = Object.values(sizes).reduce((total, quantity) => total + quantity, 0);
+        const gsm = f.gsm.valueAsNumber, edge = f.edge.valueAsNumber;
+        if (count < 1 || count > 12) { sizeFields[1].setCustomValidity('每版合计须在 1–12 件之间'); sizeFields[1].reportValidity(); return; }
         let widths;
         try { widths = candidateWidths(f.widths.value); }
         catch (e) { f.widths.setCustomValidity(e.message); f.widths.reportValidity(); return; }

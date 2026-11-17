@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {candidateWidths, compactionSavingMm, fabricConsumption, markerRequest, selectMarkerTrial, solveMarkerDirection} from '../../main/resources/static/app/js/model/garment.js';
+import {GARMENT_EXAMPLES, candidateWidths, compactionSavingMm, fabricConsumption, markerRequest, selectMarkerTrial, solveMarkerDirection} from '../../main/resources/static/app/js/model/garment.js';
 import {markerExample} from '../../main/resources/static/js/nesting/marker-demo.js';
 
 test('width trials preserve the same single-size or mixed-size bill of pieces, including small parts', () => {
@@ -50,6 +50,37 @@ test('mass uses total fabric width, occupied length and garment count only for v
         marker:{...result.marker, gapFillPlacements:[]}}).fillCount, 0);
     for (const change of [{validationStatus:'FAILED'}, {fulfillmentStatus:'PARTIAL'}, {meetsRequirement:false},
         {marker:{occupiedLengthMm:null}}, {metrics:[]}]) assert.equal(calculate(change), null);
+});
+
+test('the four-piece report compares the same sixteen pieces in each direction and caps spares by its actual sizes', () => {
+    const example = GARMENT_EXAMPLES.find(e => e.id === 'four-piece-130-140');
+    assert.deepEqual(example.widths, [1780]);
+    assert.equal(example.gapFill, false);
+    assert.equal(example.halfTurn, true);
+    const sizes = {130:example[130], 140:example[140]};
+    const fixed = markerRequest(example.style, 1780, sizes, 'fixed');
+    const turned = markerRequest(example.style, 1780, sizes, 'turned', true);
+    for (const req of [fixed, turned]) {
+        for (const size of ['130', '140']) {
+            const parts = req.problem.parts.filter(part => part.name.startsWith(size + '码'));
+            assert.equal(parts.length, 4);
+            assert.deepEqual(parts.map(p => p.quantity), [2, 2, 2, 2]);
+            assert.ok(parts.every(p => !p.allowRotation && Boolean(p.allowHalfTurn) === (req === turned)));
+        }
+        assert.equal(req.problem.parts.length, 8);
+        assert.equal(req.strategy.gapFillLimits, undefined);
+    }
+    const extra = markerRequest(example.style, 1780, {130:0, 140:3}, 'spares', true, true);
+    assert.equal(extra.problem.parts.length, 4);
+    assert.ok(extra.problem.parts.every(p => p.name.startsWith('140码') && p.quantity === 3));
+    assert.deepEqual(extra.strategy.gapFillLimits, Object.fromEntries(extra.problem.parts.map(p => [p.id, 2])));
+});
+
+test('missing fabric weight preserves measured utilization and linear consumption without estimating mass', () => {
+    const result = {validationStatus:'PASSED', fulfillmentStatus:'COMPLETE', meetsRequirement:true,
+        marker:{occupiedLengthMm:2000}, metrics:[{name:'markerAreaUtilization',value:74.5}]};
+    const use = fabricConsumption(result, 1780, 0, NaN, 4);
+    assert.deepEqual(use, {length:2000, utilization:74.5, lengthPerGarment:500, gramsPerGarment:null});
 });
 
 test('compaction savings use the shortest preceding complete occupied length', () => {

@@ -1,4 +1,4 @@
-import {markerExample} from '../../../js/nesting/marker-demo.js';
+import {markerExample, markerSizeLabels} from '../../../js/nesting/marker-demo.js';
 
 export const GARMENT_EXAMPLES = [
     {id:'shirt-mixed', name:'上衣 · 三种门幅对比', style:'GARMENT_SHIRT', M:1, L:1, widths:[1600,1850,1950], edge:0, gsm:200},
@@ -10,7 +10,10 @@ export const GARMENT_EXAMPLES = [
     {id:'apron-canvas', name:'围裙 · 帆布长系带', style:'GARMENT_APRON', M:1, L:1, widths:[1200,1500], edge:25, gsm:280},
     {id:'gored-skirt', name:'六片裙 · 梯形裙片交错密排', style:'GARMENT_GORED_SKIRT', M:2, L:0, widths:[1270,1400], edge:20, gsm:180},
     {id:'gathered-skirt', name:'抽褶裙 · 直裁满幅对照', style:'GARMENT_GATHERED_SKIRT', M:2, L:0, widths:[1400,1500], edge:20, gsm:150},
-    {id:'tank-six', name:'背心 · 混码六件合排', style:'GARMENT_TANK', M:3, L:3, widths:[1750], edge:30, gsm:165}
+    {id:'tank-six', name:'背心 · 混码六件合排', style:'GARMENT_TANK', M:3, L:3, widths:[1750], edge:30, gsm:165},
+    {id:'four-piece-130-140', name:'四大件 · 130 / 140 码', style:'GARMENT_FOUR_PIECE',
+        130:2, 140:2, widths:[1780], edge:0, gsm:null, halfTurn:true, gapFill:false,
+        reference:'原报告在 1780 mm 幅宽下排入 16 片（130、140 码各 2 件），唛架长 1825.1 mm，利用率 83.4%。本例轮廓按图片描摹。'}
 ];
 
 export function markerRequest(style, width, sizeCounts, clientRequestId, allowHalfTurn = false, gapFill = false) {
@@ -19,7 +22,7 @@ export function markerRequest(style, width, sizeCounts, clientRequestId, allowHa
     const strategy = {id:'marker-shortening', version:'2', maxTrials:7};
     if (gapFill) {
         // Spare stock is capped at two garments of each requested size regardless of the order quantity.
-        const oneEach = {M:Math.min(1, sizeCounts.M), L:Math.min(1, sizeCounts.L)};
+        const oneEach = Object.fromEntries(markerSizeLabels(style).map(size => [size, Math.min(1, sizeCounts?.[size] ?? 1)]));
         const perSize = markerExample(width, style, oneEach).parts;
         strategy.gapFillLimits = Object.fromEntries(perSize.map(part => [part.id, 2 * part.quantity]));
     }
@@ -41,7 +44,7 @@ export function fabricConsumption(result, width, edge, gsm, garmentCount) {
         || !result.meetsRequirement || !Number.isFinite(length) || length <= 0 || !Number.isFinite(utilization)) return null;
     const lengthPerGarment = length / garmentCount;
     const consumption = {length, utilization, lengthPerGarment,
-        gramsPerGarment: (width + edge) * lengthPerGarment * gsm / 1_000_000};
+        gramsPerGarment: Number.isFinite(gsm) && gsm > 0 ? (width + edge) * lengthPerGarment * gsm / 1_000_000 : null};
     const withFill = result.metrics.find(m => m.name === 'markerAreaUtilizationWithFill')?.value;
     if (Number.isFinite(withFill) && Array.isArray(result.marker.gapFillPlacements)) {
         consumption.utilizationWithFill = withFill;

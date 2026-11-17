@@ -1,4 +1,5 @@
-import {garmentExample} from './scenario-examples.js';
+import {garmentContourProblem, garmentExample} from './scenario-examples.js';
+import {fourPieceParts} from './four-piece-pattern.js';
 import {polygon, rectangle, shapeArea} from '../canvas/nesting-scene.js';
 
 export const MARKER_STYLES = Object.freeze([
@@ -12,13 +13,16 @@ export const MARKER_STYLES = Object.freeze([
     {id:'GARMENT_GATHERED_SKIRT', name:'直裁抽褶裙', description:'两片直裁裙身与分段腰头'}
 ]);
 
-/** Two sizes of a simplified garment; every named part is required, including small pieces. */
-export function markerExample(width = 1500, style = 'GARMENT_SHIRT', sizeCounts = {M:1, L:1}) {
-    if (!Number.isFinite(width) || width < 1200 || width > 2000) throw new Error('示例布宽应在 1200–2000 mm 之间');
-    if (!MARKER_STYLES.some(item => item.id === style)) throw new Error('唛架款式不存在');
-    if (![sizeCounts.M, sizeCounts.L].every(n => Number.isInteger(n) && n >= 0)
-        || sizeCounts.M + sizeCounts.L < 1 || sizeCounts.M + sizeCounts.L > 12)
-        throw new Error('每版 M、L 码合计须为 1–12 件成衣');
+const FOUR_PIECE = {id:'GARMENT_FOUR_PIECE', name:'四大件', sizes:['130','140']};
+export const GARMENT_TRIAL_STYLES = Object.freeze([...MARKER_STYLES, FOUR_PIECE]);
+
+export function markerSizeLabels(style) {
+    const entry = GARMENT_TRIAL_STYLES.find(item => item.id === style);
+    if (!entry) throw new Error('唛架款式不存在');
+    return entry.sizes ?? ['M','L'];
+}
+
+function gradedParts(style, sizeCounts) {
     const base = garmentExample(style);
     const small = style === 'GARMENT_SHIRT' ? [
         {name:'领片', quantity:1, shape:polygon([{x:0,y:0},{x:340,y:0},{x:320,y:70},{x:20,y:70}])},
@@ -28,19 +32,31 @@ export function markerExample(width = 1500, style = 'GARMENT_SHIRT', sizeCounts 
         {name:'腰头', quantity:1, shape:rectangle(760,90)},
         {name:'门襟', quantity:2, shape:rectangle(65,240)}
     ] : style === 'GARMENT_SKIRT' ? [{name:'腰头', quantity:1, shape:rectangle(720,90)}] : [];
-    const parts = ['M','L'].flatMap((size, index) => [...base.parts, ...small].map(part => {
+    return ['M','L'].flatMap((size, index) => [...base.parts, ...small].map(part => {
         const scale = index ? 1.08 : 1;
         const shape = part.shape.type === 'RECTANGLE' ? rectangle(Math.round(part.shape.width * scale), Math.round(part.shape.height * scale))
             : polygon(part.shape.vertices.map(p => ({x:Math.round(p.x * scale), y:Math.round(p.y * scale)})));
         return {name:`${size}码 · ${part.name}`, quantity:part.quantity * sizeCounts[size], shape, allowRotation:false};
     })).map((part, index) => ({...part, id:index + 1})).filter(part => part.quantity > 0);
+}
+
+/** Each requested garment contributes its full set of cut pieces. */
+export function markerExample(width = 1500, style = 'GARMENT_SHIRT', sizeCounts) {
+    if (!Number.isFinite(width) || width < 1200 || width > 2000) throw new Error('示例布宽应在 1200–2000 mm 之间');
+    const sizes = markerSizeLabels(style);
+    const counts = sizeCounts ?? (style === FOUR_PIECE.id ? {'130':2,'140':2} : {M:1,L:1});
+    const total = sizes.reduce((sum, size) => sum + counts[size], 0);
+    if (!sizes.every(size => Number.isInteger(counts[size]) && counts[size] >= 0) || total < 1 || total > 12)
+        throw new Error(`每版 ${sizes.join('、')} 码合计须为 1–12 件成衣`);
+    const parts = style === FOUR_PIECE.id ? fourPieceParts(counts) : gradedParts(style, counts);
     // A deterministic row layout supplies a generous starting length, not an asserted optimum.
     let x = 0, y = 0, rowHeight = 0;
     for (const part of parts) for (let i = 0; i < part.quantity; i++) {
         if (x + part.shape.width > width) { y += rowHeight; x = 0; rowHeight = 0; }
         x += part.shape.width; rowHeight = Math.max(rowHeight, part.shape.height);
     }
-    return {...base, timeLimitSeconds:2, material:{...base.material, id:`DEMO-MARKER-${style}-ML`, shape:rectangle(width, Math.ceil(y + rowHeight + 100))}, parts};
+    const materialId = `DEMO-MARKER-${style}-${sizes.join('')}`;
+    return garmentContourProblem(materialId, rectangle(width, Math.ceil(y + rowHeight + 100)), parts, 2);
 }
 
 export function markerSummary(problem, scene) {

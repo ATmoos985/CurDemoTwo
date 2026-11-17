@@ -13,6 +13,18 @@ test('marker includes two complete size sets and preserves fixed grain and width
     for (const size of ['M','L']) assert.equal(p.parts.filter(part=>part.name.startsWith(size)).length,6);
     assert.throws(()=>markerExample(0));
 });
+test('four-piece outlines keep their scale and demand IDs across widths and single-size markers', () => {
+    const style = 'GARMENT_FOUR_PIECE', reference = markerExample(1780, style).parts;
+    assert.equal(reference.length, 8);
+    assert.ok(reference.every(p => p.shape.type === 'POLYGON' && p.quantity === 2));
+    for (const size of ['130','140']) {
+        const counts = {'130':0, '140':0, [size]:1};
+        const expected = reference.filter(p => p.name.startsWith(size + '码')).map(p => ({...p, quantity:1}));
+        assert.equal(expected.length, 4);
+        assert.deepEqual(markerExample(1500, style, counts).parts, expected);
+    }
+    assert.throws(() => markerExample(1780, style, {M:2,L:2}));
+});
 test('one missing piece or substituting another size cannot qualify as a complete marker', () => {
     const p=markerExample(), partial=sceneFor(p,2000,false);
     assert.equal(markerSummary(p,partial).complete,false);
