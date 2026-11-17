@@ -149,28 +149,36 @@ class OptimizationServiceTests {
         } finally {engine.release.countDown();pool.shutdownNow();}
     }
     @Test @Timeout(90) void acceptedJobsAreNotRejectedDuringWorkerHandoff() throws Exception {
+        final int jobCount = 10_000;
+        var completions = new Semaphore(0);
         var store=new OptimizationJobStore(){
             public List<StoredOptimizationJob> load(){return List.of();}
-            public void save(StoredOptimizationJob document){}
+            public void save(StoredOptimizationJob document){
+                if (document.job().terminal()) completions.release();
+            }
             public void close(){}
         };
-        var s=service(new SolverFactory(List.of(new CrossCutSolverService())),store,1,10000);
+        var s=service(new SolverFactory(List.of(new CrossCutSolverService())),store,1,jobCount);
         var ids=new ArrayList<String>();
-        // Exercise all 10,000 handoffs; this is a correctness test, not a CI CPU throughput limit.
+        int observedCompletions = 0;
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(60);
-        while(ids.size()<10000 && System.nanoTime()<deadline) {
+        while(ids.size()<jobCount && System.nanoTime()<deadline) {
             try {
                 var job=s.submit("handoff-"+ids.size(),request("crosscut",1,3,false));
                 assertNotEquals("QUEUE_REJECTED",job.code(),"Durably accepted work must not be lost at worker handoff");
                 ids.add(job.id());
             } catch(OptimizationService.Failure full) {
                 assertEquals("QUOTA_EXCEEDED",full.code);
-                // yield() may immediately reacquire submit's monitor and starve the worker.
-                Thread.sleep(1);
+                // A terminal save can arrive before this wait. Retry submit to check actual capacity.
+                assertTrue(completions.tryAcquire(deadline - System.nanoTime(), TimeUnit.NANOSECONDS),
+                        () -> "Timed out waiting for a completion after accepting " + ids.size() + " jobs");
+                observedCompletions++;
             }
         }
-        assertEquals(10000,ids.size());
-        for(String id:ids)assertEquals("SUCCEEDED",finished(s,id).state());
+        assertEquals(jobCount,ids.size());
+        assertTrue(completions.tryAcquire(jobCount - observedCompletions, 5, TimeUnit.SECONDS),
+                "All accepted jobs must reach a terminal state");
+        for(String id:ids)assertEquals("SUCCEEDED",s.get(id).state(),id);
     }
     private record FileCount(Path path){long count()throws Exception{try(var files=Files.list(path)){return files.filter(p->p.toString().endsWith(".json")).count();}}}
     @Test void invalidEngineOutputIsFailedWithoutPublishingUnsafeGeometry()throws Exception{
