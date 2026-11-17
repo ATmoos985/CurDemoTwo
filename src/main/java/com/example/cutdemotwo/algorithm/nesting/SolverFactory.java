@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
@@ -132,6 +133,40 @@ public class SolverFactory implements NestingSolver {
         if (PolygonResultValidator.validate(problem, candidate) != null) return Optional.of(incumbent);
         return Optional.of(toResult(problem, candidate, incumbent.engine(), incumbent.engineVersion(), elapsed(start),
                 incumbent.requestedEngine(), incumbent.fallbackReason()));
+    }
+
+    @Override
+    public List<NestingResult.Placement> fillMarkerGaps(NestingProblem problem, NestingResult incumbent,
+                                                        Map<Integer, Integer> limits, long deadlineNanos) {
+        if (System.nanoTime() >= deadlineNanos || limits.isEmpty() || !incumbent.feasible()
+                || !"CONTOUR".equals(problem.process().mode()) || !MarkerCompactor.supportsGapSearch(problem))
+            return List.of();
+        var fixed = incumbent.placements();
+        var baseCounts = new HashMap<Integer, Integer>();
+        double length = 0;
+        for (var piece : fixed) {
+            baseCounts.merge(piece.demandId(), 1, Integer::sum);
+            length = Math.max(length, piece.y() + piece.shape().height());
+        }
+        if (length <= 0 || length > problem.height() + .000001 || baseCounts.size() != problem.parts().size()
+                || problem.parts().stream().anyMatch(p -> baseCounts.getOrDefault(p.id(), 0) != p.quantity()))
+            return List.of();
+
+        var extras = MarkerCompactor.fillGaps(problem, fixed, limits, length, deadlineNanos);
+        if (extras.isEmpty()) return List.of();
+        var counts = new HashMap<>(baseCounts);
+        for (var extra : extras) counts.merge(extra.demandId(), 1, Integer::sum);
+        var parts = problem.parts().stream().map(p -> new NestingProblem.Part(p.id(), p.name(), p.shape(),
+                counts.get(p.id()), p.allowRotation(), p.allowHalfTurn())).toList();
+        var material = new NestingProblem.Material(problem.material().id(), NestingProblem.Shape.rectangle(problem.width(), length),
+                problem.material().exclusions(), problem.material().continuesAfterRegion());
+        var filled = new NestingProblem(problem.schemaVersion(), problem.unit(), material, parts,
+                problem.process(), problem.engine(), problem.timeLimitSeconds());
+        var combined = new ArrayList<>(fixed);
+        combined.addAll(extras);
+        var candidate = new EngineResult();
+        candidate.setPlacements(combined);
+        return PolygonResultValidator.validate(filled, candidate) == null ? extras : List.of();
     }
 
     public NestingResult solve(NestingProblem problem, boolean allowFallback) {

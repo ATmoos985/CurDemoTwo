@@ -46,6 +46,50 @@ test('slitting shows one finite default-length crosscut with true strip widths, 
     assert.deepEqual(sc.segments[0].pieces.map(p => [p.v,p.du,p.dv]), [[20,5000,900],[920,5000,900],[1820,5000,900]]);
 });
 
+test('garment marker ends at its occupied length and retains the trial window for unverified or incomplete geometry', () => {
+    const request = showcaseRequest('marker-GARMENT_SHIRT');
+    const shape = {type:'RECTANGLE', width:1950, height:1257.5};
+    const placement = {id:'sleeve', x:200, y:702, shape:{type:'RECTANGLE', width:230, height:500}};
+    const result = {meetsRequirement:true, layout:{schemaVersion:'1', unit:'mm', coordinateSystem:'source-local-top-left',
+        materialId:request.problem.material.id, processingRegion:shape, status:'FEASIBLE', placements:[placement]}};
+    const occupied = {occupiedLengthMm:1202};
+    const marker = showcaseScene(request, result, 0, occupied);
+    assert.deepEqual([marker.roll.total, marker.roll.shape.height, marker.window.len, marker.segments[0].len,
+        marker.segments[0].bedLength, marker.segments[0].totalArea], [1202,1202,1202,1202,1202,1950*1202]);
+    assert.equal(marker.segments[0].pieces[0].u + marker.segments[0].pieces[0].du, 1202);
+    assert.equal(shape.height, 1257.5);
+    assert.equal(showcaseScene(request, result).window.len, 1257.5);
+    assert.equal(showcaseScene(request, {...result,meetsRequirement:false}, 0, occupied).window.len, 1257.5);
+    assert.equal(showcaseScene(request, result, 0, {occupiedLengthMm:1201}).window.len, 1257.5);
+});
+
+test('verified fill pieces keep their contour and coordinates and add their net area once', () => {
+    const request = showcaseRequest('marker-GARMENT_SHIRT');
+    const sleeve = {id:1, demandId:3, name:'M码 · 袖片', x:500, y:702, shape:{type:'RECTANGLE', width:220, height:500}};
+    const result = {meetsRequirement:true, layout:{schemaVersion:'1', unit:'mm', coordinateSystem:'source-local-top-left',
+        materialId:request.problem.material.id, processingRegion:{type:'RECTANGLE',width:1950,height:1257.5},
+        status:'FEASIBLE', placements:[sleeve]}};
+    const collar = {id:1, demandId:4, name:'M码 · 领片', x:0, y:1123, rotationDegrees:180, shape:{
+        type:'POLYGON', width:340, height:70, vertices:[{x:0,y:0},{x:340,y:0},{x:330,y:70},{x:10,y:70}]}};
+    const before = structuredClone(result);
+    const required = showcaseScene(request, result, 0, {occupiedLengthMm:1202}).segments[0];
+    const options = {occupiedLengthMm:1202, gapFillPlacements:[collar]};
+    const filled = showcaseScene(request, result, 0, options).segments[0];
+    assert.deepEqual(filled.pieces.slice(0,1), required.pieces);
+    assert.equal(filled.pieces.length, 2);
+    const added = filled.pieces[1];
+    assert.notEqual(added.id, sleeve.id);
+    assert.equal(added.label, '补 · M码 · 领片');
+    assert.equal(added.title, added.label);
+    assert.deepEqual([added.v,added.u,added.shape], [collar.x,collar.y,collar.shape]);
+    assert.equal(filled.pieceArea, required.pieceArea + (340+320)*70/2);
+    assert.deepEqual([filled.len, filled.totalArea], [required.len, required.totalArea]);
+    assert.deepEqual(result, before);
+    assert.equal(showcaseScene(request, {...result,meetsRequirement:false}, 0, options).segments[0].pieces.length, 1);
+    const beyondTail = {...options, gapFillPlacements:[{...collar, y:1165}]};
+    assert.equal(showcaseScene(request, result, 0, beyondTail).segments[0].len, 1257.5);
+});
+
 test('historical demo links retain scenario and style in new routes without iframes', () => {
     const base = 'http://localhost:8080';
     for (const [path,target] of [['/demos.html','#/showcase'],['/nesting.html?scenario=4','#/showcase/4'],['/demos.html#linear','#/showcase/film'],['/linear-demo.html?scenario=board','#/showcase/board'],['/marker-demo.html?style=GARMENT_PANTS','#/showcase/marker-GARMENT_PANTS'],['/cloth_cad_nesting.html','#/showcase/GUILLOTINE']])

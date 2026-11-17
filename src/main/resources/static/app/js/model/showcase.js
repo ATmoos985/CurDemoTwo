@@ -69,7 +69,7 @@ export function showcaseRequest(id, profile = 'FAST') {
 }
 
 /** 将已校验的计算结果投影到新版画布，输出轮廓不二次旋转。 */
-export function showcaseScene(request, result = null, patternIndex = 0) {
+export function showcaseScene(request, result = null, patternIndex = 0, {occupiedLengthMm, gapFillPlacements = []} = {}) {
     const p = request.problem;
     let width, length, outline, home, pieces = [], cuts = [], remnants = [], defects = [];
     if (request.problemType === 'SLITTING_1D') {
@@ -83,12 +83,33 @@ export function showcaseScene(request, result = null, patternIndex = 0) {
         }
     } else {
         // 唛架策略返回缩短后的加工区，按实际返回尺寸核对材料。
-        const input = result?.layout && request.strategy ? {...p, material: {...p.material, shape: result.layout.processingRegion}} : p;
-        const sc = createNestingScene(input, result?.layout);
-        const origin = sceneOrigin(sc); home = {u: origin.y, v: origin.x};
-        width = sc.material.shape.width; length = sc.material.shape.height; outline = sc.material.shape;
-        pieces = sc.placements.map((v, i) => ({id: v.id, demandId: v.demandId, u: v.y, v: v.x, du: v.shape.height, dv: v.shape.width,
-            shape: v.shape, label: v.name || String(v.demandId), color: PIECE_PALETTE[(v.demandId ?? i) % PIECE_PALETTE.length]}));
+        const layout = result?.layout;
+        const input = layout && request.strategy ? {...p, material: {...p.material, shape: layout.processingRegion}} : p;
+        const ordered = layout?.placements || [];
+        const preview = layout && result.meetsRequirement && gapFillPlacements?.length
+            ? {...layout, placements: [...ordered, ...gapFillPlacements]} : layout;
+        const sc = createNestingScene(input, preview);
+        outline = sc.material.shape;
+        // 服装页传入已验齐套的实耗长度。保留原始试排区校验，并避免截断任何已返回图元。
+        if (result?.meetsRequirement && outline.type === 'RECTANGLE' && Number.isFinite(occupiedLengthMm)
+            && occupiedLengthMm > 0 && occupiedLengthMm < outline.height && sc.placements.length
+            && [...sc.placements, ...sc.leftovers, ...sc.exclusions].every(item => item.y + item.shape.height <= occupiedLengthMm)
+            && sc.cuts.every(cut => Math.max(cut.startY, cut.endY) <= occupiedLengthMm)) {
+            outline = rectangle(outline.width, occupiedLengthMm);
+            sc.region.shape = outline;
+        }
+        const origin = sceneOrigin(sc);
+        home = {u: origin.y, v: origin.x};
+        width = outline.width; length = outline.height;
+        pieces = sc.placements.map((v, i) => {
+            const fill = i >= ordered.length;
+            const name = v.name || String(v.demandId);
+            const label = fill ? `补 · ${name}` : name;
+            return {id: fill ? `gap-fill-${i - ordered.length + 1}` : v.id, demandId: v.demandId,
+                u: v.y, v: v.x, du: v.shape.height, dv: v.shape.width, shape: v.shape,
+                label, ...(fill ? {title: label} : {}),
+                color: fill ? '#48b59e' : PIECE_PALETTE[(v.demandId ?? i) % PIECE_PALETTE.length]};
+        });
         cuts = sc.cuts.map(c => ({u1: c.startY, v1: c.startX, u2: c.endY, v2: c.endX, type: c.kind, step: c.sequence}));
         remnants = sc.leftovers.map(v => ({id: v.id, x: v.x, y: v.y, w: v.shape.width, l: v.shape.height, shape: v.shape, hasDefect: v.hasDefect}));
         defects = sc.exclusions.map(v => ({id: v.id, u: v.y, v: v.x, du: v.shape.height, dv: v.shape.width, margin: v.clearance || 0, label: '禁入区'}));

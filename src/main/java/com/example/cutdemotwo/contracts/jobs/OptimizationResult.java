@@ -35,8 +35,17 @@ public record OptimizationResult(String id, String jobId, String inputHash, Stri
     public record Metric(String name, double value, String unit, double numerator, double denominator,
                          String basis, String version) {}
     public record MarkerReport(String strategyVersion, Double firstOccupiedLengthMm, Double occupiedLengthMm,
-                               double trialLengthMm, List<Trial> trials, boolean optimalityProven) {
-        public MarkerReport { trials = List.copyOf(trials); }
+                               double trialLengthMm, List<Trial> trials, boolean optimalityProven,
+                               @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                               List<NestingResult.Placement> gapFillPlacements) {
+        public MarkerReport {
+            trials = List.copyOf(trials);
+            if (gapFillPlacements != null) gapFillPlacements = List.copyOf(gapFillPlacements);
+        }
+        public MarkerReport(String strategyVersion, Double firstOccupiedLengthMm, Double occupiedLengthMm,
+                            double trialLengthMm, List<Trial> trials, boolean optimalityProven) {
+            this(strategyVersion, firstOccupiedLengthMm, occupiedLengthMm, trialLengthMm, trials, optimalityProven, null);
+        }
     }
     public record Trial(int index, double lengthMm, Double occupiedLengthMm, String status, boolean complete,
                         int placed, int timeLimitSeconds, long elapsedMillis, String engine, String engineVersion,

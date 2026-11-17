@@ -11,7 +11,7 @@
 .demo-split{grid-template-columns:250px minmax(280px,1fr) 290px}
 .garment-split{grid-template-columns:minmax(280px,320px) minmax(0,1fr)}
 .garment-split .field{width:100%;min-width:0}
-#garment-half-turn{justify-self:start;margin:0}
+#garment-form input[type=checkbox]{justify-self:start;margin:0}
 #garment-help summary{cursor:pointer}
 #garment-help .help-mark{width:16px;height:16px;border:1px solid currentColor;border-radius:50%;color:var(--text-3);font-size:11px;text-align:center;line-height:14px}
 .garment-help-text{padding:0 12px;border-bottom:1px solid var(--line-2);color:var(--text-2)}

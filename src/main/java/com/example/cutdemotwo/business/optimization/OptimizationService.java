@@ -390,6 +390,11 @@ public class OptimizationService implements AutoCloseable {
             double area=layout.processingRegion().width()*marker.occupiedLengthMm();
             metrics.add(new OptimizationResult.Metric("markerAreaUtilization",m.pieceAreaMm2()/area*100,"%",
                     m.pieceAreaMm2(),area,"complete-kit-net-area / (fixed-width * occupied-marker-length); excludes unused tail; planned","1"));
+            if (marker.gapFillPlacements() != null) {
+                double withFill = m.pieceAreaMm2() + marker.gapFillPlacements().stream().mapToDouble(p -> p.shape().areaMm2()).sum();
+                metrics.add(new OptimizationResult.Metric("markerAreaUtilizationWithFill", withFill / area * 100, "%",
+                        withFill, area, "(complete-kit + verified spare net area) / (fixed-width * occupied-marker-length); planned", "1"));
+            }
         }
         return new OptimizationResult(document.job().id(),document.job().id(),document.job().inputHash(),"2.0","PASSED",
                 complete?"COMPLETE":placed>0?"PARTIAL":"NONE",layout.feasible() && (!document.input().requireComplete() || complete),termination,

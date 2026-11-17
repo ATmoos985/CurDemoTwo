@@ -30,5 +30,15 @@ public record OptimizationRequest(String schemaVersion, String problemType, Stri
     }
     private record Wire(String schemaVersion,String problemType,String clientRequestId,
                         tools.jackson.databind.JsonNode problem,Boolean allowFallback,Boolean requireComplete,Strategy strategy) {}
-    public record Strategy(String id, String version, int maxTrials) {}
+    public record Strategy(String id, String version, int maxTrials,
+                           @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                           java.util.Map<Integer, Integer> gapFillLimits) {
+        public Strategy {
+            if (gapFillLimits != null)
+                gapFillLimits = java.util.Collections.unmodifiableSortedMap(new java.util.TreeMap<>(gapFillLimits));
+        }
+        public Strategy(String id, String version, int maxTrials) {
+            this(id, version, maxTrials, null);
+        }
+    }
 }

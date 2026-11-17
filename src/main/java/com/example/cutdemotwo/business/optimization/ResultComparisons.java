@@ -16,6 +16,8 @@ public final class ResultComparisons {
         if(!Objects.equals(leftInput.problemType(),rightInput.problemType()))differences.add("problemType");
         if(!Objects.equals(leftInput.schemaVersion(),rightInput.schemaVersion()))differences.add("schemaVersion");
         if(!Objects.equals(leftInput.requireComplete(),rightInput.requireComplete()))differences.add("requireComplete");
+        if(!Objects.equals(leftInput.strategy()==null?null:leftInput.strategy().gapFillLimits(),
+                rightInput.strategy()==null?null:rightInput.strategy().gapFillLimits()))differences.add("strategy.gapFillLimits");
         var a=constraints(leftInput);var b=constraints(rightInput);
         var fields=new TreeSet<String>();a.properties().forEach(e->fields.add(e.getKey()));b.properties().forEach(e->fields.add(e.getKey()));
         for(String field:fields)if(!Objects.equals(a.get(field),b.get(field)))differences.add("problem."+field);

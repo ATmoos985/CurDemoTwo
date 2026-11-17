@@ -1261,7 +1261,7 @@
     "/api/v2/result-comparisons": {
       "get": {
         "summary": "Compare archived forecast results without running solvers or modifying inventory",
-        "description": "Only equal hard constraints and equal metric unit/basis/version permit numeric deltas. Engine, time budget, objective/profile and orchestration strategy may differ. Lists changed input groups; list ordering is conservatively significant. Does not select a winner or claim optimality.",
+        "description": "Numeric deltas require equal hard constraints, including spare-piece limits, and equal metric unit/basis/version. Engine, time budget, objective/profile and search settings may differ. Lists changed input groups; list ordering is conservatively significant. Does not select a winner or claim optimality.",
         "parameters": [
           {
             "name": "leftId",
@@ -2864,6 +2864,8 @@
       "Strategy": {
         "type": "object",
         "additionalProperties": false,
+        "if": {"required": ["gapFillLimits"]},
+        "then": {"properties": {"version": {"const": "2"}}},
         "properties": {
           "id": {
             "type": "string",
@@ -2872,6 +2874,14 @@
           "version": {
             "type": "string",
             "enum": ["1", "2"]
+          },
+          "gapFillLimits": {
+            "type": "object",
+            "description": "Marker v2 only. Maximum extra pieces for each existing part ID within the complete marker. Job fulfillment excludes these spare pieces.",
+            "minProperties": 1,
+            "maxProperties": 80,
+            "propertyNames": {"pattern": "^-?(0|[1-9][0-9]*)$"},
+            "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 80}
           },
           "maxTrials": {
             "type": "integer",
@@ -2976,6 +2986,11 @@
             "items": {
               "$ref": "#/components/schemas/MarkerTrial"
             }
+          },
+          "gapFillPlacements": {
+            "type": "array",
+            "description": "Verified spare pieces inside the occupied marker, separate from layout.placements. Returned with markerAreaUtilizationWithFill. An empty list contributes zero spare area.",
+            "items": {"$ref": "#/components/schemas/Placement"}
           },
           "optimalityProven": {
             "type": "boolean",

@@ -138,6 +138,50 @@ class MarkerOptimizationTests {
         assertThrows(OptimizationService.Failure.class,()->MarkerOptimization.validate(new OptimizationRequest(
                 r.schemaVersion(),r.problemType(),r.clientRequestId(),r.problem(),false,true,new OptimizationRequest.Strategy("unknown","1",5))));
     }
+    @Test void gapFillIsArchivedWithItsOwnAreaButDoesNotFulfillAnotherGarment() throws Exception {
+        var base = request("javairregular").nestingProblem();
+        var problem = new NestingProblem(base.schemaVersion(), base.unit(),
+                new NestingProblem.Material("fabric", NestingProblem.Shape.rectangle(100,100), List.of(), false),
+                List.of(new NestingProblem.Part(1,"身片",NestingProblem.Shape.rectangle(60,100),1,false),
+                        new NestingProblem.Part(2,"袋布",NestingProblem.Shape.rectangle(20,20),1,false)),
+                base.process(), base.engine(), 4);
+        var input = new OptimizationRequest("2.0","NESTING_2D","gap-fill",problem,false,true,
+                new OptimizationRequest.Strategy("marker-shortening","2",1,Map.of(2,2)));
+        var store = new FileOptimizationJobStore(temp);
+        var factory = new SolverFactory(List.of(new JavaIrregularSolverEngine()));
+        try (var service = new OptimizationService(factory, new com.example.cutdemotwo.algorithm.slitting.LinearSlittingSolverEngine(), store,1,1,100)) {
+            String id = service.submit("gap-fill", input).id();
+            assertEquals("SUCCEEDED", OptimizationServiceTests.finished(service,id).state());
+            var result = service.result(id);
+            assertEquals("COMPLETE", result.fulfillmentStatus());
+            assertEquals(2, result.layout().placements().size());
+            assertEquals(2, result.marker().gapFillPlacements().size());
+            var kit = result.metrics().stream().filter(m -> m.name().equals("markerAreaUtilization")).findFirst().orElseThrow();
+            var total = result.metrics().stream().filter(m -> m.name().equals("markerAreaUtilizationWithFill")).findFirst().orElseThrow();
+            assertEquals(64, kit.value());
+            assertEquals(72, total.value());
+            assertEquals(kit.denominator(), total.denominator());
+            var archived = store.load().stream().filter(d -> d.job().id().equals(id)).findFirst().orElseThrow();
+            assertEquals(input, archived.input());
+            assertEquals(result.marker(), archived.result().marker());
+        }
+    }
+    @Test void rejectsUnknownPartsAndInvalidGapFillLimits() {
+        var base = request("trials");
+        for (var limits : List.of(Map.of(999,1), Map.of(1,0), Map.of(1,81), Map.<Integer,Integer>of())) {
+            var input = new OptimizationRequest(base.schemaVersion(),base.problemType(),base.clientRequestId(),
+                    base.problem(),false,true,new OptimizationRequest.Strategy("marker-shortening","2",1,limits));
+            assertThrows(OptimizationService.Failure.class, () -> MarkerOptimization.validate(input));
+        }
+        assertFalse(JsonMapper.builder().build().writeValueAsString(base).contains("gapFillLimits"));
+        var withSpares = new OptimizationRequest(base.schemaVersion(),base.problemType(),base.clientRequestId(),
+                base.problem(),false,true,new OptimizationRequest.Strategy("marker-shortening","2",1,Map.of(1,2)));
+        var metric = new OptimizationResult("a","a","hash","2.0","PASSED","COMPLETE",true,"COMPLETED",
+                List.of(),(NestingResult)null);
+        var comparison = ResultComparisons.compare(base,metric,withSpares,metric);
+        assertFalse(comparison.sameHardConstraints());
+        assertEquals(List.of("strategy.gapFillLimits"),comparison.differences());
+    }
     @Test void optionalStrategyDoesNotChangeLegacyCanonicalHashInput() {
         var json=JsonMapper.builder().build();
         var legacy=OptimizationServiceTests.request("crosscut",1,3,false);

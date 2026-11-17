@@ -6,6 +6,7 @@ import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import com.example.cutdemotwo.contracts.nesting.NestingResult;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 
@@ -22,6 +23,11 @@ public interface NestingSolver {
     /** Improve a validated complete strip layout within the remaining computation budget. */
     default Optional<NestingResult> compactMarker(NestingProblem problem, NestingResult incumbent, long deadlineNanos) {
         return Optional.empty();
+    }
+    /** Add only explicitly requested spare pieces inside a complete marker's occupied length. */
+    default List<NestingResult.Placement> fillMarkerGaps(NestingProblem problem, NestingResult incumbent,
+                                                         Map<Integer, Integer> limits, long deadlineNanos) {
+        return List.of();
     }
     default NestingResult solve(NestingProblem problem) { return solve(problem, true); }
     NestingResult validateAdjustment(NestingProblem problem, List<PlacedPiece> pieces);

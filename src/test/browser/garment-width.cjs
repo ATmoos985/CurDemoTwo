@@ -17,15 +17,23 @@ test('the rotation checkbox works with mouse and keyboard and parameter help pre
     const form = page.locator('#garment-form');
     const label = form.getByText('允许 180° 旋转', {exact:true});
     const toggle = form.getByRole('checkbox', {name:'允许 180° 旋转', exact:true});
+    const fill = form.getByRole('checkbox', {name:'同款裁片补空', exact:true});
     const example = form.getByLabel('试算示例');
     const help = page.getByRole('button', {name:'试算条件帮助', exact:true});
-    const notes = [/倒顺排/, /1200–2000 mm/, /布头、布尾/].map(text => page.getByText(text));
+    const notes = [/倒顺排/, /每个已选尺码/, /1200–2000 mm/, /布头、布尾/].map(text => page.getByText(text));
     await example.selectOption('shirt-three');
     await expect(toggle).toBeInViewport({ratio:1});
     const checkboxBox = await toggle.boundingBox(), exampleBox = await example.boundingBox();
     assert.ok(checkboxBox.y + checkboxBox.height <= exampleBox.y);
     assert.ok(Math.abs(checkboxBox.x - exampleBox.x) <= 5);
     await expect(toggle).not.toBeChecked();
+    await expect(fill).toBeChecked();
+    await fill.uncheck();
+    await expect(page.getByRole('columnheader', {name:'含补片利用率 %'})).toHaveCount(0);
+    await expect(example).toHaveValue('shirt-three');
+    await fill.press('Space');
+    await expect(fill).toBeChecked();
+    await expect(page.getByRole('columnheader', {name:'含补片利用率 %'})).toBeVisible();
     await expect(form).not.toContainText(/已启用|未启用/);
     for (const note of notes) await expect(note).toBeHidden();
 
@@ -52,6 +60,7 @@ test('invalid per-marker garment count blocks submission', async () => {
 });
 
 test('two real jobs return complete markers with selectable drawings and comparable units', async () => {
+    await page.getByRole('checkbox', {name:'同款裁片补空'}).uncheck();
     await page.getByLabel('内置样板').selectOption('GARMENT_SKIRT');
     await page.getByLabel('M 码（件/版）').fill('1');
     await page.getByLabel('L 码（件/版）').fill('0');
@@ -76,6 +85,8 @@ test('two real jobs return complete markers with selectable drawings and compara
     }
     assert.match(values.sort((a,b) => a.grams - b.grams)[0].state, /当前最低单耗/);
     console.log('齐套候选', JSON.stringify(await page.locator('tbody tr').allTextContents()));
+    await page.getByRole('checkbox', {name:'同款裁片补空'}).check();
+    assert.equal(await page.locator('tbody tr').count(), 0);
 });
 
 test('editing clears results, stopping prevents later widths from being submitted', async () => {
@@ -151,6 +162,7 @@ test('half turns are compared against fixed grain at each width and the best com
     const toggle = page.getByRole('checkbox', {name:'允许 180° 旋转'});
     await expect(toggle).not.toBeChecked();
     await toggle.check();
+    await page.getByRole('checkbox', {name:'同款裁片补空'}).check();
     const results = [], submissions = [];
     page.on('response', response => {
         const path = new URL(response.url()).pathname, req = response.request();
@@ -185,11 +197,15 @@ test('half turns are compared against fixed grain at each width and the best com
             await expect(turnRow).toContainText('原起长复试');
         }
         for (const [j, run] of group.entries()) {
+            assert.deepEqual(run.req.strategy.gapFillLimits, Object.fromEntries(run.req.problem.parts.map(p => [p.id,2*p.quantity])));
             assert.ok(run.req.problem.parts.every(p => !p.allowRotation && Boolean(p.allowHalfTurn) === (j > 0)));
             if (run.result) assert.ok(run.result.layout.placements.every(p => p.rotationDegrees === 0 || (j > 0 && p.rotationDegrees === 180)));
         }
         const rawTurn = group.at(-1).result;
-        const retainFixed = fixed?.meetsRequirement && (!rawTurn?.meetsRequirement || fixed.marker.occupiedLengthMm < rawTurn.marker.occupiedLengthMm);
+        const rate = (result, metric) => result?.metrics.find(m => m.name === metric)?.value;
+        const effective = result => rate(result,'markerAreaUtilizationWithFill') ?? rate(result,'markerAreaUtilization');
+        const retainFixed = fixed?.meetsRequirement && (!rawTurn?.meetsRequirement || fixed.marker.occupiedLengthMm < rawTurn.marker.occupiedLengthMm
+            || effective(fixed) > effective(rawTurn));
         if (retainFixed) {
             await expect(turnRow).toContainText('沿用固定方向 · 掉头 0 片');
             await expect(turnRow).toContainText(rawTurn?.meetsRequirement ? '掉头原试排' : '掉头试排未齐套');
@@ -197,13 +213,28 @@ test('half turns are compared against fixed grain at each width and the best com
         for (const [j, chosen] of [fixed, retainFixed ? fixed : rawTurn].entries()) {
             if (!chosen?.meetsRequirement) continue;
             const i = n * 2 + j;
-            const actual = chosen.metrics.find(m => m.name === 'markerAreaUtilization').value;
-            metrics.push({i, actual, turned:chosen.layout.placements.filter(p => p.rotationDegrees === 180).length});
-            assert.ok(Math.abs(Number(await rows.nth(i).locator('td').nth(3).innerText()) - actual) <= 0.0051);
+            const actual = rate(chosen, 'markerAreaUtilization');
+            const fill = rate(chosen, 'markerAreaUtilizationWithFill');
+            const extras = chosen.marker.gapFillPlacements;
+            const cells = rows.nth(i).locator('td');
+            const number = async col => Number((await cells.nth(col).innerText()).split('\n')[0].replaceAll(',', ''));
+            const length = chosen.marker.occupiedLengthMm;
+            assert.ok(Math.abs(await number(3) - actual) <= .0051);
+            assert.ok(Math.abs(await number(4) - length / 2) <= .0051);
+            assert.ok(Math.abs(await number(5) - width * (length / 2) * 200 / 1e6) <= .0051);
+            if (fill == null) {
+                await expect(cells.nth(6)).toHaveText('—');
+            } else {
+                assert.ok(fill >= actual && fill <= 100.000001);
+                assert.ok(Math.abs(await number(6) - fill) <= .0051);
+                await expect(cells.nth(6)).toContainText(`实补 ${extras.length} 片`);
+            }
+            metrics.push({i, actual:effective(chosen), extras:extras?.length ?? 0, fill});
         }
     }
+    assert.ok(metrics.some(m => m.extras > 0), 'at least one default shirt layout fits a real spare part');
     const best = metrics.reduce((a,b) => a.actual >= b.actual ? a : b);
-    await expect(rows.nth(best.i)).toContainText('最高利用率');
+    await expect(rows.nth(best.i)).toContainText(best.fill != null ? '最高含补片利用率' : '最高齐套利用率');
     await expect(rows.nth(best.i).getByRole('button')).toHaveAttribute('aria-pressed', 'true');
     console.log('上衣同幅宽对照（固定 / 掉头）', JSON.stringify(metrics));
     await toggle.uncheck();

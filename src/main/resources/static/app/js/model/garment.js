@@ -13,12 +13,18 @@ export const GARMENT_EXAMPLES = [
     {id:'tank-six', name:'背心 · 混码六件合排', style:'GARMENT_TANK', M:3, L:3, widths:[1750], edge:30, gsm:165}
 ];
 
-export function markerRequest(style, width, sizeCounts, clientRequestId, allowHalfTurn = false) {
+export function markerRequest(style, width, sizeCounts, clientRequestId, allowHalfTurn = false, gapFill = false) {
     const problem = markerExample(width, style, sizeCounts);
     if (allowHalfTurn) problem.parts.forEach(part => { part.allowHalfTurn = true; });
+    const strategy = {id:'marker-shortening', version:'2', maxTrials:7};
+    if (gapFill) {
+        // Spare stock is capped at two garments of each requested size regardless of the order quantity.
+        const oneEach = {M:Math.min(1, sizeCounts.M), L:Math.min(1, sizeCounts.L)};
+        const perSize = markerExample(width, style, oneEach).parts;
+        strategy.gapFillLimits = Object.fromEntries(perSize.map(part => [part.id, 2 * part.quantity]));
+    }
     return {schemaVersion: '2.0', clientRequestId, problemType: 'NESTING_2D', allowFallback: true,
-        requireComplete: true, problem: {...problem, timeLimitSeconds: 14},
-        strategy: {id: 'marker-shortening', version: '2', maxTrials: 7}};
+        requireComplete: true, problem: {...problem, timeLimitSeconds: gapFill ? 15 : 14}, strategy};
 }
 
 export function candidateWidths(input) {
@@ -34,9 +40,17 @@ export function fabricConsumption(result, width, edge, gsm, garmentCount) {
     if (result.validationStatus !== 'PASSED' || result.fulfillmentStatus !== 'COMPLETE'
         || !result.meetsRequirement || !Number.isFinite(length) || length <= 0 || !Number.isFinite(utilization)) return null;
     const lengthPerGarment = length / garmentCount;
-    return {length, utilization, lengthPerGarment,
+    const consumption = {length, utilization, lengthPerGarment,
         gramsPerGarment: (width + edge) * lengthPerGarment * gsm / 1_000_000};
+    const withFill = result.metrics.find(m => m.name === 'markerAreaUtilizationWithFill')?.value;
+    if (Number.isFinite(withFill) && Array.isArray(result.marker.gapFillPlacements)) {
+        consumption.utilizationWithFill = withFill;
+        consumption.fillCount = result.marker.gapFillPlacements.length;
+    }
+    return consumption;
 }
+
+export const effectiveUtilization = use => use?.utilizationWithFill ?? use?.utilization ?? -1;
 
 export function compactionSavingMm(trials = []) {
     const index = trials.findIndex(trial => trial.phase === 'COMPACTION');
@@ -48,9 +62,12 @@ export function compactionSavingMm(trials = []) {
     return Math.max(0, shortest - trials[index].occupiedLengthMm);
 }
 
-export function selectMarkerTrial(jobState, trial, fixed) {
+export function selectMarkerTrial(jobState, trial, fixed, gapFill = false) {
     const canCompare = jobState === 'SUCCEEDED' || jobState === 'TIMED_OUT';
-    if (canCompare && fixed?.use && (!trial.use || fixed.use.length < trial.use.length)) return fixed;
+    if (canCompare && fixed?.use) {
+        if (!trial.use || fixed.use.length < trial.use.length) return fixed;
+        if (gapFill && effectiveUtilization(fixed.use) > effectiveUtilization(trial.use)) return fixed;
+    }
     return trial;
 }
 

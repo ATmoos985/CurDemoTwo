@@ -312,6 +312,8 @@
     "Strategy": {
       "type": "object",
       "additionalProperties": false,
+      "if": {"required": ["gapFillLimits"]},
+      "then": {"properties": {"version": {"const": "2"}}},
       "properties": {
         "id": {
           "type": "string",
@@ -320,6 +322,14 @@
         "version": {
           "type": "string",
           "enum": ["1", "2"]
+        },
+        "gapFillLimits": {
+          "type": "object",
+          "description": "Marker v2 only. Maximum extra pieces for each existing part ID within the complete marker. Job fulfillment excludes these spare pieces.",
+          "minProperties": 1,
+          "maxProperties": 80,
+          "propertyNames": {"pattern": "^-?(0|[1-9][0-9]*)$"},
+          "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 80}
         },
         "maxTrials": {
           "type": "integer",

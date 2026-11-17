@@ -25,6 +25,14 @@ final class MarkerOptimization {
         if (!Boolean.TRUE.equals(input.requireComplete()) || !"CONTOUR".equals(input.nestingProblem().process().mode())
                 || !"RECTANGLE".equals(input.nestingProblem().material().shape().type()))
             throw new OptimizationService.Failure("UNSUPPORTED_CONSTRAINT", "唛架缩长要求矩形门幅、轮廓工艺及完整齐套", 422, false);
+        var limits = strategy.gapFillLimits();
+        if (limits != null) {
+            var ids = new HashSet<Integer>();
+            input.nestingProblem().parts().forEach(part -> ids.add(part.id()));
+            if (!"2".equals(strategy.version()) || limits.isEmpty() || limits.size() > 80 ||
+                    !ids.containsAll(limits.keySet()) || limits.values().stream().anyMatch(n -> n == null || n < 1 || n > 80))
+                throw new OptimizationService.Failure("INVALID_INPUT", "补片限额须使用策略 2 的现有裁片，每种为 1–80 片，最多 80 种", 400, false);
+        }
     }
 
     static Outcome solve(OptimizationRequest input, NestingSolver factory, Consumer<String> progress) {
@@ -47,8 +55,10 @@ final class MarkerOptimization {
         Optional<Function<NestingProblem, NestingResult>> strip = Optional.empty();
         if (compact && input.strategy().maxTrials() >= 3 && original.timeLimitSeconds() >= 5)
             strip = refiner.stripSearch(original, input.allowFallback());
-        long deadline = started + original.timeLimitSeconds() * 1_000_000_000L;
-        long budget = (original.timeLimitSeconds() - (compact ? 1 : 0) - (strip.isPresent() ? 3 : 0)) * 1_000_000_000L;
+        long jobDeadline = started + original.timeLimitSeconds() * 1_000_000_000L;
+        long fillBudget = input.strategy().gapFillLimits() != null && original.timeLimitSeconds() >= 6 ? 1_000_000_000L : 0;
+        long deadline = jobDeadline - fillBudget;
+        long budget = deadline - started - ((compact ? 1 : 0) + (strip.isPresent() ? 3 : 0)) * 1_000_000_000L;
         int searchTrials = input.strategy().maxTrials() - (compact ? 1 : 0) - (strip.isPresent() ? 1 : 0);
         double high = original.height();
         // Rotated parts may use their shorter dimension along the feed direction.
@@ -127,8 +137,21 @@ final class MarkerOptimization {
         }
         var chosen = best != null ? best : latest;
         if (chosen == null) chosen = NestingResult.failure("CANCELLED", "试排开始前已停止", original.engine(), original.engine(), null, 0);
+        List<NestingResult.Placement> extras = null;
+        if (input.strategy().gapFillLimits() != null && best != null && refiner != null && failureCode == null
+                && !Thread.currentThread().isInterrupted() && System.nanoTime() < jobDeadline) {
+            progress.accept("在齐套唛架空隙内试排同款备片");
+            try {
+                extras = refiner.fillMarkerGaps(bestProblem, best, input.strategy().gapFillLimits(),
+                        Math.min(jobDeadline, System.nanoTime() + 1_000_000_000L));
+            } catch (java.util.concurrent.CancellationException stopped) {
+                Thread.currentThread().interrupt();
+            } catch (RuntimeException failed) {
+                log.warn("Marker gap fill failed; keeping the verified complete kit", failed);
+            }
+        }
         return new Outcome(chosen, new MarkerReport(input.strategy().version(), firstLength, best == null ? null : bestLength,
-                chosen.processingRegion() == null ? original.height() : chosen.processingRegion().height(), history, false), failureCode);
+                chosen.processingRegion() == null ? original.height() : chosen.processingRegion().height(), history, false, extras), failureCode);
     }
 
     static boolean complete(NestingResult layout) {

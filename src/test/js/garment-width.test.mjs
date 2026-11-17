@@ -26,11 +26,28 @@ test('invalid size counts and out-of-range width candidates are rejected before 
     assert.deepEqual(candidateWidths('1600，1850.5、1600 1950'), [1600,1850.5,1950]);
 });
 
+test('gap fill requests two spare kits per active size without expanding the order or its allowed angles', () => {
+    for (const sizes of [{M:0,L:3}, {M:2,L:1}, {M:12,L:0}]) {
+        const [basic, fill] = [false,true].map(on => markerRequest('GARMENT_SHIRT', 1950, sizes, 'test', true, on));
+        assert.deepEqual(fill.problem.parts, basic.problem.parts);
+        assert.equal(fill.problem.timeLimitSeconds, 15);
+        assert.deepEqual(fill.strategy.gapFillLimits, Object.fromEntries(
+            basic.problem.parts.map(p => [p.id, 2 * p.quantity / sizes[p.name.charAt(0)]])));
+    }
+});
+
 test('mass uses total fabric width, occupied length and garment count only for verified complete markers', () => {
     const result = {validationStatus:'PASSED', fulfillmentStatus:'COMPLETE', meetsRequirement:true,
         marker:{occupiedLengthMm:2400}, metrics:[{name:'markerAreaUtilization',value:81.5}]};
     const calculate = override => fabricConsumption({...result,...override}, 1600, 50, 200, 3);
     assert.deepEqual(calculate({}), {length:2400, utilization:81.5, lengthPerGarment:800, gramsPerGarment:264});
+    const reported = [{name:'markerAreaUtilizationWithFill',value:86}, ...result.metrics];
+    assert.deepEqual(calculate({metrics:reported, marker:{...result.marker, gapFillPlacements:[{id:1},{id:2}]}}),
+        {...calculate({}), utilizationWithFill:86, fillCount:2});
+    assert.deepEqual(calculate({metrics:reported}), calculate({}));
+    assert.deepEqual(calculate({marker:{...result.marker, gapFillPlacements:[]}}), calculate({}));
+    assert.equal(calculate({metrics:[{name:'markerAreaUtilizationWithFill',value:81.5}, ...result.metrics],
+        marker:{...result.marker, gapFillPlacements:[]}}).fillCount, 0);
     for (const change of [{validationStatus:'FAILED'}, {fulfillmentStatus:'PARTIAL'}, {meetsRequirement:false},
         {marker:{occupiedLengthMm:null}}, {metrics:[]}]) assert.equal(calculate(change), null);
 });
@@ -64,6 +81,17 @@ test('the allowed direction keeps the verified fixed marker when its normal or t
     }
     for (const state of ['FAILED','CANCELLED']) assert.equal(selectMarkerTrial(state, partial, fixed), partial);
     assert.equal(selectMarkerTrial('SUCCEEDED', worse, {...fixed, use:null}), worse);
+});
+
+test('gap fill compares verified occupied area within the fixed length ceiling and breaks ties by length', () => {
+    const candidate = (length, utilization, utilizationWithFill) => ({use:{length, utilization, utilizationWithFill}});
+    const fixed = candidate(1202, 84, 88);
+    for (const trial of [candidate(1203,83,92), candidate(1201,85,87), candidate(1202,84,undefined)])
+        assert.equal(selectMarkerTrial('SUCCEEDED', trial, fixed, true), fixed);
+    for (const trial of [candidate(1201,85,88), candidate(1202,84,91)])
+        assert.equal(selectMarkerTrial('SUCCEEDED', trial, fixed, true), trial);
+    const shorter = candidate(1201,85,87);
+    assert.equal(selectMarkerTrial('SUCCEEDED', shorter, fixed, false), shorter);
 });
 
 test('only a shortened incomplete directional search retries once at the original height', async () => {
