@@ -7,6 +7,8 @@ import { SettingsPage } from './pages/SettingsPage';
 import { TasksPage } from './pages/TasksPage';
 import { TaskEditPage } from './pages/TaskEditPage';
 import { QualityPage } from './pages/QualityPage';
+import { InventoryPage } from './pages/InventoryPage';
+import { DocumentsPage } from './pages/DocumentsPage';
 import { LegacyPageHost } from './components/LegacyPageHost';
 import { requestJSON } from '@static/app/js/util.js';
 import { useStudioStore } from './store/useStudioStore';
@@ -127,13 +129,7 @@ export const App: React.FC = () => {
       case 'task':
         return <TaskEditPage params={route.params} />;
       case 'inventory':
-        return (
-          <LegacyPageHost
-            routeKey={route.rawKey}
-            loader={() => import('@static/app/js/pages/inventory.js')}
-            params={route.params}
-          />
-        );
+        return <InventoryPage params={route.params} />;
       case 'inspection':
         return (
           <LegacyPageHost
@@ -143,13 +139,7 @@ export const App: React.FC = () => {
           />
         );
       case 'documents':
-        return (
-          <LegacyPageHost
-            routeKey={route.rawKey}
-            loader={() => import('@static/app/js/pages/documents.js')}
-            params={route.params}
-          />
-        );
+        return <DocumentsPage />;
       case 'quality':
         return <QualityPage />;
       case 'analysis':
