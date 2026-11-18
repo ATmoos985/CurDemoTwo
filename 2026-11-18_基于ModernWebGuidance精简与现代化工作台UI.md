@@ -17,8 +17,8 @@
    - 右栏翻转信息层级：首屏直接展示当前方案的综合材料利用率、实占唛架长度（含较上限省料毫米数）、排入齐套数、净面积及“移交车间执行 / 导出 DXF·G-Code”核心交付动作；7 项并行竞速引擎采用 `<details>` 手风琴与 `:has(> input:checked)` 选择卡片呈现，消除长段说明文字堆叠与选中跳动。
 4. [ClusterCenterPage.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/pages/ClusterCenterPage.tsx)、[SlittingStudio1DPage.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/pages/SlittingStudio1DPage.tsx)、[TasksPage.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/pages/TasksPage.tsx)、[ExecutionCenterPage.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/pages/ExecutionCenterPage.tsx)、[SettingsPage.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/pages/SettingsPage.tsx) 与 [studio.css](file:///d:/GitHub/CutDemoTwo/frontend/src/styles/studio.css)
    - 纸样簇新建弹窗切换至原生 `ModalDialog`，卡片接入 `container-type: inline-size` 与 `:has(.cluster-check input:checked)` 选中态；一维分切台收折切边/组合宽次级约束并新增相对传统独立分切的“省车数 + 利用率增益”横幅；任务页合并重复的双层状态筛选条为单一交互式 KPI 筛选组（保留 `data-status` 与 `aria-pressed` 无障碍契约）。
-5. [InventoryPage.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/pages/InventoryPage.tsx)（按“物料品号 → 母卷 + 关联派生料头”重构库存台账）
-   - 取消原先将“母卷”与“料头”割裂为两个独立页签的设计，改为左栏选择 **物料品号（`rollModel`）**、右栏同屏联动展示该品下的 **在库母卷列表** 与 **关联派生料头明细（按 `sourceRollId` 追溯来源母卷与 `G1/G2` 代数谱系）**；支持点击单卷母卷一键过滤其名下派生料头，并将母卷入库、移库、盘点、报废与疵点档案统一收纳至原生 `ModalDialog`。
+5. [InventoryPage.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/pages/InventoryPage.tsx) 与 [CadCanvasView.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/components/CadCanvasView.tsx)（按“物料品号 → 母卷/料头台账 → 右侧可调宽 CAD 实物预览”重构三栏工作台）
+   - 取消原先将“母卷”与“料头”割裂为两个独立页签的设计，改为左栏选择 **物料品号（`rollModel`）**、中栏同屏联动展示该品下的 **在库母卷列表** 与 **关联派生料头明细**、右栏新增 **可左右拖拽调节宽度的交互式 CAD 实物预览窗格**（复用纯适配函数 `buildRollScene` / `remnantAsRoll`，支持点击任意母卷查看折叠全卷/单条全卷/待切端头与疵点定位，点击任意料头查看单块实尺几何与母卷溯源，分隔手柄接入 `setPointerCapture`、方向键缩放与一键加宽/收起控制）。
 
 ## 验证与本地服务状态
 
