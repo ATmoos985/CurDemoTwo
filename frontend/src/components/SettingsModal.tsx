@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { requestJSON, toast, fmtN } from '@static/app/js/util.js';
-import { presets, matchPreset, describePreset } from '@static/js/industry/industry-profiles.js';
+import { presets, matchPreset } from '@static/js/industry/industry-profiles.js';
 import {
   DEFAULT_STUDIO_SETTINGS,
   FirstStageOrientation,
@@ -22,8 +22,6 @@ export interface SettingsModalProps {
 interface TabMeta {
   id: SettingsTabId;
   label: string;
-  hint: string;
-  desc: string;
   icon: React.ReactNode;
 }
 
@@ -31,38 +29,34 @@ const TABS: TabMeta[] = [
   {
     id: 'general',
     label: '画布与常规',
-    hint: '视口图层 · 起刀原点',
-    desc: '配置 CAD 排料视口的默认朝向、标注图层以及机床起刀坐标基准。',
     icon: (
-      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+      <svg viewBox="0 0 18 18" width="16" height="16" aria-hidden="true">
         <rect
-          x="2"
-          y="2.5"
-          width="12"
-          height="11"
-          rx="1.5"
+          x="2.2"
+          y="2.8"
+          width="13.6"
+          height="12.4"
+          rx="2"
           fill="none"
           stroke="currentColor"
-          strokeWidth="1.4"
+          strokeWidth="1.5"
         />
-        <path d="M2 6h12M6 6v7.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        <path d="M2.2 6.8h13.6M6.8 6.8v8.4" fill="none" stroke="currentColor" strokeWidth="1.4" />
       </svg>
     )
   },
   {
     id: 'craft',
     label: '裁切工艺与预设',
-    hint: '行业模板 · 避疵修边',
-    desc: '一键套用工厂行业工艺预设，或精细设定避疵外扩、切头修边、刀缝与直刀方向。',
     icon: (
-      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-        <circle cx="4.5" cy="4.5" r="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
-        <circle cx="4.5" cy="11.5" r="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <svg viewBox="0 0 18 18" width="16" height="16" aria-hidden="true">
+        <circle cx="5" cy="5" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <circle cx="5" cy="13" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
         <path
-          d="M6.2 5.7 13.5 12M13.5 4 6.2 10.3"
+          d="M6.9 6.3 15.2 13.5M15.2 4.5 6.9 11.7"
           fill="none"
           stroke="currentColor"
-          strokeWidth="1.4"
+          strokeWidth="1.5"
           strokeLinecap="round"
         />
       </svg>
@@ -71,12 +65,20 @@ const TABS: TabMeta[] = [
   {
     id: 'remnant',
     label: '料头与余料策略',
-    hint: '回收门槛 · 账实规则',
-    desc: '定义排料后候选余料的最小回收宽高门槛，明确试算、完工入库与复检剪裁边界。',
     icon: (
-      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+      <svg viewBox="0 0 18 18" width="16" height="16" aria-hidden="true">
+        <rect
+          x="2.5"
+          y="2.5"
+          width="13"
+          height="13"
+          rx="1.8"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        />
         <path
-          d="M2.5 2.5h11v11h-11v-11Zm6 0v6h5M2.5 8.5h6v5"
+          d="M9.5 2.5v7h6M2.5 9.5h7v6"
           fill="none"
           stroke="currentColor"
           strokeWidth="1.4"
@@ -88,25 +90,23 @@ const TABS: TabMeta[] = [
   {
     id: 'engines',
     label: '求解引擎与配额',
-    hint: '并发池 · 内核状态',
-    desc: '配置计算作业求解时限与降级保护，实时监控多线程并发队列与 7 大算法内核状态。',
     icon: (
-      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+      <svg viewBox="0 0 18 18" width="16" height="16" aria-hidden="true">
         <rect
-          x="4"
-          y="4"
-          width="8"
-          height="8"
-          rx="1.2"
+          x="4.5"
+          y="4.5"
+          width="9"
+          height="9"
+          rx="1.6"
           fill="none"
           stroke="currentColor"
-          strokeWidth="1.4"
+          strokeWidth="1.5"
         />
         <path
-          d="M6.5 1.8v2.2M9.5 1.8v2.2M6.5 12v2.2M9.5 12v2.2M1.8 6.5H4M1.8 9.5H4M12 6.5h2.2M12 9.5h2.2"
+          d="M7.2 2v2.5M10.8 2v2.5M7.2 13.5V16M10.8 13.5V16M2 7.2h2.5M2 10.8h2.5M13.5 7.2H16M13.5 10.8H16"
           fill="none"
           stroke="currentColor"
-          strokeWidth="1.4"
+          strokeWidth="1.5"
           strokeLinecap="round"
         />
       </svg>
@@ -115,15 +115,13 @@ const TABS: TabMeta[] = [
   {
     id: 'integration',
     label: '导出与系统接入',
-    hint: 'CAM 命名 · 开放契约',
-    desc: '设置 DXF / G-Code 导出命名与车间随工单打印选项，查看 OpenAPI、MES 与 MCP 协同状态。',
     icon: (
-      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+      <svg viewBox="0 0 18 18" width="16" height="16" aria-hidden="true">
         <path
-          d="M5.5 5 2.5 8l3 3M10.5 5l3 3-3 3M9 3.5l-2 9"
+          d="M6.2 5.5 2.8 9l3.4 3.5M11.8 5.5 15.2 9l-3.4 3.5M10.2 4l-2.4 10"
           fill="none"
           stroke="currentColor"
-          strokeWidth="1.4"
+          strokeWidth="1.5"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -132,26 +130,34 @@ const TABS: TabMeta[] = [
   }
 ];
 
-const CORNER_OPTIONS: { value: StartCornerType; label: string; detail: string }[] = [
+const CORNERS: {
+  id: StartCornerType;
+  short: string;
+  sub: string;
+  cx: number;
+  cy: number;
+  dx: number;
+  dy: number;
+}[] = [
+  { id: 'left-top', short: '左上起刀', sub: 'Left-Top · 标准 CAM', cx: 38, cy: 34, dx: 1, dy: 1 },
+  { id: 'right-top', short: '右上起刀', sub: 'Right-Top · 右导轨顺流', cx: 242, cy: 34, dx: -1, dy: 1 },
   {
-    value: 'left-top',
-    label: '左上角 (Left-Top · 标准 CAM 基准)',
-    detail: '靠左导轨顺流进给，与二维排料默认局部坐标系一致'
+    id: 'left-bottom',
+    short: '左下起刀',
+    sub: 'Left-Bottom · 落料口左起',
+    cx: 38,
+    cy: 146,
+    dx: 1,
+    dy: -1
   },
   {
-    value: 'right-bottom',
-    label: '右下角 (Right-Bottom · 落料口自下而上)',
-    detail: '靠右基准导轨，从裁床前端落料口向卷内逆向起刀'
-  },
-  {
-    value: 'right-top',
-    label: '右上角 (Right-Top · 靠右导轨顺流)',
-    detail: '靠右基准导轨定位，顺走布送料方向排刀'
-  },
-  {
-    value: 'left-bottom',
-    label: '左下角 (Left-Bottom · 靠左布边起切)',
-    detail: '靠左布边导轨，从落料口前端自下而上起切'
+    id: 'right-bottom',
+    short: '右下起刀',
+    sub: 'Right-Bottom · 落料口右起',
+    cx: 242,
+    cy: 146,
+    dx: -1,
+    dy: -1
   }
 ];
 
@@ -163,6 +169,54 @@ function countChangedFields(a: StudioSettings, b: StudioSettings): number {
   return diff;
 }
 
+const StepperNumberInput: React.FC<{
+  id: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  unit: string;
+  onChange: (next: number) => void;
+}> = ({ id, value, min, max, step, unit, onChange }) => {
+  const bump = (dir: -1 | 1) => {
+    const raw = Number((value + dir * step).toFixed(2));
+    onChange(Math.min(max, Math.max(min, raw)));
+  };
+  return (
+    <div className="sc-stepper">
+      <button
+        type="button"
+        className="sc-step-btn"
+        aria-label="减小数值"
+        disabled={value <= min}
+        onClick={() => bump(-1)}
+      >
+        −
+      </button>
+      <input
+        id={id}
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        className="sc-step-input num"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+      <button
+        type="button"
+        className="sc-step-btn"
+        aria-label="增大数值"
+        disabled={value >= max}
+        onClick={() => bump(1)}
+      >
+        +
+      </button>
+      <span className="sc-step-unit num">{unit}</span>
+    </div>
+  );
+};
+
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   open,
   initialTab = 'general',
@@ -171,6 +225,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const tabRefs = useRef<Record<SettingsTabId, HTMLButtonElement | null>>({
+    general: null,
+    craft: null,
+    remnant: null,
+    engines: null,
+    integration: null
+  });
+  const panelRefs = useRef<Record<SettingsTabId, HTMLDivElement | null>>({
     general: null,
     craft: null,
     remnant: null,
@@ -225,7 +286,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       });
   };
 
-  // Sync draft & tab whenever modal opens
   useEffect(() => {
     if (open) {
       setDraft(loadStudioSettings());
@@ -233,19 +293,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setActiveTab(initialTab);
       fetchRuntimeStatus();
     } else {
-      // Invalidate in-flight capability fetches when closed
       fetchSeqRef.current += 1;
     }
   }, [open, initialTab]);
 
-  // Keep draft synced if storeSettings changes externally while clean
   useEffect(() => {
     if (!open) {
       setDraft(storeSettings);
     }
   }, [storeSettings, open]);
 
-  // Manage native <dialog> top-layer modal lifecycle
+  // Sync hidden="until-found" & beforematch for browser find-in-page per modern-web-guidance `tabs`
+  useEffect(() => {
+    const cleanups: (() => void)[] = [];
+    for (const tab of TABS) {
+      const el = panelRefs.current[tab.id];
+      if (!el) continue;
+      if (activeTab === tab.id) {
+        el.removeAttribute('hidden');
+      } else {
+        el.setAttribute('hidden', 'until-found');
+      }
+      const onBeforeMatch = () => setActiveTab(tab.id);
+      el.addEventListener('beforematch', onBeforeMatch);
+      cleanups.push(() => el.removeEventListener('beforematch', onBeforeMatch));
+    }
+    return () => cleanups.forEach((fn) => fn());
+  }, [activeTab]);
+
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -340,13 +415,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       minRemnantWidthMm: Number(preset.values.minRemnantWidth ?? 200),
       minRemnantLengthMm: Number(preset.values.minRemnantLength ?? 300)
     });
-    toast(`已填入「${preset.name}」工艺预设，点击右下角保存并应用后生效`);
+    toast(`已套用「${preset.name}」参数模板`);
   };
 
   const handleRestoreDefaults = () => {
     setDraft({ ...DEFAULT_STUDIO_SETTINGS });
     setValidationError(null);
-    toast('已填入系统出厂默认参数，点击「保存并应用」后生效');
+    toast('已恢复默认参数，点击「保存并应用」生效');
   };
 
   const handleSave = (e?: React.FormEvent) => {
@@ -358,15 +433,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       return;
     }
     updateStudioSettings(draft);
-    toast('系统与工艺设置已保存并应用');
+    toast('设置已保存并应用');
     dialogRef.current?.close();
   };
 
   const handleTabKeyDown = (e: React.KeyboardEvent, idx: number) => {
     let nextIdx = -1;
-    if (e.key === 'ArrowDown') {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
       nextIdx = (idx + 1) % TABS.length;
-    } else if (e.key === 'ArrowUp') {
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
       nextIdx = (idx - 1 + TABS.length) % TABS.length;
     } else if (e.key === 'Home') {
       nextIdx = 0;
@@ -389,8 +464,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         ? [
             {
               ...cap.slittingEngine,
-              shapes: ['定长条宽订单'],
-              modes: ['一维分切'],
+              shapes: ['1D STRIP'],
+              modes: ['SLITTING'],
               coordinateResolutionMm: cap.slittingEngine.lengthResolutionMm
             }
           ]
@@ -408,10 +483,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     [draft, storeSettings]
   );
 
-  const currentTabMeta = TABS.find((t) => t.id === activeTab) || TABS[0];
+  const activeCornerMeta = CORNERS.find((c) => c.id === draft.startCorner) || CORNERS[0];
   const minRemnantAreaM2 = ((draft.minRemnantWidthMm * draft.minRemnantLengthMm) / 1_000_000).toFixed(
     3
   );
+
+  // Scaled visual preview geometry for Remnant Blueprint (clamped for visual proportion)
+  const remVisW = Math.round(
+    Math.min(132, Math.max(44, (draft.minRemnantWidthMm / 1000) * 140))
+  );
+  const remVisH = Math.round(
+    Math.min(108, Math.max(38, (draft.minRemnantLengthMm / 1200) * 116))
+  );
+
+  // Scaled visual preview geometry for Craft Tolerance Schematic
+  const trimVis = Math.min(28, Math.max(0, Math.round(draft.trimStartMm / 8)));
+  const marginVis = Math.min(18, Math.max(2, Math.round(draft.defectMarginMm / 4)));
+  const gapVis = Math.min(16, Math.max(2, Math.round(2 + draft.pieceGapMm * 0.6)));
 
   return (
     <dialog
@@ -421,14 +509,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       aria-labelledby={titleId}
       className="native-modal-dialog settings-center-dialog"
     >
-      {/* Top Modal Header */}
-      <div className="settings-center-head">
-        <div className="settings-center-title-wrap">
-          <span className="settings-head-icon" aria-hidden="true">
+      {/* Slim Architectural Top Bar */}
+      <div className="sc-head">
+        <div className="sc-brand">
+          <span className="sc-brand-mark" aria-hidden="true">
             <svg viewBox="0 0 16 16" width="15" height="15">
-              <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              <circle cx="8" cy="8" r="2.3" fill="none" stroke="currentColor" strokeWidth="1.5" />
               <path
-                d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1"
+                d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M12.4 3.6l-1.2 1.2M4.8 11.2l-1.2 1.2"
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="1.5"
@@ -437,525 +525,843 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </svg>
           </span>
           <h1 id={titleId}>设置</h1>
-          <span className="settings-head-sep" aria-hidden="true">
-            /
-          </span>
-          <span className="settings-center-sub">系统偏好、裁切工艺、余料策略与求解内核配置</span>
         </div>
-        <div className="settings-head-actions">
-          <kbd className="settings-kbd" aria-hidden="true">
-            Esc
+
+        <div className="sc-head-right">
+          <kbd className="sc-kbd" aria-hidden="true">
+            ESC
           </kbd>
           <button
             type="button"
-            className="btn sm"
+            className="sc-close-btn"
             aria-label="关闭设置弹窗"
             onClick={() => dialogRef.current?.close()}
           >
-            关闭
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path
+                d="M4 4l8 8M12 4l-8 8"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
+            </svg>
+            <span>关闭</span>
           </button>
         </div>
       </div>
 
-      {/* Main Split Body: Left Vertical Tabs + Right Tab Panel */}
-      <form className="settings-center-form" onSubmit={handleSave}>
-        <div className="settings-center-body">
-          {/* Left Vertical Tab Column */}
+      {/* Main Split Workspace: Left Vertical Tabs + Right Instrument Deck */}
+      <form className="sc-form" onSubmit={handleSave}>
+        <div className="sc-body">
+          {/* Left Vertical Tab Rail */}
           <div
-            className="settings-center-rail"
+            className="sc-rail"
             role="tablist"
             aria-orientation="vertical"
-            aria-label="系统设置分组"
+            aria-label="系统设置分类"
+            {...({ focusgroup: 'tablist nomemory' } as any)}
           >
-            <div className="settings-rail-caption">配置模块</div>
-            {TABS.map((tab, idx) => {
-              const selected = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  ref={(el) => {
-                    tabRefs.current[tab.id] = el;
-                  }}
-                  type="button"
-                  role="tab"
-                  id={`settings-tab-${tab.id}`}
-                  aria-selected={selected}
-                  aria-controls={`settings-panel-${tab.id}`}
-                  tabIndex={selected ? 0 : -1}
-                  className={`settings-tab-item ${selected ? 'on' : ''}`}
-                  onClick={() => setActiveTab(tab.id)}
-                  onKeyDown={(e) => handleTabKeyDown(e, idx)}
-                >
-                  <span className="settings-tab-icon">{tab.icon}</span>
-                  <span className="settings-tab-text">
+            <div className="sc-rail-tabs">
+              {TABS.map((tab, idx) => {
+                const selected = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    ref={(el) => {
+                      tabRefs.current[tab.id] = el;
+                    }}
+                    type="button"
+                    role="tab"
+                    id={`settings-tab-${tab.id}`}
+                    aria-selected={selected}
+                    tabIndex={selected ? 0 : -1}
+                    {...(selected ? ({ focusgroupstart: '' } as any) : {})}
+                    className="sc-tab"
+                    onClick={() => setActiveTab(tab.id)}
+                    onKeyDown={(e) => handleTabKeyDown(e, idx)}
+                  >
+                    <span className="sc-tab-ico">{tab.icon}</span>
                     <strong>{tab.label}</strong>
-                    <small>{tab.hint}</small>
-                  </span>
-                  {tab.id === 'engines' && allEngines.length > 0 && (
-                    <span className="settings-tab-badge num" title="就绪内核数 / 总注册数">
-                      {readyEngineCount}/{allEngines.length}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-
-            <div className="settings-rail-foot">
-              <div>存储范围：本机浏览器</div>
-              <div>排料试算零扣库 · 完工扣库存</div>
+                    {tab.id === 'engines' && allEngines.length > 0 && (
+                      <span className="sc-tab-pill num">{readyEngineCount}/{allEngines.length}</span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          {/* Right Settings Detail Panel */}
-          <div
-            className="settings-center-pane"
-            role="tabpanel"
-            id={`settings-panel-${activeTab}`}
-            aria-labelledby={`settings-tab-${activeTab}`}
-          >
-            <div className="settings-pane-head">
-              <div>
-                <h2>{currentTabMeta.label}</h2>
-                <p>{currentTabMeta.desc}</p>
-              </div>
-              {activeTab === 'engines' && (
-                <button
-                  type="button"
-                  className="btn sm"
-                  disabled={capLoading}
-                  onClick={fetchRuntimeStatus}
-                >
-                  {capLoading ? '检测中…' : '↻ 刷新服务能力'}
-                </button>
-              )}
-            </div>
+          {/* Right Tab Panels Stack (shared grid cell + hidden="until-found") */}
+          <div className="sc-panels-host">
+            {/* ==================== TAB 1: 画布与常规 ==================== */}
+            <div
+              ref={(el) => {
+                panelRefs.current.general = el;
+              }}
+              role="tabpanel"
+              aria-labelledby="settings-tab-general"
+              className="sc-panel"
+            >
+              <div className="sc-panel-inner">
+                <div className="sc-pane-bar">
+                  <h2>画布与坐标基准</h2>
+                </div>
 
-            {/* TAB 1: 画布与常规 */}
-            {activeTab === 'general' && (
-              <div className="settings-sections">
-                <section className="settings-section">
-                  <div className="settings-sec-title">CAD 排料视口默认显示</div>
+                <div className="sc-two-col">
+                  {/* Left Visual Card: Interactive CNC Machine Bed Origin Selector */}
+                  <section className="sc-card sc-origin-card">
+                    <div className="sc-card-head">
+                      <span>机床起刀零点</span>
+                      <code className="sc-code-pill num">{activeCornerMeta.short}</code>
+                    </div>
 
-                  <div className="settings-row">
-                    <div className="settings-row-info">
-                      <strong>画布默认排布朝向</strong>
-                      <small>控制搭切工作台与结果中心打开时的母卷展开视角（工具栏仍可随时切换）</small>
-                    </div>
-                    <div className="settings-row-ctrl">
-                      <div className="seg" role="group" aria-label="画布默认排布朝向">
-                        <button
-                          type="button"
-                          className={draft.vertical ? 'on' : ''}
-                          aria-pressed={draft.vertical}
-                          onClick={() => patchDraft({ vertical: true })}
-                        >
-                          纵向走布 (推荐)
-                        </button>
-                        <button
-                          type="button"
-                          className={!draft.vertical ? 'on' : ''}
-                          aria-pressed={!draft.vertical}
-                          onClick={() => patchDraft({ vertical: false })}
-                        >
-                          横向台板
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="settings-row">
-                    <div className="settings-row-info">
-                      <strong>裁片尺寸与件号标注图层</strong>
-                      <small>在二维 CAD 画布中默认绘制裁片名称、长宽毫米标注与旋转角</small>
-                    </div>
-                    <div className="settings-row-ctrl">
-                      <label className="settings-switch">
-                        <input
-                          type="checkbox"
-                          checked={draft.showDimensions}
-                          onChange={(e) => patchDraft({ showDimensions: e.target.checked })}
+                    <div
+                      className="sc-bed-pad"
+                      role="radiogroup"
+                      aria-label="默认起刀位置"
+                    >
+                      <svg
+                        viewBox="0 0 280 180"
+                        className="sc-bed-svg"
+                        aria-hidden="true"
+                      >
+                        <defs>
+                          <pattern
+                            id="sc-cad-grid"
+                            width="20"
+                            height="20"
+                            patternUnits="userSpaceOnUse"
+                          >
+                            <path
+                              d="M 20 0 L 0 0 0 20"
+                              fill="none"
+                              stroke="rgba(148,163,184,0.12)"
+                              strokeWidth="1"
+                            />
+                          </pattern>
+                        </defs>
+                        {/* Machine Bed Surface */}
+                        <rect
+                          x="38"
+                          y="34"
+                          width="204"
+                          height="112"
+                          rx="4"
+                          fill="url(#sc-cad-grid)"
+                          stroke="#475569"
+                          strokeWidth="1.5"
                         />
-                        <span>{draft.showDimensions ? '默认开启' : '默认隐藏'}</span>
-                      </label>
-                    </div>
-                  </div>
+                        {/* Guide Rails */}
+                        <line x1="30" y1="26" x2="30" y2="154" stroke="#334155" strokeWidth="3" />
+                        <line x1="250" y1="26" x2="250" y2="154" stroke="#334155" strokeWidth="3" />
+                        <text x="140" y="21" textAnchor="middle" fill="#64748b" fontSize="10">
+                          母卷进给方向 ↓
+                        </text>
+                        <text x="140" y="168" textAnchor="middle" fill="#64748b" fontSize="10">
+                          裁床前端落料口
+                        </text>
 
-                  <div className="settings-row">
-                    <div className="settings-row-info">
-                      <strong>CNC 走刀路径与刀序叠加</strong>
-                      <small>在排料画布上默认显示贯通直刀切割线、空行程虚线与下刀序号</small>
-                    </div>
-                    <div className="settings-row-ctrl">
-                      <label className="settings-switch">
-                        <input
-                          type="checkbox"
-                          checked={draft.showPath}
-                          onChange={(e) => patchDraft({ showPath: e.target.checked })}
+                        {/* Sample Nested Part Silhouette */}
+                        <rect
+                          x="68"
+                          y="56"
+                          width="68"
+                          height="42"
+                          rx="2"
+                          fill="rgba(56,189,248,0.12)"
+                          stroke="rgba(56,189,248,0.4)"
+                          strokeDasharray="3 2"
                         />
-                        <span>{draft.showPath ? '默认开启' : '按需开启'}</span>
-                      </label>
-                    </div>
-                  </div>
-                </section>
+                        <rect
+                          x="144"
+                          y="56"
+                          width="66"
+                          height="66"
+                          rx="2"
+                          fill="rgba(56,189,248,0.08)"
+                          stroke="rgba(56,189,248,0.32)"
+                          strokeDasharray="3 2"
+                        />
 
-                <section className="settings-section">
-                  <div className="settings-sec-title">机床坐标系与起刀基准</div>
+                        {/* Active Origin X / Y Axis Vectors */}
+                        <line
+                          x1={activeCornerMeta.cx}
+                          y1={activeCornerMeta.cy}
+                          x2={activeCornerMeta.cx + activeCornerMeta.dx * 54}
+                          y2={activeCornerMeta.cy}
+                          stroke="#38bdf8"
+                          strokeWidth="2.2"
+                        />
+                        <line
+                          x1={activeCornerMeta.cx}
+                          y1={activeCornerMeta.cy}
+                          x2={activeCornerMeta.cx}
+                          y2={activeCornerMeta.cy + activeCornerMeta.dy * 44}
+                          stroke="#10b981"
+                          strokeWidth="2.2"
+                        />
+                        <text
+                          x={activeCornerMeta.cx + activeCornerMeta.dx * 62}
+                          y={activeCornerMeta.cy + 4}
+                          textAnchor="middle"
+                          fill="#38bdf8"
+                          fontSize="10"
+                          fontFamily="var(--mono)"
+                          fontWeight="700"
+                        >
+                          X
+                        </text>
+                        <text
+                          x={activeCornerMeta.cx}
+                          y={activeCornerMeta.cy + activeCornerMeta.dy * 54 + 3}
+                          textAnchor="middle"
+                          fill="#10b981"
+                          fontSize="10"
+                          fontFamily="var(--mono)"
+                          fontWeight="700"
+                        >
+                          Y
+                        </text>
+                      </svg>
 
-                  <div className="settings-row">
-                    <div className="settings-row-info">
-                      <label htmlFor="cfg-studio-corner">
-                        <strong>默认起刀位置 (Start Corner)</strong>
-                      </label>
-                      <small>
-                        {CORNER_OPTIONS.find((c) => c.value === draft.startCorner)?.detail}
-                      </small>
+                      {/* 4 Tactile Corner Hotspots */}
+                      {CORNERS.map((c) => {
+                        const active = draft.startCorner === c.id;
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            className={`sc-corner-node pos-${c.id} ${active ? 'on' : ''}`}
+                            onClick={() => patchDraft({ startCorner: c.id })}
+                          >
+                            <span className="sc-corner-dot" />
+                            <span>{c.short}</span>
+                          </button>
+                        );
+                      })}
                     </div>
-                    <div className="settings-row-ctrl">
+
+                    {/* Accessible Native Select Synced Underneath for Keyboard / Form Clarity */}
+                    <div className="sc-origin-select-row">
+                      <label htmlFor="cfg-studio-corner" className="muted">
+                        坐标枚举
+                      </label>
                       <select
                         id="cfg-studio-corner"
-                        className="field"
-                        style={{ width: 256 }}
+                        className="field num"
                         value={draft.startCorner}
                         onChange={(e) =>
                           patchDraft({ startCorner: e.target.value as StartCornerType })
                         }
                       >
-                        {CORNER_OPTIONS.map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.label}
+                        {CORNERS.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.short} ({c.sub})
                           </option>
                         ))}
                       </select>
                     </div>
-                  </div>
+                  </section>
 
-                  <div className="settings-note-bar">
-                    起刀基准决定二维排切刀序方向及 G-Code / DXF 导出零点映射；已确认锁定的历史排程方案保留原坐标快照不变。
+                  {/* Right Visual Stack: Orientation Cards + Layer Switches */}
+                  <div className="sc-col-stack">
+                    <section className="sc-card">
+                      <div className="sc-card-head">
+                        <span>画布铺布视角</span>
+                      </div>
+                      <div className="sc-orient-grid" role="group" aria-label="画布默认排布朝向">
+                        <button
+                          type="button"
+                          className={`sc-orient-card ${draft.vertical ? 'on' : ''}`}
+                          aria-pressed={draft.vertical}
+                          onClick={() => patchDraft({ vertical: true })}
+                        >
+                          <svg viewBox="0 0 64 48" width="56" height="42" aria-hidden="true">
+                            <rect
+                              x="16"
+                              y="4"
+                              width="32"
+                              height="40"
+                              rx="3"
+                              fill="currentColor"
+                              fillOpacity="0.08"
+                              stroke="currentColor"
+                              strokeWidth="1.6"
+                            />
+                            <rect
+                              x="20"
+                              y="9"
+                              width="11"
+                              height="14"
+                              rx="1.5"
+                              fill="currentColor"
+                              fillOpacity="0.35"
+                            />
+                            <rect
+                              x="33"
+                              y="9"
+                              width="11"
+                              height="20"
+                              rx="1.5"
+                              fill="currentColor"
+                              fillOpacity="0.24"
+                            />
+                          </svg>
+                          <strong>纵向走布</strong>
+                          <span className="num">母卷垂向进给</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className={`sc-orient-card ${!draft.vertical ? 'on' : ''}`}
+                          aria-pressed={!draft.vertical}
+                          onClick={() => patchDraft({ vertical: false })}
+                        >
+                          <svg viewBox="0 0 64 48" width="56" height="42" aria-hidden="true">
+                            <rect
+                              x="6"
+                              y="11"
+                              width="52"
+                              height="26"
+                              rx="3"
+                              fill="currentColor"
+                              fillOpacity="0.08"
+                              stroke="currentColor"
+                              strokeWidth="1.6"
+                            />
+                            <rect
+                              x="11"
+                              y="15"
+                              width="16"
+                              height="9"
+                              rx="1.5"
+                              fill="currentColor"
+                              fillOpacity="0.35"
+                            />
+                            <rect
+                              x="30"
+                              y="15"
+                              width="22"
+                              height="11"
+                              rx="1.5"
+                              fill="currentColor"
+                              fillOpacity="0.24"
+                            />
+                          </svg>
+                          <strong>横向台板</strong>
+                          <span className="num">裁床水平视角</span>
+                        </button>
+                      </div>
+                    </section>
+
+                    <section className="sc-card">
+                      <div className="sc-card-head">
+                        <span>默认叠加图层</span>
+                      </div>
+
+                      <label className="sc-switch-row">
+                        <span className="sc-switch-label">
+                          <strong>尺寸与件号标注</strong>
+                          <code className="num">W × L mm · #ID</code>
+                        </span>
+                        <input
+                          type="checkbox"
+                          role="switch"
+                          {...({ switch: '' } as any)}
+                          className="ux-switch"
+                          checked={draft.showDimensions}
+                          onChange={(e) => patchDraft({ showDimensions: e.target.checked })}
+                        />
+                      </label>
+
+                      <label className="sc-switch-row">
+                        <span className="sc-switch-label">
+                          <strong>CNC 刀序与走刀轨迹</strong>
+                          <code className="num">G00 / G01 路径线</code>
+                        </span>
+                        <input
+                          type="checkbox"
+                          role="switch"
+                          {...({ switch: '' } as any)}
+                          className="ux-switch"
+                          checked={draft.showPath}
+                          onChange={(e) => patchDraft({ showPath: e.target.checked })}
+                        />
+                      </label>
+                    </section>
+
+                    <details className="sc-fold">
+                      <summary>历史方案坐标兼容规则</summary>
+                      <p>
+                        更改起刀零点仅作用于新发起的排料计算与 CAM 导出；已确认锁定的历史方案保留原快照坐标不变。
+                      </p>
+                    </details>
                   </div>
-                </section>
+                </div>
               </div>
-            )}
+            </div>
 
-            {/* TAB 2: 裁切工艺与预设 */}
-            {activeTab === 'craft' && (
-              <div className="settings-sections">
-                <section className="settings-section">
-                  <div className="settings-sec-head">
-                    <span>工厂行业规则预设</span>
-                    <span className={`tag ${matchedPresetId ? 'run' : 'kind'}`}>
-                      {matchedPresetId
-                        ? `当前匹配：${
-                            industryPresets.find((p) => p.id === matchedPresetId)?.name || '预设'
-                          }`
-                        : '当前：自定义工艺参数'}
-                    </span>
+            {/* ==================== TAB 2: 裁切工艺与预设 ==================== */}
+            <div
+              ref={(el) => {
+                panelRefs.current.craft = el;
+              }}
+              role="tabpanel"
+              aria-labelledby="settings-tab-craft"
+              className="sc-panel"
+            >
+              <div className="sc-panel-inner">
+                <div className="sc-pane-bar">
+                  <h2>裁切工艺与行业预设</h2>
+                  <span className={`sc-state-chip ${matchedPresetId ? 'ok' : ''}`}>
+                    {matchedPresetId
+                      ? `预设：${industryPresets.find((p) => p.id === matchedPresetId)?.name}`
+                      : '自定义工艺组合'}
+                  </span>
+                </div>
+
+                {/* 4-Up Clean Preset Cards */}
+                <div className="sc-preset-strip" role="group" aria-label="行业工艺预设">
+                  {industryPresets.map((preset: any) => {
+                    const active = matchedPresetId === preset.id;
+                    const v = preset.values || {};
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        className={`settings-preset-card sc-preset-tile ${active ? 'on' : ''}`}
+                        aria-pressed={active}
+                        onClick={() => handleApplyIndustryPreset(preset)}
+                      >
+                        <div className="sc-preset-tile-head">
+                          <strong>{preset.name}</strong>
+                          {active && <span className="sc-preset-dot" aria-hidden="true" />}
+                        </div>
+                        <div className="sc-preset-chips num">
+                          <span>避疵 {v.defectMargin}</span>
+                          <span>切头 {v.trimStart}</span>
+                          <span>{Number(v.allowRotation) === 1 ? '↻ 90°' : '0° 经向'}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* 2-Column Tolerance Steppers + Visual Craft Schematic */}
+                <div className="sc-two-col">
+                  <section className="sc-card">
+                    <div className="sc-card-head">
+                      <span>几何安全容差</span>
+                      <span className="muted num">精度 0.1 mm</span>
+                    </div>
+
+                    <div className="sc-ctrl-row">
+                      <label htmlFor="cfg-studio-margin">
+                        <strong>疵点避让外扩</strong>
+                        <span className="num muted">0 – 200 mm</span>
+                      </label>
+                      <StepperNumberInput
+                        id="cfg-studio-margin"
+                        value={draft.defectMarginMm}
+                        min={0}
+                        max={200}
+                        step={5}
+                        unit="mm"
+                        onChange={(v) => patchDraft({ defectMarginMm: v })}
+                      />
+                    </div>
+
+                    <div className="sc-ctrl-row">
+                      <label htmlFor="cfg-studio-trim">
+                        <strong>卷头修边切头</strong>
+                        <span className="num muted">0 – 1000 mm</span>
+                      </label>
+                      <StepperNumberInput
+                        id="cfg-studio-trim"
+                        value={draft.trimStartMm}
+                        min={0}
+                        max={1000}
+                        step={10}
+                        unit="mm"
+                        onChange={(v) => patchDraft({ trimStartMm: v })}
+                      />
+                    </div>
+
+                    <div className="sc-ctrl-row">
+                      <label htmlFor="cfg-studio-gap">
+                        <strong>裁片安全刀缝</strong>
+                        <span className="num muted">0 – 50 mm</span>
+                      </label>
+                      <StepperNumberInput
+                        id="cfg-studio-gap"
+                        value={draft.pieceGapMm}
+                        min={0}
+                        max={50}
+                        step={0.5}
+                        unit="mm"
+                        onChange={(v) => patchDraft({ pieceGapMm: v })}
+                      />
+                    </div>
+                  </section>
+
+                  <div className="sc-col-stack">
+                    {/* Live Dynamic SVG Schematic of Trim + Gap + Defect Margin */}
+                    <section className="sc-card sc-craft-vis-card">
+                      <div className="sc-card-head">
+                        <span>容差实时图解</span>
+                        <span className="num muted">
+                          切头 {draft.trimStartMm} · 片距 {draft.pieceGapMm} · 避疵{' '}
+                          {draft.defectMarginMm} mm
+                        </span>
+                      </div>
+                      <svg viewBox="0 0 280 98" className="sc-craft-svg" aria-hidden="true">
+                        <rect
+                          x="10"
+                          y="10"
+                          width="260"
+                          height="78"
+                          rx="3"
+                          fill="#0f172a"
+                          stroke="#334155"
+                        />
+                        {/* Trim Zone */}
+                        {trimVis > 0 && (
+                          <rect
+                            x="10"
+                            y="10"
+                            width={trimVis}
+                            height="78"
+                            fill="rgba(245,158,11,0.28)"
+                            stroke="#f59e0b"
+                            strokeDasharray="3 2"
+                          />
+                        )}
+                        {/* Two Adjacent Parts separated by pieceGap */}
+                        <rect
+                          x={18 + trimVis}
+                          y="20"
+                          width="68"
+                          height="56"
+                          rx="2"
+                          fill="rgba(56,189,248,0.2)"
+                          stroke="#38bdf8"
+                        />
+                        <rect
+                          x={18 + trimVis + 68 + gapVis}
+                          y="20"
+                          width="62"
+                          height="56"
+                          rx="2"
+                          fill="rgba(56,189,248,0.2)"
+                          stroke="#38bdf8"
+                        />
+                        {/* Defect Core + Safety Margin Halo */}
+                        <rect
+                          x={216 - marginVis}
+                          y={46 - marginVis}
+                          width={16 + marginVis * 2}
+                          height={12 + marginVis * 2}
+                          rx="2"
+                          fill="rgba(239,68,68,0.16)"
+                          stroke="#ef4444"
+                          strokeDasharray="3 2"
+                        />
+                        <circle cx="224" cy="52" r="4" fill="#ef4444" />
+                      </svg>
+                    </section>
+
+                    <section className="sc-card">
+                      <div className="sc-ctrl-row compact">
+                        <strong>首阶段直刀方向</strong>
+                        <div className="seg" role="group" aria-label="第一阶段直刀方向">
+                          <button
+                            type="button"
+                            className={draft.firstStageOrientation === 'horizontal' ? 'on' : ''}
+                            aria-pressed={draft.firstStageOrientation === 'horizontal'}
+                            onClick={() =>
+                              patchDraft({
+                                firstStageOrientation: 'horizontal' as FirstStageOrientation
+                              })
+                            }
+                          >
+                            ━ 横切优先
+                          </button>
+                          <button
+                            type="button"
+                            className={draft.firstStageOrientation === 'vertical' ? 'on' : ''}
+                            aria-pressed={draft.firstStageOrientation === 'vertical'}
+                            onClick={() =>
+                              patchDraft({
+                                firstStageOrientation: 'vertical' as FirstStageOrientation
+                              })
+                            }
+                          >
+                            ┃ 纵切优先
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="sc-ctrl-row compact">
+                        <strong>新建矩形件纹理</strong>
+                        <div className="seg" role="group" aria-label="默认旋转规则">
+                          <button
+                            type="button"
+                            className={!draft.defaultAllowRotation ? 'on' : ''}
+                            aria-pressed={!draft.defaultAllowRotation}
+                            onClick={() => patchDraft({ defaultAllowRotation: false })}
+                          >
+                            0° 锁经向
+                          </button>
+                          <button
+                            type="button"
+                            className={draft.defaultAllowRotation ? 'on' : ''}
+                            aria-pressed={draft.defaultAllowRotation}
+                            onClick={() => patchDraft({ defaultAllowRotation: true })}
+                          >
+                            ↻ 允许 90°
+                          </button>
+                        </div>
+                      </div>
+                    </section>
                   </div>
+                </div>
+              </div>
+            </div>
 
-                  <div className="settings-preset-grid">
-                    {industryPresets.map((preset: any) => {
-                      const active = matchedPresetId === preset.id;
-                      const summary = describePreset(preset.values)
-                        .slice(0, 4)
-                        .map((d: any) => `${d.label} ${d.text}`)
-                        .join(' · ');
+            {/* ==================== TAB 3: 料头与余料策略 ==================== */}
+            <div
+              ref={(el) => {
+                panelRefs.current.remnant = el;
+              }}
+              role="tabpanel"
+              aria-labelledby="settings-tab-remnant"
+              className="sc-panel"
+            >
+              <div className="sc-panel-inner">
+                <div className="sc-pane-bar">
+                  <h2>候选余料回收门槛</h2>
+                  <div className="width-quick-pills" role="group" aria-label="常用回收门槛快捷档">
+                    {[
+                      { label: '100 × 100 小料', w: 100, l: 100 },
+                      { label: '200 × 300 标准布料', w: 200, l: 300 },
+                      { label: '300 × 300 整板余料', w: 300, l: 300 }
+                    ].map((q) => {
+                      const isMatch =
+                        draft.minRemnantWidthMm === q.w && draft.minRemnantLengthMm === q.l;
                       return (
                         <button
-                          key={preset.id}
+                          key={q.label}
                           type="button"
-                          className={`settings-preset-card ${active ? 'on' : ''}`}
-                          aria-pressed={active}
-                          onClick={() => handleApplyIndustryPreset(preset)}
+                          className={isMatch ? 'on' : ''}
+                          aria-pressed={isMatch}
+                          onClick={() =>
+                            patchDraft({ minRemnantWidthMm: q.w, minRemnantLengthMm: q.l })
+                          }
                         >
-                          <div className="settings-preset-top">
-                            <strong>{preset.name}</strong>
-                            <span>{active ? '已匹配' : '填入预设'}</span>
-                          </div>
-                          <small>{summary}</small>
+                          {q.label}
                         </button>
                       );
                     })}
                   </div>
-                </section>
+                </div>
 
-                <section className="settings-section">
-                  <div className="settings-sec-title">二维排料与瑕疵隔离参数</div>
+                <div className="sc-two-col">
+                  <section className="sc-card">
+                    <div className="sc-card-head">
+                      <span>最小可入库几何尺寸</span>
+                    </div>
 
-                  <div className="settings-row">
-                    <div className="settings-row-info">
-                      <label htmlFor="cfg-studio-margin">
-                        <strong>疵点默认安全避让间距</strong>
-                      </label>
-                      <small>母卷疵点未单独指定边距时，自动向外扩展禁入区的安全距离 (0–200 mm)</small>
-                    </div>
-                    <div className="settings-row-ctrl">
-                      <div className="settings-unit-input">
-                        <input
-                          id="cfg-studio-margin"
-                          type="number"
-                          min={0}
-                          max={200}
-                          step={1}
-                          className="field num"
-                          value={draft.defectMarginMm}
-                          onChange={(e) => patchDraft({ defectMarginMm: Number(e.target.value) })}
-                        />
-                        <span>mm</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="settings-row">
-                    <div className="settings-row-info">
-                      <label htmlFor="cfg-studio-trim">
-                        <strong>卷头默认修边切头长度</strong>
-                      </label>
-                      <small>新建排程画布起始端默认预留的齐头修边宽度 (0–1000 mm)</small>
-                    </div>
-                    <div className="settings-row-ctrl">
-                      <div className="settings-unit-input">
-                        <input
-                          id="cfg-studio-trim"
-                          type="number"
-                          min={0}
-                          max={1000}
-                          step={10}
-                          className="field num"
-                          value={draft.trimStartMm}
-                          onChange={(e) => patchDraft({ trimStartMm: Number(e.target.value) })}
-                        />
-                        <span>mm</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="settings-row">
-                    <div className="settings-row-info">
-                      <label htmlFor="cfg-studio-gap">
-                        <strong>裁片默认安全刀缝 / 间距</strong>
-                      </label>
-                      <small>相邻裁片轮廓之间的最小安全净距，支持 0.1 mm 精度 (0–50 mm)</small>
-                    </div>
-                    <div className="settings-row-ctrl">
-                      <div className="settings-unit-input">
-                        <input
-                          id="cfg-studio-gap"
-                          type="number"
-                          min={0}
-                          max={50}
-                          step={0.5}
-                          className="field num"
-                          value={draft.pieceGapMm}
-                          onChange={(e) => patchDraft({ pieceGapMm: Number(e.target.value) })}
-                        />
-                        <span>mm</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="settings-row">
-                    <div className="settings-row-info">
-                      <strong>第一阶段贯通直刀方向</strong>
-                      <small>矩形 Guillotine 排切时的首刀切透方向偏好</small>
-                    </div>
-                    <div className="settings-row-ctrl">
-                      <div className="seg" role="group" aria-label="第一阶段直刀方向">
-                        <button
-                          type="button"
-                          className={draft.firstStageOrientation === 'horizontal' ? 'on' : ''}
-                          aria-pressed={draft.firstStageOrientation === 'horizontal'}
-                          onClick={() =>
-                            patchDraft({
-                              firstStageOrientation: 'horizontal' as FirstStageOrientation
-                            })
-                          }
-                        >
-                          横切优先
-                        </button>
-                        <button
-                          type="button"
-                          className={draft.firstStageOrientation === 'vertical' ? 'on' : ''}
-                          aria-pressed={draft.firstStageOrientation === 'vertical'}
-                          onClick={() =>
-                            patchDraft({
-                              firstStageOrientation: 'vertical' as FirstStageOrientation
-                            })
-                          }
-                        >
-                          纵切优先
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="settings-row">
-                    <div className="settings-row-info">
-                      <strong>手动新增矩形件默认旋转规则</strong>
-                      <small>在搭切工作台新增自定义规格件时的初始 90° 旋转开关</small>
-                    </div>
-                    <div className="settings-row-ctrl">
-                      <div className="seg" role="group" aria-label="默认旋转规则">
-                        <button
-                          type="button"
-                          className={!draft.defaultAllowRotation ? 'on' : ''}
-                          aria-pressed={!draft.defaultAllowRotation}
-                          onClick={() => patchDraft({ defaultAllowRotation: false })}
-                        >
-                          禁止旋转 (保纹理)
-                        </button>
-                        <button
-                          type="button"
-                          className={draft.defaultAllowRotation ? 'on' : ''}
-                          aria-pressed={draft.defaultAllowRotation}
-                          onClick={() => patchDraft({ defaultAllowRotation: true })}
-                        >
-                          允许 90° 旋转
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </section>
-              </div>
-            )}
-
-            {/* TAB 3: 料头与余料策略 */}
-            {activeTab === 'remnant' && (
-              <div className="settings-sections">
-                <section className="settings-section">
-                  <div className="settings-sec-head">
-                    <span>候选料头自动划分尺寸门槛</span>
-                    <div className="width-quick-pills" role="group" aria-label="常用回收门槛快捷档">
-                      {[
-                        { label: '100×100 小料', w: 100, l: 100 },
-                        { label: '200×300 标准布料', w: 200, l: 300 },
-                        { label: '300×300 整板余料', w: 300, l: 300 }
-                      ].map((q) => {
-                        const isMatch =
-                          draft.minRemnantWidthMm === q.w && draft.minRemnantLengthMm === q.l;
-                        return (
-                          <button
-                            key={q.label}
-                            type="button"
-                            className={isMatch ? 'on' : ''}
-                            aria-pressed={isMatch}
-                            onClick={() =>
-                              patchDraft({ minRemnantWidthMm: q.w, minRemnantLengthMm: q.l })
-                            }
-                          >
-                            {q.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="settings-row">
-                    <div className="settings-row-info">
+                    <div className="sc-ctrl-row">
                       <label htmlFor="s-width">
-                        <strong>候选料头最小回收宽度</strong>
+                        <strong>最小回收宽度 W</strong>
+                        <span className="num muted">50 – 2000 mm</span>
                       </label>
-                      <small>低于此宽度的边角余料视为不可复用损耗，不生成候选料头块 (50–2000 mm)</small>
+                      <StepperNumberInput
+                        id="s-width"
+                        value={draft.minRemnantWidthMm}
+                        min={50}
+                        max={2000}
+                        step={10}
+                        unit="mm"
+                        onChange={(v) => patchDraft({ minRemnantWidthMm: v })}
+                      />
                     </div>
-                    <div className="settings-row-ctrl">
-                      <div className="settings-unit-input">
-                        <input
-                          id="s-width"
-                          type="number"
-                          min={50}
-                          max={2000}
-                          step={10}
-                          className="field num"
-                          value={draft.minRemnantWidthMm}
-                          onChange={(e) =>
-                            patchDraft({ minRemnantWidthMm: Number(e.target.value) })
-                          }
-                        />
-                        <span>mm</span>
-                      </div>
-                    </div>
-                  </div>
 
-                  <div className="settings-row">
-                    <div className="settings-row-info">
+                    <div className="sc-ctrl-row">
                       <label htmlFor="s-length">
-                        <strong>候选料头最小回收长度</strong>
+                        <strong>最小回收长度 L</strong>
+                        <span className="num muted">50 – 5000 mm</span>
                       </label>
-                      <small>沿送料方向满足此最小长度的整洁余料区自动标定为可回收料头 (50–5000 mm)</small>
+                      <StepperNumberInput
+                        id="s-length"
+                        value={draft.minRemnantLengthMm}
+                        min={50}
+                        max={5000}
+                        step={10}
+                        unit="mm"
+                        onChange={(v) => patchDraft({ minRemnantLengthMm: v })}
+                      />
                     </div>
-                    <div className="settings-row-ctrl">
-                      <div className="settings-unit-input">
-                        <input
-                          id="s-length"
-                          type="number"
-                          min={50}
-                          max={5000}
-                          step={10}
-                          className="field num"
-                          value={draft.minRemnantLengthMm}
-                          onChange={(e) =>
-                            patchDraft({ minRemnantLengthMm: Number(e.target.value) })
-                          }
+
+                    <div className="sc-rem-kpi">
+                      <span>单块最小入库面积</span>
+                      <strong className="num">{minRemnantAreaM2} m²</strong>
+                    </div>
+
+                    <details className="sc-fold">
+                      <summary>试算、过账与复检账实规则</summary>
+                      <p>
+                        排料试算仅划分候选余料区、零扣库存；完工过账后生成独立条码入库；复检判废剪裁转料头须处于原裁片轮廓内且不冲抵原卷耗用。
+                      </p>
+                    </details>
+                  </section>
+
+                  {/* Right Live Proportional Remnant Schematic */}
+                  <section className="sc-card sc-rem-vis-card">
+                    <div className="sc-card-head">
+                      <span>余料划分示意</span>
+                      <code className="sc-code-pill amber num">
+                        ≥ {fmtN(draft.minRemnantWidthMm)} × {fmtN(draft.minRemnantLengthMm)} mm
+                      </code>
+                    </div>
+                    <svg viewBox="0 0 280 184" className="sc-rem-svg" aria-hidden="true">
+                      <rect
+                        x="18"
+                        y="16"
+                        width="244"
+                        height="152"
+                        rx="4"
+                        fill="#0f172a"
+                        stroke="#334155"
+                        strokeWidth="1.5"
+                      />
+                      {/* Cut Qualified Parts */}
+                      <rect
+                        x="26"
+                        y="24"
+                        width={220 - remVisW}
+                        height="84"
+                        rx="2"
+                        fill="rgba(16,185,129,0.16)"
+                        stroke="#10b981"
+                      />
+                      <text
+                        x={26 + (220 - remVisW) / 2}
+                        y="70"
+                        textAnchor="middle"
+                        fill="#6ee7b7"
+                        fontSize="11"
+                      >
+                        合格裁片区
+                      </text>
+                      <rect
+                        x="26"
+                        y="114"
+                        width={220 - remVisW}
+                        height="46"
+                        rx="2"
+                        fill="rgba(56,189,248,0.14)"
+                        stroke="#38bdf8"
+                      />
+                      {/* Dynamic Amber Recoverable Remnant Zone */}
+                      <rect
+                        x={254 - remVisW}
+                        y="24"
+                        width={remVisW}
+                        height={remVisH}
+                        rx="2"
+                        fill="rgba(245,158,11,0.22)"
+                        stroke="#f59e0b"
+                        strokeWidth="1.6"
+                        strokeDasharray="4 2"
+                      />
+                      <text
+                        x={254 - remVisW / 2}
+                        y={24 + remVisH / 2 - 3}
+                        textAnchor="middle"
+                        fill="#fcd34d"
+                        fontSize="10.5"
+                        fontWeight="700"
+                      >
+                        可回收料头
+                      </text>
+                      <text
+                        x={254 - remVisW / 2}
+                        y={24 + remVisH / 2 + 12}
+                        textAnchor="middle"
+                        fill="#fde68a"
+                        fontSize="10"
+                        fontFamily="var(--mono)"
+                      >
+                        {draft.minRemnantWidthMm}×{draft.minRemnantLengthMm}
+                      </text>
+                      {/* Below-threshold Scrap Strip */}
+                      {136 - remVisH > 16 && (
+                        <rect
+                          x={254 - remVisW}
+                          y={28 + remVisH}
+                          width={remVisW}
+                          height={132 - remVisH}
+                          rx="2"
+                          fill="rgba(100,116,139,0.16)"
+                          stroke="#475569"
                         />
-                        <span>mm</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="settings-row">
-                    <div className="settings-row-info">
-                      <strong>单块最小入库面积折算</strong>
-                      <small>由最小回收宽 × 最小回收长实时折算的单块入库门槛</small>
-                    </div>
-                    <div className="settings-row-ctrl">
-                      <span className="tag ok num" style={{ height: 24, lineHeight: '24px' }}>
-                        ≥ {minRemnantAreaM2} m² ({fmtN(draft.minRemnantWidthMm)} ×{' '}
-                        {fmtN(draft.minRemnantLengthMm)} mm)
-                      </span>
-                    </div>
-                  </div>
-                </section>
-
-                <section className="settings-section">
-                  <div className="settings-sec-title">余料与台账业务不变量</div>
-                  <div className="settings-rules-list">
-                    <div>
-                      <span className="tag run">排料试算</span>
-                      <span>
-                        仅在画布与方案快照中标出候选余料区域，零扣减母卷库存、不混入成品净利用率。
-                      </span>
-                    </div>
-                    <div>
-                      <span className="tag ok">完工过账</span>
-                      <span>
-                        结果管理执行实切完工记账后，合格余料方才生成可扫码料头档案并追加不可变库存流水。
-                      </span>
-                    </div>
-                    <div>
-                      <span className="tag warn">复检剪裁</span>
-                      <span>
-                        裁后复检判废剪裁转料头时，回收矩形须完全处于原裁片实物轮廓内，且不冲抵已耗母卷长度。
-                      </span>
-                    </div>
-                  </div>
-                </section>
+                      )}
+                    </svg>
+                  </section>
+                </div>
               </div>
-            )}
+            </div>
 
-            {/* TAB 4: 求解引擎与配额 */}
-            {activeTab === 'engines' && (
-              <div className="settings-sections">
-                <section className="settings-section">
-                  <div className="settings-sec-title">计算作业预算与回退策略</div>
+            {/* ==================== TAB 4: 求解引擎与配额 ==================== */}
+            <div
+              ref={(el) => {
+                panelRefs.current.engines = el;
+              }}
+              role="tabpanel"
+              aria-labelledby="settings-tab-engines"
+              className="sc-panel"
+            >
+              <div className="sc-panel-inner">
+                <div className="sc-pane-bar">
+                  <h2>求解内核与并发配额</h2>
+                  <button
+                    type="button"
+                    className="btn sm"
+                    disabled={capLoading}
+                    onClick={fetchRuntimeStatus}
+                  >
+                    {capLoading ? '检测中…' : '↻ 刷新能力'}
+                  </button>
+                </div>
 
-                  <div className="settings-row">
-                    <div className="settings-row-info">
-                      <label htmlFor="s-time">
-                        <strong>单作业基准求解时限</strong>
-                      </label>
-                      <small>
-                        标准计算作业时间预算 (1–120 秒)；多轮二分缩长策略按此基准等比放宽搜索时限
-                      </small>
+                {/* Compact Top Telemetry + Budget Strip */}
+                <div className="sc-engine-top">
+                  <div className="sc-kpis">
+                    <div className="sc-kpi">
+                      <span>并发线程</span>
+                      <strong className="num ok">{cap?.limits?.workers ?? '—'}</strong>
                     </div>
-                    <div className="settings-row-ctrl" style={{ gap: 8 }}>
+                    <div className="sc-kpi">
+                      <span>队列容量</span>
+                      <strong className="num">{cap?.limits?.queueCapacity ?? '—'}</strong>
+                    </div>
+                    <div className="sc-kpi">
+                      <span>异形上限</span>
+                      <strong className="num">{fmtN(cap?.limits?.maxContourPieces ?? 0)}</strong>
+                    </div>
+                    <div className="sc-kpi">
+                      <span>矩形上限</span>
+                      <strong className="num">{fmtN(cap?.limits?.maxPieces ?? 0)}</strong>
+                    </div>
+                  </div>
+
+                  <div className="sc-engine-budget">
+                    <div className="sc-budget-item">
+                      <label htmlFor="s-time">基准时限</label>
                       <div className="width-quick-pills" role="group" aria-label="时限快捷档">
                         {[3, 5, 10, 30].map((sec) => (
                           <button
@@ -977,250 +1383,208 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           max={120}
                           step={1}
                           className="field num"
-                          style={{ width: 68 }}
+                          style={{ width: 54 }}
                           value={draft.timeLimitSeconds}
                           onChange={(e) => patchDraft({ timeLimitSeconds: Number(e.target.value) })}
                         />
-                        <span>秒</span>
+                        <span>s</span>
                       </div>
                     </div>
+
+                    <label className="sc-budget-fallback">
+                      <span>缺原生内核时回退 Java</span>
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        {...({ switch: '' } as any)}
+                        className="ux-switch"
+                        checked={draft.allowFallback}
+                        onChange={(e) => patchDraft({ allowFallback: e.target.checked })}
+                      />
+                    </label>
                   </div>
+                </div>
 
-                  <div className="settings-row">
-                    <div className="settings-row-info">
-                      <strong>缺少 C++ 原生二进制时允许平滑降级</strong>
-                      <small>
-                        开启后若部署环境未安装原生 PackingSolver，将回退至内置 Java 引擎并在结果中显式标注降级原因
-                      </small>
-                    </div>
-                    <div className="settings-row-ctrl">
-                      <label className="settings-switch">
-                        <input
-                          type="checkbox"
-                          checked={draft.allowFallback}
-                          onChange={(e) => patchDraft({ allowFallback: e.target.checked })}
-                        />
-                        <span>{draft.allowFallback ? '允许降级' : '严格指定'}</span>
-                      </label>
-                    </div>
+                {capError && (
+                  <div id="capabilities-error" className="sc-alert-row">
+                    <span>读取失败：{capError}</span>
+                    <button type="button" className="btn sm" onClick={fetchRuntimeStatus}>
+                      重试
+                    </button>
                   </div>
-                </section>
+                )}
 
-                <section className="settings-section" style={{ padding: 0, overflow: 'hidden' }}>
-                  <div className="pane-h" style={{ background: 'var(--panel-2)' }}>
-                    <span>多线程并发配额与已注册求解内核</span>
-                    <span className="sp" />
-                    {cap && (
-                      <span className="muted num" style={{ fontSize: 11.5, fontWeight: 400 }}>
-                        契约 v{cap.schemaVersion || '2.0'}
-                      </span>
-                    )}
-                  </div>
-
-                  {capError && (
-                    <div
-                      id="capabilities-error"
-                      className="error-box"
-                      style={{
-                        margin: 10,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 10
-                      }}
-                    >
-                      <span>读取失败：{capError}</span>
-                      <button type="button" className="btn sm" onClick={fetchRuntimeStatus}>
-                        重试
-                      </button>
-                    </div>
-                  )}
-
+                {/* Spacious Full 7-Engine Table (All Visible Without Clipping) */}
+                <section className="sc-card sc-table-card">
                   {cap ? (
-                    <>
-                      <div className="metric" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-                        <div>
-                          <small>并发求解工作线程</small>
-                          <b className="num" style={{ color: 'var(--ok)' }}>
-                            {cap.limits?.workers ?? '—'} <em>线程</em>
-                          </b>
-                        </div>
-                        <div>
-                          <small>等待队列容量</small>
-                          <b className="num">
-                            {cap.limits?.queueCapacity ?? '—'} <em>作业</em>
-                          </b>
-                        </div>
-                        <div>
-                          <small>异形最大裁片数</small>
-                          <b className="num">{fmtN(cap.limits?.maxContourPieces ?? 0)}</b>
-                        </div>
-                        <div>
-                          <small>矩形最大裁片数</small>
-                          <b className="num">{fmtN(cap.limits?.maxPieces ?? 0)}</b>
-                        </div>
-                      </div>
-
-                      <table className="t" style={{ border: 0 }}>
-                        <thead>
-                          <tr>
-                            <th>求解器引擎 ID</th>
-                            <th>状态</th>
-                            <th>支持几何 / 工艺模式</th>
-                            <th className="r">物理精度</th>
+                    <table className="sc-engine-table">
+                      <thead>
+                        <tr>
+                          <th>内核标识</th>
+                          <th>运行状态</th>
+                          <th>工艺与几何模式</th>
+                          <th className="r">坐标精度</th>
+                        </tr>
+                      </thead>
+                      <tbody id="engine-rows">
+                        {allEngines.map((e: any) => (
+                          <tr key={e.id}>
+                            <td className="num sc-eng-id">{e.id}</td>
+                            <td>
+                              <span className={`sc-status-pill ${e.available ? 'ok' : 'err'}`}>
+                                <i aria-hidden="true" />
+                                {e.available ? '隔离进程就绪' : '未就绪'}
+                              </span>
+                            </td>
+                            <td>
+                              <div className="sc-mode-tags">
+                                {[...(e.modes || []), ...(e.shapes || [])].map((m: string) => (
+                                  <span key={m} className="num">
+                                    {m}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="r num">{e.coordinateResolutionMm} mm</td>
                           </tr>
-                        </thead>
-                        <tbody id="engine-rows">
-                          {allEngines.map((e: any) => (
-                            <tr key={e.id}>
-                              <td className="num" style={{ fontWeight: 600 }}>
-                                {e.id}
-                              </td>
-                              <td>
-                                <span className={`tag ${e.available ? 'ok' : 'err'}`}>
-                                  {e.available ? '可用 (并行隔离进程)' : '未就绪'}
-                                </span>
-                              </td>
-                              <td>{[...(e.modes || []), ...(e.shapes || [])].join(' · ')}</td>
-                              <td className="r num">{e.coordinateResolutionMm} mm</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </>
+                        ))}
+                      </tbody>
+                    </table>
                   ) : !capError ? (
-                    <div className="loading">正在读取服务端线程池与内核能力…</div>
+                    <div className="loading">正在检测多线程求解池…</div>
                   ) : null}
                 </section>
               </div>
-            )}
+            </div>
 
-            {/* TAB 5: 导出与系统接入 */}
-            {activeTab === 'integration' && (
-              <div className="settings-sections">
-                <section className="settings-section">
-                  <div className="settings-sec-title">车间单据与 CAM 文件导出</div>
+            {/* ==================== TAB 5: 导出与系统接入 ==================== */}
+            <div
+              ref={(el) => {
+                panelRefs.current.integration = el;
+              }}
+              role="tabpanel"
+              aria-labelledby="settings-tab-integration"
+              className="sc-panel"
+            >
+              <div className="sc-panel-inner">
+                <div className="sc-pane-bar">
+                  <h2>导出规范与开放契约</h2>
+                  <span className={`sc-state-chip ${healthInfo?.status === 'UP' ? 'ok' : ''}`}>
+                    {healthInfo?.status === 'UP'
+                      ? `服务 UP · 在库料头 ${healthInfo.remnantsInStock ?? 0} 块`
+                      : '检测连接中'}
+                  </span>
+                </div>
 
-                  <div className="settings-row">
-                    <div className="settings-row-info">
-                      <label htmlFor="cfg-export-prefix">
-                        <strong>DXF / G-Code 导出文件名前缀</strong>
-                      </label>
-                      <small className="num">
-                        文件命名预览：{draft.exportPrefix.trim() || 'CutPlan'}-1650x1540.dxf
-                      </small>
-                    </div>
-                    <div className="settings-row-ctrl">
-                      <input
-                        id="cfg-export-prefix"
-                        type="text"
-                        maxLength={32}
-                        className="field num"
-                        style={{ width: 190 }}
-                        value={draft.exportPrefix}
-                        onChange={(e) => patchDraft({ exportPrefix: e.target.value })}
-                        placeholder="CutPlan"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="settings-row">
-                    <div className="settings-row-info">
-                      <strong>A4 车间随工单附带直刀顺序明细</strong>
-                      <small>当二维方案包含贯通直刀路径时，在打印派工单底部输出刀序坐标表</small>
-                    </div>
-                    <div className="settings-row-ctrl">
-                      <label className="settings-switch">
+                {/* Live Filename Token Composer + Ticket Toggle */}
+                <section className="sc-card">
+                  <div className="sc-export-composer">
+                    <div className="sc-export-input-group">
+                      <label htmlFor="cfg-export-prefix">CAM 导出文件前缀</label>
+                      <div className="sc-token-preview num">
                         <input
-                          type="checkbox"
-                          checked={draft.ticketShowCuts}
-                          onChange={(e) => patchDraft({ ticketShowCuts: e.target.checked })}
+                          id="cfg-export-prefix"
+                          type="text"
+                          maxLength={32}
+                          className="sc-prefix-input num"
+                          value={draft.exportPrefix}
+                          onChange={(e) => patchDraft({ exportPrefix: e.target.value })}
+                          placeholder="CutPlan"
                         />
-                        <span>{draft.ticketShowCuts ? '附带刀序' : '仅裁片表'}</span>
-                      </label>
+                        <span className="sc-token-sep">-1650x1540</span>
+                        <span className="sc-ext-badge">.dxf</span>
+                        <span className="sc-ext-badge">.nc</span>
+                      </div>
                     </div>
+
+                    <label className="sc-switch-row sc-ticket-switch">
+                      <span className="sc-switch-label">
+                        <strong>A4 随工单打印直刀顺序表</strong>
+                        <code className="num">附带每刀起点 / 终点坐标</code>
+                      </span>
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        {...({ switch: '' } as any)}
+                        className="ux-switch"
+                        checked={draft.ticketShowCuts}
+                        onChange={(e) => patchDraft({ ticketShowCuts: e.target.checked })}
+                      />
+                    </label>
                   </div>
                 </section>
 
-                <section className="settings-section">
-                  <div className="settings-sec-head">
-                    <span>系统运行健康与开放协同契约</span>
-                    <span className={`tag ${healthInfo?.status === 'UP' ? 'ok' : 'warn'}`}>
-                      {healthInfo?.status === 'UP'
-                        ? `服务在线 · 在库可用料头 ${healthInfo.remnantsInStock ?? 0} 块`
-                        : '健康状态待刷新'}
-                    </span>
-                  </div>
-
-                  <div className="settings-endpoint-list">
-                    <div className="settings-endpoint-row">
-                      <div>
-                        <strong>OpenAPI 3.1 统一计算与业务契约</strong>
-                        <small className="num">/api-v2/openapi.json</small>
-                      </div>
+                {/* 2x2 Clean Endpoint Status Cards */}
+                <div className="sc-endpoint-grid">
+                  <div className="sc-ep-card">
+                    <div className="sc-ep-top">
+                      <strong>OpenAPI 3.1 契约</strong>
                       <a
                         href="/api-v2/openapi.json"
                         target="_blank"
                         rel="noreferrer"
                         className="btn sm"
                       >
-                        查看契约 JSON
+                        查看 JSON ↗
                       </a>
                     </div>
-
-                    <div className="settings-endpoint-row">
-                      <div>
-                        <strong>MES 工单下推与完工报工协同接口</strong>
-                        <small className="num">/api/v2/mes/* · 幂等键防重放</small>
-                      </div>
-                      <span className="tag ok">已启用</span>
-                    </div>
-
-                    <div className="settings-endpoint-row">
-                      <div>
-                        <strong>不可变库存流水与内部账实平衡核验</strong>
-                        <small className="num">/api/v2/inventory-ledger/reconciliation</small>
-                      </div>
-                      <span className="tag ok">同事务追加</span>
-                    </div>
-
-                    <div className="settings-endpoint-row">
-                      <div>
-                        <strong>本机 AI / MCP 受控适配器</strong>
-                        <small className="num">integrations/mcp · 复用标准 REST 与只读权限门禁</small>
-                      </div>
-                      <span className="tag kind">宿主受控</span>
-                    </div>
+                    <code className="num">/api-v2/openapi.json</code>
                   </div>
-                </section>
+
+                  <div className="sc-ep-card">
+                    <div className="sc-ep-top">
+                      <strong>MES 派工与报工闭环</strong>
+                      <span className="sc-status-pill ok">
+                        <i aria-hidden="true" /> 已启用
+                      </span>
+                    </div>
+                    <code className="num">/api/v2/mes/* · Idempotency-Key</code>
+                  </div>
+
+                  <div className="sc-ep-card">
+                    <div className="sc-ep-top">
+                      <strong>不可变库存流水对账</strong>
+                      <span className="sc-status-pill ok">
+                        <i aria-hidden="true" /> 同事务追加
+                      </span>
+                    </div>
+                    <code className="num">/api/v2/inventory-ledger/reconciliation</code>
+                  </div>
+
+                  <div className="sc-ep-card">
+                    <div className="sc-ep-top">
+                      <strong>本机 MCP 适配器</strong>
+                      <span className="sc-status-pill">宿主门禁</span>
+                    </div>
+                    <code className="num">integrations/mcp · stdio</code>
+                  </div>
+                </div>
               </div>
-            )}
+            </div>
           </div>
         </div>
 
-        {/* Sticky Modal Footer */}
-        <div className="settings-center-foot">
-          <button type="button" className="btn sm" onClick={handleRestoreDefaults}>
-            恢复默认参数
+        {/* Clean Single-Row Footer */}
+        <div className="sc-foot">
+          <button type="button" className="btn" onClick={handleRestoreDefaults}>
+            恢复默认
           </button>
 
-          <div className="settings-foot-status" role="status">
+          <div className="sc-foot-mid" role="status">
             {validationError ? (
-              <span className="settings-err-text">{validationError}</span>
+              <span className="sc-err-msg">{validationError}</span>
             ) : changedCount > 0 ? (
-              <span className="settings-dirty-badge">
-                <i aria-hidden="true" /> 已修改 <b className="num">{changedCount}</b> 项设置，保存后生效
+              <span className="sc-dirty-pill">
+                <i aria-hidden="true" /> {changedCount} 项待保存
               </span>
-            ) : (
-              <span className="muted">设置保存在本机，新排料与视口立即生效，已锁方案保持原快照</span>
-            )}
+            ) : null}
           </div>
 
-          <div className="settings-foot-btns">
+          <div className="sc-foot-actions">
             <button type="button" className="btn" onClick={() => dialogRef.current?.close()}>
               取消
             </button>
-            <button type="submit" className="btn pri">
+            <button type="submit" className="btn pri sc-save-btn">
               保存并应用
             </button>
           </div>
