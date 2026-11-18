@@ -2,6 +2,7 @@ package com.example.cutdemotwo.algorithm.api;
 
 import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
 import com.example.cutdemotwo.contracts.jobs.ProblemCheck;
+import com.example.cutdemotwo.contracts.jobs.OptimizationRequest.InitialPlacement;
 import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import com.example.cutdemotwo.contracts.nesting.NestingResult;
@@ -24,6 +25,8 @@ public interface NestingSolver {
     default Optional<NestingResult> compactMarker(NestingProblem problem, NestingResult incumbent, long deadlineNanos) {
         return Optional.empty();
     }
+    /** Rebuild a complete input layout from demand shapes and independently verify all geometric constraints. */
+    NestingResult validateMarkerSeed(NestingProblem problem, List<InitialPlacement> poses);
     /** Add only explicitly requested spare pieces inside a complete marker's occupied length. */
     default List<NestingResult.Placement> fillMarkerGaps(NestingProblem problem, NestingResult incumbent,
                                                          Map<Integer, Integer> limits, long deadlineNanos) {

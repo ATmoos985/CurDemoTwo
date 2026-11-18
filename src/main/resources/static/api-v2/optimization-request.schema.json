@@ -312,7 +312,7 @@
     "Strategy": {
       "type": "object",
       "additionalProperties": false,
-      "if": {"required": ["gapFillLimits"]},
+      "if": {"anyOf": [{"required": ["gapFillLimits"]}, {"required": ["initialPlacements"]}]},
       "then": {"properties": {"version": {"const": "2"}}},
       "properties": {
         "id": {
@@ -322,6 +322,19 @@
         "version": {
           "type": "string",
           "enum": ["1", "2"]
+        },
+        "initialPlacements": {
+          "type": "array", "minItems": 1, "maxItems": 200,
+          "description": "Optional complete starting layout. The server rebuilds the outlines from the order and validates the geometry before using it.",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["demandId", "x", "y", "rotationDegrees"],
+            "properties": {
+              "demandId": {"type": "integer"},
+              "x": {"type": "number", "minimum": 0}, "y": {"type": "number", "minimum": 0},
+              "rotationDegrees": {"type": "integer", "enum": [0, 90, 180, 270]}
+            }
+          }
         },
         "gapFillLimits": {
           "type": "object",

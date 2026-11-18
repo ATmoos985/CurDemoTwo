@@ -12,6 +12,9 @@
 .garment-split{grid-template-columns:minmax(280px,320px) minmax(0,1fr)}
 .garment-split .field{width:100%;min-width:0}
 #garment-form input[type=checkbox]{justify-self:start;margin:0}
+#garment-sizes{display:contents}
+#garment-reference:not([hidden]){display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px;padding:5px 10px;border-bottom:1px solid var(--line-2);font-size:12px;font-variant-numeric:tabular-nums}
+#garment-replay[aria-pressed=true],#garment-optimum[aria-pressed=true]:not(.pri){border-color:var(--accent);color:var(--accent-ink);background:var(--accent-2)}
 #garment-help summary{cursor:pointer}
 #garment-help .help-mark{width:16px;height:16px;border:1px solid currentColor;border-radius:50%;color:var(--text-3);font-size:11px;text-align:center;line-height:14px}
 .garment-help-text{padding:0 12px;border-bottom:1px solid var(--line-2);color:var(--text-2)}
@@ -268,6 +271,11 @@ button,a,input,select{touch-action:manipulation}
 .task-progress .bar{width:104px;height:4px}
 .task-table td:last-child{white-space:nowrap}
 .task-table .btn:not(.pri){background:transparent}
+@media(max-width:1230px){
+  .task-table th:last-child,.task-table td:last-child{position:sticky;right:0;box-shadow:-1px 0 var(--line)}
+  .task-table th:last-child{background:var(--panel-2);z-index:2}
+  .task-table td:last-child{background:var(--panel)}
+}
 .empty strong{font-size:15px;color:var(--text-2)}
 .empty p{margin:8px 0 16px}
 .demo-card b{font:600 15px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--text)}

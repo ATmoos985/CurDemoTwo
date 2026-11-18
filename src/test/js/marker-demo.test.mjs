@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {MARKER_STYLES, markerExample, markerSummary} from '../../main/resources/static/js/nesting/marker-demo.js';
+import {DXF_TRIAL_STYLES, MARKER_STYLES, markerExample, markerSummary} from '../../main/resources/static/js/nesting/marker-demo.js';
+import {dxfParts} from '../../main/resources/static/js/nesting/dxf-patterns.js';
 import {DXF_GARMENT_STYLES, buildDxfStyleParts, parseDxfGarmentText} from '../../main/resources/static/js/nesting/dxf-garment-samples.js';
+import {shapeArea} from '../../main/resources/static/js/canvas/nesting-scene.js';
 import {cuttingFrame, CUT_PATHS} from '../../main/resources/static/js/intro/cutting-timeline.js';
 import fs from 'node:fs';
 import {fileURLToPath} from 'node:url';
@@ -16,6 +18,18 @@ test('marker includes two complete size sets and preserves fixed grain and width
     for (const size of ['M','L']) assert.equal(p.parts.filter(part=>part.name.startsWith(size)).length,6);
     assert.throws(()=>markerExample(0));
 });
+test('four-piece outlines keep their scale and demand IDs across widths and single-size markers', () => {
+    const style = 'GARMENT_FOUR_PIECE', reference = markerExample(1780, style).parts;
+    assert.equal(reference.length, 8);
+    assert.ok(reference.every(p => p.shape.type === 'POLYGON' && p.quantity === 2));
+    for (const size of ['130','140']) {
+        const counts = {'130':0, '140':0, [size]:1};
+        const expected = reference.filter(p => p.name.startsWith(size + '码')).map(p => ({...p, quantity:1}));
+        assert.equal(expected.length, 4);
+        assert.deepEqual(markerExample(1500, style, counts).parts, expected);
+    }
+    assert.throws(() => markerExample(1780, style, {M:2,L:2}));
+});
 test('one missing piece or substituting another size cannot qualify as a complete marker', () => {
     const p=markerExample(), partial=sceneFor(p,2000,false);
     assert.equal(markerSummary(p,partial).complete,false);
@@ -23,8 +37,23 @@ test('one missing piece or substituting another size cannot qualify as a complet
     partial.placements.push({...partial.placements[0]});
     assert.equal(markerSummary(p,partial).complete,false);
 });
+
+test('all DXF grades and handed pieces fit the solver coordinate resolution and retain measured area', () => {
+    for (const style of DXF_TRIAL_STYLES) {
+        const counts = Object.fromEntries(style.sizes.map(size => [size,1]));
+        const original = dxfParts(style, counts, false);
+        const parts = markerExample(1780, style.id, counts).parts;
+        for (const [i, part] of parts.entries()) {
+            const {width,height,vertices} = part.shape;
+            const coordinates = [width,height,...vertices.flatMap(({x,y}) => [x,y])];
+            assert.ok(coordinates.every(n => Math.abs(n*10 - Math.round(n*10)) < 1e-8), part.name);
+            assert.equal(new Set(vertices.map(({x,y}) => x + ',' + y)).size, vertices.length, part.name);
+            assert.ok(Math.abs(shapeArea(part.shape)/shapeArea(original[i].shape) - 1) < 0.0015, part.name);
+        }
+    }
+});
 test('all garment cases include both sizes and small parts within the fixed fabric width', () => {
-    const counts = {DXF_1226:8, DXF_20148D:8, DXF_3129:44, GARMENT_SHIRT:18, GARMENT_PANTS:18, GARMENT_SKIRT:14, GARMENT_TANK:10, GARMENT_SHORTS:14,
+    const counts = {GARMENT_SHIRT:18, GARMENT_PANTS:18, GARMENT_SKIRT:14, GARMENT_TANK:10, GARMENT_SHORTS:14,
         GARMENT_APRON:10, GARMENT_GORED_SKIRT:16, GARMENT_GATHERED_SKIRT:8};
     for (const style of MARKER_STYLES) for (const width of [1200,1500,2000]) {
         const p=markerExample(width,style.id);

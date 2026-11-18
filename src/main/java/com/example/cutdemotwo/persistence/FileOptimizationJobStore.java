@@ -10,12 +10,22 @@ import java.util.*;
 
 /** One dispatcher owns this directory for its entire lifetime. Documents replace atomically or fail. */
 public final class FileOptimizationJobStore implements OptimizationJobStore {
+    @FunctionalInterface
+    interface AtomicReplace {
+        void move(Path source, Path target) throws IOException;
+    }
+    private final AtomicReplace replace;
     private final Path directory;
     private final FileChannel channel;
     private final FileLock lock;
     private final JsonMapper json = JsonMapper.builder().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,
             DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
     public FileOptimizationJobStore(Path directory) {
+        this(directory, (source, target) -> Files.move(source, target,
+                StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING));
+    }
+    FileOptimizationJobStore(Path directory, AtomicReplace replace) {
+        this.replace = replace;
         this.directory = directory.toAbsolutePath();
         FileChannel opened = null;
         try {
@@ -49,9 +59,27 @@ public final class FileOptimizationJobStore implements OptimizationJobStore {
             temporary = Files.createTempFile(directory,"pending-",".tmp");
             Files.write(temporary,json.writeValueAsBytes(document));
             try (var output = FileChannel.open(temporary,StandardOpenOption.WRITE)) { output.force(true); }
-            Files.move(temporary,directory.resolve(id+".json"),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
+            replaceSnapshot(temporary, directory.resolve(id+".json"));
         } catch (IOException error) { throw new IllegalStateException("计算作业保存失败",error); }
         finally { if (temporary != null) try { Files.deleteIfExists(temporary); } catch (IOException ignored) {} }
+    }
+    private void replaceSnapshot(Path source, Path target) throws IOException {
+        // Windows can briefly deny replacement while another process has a snapshot open.
+        for (int delayMillis = 10; ; delayMillis *= 2) {
+            try {
+                replace.move(source, target);
+                return;
+            } catch (AccessDeniedException denied) {
+                if (delayMillis > 160) throw denied;
+                try {
+                    Thread.sleep(delayMillis);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    denied.addSuppressed(interrupted);
+                    throw denied;
+                }
+            }
+        }
     }
     @Override public void close() {
         try { lock.release(); channel.close(); }

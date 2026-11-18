@@ -14,12 +14,12 @@ final class MarkerCompactor {
     // Match the standard contour problem limit when validating the fixed pieces and spares together.
     private static final int MAX_FILLED_PIECES = 200;
 
-    private record Edge(Point a, Point b) {
+    record Edge(Point a, Point b) {
         double y(double x) { return a.y() + (b.y() - a.y()) * ((x - a.x()) / (b.x() - a.x())); }
     }
-    private record Slab(double left, double right, Edge top, Edge bottom) {}
+    record Slab(double left, double right, Edge top, Edge bottom) {}
     private record Interval(double low, double high) {}
-    private record Oriented(Shape shape, int angle, List<Slab> slabs, double[] xs) {
+    record Oriented(Shape shape, int angle, List<Slab> slabs, double[] xs) {
         static Oriented of(Shape shape, int angle) {
             var vertices = PolygonGeometry.vertices(shape);
             double[] xs = vertices.stream().mapToDouble(Point::x).distinct().sorted().toArray();
@@ -57,7 +57,7 @@ final class MarkerCompactor {
     }
 
     static boolean supports(NestingProblem problem, List<Placement> incumbent) {
-        return incumbent.size() <= 80 && supportsGapSearch(problem);
+        return incumbent.size() <= 80 && (supportsGapSearch(problem) || AxisMarkerCompactor.supports(problem));
     }
 
     static boolean supportsGapSearch(NestingProblem problem) {
@@ -68,6 +68,8 @@ final class MarkerCompactor {
     }
 
     static List<Placement> compact(NestingProblem problem, List<Placement> incumbent, long deadline) {
+        if (!supportsGapSearch(problem))
+            return AxisMarkerCompactor.compact(problem, incumbent, deadline);
         var choices = new HashMap<Integer, List<Oriented>>();
         for (var part : problem.parts()) {
             if (expired(deadline)) return incumbent;

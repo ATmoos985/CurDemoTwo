@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { requestJSON, fmtN, toast, loadSheetLib } from '@static/app/js/util.js';
 import {
-  emptyTask,
   fromTask,
   addDemand,
   mergeImport,
@@ -11,6 +10,7 @@ import {
   demandTemplateCsv,
   withProblemType
 } from '@static/app/js/model/task-form.js';
+import { TASK_PACK_GROUPS, taskPackForm } from '@static/app/js/model/task-packs.js';
 import { SLITTING } from '@static/app/js/model/slitting.js';
 import { workflowTemplate } from '@static/app/js/model/showcase.js';
 import {
@@ -45,25 +45,32 @@ interface ImportState {
 
 export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) => {
   const [taskId, templateId] = params;
-  const template = useMemo(
+  const routeTemplate = useMemo(
     () => (taskId === 'new' && templateId ? workflowTemplate(templateId) : null),
     [taskId, templateId]
   );
+  const routePackId = routeTemplate ? 'showcase-' + templateId : '';
+  const buildNewForm = (id: string) =>
+    routeTemplate && id === routePackId
+      ? fromTask(routeTemplate.task)
+      : taskPackForm(id);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [original, setOriginal] = useState<any>(null);
   const [completed, setCompleted] = useState<Record<string, number>>({});
   const [rolls, setRolls] = useState<any[]>([]);
-  const [form, setForm] = useState<any>(() => emptyTask());
+  const [packId, setPackId] = useState<string>(routePackId);
+  const [baseline, setBaseline] = useState<any>(() => buildNewForm(routePackId));
+  const [form, setForm] = useState<any>(() => buildNewForm(routePackId));
   const [hasDraft, setHasDraft] = useState(false);
   const [imp, setImp] = useState<ImportState | null>(null);
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
 
   const storageKey = useMemo(
-    () => draftKey(original?.id || (template ? 'demo-' + templateId : null)),
-    [original?.id, template, templateId]
+    () => draftKey(original?.id || (routeTemplate ? 'demo-' + templateId : null)),
+    [original?.id, routeTemplate, templateId]
   );
 
   useEffect(() => {
@@ -85,8 +92,10 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
         setOriginal(origTask);
         setCompleted(compMap);
 
-        const k = draftKey(origTask?.id || (template ? 'demo-' + templateId : null));
-        let parsedDraft = null;
+        const k = draftKey(
+          origTask?.id || (routeTemplate ? 'demo-' + templateId : null)
+        );
+        let parsedDraft: any = null;
         try {
           parsedDraft = JSON.parse(localStorage.getItem(k) || 'null');
         } catch {}
@@ -94,15 +103,16 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
         const useDraft = Boolean(
           parsedDraft && (!origTask || parsedDraft.revision === origTask.revision)
         );
-        setHasDraft(useDraft);
-        const initialForm = useDraft
-          ? parsedDraft
-          : origTask
+        const resolvedPackId = origTask
+          ? ''
+          : parsedDraft?.taskPackId ?? routePackId;
+        const resolvedBaseline = origTask
           ? fromTask(origTask)
-          : template
-          ? fromTask(template.task)
-          : emptyTask();
-        setForm(initialForm);
+          : buildNewForm(resolvedPackId);
+        setPackId(resolvedPackId);
+        setBaseline(resolvedBaseline);
+        setHasDraft(useDraft);
+        setForm(useDraft ? fromTask(parsedDraft) : resolvedBaseline);
       } catch (e: any) {
         if (!cancelled) setError(e.message || '加载任务失败');
       } finally {
@@ -112,13 +122,19 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
     return () => {
       cancelled = true;
     };
-  }, [taskId, templateId, template]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId, templateId, routeTemplate]);
 
-  const updateAndPersist = (nextForm: any) => {
+  const updateAndPersist = (nextForm: any, nextPackId: string = packId) => {
     setForm(nextForm);
     setHasDraft(true);
     try {
-      localStorage.setItem(storageKey, JSON.stringify(nextForm));
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify(
+          original ? nextForm : { ...nextForm, taskPackId: nextPackId }
+        )
+      );
     } catch {}
   };
 
@@ -127,10 +143,16 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
     [rolls]
   );
 
-  const isDirty = useMemo(() => {
-    if (!original) return true;
-    return JSON.stringify(toPayload(form)) !== JSON.stringify(toPayload(fromTask(original)));
-  }, [form, original]);
+  const hasChangesFromBaseline = useMemo(
+    () =>
+      JSON.stringify(toPayload(form)) !== JSON.stringify(toPayload(baseline)),
+    [form, baseline]
+  );
+
+  const isDirty = useMemo(
+    () => !original || hasChangesFromBaseline,
+    [original, hasChangesFromBaseline]
+  );
 
   const problems: string[] = useMemo(
     () => taskProblems(form, { original, completed }),
@@ -144,19 +166,41 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
     0
   );
 
+  const handlePackChange = (nextId: string) => {
+    if (
+      (hasChangesFromBaseline || imp) &&
+      !confirm('切换示例包会替换当前草稿，继续切换？')
+    ) {
+      return;
+    }
+    const fresh = buildNewForm(nextId);
+    setPackId(nextId);
+    setBaseline(fresh);
+    setImp(null);
+    updateAndPersist(fresh, nextId);
+  };
+
   const handleDiscard = () => {
     localStorage.removeItem(storageKey);
     setHasDraft(false);
-    setForm(original ? fromTask(original) : template ? fromTask(template.task) : emptyTask());
+    setImp(null);
+    setPackId(routePackId);
+    const fresh = original ? fromTask(original) : buildNewForm(routePackId);
+    setBaseline(fresh);
+    setForm(fresh);
   };
 
   const handleReloadLatest = async () => {
     if (!original?.id) return;
     try {
-      const d = await requestJSON('/api/cutting/tasks/' + encodeURIComponent(original.id));
+      const d = await requestJSON(
+        '/api/cutting/tasks/' + encodeURIComponent(original.id)
+      );
+      const fresh = fromTask(d.task);
       setOriginal(d.task);
       setCompleted(d.completed || {});
-      setForm(fromTask(d.task));
+      setBaseline(fresh);
+      setForm(fresh);
       setConflict(false);
       setHasDraft(false);
       localStorage.removeItem(storageKey);
@@ -373,9 +417,9 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
         </button>
       </div>
 
-      {template && (
+      {routeTemplate && packId === routePackId && (
         <div className="notice">
-          演示模板 · 型号 {template.task.materialModel}。请先
+          演示模板 · 型号 {routeTemplate.task.materialModel}。请先
           <a href={`#/inventory/receive/${encodeURIComponent(templateId || '')}`}>
             登记对应演示母卷
           </a>
@@ -416,6 +460,36 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
             <div className="box">
               <div className="pane-h">基本信息</div>
               <div className="form" style={{ gridTemplateColumns: '80px 1fr' }}>
+                {!original && (
+                  <>
+                    <label htmlFor="task-pack">示例包</label>
+                    <select
+                      className="field"
+                      id="task-pack"
+                      disabled={saving}
+                      value={packId}
+                      onChange={(e) => handlePackChange(e.target.value)}
+                    >
+                      <option value="">空白任务</option>
+                      {routeTemplate && (
+                        <optgroup label="能力展示">
+                          <option value={routePackId}>
+                            {routeTemplate.task.name}
+                          </option>
+                        </optgroup>
+                      )}
+                      {TASK_PACK_GROUPS.map((group: any) => (
+                        <optgroup key={group.name} label={group.name}>
+                          {group.packs.map((pack: any) => (
+                            <option key={pack.id} value={pack.id}>
+                              {pack.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </>
+                )}
                 <label>任务名称</label>
                 <input
                   className="field"
@@ -462,6 +536,20 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
                   <div className="muted" style={{ fontSize: 11.5, marginTop: 3 }}>
                     在库同型号母卷{' '}
                     {rolls.filter((r) => r.rollModel === form.materialModel).length} 卷
+                    {routeTemplate &&
+                      packId === routePackId &&
+                      routeTemplate.task.materialModel === form.materialModel && (
+                        <>
+                          {' '}
+                          <a
+                            href={`#/inventory/receive/${encodeURIComponent(
+                              templateId || ''
+                            )}`}
+                          >
+                            登记示例母卷
+                          </a>
+                        </>
+                      )}
                   </div>
                 </div>
                 <label>来源</label>
@@ -702,7 +790,8 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
             <div className="pane-h">
               需求
               <span className="sub">
-                {(form.demands || []).length} 项 · {fmtN(totalPieces)} 件
+                {(form.demands || []).length} 项 · {fmtN(totalPieces)}{' '}
+                {isSlitting ? '卷' : '件'}
               </span>
               <span className="sp" />
               {!isSlitting && (

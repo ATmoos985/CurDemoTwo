@@ -120,7 +120,7 @@ export const App: React.FC = () => {
       case 'settings':
         return <SettingsPage />;
       case 'garment':
-        return <GarmentWidthPage />;
+        return <GarmentWidthPage exampleId={route.params[0] || undefined} />;
       case 'tasks':
         return <TasksPage />;
       case 'task':

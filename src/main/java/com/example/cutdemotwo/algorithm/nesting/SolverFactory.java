@@ -5,6 +5,7 @@ import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
 import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
 import com.example.cutdemotwo.algorithm.api.NestingSolver;
 import com.example.cutdemotwo.contracts.jobs.ProblemCheck;
+import com.example.cutdemotwo.contracts.jobs.OptimizationRequest.InitialPlacement;
 import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
 
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
@@ -122,6 +123,31 @@ public class SolverFactory implements NestingSolver {
     }
 
     @Override
+    public NestingResult validateMarkerSeed(NestingProblem problem, List<InitialPlacement> poses) {
+        long start = System.nanoTime();
+        if (poses == null || poses.isEmpty() || poses.size() != problem.parts().stream().mapToInt(NestingProblem.Part::quantity).sum())
+            throw new IllegalArgumentException("初始排法必须包含全部齐套裁片");
+        var demands = new HashMap<Integer, NestingProblem.Part>();
+        problem.parts().forEach(part -> demands.put(part.id(), part));
+        var placements = new ArrayList<NestingResult.Placement>();
+        for (var pose : poses) {
+            var part = pose == null ? null : demands.get(pose.demandId());
+            if (part == null || pose.x() == null || pose.y() == null || pose.rotationDegrees() == null
+                    || !Double.isFinite(pose.x()) || !Double.isFinite(pose.y()) || pose.x() < 0 || pose.y() < 0
+                    || !part.contourAngles().contains(pose.rotationDegrees()))
+                throw new IllegalArgumentException("初始排法的裁片、位置或方向无效");
+            placements.add(new NestingResult.Placement(placements.size() + 1, part.id(), part.name(), pose.x(), pose.y(),
+                    PolygonGeometry.rotate(part.shape(), pose.rotationDegrees()), pose.rotationDegrees()));
+        }
+        var candidate = new EngineResult();
+        candidate.setSuccess(true);
+        candidate.setPlacements(placements);
+        String error = PolygonResultValidator.validate(problem, candidate);
+        if (error != null) throw new IllegalArgumentException("初始排法未通过几何校验：" + error);
+        return toResult(problem, candidate, "validated-seed", "1", elapsed(start), problem.engine(), null);
+    }
+
+    @Override
     public Optional<NestingResult> compactMarker(NestingProblem problem, NestingResult incumbent, long deadlineNanos) {
         long start = System.nanoTime();
         if (start >= deadlineNanos || !MarkerCompactor.supports(problem, incumbent.placements())) return Optional.empty();
@@ -131,7 +157,8 @@ public class SolverFactory implements NestingSolver {
         candidate.setSuccess(true);
         candidate.setPlacements(placements);
         if (PolygonResultValidator.validate(problem, candidate) != null) return Optional.of(incumbent);
-        return Optional.of(toResult(problem, candidate, incumbent.engine(), incumbent.engineVersion(), elapsed(start),
+        String engine = "validated-seed".equals(incumbent.engine()) ? "marker-compactor" : incumbent.engine();
+        return Optional.of(toResult(problem, candidate, engine, incumbent.engineVersion(), elapsed(start),
                 incumbent.requestedEngine(), incumbent.fallbackReason()));
     }
 

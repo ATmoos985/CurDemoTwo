@@ -49,6 +49,22 @@ class MarkerCompactorTests {
                 seed, System.nanoTime() - 1));
     }
 
+    @Test void denseContoursMoveTogetherAndKeepTheirExactOutlines() {
+        var vertices = new java.util.ArrayList<Point>();
+        for (int i = 0; i <= 24; i++) vertices.add(new Point(i,0));
+        for (int i = 24; i >= 0; i--) vertices.add(new Point(i,10));
+        var shape = new Shape("POLYGON",24,10,vertices);
+        var trial = marker(24, List.of(new Part(1,"panel",shape,3,false)), List.of());
+        var seed = List.of(new Placement(1,1,"panel",0,5,shape,0),
+                new Placement(2,1,"panel",0,15,shape,0),new Placement(3,1,"panel",0,28,shape,0));
+        assertTrue(MarkerCompactor.supports(trial,seed));
+        assertFalse(MarkerCompactor.supportsGapSearch(trial));
+        var output = compact(trial,seed);
+        assertEquals(30, length(output), 1e-6);
+        assertEquals(List.of(0d,10d,20d), output.stream().map(Placement::y).toList());
+        assertTrue(output.stream().allMatch(p -> p.shape().equals(shape)));
+    }
+
     private static List<Placement> fill(NestingProblem problem, List<Placement> fixed, Map<Integer,Integer> limits) {
         var fulfillment = problem.parts().stream().map(part -> {
             int count = (int) fixed.stream().filter(p -> p.demandId() == part.id()).count();

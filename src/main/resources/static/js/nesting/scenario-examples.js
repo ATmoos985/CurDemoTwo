@@ -62,10 +62,14 @@ export function garmentExample(id) {
     ]};
     const sample = samples[id];
     if (!sample) throw new Error('服装示例不存在');
-    return {schemaVersion:'1', unit:'mm', engine:'auto', timeLimitSeconds:id === 'GARMENT_FULL' ? 10 : 3,
-        material:{id:`DEMO-${id}`, shape:rectangle(1500,sample.height), continuesAfterRegion:false, exclusions:[]},
-        parts:sample.parts.map(([name,quantity,points], index) => ({id:index+1,name,quantity,allowRotation:false,
-            shape:polygon(points.map(([x,y]) => ({x,y})))})),
+    const parts = sample.parts.map(([name,quantity,points], index) => ({id:index+1,name,quantity,allowRotation:false,
+        shape:polygon(points.map(([x,y]) => ({x,y})))}));
+    return garmentContourProblem(`DEMO-${id}`, rectangle(1500,sample.height), parts, id === 'GARMENT_FULL' ? 10 : 3);
+}
+
+export function garmentContourProblem(materialId, sheet, parts, timeLimitSeconds) {
+    return {schemaVersion:'1', unit:'mm', engine:'auto', timeLimitSeconds,
+        material:{id:materialId, shape:sheet, continuesAfterRegion:false, exclusions:[]}, parts,
         process:{mode:'CONTOUR',feedMode:'SHEET',startCorner:'left-top',firstStageOrientation:'none',trimStart:0,
             minReusableWidth:0,minReusableHeight:0,kerf:0,objective:'MAXIMIZE_PIECE_AREA',pieceGap:0}};
 }

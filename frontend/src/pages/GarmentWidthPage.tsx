@@ -1,6 +1,13 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fmtN, toast } from '@static/app/js/util.js';
-import { MARKER_STYLES } from '@static/js/nesting/marker-demo.js';
+import {
+  DXF_TRIAL_STYLES,
+  GARMENT_TRIAL_STYLES,
+  MARKER_STYLES,
+  markerSizeLabels
+} from '@static/js/nesting/marker-demo.js';
+import { fourPieceReference } from '@static/js/nesting/dxf-reference.js';
+import { fourPieceOptimized } from '@static/js/nesting/four-piece-seed.js';
 import { DXF_GARMENT_STYLES } from '@static/js/nesting/dxf-garment-samples.js';
 import { OptimizationSession } from '@static/js/business/optimization/job-client.js';
 import {
@@ -17,34 +24,143 @@ import { createRollCanvas } from '@static/app/js/canvas/roll-canvas.js';
 import { showcaseScene } from '@static/app/js/model/showcase.js';
 import { useStudioStore } from '../store/useStudioStore';
 
-export const GarmentWidthPage: React.FC = () => {
-  const initialEx = GARMENT_EXAMPLES[0];
-  const [halfTurn, setHalfTurn] = useState<boolean>(false);
-  const [gapFill, setGapFill] = useState<boolean>(true);
-  const [exampleId, setExampleId] = useState<string>(initialEx.id);
+interface GarmentExample {
+  id: string;
+  name: string;
+  style: string;
+  widths: number[];
+  edge: number;
+  gsm?: number | null;
+  source?: string;
+  fabric?: string;
+  halfTurn?: boolean;
+  gapFill?: boolean;
+  benchmark?: {
+    width: number;
+    length: number;
+    counts: Record<string, number>;
+    utilization: number;
+    dxfUtilization: number;
+  };
+  [size: string]: any;
+}
+
+const EXAMPLES = GARMENT_EXAMPLES as GarmentExample[];
+
+type SelectedSource =
+  | { kind: 'row'; index: number }
+  | { kind: 'optimized' }
+  | { kind: 'reference' }
+  | null;
+
+function buildPreviewRow(layout: any, direction: string) {
+  const { request, result, verified } = layout;
+  return {
+    width: verified.widthMm,
+    layoutRequest: request,
+    result,
+    direction,
+    state: `${verified.pieceCount} 片 · 掉头 ${verified.rotatedCount} 片`,
+    use: {
+      length: verified.occupiedLengthMm,
+      utilization: verified.utilizationPercent,
+      gramsPerGarment: null
+    },
+    verified
+  };
+}
+
+function getOrderedSizes(style: string): string[] {
+  const dxf = EXAMPLES.find((e) => e.style === style && e.source);
+  const sizes: string[] = markerSizeLabels(style);
+  return dxf
+    ? [...sizes.filter((s) => dxf[s] > 0), ...sizes.filter((s) => !dxf[s])]
+    : sizes;
+}
+
+function buildSizeCounts(style: string, source?: Record<string, any>): Record<string, number> {
+  const dxf = EXAMPLES.find((e) => e.style === style && e.source);
+  const sizes: string[] = markerSizeLabels(style);
+  const out: Record<string, number> = {};
+  for (const s of sizes) {
+    const raw = source?.[s] ?? dxf?.[s] ?? 1;
+    out[s] = Number.isFinite(Number(raw)) ? Number(raw) : 0;
+  }
+  return out;
+}
+
+const QUICK_PILL_STYLES = [
+  ...DXF_TRIAL_STYLES.filter((s: any) => s.fabric === '面布'),
+  ...MARKER_STYLES
+];
+
+export const GarmentWidthPage: React.FC<{ exampleId?: string }> = ({
+  exampleId: routeExampleId
+}) => {
+  const resolveInitialExample = (id?: string): GarmentExample =>
+    EXAMPLES.find((e) => e.id === id) ?? EXAMPLES[0];
+
+  const initialEx = resolveInitialExample(routeExampleId);
+  const initialIsDxf = Boolean(initialEx.source);
+
+  const [currentExampleId, setCurrentExampleId] = useState<string>(initialEx.id);
   const [styleId, setStyleId] = useState<string>(initialEx.style);
-  const [countM, setCountM] = useState<number>(initialEx.M);
-  const [countL, setCountL] = useState<number>(initialEx.L);
+  const [halfTurn, setHalfTurn] = useState<boolean>(
+    initialIsDxf ? Boolean(initialEx.halfTurn) : false
+  );
+  const [gapFill, setGapFill] = useState<boolean>(
+    initialIsDxf ? Boolean(initialEx.gapFill) : true
+  );
+  const [sizeCounts, setSizeCounts] = useState<Record<string, number>>(() =>
+    buildSizeCounts(initialEx.style, initialEx)
+  );
   const [widthsText, setWidthsText] = useState<string>(initialEx.widths.join(', '));
   const [edgeMm, setEdgeMm] = useState<number>(initialEx.edge);
-  const [gsm, setGsm] = useState<number>(initialEx.gsm);
+  const [gsmText, setGsmText] = useState<string>(
+    initialEx.gsm != null ? String(initialEx.gsm) : ''
+  );
 
   const [rows, setRows] = useState<any[]>([]);
-  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [selectedSource, setSelectedSource] = useState<SelectedSource>(
+    initialEx.benchmark ? { kind: 'optimized' } : null
+  );
   const [isBusy, setIsBusy] = useState<boolean>(false);
   const [statusText, setStatusText] = useState<string>('待试算');
 
   const helpRef = useRef<HTMLDetailsElement | null>(null);
-  const inputLRef = useRef<HTMLInputElement | null>(null);
+  const sizeInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const inputWidthsRef = useRef<HTMLInputElement | null>(null);
   const canvasHostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<any>(null);
   const sessionRef = useRef<any>(null);
   const revisionRef = useRef<number>(0);
   const manualViewRef = useRef<boolean>(false);
+  const previousOptionsRef = useRef<{ halfTurn: boolean; gapFill: boolean } | null>(
+    initialIsDxf ? { halfTurn: false, gapFill: true } : null
+  );
 
   const setCanvasSpec = useStudioStore((s) => s.setCanvasSpec);
   const setActiveDemands2D = useStudioStore((s) => s.setActiveDemands2D);
+
+  const activeExample = useMemo(
+    () => EXAMPLES.find((e) => e.id === currentExampleId) || null,
+    [currentExampleId]
+  );
+  const benchmark = activeExample?.benchmark || null;
+  const isDxfStyleActive = useMemo(
+    () => Boolean(EXAMPLES.find((e) => e.style === styleId && e.source)),
+    [styleId]
+  );
+  const orderedSizes = useMemo(() => getOrderedSizes(styleId), [styleId]);
+
+  const referencePreview = useMemo(
+    () => (benchmark ? buildPreviewRow(fourPieceReference(), '按图复排') : null),
+    [benchmark]
+  );
+  const optimizedPreview = useMemo(
+    () => (benchmark ? buildPreviewRow(fourPieceOptimized(), '优化排料') : null),
+    [benchmark]
+  );
 
   useEffect(() => {
     sessionRef.current = new OptimizationSession();
@@ -57,53 +173,106 @@ export const GarmentWidthPage: React.FC = () => {
   }, []);
 
   const clearValidity = () => {
-    inputLRef.current?.setCustomValidity('');
+    Object.values(sizeInputRefs.current).forEach((el) => el?.setCustomValidity(''));
     inputWidthsRef.current?.setCustomValidity('');
   };
 
-  const resetResults = () => {
+  const resetResults = (hasBenchmark: boolean) => {
     clearValidity();
     setRows([]);
-    setSelectedIdx(null);
     manualViewRef.current = false;
-    canvasRef.current?.destroy();
-    canvasRef.current = null;
     setStatusText('待试算');
+    if (hasBenchmark) {
+      setSelectedSource({ kind: 'optimized' });
+    } else {
+      canvasRef.current?.destroy();
+      canvasRef.current = null;
+      setSelectedSource(null);
+    }
   };
 
-  const handleLoadExample = (id: string) => {
-    const ex = GARMENT_EXAMPLES.find((e: any) => e.id === id);
+  const applyExample = (ex: GarmentExample) => {
     if (!ex) return;
-    setExampleId(ex.id);
+    setCurrentExampleId(ex.id);
     setStyleId(ex.style);
-    setCountM(ex.M);
-    setCountL(ex.L);
+    setSizeCounts(buildSizeCounts(ex.style, ex));
     setEdgeMm(ex.edge);
-    setGsm(ex.gsm);
+    setGsmText(ex.gsm != null ? String(ex.gsm) : '');
     setWidthsText(ex.widths.join(', '));
-    resetResults();
+    const dxf = EXAMPLES.find((e) => e.style === ex.style && e.source);
+    if (dxf) {
+      if (!previousOptionsRef.current) {
+        previousOptionsRef.current = { halfTurn, gapFill };
+      }
+      setHalfTurn(Boolean(dxf.halfTurn));
+      setGapFill(Boolean(dxf.gapFill));
+    } else if (previousOptionsRef.current) {
+      setHalfTurn(previousOptionsRef.current.halfTurn);
+      setGapFill(previousOptionsRef.current.gapFill);
+      previousOptionsRef.current = null;
+    }
+    resetResults(Boolean(ex.benchmark));
   };
-
-  const selectedRow = selectedIdx != null ? rows[selectedIdx] || null : null;
 
   useEffect(() => {
-    if (!selectedRow?.result?.layout || !canvasHostRef.current) return;
+    if (routeExampleId) {
+      const target = EXAMPLES.find((e) => e.id === routeExampleId);
+      if (target && target.id !== currentExampleId) {
+        applyExample(target);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeExampleId]);
+
+  const handleStyleChange = (nextStyle: string) => {
+    const dxf = EXAMPLES.find((e) => e.style === nextStyle && e.source);
+    setStyleId(nextStyle);
+    setCurrentExampleId('');
+    setSizeCounts((prev) => buildSizeCounts(nextStyle, { ...dxf, ...prev }));
+    if (dxf) {
+      if (!previousOptionsRef.current) {
+        previousOptionsRef.current = { halfTurn, gapFill };
+      }
+      setHalfTurn(Boolean(dxf.halfTurn));
+      setGapFill(Boolean(dxf.gapFill));
+    } else if (previousOptionsRef.current) {
+      setHalfTurn(previousOptionsRef.current.halfTurn);
+      setGapFill(previousOptionsRef.current.gapFill);
+      previousOptionsRef.current = null;
+    }
+    resetResults(false);
+  };
+
+  const handlePillClick = (pillStyleId: string) => {
+    const dxfEx = EXAMPLES.find((e) => e.style === pillStyleId && e.source);
+    if (dxfEx) {
+      applyExample(dxfEx);
+      return;
+    }
+    handleStyleChange(pillStyleId);
+  };
+
+  const displayedRow = useMemo(() => {
+    if (!selectedSource) return null;
+    if (selectedSource.kind === 'row') return rows[selectedSource.index] || null;
+    if (selectedSource.kind === 'optimized') return optimizedPreview;
+    if (selectedSource.kind === 'reference') return referencePreview;
+    return null;
+  }, [selectedSource, rows, optimizedPreview, referencePreview]);
+
+  useEffect(() => {
+    if (!displayedRow?.result?.layout || !canvasHostRef.current) return;
     if (!canvasRef.current) {
       canvasRef.current = createRollCanvas(canvasHostRef.current);
     }
     canvasRef.current.setScene(
-      (showcaseScene as any)(
-        selectedRow.layoutRequest,
-        selectedRow.result,
-        0,
-        {
-          occupiedLengthMm: selectedRow.use?.length,
-          gapFillPlacements: selectedRow.result?.marker?.gapFillPlacements
-        }
-      ),
+      (showcaseScene as any)(displayedRow.layoutRequest, displayedRow.result, 0, {
+        occupiedLengthMm: displayedRow.use?.length,
+        gapFillPlacements: displayedRow.result?.marker?.gapFillPlacements
+      }),
       { refit: true }
     );
-  }, [selectedRow]);
+  }, [displayedRow]);
 
   const handleStop = () => {
     revisionRef.current++;
@@ -116,14 +285,14 @@ export const GarmentWidthPage: React.FC = () => {
   };
 
   const handleExportJson = () => {
-    if (!selectedRow?.result) return;
+    if (!displayedRow?.result) return;
     const blob = new Blob(
       [
         JSON.stringify(
           {
-            request: selectedRow.layoutRequest,
-            result: selectedRow.result,
-            consumption: selectedRow.use
+            request: displayedRow.layoutRequest,
+            result: displayedRow.result,
+            consumption: displayedRow.use
           },
           null,
           2
@@ -134,28 +303,42 @@ export const GarmentWidthPage: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `marker-${selectedRow.width}mm.json`;
+    a.download = `marker-${displayedRow.width}mm.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  const handleToTask = () => {
-    if (!selectedRow?.layoutRequest?.problem) return;
-    const prob = selectedRow.layoutRequest.problem;
+  const resolveMaterialMeta = () => {
+    const dxfTrial = DXF_TRIAL_STYLES.find((s: any) => s.id === styleId);
+    const dxfLegacy = (DXF_GARMENT_STYLES as any)[styleId];
     const styleName =
-      MARKER_STYLES.find((s: any) => s.id === styleId)?.name || '服装唛架';
-    const dxfMeta = (DXF_GARMENT_STYLES as any)[styleId];
+      GARMENT_TRIAL_STYLES.find((s: any) => s.id === styleId)?.name || '服装唛架';
+    const materialModel =
+      dxfTrial?.fabric ||
+      dxfLegacy?.materialModel ||
+      (displayedRow ? `GARMENT-${Math.round(displayedRow.width)}` : 'TC涤棉-B2026');
+    const externalRef = dxfTrial
+      ? `${dxfTrial.source}.dxf · ${fmtN(displayedRow?.width ?? 1780, 1)}mm`
+      : dxfLegacy
+      ? `CAD纸样 ${dxfLegacy.file} · ${fmtN(displayedRow?.width ?? 1650, 1)}mm`
+      : `唛架试算 ${fmtN(displayedRow?.width ?? 1500, 1)}mm (${
+          displayedRow?.direction || ''
+        })`;
+    return { styleName, materialModel, externalRef };
+  };
+
+  const handleToTask = () => {
+    if (!displayedRow?.layoutRequest?.problem) return;
+    const prob = displayedRow.layoutRequest.problem;
+    const { styleName, materialModel, externalRef } = resolveMaterialMeta();
     const draft = {
-      name: `${styleName} · ${fmtN(selectedRow.width, 0)}mm 幅宽试算转排产`,
+      name: `${styleName} · ${fmtN(displayedRow.width, 0)}mm 幅宽试算转排产`,
       problemType: 'NESTING_2D',
-      materialModel:
-        dxfMeta?.materialModel || `GARMENT-${Math.round(selectedRow.width)}`,
-      externalRef: dxfMeta
-        ? `CAD纸样 ${dxfMeta.file} · ${fmtN(selectedRow.width, 1)}mm`
-        : `唛架试算 ${fmtN(selectedRow.width, 1)}mm (${selectedRow.direction})`,
+      materialModel,
+      externalRef,
       process: {
         bedLength: Math.ceil(
-          selectedRow.use?.length || prob.material?.shape?.height || 5000
+          displayedRow.use?.length || prob.material?.shape?.height || 5000
         ),
         trimStart: 0,
         pieceGap: prob.process?.pieceGap ?? 0,
@@ -179,9 +362,9 @@ export const GarmentWidthPage: React.FC = () => {
   };
 
   const handleToStudio2D = () => {
-    if (!selectedRow?.layoutRequest?.problem) return;
-    const prob = selectedRow.layoutRequest.problem;
-    const dxfMeta = (DXF_GARMENT_STYLES as any)[styleId];
+    if (!displayedRow?.layoutRequest?.problem) return;
+    const prob = displayedRow.layoutRequest.problem;
+    const { materialModel } = resolveMaterialMeta();
     const demands = (prob.parts || []).map((p: any, i: number) => ({
       id: i + 1,
       name: p.name || String(p.id),
@@ -194,27 +377,41 @@ export const GarmentWidthPage: React.FC = () => {
     }));
     setCanvasSpec({
       canvasMode: 'FREE_CANVAS',
-      canvasWidthMm: selectedRow.width,
+      canvasWidthMm: displayedRow.width,
       canvasLengthMm: Math.ceil(
-        selectedRow.use?.length || prob.material?.shape?.height || 2000
+        displayedRow.use?.length || prob.material?.shape?.height || 2000
       ),
-      materialModel2D:
-        dxfMeta?.materialModel || `GARMENT-${Math.round(selectedRow.width)}`
+      materialModel2D: materialModel
     });
     setActiveDemands2D(demands);
-    toast(`已将 ${selectedRow.width}mm 门幅与裁片带入二维自由画布`);
+    toast(`已将 ${displayedRow.width}mm 门幅与裁片带入二维自由画布`);
     location.hash = '#/workbench';
   };
+
+  const totalGarmentCount = useMemo(
+    () =>
+      orderedSizes.reduce((sum, sz) => sum + (Number(sizeCounts[sz]) || 0), 0),
+    [orderedSizes, sizeCounts]
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isBusy) return;
     clearValidity();
 
-    const totalCount = (Number(countM) || 0) + (Number(countL) || 0);
+    const sizes: Record<string, number> = Object.fromEntries(
+      orderedSizes.map((sz) => [sz, Math.trunc(Number(sizeCounts[sz]) || 0)])
+    );
+    const totalCount = Object.values(sizes).reduce((sum, q) => sum + q, 0);
     if (totalCount < 1 || totalCount > 12) {
-      inputLRef.current?.setCustomValidity('每版合计须在 1–12 件之间');
-      inputLRef.current?.reportValidity();
+      const activeEl = document.activeElement as HTMLInputElement | null;
+      const targetInput =
+        orderedSizes
+          .map((sz) => sizeInputRefs.current[sz])
+          .find((el) => el && el === activeEl) ||
+        sizeInputRefs.current[orderedSizes[orderedSizes.length - 1]];
+      targetInput?.setCustomValidity('每版合计须在 1–12 件之间');
+      targetInput?.reportValidity();
       return;
     }
 
@@ -227,11 +424,16 @@ export const GarmentWidthPage: React.FC = () => {
       return;
     }
 
+    const parsedGsm = gsmText.trim() === '' ? NaN : Number(gsmText);
+    const parsedEdge = Number(edgeMm) || 0;
+    const compare = halfTurn;
+    const filling = gapFill;
+
     const mine = ++revisionRef.current;
-    resetResults();
-    const sizes = { M: Number(countM) || 0, L: Number(countL) || 0 };
+    resetResults(Boolean(benchmark));
+
     const initialRows: any[] = widths.flatMap((width) =>
-      (halfTurn ? [false, true] : [false]).map((ht) => ({
+      (compare ? [false, true] : [false]).map((ht) => ({
         width,
         halfTurn: ht,
         direction: ht ? '允许掉头' : '固定方向',
@@ -242,14 +444,14 @@ export const GarmentWidthPage: React.FC = () => {
           sizes,
           crypto.randomUUID(),
           ht,
-          gapFill
+          filling
         )
       }))
     );
 
     setRows([...initialRows]);
     setIsBusy(true);
-    let currentSelectedIdx: number | null = null;
+    let bestRowIdx: number | null = null;
 
     try {
       for (let i = 0; i < initialRows.length; i++) {
@@ -284,8 +486,8 @@ export const GarmentWidthPage: React.FC = () => {
               fabricConsumption(
                 result,
                 row.width,
-                Number(edgeMm) || 0,
-                Number(gsm) || 200,
+                parsedEdge,
+                parsedGsm,
                 totalCount
               )
           };
@@ -313,7 +515,7 @@ export const GarmentWidthPage: React.FC = () => {
             job.state,
             row.trial,
             baseline?.trial,
-            gapFill
+            filling
           );
           row.usedFixed = chosen !== row.trial;
           row.layoutRequest = chosen.request;
@@ -328,15 +530,17 @@ export const GarmentWidthPage: React.FC = () => {
               job.state === 'FAILED' ? '试算失败' : '已停止'
             } · ${row.state}`;
           }
-          if (
-            !manualViewRef.current &&
-            row.result?.layout &&
-            (currentSelectedIdx == null ||
-              effectiveUtilization(row.use) >
-                effectiveUtilization(initialRows[currentSelectedIdx].use))
-          ) {
-            currentSelectedIdx = i;
-            setSelectedIdx(i);
+          const preferTrial =
+            bestRowIdx == null ||
+            effectiveUtilization(row.use) >
+              effectiveUtilization(initialRows[bestRowIdx].use);
+          if (!manualViewRef.current && row.result?.layout && preferTrial) {
+            if (bestRowIdx == null && !row.use && benchmark) {
+              // Keep verified preview until at least one live row is complete, unless no preview exists
+            } else {
+              bestRowIdx = i;
+              setSelectedSource({ kind: 'row', index: i });
+            }
           }
         } catch (err: any) {
           if (mine !== revisionRef.current) return;
@@ -348,7 +552,7 @@ export const GarmentWidthPage: React.FC = () => {
       const completeCount = initialRows.filter((r) => r.use).length;
       setStatusText(
         `试算结束 · ${completeCount} / ${initialRows.length} 个${
-          halfTurn ? '方案' : '幅宽'
+          compare ? '方案' : '幅宽'
         }齐套`
       );
     } finally {
@@ -359,19 +563,36 @@ export const GarmentWidthPage: React.FC = () => {
   };
 
   const validRows = rows.filter((r) => r.use);
-  const lowestGrams = validRows.length
-    ? Math.min(...validRows.map((r) => r.use.gramsPerGarment))
+  const finiteGramRows = validRows.filter((r) =>
+    Number.isFinite(r.use?.gramsPerGarment)
+  );
+  const lowestGrams = finiteGramRows.length
+    ? Math.min(...finiteGramRows.map((r) => r.use.gramsPerGarment))
     : Infinity;
   const highestUtil = validRows.length
     ? Math.max(...validRows.map((r) => effectiveUtilization(r.use)))
     : -Infinity;
   const lowestRow =
-    validRows.find((r) => r.use.gramsPerGarment === lowestGrams) || null;
+    finiteGramRows.find((r) => r.use.gramsPerGarment === lowestGrams) || null;
   const highestRow =
     validRows.find((r) => effectiveUtilization(r.use) === highestUtil) || null;
+  const recommendedRow = lowestRow || highestRow;
 
   const buildTrialDetailNodes = (row: any) => {
     const info: string[] = halfTurn ? [row.direction] : [];
+    if (referencePreview && row.use) {
+      const delta = row.use.utilization - referencePreview.use.utilization;
+      info.push(`较按图复排 ${delta > 0 ? '+' : ''}${fmtN(delta, 2)} 个百分点`);
+    }
+    const seed = row.result?.marker?.trials?.find((t: any) => t.phase === 'SEED');
+    if (seed && row.use) {
+      const improvement = seed.occupiedLengthMm - row.use.length;
+      info.push(
+        improvement > 0.005
+          ? `较初排缩短 ${fmtN(improvement, 2)} mm`
+          : '沿用已验初排'
+      );
+    }
     if (row.retryNote) info.push(row.retryNote);
     if (row.halfTurn && row.result?.layout) {
       if (row.usedFixed) info.push('沿用固定方向');
@@ -417,7 +638,7 @@ export const GarmentWidthPage: React.FC = () => {
       }
     }
     const saved = row.use && compactionSavingMm(row.result.marker.trials);
-    if (saved > 0) {
+    if (saved > 0 && !seed) {
       info.push(
         `${row.usedFixed ? '固定方案' : ''}压紧节省 ${
           saved < 0.01 ? '不足 0.01' : fmtN(saved, 2)
@@ -447,7 +668,9 @@ export const GarmentWidthPage: React.FC = () => {
               ref={helpRef}
               onKeyDown={(e) => {
                 if (e.key === 'Escape' && helpRef.current?.open) {
+                  e.preventDefault();
                   helpRef.current.open = false;
+                  helpRef.current.querySelector('summary')?.focus();
                 }
               }}
             >
@@ -478,7 +701,7 @@ export const GarmentWidthPage: React.FC = () => {
                   </a>
                 </p>
                 <p id="width-help">
-                  M、L 码每版合计 1–12 件。有效幅宽可填 1–8 个值，范围 1200–2000
+                  每版合计 1–12 件。有效幅宽可填 1–8 个值，范围 1200–2000
                   mm，用逗号或空格分隔。
                 </p>
                 <p id="weight-help">
@@ -492,18 +715,14 @@ export const GarmentWidthPage: React.FC = () => {
               id="garment-style-pills"
               aria-label="快捷样板选择"
             >
-              {MARKER_STYLES.map((s: any) => (
+              {QUICK_PILL_STYLES.map((s: any) => (
                 <button
                   key={s.id}
                   type="button"
                   className={`style-pill ${styleId === s.id ? 'on' : ''}`}
                   data-style-pill={s.id}
                   disabled={isBusy}
-                  onClick={() => {
-                    setStyleId(s.id);
-                    setExampleId('');
-                    resetResults();
-                  }}
+                  onClick={() => handlePillClick(s.id)}
                 >
                   {s.name}
                 </button>
@@ -521,7 +740,7 @@ export const GarmentWidthPage: React.FC = () => {
                 checked={halfTurn}
                 onChange={(e) => {
                   setHalfTurn(e.target.checked);
-                  resetResults();
+                  resetResults(Boolean(benchmark));
                 }}
               />
               <label htmlFor="garment-gap-fill">同款裁片补空</label>
@@ -534,7 +753,7 @@ export const GarmentWidthPage: React.FC = () => {
                 checked={gapFill}
                 onChange={(e) => {
                   setGapFill(e.target.checked);
-                  resetResults();
+                  resetResults(Boolean(benchmark));
                 }}
               />
               <label htmlFor="garment-example">试算示例</label>
@@ -543,13 +762,18 @@ export const GarmentWidthPage: React.FC = () => {
                 id="garment-example"
                 name="example"
                 disabled={isBusy}
-                value={exampleId}
-                onChange={(e) => handleLoadExample(e.target.value)}
+                value={currentExampleId}
+                onChange={(e) => {
+                  const ex = EXAMPLES.find(
+                    (item) => item.id === e.target.value
+                  );
+                  if (ex) applyExample(ex);
+                }}
               >
                 <option value="" disabled>
                   自定义参数
                 </option>
-                {GARMENT_EXAMPLES.map((e: any) => (
+                {EXAMPLES.map((e) => (
                   <option key={e.id} value={e.id}>
                     {e.name}
                   </option>
@@ -562,53 +786,48 @@ export const GarmentWidthPage: React.FC = () => {
                 name="style"
                 disabled={isBusy}
                 value={styleId}
-                onChange={(e) => {
-                  setStyleId(e.target.value);
-                  setExampleId('');
-                  resetResults();
-                }}
+                onChange={(e) => handleStyleChange(e.target.value)}
               >
-                {MARKER_STYLES.map((s: any) => (
+                {GARMENT_TRIAL_STYLES.map((s: any) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
                   </option>
                 ))}
               </select>
-              <label htmlFor="garment-m">M 码（件/版）</label>
-              <input
-                className="field"
-                id="garment-m"
-                name="M"
-                type="number"
-                min={0}
-                max={12}
-                required
-                disabled={isBusy}
-                value={countM}
-                onChange={(e) => {
-                  setCountM(Number(e.target.value));
-                  setExampleId('');
-                  resetResults();
-                }}
-              />
-              <label htmlFor="garment-l">L 码（件/版）</label>
-              <input
-                ref={inputLRef}
-                className="field"
-                id="garment-l"
-                name="L"
-                type="number"
-                min={0}
-                max={12}
-                required
-                disabled={isBusy}
-                value={countL}
-                onChange={(e) => {
-                  setCountL(Number(e.target.value));
-                  setExampleId('');
-                  resetResults();
-                }}
-              />
+
+              <div id="garment-sizes">
+                {orderedSizes.map((size) => {
+                  const inputId = `garment-${size.toLowerCase()}`;
+                  return (
+                    <React.Fragment key={size}>
+                      <label htmlFor={inputId}>{size} 码（件/版）</label>
+                      <input
+                        ref={(el) => {
+                          sizeInputRefs.current[size] = el;
+                        }}
+                        className="field"
+                        id={inputId}
+                        name={size}
+                        type="number"
+                        min={0}
+                        max={12}
+                        required
+                        disabled={isBusy}
+                        value={sizeCounts[size] ?? 0}
+                        onChange={(e) => {
+                          setSizeCounts((prev) => ({
+                            ...prev,
+                            [size]: Number(e.target.value)
+                          }));
+                          setCurrentExampleId('');
+                          resetResults(false);
+                        }}
+                      />
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+
               <label htmlFor="garment-widths">有效幅宽（mm）</label>
               <input
                 ref={inputWidthsRef}
@@ -621,8 +840,8 @@ export const GarmentWidthPage: React.FC = () => {
                 value={widthsText}
                 onChange={(e) => {
                   setWidthsText(e.target.value);
-                  setExampleId('');
-                  resetResults();
+                  setCurrentExampleId('');
+                  resetResults(false);
                 }}
               />
               <label htmlFor="garment-edge">两侧布边合计（mm）</label>
@@ -638,8 +857,8 @@ export const GarmentWidthPage: React.FC = () => {
                 value={edgeMm}
                 onChange={(e) => {
                   setEdgeMm(Number(e.target.value));
-                  setExampleId('');
-                  resetResults();
+                  setCurrentExampleId('');
+                  resetResults(false);
                 }}
               />
               <label htmlFor="garment-gsm">克重（g/m²）</label>
@@ -651,13 +870,14 @@ export const GarmentWidthPage: React.FC = () => {
                 min="0.1"
                 step="0.1"
                 aria-describedby="weight-help"
-                required
+                required={!isDxfStyleActive}
+                placeholder={isDxfStyleActive ? '选填（留空不计克重）' : undefined}
                 disabled={isBusy}
-                value={gsm}
+                value={gsmText}
                 onChange={(e) => {
-                  setGsm(Number(e.target.value));
-                  setExampleId('');
-                  resetResults();
+                  setGsmText(e.target.value);
+                  setCurrentExampleId('');
+                  resetResults(false);
                 }}
               />
             </form>
@@ -677,7 +897,11 @@ export const GarmentWidthPage: React.FC = () => {
               <div>
                 <small>推荐最优门幅</small>
                 <b>
-                  {lowestRow ? fmtN(lowestRow.width, 1) : '—'}
+                  {recommendedRow
+                    ? fmtN(recommendedRow.width, 1)
+                    : optimizedPreview
+                    ? fmtN(optimizedPreview.width, 1)
+                    : '—'}
                   <em>mm</em>
                 </b>
               </div>
@@ -686,6 +910,8 @@ export const GarmentWidthPage: React.FC = () => {
                 <b>
                   {highestRow
                     ? fmtN(effectiveUtilization(highestRow.use), 2)
+                    : optimizedPreview
+                    ? fmtN(optimizedPreview.use.utilization, 2)
                     : '—'}
                   <em>%</em>
                 </b>
@@ -693,7 +919,7 @@ export const GarmentWidthPage: React.FC = () => {
               <div>
                 <small>本版配码 / 已齐套</small>
                 <b>
-                  {(Number(countM) || 0) + (Number(countL) || 0)}
+                  {totalGarmentCount}
                   <em>
                     件 · {validRows.length}/{rows.length || 0}
                   </em>
@@ -705,6 +931,53 @@ export const GarmentWidthPage: React.FC = () => {
           <div className="pane-h">
             候选幅宽比较<span className="sub">按实算齐套结果对比单耗与利用率</span>
           </div>
+
+          {benchmark && referencePreview && optimizedPreview && (
+            <div id="garment-reference">
+              <span id="garment-benchmark">
+                {`原报告 ${benchmark.utilization.toFixed(
+                  2
+                )}% · DXF 同版长换算 ${benchmark.dxfUtilization.toFixed(2)}%（${
+                  benchmark.width
+                } × ${benchmark.length} mm，${Object.entries(benchmark.counts)
+                  .map(([size, qty]) => `${size} 码 ${qty} 件`)
+                  .join('、')}）`}
+              </span>
+              <span role="group" aria-label="排料方案" style={{ display: 'inline-flex', gap: 6 }}>
+                <button
+                  className={`btn sm ${
+                    selectedSource?.kind === 'optimized' ? 'pri' : ''
+                  }`}
+                  id="garment-optimum"
+                  type="button"
+                  aria-pressed={selectedSource?.kind === 'optimized'}
+                  onClick={() => {
+                    manualViewRef.current = true;
+                    setSelectedSource({ kind: 'optimized' });
+                  }}
+                >
+                  {`优化排料 · ${optimizedPreview.verified.occupiedLengthMm.toFixed(
+                    2
+                  )} mm · ${optimizedPreview.verified.utilizationPercent.toFixed(2)}%`}
+                </button>
+                <button
+                  className="btn sm"
+                  id="garment-replay"
+                  type="button"
+                  aria-pressed={selectedSource?.kind === 'reference'}
+                  onClick={() => {
+                    manualViewRef.current = true;
+                    setSelectedSource({ kind: 'reference' });
+                  }}
+                >
+                  {`按图复排 · ${referencePreview.verified.occupiedLengthMm.toFixed(
+                    2
+                  )} mm · ${referencePreview.verified.utilizationPercent.toFixed(2)}%`}
+                </button>
+              </span>
+            </div>
+          )}
+
           <div className="garment-results">
             <table className="t">
               <thead>
@@ -730,22 +1003,31 @@ export const GarmentWidthPage: React.FC = () => {
                           ? ' · 最高含补片利用率'
                           : ' · 最高齐套利用率'
                         : ''}
-                      {r.use?.gramsPerGarment === lowestGrams
+                      {Number.isFinite(r.use?.gramsPerGarment) &&
+                      r.use.gramsPerGarment === lowestGrams
                         ? ' · 当前最低单耗'
                         : ''}
                       {buildTrialDetailNodes(r)}
                     </td>
                     <td className="num">
-                      {r.use ? fmtN(r.use.length, 2) : '—'}
+                      {Number.isFinite(r.use?.length)
+                        ? fmtN(r.use.length, 2)
+                        : '—'}
                     </td>
                     <td className="num">
-                      {r.use ? fmtN(r.use.utilization, 2) : '—'}
+                      {Number.isFinite(r.use?.utilization)
+                        ? fmtN(r.use.utilization, 2)
+                        : '—'}
                     </td>
                     <td className="num">
-                      {r.use ? fmtN(r.use.lengthPerGarment, 2) : '—'}
+                      {Number.isFinite(r.use?.lengthPerGarment)
+                        ? fmtN(r.use.lengthPerGarment, 2)
+                        : '—'}
                     </td>
                     <td className="num">
-                      {r.use ? fmtN(r.use.gramsPerGarment, 2) : '—'}
+                      {Number.isFinite(r.use?.gramsPerGarment)
+                        ? fmtN(r.use.gramsPerGarment, 2)
+                        : '—'}
                     </td>
                     {gapFill && (
                       <td className="num">
@@ -766,10 +1048,13 @@ export const GarmentWidthPage: React.FC = () => {
                           className="btn sm"
                           type="button"
                           aria-label={`查看 ${r.width} mm ${r.direction}排料图`}
-                          aria-pressed={selectedIdx === i}
+                          aria-pressed={
+                            selectedSource?.kind === 'row' &&
+                            selectedSource.index === i
+                          }
                           onClick={() => {
                             manualViewRef.current = true;
-                            setSelectedIdx(i);
+                            setSelectedSource({ kind: 'row', index: i });
                           }}
                         >
                           查看
@@ -786,12 +1071,12 @@ export const GarmentWidthPage: React.FC = () => {
 
           <div className="pane-h">
             <span id="garment-view">
-              {selectedRow
-                ? `排料图 · ${fmtN(selectedRow.width, 1)} mm · ${
-                    selectedRow.usedFixed
+              {displayedRow
+                ? `排料图 · ${fmtN(displayedRow.width, 1)} mm · ${
+                    displayedRow.usedFixed
                       ? '沿用固定方向'
-                      : selectedRow.direction
-                  } · ${selectedRow.state}`
+                      : displayedRow.direction
+                  } · ${displayedRow.state}`
                 : '排料图'}
             </span>
             <span className="sp" />
@@ -799,7 +1084,7 @@ export const GarmentWidthPage: React.FC = () => {
               type="button"
               className="btn sm"
               id="garment-export"
-              disabled={!selectedRow?.result?.layout}
+              disabled={!displayedRow?.result?.layout}
               onClick={handleExportJson}
             >
               导出唛架 JSON
@@ -807,7 +1092,7 @@ export const GarmentWidthPage: React.FC = () => {
             <button
               type="button"
               className="btn sm"
-              disabled={!selectedRow?.result?.layout}
+              disabled={!displayedRow?.result?.layout}
               onClick={handleToStudio2D}
             >
               送入二维自由画布 ↗
@@ -816,7 +1101,7 @@ export const GarmentWidthPage: React.FC = () => {
               type="button"
               className="btn sm pri"
               id="garment-to-task"
-              disabled={!selectedRow?.result?.layout}
+              disabled={!displayedRow?.result?.layout}
               title="将当前选中的门幅与样板裁片带入新建二维生产任务"
               onClick={handleToTask}
             >

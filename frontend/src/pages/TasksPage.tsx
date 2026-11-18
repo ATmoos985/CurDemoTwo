@@ -275,7 +275,7 @@ export const TasksPage: React.FC = () => {
                             {r.completed}
                             <span className="muted">
                               {' '}
-                              / {r.total} 件 ({Math.round(pct)}%)
+                              / {r.total} {isSlitting ? '卷' : '件'} ({Math.round(pct)}%)
                             </span>
                           </span>
                           <span className="bar" aria-hidden="true">

@@ -16,6 +16,28 @@ import tools.jackson.databind.json.JsonMapper;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MarkerOptimizationTests {
+    @Test void validatedStartingLayoutParticipatesInActualCompactionAndRejectsBadGeometry() {
+        var r = request("trials");
+        var a = new OptimizationRequest.InitialPlacement(1,0d,0d,0);
+        var b = new OptimizationRequest.InitialPlacement(1,0d,140d,0);
+        var poses = List.of(a,b);
+        var engine = new TrialsEngine();
+        var solver = new SolverFactory(List.of(engine));
+        var input = new OptimizationRequest(r.schemaVersion(),r.problemType(),r.clientRequestId(),r.problem(),false,true,
+                new OptimizationRequest.Strategy("marker-shortening","2",3,null,poses));
+        var outcome = MarkerOptimization.solve(input,solver,ignored->{});
+        assertEquals("SEED", outcome.marker().trials().get(0).phase());
+        assertEquals(240, outcome.marker().firstOccupiedLengthMm(),.00001);
+        assertEquals("COMPACTION", outcome.marker().trials().get(outcome.marker().trials().size()-1).phase());
+        assertEquals(200, outcome.marker().occupiedLengthMm(),.00001);
+        assertEquals("marker-compactor",outcome.layout().engine());
+        assertEquals(2,outcome.layout().placements().size());
+        for (var invalid : List.of(List.of(a),List.of(a,a),List.of(a,new OptimizationRequest.InitialPlacement(1,0d,130d,180)),
+                List.of(a,new OptimizationRequest.InitialPlacement(1,0d,999d,0)),
+                List.of(a,new OptimizationRequest.InitialPlacement(2,0d,130d,0)))) {
+            assertThrows(IllegalArgumentException.class,()->solver.validateMarkerSeed(r.nestingProblem(),invalid));
+        }
+    }
     @TempDir Path temp;
     static OptimizationRequest request(String engine) {
         return new OptimizationRequest("2.0","NESTING_2D","marker-001",
