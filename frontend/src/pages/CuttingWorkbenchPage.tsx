@@ -8,6 +8,7 @@ import {
   Scenario2DType
 } from '../store/useStudioStore';
 import { CadCanvasView } from '../components/CadCanvasView';
+import { ModalDialog } from '../components/ModalDialog';
 import { OptimizationSession } from '@static/js/business/optimization/job-client.js';
 import { showcaseScene } from '@static/app/js/model/showcase.js';
 import { rectangle, shapeArea } from '@static/js/canvas/nesting-scene.js';
@@ -313,6 +314,7 @@ export const CuttingWorkbenchPage: React.FC<{
     loadClusterInto2D,
     loadClusterInto1D,
     loadDemandFamilyIntoWorkbench,
+    syncDemandFamilyProgress,
     activeDimension,
     setActiveDimension,
     scenario2D,
@@ -377,8 +379,11 @@ export const CuttingWorkbenchPage: React.FC<{
   const [rolls, setRolls] = useState<any[]>([]);
   const [remnants, setRemnants] = useState<any[]>([]);
   const [poolFamilies, setPoolFamilies] = useState<DemandFamilySummary[]>([]);
+  const [taskSchemes, setTaskSchemes] = useState<any[]>([]);
   const [demandSourceTab, setDemandSourceTab] = useState<'POOL' | 'TEMPLATE'>('TEMPLATE');
   const [activeClusterQuickId, setActiveClusterQuickId] = useState('DXF_1226');
+  const [overviewModalOpen, setOverviewModalOpen] = useState(false);
+  const [overviewTab, setOverviewTab] = useState<'progress' | 'edit'>('progress');
 
   const [workerCount, setWorkerCount] = useState<number>(6);
   const [vertical, setVertical] = useState(true);
@@ -404,18 +409,32 @@ export const CuttingWorkbenchPage: React.FC<{
   const canvasInstanceRef = useRef<any>(null);
   const activeSessionsRef = useRef<OptimizationSession[]>([]);
 
-  const reloadReferenceData = async () => {
-    const [rList, remList, famList] = await Promise.all([
+  const reloadReferenceData = async (explicitTaskId?: string | null) => {
+    const curTaskId =
+      explicitTaskId !== undefined
+        ? explicitTaskId
+        : activeDimension === '2D'
+        ? loadedTaskId
+        : slitLoadedTaskId;
+    const [rList, remList, famList, schList] = await Promise.all([
       requestJSON('/api/rolls').catch(() => []),
       requestJSON('/api/remnants').catch(() => []),
-      requestJSON('/api/v2/demand-pool').catch(() => [])
+      requestJSON('/api/v2/demand-pool').catch(() => []),
+      curTaskId
+        ? requestJSON(`/api/v2/schemes?taskId=${encodeURIComponent(curTaskId)}`).catch(() => [])
+        : Promise.resolve([])
     ]);
     setRolls(Array.isArray(rList) ? rList : []);
     setRemnants(Array.isArray(remList) ? remList : []);
     const fams: DemandFamilySummary[] = Array.isArray(famList) ? famList : [];
     setPoolFamilies(fams);
-    if (fams.some((f) => f.openTotal > 0)) {
-      setDemandSourceTab((prev) => (loadedTaskId || slitLoadedTaskId ? 'POOL' : prev));
+    setTaskSchemes(Array.isArray(schList) ? schList : []);
+    if (curTaskId) {
+      const matched = fams.find((f) => f.id === curTaskId);
+      if (matched) {
+        syncDemandFamilyProgress(matched);
+      }
+      setDemandSourceTab('POOL');
     }
     return fams;
   };
@@ -451,6 +470,17 @@ export const CuttingWorkbenchPage: React.FC<{
       })
       .catch((e) => toast('加载需求族失败：' + e.message, true));
   }, [taskId]);
+
+  useEffect(() => {
+    const curTaskId = activeDimension === '2D' ? loadedTaskId : slitLoadedTaskId;
+    if (!curTaskId) {
+      setTaskSchemes([]);
+      return;
+    }
+    requestJSON(`/api/v2/schemes?taskId=${encodeURIComponent(curTaskId)}`)
+      .then((list) => setTaskSchemes(Array.isArray(list) ? list : []))
+      .catch(() => setTaskSchemes([]));
+  }, [activeDimension, loadedTaskId, slitLoadedTaskId]);
 
   const passedRolls = useMemo(
     () => rolls.filter((r) => r.inspectionStatus === 'PASSED'),
@@ -544,12 +574,20 @@ export const CuttingWorkbenchPage: React.FC<{
 
   const handleRunSolve2D = async () => {
     if (runningSolve) return;
-    const validDemands = activeDemands2D.filter(
+    let validDemands = activeDemands2D.filter(
       (d) => d.quantity > 0 && d.width > 0 && d.length > 0
     );
     if (!validDemands.length) {
-      toast('请先在左侧选取需求族、载入需求模板或添加有效裁片需求', true);
-      return;
+      const retrial = activeDemands2D
+        .filter((d) => (d.orderedQty || 0) > 0 && d.width > 0 && d.length > 0)
+        .map((d) => ({ ...d, quantity: d.orderedQty || 1 }));
+      if (retrial.length > 0) {
+        validDemands = retrial;
+        toast('该需求族已全部排完，本次按原单总量进行重排对比试算');
+      } else {
+        toast('请先在左侧选取需求族、载入需求模板或添加有效裁片需求', true);
+        return;
+      }
     }
 
     const chosenDefs = STRATEGIES_2D.filter((s) => selectedStrategies2D.includes(s.id));
@@ -778,10 +816,18 @@ export const CuttingWorkbenchPage: React.FC<{
 
   const handleRunSolve1D = async () => {
     if (runningSolve) return;
-    const validOrders = slitOrders.filter((o) => o.quantity > 0 && o.widthMm > 0);
+    let validOrders = slitOrders.filter((o) => o.quantity > 0 && o.widthMm > 0);
     if (!validOrders.length) {
-      toast('请先在左侧载入分条需求族或添加有效分条规格', true);
-      return;
+      const retrial = slitOrders
+        .filter((o) => (o.orderedQty || 0) > 0 && o.widthMm > 0)
+        .map((o) => ({ ...o, quantity: o.orderedQty || 1 }));
+      if (retrial.length > 0) {
+        validOrders = retrial;
+        toast('该分条需求族已全部排完，本次按原单总量进行重排对比试算');
+      } else {
+        toast('请先在左侧载入分条需求族或添加有效分条规格', true);
+        return;
+      }
     }
     setRunningSolve(true);
     setLastConfirmSummary(null);
@@ -1058,12 +1104,12 @@ export const CuttingWorkbenchPage: React.FC<{
         pieceGapMm,
         utilizationPct: activeScheme2D.utilizationPct,
         pieceAreaM2: activeScheme2D.pieceAreaM2,
-        demands: activeScheme2D.demands.map((d) => ({
+        demands: activeDemands2D.map((d) => ({
           id: d.id,
           name: d.name,
           width: d.width,
           length: d.length,
-          quantity: d.quantity,
+          quantity: Math.max(1, d.orderedQty || d.quantity),
           allowRotation: Boolean(d.allowRotation),
           allowHalfTurn: Boolean(d.allowHalfTurn),
           sizeLabel: d.sizeLabel,
@@ -1094,21 +1140,14 @@ export const CuttingWorkbenchPage: React.FC<{
       const updatedFamily: DemandFamilySummary | undefined = res.demandFamily;
       markSchemeDispatched(activeScheme2D.id, savedScheme.taskId, savedScheme.id);
 
-      await reloadReferenceData();
+      await reloadReferenceData(savedScheme.taskId);
       if (updatedFamily) {
-        setCanvasSpec({
-          loadedTaskId: updatedFamily.id,
-          loadedTaskName: updatedFamily.name
-        });
+        syncDemandFamilyProgress(updatedFamily);
         setLastConfirmSummary({
           schemeId: savedScheme.id,
           openRemaining: updatedFamily.openTotal,
           state: savedScheme.state
         });
-        if (updatedFamily.openTotal > 0) {
-          // Automatically refresh left list to remaining open quantities for seamless continuation!
-          loadDemandFamilyIntoWorkbench(updatedFamily);
-        }
       }
 
       toast(
@@ -1167,7 +1206,7 @@ export const CuttingWorkbenchPage: React.FC<{
           name: o.name,
           width: o.widthMm,
           length: slitFixedLengthMm,
-          quantity: o.quantity,
+          quantity: Math.max(1, o.orderedQty || o.quantity),
           allowRotation: false
         })),
         slitting1D: {
@@ -1196,8 +1235,9 @@ export const CuttingWorkbenchPage: React.FC<{
       const savedScheme = res.scheme;
       const updatedFamily: DemandFamilySummary | undefined = res.demandFamily;
       markSlitSchemeDispatched(activeScheme1D.id, savedScheme.taskId, savedScheme.id);
-      await reloadReferenceData();
+      await reloadReferenceData(savedScheme.taskId);
       if (updatedFamily) {
+        syncDemandFamilyProgress(updatedFamily);
         setLastConfirmSummary({
           schemeId: savedScheme.id,
           openRemaining: updatedFamily.openTotal,
@@ -1322,6 +1362,112 @@ export const CuttingWorkbenchPage: React.FC<{
 
   const totalPieces2D = activeDemands2D.reduce((s, d) => s + (Number(d.quantity) || 0), 0);
   const totalRolls1D = slitOrders.reduce((s, o) => s + (Number(o.quantity) || 0), 0);
+
+  // Per-item completion progress & live candidate preview ("有几个显示几个 + 小进度条 + 本次具体需求概览")
+  const demandRowsView = useMemo(() => {
+    if (is2D) {
+      const candCounts = new Map<number, number>();
+      if (activeScheme2D && !activeScheme2D.confirmedSchemeId) {
+        for (const p of activeScheme2D.result?.layout?.placements || []) {
+          if (p.demandId != null) {
+            candCounts.set(Number(p.demandId), (candCounts.get(Number(p.demandId)) || 0) + 1);
+          }
+        }
+      }
+      return activeDemands2D.map((d, idx) => {
+        const done = Math.max(0, Number(d.completedQty) || 0);
+        const planned = Math.max(0, Number(d.plannedQty) || 0);
+        const uncut = Math.max(0, Number(d.quantity) || 0);
+        const ordered = Math.max(Number(d.orderedQty) || 0, done + planned + uncut, 1);
+        const cand = Math.min(uncut, candCounts.get(d.id) || 0);
+        const afterCandUncut = Math.max(0, uncut - cand);
+        const isPoly = d.shape?.type === 'POLYGON';
+        const areaM2 = ((isPoly ? shapeArea(d.shape) : d.width * d.length) * ordered) / 1_000_000;
+        return {
+          key: String(d.id),
+          rawId: d.id,
+          index: idx + 1,
+          name: d.name,
+          specText: `${fmtN(d.width, 0)} × ${fmtN(d.length, 0)} mm`,
+          kindText: isPoly
+            ? `异形轮廓${d.allowHalfTurn ? ' · 180°' : ' · 0°'}`
+            : `矩形件${d.allowRotation ? ' · 可90°旋' : ' · 固定向'}`,
+          ordered,
+          done,
+          planned,
+          uncut,
+          cand,
+          afterCandUncut,
+          areaM2
+        };
+      });
+    }
+
+    const cand1D = new Map<string, number>();
+    if (
+      activeScheme1D &&
+      activeScheme1D.state === 'SUCCEEDED' &&
+      !activeScheme1D.confirmedSchemeId
+    ) {
+      for (const f of activeScheme1D.fulfillment || []) {
+        cand1D.set(String(f.orderId), Math.max(0, Number(f.produced) || 0));
+      }
+    }
+    return slitOrders.map((o, idx) => {
+      const done = Math.max(0, Number(o.completedQty) || 0);
+      const planned = Math.max(0, Number(o.plannedQty) || 0);
+      const uncut = Math.max(0, Number(o.quantity) || 0);
+      const ordered = Math.max(Number(o.orderedQty) || 0, done + planned + uncut, 1);
+      const cand = Math.min(uncut, cand1D.get(String(o.id)) || 0);
+      const afterCandUncut = Math.max(0, uncut - cand);
+      const areaM2 = (o.widthMm * slitFixedLengthMm * ordered) / 1_000_000;
+      return {
+        key: String(o.id),
+        rawId: o.id,
+        index: idx + 1,
+        name: o.name,
+        specText: `宽 ${fmtN(o.widthMm, 0)} × 长 ${fmtN(slitFixedLengthMm, 0)} mm`,
+        kindText: '一维定长分条',
+        ordered,
+        done,
+        planned,
+        uncut,
+        cand,
+        afterCandUncut,
+        areaM2
+      };
+    });
+  }, [is2D, activeDemands2D, activeScheme2D, slitOrders, activeScheme1D, slitFixedLengthMm]);
+
+  const overviewStats = useMemo(() => {
+    const ordered = demandRowsView.reduce((s, r) => s + r.ordered, 0);
+    const done = demandRowsView.reduce((s, r) => s + r.done, 0);
+    const planned = demandRowsView.reduce((s, r) => s + r.planned, 0);
+    const uncut = demandRowsView.reduce((s, r) => s + r.uncut, 0);
+    const cand = demandRowsView.reduce((s, r) => s + r.cand, 0);
+    const afterCandUncut = demandRowsView.reduce((s, r) => s + r.afterCandUncut, 0);
+    const totalAreaM2 = demandRowsView.reduce((s, r) => s + r.areaM2, 0);
+    const uncutSpecCount = demandRowsView.filter((r) => r.uncut > 0).length;
+    const settled = done + planned;
+    const pct = ordered > 0 ? Math.min(100, Math.round((settled / ordered) * 100)) : 0;
+    const pctWithCand =
+      ordered > 0 ? Math.min(100, Math.round(((settled + cand) / ordered) * 100)) : 0;
+    return {
+      itemCount: demandRowsView.length,
+      ordered,
+      done,
+      planned,
+      settled,
+      uncut,
+      cand,
+      afterCandUncut,
+      uncutSpecCount,
+      totalAreaM2,
+      pct,
+      pctWithCand,
+      unit: is2D ? '片' : '卷'
+    };
+  }, [demandRowsView, is2D]);
   const hasCandidateResult = is2D
     ? Boolean(activeScheme2D)
     : Boolean(activeScheme1D && activeScheme1D.state === 'SUCCEEDED');
@@ -1757,25 +1903,17 @@ export const CuttingWorkbenchPage: React.FC<{
 
         <span className="sp" />
 
-        <div className="studio-run-controls">
-          {runningSolve && (
-            <button type="button" className="btn" onClick={handleStopSolve}>
-              ■ 停止计算
-            </button>
-          )}
-          <button
-            type="button"
-            className="btn pri studio-solve-btn"
-            disabled={runningSolve}
-            onClick={is2D ? handleRunSolve2D : handleRunSolve1D}
-          >
-            {runningSolve
-              ? '⚡ 多引擎竞速求解中…'
-              : is2D
-              ? `⚡ 启动并行搭切 (${selectedStrategies2D.length} 算法)`
-              : '⚡ 启动分切搭切 (3 策略)'}
-          </button>
-        </div>
+        <button
+          type="button"
+          className="btn sm"
+          onClick={() => {
+            setOverviewTab('progress');
+            setOverviewModalOpen(true);
+          }}
+        >
+          📋 本次具体需求概览 ({overviewStats.settled}/{overviewStats.ordered}
+          {overviewStats.uncut > 0 ? ` · 待切 ${overviewStats.uncut}` : ' · 已排齐'})
+        </button>
       </div>
 
       {/* Main 3-Column Studio Workspace */}
@@ -1920,183 +2058,190 @@ export const CuttingWorkbenchPage: React.FC<{
               )}
             </div>
 
-            {/* Active Demand Lines Table */}
-            {is2D ? (
-              <>
-                <div
-                  className="sec"
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                >
-                  <span>
-                    本次待排 (<b className="num">{activeDemands2D.length}</b> 种 · 共{' '}
-                    <b className="num">{totalPieces2D}</b> 片)
-                  </span>
-                  <button type="button" className="btn sm" onClick={addBlankDemand2D}>
-                    ＋ 新增规格
-                  </button>
+            {/* 1A. Compact Demand Overview Card -> Opens Concrete Demand Overview Sheet */}
+            <div className="wb-overview-card num">
+              <div className="wb-overview-head">
+                <div>
+                  <strong>本次需求切制进度</strong>
+                  <small className="muted" style={{ marginLeft: 6 }}>
+                    共 {overviewStats.itemCount} 项
+                  </small>
                 </div>
+                <button
+                  type="button"
+                  className="btn sm"
+                  onClick={() => {
+                    setOverviewTab('progress');
+                    setOverviewModalOpen(true);
+                  }}
+                >
+                  具体需求概览 ↗
+                </button>
+              </div>
 
-                <table className="t dock-table" style={{ border: 0 }}>
-                  <thead>
-                    <tr>
-                      <th>部件</th>
-                      <th className="r">尺寸 mm</th>
-                      <th className="r">数量</th>
-                      <th title="允许 90° 旋转">旋</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {activeDemands2D.map((d) => {
-                      const isPoly = d.shape?.type === 'POLYGON';
-                      return (
-                        <tr key={d.id}>
-                          <td className="wrap">
-                            <div style={{ fontWeight: 600, fontSize: 12 }}>{d.name}</div>
-                            <small className="muted">
-                              {isPoly ? `异形轮廓 · ${d.shape?.vertices?.length}点` : '矩形件'}
-                            </small>
-                          </td>
-                          <td className="r num">
-                            {isPoly ? (
-                              `${fmtN(d.width, 0)}×${fmtN(d.length, 0)}`
-                            ) : (
-                              <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center' }}>
-                                <input
-                                  type="number"
-                                  className="field num"
-                                  style={{ width: 44, height: 22, padding: '0 2px' }}
-                                  value={d.width}
-                                  onChange={(e) =>
-                                    updateDemand2D(d.id, { width: Number(e.target.value) })
-                                  }
-                                />
-                                ×
-                                <input
-                                  type="number"
-                                  className="field num"
-                                  style={{ width: 44, height: 22, padding: '0 2px' }}
-                                  value={d.length}
-                                  onChange={(e) =>
-                                    updateDemand2D(d.id, { length: Number(e.target.value) })
-                                  }
-                                />
-                              </span>
-                            )}
-                          </td>
-                          <td className="r">
-                            <input
-                              type="number"
-                              min={0}
-                              max={500}
-                              className="field num"
-                              style={{ width: 46, height: 22, textAlign: 'right' }}
-                              value={d.quantity}
-                              onChange={(e) =>
-                                updateDemand2D(d.id, {
-                                  quantity: Math.max(0, Number(e.target.value))
-                                })
-                              }
-                            />
-                          </td>
-                          <td style={{ textAlign: 'center' }}>
-                            <input
-                              type="checkbox"
-                              checked={Boolean(d.allowRotation)}
-                              onChange={(e) =>
-                                updateDemand2D(d.id, { allowRotation: e.target.checked })
-                              }
-                              title="允许 90° 旋转"
-                            />
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="btn sm"
-                              style={{ padding: '0 5px', height: 20 }}
-                              onClick={() => removeDemand2D(d.id)}
-                            >
-                              ×
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </>
-            ) : (
-              <>
-                <div
-                  className="sec"
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+              <div className="wb-overview-nums">
+                <span>
+                  总需求 <b>{overviewStats.ordered}</b>
+                </span>
+                <span style={{ color: '#059669' }}>
+                  已实切 <b>{overviewStats.done}</b>
+                </span>
+                <span style={{ color: '#0284c7' }}>
+                  已排锁 <b>{overviewStats.planned}</b>
+                </span>
+                <span
+                  style={{
+                    color: overviewStats.uncut > 0 ? '#b45309' : 'var(--ok)',
+                    fontWeight: 700
+                  }}
                 >
-                  <span>
-                    分条订单 (<b className="num">{slitOrders.length}</b> 项 · 共{' '}
-                    <b className="num">{totalRolls1D}</b> 卷)
-                  </span>
-                  <button type="button" className="btn sm" onClick={addSlitOrder}>
-                    ＋ 新增条宽
-                  </button>
+                  {overviewStats.uncut > 0
+                    ? `未切余 ${overviewStats.uncut}${overviewStats.unit}`
+                    : '全部已排 ✓'}
+                </span>
+              </div>
+
+              {overviewStats.cand > 0 && (
+                <div className="wb-overview-cand">
+                  当前画布候选拟切 <b>+{overviewStats.cand}</b> {overviewStats.unit} · 选定后还剩{' '}
+                  <b>{overviewStats.afterCandUncut}</b> {overviewStats.unit}未切
                 </div>
-                <table className="t dock-table" style={{ border: 0 }}>
-                  <thead>
-                    <tr>
-                      <th>名称</th>
-                      <th className="r">条宽 mm</th>
-                      <th className="r">卷数</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {slitOrders.map((o) => (
-                      <tr key={o.id}>
-                        <td>
-                          <input
-                            className="field"
-                            style={{ width: '100%', height: 22 }}
-                            value={o.name}
-                            onChange={(e) => updateSlitOrder(o.id, { name: e.target.value })}
-                          />
-                        </td>
-                        <td className="r">
-                          <input
-                            type="number"
-                            className="field num"
-                            style={{ width: 60, height: 22, textAlign: 'right' }}
-                            value={o.widthMm}
-                            onChange={(e) =>
-                              updateSlitOrder(o.id, { widthMm: Number(e.target.value) })
-                            }
-                          />
-                        </td>
-                        <td className="r">
-                          <input
-                            type="number"
-                            className="field num"
-                            style={{ width: 48, height: 22, textAlign: 'right' }}
-                            value={o.quantity}
-                            onChange={(e) =>
-                              updateSlitOrder(o.id, { quantity: Number(e.target.value) })
-                            }
-                          />
-                        </td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn sm"
-                            style={{ height: 20, padding: '0 5px' }}
-                            onClick={() => removeSlitOrder(o.id)}
-                          >
-                            ×
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </>
-            )}
+              )}
+
+              <div className="wb-mini-prog lg" aria-label={`总体完成率 ${overviewStats.pct}%`}>
+                <i
+                  className="seg-done"
+                  style={{
+                    width: `${
+                      overviewStats.ordered > 0
+                        ? Math.min(100, (overviewStats.done / overviewStats.ordered) * 100)
+                        : 0
+                    }%`
+                  }}
+                />
+                <i
+                  className="seg-plan"
+                  style={{
+                    width: `${
+                      overviewStats.ordered > 0
+                        ? Math.min(
+                            100 - (overviewStats.done / overviewStats.ordered) * 100,
+                            (overviewStats.planned / overviewStats.ordered) * 100
+                          )
+                        : 0
+                    }%`
+                  }}
+                />
+                {overviewStats.cand > 0 && (
+                  <i
+                    className="seg-cand"
+                    style={{
+                      width: `${
+                        overviewStats.ordered > 0
+                          ? Math.min(
+                              100 - (overviewStats.settled / overviewStats.ordered) * 100,
+                              (overviewStats.cand / overviewStats.ordered) * 100
+                            )
+                          : 0
+                      }%`
+                    }}
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* 1B. Simple Per-Item Completion Progress List ("有几个显示几个，有个小进度条，切完一次知道还有多少没切") */}
+            <div
+              className="sec"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+            >
+              <span>
+                需求完成程度 (<b className="num">{demandRowsView.length}</b> 项)
+              </span>
+              <div style={{ display: 'inline-flex', gap: 4 }}>
+                <button
+                  type="button"
+                  className="btn sm"
+                  onClick={() => {
+                    setOverviewTab('edit');
+                    setOverviewModalOpen(true);
+                  }}
+                >
+                  编辑规格
+                </button>
+                <button
+                  type="button"
+                  className="btn sm"
+                  onClick={() => {
+                    if (is2D) addBlankDemand2D();
+                    else addSlitOrder();
+                    setOverviewTab('edit');
+                    setOverviewModalOpen(true);
+                  }}
+                >
+                  ＋ 新增
+                </button>
+              </div>
+            </div>
+
+            <div className="wb-demand-list" role="list" aria-label="逐项需求完成进度列表">
+              {demandRowsView.length === 0 ? (
+                <div className="empty" style={{ padding: 18 }}>
+                  暂无需求项，请在上方选取需求族或从需求模板导入
+                </div>
+              ) : (
+                demandRowsView.map((row) => {
+                  const settledRow = row.done + row.planned;
+                  const donePct = Math.min(100, (row.done / row.ordered) * 100);
+                  const planPct = Math.min(100 - donePct, (row.planned / row.ordered) * 100);
+                  const candPct = Math.min(
+                    100 - donePct - planPct,
+                    (row.cand / row.ordered) * 100
+                  );
+                  const isFinished = row.uncut === 0;
+                  return (
+                    <div
+                      key={row.key}
+                      role="listitem"
+                      className={`wb-demand-prog-row ${isFinished ? 'is-done' : row.cand > 0 ? 'is-cand' : 'is-open'}`}
+                    >
+                      <div className="wb-demand-row-top">
+                        <span className="wb-demand-name" title={row.name}>
+                          <em className="num">#{row.index}</em> {row.name}
+                        </span>
+                        {isFinished ? (
+                          <span className="wb-prog-pill done num">
+                            ✓ 已切排 {settledRow}/{row.ordered}
+                          </span>
+                        ) : row.cand > 0 ? (
+                          <span className="wb-prog-pill cand num">
+                            本轮+{row.cand} · 余{row.afterCandUncut}
+                          </span>
+                        ) : (
+                          <span className="wb-prog-pill open num">
+                            未切 {row.uncut}/{row.ordered}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="wb-mini-prog" aria-hidden="true">
+                        <i className="seg-done" style={{ width: `${donePct}%` }} />
+                        <i className="seg-plan" style={{ width: `${planPct}%` }} />
+                        {candPct > 0 && <i className="seg-cand" style={{ width: `${candPct}%` }} />}
+                      </div>
+
+                      <div className="wb-demand-row-sub num">
+                        <span>{row.specText}</span>
+                        <span>
+                          已排切 {settledRow}/{row.ordered}
+                          {row.uncut > 0 ? ` · 待切 ${row.uncut}` : ''}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         </section>
 
@@ -2207,7 +2352,7 @@ export const CuttingWorkbenchPage: React.FC<{
               <div className="scheme-slots">
                 {schemes2D.length === 0 ? (
                   <div className="scheme-empty">
-                    画布已就绪（当前：{canvasMode === 'FREE_CANVAS' ? `默认新母卷 ${canvasWidthMm}mm` : canvasMode === 'STOCK_ROLL' ? `在库母卷 ${currentRoll2D?.rollId || ''}` : `在库料头 ${currentRemnant2D?.id || ''}`}）— 点击右上角「⚡ 启动并行搭切」同屏对比多引擎结果
+                    画布已就绪（当前：{canvasMode === 'FREE_CANVAS' ? `默认新母卷 ${canvasWidthMm}mm` : canvasMode === 'STOCK_ROLL' ? `在库母卷 ${currentRoll2D?.rollId || ''}` : `在库料头 ${currentRemnant2D?.id || ''}`}）— 点击右下角「⚡ 启动并行搭切」同屏对比多引擎结果
                   </div>
                 ) : (
                   schemes2D.map((s, idx) => {
@@ -2710,8 +2855,493 @@ export const CuttingWorkbenchPage: React.FC<{
               </details>
             )}
           </div>
+
+          {/* Sticky Bottom-Right Primary Solve Action Bar */}
+          <div className="studio-right-foot">
+            <div className="studio-right-foot-meta num">
+              {is2D ? (
+                <span>
+                  待排余量{' '}
+                  <b>
+                    {overviewStats.uncut > 0 ? overviewStats.uncut : overviewStats.ordered}{' '}
+                    {overviewStats.unit}
+                  </b>
+                  {overviewStats.uncut === 0 && overviewStats.ordered > 0 ? ' (全单重排试算)' : ''} ·{' '}
+                  {canvasMode === 'FREE_CANVAS'
+                    ? `新母卷 W${canvasWidthMm}mm`
+                    : canvasMode === 'STOCK_ROLL'
+                    ? `实卷 ${currentRoll2D?.rollId || ''}`
+                    : `料头 ${currentRemnant2D?.id || ''}`}
+                </span>
+              ) : (
+                <span>
+                  待排余量{' '}
+                  <b>
+                    {overviewStats.uncut > 0 ? overviewStats.uncut : overviewStats.ordered}{' '}
+                    {overviewStats.unit}
+                  </b>{' '}
+                  · 母卷 W
+                  {slitMaterialMode === 'STOCK_ROLL' && currentRoll1D
+                    ? currentRoll1D.width
+                    : slitMotherWidthMm}
+                  mm
+                </span>
+              )}
+            </div>
+            <div className="studio-right-foot-btns">
+              {runningSolve && (
+                <button type="button" className="btn" onClick={handleStopSolve}>
+                  ■ 停止计算
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn pri studio-solve-btn"
+                style={{ flex: 1 }}
+                disabled={runningSolve}
+                onClick={is2D ? handleRunSolve2D : handleRunSolve1D}
+              >
+                {runningSolve
+                  ? '⚡ 多引擎竞速求解中…'
+                  : is2D
+                  ? `⚡ 启动并行搭切 (${selectedStrategies2D.length} 算法)`
+                  : '⚡ 启动分切搭切 (3 策略)'}
+              </button>
+            </div>
+          </div>
         </section>
       </div>
+
+      {/* Concrete Demand Overview & Spec Editor Modal ("本次具体需求概览") */}
+      <ModalDialog
+        open={overviewModalOpen}
+        title={`本次具体需求概览 · ${
+          (is2D ? loadedTaskName : slitLoadedTaskName) || '当前画布排程批次'
+        }`}
+        onClose={() => setOverviewModalOpen(false)}
+        maxWidth={960}
+      >
+        <div className="wb-overview-modal">
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+              marginBottom: 12
+            }}
+          >
+            <div className="seg" role="group" aria-label="概览与编辑切换">
+              <button
+                type="button"
+                className={overviewTab === 'progress' ? 'on' : ''}
+                onClick={() => setOverviewTab('progress')}
+              >
+                切制情况与批次总览
+              </button>
+              <button
+                type="button"
+                className={overviewTab === 'edit' ? 'on' : ''}
+                onClick={() => setOverviewTab('edit')}
+              >
+                编辑需求规格明细 ({demandRowsView.length})
+              </button>
+            </div>
+            <div className="muted num" style={{ fontSize: 12 }}>
+              物料品号：<b>{is2D ? materialModel2D : slitMaterialModel}</b> · 净需求总面积：{' '}
+              <b>{fmtN(overviewStats.totalAreaM2, 2)} m²</b>
+            </div>
+          </div>
+
+          {overviewTab === 'progress' ? (
+            <>
+              {/* 5-Column Cutting Status KPI Strip */}
+              <div className="wb-overview-kpis num">
+                <div className="wb-ov-kpi">
+                  <small>需求总量 ({overviewStats.itemCount} 项)</small>
+                  <b>
+                    {overviewStats.ordered} <em>{overviewStats.unit}</em>
+                  </b>
+                </div>
+                <div className="wb-ov-kpi ok">
+                  <small>已实切合格</small>
+                  <b>
+                    {overviewStats.done} <em>{overviewStats.unit}</em>
+                  </b>
+                </div>
+                <div className="wb-ov-kpi plan">
+                  <small>已锁方案待切</small>
+                  <b>
+                    {overviewStats.planned} <em>{overviewStats.unit}</em>
+                  </b>
+                </div>
+                <div className="wb-ov-kpi cand">
+                  <small>当前候选拟切</small>
+                  <b>
+                    +{overviewStats.cand} <em>{overviewStats.unit}</em>
+                  </b>
+                </div>
+                <div className={`wb-ov-kpi ${overviewStats.uncut > 0 ? 'warn' : 'ok'}`}>
+                  <small>剩余未切缺口</small>
+                  <b>
+                    {overviewStats.uncut}{' '}
+                    <em>
+                      {overviewStats.unit}
+                      {overviewStats.cand > 0 ? ` (选定后余 ${overviewStats.afterCandUncut})` : ''}
+                    </em>
+                  </b>
+                </div>
+              </div>
+
+              {/* Confirmed Cut Batches History (if any schemes already saved against this family) */}
+              {taskSchemes.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div className="sec" style={{ margin: '0 0 6px' }}>
+                    已选定排程切次记录（共 {taskSchemes.length} 次方案）
+                  </div>
+                  <table className="t">
+                    <thead>
+                      <tr>
+                        <th>排程方案号</th>
+                        <th>采用算法与规格</th>
+                        <th>绑定母卷 / 模式</th>
+                        <th className="r">排入数量</th>
+                        <th className="r">利用率</th>
+                        <th>执行状态</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {taskSchemes.map((entry: any) => {
+                        const s = entry.scheme;
+                        return (
+                          <tr key={s.id}>
+                            <td className="num" style={{ fontWeight: 600 }}>
+                              {s.id}
+                            </td>
+                            <td>{s.title}</td>
+                            <td className="num">
+                              {s.rollId || s.remnantId || `虚拟新母卷 W${s.widthMm}`}
+                            </td>
+                            <td className="r num">{s.placedCount}</td>
+                            <td className="r num">{s.utilizationPct}%</td>
+                            <td>
+                              <span
+                                className={`tag ${
+                                  s.state === 'COMPLETED'
+                                    ? 'ok'
+                                    : s.state === 'CANCELLED'
+                                    ? ''
+                                    : 'run'
+                                }`}
+                              >
+                                {s.state === 'COMPLETED'
+                                  ? '已完工记账'
+                                  : s.state === 'READY_TO_CUT'
+                                  ? '已锁实卷待切'
+                                  : s.state === 'AWAITING_ROLL'
+                                  ? '待绑实卷'
+                                  : s.state === 'DISPATCHED_MES'
+                                  ? '已下发 MES'
+                                  : '已作废'}
+                              </span>
+                            </td>
+                            <td>
+                              <a
+                                className="btn sm"
+                                href={`#/results/${encodeURIComponent(s.id)}`}
+                                onClick={() => setOverviewModalOpen(false)}
+                              >
+                                查看结果 ↗
+                              </a>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Detailed Per-Item Cutting Status Breakdown Table */}
+              <div className="sec" style={{ margin: '0 0 6px' }}>
+                逐项具体需求切制明细（共 {demandRowsView.length} 种规格）
+              </div>
+              <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+                <table className="t">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>需求部件 / 订单行名称</th>
+                      <th>规格尺寸</th>
+                      <th>工艺/丝缕</th>
+                      <th className="r">总需求</th>
+                      <th className="r">已实切</th>
+                      <th className="r">已排锁</th>
+                      <th className="r">本轮拟切</th>
+                      <th className="r">剩余未切</th>
+                      <th style={{ minWidth: 150 }}>完成进度</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {demandRowsView.map((r) => {
+                      const donePct = Math.min(100, (r.done / r.ordered) * 100);
+                      const planPct = Math.min(100 - donePct, (r.planned / r.ordered) * 100);
+                      const candPct = Math.min(
+                        100 - donePct - planPct,
+                        (r.cand / r.ordered) * 100
+                      );
+                      const settledPct = Math.min(
+                        100,
+                        Math.round(((r.done + r.planned) / r.ordered) * 100)
+                      );
+                      return (
+                        <tr key={r.key}>
+                          <td className="num muted">{r.index}</td>
+                          <td style={{ fontWeight: 600 }}>{r.name}</td>
+                          <td className="num">{r.specText}</td>
+                          <td>
+                            <span className="muted" style={{ fontSize: 11.5 }}>
+                              {r.kindText}
+                            </span>
+                          </td>
+                          <td className="r num">{r.ordered}</td>
+                          <td className="r num" style={{ color: '#059669', fontWeight: 600 }}>
+                            {r.done}
+                          </td>
+                          <td className="r num" style={{ color: '#0284c7', fontWeight: 600 }}>
+                            {r.planned}
+                          </td>
+                          <td className="r num" style={{ color: '#0369a1' }}>
+                            {r.cand > 0 ? `+${r.cand}` : '—'}
+                          </td>
+                          <td
+                            className="r num"
+                            style={{
+                              color: r.uncut > 0 ? '#b45309' : 'var(--ok)',
+                              fontWeight: 700
+                            }}
+                          >
+                            {r.uncut > 0 ? r.uncut : '0 ✓'}
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <div className="wb-mini-prog" style={{ flex: 1 }}>
+                                <i className="seg-done" style={{ width: `${donePct}%` }} />
+                                <i className="seg-plan" style={{ width: `${planPct}%` }} />
+                                {candPct > 0 && (
+                                  <i className="seg-cand" style={{ width: `${candPct}%` }} />
+                                )}
+                              </div>
+                              <span className="num muted" style={{ fontSize: 11, width: 34 }}>
+                                {settledPct}%
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            /* Tab 2: Spacious Demand Spec Editor */
+            <div>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: 8
+                }}
+              >
+                <span className="muted" style={{ fontSize: 12 }}>
+                  调整待切余量、规格尺寸或新增自定义部件（异形轮廓尺寸由 CAD 顶点锁定）
+                </span>
+                <button
+                  type="button"
+                  className="btn sm pri"
+                  onClick={() => (is2D ? addBlankDemand2D() : addSlitOrder())}
+                >
+                  {is2D ? '＋ 新增二维裁片规格' : '＋ 新增一维分条规格'}
+                </button>
+              </div>
+              <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+                {is2D ? (
+                  <table className="t">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>部件名称</th>
+                        <th className="r">宽 mm</th>
+                        <th className="r">长 mm</th>
+                        <th className="r">待切数量</th>
+                        <th>允许 90° 旋转</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeDemands2D.map((d, idx) => {
+                        const isPoly = d.shape?.type === 'POLYGON';
+                        return (
+                          <tr key={d.id}>
+                            <td className="num muted">{idx + 1}</td>
+                            <td>
+                              <input
+                                className="field"
+                                style={{ width: '100%' }}
+                                value={d.name}
+                                onChange={(e) => updateDemand2D(d.id, { name: e.target.value })}
+                              />
+                            </td>
+                            <td className="r num">
+                              {isPoly ? (
+                                fmtN(d.width, 1)
+                              ) : (
+                                <input
+                                  type="number"
+                                  className="field num"
+                                  style={{ width: 90, textAlign: 'right' }}
+                                  value={d.width}
+                                  onChange={(e) =>
+                                    updateDemand2D(d.id, { width: Number(e.target.value) })
+                                  }
+                                />
+                              )}
+                            </td>
+                            <td className="r num">
+                              {isPoly ? (
+                                fmtN(d.length, 1)
+                              ) : (
+                                <input
+                                  type="number"
+                                  className="field num"
+                                  style={{ width: 90, textAlign: 'right' }}
+                                  value={d.length}
+                                  onChange={(e) =>
+                                    updateDemand2D(d.id, { length: Number(e.target.value) })
+                                  }
+                                />
+                              )}
+                            </td>
+                            <td className="r">
+                              <input
+                                type="number"
+                                min={0}
+                                max={5000}
+                                className="field num"
+                                style={{ width: 84, textAlign: 'right' }}
+                                value={d.quantity}
+                                onChange={(e) => {
+                                  const nextQ = Math.max(0, Number(e.target.value));
+                                  const nextOrd = Math.max(
+                                    d.orderedQty || 0,
+                                    (d.completedQty || 0) + (d.plannedQty || 0) + nextQ
+                                  );
+                                  updateDemand2D(d.id, { quantity: nextQ, orderedQty: nextOrd });
+                                }}
+                              />
+                            </td>
+                            <td>
+                              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                <input
+                                  type="checkbox"
+                                  disabled={isPoly}
+                                  checked={Boolean(d.allowRotation)}
+                                  onChange={(e) =>
+                                    updateDemand2D(d.id, { allowRotation: e.target.checked })
+                                  }
+                                />
+                                <span className="muted" style={{ fontSize: 12 }}>
+                                  {isPoly ? '由算法策略控制倒顺' : '允许 90°'}
+                                </span>
+                              </label>
+                            </td>
+                            <td>
+                              <button
+                                type="button"
+                                className="btn sm"
+                                onClick={() => removeDemand2D(d.id)}
+                              >
+                                删除
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                ) : (
+                  <table className="t">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>订单条宽名称</th>
+                        <th className="r">条宽 mm</th>
+                        <th className="r">待切卷数</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {slitOrders.map((o, idx) => (
+                        <tr key={o.id}>
+                          <td className="num muted">{idx + 1}</td>
+                          <td>
+                            <input
+                              className="field"
+                              style={{ width: '100%' }}
+                              value={o.name}
+                              onChange={(e) => updateSlitOrder(o.id, { name: e.target.value })}
+                            />
+                          </td>
+                          <td className="r">
+                            <input
+                              type="number"
+                              className="field num"
+                              style={{ width: 100, textAlign: 'right' }}
+                              value={o.widthMm}
+                              onChange={(e) =>
+                                updateSlitOrder(o.id, { widthMm: Number(e.target.value) })
+                              }
+                            />
+                          </td>
+                          <td className="r">
+                            <input
+                              type="number"
+                              min={0}
+                              className="field num"
+                              style={{ width: 90, textAlign: 'right' }}
+                              value={o.quantity}
+                              onChange={(e) => {
+                                const nextQ = Math.max(0, Number(e.target.value));
+                                const nextOrd = Math.max(
+                                  o.orderedQty || 0,
+                                  (o.completedQty || 0) + (o.plannedQty || 0) + nextQ
+                                );
+                                updateSlitOrder(o.id, { quantity: nextQ, orderedQty: nextOrd });
+                              }}
+                            />
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn sm"
+                              onClick={() => removeSlitOrder(o.id)}
+                            >
+                              删除
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </ModalDialog>
     </div>
   );
 };

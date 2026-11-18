@@ -6,6 +6,11 @@ import {
 } from '@static/js/nesting/dxf-garment-samples.js';
 import { polygon, rectangle } from '@static/js/canvas/nesting-scene.js';
 import { requestJSON } from '@static/app/js/util.js';
+import {
+  StudioSettings,
+  loadStudioSettings,
+  persistStudioSettings
+} from './studioSettings';
 
 export interface ShapeGeometry {
   type: 'RECTANGLE' | 'POLYGON';
@@ -20,6 +25,9 @@ export interface DemandItem {
   width: number;
   length: number;
   quantity: number;
+  orderedQty?: number;
+  plannedQty?: number;
+  completedQty?: number;
   allowRotation: boolean;
   allowHalfTurn?: boolean;
   shape?: ShapeGeometry;
@@ -107,6 +115,9 @@ export interface SlittingOrderLine {
   widthMm: number;
   lengthMm: number;
   quantity: number;
+  orderedQty?: number;
+  plannedQty?: number;
+  completedQty?: number;
   surfaceTreatment?: string;
 }
 
@@ -501,6 +512,7 @@ interface StudioState {
   loadClusterInto2D: (clusterId: string, append?: boolean) => void;
   loadSelectedClustersInto2D: (clusterIds: string[], append?: boolean) => void;
   loadDemandFamilyIntoWorkbench: (family: DemandFamilySummary) => void;
+  syncDemandFamilyProgress: (family: DemandFamilySummary) => void;
   loadDemandFamiliesMergedIntoWorkbench: (families: DemandFamilySummary[]) => void;
 
   setCanvasSpec: (spec: Partial<{
@@ -538,8 +550,13 @@ interface StudioState {
   setSlitSchemes: (schemes: SlittingSchemeRun[]) => void;
   setActiveSlitScheme: (id: string | null) => void;
   markSlitSchemeDispatched: (schemeId: string, taskId: string, confirmedSchemeId?: string) => void;
+
+  // Global Studio Settings
+  settings: StudioSettings;
+  updateStudioSettings: (next: StudioSettings) => StudioSettings;
 }
 
+const initialSettings = loadStudioSettings();
 const initialClusters = createInitialClusters();
 const initialSelectionMap: Record<string, Record<string, number>> = {};
 for (const c of initialClusters) {
@@ -562,8 +579,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   canvasMode: 'FREE_CANVAS',
   canvasWidthMm: defaultCluster2D.defaultWidthMm,
   canvasLengthMm: defaultCluster2D.defaultLengthMm,
-  pieceGapMm: 0,
-  trimStartMm: 0,
+  pieceGapMm: initialSettings.pieceGapMm,
+  trimStartMm: initialSettings.trimStartMm,
   selectedRollId: 'ROLL-2026-0920',
   selectedRemnantId: '',
   materialModel2D: defaultCluster2D.materialModel,
@@ -835,14 +852,13 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   },
 
   loadDemandFamilyIntoWorkbench: (family) => {
-    const openLines = family.lines.filter((l) => l.openQty > 0);
-    const effectiveLines = openLines.length > 0 ? openLines : family.lines;
+    const allLines = family.lines;
     if (family.dimension === 'SLITTING_1D') {
       const sp = family.slitting || {};
       const maxW = Number(sp.maxWidth) || 4400;
       const lt = Number(sp.leftTrim) ?? 100;
       const rt = Number(sp.rightTrim) ?? 100;
-      const fixedLen = effectiveLines[0]?.length || Number(family.process?.bedLength) || 2000;
+      const fixedLen = allLines[0]?.length || Number(family.process?.bedLength) || 2000;
       set({
         activeDimension: '1D',
         slitLoadedTaskId: family.id,
@@ -856,24 +872,30 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         slitWidthStepMm: Number(sp.widthStep) || 10,
         slitOverCap: Number(sp.totalOverCap) ?? 20,
         slitFixedLengthMm: fixedLen,
-        slitOrders: effectiveLines.map((l) => ({
+        slitOrders: allLines.map((l) => ({
           id: String(l.id),
           name: l.name,
           widthMm: l.width,
           lengthMm: l.length,
-          quantity: l.openQty > 0 ? l.openQty : l.orderedQty,
+          quantity: l.openQty,
+          orderedQty: l.orderedQty,
+          plannedQty: l.plannedQty,
+          completedQty: l.completedQty,
           surfaceTreatment: l.surfaceTreatment
         })),
         slitSchemes: [],
         activeSlitSchemeId: null
       });
     } else {
-      const mappedDemands = effectiveLines.map((l) => ({
+      const mappedDemands = allLines.map((l) => ({
         id: l.id,
         name: l.name,
         width: l.width,
         length: l.length,
-        quantity: l.openQty > 0 ? l.openQty : l.orderedQty,
+        quantity: l.openQty,
+        orderedQty: l.orderedQty,
+        plannedQty: l.plannedQty,
+        completedQty: l.completedQty,
         allowRotation: Boolean(l.allowRotation),
         allowHalfTurn: Boolean(l.allowHalfTurn),
         shape: l.shape,
@@ -881,8 +903,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         sizeLabel: l.sizeLabel
       }));
       const curW = get().canvasWidthMm || 1650;
-      const totalArea = mappedDemands.reduce((s, d) => s + d.width * d.length * d.quantity, 0);
-      const estLen = Math.ceil(totalArea / Math.max(400, curW * 0.65) / 500) * 500;
+      const openOrFullArea = mappedDemands.reduce(
+        (s, d) => s + d.width * d.length * (d.quantity > 0 ? d.quantity : d.orderedQty || 1),
+        0
+      );
+      const estLen = Math.ceil(openOrFullArea / Math.max(400, curW * 0.65) / 500) * 500;
       set({
         activeDimension: '2D',
         loadedTaskId: family.id,
@@ -895,6 +920,47 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         activeDemands2D: mappedDemands,
         schemes2D: [],
         activeSchemeId2D: null
+      });
+    }
+  },
+
+  syncDemandFamilyProgress: (family) => {
+    if (family.dimension === 'SLITTING_1D') {
+      set({
+        slitLoadedTaskId: family.id,
+        slitLoadedTaskName: family.name,
+        slitOrders: family.lines.map((l) => ({
+          id: String(l.id),
+          name: l.name,
+          widthMm: l.width,
+          lengthMm: l.length,
+          quantity: l.openQty,
+          orderedQty: l.orderedQty,
+          plannedQty: l.plannedQty,
+          completedQty: l.completedQty,
+          surfaceTreatment: l.surfaceTreatment
+        }))
+      });
+    } else {
+      set({
+        loadedTaskId: family.id,
+        loadedTaskName: family.name,
+        loadedExternalRef: family.externalRef || null,
+        activeDemands2D: family.lines.map((l) => ({
+          id: l.id,
+          name: l.name,
+          width: l.width,
+          length: l.length,
+          quantity: l.openQty,
+          orderedQty: l.orderedQty,
+          plannedQty: l.plannedQty,
+          completedQty: l.completedQty,
+          allowRotation: Boolean(l.allowRotation),
+          allowHalfTurn: Boolean(l.allowHalfTurn),
+          shape: l.shape,
+          clusterName: family.name,
+          sizeLabel: l.sizeLabel
+        }))
       });
     }
   },
@@ -1002,7 +1068,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             width: 500,
             length: 800,
             quantity: 2,
-            allowRotation: false,
+            allowRotation: Boolean(st.settings.defaultAllowRotation),
             clusterName: '手动录入'
           }
         ]
@@ -1146,5 +1212,21 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       slitSchemes: st.slitSchemes.map((s) =>
         s.id === schemeId ? { ...s, dispatchedTaskId: taskId, confirmedSchemeId } : s
       )
-    }))
+    })),
+
+  settings: initialSettings,
+
+  updateStudioSettings: (next) => {
+    const saved = persistStudioSettings(next);
+    set((st) => ({
+      settings: saved,
+      ...(st.loadedTaskId
+        ? {}
+        : {
+            pieceGapMm: saved.pieceGapMm,
+            trimStartMm: saved.trimStartMm
+          })
+    }));
+    return saved;
+  }
 }));

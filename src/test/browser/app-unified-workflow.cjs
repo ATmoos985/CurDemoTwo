@@ -130,11 +130,23 @@ const api = async (path) => {
       await page.waitForURL('**/#/workbench');
       await page.getByRole('heading', { name: '搭切工作台', exact: true, level: 1 }).waitFor();
 
-      // Default Virtual New Mother Roll must be active
+      // Default Virtual New Mother Roll must be active, and solve button must live at bottom-right (.studio-right-foot)
       const defaultVirtualPressed = await page
         .getByRole('button', { name: '默认新母卷', exact: true })
         .getAttribute('aria-pressed');
       assert.equal(defaultVirtualPressed, 'true', 'Virtual new mother roll is default');
+      assert.equal(await page.locator('.studio-top-bar .studio-solve-btn').count(), 0, 'Solve CTA removed from top bar');
+      assert.equal(await page.locator('.studio-right-foot .studio-solve-btn').count(), 1, 'Solve CTA pinned at bottom-right');
+
+      // Left column shows per-item completion progress rows with mini progress bars
+      assert.equal(await page.locator('.wb-demand-prog-row').count(), 2, 'All demand items shown with progress bars');
+      assert.equal(await page.locator('.wb-demand-prog-row .wb-mini-prog').count(), 2, 'Each item has a mini progress bar');
+
+      // Open "本次具体需求概览" sheet and verify cutting breakdown table
+      await page.getByRole('button', { name: '具体需求概览 ↗' }).click();
+      await page.locator('dialog[open] .wb-overview-kpis').waitFor();
+      assert.ok((await page.locator('dialog[open]').innerText()).includes('逐项具体需求切制明细'));
+      await page.locator('dialog[open] .native-modal-head button').click();
 
       // Select fast deterministic Java heuristic strategy so solve completes in <1s
       const strategyDetails = page.locator('details.studio-accordion', { hasText: '并行求解算法引擎' });
@@ -149,13 +161,14 @@ const api = async (path) => {
         }
       }
 
-      await page.getByRole('button', { name: /启动并行搭切/ }).click();
+      await page.locator('.studio-right-foot').getByRole('button', { name: /启动并行搭切/ }).click();
       await page.locator('.scheme-slot.on').waitFor({ timeout: 15000 });
       assert.ok(await page.locator('canvas').first().isVisible(), 'CAD canvas rendered');
 
-      // Confirm selected scheme -> zero re-solve & immediate demand deduction
+      // Confirm selected scheme -> zero re-solve & immediate demand deduction + left progress bars update to done!
       await page.getByRole('button', { name: '✓ 选定此方案（扣减需求并保存结果）' }).click();
       await page.getByRole('link', { name: '去结果管理查看/导出 ↗' }).waitFor({ timeout: 10000 });
+      assert.equal(await page.locator('.wb-demand-prog-row.is-done').count(), 2, 'All items stay visible and turn done on left progress list');
 
       const poolAfterConfirm = await api('/api/v2/demand-pool');
       const familyAfterConfirm = poolAfterConfirm.find((f) => f.id === createdTaskId);
