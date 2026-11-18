@@ -8,7 +8,7 @@
 
 1. [index.html](file:///d:/GitHub/CutDemoTwo/src/main/resources/static/app/index.html) 与 [App.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/App.tsx)
    - 移除底栏与顶栏中的 `React 19 + Vite + Zustand`、`branch: react`、`(解耦)`、`DEMO` 等内部开发术语，以及顶栏与左侧栏的重复导航链接。
-   - 顶栏改为展示“01 需求与纸样簇 › 02 智能排料/分切 › 03 任务下达与报工 › 04 余料台账与对账”四段式核心业务闭环及实时并发引擎就绪状态；左侧主导航收敛为无重叠的业务分组，确保任意路由下 `nav [aria-current="page"]` 唯一标识当前页面。
+   - 左侧栏重构为“大类可展开分组 Tab 包含小类子 Tab”的双层嵌套导航结构（基于 `navbar` 指南的 `<button aria-expanded aria-controls>` + 紧邻 `<ul hidden>` + `@supports (interpolate-size: allow-keywords)` 平滑展开动画 + `:has([aria-current="page"])` 父级联动高亮），统一划分为 **求解场景**（二维异形排料、一维定长分切、多门幅工艺对比、需求与纸样簇）、**生产执行**（生产任务队列、执行与报工、复检处置）、**库存管理**（母卷与余料库存、跑布验疵定位、移库与盘点单据、产出与用料对账）、**示例场景**（全部算例总览、服装齐套算例、卷材分切算例、业务流程演练）四大类及底部 **系统与引擎设置**，同时清退各内容页头重复的 `.hub-tabs` 二级页签。
 2. [ModalDialog.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/components/ModalDialog.tsx)
    - 新建原生 `<dialog>` 模态框组件，通过 `showModal()` 提升至顶层并启用原生焦点锁定与 `Esc` 关闭，声明 `closedby="any"` 并内置无 `closedBy` 环境下的坐标点击遮罩关闭回退，关闭时重置 `returnValue`。
 3. [NestingStudio2DPage.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/pages/NestingStudio2DPage.tsx)

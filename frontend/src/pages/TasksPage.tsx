@@ -122,13 +122,6 @@ export const TasksPage: React.FC = () => {
       <div className="ph">
         <h1>任务</h1>
         <span className="crumb">订单需求跟踪与车间进度总览</span>
-        <div className="hub-tabs" role="navigation" aria-label="生产作业视图">
-          <a className="on" href="#/tasks">
-            任务队列 ({rows.length})
-          </a>
-          <a href="#/execution">工位执行单</a>
-          <a href="#/quality">异常复检</a>
-        </div>
         <span className="sp" />
         <input
           className="field"

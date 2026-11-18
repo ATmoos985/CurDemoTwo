@@ -323,14 +323,6 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
       <div className="ph">
         <h1>库存</h1>
         <span className="crumb">母卷与料头档案</span>
-        <div className="hub-tabs" role="navigation" aria-label="材料与台账视图">
-          <a className="on" href="#/inventory">
-            实物库存
-          </a>
-          <a href="#/inspection">跑布验疵</a>
-          <a href="#/documents">移库与盘点单</a>
-          <a href="#/analysis">产出对账</a>
-        </div>
         <span className="sp" />
         <button
           type="button"

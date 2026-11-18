@@ -66,13 +66,6 @@ export const QualityPage: React.FC = () => {
         >
           已报工产出质量重分类
         </span>
-        <div className="hub-tabs" role="navigation" aria-label="生产作业视图">
-          <a href="#/tasks">任务队列</a>
-          <a href="#/execution">工位执行单</a>
-          <a className="on" href="#/quality">
-            异常复检
-          </a>
-        </div>
         <span className="sp" />
         <button type="button" className="btn sm" onClick={loadQualityReports}>
           刷新列表

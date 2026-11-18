@@ -125,14 +125,6 @@ export const DocumentsPage: React.FC = () => {
       <div className="ph">
         <h1>库存单据</h1>
         <span className="crumb">移库单、盘点单与变更流水</span>
-        <div className="hub-tabs" role="navigation" aria-label="材料与台账视图">
-          <a href="#/inventory">实物库存</a>
-          <a href="#/inspection">跑布验疵</a>
-          <a className="on" href="#/documents">
-            移库与盘点单
-          </a>
-          <a href="#/analysis">产出对账</a>
-        </div>
         <span className="sp" />
         <button type="button" className="btn sm" onClick={loadData}>
           刷新单据

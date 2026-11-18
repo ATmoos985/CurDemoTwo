@@ -471,13 +471,6 @@ export const ExecutionCenterPage: React.FC<{
         <span className="crumb">
           锁料预约 · 开工确认 · 实切报工 · 余料入库
         </span>
-        <div className="hub-tabs" role="navigation" aria-label="生产作业视图">
-          <a href="#/tasks">任务队列</a>
-          <a className="on" href="#/execution">
-            工位执行单
-          </a>
-          <a href="#/quality">异常复检</a>
-        </div>
         <span className="sp" />
         <button type="button" className="btn sm" onClick={reloadCurrentTask}>
           刷新状态

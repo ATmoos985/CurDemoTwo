@@ -31,8 +31,9 @@ const METRIC_LABELS: Record<string, [string, string]> = {
   ]
 };
 
-export const ShowcasePage: React.FC<{ params?: string[] }> = ({
-  params = []
+export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> = ({
+  params = [],
+  groupQuery = ''
 }) => {
   const [caseId] = params;
   const selected = useMemo(
@@ -41,8 +42,12 @@ export const ShowcasePage: React.FC<{ params?: string[] }> = ({
   );
 
   // Catalogue state
-  const [activeGroup, setActiveGroup] = useState<string>('all');
+  const [activeGroup, setActiveGroup] = useState<string>(groupQuery || 'all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  useEffect(() => {
+    setActiveGroup(groupQuery || 'all');
+  }, [groupQuery]);
 
   // Detail case state
   const [request, setRequest] = useState<any>(() =>
