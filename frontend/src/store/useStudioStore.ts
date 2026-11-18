@@ -475,7 +475,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   loadedTaskId: null,
   loadedTaskName: null,
   activeDemands2D: defaultDemands2D,
-  selectedStrategies2D: ['SHORTEN_FIXED', 'SHORTEN_HALF_TURN', 'JAVA_HEURISTIC'],
+  selectedStrategies2D: ['SHORTEN_FIXED', 'SHORTEN_HALF_TURN', 'DEEPNEST_NFP_GA', 'JAVA_HEURISTIC'],
   strategyRuns2D: [],
   schemes2D: [],
   activeSchemeId2D: null,

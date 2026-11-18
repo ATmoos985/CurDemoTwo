@@ -21,7 +21,7 @@ interface SolverStrategyDef {
   forceRotateRect?: boolean;
   shorten: boolean;
   gapFill: boolean;
-  enginePref: 'auto' | 'java';
+  enginePref: 'auto' | 'java' | 'deepnest';
   timeLimit: number;
 }
 
@@ -63,8 +63,32 @@ const STRATEGIES_2D: SolverStrategyDef[] = [
     timeLimit: 12
   },
   {
+    id: 'DEEPNEST_NFP_GA',
+    name: '策略 D · Deepnest 异形 NFP+GA 进化缩长',
+    badge: 'NFP+GA · Deepnest',
+    description: '使用迁移自 Deepnest 的 Minkowski 临界多边形卷积 + 遗传算法进化搜索与共边奖励',
+    halfTurn: true,
+    forceRotateRect: true,
+    shorten: true,
+    gapFill: false,
+    enginePref: 'deepnest',
+    timeLimit: 8
+  },
+  {
+    id: 'DEEPNEST_FIXED_GRAIN',
+    name: '策略 E · Deepnest 严格经向 NFP 直排',
+    badge: '经向 NFP · Deepnest',
+    description: '保持 0° 丝缕方向，采用 Deepnest NFP 精确凹凸嵌套与多代遗传进化直排对照',
+    halfTurn: false,
+    forceRotateRect: false,
+    shorten: false,
+    gapFill: false,
+    enginePref: 'deepnest',
+    timeLimit: 5
+  },
+  {
     id: 'JAVA_HEURISTIC',
-    name: '策略 D · Java 天际线启发式并行',
+    name: '策略 F · Java 天际线启发式并行',
     badge: '天际线 · Java',
     description: '独立线程并行运行 Java 天际线快速启发式引擎，作多策略交叉对照',
     halfTurn: false,
@@ -76,7 +100,7 @@ const STRATEGIES_2D: SolverStrategyDef[] = [
   },
   {
     id: 'DIRECT_FIXED_WINDOW',
-    name: '策略 E · 预设画布定长直排',
+    name: '策略 G · 预设画布定长直排',
     badge: '定长画布 · C++',
     description: '按上方预设幅宽 × 长度整床一次直排，快速查看固定台板装入量',
     halfTurn: false,
@@ -100,7 +124,11 @@ function buildOptimizationRequest2D(
   const hasPolygon = demands.some((d) => d.shape?.type === 'POLYGON');
   const mode = hasPolygon ? 'CONTOUR' : 'GUILLOTINE';
   const engine =
-    strategy.enginePref === 'java'
+    strategy.enginePref === 'deepnest'
+      ? mode === 'CONTOUR'
+        ? 'deepnest'
+        : 'javaguillotine'
+      : strategy.enginePref === 'java'
       ? mode === 'CONTOUR'
         ? 'javairregular'
         : 'javaguillotine'
@@ -722,7 +750,12 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
           allowLongitudinal: true,
           feedPortType: 'roll',
           sourceRemnantId: null,
-          solver: activeScheme.request?.problem?.engine === 'javaguillotine' || activeScheme.request?.problem?.engine === 'javairregular' ? activeScheme.request.problem.engine : 'packingsolver',
+          solver:
+            activeScheme.request?.problem?.engine === 'javaguillotine' ||
+            activeScheme.request?.problem?.engine === 'javairregular' ||
+            activeScheme.request?.problem?.engine === 'deepnest'
+              ? activeScheme.request.problem.engine
+              : 'packingsolver',
           defects: winDefects,
           demands: task.demands.map((d: any) => ({
             id: d.id,

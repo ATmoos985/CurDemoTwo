@@ -44,10 +44,13 @@ public final class ContourWorkflow {
             // Each pattern owns its grain permission; the rectangle-wide rotation switch cannot override it.
             return new NestingProblem.Part(d.getId(), d.getName(), d.geometry(), d.getDemand(), d.isAllowRotation());
         }).toList();
+        String rawSolver = r.getSolver();
+        String contourEngine = (rawSolver == null || rawSolver.isBlank() || "packingsolver".equalsIgnoreCase(rawSolver))
+                ? "auto" : rawSolver;
         return new NestingProblem("1", "mm", new NestingProblem.Material("work-region",
                 NestingProblem.Shape.rectangle(r.getRollW(), length), exclusions, false), parts,
                 new NestingProblem.Process("CONTOUR", "SHEET", "left-top", "none", 0, 0, 0, 0,
-                        "MAXIMIZE_PIECE_AREA", r.getPieceGap()), "auto", r.getTimeLimitSeconds());
+                        "MAXIMIZE_PIECE_AREA", r.getPieceGap()), contourEngine, r.getTimeLimitSeconds());
     }
 
     static SolveResponse solve(NestingSolver factory, SolveRequest r) {
