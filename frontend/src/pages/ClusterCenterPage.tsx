@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { useStudioStore, DemandCluster, ClusterTemplatePiece } from '../store/useStudioStore';
+import { ModalDialog } from '../components/ModalDialog';
 import { toast } from '@static/app/js/util.js';
 
 const CATEGORY_LABELS: Record<DemandCluster['category'], { label: string; tagClass: string }> = {
-  DXF_GARMENT: { label: '服装 CAD 纸样簇 (DXF)', tagClass: 'run' },
-  CURTAIN_2D: { label: '家纺窗帘套系簇 (2D)', tagClass: 'ok' },
-  BOARD_2D: { label: '板材开料套系簇 (2D)', tagClass: 'warn' },
-  SLITTING_1D: { label: '一维定长分条簇 (1D)', tagClass: 'kind' }
+  DXF_GARMENT: { label: '服装 CAD 纸样', tagClass: 'run' },
+  CURTAIN_2D: { label: '家纺窗帘套系', tagClass: 'ok' },
+  BOARD_2D: { label: '板材开料套系', tagClass: 'warn' },
+  SLITTING_1D: { label: '一维定长分条', tagClass: 'kind' }
 };
 
 function PieceMiniSvg({ piece, sizeKey }: { piece: ClusterTemplatePiece; sizeKey: string }) {
@@ -14,22 +15,28 @@ function PieceMiniSvg({ piece, sizeKey }: { piece: ClusterTemplatePiece; sizeKey
   if (!geom) return null;
   const w = geom.w || 100;
   const h = geom.h || 100;
-  const pts = geom.v && geom.v.length >= 3
-    ? geom.v.map(([x, y]) => `${x},${y}`).join(' ')
-    : `0,0 ${w},0 ${w},${h} 0,${h}`;
+  const pts =
+    geom.v && geom.v.length >= 3
+      ? geom.v.map(([x, y]) => `${x},${y}`).join(' ')
+      : `0,0 ${w},0 ${w},${h} 0,${h}`;
   return (
     <div className="cluster-piece-chip" title={`${piece.name} (${sizeKey}: ${w}×${h}mm)`}>
-      <svg viewBox={`-8 -8 ${w + 16} ${h + 16}`} width="42" height="42">
+      <svg viewBox={`-8 -8 ${w + 16} ${h + 16}`} width="40" height="40" aria-hidden="true">
         <polygon
           points={pts}
-          fill="rgba(37, 99, 235, 0.16)"
-          stroke="#2563eb"
-          strokeWidth={Math.max(w, h) * 0.04}
+          fill="rgba(2, 132, 199, 0.14)"
+          stroke="#0284c7"
+          strokeWidth={Math.max(w, h) * 0.045}
         />
       </svg>
       <div className="cluster-piece-meta">
-        <b>{piece.name}{piece.pairMirror ? ' (左右对称)' : ''}</b>
-        <span className="num">{Math.round(w)}×{Math.round(h)} mm · ×{piece.quantityPerUnit}</span>
+        <b>
+          {piece.name}
+          {piece.pairMirror ? ' · 对称' : ''}
+        </b>
+        <span className="num">
+          {Math.round(w)}×{Math.round(h)} · ×{piece.quantityPerUnit}
+        </span>
       </div>
     </div>
   );
@@ -51,16 +58,17 @@ export const ClusterCenterPage: React.FC = () => {
   const [checkedIds, setCheckedIds] = useState<string[]>(['DXF_1226']);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
-  // New custom cluster form state
   const [newName, setNewName] = useState('');
   const [newCategory, setNewCategory] = useState<DemandCluster['category']>('CURTAIN_2D');
   const [newWidth, setNewWidth] = useState(1650);
   const [newLength, setNewLength] = useState(2400);
   const [newSizesText, setNewSizesText] = useState('S, M, L');
-  const [newPieces, setNewPieces] = useState<{ name: string; w: number; h: number; qty: number }[]>([
-    { name: '主裁片 A', w: 520, h: 680, qty: 2 },
-    { name: '配片 B', w: 320, h: 420, qty: 2 }
-  ]);
+  const [newPieces, setNewPieces] = useState<{ name: string; w: number; h: number; qty: number }[]>(
+    [
+      { name: '主裁片 A', w: 520, h: 680, qty: 2 },
+      { name: '配片 B', w: 320, h: 420, qty: 2 }
+    ]
+  );
 
   const filtered = clusters.filter((c) => filterCat === 'ALL' || c.category === filterCat);
 
@@ -81,7 +89,7 @@ export const ClusterCenterPage: React.FC = () => {
       }
       const created = importDxfAsCluster(text, file.name);
       setCheckedIds((prev) => [created.id, ...prev]);
-      toast(`成功解析并创建纸样簇：${created.name}（${created.pieces.length} 种裁片）`);
+      toast(`已解析创建纸样簇：${created.name}（${created.pieces.length} 种裁片）`);
     } catch (err: any) {
       toast('DXF 纸样簇导入失败：' + err.message, true);
     } finally {
@@ -108,7 +116,7 @@ export const ClusterCenterPage: React.FC = () => {
       code: 'TPL-' + Date.now().toString(36).slice(-4).toUpperCase(),
       category: newCategory,
       dimension: newCategory === 'SLITTING_1D' ? '1D' : '2D',
-      description: `自定义模板簇（包含 ${newPieces.map((p) => p.name).join('、')}，支持按尺码阶梯缩放）`,
+      description: `包含 ${newPieces.map((p) => p.name).join('、')}，支持按规格阶梯放码`,
       defaultWidthMm: Number(newWidth) || 1650,
       defaultLengthMm: Number(newLength) || 2400,
       materialModel: 'CUSTOM-' + newName.trim().slice(0, 8),
@@ -117,7 +125,7 @@ export const ClusterCenterPage: React.FC = () => {
       pieces: newPieces.map((p) => {
         const sizeMap: Record<string, { w: number; h: number }> = {};
         sizeList.forEach((sz, idx) => {
-          const scale = 1 + idx * 0.06; // Automatic 6% grading per size step
+          const scale = 1 + idx * 0.06;
           sizeMap[sz] = {
             w: Math.round(p.w * scale),
             h: Math.round(p.h * scale)
@@ -141,14 +149,14 @@ export const ClusterCenterPage: React.FC = () => {
     <div className="react-page">
       <div className="ph">
         <h1>需求与纸样簇库</h1>
-        <span className="crumb">按款式/套系集中管理固定形状与多尺码模板 · 勾选几个簇即可直接送入二维或一维工作台</span>
+        <span className="crumb">按款式与产品套系管理部件清单及配码比例</span>
         <span className="sp" />
         <label className="btn" style={{ cursor: 'pointer' }}>
-          ＋ 导入 CAD DXF 为纸样簇
+          导入 CAD DXF
           <input type="file" accept=".dxf" hidden onChange={handleDxfFileUpload} />
         </label>
         <button type="button" className="btn" onClick={() => setShowCreateModal(true)}>
-          ＋ 新建规格模板簇
+          ＋ 新建规格簇
         </button>
         <button
           type="button"
@@ -159,23 +167,24 @@ export const ClusterCenterPage: React.FC = () => {
             location.hash = '#/workbench';
           }}
         >
-          将已选簇 ({checkedIds.length}) 送入二维画布搭切 →
+          送入二维排料 ({checkedIds.length}) →
         </button>
       </div>
 
       <div className="toolbar">
-        <div className="seg">
+        <div className="seg" role="group" aria-label="行业分类筛选">
           {[
-            ['ALL', `全部簇 (${clusters.length})`],
-            ['DXF_GARMENT', '服装 DXF 纸样簇'],
-            ['CURTAIN_2D', '窗帘家纺簇'],
-            ['BOARD_2D', '板材套系簇'],
-            ['SLITTING_1D', '一维分条簇']
+            ['ALL', `全部 (${clusters.length})`],
+            ['DXF_GARMENT', '服装 CAD 纸样'],
+            ['CURTAIN_2D', '窗帘家纺套系'],
+            ['BOARD_2D', '板材开料套系'],
+            ['SLITTING_1D', '一维定长分条']
           ].map(([k, label]) => (
             <button
               key={k}
               type="button"
               className={filterCat === k ? 'on' : ''}
+              aria-pressed={filterCat === k}
               onClick={() => setFilterCat(k)}
             >
               {label}
@@ -183,159 +192,175 @@ export const ClusterCenterPage: React.FC = () => {
           ))}
         </div>
         <span className="sp" />
-        <span className="muted" style={{ fontSize: 12 }}>
-          提示：在下方每个簇卡片中直接调整各尺码件数（如 120码×2 + 140码×1），一键送入画布，免去逐行填表。
-        </span>
+        <span className="muted num">已勾选 {checkedIds.length} 个套系模板</span>
       </div>
 
-      {showCreateModal && (
-        <div className="react-modal-backdrop">
-          <form className="box react-modal" onSubmit={handleCreateCustomCluster}>
-            <div className="pane-h">
-              新建需求/纸样模板簇
-              <span className="sp" />
-              <button type="button" className="btn sm" onClick={() => setShowCreateModal(false)}>
-                关闭
-              </button>
-            </div>
-            <div className="pane-b" style={{ padding: 14 }}>
-              <div className="form" style={{ gridTemplateColumns: '110px 1fr' }}>
-                <label>簇名称</label>
-                <input
-                  className="field"
-                  required
-                  placeholder="如：2026秋季工装夹克簇 / 酒店标准窗帘簇"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                />
-                <label>所属类型</label>
-                <select
-                  className="field"
-                  value={newCategory}
-                  onChange={(e) => setNewCategory(e.target.value as any)}
-                >
-                  <option value="CURTAIN_2D">二维矩形套系簇（窗帘/家纺）</option>
-                  <option value="BOARD_2D">二维板材开料簇（家具/柜体）</option>
-                  <option value="SLITTING_1D">一维定长分条簇（薄膜/卷材）</option>
-                </select>
-                <label>预设画布幅宽</label>
-                <input
-                  type="number"
-                  className="field num"
-                  value={newWidth}
-                  onChange={(e) => setNewWidth(Number(e.target.value))}
-                />
-                <label>预设画布长度</label>
-                <input
-                  type="number"
-                  className="field num"
-                  value={newLength}
-                  onChange={(e) => setNewLength(Number(e.target.value))}
-                />
-                <label>尺码/规格档位</label>
-                <input
-                  className="field"
-                  value={newSizesText}
-                  onChange={(e) => setNewSizesText(e.target.value)}
-                  placeholder="用逗号分隔，如 S, M, L 或 110, 120, 130"
-                />
-              </div>
-              <div className="sec">簇内固定组成部件（基准码尺寸，其余档位自动按阶梯放码）</div>
-              <table className="t">
-                <thead>
-                  <tr>
-                    <th>部件名称</th>
-                    <th className="r">基准宽 mm</th>
-                    <th className="r">基准长 mm</th>
-                    <th className="r">每套数量</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {newPieces.map((p, idx) => (
-                    <tr key={idx}>
-                      <td>
-                        <input
-                          className="field"
-                          value={p.name}
-                          onChange={(e) =>
-                            setNewPieces((arr) =>
-                              arr.map((item, i) => (i === idx ? { ...item, name: e.target.value } : item))
-                            )
-                          }
-                        />
-                      </td>
-                      <td className="r">
-                        <input
-                          type="number"
-                          className="field num"
-                          style={{ width: 85 }}
-                          value={p.w}
-                          onChange={(e) =>
-                            setNewPieces((arr) =>
-                              arr.map((item, i) => (i === idx ? { ...item, w: Number(e.target.value) } : item))
-                            )
-                          }
-                        />
-                      </td>
-                      <td className="r">
-                        <input
-                          type="number"
-                          className="field num"
-                          style={{ width: 85 }}
-                          value={p.h}
-                          onChange={(e) =>
-                            setNewPieces((arr) =>
-                              arr.map((item, i) => (i === idx ? { ...item, h: Number(e.target.value) } : item))
-                            )
-                          }
-                        />
-                      </td>
-                      <td className="r">
-                        <input
-                          type="number"
-                          className="field num"
-                          style={{ width: 65 }}
-                          value={p.qty}
-                          onChange={(e) =>
-                            setNewPieces((arr) =>
-                              arr.map((item, i) => (i === idx ? { ...item, qty: Number(e.target.value) } : item))
-                            )
-                          }
-                        />
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn sm"
-                          onClick={() => setNewPieces((arr) => arr.filter((_, i) => i !== idx))}
-                        >
-                          删除
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                <button
-                  type="button"
-                  className="btn sm"
-                  onClick={() =>
-                    setNewPieces((arr) => [...arr, { name: `部件 ${arr.length + 1}`, w: 400, h: 600, qty: 1 }])
-                  }
-                >
-                  ＋ 添加部件
-                </button>
-                <span className="sp" />
-                <button type="submit" className="btn pri">
-                  保存为需求簇
-                </button>
-              </div>
-            </div>
-          </form>
-        </div>
-      )}
+      <ModalDialog
+        open={showCreateModal}
+        title="新建需求与纸样模板簇"
+        onClose={() => setShowCreateModal(false)}
+        maxWidth={680}
+      >
+        <form onSubmit={handleCreateCustomCluster}>
+          <div className="form" style={{ gridTemplateColumns: '110px 1fr', padding: '4px 0 12px' }}>
+            <label htmlFor="new-cluster-name">簇名称</label>
+            <input
+              id="new-cluster-name"
+              className="field"
+              required
+              autoFocus
+              placeholder="如：2026秋季工装夹克 / 酒店遮光窗帘套系"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+            />
+            <label htmlFor="new-cluster-cat">所属类型</label>
+            <select
+              id="new-cluster-cat"
+              className="field"
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value as any)}
+            >
+              <option value="CURTAIN_2D">二维矩形套系（窗帘 / 家纺）</option>
+              <option value="BOARD_2D">二维板材开料（家具 / 柜体）</option>
+              <option value="SLITTING_1D">一维定长分条（薄膜 / 卷材）</option>
+            </select>
+            <label htmlFor="new-cluster-w">预设门幅 mm</label>
+            <input
+              id="new-cluster-w"
+              type="number"
+              className="field num"
+              value={newWidth}
+              onChange={(e) => setNewWidth(Number(e.target.value))}
+            />
+            <label htmlFor="new-cluster-l">预设版长 mm</label>
+            <input
+              id="new-cluster-l"
+              type="number"
+              className="field num"
+              value={newLength}
+              onChange={(e) => setNewLength(Number(e.target.value))}
+            />
+            <label htmlFor="new-cluster-sizes">尺码/规格档位</label>
+            <input
+              id="new-cluster-sizes"
+              className="field"
+              value={newSizesText}
+              onChange={(e) => setNewSizesText(e.target.value)}
+              placeholder="逗号分隔，如 S, M, L 或 110, 120, 130"
+            />
+          </div>
+
+          <div className="sec" style={{ margin: '0 -16px' }}>
+            组成部件明细（基准码尺寸，其余档位自动阶梯放码）
+          </div>
+          <table className="t" style={{ marginTop: 8 }}>
+            <thead>
+              <tr>
+                <th>部件名称</th>
+                <th className="r">基准宽 mm</th>
+                <th className="r">基准长 mm</th>
+                <th className="r">每套数量</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {newPieces.map((p, idx) => (
+                <tr key={idx}>
+                  <td>
+                    <input
+                      className="field"
+                      value={p.name}
+                      onChange={(e) =>
+                        setNewPieces((arr) =>
+                          arr.map((item, i) =>
+                            i === idx ? { ...item, name: e.target.value } : item
+                          )
+                        )
+                      }
+                    />
+                  </td>
+                  <td className="r">
+                    <input
+                      type="number"
+                      className="field num"
+                      style={{ width: 84 }}
+                      value={p.w}
+                      onChange={(e) =>
+                        setNewPieces((arr) =>
+                          arr.map((item, i) =>
+                            i === idx ? { ...item, w: Number(e.target.value) } : item
+                          )
+                        )
+                      }
+                    />
+                  </td>
+                  <td className="r">
+                    <input
+                      type="number"
+                      className="field num"
+                      style={{ width: 84 }}
+                      value={p.h}
+                      onChange={(e) =>
+                        setNewPieces((arr) =>
+                          arr.map((item, i) =>
+                            i === idx ? { ...item, h: Number(e.target.value) } : item
+                          )
+                        )
+                      }
+                    />
+                  </td>
+                  <td className="r">
+                    <input
+                      type="number"
+                      className="field num"
+                      style={{ width: 64 }}
+                      value={p.qty}
+                      onChange={(e) =>
+                        setNewPieces((arr) =>
+                          arr.map((item, i) =>
+                            i === idx ? { ...item, qty: Number(e.target.value) } : item
+                          )
+                        )
+                      }
+                    />
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn sm"
+                      onClick={() => setNewPieces((arr) => arr.filter((_, i) => i !== idx))}
+                    >
+                      移除
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+            <button
+              type="button"
+              className="btn sm"
+              onClick={() =>
+                setNewPieces((arr) => [
+                  ...arr,
+                  { name: `部件 ${arr.length + 1}`, w: 400, h: 600, qty: 1 }
+                ])
+              }
+            >
+              ＋ 添加部件
+            </button>
+            <span className="sp" />
+            <button type="button" className="btn" onClick={() => setShowCreateModal(false)}>
+              取消
+            </button>
+            <button type="submit" className="btn pri">
+              保存模板簇
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
 
       <div className="body">
         <div className="cluster-grid">
@@ -347,14 +372,12 @@ export const ClusterCenterPage: React.FC = () => {
             const totalPieces = Math.max(1, totalUnits) * perUnitPieces;
             const isChecked = checkedIds.includes(cluster.id);
             const previewSize =
-              cluster.availableSizes.find((sz) => (counts[sz] || 0) > 0) || cluster.availableSizes[0];
+              cluster.availableSizes.find((sz) => (counts[sz] || 0) > 0) ||
+              cluster.availableSizes[0];
 
             return (
-              <article
-                key={cluster.id}
-                className={`cluster-card ${isChecked ? 'selected' : ''}`}
-              >
-                <div className="cluster-card-head">
+              <article key={cluster.id} className="cluster-card">
+                <header className="cluster-card-head">
                   <label className="cluster-check">
                     <input
                       type="checkbox"
@@ -364,14 +387,20 @@ export const ClusterCenterPage: React.FC = () => {
                     <strong>{cluster.name}</strong>
                   </label>
                   <span className={`tag ${catMeta.tagClass}`}>{catMeta.label}</span>
-                </div>
+                </header>
 
                 <p className="cluster-desc">{cluster.description}</p>
 
-                <div className="cluster-spec-bar">
-                  <span>预设门幅/母卷：<b className="num">{cluster.defaultWidthMm} mm</b></span>
-                  <span>每套含裁片：<b className="num">{perUnitPieces} 片 ({cluster.pieces.length} 种部件)</b></span>
-                  <span>当前选配：<b className="num" style={{ color: 'var(--accent)' }}>{totalUnits || 1} 套 · 共 {totalPieces} 片</b></span>
+                <div className="cluster-spec-bar num">
+                  <span>
+                    标准门幅 <b>{cluster.defaultWidthMm} mm</b>
+                  </span>
+                  <span>
+                    单套 <b>{perUnitPieces} 片</b> ({cluster.pieces.length} 部件)
+                  </span>
+                  <span>
+                    当前排量 <b style={{ color: 'var(--accent-ink)' }}>{totalUnits || 1} 套 · {totalPieces} 片</b>
+                  </span>
                 </div>
 
                 <div className="cluster-pieces-preview">
@@ -379,14 +408,12 @@ export const ClusterCenterPage: React.FC = () => {
                     <PieceMiniSvg key={idx} piece={p} sizeKey={previewSize} />
                   ))}
                   {cluster.pieces.length > 8 && (
-                    <div className="cluster-piece-more">
-                      +{cluster.pieces.length - 8} 种裁片
-                    </div>
+                    <div className="cluster-piece-more">+{cluster.pieces.length - 8} 种部件</div>
                   )}
                 </div>
 
                 <div className="cluster-sizes-box">
-                  <small>尺码 / 规格配比（直接输入件/套数）：</small>
+                  <small>配码套数：</small>
                   <div className="cluster-size-inputs">
                     {cluster.availableSizes.map((sz) => (
                       <label key={sz} className={(counts[sz] || 0) > 0 ? 'active' : ''}>
@@ -397,14 +424,16 @@ export const ClusterCenterPage: React.FC = () => {
                           max={50}
                           className="field num"
                           value={counts[sz] ?? 0}
-                          onChange={(e) => setClusterCount(cluster.id, sz, Number(e.target.value))}
+                          onChange={(e) =>
+                            setClusterCount(cluster.id, sz, Number(e.target.value))
+                          }
                         />
                       </label>
                     ))}
                   </div>
                 </div>
 
-                <div className="cluster-card-actions">
+                <footer className="cluster-card-actions">
                   {cluster.dimension === '1D' ? (
                     <button
                       type="button"
@@ -426,21 +455,21 @@ export const ClusterCenterPage: React.FC = () => {
                           location.hash = '#/workbench';
                         }}
                       >
-                        独立送入二维画布 →
+                        送入二维排料 →
                       </button>
                       <button
                         type="button"
                         className="btn sm"
                         onClick={() => {
                           loadClusterInto2D(cluster.id, true);
-                          toast(`已将「${cluster.name}」追加到当前二维待排列表`);
+                          toast(`已将「${cluster.name}」追加到当前待排清单`);
                         }}
                       >
-                        ＋ 追加到当前画布合排
+                        ＋ 追加合排
                       </button>
                     </>
                   )}
-                </div>
+                </footer>
               </article>
             );
           })}

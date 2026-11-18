@@ -467,9 +467,9 @@ export const ExecutionCenterPage: React.FC<{
   return (
     <div className="react-page">
       <div className="ph">
-        <h1>生产移交与报工中心</h1>
+        <h1>执行与报工</h1>
         <span className="crumb">
-          与排料画布解耦 · 集中办理执行单锁料、开工、实切报工、余料回库与异常复检处置
+          锁料预约 · 开工确认 · 实切报工 · 余料入库
         </span>
         <div className="hub-tabs" role="navigation" aria-label="生产作业视图">
           <a href="#/tasks">任务队列</a>
@@ -483,7 +483,7 @@ export const ExecutionCenterPage: React.FC<{
           刷新状态
         </button>
         <a className="btn" href="#/workbench">
-          ← 返回二维搭切台
+          选择任务方案
         </a>
       </div>
 

@@ -28,8 +28,8 @@ export const SettingsPage: React.FC = () => {
   return (
     <div className="react-page">
       <div className="ph">
-        <h1>多线程调度与系统设置</h1>
-        <span className="crumb">查看后端多线程求解池额度、引擎可用性，配置默认料头回收与超时参数</span>
+        <h1>设置</h1>
+        <span className="crumb">并发计算引擎状态与本机默认排料参数</span>
         <span className="sp" />
         <button type="button" className="btn sm" onClick={fetchCaps}>
           刷新服务能力
@@ -37,7 +37,7 @@ export const SettingsPage: React.FC = () => {
       </div>
       <div className="body" style={{ maxWidth: 880 }}>
         <div className="box">
-          <div className="pane-h">后端多线程并行计算池状态（天然支持多策略竞速）</div>
+          <div className="pane-h">求解引擎状态与并发配额</div>
           {cap ? (
             <>
               <div className="metric" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>

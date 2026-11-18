@@ -1,12 +1,92 @@
-/* React CAD/CAM Studio Extensions over Industrial Theme */
+/* CutPlan Modern Industrial Workbench Styles — Guided by Google Chrome Modern Web Guidance */
+
 .react-page {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
   min-width: 0;
+  line-height: 1.5;
 }
 
+/* 1. Topbar Workflow Value Chain & Engine Readiness */
+.topbar-flow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  padding-left: 14px;
+  border-left: 1px solid #334155;
+}
+
+.topbar-flow-sep {
+  color: #475569;
+  font-size: 12px;
+  user-select: none;
+}
+
+.topbar-flow-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  color: #94a3b8;
+  font-size: 12px;
+  border: 1px solid transparent;
+}
+
+.topbar-flow-step em {
+  font-style: normal;
+  font-size: 10.5px;
+  color: #64748b;
+}
+
+@media (hover: hover) {
+  .topbar-flow-step:hover {
+    color: #f8fafc;
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+
+.topbar-flow-step.active {
+  color: #f8fafc;
+  background: #1e293b;
+  border-color: #38bdf8;
+  font-weight: 600;
+}
+
+.topbar-flow-step.active em {
+  color: #38bdf8;
+}
+
+@media (max-width: 1120px) {
+  .topbar-flow {
+    display: none;
+  }
+}
+
+.engine-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  font-size: 11.5px;
+}
+
+/* Navigation active state hooked directly to [aria-current="page"] */
+.nav a[aria-current="page"] {
+  background: #1e293b;
+  color: #ffffff;
+  border-left-color: #38bdf8;
+  font-weight: 600;
+}
+
+/* 2. Studio 2D Top Header Bar & Progressive Craft Disclosure */
 .studio-top-bar {
   display: flex;
   align-items: center;
@@ -18,10 +98,18 @@
   flex: none;
 }
 
+.studio-title {
+  margin: 0 4px 0 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+}
+
 .studio-canvas-inputs {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -41,7 +129,7 @@
 }
 
 .studio-canvas-inputs .field {
-  height: 28px;
+  min-block-size: 28px;
 }
 
 .width-quick-pills {
@@ -50,8 +138,9 @@
 }
 
 .width-quick-pills button {
-  height: 24px;
-  padding: 0 7px;
+  min-block-size: 24px;
+  min-inline-size: 24px;
+  padding: 2px 7px;
   font-size: 11px;
   font-family: var(--mono);
   border: 1px solid var(--line);
@@ -61,11 +150,86 @@
   cursor: pointer;
 }
 
+.width-quick-pills button[aria-pressed="true"],
 .width-quick-pills button.on {
   background: var(--accent-2);
   border-color: var(--accent);
   color: var(--accent-ink);
   font-weight: 600;
+}
+
+/* Inline progressive disclosure for secondary craft tolerances */
+.craft-disclosure {
+  position: relative;
+}
+
+.craft-disclosure > summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-block-size: 28px;
+  padding: 2px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.craft-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.craft-disclosure > summary::before {
+  content: "";
+  inline-size: 0.75em;
+  block-size: 0.75em;
+  flex-shrink: 0;
+  background-color: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.2 6 7.8l3.5-3.6' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center / contain;
+  rotate: -90deg;
+}
+
+.craft-disclosure[open] > summary {
+  border-color: var(--accent);
+  background: var(--accent-2);
+  color: var(--accent-ink);
+}
+
+.craft-disclosure[open] > summary::before {
+  rotate: 0deg;
+}
+
+.craft-disclosure-panel {
+  position: absolute;
+  inset-block-start: calc(100% + 6px);
+  inset-inline-start: 0;
+  z-index: 30;
+  min-inline-size: 240px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+  display: grid;
+  gap: 8px;
+}
+
+.craft-disclosure-panel label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.craft-disclosure-panel input {
+  width: 72px;
+  text-align: right;
 }
 
 .studio-run-controls {
@@ -75,22 +239,36 @@
 }
 
 .studio-solve-btn {
-  height: 30px;
-  padding: 0 14px;
+  min-block-size: 30px;
+  padding: 4px 14px;
   font-weight: 600;
 }
 
+.link-btn {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--accent);
+  cursor: pointer;
+  margin-left: 8px;
+}
+
+@media (hover: hover) {
+  .link-btn:hover {
+    text-decoration: underline;
+  }
+}
+
+/* 3. Studio 3-Column Layout */
 .studio-split {
   flex: 1;
   display: grid;
-  grid-template-columns: 290px minmax(0, 1fr) 316px;
+  grid-template-columns: 284px minmax(0, 1fr) 324px;
   min-height: 0;
 }
 
 .studio-canvas-hint {
-  height: 24px;
-  line-height: 24px;
-  padding: 0 12px;
+  min-block-size: 24px;
+  padding: 3px 12px;
   background: #23272c;
   color: #9aa4ae;
   font-size: 11.5px;
@@ -98,13 +276,338 @@
   flex: none;
 }
 
-/* Cluster quick loader inside 2D studio left panel */
+/* Accessible Canvas Toolbar (role="toolbar") */
+.ctool {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: #141920;
+  border-bottom: 1px solid #2a323d;
+  color: #cbd5e1;
+  flex-wrap: wrap;
+}
+
+.ctool-group,
+.ctool .vseg {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.ctool button {
+  min-inline-size: 26px;
+  min-block-size: 26px;
+  padding: 2px 8px;
+  border: 1px solid #334155;
+  border-radius: 3px;
+  background: #1e293b;
+  color: #cbd5e1;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.ctool button:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 1px;
+}
+
+@media (hover: hover) {
+  .ctool button:hover {
+    background: #283548;
+    color: #ffffff;
+  }
+}
+
+/* Style toggled state directly from ARIA [aria-pressed="true"] */
+.ctool button[aria-pressed="true"] {
+  background: #0369a1;
+  border-color: #38bdf8;
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.35);
+}
+
+.ctool .div {
+  display: inline-block;
+  inline-size: 0;
+  block-size: 16px;
+  border-inline-start: 1px solid #334155;
+  margin-inline: 2px;
+}
+
+.ctool-readout {
+  color: #94a3b8;
+  font-size: 11.5px;
+}
+
+/* 4. Customer Value KPI Panel (Right Column Top) */
+.value-hero-panel {
+  margin: 10px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.value-hero-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.value-hero-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.value-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.value-kpi-cell {
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.value-kpi-cell.highlight {
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+
+.value-kpi-cell small {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.value-kpi-cell b {
+  font-size: 18px;
+  line-height: 1.25;
+  color: var(--text);
+}
+
+.value-kpi-cell.highlight b {
+  color: #047857;
+}
+
+.value-kpi-cell b em {
+  font-style: normal;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-3);
+  margin-left: 3px;
+}
+
+.kpi-sub {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ok-ink {
+  color: var(--ok);
+}
+
+.value-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.value-primary-cta {
+  width: 100%;
+  min-block-size: 36px;
+  font-weight: 600;
+}
+
+.value-export-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.value-empty-card {
+  margin: 10px;
+  padding: 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.value-empty-card strong {
+  display: block;
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.value-empty-card p {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+/* 5. Native <details> Accordion & Choice Cards (Modern Web Guidance) */
+.studio-accordion {
+  margin: 8px 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.studio-accordion > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5ch;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.studio-accordion > summary::-webkit-details-marker {
+  display: none;
+}
+
+.studio-accordion > summary::before {
+  content: "";
+  inline-size: 0.9em;
+  block-size: 0.9em;
+  flex-shrink: 0;
+  background-color: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.2 6 7.8l3.5-3.6' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center / contain;
+  rotate: -90deg;
+}
+
+.studio-accordion[open] > summary {
+  border-bottom: 1px solid var(--line-2);
+}
+
+.studio-accordion[open] > summary::before {
+  rotate: 0deg;
+}
+
+.studio-accordion::details-content {
+  interpolate-size: allow-keywords;
+  overflow: clip;
+  contain: layout;
+}
+
+.studio-accordion:not([open])::details-content {
+  block-size: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .studio-accordion > summary::before,
+  .craft-disclosure > summary::before {
+    transition: rotate 0.18s;
+  }
+  .studio-accordion::details-content {
+    transition: block-size, content-visibility, display;
+    transition-duration: 0.22s;
+    transition-timing-function: ease-in-out;
+    transition-behavior: allow-discrete;
+  }
+}
+
+/* Choice Cards: use :has(:checked) and never alter layout-shifting border-width or font-weight */
+.choice-card-list {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.choice-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1.5px solid var(--line-2);
+  border-radius: 5px;
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.choice-card > input[type="checkbox"] {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.choice-card:has(> input:checked) {
+  border-color: var(--accent);
+  background: #f8fbff;
+}
+
+.choice-card.is-running {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.16);
+}
+
+.choice-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.choice-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.choice-card-head strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.choice-card-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 1px;
+}
+
+.choice-card-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--line-2);
+  font-size: 11px;
+}
+
+.choice-card-phase {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 6. Cluster Quick Box & Bottom Scheme Strip */
 .cluster-quick-box {
   margin: 8px;
   padding: 8px;
   background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 5px;
 }
 
 .cluster-quick-row {
@@ -114,7 +617,7 @@
 }
 
 .cluster-quick-row .field {
-  height: 28px;
+  min-block-size: 28px;
   font-size: 12px;
 }
 
@@ -132,7 +635,7 @@
   padding: 2px 6px;
   border: 1px solid var(--line);
   border-radius: 3px;
-  background: #fff;
+  background: #ffffff;
   font-size: 11px;
 }
 
@@ -156,7 +659,6 @@
   gap: 6px;
 }
 
-/* Scheme comparison strip under canvas */
 .scheme-strip {
   flex: none;
   background: #0f172a;
@@ -182,25 +684,26 @@
 }
 
 .scheme-empty {
-  color: #64748b;
+  color: #94a3b8;
   font-size: 12px;
-  padding: 8px 4px;
+  padding: 6px 4px;
 }
 
 .scheme-slot {
-  flex: 1 1 180px;
-  min-width: 175px;
-  max-width: 280px;
-  padding: 6px 8px;
-  border: 1px solid #334155;
-  border-radius: 4px;
+  flex: 1 1 190px;
+  min-width: 180px;
+  max-width: 290px;
+  padding: 6px 9px;
+  border: 1.5px solid #334155;
+  border-radius: 5px;
   background: #1e293b;
   cursor: pointer;
-  transition: border-color 0.12s, background 0.12s;
 }
 
-.scheme-slot:hover {
-  border-color: #64748b;
+@media (hover: hover) {
+  .scheme-slot:hover {
+    border-color: #64748b;
+  }
 }
 
 .scheme-slot.on {
@@ -218,18 +721,25 @@
 
 .scheme-slot-top strong {
   color: #f8fafc;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .scheme-del {
   margin-left: auto;
+  border: 0;
+  background: transparent;
   color: #94a3b8;
   padding: 0 4px;
   font-weight: 700;
+  cursor: pointer;
 }
 
-.scheme-del:hover {
-  color: #f87171;
+@media (hover: hover) {
+  .scheme-del:hover {
+    color: #f87171;
+  }
 }
 
 .scheme-slot-metrics {
@@ -240,73 +750,20 @@
 }
 
 .scheme-slot-metrics b {
-  color: #e2e8f0;
+  color: #f8fafc;
 }
 
-/* Parallel Strategy Matrix */
-.strategy-list {
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.strategy-card {
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 8px 10px;
-  background: var(--panel);
-}
-
-.strategy-card.checked {
-  border-color: #93c5fd;
-  background: #f8fbff;
-}
-
-.strategy-card.running {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15);
-}
-
-.strategy-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.strategy-head b {
-  flex: 1;
-}
-
-.strategy-desc {
-  margin: 4px 0 0 20px;
-  font-size: 11px;
-  color: var(--text-3);
-  line-height: 1.4;
-}
-
-.strategy-run-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px dashed var(--line-2);
-  font-size: 11px;
-}
-
-/* Cluster Library Grid */
+/* 7. Demand Cluster Library Cards (Container-Query & :has(:checked) Ready) */
 .cluster-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(430px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
   gap: 14px;
 }
 
 .cluster-card {
+  container-type: inline-size;
   background: var(--panel);
-  border: 1px solid var(--line);
+  border: 1.5px solid var(--line);
   border-radius: 6px;
   padding: 12px 14px;
   display: flex;
@@ -314,9 +771,9 @@
   gap: 8px;
 }
 
-.cluster-card.selected {
+.cluster-card:has(.cluster-check input:checked) {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.14);
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.12);
 }
 
 .cluster-card-head {
@@ -330,7 +787,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 14.5px;
+  font-size: 14px;
   cursor: pointer;
 }
 
@@ -346,8 +803,8 @@
   gap: 14px;
   flex-wrap: wrap;
   font-size: 12px;
-  color: var(--text-3);
-  padding: 5px 8px;
+  color: var(--text-2);
+  padding: 6px 9px;
   background: var(--panel-2);
   border-radius: 4px;
 }
@@ -365,7 +822,7 @@
   padding: 4px 7px;
   border: 1px solid var(--line-2);
   border-radius: 4px;
-  background: #fff;
+  background: #ffffff;
   font-size: 11px;
 }
 
@@ -429,7 +886,7 @@
 
 .cluster-size-inputs input {
   width: 44px;
-  height: 22px;
+  min-block-size: 22px;
   text-align: right;
 }
 
@@ -439,7 +896,36 @@
   padding-top: 4px;
 }
 
-/* 1D Slitting Strip Bars */
+/* 8. Tasks Unified KPI Filter Strip & 1D Slitting ROI Banner */
+.kpi-strip-6 {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+@media (max-width: 1160px) {
+  .kpi-strip-6 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.kpi-card[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-2);
+}
+
+.roi-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 6px;
+  color: #065f46;
+  font-size: 12.5px;
+}
+
 .slit-scheme-card {
   cursor: pointer;
 }
@@ -473,7 +959,7 @@
 
 .slit-bar-wrap {
   display: flex;
-  height: 28px;
+  min-block-size: 28px;
   width: 100%;
   border-radius: 3px;
   overflow: hidden;
@@ -485,7 +971,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: #ffffff;
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 600;
@@ -504,21 +990,52 @@
   color: #334155;
 }
 
-/* Modal */
-.react-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.55);
-  z-index: 60;
-  display: grid;
-  place-items: center;
-  padding: 20px;
+/* 9. Native <dialog> Modal Styles (Modern Web Guidance: scope display with dialog[open] + overscroll-behavior) */
+dialog.native-modal-dialog {
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  inline-size: 100%;
+  max-block-size: min(88dvh, 760px);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.28);
 }
 
-.react-modal {
-  width: min(680px, 100%);
-  max-height: 90vh;
+dialog.native-modal-dialog[open] {
   display: flex;
   flex-direction: column;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+}
+
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background-color: rgba(15, 23, 42, 0.52);
+  backdrop-filter: blur(2px);
+}
+
+.native-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line-2);
+  background: var(--panel-2);
+}
+
+.native-modal-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.native-modal-body {
+  padding: 12px 16px 16px;
+  overflow: auto;
 }

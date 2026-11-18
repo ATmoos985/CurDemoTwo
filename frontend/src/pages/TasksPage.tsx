@@ -14,8 +14,8 @@ const STATUS_TAG_MAP: Record<string, string> = {
 const ACTION_LABEL_MAP: Record<string, string> = {
   PLAN_PENDING: '进入排料',
   EXECUTION_PENDING: '进入工作台',
-  REPORT_PENDING: '工作台',
-  ATTENTION: '工作台',
+  REPORT_PENDING: '查看方案',
+  ATTENTION: '复核方案',
   COMPLETED: '查看产出'
 };
 
@@ -53,12 +53,6 @@ export const TasksPage: React.FC = () => {
   const countByStatus = (key: string) =>
     key === 'all' ? rows.length : rows.filter((r) => r.status === key).length;
 
-  const planPending = countByStatus('PLAN_PENDING');
-  const execPending = countByStatus('EXECUTION_PENDING');
-  const reportPending = countByStatus('REPORT_PENDING');
-  const attention = countByStatus('ATTENTION');
-  const completed = countByStatus('COMPLETED');
-
   const handleOpenSlittingTask = (task: any) => {
     const sp = task.slitting || {};
     const orders = (task.demands || []).map((d: any, idx: number) => ({
@@ -94,11 +88,40 @@ export const TasksPage: React.FC = () => {
     }
   };
 
+  const statusCards: { key: string; label: string; hint: string; color?: string }[] = [
+    { key: 'all', label: '全部生产单', hint: '总览全部在制与完工任务' },
+    { key: 'PLAN_PENDING', label: '待排料计算', hint: '尚未生成候选排布方案' },
+    {
+      key: 'EXECUTION_PENDING',
+      label: '候选已就绪',
+      hint: '可锁料下达车间执行',
+      color: 'var(--accent)'
+    },
+    {
+      key: 'REPORT_PENDING',
+      label: '待实切报工',
+      hint: '机台已领料，待回填产出',
+      color: 'var(--warn)'
+    },
+    {
+      key: 'ATTENTION',
+      label: '异常需处理',
+      hint: '复检缺口或预约变更',
+      color: countByStatus('ATTENTION') > 0 ? 'var(--err)' : undefined
+    },
+    {
+      key: 'COMPLETED',
+      label: '已齐套完工',
+      hint: '良品履约已全部达成',
+      color: 'var(--ok)'
+    }
+  ];
+
   return (
     <div className="react-page">
       <div className="ph">
         <h1>任务</h1>
-        <span className="crumb">生产作业调度中心</span>
+        <span className="crumb">订单需求跟踪与车间进度总览</span>
         <div className="hub-tabs" role="navigation" aria-label="生产作业视图">
           <a className="on" href="#/tasks">
             任务队列 ({rows.length})
@@ -107,94 +130,46 @@ export const TasksPage: React.FC = () => {
           <a href="#/quality">异常复检</a>
         </div>
         <span className="sp" />
-        <button type="button" className="btn sm" onClick={loadTasks}>
-          刷新队列
-        </button>
-        <a className="btn pri" href="#/task/new">
-          ＋ 新建生产任务
-        </a>
-      </div>
-
-      <div className="kpi-strip">
-        <button
-          type="button"
-          className={`kpi-card ${statusFilter === 'PLAN_PENDING' ? 'on' : ''}`}
-          onClick={() => setStatusFilter(statusFilter === 'PLAN_PENDING' ? 'all' : 'PLAN_PENDING')}
-        >
-          <small>待排料任务</small>
-          <b className="num">{planPending}</b>
-          <span>点击筛选待计算需求</span>
-        </button>
-        <button
-          type="button"
-          className={`kpi-card ${statusFilter === 'EXECUTION_PENDING' ? 'on' : ''}`}
-          onClick={() =>
-            setStatusFilter(statusFilter === 'EXECUTION_PENDING' ? 'all' : 'EXECUTION_PENDING')
-          }
-        >
-          <small>待执行 / 候选就绪</small>
-          <b className="num" style={{ color: 'var(--accent)' }}>
-            {execPending}
-          </b>
-          <span>已有候选方案可下达或报工</span>
-        </button>
-        <button
-          type="button"
-          className={`kpi-card ${statusFilter === 'REPORT_PENDING' ? 'on' : ''}`}
-          onClick={() =>
-            setStatusFilter(statusFilter === 'REPORT_PENDING' ? 'all' : 'REPORT_PENDING')
-          }
-        >
-          <small>待实切报工</small>
-          <b className="num" style={{ color: 'var(--warn)' }}>
-            {reportPending}
-          </b>
-          <span>机台已锁定，直达报工记账</span>
-        </button>
-        <button
-          type="button"
-          className={`kpi-card ${statusFilter === 'ATTENTION' ? 'on' : ''}`}
-          onClick={() => setStatusFilter(statusFilter === 'ATTENTION' ? 'all' : 'ATTENTION')}
-        >
-          <small>异常需处理 / 已完成</small>
-          <b
-            className="num"
-            style={{ color: attention ? 'var(--err)' : 'var(--ok)' }}
-          >
-            {attention}{' '}
-            <em style={{ fontSize: 13, color: 'var(--text-3)', fontStyle: 'normal' }}>
-              / {completed} 完
-            </em>
-          </b>
-          <span>复检补产或方案失效重算</span>
-        </button>
-      </div>
-
-      <div className="toolbar">
-        <div className="seg task-filters" role="group" aria-label="任务状态">
-          {['all', ...Object.keys(taskLabels)].map((k) => (
-            <button
-              key={k}
-              type="button"
-              className={statusFilter === k ? 'on' : ''}
-              aria-pressed={statusFilter === k}
-              onClick={() => setStatusFilter(k)}
-            >
-              {k === 'all' ? '全部' : (taskLabels as Record<string, string>)[k]}{' '}
-              <span className="filter-count num">{countByStatus(k)}</span>
-            </button>
-          ))}
-        </div>
-        <span className="sp" />
         <input
           className="field"
           id="task-search"
           aria-label="搜索任务"
-          placeholder="搜索任务号 / 名称 / 材料型号 / 外部单号…"
-          style={{ width: 260 }}
+          placeholder="搜索任务号 / 款式 / 材料型号 / 外部单号…"
+          style={{ width: 250 }}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        <button type="button" className="btn sm" onClick={loadTasks}>
+          刷新
+        </button>
+        <a className="btn pri" href="#/task/new">
+          ＋ 新建任务
+        </a>
+      </div>
+
+      {/* Single unified KPI + Status Filter Strip (eliminates redundant duplicate filter bar) */}
+      <div className="kpi-strip kpi-strip-6" role="group" aria-label="按任务状态筛选">
+        {statusCards.map((c) => {
+          const active = statusFilter === c.key;
+          return (
+            <button
+              key={c.key}
+              type="button"
+              data-status={c.key}
+              aria-pressed={active}
+              className={`kpi-card ${active ? 'on' : ''}`}
+              onClick={() =>
+                setStatusFilter(active && c.key !== 'all' ? 'all' : c.key)
+              }
+            >
+              <small>{c.label}</small>
+              <b className="num" style={c.color ? { color: c.color } : undefined}>
+                {countByStatus(c.key)}
+              </b>
+              <span>{c.hint}</span>
+            </button>
+          );
+        })}
       </div>
 
       <div className="body">
@@ -210,15 +185,15 @@ export const TasksPage: React.FC = () => {
             <table className="t task-table">
               <thead>
                 <tr>
-                  <th>任务 / 来源</th>
-                  <th>类型</th>
+                  <th>任务 / 来源单号</th>
+                  <th>工艺类型</th>
                   <th>材料型号</th>
-                  <th className="r">需求项</th>
-                  <th>良品履约进度</th>
-                  <th>当前环节</th>
-                  <th className="r">候选方案</th>
-                  <th className="r">已报工</th>
-                  <th>主操作</th>
+                  <th className="r">规格数</th>
+                  <th>良品履约达成率</th>
+                  <th>当前状态</th>
+                  <th className="r">候选</th>
+                  <th className="r">报工</th>
+                  <th>推进操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -257,12 +232,12 @@ export const TasksPage: React.FC = () => {
                         </a>
                         <small>
                           <span className="num">{shortId(t.id)}</span> ·{' '}
-                          {t.externalRef || '无来源编号'}
+                          {t.externalRef || '内部创建'}
                         </small>
                       </td>
                       <td>
                         <span className="tag kind">
-                          {isSlitting ? '一维分切' : '二维裁切'}
+                          {isSlitting ? '一维分切' : '二维排料'}
                         </span>
                       </td>
                       <td>
@@ -279,11 +254,7 @@ export const TasksPage: React.FC = () => {
                             </span>
                           </span>
                           <span className="bar" aria-hidden="true">
-                            <i
-                              style={{
-                                width: `${Math.min(100, Math.max(0, pct))}%`
-                              }}
-                            />
+                            <i style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} />
                           </span>
                         </div>
                       </td>
@@ -308,7 +279,8 @@ export const TasksPage: React.FC = () => {
                             <a
                               className={`btn sm ${
                                 !directIntent &&
-                                (r.status === 'PLAN_PENDING' || r.status === 'EXECUTION_PENDING')
+                                (r.status === 'PLAN_PENDING' ||
+                                  r.status === 'EXECUTION_PENDING')
                                   ? 'pri'
                                   : ''
                               }`}
@@ -326,7 +298,7 @@ export const TasksPage: React.FC = () => {
                                   : `#/quality`
                               }
                             >
-                              {directIntent === 'report' ? '直达报工' : '处理异常'}
+                              {directIntent === 'report' ? '去报工' : '处理异常'}
                             </a>
                           )}
                           <a className="btn sm" href={`#/task/${encodeURIComponent(t.id)}`}>
@@ -340,10 +312,10 @@ export const TasksPage: React.FC = () => {
               </tbody>
             </table>
             <div className="pager">
-              <span>
+              <span className="num">
                 显示 {filteredList.length} / 共 {rows.length} 条任务
               </span>
-              <span>双击任意行直接打开对应排料/分切工作台</span>
+              <span>双击任意任务行可直达对应排料或分切工作台</span>
             </div>
           </>
         ) : (

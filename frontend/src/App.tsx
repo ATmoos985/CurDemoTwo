@@ -52,6 +52,37 @@ function parseHashRoute(hash: string): ParsedRoute {
   return { page, params, rawKey: clean || 'workbench' };
 }
 
+const WORKFLOW_STAGES: { id: string; step: string; label: string; href: string; pages: string[] }[] = [
+  {
+    id: 'demand',
+    step: '01',
+    label: '需求与纸样簇',
+    href: '#/clusters',
+    pages: ['clusters']
+  },
+  {
+    id: 'solve',
+    step: '02',
+    label: '智能排料 / 分切',
+    href: '#/workbench',
+    pages: ['workbench', 'slitting', 'garment', 'showcase']
+  },
+  {
+    id: 'execute',
+    step: '03',
+    label: '任务下达与报工',
+    href: '#/execution',
+    pages: ['tasks', 'task', 'execution', 'quality']
+  },
+  {
+    id: 'ledger',
+    step: '04',
+    label: '余料台账与对账',
+    href: '#/inventory',
+    pages: ['inventory', 'inspection', 'documents', 'analysis']
+  }
+];
+
 export const App: React.FC = () => {
   const [route, setRoute] = useState<ParsedRoute>(() => {
     if (!location.hash || location.hash === '#/' || location.hash === '#') {
@@ -59,7 +90,9 @@ export const App: React.FC = () => {
     }
     return parseHashRoute(location.hash);
   });
-  const [health, setHealth] = useState<{ ok: boolean; workers?: number }>({ ok: false });
+  const [health, setHealth] = useState<{ ok: boolean; workers?: number; engineCount?: number }>({
+    ok: false
+  });
 
   const schemes2D = useStudioStore((s) => s.schemes2D);
   const slitSchemes = useStudioStore((s) => s.slitSchemes);
@@ -79,24 +112,33 @@ export const App: React.FC = () => {
       requestJSON('/api/health').catch(() => null),
       requestJSON('/api/v2/capabilities').catch(() => null)
     ]).then(([h, c]) => {
+      const availableEngines =
+        (c?.engines || []).filter((e: any) => e.available).length +
+        (c?.slittingEngine?.available ? 1 : 0);
       setHealth({
         ok: h?.status === 'UP',
-        workers: c?.limits?.workers
+        workers: c?.limits?.workers,
+        engineCount: availableEngines || undefined
       });
     });
   }, []);
 
-  const navLink = (key: string, label: string, badge?: string | number, sub = false, matches: string[] = [key]) => {
+  const navLink = (
+    key: string,
+    label: string,
+    badge?: string | number,
+    matches: string[] = [key]
+  ) => {
     const active = matches.includes(route.page);
     return (
       <a
         key={key}
         href={`#/${key}`}
-        className={`${active ? 'on' : ''} ${sub ? 'nav-sub' : ''}`}
+        className={active ? 'on' : undefined}
         aria-current={active ? 'page' : undefined}
       >
         <span>{label}</span>
-        {badge !== undefined && badge !== '' && <span className="cnt">{badge}</span>}
+        {badge !== undefined && badge !== '' && <span className="cnt num">{badge}</span>}
       </a>
     );
   };
@@ -146,44 +188,59 @@ export const App: React.FC = () => {
     <div className="app">
       <header className="topbar">
         <a className="brand" href="#/workbench">
-          <i />
-          搭切 CutPlan · React CAD/CAM 工作台
+          <i aria-hidden="true" />
+          <span>CutPlan 智能排料与裁切协同系统</span>
         </a>
+
+        <div className="topbar-flow" aria-label="核心业务闭环">
+          {WORKFLOW_STAGES.map((stage, idx) => {
+            const isCurrent = stage.pages.includes(route.page);
+            return (
+              <React.Fragment key={stage.id}>
+                {idx > 0 && <span className="topbar-flow-sep" aria-hidden="true">›</span>}
+                <a
+                  href={stage.href}
+                  className={`topbar-flow-step ${isCurrent ? 'active' : ''}`}
+                >
+                  <em className="num">{stage.step}</em>
+                  <span>{stage.label}</span>
+                </a>
+              </React.Fragment>
+            );
+          })}
+        </div>
+
         <span className="topbar-sp" />
+
         <div className="topbar-meta">
-          <span id="engine-status">
-            <span className={`dot ${health.ok ? 'ok' : 'warn'}`} />
-            服务 <b>{health.ok ? '正常' : '检测中'}</b>
-            {health.workers ? ` · ${health.workers}线程求解` : ''}
+          <span id="engine-status" className="engine-pill">
+            <span className={`dot ${health.ok ? 'ok' : 'warn'}`} aria-hidden="true" />
+            <span>求解引擎</span>
+            <b>{health.ok ? '就绪' : '连接中'}</b>
+            {health.workers ? <span className="num">· {health.workers} 并发</span> : null}
+            {health.engineCount ? <span className="num">· {health.engineCount} 内核</span> : null}
           </span>
-          <a href="#/clusters">纸样簇 ({clusters.length})</a>
-          <a href="#/showcase">演示沙盒</a>
-          <a href="#/settings">并发设置</a>
-          <a href="/workspace.html" title="打开传统多页工作台">
-            经典版本 ↗
-          </a>
         </div>
       </header>
 
       <nav className="nav" id="nav" aria-label="功能导航">
         <div className="nav-main">
-          <h6>搭切核心区</h6>
-          {navLink('workbench', '二维搭切画布', schemes2D.length || undefined)}
-          {navLink('slitting', '一维分切组合', slitSchemes.length || undefined)}
-          {navLink('clusters', '需求与纸样簇', clusters.length)}
+          <h6>智能排料设计</h6>
+          {navLink('workbench', '二维异形排料', schemes2D.length || undefined)}
+          {navLink('slitting', '一维定长分切', slitSchemes.length || undefined)}
           {navLink('garment', '多门幅工艺对比')}
+          {navLink('clusters', '需求与纸样簇', clusters.length)}
 
-          <h6>报工与材料 (解耦)</h6>
-          {navLink('execution', '方案报工中心', undefined, false, ['execution', 'quality'])}
-          {navLink('tasks', '生产任务单据', undefined, true, ['tasks', 'task'])}
-          {navLink('inventory', '实物库存台账', undefined, false, ['inventory', 'inspection', 'documents', 'analysis'])}
-          {navLink('inspection', '跑布验疵定位', undefined, true)}
-          {navLink('analysis', '库存流水对账', undefined, true)}
+          <h6>生产执行与库存</h6>
+          {navLink('tasks', '生产任务队列', undefined, ['tasks', 'task'])}
+          {navLink('execution', '执行与报工', undefined, ['execution', 'quality'])}
+          {navLink('inventory', '母卷与余料库存', undefined, ['inventory', 'inspection', 'documents'])}
+          {navLink('analysis', '产出与用料对账')}
         </div>
         <div className="nav-foot">
-          <h6>沙盒与系统</h6>
-          {navLink('showcase', '算法演示沙盒', 'DEMO')}
-          {navLink('settings', '并发池与设置')}
+          <h6>算例与设置</h6>
+          {navLink('showcase', '行业算例演示')}
+          {navLink('settings', '系统与引擎设置')}
         </div>
       </nav>
 
@@ -192,10 +249,9 @@ export const App: React.FC = () => {
       </main>
 
       <footer className="statusbar" id="statusbar">
-        <span>React 19 + Vite + Zustand 工作台架构</span>
-        <span>需求簇管理 · 二维自由画布 · 一维纯分切 · 多线程竞速求解</span>
+        <span>计量基准 mm / m² · 排料试算零扣库 · 实切报工与复检独立记账</span>
         <span className="sp" />
-        <span>CutPlan Studio v3 (branch: react)</span>
+        <span>独立几何防碰撞核验 · 支持 CAD DXF / CNC G-Code / Excel 导出</span>
       </footer>
     </div>
   );

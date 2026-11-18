@@ -481,11 +481,30 @@ export const SlittingStudio1DPage: React.FC = () => {
     }
   };
 
+  const baselineScheme = useMemo(
+    () => slitSchemes.find((s) => s.strategyId === 'BASELINE') || null,
+    [slitSchemes]
+  );
+  const savedCarsVsBaseline =
+    activeScheme &&
+    baselineScheme &&
+    activeScheme.strategyId !== 'BASELINE' &&
+    activeScheme.state === 'SUCCEEDED'
+      ? Math.max(0, baselineScheme.totalCars - activeScheme.totalCars)
+      : 0;
+  const utilGainVsBaseline =
+    activeScheme &&
+    baselineScheme &&
+    activeScheme.strategyId !== 'BASELINE' &&
+    activeScheme.state === 'SUCCEEDED'
+      ? Number((activeScheme.avgUtilizationPct - baselineScheme.avgUtilizationPct).toFixed(2))
+      : 0;
+
   return (
     <div className="react-page">
       <div className="ph">
         <h1>一维定长分切台</h1>
-        <span className="crumb">聚焦条宽组合、车数、余宽与超产对比 · 无需浏览整卷画布，仅在需要避让疵点时可选关联实卷</span>
+        <span className="crumb">多订单条宽搭切组合 · 自动对比传统独立分切车数与余宽损耗</span>
         <span className="sp" />
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}>
           <input
@@ -501,7 +520,7 @@ export const SlittingStudio1DPage: React.FC = () => {
           disabled={solving}
           onClick={handleSolveParallel1D}
         >
-          {solving ? '⚡ 三策略并行计算中…' : '⚡ 并行计算分切方案（独立 vs 快速 vs 精细）'}
+          {solving ? '⚡ 三策略并行计算中…' : '⚡ 并行计算分切方案'}
         </button>
       </div>
 
@@ -513,12 +532,13 @@ export const SlittingStudio1DPage: React.FC = () => {
             <span className="sp" />
             <select
               className="field"
+              aria-label="从分条簇载入样板"
               style={{ height: 24, fontSize: 11.5, maxWidth: 160 }}
               onChange={(e) => e.target.value && loadClusterInto1D(e.target.value)}
               defaultValue=""
             >
               <option value="" disabled>
-                从分条簇载入…
+                载入分条样板…
               </option>
               {clusters1D.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -543,49 +563,60 @@ export const SlittingStudio1DPage: React.FC = () => {
                 value={slitFixedLengthMm}
                 onChange={(e) => setSlitSpec({ slitFixedLengthMm: Number(e.target.value) })}
               />
-              <label>左右切边 mm</label>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input
-                  type="number"
-                  className="field num"
-                  style={{ width: '50%' }}
-                  value={slitLeftTrimMm}
-                  onChange={(e) => setSlitSpec({ slitLeftTrimMm: Number(e.target.value) })}
-                />
-                <input
-                  type="number"
-                  className="field num"
-                  style={{ width: '50%' }}
-                  value={slitRightTrimMm}
-                  onChange={(e) => setSlitSpec({ slitRightTrimMm: Number(e.target.value) })}
-                />
-              </div>
-              <label>组合宽范围</label>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <input
-                  type="number"
-                  className="field num"
-                  style={{ width: '46%' }}
-                  value={slitMinWidthMm}
-                  onChange={(e) => setSlitSpec({ slitMinWidthMm: Number(e.target.value) })}
-                />
-                <span>–</span>
-                <input
-                  type="number"
-                  className="field num"
-                  style={{ width: '46%' }}
-                  value={slitMaxWidthMm}
-                  onChange={(e) => setSlitSpec({ slitMaxWidthMm: Number(e.target.value) })}
-                />
-              </div>
-              <label>超产上限 (卷)</label>
-              <input
-                type="number"
-                className="field num"
-                value={slitOverCap}
-                onChange={(e) => setSlitSpec({ slitOverCap: Number(e.target.value) })}
-              />
             </div>
+
+            <details className="studio-accordion">
+              <summary>
+                <span>机台切边与组合宽约束</span>
+                <span className="tag num" style={{ marginLeft: 'auto' }}>
+                  边 {slitLeftTrimMm}+{slitRightTrimMm} · 超≤{slitOverCap}
+                </span>
+              </summary>
+              <div className="form" style={{ gridTemplateColumns: '100px 1fr', gap: '6px 10px' }}>
+                <label>左右切边 mm</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input
+                    type="number"
+                    className="field num"
+                    style={{ width: '50%' }}
+                    value={slitLeftTrimMm}
+                    onChange={(e) => setSlitSpec({ slitLeftTrimMm: Number(e.target.value) })}
+                  />
+                  <input
+                    type="number"
+                    className="field num"
+                    style={{ width: '50%' }}
+                    value={slitRightTrimMm}
+                    onChange={(e) => setSlitSpec({ slitRightTrimMm: Number(e.target.value) })}
+                  />
+                </div>
+                <label>组合宽范围</label>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input
+                    type="number"
+                    className="field num"
+                    style={{ width: '46%' }}
+                    value={slitMinWidthMm}
+                    onChange={(e) => setSlitSpec({ slitMinWidthMm: Number(e.target.value) })}
+                  />
+                  <span>–</span>
+                  <input
+                    type="number"
+                    className="field num"
+                    style={{ width: '46%' }}
+                    value={slitMaxWidthMm}
+                    onChange={(e) => setSlitSpec({ slitMaxWidthMm: Number(e.target.value) })}
+                  />
+                </div>
+                <label>超产上限 (卷)</label>
+                <input
+                  type="number"
+                  className="field num"
+                  value={slitOverCap}
+                  onChange={(e) => setSlitSpec({ slitOverCap: Number(e.target.value) })}
+                />
+              </div>
+            </details>
 
             {slitAvoidDefects && (
               <div className="notice" style={{ margin: '4px 12px 8px' }}>
@@ -671,16 +702,32 @@ export const SlittingStudio1DPage: React.FC = () => {
           <div className="body">
             {slitSchemes.length === 0 ? (
               <div className="box" style={{ padding: 36, textAlign: 'center' }}>
-                <strong style={{ fontSize: 16 }}>一维分切组合方案工作区</strong>
-                <p className="muted" style={{ maxWidth: 520, margin: '10px auto 18px' }}>
-                  一维场景默认固定卷长（当前 <b className="num">{slitFixedLengthMm} mm</b>），重点直接给出不同求解策略的多条宽搭切组合、余宽与超产对比。无需先选库存母卷或展示二维全卷画布。
+                <strong style={{ fontSize: 16 }}>多订单条宽搭切与省车测算</strong>
+                <p className="muted" style={{ maxWidth: 480, margin: '10px auto 18px' }}>
+                  当前母卷幅宽 <b className="num">{slitMotherWidthMm} mm</b>、定长{' '}
+                  <b className="num">{slitFixedLengthMm} mm</b>，共{' '}
+                  <b className="num">{slitOrders.length}</b> 项分切规格。点击下方按钮同屏比较传统逐规格分切与 OR-Tools 整数规划搭切收益。
                 </p>
                 <button type="button" className="btn pri" onClick={handleSolveParallel1D}>
-                  ⚡ 立即并行计算一维搭切方案
+                  ⚡ 立即并行计算分切方案
                 </button>
               </div>
             ) : (
               <>
+                {(savedCarsVsBaseline > 0 || utilGainVsBaseline > 0) && (
+                  <div className="roi-banner num">
+                    <span className="tag ok">搭切省料收益</span>
+                    <span>
+                      当前方案较传统人工独立分切减少 <b>{savedCarsVsBaseline} 车</b> 上机换刀
+                    </span>
+                    {utilGainVsBaseline > 0 && (
+                      <span>
+                        · 母卷面积利用率提升 <b>+{utilGainVsBaseline}%</b>
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 {/* 3-Strategy Comparison Cards */}
                 <div className="cards" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
                   {slitSchemes.map((s) => (
