@@ -24,9 +24,17 @@ public record CuttingTask(String id, String name, String materialModel, String e
     public boolean slittingTask() { return SLITTING_1D.equals(problemType); }
 
     public record Line(int id, String name, double width, double length, int quantity, boolean allowRotation,
-                       com.example.cutdemotwo.contracts.nesting.NestingProblem.Shape shape) {
+                       com.example.cutdemotwo.contracts.nesting.NestingProblem.Shape shape,
+                       @JsonInclude(JsonInclude.Include.NON_NULL) Boolean allowHalfTurn,
+                       @JsonInclude(JsonInclude.Include.NON_NULL) String sizeLabel,
+                       @JsonInclude(JsonInclude.Include.NON_NULL) String sourceTemplateId,
+                       @JsonInclude(JsonInclude.Include.NON_NULL) String surfaceTreatment) {
+        public Line(int id, String name, double width, double length, int quantity, boolean allowRotation,
+                    com.example.cutdemotwo.contracts.nesting.NestingProblem.Shape shape) {
+            this(id, name, width, length, quantity, allowRotation, shape, null, null, null, null);
+        }
         public Line(int id, String name, double width, double length, int quantity, boolean allowRotation) {
-            this(id, name, width, length, quantity, allowRotation, null);
+            this(id, name, width, length, quantity, allowRotation, null, null, null, null, null);
         }
     }
     public record Process(double bedLength, double trimStart, String cutOrigin, String firstStageOrientation,

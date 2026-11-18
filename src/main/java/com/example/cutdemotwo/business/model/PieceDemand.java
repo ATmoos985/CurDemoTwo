@@ -13,6 +13,8 @@ public class PieceDemand {
     private double length;
     private int demand = 1;
     private Boolean allowRotation = false;
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private Boolean allowHalfTurn;
 
     public PieceDemand() {}
 
@@ -51,4 +53,8 @@ public class PieceDemand {
 
     public boolean isAllowRotation() { return Boolean.TRUE.equals(allowRotation); }
     public void setAllowRotation(Boolean allowRotation) { this.allowRotation = allowRotation; }
+
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public Boolean getAllowHalfTurn() { return allowHalfTurn; }
+    public void setAllowHalfTurn(Boolean allowHalfTurn) { this.allowHalfTurn = Boolean.TRUE.equals(allowHalfTurn) ? Boolean.TRUE : null; }
 }

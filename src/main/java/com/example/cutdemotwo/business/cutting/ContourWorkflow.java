@@ -42,7 +42,7 @@ public final class ContourWorkflow {
                 throw new IllegalArgumentException("需求尺寸与衣片轮廓不一致");
             PolygonGeometry.validate(d.geometry());
             // Each pattern owns its grain permission; the rectangle-wide rotation switch cannot override it.
-            return new NestingProblem.Part(d.getId(), d.getName(), d.geometry(), d.getDemand(), d.isAllowRotation());
+            return new NestingProblem.Part(d.getId(), d.getName(), d.geometry(), d.getDemand(), d.isAllowRotation(), d.getAllowHalfTurn());
         }).toList();
         String rawSolver = r.getSolver();
         String contourEngine = (rawSolver == null || rawSolver.isBlank() || "packingsolver".equalsIgnoreCase(rawSolver))

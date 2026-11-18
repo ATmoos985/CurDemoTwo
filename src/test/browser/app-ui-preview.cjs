@@ -36,7 +36,7 @@ assert.ok(new URL(base).port && new URL(base).port !== '8080', 'isolated service
             await page.route('**/api/v2/execution-orders', r => r.fulfill({contentType: 'application/json', body: '[]'}));
             await page.goto(base + '/app/#/execution');
             await page.getByRole('link', {name: '选择任务方案', exact: true}).click();
-            await page.getByRole('heading', {name: '排料工作台', exact: true, level: 1}).waitFor();
+            await page.getByRole('heading', {name: '搭切工作台', exact: true, level: 1}).waitFor();
             await page.unroute('**/api/v2/execution-orders');
         });
         await check('browsing has no business writes or script errors', async () => { assert.deepEqual(writes, []); assert.deepEqual(errors, []); });

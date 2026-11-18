@@ -99,11 +99,12 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
   const [draggingSide, setDraggingSide] = useState<'left' | 'right' | null>(null);
   const [liveAnnounce, setLiveAnnounce] = useState<string>('');
 
-  // Preview CAD Canvas options
+  // Preview CAD Canvas options & Mother Roll Spatial Map (Cut Zones + Planned Zones + Defects)
   const [rollLayout, setRollLayout] = useState<RollPreviewLayout>('tile');
   const [vertical, setVertical] = useState<boolean>(true);
   const [tool, setTool] = useState<'pan' | 'measure'>('pan');
   const [cursor, setCursor] = useState<{ u: number; v: number } | null>(null);
+  const [rollSpatialMap, setRollSpatialMap] = useState<any | null>(null);
 
   const layoutContainerRef = useRef<HTMLDivElement | null>(null);
   const previewCanvasRef = useRef<any>(null);
@@ -136,6 +137,17 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
       ]);
       setRolls(r || []);
       setRemnants(rem || []);
+      // Support deep-linking via #/inventory?roll=ROLL_ID
+      const hashQuery = (location.hash.split('?')[1] || '');
+      const targetRollParam = new URLSearchParams(hashQuery).get('roll');
+      if (targetRollParam && Array.isArray(r)) {
+        const hit = r.find((x: any) => x.rollId === targetRollParam);
+        if (hit) {
+          setSelectedModel(hit.rollModel || hit.materialName || '未分类品号');
+          setPreviewTarget({ kind: 'roll', id: hit.rollId });
+          setPreviewOpen(true);
+        }
+      }
     } catch (e: any) {
       setError(e.message || '读取库存档案失败');
     } finally {
@@ -388,12 +400,91 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
     [previewTarget, remnants]
   );
 
+  // Load Mother Roll Spatial Map (Cut Zones + Planned Zones + Clean Spans) when previewRoll changes
+  useEffect(() => {
+    if (!previewRoll?.rollId) {
+      setRollSpatialMap(null);
+      return;
+    }
+    let cancelled = false;
+    requestJSON('/api/rolls/' + encodeURIComponent(previewRoll.rollId) + '/spatial-map')
+      .then((data) => {
+        if (!cancelled) setRollSpatialMap(data);
+      })
+      .catch(() => {
+        if (!cancelled) setRollSpatialMap(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [previewRoll?.rollId, rolls]);
+
   const previewScene = useMemo(() => {
     if (previewRoll) {
+      const cutZones: any[] = rollSpatialMap?.cutZones || [];
+      const plannedZones: any[] = rollSpatialMap?.plannedZones || [];
+
+      const mappedPlans = [
+        ...cutZones.map((cz: any) => ({
+          id: cz.planId,
+          status: 'CONFIRMED',
+          version: 1,
+          request: {
+            rollId: previewRoll.rollId,
+            rollW: previewRoll.width,
+            rollL: cz.lengthMm,
+            windowStartY: cz.startY,
+            feedPortType: 'roll',
+            cutOrigin: 'left-top'
+          },
+          result: {
+            deductLen: cz.lengthMm,
+            pieces: cz.pieces || []
+          }
+        })),
+        ...plannedZones.map((pz: any, i: number) => ({
+          id: pz.planId || pz.schemeId || `PZ-${i}`,
+          status: 'PENDING',
+          version: 1,
+          request: {
+            rollId: previewRoll.rollId,
+            rollW: previewRoll.width,
+            rollL: pz.lengthMm,
+            windowStartY: pz.startY,
+            feedPortType: 'roll',
+            cutOrigin: 'left-top'
+          },
+          result: {
+            deductLen: pz.lengthMm,
+            pieces: pz.pieces || []
+          }
+        }))
+      ];
+
+      const mappedReports = cutZones.map((cz: any) => ({
+        planId: cz.planId,
+        status: 'CONFIRMED',
+        windowStartY: cz.startY,
+        actualCutLen: cz.lengthMm,
+        pieceResults: (cz.pieces || []).length
+          ? (cz.pieces || []).map((p: any) => ({
+              pieceId: p.id,
+              demandId: p.demandId,
+              name: p.name,
+              x: p.x,
+              y: p.y,
+              w: p.w,
+              l: p.l,
+              shape: p.shape,
+              outcome: 'QUALIFIED'
+            }))
+          : undefined
+      }));
+
       return buildRollScene({
         roll: previewRoll,
-        plans: [],
-        reports: [],
+        plans: mappedPlans,
+        reports: mappedReports,
         rollId: previewRoll.rollId,
         demands: [],
         process: { bedLength: Math.min(3000, previewRoll.totalLength || 3000) }
@@ -411,7 +502,29 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
       });
     }
     return null;
-  }, [previewRoll, previewRemnant]);
+  }, [previewRoll, previewRemnant, rollSpatialMap]);
+
+  const handleZoomToSpan = (startY: number, endY: number, widthMm: number) => {
+    if (!previewCanvasRef.current) return;
+    if (rollLayout === 'tile') {
+      setRollLayout('strip');
+      window.setTimeout(() => {
+        previewCanvasRef.current?.fitBounds({
+          u0: Math.max(0, startY - 300),
+          u1: endY + 300,
+          v0: 0,
+          v1: widthMm
+        });
+      }, 40);
+      return;
+    }
+    previewCanvasRef.current.fitBounds({
+      u0: Math.max(0, startY - 300),
+      u1: endY + 300,
+      v0: 0,
+      v1: widthMm
+    });
+  };
 
   const handleInspectRoll = (r: any) => {
     setPreviewTarget({ kind: 'roll', id: r.rollId });
@@ -973,6 +1086,13 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                                 <td className="r num">{fmtN(r.width)}</td>
                                 <td className="r num">
                                   <b>{fmtM(remLen)}</b> / {fmtM(r.totalLength)} m
+                                  {(r.usedLength || 0) > 0 && (
+                                    <div>
+                                      <small className="muted">
+                                        已切 {fmtM(r.usedLength)} m
+                                      </small>
+                                    </div>
+                                  )}
                                 </td>
                                 <td onClick={(e) => e.stopPropagation()}>
                                   {linkedRems.length > 0 ? (
@@ -1008,12 +1128,22 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                                   <span className={`tag ${qc}`}>{qt}</span>
                                 </td>
                                 <td onClick={(e) => e.stopPropagation()}>
-                                  <a
-                                    className="btn sm"
-                                    href={`#/inspection/${encodeURIComponent(r.rollId)}`}
-                                  >
-                                    验疵
-                                  </a>
+                                  <div style={{ display: 'inline-flex', gap: 4 }}>
+                                    <button
+                                      type="button"
+                                      className="btn sm"
+                                      onClick={() => handleInspectRoll(r)}
+                                      title="查看该母卷已切割区域、预占区段与疵点空间图"
+                                    >
+                                      看切割区
+                                    </button>
+                                    <a
+                                      className="btn sm"
+                                      href={`#/inspection/${encodeURIComponent(r.rollId)}`}
+                                    >
+                                      跑疵点
+                                    </a>
+                                  </div>
                                 </td>
                               </tr>
                             );
@@ -1161,18 +1291,39 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                                   <span className={`tag ${stClass}`}>{stLabel}</span>
                                 </td>
                                 <td onClick={(e) => e.stopPropagation()}>
-                                  {(rm.status === 'AVAILABLE' ||
-                                    rm.status === 'QUARANTINED') && (
-                                    <button
-                                      type="button"
-                                      className="btn sm"
-                                      onClick={() =>
-                                        openActionPanel('scrap', { scrapId: rm.id })
-                                      }
-                                    >
-                                      报废
-                                    </button>
-                                  )}
+                                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                    {rm.status === 'AVAILABLE' && (
+                                      <button
+                                        type="button"
+                                        className="btn sm"
+                                        onClick={() => {
+                                          setCanvasSpec({
+                                            canvasMode: 'REMNANT',
+                                            selectedRemnantId: rm.id,
+                                            canvasWidthMm: rm.width,
+                                            canvasLengthMm: rm.length,
+                                            materialModel2D:
+                                              rm.materialBatch || activeProduct?.modelKey || 'REMNANT'
+                                          });
+                                          location.hash = '#/workbench';
+                                        }}
+                                      >
+                                        排料
+                                      </button>
+                                    )}
+                                    {(rm.status === 'AVAILABLE' ||
+                                      rm.status === 'QUARANTINED') && (
+                                      <button
+                                        type="button"
+                                        className="btn sm"
+                                        onClick={() =>
+                                          openActionPanel('scrap', { scrapId: rm.id })
+                                        }
+                                      >
+                                        报废
+                                      </button>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             );
@@ -1280,14 +1431,15 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                       className="btn sm pri"
                       onClick={() => {
                         setCanvasSpec({
-                          canvasMode: 'FREE_CANVAS',
+                          canvasMode: 'REMNANT',
+                          selectedRemnantId: previewRemnant.id,
                           canvasWidthMm: previewRemnant.width,
                           canvasLengthMm: previewRemnant.length,
                           materialModel2D:
                             previewRemnant.materialBatch || activeProduct?.modelKey || 'REMNANT'
                         });
                         toast(
-                          `已按料头 ${previewRemnant.id} (${previewRemnant.width}×${previewRemnant.length}mm) 设定排料画布`
+                          `已选定在库料头 ${previewRemnant.id} (${previewRemnant.width}×${previewRemnant.length}mm) 进入搭切工作台`
                         );
                         location.hash = '#/workbench';
                       }}
@@ -1447,6 +1599,95 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                         </>
                       )}
                     </div>
+
+                    {/* Mother Roll Spatial Cut-Zone & Planned-Zone Strip */}
+                    {previewRoll && rollSpatialMap && (
+                      <div className="roll-spatial-panel">
+                        <div className="roll-spatial-legend num">
+                          <span className="spatial-dot cut" />
+                          <span>
+                            已切割{' '}
+                            <b>
+                              {fmtM(
+                                (rollSpatialMap.cutZones || []).reduce(
+                                  (s: number, z: any) => s + (z.lengthMm || 0),
+                                  0
+                                ) || previewRoll.usedLength || 0
+                              )}
+                              m
+                            </b>
+                          </span>
+                          <span className="spatial-dot planned" />
+                          <span>
+                            排程预占 <b>{fmtM(rollSpatialMap.summary?.plannedLengthMm || 0)}m</b>
+                          </span>
+                          <span className="spatial-dot clean" />
+                          <span>
+                            净可排余量{' '}
+                            <b>{fmtM(rollSpatialMap.summary?.netAvailableToPlanMm || 0)}m</b>
+                          </span>
+                          <span className="spatial-dot defect" />
+                          <span>疵点 {(previewRoll.defects || []).length} 处</span>
+                        </div>
+
+                        <div
+                          className="roll-spatial-bar"
+                          role="group"
+                          aria-label="母卷全长切割与预占空间分布条"
+                        >
+                          {(rollSpatialMap.cutZones || []).map((cz: any, idx: number) => {
+                            const total = Math.max(1, previewRoll.totalLength);
+                            const leftPct = (cz.startY / total) * 100;
+                            const widthPct = Math.max(1.2, (cz.lengthMm / total) * 100);
+                            return (
+                              <button
+                                key={`cz-${idx}`}
+                                type="button"
+                                className="spatial-seg cut"
+                                style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                                title={`已切割区域：${cz.title} (${fmtM(cz.startY)}m ~ ${fmtM(cz.endY)}m)`}
+                                onClick={() =>
+                                  handleZoomToSpan(cz.startY, cz.endY, previewRoll.width)
+                                }
+                              >
+                                {widthPct > 8 ? '已切' : ''}
+                              </button>
+                            );
+                          })}
+                          {(rollSpatialMap.plannedZones || []).map((pz: any, idx: number) => {
+                            const total = Math.max(1, previewRoll.totalLength);
+                            const leftPct = (pz.startY / total) * 100;
+                            const widthPct = Math.max(1.2, (pz.lengthMm / total) * 100);
+                            return (
+                              <button
+                                key={`pz-${idx}`}
+                                type="button"
+                                className="spatial-seg planned"
+                                style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                                title={`排程预占：${pz.title} (${fmtM(pz.startY)}m ~ ${fmtM(pz.endY)}m)`}
+                                onClick={() =>
+                                  handleZoomToSpan(pz.startY, pz.endY, previewRoll.width)
+                                }
+                              >
+                                {widthPct > 8 ? '预占' : ''}
+                              </button>
+                            );
+                          })}
+                          {(previewRoll.defects || []).map((d: any, idx: number) => {
+                            const total = Math.max(1, previewRoll.totalLength);
+                            const leftPct = Math.min(99, (d.y / total) * 100);
+                            return (
+                              <i
+                                key={`df-${idx}`}
+                                className="spatial-defect-tick"
+                                style={{ left: `${leftPct}%` }}
+                                title={`疵点 #${idx + 1}: ${d.typeName || d.defectType} (Y=${fmtM(d.y)}m)`}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Full-Height Interactive Konva CAD Canvas */}
                     <div className="inv-canvas-box">

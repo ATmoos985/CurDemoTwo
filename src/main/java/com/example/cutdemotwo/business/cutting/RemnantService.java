@@ -2,6 +2,7 @@ package com.example.cutdemotwo.business.cutting;
 
 import com.example.cutdemotwo.contracts.geometry.Defect;
 import com.example.cutdemotwo.business.model.CuttingTask;
+import com.example.cutdemotwo.business.model.DemandTemplate;
 import com.example.cutdemotwo.business.model.ExecutionOrder;
 import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
 import com.example.cutdemotwo.business.model.InventoryTransfer;
@@ -9,6 +10,7 @@ import com.example.cutdemotwo.business.model.InventoryEvent;
 import com.example.cutdemotwo.business.model.InventoryCount;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
 import com.example.cutdemotwo.business.model.RemnantStock;
+import com.example.cutdemotwo.business.model.SchedulingScheme;
 import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.business.model.SolveResponse;
 import com.example.cutdemotwo.business.model.CutReport;
@@ -48,6 +50,8 @@ public class RemnantService {
     private List<InventoryLedgerEntry> ledger = List.of();
     private List<InventoryEvent> outbox = List.of();
     private final Map<String,InventoryCount> counts=new LinkedHashMap<>();
+    private final Map<String,DemandTemplate> templates=new LinkedHashMap<>();
+    private final Map<String,SchedulingScheme> schemes=new LinkedHashMap<>();
     private long revision;
     private boolean accessing;
     private long operationTime;
@@ -142,7 +146,7 @@ public class RemnantService {
 
     private InventorySnapshot snapshot() {
         return new InventorySnapshot(new ArrayList<>(motherRolls.values()), new ArrayList<>(remnantPool.values()),
-                receipts, remnantSeq.get(), defectSeq.get(), tasks, plans, revision, executions, ledger, transfers, outbox, counts);
+                receipts, remnantSeq.get(), defectSeq.get(), tasks, plans, revision, executions, ledger, transfers, outbox, counts, templates, schemes);
     }
 
     private void restore(InventorySnapshot snapshot) {
@@ -156,6 +160,8 @@ public class RemnantService {
         outbox = snapshot.outbox();
         counts.clear();counts.putAll(snapshot.counts());
         transfers.clear();transfers.putAll(snapshot.transfers());
+        templates.clear(); if (snapshot.templates() != null) templates.putAll(snapshot.templates());
+        schemes.clear(); if (snapshot.schemes() != null) schemes.putAll(snapshot.schemes());
         revision = snapshot.revision();
         remnantSeq.set(snapshot.remnantSeq()); defectSeq.set(snapshot.defectSeq());
     }
@@ -1074,6 +1080,7 @@ public class RemnantService {
                 throw new IllegalArgumentException("需求尺寸或剩余数量已变化，请刷新任务后重新排料");
             demand.setName(line.name());
             demand.setAllowRotation(line.allowRotation());
+            if (line.allowHalfTurn() != null) demand.setAllowHalfTurn(line.allowHalfTurn());
         }
     }
 
@@ -1921,4 +1928,33 @@ public class RemnantService {
         }
         return false;
     }
+
+    // ---- Package-private transactional hooks for SchedulingStudioService ----
+    synchronized <T> T studioRead(java.util.function.Supplier<T> query) {
+        return read(query);
+    }
+
+    synchronized <T> T studioMutate(String eventType, String businessId, String actor, java.util.function.Supplier<T> command) {
+        return mutate(eventType, businessId, actor, command);
+    }
+
+    Map<String, DemandTemplate> templateMap() { return templates; }
+    Map<String, SchedulingScheme> schemeMap() { return schemes; }
+    Map<String, CuttingTask> taskMap() { return tasks; }
+    Map<String, CuttingPlan> planMap() { return plans; }
+    Map<String, ExecutionOrder> executionMap() { return executions; }
+    Map<String, MotherRollInfo> rollMap() { return motherRolls; }
+    Map<String, RemnantStock> remnantMap() { return remnantPool; }
+    Map<String, Map<String, Object>> receiptMap() { return receipts; }
+    long currentOperationTime() { return operationTime; }
+    long currentRevision() { return revision; }
+    ObjectMapper jsonMapper() { return json; }
+    CuttingTask saveTaskInTx(CuttingTask input) { return saveTaskInternal(input); }
+    MotherRollInfo saveRollInTx(MotherRollInfo roll) { return saveOrUpdateMotherRollInternal(roll); }
+    void prepareTaskSolveInTx(SolveRequest request) { prepareTaskSolveInternal(request); }
+    String materialFingerprintInTx(SolveRequest request) { return materialFingerprintInternal(request); }
+    Map<String, Integer> completedQuantitiesInTx(String taskId) { return completedQuantitiesInternal(taskId); }
+    Map<String, Integer> executionReservedQuantitiesInTx(String taskId, String exceptPlan) { return reservedQuantities(taskId, exceptPlan); }
+    Map<String, Object> confirmPlanInTx(CutReport report, Set<String> pendingBatchPlans) { return confirmPlanInternal(report, pendingBatchPlans); }
+    Map<String, Object> projectQualityInTx(Map<String, Object> receipt) { return qualityProjection(receipt); }
 }

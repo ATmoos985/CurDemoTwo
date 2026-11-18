@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ClusterCenterPage } from './pages/ClusterCenterPage';
-import { NestingStudio2DPage } from './pages/NestingStudio2DPage';
-import { SlittingStudio1DPage } from './pages/SlittingStudio1DPage';
+import { DemandPoolPage } from './pages/DemandPoolPage';
+import { CuttingWorkbenchPage } from './pages/CuttingWorkbenchPage';
+import { ResultsCenterPage } from './pages/ResultsCenterPage';
+import { ReconciliationPage } from './pages/ReconciliationPage';
 import { ExecutionCenterPage } from './pages/ExecutionCenterPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TasksPage } from './pages/TasksPage';
@@ -20,6 +22,7 @@ interface ParsedRoute {
   page: string;
   params: string[];
   groupQuery: string;
+  taskIdQuery: string;
   rawKey: string;
 }
 
@@ -31,28 +34,37 @@ function parseHashRoute(hash: string): ParsedRoute {
   const sp = new URLSearchParams(query);
   const intent = sp.get('intent');
   const groupQuery = sp.get('group') || '';
+  const taskIdQuery = sp.get('taskId') || '';
+  const rollQuery = sp.get('roll') || '';
   if (intent && params.length < 3) {
     while (params.length < 2) params.push('');
     params.push(intent);
   }
+  if (pageRaw === 'inventory' && rollQuery && params.length === 0) {
+    params.push(rollQuery);
+  }
   const known = [
+    'demands',
+    'clusters',
     'workbench',
     'slitting',
-    'clusters',
-    'garment',
-    'execution',
-    'tasks',
-    'task',
+    'results',
+    'reconciliation',
     'inventory',
     'inspection',
     'documents',
-    'quality',
-    'analysis',
+    'garment',
     'showcase',
-    'settings'
+    'settings',
+    // Legacy compatibility routes
+    'execution',
+    'tasks',
+    'task',
+    'quality',
+    'analysis'
   ];
   const page = known.includes(pageRaw) ? pageRaw : 'workbench';
-  return { page, params, groupQuery, rawKey: clean || 'workbench' };
+  return { page, params, groupQuery, taskIdQuery, rawKey: clean || 'workbench' };
 }
 
 interface NavSubItem {
@@ -73,7 +85,7 @@ interface NavCategory {
 export const App: React.FC = () => {
   const [route, setRoute] = useState<ParsedRoute>(() => {
     if (!location.hash || location.hash === '#/' || location.hash === '#') {
-      return { page: 'workbench', params: [], groupQuery: '', rawKey: 'workbench' };
+      return { page: 'workbench', params: [], groupQuery: '', taskIdQuery: '', rawKey: 'workbench' };
     }
     return parseHashRoute(location.hash);
   });
@@ -81,10 +93,11 @@ export const App: React.FC = () => {
     ok: false
   });
   const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({
+    demand: true,
     solving: true,
-    execution: true,
+    results: true,
     inventory: true,
-    showcase: true
+    showcase: false
   });
 
   const schemes2D = useStudioStore((s) => s.schemes2D);
@@ -116,11 +129,44 @@ export const App: React.FC = () => {
     });
   }, []);
 
+  const candidateCount = schemes2D.length + slitSchemes.length;
+
   const categories: NavCategory[] = useMemo(
     () => [
       {
+        id: 'demand',
+        label: '需求管理',
+        icon: (
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path
+              d="M3 2.5h7.5L13.5 5.5v8H3v-11Zm7 0v3h3M5.2 8h5.6M5.2 10.6h4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        ),
+        items: [
+          {
+            id: 'demands',
+            label: '待排需求池',
+            href: '#/demands',
+            isActive: (r) => r.page === 'demands' || r.page === 'tasks' || r.page === 'task'
+          },
+          {
+            id: 'clusters',
+            label: '需求模板库',
+            href: '#/clusters',
+            badge: clusters.length || undefined,
+            isActive: (r) => r.page === 'clusters'
+          }
+        ]
+      },
+      {
         id: 'solving',
-        label: '求解场景',
+        label: '搭切工作台',
         icon: (
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
             <path
@@ -135,36 +181,16 @@ export const App: React.FC = () => {
         items: [
           {
             id: 'workbench',
-            label: '二维异形排料',
+            label: '智能搭切排程',
             href: '#/workbench',
-            badge: schemes2D.length || undefined,
-            isActive: (r) => r.page === 'workbench'
-          },
-          {
-            id: 'slitting',
-            label: '一维定长分切',
-            href: '#/slitting',
-            badge: slitSchemes.length || undefined,
-            isActive: (r) => r.page === 'slitting'
-          },
-          {
-            id: 'garment',
-            label: '多门幅工艺对比',
-            href: '#/garment',
-            isActive: (r) => r.page === 'garment'
-          },
-          {
-            id: 'clusters',
-            label: '需求与纸样簇',
-            href: '#/clusters',
-            badge: clusters.length || undefined,
-            isActive: (r) => r.page === 'clusters'
+            badge: candidateCount || undefined,
+            isActive: (r) => r.page === 'workbench' || r.page === 'slitting'
           }
         ]
       },
       {
-        id: 'execution',
-        label: '生产执行',
+        id: 'results',
+        label: '结果管理',
         icon: (
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
             <path
@@ -179,22 +205,17 @@ export const App: React.FC = () => {
         ),
         items: [
           {
-            id: 'tasks',
-            label: '生产任务队列',
-            href: '#/tasks',
-            isActive: (r) => r.page === 'tasks' || r.page === 'task'
+            id: 'results-center',
+            label: '排程方案与导出',
+            href: '#/results',
+            isActive: (r) => r.page === 'results' || r.page === 'execution'
           },
           {
-            id: 'execution-center',
-            label: '执行与报工',
-            href: '#/execution',
-            isActive: (r) => r.page === 'execution'
-          },
-          {
-            id: 'quality',
-            label: '复检处置',
-            href: '#/quality',
-            isActive: (r) => r.page === 'quality'
+            id: 'reconciliation',
+            label: '复检补排与对账',
+            href: '#/reconciliation',
+            isActive: (r) =>
+              r.page === 'reconciliation' || r.page === 'quality' || r.page === 'analysis'
           }
         ]
       },
@@ -216,7 +237,7 @@ export const App: React.FC = () => {
         items: [
           {
             id: 'stock',
-            label: '母卷与余料库存',
+            label: '母卷与料头台账',
             href: '#/inventory',
             isActive: (r) => r.page === 'inventory'
           },
@@ -231,12 +252,6 @@ export const App: React.FC = () => {
             label: '移库与盘点单据',
             href: '#/documents',
             isActive: (r) => r.page === 'documents'
-          },
-          {
-            id: 'analysis',
-            label: '产出与用料对账',
-            href: '#/analysis',
-            isActive: (r) => r.page === 'analysis'
           }
         ]
       },
@@ -255,6 +270,12 @@ export const App: React.FC = () => {
           </svg>
         ),
         items: [
+          {
+            id: 'garment',
+            label: '多门幅工艺对比',
+            href: '#/garment',
+            isActive: (r) => r.page === 'garment'
+          },
           {
             id: 'showcase-all',
             label: '全部算例总览',
@@ -284,7 +305,7 @@ export const App: React.FC = () => {
         ]
       }
     ],
-    [schemes2D.length, slitSchemes.length, clusters.length]
+    [candidateCount, clusters.length]
   );
 
   // Ensure the category owning the active route automatically unfolds
@@ -303,7 +324,7 @@ export const App: React.FC = () => {
       const sub = cat.items.find((it) => it.isActive(route));
       if (sub) return { cat: cat.label, sub: sub.label };
     }
-    return { cat: '求解场景', sub: '二维异形排料' };
+    return { cat: '搭切工作台', sub: '智能搭切排程' };
   }, [categories, route]);
 
   const toggleCategory = (id: string) => {
@@ -312,12 +333,36 @@ export const App: React.FC = () => {
 
   const renderMain = () => {
     switch (route.page) {
+      case 'demands':
+        return <DemandPoolPage />;
       case 'clusters':
         return <ClusterCenterPage />;
       case 'workbench':
-        return <NestingStudio2DPage taskId={route.params[0] || undefined} />;
+        return <CuttingWorkbenchPage taskId={route.params[0] || undefined} />;
       case 'slitting':
-        return <SlittingStudio1DPage />;
+        return <CuttingWorkbenchPage forceDimension="1D" />;
+      case 'results':
+        return (
+          <ResultsCenterPage
+            schemeId={route.params[0] || undefined}
+            taskIdQuery={route.taskIdQuery || undefined}
+          />
+        );
+      case 'reconciliation':
+        return <ReconciliationPage />;
+      case 'inventory':
+        return <InventoryPage params={route.params} />;
+      case 'inspection':
+        return <InspectionPage params={route.params} />;
+      case 'documents':
+        return <DocumentsPage />;
+      case 'garment':
+        return <GarmentWidthPage exampleId={route.params[0] || undefined} />;
+      case 'showcase':
+        return <ShowcasePage params={route.params} groupQuery={route.groupQuery} />;
+      case 'settings':
+        return <SettingsPage />;
+      // Legacy compatibility routes
       case 'execution':
         return (
           <ExecutionCenterPage
@@ -326,28 +371,16 @@ export const App: React.FC = () => {
             intent={route.params[2] || undefined}
           />
         );
-      case 'settings':
-        return <SettingsPage />;
-      case 'garment':
-        return <GarmentWidthPage exampleId={route.params[0] || undefined} />;
       case 'tasks':
         return <TasksPage />;
       case 'task':
         return <TaskEditPage params={route.params} />;
-      case 'inventory':
-        return <InventoryPage params={route.params} />;
-      case 'inspection':
-        return <InspectionPage params={route.params} />;
-      case 'documents':
-        return <DocumentsPage />;
       case 'quality':
         return <QualityPage />;
       case 'analysis':
         return <AnalysisPage />;
-      case 'showcase':
-        return <ShowcasePage params={route.params} groupQuery={route.groupQuery} />;
       default:
-        return <NestingStudio2DPage />;
+        return <CuttingWorkbenchPage />;
     }
   };
 
@@ -447,9 +480,9 @@ export const App: React.FC = () => {
       </main>
 
       <footer className="statusbar" id="statusbar">
-        <span>计量基准 mm / m² · 排料试算零扣库 · 实切报工与复检独立记账</span>
+        <span>计量基准 mm / m² · 排料试算零扣库 · 选定方案扣需求 · 实切完工扣库存</span>
         <span className="sp" />
-        <span>独立几何防碰撞核验 · 支持 CAD DXF / CNC G-Code / Excel 导出</span>
+        <span>独立几何防碰撞核验 · 支持 CAD DXF / CNC G-Code / MES 派工包 / 工票打印</span>
       </footer>
     </div>
   );

@@ -7,8 +7,10 @@ import com.example.cutdemotwo.business.model.InventoryEvent;
 import com.example.cutdemotwo.business.model.InventoryCount;
 import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
 import com.example.cutdemotwo.business.model.CuttingTask;
+import com.example.cutdemotwo.business.model.DemandTemplate;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
 import com.example.cutdemotwo.business.model.RemnantStock;
+import com.example.cutdemotwo.business.model.SchedulingScheme;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -52,8 +54,12 @@ public class JdbcInventoryStore implements InventoryStore {
             });
             Map<String,ExecutionOrder> executions=new LinkedHashMap<>();
             rows("execution_order",ExecutionOrder.class).forEach(e->executions.put(e.id(),e));
+            Map<String,DemandTemplate> templates=new LinkedHashMap<>();
+            rows("demand_template",DemandTemplate.class).forEach(t->templates.put(t.id(),t));
+            Map<String,SchedulingScheme> schemes=new LinkedHashMap<>();
+            rows("scheduling_scheme",SchedulingScheme.class).forEach(s->schemes.put(s.id(),s));
             return new InventorySnapshot(rolls, remnants, receipts, ((Number)meta.get("remnant_seq")).intValue(),
-                    ((Number)meta.get("defect_seq")).intValue(), tasks, plans, revision, executions, ledger(), transfers(), outbox(), counts());
+                    ((Number)meta.get("defect_seq")).intValue(), tasks, plans, revision, executions, ledger(), transfers(), outbox(), counts(), templates, schemes);
         });
     }
     private Map<String,InventoryCount> counts() {
@@ -99,6 +105,12 @@ public class JdbcInventoryStore implements InventoryStore {
             sync("execution_order", List.of("idempotency_key","plan_id","task_id","material_type","material_id","state","version","expires_at"),
                     values(snapshot.executions()),ExecutionOrder::id,
                     e->Arrays.asList(e.idempotencyKey(),e.planId(),e.taskId(),e.materialType(),e.materialId(),e.state(),e.version(),e.expiresAt()));
+            sync("demand_template", List.of("dimension","material_model"),
+                    values(snapshot.templates()),DemandTemplate::id,
+                    t->Arrays.asList(t.dimension(),t.materialModel()));
+            sync("scheduling_scheme", List.of("task_id","roll_id","state","dimension"),
+                    values(snapshot.schemes()),SchedulingScheme::id,
+                    s->Arrays.asList(s.taskId(),s.rollId(),s.state(),s.dimension()));
             var posted=transfers();
             InventoryTransfer.requireAppendOnly(posted,snapshot.transfers());
             for(var document:snapshot.transfers().values())if(!posted.containsKey(document.id()))

@@ -5,6 +5,7 @@ import {
   mirrorVerticesX
 } from '@static/js/nesting/dxf-garment-samples.js';
 import { polygon, rectangle } from '@static/js/canvas/nesting-scene.js';
+import { requestJSON } from '@static/app/js/util.js';
 
 export interface ShapeGeometry {
   type: 'RECTANGLE' | 'POLYGON';
@@ -26,6 +27,7 @@ export interface DemandItem {
   clusterName?: string;
   sizeLabel?: string;
   fabric?: string;
+  surfaceTreatment?: string;
 }
 
 export interface ClusterTemplatePiece {
@@ -33,6 +35,7 @@ export interface ClusterTemplatePiece {
   fabric?: string;
   quantityPerUnit: number;
   pairMirror?: boolean;
+  grainRule?: 'STRICT_0' | 'HALF_TURN_180' | 'FREE_90';
   sizes: Record<string, { w: number; h: number; v?: [number, number][] }>;
 }
 
@@ -42,6 +45,7 @@ export interface DemandCluster {
   code: string;
   category: 'DXF_GARMENT' | 'CURTAIN_2D' | 'BOARD_2D' | 'SLITTING_1D';
   dimension: '2D' | '1D';
+  subDimension?: 'CONTOUR_2D' | 'RECT_2D' | 'SLITTING_1D';
   description: string;
   defaultWidthMm: number;
   defaultLengthMm: number;
@@ -72,10 +76,14 @@ export interface StrategyJobRun {
 export interface SavedScheme2D {
   id: string;
   title: string;
+  strategyId?: string;
   strategyName: string;
+  scenarioId?: string;
   createdAt: string;
-  canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL';
+  canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
   rollId?: string;
+  remnantId?: string;
+  windowStartY?: number;
   materialModel: string;
   widthMm: number;
   canvasLengthMm: number;
@@ -84,11 +92,13 @@ export interface SavedScheme2D {
   pieceAreaM2: number;
   placedCount: number;
   requestedCount: number;
+  gapFillCount?: number;
   complete: boolean;
   demands: DemandItem[];
   request: any;
   result: any;
   dispatchedTaskId?: string;
+  confirmedSchemeId?: string;
 }
 
 export interface SlittingOrderLine {
@@ -133,7 +143,44 @@ export interface SlittingSchemeRun {
   }[];
   rawResult?: any;
   dispatchedTaskId?: string;
+  confirmedSchemeId?: string;
 }
+
+export interface DemandFamilySummary {
+  id: string;
+  name: string;
+  materialModel: string;
+  externalRef?: string;
+  dimension: 'CONTOUR_2D' | 'RECT_2D' | 'SLITTING_1D';
+  revision: number;
+  orderedTotal: number;
+  plannedTotal: number;
+  completedTotal: number;
+  openTotal: number;
+  schemeCount: number;
+  status: string;
+  process?: any;
+  slitting?: any;
+  lines: {
+    id: number;
+    name: string;
+    width: number;
+    length: number;
+    orderedQty: number;
+    plannedQty: number;
+    completedQty: number;
+    openQty: number;
+    allowRotation?: boolean;
+    allowHalfTurn?: boolean;
+    sizeLabel?: string;
+    sourceTemplateId?: string;
+    surfaceTreatment?: string;
+    shape?: ShapeGeometry;
+  }[];
+}
+
+export type Scenario2DType = 'SHORTEN_KIT' | 'SHORTEN_GAP_FILL' | 'FIXED_BED' | 'MULTI_WIDTH';
+export type Scenario1DType = 'MIN_CARS' | 'MAX_UTIL';
 
 const CUSTOM_CLUSTERS_KEY = 'cutplan.react.customClusters.v1';
 
@@ -163,19 +210,22 @@ function createInitialClusters(): DemandCluster[] {
       code: s.code,
       category: 'DXF_GARMENT',
       dimension: '2D',
+      subDimension: 'CONTOUR_2D',
       description: s.description,
       defaultWidthMm: s.defaultWidth,
       defaultLengthMm: styleId === 'DXF_3129' ? 2400 : 1600,
       materialModel: s.materialModel,
       availableSizes: s.sizes,
-      defaultSizeCounts: styleId === 'DXF_3129'
-        ? { '110': 0, '120': 1, '130': 0, '140': 0, '150': 0, '160': 0 }
-        : { '110': 0, '120': 1, '130': 0, '140': 1, '150': 0, '160': 0 },
+      defaultSizeCounts:
+        styleId === 'DXF_3129'
+          ? { '110': 0, '120': 1, '130': 0, '140': 0, '150': 0, '160': 0 }
+          : { '110': 0, '120': 1, '130': 0, '140': 1, '150': 0, '160': 0 },
       pieces: mainPieces.map((p: any) => ({
         name: p.name,
         fabric: p.fabric,
         quantityPerUnit: p.quantity,
         pairMirror: p.pairMirror,
+        grainRule: 'STRICT_0',
         sizes: p.sizes
       }))
     };
@@ -184,73 +234,80 @@ function createInitialClusters(): DemandCluster[] {
   const s1226 = DXF_GARMENT_STYLES.DXF_1226;
   const rib1226: DemandCluster = {
     id: 'DXF_1226_RIB',
-    name: '1226 卫衣罗纹配套簇 (领/袖口/下摆)',
+    name: '1226 卫衣罗纹配套模板 (领/袖口/下摆)',
     code: 'F1CRH1226-RIB',
     category: 'DXF_GARMENT',
     dimension: '2D',
-    description: '1226.dxf 配套罗纹裁片簇：下摆×1、左右袖口×2、罗纹领×1（支持 110–160 码按套选配）',
+    subDimension: 'CONTOUR_2D',
+    description: '1226.dxf 配套罗纹纸样模板：下摆×1、左右袖口×2、罗纹领×1（支持 110–160 码按套选配）',
     defaultWidthMm: 1500,
     defaultLengthMm: 1200,
     materialModel: 'DXF-1226-配套罗纹',
     availableSizes: s1226.sizes,
     defaultSizeCounts: { '110': 0, '120': 2, '130': 0, '140': 2, '150': 0, '160': 0 },
-    pieces: s1226.pieces.filter((p: any) => p.fabric === '罗纹').map((p: any) => ({
-      name: p.name,
-      fabric: p.fabric,
-      quantityPerUnit: p.quantity,
-      pairMirror: p.pairMirror,
-      sizes: p.sizes
-    }))
+    pieces: s1226.pieces
+      .filter((p: any) => p.fabric === '罗纹')
+      .map((p: any) => ({
+        name: p.name,
+        fabric: p.fabric,
+        quantityPerUnit: p.quantity,
+        pairMirror: p.pairMirror,
+        grainRule: 'STRICT_0',
+        sizes: p.sizes
+      }))
   };
 
   const curtainCluster: DemandCluster = {
     id: 'CLUSTER_CURTAIN_SUITE',
-    name: '全屋窗帘主帘+辅件标准簇',
+    name: '全屋窗帘主帘+辅件需求模板',
     code: 'CURTAIN-SUITE',
     category: 'CURTAIN_2D',
     dimension: '2D',
-    description: '固定窗帘款式组成（落地主帘左/右片、飘窗短帘、定型绑带、同款抱枕套），支持标准高/挑空两档成套选配',
+    subDimension: 'RECT_2D',
+    description: '标准窗帘产品套系模板（落地主帘左/右片、飘窗短帘、定型绑带、同款抱枕套），支持标准高/挑空两档成套选配',
     defaultWidthMm: 2000,
     defaultLengthMm: 3600,
     materialModel: 'TC涤棉-B2026',
     availableSizes: ['标准2.6m高', '挑空3.2m高'],
     defaultSizeCounts: { '标准2.6m高': 1, '挑空3.2m高': 0 },
     pieces: [
-      { name: '客厅双开主帘', quantityPerUnit: 2, sizes: { '标准2.6m高': { w: 1200, h: 1600 }, '挑空3.2m高': { w: 1400, h: 2200 } } },
-      { name: '次卧飘窗短帘', quantityPerUnit: 2, sizes: { '标准2.6m高': { w: 600, h: 900 }, '挑空3.2m高': { w: 750, h: 1100 } } },
-      { name: '定型绑带', quantityPerUnit: 4, sizes: { '标准2.6m高': { w: 180, h: 750 }, '挑空3.2m高': { w: 200, h: 850 } } },
-      { name: '同款沙发抱枕套', quantityPerUnit: 2, sizes: { '标准2.6m高': { w: 450, h: 450 }, '挑空3.2m高': { w: 500, h: 500 } } }
+      { name: '客厅双开主帘', quantityPerUnit: 2, grainRule: 'STRICT_0', sizes: { '标准2.6m高': { w: 1200, h: 1600 }, '挑空3.2m高': { w: 1400, h: 2200 } } },
+      { name: '次卧飘窗短帘', quantityPerUnit: 2, grainRule: 'STRICT_0', sizes: { '标准2.6m高': { w: 600, h: 900 }, '挑空3.2m高': { w: 750, h: 1100 } } },
+      { name: '定型绑带', quantityPerUnit: 4, grainRule: 'FREE_90', sizes: { '标准2.6m高': { w: 180, h: 750 }, '挑空3.2m高': { w: 200, h: 850 } } },
+      { name: '同款沙发抱枕套', quantityPerUnit: 2, grainRule: 'FREE_90', sizes: { '标准2.6m高': { w: 450, h: 450 }, '挑空3.2m高': { w: 500, h: 500 } } }
     ]
   };
 
   const boardCluster: DemandCluster = {
     id: 'CLUSTER_CABINET_BOARD',
-    name: '定制衣柜板材套板簇',
+    name: '定制衣柜板材套板需求模板',
     code: 'CABINET-2440',
     category: 'BOARD_2D',
     dimension: '2D',
-    description: '标准 1220×2440mm 板材开料套系（侧板、门板、层板、隔板、抽屉面板）',
+    subDimension: 'RECT_2D',
+    description: '标准 1220×2440mm 板材开料套系模板（侧板、门板、层板、隔板、抽屉面板）',
     defaultWidthMm: 1220,
     defaultLengthMm: 2440,
     materialModel: '定制板材-1220',
     availableSizes: ['800宽柜体', '1000宽柜体'],
     defaultSizeCounts: { '800宽柜体': 1, '1000宽柜体': 0 },
     pieces: [
-      { name: '柜体门板', quantityPerUnit: 1, sizes: { '800宽柜体': { w: 800, h: 1200 }, '1000宽柜体': { w: 960, h: 1200 } } },
-      { name: '柜体侧板', quantityPerUnit: 3, sizes: { '800宽柜体': { w: 600, h: 500 }, '1000宽柜体': { w: 600, h: 550 } } },
-      { name: '层板', quantityPerUnit: 1, sizes: { '800宽柜体': { w: 764, h: 396 }, '1000宽柜体': { w: 964, h: 396 } } },
-      { name: '抽屉面板', quantityPerUnit: 1, sizes: { '800宽柜体': { w: 720, h: 396 }, '1000宽柜体': { w: 920, h: 396 } } },
-      { name: '隔板', quantityPerUnit: 1, sizes: { '800宽柜体': { w: 400, h: 396 }, '1000宽柜体': { w: 480, h: 396 } } }
+      { name: '柜体门板', quantityPerUnit: 1, grainRule: 'STRICT_0', sizes: { '800宽柜体': { w: 800, h: 1200 }, '1000宽柜体': { w: 960, h: 1200 } } },
+      { name: '柜体侧板', quantityPerUnit: 3, grainRule: 'FREE_90', sizes: { '800宽柜体': { w: 600, h: 500 }, '1000宽柜体': { w: 600, h: 550 } } },
+      { name: '层板', quantityPerUnit: 1, grainRule: 'FREE_90', sizes: { '800宽柜体': { w: 764, h: 396 }, '1000宽柜体': { w: 964, h: 396 } } },
+      { name: '抽屉面板', quantityPerUnit: 1, grainRule: 'STRICT_0', sizes: { '800宽柜体': { w: 720, h: 396 }, '1000宽柜体': { w: 920, h: 396 } } },
+      { name: '隔板', quantityPerUnit: 1, grainRule: 'FREE_90', sizes: { '800宽柜体': { w: 400, h: 396 }, '1000宽柜体': { w: 480, h: 396 } } }
     ]
   };
 
   const slittingFilmCluster: DemandCluster = {
     id: 'CLUSTER_SLIT_FILM',
-    name: '光学膜同卷长分条订单簇 (4600mm母卷)',
+    name: '光学膜同卷长分条需求模板 (4600mm母卷)',
     code: 'SLIT-FILM-4600',
     category: 'SLITTING_1D',
     dimension: '1D',
-    description: '4 个客户同卷长 (2000mm) 不同条宽规格簇，专门用于一维分切多组合套裁优化',
+    subDimension: 'SLITTING_1D',
+    description: '4 个客户同卷长 (2000mm) 不同条宽规格族模板，用于一维分切多组合套裁优化',
     defaultWidthMm: 4600,
     defaultLengthMm: 2000,
     materialModel: '光学膜-4600',
@@ -266,11 +323,12 @@ function createInitialClusters(): DemandCluster[] {
 
   const slittingCurtainCluster: DemandCluster = {
     id: 'CLUSTER_SLIT_CURTAIN',
-    name: '涂层面料定长分条簇 (2000mm母卷)',
+    name: '涂层面料定长分条模板 (2000mm母卷)',
     code: 'SLIT-CURTAIN-2000',
     category: 'SLITTING_1D',
     dimension: '1D',
-    description: '宽窄条混搭一维分切簇（600mm / 700mm / 450mm），无需看二维卷面，直接算最优分条组合',
+    subDimension: 'SLITTING_1D',
+    description: '宽窄条混搭一维分切模板（600mm / 700mm / 450mm），直接计算最优分条组合',
     defaultWidthMm: 2000,
     defaultLengthMm: 2000,
     materialModel: '涂层面料-2000',
@@ -309,6 +367,8 @@ export function expandClusterToDemands(
     for (const piece of cluster.pieces) {
       const geom = piece.sizes[sizeKey] || Object.values(piece.sizes)[0];
       if (!geom) continue;
+      const allowFreeRot = piece.grainRule === 'FREE_90';
+      const allowHalf = piece.grainRule === 'HALF_TURN_180';
 
       if (geom.v && geom.v.length >= 3) {
         const baseVerts = geom.v.map(([x, y]) => ({ x, y }));
@@ -321,7 +381,8 @@ export function expandClusterToDemands(
             width: baseShape.width,
             length: baseShape.height,
             quantity: count,
-            allowRotation: false,
+            allowRotation: allowFreeRot,
+            allowHalfTurn: allowHalf,
             shape: baseShape,
             clusterId: cluster.id,
             clusterName: cluster.name,
@@ -334,7 +395,8 @@ export function expandClusterToDemands(
             width: rightShape.width,
             length: rightShape.height,
             quantity: count,
-            allowRotation: false,
+            allowRotation: allowFreeRot,
+            allowHalfTurn: allowHalf,
             shape: rightShape,
             clusterId: cluster.id,
             clusterName: cluster.name,
@@ -348,7 +410,8 @@ export function expandClusterToDemands(
             width: baseShape.width,
             length: baseShape.height,
             quantity: piece.quantityPerUnit * count,
-            allowRotation: false,
+            allowRotation: allowFreeRot,
+            allowHalfTurn: allowHalf,
             shape: baseShape,
             clusterId: cluster.id,
             clusterName: cluster.name,
@@ -364,7 +427,8 @@ export function expandClusterToDemands(
           width: geom.w,
           length: geom.h,
           quantity: piece.quantityPerUnit * count,
-          allowRotation: false,
+          allowRotation: allowFreeRot,
+          allowHalfTurn: allowHalf,
           shape: undefined,
           clusterId: cluster.id,
           clusterName: cluster.name,
@@ -380,22 +444,33 @@ export function expandClusterToDemands(
 interface StudioState {
   clusters: DemandCluster[];
   clusterSelections: Record<string, Record<string, number>>;
-  // 2D Studio State
-  canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL';
+
+  // Unified Workbench Dimension & Scenario State
+  activeDimension: '2D' | '1D';
+  scenario2D: Scenario2DType;
+  multiWidthsText2D: string;
+  scenario1D: Scenario1DType;
+
+  // 2D Studio State (defaults to FREE_CANVAS = Virtual New Mother Roll!)
+  canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
   canvasWidthMm: number;
   canvasLengthMm: number;
   pieceGapMm: number;
   trimStartMm: number;
   selectedRollId: string;
+  selectedRemnantId: string;
   materialModel2D: string;
   loadedTaskId: string | null;
   loadedTaskName: string | null;
+  loadedExternalRef: string | null;
   activeDemands2D: DemandItem[];
   selectedStrategies2D: string[];
   strategyRuns2D: StrategyJobRun[];
   schemes2D: SavedScheme2D[];
   activeSchemeId2D: string | null;
+
   // 1D Slitting Studio State
+  slitMaterialMode: 'VIRTUAL_ROLL' | 'STOCK_ROLL';
   slitMotherWidthMm: number;
   slitLeftTrimMm: number;
   slitRightTrimMm: number;
@@ -406,27 +481,41 @@ interface StudioState {
   slitFixedLengthMm: number;
   slitAvoidDefects: boolean;
   slitRollId: string;
+  slitMaterialModel: string;
+  slitLoadedTaskId: string | null;
+  slitLoadedTaskName: string | null;
   slitOrders: SlittingOrderLine[];
   slitSchemes: SlittingSchemeRun[];
   activeSlitSchemeId: string | null;
 
   // Actions
+  setActiveDimension: (dim: '2D' | '1D') => void;
+  setScenario2D: (sc: Scenario2DType) => void;
+  setMultiWidthsText2D: (txt: string) => void;
+  setScenario1D: (sc: Scenario1DType) => void;
+  syncTemplatesFromServer: () => Promise<void>;
   setClusterCount: (clusterId: string, sizeKey: string, count: number) => void;
   addCustomCluster: (cluster: DemandCluster) => void;
   deleteCustomCluster: (clusterId: string) => void;
   importDxfAsCluster: (text: string, fileName: string) => DemandCluster;
   loadClusterInto2D: (clusterId: string, append?: boolean) => void;
   loadSelectedClustersInto2D: (clusterIds: string[], append?: boolean) => void;
+  loadDemandFamilyIntoWorkbench: (family: DemandFamilySummary) => void;
+  loadDemandFamiliesMergedIntoWorkbench: (families: DemandFamilySummary[]) => void;
+
   setCanvasSpec: (spec: Partial<{
-    canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL';
+    activeDimension: '2D' | '1D';
+    canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
     canvasWidthMm: number;
     canvasLengthMm: number;
     pieceGapMm: number;
     trimStartMm: number;
     selectedRollId: string;
+    selectedRemnantId: string;
     materialModel2D: string;
     loadedTaskId: string | null;
     loadedTaskName: string | null;
+    loadedExternalRef: string | null;
   }>) => void;
   setActiveDemands2D: (demands: DemandItem[]) => void;
   updateDemand2D: (id: number, patch: Partial<DemandItem>) => void;
@@ -438,17 +527,17 @@ interface StudioState {
   removeScheme2D: (id: string) => void;
   clearSchemes2D: () => void;
   setActiveScheme2D: (id: string | null) => void;
-  markSchemeDispatched: (schemeId: string, taskId: string) => void;
+  markSchemeDispatched: (schemeId: string, taskId: string, confirmedSchemeId?: string) => void;
 
   // 1D Actions
-  loadClusterInto1D: (clusterId: string) => void;
+  loadClusterInto1D: (clusterId: string, append?: boolean) => void;
   setSlitSpec: (spec: Partial<StudioState>) => void;
   updateSlitOrder: (id: string, patch: Partial<SlittingOrderLine>) => void;
   addSlitOrder: () => void;
   removeSlitOrder: (id: string) => void;
   setSlitSchemes: (schemes: SlittingSchemeRun[]) => void;
   setActiveSlitScheme: (id: string | null) => void;
-  markSlitSchemeDispatched: (schemeId: string, taskId: string) => void;
+  markSlitSchemeDispatched: (schemeId: string, taskId: string, confirmedSchemeId?: string) => void;
 }
 
 const initialClusters = createInitialClusters();
@@ -465,21 +554,29 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   clusters: initialClusters,
   clusterSelections: initialSelectionMap,
 
+  activeDimension: '2D',
+  scenario2D: 'SHORTEN_KIT',
+  multiWidthsText2D: '1500, 1650, 1800',
+  scenario1D: 'MIN_CARS',
+
   canvasMode: 'FREE_CANVAS',
   canvasWidthMm: defaultCluster2D.defaultWidthMm,
   canvasLengthMm: defaultCluster2D.defaultLengthMm,
   pieceGapMm: 0,
   trimStartMm: 0,
-  selectedRollId: 'ROLL-DXF-1226',
+  selectedRollId: 'ROLL-2026-0920',
+  selectedRemnantId: '',
   materialModel2D: defaultCluster2D.materialModel,
   loadedTaskId: null,
   loadedTaskName: null,
+  loadedExternalRef: null,
   activeDemands2D: defaultDemands2D,
   selectedStrategies2D: ['SHORTEN_FIXED', 'SHORTEN_HALF_TURN', 'DEEPNEST_NFP_GA', 'JAVA_HEURISTIC'],
   strategyRuns2D: [],
   schemes2D: [],
   activeSchemeId2D: null,
 
+  slitMaterialMode: 'VIRTUAL_ROLL',
   slitMotherWidthMm: 4600,
   slitLeftTrimMm: 100,
   slitRightTrimMm: 100,
@@ -490,6 +587,9 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   slitFixedLengthMm: 2000,
   slitAvoidDefects: false,
   slitRollId: '',
+  slitMaterialModel: defaultSlitCluster.materialModel,
+  slitLoadedTaskId: null,
+  slitLoadedTaskName: null,
   slitOrders: defaultSlitCluster.pieces.map((p, idx) => ({
     id: String(idx + 1),
     name: p.name,
@@ -499,6 +599,53 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   })),
   slitSchemes: [],
   activeSlitSchemeId: null,
+
+  setActiveDimension: (dim) => set({ activeDimension: dim }),
+  setScenario2D: (sc) => set({ scenario2D: sc }),
+  setMultiWidthsText2D: (txt) => set({ multiWidthsText2D: txt }),
+  setScenario1D: (sc) => set({ scenario1D: sc }),
+
+  syncTemplatesFromServer: async () => {
+    try {
+      const serverTpls: any[] = await requestJSON('/api/v2/demand-templates');
+      if (!Array.isArray(serverTpls) || serverTpls.length === 0) return;
+      const mapped: DemandCluster[] = serverTpls.map((t) => ({
+        id: t.id,
+        name: t.name,
+        code: t.code || t.id,
+        category: t.category || (t.dimension === 'SLITTING_1D' ? 'SLITTING_1D' : 'CURTAIN_2D'),
+        dimension: t.dimension === 'SLITTING_1D' ? '1D' : '2D',
+        subDimension: t.dimension,
+        description: t.description || '',
+        defaultWidthMm: Number(t.defaultWidthMm) || 1650,
+        defaultLengthMm: Number(t.defaultLengthMm) || 2000,
+        materialModel: t.materialModel || 'STANDARD',
+        availableSizes: Array.isArray(t.availableSizes) && t.availableSizes.length ? t.availableSizes : ['标准规格'],
+        defaultSizeCounts: t.defaultSizeCounts || { 标准规格: 1 },
+        custom: true,
+        pieces: (t.pieces || []).map((p: any) => ({
+          name: p.name,
+          fabric: p.fabric,
+          quantityPerUnit: p.quantityPerUnit || 1,
+          pairMirror: Boolean(p.pairMirror),
+          grainRule: p.grainRule || 'STRICT_0',
+          sizes: p.sizes || {}
+        }))
+      }));
+      set((st) => {
+        const serverIds = new Set(mapped.map((m) => m.id));
+        const builtinsAndLocal = st.clusters.filter((c) => !serverIds.has(c.id));
+        const nextSel = { ...st.clusterSelections };
+        for (const m of mapped) {
+          if (!nextSel[m.id]) nextSel[m.id] = { ...m.defaultSizeCounts };
+        }
+        return {
+          clusters: [...mapped, ...builtinsAndLocal],
+          clusterSelections: nextSel
+        };
+      });
+    } catch {}
+  },
 
   setClusterCount: (clusterId, sizeKey, count) =>
     set((st) => ({
@@ -511,25 +658,51 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       }
     })),
 
-  addCustomCluster: (cluster) =>
+  addCustomCluster: (cluster) => {
+    const withFlag: DemandCluster = { ...cluster, custom: true };
     set((st) => {
-      const next = [{ ...cluster, custom: true }, ...st.clusters];
+      const next = [withFlag, ...st.clusters.filter((c) => c.id !== withFlag.id)];
       saveCustomClusters(next);
       return {
         clusters: next,
         clusterSelections: {
           ...st.clusterSelections,
-          [cluster.id]: { ...cluster.defaultSizeCounts }
+          [withFlag.id]: { ...withFlag.defaultSizeCounts }
         }
       };
-    }),
+    });
+    // Persist custom template to backend asynchronously
+    requestJSON('/api/v2/demand-templates', {
+      id: withFlag.id,
+      code: withFlag.code,
+      name: withFlag.name,
+      category: withFlag.category,
+      dimension:
+        withFlag.subDimension ||
+        (withFlag.dimension === '1D'
+          ? 'SLITTING_1D'
+          : withFlag.category === 'DXF_GARMENT'
+          ? 'CONTOUR_2D'
+          : 'RECT_2D'),
+      description: withFlag.description,
+      defaultWidthMm: withFlag.defaultWidthMm,
+      defaultLengthMm: withFlag.defaultLengthMm,
+      materialModel: withFlag.materialModel,
+      availableSizes: withFlag.availableSizes,
+      defaultSizeCounts: withFlag.defaultSizeCounts,
+      custom: true,
+      pieces: withFlag.pieces
+    }).catch(() => {});
+  },
 
-  deleteCustomCluster: (clusterId) =>
+  deleteCustomCluster: (clusterId) => {
     set((st) => {
       const next = st.clusters.filter((c) => c.id !== clusterId || !c.custom);
       saveCustomClusters(next);
       return { clusters: next };
-    }),
+    });
+    fetch('/api/v2/demand-templates/' + encodeURIComponent(clusterId), { method: 'DELETE' }).catch(() => {});
+  },
 
   importDxfAsCluster: (text, fileName) => {
     const parsed = parseDxfGarmentText(text, fileName);
@@ -552,6 +725,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             fabric: '面布',
             quantityPerUnit: isLeft ? 2 : d.quantity,
             pairMirror: isLeft,
+            grainRule: 'STRICT_0',
             sizes: {}
           });
         }
@@ -570,11 +744,12 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
     const newCluster: DemandCluster = {
       id,
-      name: `${baseCode} 导入纸样簇 (DXF)`,
+      name: `${baseCode} 导入纸样模板 (DXF)`,
       code: baseCode,
       category: 'DXF_GARMENT',
       dimension: '2D',
-      description: `从 ${fileName} 实时解析的 CAD 纸样簇（共 ${pieceMap.size} 种裁片，尺码 ${availableSizes.join('/')}）`,
+      subDimension: 'CONTOUR_2D',
+      description: `从 ${fileName} 解析的 CAD 纸样需求模板（共 ${pieceMap.size} 种裁片，尺码 ${availableSizes.join('/')}）`,
       defaultWidthMm: 1650,
       defaultLengthMm: 2000,
       materialModel: `DXF-${baseCode}`,
@@ -593,32 +768,45 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     if (!cluster) return;
     const counts = st.clusterSelections[clusterId] || cluster.defaultSizeCounts;
     const hasPositive = Object.values(counts).some((v) => v > 0);
-    const effectiveCounts = hasPositive
-      ? counts
-      : { [cluster.availableSizes[0]]: 1 };
+    const effectiveCounts = hasPositive ? counts : { [cluster.availableSizes[0]]: 1 };
     const startId = append ? st.activeDemands2D.reduce((m, d) => Math.max(m, d.id), 0) + 1 : 1;
     const expanded = expandClusterToDemands(cluster, effectiveCounts, startId);
     set({
-      loadedTaskId: null,
-      loadedTaskName: null,
+      activeDimension: '2D',
+      loadedTaskId: append ? st.loadedTaskId : null,
+      loadedTaskName: append ? st.loadedTaskName : null,
+      loadedExternalRef: append ? st.loadedExternalRef : null,
       activeDemands2D: append ? [...st.activeDemands2D, ...expanded] : expanded,
       canvasWidthMm: append ? st.canvasWidthMm : cluster.defaultWidthMm,
       canvasLengthMm: append ? st.canvasLengthMm : cluster.defaultLengthMm,
       materialModel2D: append ? st.materialModel2D : cluster.materialModel,
-      ...(append ? {} : { activeSchemeId2D: null })
+      ...(append ? {} : { activeSchemeId2D: null, schemes2D: [] })
     });
   },
 
   loadSelectedClustersInto2D: (clusterIds, append = false) => {
     const st = get();
+    const chosen1D = clusterIds
+      .map((id) => st.clusters.find((c) => c.id === id))
+      .filter((c): c is DemandCluster => Boolean(c && c.dimension === '1D'));
+    const chosen2D = clusterIds
+      .map((id) => st.clusters.find((c) => c.id === id))
+      .filter((c): c is DemandCluster => Boolean(c && c.dimension === '2D'));
+
+    if (chosen2D.length === 0 && chosen1D.length > 0) {
+      get().loadClusterInto1D(chosen1D[0].id, false);
+      for (let i = 1; i < chosen1D.length; i++) {
+        get().loadClusterInto1D(chosen1D[i].id, true);
+      }
+      return;
+    }
+
     let list: DemandItem[] = append ? [...st.activeDemands2D] : [];
     let nextId = list.reduce((m, d) => Math.max(m, d.id), 0) + 1;
     let firstCluster: DemandCluster | null = null;
-    for (const id of clusterIds) {
-      const cluster = st.clusters.find((c) => c.id === id);
-      if (!cluster || cluster.dimension !== '2D') continue;
+    for (const cluster of chosen2D) {
       if (!firstCluster) firstCluster = cluster;
-      const counts = st.clusterSelections[id] || cluster.defaultSizeCounts;
+      const counts = st.clusterSelections[cluster.id] || cluster.defaultSizeCounts;
       const effectiveCounts = Object.values(counts).some((v) => v > 0)
         ? counts
         : { [cluster.availableSizes[0]]: 1 };
@@ -628,17 +816,162 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     }
     if (list.length) {
       set({
+        activeDimension: '2D',
         loadedTaskId: null,
         loadedTaskName: null,
+        loadedExternalRef: null,
         activeDemands2D: list,
         ...(firstCluster && !append
           ? {
               canvasWidthMm: firstCluster.defaultWidthMm,
               canvasLengthMm: firstCluster.defaultLengthMm,
               materialModel2D: firstCluster.materialModel,
-              activeSchemeId2D: null
+              activeSchemeId2D: null,
+              schemes2D: []
             }
           : {})
+      });
+    }
+  },
+
+  loadDemandFamilyIntoWorkbench: (family) => {
+    const openLines = family.lines.filter((l) => l.openQty > 0);
+    const effectiveLines = openLines.length > 0 ? openLines : family.lines;
+    if (family.dimension === 'SLITTING_1D') {
+      const sp = family.slitting || {};
+      const maxW = Number(sp.maxWidth) || 4400;
+      const lt = Number(sp.leftTrim) ?? 100;
+      const rt = Number(sp.rightTrim) ?? 100;
+      const fixedLen = effectiveLines[0]?.length || Number(family.process?.bedLength) || 2000;
+      set({
+        activeDimension: '1D',
+        slitLoadedTaskId: family.id,
+        slitLoadedTaskName: family.name,
+        slitMaterialModel: family.materialModel,
+        slitMotherWidthMm: maxW + lt + rt,
+        slitLeftTrimMm: lt,
+        slitRightTrimMm: rt,
+        slitMinWidthMm: Number(sp.minWidth) || Math.floor(maxW * 0.9),
+        slitMaxWidthMm: maxW,
+        slitWidthStepMm: Number(sp.widthStep) || 10,
+        slitOverCap: Number(sp.totalOverCap) ?? 20,
+        slitFixedLengthMm: fixedLen,
+        slitOrders: effectiveLines.map((l) => ({
+          id: String(l.id),
+          name: l.name,
+          widthMm: l.width,
+          lengthMm: l.length,
+          quantity: l.openQty > 0 ? l.openQty : l.orderedQty,
+          surfaceTreatment: l.surfaceTreatment
+        })),
+        slitSchemes: [],
+        activeSlitSchemeId: null
+      });
+    } else {
+      const mappedDemands = effectiveLines.map((l) => ({
+        id: l.id,
+        name: l.name,
+        width: l.width,
+        length: l.length,
+        quantity: l.openQty > 0 ? l.openQty : l.orderedQty,
+        allowRotation: Boolean(l.allowRotation),
+        allowHalfTurn: Boolean(l.allowHalfTurn),
+        shape: l.shape,
+        clusterName: family.name,
+        sizeLabel: l.sizeLabel
+      }));
+      const curW = get().canvasWidthMm || 1650;
+      const totalArea = mappedDemands.reduce((s, d) => s + d.width * d.length * d.quantity, 0);
+      const estLen = Math.ceil(totalArea / Math.max(400, curW * 0.65) / 500) * 500;
+      set({
+        activeDimension: '2D',
+        loadedTaskId: family.id,
+        loadedTaskName: family.name,
+        loadedExternalRef: family.externalRef || null,
+        materialModel2D: family.materialModel,
+        canvasLengthMm: Math.max(Number(family.process?.bedLength) || 2400, estLen, 1500),
+        pieceGapMm: Number(family.process?.pieceGap) || 0,
+        trimStartMm: Number(family.process?.trimStart) || 0,
+        activeDemands2D: mappedDemands,
+        schemes2D: [],
+        activeSchemeId2D: null
+      });
+    }
+  },
+
+  loadDemandFamiliesMergedIntoWorkbench: (families) => {
+    if (!families.length) return;
+    if (families.length === 1) {
+      get().loadDemandFamilyIntoWorkbench(families[0]);
+      return;
+    }
+    const first = families[0];
+    if (first.dimension === 'SLITTING_1D') {
+      let nextId = 1;
+      const orders: SlittingOrderLine[] = [];
+      for (const fam of families) {
+        if (fam.dimension !== 'SLITTING_1D') continue;
+        for (const l of fam.lines) {
+          if (l.openQty <= 0) continue;
+          orders.push({
+            id: String(nextId++),
+            name: `${fam.name} · ${l.name}`,
+            widthMm: l.width,
+            lengthMm: l.length,
+            quantity: l.openQty,
+            surfaceTreatment: l.surfaceTreatment
+          });
+        }
+      }
+      const sp = first.slitting || {};
+      const maxW = Number(sp.maxWidth) || 4400;
+      const lt = Number(sp.leftTrim) ?? 100;
+      const rt = Number(sp.rightTrim) ?? 100;
+      set({
+        activeDimension: '1D',
+        slitLoadedTaskId: null,
+        slitLoadedTaskName: `多族合排 (${families.length} 族 · ${first.materialModel})`,
+        slitMaterialModel: first.materialModel,
+        slitMotherWidthMm: maxW + lt + rt,
+        slitLeftTrimMm: lt,
+        slitRightTrimMm: rt,
+        slitMaxWidthMm: maxW,
+        slitMinWidthMm: Number(sp.minWidth) || Math.floor(maxW * 0.9),
+        slitFixedLengthMm: orders[0]?.lengthMm || 2000,
+        slitOrders: orders,
+        slitSchemes: [],
+        activeSlitSchemeId: null
+      });
+    } else {
+      let nextId = 1;
+      const demands: DemandItem[] = [];
+      for (const fam of families) {
+        if (fam.dimension === 'SLITTING_1D') continue;
+        for (const l of fam.lines) {
+          if (l.openQty <= 0) continue;
+          demands.push({
+            id: nextId++,
+            name: `${fam.name} · ${l.name}`,
+            width: l.width,
+            length: l.length,
+            quantity: l.openQty,
+            allowRotation: Boolean(l.allowRotation),
+            allowHalfTurn: Boolean(l.allowHalfTurn),
+            shape: l.shape,
+            clusterName: fam.name,
+            sizeLabel: l.sizeLabel
+          });
+        }
+      }
+      set({
+        activeDimension: '2D',
+        loadedTaskId: null,
+        loadedTaskName: `多族合排 (${families.length} 族 · ${first.materialModel})`,
+        loadedExternalRef: families.map((f) => f.externalRef || f.name).join(' + '),
+        materialModel2D: first.materialModel,
+        activeDemands2D: demands,
+        schemes2D: [],
+        activeSchemeId2D: null
       });
     }
   },
@@ -665,7 +998,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
           ...st.activeDemands2D,
           {
             id: nextId,
-            name: `自定义矩形件 #${nextId}`,
+            name: `自定义规格件 #${nextId}`,
             width: 500,
             length: 800,
             quantity: 2,
@@ -718,35 +1051,52 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
   setActiveScheme2D: (id) => set({ activeSchemeId2D: id }),
 
-  markSchemeDispatched: (schemeId, taskId) =>
+  markSchemeDispatched: (schemeId, taskId, confirmedSchemeId) =>
     set((st) => ({
-      schemes2D: st.schemes2D.map((s) => (s.id === schemeId ? { ...s, dispatchedTaskId: taskId } : s))
+      schemes2D: st.schemes2D.map((s) =>
+        s.id === schemeId ? { ...s, dispatchedTaskId: taskId, confirmedSchemeId } : s
+      )
     })),
 
-  loadClusterInto1D: (clusterId) => {
+  loadClusterInto1D: (clusterId, append = false) => {
     const st = get();
     const cluster = st.clusters.find((c) => c.id === clusterId);
     if (!cluster) return;
+    const counts = st.clusterSelections[clusterId] || cluster.defaultSizeCounts;
+    const mult = Math.max(1, Object.values(counts).reduce((s, n) => s + (Number(n) || 0), 0));
+    const baseIdx = append
+      ? st.slitOrders.reduce((m, o) => Math.max(m, Number(o.id) || 0), 0)
+      : 0;
     const orders: SlittingOrderLine[] = cluster.pieces.map((p, idx) => {
       const g = Object.values(p.sizes)[0];
       return {
-        id: String(idx + 1),
+        id: String(baseIdx + idx + 1),
         name: p.name,
         widthMm: g.w,
         lengthMm: g.h,
-        quantity: p.quantityPerUnit
+        quantity: p.quantityPerUnit * mult
       };
     });
     const trim = cluster.defaultWidthMm >= 4000 ? 100 : 10;
     const usable = cluster.defaultWidthMm - trim * 2;
     set({
-      slitMotherWidthMm: cluster.defaultWidthMm,
-      slitLeftTrimMm: trim,
-      slitRightTrimMm: trim,
-      slitMaxWidthMm: usable,
-      slitMinWidthMm: Math.floor((usable * 0.92) / 10) * 10,
-      slitFixedLengthMm: cluster.defaultLengthMm,
-      slitOrders: orders
+      activeDimension: '1D',
+      slitLoadedTaskId: append ? st.slitLoadedTaskId : null,
+      slitLoadedTaskName: append ? st.slitLoadedTaskName : null,
+      slitMaterialModel: append ? st.slitMaterialModel : cluster.materialModel,
+      ...(append
+        ? { slitOrders: [...st.slitOrders, ...orders] }
+        : {
+            slitMotherWidthMm: cluster.defaultWidthMm,
+            slitLeftTrimMm: trim,
+            slitRightTrimMm: trim,
+            slitMaxWidthMm: usable,
+            slitMinWidthMm: Math.floor((usable * 0.92) / 10) * 10,
+            slitFixedLengthMm: cluster.defaultLengthMm,
+            slitOrders: orders,
+            slitSchemes: [],
+            activeSlitSchemeId: null
+          })
     });
   },
 
@@ -791,8 +1141,10 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
   setActiveSlitScheme: (id) => set({ activeSlitSchemeId: id }),
 
-  markSlitSchemeDispatched: (schemeId, taskId) =>
+  markSlitSchemeDispatched: (schemeId, taskId, confirmedSchemeId) =>
     set((st) => ({
-      slitSchemes: st.slitSchemes.map((s) => (s.id === schemeId ? { ...s, dispatchedTaskId: taskId } : s))
+      slitSchemes: st.slitSchemes.map((s) =>
+        s.id === schemeId ? { ...s, dispatchedTaskId: taskId, confirmedSchemeId } : s
+      )
     }))
 }));

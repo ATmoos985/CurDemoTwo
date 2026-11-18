@@ -636,6 +636,20 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
             {roll.inspectionStatus || '待检'}
           </span>
         )}
+        {roll && (roll.usedLength || 0) > 0 && (
+          <span className="tag run num" title="已切割区段历史疵点不可作废，验布默认从已切终点起跳">
+            已切 0 ~ {fmtM(roll.usedLength)}m · 余长 {fmtM(Math.max(0, roll.totalLength - roll.usedLength))}m
+          </span>
+        )}
+        {roll && (
+          <a
+            className="btn sm"
+            href={`#/inventory?roll=${encodeURIComponent(roll.rollId)}`}
+            title="跳转到母卷台账查看已切割区域与排程预占空间图"
+          >
+            看已切割区域
+          </a>
+        )}
         <a
           className="btn"
           href="#/inventory/receive"
