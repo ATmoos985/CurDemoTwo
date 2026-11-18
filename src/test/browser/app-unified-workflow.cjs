@@ -225,6 +225,63 @@ const api = async (path) => {
       assert.ok(await page.locator('.inv-canvas-box canvas').first().isVisible(), 'Roll preview canvas visible');
       assert.deepEqual(pageErrors, [], 'Zero pageerror across full lifecycle');
     });
+
+    await runStep('Settings Modal: left vertical tabs, right settings panes, preset & persistence without leaving current route', async () => {
+      const urlBeforeOpen = page.url();
+      await page.locator('#nav .nav-settings-link').click();
+      const dialog = page.locator('dialog#studio-settings-dialog[open]');
+      await dialog.waitFor();
+      assert.equal(page.url(), urlBeforeOpen, 'Opening settings modal must not navigate away from active page');
+
+      const tabLabels = await dialog
+        .locator('[role="tab"] strong')
+        .evaluateAll((els) => els.map((e) => e.textContent.trim()));
+      assert.deepEqual(tabLabels, [
+        '画布与常规',
+        '裁切工艺与预设',
+        '料头与余料策略',
+        '求解引擎与配额',
+        '导出与系统接入'
+      ]);
+
+      // Switch through each left tab and verify right panel switches cleanly
+      await dialog.locator('#settings-tab-craft').click();
+      await dialog.locator('#cfg-studio-margin').waitFor();
+      await dialog.locator('.settings-preset-card', { hasText: '板材 · 素色板' }).click();
+      assert.equal(await dialog.locator('#cfg-studio-margin').inputValue(), '30');
+
+      await dialog.locator('#settings-tab-remnant').click();
+      await dialog.locator('#s-width').waitFor();
+      assert.equal(await dialog.locator('#s-width').inputValue(), '300');
+      await dialog.locator('#s-width').fill('260');
+
+      await dialog.locator('#settings-tab-engines').click();
+      await dialog.locator('#engine-rows tr').first().waitFor();
+      assert.ok((await dialog.locator('#engine-rows tr').count()) >= 1);
+
+      await dialog.locator('#settings-tab-integration').click();
+      await dialog.locator('#cfg-export-prefix').fill('WorkshopA');
+
+      // Save and verify persistence + clean close
+      await dialog.getByRole('button', { name: '保存并应用', exact: true }).click();
+      assert.equal(await page.locator('dialog#studio-settings-dialog[open]').count(), 0);
+      assert.equal(await page.evaluate(() => localStorage.getItem('cam_min_rem_w')), '260');
+      assert.equal(
+        await page.evaluate(() => localStorage.getItem('cutplan.studio.exportPrefix')),
+        'WorkshopA'
+      );
+
+      // Topbar engine status pill opens directly to engines tab and Escape dismisses
+      await page.locator('#engine-status').click();
+      await dialog.waitFor();
+      assert.equal(
+        await dialog.locator('#settings-tab-engines').getAttribute('aria-selected'),
+        'true'
+      );
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('dialog#studio-settings-dialog[open]').count(), 0);
+      assert.deepEqual(pageErrors, [], 'Zero pageerror in settings modal interactions');
+    });
   } finally {
     await browser.close();
   }

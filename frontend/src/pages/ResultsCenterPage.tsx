@@ -137,6 +137,7 @@ export const ResultsCenterPage: React.FC<{
   taskIdQuery?: string;
 }> = ({ schemeId, taskIdQuery }) => {
   const loadDemandFamilyIntoWorkbench = useStudioStore((s) => s.loadDemandFamilyIntoWorkbench);
+  const settings = useStudioStore((s) => s.settings);
 
   const [entries, setEntries] = useState<any[]>([]);
   const [rolls, setRolls] = useState<any[]>([]);
@@ -144,8 +145,12 @@ export const ResultsCenterPage: React.FC<{
   const [stateFilter, setStateFilter] = useState<string>('ALL');
   const [selectedId, setSelectedId] = useState<string>(schemeId || '');
   const [showPath, setShowPath] = useState(true);
-  const [vertical, setVertical] = useState(true);
+  const [vertical, setVertical] = useState<boolean>(settings.vertical);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setVertical(settings.vertical);
+  }, [settings.vertical]);
 
   // Bind Roll Form State
   const [bindRollId, setBindRollId] = useState<string>('');
@@ -355,7 +360,7 @@ export const ResultsCenterPage: React.FC<{
       rollW: activeScheme.widthMm,
       bedL: activeScheme.occupiedLengthMm,
       windowStartY: activeScheme.windowStartY || 0,
-      cutOrigin: 'left-top',
+      cutOrigin: settings.startCorner,
       pieces: activeScheme.layout2D.placements.map((p: any) => ({
         id: p.id,
         name: p.name,
@@ -382,7 +387,7 @@ export const ResultsCenterPage: React.FC<{
     });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${activeScheme.id}-${activeScheme.widthMm}x${Math.round(activeScheme.occupiedLengthMm)}.${kind}`;
+    a.download = `${settings.exportPrefix || 'CutPlan'}-${activeScheme.id}-${activeScheme.widthMm}x${Math.round(activeScheme.occupiedLengthMm)}.${kind}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
@@ -1165,6 +1170,39 @@ export const ResultsCenterPage: React.FC<{
                     ))}
               </tbody>
             </table>
+
+            {settings.ticketShowCuts &&
+              activeScheme.layout2D?.cuts?.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>
+                    贯通直刀下刀顺序明细（共 {activeScheme.layout2D.cuts.length} 刀）
+                  </div>
+                  <table className="t">
+                    <thead>
+                      <tr>
+                        <th>刀序</th>
+                        <th>方向</th>
+                        <th className="r">起点坐标 (X, Y mm)</th>
+                        <th className="r">终点坐标 (X, Y mm)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeScheme.layout2D.cuts.slice(0, 16).map((c: any, idx: number) => (
+                        <tr key={idx}>
+                          <td className="num">第 {c.sequence || idx + 1} 刀</td>
+                          <td>{c.kind === 'HORIZONTAL' ? '横切' : '纵切'}</td>
+                          <td className="r num">
+                            ({fmtN(c.startX, 1)}, {fmtN(c.startY, 1)})
+                          </td>
+                          <td className="r num">
+                            ({fmtN(c.endX, 1)}, {fmtN(c.endY, 1)})
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
             <div
               style={{

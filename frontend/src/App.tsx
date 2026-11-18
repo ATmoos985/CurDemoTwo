@@ -5,7 +5,6 @@ import { CuttingWorkbenchPage } from './pages/CuttingWorkbenchPage';
 import { ResultsCenterPage } from './pages/ResultsCenterPage';
 import { ReconciliationPage } from './pages/ReconciliationPage';
 import { ExecutionCenterPage } from './pages/ExecutionCenterPage';
-import { SettingsPage } from './pages/SettingsPage';
 import { TasksPage } from './pages/TasksPage';
 import { TaskEditPage } from './pages/TaskEditPage';
 import { QualityPage } from './pages/QualityPage';
@@ -15,6 +14,8 @@ import { AnalysisPage } from './pages/AnalysisPage';
 import { InspectionPage } from './pages/InspectionPage';
 import { GarmentWidthPage } from './pages/GarmentWidthPage';
 import { ShowcasePage } from './pages/ShowcasePage';
+import { SettingsModal } from './components/SettingsModal';
+import { SettingsTabId } from './store/studioSettings';
 import { requestJSON } from '@static/app/js/util.js';
 import { useStudioStore } from './store/useStudioStore';
 
@@ -82,12 +83,46 @@ interface NavCategory {
   items: NavSubItem[];
 }
 
+const WORKBENCH_DEFAULT_ROUTE: ParsedRoute = {
+  page: 'workbench',
+  params: [],
+  groupQuery: '',
+  taskIdQuery: '',
+  rawKey: 'workbench'
+};
+
+const VALID_SETTINGS_TABS: SettingsTabId[] = [
+  'general',
+  'craft',
+  'remnant',
+  'engines',
+  'integration'
+];
+
 export const App: React.FC = () => {
   const [route, setRoute] = useState<ParsedRoute>(() => {
     if (!location.hash || location.hash === '#/' || location.hash === '#') {
-      return { page: 'workbench', params: [], groupQuery: '', taskIdQuery: '', rawKey: 'workbench' };
+      return WORKBENCH_DEFAULT_ROUTE;
     }
     return parseHashRoute(location.hash);
+  });
+  const [lastContentRoute, setLastContentRoute] = useState<ParsedRoute>(() => {
+    const initial =
+      !location.hash || location.hash === '#/' || location.hash === '#'
+        ? WORKBENCH_DEFAULT_ROUTE
+        : parseHashRoute(location.hash);
+    return initial.page === 'settings' ? WORKBENCH_DEFAULT_ROUTE : initial;
+  });
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(() => {
+    const initial = parseHashRoute(location.hash);
+    return initial.page === 'settings';
+  });
+  const [settingsTab, setSettingsTab] = useState<SettingsTabId>(() => {
+    const initial = parseHashRoute(location.hash);
+    const candidate = initial.params[0] as SettingsTabId | undefined;
+    return initial.page === 'settings' && candidate && VALID_SETTINGS_TABS.includes(candidate)
+      ? candidate
+      : 'general';
   });
   const [health, setHealth] = useState<{ ok: boolean; workers?: number; engineCount?: number }>({
     ok: false
@@ -104,13 +139,37 @@ export const App: React.FC = () => {
   const slitSchemes = useStudioStore((s) => s.slitSchemes);
   const clusters = useStudioStore((s) => s.clusters);
 
+  const openSettings = (tab: SettingsTabId = 'general') => {
+    setSettingsTab(tab);
+    setSettingsOpen(true);
+  };
+
   useEffect(() => {
-    const onHash = () => setRoute(parseHashRoute(location.hash));
+    const onHash = () => {
+      const next = parseHashRoute(location.hash);
+      setRoute(next);
+      if (next.page === 'settings') {
+        const candidate = next.params[0] as SettingsTabId | undefined;
+        setSettingsTab(candidate && VALID_SETTINGS_TABS.includes(candidate) ? candidate : 'general');
+        setSettingsOpen(true);
+      } else {
+        setLastContentRoute(next);
+        setSettingsOpen(false);
+      }
+    };
+    const onOpenEvent = (ev: Event) => {
+      const detailTab = (ev as CustomEvent)?.detail?.tab as SettingsTabId | undefined;
+      openSettings(detailTab && VALID_SETTINGS_TABS.includes(detailTab) ? detailTab : 'general');
+    };
     window.addEventListener('hashchange', onHash);
+    window.addEventListener('cutplan:open-settings', onOpenEvent);
     if (!location.hash) {
       location.hash = '#/workbench';
     }
-    return () => window.removeEventListener('hashchange', onHash);
+    return () => {
+      window.removeEventListener('hashchange', onHash);
+      window.removeEventListener('cutplan:open-settings', onOpenEvent);
+    };
   }, []);
 
   useEffect(() => {
@@ -331,50 +390,62 @@ export const App: React.FC = () => {
     setExpandedCats((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
+  const effectiveRoute = route.page === 'settings' ? lastContentRoute : route;
+
+  const handleSettingsClose = () => {
+    setSettingsOpen(false);
+    if (route.page === 'settings') {
+      location.hash = `#/${lastContentRoute.rawKey || 'workbench'}`;
+    }
+  };
+
   const renderMain = () => {
-    switch (route.page) {
+    switch (effectiveRoute.page) {
       case 'demands':
         return <DemandPoolPage />;
       case 'clusters':
         return <ClusterCenterPage />;
       case 'workbench':
-        return <CuttingWorkbenchPage taskId={route.params[0] || undefined} />;
+        return <CuttingWorkbenchPage taskId={effectiveRoute.params[0] || undefined} />;
       case 'slitting':
         return <CuttingWorkbenchPage forceDimension="1D" />;
       case 'results':
         return (
           <ResultsCenterPage
-            schemeId={route.params[0] || undefined}
-            taskIdQuery={route.taskIdQuery || undefined}
+            schemeId={effectiveRoute.params[0] || undefined}
+            taskIdQuery={effectiveRoute.taskIdQuery || undefined}
           />
         );
       case 'reconciliation':
         return <ReconciliationPage />;
       case 'inventory':
-        return <InventoryPage params={route.params} />;
+        return <InventoryPage params={effectiveRoute.params} />;
       case 'inspection':
-        return <InspectionPage params={route.params} />;
+        return <InspectionPage params={effectiveRoute.params} />;
       case 'documents':
         return <DocumentsPage />;
       case 'garment':
-        return <GarmentWidthPage exampleId={route.params[0] || undefined} />;
+        return <GarmentWidthPage exampleId={effectiveRoute.params[0] || undefined} />;
       case 'showcase':
-        return <ShowcasePage params={route.params} groupQuery={route.groupQuery} />;
-      case 'settings':
-        return <SettingsPage />;
+        return (
+          <ShowcasePage
+            params={effectiveRoute.params}
+            groupQuery={effectiveRoute.groupQuery}
+          />
+        );
       // Legacy compatibility routes
       case 'execution':
         return (
           <ExecutionCenterPage
-            taskId={route.params[0] || undefined}
-            planId={route.params[1] || undefined}
-            intent={route.params[2] || undefined}
+            taskId={effectiveRoute.params[0] || undefined}
+            planId={effectiveRoute.params[1] || undefined}
+            intent={effectiveRoute.params[2] || undefined}
           />
         );
       case 'tasks':
         return <TasksPage />;
       case 'task':
-        return <TaskEditPage params={route.params} />;
+        return <TaskEditPage params={effectiveRoute.params} />;
       case 'quality':
         return <QualityPage />;
       case 'analysis':
@@ -384,7 +455,8 @@ export const App: React.FC = () => {
     }
   };
 
-  const isSettingsActive = route.page === 'settings';
+  const isSettingsRoute = route.page === 'settings';
+  const isModalVisible = settingsOpen || isSettingsRoute;
 
   return (
     <div className="app">
@@ -403,13 +475,19 @@ export const App: React.FC = () => {
         <span className="topbar-sp" />
 
         <div className="topbar-meta">
-          <span id="engine-status" className="engine-pill">
+          <button
+            type="button"
+            id="engine-status"
+            className="engine-pill engine-pill-btn"
+            onClick={() => openSettings('engines')}
+            title="点击查看求解引擎并发状态与系统设置"
+          >
             <span className={`dot ${health.ok ? 'ok' : 'warn'}`} aria-hidden="true" />
             <span>求解引擎</span>
             <b>{health.ok ? '就绪' : '连接中'}</b>
             {health.workers ? <span className="num">· {health.workers} 并发</span> : null}
             {health.engineCount ? <span className="num">· {health.engineCount} 内核</span> : null}
-          </span>
+          </button>
         </div>
       </header>
 
@@ -457,8 +535,16 @@ export const App: React.FC = () => {
         <div className="nav-foot">
           <a
             href="#/settings"
-            className={`nav-settings-link ${isSettingsActive ? 'on' : ''}`}
-            aria-current={isSettingsActive ? 'page' : undefined}
+            className={`nav-settings-link ${isSettingsRoute || isModalVisible ? 'on' : ''}`}
+            aria-current={isSettingsRoute ? 'page' : undefined}
+            aria-haspopup="dialog"
+            aria-expanded={isModalVisible}
+            onClick={(e) => {
+              if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+                e.preventDefault();
+                openSettings('general');
+              }
+            }}
           >
             <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
               <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
@@ -484,6 +570,13 @@ export const App: React.FC = () => {
         <span className="sp" />
         <span>独立几何防碰撞核验 · 支持 CAD DXF / CNC G-Code / MES 派工包 / 工票打印</span>
       </footer>
+
+      <SettingsModal
+        open={isModalVisible}
+        initialTab={settingsTab}
+        onClose={handleSettingsClose}
+        onCapabilitiesLoaded={(summary) => setHealth(summary)}
+      />
     </div>
   );
 };

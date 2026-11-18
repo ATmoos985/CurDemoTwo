@@ -7,6 +7,7 @@ import {
   DemandFamilySummary,
   Scenario2DType
 } from '../store/useStudioStore';
+import { StudioSettings, DEFAULT_STUDIO_SETTINGS } from '../store/studioSettings';
 import { CadCanvasView } from '../components/CadCanvasView';
 import { ModalDialog } from '../components/ModalDialog';
 import { OptimizationSession } from '@static/js/business/optimization/job-client.js';
@@ -165,7 +166,8 @@ function buildOptimizationRequest2D(
   trimStartMm: number,
   demands: DemandItem[],
   defects: any[] = [],
-  maxLengthCapMm?: number
+  maxLengthCapMm?: number,
+  settings: StudioSettings = DEFAULT_STUDIO_SETTINGS
 ) {
   const hasPolygon = demands.some((d) => d.shape?.type === 'POLYGON');
   const mode = hasPolygon ? 'CONTOUR' : 'GUILLOTINE';
@@ -235,19 +237,25 @@ function buildOptimizationRequest2D(
   const safeStartHeight =
     maxLengthCapMm != null && maxLengthCapMm > 0 ? Math.min(rawHeight, maxLengthCapMm) : rawHeight;
 
-  const exclusions = defects.map((d, i) => ({
-    id: d.id || i + 1,
-    x: Math.max(0, d.x - (d.margin || 0)),
-    y: Math.max(0, d.y - (d.margin || 0)),
-    shape: rectangle(d.w + 2 * (d.margin || 0), d.h + 2 * (d.margin || 0)),
-    clearance: 0
-  }));
+  const exclusions = defects.map((d, i) => {
+    const margin = d.margin ?? settings.defectMarginMm;
+    return {
+      id: d.id || i + 1,
+      x: Math.max(0, d.x - margin),
+      y: Math.max(0, d.y - margin),
+      shape: rectangle(d.w + 2 * margin, d.h + 2 * margin),
+      clearance: 0
+    };
+  });
+
+  const timeScale = Math.max(0.2, (settings.timeLimitSeconds || 5) / 5);
+  const scaledTimeLimit = Math.min(120, Math.max(1, Math.round(strategy.timeLimit * timeScale)));
 
   const problem = {
     schemaVersion: '1',
     unit: 'mm',
     engine,
-    timeLimitSeconds: strategy.timeLimit,
+    timeLimitSeconds: scaledTimeLimit,
     material: {
       id: `CANVAS-${widthMm}x${safeStartHeight}`,
       shape: rectangle(widthMm, safeStartHeight),
@@ -258,11 +266,11 @@ function buildOptimizationRequest2D(
     process: {
       mode,
       feedMode: 'SHEET',
-      startCorner: 'left-top',
-      firstStageOrientation: mode === 'CONTOUR' ? 'none' : 'horizontal',
+      startCorner: settings.startCorner,
+      firstStageOrientation: mode === 'CONTOUR' ? 'none' : settings.firstStageOrientation,
       trimStart: mode === 'CONTOUR' ? 0 : trimStartMm,
-      minReusableWidth: mode === 'CONTOUR' ? 0 : 150,
-      minReusableHeight: mode === 'CONTOUR' ? 0 : 150,
+      minReusableWidth: mode === 'CONTOUR' ? 0 : settings.minRemnantWidthMm,
+      minReusableHeight: mode === 'CONTOUR' ? 0 : settings.minRemnantLengthMm,
       kerf: 0,
       objective: 'MAXIMIZE_PIECE_AREA',
       pieceGap: pieceGapMm
@@ -294,7 +302,7 @@ function buildOptimizationRequest2D(
     schemaVersion: '2.0',
     clientRequestId: `studio-${strategy.id}-${widthMm}-${Date.now()}`,
     problemType: 'NESTING_2D',
-    allowFallback: true,
+    allowFallback: settings.allowFallback,
     requireComplete: Boolean(canUseMarkerStrategy),
     problem,
     ...(strategyBlock ? { strategy: strategyBlock } : {})
@@ -373,7 +381,8 @@ export const CuttingWorkbenchPage: React.FC<{
     removeSlitOrder,
     setSlitSchemes,
     setActiveSlitScheme,
-    markSlitSchemeDispatched
+    markSlitSchemeDispatched,
+    settings
   } = useStudioStore();
 
   const [rolls, setRolls] = useState<any[]>([]);
@@ -386,9 +395,15 @@ export const CuttingWorkbenchPage: React.FC<{
   const [overviewTab, setOverviewTab] = useState<'progress' | 'edit'>('progress');
 
   const [workerCount, setWorkerCount] = useState<number>(6);
-  const [vertical, setVertical] = useState(true);
-  const [showPath, setShowPath] = useState(false);
-  const [showDimensions, setShowDimensions] = useState(true);
+  const [vertical, setVertical] = useState<boolean>(settings.vertical);
+  const [showPath, setShowPath] = useState<boolean>(settings.showPath);
+  const [showDimensions, setShowDimensions] = useState<boolean>(settings.showDimensions);
+
+  useEffect(() => {
+    setVertical(settings.vertical);
+    setShowPath(settings.showPath);
+    setShowDimensions(settings.showDimensions);
+  }, [settings.vertical, settings.showPath, settings.showDimensions]);
   const [tool, setTool] = useState<'pan' | 'measure'>('pan');
   const [cursor, setCursor] = useState<{ u: number; v: number } | null>(null);
   const [inspectedText, setInspectedText] = useState<string>(
@@ -555,7 +570,9 @@ export const CuttingWorkbenchPage: React.FC<{
       pieceGapMm,
       trimStartMm,
       activeDemands2D,
-      windowDefects
+      windowDefects,
+      undefined,
+      settings
     );
     return projectScene(previewReq, null);
   }, [
@@ -567,7 +584,8 @@ export const CuttingWorkbenchPage: React.FC<{
     trimStartMm,
     activeDemands2D,
     currentRoll2D,
-    currentRemnant2D
+    currentRemnant2D,
+    settings
   ]);
 
   // ==================== Stage 2: Parallel Solving (2D & 1D) ====================
@@ -697,7 +715,8 @@ export const CuttingWorkbenchPage: React.FC<{
           trimStartMm,
           validDemands,
           windowDefects,
-          stockMaxCap
+          stockMaxCap,
+          settings
         );
         const t0 = performance.now();
         try {
@@ -1264,7 +1283,7 @@ export const CuttingWorkbenchPage: React.FC<{
       rollW: activeScheme2D.widthMm,
       bedL: activeScheme2D.occupiedLengthMm,
       windowStartY: activeScheme2D.windowStartY || 0,
-      cutOrigin: 'left-top',
+      cutOrigin: settings.startCorner,
       pieces: placements.map((p: any) => ({
         id: p.id,
         name: p.name,
@@ -1291,7 +1310,7 @@ export const CuttingWorkbenchPage: React.FC<{
     });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `CutPlan-${activeScheme2D.widthMm}x${Math.round(activeScheme2D.occupiedLengthMm)}.${kind}`;
+    a.download = `${settings.exportPrefix || 'CutPlan'}-${activeScheme2D.widthMm}x${Math.round(activeScheme2D.occupiedLengthMm)}.${kind}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
@@ -1760,6 +1779,19 @@ export const CuttingWorkbenchPage: React.FC<{
                     }
                   />
                 </label>
+                <button
+                  type="button"
+                  className="btn sm"
+                  style={{ width: '100%', justifyContent: 'center', marginTop: 2 }}
+                  onClick={(e) => {
+                    e.currentTarget.closest('details')?.removeAttribute('open');
+                    window.dispatchEvent(
+                      new CustomEvent('cutplan:open-settings', { detail: { tab: 'craft' } })
+                    );
+                  }}
+                >
+                  更多全局工艺与引擎设置…
+                </button>
               </div>
             </details>
           </>
