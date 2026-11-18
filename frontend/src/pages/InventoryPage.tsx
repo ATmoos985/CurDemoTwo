@@ -10,6 +10,7 @@ import {
   dropWrite
 } from '@static/app/js/util.js';
 import { workflowTemplate } from '@static/app/js/model/showcase.js';
+import { ModalDialog } from '../components/ModalDialog';
 
 const ROLL_QUALITY_MAP: Record<string, [string, string]> = {
   PASSED: ['合格', 'ok'],
@@ -23,20 +24,35 @@ const REMNANT_STATUS_MAP: Record<string, [string, string]> = {
   RESERVED: ['已预约', 'run'],
   CONSUMED: ['已消耗', ''],
   SCRAPPED: ['已报废', ''],
+  LOST: ['盘亏', 'err'],
   QUARANTINED: ['隔离', 'err']
 };
 
 const ACTION_TITLES: Record<string, string> = {
-  receive: '母卷入库',
-  transfer: '移库',
-  count: '盘点',
-  scrap: '料头报废'
+  receive: '母卷入库登记',
+  transfer: '材料批量移库',
+  count: '实物库存盘点',
+  scrap: '料头报废确认'
 };
 
 interface CountRowState {
   present: boolean;
   width: string | number;
   length: string | number;
+}
+
+interface ProductGroup {
+  modelKey: string;
+  materialName: string;
+  composition: string;
+  color: string;
+  primaryWidthMm: number;
+  rolls: any[];
+  remnants: any[];
+  passedRollCount: number;
+  totalRemainingM: number;
+  availableRemnants: any[];
+  availableRemnantAreaM2: number;
 }
 
 export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) => {
@@ -47,22 +63,23 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [tab, setTab] = useState<'roll' | 'rem'>('roll');
-  const [selectedIndex, setSelectedIndex] = useState<number>(0);
+  // Product -> Mother Roll -> Linked Remnant hierarchy state
+  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [focusedRollId, setFocusedRollId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [filterModel, setFilterModel] = useState<string>('');
-  const [filterLoc, setFilterLoc] = useState<string>('');
-  const [filterStatus, setFilterStatus] = useState<string>('');
+  const [onlyWithRemnants, setOnlyWithRemnants] = useState<boolean>(false);
+  const [remnantStatusFilter, setRemnantStatusFilter] = useState<'AVAILABLE_FIRST' | 'ALL'>(
+    'AVAILABLE_FIRST'
+  );
+  const [detailRoll, setDetailRoll] = useState<any | null>(null);
 
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [action, setAction] = useState<'receive' | 'transfer' | 'count' | 'scrap' | null>(
-    null
-  );
+  const [action, setAction] = useState<'receive' | 'transfer' | 'count' | 'scrap' | null>(null);
   const [opts, setOpts] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [pendingTick, setPendingTick] = useState(0);
 
-  // Action form fields
+  // Action modal form fields
   const [destination, setDestination] = useState('');
   const [reason, setReason] = useState('');
   const [operator, setOperator] = useState('');
@@ -134,43 +151,148 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
     }
   }, [intent, templateId]);
 
-  const isRoll = tab === 'roll';
-  const allItems = isRoll ? rolls : remnants;
-  const fieldKeys = isRoll
-    ? { model: 'rollModel', loc: 'storageLocation', status: 'inspectionStatus' }
-    : { model: 'materialBatch', loc: 'location', status: 'status' };
+  // Build Product -> Mother Rolls + Linked Remnants groups
+  const productGroups = useMemo<ProductGroup[]>(() => {
+    const rollById = new Map<string, any>();
+    for (const r of rolls) {
+      if (r?.rollId) rollById.set(r.rollId, r);
+    }
 
-  const distinctOptions = (rows: any[], key: string) =>
-    [...new Set(rows.map((x) => x[key]).filter(Boolean))].sort();
+    const map = new Map<string, { rolls: any[]; remnants: any[] }>();
+    const ensure = (key: string) => {
+      const k = key || '未分类品号';
+      let g = map.get(k);
+      if (!g) {
+        g = { rolls: [], remnants: [] };
+        map.set(k, g);
+      }
+      return g;
+    };
+
+    for (const r of rolls) {
+      ensure(r.rollModel || r.materialName || '未分类品号').rolls.push(r);
+    }
+
+    for (const rem of remnants) {
+      const parentRoll = rem.sourceRollId ? rollById.get(rem.sourceRollId) : null;
+      const modelKey =
+        parentRoll?.rollModel || rem.materialBatch || rem.sourceRollId || '未分类品号';
+      ensure(modelKey).remnants.push(rem);
+    }
+
+    const groups: ProductGroup[] = [];
+    for (const [modelKey, { rolls: gRolls, remnants: gRems }] of map.entries()) {
+      const sampleRoll = gRolls[0];
+      const passedRollCount = gRolls.filter((r) => r.inspectionStatus === 'PASSED').length;
+      const totalRemainingMm = gRolls.reduce(
+        (sum, r) => sum + Math.max(0, r.currentRemainingLength ?? r.totalLength - (r.usedLength || 0)),
+        0
+      );
+      const availableRemnants = gRems.filter((rm) => rm.status === 'AVAILABLE');
+      const availableRemnantAreaM2 = availableRemnants.reduce(
+        (sum, rm) => sum + (Number(rm.area) || (Number(rm.width) * Number(rm.length)) / 1e6 || 0),
+        0
+      );
+
+      groups.push({
+        modelKey,
+        materialName: sampleRoll?.materialName || '',
+        composition: sampleRoll?.composition || '',
+        color: sampleRoll?.color || '',
+        primaryWidthMm: sampleRoll?.width || gRems[0]?.width || 0,
+        rolls: gRolls,
+        remnants: gRems,
+        passedRollCount,
+        totalRemainingM: totalRemainingMm / 1000,
+        availableRemnants,
+        availableRemnantAreaM2
+      });
+    }
+
+    // Put products that have both active rolls & available remnants first so the relationship is immediately clear
+    return groups.sort((a, b) => {
+      const scoreA = (a.rolls.length > 0 ? 100 : 0) + Math.min(50, a.availableRemnants.length * 5);
+      const scoreB = (b.rolls.length > 0 ? 100 : 0) + Math.min(50, b.availableRemnants.length * 5);
+      if (scoreB !== scoreA) return scoreB - scoreA;
+      return a.modelKey.localeCompare(b.modelKey, 'zh-CN');
+    });
+  }, [rolls, remnants]);
+
+  const filteredProducts = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return productGroups.filter((g) => {
+      if (onlyWithRemnants && g.availableRemnants.length === 0) return false;
+      if (!q) return true;
+      if (
+        `${g.modelKey} ${g.materialName} ${g.color} ${g.composition}`.toLowerCase().includes(q)
+      ) {
+        return true;
+      }
+      if (
+        g.rolls.some((r) =>
+          `${r.rollId} ${r.batchNo || ''} ${r.storageLocation || ''}`.toLowerCase().includes(q)
+        )
+      ) {
+        return true;
+      }
+      return g.remnants.some((rm) =>
+        `${rm.id} ${rm.sourceRollId || ''} ${rm.location || ''}`.toLowerCase().includes(q)
+      );
+    });
+  }, [productGroups, searchQuery, onlyWithRemnants]);
+
+  // Keep selected product valid when data loads or filters change
+  useEffect(() => {
+    if (!filteredProducts.length) return;
+    if (!selectedModel || !filteredProducts.some((g) => g.modelKey === selectedModel)) {
+      setSelectedModel(filteredProducts[0].modelKey);
+      setFocusedRollId('');
+    }
+  }, [filteredProducts, selectedModel]);
+
+  const activeProduct = useMemo(
+    () =>
+      filteredProducts.find((g) => g.modelKey === selectedModel) ||
+      productGroups.find((g) => g.modelKey === selectedModel) ||
+      null,
+    [filteredProducts, productGroups, selectedModel]
+  );
+
+  // Remnants per mother roll within the active product
+  const remnantsByRollId = useMemo(() => {
+    const map = new Map<string, any[]>();
+    if (!activeProduct) return map;
+    for (const rm of activeProduct.remnants) {
+      const key = rm.sourceRollId || '__UNLINKED__';
+      const arr = map.get(key) || [];
+      arr.push(rm);
+      map.set(key, arr);
+    }
+    return map;
+  }, [activeProduct]);
+
+  const displayedRemnants = useMemo(() => {
+    if (!activeProduct) return [];
+    let list = focusedRollId
+      ? activeProduct.remnants.filter((rm) => rm.sourceRollId === focusedRollId)
+      : activeProduct.remnants;
+    if (remnantStatusFilter === 'AVAILABLE_FIRST') {
+      list = list.filter((rm) => rm.status === 'AVAILABLE' || rm.status === 'RESERVED' || rm.status === 'QUARANTINED');
+    }
+    return list;
+  }, [activeProduct, focusedRollId, remnantStatusFilter]);
 
   const idOf = (rollMode: boolean, item: any) =>
     `${rollMode ? 'roll' : 'remnant'}:${rollMode ? item.rollId : item.id}`;
 
-  const filteredList = useMemo(() => {
-    const qLower = searchQuery.trim().toLowerCase();
-    return allItems.filter(
-      (x) =>
-        (!filterModel || x[fieldKeys.model] === filterModel) &&
-        (!filterLoc || x[fieldKeys.loc] === filterLoc) &&
-        (!filterStatus || x[fieldKeys.status] === filterStatus) &&
-        (!qLower ||
-          JSON.stringify([
-            x.rollId,
-            x.id,
-            x.rollModel,
-            x.materialName,
-            x.materialBatch,
-            x.storageLocation,
-            x.location,
-            x.sourceRollId
-          ])
-            .toLowerCase()
-            .includes(qLower))
-    );
-  }, [allItems, fieldKeys.model, fieldKeys.loc, fieldKeys.status, filterModel, filterLoc, filterStatus, searchQuery]);
-
-  const currentItem =
-    filteredList[Math.min(selectedIndex, Math.max(0, filteredList.length - 1))] || null;
+  const togglePick = (key: string, checked: boolean) => {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  };
 
   const pendings = useMemo(() => {
     void pendingTick;
@@ -211,7 +333,8 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
     }));
   };
 
-  const handleSubmitAction = async () => {
+  const handleSubmitAction = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!action || busy) return;
     setBusy(true);
     try {
@@ -223,10 +346,11 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
           totalLength: Math.round(Number(lengthInput) * 1000)
         };
         if (!body.rollId || !body.rollModel || !(body.width > 0) || !(body.totalLength > 0)) {
-          throw new Error('请填写卷号、型号、幅宽与整卷长');
+          throw new Error('请填写卷号、品号、幅宽与整卷长');
         }
         await requestJSON('/api/inspection/rolls', body);
         toast('母卷已登记，进入跑布验疵');
+        setAction(null);
         location.hash = '#/inspection/' + encodeURIComponent(body.rollId);
         return;
       }
@@ -245,9 +369,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
           (action === 'transfer' && !destination.trim())
         ) {
           throw new Error(
-            action === 'transfer'
-              ? '请填写目标库位、原因与操作人'
-              : '请填写原因与操作人'
+            action === 'transfer' ? '请填写目标库位、原因与操作人' : '请填写原因与操作人'
           );
         }
         const materials = selectedMaterials.map(({ type, id }) => {
@@ -286,10 +408,10 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
         setAction(null);
       }
       await loadData();
-    } catch (e: any) {
-      const msg = e.message || '提交失败';
+    } catch (err: any) {
+      const msg = err.message || '提交失败';
       toast(
-        (e.httpStatus || msg.startsWith('请') || msg.startsWith('上次')
+        (err.httpStatus || msg.startsWith('请') || msg.startsWith('上次')
           ? ''
           : '结果未确认，可重试：') + msg,
         true
@@ -322,13 +444,22 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
     <div className="react-page">
       <div className="ph">
         <h1>库存</h1>
-        <span className="crumb">母卷与料头档案</span>
+        <span className="crumb">按物料品号聚合在库母卷与关联派生料头</span>
         <span className="sp" />
+        {picked.size > 0 && (
+          <button
+            type="button"
+            className="btn sm"
+            onClick={() => setPicked(new Set())}
+          >
+            清空勾选 ({picked.size})
+          </button>
+        )}
         <button
           type="button"
           className="btn"
           disabled={picked.size === 0}
-          title={picked.size === 0 ? '先在列表中勾选材料' : undefined}
+          title={picked.size === 0 ? '先在右侧勾选母卷或料头' : undefined}
           onClick={() => openActionPanel('transfer')}
         >
           移库{picked.size ? ` (${picked.size})` : ''}
@@ -337,7 +468,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
           type="button"
           className="btn"
           disabled={picked.size === 0}
-          title={picked.size === 0 ? '先在列表中勾选材料' : undefined}
+          title={picked.size === 0 ? '先在右侧勾选母卷或料头' : undefined}
           onClick={() => openActionPanel('count')}
         >
           盘点{picked.size ? ` (${picked.size})` : ''}
@@ -345,9 +476,16 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
         <button
           type="button"
           className="btn pri"
-          onClick={() => openActionPanel('receive')}
+          onClick={() =>
+            openActionPanel('receive', {
+              rollId: '',
+              rollModel: activeProduct?.modelKey || '',
+              width: activeProduct?.primaryWidthMm || '',
+              length: ''
+            })
+          }
         >
-          母卷入库
+          ＋ 母卷入库
         </button>
       </div>
 
@@ -375,124 +513,6 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
         </div>
       )}
 
-      <div className="toolbar">
-        <div className="seg">
-          <button
-            type="button"
-            className={isRoll ? 'on' : ''}
-            onClick={() => {
-              setTab('roll');
-              setSelectedIndex(0);
-              setFilterModel('');
-              setFilterLoc('');
-              setFilterStatus('');
-            }}
-          >
-            母卷 {rolls.length}
-          </button>
-          <button
-            type="button"
-            className={!isRoll ? 'on' : ''}
-            onClick={() => {
-              setTab('rem');
-              setSelectedIndex(0);
-              setFilterModel('');
-              setFilterLoc('');
-              setFilterStatus('');
-            }}
-          >
-            料头 {remnants.length}
-          </button>
-        </div>
-        <span className="vsep" />
-        <select
-          className="field"
-          value={filterModel}
-          onChange={(e) => {
-            setFilterModel(e.target.value);
-            setSelectedIndex(0);
-          }}
-        >
-          <option value="">{isRoll ? '全部型号' : '全部批次'}</option>
-          {distinctOptions(allItems, fieldKeys.model).map((v) => (
-            <option key={v} value={v}>
-              {v}
-            </option>
-          ))}
-        </select>
-        <select
-          className="field"
-          value={filterLoc}
-          onChange={(e) => {
-            setFilterLoc(e.target.value);
-            setSelectedIndex(0);
-          }}
-        >
-          <option value="">全部库位</option>
-          {distinctOptions(allItems, fieldKeys.loc).map((v) => (
-            <option key={v} value={v}>
-              {v}
-            </option>
-          ))}
-        </select>
-        <select
-          className="field"
-          value={filterStatus}
-          onChange={(e) => {
-            setFilterStatus(e.target.value);
-            setSelectedIndex(0);
-          }}
-        >
-          <option value="">全部状态</option>
-          {distinctOptions(allItems, fieldKeys.status).map((v) => {
-            const labelMap = isRoll ? ROLL_QUALITY_MAP : REMNANT_STATUS_MAP;
-            return (
-              <option key={v} value={v}>
-                {labelMap[v]?.[0] || v}
-              </option>
-            );
-          })}
-        </select>
-        {(filterModel || filterLoc || filterStatus || searchQuery) && (
-          <button
-            type="button"
-            className="btn sm"
-            onClick={() => {
-              setFilterModel('');
-              setFilterLoc('');
-              setFilterStatus('');
-              setSearchQuery('');
-              setSelectedIndex(0);
-            }}
-          >
-            清除筛选
-          </button>
-        )}
-        {picked.size > 0 && (
-          <button
-            type="button"
-            className="btn sm"
-            onClick={() => setPicked(new Set())}
-          >
-            清空勾选 {picked.size}
-          </button>
-        )}
-        <span className="sp" />
-        <span className="muted" style={{ fontSize: 12 }}>
-          {filteredList.length} / {allItems.length}
-        </span>
-        <input
-          className="field"
-          placeholder="搜索编号 / 型号 / 批次 / 库位"
-          style={{ width: 220 }}
-          value={searchQuery}
-          onChange={(e) => {
-            setSearchQuery(e.target.value);
-            setSelectedIndex(0);
-          }}
-        />
-      </div>
-
       {error ? (
         <div className="body">
           <div className="error-box" role="alert">
@@ -502,596 +522,806 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
         </div>
       ) : loading ? (
         <div className="body">
-          <div className="loading">正在读取库存台账…</div>
+          <div className="loading">正在读取物料品号与母卷料头台账…</div>
         </div>
       ) : (
-        <div
-          className="split"
-          style={{ gridTemplateColumns: `1fr ${action ? 420 : 340}px` }}
-        >
-          <section className="pane" style={{ background: 'var(--bg)' }}>
-            <div className="body">
-              {filteredList.length > 0 ? (
-                <table className="t">
-                  <thead>
-                    <tr>
-                      <th>
-                        <input
-                          type="checkbox"
-                          checked={
-                            filteredList.length > 0 &&
-                            filteredList.every((x) => picked.has(idOf(isRoll, x)))
-                          }
-                          onChange={(e) => {
-                            const next = new Set(picked);
-                            filteredList.forEach((x) => {
-                              const k = idOf(isRoll, x);
-                              if (e.target.checked) next.add(k);
-                              else next.delete(k);
-                            });
-                            setPicked(next);
-                          }}
-                        />
-                      </th>
-                      {isRoll ? (
-                        <>
-                          <th>卷号</th>
-                          <th>型号 / 材料</th>
-                          <th className="r">幅宽</th>
-                          <th className="r">剩余 / 总长</th>
-                          <th>余量</th>
-                          <th className="r">疵点</th>
-                          <th>库位</th>
-                          <th>验布</th>
-                        </>
-                      ) : (
-                        <>
-                          <th>编号</th>
-                          <th>来源</th>
-                          <th className="r">宽 × 长</th>
-                          <th className="r">面积</th>
-                          <th>库位</th>
-                          <th>疵点</th>
-                          <th>状态</th>
-                        </>
+        <div className="studio-split inv-master-detail">
+          {/* Left Column: Product / Material Model Selector ("选择一个品") */}
+          <section className="pane inv-product-pane">
+            <div className="pane-h">
+              <span>物料品号目录 ({filteredProducts.length})</span>
+              <span className="sp" />
+              <label className="inv-mini-filter">
+                <input
+                  type="checkbox"
+                  checked={onlyWithRemnants}
+                  onChange={(e) => setOnlyWithRemnants(e.target.checked)}
+                />
+                <span>含料头</span>
+              </label>
+            </div>
+
+            <div className="inv-search-box">
+              <input
+                type="search"
+                className="field"
+                aria-label="搜索物料品号、母卷或料头"
+                placeholder="搜品号 / 面料名 / 卷号 / 料头号…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+
+            <div className="pane-b inv-product-list" role="listbox" aria-label="物料品号列表">
+              {filteredProducts.length > 0 ? (
+                filteredProducts.map((g) => {
+                  const isActive = activeProduct?.modelKey === g.modelKey;
+                  return (
+                    <button
+                      key={g.modelKey}
+                      type="button"
+                      role="option"
+                      aria-selected={isActive}
+                      className={`inv-product-card ${isActive ? 'on' : ''}`}
+                      onClick={() => {
+                        setSelectedModel(g.modelKey);
+                        setFocusedRollId('');
+                      }}
+                    >
+                      <div className="inv-product-top">
+                        <strong>{g.modelKey}</strong>
+                        {g.primaryWidthMm > 0 && (
+                          <span className="num muted">{fmtN(g.primaryWidthMm)} mm</span>
+                        )}
+                      </div>
+                      {g.materialName && (
+                        <div className="inv-product-name">{g.materialName}</div>
                       )}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredList.map((x, i) => {
-                      const itemKey = idOf(isRoll, x);
-                      const isChecked = picked.has(itemKey);
-                      const isSel = x === currentItem;
-
-                      if (isRoll) {
-                        const rem =
-                          x.currentRemainingLength ?? x.totalLength - x.usedLength;
-                        const [qt, qc] = ROLL_QUALITY_MAP[x.inspectionStatus] || [
-                          x.inspectionStatus || '—',
-                          ''
-                        ];
-                        return (
-                          <tr
-                            key={x.rollId}
-                            className={`click ${isSel ? 'sel' : ''}`}
-                            onClick={() => setSelectedIndex(i)}
-                          >
-                            <td onClick={(e) => e.stopPropagation()}>
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={(e) => {
-                                  const next = new Set(picked);
-                                  if (e.target.checked) next.add(itemKey);
-                                  else next.delete(itemKey);
-                                  setPicked(next);
-                                }}
-                              />
-                            </td>
-                            <td className="num">{x.rollId}</td>
-                            <td>
-                              {x.rollModel || ''}{' '}
-                              <span className="muted">{x.materialName || ''}</span>
-                            </td>
-                            <td className="r num">{fmtN(x.width)}</td>
-                            <td className="r num">
-                              {fmtM(rem)} / {fmtM(x.totalLength)} m
-                            </td>
-                            <td>
-                              <span className="bar">
-                                <i
-                                  style={{
-                                    width: `${
-                                      x.totalLength ? (rem / x.totalLength) * 100 : 0
-                                    }%`
-                                  }}
-                                />
-                              </span>
-                            </td>
-                            <td className="r num">
-                              {x.defectsCount ?? (x.defects || []).length}
-                            </td>
-                            <td>{x.storageLocation || '—'}</td>
-                            <td>
-                              <span className={`tag ${qc}`}>{qt}</span>
-                            </td>
-                          </tr>
-                        );
-                      }
-
-                      const [stLabel, stClass] = REMNANT_STATUS_MAP[x.status] || [
-                        x.status,
-                        ''
-                      ];
-                      return (
-                        <tr
-                          key={x.id}
-                          className={`click ${isSel ? 'sel' : ''}`}
-                          onClick={() => setSelectedIndex(i)}
-                        >
-                          <td onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={(e) => {
-                                const next = new Set(picked);
-                                if (e.target.checked) next.add(itemKey);
-                                else next.delete(itemKey);
-                                setPicked(next);
-                              }}
-                            />
-                          </td>
-                          <td className="num">{x.id}</td>
-                          <td className="num">{x.sourceRollId || '—'}</td>
-                          <td className="r num">
-                            {fmtN(x.width)} × {fmtN(x.length)}
-                          </td>
-                          <td className="r num">{fmtN(x.area, 2)} m²</td>
-                          <td>{x.location || '—'}</td>
-                          <td>
-                            {x.hasDefect ? (
-                              <span className="tag warn">带疵</span>
-                            ) : (
-                              '无'
-                            )}
-                          </td>
-                          <td>
-                            <span className={`tag ${stClass}`}>{stLabel}</span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      <div className="inv-product-badges num">
+                        <span className="tag kind">
+                          母卷 {g.rolls.length} 卷 · {fmtN(g.totalRemainingM, 1)}m
+                        </span>
+                        {g.availableRemnants.length > 0 ? (
+                          <span className="tag ok">
+                            可用料头 {g.availableRemnants.length} 块
+                          </span>
+                        ) : g.remnants.length > 0 ? (
+                          <span className="tag">历史料头 {g.remnants.length}</span>
+                        ) : (
+                          <span className="muted" style={{ fontSize: 11 }}>
+                            暂无料头
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })
               ) : (
-                <div className="empty">没有匹配的记录</div>
+                <div className="empty">没有匹配的物料品号</div>
               )}
             </div>
           </section>
 
-          <section className="pane">
-            {action ? (
-              <>
-                <div className="pane-h">
-                  {ACTION_TITLES[action]}
-                  <span className="sp" />
-                  <button
-                    type="button"
-                    className="btn sm"
-                    disabled={busy}
-                    onClick={() => setAction(null)}
-                  >
-                    关闭
-                  </button>
-                </div>
-                {action === 'receive' ? (
-                  <div className="pane-b">
-                    <div className="form" style={{ gridTemplateColumns: '90px 1fr' }}>
-                      <label>卷号</label>
-                      <input
-                        className="field"
-                        value={rollIdInput}
-                        placeholder="如 ROLL-2026-1101"
-                        onChange={(e) => setRollIdInput(e.target.value)}
-                      />
-                      <label>型号</label>
-                      <input
-                        className="field"
-                        list="inv-models-datalist"
-                        value={rollModelInput}
-                        onChange={(e) => setRollModelInput(e.target.value)}
-                      />
-                      <datalist id="inv-models-datalist">
-                        {distinctOptions(rolls, 'rollModel').map((m) => (
-                          <option key={m} value={m} />
-                        ))}
-                      </datalist>
-                      <label>幅宽 mm</label>
-                      <input
-                        type="number"
-                        className="field num"
-                        value={widthInput}
-                        onChange={(e) => setWidthInput(e.target.value)}
-                      />
-                      <label>整卷长 m</label>
-                      <input
-                        type="number"
-                        className="field num"
-                        value={lengthInput}
-                        onChange={(e) => setLengthInput(e.target.value)}
-                      />
-                    </div>
-                    <div
-                      className="muted"
-                      style={{ padding: '0 12px 8px', fontSize: 12 }}
-                    >
-                      登记后状态为“待检”，在跑布验疵中标记疵点并入档；验布合格前不能下达执行。
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, padding: '0 12px 12px' }}>
-                      <button
-                        type="button"
-                        className="btn pri"
-                        disabled={busy}
-                        onClick={handleSubmitAction}
-                      >
-                        登记并去验布
-                      </button>
-                    </div>
-                  </div>
-                ) : action === 'scrap' ? (
-                  <div className="pane-b">
-                    {(() => {
-                      const targetRem = remnants.find((r) => r.id === scrapId);
-                      return (
-                        <>
-                          <div className="kv">
-                            <div>料头</div>
-                            <div className="num">{targetRem?.id}</div>
-                            <div>尺寸</div>
-                            <div className="num">
-                              {fmtN(targetRem?.width)} × {fmtN(targetRem?.length)} mm
-                            </div>
-                          </div>
-                          <div
-                            className="form"
-                            style={{ gridTemplateColumns: '90px 1fr' }}
-                          >
-                            <label>报废原因</label>
-                            <input
-                              className="field"
-                              value={reason}
-                              placeholder="如：现场破损"
-                              onChange={(e) => setReason(e.target.value)}
-                            />
-                          </div>
-                          <div
-                            style={{ display: 'flex', gap: 8, padding: '0 12px 12px' }}
-                          >
-                            <button
-                              type="button"
-                              className="btn pri"
-                              disabled={busy}
-                              onClick={handleSubmitAction}
-                            >
-                              确认报废
-                            </button>
-                          </div>
-                        </>
-                      );
-                    })()}
-                  </div>
-                ) : !opts ? (
-                  <div className="loading">读取可操作材料…</div>
-                ) : (
-                  <div className="pane-b">
-                    <table className="t" style={{ border: 0 }}>
-                      <thead>
-                        <tr>
-                          <th>类型</th>
-                          <th>编号</th>
-                          <th>现库位</th>
-                          {action === 'count' && (
-                            <>
-                              <th>在库</th>
-                              <th className="r">实测宽</th>
-                              <th className="r">实测长 mm</th>
-                            </>
-                          )}
-                          <th />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {selectedMaterials.map(({ type, id, m }) => {
-                          const rowKey = `${type}:${id}`;
-                          const c = getCountRow(rowKey);
-                          return (
-                            <tr key={rowKey}>
-                              <td>{type === 'roll' ? '母卷' : '料头'}</td>
-                              <td className="num">{id}</td>
-                              <td>{m?.location || '—'}</td>
-                              {action === 'count' && (
-                                <>
-                                  <td>
-                                    <input
-                                      type="checkbox"
-                                      checked={c.present}
-                                      onChange={(e) =>
-                                        updateCountRow(rowKey, {
-                                          present: e.target.checked
-                                        })
-                                      }
-                                    />
-                                  </td>
-                                  <td className="r">
-                                    <input
-                                      type="number"
-                                      className="field num"
-                                      value={c.width}
-                                      style={{
-                                        width: 66,
-                                        height: 22,
-                                        textAlign: 'right'
-                                      }}
-                                      disabled={type === 'roll' || !c.present}
-                                      onChange={(e) =>
-                                        updateCountRow(rowKey, {
-                                          width: e.target.value
-                                        })
-                                      }
-                                    />
-                                  </td>
-                                  <td className="r">
-                                    <input
-                                      type="number"
-                                      className="field num"
-                                      value={c.length}
-                                      style={{
-                                        width: 76,
-                                        height: 22,
-                                        textAlign: 'right'
-                                      }}
-                                      disabled={!c.present}
-                                      onChange={(e) =>
-                                        updateCountRow(rowKey, {
-                                          length: e.target.value
-                                        })
-                                      }
-                                    />
-                                  </td>
-                                </>
-                              )}
-                              <td>
-                                {!m?.allowed && (
-                                  <span
-                                    className="tag err"
-                                    title={m?.reason || '不可操作'}
-                                  >
-                                    不可
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                    {blockedMaterials.length > 0 && (
-                      <div className="notice">
-                        {blockedMaterials.map((x) => (
-                          <div key={`${x.type}:${x.id}`}>
-                            {x.id}：{x.m?.reason || '当前不可操作'}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <div className="form" style={{ gridTemplateColumns: '90px 1fr' }}>
-                      {action === 'transfer' && (
-                        <>
-                          <label>目标库位</label>
-                          <input
-                            className="field"
-                            value={destination}
-                            onChange={(e) => setDestination(e.target.value)}
-                          />
-                        </>
-                      )}
-                      <label>原因</label>
-                      <input
-                        className="field"
-                        value={reason}
-                        onChange={(e) => setReason(e.target.value)}
-                      />
-                      <label>操作人</label>
-                      <input
-                        className="field"
-                        value={operator}
-                        onChange={(e) => setOperator(e.target.value)}
-                      />
-                    </div>
-                    <div
-                      className="muted"
-                      style={{ padding: '0 12px 8px', fontSize: 12 }}
-                    >
-                      {action === 'count'
-                        ? '母卷盘点实测未切长度（幅宽不随盘点改变）；料头实测宽、长；不在库取消勾选。差额单独记账，不算生产产出。'
-                        : '移库只改库位，不改数量、质量与来源。'}
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, padding: '0 12px 12px' }}>
-                      <button
-                        type="button"
-                        className="btn pri"
-                        disabled={
-                          busy ||
-                          blockedMaterials.length > 0 ||
-                          selectedMaterials.length === 0
-                        }
-                        onClick={handleSubmitAction}
-                      >
-                        确认{ACTION_TITLES[action]}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : currentItem ? (
-              isRoll ? (
+          {/* Right Column: Selected Product's Mother Rolls + Linked Remnants */}
+          <section className="pane" style={{ background: 'var(--bg)' }}>
+            <div className="body">
+              {activeProduct ? (
                 <>
-                  <div className="pane-h num">
-                    {currentItem.rollId}
-                    <span className="sp" />
-                    <a
-                      className="btn sm"
-                      href={`#/inspection/${encodeURIComponent(currentItem.rollId)}`}
-                    >
-                      跑布验疵
-                    </a>
+                  {/* Product Overview Banner */}
+                  <div className="box inv-product-hero">
+                    <div className="inv-hero-main">
+                      <div>
+                        <div className="inv-hero-eyebrow">当前选定物料品号</div>
+                        <h2 className="inv-hero-title">
+                          {activeProduct.modelKey}
+                          {activeProduct.materialName ? (
+                            <span> · {activeProduct.materialName}</span>
+                          ) : null}
+                        </h2>
+                        {(activeProduct.composition || activeProduct.color) && (
+                          <div className="inv-hero-meta">
+                            {[activeProduct.color, activeProduct.composition]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </div>
+                        )}
+                      </div>
+                      <div className="inv-hero-actions">
+                        <button
+                          type="button"
+                          className="btn sm"
+                          onClick={() =>
+                            openActionPanel('receive', {
+                              rollId: '',
+                              rollModel: activeProduct.modelKey,
+                              width: activeProduct.primaryWidthMm || '',
+                              length: ''
+                            })
+                          }
+                        >
+                          ＋ 补录同品母卷
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="inv-hero-kpis num">
+                      <div>
+                        <small>在库母卷数</small>
+                        <b>
+                          {activeProduct.rolls.length} <em>卷（合格 {activeProduct.passedRollCount}）</em>
+                        </b>
+                      </div>
+                      <div>
+                        <small>母卷可用总余长</small>
+                        <b>
+                          {fmtN(activeProduct.totalRemainingM, 2)} <em>m</em>
+                        </b>
+                      </div>
+                      <div>
+                        <small>关联可用料头</small>
+                        <b style={{ color: activeProduct.availableRemnants.length ? 'var(--ok)' : undefined }}>
+                          {activeProduct.availableRemnants.length}{' '}
+                          <em>块（共 {activeProduct.remnants.length} 条记录）</em>
+                        </b>
+                      </div>
+                      <div>
+                        <small>料头可用总面积</small>
+                        <b>
+                          {fmtN(activeProduct.availableRemnantAreaM2, 2)} <em>m²</em>
+                        </b>
+                      </div>
+                    </div>
                   </div>
-                  <div className="pane-b">
-                    <div className="metric">
-                      <div>
-                        <small>剩余</small>
-                        <b>
-                          {fmtM(
-                            currentItem.currentRemainingLength ??
-                              currentItem.totalLength - currentItem.usedLength
-                          )}
-                          <em>m</em>
-                        </b>
-                      </div>
-                      <div>
-                        <small>幅宽</small>
-                        <b>
-                          {fmtN(currentItem.width)}
-                          <em>mm</em>
-                        </b>
-                      </div>
+
+                  {/* Section 1: Mother Rolls of Selected Product */}
+                  <div className="box">
+                    <div className="pane-h">
+                      <span>
+                        1. 该品在库母卷（{activeProduct.rolls.length} 卷）
+                      </span>
+                      <small className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>
+                        点击任意母卷可聚焦查看由该母卷裁切派生的料头
+                      </small>
                     </div>
-                    <div className="kv">
-                      <div>型号</div>
-                      <div>{currentItem.rollModel || '—'}</div>
-                      <div>材料</div>
-                      <div>{currentItem.materialName || '—'}</div>
-                      <div>成分</div>
-                      <div>{currentItem.composition || '—'}</div>
-                      <div>颜色</div>
-                      <div>{currentItem.color || '—'}</div>
-                      <div>批次</div>
-                      <div>{currentItem.batchNo || '—'}</div>
-                      <div>供应商</div>
-                      <div>{currentItem.supplier || '—'}</div>
-                      <div>库位</div>
-                      <div>{currentItem.storageLocation || '—'}</div>
-                      <div>验布</div>
-                      <div>
-                        {currentItem.inspector || '—'} ·{' '}
-                        {currentItem.inspectionDate || ''}
-                      </div>
-                      <div>料头</div>
-                      <div className="num">
-                        {currentItem.remnantCount ?? 0} 块 ·{' '}
-                        {fmtN(currentItem.remnantTotalArea, 2)} m²
-                      </div>
-                    </div>
-                    <div className="sec">
-                      疵点 {(currentItem.defects || []).length || currentItem.defectsCount || 0}{' '}
-                      处
-                      {(currentItem.voidedDefects || []).length
-                        ? ` · 已作废 ${currentItem.voidedDefects.length}`
-                        : ''}
-                    </div>
-                    {(currentItem.defects || []).length > 0 ? (
+                    {activeProduct.rolls.length > 0 ? (
                       <table className="t" style={{ border: 0 }}>
                         <thead>
                           <tr>
-                            <th>Y m</th>
-                            <th className="r">X</th>
-                            <th className="r">宽×长</th>
-                            <th>类型</th>
+                            <th style={{ width: 34 }}>
+                              <input
+                                type="checkbox"
+                                aria-label="全选该品母卷"
+                                checked={
+                                  activeProduct.rolls.length > 0 &&
+                                  activeProduct.rolls.every((r) => picked.has(idOf(true, r)))
+                                }
+                                onChange={(e) => {
+                                  const next = new Set(picked);
+                                  activeProduct.rolls.forEach((r) => {
+                                    const k = idOf(true, r);
+                                    if (e.target.checked) next.add(k);
+                                    else next.delete(k);
+                                  });
+                                  setPicked(next);
+                                }}
+                              />
+                            </th>
+                            <th>母卷编号</th>
+                            <th className="r">门幅 mm</th>
+                            <th className="r">剩余 / 整卷长</th>
+                            <th>余量占比</th>
+                            <th>派生关联料头</th>
+                            <th className="r">疵点</th>
+                            <th>库位</th>
+                            <th>检验</th>
+                            <th>操作</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {currentItem.defects.map((d: any, idx: number) => (
-                            <tr key={d.id || idx}>
-                              <td className="num">{(d.y / 1000).toFixed(2)}</td>
-                              <td className="r num">{fmtN(d.x)}</td>
-                              <td className="r num">
-                                {fmtN(d.w)}×{fmtN(d.h)}
-                              </td>
-                              <td>{d.typeName || d.defectType}</td>
-                            </tr>
-                          ))}
+                          {activeProduct.rolls.map((r) => {
+                            const itemKey = idOf(true, r);
+                            const isChecked = picked.has(itemKey);
+                            const isFocused = focusedRollId === r.rollId;
+                            const remLen =
+                              r.currentRemainingLength ?? r.totalLength - (r.usedLength || 0);
+                            const pct = r.totalLength
+                              ? Math.min(100, Math.max(0, (remLen / r.totalLength) * 100))
+                              : 0;
+                            const [qt, qc] = ROLL_QUALITY_MAP[r.inspectionStatus] || [
+                              r.inspectionStatus || '—',
+                              ''
+                            ];
+                            const linkedRems = remnantsByRollId.get(r.rollId) || [];
+                            const availRems = linkedRems.filter(
+                              (rm) => rm.status === 'AVAILABLE'
+                            );
+
+                            return (
+                              <tr
+                                key={r.rollId}
+                                className={`click ${isFocused ? 'sel' : ''}`}
+                                onClick={() =>
+                                  setFocusedRollId((cur) => (cur === r.rollId ? '' : r.rollId))
+                                }
+                              >
+                                <td onClick={(e) => e.stopPropagation()}>
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`选择母卷 ${r.rollId}`}
+                                    checked={isChecked}
+                                    onChange={(e) => togglePick(itemKey, e.target.checked)}
+                                  />
+                                </td>
+                                <td className="num" style={{ fontWeight: 600 }}>
+                                  {r.rollId}
+                                  {r.batchNo && (
+                                    <div>
+                                      <small className="muted">批次 {r.batchNo}</small>
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="r num">{fmtN(r.width)}</td>
+                                <td className="r num">
+                                  <b>{fmtM(remLen)}</b> / {fmtM(r.totalLength)} m
+                                </td>
+                                <td>
+                                  <span className="bar" style={{ width: 72 }}>
+                                    <i style={{ width: `${pct}%` }} />
+                                  </span>
+                                </td>
+                                <td>
+                                  {linkedRems.length > 0 ? (
+                                    <span className={`tag ${availRems.length > 0 ? 'ok' : ''}`}>
+                                      可用 {availRems.length} / 共 {linkedRems.length} 块
+                                    </span>
+                                  ) : (
+                                    <span className="muted">无派生料头</span>
+                                  )}
+                                </td>
+                                <td className="r num">
+                                  {r.defectsCount ?? (r.defects || []).length}
+                                </td>
+                                <td>{r.storageLocation || '—'}</td>
+                                <td>
+                                  <span className={`tag ${qc}`}>{qt}</span>
+                                </td>
+                                <td onClick={(e) => e.stopPropagation()}>
+                                  <div style={{ display: 'inline-flex', gap: 6 }}>
+                                    <button
+                                      type="button"
+                                      className="btn sm"
+                                      onClick={() => setDetailRoll(r)}
+                                    >
+                                      档案
+                                    </button>
+                                    <a
+                                      className="btn sm"
+                                      href={`#/inspection/${encodeURIComponent(r.rollId)}`}
+                                    >
+                                      验疵
+                                    </a>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     ) : (
-                      <div className="empty" style={{ padding: 12 }}>
-                        无疵点记录
+                      <div className="empty" style={{ padding: 18 }}>
+                        该品号暂无整卷母卷记录
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Section 2: Linked Remnants Derived from Mother Rolls of Selected Product */}
+                  <div className="box">
+                    <div className="pane-h">
+                      <span>
+                        2. 关联派生料头（{displayedRemnants.length} 块）
+                      </span>
+                      {focusedRollId && (
+                        <span className="tag run" style={{ marginLeft: 8 }}>
+                          来源母卷：{focusedRollId}
+                          <button
+                            type="button"
+                            className="inv-clear-chip"
+                            aria-label="取消按单卷过滤"
+                            onClick={() => setFocusedRollId('')}
+                          >
+                            × 显示该品全部料头
+                          </button>
+                        </span>
+                      )}
+                      <span className="sp" />
+                      <div className="seg" role="group" aria-label="料头状态范围">
+                        <button
+                          type="button"
+                          className={remnantStatusFilter === 'AVAILABLE_FIRST' ? 'on' : ''}
+                          aria-pressed={remnantStatusFilter === 'AVAILABLE_FIRST'}
+                          onClick={() => setRemnantStatusFilter('AVAILABLE_FIRST')}
+                        >
+                          在库料头 ({activeProduct.availableRemnants.length})
+                        </button>
+                        <button
+                          type="button"
+                          className={remnantStatusFilter === 'ALL' ? 'on' : ''}
+                          aria-pressed={remnantStatusFilter === 'ALL'}
+                          onClick={() => setRemnantStatusFilter('ALL')}
+                        >
+                          含已耗/报废 ({activeProduct.remnants.length})
+                        </button>
+                      </div>
+                    </div>
+
+                    {displayedRemnants.length > 0 ? (
+                      <table className="t" style={{ border: 0 }}>
+                        <thead>
+                          <tr>
+                            <th style={{ width: 34 }}>
+                              <input
+                                type="checkbox"
+                                aria-label="全选当前列表料头"
+                                checked={
+                                  displayedRemnants.length > 0 &&
+                                  displayedRemnants.every((rm) => picked.has(idOf(false, rm)))
+                                }
+                                onChange={(e) => {
+                                  const next = new Set(picked);
+                                  displayedRemnants.forEach((rm) => {
+                                    const k = idOf(false, rm);
+                                    if (e.target.checked) next.add(k);
+                                    else next.delete(k);
+                                  });
+                                  setPicked(next);
+                                }}
+                              />
+                            </th>
+                            <th>料头编号</th>
+                            <th>关联来源母卷 · 谱系</th>
+                            <th className="r">尺寸 (宽 × 长 mm)</th>
+                            <th className="r">面积 m²</th>
+                            <th>质量 / 疵点</th>
+                            <th>库位</th>
+                            <th>状态</th>
+                            <th>操作</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {displayedRemnants.map((rm) => {
+                            const itemKey = idOf(false, rm);
+                            const isChecked = picked.has(itemKey);
+                            const [stLabel, stClass] = REMNANT_STATUS_MAP[rm.status] || [
+                              rm.status,
+                              ''
+                            ];
+                            return (
+                              <tr key={rm.id}>
+                                <td>
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`选择料头 ${rm.id}`}
+                                    checked={isChecked}
+                                    onChange={(e) => togglePick(itemKey, e.target.checked)}
+                                  />
+                                </td>
+                                <td className="num" style={{ fontWeight: 600 }}>
+                                  {rm.id}
+                                </td>
+                                <td>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                    {rm.sourceRollId ? (
+                                      <button
+                                        type="button"
+                                        className="inv-roll-link num"
+                                        title="点击按此来源母卷聚焦筛选"
+                                        onClick={() =>
+                                          setFocusedRollId((cur) =>
+                                            cur === rm.sourceRollId ? '' : rm.sourceRollId
+                                          )
+                                        }
+                                      >
+                                        母卷 {rm.sourceRollId}
+                                      </button>
+                                    ) : (
+                                      <span className="muted">未关联母卷</span>
+                                    )}
+                                    {rm.generation ? (
+                                      <span className="tag">G{rm.generation} 代余料</span>
+                                    ) : null}
+                                    {rm.qualityDispositionId && (
+                                      <span className="tag warn">复检回收</span>
+                                    )}
+                                  </div>
+                                  {rm.defectDesc && (
+                                    <small className="muted" style={{ display: 'block', marginTop: 2 }}>
+                                      {rm.defectDesc}
+                                    </small>
+                                  )}
+                                </td>
+                                <td className="r num">
+                                  {fmtN(rm.width)} × {fmtN(rm.length)}
+                                </td>
+                                <td className="r num">{fmtN(rm.area, 2)}</td>
+                                <td>
+                                  {rm.hasDefect ? (
+                                    <span className="tag warn">局部带疵</span>
+                                  ) : (
+                                    <span className="muted">无疵</span>
+                                  )}
+                                </td>
+                                <td>{rm.location || '—'}</td>
+                                <td>
+                                  <span className={`tag ${stClass}`}>{stLabel}</span>
+                                </td>
+                                <td>
+                                  {(rm.status === 'AVAILABLE' ||
+                                    rm.status === 'QUARANTINED') && (
+                                    <button
+                                      type="button"
+                                      className="btn sm"
+                                      onClick={() =>
+                                        openActionPanel('scrap', { scrapId: rm.id })
+                                      }
+                                    >
+                                      报废
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div className="empty" style={{ padding: 18 }}>
+                        {focusedRollId
+                          ? `母卷 ${focusedRollId} 下暂无符合当前筛选条件的派生料头`
+                          : '该品号下暂无符合当前筛选条件的料头'}
                       </div>
                     )}
                   </div>
                 </>
               ) : (
-                <>
-                  <div className="pane-h num">
-                    {currentItem.id}
-                    <span className="sp" />
-                    {(currentItem.status === 'AVAILABLE' ||
-                      currentItem.status === 'QUARANTINED') && (
-                      <button
-                        type="button"
-                        className="btn sm"
-                        onClick={() =>
-                          openActionPanel('scrap', { scrapId: currentItem.id })
-                        }
-                      >
-                        报废
-                      </button>
-                    )}
-                  </div>
-                  <div className="pane-b">
-                    <div className="metric">
-                      <div>
-                        <small>面积</small>
-                        <b>
-                          {fmtN(currentItem.area, 2)}
-                          <em>m²</em>
-                        </b>
-                      </div>
-                      <div>
-                        <small>尺寸</small>
-                        <b style={{ fontSize: 14 }}>
-                          {fmtN(currentItem.width)}×{fmtN(currentItem.length)}
-                        </b>
-                      </div>
-                    </div>
-                    <div className="kv">
-                      <div>来源母卷</div>
-                      <div className="num">{currentItem.sourceRollId || '—'}</div>
-                      <div>批次</div>
-                      <div>{currentItem.materialBatch || '—'}</div>
-                      <div>库位</div>
-                      <div>{currentItem.location || '—'}</div>
-                      <div>等级</div>
-                      <div>{currentItem.qualityGrade || '—'}</div>
-                      <div>代数</div>
-                      <div className="num">{currentItem.generation ?? '—'}</div>
-                      <div>来源报工</div>
-                      <div className="num">{currentItem.sourceReportId || '—'}</div>
-                      <div>说明</div>
-                      <div>{currentItem.defectDesc || '—'}</div>
-                      {currentItem.consumedByOrder && (
-                        <>
-                          <div>消耗于</div>
-                          <div className="num">{currentItem.consumedByOrder}</div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </>
-              )
-            ) : null}
+                <div className="empty">请从左侧选择一个物料品号查看对应母卷与料头</div>
+              )}
+            </div>
           </section>
         </div>
       )}
+
+      {/* Mother Roll Archive & Defect Coordinates Modal */}
+      <ModalDialog
+        open={detailRoll !== null}
+        title={detailRoll ? `母卷档案与疵点分布 · ${detailRoll.rollId}` : '母卷档案'}
+        onClose={() => setDetailRoll(null)}
+        maxWidth={620}
+      >
+        {detailRoll && (
+          <>
+            <div className="kv" style={{ padding: '4px 0 12px' }}>
+              <div>物料品号</div>
+              <div>{detailRoll.rollModel || '—'}</div>
+              <div>面料名称</div>
+              <div>{detailRoll.materialName || '—'}</div>
+              <div>幅宽 × 总长</div>
+              <div className="num">
+                {fmtN(detailRoll.width)} mm × {fmtM(detailRoll.totalLength)} m（剩余{' '}
+                {fmtM(
+                  detailRoll.currentRemainingLength ??
+                    detailRoll.totalLength - (detailRoll.usedLength || 0)
+                )}{' '}
+                m）
+              </div>
+              <div>颜色 / 成分</div>
+              <div>{[detailRoll.color, detailRoll.composition].filter(Boolean).join(' · ') || '—'}</div>
+              <div>供应商 / 批次</div>
+              <div>{[detailRoll.supplier, detailRoll.batchNo].filter(Boolean).join(' · ') || '—'}</div>
+              <div>当前库位</div>
+              <div>{detailRoll.storageLocation || '—'}</div>
+              <div>检验记录</div>
+              <div>{[detailRoll.inspector, detailRoll.inspectionDate].filter(Boolean).join(' · ') || '—'}</div>
+            </div>
+
+            <div className="sec" style={{ margin: '0 -16px' }}>
+              已登记疵点坐标（{(detailRoll.defects || []).length} 处）
+            </div>
+            {(detailRoll.defects || []).length > 0 ? (
+              <table className="t" style={{ marginTop: 8 }}>
+                <thead>
+                  <tr>
+                    <th>纵向位置 Y (m)</th>
+                    <th className="r">横向 X (mm)</th>
+                    <th className="r">宽×长 (mm)</th>
+                    <th>疵点类型</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detailRoll.defects.map((d: any, idx: number) => (
+                    <tr key={d.id || idx}>
+                      <td className="num">{(d.y / 1000).toFixed(2)}</td>
+                      <td className="r num">{fmtN(d.x)}</td>
+                      <td className="r num">
+                        {fmtN(d.w)}×{fmtN(d.h)}
+                      </td>
+                      <td>{d.typeName || d.defectType}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="empty" style={{ padding: 14 }}>
+                无疵点记录
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+              <a
+                className="btn pri"
+                href={`#/inspection/${encodeURIComponent(detailRoll.rollId)}`}
+                onClick={() => setDetailRoll(null)}
+              >
+                前往跑布验疵画布 →
+              </a>
+            </div>
+          </>
+        )}
+      </ModalDialog>
+
+      {/* Operational Action Modal: Receive / Transfer / Count / Scrap */}
+      <ModalDialog
+        open={action !== null}
+        title={action ? ACTION_TITLES[action] : '库存业务操作'}
+        onClose={() => {
+          if (!busy) setAction(null);
+        }}
+        maxWidth={680}
+      >
+        {action === 'receive' ? (
+          <form onSubmit={handleSubmitAction}>
+            <div className="form" style={{ gridTemplateColumns: '100px 1fr', padding: '4px 0 8px' }}>
+              <label htmlFor="inv-rec-rollid">母卷卷号</label>
+              <input
+                id="inv-rec-rollid"
+                data-form="rollId"
+                className="field"
+                required
+                placeholder="如 ROLL-2026-1101"
+                value={rollIdInput}
+                onChange={(e) => setRollIdInput(e.target.value)}
+              />
+              <label htmlFor="inv-rec-model">物料品号</label>
+              <input
+                id="inv-rec-model"
+                data-form="rollModel"
+                className="field"
+                required
+                list="inv-models-datalist"
+                value={rollModelInput}
+                onChange={(e) => setRollModelInput(e.target.value)}
+              />
+              <datalist id="inv-models-datalist">
+                {productGroups.map((g) => (
+                  <option key={g.modelKey} value={g.modelKey} />
+                ))}
+              </datalist>
+              <label htmlFor="inv-rec-width">幅宽 mm</label>
+              <input
+                id="inv-rec-width"
+                data-form="width"
+                type="number"
+                required
+                className="field num"
+                value={widthInput}
+                onChange={(e) => setWidthInput(e.target.value)}
+              />
+              <label htmlFor="inv-rec-len">整卷长度 m</label>
+              <input
+                id="inv-rec-len"
+                data-form="length"
+                type="number"
+                step="0.01"
+                required
+                className="field num"
+                value={lengthInput}
+                onChange={(e) => setLengthInput(e.target.value)}
+              />
+            </div>
+            <p className="muted" style={{ fontSize: 12, margin: '4px 0 14px' }}>
+              新母卷入库后默认处于“待检”状态，确认登记后直接进入跑布验疵定位画布，检验放行后方可投产锁料。
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button type="button" className="btn" disabled={busy} onClick={() => setAction(null)}>
+                取消
+              </button>
+              <button id="act-submit" type="submit" className="btn pri" disabled={busy}>
+                登记并去验布 →
+              </button>
+            </div>
+          </form>
+        ) : action === 'scrap' ? (
+          <form onSubmit={handleSubmitAction}>
+            {(() => {
+              const targetRem = remnants.find((r) => r.id === scrapId);
+              return (
+                <>
+                  <div className="kv" style={{ padding: '4px 0 10px' }}>
+                    <div>料头编号</div>
+                    <div className="num">{targetRem?.id}</div>
+                    <div>关联来源母卷</div>
+                    <div className="num">{targetRem?.sourceRollId || '—'}</div>
+                    <div>实物尺寸</div>
+                    <div className="num">
+                      {fmtN(targetRem?.width)} × {fmtN(targetRem?.length)} mm（
+                      {fmtN(targetRem?.area, 2)} m²）
+                    </div>
+                  </div>
+                  <div className="form" style={{ gridTemplateColumns: '90px 1fr', padding: '4px 0 14px' }}>
+                    <label htmlFor="inv-scrap-reason">报废原因</label>
+                    <input
+                      id="inv-scrap-reason"
+                      className="field"
+                      required
+                      autoFocus
+                      value={reason}
+                      placeholder="如：污损无法复用 / 窄边清理"
+                      onChange={(e) => setReason(e.target.value)}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={busy}
+                      onClick={() => setAction(null)}
+                    >
+                      取消
+                    </button>
+                    <button type="submit" className="btn pri" disabled={busy}>
+                      确认报废
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
+          </form>
+        ) : !opts ? (
+          <div className="loading">正在校验已选母卷与料头可操作状态…</div>
+        ) : (
+          <form onSubmit={handleSubmitAction}>
+            <table className="t" style={{ marginBottom: 12 }}>
+              <thead>
+                <tr>
+                  <th>类型</th>
+                  <th>实物编号</th>
+                  <th>当前库位</th>
+                  {action === 'count' && (
+                    <>
+                      <th>实物在库</th>
+                      <th className="r">实测宽 mm</th>
+                      <th className="r">实测长 mm</th>
+                    </>
+                  )}
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {selectedMaterials.map(({ type, id, m }) => {
+                  const rowKey = `${type}:${id}`;
+                  const c = getCountRow(rowKey);
+                  return (
+                    <tr key={rowKey}>
+                      <td>
+                        <span className="tag kind">{type === 'roll' ? '母卷' : '料头'}</span>
+                      </td>
+                      <td className="num">{id}</td>
+                      <td>{m?.location || '—'}</td>
+                      {action === 'count' && (
+                        <>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={c.present}
+                              onChange={(e) =>
+                                updateCountRow(rowKey, { present: e.target.checked })
+                              }
+                            />
+                          </td>
+                          <td className="r">
+                            <input
+                              type="number"
+                              className="field num"
+                              value={c.width}
+                              style={{ width: 72, textAlign: 'right' }}
+                              disabled={type === 'roll' || !c.present}
+                              onChange={(e) => updateCountRow(rowKey, { width: e.target.value })}
+                            />
+                          </td>
+                          <td className="r">
+                            <input
+                              type="number"
+                              className="field num"
+                              value={c.length}
+                              style={{ width: 82, textAlign: 'right' }}
+                              disabled={!c.present}
+                              onChange={(e) => updateCountRow(rowKey, { length: e.target.value })}
+                            />
+                          </td>
+                        </>
+                      )}
+                      <td>
+                        {!m?.allowed && (
+                          <span className="tag err" title={m?.reason || '不可操作'}>
+                            不可操作
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            {blockedMaterials.length > 0 && (
+              <div className="notice" style={{ marginBottom: 10 }}>
+                {blockedMaterials.map((x) => (
+                  <div key={`${x.type}:${x.id}`}>
+                    {x.id}：{x.m?.reason || '当前处于锁定或不可操作状态'}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="form" style={{ gridTemplateColumns: '90px 1fr', padding: '4px 0 8px' }}>
+              {action === 'transfer' && (
+                <>
+                  <label htmlFor="inv-dest">目标库位</label>
+                  <input
+                    id="inv-dest"
+                    className="field"
+                    required
+                    value={destination}
+                    placeholder="如：裁床待料区 A-02"
+                    onChange={(e) => setDestination(e.target.value)}
+                  />
+                </>
+              )}
+              <label htmlFor="inv-reason">变更原因</label>
+              <input
+                id="inv-reason"
+                className="field"
+                required
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+              />
+              <label htmlFor="inv-operator">经办人</label>
+              <input
+                id="inv-operator"
+                className="field"
+                required
+                value={operator}
+                onChange={(e) => setOperator(e.target.value)}
+              />
+            </div>
+            <p className="muted" style={{ fontSize: 12, margin: '4px 0 14px' }}>
+              {action === 'count'
+                ? '母卷按实测剩余长度核对（幅宽不变）；料头核对实测宽×长；实物不在库请取消勾选。盘点差异独立入账，不计入生产耗用。'
+                : '移库仅变更存放库位并生成不可变移库单，不改变数量、质量状态与母卷谱系。'}
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button type="button" className="btn" disabled={busy} onClick={() => setAction(null)}>
+                取消
+              </button>
+              <button
+                type="submit"
+                className="btn pri"
+                disabled={busy || blockedMaterials.length > 0 || selectedMaterials.length === 0}
+              >
+                确认{ACTION_TITLES[action]}
+              </button>
+            </div>
+          </form>
+        )}
+      </ModalDialog>
     </div>
   );
 };
