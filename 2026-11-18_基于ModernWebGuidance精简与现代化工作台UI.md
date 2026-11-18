@@ -18,7 +18,7 @@
 4. [ClusterCenterPage.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/pages/ClusterCenterPage.tsx)、[SlittingStudio1DPage.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/pages/SlittingStudio1DPage.tsx)、[TasksPage.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/pages/TasksPage.tsx)、[ExecutionCenterPage.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/pages/ExecutionCenterPage.tsx)、[SettingsPage.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/pages/SettingsPage.tsx) 与 [studio.css](file:///d:/GitHub/CutDemoTwo/frontend/src/styles/studio.css)
    - 纸样簇新建弹窗切换至原生 `ModalDialog`，卡片接入 `container-type: inline-size` 与 `:has(.cluster-check input:checked)` 选中态；一维分切台收折切边/组合宽次级约束并新增相对传统独立分切的“省车数 + 利用率增益”横幅；任务页合并重复的双层状态筛选条为单一交互式 KPI 筛选组（保留 `data-status` 与 `aria-pressed` 无障碍契约）。
 5. [InventoryPage.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/pages/InventoryPage.tsx) 与 [CadCanvasView.tsx](file:///d:/GitHub/CutDemoTwo/frontend/src/components/CadCanvasView.tsx)（按“物料品号 → 母卷/料头台账 → 右侧可调宽 CAD 实物预览”重构三栏工作台）
-   - 取消原先将“母卷”与“料头”割裂为两个独立页签的设计，改为左栏选择 **物料品号（`rollModel`）**、中栏同屏联动展示该品下的 **在库母卷列表** 与 **关联派生料头明细**、右栏新增 **可左右拖拽调节宽度的交互式 CAD 实物预览窗格**（复用纯适配函数 `buildRollScene` / `remnantAsRoll`，支持点击任意母卷查看折叠全卷/单条全卷/待切端头与疵点定位，点击任意料头查看单块实尺几何与母卷溯源，分隔手柄接入 `setPointerCapture`、方向键缩放与一键加宽/收起控制）。
+   - 取消原先将“母卷”与“料头”割裂为两个独立页签的设计，改为左栏选择 **物料品号（`rollModel`）**、中栏同屏联动展示该品下的 **在库母卷列表** 与 **关联派生料头明细**、右栏新增 **整栏顶天立地的可调宽全高 CAD 实物预览窗格**（清退与中栏重复的下部文字列表，将整个右栏纵向空间 100% 留给交互式 CAD 画布，仅在画布工具栏保留折叠全卷/单条全卷/待切端头、缩放测距与疵点下拉快速定位）。
 
 ## 验证与本地服务状态
 

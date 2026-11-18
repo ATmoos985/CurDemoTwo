@@ -1257,6 +1257,44 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                     <span>实物几何预览</span>
                   )}
                   <span className="sp" />
+                  {previewRoll && previewRoll.inspectionStatus === 'PASSED' && (
+                    <button
+                      type="button"
+                      className="btn sm pri"
+                      onClick={() => {
+                        setCanvasSpec({
+                          canvasMode: 'STOCK_ROLL',
+                          selectedRollId: previewRoll.rollId,
+                          canvasWidthMm: previewRoll.width,
+                          materialModel2D: previewRoll.rollModel
+                        });
+                        location.hash = '#/workbench';
+                      }}
+                    >
+                      去排料 →
+                    </button>
+                  )}
+                  {previewRemnant && previewRemnant.status === 'AVAILABLE' && (
+                    <button
+                      type="button"
+                      className="btn sm pri"
+                      onClick={() => {
+                        setCanvasSpec({
+                          canvasMode: 'FREE_CANVAS',
+                          canvasWidthMm: previewRemnant.width,
+                          canvasLengthMm: previewRemnant.length,
+                          materialModel2D:
+                            previewRemnant.materialBatch || activeProduct?.modelKey || 'REMNANT'
+                        });
+                        toast(
+                          `已按料头 ${previewRemnant.id} (${previewRemnant.width}×${previewRemnant.length}mm) 设定排料画布`
+                        );
+                        location.hash = '#/workbench';
+                      }}
+                    >
+                      去排料 →
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="btn sm"
@@ -1293,7 +1331,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                       role="toolbar"
                       aria-label="库存实物预览控制工具栏"
                     >
-                      {previewRoll && (
+                      {previewRoll ? (
                         <>
                           <div className="ctool-group" role="group" aria-label="母卷展开方式">
                             <button
@@ -1323,7 +1361,23 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                           </div>
                           <span className="div" role="separator" aria-orientation="vertical" />
                         </>
-                      )}
+                      ) : previewRemnant?.sourceRollId ? (
+                        <>
+                          <button
+                            type="button"
+                            title="切换查看该料头的来源母卷整卷预览"
+                            onClick={() => {
+                              const parent = rolls.find(
+                                (r) => r.rollId === previewRemnant.sourceRollId
+                              );
+                              if (parent) handleInspectRoll(parent);
+                            }}
+                          >
+                            ↑ 看母卷
+                          </button>
+                          <span className="div" role="separator" aria-orientation="vertical" />
+                        </>
+                      ) : null}
 
                       <div className="ctool-group" role="group" aria-label="画布缩放与测距">
                         <button
@@ -1363,9 +1417,38 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                           测距
                         </button>
                       </div>
+
+                      {((previewRoll?.defects || previewRemnant?.defects || []).length > 0) && (
+                        <>
+                          <span className="sp" />
+                          <select
+                            className="inv-toolbar-select num"
+                            aria-label="选择疵点放大定位"
+                            value=""
+                            onChange={(e) => {
+                              const list = previewRoll?.defects || previewRemnant?.defects || [];
+                              const d = list[Number(e.target.value)];
+                              const w = previewRoll?.width || previewRemnant?.width || 2000;
+                              if (d) handleZoomToDefect(d, w);
+                            }}
+                          >
+                            <option value="" disabled>
+                              定位疵点 ({(previewRoll?.defects || previewRemnant?.defects || []).length})…
+                            </option>
+                            {(previewRoll?.defects || previewRemnant?.defects || []).map(
+                              (d: any, idx: number) => (
+                                <option key={d.id || idx} value={idx}>
+                                  #{idx + 1} {d.typeName || d.defectType} · Y{' '}
+                                  {previewRoll ? `${(d.y / 1000).toFixed(2)}m` : `${fmtN(d.y)}mm`}
+                                </option>
+                              )
+                            )}
+                          </select>
+                        </>
+                      )}
                     </div>
 
-                    {/* Interactive Konva CAD Canvas */}
+                    {/* Full-Height Interactive Konva CAD Canvas */}
                     <div className="inv-canvas-box">
                       <CadCanvasView
                         scene={previewScene}
@@ -1382,7 +1465,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                         fullMode={
                           previewRoll && rollLayout === 'tile' ? 'tile' : 'strip'
                         }
-                        minHeight={260}
+                        minHeight={360}
                         ariaLabel={
                           previewRoll
                             ? `母卷 ${previewRoll.rollId} 实物预览画布`
@@ -1396,242 +1479,9 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
 
                     <div className="studio-canvas-hint num">
                       {previewRoll
-                        ? `幅宽 ${fmtN(previewRoll.width)} mm × 总长 ${fmtM(previewRoll.totalLength)} m（已耗 ${fmtM(previewRoll.usedLength || 0)} m）`
-                        : `料头尺寸 ${fmtN(previewRemnant?.width)} × ${fmtN(previewRemnant?.length)} mm`}
-                      {cursor ? ` · 坐标 X=${fmtN(cursor.v, 0)} / Y=${fmtN(cursor.u, 0)} mm` : ''}
-                    </div>
-
-                    {/* Bottom Inspector Details & Cross-Jump Links */}
-                    <div className="inv-inspector-scroll">
-                      {previewRoll ? (
-                        <>
-                          <div className="value-kpi-grid num" style={{ margin: '10px 10px 8px' }}>
-                            <div className="value-kpi-cell highlight">
-                              <small>剩余可用长度</small>
-                              <b>
-                                {fmtM(
-                                  previewRoll.currentRemainingLength ??
-                                    previewRoll.totalLength - (previewRoll.usedLength || 0)
-                                )}
-                                <em>m</em>
-                              </b>
-                            </div>
-                            <div className="value-kpi-cell">
-                              <small>幅宽 / 登记疵点</small>
-                              <b>
-                                {fmtN(previewRoll.width)}
-                                <em>mm · {(previewRoll.defects || []).length} 疵</em>
-                              </b>
-                            </div>
-                          </div>
-
-                          {/* Quick switch to child remnants of this mother roll */}
-                          {(remnantsByRollId.get(previewRoll.rollId) || []).length > 0 && (
-                            <div className="inv-related-chips">
-                              <small>点击切换查看该母卷派生的料头：</small>
-                              <div className="inv-chip-row">
-                                {(remnantsByRollId.get(previewRoll.rollId) || []).map((rm) => (
-                                  <button
-                                    key={rm.id}
-                                    type="button"
-                                    className="inv-roll-link num"
-                                    onClick={() => handleInspectRemnant(rm)}
-                                  >
-                                    {fmtN(rm.width)}×{fmtN(rm.length)} ({fmtN(rm.area, 1)}m²)
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          <div className="sec">
-                            母卷疵点定位（{(previewRoll.defects || []).length} 处 · 点击定位画布）
-                          </div>
-                          {(previewRoll.defects || []).length > 0 ? (
-                            <table className="t" style={{ border: 0 }}>
-                              <thead>
-                                <tr>
-                                  <th>Y 位置</th>
-                                  <th className="r">X</th>
-                                  <th className="r">宽×长</th>
-                                  <th>疵点类型</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {previewRoll.defects.map((d: any, idx: number) => (
-                                  <tr
-                                    key={d.id || idx}
-                                    className="click"
-                                    title="点击在上方画布放大定位到此疵点"
-                                    onClick={() => handleZoomToDefect(d, previewRoll.width)}
-                                  >
-                                    <td className="num">{(d.y / 1000).toFixed(2)} m</td>
-                                    <td className="r num">{fmtN(d.x)}</td>
-                                    <td className="r num">
-                                      {fmtN(d.w)}×{fmtN(d.h)}
-                                    </td>
-                                    <td>{d.typeName || d.defectType}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          ) : (
-                            <div className="empty" style={{ padding: 12 }}>
-                              整卷无疵点记录
-                            </div>
-                          )}
-
-                          <div className="inv-preview-actions">
-                            <button
-                              type="button"
-                              className="btn pri"
-                              style={{ flex: 1 }}
-                              disabled={previewRoll.inspectionStatus !== 'PASSED'}
-                              onClick={() => {
-                                setCanvasSpec({
-                                  canvasMode: 'STOCK_ROLL',
-                                  selectedRollId: previewRoll.rollId,
-                                  canvasWidthMm: previewRoll.width,
-                                  materialModel2D: previewRoll.rollModel
-                                });
-                                location.hash = '#/workbench';
-                              }}
-                            >
-                              以此母卷去二维排料 →
-                            </button>
-                            <a
-                              className="btn"
-                              href={`#/inspection/${encodeURIComponent(previewRoll.rollId)}`}
-                            >
-                              跑布验疵 ↗
-                            </a>
-                          </div>
-                        </>
-                      ) : previewRemnant ? (
-                        <>
-                          <div className="value-kpi-grid num" style={{ margin: '10px 10px 8px' }}>
-                            <div className="value-kpi-cell highlight">
-                              <small>单块可用面积</small>
-                              <b>
-                                {fmtN(previewRemnant.area, 2)}
-                                <em>m²</em>
-                              </b>
-                            </div>
-                            <div className="value-kpi-cell">
-                              <small>实物宽 × 长</small>
-                              <b style={{ fontSize: 15 }}>
-                                {fmtN(previewRemnant.width)}×{fmtN(previewRemnant.length)}
-                                <em>mm</em>
-                              </b>
-                            </div>
-                          </div>
-
-                          {previewRemnant.sourceRollId && (
-                            <div className="inv-related-chips">
-                              <small>母卷谱系溯源：</small>
-                              <button
-                                type="button"
-                                className="inv-roll-link num"
-                                onClick={() => {
-                                  const parent = rolls.find(
-                                    (r) => r.rollId === previewRemnant.sourceRollId
-                                  );
-                                  if (parent) handleInspectRoll(parent);
-                                }}
-                              >
-                                ↑ 切换预览来源母卷 {previewRemnant.sourceRollId}
-                              </button>
-                            </div>
-                          )}
-
-                          <div className="kv" style={{ borderTop: '1px solid var(--line-2)' }}>
-                            <div>品号 / 批次</div>
-                            <div>{previewRemnant.materialBatch || activeProduct?.modelKey || '—'}</div>
-                            <div>存放库位</div>
-                            <div>{previewRemnant.location || '—'}</div>
-                            <div>代数 / 等级</div>
-                            <div>
-                              G{previewRemnant.generation ?? 1} 代 ·{' '}
-                              {previewRemnant.qualityGrade || '—'}
-                            </div>
-                            <div>备注说明</div>
-                            <div>{previewRemnant.defectDesc || '无备注'}</div>
-                          </div>
-
-                          {(previewRemnant.defects || []).length > 0 && (
-                            <>
-                              <div className="sec">
-                                料头局部疵点（{previewRemnant.defects.length} 处 · 点击定位）
-                              </div>
-                              <table className="t" style={{ border: 0 }}>
-                                <thead>
-                                  <tr>
-                                    <th>局部 Y</th>
-                                    <th className="r">X</th>
-                                    <th className="r">宽×长</th>
-                                    <th>类型</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {previewRemnant.defects.map((d: any, idx: number) => (
-                                    <tr
-                                      key={d.id || idx}
-                                      className="click"
-                                      onClick={() =>
-                                        handleZoomToDefect(d, previewRemnant.width)
-                                      }
-                                    >
-                                      <td className="num">{fmtN(d.y)} mm</td>
-                                      <td className="r num">{fmtN(d.x)}</td>
-                                      <td className="r num">
-                                        {fmtN(d.w)}×{fmtN(d.h)}
-                                      </td>
-                                      <td>{d.typeName || d.defectType}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </>
-                          )}
-
-                          <div className="inv-preview-actions">
-                            {previewRemnant.status === 'AVAILABLE' && (
-                              <button
-                                type="button"
-                                className="btn pri"
-                                style={{ flex: 1 }}
-                                onClick={() => {
-                                  setCanvasSpec({
-                                    canvasMode: 'FREE_CANVAS',
-                                    canvasWidthMm: previewRemnant.width,
-                                    canvasLengthMm: previewRemnant.length,
-                                    materialModel2D:
-                                      previewRemnant.materialBatch || activeProduct?.modelKey || 'REMNANT'
-                                  });
-                                  toast(
-                                    `已按料头 ${previewRemnant.id} (${previewRemnant.width}×${previewRemnant.length}mm) 设定排料画布`
-                                  );
-                                  location.hash = '#/workbench';
-                                }}
-                              >
-                                按此料头尺寸去排料 →
-                              </button>
-                            )}
-                            {(previewRemnant.status === 'AVAILABLE' ||
-                              previewRemnant.status === 'QUARANTINED') && (
-                              <button
-                                type="button"
-                                className="btn"
-                                onClick={() =>
-                                  openActionPanel('scrap', { scrapId: previewRemnant.id })
-                                }
-                              >
-                                报废
-                              </button>
-                            )}
-                          </div>
-                        </>
-                      ) : null}
+                        ? `幅宽 ${fmtN(previewRoll.width)} mm × 总长 ${fmtM(previewRoll.totalLength)} m（剩余 ${fmtM(previewRoll.currentRemainingLength ?? previewRoll.totalLength - (previewRoll.usedLength || 0))} m · 疵点 ${(previewRoll.defects || []).length} 处）`
+                        : `料头尺寸 ${fmtN(previewRemnant?.width)} × ${fmtN(previewRemnant?.length)} mm（${fmtN(previewRemnant?.area, 2)} m²）`}
+                      {cursor ? ` · X=${fmtN(cursor.v, 0)} / Y=${fmtN(cursor.u, 0)} mm` : ''}
                     </div>
                   </div>
                 ) : (

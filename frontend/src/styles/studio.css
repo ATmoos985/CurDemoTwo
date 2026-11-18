@@ -1473,18 +1473,19 @@ dialog::backdrop {
   text-decoration: underline;
 }
 
-/* Right Interactive CAD Preview Pane */
+/* Right Full-Height Interactive CAD Preview Pane */
 .inv-preview-pane {
   display: flex;
   flex-direction: column;
   min-height: 0;
   min-width: 0;
   border-left: 0;
-  background: var(--panel);
+  background: var(--canvas);
 }
 
 .inv-preview-head {
   gap: 6px;
+  background: var(--panel);
 }
 
 .inv-preview-id {
@@ -1505,44 +1506,21 @@ dialog::backdrop {
   padding: 4px 8px;
 }
 
+.inv-toolbar-select {
+  min-block-size: 26px;
+  max-inline-size: 150px;
+  padding: 1px 6px;
+  border: 1px solid #334155;
+  border-radius: 3px;
+  background: #1e293b;
+  color: #cbd5e1;
+  font-size: 11.5px;
+}
+
 .inv-canvas-box {
-  flex: 1.15;
-  min-height: 250px;
+  flex: 1;
+  min-height: 0;
   position: relative;
   background: var(--canvas);
   overflow: hidden;
-}
-
-.inv-inspector-scroll {
-  flex: 1;
-  min-height: 180px;
-  overflow-y: auto;
-  border-top: 1px solid var(--line);
-  background: var(--panel);
-}
-
-.inv-related-chips {
-  padding: 6px 10px 8px;
-  border-top: 1px solid var(--line-2);
-}
-
-.inv-related-chips small {
-  display: block;
-  font-size: 11px;
-  color: var(--text-3);
-  margin-bottom: 5px;
-}
-
-.inv-chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.inv-preview-actions {
-  display: flex;
-  gap: 8px;
-  padding: 10px;
-  border-top: 1px solid var(--line-2);
-  background: var(--panel-2);
 }
