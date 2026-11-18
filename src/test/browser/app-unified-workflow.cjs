@@ -143,7 +143,7 @@ const api = async (path) => {
       assert.equal(await page.locator('.wb-demand-prog-row .wb-mini-prog').count(), 2, 'Each item has a mini progress bar');
 
       // Open "本次具体需求概览" sheet and verify cutting breakdown table
-      await page.getByRole('button', { name: '具体需求概览 ↗' }).click();
+      await page.getByRole('button', { name: '具体需求概览', exact: true }).click();
       await page.locator('dialog[open] .wb-overview-kpis').waitFor();
       assert.ok((await page.locator('dialog[open]').innerText()).includes('逐项具体需求切制明细'));
       await page.locator('dialog[open] .native-modal-head button').click();
@@ -166,8 +166,8 @@ const api = async (path) => {
       assert.ok(await page.locator('canvas').first().isVisible(), 'CAD canvas rendered');
 
       // Confirm selected scheme -> zero re-solve & immediate demand deduction + left progress bars update to done!
-      await page.getByRole('button', { name: '✓ 选定此方案（扣减需求并保存结果）' }).click();
-      await page.getByRole('link', { name: '去结果管理查看/导出 ↗' }).waitFor({ timeout: 10000 });
+      await page.getByRole('button', { name: '选定此方案（扣减需求并保存结果）' }).click();
+      await page.getByRole('link', { name: '去结果管理查看/导出' }).waitFor({ timeout: 10000 });
       assert.equal(await page.locator('.wb-demand-prog-row.is-done').count(), 2, 'All items stay visible and turn done on left progress list');
 
       const poolAfterConfirm = await api('/api/v2/demand-pool');
@@ -177,7 +177,7 @@ const api = async (path) => {
     });
 
     await runStep('Results Center: auto-bind real mother roll -> ticket preview -> complete accounting', async () => {
-      await page.getByRole('link', { name: '去结果管理查看/导出 ↗' }).click();
+      await page.getByRole('link', { name: '去结果管理查看/导出' }).click();
       await page.waitForURL('**/#/results/**');
       await page.getByRole('heading', { name: '结果管理', exact: true, level: 1 }).waitFor();
 
@@ -188,7 +188,7 @@ const api = async (path) => {
       confirmedSchemeId = myScheme.id;
 
       // Test Cut Ticket print modal preview
-      await page.getByRole('button', { name: '🖨 打印 A4 车间派工裁切单' }).click();
+      await page.getByRole('button', { name: '打印 A4 车间派工裁切单' }).click();
       await page.locator('.print-ticket-sheet').waitFor();
       assert.ok((await page.locator('.print-ticket-sheet').innerText()).includes(confirmedSchemeId));
       await page.locator('dialog[open] .native-modal-head button').click();
@@ -204,7 +204,7 @@ const api = async (path) => {
       autoBoundRollId = boundDetail.scheme.rollId;
 
       // One-click complete accounting
-      await page.getByRole('button', { name: '✓ 一键完工记账' }).click();
+      await page.getByRole('button', { name: '一键完工记账' }).click();
       await page.locator('.tag', { hasText: '已完工记账' }).first().waitFor({ timeout: 10000 });
 
       const poolAfterComplete = await api('/api/v2/demand-pool');

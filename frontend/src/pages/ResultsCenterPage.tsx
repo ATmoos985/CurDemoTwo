@@ -538,7 +538,7 @@ export const ResultsCenterPage: React.FC<{
           <div className="box" style={{ padding: 36, textAlign: 'center' }}>
             <strong>尚无已选定确认的排程结果</strong>
             <p className="muted" style={{ margin: '8px auto 16px', maxWidth: 460 }}>
-              请在「搭切工作台」完成并行求解后，点击右侧「✓ 选定此方案」，选定后的方案将自动沉淀至此进行多格式导出、绑卷或完工过账。
+              请在「搭切工作台」完成并行求解后，点击右侧「选定此方案」，选定后的方案将自动沉淀至此进行多格式导出、绑卷或完工过账。
             </p>
             <a className="btn pri" href="#/workbench">
               前往搭切工作台 →
@@ -653,7 +653,7 @@ export const ResultsCenterPage: React.FC<{
                             disabled={busy}
                             onClick={() => handleCompleteScheme(false)}
                           >
-                            ✓ 一键完工记账
+                            一键完工记账
                           </button>
                           <button
                             type="button"
@@ -735,14 +735,14 @@ export const ResultsCenterPage: React.FC<{
                       className="btn sm"
                       onClick={() => setShowTicketModal(true)}
                     >
-                      🖨 打印 A4 车间派工裁切单
+                      打印 A4 车间派工裁切单
                     </button>
                     {activeScheme.rollId && (
                       <a
                         className="btn sm"
                         href={`#/inventory?roll=${encodeURIComponent(activeScheme.rollId)}`}
                       >
-                        在库存查看母卷切割区 ↗
+                        在库存查看母卷切割区
                       </a>
                     )}
                   </div>
@@ -1227,7 +1227,7 @@ export const ResultsCenterPage: React.FC<{
                 关闭
               </button>
               <button type="button" className="btn pri" onClick={() => window.print()}>
-                🖨 立即调用系统打印 / 导出 PDF
+                立即调用系统打印 / 导出 PDF
               </button>
             </div>
           </div>

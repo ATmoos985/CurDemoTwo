@@ -751,7 +751,7 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                 }
               }}
             >
-              {running ? '❚❚ 暂停' : '▶ 自动跑布'}
+              {running ? '暂停跑布' : '自动跑布'}
             </button>
             <span className="muted" style={{ fontSize: 11.5 }}>
               空格 启停

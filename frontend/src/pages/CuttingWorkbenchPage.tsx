@@ -1943,7 +1943,7 @@ export const CuttingWorkbenchPage: React.FC<{
             setOverviewModalOpen(true);
           }}
         >
-          📋 本次具体需求概览 ({overviewStats.settled}/{overviewStats.ordered}
+          本次具体需求概览 ({overviewStats.settled}/{overviewStats.ordered}
           {overviewStats.uncut > 0 ? ` · 待切 ${overviewStats.uncut}` : ' · 已排齐'})
         </button>
       </div>
@@ -1962,7 +1962,7 @@ export const CuttingWorkbenchPage: React.FC<{
               </label>
             )}
             <a href="#/demands" className="link-btn">
-              需求池 ↗
+              需求池
             </a>
           </div>
 
@@ -2107,7 +2107,7 @@ export const CuttingWorkbenchPage: React.FC<{
                     setOverviewModalOpen(true);
                   }}
                 >
-                  具体需求概览 ↗
+                  具体需求概览
                 </button>
               </div>
 
@@ -2129,7 +2129,7 @@ export const CuttingWorkbenchPage: React.FC<{
                 >
                   {overviewStats.uncut > 0
                     ? `未切余 ${overviewStats.uncut}${overviewStats.unit}`
-                    : '全部已排 ✓'}
+                    : '全部已排'}
                 </span>
               </div>
 
@@ -2243,7 +2243,7 @@ export const CuttingWorkbenchPage: React.FC<{
                         </span>
                         {isFinished ? (
                           <span className="wb-prog-pill done num">
-                            ✓ 已切排 {settledRow}/{row.ordered}
+                            已切排 {settledRow}/{row.ordered}
                           </span>
                         ) : row.cand > 0 ? (
                           <span className="wb-prog-pill cand num">
@@ -2384,7 +2384,7 @@ export const CuttingWorkbenchPage: React.FC<{
               <div className="scheme-slots">
                 {schemes2D.length === 0 ? (
                   <div className="scheme-empty">
-                    画布已就绪（当前：{canvasMode === 'FREE_CANVAS' ? `默认新母卷 ${canvasWidthMm}mm` : canvasMode === 'STOCK_ROLL' ? `在库母卷 ${currentRoll2D?.rollId || ''}` : `在库料头 ${currentRemnant2D?.id || ''}`}）— 点击右下角「⚡ 启动并行搭切」同屏对比多引擎结果
+                    画布已就绪（当前：{canvasMode === 'FREE_CANVAS' ? `默认新母卷 ${canvasWidthMm}mm` : canvasMode === 'STOCK_ROLL' ? `在库母卷 ${currentRoll2D?.rollId || ''}` : `在库料头 ${currentRemnant2D?.id || ''}`}）— 点击右下角「启动并行搭切」同屏对比多引擎结果
                   </div>
                 ) : (
                   schemes2D.map((s, idx) => {
@@ -2446,7 +2446,7 @@ export const CuttingWorkbenchPage: React.FC<{
                     <b className="num">{totalRolls1D}</b> 卷。点击下方启动 OR-Tools 与人工基线并发比选。
                   </p>
                   <button type="button" className="btn pri" onClick={handleRunSolve1D}>
-                    ⚡ 立即计算分切搭切方案
+                    立即计算分切搭切方案
                   </button>
                 </div>
               ) : (
@@ -2597,7 +2597,7 @@ export const CuttingWorkbenchPage: React.FC<{
                     style={{ flex: 1, textAlign: 'center' }}
                     href={`#/results/${encodeURIComponent(lastConfirmSummary.schemeId)}`}
                   >
-                    去结果管理查看/导出 ↗
+                    去结果管理查看/导出
                   </a>
                   {lastConfirmSummary.openRemaining > 0 && (
                     <button
@@ -2673,8 +2673,8 @@ export const CuttingWorkbenchPage: React.FC<{
                     {confirmingScheme
                       ? '正在保存方案并扣减待排量…'
                       : activeScheme2D.confirmedSchemeId
-                      ? `✓ 已选定 (${activeScheme2D.confirmedSchemeId}) · 查看结果 ↗`
-                      : '✓ 选定此方案（扣减需求并保存结果）'}
+                      ? `已选定 (${activeScheme2D.confirmedSchemeId}) · 查看结果`
+                      : '选定此方案（扣减需求并保存结果）'}
                   </button>
                   <div className="value-export-row">
                     <button
@@ -2748,8 +2748,8 @@ export const CuttingWorkbenchPage: React.FC<{
                     {confirmingScheme
                       ? '正在保存方案并扣减需求…'
                       : activeScheme1D.confirmedSchemeId
-                      ? `✓ 已选定 (${activeScheme1D.confirmedSchemeId}) · 查看结果 ↗`
-                      : '✓ 选定此方案（扣减需求并保存结果）'}
+                      ? `已选定 (${activeScheme1D.confirmedSchemeId}) · 查看结果`
+                      : '选定此方案（扣减需求并保存结果）'}
                   </button>
                 </div>
               </div>
@@ -2934,10 +2934,10 @@ export const CuttingWorkbenchPage: React.FC<{
                 onClick={is2D ? handleRunSolve2D : handleRunSolve1D}
               >
                 {runningSolve
-                  ? '⚡ 多引擎竞速求解中…'
+                  ? '多引擎竞速求解中…'
                   : is2D
-                  ? `⚡ 启动并行搭切 (${selectedStrategies2D.length} 算法)`
-                  : '⚡ 启动分切搭切 (3 策略)'}
+                  ? `启动并行搭切 (${selectedStrategies2D.length} 算法)`
+                  : '启动分切搭切 (3 策略)'}
               </button>
             </div>
           </div>
@@ -3084,7 +3084,7 @@ export const CuttingWorkbenchPage: React.FC<{
                                 href={`#/results/${encodeURIComponent(s.id)}`}
                                 onClick={() => setOverviewModalOpen(false)}
                               >
-                                查看结果 ↗
+                                查看结果
                               </a>
                             </td>
                           </tr>
@@ -3154,7 +3154,7 @@ export const CuttingWorkbenchPage: React.FC<{
                               fontWeight: 700
                             }}
                           >
-                            {r.uncut > 0 ? r.uncut : '0 ✓'}
+                            {r.uncut > 0 ? r.uncut : '0'}
                           </td>
                           <td>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

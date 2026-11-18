@@ -1095,7 +1095,7 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string }> = ({
               disabled={!displayedRow?.result?.layout}
               onClick={handleToStudio2D}
             >
-              送入二维自由画布 ↗
+              送入二维自由画布
             </button>
             <button
               type="button"
@@ -1105,7 +1105,7 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string }> = ({
               title="将当前选中的门幅与样板裁片带入新建二维生产任务"
               onClick={handleToTask}
             >
-              转入生产任务 ↗
+              转入生产任务
             </button>
           </div>
           <div

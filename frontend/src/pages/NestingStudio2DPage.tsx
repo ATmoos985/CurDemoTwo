@@ -1058,7 +1058,7 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
           >
             {runningParallel
               ? '正在求解最优排料…'
-              : `⚡ 智能并行排料 (${selectedStrategies2D.length} 引擎)`}
+              : `智能并行排料 (${selectedStrategies2D.length} 引擎)`}
           </button>
         </div>
       </div>
@@ -1075,7 +1075,7 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
               <input type="file" accept=".dxf" hidden onChange={handleQuickDxfUpload} />
             </label>
             <a href="#/clusters" className="link-btn">
-              簇库 ↗
+              簇库
             </a>
           </div>
           <div className="pane-b">
@@ -1378,7 +1378,7 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
             <div className="scheme-slots">
               {schemes2D.length === 0 ? (
                 <div className="scheme-empty">
-                  尚未生成方案 — 确认门幅 W 与左侧裁片后，点击右上角「⚡ 智能并行排料」同屏比选多引擎结果
+                  尚未生成方案 — 确认门幅 W 与左侧裁片后，点击右上角「智能并行排料」同屏比选多引擎结果
                 </div>
               ) : (
                 schemes2D.map((s, idx) => {
@@ -1503,7 +1503,7 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
                     {dispatching
                       ? '正在建立生产单并移交…'
                       : activeScheme.dispatchedTaskId
-                      ? '✓ 已移交生产 · 查看执行单 ↗'
+                      ? '已移交生产 · 查看执行单'
                       : '确认选定方案 → 移交车间执行'}
                   </button>
                   <div className="value-export-row">
@@ -1539,7 +1539,7 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
                   disabled={runningParallel}
                   onClick={handleRunParallelStrategies}
                 >
-                  ⚡ 立即生成多引擎对比方案
+                  立即生成多引擎对比方案
                 </button>
               </div>
             )}

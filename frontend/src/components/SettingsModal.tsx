@@ -1164,7 +1164,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         rel="noreferrer"
                         className="btn sm"
                       >
-                        查看契约 JSON ↗
+                        查看契约 JSON
                       </a>
                     </div>
 

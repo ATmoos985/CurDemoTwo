@@ -595,7 +595,7 @@ export const ExecutionCenterPage: React.FC<{
                           : `#/workbench/${encodeURIComponent(taskDetail.task.id)}`
                       }
                     >
-                      回工作台查看 ↗
+                      回工作台查看
                     </a>
                   </div>
                   <div className="kv">

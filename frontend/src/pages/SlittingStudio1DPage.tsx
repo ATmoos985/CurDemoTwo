@@ -520,7 +520,7 @@ export const SlittingStudio1DPage: React.FC = () => {
           disabled={solving}
           onClick={handleSolveParallel1D}
         >
-          {solving ? '⚡ 三策略并行计算中…' : '⚡ 并行计算分切方案'}
+          {solving ? '三策略并行计算中…' : '并行计算分切方案'}
         </button>
       </div>
 
@@ -709,7 +709,7 @@ export const SlittingStudio1DPage: React.FC = () => {
                   <b className="num">{slitOrders.length}</b> 项分切规格。点击下方按钮同屏比较传统逐规格分切与 OR-Tools 整数规划搭切收益。
                 </p>
                 <button type="button" className="btn pri" onClick={handleSolveParallel1D}>
-                  ⚡ 立即并行计算分切方案
+                  立即并行计算分切方案
                 </button>
               </div>
             ) : (
@@ -769,7 +769,7 @@ export const SlittingStudio1DPage: React.FC = () => {
                           disabled={dispatching}
                           onClick={handleDispatch1D}
                         >
-                          {activeScheme.dispatchedTaskId ? '✓ 已移交（去执行单）' : '选此方案 → 拿出去报工 ↗'}
+                          {activeScheme.dispatchedTaskId ? '已移交（去执行单）' : '选此方案 → 拿出去报工'}
                         </button>
                       </div>
                       <div className="slit-patterns-list">
