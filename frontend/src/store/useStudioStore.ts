@@ -452,6 +452,26 @@ export function expandClusterToDemands(
   return items;
 }
 
+export interface WorkbenchLaunchPreset {
+  canvasMode?: 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
+  canvasWidthMm?: number;
+  canvasLengthMm?: number;
+  selectedRollId?: string;
+  selectedRemnantId?: string;
+  pieceGapMm?: number;
+  trimStartMm?: number;
+  scenario2D?: Scenario2DType;
+  multiWidthsText2D?: string;
+  slitMaterialMode?: 'VIRTUAL_ROLL' | 'STOCK_ROLL';
+  slitMotherWidthMm?: number;
+  slitLeftTrimMm?: number;
+  slitRightTrimMm?: number;
+  slitFixedLengthMm?: number;
+  slitRollId?: string;
+  slitOverCap?: number;
+  scenario1D?: Scenario1DType;
+}
+
 interface StudioState {
   clusters: DemandCluster[];
   clusterSelections: Record<string, Record<string, number>>;
@@ -511,7 +531,10 @@ interface StudioState {
   importDxfAsCluster: (text: string, fileName: string) => DemandCluster;
   loadClusterInto2D: (clusterId: string, append?: boolean) => void;
   loadSelectedClustersInto2D: (clusterIds: string[], append?: boolean) => void;
-  loadDemandFamilyIntoWorkbench: (family: DemandFamilySummary) => void;
+  loadDemandFamilyIntoWorkbench: (
+    family: DemandFamilySummary,
+    preset?: WorkbenchLaunchPreset
+  ) => void;
   syncDemandFamilyProgress: (family: DemandFamilySummary) => void;
   loadDemandFamiliesMergedIntoWorkbench: (families: DemandFamilySummary[]) => void;
 
@@ -851,27 +874,35 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     }
   },
 
-  loadDemandFamilyIntoWorkbench: (family) => {
+  loadDemandFamilyIntoWorkbench: (family, preset) => {
     const allLines = family.lines;
     if (family.dimension === 'SLITTING_1D') {
       const sp = family.slitting || {};
-      const maxW = Number(sp.maxWidth) || 4400;
-      const lt = Number(sp.leftTrim) ?? 100;
-      const rt = Number(sp.rightTrim) ?? 100;
-      const fixedLen = allLines[0]?.length || Number(family.process?.bedLength) || 2000;
+      const lt = preset?.slitLeftTrimMm ?? (Number(sp.leftTrim) ?? 100);
+      const rt = preset?.slitRightTrimMm ?? (Number(sp.rightTrim) ?? 100);
+      const motherW =
+        preset?.slitMotherWidthMm ?? ((Number(sp.maxWidth) || 4400) + lt + rt);
+      const maxW = Math.max(200, motherW - lt - rt);
+      const fixedLen =
+        preset?.slitFixedLengthMm ??
+        (allLines[0]?.length || Number(family.process?.bedLength) || 2000);
       set({
         activeDimension: '1D',
         slitLoadedTaskId: family.id,
         slitLoadedTaskName: family.name,
         slitMaterialModel: family.materialModel,
-        slitMotherWidthMm: maxW + lt + rt,
+        slitMaterialMode: preset?.slitMaterialMode ?? 'VIRTUAL_ROLL',
+        slitRollId: preset?.slitRollId ?? get().slitRollId,
+        slitAvoidDefects: preset?.slitMaterialMode === 'STOCK_ROLL',
+        slitMotherWidthMm: motherW,
         slitLeftTrimMm: lt,
         slitRightTrimMm: rt,
-        slitMinWidthMm: Number(sp.minWidth) || Math.floor(maxW * 0.9),
+        slitMinWidthMm: Number(sp.minWidth) || Math.floor((maxW * 0.9) / 10) * 10,
         slitMaxWidthMm: maxW,
         slitWidthStepMm: Number(sp.widthStep) || 10,
-        slitOverCap: Number(sp.totalOverCap) ?? 20,
+        slitOverCap: preset?.slitOverCap ?? (Number(sp.totalOverCap) ?? 20),
         slitFixedLengthMm: fixedLen,
+        ...(preset?.scenario1D ? { scenario1D: preset.scenario1D } : {}),
         slitOrders: allLines.map((l) => ({
           id: String(l.id),
           name: l.name,
@@ -902,21 +933,32 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         clusterName: family.name,
         sizeLabel: l.sizeLabel
       }));
-      const curW = get().canvasWidthMm || 1650;
+      const targetW = preset?.canvasWidthMm || get().canvasWidthMm || 1650;
       const openOrFullArea = mappedDemands.reduce(
         (s, d) => s + d.width * d.length * (d.quantity > 0 ? d.quantity : d.orderedQty || 1),
         0
       );
-      const estLen = Math.ceil(openOrFullArea / Math.max(400, curW * 0.65) / 500) * 500;
+      const estLen = Math.ceil(openOrFullArea / Math.max(400, targetW * 0.65) / 500) * 500;
       set({
         activeDimension: '2D',
         loadedTaskId: family.id,
         loadedTaskName: family.name,
         loadedExternalRef: family.externalRef || null,
         materialModel2D: family.materialModel,
-        canvasLengthMm: Math.max(Number(family.process?.bedLength) || 2400, estLen, 1500),
-        pieceGapMm: Number(family.process?.pieceGap) || 0,
-        trimStartMm: Number(family.process?.trimStart) || 0,
+        canvasMode: preset?.canvasMode ?? 'FREE_CANVAS',
+        canvasWidthMm: targetW,
+        canvasLengthMm:
+          preset?.canvasLengthMm ?? Math.max(Number(family.process?.bedLength) || 2400, estLen, 1500),
+        ...(preset?.selectedRollId !== undefined ? { selectedRollId: preset.selectedRollId } : {}),
+        ...(preset?.selectedRemnantId !== undefined
+          ? { selectedRemnantId: preset.selectedRemnantId }
+          : {}),
+        pieceGapMm: preset?.pieceGapMm ?? (Number(family.process?.pieceGap) || 0),
+        trimStartMm: preset?.trimStartMm ?? (Number(family.process?.trimStart) || 0),
+        ...(preset?.scenario2D ? { scenario2D: preset.scenario2D } : {}),
+        ...(preset?.multiWidthsText2D !== undefined
+          ? { multiWidthsText2D: preset.multiWidthsText2D }
+          : {}),
         activeDemands2D: mappedDemands,
         schemes2D: [],
         activeSchemeId2D: null

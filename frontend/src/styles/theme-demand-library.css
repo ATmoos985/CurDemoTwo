@@ -1,0 +1,160 @@
+/* ==========================================================================
+   DemandLibraryPage — Dedicated Full-Width Demand Ledger
+   ========================================================================== */
+
+.dl-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 20px 20px;
+  gap: 12px;
+  overflow: hidden;
+  background: var(--cp-bg);
+}
+
+.dl-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: none;
+  flex-wrap: wrap;
+}
+
+.dl-title-block {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.dl-title-block h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  color: var(--cp-ink);
+  letter-spacing: -0.015em;
+}
+
+.dl-summary {
+  font-size: 12px;
+  color: var(--cp-ink-3);
+}
+
+.dl-card {
+  flex: 1;
+  min-height: 0;
+  background: var(--cp-surface);
+  border-radius: var(--cp-radius-card);
+  box-shadow: var(--cp-shadow-card);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dl-toolbar {
+  flex: none;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--cp-divider);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dl-toolbar .mp-search-input {
+  width: 240px;
+  height: 32px;
+}
+
+.dl-select {
+  height: 32px;
+  min-width: 118px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--cp-border-strong);
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+  font-size: 12.5px;
+}
+
+.dl-select:focus {
+  outline: none;
+  border-color: var(--cp-accent);
+  box-shadow: 0 0 0 3px rgba(91, 97, 246, 0.12);
+}
+
+.dl-toolbar-right {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dl-table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.dl-table-scroll table.t {
+  width: 100%;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.dl-table-scroll .t th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fcfcfd;
+  height: 36px;
+  padding: 0 10px;
+}
+
+.dl-table-scroll .t td {
+  height: 52px;
+  padding: 6px 10px;
+}
+
+.dl-col-name {
+  white-space: normal;
+  min-width: 190px;
+  max-width: 300px;
+}
+
+.dl-expand-cell {
+  background: #f9fafb !important;
+  padding: 12px 18px 14px !important;
+}
+
+.dl-expand-inner {
+  background: var(--cp-surface);
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--cp-border);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.dl-expand-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--cp-divider);
+  background: #fcfcfd;
+}
+
+.dl-expand-inner table.t td {
+  height: 36px;
+}
+
+@media (max-width: 1400px) {
+  .dl-page {
+    padding: 10px 14px 14px;
+  }
+  .dl-toolbar .mp-search-input {
+    width: 195px;
+  }
+}

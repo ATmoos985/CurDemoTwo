@@ -2418,14 +2418,11 @@ export const CuttingWorkbenchPage: React.FC<{
           <div className="pane-h">
             <span>需求</span>
             <span className="sp" />
-            {is2D && (
-              <label className="link-btn" title="导入 CAD DXF 纸样">
-                导入 DXF
-                <input type="file" accept=".dxf" hidden onChange={handleQuickDxfUpload} />
-              </label>
-            )}
             <a href="#/demands" className="link-btn">
-              需求池
+              ＋ 新建
+            </a>
+            <a href="#/demand-library" className="link-btn">
+              需求库
             </a>
           </div>
 

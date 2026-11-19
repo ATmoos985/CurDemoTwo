@@ -70,6 +70,7 @@ const api = async (path) => {
       // Browse all primary routes without mutating backend state
       const routes = [
         ['demands', '需求管理'],
+        ['demand-library', '需求库'],
         ['clusters', '需求模板库'],
         ['workbench', '搭切工作台'],
         ['slitting', '搭切工作台'],
@@ -109,24 +110,37 @@ const api = async (path) => {
       await page.goto(base + '/app/#/demands');
       await page.getByRole('heading', { name: '需求管理', exact: true, level: 1 }).waitFor();
 
-      // Left persistent create form is immediately visible without modal trigger
-      await page.locator('#dp-name').waitFor();
+      // Left dropzone + pre-scheduling config + right real-time result preview
+      await page.locator('.dc-dropzone').waitFor();
+      await page.locator('.dc-gallery-grid .dc-piece-card').first().waitFor();
       await page.locator('#dp-name').fill('E2E-卫衣测试需求族');
-      await page.locator('.dp-create-form button[type="submit"]').click();
 
-      // Wait for row to appear in right-hand demand ledger
-      await page.locator('tr', { hasText: 'E2E-卫衣测试需求族' }).first().waitFor();
+      // Pre-select 1800mm mother roll width on DemandCreatePage and launch directly into Workbench
+      await page.locator('.dc-width-chips button', { hasText: '1800mm' }).click();
+      await page.locator('.dc-create-form button[type="submit"]').click();
+      await page.waitForURL('**/#/workbench');
+      await page.getByRole('heading', { name: '搭切工作台', exact: true, level: 1 }).waitFor();
+
+      // Confirm persisted family in backend and verify standalone Demand Library (#/demand-library) filters
       const poolBefore = await api('/api/v2/demand-pool');
       const familyBefore = poolBefore.find((f) => f.name === 'E2E-卫衣测试需求族');
       assert.ok(familyBefore, 'Demand family persisted in /api/v2/demand-pool');
       assert.equal(familyBefore.openTotal, 20);
       createdTaskId = familyBefore.id;
 
-      // Verify right-pane dual dropdown filters (dimension + status) work accurately
+      // Verify pre-configured 1800mm width was carried into Workbench
+      const carriedWidth = await page
+        .locator('.studio-canvas-inputs input[type="number"]')
+        .first()
+        .inputValue();
+      assert.equal(carriedWidth, '1800', 'Pre-configured 1800mm mother roll width carried into workbench');
+
+      // Also verify standalone Demand Library page with dimension + status dropdown filters
+      await page.goto(base + '/app/#/demand-library');
+      await page.getByRole('heading', { name: '需求库', exact: true, level: 1 }).waitFor();
+      await page.locator('tr', { hasText: 'E2E-卫衣测试需求族' }).first().waitFor();
       const dimSelect = page.locator('select[aria-label="按维度筛选"]');
       const statusSelect = page.locator('select[aria-label="按状态筛选"]');
-      await dimSelect.waitFor();
-      await statusSelect.waitFor();
       await dimSelect.selectOption('SLITTING_1D');
       assert.equal(
         await page.locator('tr', { hasText: 'E2E-卫衣测试需求族' }).count(),
@@ -139,7 +153,7 @@ const api = async (path) => {
       await dimSelect.selectOption('ALL');
       await statusSelect.selectOption('ALL');
 
-      // Jump to Cutting Workbench from Demand Pool
+      // Jump back to Cutting Workbench from Demand Library
       await page
         .locator('tr', { hasText: 'E2E-卫衣测试需求族' })
         .getByRole('button', { name: '去搭切排程 →' })

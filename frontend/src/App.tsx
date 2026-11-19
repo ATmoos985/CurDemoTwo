@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ClusterCenterPage } from './pages/ClusterCenterPage';
-import { DemandPoolPage } from './pages/DemandPoolPage';
+import { DemandCreatePage } from './pages/DemandCreatePage';
+import { DemandLibraryPage } from './pages/DemandLibraryPage';
 import { CuttingWorkbenchPage } from './pages/CuttingWorkbenchPage';
 import { ResultsCenterPage } from './pages/ResultsCenterPage';
 import { ReconciliationPage } from './pages/ReconciliationPage';
@@ -24,6 +25,7 @@ interface ParsedRoute {
   params: string[];
   groupQuery: string;
   taskIdQuery: string;
+  appendQuery: string;
   rawKey: string;
 }
 
@@ -36,6 +38,7 @@ function parseHashRoute(hash: string): ParsedRoute {
   const intent = sp.get('intent');
   const groupQuery = sp.get('group') || '';
   const taskIdQuery = sp.get('taskId') || '';
+  const appendQuery = sp.get('append') || '';
   const rollQuery = sp.get('roll') || '';
   if (intent && params.length < 3) {
     while (params.length < 2) params.push('');
@@ -46,6 +49,7 @@ function parseHashRoute(hash: string): ParsedRoute {
   }
   const known = [
     'demands',
+    'demand-library',
     'clusters',
     'workbench',
     'slitting',
@@ -65,7 +69,7 @@ function parseHashRoute(hash: string): ParsedRoute {
     'analysis'
   ];
   const page = known.includes(pageRaw) ? pageRaw : 'workbench';
-  return { page, params, groupQuery, taskIdQuery, rawKey: clean || 'workbench' };
+  return { page, params, groupQuery, taskIdQuery, appendQuery, rawKey: clean || 'workbench' };
 }
 
 interface NavSubItem {
@@ -88,6 +92,7 @@ const WORKBENCH_DEFAULT_ROUTE: ParsedRoute = {
   params: [],
   groupQuery: '',
   taskIdQuery: '',
+  appendQuery: '',
   rawKey: 'workbench'
 };
 
@@ -203,8 +208,25 @@ export const App: React.FC = () => {
         items: [
           {
             id: 'demands',
-            label: '待排需求池',
+            label: '新建需求',
             href: '#/demands',
+            icon: (
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+                <path
+                  d="M8 3.2v9.6M3.2 8h9.6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            ),
+            isActive: (r) => r.page === 'demands' || r.page === 'task'
+          },
+          {
+            id: 'demand-library',
+            label: '需求库',
+            href: '#/demand-library',
             icon: (
               <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
                 <path
@@ -217,7 +239,7 @@ export const App: React.FC = () => {
                 />
               </svg>
             ),
-            isActive: (r) => r.page === 'demands' || r.page === 'tasks' || r.page === 'task'
+            isActive: (r) => r.page === 'demand-library' || r.page === 'tasks'
           },
           {
             id: 'clusters',
@@ -482,7 +504,9 @@ export const App: React.FC = () => {
   const renderMain = () => {
     switch (effectiveRoute.page) {
       case 'demands':
-        return <DemandPoolPage />;
+        return <DemandCreatePage appendTaskId={effectiveRoute.appendQuery || undefined} />;
+      case 'demand-library':
+        return <DemandLibraryPage />;
       case 'clusters':
         return <ClusterCenterPage />;
       case 'workbench':
