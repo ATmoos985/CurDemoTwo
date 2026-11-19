@@ -588,7 +588,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   loadedTaskName: null,
   loadedExternalRef: null,
   activeDemands2D: defaultDemands2D,
-  selectedStrategies2D: ['SHORTEN_FIXED', 'SHORTEN_HALF_TURN', 'DEEPNEST_NFP_GA', 'JAVA_HEURISTIC'],
+  selectedStrategies2D: [...initialSettings.enabledStrategies2D],
   strategyRuns2D: [],
   schemes2D: [],
   activeSchemeId2D: null,
@@ -1079,10 +1079,16 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     set((st) => {
       const exists = st.selectedStrategies2D.includes(strategyId);
       if (exists && st.selectedStrategies2D.length <= 1) return st;
+      const nextStrategies = exists
+        ? st.selectedStrategies2D.filter((id) => id !== strategyId)
+        : [...st.selectedStrategies2D, strategyId];
+      const saved = persistStudioSettings({
+        ...st.settings,
+        enabledStrategies2D: nextStrategies
+      });
       return {
-        selectedStrategies2D: exists
-          ? st.selectedStrategies2D.filter((id) => id !== strategyId)
-          : [...st.selectedStrategies2D, strategyId]
+        settings: saved,
+        selectedStrategies2D: [...saved.enabledStrategies2D]
       };
     }),
 
@@ -1220,6 +1226,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     const saved = persistStudioSettings(next);
     set((st) => ({
       settings: saved,
+      selectedStrategies2D: [...saved.enabledStrategies2D],
       ...(st.loadedTaskId
         ? {}
         : {

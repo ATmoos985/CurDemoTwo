@@ -138,6 +138,7 @@ export const App: React.FC = () => {
   const schemes2D = useStudioStore((s) => s.schemes2D);
   const slitSchemes = useStudioStore((s) => s.slitSchemes);
   const clusters = useStudioStore((s) => s.clusters);
+  const enabledAlgoCount = useStudioStore((s) => s.settings.enabledStrategies2D.length);
 
   const openSettings = (tab: SettingsTabId = 'general') => {
     setSettingsTab(tab);
@@ -625,13 +626,13 @@ export const App: React.FC = () => {
             id="engine-status"
             className="mp-engine-foot-btn"
             onClick={() => openSettings('engines')}
-            title="点击查看求解引擎并发状态与系统配额"
+            title="点击管理并行排版算法、引擎并发状态与系统配额"
           >
             <span className={`dot ${health.ok ? 'ok' : 'warn'}`} aria-hidden="true" />
             <span className="mp-engine-label num">
               {health.ok ? '引擎就绪' : '引擎连接中'}
+              {` · ${enabledAlgoCount}算法`}
               {health.workers ? ` · ${health.workers}并发` : ''}
-              {health.engineCount ? ` · ${health.engineCount}核` : ''}
             </span>
           </button>
         </div>

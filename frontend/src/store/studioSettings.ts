@@ -2,11 +2,27 @@ export type StartCornerType = 'left-top' | 'right-bottom' | 'right-top' | 'left-
 export type FirstStageOrientation = 'horizontal' | 'vertical';
 export type SettingsTabId = 'general' | 'craft' | 'remnant' | 'engines' | 'integration';
 
+export interface WorkbenchStrategyDef {
+  id: string;
+  name: string;
+  badge: string;
+  shortTag: string;
+}
+
+export const WORKBENCH_STRATEGIES_2D: WorkbenchStrategyDef[] = [
+  { id: 'PS_FIXED', name: 'PackingSolver 严格经向缩长', badge: 'C++ 原生', shortTag: '0° 保丝缕 · 二分缩长压紧' },
+  { id: 'PS_ROT', name: 'PackingSolver 180°/90° 倒顺缩长', badge: 'C++ 原生', shortTag: '异形 180° / 矩形 90° · 最短版长' },
+  { id: 'DN_GA', name: 'Deepnest NFP+GA 进化嵌套', badge: 'NFP+GA', shortTag: 'Minkowski 临界多边形 + 遗传共边寻优' },
+  { id: 'DN_FIXED', name: 'Deepnest 严格经向直排', badge: 'NFP 经向', shortTag: '0° 严保纱向 · 临界多边形紧贴' },
+  { id: 'JAVA_FAST', name: 'Java 天际线/直刀快速基线', badge: 'Java 内置', shortTag: '极速秒出基线对照与降级兜底' }
+];
+
 export interface StudioSettings {
   // Tab 1: 画布与常规
   vertical: boolean;
   showDimensions: boolean;
   showPath: boolean;
+  showWorkflowGuide: boolean;
   startCorner: StartCornerType;
 
   // Tab 2: 裁切工艺与预设
@@ -23,6 +39,7 @@ export interface StudioSettings {
   // Tab 4: 求解引擎与配额
   timeLimitSeconds: number;
   allowFallback: boolean;
+  enabledStrategies2D: string[];
 
   // Tab 5: 导出与系统接入
   exportPrefix: string;
@@ -33,6 +50,7 @@ export const DEFAULT_STUDIO_SETTINGS: StudioSettings = {
   vertical: true,
   showDimensions: true,
   showPath: false,
+  showWorkflowGuide: false,
   startCorner: 'left-top',
 
   defectMarginMm: 20,
@@ -46,13 +64,38 @@ export const DEFAULT_STUDIO_SETTINGS: StudioSettings = {
 
   timeLimitSeconds: 5,
   allowFallback: true,
+  enabledStrategies2D: ['PS_FIXED', 'PS_ROT', 'DN_GA', 'JAVA_FAST'],
 
   exportPrefix: 'CutPlan',
   ticketShowCuts: true
 };
 
 const VALID_CORNERS: StartCornerType[] = ['left-top', 'right-bottom', 'right-top', 'left-bottom'];
+const VALID_STRATEGY_IDS = new Set(WORKBENCH_STRATEGIES_2D.map((s) => s.id));
 const PREF_KEY = 'cutplan.app.prefs';
+
+function normalizeEnabledStrategies2D(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return ['JAVA_FAST'];
+  const picked = new Set<string>();
+  for (const item of raw) {
+    if (typeof item === 'string' && VALID_STRATEGY_IDS.has(item)) {
+      picked.add(item);
+    }
+  }
+  const ordered = WORKBENCH_STRATEGIES_2D.map((s) => s.id).filter((id) => picked.has(id));
+  return ordered.length > 0 ? ordered : ['JAVA_FAST'];
+}
+
+function readEnabledStrategies2D(raw: string | null): string[] {
+  if (raw == null) {
+    return [...DEFAULT_STUDIO_SETTINGS.enabledStrategies2D];
+  }
+  try {
+    return normalizeEnabledStrategies2D(JSON.parse(raw));
+  } catch {
+    return ['JAVA_FAST'];
+  }
+}
 
 function readNumber(raw: string | null, fallback: number, min: number, max: number): number {
   if (raw == null || raw.trim() === '') return fallback;
@@ -67,7 +110,9 @@ export function loadStudioSettings(): StudioSettings {
     const rawCorner = localStorage.getItem('cam_origin') as StartCornerType | null;
     const rawFirstStage = localStorage.getItem('cam_first_stage');
     const rawRot = localStorage.getItem('cam_rot');
+    const rawWorkflowGuide = localStorage.getItem('cutplan.studio.showWorkflowGuide');
     const rawFallback = localStorage.getItem('cutplan.studio.allowFallback');
+    const rawEnabledStrategies2D = localStorage.getItem('cutplan.studio.enabledStrategies2D');
     const rawTicketCuts = localStorage.getItem('cutplan.studio.ticketShowCuts');
     const rawPrefix = (localStorage.getItem('cutplan.studio.exportPrefix') || '').trim();
 
@@ -84,6 +129,12 @@ export function loadStudioSettings(): StudioSettings {
         typeof rawPrefs.showPath === 'boolean'
           ? rawPrefs.showPath
           : DEFAULT_STUDIO_SETTINGS.showPath,
+      showWorkflowGuide:
+        rawWorkflowGuide === '1'
+          ? true
+          : rawWorkflowGuide === '0'
+          ? false
+          : DEFAULT_STUDIO_SETTINGS.showWorkflowGuide,
       startCorner:
         rawCorner && VALID_CORNERS.includes(rawCorner)
           ? rawCorner
@@ -139,6 +190,7 @@ export function loadStudioSettings(): StudioSettings {
           : rawFallback === '1'
           ? true
           : DEFAULT_STUDIO_SETTINGS.allowFallback,
+      enabledStrategies2D: readEnabledStrategies2D(rawEnabledStrategies2D),
 
       exportPrefix: rawPrefix || DEFAULT_STUDIO_SETTINGS.exportPrefix,
       ticketShowCuts:
@@ -149,7 +201,10 @@ export function loadStudioSettings(): StudioSettings {
           : DEFAULT_STUDIO_SETTINGS.ticketShowCuts
     };
   } catch {
-    return { ...DEFAULT_STUDIO_SETTINGS };
+    return {
+      ...DEFAULT_STUDIO_SETTINGS,
+      enabledStrategies2D: [...DEFAULT_STUDIO_SETTINGS.enabledStrategies2D]
+    };
   }
 }
 
@@ -180,6 +235,12 @@ export function validateStudioSettings(draft: StudioSettings): string | null {
   if (!Number.isFinite(draft.timeLimitSeconds) || draft.timeLimitSeconds < 1 || draft.timeLimitSeconds > 120) {
     return '单作业默认求解时限须在 1–120 秒之间';
   }
+  if (
+    !Array.isArray(draft.enabledStrategies2D) ||
+    draft.enabledStrategies2D.filter((id) => VALID_STRATEGY_IDS.has(id)).length < 1
+  ) {
+    return '至少保留启用 1 个二维并行排版算法';
+  }
   const cleanPrefix = draft.exportPrefix.trim();
   if (!cleanPrefix || cleanPrefix.length > 32 || /[\\/:*?"<>|]/.test(cleanPrefix)) {
     return '导出文件名前缀须为 1–32 个合法文件名字符（不含 \\ / : * ? " < > |）';
@@ -190,12 +251,14 @@ export function validateStudioSettings(draft: StudioSettings): string | null {
 export function persistStudioSettings(next: StudioSettings): StudioSettings {
   const sanitized: StudioSettings = {
     ...next,
+    showWorkflowGuide: Boolean(next.showWorkflowGuide),
     defectMarginMm: Math.round(next.defectMarginMm * 10) / 10,
     trimStartMm: Math.round(next.trimStartMm * 10) / 10,
     pieceGapMm: Math.round(next.pieceGapMm * 10) / 10,
     minRemnantWidthMm: Math.round(next.minRemnantWidthMm * 10) / 10,
     minRemnantLengthMm: Math.round(next.minRemnantLengthMm * 10) / 10,
     timeLimitSeconds: Math.round(next.timeLimitSeconds),
+    enabledStrategies2D: normalizeEnabledStrategies2D(next.enabledStrategies2D),
     exportPrefix: next.exportPrefix.trim() || 'CutPlan'
   };
 
@@ -210,6 +273,7 @@ export function persistStudioSettings(next: StudioSettings): StudioSettings {
         showPath: sanitized.showPath
       })
     );
+    localStorage.setItem('cutplan.studio.showWorkflowGuide', sanitized.showWorkflowGuide ? '1' : '0');
     localStorage.setItem('cam_origin', sanitized.startCorner);
     localStorage.setItem('cam_margin', String(sanitized.defectMarginMm));
     localStorage.setItem('cam_trim', String(sanitized.trimStartMm));
@@ -220,6 +284,10 @@ export function persistStudioSettings(next: StudioSettings): StudioSettings {
     localStorage.setItem('cam_min_rem_l', String(sanitized.minRemnantLengthMm));
     localStorage.setItem('cam_timeout', String(sanitized.timeLimitSeconds));
     localStorage.setItem('cutplan.studio.allowFallback', sanitized.allowFallback ? '1' : '0');
+    localStorage.setItem(
+      'cutplan.studio.enabledStrategies2D',
+      JSON.stringify(sanitized.enabledStrategies2D)
+    );
     localStorage.setItem('cutplan.studio.exportPrefix', sanitized.exportPrefix);
     localStorage.setItem('cutplan.studio.ticketShowCuts', sanitized.ticketShowCuts ? '1' : '0');
   } catch {}

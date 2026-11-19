@@ -1,0 +1,962 @@
+/* ==========================================================================
+   CutPlan Workbench V2 — Light Graph-Paper Interactive CAD Board & Magpie UI
+   Scoped under .studio-2d-page.wb-v2 so rules reliably supersede legacy
+   studio.css and theme-magpie.css workbench overrides regardless of bundle order.
+   ========================================================================== */
+
+.studio-2d-page.wb-v2 {
+  background: var(--cp-bg, #f5f6f8);
+  color: var(--cp-ink, #18181b);
+  overflow: hidden;
+}
+
+/* ---------- 1. Compact Top Bar ---------- */
+.studio-2d-page.wb-v2 .studio-top-bar {
+  background: var(--cp-surface, #ffffff);
+  border-bottom: 1px solid var(--cp-divider, rgba(15, 23, 42, 0.06));
+  padding: 7px 14px;
+  gap: 8px;
+  min-height: 46px;
+}
+
+.studio-2d-page.wb-v2 .studio-title {
+  margin: 0 2px 0 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--cp-ink, #18181b);
+  letter-spacing: -0.015em;
+}
+
+.studio-2d-page.wb-v2 .studio-canvas-inputs {
+  gap: 6px;
+}
+
+.studio-2d-page.wb-v2 .studio-canvas-inputs label {
+  font-size: 12px;
+  color: var(--cp-ink-2, #52525b);
+  gap: 4px;
+}
+
+.studio-2d-page.wb-v2 .studio-canvas-inputs .field {
+  height: 28px;
+  min-block-size: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.studio-2d-page.wb-v2 .width-quick-pills {
+  gap: 2px;
+}
+
+.studio-2d-page.wb-v2 .width-quick-pills button {
+  height: 24px;
+  min-block-size: 24px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--cp-ink-3, #8e929b);
+  font-size: 11px;
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.studio-2d-page.wb-v2 .width-quick-pills button:hover {
+  background: rgba(15, 23, 42, 0.045);
+  color: var(--cp-ink, #18181b);
+}
+
+.studio-2d-page.wb-v2 .width-quick-pills button[aria-pressed="true"],
+.studio-2d-page.wb-v2 .width-quick-pills button.on {
+  background: var(--cp-accent-soft, rgba(91, 97, 246, 0.1));
+  border-color: rgba(91, 97, 246, 0.28);
+  color: var(--cp-accent-ink, #4338ca);
+  font-weight: 600;
+}
+
+/* Optional workflow guide stepper (hidden by default unless enabled in Settings) */
+.studio-2d-page.wb-v2 .stage-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: #f4f5f7;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.studio-2d-page.wb-v2 .stage-stepper button {
+  border: 0;
+  background: transparent;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--cp-ink-2, #52525b);
+  cursor: pointer;
+}
+
+.studio-2d-page.wb-v2 .stage-stepper button.active {
+  background: #ffffff;
+  color: var(--cp-ink, #18181b);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.07);
+}
+
+.studio-2d-page.wb-v2 .stage-stepper .stage-arrow {
+  color: var(--cp-ink-3, #8e929b);
+  font-size: 11px;
+}
+
+/* ---------- 2. 3-Column Floating Card Layout ---------- */
+.studio-2d-page.wb-v2 .studio-split {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr) 292px;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  background: var(--cp-bg, #f5f6f8);
+}
+
+.studio-2d-page.wb-v2 .studio-split > .pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  border: 0;
+  border-radius: var(--cp-radius-card, 12px);
+  box-shadow: var(--cp-shadow-card, 0 1px 2px rgba(15, 23, 42, 0.03), 0 0 0 1px rgba(15, 23, 42, 0.055));
+  background: var(--cp-surface, #ffffff);
+  overflow: hidden;
+}
+
+.studio-2d-page.wb-v2 .studio-split > .pane.studio-center {
+  background: #ffffff;
+  box-shadow: var(--cp-shadow-card, 0 1px 2px rgba(15, 23, 42, 0.03), 0 0 0 1px rgba(15, 23, 42, 0.055));
+}
+
+.studio-2d-page.wb-v2 .studio-split .pane-h {
+  flex: none;
+  height: 40px;
+  padding: 0 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--cp-surface, #ffffff);
+  border-bottom: 1px solid var(--cp-divider, rgba(15, 23, 42, 0.055));
+  color: var(--cp-ink, #18181b);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.studio-2d-page.wb-v2 .studio-split .pane-h .link-btn {
+  margin-left: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--cp-ink-2, #52525b);
+  text-decoration: none;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.studio-2d-page.wb-v2 .studio-split .pane-h .link-btn:hover {
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--cp-ink, #18181b);
+  text-decoration: none;
+}
+
+.studio-2d-page.wb-v2 .studio-left .pane-b,
+.studio-2d-page.wb-v2 .studio-right .pane-b {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scrollbar-width: thin;
+}
+
+/* ---------- 3. Left Column: Minimal Source Switcher & Clean Flat Demand List ---------- */
+.studio-2d-page.wb-v2 .wb-source-box {
+  padding: 8px;
+  border-radius: 10px;
+  background: #f8f9fb;
+  border: 1px solid rgba(15, 23, 42, 0.055);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.studio-2d-page.wb-v2 .wb-source-box .seg {
+  width: 100%;
+}
+
+.studio-2d-page.wb-v2 .wb-source-box .seg button {
+  flex: 1;
+  justify-content: center;
+}
+
+.studio-2d-page.wb-v2 .wb-source-box .field {
+  height: 30px;
+  font-size: 12px;
+}
+
+.studio-2d-page.wb-v2 .wb-source-meta {
+  font-size: 11px;
+  color: var(--cp-ink-3, #8e929b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.studio-2d-page.wb-v2 .wb-source-meta b {
+  color: var(--cp-ink-2, #52525b);
+  font-weight: 600;
+}
+
+.studio-2d-page.wb-v2 .cluster-quick-sizes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+}
+
+.studio-2d-page.wb-v2 .cluster-quick-sizes label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #ffffff;
+  font-size: 11px;
+  color: var(--cp-ink-2, #52525b);
+}
+
+.studio-2d-page.wb-v2 .cluster-quick-sizes label.on {
+  border-color: rgba(91, 97, 246, 0.35);
+  background: rgba(91, 97, 246, 0.05);
+  color: var(--cp-accent-ink, #4338ca);
+}
+
+.studio-2d-page.wb-v2 .cluster-quick-sizes input {
+  width: 34px;
+  border: 0;
+  background: transparent;
+  text-align: right;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: inherit;
+  outline: none;
+}
+
+.studio-2d-page.wb-v2 .cluster-quick-btns {
+  display: flex;
+  gap: 6px;
+}
+
+/* Compact Demand Summary Strip */
+.studio-2d-page.wb-v2 .wb-summary-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 2px 0;
+}
+
+.studio-2d-page.wb-v2 .wb-summary-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.studio-2d-page.wb-v2 .wb-summary-nums {
+  font-size: 11.5px;
+  color: var(--cp-ink-2, #52525b);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.studio-2d-page.wb-v2 .wb-summary-nums b {
+  color: var(--cp-ink, #18181b);
+  font-weight: 650;
+}
+
+.studio-2d-page.wb-v2 .wb-summary-nums .is-ok {
+  color: #059669;
+}
+
+.studio-2d-page.wb-v2 .wb-overview-trigger {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(15, 23, 42, 0.09);
+  background: #ffffff;
+  color: var(--cp-ink-2, #52525b);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: none;
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.studio-2d-page.wb-v2 .wb-overview-trigger:hover {
+  background: #f4f5f7;
+  color: var(--cp-ink, #18181b);
+  border-color: rgba(15, 23, 42, 0.18);
+}
+
+.studio-2d-page.wb-v2 .wb-list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px;
+  font-size: 11.5px;
+  color: var(--cp-ink-3, #8e929b);
+}
+
+.studio-2d-page.wb-v2 .wb-list-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.studio-2d-page.wb-v2 .wb-tiny-ghost {
+  border: 0;
+  background: transparent;
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--cp-ink-2, #52525b);
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.studio-2d-page.wb-v2 .wb-tiny-ghost:hover {
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--cp-ink, #18181b);
+}
+
+/* Magpie Flat Pure-White Rounded Demand List (NO yellow borders, NO cards, NO yellow pills!) */
+.studio-2d-page.wb-v2 .wb-demand-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  margin: 0;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.075);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.studio-2d-page.wb-v2 .wb-demand-prog-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-left: 0 !important;
+  border-radius: 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.055);
+  background: #ffffff;
+  cursor: pointer;
+  transition: background-color 0.13s ease;
+}
+
+.studio-2d-page.wb-v2 .wb-demand-prog-row:last-child {
+  border-bottom: 0;
+}
+
+.studio-2d-page.wb-v2 .wb-demand-prog-row.is-open,
+.studio-2d-page.wb-v2 .wb-demand-prog-row.is-cand,
+.studio-2d-page.wb-v2 .wb-demand-prog-row.is-done {
+  border-left: 0 !important;
+  border-color: rgba(15, 23, 42, 0.055);
+  background: #ffffff;
+}
+
+.studio-2d-page.wb-v2 .wb-demand-prog-row:hover {
+  background: #f8f9fc;
+}
+
+.studio-2d-page.wb-v2 .wb-demand-prog-row.is-highlighted {
+  background: rgba(91, 97, 246, 0.065);
+}
+
+.studio-2d-page.wb-v2 .wb-demand-prog-row.is-done .wb-row-name {
+  color: var(--cp-ink-2, #52525b);
+}
+
+.studio-2d-page.wb-v2 .wb-row-main {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px 7px;
+  min-width: 0;
+}
+
+.studio-2d-page.wb-v2 .wb-row-thumb {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  background: #f6f7fa;
+  border: 1px solid rgba(15, 23, 42, 0.055);
+}
+
+.studio-2d-page.wb-v2 .wb-row-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.studio-2d-page.wb-v2 .wb-row-name {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--cp-ink, #18181b);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.studio-2d-page.wb-v2 .wb-row-dim {
+  font-size: 11px;
+  color: var(--cp-ink-3, #8e929b);
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.studio-2d-page.wb-v2 .wb-row-count {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--cp-ink-2, #52525b);
+  white-space: nowrap;
+}
+
+.studio-2d-page.wb-v2 .wb-row-count.is-done {
+  color: #059669;
+}
+
+.studio-2d-page.wb-v2 .wb-row-count.is-cand {
+  color: var(--cp-accent-ink, #4338ca);
+}
+
+.studio-2d-page.wb-v2 .wb-row-check {
+  width: 12px;
+  height: 12px;
+  color: #10b981;
+  flex: none;
+}
+
+/* Ultra-slim 2px progress track flush at bottom edge of each row */
+.studio-2d-page.wb-v2 .wb-demand-prog-row .wb-mini-prog {
+  height: 2px;
+  border-radius: 0;
+  background: rgba(15, 23, 42, 0.045);
+  margin: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.studio-2d-page.wb-v2 .wb-mini-prog {
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.07);
+  display: flex;
+  overflow: hidden;
+}
+
+.studio-2d-page.wb-v2 .wb-mini-prog .seg-done {
+  background: #10b981;
+}
+
+.studio-2d-page.wb-v2 .wb-mini-prog .seg-plan {
+  background: var(--cp-accent, #5b61f6);
+}
+
+.studio-2d-page.wb-v2 .wb-mini-prog .seg-cand {
+  background: #818cf8;
+}
+
+/* ---------- 4. Center Column: Light Canvas Toolbar + Fixed-Grid Board ---------- */
+.studio-2d-page.wb-v2 .studio-center .ctool {
+  flex: none;
+  height: 40px;
+  padding: 0 12px;
+  background: #ffffff;
+  border-bottom: 1px solid var(--cp-divider, rgba(15, 23, 42, 0.06));
+  color: var(--cp-ink-2, #52525b);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.studio-2d-page.wb-v2 .studio-center .ctool button {
+  height: 26px;
+  min-block-size: 26px;
+  min-inline-size: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  border: 1px solid rgba(15, 23, 42, 0.09);
+  background: #ffffff;
+  color: var(--cp-ink-2, #52525b);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.studio-2d-page.wb-v2 .studio-center .ctool button:hover {
+  background: #f4f5f7;
+  color: var(--cp-ink, #18181b);
+  border-color: rgba(15, 23, 42, 0.16);
+}
+
+.studio-2d-page.wb-v2 .studio-center .ctool button[aria-pressed="true"],
+.studio-2d-page.wb-v2 .studio-center .ctool button.on {
+  background: var(--cp-accent-soft, rgba(91, 97, 246, 0.1));
+  border-color: rgba(91, 97, 246, 0.34);
+  color: var(--cp-accent-ink, #4338ca);
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.studio-2d-page.wb-v2 .studio-center .ctool .div {
+  block-size: 14px;
+  border-inline-start: 1px solid rgba(15, 23, 42, 0.1);
+}
+
+.studio-2d-page.wb-v2 .studio-center .ctool .ctool-readout {
+  color: var(--cp-ink-2, #52525b);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.studio-2d-page.wb-v2 .studio-center .ctool .ctool-piece-act {
+  background: rgba(91, 97, 246, 0.08);
+  border-color: rgba(91, 97, 246, 0.28);
+  color: var(--cp-accent-ink, #4338ca);
+}
+
+.studio-2d-page.wb-v2 .studio-center .ctool .ctool-piece-act:hover {
+  background: rgba(91, 97, 246, 0.15);
+}
+
+/* Fixed non-moving light engineering graph-paper grid background */
+.wb-board-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+  background-color: #f4f5f7;
+  background-image:
+    linear-gradient(to right, rgba(15, 23, 42, 0.095) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.095) 1px, transparent 1px),
+    linear-gradient(to right, rgba(15, 23, 42, 0.055) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.055) 1px, transparent 1px);
+  background-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px;
+  background-position: 0 0;
+  overflow: hidden;
+  user-select: none;
+}
+
+.wb-board-konva-host {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  outline: none;
+}
+
+.wb-board-feedback {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  pointer-events: none;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+  white-space: nowrap;
+}
+
+.wb-board-feedback.is-ok {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.wb-board-feedback.is-err {
+  background: #fff1f2;
+  color: #be123c;
+  border: 1px solid rgba(225, 29, 72, 0.35);
+}
+
+.wb-board-feedback.is-return {
+  background: #eef2ff;
+  color: #4338ca;
+  border: 1px solid rgba(91, 97, 246, 0.35);
+}
+
+.wb-board-zoom-pill {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  z-index: 8;
+  pointer-events: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  color: var(--cp-ink-2, #52525b);
+  font-size: 11px;
+  font-weight: 500;
+  backdrop-filter: blur(4px);
+}
+
+/* Minimal Candidate Pill Strip (shown ONLY when schemes2D.length > 0) */
+.studio-2d-page.wb-v2 .scheme-strip {
+  flex: none;
+  padding: 8px 10px;
+  background: #ffffff;
+  border-top: 1px solid var(--cp-divider, rgba(15, 23, 42, 0.06));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.studio-2d-page.wb-v2 .scheme-slots {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 1px 0;
+  scrollbar-width: thin;
+}
+
+.studio-2d-page.wb-v2 .scheme-slot {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 9px;
+  border: 1px solid rgba(15, 23, 42, 0.09);
+  background: #fafafb;
+  color: var(--cp-ink, #18181b);
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.studio-2d-page.wb-v2 .scheme-slot:hover {
+  background: #f3f4f8;
+  border-color: rgba(15, 23, 42, 0.16);
+}
+
+.studio-2d-page.wb-v2 .scheme-slot.on {
+  background: rgba(91, 97, 246, 0.065);
+  border-color: var(--cp-accent, #5b61f6);
+  box-shadow: 0 0 0 1px rgba(91, 97, 246, 0.18);
+}
+
+.studio-2d-page.wb-v2 .scheme-slot-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cp-ink, #18181b);
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-2d-page.wb-v2 .scheme-slot-stat {
+  font-size: 11.5px;
+  color: var(--cp-ink-2, #52525b);
+  white-space: nowrap;
+}
+
+.studio-2d-page.wb-v2 .scheme-slot-stat b {
+  color: var(--cp-ink, #18181b);
+  font-weight: 650;
+}
+
+.studio-2d-page.wb-v2 .scheme-slot.on .scheme-slot-stat b {
+  color: var(--cp-accent-ink, #4338ca);
+}
+
+.studio-2d-page.wb-v2 .scheme-del {
+  border: 0;
+  background: transparent;
+  color: var(--cp-ink-3, #8e929b);
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.studio-2d-page.wb-v2 .scheme-del:hover {
+  background: rgba(15, 23, 42, 0.08);
+  color: var(--cp-ink, #18181b);
+}
+
+/* ---------- 5. Right Column: Clean Goal Selector & Active Scheme Decision ---------- */
+.studio-2d-page.wb-v2 .wb-right-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.studio-2d-page.wb-v2 .wb-right-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--cp-ink-3, #8e929b);
+}
+
+.studio-2d-page.wb-v2 .wb-goal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.studio-2d-page.wb-v2 .wb-goal-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid rgba(15, 23, 42, 0.075);
+  background: #ffffff;
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.studio-2d-page.wb-v2 .wb-goal-item:hover {
+  background: #f9fafc;
+  border-color: rgba(15, 23, 42, 0.14);
+}
+
+.studio-2d-page.wb-v2 .wb-goal-item:has(input:checked) {
+  border-color: rgba(91, 97, 246, 0.45);
+  background: rgba(91, 97, 246, 0.045);
+}
+
+.studio-2d-page.wb-v2 .wb-goal-item input[type="radio"] {
+  margin-top: 2px;
+  accent-color: var(--cp-accent, #5b61f6);
+  flex: none;
+}
+
+.studio-2d-page.wb-v2 .wb-goal-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.studio-2d-page.wb-v2 .wb-goal-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--cp-ink, #18181b);
+  line-height: 1.3;
+}
+
+.studio-2d-page.wb-v2 .wb-goal-desc {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--cp-ink-3, #8e929b);
+  line-height: 1.4;
+}
+
+/* Active Scheme Decision Card */
+.studio-2d-page.wb-v2 .value-hero-panel {
+  margin: 0;
+  padding: 11px 12px;
+  border-radius: 10px;
+  background: #fafafb;
+  border: 1px solid rgba(15, 23, 42, 0.075);
+  gap: 9px;
+}
+
+.studio-2d-page.wb-v2 .value-hero-title {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--cp-ink, #18181b);
+}
+
+.studio-2d-page.wb-v2 .value-kpi-grid {
+  gap: 6px;
+}
+
+.studio-2d-page.wb-v2 .value-kpi-cell {
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.studio-2d-page.wb-v2 .value-kpi-cell.highlight {
+  background: #f0fdf4;
+  border-color: rgba(16, 185, 129, 0.28);
+}
+
+.studio-2d-page.wb-v2 .value-kpi-cell b {
+  font-size: 16px;
+}
+
+/* Live solve progress strip (only visible while solving) */
+.studio-2d-page.wb-v2 .wb-solve-progress {
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: #f8f9fc;
+  border: 1px solid rgba(91, 97, 246, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.studio-2d-page.wb-v2 .wb-solve-progress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11.5px;
+}
+
+.studio-2d-page.wb-v2 .wb-solve-progress-name {
+  color: var(--cp-ink, #18181b);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-2d-page.wb-v2 .wb-solve-progress-phase {
+  color: var(--cp-ink-3, #8e929b);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* Sticky Bottom-Right Footer */
+.studio-2d-page.wb-v2 .studio-right-foot {
+  flex: none;
+  padding: 10px 12px 12px;
+  background: #ffffff;
+  border-top: 1px solid var(--cp-divider, rgba(15, 23, 42, 0.06));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.studio-2d-page.wb-v2 .studio-right-foot-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--cp-ink-3, #8e929b);
+}
+
+.studio-2d-page.wb-v2 .studio-right-foot-meta b {
+  color: var(--cp-ink, #18181b);
+  font-weight: 600;
+}
+
+.studio-2d-page.wb-v2 .wb-algo-config-link {
+  border: 0;
+  background: transparent;
+  padding: 1px 4px;
+  border-radius: 5px;
+  font-size: 11px;
+  color: var(--cp-ink-3, #8e929b);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.14s ease, background-color 0.14s ease;
+}
+
+.studio-2d-page.wb-v2 .wb-algo-config-link:hover {
+  color: var(--cp-accent-ink, #4338ca);
+  background: rgba(91, 97, 246, 0.08);
+}
+
+.studio-2d-page.wb-v2 .studio-right-foot-btns {
+  display: flex;
+  gap: 6px;
+}
+
+.studio-2d-page.wb-v2 .studio-right-foot .studio-solve-btn {
+  height: 36px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--cp-accent, #5b61f6);
+  border-color: var(--cp-accent, #5b61f6);
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(91, 97, 246, 0.26);
+}
+
+.studio-2d-page.wb-v2 .studio-right-foot .studio-solve-btn:hover:not([disabled]) {
+  background: var(--cp-accent-hover, #4a50e6);
+  border-color: var(--cp-accent-hover, #4a50e6);
+}
+
+/* Post-confirm banner */
+.studio-2d-page.wb-v2 .wb-confirm-banner {
+  padding: 10px 11px;
+  border-radius: 10px;
+  background: #f0fdf4;
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #065f46;
+}
+
+/* ---------- 6. Responsive Compact Guard (1366x768) ---------- */
+@media (max-width: 1400px) {
+  .studio-2d-page.wb-v2 .studio-split {
+    grid-template-columns: 244px minmax(0, 1fr) 264px;
+    gap: 8px;
+    padding: 8px 10px 10px;
+  }
+  .studio-2d-page.wb-v2 .studio-top-bar {
+    padding: 6px 12px;
+    gap: 7px;
+  }
+}

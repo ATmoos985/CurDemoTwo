@@ -1,0 +1,923 @@
+/* ==========================================================================
+   Demand Management Split Workspace (Magpie Light Desktop Dual-Column)
+   Left: Permanent inline Create / Append Demand card (zero modal friction)
+   Right: Existing Demands ledger card with search + dimension/status selects
+   Scoped under .dp-split-page so cascade order never conflicts with base CSS.
+   ========================================================================== */
+
+.dp-split-page {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 18px 14px;
+  gap: 10px;
+  background: var(--cp-bg, #f5f6f8);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+/* Compact Top Header */
+.dp-split-page .dp-split-head {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px;
+  min-height: 26px;
+}
+
+.dp-split-page .dp-split-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.dp-split-page .dp-split-title-group h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  color: var(--cp-ink, #18181b);
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.dp-split-page .dp-split-summary {
+  font-size: 12px;
+  color: var(--cp-ink-3, #8e929b);
+  white-space: nowrap;
+}
+
+.dp-split-page .dp-split-hint {
+  font-size: 11.5px;
+  color: var(--cp-ink-3, #8e929b);
+  white-space: nowrap;
+}
+
+/* Dual-Column Floating Surface Grid */
+.dp-split-page .dp-split-grid {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 420px minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.dp-split-page .dp-pane {
+  min-height: 0;
+  min-width: 0;
+  background: var(--cp-surface, #ffffff);
+  border-radius: var(--cp-radius-card, 12px);
+  box-shadow: var(--cp-shadow-card, 0 1px 2px rgba(15, 23, 42, 0.03), 0 0 0 1px rgba(15, 23, 42, 0.055));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ==========================================================================
+   Left Pane: Inline Create / Append Demand Workspace
+   ========================================================================== */
+
+.dp-split-page .dp-create-pane.is-append-mode {
+  box-shadow: 0 1px 3px rgba(91, 97, 246, 0.1), 0 0 0 1px rgba(91, 97, 246, 0.32);
+}
+
+.dp-split-page .dp-pane-head {
+  flex: none;
+  min-height: 42px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--cp-divider, rgba(15, 23, 42, 0.055));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  background: var(--cp-surface, #ffffff);
+}
+
+.dp-split-page .dp-pane-head-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--cp-ink, #18181b);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.dp-split-page .dp-pane-head-actions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.dp-split-page .dp-head-ghost {
+  height: 26px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cp-ink-2, #52525b);
+  font-size: 11.5px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.dp-split-page .dp-head-ghost:hover {
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--cp-ink, #18181b);
+}
+
+/* Append Mode Target Banner */
+.dp-split-page .dp-append-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 14px;
+  background: rgba(91, 97, 246, 0.06);
+  border-bottom: 1px solid rgba(91, 97, 246, 0.16);
+  font-size: 12px;
+  color: var(--cp-accent-ink, #4338ca);
+}
+
+.dp-split-page .dp-append-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.dp-split-page .dp-create-form {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dp-split-page .dp-create-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 11px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  scrollbar-width: thin;
+}
+
+/* Form Field Groups */
+.dp-split-page .dp-field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dp-split-page .dp-field-label {
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--cp-ink-2, #52525b);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.dp-split-page .dp-field-opt {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--cp-ink-3, #8e929b);
+}
+
+.dp-split-page .dp-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px 9px;
+}
+
+.dp-split-page .dp-span-2 {
+  grid-column: 1 / -1;
+}
+
+.dp-split-page .dp-field-block > input.field,
+.dp-split-page .dp-field-block > select.field {
+  width: 100%;
+  box-sizing: border-box;
+  height: 30px;
+  padding: 0 9px;
+  font-size: 12px;
+  border-radius: 8px;
+}
+
+/* Quick Template Expand Strip (Grid prevents select collapse or overflow) */
+.dp-split-page .dp-tpl-strip {
+  padding: 8px 9px;
+  border-radius: 9px;
+  background: #f8f9fb;
+  border: 1px solid var(--cp-border, rgba(15, 23, 42, 0.085));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dp-split-page .dp-tpl-strip-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cp-ink-3, #8e929b);
+  letter-spacing: 0.01em;
+}
+
+.dp-split-page .dp-tpl-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 46px auto auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.dp-split-page select.field.dp-tpl-select {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  font-size: 11.5px;
+  padding: 0 22px 0 7px;
+  border-radius: 7px;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dp-split-page input.field.dp-tpl-sets {
+  width: 46px;
+  min-width: 46px;
+  height: 28px;
+  padding: 0 5px;
+  text-align: center;
+  font-size: 12px;
+  border-radius: 7px;
+  box-sizing: border-box;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.dp-split-page input.field.dp-tpl-sets::-webkit-outer-spin-button,
+.dp-split-page input.field.dp-tpl-sets::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.dp-split-page .dp-tpl-unit {
+  font-size: 11.5px;
+  color: var(--cp-ink-2, #52525b);
+  white-space: nowrap;
+}
+
+.dp-split-page .dp-tpl-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 0 9px;
+}
+
+/* Spec Lines Section */
+.dp-split-page .dp-spec-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dp-split-page .dp-spec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dp-split-page .dp-spec-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cp-ink, #18181b);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dp-split-page .dp-spec-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--cp-ink-3, #8e929b);
+}
+
+.dp-split-page .dp-spec-table-wrap {
+  border-radius: 9px;
+  border: 1px solid var(--cp-border, rgba(15, 23, 42, 0.085));
+  background: var(--cp-surface, #ffffff);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.dp-split-page table.dp-spec-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.dp-split-page table.dp-spec-table th {
+  height: 28px;
+  padding: 0 4px;
+  background: #fafafb;
+  border-bottom: 1px solid var(--cp-divider, rgba(15, 23, 42, 0.055));
+  color: var(--cp-ink-3, #8e929b);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.dp-split-page table.dp-spec-table th.r {
+  text-align: right;
+  padding-right: 6px;
+}
+
+.dp-split-page table.dp-spec-table td {
+  padding: 4px 2.5px;
+  border-bottom: 1px solid var(--cp-divider, rgba(15, 23, 42, 0.055));
+  vertical-align: middle;
+}
+
+.dp-split-page table.dp-spec-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.dp-split-page table.dp-spec-table tbody tr:hover td {
+  background: #fafbfe;
+}
+
+.dp-split-page table.dp-spec-table .dp-cell-input {
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 0 5px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: #f5f6f8;
+  color: var(--cp-ink, #18181b);
+  font-size: 11.5px;
+  box-sizing: border-box;
+  transition: background-color 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.dp-split-page table.dp-spec-table .dp-cell-input:hover:not(:disabled) {
+  background: #eff1f5;
+}
+
+.dp-split-page table.dp-spec-table .dp-cell-input:focus {
+  outline: none;
+  background: #ffffff;
+  border-color: var(--cp-accent, #5b61f6);
+  box-shadow: 0 0 0 2px rgba(91, 97, 246, 0.14);
+}
+
+.dp-split-page table.dp-spec-table .dp-cell-input:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+/* Hide browser number spin buttons so 4-digit mm & 3-digit qty never clip */
+.dp-split-page table.dp-spec-table input[type='number'].dp-cell-num {
+  text-align: right;
+  padding: 0 4px;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.dp-split-page table.dp-spec-table input[type='number'].dp-cell-num::-webkit-outer-spin-button,
+.dp-split-page table.dp-spec-table input[type='number'].dp-cell-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.dp-split-page table.dp-spec-table select.dp-cell-input {
+  padding: 0 2px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.dp-split-page .dp-shape-chip {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--cp-accent-soft, rgba(91, 97, 246, 0.1));
+  color: var(--cp-accent-ink, #4338ca);
+}
+
+.dp-split-page .dp-row-del {
+  width: 20px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--cp-ink-3, #8e929b);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.dp-split-page .dp-row-del:hover {
+  background: rgba(225, 29, 72, 0.1);
+  color: #be123c;
+}
+
+.dp-split-page .dp-spec-empty {
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--cp-ink-3, #8e929b);
+}
+
+/* Sticky Bottom Action Bar in Left Pane */
+.dp-split-page .dp-create-foot {
+  flex: none;
+  padding: 9px 14px;
+  border-top: 1px solid var(--cp-divider, rgba(15, 23, 42, 0.055));
+  background: var(--cp-surface, #ffffff);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dp-split-page .dp-foot-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dp-split-page .dp-foot-stats {
+  font-size: 12px;
+  color: var(--cp-ink-2, #52525b);
+  white-space: nowrap;
+}
+
+.dp-split-page .dp-foot-stats strong {
+  color: var(--cp-ink, #18181b);
+  font-weight: 600;
+}
+
+.dp-split-page .dp-foot-submit {
+  min-width: 102px;
+  justify-content: center;
+}
+
+/* ==========================================================================
+   Right Pane: Existing Demands Ledger Card
+   ========================================================================== */
+
+.dp-split-page .dp-list-toolbar {
+  flex: none;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--cp-divider, rgba(15, 23, 42, 0.055));
+  background: var(--cp-surface, #ffffff);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.dp-split-page .dp-search-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 160px;
+  max-width: 230px;
+  min-width: 136px;
+}
+
+.dp-split-page .dp-search-input {
+  width: 100%;
+  height: 30px;
+  padding: 0 10px 0 30px;
+  border-radius: 8px;
+  border: 1px solid var(--cp-border-strong, rgba(15, 23, 42, 0.14));
+  background: #fafafb;
+  color: var(--cp-ink, #18181b);
+  font-size: 12px;
+  box-sizing: border-box;
+  transition: background-color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.dp-split-page .dp-search-input::placeholder {
+  color: var(--cp-ink-3, #8e929b);
+}
+
+.dp-split-page .dp-search-input:focus {
+  outline: none;
+  background: var(--cp-surface, #ffffff);
+  border-color: var(--cp-accent, #5b61f6);
+  box-shadow: 0 0 0 3px rgba(91, 97, 246, 0.12);
+}
+
+.dp-split-page .dp-filter-selects {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.dp-split-page select.dp-filter-select {
+  height: 30px;
+  padding: 0 22px 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--cp-border-strong, rgba(15, 23, 42, 0.14));
+  background: var(--cp-surface, #ffffff);
+  color: var(--cp-ink, #18181b);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  min-width: 96px;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.dp-split-page select.dp-filter-select:focus {
+  outline: none;
+  border-color: var(--cp-accent, #5b61f6);
+  box-shadow: 0 0 0 3px rgba(91, 97, 246, 0.12);
+}
+
+.dp-split-page .dp-list-toolbar-right {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+/* Right Card Scroll Body + Safe Horizontal Table Container */
+.dp-split-page .dp-list-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+}
+
+.dp-split-page .dp-table-xscroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.dp-split-page .dp-table-xscroll > table.t {
+  width: 100%;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+  background: var(--cp-surface, #ffffff);
+}
+
+.dp-split-page .dp-table-xscroll > table.t > thead th {
+  background: #fcfcfd;
+  height: 34px;
+  padding: 0 7px;
+  font-size: 11px;
+  color: var(--cp-ink-3, #8e929b);
+  border-bottom: 1px solid var(--cp-divider, rgba(15, 23, 42, 0.055));
+  white-space: nowrap;
+}
+
+.dp-split-page .dp-table-xscroll > table.t > tbody > tr > td {
+  height: 48px;
+  padding: 5px 7px;
+  border-bottom: 1px solid var(--cp-divider, rgba(15, 23, 42, 0.055));
+}
+
+.dp-split-page .dp-col-check {
+  width: 28px;
+  padding-left: 8px !important;
+  padding-right: 4px !important;
+  text-align: center;
+}
+
+.dp-split-page .dp-col-name {
+  white-space: normal;
+  min-width: 132px;
+  max-width: 210px;
+}
+
+.dp-split-page .dp-col-name .mp-fam-title-row {
+  gap: 4px;
+}
+
+.dp-split-page .dp-col-name .mp-fam-title-row strong {
+  font-size: 12.5px;
+}
+
+.dp-split-page .dp-col-name .mp-fam-sub {
+  max-width: 196px;
+}
+
+.dp-split-page .dp-col-mat {
+  max-width: 104px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cp-ink-2, #52525b);
+  font-size: 11.5px;
+}
+
+.dp-split-page .dp-col-ledger {
+  min-width: 148px;
+}
+
+.dp-split-page .dp-col-ledger .demand-ledger-cell {
+  min-width: 0;
+}
+
+.dp-split-page .dp-col-ledger .demand-ledger-nums {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  font-size: 10.5px;
+  line-height: 1.25;
+}
+
+.dp-split-page .dp-col-actions {
+  text-align: right;
+  white-space: nowrap;
+  padding-right: 10px !important;
+}
+
+.dp-split-page .dp-row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.dp-split-page .dp-row-actions .btn.sm {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 11.5px;
+}
+
+.dp-split-page .dp-row-is-target td {
+  background: rgba(91, 97, 246, 0.065) !important;
+}
+
+/* Expanded Sub-Card & Compact 9-Column Spec Table (Never widens outer table) */
+.dp-split-page .dp-table-xscroll > table.t > tbody > tr > td.mp-demand-expand-cell {
+  height: auto;
+  padding: 8px 10px 10px !important;
+  background: #f9fafb !important;
+}
+
+.dp-split-page .mp-demand-expand-inner {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.dp-split-page .mp-demand-expand-head {
+  padding: 7px 10px;
+  gap: 8px;
+}
+
+.dp-split-page .dp-expand-inner-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.dp-split-page table.dp-sub-table {
+  width: 100%;
+  border-collapse: collapse;
+  box-shadow: none;
+  border-radius: 0;
+  background: var(--cp-surface, #ffffff);
+}
+
+.dp-split-page table.dp-sub-table thead th {
+  height: 30px;
+  padding: 0 6px;
+  background: #fafafb;
+  color: var(--cp-ink-3, #8e929b);
+  font-size: 11px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--cp-divider, rgba(15, 23, 42, 0.055));
+  white-space: nowrap;
+}
+
+.dp-split-page table.dp-sub-table tbody td {
+  height: 34px;
+  padding: 4px 6px;
+  font-size: 11.5px;
+  border-bottom: 1px solid var(--cp-divider, rgba(15, 23, 42, 0.055));
+  white-space: nowrap;
+}
+
+.dp-split-page table.dp-sub-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.dp-split-page table.dp-sub-table td.dp-sub-name {
+  white-space: normal;
+  min-width: 82px;
+  max-width: 150px;
+  font-weight: 600;
+}
+
+.dp-split-page .dp-empty-state {
+  padding: 44px 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.dp-split-page .dp-empty-state strong {
+  font-size: 14px;
+  color: var(--cp-ink, #18181b);
+}
+
+.dp-split-page .dp-empty-state p {
+  margin: 0 0 8px;
+  max-width: 400px;
+  font-size: 12.5px;
+  color: var(--cp-ink-3, #8e929b);
+}
+
+/* ==========================================================================
+   Responsive Breakpoints: 1440x860, 1366x768 Compact Desktop & <1080px Stack
+   ========================================================================== */
+
+@media (max-width: 1480px) {
+  .dp-split-page {
+    padding: 10px 14px 12px;
+    gap: 8px;
+  }
+
+  .dp-split-page .dp-split-grid {
+    grid-template-columns: 384px minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .dp-split-page .dp-pane-head {
+    padding: 7px 12px;
+  }
+
+  .dp-split-page .dp-create-body {
+    padding: 10px 12px 12px;
+    gap: 10px;
+  }
+
+  .dp-split-page .dp-create-foot {
+    padding: 9px 12px;
+  }
+
+  .dp-split-page .dp-table-xscroll > table.t > thead th {
+    padding: 0 6px;
+  }
+
+  .dp-split-page .dp-table-xscroll > table.t > tbody > tr > td {
+    padding: 5px 6px;
+  }
+}
+
+@media (max-width: 1400px) {
+  .dp-split-page {
+    padding: 9px 12px 10px;
+    gap: 8px;
+  }
+
+  .dp-split-page .dp-split-grid {
+    grid-template-columns: 358px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .dp-split-page .dp-pane-head {
+    padding: 6px 10px;
+  }
+
+  .dp-split-page .dp-head-ghost {
+    padding: 0 5px;
+    font-size: 11px;
+  }
+
+  .dp-split-page .dp-create-body {
+    padding: 9px 10px 12px;
+    gap: 9px;
+  }
+
+  .dp-split-page .dp-create-foot {
+    padding: 8px 10px;
+  }
+
+  .dp-split-page .dp-list-toolbar {
+    padding: 7px 10px;
+    gap: 6px;
+  }
+
+  .dp-split-page .dp-search-wrap {
+    flex: 1 1 130px;
+    min-width: 124px;
+    max-width: 185px;
+  }
+
+  .dp-split-page select.dp-filter-select {
+    min-width: 88px;
+    padding: 0 18px 0 7px;
+    font-size: 11.5px;
+  }
+
+  .dp-split-page .dp-table-xscroll > table.t > thead th {
+    padding: 0 5px;
+  }
+
+  .dp-split-page .dp-table-xscroll > table.t > tbody > tr > td {
+    padding: 5px 5px;
+  }
+
+  .dp-split-page .dp-col-name {
+    min-width: 122px;
+    max-width: 175px;
+  }
+
+  .dp-split-page .dp-col-name .mp-fam-sub {
+    max-width: 165px;
+  }
+
+  .dp-split-page .dp-col-mat {
+    max-width: 86px;
+  }
+
+  .dp-split-page .dp-col-ledger {
+    min-width: 140px;
+  }
+
+  .dp-split-page .dp-row-actions .btn.sm {
+    padding: 0 7px;
+    font-size: 11px;
+  }
+
+  .dp-split-page table.dp-sub-table thead th,
+  .dp-split-page table.dp-sub-table tbody td {
+    padding-left: 5px;
+    padding-right: 5px;
+    font-size: 11px;
+  }
+
+  .dp-split-page .dp-split-hint {
+    display: none;
+  }
+}
+
+@media (max-width: 1080px) {
+  .dp-split-page {
+    height: auto;
+    overflow-y: auto;
+  }
+
+  .dp-split-page .dp-split-grid {
+    grid-template-columns: minmax(0, 1fr);
+    flex: none;
+  }
+
+  .dp-split-page .dp-pane {
+    overflow: visible;
+  }
+
+  .dp-split-page .dp-create-body,
+  .dp-split-page .dp-list-body {
+    overflow-y: visible;
+  }
+}

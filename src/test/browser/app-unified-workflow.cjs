@@ -109,18 +109,35 @@ const api = async (path) => {
       await page.goto(base + '/app/#/demands');
       await page.getByRole('heading', { name: '需求管理', exact: true, level: 1 }).waitFor();
 
-      await page.getByRole('button', { name: '＋ 新建需求族' }).click();
-      await page.locator('dialog[open]').waitFor();
+      // Left persistent create form is immediately visible without modal trigger
+      await page.locator('#dp-name').waitFor();
       await page.locator('#dp-name').fill('E2E-卫衣测试需求族');
-      await page.locator('dialog[open] button[type="submit"]').click();
+      await page.locator('.dp-create-form button[type="submit"]').click();
 
-      // Wait for row to appear in demand pool
+      // Wait for row to appear in right-hand demand ledger
       await page.locator('tr', { hasText: 'E2E-卫衣测试需求族' }).first().waitFor();
       const poolBefore = await api('/api/v2/demand-pool');
       const familyBefore = poolBefore.find((f) => f.name === 'E2E-卫衣测试需求族');
       assert.ok(familyBefore, 'Demand family persisted in /api/v2/demand-pool');
       assert.equal(familyBefore.openTotal, 20);
       createdTaskId = familyBefore.id;
+
+      // Verify right-pane dual dropdown filters (dimension + status) work accurately
+      const dimSelect = page.locator('select[aria-label="按维度筛选"]');
+      const statusSelect = page.locator('select[aria-label="按状态筛选"]');
+      await dimSelect.waitFor();
+      await statusSelect.waitFor();
+      await dimSelect.selectOption('SLITTING_1D');
+      assert.equal(
+        await page.locator('tr', { hasText: 'E2E-卫衣测试需求族' }).count(),
+        0,
+        '2D rect family filtered out when dimension=SLITTING_1D'
+      );
+      await dimSelect.selectOption('RECT_2D');
+      await statusSelect.selectOption('OPEN_ONLY');
+      await page.locator('tr', { hasText: 'E2E-卫衣测试需求族' }).first().waitFor();
+      await dimSelect.selectOption('ALL');
+      await statusSelect.selectOption('ALL');
 
       // Jump to Cutting Workbench from Demand Pool
       await page
@@ -130,13 +147,31 @@ const api = async (path) => {
       await page.waitForURL('**/#/workbench');
       await page.getByRole('heading', { name: '搭切工作台', exact: true, level: 1 }).waitFor();
 
-      // Default Virtual New Mother Roll must be active, and solve button must live at bottom-right (.studio-right-foot)
+      // Verify default clean workbench state:
+      // 1) Workflow guide stepper hidden by default
+      // 2) Right rail no longer contains "并行求解算法引擎"
+      // 3) Bottom-right primary CTA is "开始排版"
+      assert.equal(
+        await page.locator('.stage-stepper').count(),
+        0,
+        'Workflow guide stepper must be hidden by default'
+      );
+      const rightPaneText = await page.locator('.studio-right').innerText();
+      assert.ok(
+        !rightPaneText.includes('并行求解算法引擎'),
+        'Right rail must not contain 并行求解算法引擎'
+      );
       const defaultVirtualPressed = await page
         .getByRole('button', { name: '默认新母卷', exact: true })
         .getAttribute('aria-pressed');
       assert.equal(defaultVirtualPressed, 'true', 'Virtual new mother roll is default');
       assert.equal(await page.locator('.studio-top-bar .studio-solve-btn').count(), 0, 'Solve CTA removed from top bar');
       assert.equal(await page.locator('.studio-right-foot .studio-solve-btn').count(), 1, 'Solve CTA pinned at bottom-right');
+      assert.equal(
+        (await page.locator('.studio-right-foot .studio-solve-btn').innerText()).trim(),
+        '开始排版',
+        'Bottom-right primary CTA label must be 开始排版'
+      );
 
       // Left column shows per-item completion progress rows with mini progress bars
       assert.equal(await page.locator('.wb-demand-prog-row').count(), 2, 'All demand items shown with progress bars');
@@ -148,20 +183,44 @@ const api = async (path) => {
       assert.ok((await page.locator('dialog[open]').innerText()).includes('逐项具体需求切制明细'));
       await page.locator('dialog[open] .native-modal-head button').click();
 
-      // Select fast deterministic Java heuristic strategy so solve completes in <1s
-      const strategyDetails = page.locator('details.studio-accordion', { hasText: '并行求解算法引擎' });
-      const checkboxes = strategyDetails.locator('input[type="checkbox"]');
-      const cbCount = await checkboxes.count();
-      for (let i = 0; i < cbCount; i++) {
-        const labelText = await strategyDetails.locator('.choice-card').nth(i).innerText();
-        const shouldCheck = labelText.includes('Java 天际线');
-        const checked = await checkboxes.nth(i).isChecked();
-        if (checked !== shouldCheck) {
-          await checkboxes.nth(i).click();
+      // Open Settings -> "求解引擎与配额" via bottom-left #engine-status and enable only JAVA_FAST
+      await page.locator('#engine-status').click();
+      const settingsDialog = page.locator('dialog#studio-settings-dialog[open]');
+      await settingsDialog.waitFor();
+      assert.equal(
+        await settingsDialog.locator('#settings-tab-engines').getAttribute('aria-selected'),
+        'true',
+        '#engine-status should open directly to engines tab'
+      );
+      const javaFastInput = settingsDialog.locator('#cfg-strategy-JAVA_FAST');
+      await javaFastInput.waitFor();
+      if (!(await javaFastInput.isChecked())) {
+        await javaFastInput.click();
+      }
+      const strategyRows = settingsDialog.locator('[data-strategy-id]');
+      const strategyCount = await strategyRows.count();
+      assert.equal(strategyCount, 5, 'Settings engines tab should list all 5 2D strategies');
+      for (let i = 0; i < strategyCount; i++) {
+        const row = strategyRows.nth(i);
+        const sid = await row.getAttribute('data-strategy-id');
+        const cb = row.locator('input[type="checkbox"]');
+        if (sid !== 'JAVA_FAST' && (await cb.isChecked())) {
+          await cb.click();
         }
       }
+      await settingsDialog.getByRole('button', { name: '保存并应用', exact: true }).click();
+      assert.equal(await page.locator('dialog#studio-settings-dialog[open]').count(), 0);
+      await page.waitForFunction(() => {
+        const el = document.querySelector('#engine-status');
+        return Boolean(el && el.textContent && el.textContent.includes('1算法'));
+      });
+      assert.ok(
+        (await page.locator('#engine-status').innerText()).includes('1算法'),
+        '#engine-status must reflect 1 enabled algorithm after saving settings'
+      );
 
-      await page.locator('.studio-right-foot').getByRole('button', { name: /启动并行搭切/ }).click();
+      // Click bottom-right "开始排版"
+      await page.locator('.studio-right-foot').getByRole('button', { name: '开始排版', exact: true }).click();
       await page.locator('.scheme-slot.on').waitFor({ timeout: 15000 });
       assert.ok(await page.locator('canvas').first().isVisible(), 'CAD canvas rendered');
 
@@ -244,6 +303,21 @@ const api = async (path) => {
         '导出与系统接入'
       ]);
 
+      // Tab 1: verify #cfg-show-workflow-guide switch is readable & toggleable
+      const workflowGuideSwitch = dialog.locator('#cfg-show-workflow-guide');
+      await workflowGuideSwitch.waitFor();
+      assert.equal(
+        await workflowGuideSwitch.isChecked(),
+        false,
+        '#cfg-show-workflow-guide must default to off'
+      );
+      await workflowGuideSwitch.click();
+      assert.equal(
+        await workflowGuideSwitch.isChecked(),
+        true,
+        '#cfg-show-workflow-guide must toggle to on'
+      );
+
       // Switch through each left tab and verify right panel switches cleanly
       await dialog.locator('#settings-tab-craft').click();
       await dialog.locator('#cfg-studio-margin').waitFor();
@@ -269,6 +343,10 @@ const api = async (path) => {
       assert.equal(
         await page.evaluate(() => localStorage.getItem('cutplan.studio.exportPrefix')),
         'WorkshopA'
+      );
+      assert.equal(
+        await page.evaluate(() => localStorage.getItem('cutplan.studio.showWorkflowGuide')),
+        '1'
       );
 
       // Topbar engine status pill opens directly to engines tab and Escape dismisses

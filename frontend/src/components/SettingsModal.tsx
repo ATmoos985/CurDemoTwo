@@ -7,6 +7,7 @@ import {
   SettingsTabId,
   StartCornerType,
   StudioSettings,
+  WORKBENCH_STRATEGIES_2D,
   loadStudioSettings,
   validateStudioSettings
 } from '../store/studioSettings';
@@ -164,7 +165,14 @@ const CORNERS: {
 function countChangedFields(a: StudioSettings, b: StudioSettings): number {
   let diff = 0;
   (Object.keys(DEFAULT_STUDIO_SETTINGS) as (keyof StudioSettings)[]).forEach((k) => {
-    if (a[k] !== b[k]) diff += 1;
+    const va = a[k];
+    const vb = b[k];
+    if (Array.isArray(va) && Array.isArray(vb)) {
+      const same = va.length === vb.length && va.every((item) => vb.includes(item));
+      if (!same) diff += 1;
+    } else if (va !== vb) {
+      diff += 1;
+    }
   });
   return diff;
 }
@@ -419,9 +427,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleRestoreDefaults = () => {
-    setDraft({ ...DEFAULT_STUDIO_SETTINGS });
+    setDraft({
+      ...DEFAULT_STUDIO_SETTINGS,
+      enabledStrategies2D: [...DEFAULT_STUDIO_SETTINGS.enabledStrategies2D]
+    });
     setValidationError(null);
     toast('已恢复默认参数，点击「保存并应用」生效');
+  };
+
+  const handleToggleStrategy = (strategyId: string, nextChecked: boolean) => {
+    const currentlyEnabled = draft.enabledStrategies2D.includes(strategyId);
+    if (!nextChecked && currentlyEnabled && draft.enabledStrategies2D.length <= 1) {
+      toast('至少保留 1 个启用算法', true);
+      return;
+    }
+    const nextSet = new Set(draft.enabledStrategies2D);
+    if (nextChecked) {
+      nextSet.add(strategyId);
+    } else {
+      nextSet.delete(strategyId);
+    }
+    const ordered = WORKBENCH_STRATEGIES_2D.map((s) => s.id).filter((id) => nextSet.has(id));
+    patchDraft({ enabledStrategies2D: ordered });
   };
 
   const handleSave = (e?: React.FormEvent) => {
@@ -889,6 +916,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           className="ux-switch"
                           checked={draft.showPath}
                           onChange={(e) => patchDraft({ showPath: e.target.checked })}
+                        />
+                      </label>
+
+                      <label className="sc-switch-row" htmlFor="cfg-show-workflow-guide">
+                        <span className="sc-switch-label">
+                          <strong>显示排程流程引导</strong>
+                          <code className="num">在工作台顶栏显示步骤引导提示（默认关闭）</code>
+                        </span>
+                        <input
+                          id="cfg-show-workflow-guide"
+                          type="checkbox"
+                          role="switch"
+                          {...({ switch: '' } as any)}
+                          className="ux-switch"
+                          checked={draft.showWorkflowGuide}
+                          onChange={(e) => patchDraft({ showWorkflowGuide: e.target.checked })}
                         />
                       </label>
                     </section>
@@ -1404,6 +1447,51 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </label>
                   </div>
                 </div>
+
+                {/* 2D Parallel Strategy Management Card */}
+                <section className="sc-card">
+                  <div className="sc-card-head">
+                    <span>二维并行排版算法管理</span>
+                    <code className="sc-code-pill num">
+                      已启用 {draft.enabledStrategies2D.length} / {WORKBENCH_STRATEGIES_2D.length}
+                    </code>
+                  </div>
+
+                  {WORKBENCH_STRATEGIES_2D.map((st) => {
+                    const enabled = draft.enabledStrategies2D.includes(st.id);
+                    const inputId = `cfg-strategy-${st.id}`;
+                    return (
+                      <label
+                        key={st.id}
+                        htmlFor={inputId}
+                        className="sc-switch-row"
+                        data-strategy-id={st.id}
+                      >
+                        <span className="sc-switch-label">
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <strong>{st.name}</strong>
+                            <span
+                              className="sc-code-pill num"
+                              style={{ fontSize: 10.5, padding: '1px 7px', lineHeight: 1.5 }}
+                            >
+                              {st.badge}
+                            </span>
+                          </span>
+                          <code className="num">{st.shortTag}</code>
+                        </span>
+                        <input
+                          id={inputId}
+                          type="checkbox"
+                          role="switch"
+                          {...({ switch: '' } as any)}
+                          className="ux-switch"
+                          checked={enabled}
+                          onChange={(e) => handleToggleStrategy(st.id, e.target.checked)}
+                        />
+                      </label>
+                    );
+                  })}
+                </section>
 
                 {capError && (
                   <div id="capabilities-error" className="sc-alert-row">
