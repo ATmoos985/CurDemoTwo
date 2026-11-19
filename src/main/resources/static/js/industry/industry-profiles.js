@@ -114,6 +114,9 @@ export const INDUSTRIES = Object.freeze([
         presets: [],
         scenarios: [
             scenario('film', '光学膜', '四个客户、同卷长，幅宽混搭'),
+            scenario('film-t29-50', '反射膜 T29_DJY（50单·3111卷）', '188µm 反射膜 T29_DJY 50条真实客户委托（宽 730–1480 mm，卷长 1350 m），大批量合卷搭切'),
+            scenario('film-t10-17', '反射膜 T10_ESY（17单·591卷）', '188µm 反射膜 T10_ESY 17条真实客户委托（宽 860–1480 mm，卷长 1350 m），中批量合卷搭切'),
+            scenario('film-t29-85', '反射膜 T29_DJY 多客合单（85单·2501卷）', '188µm 反射膜 T29_DJY 85条多客户合单（宽 740–1480 mm，卷长 1350 m），高复杂度多客搭切'),
             scenario('curtain', '卷帘面料', '涂层面料开条，条宽差异大'),
             scenario('board', '板条开条', '1220 × 2440 整板开条，锯缝已含在条宽内')
         ]

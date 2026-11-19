@@ -96,7 +96,7 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
         SlittingValidation.validateProblem(p);
         var config=new SolverConfig(p.minWidthMm(),p.maxWidthMm(),p.widthStepMm(),p.motherWidthMm());
         long totalMs = p.timeLimitSeconds() * 1000L;
-        long startupMarginMs = Math.min(2200L, Math.max(1200L, totalMs / 5));
+        long startupMarginMs = Math.min(4500L, Math.max(2000L, totalMs / 4));
         long internalBudgetMs = Math.max(500L, totalMs - startupMarginMs);
         config.setTotalOverCap(p.totalOverCap());config.setTimeoutMs(internalBudgetMs);config.setUseNewSolver(true);
         var items=new ArrayList<SolverOrderItem>();

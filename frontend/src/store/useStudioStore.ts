@@ -5,6 +5,7 @@ import {
   mirrorVerticesX
 } from '@static/js/nesting/dxf-garment-samples.js';
 import { polygon, rectangle } from '@static/js/canvas/nesting-scene.js';
+import { LINEAR_SCENARIOS } from '@static/js/linear/linear-scenarios.js';
 import { requestJSON } from '@static/app/js/util.js';
 import {
   StudioSettings,
@@ -41,6 +42,7 @@ export interface DemandItem {
 export interface ClusterTemplatePiece {
   name: string;
   fabric?: string;
+  surfaceTreatment?: string;
   quantityPerUnit: number;
   pairMirror?: boolean;
   grainRule?: 'STRICT_0' | 'HALF_TURN_180' | 'FREE_90';
@@ -352,6 +354,65 @@ function createInitialClusters(): DemandCluster[] {
     ]
   };
 
+  const buildRealFilmSlitCluster = (
+    scenarioKey: 'film-t29-50' | 'film-t10-17' | 'film-t29-85',
+    id: string,
+    name: string,
+    code: string,
+    materialModel: string,
+    description: string
+  ): DemandCluster => {
+    const src = (LINEAR_SCENARIOS as any)[scenarioKey]?.input;
+    const items: any[] = src?.orderItems || [];
+    return {
+      id,
+      name,
+      code,
+      category: 'SLITTING_1D',
+      dimension: '1D',
+      subDimension: 'SLITTING_1D',
+      description,
+      defaultWidthMm: src?.motherWidth || 4600,
+      defaultLengthMm: 1350000,
+      materialModel,
+      availableSizes: ['标准批次'],
+      defaultSizeCounts: { '标准批次': 1 },
+      pieces: items.map((o) => ({
+        name: o.messageText,
+        surfaceTreatment: o.surfaceTreatment,
+        quantityPerUnit: o.quantity,
+        sizes: { '标准批次': { w: o.width, h: o.length * 1000 } }
+      }))
+    };
+  };
+
+  const slittingT2950Cluster = buildRealFilmSlitCluster(
+    'film-t29-50',
+    'CLUSTER_SLIT_T29_50',
+    '反射膜 T29_DJY 实单分条模板 (50单·3111卷)',
+    'SLIT-T29-50',
+    '反射膜_T29_DJY_188',
+    '188µm 反射膜 T29_DJY 50 条真实客户委托（宽 730–1480mm，长 1350m，不电晕/不涂布），4600mm 母卷合卷搭切'
+  );
+
+  const slittingT1017Cluster = buildRealFilmSlitCluster(
+    'film-t10-17',
+    'CLUSTER_SLIT_T10_17',
+    '反射膜 T10_ESY 实单分条模板 (17单·591卷)',
+    'SLIT-T10-17',
+    '反射膜_T10_ESY_188',
+    '188µm 反射膜 T10_ESY 17 条真实客户委托（宽 860–1480mm，长 1350m，不电晕/不涂布），4600mm 母卷合卷搭切'
+  );
+
+  const slittingT2985Cluster = buildRealFilmSlitCluster(
+    'film-t29-85',
+    'CLUSTER_SLIT_T29_85',
+    '反射膜 T29_DJY 多客合单模板 (85单·2501卷)',
+    'SLIT-T29-85',
+    '反射膜_T29_DJY_188',
+    '188µm 反射膜 T29_DJY 85 条多客户合单（宽 740–1480mm，长 1350m，不电晕/不涂布），大规模 4600mm 母卷搭切'
+  );
+
   return [
     ...loadSavedCustomClusters(),
     ...dxfClusters,
@@ -359,6 +420,9 @@ function createInitialClusters(): DemandCluster[] {
     curtainCluster,
     boardCluster,
     slittingFilmCluster,
+    slittingT2950Cluster,
+    slittingT1017Cluster,
+    slittingT2985Cluster,
     slittingCurtainCluster
   ];
 }
@@ -443,7 +507,8 @@ export function expandClusterToDemands(
           shape: undefined,
           clusterId: cluster.id,
           clusterName: cluster.name,
-          sizeLabel: sizeKey
+          sizeLabel: sizeKey,
+          ...(piece.surfaceTreatment ? { surfaceTreatment: piece.surfaceTreatment } : {})
         });
         void rectShape;
       }

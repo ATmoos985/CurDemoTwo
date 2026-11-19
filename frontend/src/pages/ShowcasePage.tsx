@@ -215,6 +215,36 @@ const CASE_META: Record<string, CaseMeta> = {
     verifyRule: '订单 100% 齐套（COMPLETE），搭切车数显著低于逐规格独立分切基线。',
     smoke: true
   },
+  'film-t29-50': {
+    capGroup: '1d-slitting',
+    capLabel: '一维分切搭切',
+    featureTag: '50单·3111卷实单',
+    thumb: 'slitting',
+    algorithm: '1D 大规模真实反射膜订单列生成 + 整数规划搭切',
+    scenario: '188µm 反射膜 T29_DJY（4600mm 母卷、1350m 定长、不电晕/不涂布），50 条真实客户委托共 3,111 卷合卷分切',
+    why: '面向真实光学膜大批量订单（730–1480mm 多档幅宽），在 4200–4400mm 组合宽度区间内自动压榨母卷利用率至 95%+ 并压低超产。',
+    verifyRule: '50 条订单 3,111 卷 100% COMPLETE 齐套，零缺口，母卷得率 ≥ 94%。'
+  },
+  'film-t10-17': {
+    capGroup: '1d-slitting',
+    capLabel: '一维分切搭切',
+    featureTag: '17单·591卷实单',
+    thumb: 'slitting',
+    algorithm: '1D 反射膜中批量订单列生成 + 整数规划搭切',
+    scenario: '188µm 反射膜 T10_ESY（4600mm 母卷、1350m 定长、不电晕/不涂布），17 条真实客户委托共 591 卷合卷分切',
+    why: '验证中批量反射膜订单（860–1480mm 宽幅）在 2 秒内快速收敛至 95% 母卷得率且零超产。',
+    verifyRule: '17 条订单 591 卷 100% COMPLETE 齐套，母卷得率 ≥ 94%。'
+  },
+  'film-t29-85': {
+    capGroup: '1d-slitting',
+    capLabel: '一维分切搭切',
+    featureTag: '85单·2501卷多客',
+    thumb: 'slitting',
+    algorithm: '1D 高维度多客户反射膜订单列生成 + 整数规划搭切',
+    scenario: '188µm 反射膜 T29_DJY 多客户合单（4600mm 母卷、1350m 定长），85 条真实委托共 2,501 卷高密组合优化',
+    why: '模拟真实生产计划中 85 条跨客户、27 种不同幅宽（740–1480mm）同材质同卷长合单排刀，检验大规模一维求解器稳定性与收敛质量。',
+    verifyRule: '85 条订单 2,501 卷 100% COMPLETE 齐套，超产严格受控，母卷得率 ≥ 94%。'
+  },
   curtain: {
     capGroup: '1d-slitting',
     capLabel: '一维分切搭切',

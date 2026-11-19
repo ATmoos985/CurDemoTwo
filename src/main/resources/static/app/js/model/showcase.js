@@ -30,7 +30,7 @@ export function showcaseRequest(id, profile = 'FAST') {
         return {...envelope, problemType: 'SLITTING_1D', allowFallback: false,
             problem: {schemaVersion: '1', unit: 'mm', motherWidthMm: p.motherWidth, leftTrimMm: p.leftTrim, rightTrimMm: p.rightTrim,
                 minWidthMm: p.minWidth, maxWidthMm: p.maxWidth, widthStepMm: p.step, totalOverCap: p.totalOverCap,
-                profile, timeLimitSeconds: profile === 'QUALITY' ? 30 : 10,
+                profile, timeLimitSeconds: profile === 'QUALITY' ? 35 : (p.orderItems.length >= 40 ? 20 : 10),
                 orders: p.orderItems.map((o, i) => ({id: String(i + 1), widthMm: o.width, lengthMm: id === 'board-2m' ? 2000 : o.length * scale,
                     quantity: o.quantity, surfaceTreatment: o.surfaceTreatment}))}};
     }

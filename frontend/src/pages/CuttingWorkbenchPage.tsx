@@ -1440,13 +1440,13 @@ export const CuttingWorkbenchPage: React.FC<{
             widthStepMm: Math.max(1, Math.floor(slitWidthStepMm)),
             totalOverCap: Math.floor(effOverCap),
             profile,
-            timeLimitSeconds: profile === 'QUALITY' ? 12 : 5,
+            timeLimitSeconds: profile === 'QUALITY' ? 30 : validOrders.length >= 40 ? 20 : 10,
             orders: validOrders.map((o) => ({
               id: o.id,
               widthMm: Math.floor(o.widthMm),
               lengthMm: Math.floor(slitFixedLengthMm),
               quantity: Math.floor(o.quantity),
-              surfaceTreatment: '默认'
+              surfaceTreatment: o.surfaceTreatment?.trim() || '不电晕/不涂布'
             }))
           }
         };
