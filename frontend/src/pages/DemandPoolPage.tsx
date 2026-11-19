@@ -5,6 +5,7 @@ import {
   expandClusterToDemands
 } from '../store/useStudioStore';
 import { ModalDialog } from '../components/ModalDialog';
+import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
 import { requestJSON, toast, fmtN, shortId, loadSheetLib } from '@static/app/js/util.js';
 import {
   parseDemandSheet,
@@ -350,125 +351,152 @@ export const DemandPoolPage: React.FC = () => {
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
 
-  const kpiCards = [
-    { key: 'ALL', label: '全部需求族', count: families.length, hint: '跨维度统一需求台账' },
-    {
-      key: 'OPEN_ONLY',
-      label: '有待排余量',
-      count: families.filter((f) => f.openTotal > 0).length,
-      hint: '存在可送工作台排程需求',
-      color: 'var(--accent)'
-    },
-    {
-      key: 'CONTOUR_2D',
-      label: '二维异形裁片',
-      count: families.filter((f) => f.dimension === 'CONTOUR_2D').length,
-      hint: 'CAD 服装/箱包异形轮廓'
-    },
-    {
-      key: 'RECT_2D',
-      label: '二维矩形开料',
-      count: families.filter((f) => f.dimension === 'RECT_2D').length,
-      hint: '窗帘家纺 / 板材直刀开料'
-    },
-    {
-      key: 'SLITTING_1D',
-      label: '一维定长分条',
-      count: families.filter((f) => f.dimension === 'SLITTING_1D').length,
-      hint: '薄膜 / 卷材条宽组合套裁'
-    },
-    {
-      key: 'COMPLETED',
-      label: '已齐套完工',
-      count: families.filter((f) => f.status === 'COMPLETED').length,
-      hint: '实切良品已全部达成',
-      color: 'var(--ok)'
-    }
-  ];
+  const openFamilyCount = useMemo(
+    () => families.filter((f) => f.openTotal > 0).length,
+    [families]
+  );
+
+  const filterOptions: SegmentedOption<string>[] = useMemo(
+    () => [
+      { value: 'ALL', label: '全部需求族', count: families.length },
+      {
+        value: 'OPEN_ONLY',
+        label: '有待排余量',
+        count: openFamilyCount,
+        accent: 'indigo'
+      },
+      {
+        value: 'CONTOUR_2D',
+        label: '二维异形',
+        count: families.filter((f) => f.dimension === 'CONTOUR_2D').length
+      },
+      {
+        value: 'RECT_2D',
+        label: '二维矩形',
+        count: families.filter((f) => f.dimension === 'RECT_2D').length
+      },
+      {
+        value: 'SLITTING_1D',
+        label: '一维分条',
+        count: families.filter((f) => f.dimension === 'SLITTING_1D').length
+      },
+      {
+        value: 'COMPLETED',
+        label: '已齐套完工',
+        count: families.filter((f) => f.status === 'COMPLETED').length,
+        accent: 'emerald'
+      }
+    ],
+    [families, openFamilyCount]
+  );
 
   return (
     <div className="react-page">
-      <div className="ph">
-        <h1>需求管理</h1>
-        <span className="crumb">
-          多格式导入 · 按维度与材质建立需求族 · 跟踪「总需求 / 已排预占 / 实切完成 / 待排余量」
-        </span>
-        <span className="sp" />
-        <input
-          type="search"
-          className="field"
-          aria-label="搜索需求族"
-          placeholder="搜需求族 / 物料品号 / MES工单号…"
-          style={{ width: 220 }}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <button type="button" className="btn sm" onClick={handleDownloadTemplateCsv}>
-          下载模板 CSV
-        </button>
-        <label className="btn" style={{ cursor: 'pointer' }}>
-          导入 Excel / CSV / DXF / JSON
-          <input
-            type="file"
-            accept=".xlsx,.xls,.csv,.dxf,.json"
-            hidden
-            onChange={handleFileImport}
-          />
-        </label>
-        <a className="btn" href="#/clusters">
-          从模板库拼凑
-        </a>
-        <button type="button" className="btn" onClick={() => setShowCreateModal(true)}>
-          ＋ 新建需求族
-        </button>
-        {checkedFamilies.length > 0 && (
-          <button
-            type="button"
-            className="btn pri"
-            onClick={() => {
-              loadDemandFamiliesMergedIntoWorkbench(checkedFamilies);
-              location.hash = '#/workbench';
-            }}
-          >
-            合并去搭切排程 ({checkedFamilies.length}) →
-          </button>
-        )}
-      </div>
+      <div className="mp-page-shell">
+        <div className="mp-page-head">
+          <div className="mp-page-title-block">
+            <h1>需求管理</h1>
+            <span className="mp-page-summary num">
+              {families.length} 个需求族 · {openFamilyCount} 项待排
+            </span>
+          </div>
+        </div>
 
-      <div className="kpi-strip kpi-strip-6" role="group" aria-label="按需求维度与状态筛选">
-        {kpiCards.map((c) => {
-          const active = filterKey === c.key;
-          return (
-            <button
-              key={c.key}
-              type="button"
-              aria-pressed={active}
-              className={`kpi-card ${active ? 'on' : ''}`}
-              onClick={() => setFilterKey(active && c.key !== 'ALL' ? 'ALL' : c.key)}
-            >
-              <small>{c.label}</small>
-              <b className="num" style={c.color ? { color: c.color } : undefined}>
-                {c.count}
-              </b>
-              <span>{c.hint}</span>
+        <div className="mp-filter-toolbar">
+          <div className="mp-search-wrap">
+            <span className="mp-search-ico" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="14" height="14">
+                <circle
+                  cx="7.2"
+                  cy="7.2"
+                  r="4.6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                />
+                <path
+                  d="m10.8 10.8 2.8 2.8"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <input
+              type="search"
+              className="mp-search-input"
+              aria-label="搜索需求族"
+              placeholder="筛选需求族、物料品号或工单号"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          <span className="mp-toolbar-count num">
+            显示 {filteredFamilies.length} / {families.length}
+          </span>
+
+          <div className="mp-toolbar-actions">
+            <button type="button" className="mp-ghost-btn" onClick={handleDownloadTemplateCsv}>
+              模板 CSV
             </button>
-          );
-        })}
-      </div>
+            <label className="mp-ghost-btn" style={{ cursor: 'pointer' }}>
+              导入文件
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv,.dxf,.json"
+                hidden
+                onChange={handleFileImport}
+              />
+            </label>
+            <a className="mp-ghost-btn" href="#/clusters">
+              模板库
+            </a>
+            {checkedFamilies.length > 0 && (
+              <button
+                type="button"
+                className="btn soft-accent"
+                onClick={() => {
+                  loadDemandFamiliesMergedIntoWorkbench(checkedFamilies);
+                  location.hash = '#/workbench';
+                }}
+              >
+                合并去搭切排程 ({checkedFamilies.length}) →
+              </button>
+            )}
+            <button type="button" className="btn pri" onClick={() => setShowCreateModal(true)}>
+              ＋ 新建需求族
+            </button>
+          </div>
+        </div>
 
-      <div className="body">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+          <SegmentedControl
+            options={filterOptions}
+            value={filterKey}
+            onChange={(next) => setFilterKey(next)}
+            ariaLabel="按需求维度与状态筛选"
+          />
+          <span className="mp-toolbar-count">
+            点击行展开明细 · 勾选同材质多族可合并排程
+          </span>
+        </div>
+
         {error ? (
           <div className="error-box" role="alert">
             <b>读取失败</b>
             <p>{error}</p>
           </div>
         ) : loading ? (
-          <div className="loading">正在读取多维待排需求池…</div>
+          <div className="mp-demand-card">
+            <div className="loading">正在读取多维待排需求池…</div>
+          </div>
         ) : filteredFamilies.length === 0 ? (
-          <div className="box" style={{ padding: 32, textAlign: 'center' }}>
-            <strong>当前暂无匹配的排程需求族</strong>
-            <p className="muted" style={{ margin: '8px auto 16px', maxWidth: 480 }}>
-              您可以通过右上角直接导入 Excel / CSV / CAD DXF 文件，或从「需求模板库」按配码套数一键展开生成需求族。
+          <div className="mp-demand-card" style={{ padding: 36, textAlign: 'center' }}>
+            <strong style={{ fontSize: 14 }}>当前暂无匹配的排程需求族</strong>
+            <p className="muted" style={{ margin: '8px auto 16px', maxWidth: 460 }}>
+              可通过上方导入 Excel / CSV / CAD DXF 文件，或从「需求模板库」按配码套数一键展开生成需求族。
             </p>
             <div style={{ display: 'inline-flex', gap: 10 }}>
               <button type="button" className="btn pri" onClick={() => setShowCreateModal(true)}>
@@ -480,19 +508,19 @@ export const DemandPoolPage: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="box" style={{ margin: 0 }}>
+          <div className="mp-demand-card">
             <table className="t">
               <thead>
                 <tr>
-                  <th style={{ width: 32 }} />
-                  <th>需求族名称 / 外部工单</th>
-                  <th>裁切维度</th>
+                  <th style={{ width: 34 }} />
+                  <th>需求族 / 工单标识</th>
+                  <th>维度</th>
                   <th>物料品号</th>
-                  <th className="r">规格项</th>
-                  <th>四态数量账本（完成 / 已排 / 待排）</th>
-                  <th>当前状态</th>
-                  <th className="r">已关联方案</th>
-                  <th>排程操作</th>
+                  <th className="r">项</th>
+                  <th>数量账本</th>
+                  <th>状态</th>
+                  <th className="r">方案</th>
+                  <th style={{ textAlign: 'right' }}>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -518,16 +546,21 @@ export const DemandPoolPage: React.FC = () => {
                             onChange={() => toggleSelectFamily(fam)}
                           />
                         </td>
-                        <td>
-                          <div style={{ fontWeight: 600 }}>{fam.name}</div>
-                          <small className="muted num">
-                            {shortId(fam.id)} · {fam.externalRef || '内部创建'}
-                          </small>
+                        <td className="mp-col-name">
+                          <div className="mp-fam-title-row">
+                            <strong>{fam.name}</strong>
+                            <CodeBadge>{shortId(fam.id)}</CodeBadge>
+                          </div>
+                          <div className="mp-fam-sub num">
+                            {fam.externalRef || '内部自建'}
+                          </div>
                         </td>
                         <td>
                           <span className={`tag ${dimMeta.cls}`}>{dimMeta.text}</span>
                         </td>
-                        <td className="num">{fam.materialModel}</td>
+                        <td className="num" style={{ color: 'var(--cp-ink-2)' }}>
+                          {fam.materialModel}
+                        </td>
                         <td className="r num">{fam.lines.length}</td>
                         <td>
                           <div className="demand-ledger-cell num">
@@ -535,16 +568,16 @@ export const DemandPoolPage: React.FC = () => {
                               <span>
                                 总 <b>{fam.orderedTotal}</b>
                               </span>
-                              <span style={{ color: '#0284c7' }}>
+                              <span style={{ color: 'var(--cp-accent-ink)' }}>
                                 已排 <b>{fam.plannedTotal}</b>
                               </span>
-                              <span style={{ color: 'var(--ok)' }}>
+                              <span style={{ color: '#059669' }}>
                                 实完 <b>{fam.completedTotal}</b>
                               </span>
                               <span
                                 style={{
-                                  color: fam.openTotal > 0 ? '#b45309' : 'var(--text-3)',
-                                  fontWeight: 700
+                                  color: fam.openTotal > 0 ? '#b45309' : 'var(--cp-ink-3)',
+                                  fontWeight: 600
                                 }}
                               >
                                 待排 {fam.openTotal} {dimMeta.unit}
@@ -566,11 +599,11 @@ export const DemandPoolPage: React.FC = () => {
                           <span className={`tag ${stMeta.cls}`}>{stMeta.text}</span>
                         </td>
                         <td className="r num">{fam.schemeCount}</td>
-                        <td onClick={(e) => e.stopPropagation()}>
+                        <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                           <div style={{ display: 'inline-flex', gap: 6 }}>
                             <button
                               type="button"
-                              className={`btn sm ${fam.openTotal > 0 ? 'pri' : ''}`}
+                              className={`btn sm ${fam.openTotal > 0 ? 'soft-accent' : ''}`}
                               onClick={() => {
                                 loadDemandFamilyIntoWorkbench(fam);
                                 location.hash = '#/workbench';
@@ -592,96 +625,91 @@ export const DemandPoolPage: React.FC = () => {
 
                       {isExpanded && (
                         <tr>
-                          <td colSpan={9} style={{ background: 'var(--panel-2)', padding: '10px 18px' }}>
-                            <div
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                marginBottom: 6
-                              }}
-                            >
-                              <strong style={{ fontSize: 12 }}>
-                                需求族规格明细（共 {fam.lines.length} 项）
-                              </strong>
-                              <button
-                                type="button"
-                                className="btn sm"
-                                onClick={() => {
-                                  setMergeTargetId(fam.id);
-                                  setCreateDim(fam.dimension);
-                                  setMaterialModel(fam.materialModel);
-                                  setShowCreateModal(true);
-                                }}
-                              >
-                                ＋ 向此需求族追加规格
-                              </button>
-                            </div>
-                            <table className="t" style={{ background: 'var(--panel)' }}>
-                              <thead>
-                                <tr>
-                                  <th>行号</th>
-                                  <th>规格 / 裁片名称</th>
-                                  <th>几何形态</th>
-                                  <th className="r">宽 × 长 mm</th>
-                                  <th>方向规则</th>
-                                  <th className="r">总需求</th>
-                                  <th className="r">已排预占</th>
-                                  <th className="r">实切合格</th>
-                                  <th className="r">剩余待排</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {fam.lines.map((ln) => (
-                                  <tr key={ln.id}>
-                                    <td className="num">#{ln.id}</td>
-                                    <td style={{ fontWeight: 600 }}>
-                                      {ln.name}
-                                      {ln.sizeLabel && (
-                                        <span className="tag" style={{ marginLeft: 6 }}>
-                                          {ln.sizeLabel}
-                                        </span>
-                                      )}
-                                    </td>
-                                    <td>
-                                      {fam.dimension === 'SLITTING_1D'
-                                        ? '一维定长卷条'
-                                        : ln.shape?.type === 'POLYGON'
-                                        ? `异形轮廓 (${ln.shape.vertices?.length || 0}顶点)`
-                                        : '标准矩形'}
-                                    </td>
-                                    <td className="r num">
-                                      {fmtN(ln.width, 1)} × {fmtN(ln.length, 1)}
-                                    </td>
-                                    <td>
-                                      {fam.dimension === 'SLITTING_1D'
-                                        ? '纵向开条'
-                                        : ln.allowRotation
-                                        ? '允许 90°'
-                                        : ln.allowHalfTurn
-                                        ? '允许 180° 倒顺'
-                                        : '严格 0° 经向'}
-                                    </td>
-                                    <td className="r num">{ln.orderedQty}</td>
-                                    <td className="r num" style={{ color: '#0284c7' }}>
-                                      {ln.plannedQty}
-                                    </td>
-                                    <td className="r num" style={{ color: 'var(--ok)' }}>
-                                      {ln.completedQty}
-                                    </td>
-                                    <td
-                                      className="r num"
-                                      style={{
-                                        fontWeight: 700,
-                                        color: ln.openQty > 0 ? '#b45309' : 'var(--text-3)'
-                                      }}
-                                    >
-                                      {ln.openQty}
-                                    </td>
+                          <td colSpan={9} className="mp-demand-expand-cell">
+                            <div className="mp-demand-expand-inner">
+                              <div className="mp-demand-expand-head">
+                                <strong style={{ fontSize: 12 }}>
+                                  需求族规格明细（共 {fam.lines.length} 项）
+                                </strong>
+                                <button
+                                  type="button"
+                                  className="btn sm"
+                                  onClick={() => {
+                                    setMergeTargetId(fam.id);
+                                    setCreateDim(fam.dimension);
+                                    setMaterialModel(fam.materialModel);
+                                    setShowCreateModal(true);
+                                  }}
+                                >
+                                  ＋ 向此需求族追加规格
+                                </button>
+                              </div>
+                              <table className="t">
+                                <thead>
+                                  <tr>
+                                    <th>行号</th>
+                                    <th>规格 / 裁片名称</th>
+                                    <th>几何形态</th>
+                                    <th className="r">宽 × 长 mm</th>
+                                    <th>方向规则</th>
+                                    <th className="r">总需求</th>
+                                    <th className="r">已排预占</th>
+                                    <th className="r">实切合格</th>
+                                    <th className="r">剩余待排</th>
                                   </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                                </thead>
+                                <tbody>
+                                  {fam.lines.map((ln) => (
+                                    <tr key={ln.id}>
+                                      <td className="num">#{ln.id}</td>
+                                      <td style={{ fontWeight: 600 }}>
+                                        {ln.name}
+                                        {ln.sizeLabel && (
+                                          <span className="tag" style={{ marginLeft: 6 }}>
+                                            {ln.sizeLabel}
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td>
+                                        {fam.dimension === 'SLITTING_1D'
+                                          ? '一维定长卷条'
+                                          : ln.shape?.type === 'POLYGON'
+                                          ? `异形轮廓 (${ln.shape.vertices?.length || 0}顶点)`
+                                          : '标准矩形'}
+                                      </td>
+                                      <td className="r num">
+                                        {fmtN(ln.width, 1)} × {fmtN(ln.length, 1)}
+                                      </td>
+                                      <td>
+                                        {fam.dimension === 'SLITTING_1D'
+                                          ? '纵向开条'
+                                          : ln.allowRotation
+                                          ? '允许 90°'
+                                          : ln.allowHalfTurn
+                                          ? '允许 180° 倒顺'
+                                          : '严格 0° 经向'}
+                                      </td>
+                                      <td className="r num">{ln.orderedQty}</td>
+                                      <td className="r num" style={{ color: 'var(--cp-accent-ink)' }}>
+                                        {ln.plannedQty}
+                                      </td>
+                                      <td className="r num" style={{ color: '#059669' }}>
+                                        {ln.completedQty}
+                                      </td>
+                                      <td
+                                        className="r num"
+                                        style={{
+                                          fontWeight: 600,
+                                          color: ln.openQty > 0 ? '#b45309' : 'var(--cp-ink-3)'
+                                        }}
+                                      >
+                                        {ln.openQty}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
                           </td>
                         </tr>
                       )}

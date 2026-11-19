@@ -1,0 +1,1448 @@
+/* ==========================================================================
+   CutPlan Light Desktop Theme (Magpie-Inspired Precision Light Aesthetic)
+   Loaded after studio.css to establish unified light tokens, dual-column
+   desktop shell, crisp 12px white surface cards, indigo primary CTA, black
+   pill toggles, and raised segmented controls while preserving CAD viewport
+   contrast and 1366x768 industrial density.
+   ========================================================================== */
+
+:root {
+  --cp-bg: #f5f6f8;
+  --cp-sidebar: #fafafb;
+  --cp-surface: #ffffff;
+  --cp-surface-hover: #f9fafb;
+  --cp-surface-subtle: #f1f2f5;
+  --cp-border: rgba(15, 23, 42, 0.085);
+  --cp-border-strong: rgba(15, 23, 42, 0.14);
+  --cp-divider: rgba(15, 23, 42, 0.055);
+
+  --cp-ink: #18181b;
+  --cp-ink-2: #52525b;
+  --cp-ink-3: #8e929b;
+
+  --cp-accent: #5b61f6;
+  --cp-accent-hover: #4a50e6;
+  --cp-accent-soft: rgba(91, 97, 246, 0.1);
+  --cp-accent-ink: #4338ca;
+
+  --cp-switch-on: #18181b;
+  --cp-switch-off: #e4e4e7;
+
+  --cp-radius-card: 12px;
+  --cp-radius-ctrl: 8px;
+  --cp-radius-sm: 6px;
+
+  --cp-shadow-card: 0 1px 2px rgba(15, 23, 42, 0.03), 0 0 0 1px rgba(15, 23, 42, 0.055);
+  --cp-shadow-pill: 0 1px 2px rgba(15, 23, 42, 0.07), 0 0 0 1px rgba(15, 23, 42, 0.055);
+  --cp-shadow-cta: 0 1px 2px rgba(74, 80, 230, 0.28);
+
+  /* Re-map legacy app.css tokens so all unrefactored pages harmonize cleanly */
+  --bg: var(--cp-bg);
+  --panel: var(--cp-surface);
+  --panel-2: #fafafa;
+  --line: #e4e6eb;
+  --line-2: #eff0f4;
+  --text: var(--cp-ink);
+  --text-2: var(--cp-ink-2);
+  --text-3: var(--cp-ink-3);
+  --accent: var(--cp-accent);
+  --accent-2: var(--cp-accent-soft);
+  --accent-ink: var(--cp-accent-ink);
+  --bar: var(--cp-bg);
+  --bar-2: #eef0f4;
+  --bar-text: var(--cp-ink-2);
+  --canvas: #181c22;
+  --ok: #10b981;
+  --ok-bg: rgba(16, 185, 129, 0.12);
+  --warn: #d97706;
+  --warn-bg: rgba(245, 158, 11, 0.13);
+  --err: #e11d48;
+  --err-bg: rgba(225, 29, 72, 0.1);
+  --run: var(--cp-accent);
+  --run-bg: var(--cp-accent-soft);
+  --idle: #52525b;
+  --idle-bg: #f1f2f5;
+}
+
+body {
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Inter", "PingFang SC", "Microsoft YaHei",
+    "Segoe UI", sans-serif;
+  color: var(--cp-ink);
+  background: var(--cp-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ==========================================================================
+   1. Dual-Column Light Desktop Shell (Full-Height Sidebar + Quiet Topbar)
+   ========================================================================== */
+
+.app.app-magpie {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  grid-template-rows: 46px minmax(0, 1fr);
+  height: 100vh;
+  background: var(--cp-bg);
+  color: var(--cp-ink);
+}
+
+.app.app-magpie .nav {
+  grid-column: 1 / 2;
+  grid-row: 1 / 3;
+  background: var(--cp-sidebar);
+  border-right: 1px solid var(--cp-border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Sidebar Brand Header (Top-Left, mirrors magpie header) */
+.mp-nav-brand {
+  height: 46px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 14px;
+  color: var(--cp-ink);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 14.5px;
+  letter-spacing: -0.02em;
+}
+
+.mp-nav-brand:hover {
+  color: var(--cp-ink);
+}
+
+.mp-brand-mark {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--cp-ink);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  box-shadow: 0 1px 2px rgba(24, 24, 27, 0.22);
+}
+
+.mp-brand-ver {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--cp-ink-3);
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--cp-surface-subtle);
+}
+
+/* Sidebar Flat Navigation Groups */
+.app.app-magpie .nav .nav-main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scrollbar-width: thin;
+}
+
+.app.app-magpie .nav-group {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.app.app-magpie .nav-group:has([aria-current="page"]) {
+  border-color: transparent;
+  background: transparent;
+}
+
+.app.app-magpie .nav-group-trigger {
+  inline-size: 100%;
+  min-block-size: 22px;
+  padding: 2px 8px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cp-ink-3);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  text-align: start;
+}
+
+.app.app-magpie .nav-group-trigger:hover {
+  background: transparent;
+  color: var(--cp-ink-2);
+}
+
+.app.app-magpie .nav-group:has([aria-current="page"]) > .nav-group-trigger {
+  background: transparent;
+  color: var(--cp-ink-3);
+}
+
+.app.app-magpie .nav-group-trigger::after {
+  opacity: 0.42;
+  inline-size: 0.8em;
+  block-size: 0.8em;
+}
+
+.app.app-magpie .nav-group-trigger:hover::after {
+  opacity: 0.78;
+}
+
+.app.app-magpie .nav-sublist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-inline-start: 0;
+}
+
+.app.app-magpie .nav-sublist > li + li {
+  margin-block-start: 2px;
+}
+
+.app.app-magpie .nav .nav-sublist a {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: auto;
+  min-block-size: 32px;
+  padding: 5px 10px;
+  border: 0;
+  border-left: 0;
+  border-radius: var(--cp-radius-ctrl);
+  font-size: 13px;
+  font-weight: 450;
+  color: var(--cp-ink-2);
+  background: transparent;
+  transition: background-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.app.app-magpie .nav .nav-sublist a::before {
+  display: none;
+}
+
+.app.app-magpie .nav .nav-sublist a .mp-nav-ico {
+  width: 15px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cp-ink-3);
+  flex: none;
+  transition: color 0.14s ease;
+}
+
+.app.app-magpie .nav .nav-sublist a:hover {
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--cp-ink);
+}
+
+.app.app-magpie .nav .nav-sublist a:hover .mp-nav-ico {
+  color: var(--cp-ink-2);
+}
+
+/* Signature Magpie Active Nav Pill: Crisp white raised card */
+.app.app-magpie .nav .nav-sublist a[aria-current="page"] {
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+  font-weight: 600;
+  box-shadow: var(--cp-shadow-pill);
+}
+
+.app.app-magpie .nav .nav-sublist a[aria-current="page"] .mp-nav-ico {
+  color: var(--cp-ink);
+}
+
+.app.app-magpie .nav a .cnt {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 0 6px;
+  min-height: 18px;
+  line-height: 18px;
+  border-radius: 999px;
+  background: var(--cp-surface-subtle);
+  border: 0;
+  color: var(--cp-ink-2);
+  font-weight: 500;
+}
+
+.app.app-magpie .nav a[aria-current="page"] .cnt {
+  background: var(--cp-accent-soft);
+  color: var(--cp-accent-ink);
+}
+
+/* Sidebar Footer: Settings Link + Gateway/Engine Status Row */
+.app.app-magpie .nav .nav-foot {
+  flex: none;
+  border-top: 1px solid var(--cp-divider);
+  background: var(--cp-sidebar);
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app.app-magpie .nav .nav-settings-link {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: auto;
+  min-block-size: 32px;
+  padding: 5px 10px;
+  border-left: 0;
+  border-radius: var(--cp-radius-ctrl);
+  font-size: 13px;
+  font-weight: 450;
+  color: var(--cp-ink-2);
+  background: transparent;
+}
+
+.app.app-magpie .nav .nav-settings-link:hover {
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--cp-ink);
+}
+
+.app.app-magpie .nav .nav-settings-link.on {
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+  font-weight: 600;
+  box-shadow: var(--cp-shadow-pill);
+}
+
+.mp-engine-foot-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--cp-radius-sm);
+  background: transparent;
+  color: var(--cp-ink-3);
+  font-size: 11.5px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.mp-engine-foot-btn:hover {
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--cp-ink-2);
+}
+
+.mp-engine-foot-btn .dot {
+  width: 7px;
+  height: 7px;
+  margin-right: 0;
+  flex: none;
+}
+
+.mp-engine-foot-btn .dot.ok {
+  background: #22c55e;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.16);
+}
+
+.mp-engine-foot-btn .dot.warn {
+  background: #f59e0b;
+}
+
+.mp-engine-foot-btn .mp-engine-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Right Quiet Topbar (mirrors magpie "模型 / 路由组" header) */
+.app.app-magpie .topbar {
+  grid-column: 2 / 3;
+  grid-row: 1 / 2;
+  background: var(--cp-bg);
+  color: var(--cp-ink);
+  border-bottom: 1px solid var(--cp-divider);
+  padding: 0 20px;
+  gap: 10px;
+}
+
+.app.app-magpie .topbar-context {
+  margin-inline-start: 0;
+  padding-inline-start: 0;
+  border-inline-start: 0;
+  font-size: 14px;
+  gap: 7px;
+  color: var(--cp-ink-3);
+}
+
+.app.app-magpie .topbar-context-sep {
+  color: #c4c7cf;
+  font-weight: 400;
+}
+
+.app.app-magpie .topbar-context strong {
+  color: var(--cp-ink);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.mp-top-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mp-icon-btn {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: var(--cp-radius-sm);
+  background: transparent;
+  color: var(--cp-ink-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.mp-icon-btn:hover {
+  background: rgba(15, 23, 42, 0.055);
+  color: var(--cp-ink);
+}
+
+.app.app-magpie .main {
+  grid-column: 2 / 3;
+  grid-row: 2 / 3;
+  background: var(--cp-bg);
+}
+
+/* ==========================================================================
+   2. Unified Light Controls: Buttons, Inputs, Segmented Controls, Switches
+   ========================================================================== */
+
+.btn {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--cp-radius-ctrl);
+  border: 1px solid var(--cp-border-strong);
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: background-color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease,
+    color 0.14s ease;
+}
+
+.btn:hover:not([disabled]) {
+  background: var(--cp-surface-hover);
+  border-color: rgba(15, 23, 42, 0.22);
+}
+
+.btn.sm {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.btn.pri {
+  background: var(--cp-accent);
+  border-color: var(--cp-accent);
+  color: #ffffff;
+  font-weight: 550;
+  box-shadow: var(--cp-shadow-cta);
+}
+
+.btn.pri:hover:not([disabled]) {
+  background: var(--cp-accent-hover);
+  border-color: var(--cp-accent-hover);
+  color: #ffffff;
+}
+
+.btn.ghost,
+.mp-ghost-btn {
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--cp-radius-ctrl);
+  background: transparent;
+  color: var(--cp-ink-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.btn.ghost:hover,
+.mp-ghost-btn:hover {
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--cp-ink);
+}
+
+.btn.soft-accent {
+  background: var(--cp-accent-soft);
+  border-color: rgba(91, 97, 246, 0.22);
+  color: var(--cp-accent-ink);
+}
+
+.btn.soft-accent:hover:not([disabled]) {
+  background: rgba(91, 97, 246, 0.16);
+  border-color: rgba(91, 97, 246, 0.36);
+}
+
+.field,
+input.field,
+select.field {
+  height: 32px;
+  border-radius: var(--cp-radius-ctrl);
+  border: 1px solid var(--cp-border-strong);
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+  padding: 0 10px;
+  font-size: 12.5px;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.field:focus,
+input.field:focus,
+select.field:focus {
+  outline: none;
+  border-color: var(--cp-accent);
+  box-shadow: 0 0 0 3px rgba(91, 97, 246, 0.14);
+}
+
+/* Raised Pill Segmented Control (Magpie Signature) */
+.mp-seg,
+.seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 0;
+  border-radius: 9px;
+  background: #eceef2;
+  overflow: visible;
+}
+
+.mp-seg-full {
+  display: flex;
+  width: 100%;
+}
+
+.mp-seg-full .mp-seg-btn {
+  flex: 1;
+  justify-content: center;
+}
+
+.mp-seg-btn,
+.seg button {
+  height: 26px;
+  padding: 0 11px;
+  border: 0;
+  border-right: 0 !important;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--cp-ink-2);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  transition: background-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.mp-seg-sm .mp-seg-btn {
+  height: 24px;
+  padding: 0 9px;
+  font-size: 11.5px;
+}
+
+.mp-seg-btn:hover:not(.on),
+.seg button:hover:not(.on) {
+  color: var(--cp-ink);
+}
+
+.mp-seg-btn.on,
+.seg button.on {
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.09);
+}
+
+.mp-seg-count {
+  font-size: 11px;
+  color: var(--cp-ink-3);
+  font-weight: 500;
+}
+
+.mp-seg-btn.on .mp-seg-count {
+  color: var(--cp-ink-2);
+}
+
+.mp-seg-count.accent-indigo {
+  color: var(--cp-accent);
+}
+
+.mp-seg-count.accent-emerald {
+  color: #059669;
+}
+
+/* Monochrome Code Badge (e.g. group/gemini -> ROLL-2026-001) */
+.mp-code-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: var(--cp-surface-subtle);
+  color: var(--cp-ink-2);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+/* Magpie Signature Black Toggle Switch */
+input.ux-switch {
+  inline-size: 38px;
+  block-size: 22px;
+  background: var(--cp-switch-off);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+input.ux-switch::after {
+  inset-block-start: 2px;
+  inset-inline-start: 2px;
+  inline-size: 16px;
+  block-size: 16px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.22);
+}
+
+input.ux-switch:checked {
+  background: var(--cp-switch-on);
+  border-color: var(--cp-switch-on);
+}
+
+input.ux-switch:checked::after {
+  translate: 16px 0;
+}
+
+input.ux-switch:focus-visible {
+  outline: 2px solid var(--cp-accent);
+  outline-offset: 2px;
+}
+
+/* Tags & Badges */
+.tag {
+  border-radius: 6px;
+  padding: 0 7px;
+  height: 20px;
+  line-height: 20px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.tag.kind {
+  background: var(--cp-surface-subtle);
+  border: 0;
+  color: var(--cp-ink-2);
+}
+
+/* Unified Page Headers, Cards, Tables & Modals */
+.ph {
+  height: auto;
+  min-height: 50px;
+  padding: 10px 20px;
+  background: var(--cp-bg);
+  border-bottom: 1px solid var(--cp-divider);
+}
+
+.ph h1 {
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--cp-ink);
+  letter-spacing: -0.015em;
+}
+
+.body {
+  padding: 14px 20px 20px;
+}
+
+.box,
+.card {
+  background: var(--cp-surface);
+  border: 0;
+  border-radius: var(--cp-radius-card);
+  box-shadow: var(--cp-shadow-card);
+}
+
+table.t {
+  border: 0;
+  border-radius: var(--cp-radius-card);
+  overflow: hidden;
+  background: var(--cp-surface);
+}
+
+.t th {
+  height: 36px;
+  background: #fafafb;
+  color: var(--cp-ink-3);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--cp-divider);
+}
+
+.t td {
+  height: 44px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--cp-divider);
+}
+
+.t tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.t tr:hover td {
+  background: #fafbfe;
+}
+
+.t tr.sel td {
+  background: rgba(91, 97, 246, 0.055);
+}
+
+/* Native Modal Dialog Polish */
+dialog.native-modal-dialog {
+  border: 0;
+  border-radius: 14px;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.2), 0 0 0 1px rgba(15, 23, 42, 0.07);
+}
+
+dialog.native-modal-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.32);
+}
+
+/* ==========================================================================
+   3. Demand Pool Page (Magpie Group List & Filter Bar Pattern)
+   ========================================================================== */
+
+.mp-page-shell {
+  padding: 14px 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.mp-page-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.mp-page-title-block {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.mp-page-title-block h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  color: var(--cp-ink);
+  letter-spacing: -0.015em;
+}
+
+.mp-page-summary {
+  font-size: 12px;
+  color: var(--cp-ink-3);
+}
+
+.mp-filter-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mp-search-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.mp-search-ico {
+  position: absolute;
+  left: 10px;
+  color: var(--cp-ink-3);
+  pointer-events: none;
+  display: inline-flex;
+}
+
+.mp-search-input {
+  width: 264px;
+  height: 34px;
+  padding: 0 12px 0 32px;
+  border-radius: 9px;
+  border: 1px solid var(--cp-border);
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+  font-size: 12.5px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.025);
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.mp-search-input::placeholder {
+  color: var(--cp-ink-3);
+}
+
+.mp-search-input:focus {
+  outline: none;
+  border-color: var(--cp-accent);
+  box-shadow: 0 0 0 3px rgba(91, 97, 246, 0.12);
+}
+
+.mp-toolbar-count {
+  font-size: 12px;
+  color: var(--cp-ink-3);
+  white-space: nowrap;
+}
+
+.mp-toolbar-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mp-section-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--cp-ink-3);
+  padding: 2px 4px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mp-demand-card {
+  background: var(--cp-surface);
+  border-radius: var(--cp-radius-card);
+  box-shadow: var(--cp-shadow-card);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.mp-demand-card table.t {
+  box-shadow: none;
+  border-radius: 0;
+  width: 100%;
+}
+
+.mp-demand-card .t th {
+  background: #fcfcfd;
+  height: 36px;
+  padding: 0 9px;
+}
+
+.mp-demand-card .t td {
+  height: 52px;
+  padding: 6px 9px;
+}
+
+.mp-demand-card .mp-col-name {
+  white-space: normal;
+  min-width: 170px;
+  max-width: 245px;
+}
+
+.mp-demand-card .demand-ledger-cell {
+  min-width: 185px;
+}
+
+.mp-demand-card .demand-ledger-nums {
+  gap: 6px;
+  font-size: 11px;
+}
+
+.mp-fam-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mp-fam-title-row strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cp-ink);
+  line-height: 1.35;
+}
+
+.mp-fam-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--cp-ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+
+.mp-demand-expand-cell {
+  background: #f9fafb !important;
+  padding: 12px 18px 14px !important;
+}
+
+.mp-demand-expand-inner {
+  background: var(--cp-surface);
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--cp-border);
+  overflow: hidden;
+}
+
+.mp-demand-expand-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--cp-divider);
+  background: #fcfcfd;
+}
+
+.mp-demand-expand-inner table.t td {
+  height: 36px;
+}
+
+.demand-dual-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: #eceef2;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.demand-dual-bar .seg-done {
+  background: #10b981;
+}
+
+.demand-dual-bar .seg-plan {
+  background: var(--cp-accent);
+}
+
+/* ==========================================================================
+   4. Settings Modal (Magpie Clean Settings Center)
+   ========================================================================== */
+
+dialog.settings-center-dialog {
+  background: var(--cp-bg);
+  border-radius: 14px;
+  border: 0;
+  box-shadow: 0 28px 72px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(15, 23, 42, 0.08);
+}
+
+.sc-head {
+  background: var(--cp-surface);
+  border-bottom: 1px solid var(--cp-divider);
+  padding: 11px 18px;
+}
+
+.sc-brand-mark {
+  background: var(--cp-ink);
+  color: #ffffff;
+  border-radius: 7px;
+}
+
+.sc-brand h1 {
+  color: var(--cp-ink);
+  font-size: 14.5px;
+  font-weight: 650;
+}
+
+.sc-status-chip {
+  border-radius: 999px;
+  border: 1px solid var(--cp-border);
+  background: var(--cp-surface-subtle);
+  color: var(--cp-ink-2);
+}
+
+.sc-status-chip.ok {
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.22);
+  color: #15803d;
+}
+
+.sc-body {
+  background: var(--cp-bg);
+}
+
+.sc-sidebar {
+  background: var(--cp-sidebar);
+  border-right: 1px solid var(--cp-border);
+  padding: 12px 10px;
+}
+
+.sc-tablist {
+  gap: 3px;
+}
+
+.sc-tab {
+  min-block-size: 36px;
+  padding: 7px 11px;
+  border-radius: var(--cp-radius-ctrl);
+  border: 0;
+  color: var(--cp-ink-2);
+  font-size: 13px;
+  background: transparent;
+}
+
+.sc-tab strong {
+  font-weight: 500;
+  color: inherit;
+}
+
+.sc-tab:hover {
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--cp-ink);
+}
+
+.sc-tab[aria-selected="true"] {
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+  box-shadow: var(--cp-shadow-pill);
+}
+
+.sc-tab[aria-selected="true"] strong {
+  color: var(--cp-ink);
+  font-weight: 600;
+}
+
+.sc-tab[aria-selected="true"] .sc-tab-ico {
+  color: var(--cp-ink);
+}
+
+/* Hide old blue anchor bar and pseudo left strip so the crisp white pill shines */
+.sc-tablist::after,
+.sc-tab::before,
+.sc-tab[aria-selected="true"]::before {
+  display: none !important;
+  content: none !important;
+}
+
+.sc-kbd {
+  background: var(--cp-surface-subtle) !important;
+  border: 1px solid var(--cp-border) !important;
+  color: var(--cp-ink-3) !important;
+  border-radius: 6px !important;
+}
+
+.sc-close-btn {
+  background: transparent !important;
+  border: 1px solid var(--cp-border-strong) !important;
+  color: var(--cp-ink-2) !important;
+  border-radius: 8px !important;
+}
+
+.sc-close-btn:hover {
+  background: var(--cp-surface-subtle) !important;
+  color: var(--cp-ink) !important;
+}
+
+.sc-card-pill {
+  background: var(--cp-accent-soft) !important;
+  color: var(--cp-accent-ink) !important;
+  border-color: rgba(91, 97, 246, 0.22) !important;
+  border-radius: 999px !important;
+}
+
+.sc-corner-node.on {
+  background: var(--cp-accent) !important;
+  border-color: #818cf8 !important;
+  box-shadow: 0 0 0 3px rgba(91, 97, 246, 0.25) !important;
+}
+
+.sc-orient-card.on {
+  color: var(--cp-accent) !important;
+}
+
+.sc-content {
+  background: var(--cp-bg);
+  padding: 18px 22px;
+}
+
+.sc-card {
+  background: var(--cp-surface);
+  border: 0;
+  border-radius: var(--cp-radius-card);
+  box-shadow: var(--cp-shadow-card);
+  padding: 16px 18px;
+}
+
+.sc-card-head h2 {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--cp-ink);
+}
+
+.sc-orient-card,
+.sc-preset-tile {
+  border-radius: 10px;
+  border: 1px solid var(--cp-border-strong);
+  background: var(--cp-surface);
+}
+
+.sc-orient-card.on,
+.sc-preset-tile.on {
+  border-color: var(--cp-accent);
+  background: rgba(91, 97, 246, 0.055);
+  box-shadow: 0 0 0 1px rgba(91, 97, 246, 0.25);
+}
+
+.sc-orient-card.on strong,
+.sc-preset-tile.on strong {
+  color: var(--cp-accent-ink);
+}
+
+.sc-preset-dot {
+  background: var(--cp-accent);
+}
+
+.sc-ctrl-row,
+.sc-switch-row {
+  border-radius: 10px;
+  border: 1px solid var(--cp-border);
+  background: var(--cp-surface);
+  padding: 11px 14px;
+}
+
+.sc-stepper {
+  border-radius: 8px;
+  border: 1px solid var(--cp-border-strong);
+  background: #fafafb;
+}
+
+.sc-step-btn {
+  border-radius: 6px;
+  color: var(--cp-ink);
+}
+
+.sc-step-btn:hover:not(:disabled) {
+  background: #eceef2;
+}
+
+.sc-time-btn {
+  border-radius: 7px;
+  border: 0;
+  background: #eceef2;
+  color: var(--cp-ink-2);
+}
+
+.sc-time-btn.on {
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+  font-weight: 600;
+  box-shadow: var(--cp-shadow-pill);
+}
+
+.sc-foot {
+  background: var(--cp-surface);
+  border-top: 1px solid var(--cp-divider);
+  padding: 10px 18px;
+}
+
+/* ==========================================================================
+   5. Cutting Workbench Shell (Light Floating Panes + Crisp Dark CAD Viewport)
+   ========================================================================== */
+
+.studio-top-bar {
+  background: var(--cp-surface);
+  border-bottom: 1px solid var(--cp-divider);
+  padding: 7px 16px;
+  gap: 10px;
+}
+
+.studio-top-bar h1 {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--cp-ink);
+  letter-spacing: -0.015em;
+}
+
+.studio-dim-seg,
+.studio-source-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 0 !important;
+  border-radius: 9px;
+  background: #eceef2;
+}
+
+.studio-dim-seg button,
+.studio-source-seg button {
+  height: 26px;
+  padding: 0 10px;
+  border: 0 !important;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--cp-ink-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.studio-dim-seg button:hover,
+.studio-source-seg button:hover {
+  color: var(--cp-ink);
+}
+
+.studio-dim-seg button[aria-pressed="true"],
+.studio-source-seg button[aria-pressed="true"] {
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.09);
+}
+
+.craft-disclosure > summary {
+  border-radius: var(--cp-radius-ctrl);
+  border: 1px solid var(--cp-border-strong);
+  background: var(--cp-surface);
+  color: var(--cp-ink-2);
+  padding: 4px 10px;
+}
+
+.craft-disclosure[open] > summary {
+  border-color: var(--cp-accent);
+  color: var(--cp-ink);
+}
+
+.craft-disclosure-panel {
+  border-radius: 10px;
+  border: 0;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14), 0 0 0 1px var(--cp-border);
+}
+
+/* Floating 3-Column Card Workspace */
+.studio-split {
+  background: var(--cp-bg);
+  padding: 10px 12px 12px;
+  gap: 10px;
+}
+
+.studio-split > .pane {
+  border: 0;
+  border-radius: var(--cp-radius-card);
+  box-shadow: var(--cp-shadow-card);
+  overflow: hidden;
+  background: var(--cp-surface);
+}
+
+.studio-split > .pane.studio-center {
+  background: #181c22;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.18);
+}
+
+.studio-split .pane-h {
+  height: 40px;
+  padding: 0 13px;
+  background: var(--cp-surface);
+  border-bottom: 1px solid var(--cp-divider);
+  color: var(--cp-ink);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.studio-split .sec {
+  background: #fafafb;
+  border-top: 1px solid var(--cp-divider);
+  border-bottom: 1px solid var(--cp-divider);
+  color: var(--cp-ink-3);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.wb-overview-card {
+  margin: 10px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  background: #fafafb;
+  border: 1px solid var(--cp-border);
+}
+
+.wb-mini-prog {
+  height: 5px;
+  border-radius: 999px;
+  background: #e9ebef;
+}
+
+.wb-mini-prog .seg-done {
+  background: #10b981;
+}
+
+.wb-mini-prog .seg-plan {
+  background: var(--cp-accent);
+}
+
+.wb-mini-prog .seg-cand {
+  background: #818cf8;
+}
+
+.wb-overview-head > div {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.wb-demand-prog-row {
+  border-radius: 9px;
+  border: 1px solid var(--cp-border);
+  border-left: 2.5px solid #e4e4e7;
+  background: var(--cp-surface);
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.wb-demand-prog-row.is-open {
+  border-left-color: #f59e0b;
+}
+
+.wb-demand-prog-row.is-cand {
+  border-left-color: var(--cp-accent);
+}
+
+.wb-demand-prog-row:hover {
+  border-color: var(--cp-border-strong);
+  background: #fcfcfd;
+}
+
+.wb-demand-prog-row.is-done {
+  background: rgba(16, 185, 129, 0.045);
+  border-color: rgba(16, 185, 129, 0.22);
+  border-left-color: #10b981;
+}
+
+.studio-accordion {
+  border: 0;
+  border-bottom: 1px solid var(--cp-divider);
+}
+
+.studio-accordion > summary {
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+  font-weight: 600;
+}
+
+.studio-accordion > summary:hover {
+  background: #fafafb;
+}
+
+.choice-card {
+  border-radius: 9px;
+  border: 1px solid var(--cp-border);
+  background: var(--cp-surface);
+}
+
+.choice-card:has(input:checked) {
+  border-color: rgba(91, 97, 246, 0.45);
+  background: rgba(91, 97, 246, 0.045);
+}
+
+.scheme-slot {
+  border-radius: 10px;
+  border: 1px solid var(--cp-border);
+  background: var(--cp-surface);
+}
+
+.scheme-slot.on {
+  border-color: var(--cp-accent);
+  background: rgba(91, 97, 246, 0.055);
+  box-shadow: 0 0 0 1px rgba(91, 97, 246, 0.2);
+}
+
+/* Sticky Bottom-Right Single Primary Solve CTA */
+.studio-right-foot {
+  background: var(--cp-surface);
+  border-top: 1px solid var(--cp-divider);
+  padding: 10px 12px 12px;
+}
+
+.studio-right-foot .studio-solve-btn {
+  height: 36px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--cp-accent);
+  border-color: var(--cp-accent);
+  box-shadow: 0 2px 6px rgba(91, 97, 246, 0.28);
+}
+
+.studio-right-foot .studio-solve-btn:hover:not([disabled]) {
+  background: var(--cp-accent-hover);
+  border-color: var(--cp-accent-hover);
+}
+
+/* CAD Toolbar inside Dark Viewport */
+.studio-center .ctool {
+  height: 36px;
+  background: #20252d;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 0 10px;
+}
+
+.studio-center .ctool .vseg {
+  border: 0;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px;
+  gap: 2px;
+}
+
+.studio-center .ctool .vseg button {
+  height: 22px;
+  border-radius: 5px;
+  padding: 0 9px;
+}
+
+.studio-center .ctool .vseg button[aria-pressed="true"],
+.studio-center .ctool .vseg button.on,
+.studio-center .ctool > button[aria-pressed="true"],
+.studio-center .ctool > button.on {
+  background: var(--cp-accent);
+  border-color: var(--cp-accent);
+  color: #ffffff;
+}
+
+/* Compact 1366x768 Guard */
+@media (max-width: 1400px) {
+  .app.app-magpie {
+    grid-template-columns: 196px minmax(0, 1fr);
+  }
+  .mp-page-shell {
+    padding: 12px 16px 18px;
+  }
+  .mp-search-input {
+    width: 220px;
+  }
+}
