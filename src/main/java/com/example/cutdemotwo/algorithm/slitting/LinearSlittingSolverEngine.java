@@ -95,7 +95,10 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
     static SlittingResult solveKernel(SlittingProblem p) {
         SlittingValidation.validateProblem(p);
         var config=new SolverConfig(p.minWidthMm(),p.maxWidthMm(),p.widthStepMm(),p.motherWidthMm());
-        config.setTotalOverCap(p.totalOverCap());config.setTimeoutMs(p.timeLimitSeconds()*1000L);config.setUseNewSolver(true);
+        long totalMs = p.timeLimitSeconds() * 1000L;
+        long startupMarginMs = Math.min(2200L, Math.max(1200L, totalMs / 5));
+        long internalBudgetMs = Math.max(500L, totalMs - startupMarginMs);
+        config.setTotalOverCap(p.totalOverCap());config.setTimeoutMs(internalBudgetMs);config.setUseNewSolver(true);
         var items=new ArrayList<SolverOrderItem>();
         long lengthUnit=lengthUnitMm(p);
         for(var o:p.orders()) {
@@ -106,7 +109,7 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
         boolean fast="FAST".equals(p.profile());
         var options=new HashMap<String,String>();
         options.put("cutting.fast.preview",Boolean.toString(fast));options.put("cutting.quality.enabled",Boolean.toString(!fast));
-        options.put("cutting.fast.budgetMs",Long.toString(p.timeLimitSeconds()*1000L));
+        options.put("cutting.fast.budgetMs",Long.toString(internalBudgetMs));
         options.put("cutting.aLayerParityPenalties",fast?"0":"0,0.1");
         options.put("cutting.aLayerAlignmentLambdas","0");options.put("cutting.nestedWidthCandidateSteps","0");
         options.put("cutting.candidateOrders","1");options.put("cutting.spr.maxIterations","1");

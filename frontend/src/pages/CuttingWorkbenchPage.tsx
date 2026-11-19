@@ -326,19 +326,28 @@ function buildOptimizationRequest2D(
   const safeStartHeight =
     maxLengthCapMm != null && maxLengthCapMm > 0 ? Math.min(rawHeight, maxLengthCapMm) : rawHeight;
 
-  const exclusions = defects.map((d, i) => {
-    const margin = d.margin ?? settings.defectMarginMm;
-    return {
-      id: d.id || i + 1,
-      x: Math.max(0, d.x - margin),
-      y: Math.max(0, d.y - margin),
-      shape: rectangle(d.w + 2 * margin, d.h + 2 * margin),
-      clearance: 0
-    };
-  });
+  const exclusions = defects
+    .map((d, i) => {
+      const margin = d.margin ?? settings.defectMarginMm;
+      const x0 = Math.max(0, d.x - margin);
+      const y0 = Math.max(0, d.y - margin);
+      const x1 = Math.min(widthMm, d.x + d.w + margin);
+      const y1 = Math.min(safeStartHeight, d.y + d.h + margin);
+      const ew = Math.round((x1 - x0) * 10) / 10;
+      const eh = Math.round((y1 - y0) * 10) / 10;
+      if (ew <= 0.1 || eh <= 0.1) return null;
+      return {
+        id: d.id || i + 1,
+        x: Math.round(x0 * 10) / 10,
+        y: Math.round(y0 * 10) / 10,
+        shape: rectangle(ew, eh),
+        clearance: 0
+      };
+    })
+    .filter(Boolean);
 
   const timeScale = Math.max(0.2, (settings.timeLimitSeconds || 5) / 5);
-  const scaledTimeLimit = Math.min(120, Math.max(1, Math.round(strategy.timeLimit * timeScale)));
+  const scaledTimeLimit = Math.min(60, Math.max(1, Math.round(strategy.timeLimit * timeScale)));
 
   const problem = {
     schemaVersion: '1',

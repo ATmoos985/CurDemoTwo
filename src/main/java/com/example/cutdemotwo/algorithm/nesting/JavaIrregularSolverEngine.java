@@ -129,7 +129,8 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
     public EngineResult solve(NestingProblem problem) {
         ComputationCancellation.check();
         long startTime = System.currentTimeMillis();
-        long timeBudgetMs = Math.max(1000L, problem.timeLimitSeconds() * 1000L);
+        long marginMs = Math.min(800L, Math.max(250L, problem.timeLimitSeconds() * 150L));
+        long timeBudgetMs = Math.max(350L, problem.timeLimitSeconds() * 1000L - marginMs);
 
         Shape matShape = problem.material().shape();
         Area matArea = PolygonGeometry.region(matShape, 0, 0);
@@ -227,7 +228,6 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
         List<Placement> finalPlacements = new ArrayList<>();
         int idSeq = 1;
         for (PlacedRecord rec : bestPlan) {
-            ComputationCancellation.check();
             Placement old = rec.placement;
             finalPlacements.add(new Placement(
                     idSeq++,

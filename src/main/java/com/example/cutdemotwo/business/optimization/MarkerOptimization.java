@@ -66,7 +66,8 @@ final class MarkerOptimization {
         Optional<Function<NestingProblem, NestingResult>> strip = Optional.empty();
         if (compact && input.strategy().maxTrials() >= 3 && original.timeLimitSeconds() >= 5)
             strip = refiner.stripSearch(original, input.allowFallback());
-        long jobDeadline = started + original.timeLimitSeconds() * 1_000_000_000L;
+        long exitMargin = Math.min(500_000_000L, Math.max(150_000_000L, original.timeLimitSeconds() * 80_000_000L));
+        long jobDeadline = started + Math.max(500_000_000L, original.timeLimitSeconds() * 1_000_000_000L - exitMargin);
         long fillBudget = input.strategy().gapFillLimits() != null && original.timeLimitSeconds() >= 6 ? 1_000_000_000L : 0;
         long deadline = jobDeadline - fillBudget;
         long budget = deadline - started - ((compact ? 1 : 0) + (strip.isPresent() ? 3 : 0)) * 1_000_000_000L;

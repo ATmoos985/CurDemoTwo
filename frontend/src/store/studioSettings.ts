@@ -232,8 +232,8 @@ export function validateStudioSettings(draft: StudioSettings): string | null {
   ) {
     return '候选料头最小回收长度须在 50–5000 mm 之间';
   }
-  if (!Number.isFinite(draft.timeLimitSeconds) || draft.timeLimitSeconds < 1 || draft.timeLimitSeconds > 120) {
-    return '单作业默认求解时限须在 1–120 秒之间';
+  if (!Number.isFinite(draft.timeLimitSeconds) || draft.timeLimitSeconds < 1 || draft.timeLimitSeconds > 60) {
+    return '单作业默认求解时限须在 1–60 秒之间';
   }
   if (
     !Array.isArray(draft.enabledStrategies2D) ||
@@ -257,7 +257,7 @@ export function persistStudioSettings(next: StudioSettings): StudioSettings {
     pieceGapMm: Math.round(next.pieceGapMm * 10) / 10,
     minRemnantWidthMm: Math.round(next.minRemnantWidthMm * 10) / 10,
     minRemnantLengthMm: Math.round(next.minRemnantLengthMm * 10) / 10,
-    timeLimitSeconds: Math.round(next.timeLimitSeconds),
+    timeLimitSeconds: Math.min(60, Math.max(1, Math.round(next.timeLimitSeconds))),
     enabledStrategies2D: normalizeEnabledStrategies2D(next.enabledStrategies2D),
     exportPrefix: next.exportPrefix.trim() || 'CutPlan'
   };

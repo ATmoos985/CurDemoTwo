@@ -289,8 +289,10 @@ public class DeepnestSolverEngine implements ICutSolverEngine {
         ComputationCancellation.check();
         long startNanos = System.nanoTime();
         long budgetNanos = Math.max(1L, problem.timeLimitSeconds()) * 1_000_000_000L;
-        // Reserve 10% (up to 150 ms) at the end for post-GA coordinate polish and result construction
-        long searchDeadline = startNanos + budgetNanos - Math.min(150_000_000L, budgetNanos / 10);
+        // Leave headroom before OptimizationService's wall-clock deadline so GA + polish + validation always finish cleanly
+        long exitMarginNanos = Math.min(800_000_000L, Math.max(250_000_000L, budgetNanos / 6));
+        long polishDeadline = startNanos + Math.max(200_000_000L, budgetNanos - exitMarginNanos);
+        long searchDeadline = startNanos + Math.max(150_000_000L, (polishDeadline - startNanos) - Math.min(200_000_000L, budgetNanos / 10));
 
         ProblemContext ctx = new ProblemContext(problem, stripMode);
         if (ctx.items.isEmpty()) {
@@ -380,13 +382,13 @@ public class DeepnestSolverEngine implements ICutSolverEngine {
             return out;
         }
 
-        long polishDeadline = startNanos + budgetNanos;
-        List<PlacedInstance> polished = polishPlacements(ctx, bestEval.placed(), polishDeadline);
+        List<PlacedInstance> polished = System.nanoTime() < polishDeadline && !Thread.currentThread().isInterrupted()
+                ? polishPlacements(ctx, bestEval.placed(), polishDeadline)
+                : bestEval.placed();
 
         List<Placement> finalPlacements = new ArrayList<>(polished.size());
         int seq = 1;
         for (PlacedInstance pi : polished) {
-            ComputationCancellation.check();
             finalPlacements.add(new Placement(
                     seq++,
                     pi.ori.demandId(),

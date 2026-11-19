@@ -49,7 +49,7 @@ public class IrregularPackingSolverService implements ICutSolverEngine {
             Path input = temp.resolve("input.json"), certificate = temp.resolve("certificate.json");
             Files.writeString(input, json.writeValueAsString(nativeInput(problem, objective)));
             process = new ProcessBuilder(Path.of(solverPath).toAbsolutePath().toString(), "--input", input.toString(),
-                    "--certificate", certificate.toString(), "--time-limit", Integer.toString(problem.timeLimitSeconds()),
+                    "--certificate", certificate.toString(), "--time-limit", nativeTimeLimitSeconds(problem.timeLimitSeconds()),
                     "--verbosity-level", "0", "--only-write-at-the-end", "--memory-limit", "512")
                     .directory(temp.toFile()).redirectErrorStream(true).redirectOutput(temp.resolve("solver.log").toFile()).start();
             if (!process.waitFor(problem.timeLimitSeconds() + 5L, TimeUnit.SECONDS))
@@ -78,6 +78,11 @@ public class IrregularPackingSolverService implements ICutSolverEngine {
             } catch (IOException cleanup) { log.warn("Unable to clean irregular solver temporary files", cleanup); }
         }
     }
+    static String nativeTimeLimitSeconds(int requestedSeconds) {
+        double margin = Math.min(2.2, Math.max(0.85, requestedSeconds * 0.24));
+        double budget = Math.max(0.35, requestedSeconds - margin);
+        return String.format(Locale.ROOT, "%.2f", budget);
+    }
     private static EngineResult failure(String status, String message) {
         var result = new EngineResult(); result.setFailureStatus(status); result.setMessage(message); return result;
     }
@@ -92,8 +97,14 @@ public class IrregularPackingSolverService implements ICutSolverEngine {
     static Map<String, Object> nativeInput(NestingProblem p, String objective) {
         var bin = polygon(p.material().shape(), 0, 0); bin.put("copies", 1);
         bin.put("defects", p.material().exclusions().stream().map(d -> {
-            var shape = d.clearance() == 0 ? d.shape() : NestingProblem.Shape.rectangle(d.shape().width() + 2*d.clearance(), d.shape().height() + 2*d.clearance());
-            var defect = polygon(shape, d.x() - d.clearance(), d.y() - d.clearance());
+            double left = Math.max(0, d.x() - d.clearance());
+            double top = Math.max(0, d.y() - d.clearance());
+            double right = Math.min(p.width(), d.x() + d.shape().width() + d.clearance());
+            double bottom = Math.min(p.height(), d.y() + d.shape().height() + d.clearance());
+            var shape = d.clearance() == 0
+                    ? d.shape()
+                    : NestingProblem.Shape.rectangle(Math.max(0.1, right - left), Math.max(0.1, bottom - top));
+            var defect = polygon(shape, d.clearance() == 0 ? d.x() : left, d.clearance() == 0 ? d.y() : top);
             defect.put("defect_type", -1); defect.put("item_defect_minimum_spacing", 0); return defect;
         }).toList());
         var items = p.parts().stream().map(part -> {

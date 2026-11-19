@@ -180,12 +180,22 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
         cmd.add("--linear-programming-solver"); cmd.add("highs");
         cmd.add("--certificate"); cmd.add(certCsv.getAbsolutePath());
         cmd.add("--only-write-at-the-end");
-        cmd.add("--time-limit"); cmd.add(Integer.toString(req.timeLimitSeconds()));
+        cmd.add("--time-limit"); cmd.add(nativeTimeLimitSeconds(req.timeLimitSeconds()));
 
         if (!req.parts().stream().anyMatch(NestingProblem.Part::allowRotation)) {
             cmd.add("--no-item-rotation");
         }
         return cmd;
+    }
+
+    /**
+     * Leave wall-clock headroom for process launch, certificate write (--only-write-at-the-end),
+     * and Java validation so the native solver exits cleanly before OptimizationService's deadline.
+     */
+    static String nativeTimeLimitSeconds(int requestedSeconds) {
+        double margin = Math.min(1.8, Math.max(0.75, requestedSeconds * 0.22));
+        double budget = Math.max(0.35, requestedSeconds - margin);
+        return String.format(Locale.ROOT, "%.2f", budget);
     }
 
     /**

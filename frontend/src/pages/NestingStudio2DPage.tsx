@@ -173,19 +173,31 @@ function buildOptimizationRequest2D(
     ? Math.max(lengthMm, Math.ceil(rowY + rowH + 150))
     : lengthMm;
 
-  const exclusions = defects.map((d, i) => ({
-    id: d.id || i + 1,
-    x: Math.max(0, d.x - (d.margin || 0)),
-    y: Math.max(0, d.y - (d.margin || 0)),
-    shape: rectangle(d.w + 2 * (d.margin || 0), d.h + 2 * (d.margin || 0)),
-    clearance: 0
-  }));
+  const exclusions = defects
+    .map((d, i) => {
+      const m = d.margin || 0;
+      const x0 = Math.max(0, d.x - m);
+      const y0 = Math.max(0, d.y - m);
+      const x1 = Math.min(widthMm, d.x + d.w + m);
+      const y1 = Math.min(safeStartHeight, d.y + d.h + m);
+      const ew = Math.round((x1 - x0) * 10) / 10;
+      const eh = Math.round((y1 - y0) * 10) / 10;
+      if (ew <= 0.1 || eh <= 0.1) return null;
+      return {
+        id: d.id || i + 1,
+        x: Math.round(x0 * 10) / 10,
+        y: Math.round(y0 * 10) / 10,
+        shape: rectangle(ew, eh),
+        clearance: 0
+      };
+    })
+    .filter(Boolean);
 
   const problem = {
     schemaVersion: '1',
     unit: 'mm',
     engine,
-    timeLimitSeconds: strategy.timeLimit,
+    timeLimitSeconds: Math.min(60, Math.max(1, strategy.timeLimit)),
     material: {
       id: `CANVAS-${widthMm}x${safeStartHeight}`,
       shape: rectangle(widthMm, safeStartHeight),
