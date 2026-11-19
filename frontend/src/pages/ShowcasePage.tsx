@@ -691,6 +691,7 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
   );
   const [scenarioFilter, setScenarioFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [viewStyle, setViewStyle] = useState<'list' | 'card'>('list');
 
   // Stage 2 Detail side-panel tab: 'data' (数据与结果, default) | 'about' (示例说明)
   const [detailTab, setDetailTab] = useState<DetailSideTab>('data');
@@ -1036,53 +1037,78 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
     []
   );
 
-  // Render a single minimalist case card for Stage 1 Overview
-  const renderCaseCard = (c: any) => {
+  // Render a single minimalist case item (List Row by default, or Simplified Card)
+  const renderCaseItem = (c: any) => {
     const meta = getCaseMeta(c);
     const sum = caseInputSummaries[c.id];
     const ver = verifications[c.id];
     const isHidden = !matchesCase(c);
 
+    if (viewStyle === 'list') {
+      return (
+        <a
+          key={c.id}
+          className="demo-card mp-case-list-row"
+          data-case={c.id}
+          href={`#/showcase/${encodeURIComponent(c.id)}`}
+          hidden={isHidden}
+        >
+          <CaseThumbSvg kind={meta.thumb} />
+          <div className="mp-clr-main">
+            <div className="mp-clr-title-line">
+              <b>{c.name}</b>
+              <span className="mp-cc3-feature">{meta.featureTag}</span>
+            </div>
+            <p>{c.note}</p>
+          </div>
+          <div className="mp-clr-meta num">
+            <span className="mp-clr-spec">
+              {sum?.specText} · {sum?.pieceSummary}
+            </span>
+            {ver ? (
+              <span className={`mp-lab-ver-badge num ${ver.pass ? 'ok' : 'warn'}`}>
+                {ver.badgeText}
+              </span>
+            ) : (
+              <span className="mp-clr-arrow" aria-hidden="true">
+                →
+              </span>
+            )}
+          </div>
+        </a>
+      );
+    }
+
     return (
       <a
         key={c.id}
-        className="card demo-card mp-case-card-v3"
+        className="card demo-card mp-case-card-v4"
         data-case={c.id}
         href={`#/showcase/${encodeURIComponent(c.id)}`}
         hidden={isHidden}
       >
-        <div className="mp-cc3-top">
-          <span className="tag kind">{sum?.engineBadge}</span>
-          <span className="mp-cc3-feature">{meta.featureTag}</span>
-          <span className="sp" />
-          {ver ? (
-            <span className={`mp-lab-ver-badge num ${ver.pass ? 'ok' : 'warn'}`}>
-              {ver.badgeText}
-            </span>
-          ) : (
-            <CodeBadge>{c.id}</CodeBadge>
-          )}
-        </div>
-
-        <div className="mp-cc3-mid">
-          <div className="mp-cc3-text">
+        <CaseThumbSvg kind={meta.thumb} />
+        <div className="mp-cc4-body">
+          <div className="mp-cc4-head">
             <b>{c.name}</b>
-            <p>{c.note}</p>
+            <span className="mp-cc3-feature">{meta.featureTag}</span>
+            {ver && (
+              <span className={`mp-lab-ver-badge num ${ver.pass ? 'ok' : 'warn'}`}>
+                {ver.badgeText}
+              </span>
+            )}
           </div>
-          <CaseThumbSvg kind={meta.thumb} />
-        </div>
-
-        <div className="mp-cc3-foot num">
-          <span className="mp-cc3-chip">{sum?.specText}</span>
-          <span className="mp-cc3-chip">{sum?.pieceSummary}</span>
-          <span className="mp-cc3-enter">试算 →</span>
+          <p>{c.note}</p>
+          <span className="mp-cc4-spec num">
+            {sum?.specText} · {sum?.pieceSummary}
+          </span>
         </div>
       </a>
     );
   };
 
   // =========================================================================
-  // STAGE 1: Minimalist Overview (#/showcase) — 先看算例/场景卡片，点击进入
+  // STAGE 1: Minimalist Overview (#/showcase) — 分场景切割 + 列式清单
   // =========================================================================
   if (!selected) {
     const capGroups: Exclude<CapabilityCategory, 'all'>[] = [
@@ -1093,12 +1119,21 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
       'boundary'
     ];
     const capGroupTitles: Record<Exclude<CapabilityCategory, 'all'>, [string, string]> = {
-      '2d-guillotine': ['二维套裁与避疵', '通幅直切 · 疵点禁入区避让 · 短料头复用 · 断头台贯通刀序'],
-      '2d-contour': ['异形轮廓与密排', '多边形折线包络 · 凹角嵌合 · 服装大小裁片填空'],
+      '2d-guillotine': ['二维套裁与避疵', '通幅直切 · 疵点禁入区避让 · 短料头复用 · 贯通刀序'],
+      '2d-contour': ['异形轮廓与密排', '多边形折线包络 · 凹角嵌合 · 服装大小片填空'],
       '2d-marker': ['服装混码齐套缩短', 'M/L 混码全部位 100% 齐套 · 多轮二分缩短唛架长度'],
-      '1d-slitting': ['一维分切与搭切', '列生成合卷搭切 · 独立分切基线对比 · 快速/精细双档'],
-      boundary: ['边界与规则对照', '尺寸超限禁止旋转阻断 · 90° 旋转解锁 · 10mm 固定刀缝间距']
+      '1d-slitting': ['一维分切与搭切', '列生成合卷搭切 · 独立分切基线对比 · 快/精双档'],
+      boundary: ['边界与规则对照', '尺寸越界防呆阻断 · 90° 旋转解锁 · 10mm 刀缝间距']
     };
+
+    const viewStyleOptions: SegmentedOption<'list' | 'card'>[] = [
+      { value: 'list', label: '列式清单' },
+      { value: 'card', label: '简约卡片' }
+    ];
+
+    const isSingleGroupFocused =
+      (mainTab === 'lab' && capFilter !== 'all') ||
+      (mainTab === 'scenario' && scenarioFilter !== 'all');
 
     return (
       <div className="react-page page-host mp-showcase-page">
@@ -1170,7 +1205,7 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                   type="button"
                   className="mp-ghost-btn"
                   onClick={() => handleBatchVerify(smokeCases)}
-                  title="自动依次检验 10 个核心基准算例并在卡片上回填实测利用率"
+                  title="自动依次检验 10 个核心基准算例并回填实测利用率"
                 >
                   一键快检 ({smokeCases.length})
                 </button>
@@ -1207,14 +1242,29 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                   ariaLabel="按行业场景筛选"
                 />
               )}
-              <span className="mp-toolbar-count num">
-                显示 {visibleCases.length} / {SHOWCASE_CASES.length} · 点击任意卡片进入工作台试算
-              </span>
+
+              <div className="mp-sc-filter-right">
+                <span className="mp-toolbar-count num">
+                  显示 {visibleCases.length} / {SHOWCASE_CASES.length}
+                </span>
+                <SegmentedControl
+                  options={viewStyleOptions}
+                  value={viewStyle}
+                  onChange={(next) => setViewStyle(next)}
+                  ariaLabel="切换列式或卡片视图"
+                  size="sm"
+                />
+              </div>
             </div>
 
-            <div id="case-catalogue" className="mp-sc-catalogue-v3">
+            <div
+              id="case-catalogue"
+              className={`mp-sc-board-v4 ${
+                viewStyle === 'list' ? 'is-list-board' : 'is-card-board'
+              } ${isSingleGroupFocused ? 'is-single-group' : ''}`}
+            >
               {mainTab === 'lab'
-                ? capGroups.map((cg) => {
+                ? capGroups.map((cg, gIdx) => {
                     const groupCases = SHOWCASE_CASES.filter(
                       (c: any) => getCaseMeta(c).capGroup === cg
                     );
@@ -1227,22 +1277,33 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                         key={cg}
                         data-case-group={cg}
                         hidden={visibleInGroup === 0}
-                        className="mp-case-group-v3"
+                        className="mp-scene-panel"
                       >
-                        <div className="mp-case-group-head-v3">
-                          <h3>{title}</h3>
-                          <CodeBadge>
-                            {visibleInGroup}/{groupCases.length}
-                          </CodeBadge>
-                          <span className="mp-case-group-tags">{tagsText}</span>
+                        <div className="mp-scene-panel-head">
+                          <span className="mp-scene-index num">
+                            0{gIdx + 1}
+                          </span>
+                          <div className="mp-scene-title-wrap">
+                            <h3>{title}</h3>
+                            <span className="mp-scene-sub">{tagsText}</span>
+                          </div>
+                          <span className="mp-scene-count num">
+                            {visibleInGroup} 项
+                          </span>
                         </div>
-                        <div className="mp-case-grid-v3">
-                          {groupCases.map((c: any) => renderCaseCard(c))}
+                        <div
+                          className={
+                            viewStyle === 'list'
+                              ? 'mp-scene-row-list'
+                              : 'mp-case-grid-v4'
+                          }
+                        >
+                          {groupCases.map((c: any) => renderCaseItem(c))}
                         </div>
                       </section>
                     );
                   })
-                : SCENARIO_DOMAINS.map((dom) => {
+                : SCENARIO_DOMAINS.map((dom, gIdx) => {
                     const domCases = SHOWCASE_CASES.filter((c: any) =>
                       dom.groups.includes(c.group)
                     );
@@ -1254,23 +1315,30 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                         key={dom.id}
                         data-case-group={dom.id}
                         hidden={visibleInDom === 0}
-                        className="mp-case-group-v3"
+                        className="mp-scene-panel"
                       >
-                        <div className="mp-case-group-head-v3">
-                          <h3>{dom.title}</h3>
-                          <CodeBadge>
-                            {visibleInDom}/{domCases.length}
-                          </CodeBadge>
-                          <div className="mp-domain-tag-row">
-                            {dom.tags.map((t) => (
-                              <span key={t} className="mp-domain-tag">
-                                {t}
-                              </span>
-                            ))}
+                        <div className="mp-scene-panel-head">
+                          <span className="mp-scene-index num">
+                            0{gIdx + 1}
+                          </span>
+                          <div className="mp-scene-title-wrap">
+                            <h3>{dom.title}</h3>
+                            <span className="mp-scene-sub">
+                              {dom.tags.join(' · ')}
+                            </span>
                           </div>
+                          <span className="mp-scene-count num">
+                            {visibleInDom} 项
+                          </span>
                         </div>
-                        <div className="mp-case-grid-v3">
-                          {domCases.map((c: any) => renderCaseCard(c))}
+                        <div
+                          className={
+                            viewStyle === 'list'
+                              ? 'mp-scene-row-list'
+                              : 'mp-case-grid-v4'
+                          }
+                        >
+                          {domCases.map((c: any) => renderCaseItem(c))}
                         </div>
                       </section>
                     );
