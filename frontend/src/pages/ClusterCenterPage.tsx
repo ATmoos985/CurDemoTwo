@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   useStudioStore,
   DemandCluster,
@@ -6,13 +6,14 @@ import {
   expandClusterToDemands
 } from '../store/useStudioStore';
 import { ModalDialog } from '../components/ModalDialog';
+import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
 import { requestJSON, toast } from '@static/app/js/util.js';
 
 const CATEGORY_LABELS: Record<DemandCluster['category'], { label: string; tagClass: string }> = {
-  DXF_GARMENT: { label: '服装/异形纸样模板', tagClass: 'run' },
-  CURTAIN_2D: { label: '家纺窗帘矩形模板', tagClass: 'ok' },
-  BOARD_2D: { label: '板材开料套系模板', tagClass: 'warn' },
-  SLITTING_1D: { label: '一维定长分条模板', tagClass: 'kind' }
+  DXF_GARMENT: { label: '服装/异形纸样', tagClass: 'run' },
+  CURTAIN_2D: { label: '家纺窗帘矩形', tagClass: 'ok' },
+  BOARD_2D: { label: '板材开料套系', tagClass: 'warn' },
+  SLITTING_1D: { label: '一维定长分条', tagClass: 'kind' }
 };
 
 function PieceMiniSvg({ piece, sizeKey }: { piece: ClusterTemplatePiece; sizeKey: string }) {
@@ -25,16 +26,16 @@ function PieceMiniSvg({ piece, sizeKey }: { piece: ClusterTemplatePiece; sizeKey
       ? geom.v.map(([x, y]) => `${x},${y}`).join(' ')
       : `0,0 ${w},0 ${w},${h} 0,${h}`;
   return (
-    <div className="cluster-piece-chip" title={`${piece.name} (${sizeKey}: ${w}×${h}mm)`}>
-      <svg viewBox={`-8 -8 ${w + 16} ${h + 16}`} width="38" height="38" aria-hidden="true">
+    <div className="mp-tpl-piece-chip" title={`${piece.name} (${sizeKey}: ${w}×${h}mm)`}>
+      <svg viewBox={`-8 -8 ${w + 16} ${h + 16}`} width="34" height="34" aria-hidden="true">
         <polygon
           points={pts}
-          fill="rgba(2, 132, 199, 0.14)"
-          stroke="#0284c7"
+          fill="rgba(91, 97, 246, 0.11)"
+          stroke="#5b61f6"
           strokeWidth={Math.max(w, h) * 0.045}
         />
       </svg>
-      <div className="cluster-piece-meta">
+      <div className="mp-tpl-piece-meta">
         <b>
           {piece.name}
           {piece.pairMirror ? ' · 对称' : ''}
@@ -62,6 +63,7 @@ export const ClusterCenterPage: React.FC = () => {
   } = useStudioStore();
 
   const [filterCat, setFilterCat] = useState<string>('ALL');
+  const [search, setSearch] = useState('');
   const [checkedIds, setCheckedIds] = useState<string[]>(['DXF_1226']);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [pushingToPool, setPushingToPool] = useState(false);
@@ -83,7 +85,17 @@ export const ClusterCenterPage: React.FC = () => {
     syncTemplatesFromServer();
   }, []);
 
-  const filtered = clusters.filter((c) => filterCat === 'ALL' || c.category === filterCat);
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return clusters.filter((c) => {
+      if (filterCat !== 'ALL' && c.category !== filterCat) return false;
+      if (!q) return true;
+      const pieceText = c.pieces.map((p) => p.name).join(' ');
+      return `${c.name} ${c.code} ${c.materialModel} ${c.description} ${pieceText}`
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [clusters, filterCat, search]);
 
   const toggleCheck = (id: string) => {
     setCheckedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -244,62 +256,284 @@ export const ClusterCenterPage: React.FC = () => {
 
   const selectedTemplates = clusters.filter((c) => checkedIds.includes(c.id));
 
+  const categoryOptions: SegmentedOption<string>[] = useMemo(
+    () => [
+      { value: 'ALL', label: '全部模板', count: clusters.length },
+      {
+        value: 'DXF_GARMENT',
+        label: '二维异形纸样',
+        count: clusters.filter((c) => c.category === 'DXF_GARMENT').length
+      },
+      {
+        value: 'CURTAIN_2D',
+        label: '二维家纺窗帘',
+        count: clusters.filter((c) => c.category === 'CURTAIN_2D').length
+      },
+      {
+        value: 'BOARD_2D',
+        label: '二维板材开料',
+        count: clusters.filter((c) => c.category === 'BOARD_2D').length
+      },
+      {
+        value: 'SLITTING_1D',
+        label: '一维定长分条',
+        count: clusters.filter((c) => c.category === 'SLITTING_1D').length
+      }
+    ],
+    [clusters]
+  );
+
   return (
     <div className="react-page">
-      <div className="ph">
-        <h1>需求模板库</h1>
-        <span className="crumb">维护款式纸样、套板与分条 BOM 配方 · 按配码套数展开拼凑排程需求</span>
-        <span className="sp" />
-        <label className="btn" style={{ cursor: 'pointer' }}>
-          导入 CAD DXF 模板
-          <input type="file" accept=".dxf" hidden onChange={handleDxfFileUpload} />
-        </label>
-        <button type="button" className="btn" onClick={() => setShowCreateModal(true)}>
-          ＋ 新建需求模板
-        </button>
-        <button
-          type="button"
-          className="btn"
-          disabled={!selectedTemplates.length || pushingToPool}
-          onClick={() => handleExpandToDemandPool(selectedTemplates)}
-        >
-          展开加入需求池 ({selectedTemplates.length})
-        </button>
-        <button
-          type="button"
-          className="btn pri"
-          disabled={!selectedTemplates.length}
-          onClick={() => {
-            loadSelectedClustersInto2D(checkedIds, false);
-            location.hash = '#/workbench';
-          }}
-        >
-          拼凑直达搭切工作台 ({selectedTemplates.length}) →
-        </button>
-      </div>
-
-      <div className="toolbar">
-        <div className="seg" role="group" aria-label="模板分类筛选">
-          {[
-            ['ALL', `全部模板 (${clusters.length})`],
-            ['DXF_GARMENT', '二维异形 CAD 纸样'],
-            ['CURTAIN_2D', '二维家纺窗帘套系'],
-            ['BOARD_2D', '二维板材开料套系'],
-            ['SLITTING_1D', '一维定长分条组']
-          ].map(([k, label]) => (
-            <button
-              key={k}
-              type="button"
-              className={filterCat === k ? 'on' : ''}
-              aria-pressed={filterCat === k}
-              onClick={() => setFilterCat(k)}
-            >
-              {label}
-            </button>
-          ))}
+      <div className="mp-page-shell">
+        <div className="mp-page-head">
+          <div className="mp-page-title-block">
+            <h1>需求模板库</h1>
+            <span className="mp-page-summary num">
+              {clusters.length} 个模板 · 已勾选 {selectedTemplates.length} 项用于拼单
+            </span>
+          </div>
         </div>
-        <span className="sp" />
-        <span className="muted num">已勾选 {selectedTemplates.length} 个需求模板用于拼单</span>
+
+        <div className="mp-filter-toolbar">
+          <div className="mp-search-wrap">
+            <span className="mp-search-ico" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="14" height="14">
+                <circle
+                  cx="7.2"
+                  cy="7.2"
+                  r="4.6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                />
+                <path
+                  d="m10.8 10.8 2.8 2.8"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <input
+              type="search"
+              className="mp-search-input"
+              aria-label="搜索需求模板"
+              placeholder="筛选模板名称、编号、物料品号或部件"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          <span className="mp-toolbar-count num">
+            显示 {filtered.length} / {clusters.length}
+          </span>
+
+          <div className="mp-toolbar-actions">
+            <label className="mp-ghost-btn" style={{ cursor: 'pointer' }}>
+              导入 CAD DXF 模板
+              <input type="file" accept=".dxf" hidden onChange={handleDxfFileUpload} />
+            </label>
+            <button
+              type="button"
+              className="mp-ghost-btn"
+              disabled={!selectedTemplates.length || pushingToPool}
+              onClick={() => handleExpandToDemandPool(selectedTemplates)}
+            >
+              展开加入需求池 ({selectedTemplates.length})
+            </button>
+            <button
+              type="button"
+              className="btn soft-accent"
+              disabled={!selectedTemplates.length}
+              onClick={() => {
+                loadSelectedClustersInto2D(checkedIds, false);
+                location.hash = '#/workbench';
+              }}
+            >
+              拼凑直达搭切工作台 ({selectedTemplates.length}) →
+            </button>
+            <button type="button" className="btn pri" onClick={() => setShowCreateModal(true)}>
+              ＋ 新建需求模板
+            </button>
+          </div>
+        </div>
+
+        <div className="mp-tpl-seg-row">
+          <SegmentedControl
+            options={categoryOptions}
+            value={filterCat}
+            onChange={(next) => setFilterCat(next)}
+            ariaLabel="模板分类筛选"
+          />
+          <span className="mp-toolbar-count num">
+            维护款式纸样、套板与分条 BOM 配方 · 按配码套数展开排程
+          </span>
+        </div>
+
+        {filtered.length === 0 ? (
+          <div className="mp-empty-card">
+            <strong>暂无匹配的需求模板</strong>
+            <p>
+              可调整上方搜索关键词或切换维度分类，也可以导入 CAD DXF 纸样或新建自定义需求模板。
+            </p>
+            <div style={{ display: 'inline-flex', gap: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setFilterCat('ALL');
+                  setSearch('');
+                }}
+              >
+                重置筛选
+              </button>
+              <button
+                type="button"
+                className="btn soft-accent"
+                onClick={() => setShowCreateModal(true)}
+              >
+                ＋ 新建需求模板
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mp-tpl-grid">
+            {filtered.map((cluster) => {
+              const catMeta = CATEGORY_LABELS[cluster.category];
+              const counts = clusterSelections[cluster.id] || cluster.defaultSizeCounts;
+              const totalUnits = Object.values(counts).reduce((s, n) => s + (Number(n) || 0), 0);
+              const perUnitPieces = cluster.pieces.reduce((s, p) => s + p.quantityPerUnit, 0);
+              const totalPieces = Math.max(1, totalUnits) * perUnitPieces;
+              const isChecked = checkedIds.includes(cluster.id);
+              const previewSize =
+                cluster.availableSizes.find((sz) => (counts[sz] || 0) > 0) ||
+                cluster.availableSizes[0];
+
+              return (
+                <article
+                  key={cluster.id}
+                  className={`mp-tpl-card ${isChecked ? 'is-checked' : ''}`}
+                >
+                  <header className="mp-tpl-card-head">
+                    <label className="mp-tpl-title-wrap">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleCheck(cluster.id)}
+                      />
+                      <strong>{cluster.name}</strong>
+                      <CodeBadge>{cluster.code}</CodeBadge>
+                    </label>
+                    <div className="mp-tpl-head-right">
+                      <span className={`tag ${catMeta.tagClass}`}>{catMeta.label}</span>
+                      {cluster.custom && (
+                        <button
+                          type="button"
+                          className="mp-ghost-btn mp-ghost-sm mp-btn-danger-ghost"
+                          style={{ height: 22, padding: '0 6px', fontSize: 11.5 }}
+                          title="删除自定义需求模板"
+                          onClick={() => deleteCustomCluster(cluster.id)}
+                        >
+                          删除
+                        </button>
+                      )}
+                    </div>
+                  </header>
+
+                  <p className="mp-tpl-desc">{cluster.description}</p>
+
+                  <div className="mp-tpl-spec-bar num">
+                    <span>
+                      品号 <b>{cluster.materialModel}</b>
+                    </span>
+                    <span>
+                      标准门幅 <b>{cluster.defaultWidthMm} mm</b>
+                    </span>
+                    <span>
+                      展开量{' '}
+                      <b className="is-accent">
+                        {totalUnits || 1} 套 · {totalPieces}{' '}
+                        {cluster.dimension === '1D' ? '卷' : '片'}
+                      </b>
+                    </span>
+                  </div>
+
+                  <div className="mp-tpl-pieces">
+                    {cluster.pieces.slice(0, 8).map((p, idx) => (
+                      <PieceMiniSvg key={idx} piece={p} sizeKey={previewSize} />
+                    ))}
+                    {cluster.pieces.length > 8 && (
+                      <div className="mp-tpl-piece-more">+{cluster.pieces.length - 8} 种部件</div>
+                    )}
+                  </div>
+
+                  <div className="mp-tpl-sizes">
+                    <small>选取配码 / 批次套数</small>
+                    <div className="mp-tpl-size-pills">
+                      {cluster.availableSizes.map((sz) => (
+                        <label
+                          key={sz}
+                          className={`mp-tpl-size-pill ${(counts[sz] || 0) > 0 ? 'active' : ''}`}
+                        >
+                          <span>{sz}</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={200}
+                            className="num"
+                            value={counts[sz] ?? 0}
+                            onChange={(e) => setClusterCount(cluster.id, sz, Number(e.target.value))}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <footer className="mp-tpl-card-actions">
+                    <button
+                      type="button"
+                      className="btn sm soft-accent"
+                      onClick={() => {
+                        if (cluster.dimension === '1D') {
+                          loadClusterInto1D(cluster.id, false);
+                        } else {
+                          loadClusterInto2D(cluster.id, false);
+                        }
+                        location.hash = '#/workbench';
+                      }}
+                    >
+                      送入搭切工作台 →
+                    </button>
+                    <button
+                      type="button"
+                      className="btn sm"
+                      disabled={pushingToPool}
+                      onClick={() => handleExpandToDemandPool([cluster])}
+                    >
+                      展开入需求池
+                    </button>
+                    <button
+                      type="button"
+                      className="mp-ghost-btn mp-ghost-sm"
+                      onClick={() => {
+                        if (cluster.dimension === '1D') {
+                          loadClusterInto1D(cluster.id, true);
+                        } else {
+                          loadClusterInto2D(cluster.id, true);
+                        }
+                        toast(`已将「${cluster.name}」追加拼入工作台待排清单`);
+                      }}
+                    >
+                      ＋ 追加合排
+                    </button>
+                  </footer>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <ModalDialog
@@ -386,110 +620,112 @@ export const ClusterCenterPage: React.FC = () => {
           <div className="sec" style={{ margin: '0 -16px' }}>
             组成部件 / 分条明细
           </div>
-          <table className="t" style={{ marginTop: 8 }}>
-            <thead>
-              <tr>
-                <th>部件 / 条宽名称</th>
-                <th className="r">{newCategory === 'SLITTING_1D' ? '条宽 mm' : '基准宽 mm'}</th>
-                {newCategory !== 'SLITTING_1D' && <th className="r">基准长 mm</th>}
-                <th className="r">{newCategory === 'SLITTING_1D' ? '每批卷数' : '每套数量'}</th>
-                {newCategory !== 'SLITTING_1D' && <th>丝缕/旋转方向</th>}
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {newPieces.map((p, idx) => (
-                <tr key={idx}>
-                  <td>
-                    <input
-                      className="field"
-                      value={p.name}
-                      onChange={(e) =>
-                        setNewPieces((arr) =>
-                          arr.map((item, i) => (i === idx ? { ...item, name: e.target.value } : item))
-                        )
-                      }
-                    />
-                  </td>
-                  <td className="r">
-                    <input
-                      type="number"
-                      className="field num"
-                      style={{ width: 82 }}
-                      value={p.w}
-                      onChange={(e) =>
-                        setNewPieces((arr) =>
-                          arr.map((item, i) =>
-                            i === idx ? { ...item, w: Number(e.target.value) } : item
+          <div className="mp-table-scroll" style={{ marginTop: 8 }}>
+            <table className="t">
+              <thead>
+                <tr>
+                  <th>部件 / 条宽名称</th>
+                  <th className="r">{newCategory === 'SLITTING_1D' ? '条宽 mm' : '基准宽 mm'}</th>
+                  {newCategory !== 'SLITTING_1D' && <th className="r">基准长 mm</th>}
+                  <th className="r">{newCategory === 'SLITTING_1D' ? '每批卷数' : '每套数量'}</th>
+                  {newCategory !== 'SLITTING_1D' && <th>丝缕/旋转方向</th>}
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {newPieces.map((p, idx) => (
+                  <tr key={idx}>
+                    <td>
+                      <input
+                        className="field"
+                        value={p.name}
+                        onChange={(e) =>
+                          setNewPieces((arr) =>
+                            arr.map((item, i) => (i === idx ? { ...item, name: e.target.value } : item))
                           )
-                        )
-                      }
-                    />
-                  </td>
-                  {newCategory !== 'SLITTING_1D' && (
+                        }
+                      />
+                    </td>
                     <td className="r">
                       <input
                         type="number"
                         className="field num"
                         style={{ width: 82 }}
-                        value={p.h}
+                        value={p.w}
                         onChange={(e) =>
                           setNewPieces((arr) =>
                             arr.map((item, i) =>
-                              i === idx ? { ...item, h: Number(e.target.value) } : item
+                              i === idx ? { ...item, w: Number(e.target.value) } : item
                             )
                           )
                         }
                       />
                     </td>
-                  )}
-                  <td className="r">
-                    <input
-                      type="number"
-                      className="field num"
-                      style={{ width: 64 }}
-                      value={p.qty}
-                      onChange={(e) =>
-                        setNewPieces((arr) =>
-                          arr.map((item, i) =>
-                            i === idx ? { ...item, qty: Number(e.target.value) } : item
-                          )
-                        )
-                      }
-                    />
-                  </td>
-                  {newCategory !== 'SLITTING_1D' && (
-                    <td>
-                      <select
-                        className="field"
-                        style={{ height: 26, fontSize: 12 }}
-                        value={p.grainRule}
+                    {newCategory !== 'SLITTING_1D' && (
+                      <td className="r">
+                        <input
+                          type="number"
+                          className="field num"
+                          style={{ width: 82 }}
+                          value={p.h}
+                          onChange={(e) =>
+                            setNewPieces((arr) =>
+                              arr.map((item, i) =>
+                                i === idx ? { ...item, h: Number(e.target.value) } : item
+                              )
+                            )
+                          }
+                        />
+                      </td>
+                    )}
+                    <td className="r">
+                      <input
+                        type="number"
+                        className="field num"
+                        style={{ width: 64 }}
+                        value={p.qty}
                         onChange={(e) =>
                           setNewPieces((arr) =>
                             arr.map((item, i) =>
-                              i === idx ? { ...item, grainRule: e.target.value as any } : item
+                              i === idx ? { ...item, qty: Number(e.target.value) } : item
                             )
                           )
                         }
-                      >
-                        <option value="STRICT_0">严格 0° 经向</option>
-                        <option value="FREE_90">允许 90° 旋转</option>
-                      </select>
+                      />
                     </td>
-                  )}
-                  <td>
-                    <button
-                      type="button"
-                      className="btn sm"
-                      onClick={() => setNewPieces((arr) => arr.filter((_, i) => i !== idx))}
-                    >
-                      移除
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    {newCategory !== 'SLITTING_1D' && (
+                      <td>
+                        <select
+                          className="field"
+                          style={{ height: 26, fontSize: 12 }}
+                          value={p.grainRule}
+                          onChange={(e) =>
+                            setNewPieces((arr) =>
+                              arr.map((item, i) =>
+                                i === idx ? { ...item, grainRule: e.target.value as any } : item
+                              )
+                            )
+                          }
+                        >
+                          <option value="STRICT_0">严格 0° 经向</option>
+                          <option value="FREE_90">允许 90° 旋转</option>
+                        </select>
+                      </td>
+                    )}
+                    <td>
+                      <button
+                        type="button"
+                        className="btn sm"
+                        onClick={() => setNewPieces((arr) => arr.filter((_, i) => i !== idx))}
+                      >
+                        移除
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
             <button
@@ -520,135 +756,6 @@ export const ClusterCenterPage: React.FC = () => {
           </div>
         </form>
       </ModalDialog>
-
-      <div className="body">
-        <div className="cluster-grid">
-          {filtered.map((cluster) => {
-            const catMeta = CATEGORY_LABELS[cluster.category];
-            const counts = clusterSelections[cluster.id] || cluster.defaultSizeCounts;
-            const totalUnits = Object.values(counts).reduce((s, n) => s + (Number(n) || 0), 0);
-            const perUnitPieces = cluster.pieces.reduce((s, p) => s + p.quantityPerUnit, 0);
-            const totalPieces = Math.max(1, totalUnits) * perUnitPieces;
-            const isChecked = checkedIds.includes(cluster.id);
-            const previewSize =
-              cluster.availableSizes.find((sz) => (counts[sz] || 0) > 0) ||
-              cluster.availableSizes[0];
-
-            return (
-              <article key={cluster.id} className="cluster-card">
-                <header className="cluster-card-head">
-                  <label className="cluster-check">
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={() => toggleCheck(cluster.id)}
-                    />
-                    <strong>{cluster.name}</strong>
-                  </label>
-                  <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                    <span className={`tag ${catMeta.tagClass}`}>{catMeta.label}</span>
-                    {cluster.custom && (
-                      <button
-                        type="button"
-                        className="btn sm"
-                        style={{ height: 20, padding: '0 6px' }}
-                        title="删除自定义需求模板"
-                        onClick={() => deleteCustomCluster(cluster.id)}
-                      >
-                        删除
-                      </button>
-                    )}
-                  </div>
-                </header>
-
-                <p className="cluster-desc">{cluster.description}</p>
-
-                <div className="cluster-spec-bar num">
-                  <span>
-                    品号 <b>{cluster.materialModel}</b>
-                  </span>
-                  <span>
-                    标准门幅 <b>{cluster.defaultWidthMm} mm</b>
-                  </span>
-                  <span>
-                    展开量{' '}
-                    <b style={{ color: 'var(--accent-ink)' }}>
-                      {totalUnits || 1} 套 · {totalPieces} {cluster.dimension === '1D' ? '卷' : '片'}
-                    </b>
-                  </span>
-                </div>
-
-                <div className="cluster-pieces-preview">
-                  {cluster.pieces.slice(0, 8).map((p, idx) => (
-                    <PieceMiniSvg key={idx} piece={p} sizeKey={previewSize} />
-                  ))}
-                  {cluster.pieces.length > 8 && (
-                    <div className="cluster-piece-more">+{cluster.pieces.length - 8} 种部件</div>
-                  )}
-                </div>
-
-                <div className="cluster-sizes-box">
-                  <small>选取配码/批次套数：</small>
-                  <div className="cluster-size-inputs">
-                    {cluster.availableSizes.map((sz) => (
-                      <label key={sz} className={(counts[sz] || 0) > 0 ? 'active' : ''}>
-                        <span>{sz}</span>
-                        <input
-                          type="number"
-                          min={0}
-                          max={200}
-                          className="field num"
-                          value={counts[sz] ?? 0}
-                          onChange={(e) => setClusterCount(cluster.id, sz, Number(e.target.value))}
-                        />
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                <footer className="cluster-card-actions">
-                  <button
-                    type="button"
-                    className="btn sm pri"
-                    onClick={() => {
-                      if (cluster.dimension === '1D') {
-                        loadClusterInto1D(cluster.id, false);
-                      } else {
-                        loadClusterInto2D(cluster.id, false);
-                      }
-                      location.hash = '#/workbench';
-                    }}
-                  >
-                    送入搭切工作台 →
-                  </button>
-                  <button
-                    type="button"
-                    className="btn sm"
-                    disabled={pushingToPool}
-                    onClick={() => handleExpandToDemandPool([cluster])}
-                  >
-                    展开入需求池
-                  </button>
-                  <button
-                    type="button"
-                    className="btn sm"
-                    onClick={() => {
-                      if (cluster.dimension === '1D') {
-                        loadClusterInto1D(cluster.id, true);
-                      } else {
-                        loadClusterInto2D(cluster.id, true);
-                      }
-                      toast(`已将「${cluster.name}」追加拼入工作台待排清单`);
-                    }}
-                  >
-                    ＋ 追加合排
-                  </button>
-                </footer>
-              </article>
-            );
-          })}
-        </div>
-      </div>
     </div>
   );
 };

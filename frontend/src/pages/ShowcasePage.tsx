@@ -14,6 +14,11 @@ import {
   independentBaseline,
   planSummary
 } from '@static/js/linear/linear-model.js';
+import {
+  SegmentedControl,
+  CodeBadge,
+  SegmentedOption
+} from '../components/ui/MagpiePrimitives';
 
 const METRIC_LABELS: Record<string, [string, string]> = {
   processingAreaUtilization: ['加工区占用率', '裁片净面积 / 本次加工区面积'],
@@ -214,95 +219,132 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
   };
 
   if (!selected) {
-    const groups = [...new Set(SHOWCASE_CASES.map((c: any) => c.group))];
+    const groups = [...new Set(SHOWCASE_CASES.map((c: any) => c.group))] as string[];
     const qLower = searchQuery.trim().toLowerCase();
     const onlyWorkflow = activeGroup === '__workflow__';
 
-    return (
-      <div className="react-page page-host">
-        <div className="ph">
-          <h1>能力展示</h1>
-          <span className="crumb">
-            算法基准与业务演练沙盒 · {SHOWCASE_CASES.length} 个计算用例 · 6
-            条业务演示路线
-          </span>
-        </div>
-        <div className="toolbar">
-          <div className="seg" id="case-tabs" role="group" aria-label="沙盒分类">
-            <button
-              type="button"
-              className={activeGroup === 'all' ? 'on' : ''}
-              data-group-filter="all"
-              onClick={() => setActiveGroup('all')}
-            >
-              全部 ({SHOWCASE_CASES.length})
-            </button>
-            {groups.map((g: any) => (
-              <button
-                key={g}
-                type="button"
-                className={activeGroup === g ? 'on' : ''}
-                data-group-filter={g}
-                onClick={() => setActiveGroup(g)}
-              >
-                {g}
-              </button>
-            ))}
-            <button
-              type="button"
-              className={activeGroup === '__workflow__' ? 'on' : ''}
-              data-group-filter="__workflow__"
-              onClick={() => setActiveGroup('__workflow__')}
-            >
-              业务流程演练 (6)
-            </button>
-          </div>
-          <span className="sp" />
-          <label>
-            查找用例{' '}
-            <input
-              className="field"
-              id="case-search"
-              type="search"
-              placeholder="行业、规则或异常"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </label>
-          <span className="muted">
-            计算演示不扣库存；业务流程使用实际任务。
-          </span>
-        </div>
+    const matchesCase = (c: any) => {
+      const kindText =
+        c.kind === 'marker'
+          ? '齐套与用布优化'
+          : c.kind === 'slitting'
+          ? '独立分切 / 快速 / 精细'
+          : '二维计算';
+      const groupMatch = activeGroup === 'all' || c.group === activeGroup;
+      const textMatch =
+        !qLower ||
+        `${kindText}${c.name}${c.note}打开用例 →${c.group}`
+          .toLowerCase()
+          .includes(qLower);
+      return groupMatch && textMatch;
+    };
 
-        <div className="body">
+    const visibleCaseCount = onlyWorkflow
+      ? 0
+      : SHOWCASE_CASES.filter((c: any) => matchesCase(c)).length;
+
+    const categoryOptions: SegmentedOption<string>[] = [
+      { value: 'all', label: '全部', count: SHOWCASE_CASES.length },
+      ...groups.map((g) => ({
+        value: g,
+        label: g,
+        count: SHOWCASE_CASES.filter((c: any) => c.group === g).length
+      })),
+      {
+        value: '__workflow__',
+        label: '业务流程演练',
+        count: WORKFLOW_GUIDES.length,
+        accent: 'indigo'
+      }
+    ];
+
+    return (
+      <div className="react-page page-host mp-showcase-page">
+        <div className="mp-page-shell">
+          <div className="mp-page-head">
+            <div className="mp-page-title-block">
+              <h1>能力展示</h1>
+              <span className="mp-page-summary num">
+                算法基准与业务演练沙盒 · {SHOWCASE_CASES.length} 个计算用例 ·{' '}
+                {WORKFLOW_GUIDES.length} 条业务演示路线
+              </span>
+            </div>
+          </div>
+
+          <div className="mp-filter-toolbar">
+            <div className="mp-search-wrap">
+              <span className="mp-search-ico" aria-hidden="true">
+                <svg viewBox="0 0 16 16" width="14" height="14">
+                  <circle
+                    cx="7.2"
+                    cy="7.2"
+                    r="4.6"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                  />
+                  <path
+                    d="m10.8 10.8 2.8 2.8"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </span>
+              <input
+                className="mp-search-input"
+                id="case-search"
+                type="search"
+                aria-label="查找用例"
+                placeholder="搜索行业、规则或异常用例"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+
+            <span className="mp-toolbar-count num">
+              显示 {visibleCaseCount} / {SHOWCASE_CASES.length}
+            </span>
+
+            <div className="mp-toolbar-actions">
+              <span className="mp-toolbar-count">
+                计算演示不扣库存；业务流程使用实际任务。
+              </span>
+            </div>
+          </div>
+
+          <div id="case-tabs">
+            <SegmentedControl
+              options={categoryOptions}
+              value={activeGroup}
+              onChange={(next) => setActiveGroup(next)}
+              ariaLabel="沙盒分类"
+            />
+          </div>
+
           <div id="case-catalogue" hidden={onlyWorkflow}>
-            {groups.map((group: any) => {
+            {groups.map((group) => {
               const groupCases = SHOWCASE_CASES.filter(
                 (c: any) => c.group === group
               );
-              const anyVisible = groupCases.some((c: any) => {
-                const groupMatch = activeGroup === 'all' || c.group === activeGroup;
-                const kindText =
-                  c.kind === 'marker'
-                    ? '齐套与用布优化'
-                    : c.kind === 'slitting'
-                    ? '独立分切 / 快速 / 精细'
-                    : '二维计算';
-                const textMatch =
-                  !qLower ||
-                  `${kindText}${c.name}${c.note}打开用例 →${c.group}`
-                    .toLowerCase()
-                    .includes(qLower);
-                return groupMatch && textMatch;
-              });
+              const visibleInGroup = groupCases.filter((c: any) =>
+                matchesCase(c)
+              ).length;
               return (
                 <section
                   key={group}
                   data-case-group={group}
-                  hidden={!anyVisible}
+                  hidden={visibleInGroup === 0}
+                  className="mp-case-group"
                 >
-                  <h3>{group}</h3>
-                  <div className="cards">
+                  <div className="mp-case-group-head">
+                    <h3>{group}</h3>
+                    <CodeBadge>
+                      {visibleInGroup}/{groupCases.length}
+                    </CodeBadge>
+                  </div>
+                  <div className="mp-case-grid">
                     {groupCases.map((c: any) => {
                       const kindText =
                         c.kind === 'marker'
@@ -310,26 +352,22 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                           : c.kind === 'slitting'
                           ? '独立分切 / 快速 / 精细'
                           : '二维计算';
-                      const groupMatch =
-                        activeGroup === 'all' || c.group === activeGroup;
-                      const textMatch =
-                        !qLower ||
-                        `${kindText}${c.name}${c.note}打开用例 →${c.group}`
-                          .toLowerCase()
-                          .includes(qLower);
-                      const isHidden = !(groupMatch && textMatch);
+                      const isHidden = !matchesCase(c);
                       return (
                         <a
                           key={c.id}
-                          className="card demo-card"
+                          className="card demo-card mp-case-card"
                           data-case={c.id}
                           href={`#/showcase/${encodeURIComponent(c.id)}`}
                           hidden={isHidden}
                         >
-                          <small>{kindText}</small>
+                          <div className="mp-case-card-top">
+                            <span className="tag kind">{kindText}</span>
+                            <CodeBadge>{c.id}</CodeBadge>
+                          </div>
                           <b>{c.name}</b>
                           <p>{c.note}</p>
-                          <span>打开用例 →</span>
+                          <span className="mp-case-link">打开用例 →</span>
                         </a>
                       );
                     })}
@@ -343,38 +381,48 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
             id="workflow-sandbox"
             hidden={activeGroup !== 'all' && !onlyWorkflow}
           >
-            <section>
-              <h3>
-                业务演示数据 <span className="tag warn">写入演练库</span>
-              </h3>
-              <p className="muted">
+            <section className="mp-case-group">
+              <div className="mp-case-group-head">
+                <h3>业务演示数据</h3>
+                <span className="tag warn">写入演练库</span>
+              </div>
+              <p className="mp-workflow-lead">
                 先登记演示母卷并完成检验，再创建匹配任务。按钮只预填表单；点击保存才写入数据。
               </p>
-              <div className="cards">
+              <div className="mp-case-grid">
                 {WORKFLOW_TEMPLATES.map((t: any) => (
-                  <article key={t.id} className="card demo-card">
+                  <article key={t.id} className="card demo-card mp-case-card">
+                    <div className="mp-case-card-top">
+                      <span className="tag kind">演示模板</span>
+                      <CodeBadge>{t.id}</CodeBadge>
+                    </div>
                     <b>{t.name}</b>
                     <p>
                       母卷 {t.width} mm × {t.totalLength / 1000} m · 拉布{' '}
                       {t.bedLength} mm ·{' '}
                       {t.demands.reduce((n: number, d: any) => n + d[3], 0)} 件 / 卷
                     </p>
-                    <a className="btn sm" href={`#/inventory/receive/${t.id}`}>
-                      ① 登记演示母卷
-                    </a>{' '}
-                    <a className="btn sm" href={`#/task/new/${t.id}`}>
-                      ② 创建演示任务
-                    </a>
+                    <div className="mp-workflow-actions">
+                      <a className="btn sm" href={`#/inventory/receive/${t.id}`}>
+                        ① 登记演示母卷
+                      </a>
+                      <a className="btn sm soft-accent" href={`#/task/new/${t.id}`}>
+                        ② 创建演示任务
+                      </a>
+                    </div>
                   </article>
                 ))}
               </div>
             </section>
-            <section>
-              <h3>完整业务流程</h3>
-              <p className="muted">
+            <section className="mp-case-group">
+              <div className="mp-case-group-head">
+                <h3>完整业务流程</h3>
+                <CodeBadge>{WORKFLOW_GUIDES.length} 条</CodeBadge>
+              </div>
+              <p className="mp-workflow-lead">
                 以下步骤使用新版实际业务页面，报工会记账。建议使用单独登记的演示材料和任务。
               </p>
-              <div className="cards">
+              <div className="mp-case-grid">
                 {WORKFLOW_GUIDES.map(
                   ([title, steps, acceptance, route]: [
                     string,
@@ -382,16 +430,18 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                     string,
                     string
                   ]) => (
-                    <article key={title} className="card demo-card">
+                    <article key={title} className="card demo-card mp-case-card">
                       <b>{title}</b>
                       <p>{steps}</p>
                       <p>
                         <strong>验收：</strong>
                         {acceptance}
                       </p>
-                      <a className="btn sm" href={`#/${route}`}>
-                        进入{title}
-                      </a>
+                      <div className="mp-workflow-actions">
+                        <a className="btn sm soft-accent" href={`#/${route}`}>
+                          进入{title}
+                        </a>
+                      </div>
                     </article>
                   )
                 )}
@@ -421,21 +471,22 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
   const currentSc = request ? showcaseScene(request, result, patternIndex) : null;
 
   return (
-    <div className="react-page page-host">
-      <div className="ph">
-        <a className="btn" href="#/showcase">
+    <div className="react-page page-host mp-showcase-detail-page">
+      <div className="mp-sc-topbar">
+        <a className="btn sm" href="#/showcase">
           ← 用例库
         </a>
         <h1>{selected.name}</h1>
+        <CodeBadge>{selected.id}</CodeBadge>
+        <span className="mp-sc-sub" title={selected.note}>
+          {selected.note}
+        </span>
         <span className="sp" />
         <span className="tag">计算预览 · 不扣库存</span>
       </div>
-      <div className="toolbar">
-        <span>{selected.note}</span>
-      </div>
 
-      <div className="split demo-split">
-        <section className="pane">
+      <div className="split demo-split mp-demo-split">
+        <section className="pane mp-float-card">
           <div className="pane-h">输入与演示步骤</div>
           <div className="pane-b" id="demo-input">
             <div className="kv">
@@ -456,26 +507,28 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                 图示段长 {fmtN(currentSc.roll.total)} mm；订单卷长见下表，图示不展开整卷。
               </div>
             )}
-            <table className="t">
-              <thead>
-                <tr>
-                  <th>需求</th>
-                  <th>宽×长 mm</th>
-                  <th>数量</th>
-                </tr>
-              </thead>
-              <tbody>
-                {inputRows.map((r: any, idx: number) => (
-                  <tr key={idx}>
-                    <td className="wrap">{r[0]}</td>
-                    <td className="num">
-                      {fmtN(r[1])}×{fmtN(r[2])}
-                    </td>
-                    <td className="num">{r[3]}</td>
+            <div className="mp-table-scroll">
+              <table className="t">
+                <thead>
+                  <tr>
+                    <th>需求</th>
+                    <th>宽×长 mm</th>
+                    <th>数量</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {inputRows.map((r: any, idx: number) => (
+                    <tr key={idx}>
+                      <td className="wrap">{r[0]}</td>
+                      <td className="num">
+                        {fmtN(r[1])}×{fmtN(r[2])}
+                      </td>
+                      <td className="num">{r[3]}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             <div className="sec">操作与验收</div>
             <ol className="demo-steps">
               <li>核对材料、需求和工艺；点击计算。</li>
@@ -506,13 +559,15 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
           </div>
         </section>
 
-        <section className="pane">
-          <div className="pane-h">
-            {slit ? '定长横切示意' : '排料图'}
+        <section className="pane mp-cad-card mp-demo-canvas-card">
+          <div className="mp-cad-head">
+            <span className="mp-cad-title">
+              {slit ? '定长横切示意' : '排料图'}
+            </span>
             <span className="sp" />
             <button
               type="button"
-              className="btn sm"
+              className="mp-cad-btn"
               id="demo-fit"
               onClick={() => canvasRef.current?.fit()}
             >
@@ -520,7 +575,7 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
             </button>
             <button
               type="button"
-              className="btn sm"
+              className="mp-cad-btn"
               id="demo-rotate"
               onClick={() => {
                 const next = !vertical;
@@ -532,7 +587,7 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
             </button>
             <button
               type="button"
-              className="btn sm"
+              className="mp-cad-btn"
               id="demo-path"
               aria-pressed={showPath}
               disabled={slit || p.process?.mode === 'CONTOUR'}
@@ -557,12 +612,12 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
             tabIndex={0}
             aria-label="演示排料画布"
           />
-          <div className="foot" id="demo-selection">
+          <div className="mp-cad-foot" id="demo-selection">
             {selectionText}
           </div>
         </section>
 
-        <section className="pane">
+        <section className="pane mp-float-card">
           <div className="pane-h">计算结果</div>
           <div className="pane-b" id="demo-result">
             {busy ? (
@@ -645,44 +700,46 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                         ? ' 请核对缺口；不能作为齐套完成。'
                         : ''}
                     </div>
-                    <table className="t">
-                      <thead>
-                        <tr>
-                          <th>需求</th>
-                          <th>已排 / 需求</th>
-                          <th>缺口</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {fulfilled.map((f: any, idx: number) => (
-                          <React.Fragment key={idx}>
-                            <tr>
-                              <td className="wrap">
-                                {p.parts?.find(
-                                  (pt: any) => pt.id === f.demandId
-                                )?.name ||
-                                  f.orderId ||
-                                  f.demandId}
-                              </td>
-                              <td className="num">
-                                {f.placed ?? f.produced ?? 0} / {f.requested}
-                              </td>
-                              <td className="num">
-                                {f.missing ?? f.unplaced ?? 0}
-                              </td>
-                            </tr>
-                            {f.reason &&
-                              Boolean(f.unplaced || f.missing) && (
-                                <tr>
-                                  <td colSpan={3} className="wrap muted">
-                                    <small>{fulfillmentReason(f.reason)}</small>
-                                  </td>
-                                </tr>
-                              )}
-                          </React.Fragment>
-                        ))}
-                      </tbody>
-                    </table>
+                    <div className="mp-table-scroll">
+                      <table className="t">
+                        <thead>
+                          <tr>
+                            <th>需求</th>
+                            <th>已排 / 需求</th>
+                            <th>缺口</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {fulfilled.map((f: any, idx: number) => (
+                            <React.Fragment key={idx}>
+                              <tr>
+                                <td className="wrap">
+                                  {p.parts?.find(
+                                    (pt: any) => pt.id === f.demandId
+                                  )?.name ||
+                                    f.orderId ||
+                                    f.demandId}
+                                </td>
+                                <td className="num">
+                                  {f.placed ?? f.produced ?? 0} / {f.requested}
+                                </td>
+                                <td className="num">
+                                  {f.missing ?? f.unplaced ?? 0}
+                                </td>
+                              </tr>
+                              {f.reason &&
+                                Boolean(f.unplaced || f.missing) && (
+                                  <tr>
+                                    <td colSpan={3} className="wrap muted">
+                                      <small>{fulfillmentReason(f.reason)}</small>
+                                    </td>
+                                  </tr>
+                                )}
+                            </React.Fragment>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
 
                     {s && (
                       <>
@@ -691,7 +748,9 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                           <button
                             key={pat.id || i}
                             type="button"
-                            className="btn demo-pattern"
+                            className={`btn demo-pattern ${
+                              patternIndex === i ? 'on' : ''
+                            }`}
                             data-pattern={i}
                             onClick={() => setPatternIndex(i)}
                           >
@@ -707,25 +766,27 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                         ))}
                         <div id="demo-compare">
                           <div className="sec">同一输入对比</div>
-                          <table className="t">
-                            <thead>
-                              <tr>
-                                <th>方法</th>
-                                <th>车数</th>
-                                <th>缺口</th>
-                                <th>超产</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {compareRows.map((row, rIdx) => (
-                                <tr key={rIdx}>
-                                  {row.map((v: any, cIdx: number) => (
-                                    <td key={cIdx}>{v}</td>
-                                  ))}
+                          <div className="mp-table-scroll">
+                            <table className="t">
+                              <thead>
+                                <tr>
+                                  <th>方法</th>
+                                  <th>车数</th>
+                                  <th>缺口</th>
+                                  <th>超产</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                              </thead>
+                              <tbody>
+                                {compareRows.map((row, rIdx) => (
+                                  <tr key={rIdx}>
+                                    {row.map((v: any, cIdx: number) => (
+                                      <td key={cIdx}>{v}</td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                       </>
                     )}
@@ -772,8 +833,8 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
         </section>
       </div>
 
-      <div className="foot">
-        <span id="demo-state" role="status">
+      <div className="foot mp-action-foot">
+        <span id="demo-state" role="status" className="mp-status-text">
           {stateText}
         </span>
         <span className="sp" />

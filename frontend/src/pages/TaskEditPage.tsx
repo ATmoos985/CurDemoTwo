@@ -382,10 +382,10 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
   const curGroup = imp ? imp.groups[imp.gi] || imp.groups[0] : null;
 
   return (
-    <div className="react-page">
-      <div className="ph">
+    <div className="react-page mp-legacy-page mp-task-edit-page">
+      <div className="mp-sc-topbar">
         <h1>{original ? '编辑任务' : '新建任务'}</h1>
-        <span className="crumb">
+        <span className="mp-sc-sub">
           {original
             ? `${original.name} · 版本 ${original.revision}`
             : '填写需求后保存，再进入工作台选料排料'}
@@ -418,7 +418,7 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
       </div>
 
       {routeTemplate && packId === routePackId && (
-        <div className="notice">
+        <div className="mp-legacy-notice">
           演示模板 · 型号 {routeTemplate.task.materialModel}。请先
           <a href={`#/inventory/receive/${encodeURIComponent(templateId || '')}`}>
             登记对应演示母卷
@@ -429,9 +429,8 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
 
       {conflict && (
         <div
-          className="notice"
+          className="mp-legacy-notice"
           style={{
-            margin: '12px 16px 0',
             display: 'flex',
             alignItems: 'center',
             gap: 10
@@ -448,15 +447,8 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
       )}
 
       <div className="body">
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '340px 1fr',
-            gap: 12,
-            alignItems: 'start'
-          }}
-        >
-          <div>
+        <div className="mp-task-edit-grid">
+          <div className="mp-task-edit-col">
             <div className="box">
               <div className="pane-h">基本信息</div>
               <div className="form" style={{ gridTemplateColumns: '80px 1fr' }}>
@@ -981,7 +973,8 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
             )}
 
             {(form.demands || []).length > 0 ? (
-              <table className="t" style={{ border: 0 }}>
+              <div className="mp-table-scroll">
+                <table className="t" style={{ border: 0 }}>
                 <thead>
                   <tr>
                     <th className="r">编号</th>
@@ -1124,6 +1117,7 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
                   })}
                 </tbody>
               </table>
+              </div>
             ) : (
               <div className="empty">
                 还没有需求。添加需求，或导入订单表（9.28 订单格式 / 标准模板 / 任务 JSON / DXF）。

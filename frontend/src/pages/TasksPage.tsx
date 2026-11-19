@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { requestJSON, shortId, toast } from '@static/app/js/util.js';
 import { taskLabels, filterTasks } from '@static/js/business/cutting/task-list-model.js';
 import { useStudioStore } from '../store/useStudioStore';
+import { CodeBadge } from '../components/ui/MagpiePrimitives';
 
 const STATUS_TAG_MAP: Record<string, string> = {
   PLAN_PENDING: 'idle',
@@ -88,93 +89,139 @@ export const TasksPage: React.FC = () => {
     }
   };
 
-  const statusCards: { key: string; label: string; hint: string; color?: string }[] = [
+  const statusCards: { key: string; label: string; hint: string; accent?: string }[] = [
     { key: 'all', label: '全部生产单', hint: '总览全部在制与完工任务' },
     { key: 'PLAN_PENDING', label: '待排料计算', hint: '尚未生成候选排布方案' },
     {
       key: 'EXECUTION_PENDING',
       label: '候选已就绪',
       hint: '可锁料下达车间执行',
-      color: 'var(--accent)'
+      accent: 'accent-indigo'
     },
     {
       key: 'REPORT_PENDING',
       label: '待实切报工',
-      hint: '机台已领料，待回填产出',
-      color: 'var(--warn)'
+      hint: '机台已领料，待回填产出'
     },
     {
       key: 'ATTENTION',
       label: '异常需处理',
-      hint: '复检缺口或预约变更',
-      color: countByStatus('ATTENTION') > 0 ? 'var(--err)' : undefined
+      hint: '复检缺口或预约变更'
     },
     {
       key: 'COMPLETED',
       label: '已齐套完工',
       hint: '良品履约已全部达成',
-      color: 'var(--ok)'
+      accent: 'accent-emerald'
     }
   ];
 
   return (
-    <div className="react-page">
-      <div className="ph">
-        <h1>任务</h1>
-        <span className="crumb">订单需求跟踪与车间进度总览</span>
-        <span className="sp" />
-        <input
-          className="field"
-          id="task-search"
-          aria-label="搜索任务"
-          placeholder="搜索任务号 / 款式 / 材料型号 / 外部单号…"
-          style={{ width: 250 }}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <button type="button" className="btn sm" onClick={loadTasks}>
-          刷新
-        </button>
-        <a className="btn pri" href="#/task/new">
-          ＋ 新建任务
-        </a>
-      </div>
+    <div className="react-page mp-legacy-page">
+      <div className="mp-page-shell">
+        <div className="mp-page-head">
+          <div className="mp-page-title-block">
+            <h1>任务</h1>
+            <span className="mp-page-summary num">
+              订单需求跟踪与车间进度总览 · 共 {rows.length} 条
+            </span>
+          </div>
+        </div>
 
-      {/* Single unified KPI + Status Filter Strip (eliminates redundant duplicate filter bar) */}
-      <div className="kpi-strip kpi-strip-6" role="group" aria-label="按任务状态筛选">
-        {statusCards.map((c) => {
-          const active = statusFilter === c.key;
-          return (
-            <button
-              key={c.key}
-              type="button"
-              data-status={c.key}
-              aria-pressed={active}
-              className={`kpi-card ${active ? 'on' : ''}`}
-              onClick={() =>
-                setStatusFilter(active && c.key !== 'all' ? 'all' : c.key)
-              }
-            >
-              <small>{c.label}</small>
-              <b className="num" style={c.color ? { color: c.color } : undefined}>
-                {countByStatus(c.key)}
-              </b>
-              <span>{c.hint}</span>
+        <div className="mp-filter-toolbar">
+          <div className="mp-search-wrap">
+            <span className="mp-search-ico" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="14" height="14">
+                <circle
+                  cx="7.2"
+                  cy="7.2"
+                  r="4.6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                />
+                <path
+                  d="m10.8 10.8 2.8 2.8"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <input
+              className="mp-search-input"
+              id="task-search"
+              type="search"
+              aria-label="搜索任务"
+              placeholder="搜索任务号 / 款式 / 材料型号 / 外部单号"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          <span className="mp-toolbar-count num">
+            显示 {filteredList.length} / {rows.length}
+          </span>
+
+          <div className="mp-toolbar-actions">
+            <button type="button" className="mp-ghost-btn" onClick={loadTasks}>
+              刷新
             </button>
-          );
-        })}
-      </div>
+            <a className="btn pri" href="#/task/new">
+              ＋ 新建任务
+            </a>
+          </div>
+        </div>
 
-      <div className="body">
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 8
+          }}
+        >
+          <div className="mp-seg" role="group" aria-label="按任务状态筛选">
+            {statusCards.map((c) => {
+              const active = statusFilter === c.key;
+              return (
+                <button
+                  key={c.key}
+                  type="button"
+                  data-status={c.key}
+                  aria-pressed={active}
+                  title={c.hint}
+                  className={`mp-seg-btn ${active ? 'on' : ''}`}
+                  onClick={() =>
+                    setStatusFilter(active && c.key !== 'all' ? 'all' : c.key)
+                  }
+                >
+                  <span>{c.label}</span>
+                  <span className={`mp-seg-count num ${c.accent || ''}`}>
+                    {countByStatus(c.key)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <span className="mp-toolbar-count">
+            双击任意任务行可直达对应排料或分切工作台
+          </span>
+        </div>
+
         {error ? (
           <div className="error-box" role="alert">
             <b>操作未完成</b>
             <p>{error}</p>
           </div>
         ) : loading ? (
-          <div className="loading">正在读取生产任务队列…</div>
+          <div className="mp-demand-card">
+            <div className="loading">正在读取生产任务队列…</div>
+          </div>
         ) : filteredList.length > 0 ? (
-          <>
+          <div className="mp-demand-card mp-tasks-card">
             <table className="t task-table">
               <thead>
                 <tr>
@@ -208,25 +255,25 @@ export const TasksPage: React.FC = () => {
                       onDoubleClick={() => handleRowDoubleClick(t)}
                     >
                       <td className="task-identity">
-                        <a
-                          href={
-                            isSlitting
-                              ? '#/slitting'
-                              : `#/workbench/${encodeURIComponent(t.id)}`
-                          }
-                          onClick={(e) => {
-                            if (isSlitting) {
-                              e.preventDefault();
-                              handleOpenSlittingTask(t);
+                        <div className="task-identity-row">
+                          <a
+                            href={
+                              isSlitting
+                                ? '#/slitting'
+                                : `#/workbench/${encodeURIComponent(t.id)}`
                             }
-                          }}
-                        >
-                          {t.name}
-                        </a>
-                        <small>
-                          <span className="num">{shortId(t.id)}</span> ·{' '}
-                          {t.externalRef || '内部创建'}
-                        </small>
+                            onClick={(e) => {
+                              if (isSlitting) {
+                                e.preventDefault();
+                                handleOpenSlittingTask(t);
+                              }
+                            }}
+                          >
+                            {t.name}
+                          </a>
+                          <CodeBadge>{shortId(t.id)}</CodeBadge>
+                        </div>
+                        <small>{t.externalRef || '内部创建'}</small>
                       </td>
                       <td>
                         <span className="tag kind">
@@ -263,7 +310,7 @@ export const TasksPage: React.FC = () => {
                           {isSlitting ? (
                             <button
                               type="button"
-                              className="btn sm pri"
+                              className="btn sm soft-accent"
                               onClick={() => handleOpenSlittingTask(t)}
                             >
                               一维分切台
@@ -274,7 +321,7 @@ export const TasksPage: React.FC = () => {
                                 !directIntent &&
                                 (r.status === 'PLAN_PENDING' ||
                                   r.status === 'EXECUTION_PENDING')
-                                  ? 'pri'
+                                  ? 'soft-accent'
                                   : ''
                               }`}
                               href={`#/workbench/${encodeURIComponent(t.id)}`}
@@ -284,7 +331,7 @@ export const TasksPage: React.FC = () => {
                           )}
                           {directIntent && (
                             <a
-                              className="btn sm pri"
+                              className="btn sm soft-accent"
                               href={
                                 directIntent === 'report'
                                   ? `#/execution/${encodeURIComponent(t.id)}`
@@ -304,15 +351,11 @@ export const TasksPage: React.FC = () => {
                 })}
               </tbody>
             </table>
-            <div className="pager">
-              <span className="num">
-                显示 {filteredList.length} / 共 {rows.length} 条任务
-              </span>
-              <span>双击任意任务行可直达对应排料或分切工作台</span>
-            </div>
-          </>
+          </div>
         ) : (
-          <div className="empty">没有符合条件的任务</div>
+          <div className="mp-demand-card">
+            <div className="empty">没有符合条件的任务</div>
+          </div>
         )}
       </div>
     </div>

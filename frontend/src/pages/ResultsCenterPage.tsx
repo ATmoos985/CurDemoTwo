@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CadCanvasView } from '../components/CadCanvasView';
 import { SlittingStripBar } from './CuttingWorkbenchPage';
 import { ModalDialog } from '../components/ModalDialog';
+import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
 import { showcaseScene } from '@static/app/js/model/showcase.js';
 import { rectangle } from '@static/js/canvas/nesting-scene.js';
 import { gcodeText, dxfText } from '@static/js/plugins/export/cam-format.js';
@@ -136,13 +137,13 @@ export const ResultsCenterPage: React.FC<{
   schemeId?: string;
   taskIdQuery?: string;
 }> = ({ schemeId, taskIdQuery }) => {
-  const loadDemandFamilyIntoWorkbench = useStudioStore((s) => s.loadDemandFamilyIntoWorkbench);
   const settings = useStudioStore((s) => s.settings);
 
   const [entries, setEntries] = useState<any[]>([]);
   const [rolls, setRolls] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [stateFilter, setStateFilter] = useState<string>('ALL');
+  const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string>(schemeId || '');
   const [showPath, setShowPath] = useState(true);
   const [vertical, setVertical] = useState<boolean>(settings.vertical);
@@ -195,13 +196,17 @@ export const ResultsCenterPage: React.FC<{
     loadAll();
   }, [schemeId, taskIdQuery]);
 
-  const filteredEntries = useMemo(
-    () =>
-      entries.filter(
-        (e) => stateFilter === 'ALL' || e.scheme?.state === stateFilter
-      ),
-    [entries, stateFilter]
-  );
+  const filteredEntries = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return entries.filter((e) => {
+      if (stateFilter !== 'ALL' && e.scheme?.state !== stateFilter) return false;
+      if (!q) return true;
+      const s = e.scheme || {};
+      return `${s.id || ''} ${s.title || ''} ${s.taskName || ''} ${s.materialModel || ''} ${s.rollId || ''} ${s.externalOrderNo || ''}`
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [entries, stateFilter, search]);
 
   const activeEntry = useMemo(
     () =>
@@ -482,62 +487,133 @@ export const ResultsCenterPage: React.FC<{
   const countByState = (st: string) =>
     st === 'ALL' ? entries.length : entries.filter((e) => e.scheme?.state === st).length;
 
-  return (
-    <div className="react-page">
-      <div className="ph no-print">
-        <h1>结果管理</h1>
-        <span className="crumb">
-          排程方案沉淀 · 虚拟卷转绑实卷 · DXF/G-Code/Excel/A4工单全格式交付 · MES 下发与一键核销
-        </span>
-        <span className="sp" />
-        <button type="button" className="btn sm" onClick={loadAll}>
-          刷新列表
-        </button>
-        <a className="btn" href="#/reconciliation">
-          复检补排与对账
-        </a>
-        <a className="btn pri" href="#/workbench">
-          返回搭切工作台
-        </a>
-      </div>
+  const stateFilterOptions: SegmentedOption<string>[] = useMemo(
+    () => [
+      { value: 'ALL', label: '全部方案', count: entries.length },
+      {
+        value: 'AWAITING_ROLL',
+        label: '待绑实卷',
+        count: countByState('AWAITING_ROLL'),
+        accent: 'amber'
+      },
+      {
+        value: 'READY_TO_CUT',
+        label: '已锁料待切',
+        count: countByState('READY_TO_CUT'),
+        accent: 'indigo'
+      },
+      {
+        value: 'DISPATCHED_MES',
+        label: '已下发 MES',
+        count: countByState('DISPATCHED_MES')
+      },
+      {
+        value: 'COMPLETED',
+        label: '已完工记账',
+        count: countByState('COMPLETED'),
+        accent: 'emerald'
+      },
+      {
+        value: 'CANCELLED',
+        label: '已作废释放',
+        count: countByState('CANCELLED')
+      }
+    ],
+    [entries]
+  );
 
-      <div className="kpi-strip kpi-strip-6 no-print" role="group" aria-label="按方案状态筛选">
-        {[
-          { k: 'ALL', l: '全部排程方案', h: '含二维排料与一维分切' },
-          { k: 'AWAITING_ROLL', l: '待绑实卷', h: '虚拟母卷方案 · 待备料绑卷', c: 'var(--warn)' },
-          { k: 'READY_TO_CUT', l: '已锁料待切', h: '实卷区段已锁定 · 可开切', c: 'var(--accent)' },
-          { k: 'DISPATCHED_MES', l: '已下发 MES', h: '等待车间机台完工回传' },
-          { k: 'COMPLETED', l: '已完工记账', h: '库存耗用与余料已过账', c: 'var(--ok)' },
-          { k: 'CANCELLED', l: '已作废释放', h: '预占需求已退回需求池' }
-        ].map((item) => {
-          const active = stateFilter === item.k;
-          return (
-            <button
-              key={item.k}
-              type="button"
-              aria-pressed={active}
-              className={`kpi-card ${active ? 'on' : ''}`}
-              onClick={() => setStateFilter(active && item.k !== 'ALL' ? 'ALL' : item.k)}
-            >
-              <small>{item.l}</small>
-              <b className="num" style={item.c ? { color: item.c } : undefined}>
-                {countByState(item.k)}
-              </b>
-              <span>{item.h}</span>
+  const hasDetailPrimaryCta = Boolean(
+    activeScheme && (activeEntry?.canComplete || activeEntry?.canBindRoll)
+  );
+
+  return (
+    <div className="react-page mp-res-page">
+      <div className="mp-res-top no-print">
+        <div className="mp-page-head">
+          <div className="mp-page-title-block">
+            <h1>结果管理</h1>
+            <span className="mp-page-summary num">
+              {entries.length} 个方案 · {countByState('AWAITING_ROLL')} 待绑实卷 ·{' '}
+              {countByState('READY_TO_CUT')} 待切 · {countByState('COMPLETED')} 已完工
+            </span>
+          </div>
+        </div>
+
+        <div className="mp-filter-toolbar">
+          <div className="mp-search-wrap">
+            <span className="mp-search-ico" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="14" height="14">
+                <circle
+                  cx="7.2"
+                  cy="7.2"
+                  r="4.6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                />
+                <path
+                  d="m10.8 10.8 2.8 2.8"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <input
+              type="search"
+              className="mp-search-input"
+              aria-label="搜索排程方案"
+              placeholder="筛选方案号、标题、需求族、品号或实卷号"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          <span className="mp-toolbar-count num">
+            显示 {filteredEntries.length} / {entries.length}
+          </span>
+
+          <div className="mp-toolbar-actions">
+            <button type="button" className="mp-ghost-btn" onClick={loadAll}>
+              刷新列表
             </button>
-          );
-        })}
+            <a className="mp-ghost-btn" href="#/reconciliation">
+              复检补排与对账
+            </a>
+            <a
+              className={hasDetailPrimaryCta || entries.length === 0 ? 'btn' : 'btn pri'}
+              href="#/workbench"
+            >
+              返回搭切工作台
+            </a>
+          </div>
+        </div>
+
+        <div className="mp-res-seg-row">
+          <SegmentedControl
+            options={stateFilterOptions}
+            value={stateFilter}
+            onChange={(next) => setStateFilter(next)}
+            ariaLabel="按方案状态筛选"
+          />
+          <span className="mp-toolbar-count">
+            排程方案沉淀 · 虚拟卷转绑实卷 · 多格式导出与完工过账
+          </span>
+        </div>
       </div>
 
       {loading ? (
-        <div className="body no-print">
-          <div className="loading">正在读取排程结果台账…</div>
+        <div className="mp-res-body-pad no-print">
+          <div className="mp-empty-card">
+            <div className="loading">正在读取排程结果台账…</div>
+          </div>
         </div>
       ) : entries.length === 0 ? (
-        <div className="body no-print">
-          <div className="box" style={{ padding: 36, textAlign: 'center' }}>
+        <div className="mp-res-body-pad no-print">
+          <div className="mp-empty-card">
             <strong>尚无已选定确认的排程结果</strong>
-            <p className="muted" style={{ margin: '8px auto 16px', maxWidth: 460 }}>
+            <p>
               请在「搭切工作台」完成并行求解后，点击右侧「选定此方案」，选定后的方案将自动沉淀至此进行多格式导出、绑卷或完工过账。
             </p>
             <a className="btn pri" href="#/workbench">
@@ -546,77 +622,82 @@ export const ResultsCenterPage: React.FC<{
           </div>
         </div>
       ) : (
-        <div
-          className="studio-split no-print"
-          style={{ gridTemplateColumns: '390px minmax(0, 1fr)' }}
-        >
-          {/* Left: Scheme Registry List */}
-          <section className="pane">
-            <div className="pane-h">
-              <span>排程方案列表 ({filteredEntries.length})</span>
+        <div className="mp-res-split no-print">
+          {/* Left: Scheme Registry List Card */}
+          <section className="mp-res-list-pane" aria-label="排程方案列表">
+            <div className="mp-res-pane-head">
+              <span>排程方案列表</span>
+              <span className="mp-toolbar-count num">{filteredEntries.length} 项</span>
             </div>
-            <div className="pane-b" style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {filteredEntries.map((entry) => {
-                const s = entry.scheme;
-                const st = STATE_BADGE[s.state] || { label: s.state, cls: '' };
-                const isSelected = activeScheme?.id === s.id;
-                return (
+            <div className="mp-res-list-scroll">
+              {filteredEntries.length === 0 ? (
+                <div className="mp-res-list-empty">
+                  <span>当前筛选条件下暂无匹配方案</span>
                   <button
-                    key={s.id}
                     type="button"
-                    className="inv-product-card"
-                    aria-selected={isSelected}
-                    onClick={() => setSelectedId(s.id)}
+                    className="btn sm"
+                    onClick={() => {
+                      setStateFilter('ALL');
+                      setSearch('');
+                    }}
                   >
-                    <div className="inv-product-top">
-                      <strong className="num">{s.id}</strong>
-                      <span className={`tag ${st.cls}`}>{st.label}</span>
-                    </div>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>
-                      {s.title}
-                    </div>
-                    <div className="inv-product-name">
-                      需求族：{s.taskName} · 品号 {s.materialModel}
-                    </div>
-                    <div className="inv-product-badges num">
-                      <span className="tag ok">利用率 {s.utilizationPct}%</span>
-                      <span className="tag">
-                        {s.dimension === 'SLITTING_1D'
-                          ? `${s.slitting1D?.totalCars || 1} 车`
-                          : `${s.widthMm}×${fmtN(s.occupiedLengthMm, 0)}mm`}
-                      </span>
-                      {s.rollId ? (
-                        <span className="tag run">实卷 {s.rollId}</span>
-                      ) : (
-                        <span className="tag warn">新母卷待绑</span>
-                      )}
-                    </div>
+                    重置筛选条件
                   </button>
-                );
-              })}
+                </div>
+              ) : (
+                filteredEntries.map((entry) => {
+                  const s = entry.scheme;
+                  const st = STATE_BADGE[s.state] || { label: s.state, cls: '' };
+                  const isSelected = activeScheme?.id === s.id;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className="mp-res-item"
+                      aria-selected={isSelected}
+                      onClick={() => setSelectedId(s.id)}
+                    >
+                      <div className="mp-res-item-top">
+                        <span className="mp-res-item-title">{s.title}</span>
+                        <span className={`tag ${st.cls}`}>{st.label}</span>
+                      </div>
+                      <div className="mp-res-item-code-row">
+                        <CodeBadge>{s.id}</CodeBadge>
+                        <span className="mp-res-item-sub">
+                          {s.taskName} · {s.materialModel}
+                        </span>
+                      </div>
+                      <div className="mp-res-item-metrics num">
+                        <span className="mp-res-pill ok">利用率 {s.utilizationPct}%</span>
+                        <span className="mp-res-pill">
+                          {s.dimension === 'SLITTING_1D'
+                            ? `${s.slitting1D?.totalCars || 1} 车`
+                            : `${s.widthMm}×${fmtN(s.occupiedLengthMm, 0)}mm`}
+                        </span>
+                        {s.rollId ? (
+                          <span className="mp-res-pill run">实卷 {s.rollId}</span>
+                        ) : (
+                          <span className="mp-res-pill warn">新母卷待绑</span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })
+              )}
             </div>
           </section>
 
-          {/* Right: Active Scheme Visual Inspector + Roll Binding + Export Matrix + Settlement */}
-          <section className="pane" style={{ background: 'var(--bg)' }}>
+          {/* Right: Active Scheme Detail + Roll Binding + Visual Replay */}
+          <section className="mp-res-detail-pane" aria-label="方案详情与复盘">
             {activeScheme ? (
-              <div className="body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {/* Header Summary + Export & Execution Bar */}
-                <div className="box" style={{ margin: 0, padding: '12px 16px' }}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      justifyContent: 'space-between',
-                      gap: 12,
-                      flexWrap: 'wrap'
-                    }}
-                  >
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <strong className="num" style={{ fontSize: 16 }}>
-                          {activeScheme.id}
-                        </strong>
+              <>
+                {/* Header Summary + Lifecycle & Export Actions Card */}
+                <div className="mp-res-detail-card">
+                  <div className="mp-res-detail-head">
+                    <div className="mp-res-detail-identity">
+                      <div className="mp-res-detail-title-row">
+                        <h2 className="mp-res-detail-title">{activeScheme.title}</h2>
+                        <CodeBadge>{activeScheme.id}</CodeBadge>
                         <span
                           className={`tag ${STATE_BADGE[activeScheme.state]?.cls || ''}`}
                         >
@@ -630,21 +711,13 @@ export const ResultsCenterPage: React.FC<{
                             : '二维矩形开料'}
                         </span>
                       </div>
-                      <div style={{ fontSize: 13.5, fontWeight: 600, marginTop: 4 }}>
-                        {activeScheme.title} · 关联需求族「{activeScheme.taskName}」
-                      </div>
-                      <div className="muted num" style={{ fontSize: 12, marginTop: 2 }}>
-                        创建于 {activeScheme.createdAt} · 品号 {activeScheme.materialModel} · 门幅{' '}
-                        {activeScheme.widthMm} mm · 实占总长 {fmtN(activeScheme.occupiedLengthMm, 1)} mm · 利用率{' '}
-                        <b>{activeScheme.utilizationPct}%</b>
-                        {activeScheme.rollId
-                          ? ` · 绑定实卷 ${activeScheme.rollId} (区间 Y=${fmtN(activeScheme.windowStartY)}~${fmtN(activeScheme.windowStartY + activeScheme.occupiedLengthMm)} mm)`
-                          : ''}
+                      <div className="mp-res-detail-subtitle num">
+                        关联需求族「{activeScheme.taskName}」 · 创建于 {activeScheme.createdAt}
                       </div>
                     </div>
 
-                    {/* Execution & Lifecycle Actions */}
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {/* Execution & Lifecycle Actions (Single Primary CTA) */}
+                    <div className="mp-res-detail-actions">
                       {activeEntry.canComplete && (
                         <>
                           <button
@@ -680,7 +753,7 @@ export const ResultsCenterPage: React.FC<{
                       {activeEntry.canCancel && (
                         <button
                           type="button"
-                          className="btn"
+                          className="mp-ghost-btn mp-btn-danger-ghost"
                           disabled={busy}
                           onClick={handleCancelScheme}
                         >
@@ -690,21 +763,47 @@ export const ResultsCenterPage: React.FC<{
                     </div>
                   </div>
 
+                  {/* Tabular Spec Summary Strip */}
+                  <div className="mp-res-spec-grid num">
+                    <div className="mp-res-spec-cell">
+                      <small>物料品号</small>
+                      <b title={activeScheme.materialModel}>{activeScheme.materialModel}</b>
+                    </div>
+                    <div className="mp-res-spec-cell">
+                      <small>门幅 × 实占总长</small>
+                      <b>
+                        {activeScheme.widthMm} × {fmtN(activeScheme.occupiedLengthMm, 1)} mm
+                      </b>
+                    </div>
+                    <div className="mp-res-spec-cell">
+                      <small>净材料利用率</small>
+                      <b className="is-ok">{activeScheme.utilizationPct}%</b>
+                    </div>
+                    <div className="mp-res-spec-cell">
+                      <small>排入产出</small>
+                      <b>
+                        {activeScheme.placedCount} / {activeScheme.requestedCount}
+                      </b>
+                    </div>
+                    <div className="mp-res-spec-cell">
+                      <small>母卷绑定状态</small>
+                      {activeScheme.rollId ? (
+                        <b
+                          className="is-accent"
+                          title={`实卷 ${activeScheme.rollId} (Y=${fmtN(activeScheme.windowStartY)}~${fmtN(activeScheme.windowStartY + activeScheme.occupiedLengthMm)} mm)`}
+                        >
+                          {activeScheme.rollId} · Y{fmtN(activeScheme.windowStartY, 0)}~
+                          {fmtN(activeScheme.windowStartY + activeScheme.occupiedLengthMm, 0)}
+                        </b>
+                      ) : (
+                        <b>待绑实卷</b>
+                      )}
+                    </div>
+                  </div>
+
                   {/* Export Matrix Bar */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      flexWrap: 'wrap',
-                      marginTop: 12,
-                      paddingTop: 10,
-                      borderTop: '1px solid var(--line-2)'
-                    }}
-                  >
-                    <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>
-                      结果交付与导出：
-                    </span>
+                  <div className="mp-res-export-bar">
+                    <span className="mp-res-export-label">结果交付与导出</span>
                     {activeScheme.dimension !== 'SLITTING_1D' ? (
                       <>
                         <button
@@ -732,14 +831,14 @@ export const ResultsCenterPage: React.FC<{
                     </button>
                     <button
                       type="button"
-                      className="btn sm"
+                      className="btn sm soft-accent"
                       onClick={() => setShowTicketModal(true)}
                     >
                       打印 A4 车间派工裁切单
                     </button>
                     {activeScheme.rollId && (
                       <a
-                        className="btn sm"
+                        className="mp-ghost-btn mp-ghost-sm"
                         href={`#/inventory?roll=${encodeURIComponent(activeScheme.rollId)}`}
                       >
                         在库存查看母卷切割区
@@ -748,38 +847,31 @@ export const ResultsCenterPage: React.FC<{
                   </div>
                 </div>
 
-                {/* Virtual Mother Roll -> Bind Real Stock Roll Box */}
+                {/* Virtual Mother Roll -> Bind Real Stock Roll Card */}
                 {activeEntry.canBindRoll && (
-                  <div
-                    className="notice"
-                    style={{
-                      margin: 0,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 8,
-                      background: '#fffbeb',
-                      borderColor: '#fcd34d'
-                    }}
-                  >
-                    <div>
-                      <strong>待备料绑卷（虚拟新母卷方案）</strong>：建议备料规格为品号{' '}
-                      <b className="num">{activeScheme.materialModel}</b>、净门幅{' '}
-                      <b className="num">{activeScheme.widthMm} mm</b>、至少可用长度{' '}
-                      <b className="num">
-                        {fmtN(
-                          activeScheme.suggestedRoll?.minLengthMm ||
-                            activeScheme.occupiedLengthMm
-                        )}{' '}
-                        mm
-                      </b>
-                      。绑定真实母卷后即可一键完工核销或校验实卷疵点。
+                  <div className="mp-res-bind-card">
+                    <div className="mp-res-bind-head">
+                      <span className="tag warn">待备料绑卷</span>
+                      <span>
+                        <strong>虚拟新母卷方案</strong> · 建议备料品号{' '}
+                        <b className="num">{activeScheme.materialModel}</b>、净门幅{' '}
+                        <b className="num">{activeScheme.widthMm} mm</b>、最小可用长度{' '}
+                        <b className="num">
+                          {fmtN(
+                            activeScheme.suggestedRoll?.minLengthMm ||
+                              activeScheme.occupiedLengthMm
+                          )}{' '}
+                          mm
+                        </b>
+                        。绑定真实母卷后即可一键完工核销或校验实卷疵点。
+                      </span>
                     </div>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div className="mp-res-bind-controls">
                       {matchingPassedRolls.length > 0 ? (
                         <>
                           <select
-                            className="field"
-                            style={{ minWidth: 240 }}
+                            className="field mp-res-bind-select"
+                            aria-label="选择在库合格母卷"
                             value={bindRollId}
                             onChange={(e) => setBindRollId(e.target.value)}
                           >
@@ -797,23 +889,23 @@ export const ResultsCenterPage: React.FC<{
                           >
                             绑定所选在库母卷并校验疵点
                           </button>
-                          <span className="muted">或</span>
+                          <span className="mp-toolbar-count">或</span>
                         </>
                       ) : (
-                        <span className="muted" style={{ fontSize: 12 }}>
+                        <span className="mp-toolbar-count">
                           当前暂无同幅宽 ({activeScheme.widthMm}mm) 合格母卷，可直接按建议规格建档入库：
                         </span>
                       )}
                       <input
-                        className="field num"
-                        style={{ width: 150, height: 28 }}
+                        className="field num mp-res-bind-input"
+                        style={{ height: 28 }}
                         placeholder="新母卷条码 (可留空自动生成)"
                         value={newRollCode}
                         onChange={(e) => setNewRollCode(e.target.value)}
                       />
                       <button
                         type="button"
-                        className="btn sm pri"
+                        className={`btn sm ${matchingPassedRolls.length > 0 ? 'soft-accent' : 'pri'}`}
                         disabled={busy}
                         onClick={() => handleBindStockRoll(true)}
                       >
@@ -823,19 +915,9 @@ export const ResultsCenterPage: React.FC<{
                   </div>
                 )}
 
-                {/* Visual Diagram Replay (2D CAD Canvas or 1D Strip Bars) */}
+                {/* Visual Diagram Replay (2D Dark Charcoal CAD Viewport or 1D Strip Bars Card) */}
                 {activeScheme.dimension !== 'SLITTING_1D' && replayScene2D ? (
-                  <div
-                    className="box"
-                    style={{
-                      margin: 0,
-                      flex: 1,
-                      minHeight: 380,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      overflow: 'hidden'
-                    }}
-                  >
+                  <div className="mp-res-cad-card">
                     <div className="ctool">
                       <span style={{ fontSize: 12, fontWeight: 600 }}>1:1 排料图纸与走刀复盘</span>
                       <span className="div" />
@@ -861,7 +943,7 @@ export const ResultsCenterPage: React.FC<{
                         排入 {activeScheme.placedCount} 件 · 净面积 {activeScheme.pieceAreaM2} m²
                       </span>
                     </div>
-                    <div style={{ flex: 1, minHeight: 330, background: 'var(--canvas)' }}>
+                    <div className="mp-res-cad-viewport">
                       <CadCanvasView
                         scene={replayScene2D}
                         vertical={vertical}
@@ -872,10 +954,11 @@ export const ResultsCenterPage: React.FC<{
                     </div>
                   </div>
                 ) : activeScheme.slitting1D ? (
-                  <div className="box" style={{ margin: 0 }}>
-                    <div className="pane-h">
-                      <span>
-                        一维分切刀组与订单履约明细（共 {activeScheme.slitting1D.totalCars} 车）
+                  <div className="mp-res-slit-card">
+                    <div className="mp-res-pane-head">
+                      <span>一维分切刀组与订单履约明细</span>
+                      <span className="mp-toolbar-count num">
+                        共 {activeScheme.slitting1D.totalCars} 车
                       </span>
                     </div>
                     <div className="slit-patterns-list">
@@ -905,7 +988,7 @@ export const ResultsCenterPage: React.FC<{
                     </div>
                   </div>
                 ) : null}
-              </div>
+              </>
             ) : null}
           </section>
         </div>
@@ -923,7 +1006,7 @@ export const ResultsCenterPage: React.FC<{
             <div className="form" style={{ gridTemplateColumns: '130px 1fr', padding: '4px 0 12px' }}>
               <label>绑定母卷 / 料头</label>
               <div className="num" style={{ fontWeight: 600 }}>
-                {activeScheme.rollId || activeScheme.remnantId}
+                <CodeBadge>{activeScheme.rollId || activeScheme.remnantId}</CodeBadge>
               </div>
               {activeScheme.dimension !== 'SLITTING_1D' && !activeScheme.remnantId && (
                 <>
@@ -937,9 +1020,10 @@ export const ResultsCenterPage: React.FC<{
                 </>
               )}
               <label>余料自动入库</label>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <label className="mp-modal-switch-row">
                 <input
                   type="checkbox"
+                  className="ux-switch"
                   checked={recoverRems}
                   onChange={(e) => setRecoverRems(e.target.checked)}
                 />
@@ -958,48 +1042,50 @@ export const ResultsCenterPage: React.FC<{
                 <div className="sec" style={{ margin: '0 -16px 8px' }}>
                   逐件质检结果（默认全部合格；若切坏勾选判废，缺口将自动退回需求池补排）
                 </div>
-                <div style={{ maxHeight: 220, overflowY: 'auto' }}>
-                  <table className="t">
-                    <thead>
-                      <tr>
-                        <th>件号</th>
-                        <th>名称</th>
-                        <th className="r">尺寸 mm</th>
-                        <th>当场判废</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {activeScheme.layout2D.placements.map((p: any) => {
-                        const isRej = rejectedIds.has(p.id);
-                        return (
-                          <tr key={p.id}>
-                            <td className="num">#{p.id}</td>
-                            <td>{p.name}</td>
-                            <td className="r num">
-                              {fmtN(p.shape?.width || p.w)} × {fmtN(p.shape?.height || p.l)}
-                            </td>
-                            <td>
-                              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                                <input
-                                  type="checkbox"
-                                  checked={isRej}
-                                  onChange={(e) => {
-                                    const next = new Set(rejectedIds);
-                                    if (e.target.checked) next.add(p.id);
-                                    else next.delete(p.id);
-                                    setRejectedIds(next);
-                                  }}
-                                />
-                                <span style={{ color: isRej ? 'var(--err)' : 'var(--ok)' }}>
-                                  {isRej ? '异常报废' : '合格'}
-                                </span>
-                              </label>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                <div className="mp-modal-table-box">
+                  <div className="mp-table-scroll">
+                    <table className="t">
+                      <thead>
+                        <tr>
+                          <th>件号</th>
+                          <th>名称</th>
+                          <th className="r">尺寸 mm</th>
+                          <th>当场判废</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {activeScheme.layout2D.placements.map((p: any) => {
+                          const isRej = rejectedIds.has(p.id);
+                          return (
+                            <tr key={p.id}>
+                              <td className="num">#{p.id}</td>
+                              <td>{p.name}</td>
+                              <td className="r num">
+                                {fmtN(p.shape?.width || p.w)} × {fmtN(p.shape?.height || p.l)}
+                              </td>
+                              <td>
+                                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isRej}
+                                    onChange={(e) => {
+                                      const next = new Set(rejectedIds);
+                                      if (e.target.checked) next.add(p.id);
+                                      else next.delete(p.id);
+                                      setRejectedIds(next);
+                                    }}
+                                  />
+                                  <span style={{ color: isRej ? 'var(--err)' : 'var(--ok)' }}>
+                                    {isRej ? '异常报废' : '合格'}
+                                  </span>
+                                </label>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </>
             )}
@@ -1131,45 +1217,47 @@ export const ResultsCenterPage: React.FC<{
               </div>
             )}
 
-            <table className="t" style={{ marginBottom: 16 }}>
-              <thead>
-                <tr>
-                  <th>序号</th>
-                  <th>部件 / 分条规格</th>
-                  <th className="r">尺寸规格 mm</th>
-                  <th className="r">计划产出</th>
-                  <th>实切合格登记</th>
-                  <th>异常/备注</th>
-                </tr>
-              </thead>
-              <tbody>
-                {activeScheme.dimension === 'SLITTING_1D' && activeScheme.slitting1D
-                  ? activeScheme.slitting1D.fulfillment.map((f: any, i: number) => (
-                      <tr key={i}>
-                        <td className="num">{i + 1}</td>
-                        <td>{f.name}</td>
-                        <td className="r num">
-                          {f.widthMm} × {activeScheme.slitting1D.fixedLengthMm}
-                        </td>
-                        <td className="r num">{f.produced} 卷</td>
-                        <td>________</td>
-                        <td>________</td>
-                      </tr>
-                    ))
-                  : (activeScheme.layout2D?.placements || []).slice(0, 25).map((p: any, i: number) => (
-                      <tr key={p.id}>
-                        <td className="num">#{p.id || i + 1}</td>
-                        <td>{p.name}</td>
-                        <td className="r num">
-                          {fmtN(p.shape?.width || p.w, 0)} × {fmtN(p.shape?.height || p.l, 0)}
-                        </td>
-                        <td className="r num">1 件</td>
-                        <td>□ 合格</td>
-                        <td />
-                      </tr>
-                    ))}
-              </tbody>
-            </table>
+            <div className="mp-table-scroll" style={{ marginBottom: 16 }}>
+              <table className="t">
+                <thead>
+                  <tr>
+                    <th>序号</th>
+                    <th>部件 / 分条规格</th>
+                    <th className="r">尺寸规格 mm</th>
+                    <th className="r">计划产出</th>
+                    <th>实切合格登记</th>
+                    <th>异常/备注</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeScheme.dimension === 'SLITTING_1D' && activeScheme.slitting1D
+                    ? activeScheme.slitting1D.fulfillment.map((f: any, i: number) => (
+                        <tr key={i}>
+                          <td className="num">{i + 1}</td>
+                          <td>{f.name}</td>
+                          <td className="r num">
+                            {f.widthMm} × {activeScheme.slitting1D.fixedLengthMm}
+                          </td>
+                          <td className="r num">{f.produced} 卷</td>
+                          <td>________</td>
+                          <td>________</td>
+                        </tr>
+                      ))
+                    : (activeScheme.layout2D?.placements || []).slice(0, 25).map((p: any, i: number) => (
+                        <tr key={p.id}>
+                          <td className="num">#{p.id || i + 1}</td>
+                          <td>{p.name}</td>
+                          <td className="r num">
+                            {fmtN(p.shape?.width || p.w, 0)} × {fmtN(p.shape?.height || p.l, 0)}
+                          </td>
+                          <td className="r num">1 件</td>
+                          <td>□ 合格</td>
+                          <td />
+                        </tr>
+                      ))}
+                </tbody>
+              </table>
+            </div>
 
             {settings.ticketShowCuts &&
               activeScheme.layout2D?.cuts?.length > 0 && (

@@ -5,6 +5,7 @@ import {
   effectivePieceResults,
   receiptSummary
 } from '@static/app/js/model/quality.js';
+import { CodeBadge } from '../components/ui/MagpiePrimitives';
 
 interface ReportRow {
   task: any;
@@ -57,96 +58,106 @@ export const QualityPage: React.FC = () => {
   }, [rows, onlyOpen]);
 
   return (
-    <div className="react-page">
-      <div className="ph">
-        <h1>复检处置</h1>
-        <span
-          className="crumb"
-          title="已报良品发现不良时可报废或转料头；原报工与母卷耗用保留，完成量扣回形成补产"
-        >
-          已报工产出质量重分类
-        </span>
-        <span className="sp" />
-        <button type="button" className="btn sm" onClick={loadQualityReports}>
-          刷新列表
-        </button>
-      </div>
+    <div className="react-page mp-legacy-page">
+      <div className="mp-page-shell">
+        <div className="mp-page-head">
+          <div className="mp-page-title-block">
+            <h1>复检处置</h1>
+            <span
+              className="mp-page-summary"
+              title="已报良品发现不良时可报废或转料头；原报工与母卷耗用保留，完成量扣回形成补产"
+            >
+              已报工产出质量重分类 · {filteredList.length} 张报工单
+            </span>
+          </div>
+        </div>
 
-      <div className="toolbar">
-        <label className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <input
-            type="checkbox"
-            checked={onlyOpen}
-            onChange={(e) => setOnlyOpen(e.target.checked)}
-          />
-          只看仍可复检的报工
-        </label>
-        <span className="sp" />
-        <span className="muted">{filteredList.length} 张报工单</span>
-      </div>
+        <div className="mp-filter-toolbar">
+          <label className="mp-switch-label">
+            <input
+              type="checkbox"
+              className="ux-switch"
+              checked={onlyOpen}
+              onChange={(e) => setOnlyOpen(e.target.checked)}
+            />
+            <span>只看仍可复检的报工</span>
+          </label>
+          <div className="mp-toolbar-actions">
+            <button type="button" className="btn" onClick={loadQualityReports}>
+              刷新列表
+            </button>
+          </div>
+        </div>
 
-      <div className="body">
         {error ? (
           <div className="error-box" role="alert">
             <b>操作未完成</b>
             <p>{error}</p>
           </div>
         ) : loading ? (
-          <div className="loading">正在读取报工回执与可复检裁片…</div>
+          <div className="mp-demand-card">
+            <div className="loading">正在读取报工回执与可复检裁片…</div>
+          </div>
         ) : filteredList.length > 0 ? (
-          <table className="t">
-            <thead>
-              <tr>
-                <th>报工单</th>
-                <th>任务</th>
-                <th>母卷 / 料头</th>
-                <th className="r">实切 mm</th>
-                <th className="r">合格</th>
-                <th className="r">异常</th>
-                <th className="r">可复检</th>
-                <th className="r">已复检</th>
-                <th>时间</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {filteredList.map(({ task, report }) => {
-                const s = receiptSummary(report, effectivePieceResults);
-                const revCount = reviewablePieces(report).length;
-                return (
-                  <tr key={report.planId}>
-                    <td className="num">{shortId(report.planId)}</td>
-                    <td>{task.name}</td>
-                    <td className="num">
-                      {report.rollId || report.sourceRemnantId || '—'}
-                    </td>
-                    <td className="r num">{Math.round(report.actualCutLen || 0)}</td>
-                    <td className="r num">{s.qualified}</td>
-                    <td className="r num">{s.rejected}</td>
-                    <td className="r num">{revCount}</td>
-                    <td className="r num">{s.dispositions}</td>
-                    <td className="num">
-                      {String(report.confirmedAt || '')
-                        .replace('T', ' ')
-                        .slice(5, 16)}
-                    </td>
-                    <td>
-                      <a
-                        className="btn sm pri"
-                        href={`#/execution/${encodeURIComponent(task.id)}/${encodeURIComponent(
-                          report.planId
-                        )}?intent=quality`}
-                      >
-                        打开处置
-                      </a>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="mp-demand-card">
+            <table className="t">
+              <thead>
+                <tr>
+                  <th>报工单</th>
+                  <th>任务</th>
+                  <th>母卷 / 料头</th>
+                  <th className="r">实切 mm</th>
+                  <th className="r">合格</th>
+                  <th className="r">异常</th>
+                  <th className="r">可复检</th>
+                  <th className="r">已复检</th>
+                  <th>时间</th>
+                  <th style={{ textAlign: 'right' }}>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredList.map(({ task, report }) => {
+                  const s = receiptSummary(report, effectivePieceResults);
+                  const revCount = reviewablePieces(report).length;
+                  return (
+                    <tr key={report.planId}>
+                      <td>
+                        <CodeBadge>{shortId(report.planId)}</CodeBadge>
+                      </td>
+                      <td style={{ fontWeight: 600 }}>{task.name}</td>
+                      <td className="num">
+                        {report.rollId || report.sourceRemnantId || '—'}
+                      </td>
+                      <td className="r num">{Math.round(report.actualCutLen || 0)}</td>
+                      <td className="r num">{s.qualified}</td>
+                      <td className="r num">{s.rejected}</td>
+                      <td className="r num">{revCount}</td>
+                      <td className="r num">{s.dispositions}</td>
+                      <td className="num">
+                        {String(report.confirmedAt || '')
+                          .replace('T', ' ')
+                          .slice(5, 16)}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <a
+                          className="btn sm soft-accent"
+                          href={`#/execution/${encodeURIComponent(task.id)}/${encodeURIComponent(
+                            report.planId
+                          )}?intent=quality`}
+                        >
+                          打开处置
+                        </a>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         ) : (
-          <div className="empty">没有需要复检的报工</div>
+          <div className="mp-demand-card">
+            <div className="empty">没有需要复检的报工</div>
+          </div>
         )}
       </div>
     </div>

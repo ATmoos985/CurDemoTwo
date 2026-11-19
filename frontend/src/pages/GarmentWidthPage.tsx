@@ -23,6 +23,7 @@ import {
 import { createRollCanvas } from '@static/app/js/canvas/roll-canvas.js';
 import { showcaseScene } from '@static/app/js/model/showcase.js';
 import { useStudioStore } from '../store/useStudioStore';
+import { CodeBadge } from '../components/ui/MagpiePrimitives';
 
 interface GarmentExample {
   id: string;
@@ -654,14 +655,15 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string }> = ({
   };
 
   return (
-    <div className="react-page">
-      <div className="ph">
+    <div className="react-page mp-garment-page">
+      <div className="mp-sc-topbar">
         <h1>唛架幅宽试算</h1>
-        <span className="crumb">服装工艺测算 · 多门幅单耗与齐套排料对比</span>
+        <span className="mp-sc-sub">服装工艺测算 · 多门幅单耗与齐套排料对比</span>
+        {activeExample && <CodeBadge>{activeExample.id}</CodeBadge>}
       </div>
 
-      <div className="split garment-split">
-        <section className="pane">
+      <div className="split garment-split mp-garment-split">
+        <section className="pane mp-float-card mp-garment-left">
           <div className="pane-b">
             <details
               id="garment-help"
@@ -711,7 +713,7 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string }> = ({
             </details>
 
             <div
-              className="style-pills"
+              className="style-pills mp-style-pills"
               id="garment-style-pills"
               aria-label="快捷样板选择"
             >
@@ -729,12 +731,17 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string }> = ({
               ))}
             </div>
 
-            <form id="garment-form" className="form" onSubmit={handleSubmit}>
+            <form
+              id="garment-form"
+              className="form mp-garment-form"
+              onSubmit={handleSubmit}
+            >
               <label htmlFor="garment-half-turn">允许 180° 旋转</label>
               <input
                 id="garment-half-turn"
                 name="halfTurn"
                 type="checkbox"
+                className="ux-switch"
                 aria-describedby="angle-help"
                 disabled={isBusy}
                 checked={halfTurn}
@@ -748,6 +755,7 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string }> = ({
                 id="garment-gap-fill"
                 name="gapFill"
                 type="checkbox"
+                className="ux-switch"
                 aria-describedby="fill-help"
                 disabled={isBusy}
                 checked={gapFill}
@@ -884,241 +892,257 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string }> = ({
           </div>
         </section>
 
-        <section className="pane">
-          <div className="garment-kpis" id="garment-kpis">
-            <div className="metric garment-metric">
-              <div>
-                <small>最低单件克重</small>
-                <b>
-                  {lowestRow ? fmtN(lowestRow.use.gramsPerGarment, 2) : '—'}
-                  <em>g/件</em>
-                </b>
-              </div>
-              <div>
-                <small>推荐最优门幅</small>
-                <b>
-                  {recommendedRow
-                    ? fmtN(recommendedRow.width, 1)
-                    : optimizedPreview
-                    ? fmtN(optimizedPreview.width, 1)
-                    : '—'}
-                  <em>mm</em>
-                </b>
-              </div>
-              <div>
-                <small>最高利用率</small>
-                <b>
-                  {highestRow
-                    ? fmtN(effectiveUtilization(highestRow.use), 2)
-                    : optimizedPreview
-                    ? fmtN(optimizedPreview.use.utilization, 2)
-                    : '—'}
-                  <em>%</em>
-                </b>
-              </div>
-              <div>
-                <small>本版配码 / 已齐套</small>
-                <b>
-                  {totalGarmentCount}
-                  <em>
-                    件 · {validRows.length}/{rows.length || 0}
-                  </em>
-                </b>
+        <div className="mp-garment-right">
+          <section className="mp-float-card mp-garment-results-card">
+            <div className="garment-kpis mp-garment-kpis" id="garment-kpis">
+              <div className="metric garment-metric">
+                <div>
+                  <small>最低单件克重</small>
+                  <b>
+                    {lowestRow ? fmtN(lowestRow.use.gramsPerGarment, 2) : '—'}
+                    <em>g/件</em>
+                  </b>
+                </div>
+                <div>
+                  <small>推荐最优门幅</small>
+                  <b>
+                    {recommendedRow
+                      ? fmtN(recommendedRow.width, 1)
+                      : optimizedPreview
+                      ? fmtN(optimizedPreview.width, 1)
+                      : '—'}
+                    <em>mm</em>
+                  </b>
+                </div>
+                <div>
+                  <small>最高利用率</small>
+                  <b>
+                    {highestRow
+                      ? fmtN(effectiveUtilization(highestRow.use), 2)
+                      : optimizedPreview
+                      ? fmtN(optimizedPreview.use.utilization, 2)
+                      : '—'}
+                    <em>%</em>
+                  </b>
+                </div>
+                <div>
+                  <small>本版配码 / 已齐套</small>
+                  <b>
+                    {totalGarmentCount}
+                    <em>
+                      件 · {validRows.length}/{rows.length || 0}
+                    </em>
+                  </b>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="pane-h">
-            候选幅宽比较<span className="sub">按实算齐套结果对比单耗与利用率</span>
-          </div>
-
-          {benchmark && referencePreview && optimizedPreview && (
-            <div id="garment-reference">
-              <span id="garment-benchmark">
-                {`原报告 ${benchmark.utilization.toFixed(
-                  2
-                )}% · DXF 同版长换算 ${benchmark.dxfUtilization.toFixed(2)}%（${
-                  benchmark.width
-                } × ${benchmark.length} mm，${Object.entries(benchmark.counts)
-                  .map(([size, qty]) => `${size} 码 ${qty} 件`)
-                  .join('、')}）`}
-              </span>
-              <span role="group" aria-label="排料方案" style={{ display: 'inline-flex', gap: 6 }}>
-                <button
-                  className={`btn sm ${
-                    selectedSource?.kind === 'optimized' ? 'pri' : ''
-                  }`}
-                  id="garment-optimum"
-                  type="button"
-                  aria-pressed={selectedSource?.kind === 'optimized'}
-                  onClick={() => {
-                    manualViewRef.current = true;
-                    setSelectedSource({ kind: 'optimized' });
-                  }}
-                >
-                  {`优化排料 · ${optimizedPreview.verified.occupiedLengthMm.toFixed(
-                    2
-                  )} mm · ${optimizedPreview.verified.utilizationPercent.toFixed(2)}%`}
-                </button>
-                <button
-                  className="btn sm"
-                  id="garment-replay"
-                  type="button"
-                  aria-pressed={selectedSource?.kind === 'reference'}
-                  onClick={() => {
-                    manualViewRef.current = true;
-                    setSelectedSource({ kind: 'reference' });
-                  }}
-                >
-                  {`按图复排 · ${referencePreview.verified.occupiedLengthMm.toFixed(
-                    2
-                  )} mm · ${referencePreview.verified.utilizationPercent.toFixed(2)}%`}
-                </button>
-              </span>
+            <div className="pane-h">
+              候选幅宽比较<span className="sub">按实算齐套结果对比单耗与利用率</span>
             </div>
-          )}
 
-          <div className="garment-results">
-            <table className="t">
-              <thead>
-                <tr>
-                  <th>有效幅宽 mm</th>
-                  <th>试算状态</th>
-                  <th>唛架长 mm</th>
-                  <th>齐套利用率 %</th>
-                  <th>mm/件</th>
-                  <th>g/件</th>
-                  {gapFill && <th id="garment-fill-column">含补片利用率 %</th>}
-                  <th>排料图</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r, i) => (
-                  <tr key={`${r.width}-${r.direction}-${i}`}>
-                    <td className="num">{fmtN(r.width, 1)}</td>
-                    <td className="wrap">
-                      {r.state}
-                      {r.use && effectiveUtilization(r.use) === highestUtil
-                        ? r.use.fillCount != null
-                          ? ' · 最高含补片利用率'
-                          : ' · 最高齐套利用率'
-                        : ''}
-                      {Number.isFinite(r.use?.gramsPerGarment) &&
-                      r.use.gramsPerGarment === lowestGrams
-                        ? ' · 当前最低单耗'
-                        : ''}
-                      {buildTrialDetailNodes(r)}
-                    </td>
-                    <td className="num">
-                      {Number.isFinite(r.use?.length)
-                        ? fmtN(r.use.length, 2)
-                        : '—'}
-                    </td>
-                    <td className="num">
-                      {Number.isFinite(r.use?.utilization)
-                        ? fmtN(r.use.utilization, 2)
-                        : '—'}
-                    </td>
-                    <td className="num">
-                      {Number.isFinite(r.use?.lengthPerGarment)
-                        ? fmtN(r.use.lengthPerGarment, 2)
-                        : '—'}
-                    </td>
-                    <td className="num">
-                      {Number.isFinite(r.use?.gramsPerGarment)
-                        ? fmtN(r.use.gramsPerGarment, 2)
-                        : '—'}
-                    </td>
-                    {gapFill && (
-                      <td className="num">
-                        {r.use?.fillCount != null ? (
-                          <>
-                            {fmtN(r.use.utilizationWithFill, 2)}
-                            <br />
-                            <small>实补 {r.use.fillCount} 片</small>
-                          </>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                    )}
-                    <td>
-                      {r.result?.layout ? (
-                        <button
-                          className="btn sm"
-                          type="button"
-                          aria-label={`查看 ${r.width} mm ${r.direction}排料图`}
-                          aria-pressed={
-                            selectedSource?.kind === 'row' &&
-                            selectedSource.index === i
-                          }
-                          onClick={() => {
-                            manualViewRef.current = true;
-                            setSelectedSource({ kind: 'row', index: i });
-                          }}
-                        >
-                          查看
-                        </button>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
+            {benchmark && referencePreview && optimizedPreview && (
+              <div id="garment-reference" className="mp-garment-ref">
+                <span id="garment-benchmark">
+                  {`原报告 ${benchmark.utilization.toFixed(
+                    2
+                  )}% · DXF 同版长换算 ${benchmark.dxfUtilization.toFixed(2)}%（${
+                    benchmark.width
+                  } × ${benchmark.length} mm，${Object.entries(benchmark.counts)
+                    .map(([size, qty]) => `${size} 码 ${qty} 件`)
+                    .join('、')}）`}
+                </span>
+                <span
+                  className="mp-seg mp-seg-sm"
+                  role="group"
+                  aria-label="排料方案"
+                >
+                  <button
+                    className={`mp-seg-btn ${
+                      selectedSource?.kind === 'optimized' ? 'on' : ''
+                    }`}
+                    id="garment-optimum"
+                    type="button"
+                    aria-pressed={selectedSource?.kind === 'optimized'}
+                    onClick={() => {
+                      manualViewRef.current = true;
+                      setSelectedSource({ kind: 'optimized' });
+                    }}
+                  >
+                    {`优化排料 · ${optimizedPreview.verified.occupiedLengthMm.toFixed(
+                      2
+                    )} mm · ${optimizedPreview.verified.utilizationPercent.toFixed(2)}%`}
+                  </button>
+                  <button
+                    className={`mp-seg-btn ${
+                      selectedSource?.kind === 'reference' ? 'on' : ''
+                    }`}
+                    id="garment-replay"
+                    type="button"
+                    aria-pressed={selectedSource?.kind === 'reference'}
+                    onClick={() => {
+                      manualViewRef.current = true;
+                      setSelectedSource({ kind: 'reference' });
+                    }}
+                  >
+                    {`按图复排 · ${referencePreview.verified.occupiedLengthMm.toFixed(
+                      2
+                    )} mm · ${referencePreview.verified.utilizationPercent.toFixed(2)}%`}
+                  </button>
+                </span>
+              </div>
+            )}
+
+            <div className="garment-results mp-garment-results-scroll">
+              <table className="t">
+                <thead>
+                  <tr>
+                    <th>有效幅宽 mm</th>
+                    <th>试算状态</th>
+                    <th>唛架长 mm</th>
+                    <th>齐套利用率 %</th>
+                    <th>mm/件</th>
+                    <th>g/件</th>
+                    {gapFill && <th id="garment-fill-column">含补片利用率 %</th>}
+                    <th>排料图</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => {
+                    const isRowActive =
+                      selectedSource?.kind === 'row' && selectedSource.index === i;
+                    return (
+                      <tr
+                        key={`${r.width}-${r.direction}-${i}`}
+                        className={isRowActive ? 'sel' : ''}
+                      >
+                        <td className="num">{fmtN(r.width, 1)}</td>
+                        <td className="wrap">
+                          {r.state}
+                          {r.use && effectiveUtilization(r.use) === highestUtil
+                            ? r.use.fillCount != null
+                              ? ' · 最高含补片利用率'
+                              : ' · 最高齐套利用率'
+                            : ''}
+                          {Number.isFinite(r.use?.gramsPerGarment) &&
+                          r.use.gramsPerGarment === lowestGrams
+                            ? ' · 当前最低单耗'
+                            : ''}
+                          {buildTrialDetailNodes(r)}
+                        </td>
+                        <td className="num">
+                          {Number.isFinite(r.use?.length)
+                            ? fmtN(r.use.length, 2)
+                            : '—'}
+                        </td>
+                        <td className="num">
+                          {Number.isFinite(r.use?.utilization)
+                            ? fmtN(r.use.utilization, 2)
+                            : '—'}
+                        </td>
+                        <td className="num">
+                          {Number.isFinite(r.use?.lengthPerGarment)
+                            ? fmtN(r.use.lengthPerGarment, 2)
+                            : '—'}
+                        </td>
+                        <td className="num">
+                          {Number.isFinite(r.use?.gramsPerGarment)
+                            ? fmtN(r.use.gramsPerGarment, 2)
+                            : '—'}
+                        </td>
+                        {gapFill && (
+                          <td className="num">
+                            {r.use?.fillCount != null ? (
+                              <>
+                                {fmtN(r.use.utilizationWithFill, 2)}
+                                <br />
+                                <small>实补 {r.use.fillCount} 片</small>
+                              </>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                        )}
+                        <td>
+                          {r.result?.layout ? (
+                            <button
+                              className={`btn sm ${isRowActive ? 'soft-accent' : ''}`}
+                              type="button"
+                              aria-label={`查看 ${r.width} mm ${r.direction}排料图`}
+                              aria-pressed={isRowActive}
+                              onClick={() => {
+                                manualViewRef.current = true;
+                                setSelectedSource({ kind: 'row', index: i });
+                              }}
+                            >
+                              查看
+                            </button>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
 
-          <div className="pane-h">
-            <span id="garment-view">
-              {displayedRow
-                ? `排料图 · ${fmtN(displayedRow.width, 1)} mm · ${
-                    displayedRow.usedFixed
-                      ? '沿用固定方向'
-                      : displayedRow.direction
-                  } · ${displayedRow.state}`
-                : '排料图'}
-            </span>
-            <span className="sp" />
-            <button
-              type="button"
-              className="btn sm"
-              id="garment-export"
-              disabled={!displayedRow?.result?.layout}
-              onClick={handleExportJson}
-            >
-              导出唛架 JSON
-            </button>
-            <button
-              type="button"
-              className="btn sm"
-              disabled={!displayedRow?.result?.layout}
-              onClick={handleToStudio2D}
-            >
-              送入二维自由画布
-            </button>
-            <button
-              type="button"
-              className="btn sm pri"
-              id="garment-to-task"
-              disabled={!displayedRow?.result?.layout}
-              title="将当前选中的门幅与样板裁片带入新建二维生产任务"
-              onClick={handleToTask}
-            >
-              转入生产任务
-            </button>
-          </div>
-          <div
-            ref={canvasHostRef}
-            id="garment-canvas"
-            className="demo-canvas"
-            aria-label="当前候选唛架"
-          />
-        </section>
+          <section className="mp-cad-card mp-garment-canvas-card">
+            <div className="mp-cad-head">
+              <span id="garment-view" className="mp-cad-title">
+                {displayedRow
+                  ? `排料图 · ${fmtN(displayedRow.width, 1)} mm · ${
+                      displayedRow.usedFixed
+                        ? '沿用固定方向'
+                        : displayedRow.direction
+                    } · ${displayedRow.state}`
+                  : '排料图'}
+              </span>
+              <span className="sp" />
+              <button
+                type="button"
+                className="mp-cad-btn"
+                id="garment-export"
+                disabled={!displayedRow?.result?.layout}
+                onClick={handleExportJson}
+              >
+                导出唛架 JSON
+              </button>
+              <button
+                type="button"
+                className="mp-cad-btn"
+                disabled={!displayedRow?.result?.layout}
+                onClick={handleToStudio2D}
+              >
+                送入二维自由画布
+              </button>
+              <button
+                type="button"
+                className="mp-cad-btn accent"
+                id="garment-to-task"
+                disabled={!displayedRow?.result?.layout}
+                title="将当前选中的门幅与样板裁片带入新建二维生产任务"
+                onClick={handleToTask}
+              >
+                转入生产任务
+              </button>
+            </div>
+            <div
+              ref={canvasHostRef}
+              id="garment-canvas"
+              className="demo-canvas"
+              aria-label="当前候选唛架"
+            />
+          </section>
+        </div>
       </div>
 
-      <div className="foot">
-        <span role="status">{statusText}</span>
+      <div className="foot mp-action-foot">
+        <span role="status" className="mp-status-text">
+          {statusText}
+        </span>
         <span className="sp" />
         {isBusy && (
           <button

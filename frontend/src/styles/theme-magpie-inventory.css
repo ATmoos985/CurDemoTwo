@@ -1,0 +1,1138 @@
+/* ==========================================================================
+   Inventory Domain — Magpie Light Desktop Theme
+   Covers:
+     1. InventoryPage (Mother Rolls & Linked Remnants Ledger + Dark CAD Preview)
+     2. InspectionPage (Roll Defect Inspection Workbench)
+     3. DocumentsPage (Inventory Ledger, Transfers & Counts)
+   ========================================================================== */
+
+/* Shared Table Scroll Guard (Zero Horizontal Overflow at 1366x768 & 1920x1080) */
+.mp-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.mp-table-scroll > table.t {
+  width: 100%;
+  border-radius: 0;
+  box-shadow: none;
+  border: 0;
+}
+
+.mp-empty-inline {
+  padding: 28px 18px;
+  text-align: center;
+  color: var(--cp-ink-3);
+  font-size: 12.5px;
+}
+
+.mp-empty-inline strong {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--cp-ink);
+  margin-bottom: 4px;
+}
+
+/* ==========================================================================
+   1. InventoryPage — Light Desktop Shell + Aggregated Card + Dark CAD Preview
+   ========================================================================== */
+
+.mp-inv-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  background: var(--cp-bg);
+  overflow: hidden;
+}
+
+.mp-inv-header {
+  flex: none;
+  padding: 12px 18px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--cp-bg);
+}
+
+.mp-inv-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.mp-inv-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mp-inv-filter-row .mp-search-input {
+  width: 248px;
+  height: 32px;
+}
+
+.mp-inv-filter-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.mp-inv-notice {
+  margin: 0 18px 10px;
+  padding: 8px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(217, 119, 6, 0.28);
+  background: rgba(245, 158, 11, 0.1);
+  color: #92400e;
+  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Main Resizable Dual-Card Workspace (Left White Ledger Card + Narrow Grip + Right Dark CAD Card) */
+.mp-inv-workspace.inv-resizable-workspace {
+  flex: 1;
+  display: grid;
+  min-height: 0;
+  min-width: 0;
+  padding: 0 18px 14px;
+  gap: 0;
+  background: var(--cp-bg);
+}
+
+/* Left Pure-White 12px Aggregated Ledger Card */
+.mp-inv-ledger-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--cp-surface);
+  border-radius: var(--cp-radius-card);
+  box-shadow: var(--cp-shadow-card);
+  overflow: hidden;
+}
+
+/* Product Model Quick-Switch Pill Strip inside Top of White Ledger Card */
+.mp-inv-model-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--cp-divider);
+  background: #fafafb;
+  min-width: 0;
+}
+
+.mp-inv-model-bar-label {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--cp-ink-3);
+  white-space: nowrap;
+}
+
+.mp-inv-model-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+  flex: 1;
+  min-width: 0;
+}
+
+.mp-inv-model-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--cp-border);
+  background: var(--cp-surface);
+  color: var(--cp-ink-2);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease,
+    box-shadow 0.14s ease;
+}
+
+.mp-inv-model-pill:hover {
+  border-color: var(--cp-border-strong);
+  color: var(--cp-ink);
+  background: #ffffff;
+}
+
+.mp-inv-model-pill[aria-selected="true"] {
+  background: var(--cp-surface);
+  border-color: rgba(91, 97, 246, 0.45);
+  color: var(--cp-ink);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(91, 97, 246, 0.14), 0 0 0 1px rgba(91, 97, 246, 0.16);
+}
+
+.mp-inv-model-pill .mp-pill-meta {
+  font-size: 11px;
+  color: var(--cp-ink-3);
+  font-weight: 500;
+}
+
+.mp-inv-model-pill[aria-selected="true"] .mp-pill-meta {
+  color: var(--cp-accent-ink);
+}
+
+/* Selected Product Inline Summary Strip (Replaces Bulky KPI Block) */
+.mp-inv-product-strip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--cp-divider);
+  background: var(--cp-surface);
+}
+
+.mp-inv-product-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.mp-inv-product-identity strong {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--cp-ink);
+  letter-spacing: -0.01em;
+}
+
+.mp-inv-product-meta {
+  font-size: 12px;
+  color: var(--cp-ink-3);
+}
+
+.mp-inv-metrics-inline {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--cp-ink-2);
+}
+
+.mp-inv-metric-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.mp-inv-metric-item span {
+  font-size: 11.5px;
+  color: var(--cp-ink-3);
+}
+
+.mp-inv-metric-item b {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--cp-ink);
+}
+
+.mp-inv-metric-item b.is-ok {
+  color: #059669;
+}
+
+/* Scrollable Ledger Body inside Left Pure-White Card */
+.mp-inv-ledger-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+}
+
+.mp-inv-section + .mp-inv-section {
+  border-top: 1px solid var(--cp-border);
+}
+
+.mp-inv-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 9px 14px;
+  background: #fcfcfd;
+  border-bottom: 1px solid var(--cp-divider);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--cp-ink);
+}
+
+.mp-inv-section-hint {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--cp-ink-3);
+}
+
+.mp-inv-ledger-card table.t th {
+  background: #fafafb;
+  height: 34px;
+  padding: 0 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--cp-ink-3);
+  border-bottom: 1px solid var(--cp-divider);
+}
+
+.mp-inv-ledger-card table.t td {
+  height: 44px;
+  padding: 5px 7px;
+  border-bottom: 1px solid var(--cp-divider);
+  font-size: 12px;
+}
+
+.mp-inv-ledger-card table.t tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.mp-inv-ledger-card table.t .btn.sm {
+  height: 25px;
+  padding: 0 7px;
+  font-size: 11.5px;
+  border-radius: 6px;
+}
+
+.mp-inv-id-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mp-inv-roll-id {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cp-ink);
+  max-width: 144px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mp-inv-loc-cell {
+  display: block;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cp-ink-2);
+}
+
+.mp-code-badge.mp-inv-rem-id {
+  display: inline-block;
+  max-width: 158px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.mp-inv-lineage-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.mp-inv-source-id {
+  display: inline-block;
+  max-width: 108px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+}
+
+.mp-inv-row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+
+.mp-inv-sub-meta {
+  font-size: 11px;
+  color: var(--cp-ink-3);
+  line-height: 1.3;
+}
+
+.mp-inv-remnant-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--cp-border);
+  background: var(--cp-surface-subtle);
+  color: var(--cp-accent-ink);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.mp-inv-remnant-link:hover {
+  background: var(--cp-accent-soft);
+  border-color: rgba(91, 97, 246, 0.35);
+}
+
+.mp-inv-remnant-link.active {
+  background: var(--cp-accent-soft);
+  border-color: rgba(91, 97, 246, 0.5);
+  font-weight: 600;
+}
+
+/* Refined Narrow Drag Splitter Handle between White Card and Dark CAD Card */
+.mp-inv-workspace .inv-split-handle.mp-inv-splitter {
+  border: 0;
+  background: transparent;
+  width: 10px;
+  cursor: col-resize;
+  position: relative;
+}
+
+.mp-inv-workspace .inv-split-handle.mp-inv-splitter::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: 50%;
+  inset-block-start: 50%;
+  inline-size: 3px;
+  block-size: 42px;
+  translate: -50% -50%;
+  border-radius: 999px;
+  background: #d4d7de;
+  transition: background-color 0.14s ease, block-size 0.14s ease;
+}
+
+.mp-inv-workspace .inv-split-handle.mp-inv-splitter:hover {
+  background: transparent;
+  border-color: transparent;
+}
+
+.mp-inv-workspace .inv-split-handle.mp-inv-splitter:hover::after,
+.mp-inv-workspace .inv-split-handle.mp-inv-splitter.dragging::after,
+.mp-inv-workspace .inv-split-handle.mp-inv-splitter:focus-visible::after {
+  background: var(--cp-accent);
+  block-size: 64px;
+}
+
+.mp-inv-workspace .inv-split-handle.mp-inv-splitter.dragging,
+.mp-inv-workspace .inv-split-handle.mp-inv-splitter:focus-visible {
+  background: transparent;
+  border-color: transparent;
+  outline: none;
+}
+
+/* Right Dark Charcoal (#181c22) Rounded 12px CAD Preview Card */
+.mp-inv-preview-card.inv-preview-pane {
+  border: 0;
+  border-radius: var(--cp-radius-card);
+  background: #181c22;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.18);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.mp-inv-preview-card .mp-inv-preview-head {
+  height: 42px;
+  padding: 0 12px;
+  background: #20252d;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  color: #f4f5f7;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.mp-inv-preview-card .inv-preview-id {
+  color: #f4f5f7;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.mp-dark-pill-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.mp-dark-pill-tag.roll {
+  background: rgba(91, 97, 246, 0.24);
+  color: #c7d2fe;
+}
+
+.mp-dark-pill-tag.remnant {
+  background: rgba(16, 185, 129, 0.22);
+  color: #a7f3d0;
+}
+
+.mp-dark-btn {
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #d4d8e0;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.mp-dark-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.mp-dark-btn.accent {
+  background: rgba(91, 97, 246, 0.26);
+  border-color: rgba(129, 140, 248, 0.45);
+  color: #e0e7ff;
+  font-weight: 600;
+}
+
+.mp-dark-btn.accent:hover {
+  background: rgba(91, 97, 246, 0.4);
+  color: #ffffff;
+}
+
+/* Dark CAD Toolbar inside Inventory Preview Card */
+.mp-inv-preview-card .ctool.inv-preview-toolbar {
+  background: #1b2028;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 5px 10px;
+  min-height: 36px;
+  gap: 6px;
+}
+
+.mp-inv-preview-card .ctool-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.mp-inv-preview-card .ctool button {
+  height: 23px;
+  min-height: 23px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #cbd5e1;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.mp-inv-preview-card .ctool button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.mp-inv-preview-card .ctool button[aria-pressed="true"],
+.mp-inv-preview-card .ctool button.on {
+  background: var(--cp-accent);
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.mp-inv-preview-card .ctool .div {
+  border-inline-start: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+}
+
+.mp-inv-preview-card .inv-toolbar-select {
+  height: 25px;
+  min-block-size: 25px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #232933;
+  color: #e2e8f0;
+  font-size: 11.5px;
+  padding: 0 7px;
+}
+
+/* Refined Spatial Cut-Zone & Planned-Zone Strip inside Dark Card */
+.mp-inv-preview-card .roll-spatial-panel {
+  padding: 8px 12px 9px;
+  background: #1d222b;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  color: #cbd5e1;
+  gap: 7px;
+}
+
+.mp-inv-preview-card .roll-spatial-legend {
+  gap: 8px;
+  font-size: 11px;
+  color: #a1a8b3;
+}
+
+.mp-inv-preview-card .roll-spatial-legend b {
+  color: #f4f5f7;
+  font-weight: 600;
+}
+
+.mp-inv-preview-card .spatial-dot.planned {
+  background: #6366f1;
+  border-color: #818cf8;
+}
+
+.mp-inv-preview-card .roll-spatial-bar {
+  block-size: 22px;
+  border-radius: 6px;
+  background: rgba(16, 185, 129, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+}
+
+.mp-inv-preview-card .spatial-seg {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: clip;
+}
+
+.mp-inv-preview-card .spatial-seg.cut {
+  background: repeating-linear-gradient(
+    -45deg,
+    #4b5563 0 5px,
+    #374151 5px 10px
+  );
+  border-right: 1.5px solid #9ca3af;
+  color: #f3f4f6;
+}
+
+.mp-inv-preview-card .spatial-seg.planned {
+  background: rgba(91, 97, 246, 0.85);
+  border-inline: 1px solid #a5b4fc;
+}
+
+.mp-inv-preview-card .inv-canvas-box {
+  background: #181c22;
+}
+
+.mp-inv-preview-card .studio-canvas-hint {
+  background: #20252d;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  color: #9aa4b2;
+  padding: 5px 12px;
+  font-size: 11.5px;
+}
+
+.mp-inv-preview-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px 18px;
+  text-align: center;
+  color: #8e96a3;
+  font-size: 12.5px;
+}
+
+/* ==========================================================================
+   2. InspectionPage — Light Shell + Dark Charcoal CAD Viewport + White Card
+   ========================================================================== */
+
+.mp-insp-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  background: var(--cp-bg);
+  overflow: hidden;
+}
+
+.mp-insp-head.inspection-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-height: 48px;
+  padding: 8px 16px;
+  background: var(--cp-surface);
+  border-bottom: 1px solid var(--cp-divider);
+}
+
+.mp-insp-head h1 {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 650;
+  color: var(--cp-ink);
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+}
+
+.mp-insp-roll-select {
+  width: 280px;
+  max-width: 100%;
+  height: 30px;
+  font-size: 12.5px;
+}
+
+.mp-insp-feedbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 7px 16px;
+  background: #fafafb;
+  border-bottom: 1px solid var(--cp-divider);
+  font-size: 12px;
+}
+
+.mp-insp-feed-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.mp-insp-feed-group .field {
+  height: 28px;
+  padding: 0 7px;
+  font-size: 12px;
+}
+
+.mp-insp-vsep {
+  width: 1px;
+  height: 18px;
+  background: var(--cp-border);
+}
+
+/* Floating Light-Shell Workspace */
+.mp-insp-workspace {
+  flex: 1;
+  display: grid;
+  min-height: 0;
+  min-width: 0;
+  padding: 10px 12px 12px;
+  gap: 10px;
+  background: var(--cp-bg);
+}
+
+.mp-insp-track-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 0 8px;
+  background: #181c22;
+  border-radius: var(--cp-radius-card);
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.18);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mp-insp-track-label {
+  color: #9aa4b2;
+  font-size: 10.5px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.mp-insp-track-card .vtrack {
+  border-radius: 4px;
+  background: #272d36;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.mp-insp-track-card .vtrack b {
+  background: rgba(16, 185, 129, 0.28);
+}
+
+.mp-insp-track-card .vtrack em {
+  background: #34d399;
+}
+
+.mp-insp-canvas-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: #181c22;
+  border-radius: var(--cp-radius-card);
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.18);
+  overflow: hidden;
+}
+
+.mp-insp-canvas-card .ctool {
+  min-height: 36px;
+  padding: 4px 10px;
+  background: #20252d;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  gap: 6px;
+}
+
+.mp-insp-canvas-card .ctool .vseg {
+  border: 0;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px;
+  gap: 2px;
+}
+
+.mp-insp-canvas-card .ctool button {
+  height: 24px;
+  min-height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #cbd5e1;
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 0 9px;
+}
+
+.mp-insp-canvas-card .ctool .vseg button {
+  height: 22px;
+  min-height: 22px;
+  border-radius: 5px;
+  background: transparent;
+}
+
+.mp-insp-canvas-card .ctool button:hover:not([disabled]) {
+  background: rgba(255, 255, 255, 0.13);
+  color: #ffffff;
+}
+
+.mp-insp-canvas-card .ctool button.on,
+.mp-insp-canvas-card .ctool button[aria-pressed="true"] {
+  background: var(--cp-accent);
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.mp-insp-canvas-card .canvas-wrap {
+  background: #181c22;
+}
+
+/* Right Pure-White 12px Defect Record & Precision Form Card */
+.mp-insp-side-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--cp-surface);
+  border-radius: var(--cp-radius-card);
+  box-shadow: var(--cp-shadow-card);
+  overflow: hidden;
+}
+
+.mp-insp-side-card .pane-h {
+  height: 40px;
+  padding: 0 13px;
+  background: var(--cp-surface);
+  border-bottom: 1px solid var(--cp-divider);
+  color: var(--cp-ink);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.mp-insp-side-card .sec {
+  background: #fafafb;
+  border-top: 1px solid var(--cp-divider);
+  border-bottom: 1px solid var(--cp-divider);
+  color: var(--cp-ink-3);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 7px 13px;
+}
+
+.mp-insp-side-card .form {
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 10px;
+  padding: 10px 13px 10px;
+}
+
+.mp-insp-side-card .form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--cp-ink-2);
+}
+
+.mp-insp-side-card .form .field {
+  height: 30px;
+  width: 100%;
+}
+
+.mp-insp-side-card table.t th {
+  background: #fafafb;
+  height: 32px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.mp-insp-side-card table.t td {
+  height: 36px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.mp-insp-side-foot {
+  flex: none;
+  padding: 9px 13px;
+  background: #fafafb;
+  border-top: 1px solid var(--cp-divider);
+  font-size: 11.5px;
+  color: var(--cp-ink-3);
+  line-height: 1.45;
+}
+
+.mp-insp-void-row {
+  padding: 8px 13px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.mp-insp-void-note {
+  padding: 0 13px 8px;
+  font-size: 11.5px;
+  color: var(--cp-ink-3);
+}
+
+/* Empty State Card when No Roll Selected */
+.mp-insp-empty-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 22px 24px;
+}
+
+.mp-insp-empty-card {
+  background: var(--cp-surface);
+  border-radius: var(--cp-radius-card);
+  box-shadow: var(--cp-shadow-card);
+  padding: 24px;
+  max-width: 860px;
+}
+
+.mp-insp-empty-card h2 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--cp-ink);
+}
+
+.mp-insp-empty-card p {
+  margin: 0 0 16px;
+  font-size: 12.5px;
+  color: var(--cp-ink-2);
+}
+
+.mp-insp-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.mp-insp-quick-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--cp-border);
+  background: #fafafb;
+  color: var(--cp-ink);
+  text-decoration: none;
+  transition: border-color 0.14s ease, background-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.mp-insp-quick-item:hover {
+  background: var(--cp-surface);
+  border-color: rgba(91, 97, 246, 0.45);
+  box-shadow: 0 2px 6px rgba(91, 97, 246, 0.1);
+}
+
+.mp-insp-quick-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.mp-insp-quick-meta {
+  font-size: 11.5px;
+  color: var(--cp-ink-3);
+}
+
+/* ==========================================================================
+   3. DocumentsPage — Light Desktop Shell + Segmented Filter + White Card Table
+   ========================================================================== */
+
+.mp-doc-subbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mp-doc-ledger-filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mp-doc-select {
+  height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+  min-width: 118px;
+}
+
+.mp-doc-switch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--cp-ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+  padding-left: 2px;
+}
+
+.mp-doc-card {
+  background: var(--cp-surface);
+  border-radius: var(--cp-radius-card);
+  box-shadow: var(--cp-shadow-card);
+  overflow: hidden;
+}
+
+.mp-doc-card .mp-table-scroll > table.t th {
+  background: #fcfcfd;
+  height: 36px;
+  padding: 0 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--cp-ink-3);
+  border-bottom: 1px solid var(--cp-divider);
+}
+
+.mp-doc-card .mp-table-scroll > table.t td {
+  height: 46px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--cp-divider);
+  font-size: 12.5px;
+}
+
+.mp-doc-card .mp-table-scroll > table.t tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.mp-doc-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-top: 1px solid var(--cp-divider);
+  background: #fafafb;
+  font-size: 12px;
+  color: var(--cp-ink-3);
+}
+
+.mp-doc-foot a {
+  color: var(--cp-accent-ink);
+  font-weight: 500;
+}
+
+.mp-doc-foot a:hover {
+  text-decoration: underline;
+}
+
+.mp-doc-detail-cell {
+  white-space: normal !important;
+  min-width: 210px;
+  max-width: 380px;
+  line-height: 1.45;
+  color: var(--cp-ink-2);
+}
+
+/* ==========================================================================
+   4. Responsive Compact Guard (1366x768)
+   ========================================================================== */
+
+@media (max-width: 1400px) {
+  .mp-inv-header {
+    padding: 10px 14px 8px;
+    gap: 8px;
+  }
+
+  .mp-inv-workspace.inv-resizable-workspace {
+    padding: 0 14px 12px;
+  }
+
+  .mp-inv-filter-row .mp-search-input {
+    width: 205px;
+  }
+
+  .mp-insp-roll-select {
+    width: 230px;
+  }
+
+  .mp-insp-feedbar {
+    padding: 6px 12px;
+    gap: 8px;
+  }
+}

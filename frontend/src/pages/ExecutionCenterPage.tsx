@@ -28,6 +28,7 @@ import {
   carStart,
   carRequest
 } from '@static/app/js/model/slitting.js';
+import { CodeBadge } from '../components/ui/MagpiePrimitives';
 
 export const ExecutionCenterPage: React.FC<{
   taskId?: string;
@@ -465,23 +466,23 @@ export const ExecutionCenterPage: React.FC<{
   );
 
   return (
-    <div className="react-page">
-      <div className="ph">
+    <div className="react-page mp-legacy-page">
+      <div className="mp-sc-topbar">
         <h1>执行与报工</h1>
-        <span className="crumb">
+        <span className="mp-sc-sub">
           锁料预约 · 开工确认 · 实切报工 · 余料入库
         </span>
         <span className="sp" />
-        <button type="button" className="btn sm" onClick={reloadCurrentTask}>
+        <button type="button" className="mp-ghost-btn" onClick={reloadCurrentTask}>
           刷新状态
         </button>
-        <a className="btn" href="#/workbench">
+        <a className="btn soft-accent" href="#/workbench">
           选择任务方案
         </a>
       </div>
 
       {pendingSlots.length > 0 && (
-        <div className="notice" style={{ margin: '8px 16px 0' }}>
+        <div className="mp-legacy-notice">
           有 {pendingSlots.length} 个执行单操作结果未确认：
           {pendingSlots.map(([slot, v]: [string, any]) => (
             <button
@@ -498,64 +499,68 @@ export const ExecutionCenterPage: React.FC<{
         </div>
       )}
 
-      <div className="studio-split" style={{ gridTemplateColumns: '340px minmax(0, 1fr)' }}>
+      <div className="studio-split mp-exec-split">
         <section className="pane">
           <div className="pane-h">生产任务单列表 ({summaries.length})</div>
           <div className="pane-b">
-            <table className="t" style={{ border: 0 }}>
-              <thead>
-                <tr>
-                  <th>任务 / 方案来源</th>
-                  <th className="r">进度</th>
-                  <th>状态</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summaries
-                  .slice()
-                  .reverse()
-                  .map((r) => (
-                    <tr
-                      key={r.task.id}
-                      className={`click ${selectedTaskId === r.task.id ? 'sel' : ''}`}
-                      onClick={() => setSelectedTaskId(r.task.id)}
-                    >
-                      <td className="wrap">
-                        <div style={{ fontWeight: 600 }}>{r.task.name}</div>
-                        <small className="muted num">
-                          {shortId(r.task.id)} ·{' '}
-                          {r.task.problemType === 'SLITTING_1D' ? '1D分切' : '2D裁切'} ·{' '}
-                          {r.task.materialModel}
-                        </small>
-                      </td>
-                      <td className="r num">
-                        {r.completed}/{r.total}
-                      </td>
-                      <td>
-                        <span
-                          className={`tag ${
-                            r.status === 'COMPLETED'
-                              ? 'ok'
+            <div className="mp-table-scroll">
+              <table className="t" style={{ border: 0 }}>
+                <thead>
+                  <tr>
+                    <th>任务 / 方案来源</th>
+                    <th className="r">进度</th>
+                    <th>状态</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summaries
+                    .slice()
+                    .reverse()
+                    .map((r) => (
+                      <tr
+                        key={r.task.id}
+                        className={`click ${selectedTaskId === r.task.id ? 'sel' : ''}`}
+                        onClick={() => setSelectedTaskId(r.task.id)}
+                      >
+                        <td className="wrap">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <strong style={{ fontWeight: 600 }}>{r.task.name}</strong>
+                            <CodeBadge>{shortId(r.task.id)}</CodeBadge>
+                          </div>
+                          <small className="muted num">
+                            {r.task.problemType === 'SLITTING_1D' ? '1D分切' : '2D裁切'} ·{' '}
+                            {r.task.materialModel}
+                          </small>
+                        </td>
+                        <td className="r num">
+                          {r.completed}/{r.total}
+                        </td>
+                        <td>
+                          <span
+                            className={`tag ${
+                              r.status === 'COMPLETED'
+                                ? 'ok'
+                                : r.pendingCount > 0
+                                ? 'run'
+                                : ''
+                            }`}
+                          >
+                            {r.status === 'COMPLETED'
+                              ? '已完工'
                               : r.pendingCount > 0
-                              ? 'run'
-                              : ''
-                          }`}
-                        >
-                          {r.status === 'COMPLETED'
-                            ? '已完工'
-                            : r.pendingCount > 0
-                            ? `${r.pendingCount}待报`
-                            : '待出车'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
+                              ? `${r.pendingCount}待报`
+                              : '待出车'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
 
-        <section className="pane" style={{ background: 'var(--bg)' }}>
+        <section className="pane mp-exec-detail-pane">
           <div className="body">
             {taskDetail?.task ? (
               <>
@@ -633,45 +638,47 @@ export const ExecutionCenterPage: React.FC<{
                       </span>
                     </div>
                     {savedSlitScheme?.patterns?.length > 0 ? (
-                      <table className="t" style={{ border: 0 }}>
-                        <thead>
-                          <tr>
-                            <th>刀组编号</th>
-                            <th>条宽组合 (mm×条)</th>
-                            <th className="r">单车长 mm</th>
-                            <th className="r">已用/余宽 mm</th>
-                            <th className="r">计划车数</th>
-                            <th>按车生成执行方案</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {savedSlitScheme.patterns.map((pat: any, idx: number) => (
-                            <tr key={pat.id || idx}>
-                              <td className="num">组 #{idx + 1}</td>
-                              <td className="num">
-                                {pat.stations
-                                  .map((s: any) => `${s.widthMm}×${s.countPerRepetition}`)
-                                  .join(' + ')}
-                              </td>
-                              <td className="r num">{fmtN(pat.lengthMm)}</td>
-                              <td className="r num">
-                                {pat.usedWidthMm} / 余 {pat.spareWidthMm}
-                              </td>
-                              <td className="r num">{pat.repetitions} 车</td>
-                              <td>
-                                <button
-                                  type="button"
-                                  className="btn sm pri"
-                                  disabled={busy || !passedRolls.length}
-                                  onClick={() => handleDispatchSlitCar(pat)}
-                                >
-                                  ＋ 出一车待报方案
-                                </button>
-                              </td>
+                      <div className="mp-table-scroll">
+                        <table className="t" style={{ border: 0 }}>
+                          <thead>
+                            <tr>
+                              <th>刀组编号</th>
+                              <th>条宽组合 (mm×条)</th>
+                              <th className="r">单车长 mm</th>
+                              <th className="r">已用/余宽 mm</th>
+                              <th className="r">计划车数</th>
+                              <th>按车生成执行方案</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {savedSlitScheme.patterns.map((pat: any, idx: number) => (
+                              <tr key={pat.id || idx}>
+                                <td className="num">组 #{idx + 1}</td>
+                                <td className="num">
+                                  {pat.stations
+                                    .map((s: any) => `${s.widthMm}×${s.countPerRepetition}`)
+                                    .join(' + ')}
+                                </td>
+                                <td className="r num">{fmtN(pat.lengthMm)}</td>
+                                <td className="r num">
+                                  {pat.usedWidthMm} / 余 {pat.spareWidthMm}
+                                </td>
+                                <td className="r num">{pat.repetitions} 车</td>
+                                <td>
+                                  <button
+                                    type="button"
+                                    className="btn sm pri"
+                                    disabled={busy || !passedRolls.length}
+                                    onClick={() => handleDispatchSlitCar(pat)}
+                                  >
+                                    ＋ 出一车待报方案
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     ) : (
                       <div className="muted" style={{ padding: 12, fontSize: 12 }}>
                         可在<a href="#/slitting">一维定长分切台</a>计算多订单组合后移交至此按车出车并报工。
@@ -714,7 +721,8 @@ export const ExecutionCenterPage: React.FC<{
                       该任务暂无待执行排料方案 — 可在上方选择在库实卷一键生成，或前往工作台选定方案移交
                     </div>
                   ) : (
-                    <table className="t" style={{ border: 0 }}>
+                    <div className="mp-table-scroll">
+                      <table className="t" style={{ border: 0 }}>
                       <thead>
                         <tr>
                           <th>方案编号</th>
@@ -969,6 +977,7 @@ export const ExecutionCenterPage: React.FC<{
                         })}
                       </tbody>
                     </table>
+                    </div>
                   )}
                 </div>
 
@@ -1291,15 +1300,16 @@ export const ExecutionCenterPage: React.FC<{
                       </div>
                     </div>
 
-                    <table className="t" style={{ border: 0 }}>
-                      <thead>
-                        <tr>
-                          <th>裁片编号</th>
-                          <th>名称</th>
-                          <th className="r">尺寸 mm</th>
-                          <th>实切判定</th>
-                        </tr>
-                      </thead>
+                    <div className="mp-table-scroll">
+                      <table className="t" style={{ border: 0 }}>
+                        <thead>
+                          <tr>
+                            <th>裁片编号</th>
+                            <th>名称</th>
+                            <th className="r">尺寸 mm</th>
+                            <th>实切判定</th>
+                          </tr>
+                        </thead>
                       <tbody>
                         {reportDraft.seg.pieces.map((pc: any) => {
                           const row = reportDraft.draft.rows[pc.id] || {
@@ -1379,10 +1389,12 @@ export const ExecutionCenterPage: React.FC<{
                         })}
                       </tbody>
                     </table>
+                    </div>
 
                     {currentRecoveryCands.length > 0 && (
                       <>
                         <div className="sec">可回收料头核对 ({currentRecoveryCands.length})</div>
+                        <div className="mp-table-scroll">
                         <table className="t" style={{ border: 0 }}>
                           <thead>
                             <tr>
@@ -1495,6 +1507,7 @@ export const ExecutionCenterPage: React.FC<{
                             })}
                           </tbody>
                         </table>
+                        </div>
                       </>
                     )}
 

@@ -11,12 +11,14 @@ import {
 } from '@static/app/js/model/quality.js';
 import { csvCell } from '@static/js/business/analysis/report-model.js';
 import { ModalDialog } from '../components/ModalDialog';
+import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
 import { useStudioStore, DemandFamilySummary } from '../store/useStudioStore';
 
 export const ReconciliationPage: React.FC = () => {
   const loadDemandFamilyIntoWorkbench = useStudioStore((s) => s.loadDemandFamilyIntoWorkbench);
 
   const [tab, setTab] = useState<'quality' | 'reconcile'>('quality');
+  const [search, setSearch] = useState('');
   const [reports, setReports] = useState<{ task: any; report: any }[]>([]);
   const [recon, setRecon] = useState<any>(null);
   const [ledgerItems, setLedgerItems] = useState<any[]>([]);
@@ -148,124 +150,276 @@ export const ReconciliationPage: React.FC = () => {
     };
   }, [recon]);
 
+  const gapReportCount = useMemo(
+    () =>
+      reports.filter(({ report }) => {
+        const s = receiptSummary(report, effectivePieceResults);
+        return (report.qualityDispositions || []).length > 0 || s.rejected > 0;
+      }).length,
+    [reports]
+  );
+
+  const filteredReports = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return reports;
+    return reports.filter(({ task, report }) =>
+      `${report.planId || ''} ${task?.name || ''} ${report.rollId || ''} ${report.sourceRemnantId || ''}`
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [reports, search]);
+
+  const filteredLedger = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return ledgerItems;
+    return ledgerItems.filter((it) =>
+      `${it.sequence ?? ''} ${it.eventType || ''} ${it.aggregateType || ''} ${it.aggregateId || ''} ${it.actor || ''}`
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [ledgerItems, search]);
+
+  const tabOptions: SegmentedOption<'quality' | 'reconcile'>[] = useMemo(
+    () => [
+      {
+        value: 'quality',
+        label: '裁后复检与缺口补排',
+        count: reports.length,
+        accent: gapReportCount > 0 ? 'amber' : 'default'
+      },
+      {
+        value: 'reconcile',
+        label: '用料对账与不可变流水',
+        count: ledgerItems.length
+      }
+    ],
+    [reports.length, gapReportCount, ledgerItems.length]
+  );
+
+  const visibleCount = tab === 'quality' ? filteredReports.length : filteredLedger.length;
+  const totalCount = tab === 'quality' ? reports.length : ledgerItems.length;
+
   return (
     <div className="react-page">
-      <div className="ph">
-        <h1>复检补排与对账</h1>
-        <span className="crumb">
-          裁后质量重分类（不良退回需求池补排、不篡改已切母卷耗用）· 净良品产出率与流水平衡核验
-        </span>
-        <span className="sp" />
-        <div className="seg" role="group" aria-label="对账子视图">
-          <button
-            type="button"
-            className={tab === 'quality' ? 'on' : ''}
-            aria-pressed={tab === 'quality'}
-            onClick={() => setTab('quality')}
-          >
-            裁后复检与缺口补排 ({reports.length})
-          </button>
-          <button
-            type="button"
-            className={tab === 'reconcile' ? 'on' : ''}
-            aria-pressed={tab === 'reconcile'}
-            onClick={() => setTab('reconcile')}
-          >
-            用料对账与不可变流水
-          </button>
+      <div className="mp-page-shell">
+        <div className="mp-page-head">
+          <div className="mp-page-title-block">
+            <h1>复检补排与对账</h1>
+            <span className="mp-page-summary num">
+              {reports.length} 笔报工回执 · {gapReportCount} 项含复检缺口 · 账实
+              {recon?.status === 'BALANCED'
+                ? '平衡'
+                : recon?.status === 'MISMATCH'
+                ? '发现差异'
+                : '待首次记账'}
+            </span>
+          </div>
         </div>
-        <button type="button" className="btn sm" onClick={loadData}>
-          刷新
-        </button>
-      </div>
 
-      <div className="body">
+        <div className="mp-filter-toolbar">
+          <SegmentedControl
+            options={tabOptions}
+            value={tab}
+            onChange={(next) => {
+              setTab(next);
+              setSearch('');
+            }}
+            ariaLabel="对账子视图"
+          />
+
+          <div className="mp-search-wrap">
+            <span className="mp-search-ico" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="14" height="14">
+                <circle
+                  cx="7.2"
+                  cy="7.2"
+                  r="4.6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                />
+                <path
+                  d="m10.8 10.8 2.8 2.8"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <input
+              type="search"
+              className="mp-search-input"
+              aria-label={tab === 'quality' ? '搜索报工回执' : '搜索对账流水'}
+              placeholder={
+                tab === 'quality'
+                  ? '筛选报工单号、需求族或母卷/料头号'
+                  : '筛选事件类型、对象编号或操作方'
+              }
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          <span className="mp-toolbar-count num">
+            显示 {visibleCount} / {totalCount}
+          </span>
+
+          <div className="mp-toolbar-actions">
+            <button type="button" className="mp-ghost-btn" onClick={loadData}>
+              刷新
+            </button>
+            <a className="mp-ghost-btn" href="#/results">
+              结果管理
+            </a>
+            {tab === 'reconcile' ? (
+              <button
+                type="button"
+                className="btn pri"
+                disabled={!ledgerItems.length}
+                onClick={handleExportLedgerCsv}
+              >
+                导出流水 CSV
+              </button>
+            ) : (
+              <a className="btn pri" href="#/workbench">
+                前往搭切补排 →
+              </a>
+            )}
+          </div>
+        </div>
+
         {loading ? (
-          <div className="loading">正在读取报工回执与账实对账快照…</div>
+          <div className="mp-empty-card">
+            <div className="loading">正在读取报工回执与账实对账快照…</div>
+          </div>
         ) : tab === 'quality' ? (
-          reports.length === 0 ? (
-            <div className="box" style={{ padding: 32, textAlign: 'center' }}>
-              <strong>暂无已完工报工记录</strong>
-              <p className="muted" style={{ marginTop: 6 }}>
-                排程方案在「结果管理」完成完工过账（或由 MES 回传报工）后，即可在此执行裁后复检判废或剪裁转料头。
-              </p>
+          <>
+            <div className="mp-rec-note">
+              <span>
+                裁后质量重分类仅扣回良品履约并将缺口退回需求池补排，不撤回或篡改已切母卷耗用。
+              </span>
+              <span className="mp-toolbar-count num">
+                待补排缺口单：{gapReportCount} 笔
+              </span>
             </div>
-          ) : (
-            <div className="box" style={{ margin: 0 }}>
-              <table className="t">
-                <thead>
-                  <tr>
-                    <th>报工单号</th>
-                    <th>所属需求族</th>
-                    <th>消耗母卷 / 料头</th>
-                    <th className="r">实切长 mm</th>
-                    <th className="r">净合格件</th>
-                    <th className="r">异常/判废</th>
-                    <th className="r">净利用率</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reports.map(({ task, report }) => {
-                    const s = receiptSummary(report, effectivePieceResults);
-                    const revCount = reviewablePieces(report).length;
-                    const hasGap = (report.qualityDispositions || []).length > 0 || s.rejected > 0;
-                    return (
-                      <tr key={report.planId}>
-                        <td className="num">{shortId(report.planId)}</td>
-                        <td style={{ fontWeight: 600 }}>{task.name}</td>
-                        <td className="num">{report.sourceRemnantId || report.rollId}</td>
-                        <td className="r num">{fmtN(report.actualCutLen, 1)}</td>
-                        <td className="r num" style={{ color: 'var(--ok)', fontWeight: 600 }}>
-                          {s.qualified}
-                        </td>
-                        <td className="r num" style={{ color: hasGap ? 'var(--err)' : undefined }}>
-                          {s.rejected + s.scrapped + s.remnant}
-                        </td>
-                        <td className="r num">{fmtN(report.netUtilization, 2)}%</td>
-                        <td>
-                          <div style={{ display: 'inline-flex', gap: 6 }}>
-                            {revCount > 0 && (
-                              <button
-                                type="button"
-                                className="btn sm"
-                                onClick={() => handleOpenQualityReview(report)}
-                              >
-                                复检处置 ({revCount})
-                              </button>
-                            )}
-                            {hasGap && (
-                              <button
-                                type="button"
-                                className="btn sm pri"
-                                onClick={() => handleReplenishTask(task.id)}
-                              >
-                                带缺口去补排 →
-                              </button>
-                            )}
-                          </div>
-                        </td>
+
+            {reports.length === 0 ? (
+              <div className="mp-empty-card">
+                <strong>暂无已完工报工记录</strong>
+                <p>
+                  排程方案在「结果管理」完成完工过账（或由 MES 回传报工）后，即可在此执行裁后复检判废或剪裁转料头。
+                </p>
+                <a className="btn" href="#/results">
+                  前往结果管理查看方案 →
+                </a>
+              </div>
+            ) : filteredReports.length === 0 ? (
+              <div className="mp-empty-card">
+                <strong>未找到匹配的报工回执</strong>
+                <p>请调整搜索关键词后重试。</p>
+                <button type="button" className="btn" onClick={() => setSearch('')}>
+                  清空搜索
+                </button>
+              </div>
+            ) : (
+              <div className="mp-rec-table-card">
+                <div className="mp-table-scroll">
+                  <table className="t">
+                    <thead>
+                      <tr>
+                        <th>报工单号</th>
+                        <th>所属需求族</th>
+                        <th>消耗母卷 / 料头</th>
+                        <th className="r">实切长 mm</th>
+                        <th className="r">净合格件</th>
+                        <th className="r">异常 / 判废</th>
+                        <th className="r">净利用率</th>
+                        <th style={{ textAlign: 'right' }}>操作</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )
+                    </thead>
+                    <tbody>
+                      {filteredReports.map(({ task, report }) => {
+                        const s = receiptSummary(report, effectivePieceResults);
+                        const revCount = reviewablePieces(report).length;
+                        const defectCount = Number(s.rejected) || 0;
+                        const hasGap =
+                          (Number(s.dispositions) || 0) > 0 || defectCount > 0;
+                        return (
+                          <tr key={report.planId}>
+                            <td>
+                              <CodeBadge>{shortId(report.planId)}</CodeBadge>
+                            </td>
+                            <td className="mp-rec-name-cell">
+                              <strong>{task.name}</strong>
+                              {report.confirmedAt && (
+                                <span className="mp-rec-name-sub num">
+                                  完工于{' '}
+                                  {String(report.confirmedAt).replace('T', ' ').slice(0, 19)}
+                                </span>
+                              )}
+                            </td>
+                            <td>
+                              <CodeBadge>{report.sourceRemnantId || report.rollId}</CodeBadge>
+                            </td>
+                            <td className="r num">{fmtN(report.actualCutLen, 1)}</td>
+                            <td className="r num" style={{ color: '#059669', fontWeight: 600 }}>
+                              {s.qualified}
+                            </td>
+                            <td
+                              className="r num"
+                              style={{
+                                color: defectCount > 0 ? '#e11d48' : 'var(--cp-ink-3)',
+                                fontWeight: defectCount > 0 ? 600 : 400
+                              }}
+                            >
+                              {defectCount}
+                            </td>
+                            <td className="r num">{fmtN(report.netUtilization, 2)}%</td>
+                            <td style={{ textAlign: 'right' }}>
+                              <div style={{ display: 'inline-flex', gap: 6 }}>
+                                {revCount > 0 && (
+                                  <button
+                                    type="button"
+                                    className="btn sm"
+                                    onClick={() => handleOpenQualityReview(report)}
+                                  >
+                                    复检处置 ({revCount})
+                                  </button>
+                                )}
+                                {hasGap && (
+                                  <button
+                                    type="button"
+                                    className="btn sm soft-accent"
+                                    onClick={() => handleReplenishTask(task.id)}
+                                  >
+                                    带缺口去补排 →
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div className="cards" style={{ gridTemplateColumns: 'repeat(5, minmax(0, 1fr))' }}>
-              <div className="card">
+          <>
+            <div className="mp-rec-kpi-grid">
+              <div className="mp-rec-kpi-card">
                 <small>账实流水平衡状态</small>
                 <b
-                  style={{
-                    color:
-                      recon?.status === 'BALANCED'
-                        ? 'var(--ok)'
-                        : recon?.status === 'MISMATCH'
-                        ? 'var(--err)'
-                        : undefined
-                  }}
+                  className={`mp-rec-kpi-val ${
+                    recon?.status === 'BALANCED'
+                      ? 'ok'
+                      : recon?.status === 'MISMATCH'
+                      ? 'err'
+                      : ''
+                  }`}
                 >
                   {recon?.status === 'BALANCED'
                     ? 'BALANCED 平衡'
@@ -273,68 +427,81 @@ export const ReconciliationPage: React.FC = () => {
                     ? '发现差异'
                     : '待首次记账'}
                 </b>
-                <div className="d num">版本 v{recon?.revision ?? 0}</div>
+                <div className="mp-rec-kpi-sub num">版本 v{recon?.revision ?? 0}</div>
               </div>
-              <div className="card">
+              <div className="mp-rec-kpi-card">
                 <small>累计实耗原料面积</small>
-                <b className="num">{fmtN(areaStats.consumed, 3)} m²</b>
-                <div className="d">含已切母卷与领用料头</div>
+                <b className="mp-rec-kpi-val num">{fmtN(areaStats.consumed, 3)} m²</b>
+                <div className="mp-rec-kpi-sub">含已切母卷与领用料头</div>
               </div>
-              <div className="card">
+              <div className="mp-rec-kpi-card">
                 <small>扣除复检净良品面积</small>
-                <b className="num" style={{ color: 'var(--ok)' }}>
-                  {fmtN(areaStats.qualified, 3)} m²
-                </b>
-                <div className="d">仅合格成品计入履约</div>
+                <b className="mp-rec-kpi-val ok num">{fmtN(areaStats.qualified, 3)} m²</b>
+                <div className="mp-rec-kpi-sub">仅合格成品计入履约</div>
               </div>
-              <div className="card">
+              <div className="mp-rec-kpi-card">
                 <small>实际净良品产出率</small>
-                <b className="num">
+                <b className="mp-rec-kpi-val num">
                   {areaStats.netRate ? `${areaStats.netRate}%` : '暂无实切'}
                 </b>
-                <div className="d">净良品面积 ÷ 实耗总面积</div>
+                <div className="mp-rec-kpi-sub">净良品面积 ÷ 实耗总面积</div>
               </div>
-              <div className="card">
+              <div className="mp-rec-kpi-card">
                 <small>回收可用余料面积</small>
-                <b className="num">{fmtN(areaStats.recovered, 3)} m²</b>
-                <div className="d">独立入账 · 不虚增利用率</div>
+                <b className="mp-rec-kpi-val num">{fmtN(areaStats.recovered, 3)} m²</b>
+                <div className="mp-rec-kpi-sub">独立入账 · 不虚增利用率</div>
               </div>
             </div>
 
-            <div className="box" style={{ margin: 0 }}>
-              <div className="pane-h">
-                <span>不可变库存与需求过账流水（最近 {ledgerItems.length} 笔）</span>
-                <span className="sp" />
-                <button type="button" className="btn sm" onClick={handleExportLedgerCsv}>
-                  导出流水 CSV
-                </button>
+            <div className="mp-rec-table-card">
+              <div className="mp-rec-card-head">
+                <strong>不可变库存与需求过账流水</strong>
+                <span className="mp-toolbar-count num">
+                  显示 {filteredLedger.length} / 最近 {ledgerItems.length} 笔
+                </span>
               </div>
-              <table className="t">
-                <thead>
-                  <tr>
-                    <th>序号</th>
-                    <th>事件类型</th>
-                    <th>账本对象</th>
-                    <th>对象编号</th>
-                    <th>操作方</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ledgerItems.map((it) => (
-                    <tr key={it.id}>
-                      <td className="num">#{it.sequence}</td>
-                      <td>
-                        <span className="tag kind">{it.eventType}</span>
-                      </td>
-                      <td>{it.aggregateType}</td>
-                      <td className="num">{it.aggregateId}</td>
-                      <td>{it.actor}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {filteredLedger.length === 0 ? (
+                <div style={{ padding: '28px 16px', textAlign: 'center', color: 'var(--cp-ink-3)' }}>
+                  暂无匹配的过账流水记录
+                </div>
+              ) : (
+                <div className="mp-table-scroll">
+                  <table className="t">
+                    <thead>
+                      <tr>
+                        <th>序号</th>
+                        <th>事件类型</th>
+                        <th>账本对象</th>
+                        <th>对象编号</th>
+                        <th>操作方</th>
+                        <th className="r">过账时间</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredLedger.map((it) => (
+                        <tr key={it.id}>
+                          <td className="num">#{it.sequence}</td>
+                          <td>
+                            <span className="tag kind">{it.eventType}</span>
+                          </td>
+                          <td>{it.aggregateType}</td>
+                          <td>
+                            <CodeBadge>{it.aggregateId}</CodeBadge>
+                          </td>
+                          <td>{it.actor}</td>
+                          <td className="r num" style={{ color: 'var(--cp-ink-3)' }}>
+                            {it.occurredAt
+                              ? String(it.occurredAt).replace('T', ' ').slice(0, 19)
+                              : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-          </div>
+          </>
         )}
       </div>
 

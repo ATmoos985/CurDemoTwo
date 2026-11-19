@@ -146,36 +146,47 @@ export const AnalysisPage: React.FC = () => {
     : '正在读取对账状态…';
 
   return (
-    <div className="react-page">
-      <div className="ph">
-        <h1>生产分析</h1>
-        <span className="crumb">实际产出与库存对账</span>
-        <div className="hub-tabs" role="navigation" aria-label="材料与台账视图">
-          <a href="#/inventory">实物库存</a>
-          <a href="#/inspection">跑布验疵</a>
-          <a href="#/documents">移库与盘点单</a>
-          <a className="on" href="#/analysis">
-            产出对账
-          </a>
+    <div className="react-page mp-legacy-page mp-analysis-page">
+      <div className="mp-page-shell">
+        <div className="mp-page-head">
+          <div className="mp-page-title-block">
+            <h1>生产分析</h1>
+            <span className="mp-page-summary">实际产出与库存对账</span>
+          </div>
+          <div className="mp-toolbar-actions">
+            <button
+              type="button"
+              className="btn pri"
+              id="refresh-analysis"
+              disabled={reconBusy}
+              onClick={refreshAnalysis}
+            >
+              刷新对账
+            </button>
+          </div>
         </div>
-        <span className="sp" />
-        <button
-          type="button"
-          className="btn"
-          id="refresh-analysis"
-          disabled={reconBusy}
-          onClick={refreshAnalysis}
-        >
-          刷新对账
-        </button>
-      </div>
 
-      <div className="body">
-        <div id="analysis-status" role="status">
-          {statusLabel}
+        <div className="mp-filter-toolbar">
+          <div className="hub-tabs" role="navigation" aria-label="材料与台账视图">
+            <a href="#/inventory">实物库存</a>
+            <a href="#/inspection">跑布验疵</a>
+            <a href="#/documents">移库与盘点单</a>
+            <a className="on" href="#/analysis">
+              产出对账
+            </a>
+          </div>
+          <div className="mp-toolbar-actions mp-analysis-status-row">
+            <span id="analysis-status" role="status">
+              {statusLabel}
+            </span>
+            <span className="muted" id="task-summary" role="status">
+              {taskSummaryText}
+            </span>
+          </div>
         </div>
+
         {reconError && (
-          <div id="analysis-error" className="notice" role="alert">
+          <div id="analysis-error" className="mp-legacy-notice" role="alert" style={{ margin: 0 }}>
             {reconError}
           </div>
         )}
@@ -198,24 +209,22 @@ export const AnalysisPage: React.FC = () => {
             ].map(([label, value]) => (
               <article key={label} className="card">
                 <span>{label}</span>
-                <strong>{value}</strong>
+                <strong className="num">{value}</strong>
               </article>
             ))}
           </div>
         ) : (
-          <div className="cards" id="actual-metrics" aria-label="实际报工指标">
+          <div className="box" id="actual-metrics" aria-label="实际报工指标" style={{ padding: '14px 16px' }}>
             {recon
               ? '当前没有可可靠汇总的报工面积；不显示零值或估算利用率。'
               : '正在计算面积汇总…'}
           </div>
         )}
 
-        <div className="muted" id="task-summary" role="status">
-          {taskSummaryText}
-        </div>
-
         <details className="box">
-          <summary className="pane-h">指标口径与适用范围</summary>
+          <summary className="pane-h" style={{ cursor: 'pointer' }}>
+            指标口径与适用范围
+          </summary>
           <div className="pane-b">
             <p>
               只统计未冲销、面积资料完整的二维报工，良品已扣除复检降级。实际良品产出率 = 净良品面积总和 ÷ 加工投入面积总和；可回收率 = 回收面积总和 ÷ 加工投入面积总和。按面积加权，单位 m²。
@@ -228,7 +237,7 @@ export const AnalysisPage: React.FC = () => {
 
         <div id="analysis-issues" role="status">
           {(recon?.issues || []).map((issue: any, idx: number) => (
-            <p key={idx}>
+            <p key={idx} className="mp-legacy-notice" style={{ margin: '0 0 8px' }}>
               异常 {issue.code} · {issue.aggregate || issue.reportId || issue.entryId || '全局'}
             </p>
           ))}
@@ -238,7 +247,7 @@ export const AnalysisPage: React.FC = () => {
           <div className="pane-h">
             逐单面积分解<span className="sub">单位 m²</span>
           </div>
-          <div style={{ overflow: 'auto' }}>
+          <div className="mp-table-scroll">
             <table className="t">
               <thead>
                 <tr>
@@ -255,14 +264,14 @@ export const AnalysisPage: React.FC = () => {
               <tbody id="area-rows">
                 {(recon?.areas || []).map((row: any) => (
                   <tr key={row.reportId}>
-                    <td>{row.reportId}</td>
-                    <td>{fmtNum4(row.consumed)}</td>
-                    <td>{fmtNum4(row.qualified)}</td>
-                    <td>{fmtNum4(row.recovered)}</td>
-                    <td>{fmtNum4(row.rejected)}</td>
-                    <td>{fmtNum4(row.otherWasteAndLoss)}</td>
-                    <td>{fmtNum4(row.difference)}</td>
-                    <td>
+                    <td className="num">{row.reportId}</td>
+                    <td className="num">{fmtNum4(row.consumed)}</td>
+                    <td className="num">{fmtNum4(row.qualified)}</td>
+                    <td className="num">{fmtNum4(row.recovered)}</td>
+                    <td className="num">{fmtNum4(row.rejected)}</td>
+                    <td className="num">{fmtNum4(row.otherWasteAndLoss)}</td>
+                    <td className="num">{fmtNum4(row.difference)}</td>
+                    <td className="num">
                       {row.unit === 'm2' &&
                       row.consumed > 0 &&
                       Number.isFinite(row.qualified)
@@ -290,7 +299,7 @@ export const AnalysisPage: React.FC = () => {
               导出已载入流水 CSV
             </button>
           </div>
-          <div className="notice">
+          <div className="mp-legacy-notice" style={{ margin: '10px 14px 0' }}>
             流水按顺序追加。迁移期初是历史余额快照，不代表当时发生过入库或裁切。
           </div>
           <form
@@ -335,18 +344,18 @@ export const AnalysisPage: React.FC = () => {
             <button className="btn" type="submit" disabled={ledgerBusy}>
               查询流水
             </button>
-            <span id="ledger-status" role="status">
+            <span id="ledger-status" role="status" className="mp-toolbar-count num">
               已载入 {entries.length} 条 · 本页库存版本 {ledgerRev}
             </span>
           </form>
 
           {ledgerError && (
-            <div id="ledger-error" className="notice" role="alert">
+            <div id="ledger-error" className="mp-legacy-notice" role="alert">
               {ledgerError}
             </div>
           )}
 
-          <div style={{ overflow: 'auto' }}>
+          <div className="mp-table-scroll">
             <table className="t">
               <thead>
                 <tr>
@@ -360,17 +369,17 @@ export const AnalysisPage: React.FC = () => {
               <tbody id="ledger-rows">
                 {entries.map((row) => (
                   <tr key={row.sequence}>
-                    <td>
+                    <td className="num">
                       {row.sequence} /{' '}
                       {new Date(row.occurredAt).toLocaleString('zh-CN', {
                         hour12: false
                       })}
                     </td>
                     <td>{EVENT_NAMES[row.eventType] || row.eventType}</td>
-                    <td>
+                    <td className="num">
                       {row.aggregateType} / {row.aggregateId}
                     </td>
-                    <td>
+                    <td className="num">
                       {row.businessId} / {(row.sourceReportIds || []).join(', ')}
                     </td>
                     <td>
@@ -401,7 +410,7 @@ export const AnalysisPage: React.FC = () => {
               type="button"
               className="btn"
               id="load-ledger"
-              style={{ margin: '8px 12px' }}
+              style={{ margin: '10px 14px' }}
               disabled={ledgerBusy}
               onClick={() => loadLedgerPage(false)}
             >

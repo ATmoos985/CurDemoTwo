@@ -7,6 +7,11 @@ import {
 } from '@static/js/inspection/inspection-model.js';
 import { createRollCanvas } from '@static/js/canvas/roll-canvas.js';
 import { buildInspectionScene } from '@static/app/js/model/roll-scene.js';
+import {
+  SegmentedControl,
+  CodeBadge,
+  SegmentedOption
+} from '../components/ui/MagpiePrimitives';
 
 const DEFECT_TYPES: [string, string][] = [
   ['STAIN', '污渍 / 斑点'],
@@ -16,6 +21,15 @@ const DEFECT_TYPES: [string, string][] = [
   ['SHADING', '色差'],
   ['MANUAL_MARK', '其他疵点']
 ];
+
+const ROLL_STATUS_LABEL: Record<string, [string, string]> = {
+  PASSED: ['合格', 'ok'],
+  PENDING: ['待检', 'warn'],
+  FAILED: ['不合格', 'err'],
+  QUARANTINED: ['隔离', 'err']
+};
+
+type RollFilterScope = 'ALL' | 'PENDING' | 'PASSED';
 
 const draftKey = (id: string) => 'cutplan.app.inspection.' + id;
 const SAVED_EVENT = 'cutplan:inspection-saved';
@@ -45,6 +59,7 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
   const [rollParam] = params;
 
   const [rolls, setRolls] = useState<any[]>([]);
+  const [rollFilter, setRollFilter] = useState<RollFilterScope>('ALL');
   const [error, setError] = useState<string | null>(null);
   const [roll, setRoll] = useState<any>(null);
   const [pending, setPending] = useState<any[]>([]);
@@ -122,6 +137,38 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
       ...pending.map((d: any) => ({ ...d, saved: false }))
     ];
   }, [roll, pending]);
+
+  const filteredRolls = useMemo(() => {
+    const base = rolls.filter((x) => {
+      if (rollFilter === 'PENDING') return x.inspectionStatus !== 'PASSED';
+      if (rollFilter === 'PASSED') return x.inspectionStatus === 'PASSED';
+      return true;
+    });
+    if (roll?.rollId && !base.some((x) => x.rollId === roll.rollId)) {
+      const current = rolls.find((x) => x.rollId === roll.rollId) || roll;
+      return [current, ...base];
+    }
+    return base;
+  }, [rolls, rollFilter, roll]);
+
+  const rollFilterOptions: SegmentedOption<RollFilterScope>[] = useMemo(
+    () => [
+      { value: 'ALL', label: '全部', count: rolls.length },
+      {
+        value: 'PENDING',
+        label: '待检',
+        count: rolls.filter((r) => r.inspectionStatus !== 'PASSED').length,
+        accent: 'indigo'
+      },
+      {
+        value: 'PASSED',
+        label: '已检',
+        count: rolls.filter((r) => r.inspectionStatus === 'PASSED').length,
+        accent: 'emerald'
+      }
+    ],
+    [rolls]
+  );
 
   // Sync editor form fields when selection or position changes
   useEffect(() => {
@@ -588,9 +635,11 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
   if (error) {
     return (
       <div className="react-page">
-        <div className="error-box" role="alert">
-          <b>读取失败</b>
-          <p>{error}</p>
+        <div className="mp-page-shell">
+          <div className="error-box" role="alert">
+            <b>读取失败</b>
+            <p>{error}</p>
+          </div>
         </div>
       </div>
     );
@@ -603,15 +652,28 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
       selectedDefect.saved &&
       selectedDefect.y + selectedDefect.h <= (roll?.usedLength || 0)
   );
+  const [rollStatusText, rollStatusCls] = roll
+    ? ROLL_STATUS_LABEL[roll.inspectionStatus] || [roll.inspectionStatus || '待检', 'warn']
+    : ['', ''];
 
   return (
-    <div className="react-page">
-      <div className="ph inspection-head">
+    <div className="react-page mp-insp-page">
+      {/* Compact Light Top Header Bar */}
+      <div className="mp-insp-head inspection-head">
         <h1>跑布验疵</h1>
+
+        <SegmentedControl
+          options={rollFilterOptions}
+          value={rollFilter}
+          onChange={(next) => setRollFilter(next)}
+          ariaLabel="筛选母卷验布状态"
+          size="sm"
+        />
+
         <select
-          className="field"
+          className="field mp-insp-roll-select"
           id="roll"
-          style={{ width: 300 }}
+          aria-label="选择验布母卷"
           value={roll?.rollId || ''}
           onChange={(e) => {
             location.hash = e.target.value
@@ -620,170 +682,248 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
           }}
         >
           <option value="">选择母卷开始验布</option>
-          {rolls.map((x) => (
+          {filteredRolls.map((x) => (
             <option key={x.rollId} value={x.rollId}>
               {x.rollId} · {x.rollModel || ''} · {fmtN(x.width)} mm ×{' '}
               {fmtM(x.totalLength)} m
             </option>
           ))}
         </select>
-        {roll && (
-          <span
-            className={`tag ${
-              roll.inspectionStatus === 'PASSED' ? 'ok' : 'warn'
-            }`}
-          >
-            {roll.inspectionStatus || '待检'}
-          </span>
-        )}
+
+        {roll && <span className={`tag ${rollStatusCls}`}>{rollStatusText}</span>}
+
         {roll && (roll.usedLength || 0) > 0 && (
-          <span className="tag run num" title="已切割区段历史疵点不可作废，验布默认从已切终点起跳">
-            已切 0 ~ {fmtM(roll.usedLength)}m · 余长 {fmtM(Math.max(0, roll.totalLength - roll.usedLength))}m
-          </span>
+          <CodeBadge title="已切割区段历史疵点不可作废，验布默认从已切终点起跳">
+            已切 0~{fmtM(roll.usedLength)}m · 余长{' '}
+            {fmtM(Math.max(0, roll.totalLength - roll.usedLength))}m
+          </CodeBadge>
         )}
-        {roll && (
+
+        <div className="mp-toolbar-actions">
+          {roll && (
+            <a
+              className="mp-ghost-btn"
+              href={`#/inventory?roll=${encodeURIComponent(roll.rollId)}`}
+              title="跳转到母卷台账查看已切割区域与排程预占空间图"
+            >
+              看已切割区域
+            </a>
+          )}
           <a
-            className="btn sm"
-            href={`#/inventory?roll=${encodeURIComponent(roll.rollId)}`}
-            title="跳转到母卷台账查看已切割区域与排程预占空间图"
+            className="mp-ghost-btn"
+            href="#/inventory/receive"
+            title="登记母卷后返回跑布验疵"
           >
-            看已切割区域
+            新建母卷
           </a>
-        )}
-        <a
-          className="btn"
-          href="#/inventory/receive"
-          title="登记母卷后返回跑布验疵"
-        >
-          新建母卷
-        </a>
-        <span className="sp" />
-        <button
-          type="button"
-          className="btn pri"
-          id="save"
-          disabled={!pending.length || saving}
-          onClick={handleSaveToRoll}
-        >
-          保存到母卷{pending.length ? ` (${pending.length})` : ''}
-        </button>
+          <button
+            type="button"
+            className="btn pri"
+            id="save"
+            disabled={!pending.length || saving}
+            onClick={handleSaveToRoll}
+          >
+            保存到母卷{pending.length ? ` (${pending.length})` : ''}
+          </button>
+        </div>
       </div>
 
       {!roll ? (
-        <div className="empty">
-          选择母卷后开始标记。整卷连续跑布，所有疵点按距卷头的累计位置记录。
+        <div className="mp-insp-empty-wrap">
+          <div className="mp-insp-empty-card">
+            <h2>选择一卷母卷开始跑布验疵</h2>
+            <p>
+              整卷连续跑布定位，所有疵点均按距卷头的绝对物理坐标（mm）记录；本机草稿自动暂存，点击右上角「保存到母卷」正式入档。
+            </p>
+            {filteredRolls.length > 0 ? (
+              <div className="mp-insp-quick-grid">
+                {filteredRolls.slice(0, 12).map((x) => {
+                  const [stTxt, stCls] = ROLL_STATUS_LABEL[x.inspectionStatus] || [
+                    x.inspectionStatus || '待检',
+                    'warn'
+                  ];
+                  return (
+                    <a
+                      key={x.rollId}
+                      className="mp-insp-quick-item"
+                      href={`#/inspection/${encodeURIComponent(x.rollId)}`}
+                    >
+                      <div className="mp-insp-quick-top">
+                        <strong className="num" style={{ fontSize: 12.5 }}>
+                          {x.rollId}
+                        </strong>
+                        <span className={`tag ${stCls}`}>{stTxt}</span>
+                      </div>
+                      <div className="mp-insp-quick-meta">
+                        {x.rollModel || '未分类品号'}
+                      </div>
+                      <div className="mp-insp-quick-meta num">
+                        {fmtN(x.width)} mm × {fmtM(x.totalLength)} m · 疵点{' '}
+                        {x.defectsCount ?? (x.defects || []).length} 处
+                      </div>
+                    </a>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="mp-empty-inline">
+                当前状态下暂无母卷，可切换上方筛选器或先登记新母卷。
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         <>
-          <div className="toolbar">
-            <span className="muted">当前位置</span>
-            <input
-              className="field num"
-              id="pos"
-              style={{ width: 100, textAlign: 'right' }}
-              value={posInputText}
-              onChange={(e) => setPosInputText(e.target.value)}
-            />
-            <span>m</span>
-            <button
-              type="button"
-              className="btn sm"
-              id="locate"
-              onClick={() => {
-                const m = Number(posInputText);
-                if (!(m >= 0)) {
-                  toast('请输入有效米数', true);
-                  return;
-                }
-                const nextPos = Math.min(roll.totalLength, round(m * 1000));
-                setPos(nextPos);
-                persistDraft(roll, pending, nextPos);
-              }}
+          {/* Compact Light Tool & Roll Feed Control Bar */}
+          <div className="mp-insp-feedbar">
+            <div
+              className="mp-seg mp-seg-sm"
+              role="group"
+              aria-label="画布验疵工具切换"
             >
-              定位 / 校准
-            </button>
-            <span className="vsep" />
-            <span className="muted">每次前进</span>
-            <input
-              type="number"
-              className="field num"
-              id="step"
-              style={{ width: 60, textAlign: 'right' }}
-              value={step}
-              onChange={(e) => setStep(Math.max(0.1, Number(e.target.value) || 1))}
-            />
-            <span>m</span>
-            <button
-              type="button"
-              className="btn sm"
-              id="advance"
-              onClick={() => {
-                const nextPos = Math.min(roll.totalLength, pos + step * 1000);
-                setPos(nextPos);
-                persistDraft(roll, pending, nextPos);
-              }}
-            >
-              前进一段 ↓
-            </button>
-            <span className="vsep" />
-            <span className="muted">速度</span>
-            <input
-              type="number"
-              className="field num"
-              id="speed"
-              style={{ width: 56, textAlign: 'right' }}
-              value={speed}
-              onChange={(e) => setSpeed(Math.max(0.1, Number(e.target.value) || 3))}
-            />
-            <span>m/min</span>
-            <button
-              type="button"
-              className={`btn sm ${running ? 'pri' : ''}`}
-              id="run"
-              onClick={() => {
-                if (running) {
-                  setRunning(false);
-                  persistDraft(roll, pending, pos);
-                } else {
-                  setOverview(false);
-                  setRunning(true);
-                  canvasRef.current?.fit();
-                }
-              }}
-            >
-              {running ? '暂停跑布' : '自动跑布'}
-            </button>
-            <span className="muted" style={{ fontSize: 11.5 }}>
-              空格 启停
-            </span>
+              <button
+                type="button"
+                data-tool="mark"
+                className={`mp-seg-btn ${tool === 'mark' ? 'on' : ''}`}
+                aria-pressed={tool === 'mark'}
+                onClick={() => setTool('mark')}
+              >
+                标记疵点
+              </button>
+              <button
+                type="button"
+                data-tool="select"
+                className={`mp-seg-btn ${tool === 'select' ? 'on' : ''}`}
+                aria-pressed={tool === 'select'}
+                onClick={() => setTool('select')}
+              >
+                选择 / 调整
+              </button>
+              <button
+                type="button"
+                data-tool="measure"
+                className={`mp-seg-btn ${tool === 'measure' ? 'on' : ''}`}
+                aria-pressed={tool === 'measure'}
+                onClick={() => setTool('measure')}
+              >
+                测距
+              </button>
+            </div>
+
+            <span className="mp-insp-vsep" />
+
+            <div className="mp-insp-feed-group">
+              <span className="muted">位置</span>
+              <input
+                className="field num"
+                id="pos"
+                aria-label="当前位置米数"
+                style={{ width: 82, textAlign: 'right' }}
+                value={posInputText}
+                onChange={(e) => setPosInputText(e.target.value)}
+              />
+              <span className="muted">m</span>
+              <button
+                type="button"
+                className="btn sm"
+                id="locate"
+                onClick={() => {
+                  const m = Number(posInputText);
+                  if (!(m >= 0)) {
+                    toast('请输入有效米数', true);
+                    return;
+                  }
+                  const nextPos = Math.min(roll.totalLength, round(m * 1000));
+                  setPos(nextPos);
+                  persistDraft(roll, pending, nextPos);
+                }}
+              >
+                定位 / 校准
+              </button>
+            </div>
+
+            <span className="mp-insp-vsep" />
+
+            <div className="mp-insp-feed-group">
+              <span className="muted">步进</span>
+              <input
+                type="number"
+                className="field num"
+                id="step"
+                aria-label="每次前进米数"
+                style={{ width: 54, textAlign: 'right' }}
+                value={step}
+                onChange={(e) => setStep(Math.max(0.1, Number(e.target.value) || 1))}
+              />
+              <span className="muted">m</span>
+              <button
+                type="button"
+                className="btn sm"
+                id="advance"
+                onClick={() => {
+                  const nextPos = Math.min(roll.totalLength, pos + step * 1000);
+                  setPos(nextPos);
+                  persistDraft(roll, pending, nextPos);
+                }}
+              >
+                前进 ↓
+              </button>
+            </div>
+
+            <span className="mp-insp-vsep" />
+
+            <div className="mp-insp-feed-group">
+              <span className="muted">速度</span>
+              <input
+                type="number"
+                className="field num"
+                id="speed"
+                aria-label="自动跑布速度"
+                style={{ width: 54, textAlign: 'right' }}
+                value={speed}
+                onChange={(e) => setSpeed(Math.max(0.1, Number(e.target.value) || 3))}
+              />
+              <span className="muted">m/min</span>
+              <button
+                type="button"
+                className={`btn sm ${running ? 'soft-accent' : ''}`}
+                id="run"
+                onClick={() => {
+                  if (running) {
+                    setRunning(false);
+                    persistDraft(roll, pending, pos);
+                  } else {
+                    setOverview(false);
+                    setRunning(true);
+                    canvasRef.current?.fit();
+                  }
+                }}
+              >
+                {running ? '暂停跑布' : '自动跑布'}
+              </button>
+            </div>
+
             <span className="sp" />
-            <span className="muted" style={{ fontSize: 12 }}>
-              {running
-                ? '自动跑布：位置按速度与时间计算，可随时暂停校准'
-                : '手动模式'}
+            <span className="mp-toolbar-count">
+              {running ? '自动跑布中 · 空格随时暂停' : '手动模式 · 空格启停'}
             </span>
           </div>
 
+          {/* Floating Light-Shell 3-Card Workspace */}
           <div
-            className="split"
+            className="mp-insp-workspace"
             style={{
-              gridTemplateColumns: `56px minmax(0,1fr) ${
-                panelCollapsed ? '0px' : '370px'
-              }`
+              gridTemplateColumns: panelCollapsed
+                ? '52px minmax(0, 1fr)'
+                : '52px minmax(0, 1fr) 368px'
             }}
           >
+            {/* Card 1: Vertical Full-Roll Navigator Track */}
             <section
-              className="pane"
-              style={{
-                background: '#23272c',
-                alignItems: 'center',
-                padding: '8px 0'
-              }}
-              title="全卷：点击跳转"
+              className="mp-insp-track-card"
+              title="全卷位置导轨：点击跳转"
             >
-              <div style={{ color: '#9aa4ae', fontSize: 10.5, marginBottom: 4 }}>
-                全卷
-              </div>
+              <div className="mp-insp-track-label">全卷</div>
               <div
                 className="vtrack"
                 id="vtrack"
@@ -808,59 +948,40 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
               </div>
               <div
                 className="num"
-                style={{ color: '#9aa4ae', fontSize: 10, marginTop: 4 }}
+                style={{ color: '#9aa4b2', fontSize: 10, marginTop: 6 }}
               >
-                {fmtM(roll.totalLength)} m
+                {fmtM(roll.totalLength)}m
               </div>
             </section>
 
-            <section className="pane" style={{ background: 'var(--canvas)' }}>
+            {/* Card 2: Dark Charcoal #181c22 CAD Inspection Viewport */}
+            <section className="mp-insp-canvas-card">
               <div className="ctool">
                 <div className="vseg">
                   <button
                     type="button"
-                    className={tool === 'mark' ? 'on' : ''}
-                    onClick={() => setTool('mark')}
+                    id="follow"
+                    className={!overview ? 'on' : ''}
+                    onClick={() => {
+                      setOverview(false);
+                      setTimeout(() => canvasRef.current?.fit(), 0);
+                    }}
                   >
-                    ＋ 标记疵点
+                    跟随验布线
                   </button>
                   <button
                     type="button"
-                    className={tool === 'select' ? 'on' : ''}
-                    onClick={() => setTool('select')}
+                    id="overview"
+                    className={overview ? 'on' : ''}
+                    onClick={() => {
+                      setRunning(false);
+                      setOverview(true);
+                      setTimeout(() => canvasRef.current?.fit(), 0);
+                    }}
                   >
-                    选择 / 调整
+                    全卷
                   </button>
                 </div>
-                <button
-                  type="button"
-                  className={tool === 'measure' ? 'on' : ''}
-                  onClick={() => setTool('measure')}
-                >
-                  测距
-                </button>
-                <button
-                  type="button"
-                  id="follow"
-                  onClick={() => {
-                    setOverview(false);
-                    setTimeout(() => canvasRef.current?.fit(), 0);
-                  }}
-                >
-                  跟随验布线
-                </button>
-                <button
-                  type="button"
-                  id="overview"
-                  className={overview ? 'on' : ''}
-                  onClick={() => {
-                    setRunning(false);
-                    setOverview(true);
-                    setTimeout(() => canvasRef.current?.fit(), 0);
-                  }}
-                >
-                  全卷
-                </button>
                 <button
                   type="button"
                   id="undo"
@@ -874,14 +995,15 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                   type="button"
                   id="toggle-panel"
                   aria-expanded={!panelCollapsed}
-                  title="收起或展开疵点记录"
+                  title="收起或展开右侧疵点记录卡"
                   onClick={() => setPanelCollapsed((c) => !c)}
                 >
-                  记录
+                  {panelCollapsed ? '展开记录' : '收起记录'}
                 </button>
-                <div className="div" />
                 <span className="sp" />
-                <span id="pointer-position">{pointerText}</span>
+                <span id="pointer-position" className="num">
+                  {pointerText}
+                </span>
               </div>
               <div className="canvas-wrap">
                 <div
@@ -896,16 +1018,16 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
               </div>
             </section>
 
+            {/* Card 3: Pure-White 12px Defect Records & Precision Editor Card */}
             <section
-              className="pane"
+              className="mp-insp-side-card"
               style={panelCollapsed ? { display: 'none' } : undefined}
             >
               <div className="pane-h">
-                疵点记录
+                <span>疵点记录</span>
                 <span className="sp" />
-                <span className="sub">
-                  已入档 {allDefects.length - pending.length} · 本次待保存{' '}
-                  {pending.length}
+                <span className="sub num">
+                  已入档 {allDefects.length - pending.length} · 待保存 {pending.length}
                 </span>
               </div>
               <div className="pane-b">
@@ -913,9 +1035,9 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                   <div className="sec">
                     {selectedDefect
                       ? editable
-                        ? '本次标记 · 可修改 / 删除（Delete）'
+                        ? '本次标记 · 可修改 / Delete 删除'
                         : '已入档疵点'
-                      : '精确录入'}
+                      : '精确坐标录入'}
                   </div>
                   {selectedDefect && (
                     <div className="kv">
@@ -944,19 +1066,12 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                       </div>
                     ) : (
                       <>
-                        <div
-                          style={{
-                            padding: '8px 12px',
-                            display: 'flex',
-                            gap: 6,
-                            alignItems: 'center'
-                          }}
-                        >
+                        <div className="mp-insp-void-row">
                           <input
                             className="field"
                             id="void-reason"
                             placeholder="作废原因（必填，如：复核为误检）"
-                            style={{ flex: 1 }}
+                            style={{ flex: 1, height: 30 }}
                             value={voidReason}
                             onChange={(e) => setVoidReason(e.target.value)}
                           />
@@ -970,26 +1085,20 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                             作废
                           </button>
                         </div>
-                        <div
-                          className="muted"
-                          style={{ padding: '0 12px 8px', fontSize: 11.5 }}
-                        >
+                        <div className="mp-insp-void-note">
                           作废后不再避让，原记录与原因留痕；该卷上未报工的候选方案需重新计算。
                         </div>
                       </>
                     )
                   )}
 
-                  <div
-                    className="form"
-                    style={{ gridTemplateColumns: '1fr 1fr', gap: '6px 10px' }}
-                  >
+                  <div className="form">
                     <label>
                       距右边缘 mm
                       <input
                         type="number"
+                        data-f="right"
                         className="field num"
-                        style={{ width: '100%' }}
                         disabled={Boolean(saving || (selectedDefect && !editable))}
                         value={fRight}
                         onChange={(e) => setFRight(e.target.value)}
@@ -999,8 +1108,8 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                       距卷头 mm
                       <input
                         type="number"
+                        data-f="y"
                         className="field num"
-                        style={{ width: '100%' }}
                         disabled={Boolean(saving || (selectedDefect && !editable))}
                         value={fY}
                         onChange={(e) => setFY(e.target.value)}
@@ -1010,8 +1119,8 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                       疵点宽 mm
                       <input
                         type="number"
+                        data-f="w"
                         className="field num"
-                        style={{ width: '100%' }}
                         disabled={Boolean(saving || (selectedDefect && !editable))}
                         value={fW}
                         onChange={(e) => setFW(e.target.value)}
@@ -1021,8 +1130,8 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                       疵点长 mm
                       <input
                         type="number"
+                        data-f="h"
                         className="field num"
-                        style={{ width: '100%' }}
                         disabled={Boolean(saving || (selectedDefect && !editable))}
                         value={fH}
                         onChange={(e) => setFH(e.target.value)}
@@ -1031,8 +1140,8 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                     <label>
                       类型
                       <select
+                        data-f="type"
                         className="field"
-                        style={{ width: '100%' }}
                         disabled={Boolean(selectedDefect && !editable)}
                         value={fType}
                         onChange={(e) => setFType(e.target.value)}
@@ -1048,8 +1157,8 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                       避让外扩 mm
                       <input
                         type="number"
+                        data-f="margin"
                         className="field num"
-                        style={{ width: '100%' }}
                         disabled={Boolean(selectedDefect && !editable)}
                         value={fMargin}
                         onChange={(e) => setFMargin(e.target.value)}
@@ -1060,14 +1169,15 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                   <div
                     style={{
                       display: 'flex',
-                      gap: 8,
-                      padding: '0 12px 10px',
+                      gap: 6,
+                      padding: '0 13px 10px',
                       justifyContent: 'flex-end'
                     }}
                   >
                     {selectedDefect && (
                       <button
                         type="button"
+                        id="new"
                         className="btn sm"
                         onClick={() => setSel(null)}
                       >
@@ -1085,16 +1195,18 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                         </button>
                         <button
                           type="button"
-                          className="btn sm pri"
+                          id="apply"
+                          className="btn sm soft-accent"
                           onClick={handleApplyManualDefect}
                         >
-                          更新
+                          更新标记
                         </button>
                       </>
                     ) : !selectedDefect ? (
                       <button
                         type="button"
-                        className="btn sm pri"
+                        id="apply"
+                        className="btn sm soft-accent"
                         onClick={handleApplyManualDefect}
                       >
                         添加到本次记录
@@ -1103,89 +1215,92 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                   </div>
                 </div>
 
-                <div className="sec">全部疵点 · 点击定位</div>
-                <table className="t" style={{ border: 0 }}>
-                  <thead>
-                    <tr>
-                      <th>Y m</th>
-                      <th className="r">距右</th>
-                      <th className="r">宽×长</th>
-                      <th>类型</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {allDefects.map((d, i) => (
-                      <tr
-                        key={defectKey(d) || i}
-                        className={`click ${sel === i ? 'sel' : ''}`}
-                        onClick={() => {
-                          setRunning(false);
-                          setSel(i);
-                          const nextPos = Math.min(roll.totalLength, d.y + 300);
-                          setPos(nextPos);
-                          setOverview(false);
-                          persistDraft(roll, pending, nextPos);
-                          setTimeout(() => canvasRef.current?.fit(), 0);
-                        }}
-                      >
-                        <td className="num">{(d.y / 1000).toFixed(2)}</td>
-                        <td className="r num">
-                          {fmtN(roll.width - d.x - d.w, 1)}
-                        </td>
-                        <td className="r num">
-                          {fmtN(d.w, 1)}×{fmtN(d.h, 1)}
-                        </td>
-                        <td>{d.typeName || d.defectType}</td>
-                        <td>
-                          {d.saved ? (
-                            <span className="tag">已入档</span>
-                          ) : (
-                            <span className="tag warn">待保存</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="sec">全部疵点 · 点击定位（{allDefects.length}）</div>
+                {allDefects.length > 0 ? (
+                  <div className="mp-table-scroll">
+                    <table className="t">
+                      <thead>
+                        <tr>
+                          <th>Y m</th>
+                          <th className="r">距右</th>
+                          <th className="r">宽×长</th>
+                          <th>类型</th>
+                          <th style={{ textAlign: 'right' }}>状态</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allDefects.map((d, i) => (
+                          <tr
+                            key={defectKey(d) || i}
+                            className={`click ${sel === i ? 'sel' : ''}`}
+                            onClick={() => {
+                              setRunning(false);
+                              setSel(i);
+                              const nextPos = Math.min(roll.totalLength, d.y + 300);
+                              setPos(nextPos);
+                              setOverview(false);
+                              persistDraft(roll, pending, nextPos);
+                              setTimeout(() => canvasRef.current?.fit(), 0);
+                            }}
+                          >
+                            <td className="num">{(d.y / 1000).toFixed(2)}</td>
+                            <td className="r num">
+                              {fmtN(roll.width - d.x - d.w, 1)}
+                            </td>
+                            <td className="r num">
+                              {fmtN(d.w, 1)}×{fmtN(d.h, 1)}
+                            </td>
+                            <td>{d.typeName || d.defectType}</td>
+                            <td style={{ textAlign: 'right' }}>
+                              {d.saved ? (
+                                <span className="tag">已入档</span>
+                              ) : (
+                                <span className="tag warn">待保存</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="mp-empty-inline">
+                    暂未标记疵点，可直接在左侧画布框选或上方录入坐标
+                  </div>
+                )}
 
                 {(roll.voidedDefects || []).length > 0 && (
                   <>
                     <div className="sec">
                       已作废 {roll.voidedDefects.length} 处 · 留痕
                     </div>
-                    <table className="t" style={{ border: 0 }}>
-                      <tbody>
-                        {roll.voidedDefects
-                          .slice()
-                          .reverse()
-                          .map((v: any, idx: number) => (
-                            <tr key={idx}>
-                              <td className="num muted">
-                                {(v.defect.y / 1000).toFixed(2)} m
-                              </td>
-                              <td className="muted">
-                                {v.defect.typeName || v.defect.defectType}
-                              </td>
-                              <td className="wrap muted" title={v.voidedAt}>
-                                {v.reason}
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
+                    <div className="mp-table-scroll">
+                      <table className="t">
+                        <tbody>
+                          {roll.voidedDefects
+                            .slice()
+                            .reverse()
+                            .map((v: any, idx: number) => (
+                              <tr key={idx}>
+                                <td className="num muted">
+                                  {(v.defect.y / 1000).toFixed(2)} m
+                                </td>
+                                <td className="muted">
+                                  {v.defect.typeName || v.defect.defectType}
+                                </td>
+                                <td className="wrap muted" title={v.voidedAt}>
+                                  {v.reason}
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </>
                 )}
               </div>
-              <div
-                className="foot"
-                style={{
-                  background: '#fff',
-                  fontSize: 11.5,
-                  color: 'var(--text-3)'
-                }}
-              >
-                本次记录保存在本机；入档后用于裁切避让，已有方案需重新核对
+              <div className="mp-insp-side-foot">
+                本次记录保存在本机；点击右上角「保存到母卷」入档后用于裁切避让，已有方案需重新核对。
               </div>
             </section>
           </div>

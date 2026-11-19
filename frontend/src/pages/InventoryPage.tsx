@@ -13,6 +13,11 @@ import { buildRollScene, remnantAsRoll } from '@static/app/js/model/roll-scene.j
 import { workflowTemplate } from '@static/app/js/model/showcase.js';
 import { CadCanvasView } from '../components/CadCanvasView';
 import { ModalDialog } from '../components/ModalDialog';
+import {
+  SegmentedControl,
+  CodeBadge,
+  SegmentedOption
+} from '../components/ui/MagpiePrimitives';
 import { useStudioStore } from '../store/useStudioStore';
 
 const ROLL_QUALITY_MAP: Record<string, [string, string]> = {
@@ -64,6 +69,8 @@ type PreviewTarget =
   | null;
 
 type RollPreviewLayout = 'tile' | 'strip' | 'station';
+type InventoryViewScope = 'ALL' | 'ROLLS' | 'REMNANTS';
+type InventoryStatusScope = 'ALL' | 'READY' | 'PENDING' | 'HISTORY';
 
 function clampNum(val: number, min: number, max: number) {
   return Math.max(min, Math.min(max, val));
@@ -78,25 +85,20 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Product -> Mother Roll -> Linked Remnant hierarchy state
+  // Filter & Product -> Mother Roll -> Linked Remnant hierarchy state
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [focusedRollId, setFocusedRollId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [onlyWithRemnants, setOnlyWithRemnants] = useState<boolean>(false);
-  const [remnantStatusFilter, setRemnantStatusFilter] = useState<'AVAILABLE_FIRST' | 'ALL'>(
-    'AVAILABLE_FIRST'
-  );
+  const [viewScope, setViewScope] = useState<InventoryViewScope>('ALL');
+  const [statusScope, setStatusScope] = useState<InventoryStatusScope>('ALL');
 
   // Right Preview Pane & Resizable Split Layout State
   const [previewTarget, setPreviewTarget] = useState<PreviewTarget>(null);
   const [previewOpen, setPreviewOpen] = useState<boolean>(true);
-  const [leftWidth, setLeftWidth] = useState<number>(() =>
-    clampNum(Number(localStorage.getItem('cutplan.inv.leftW')) || 268, 210, 400)
-  );
   const [previewWidth, setPreviewWidth] = useState<number>(() =>
-    clampNum(Number(localStorage.getItem('cutplan.inv.rightW')) || 420, 290, 740)
+    clampNum(Number(localStorage.getItem('cutplan.inv.rightW')) || 384, 300, 740)
   );
-  const [draggingSide, setDraggingSide] = useState<'left' | 'right' | null>(null);
+  const [draggingRight, setDraggingRight] = useState<boolean>(false);
   const [liveAnnounce, setLiveAnnounce] = useState<string>('');
 
   // Preview CAD Canvas options & Mother Roll Spatial Map (Cut Zones + Planned Zones + Defects)
@@ -138,7 +140,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
       setRolls(r || []);
       setRemnants(rem || []);
       // Support deep-linking via #/inventory?roll=ROLL_ID
-      const hashQuery = (location.hash.split('?')[1] || '');
+      const hashQuery = location.hash.split('?')[1] || '';
       const targetRollParam = new URLSearchParams(hashQuery).get('roll');
       if (targetRollParam && Array.isArray(r)) {
         const hit = r.find((x: any) => x.rollId === targetRollParam);
@@ -166,20 +168,10 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
     }, 1200);
   };
 
-  const commitLeftWidth = (next: number) => {
-    const containerW = layoutContainerRef.current?.clientWidth || 1200;
-    const maxLeft = Math.max(220, Math.min(420, containerW - (previewOpen ? previewWidth : 0) - 340));
-    const clamped = clampNum(Math.round(next), 200, maxLeft);
-    setLeftWidth(clamped);
-    try {
-      localStorage.setItem('cutplan.inv.leftW', String(clamped));
-    } catch {}
-  };
-
   const commitPreviewWidth = (next: number) => {
     const containerW = layoutContainerRef.current?.clientWidth || 1200;
-    const maxRight = Math.max(300, Math.min(760, containerW - leftWidth - 340));
-    const clamped = clampNum(Math.round(next), 280, maxRight);
+    const maxRight = Math.max(320, Math.min(760, containerW - 440));
+    const clamped = clampNum(Math.round(next), 300, maxRight);
     setPreviewWidth(clamped);
     try {
       localStorage.setItem('cutplan.inv.rightW', String(clamped));
@@ -294,10 +286,30 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
     });
   }, [rolls, remnants]);
 
+  const passedRollTotal = useMemo(
+    () => rolls.filter((r) => r.inspectionStatus === 'PASSED').length,
+    [rolls]
+  );
+  const availableRemnantTotal = useMemo(
+    () => remnants.filter((rm) => rm.status === 'AVAILABLE').length,
+    [remnants]
+  );
+  const pendingIssueTotal = useMemo(
+    () =>
+      rolls.filter((r) => r.inspectionStatus !== 'PASSED').length +
+      remnants.filter((rm) => rm.status === 'QUARANTINED' || rm.status === 'LOST').length,
+    [rolls, remnants]
+  );
+
   const filteredProducts = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return productGroups.filter((g) => {
-      if (onlyWithRemnants && g.availableRemnants.length === 0) return false;
+      if (viewScope === 'ROLLS' && g.rolls.length === 0) return false;
+      if (viewScope === 'REMNANTS') {
+        if (statusScope === 'HISTORY' ? g.remnants.length === 0 : g.availableRemnants.length === 0 && g.remnants.every((rm) => rm.status === 'CONSUMED' || rm.status === 'SCRAPPED')) {
+          return false;
+        }
+      }
       if (!q) return true;
       if (
         `${g.modelKey} ${g.materialName} ${g.color} ${g.composition}`.toLowerCase().includes(q)
@@ -315,7 +327,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
         `${rm.id} ${rm.sourceRollId || ''} ${rm.location || ''}`.toLowerCase().includes(q)
       );
     });
-  }, [productGroups, searchQuery, onlyWithRemnants]);
+  }, [productGroups, searchQuery, viewScope, statusScope]);
 
   useEffect(() => {
     if (!filteredProducts.length) return;
@@ -346,17 +358,21 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
         activeProduct.remnants.some((rm) => rm.id === previewTarget.id));
 
     if (!validCurrent) {
-      if (activeProduct.rolls.length > 0) {
+      if (viewScope !== 'REMNANTS' && activeProduct.rolls.length > 0) {
         const firstRoll = activeProduct.rolls[0];
         setPreviewTarget({ kind: 'roll', id: firstRoll.rollId });
         setRollLayout(firstRoll.totalLength > 15000 ? 'tile' : 'strip');
       } else if (activeProduct.remnants.length > 0) {
         setPreviewTarget({ kind: 'remnant', id: activeProduct.remnants[0].id });
+      } else if (activeProduct.rolls.length > 0) {
+        const firstRoll = activeProduct.rolls[0];
+        setPreviewTarget({ kind: 'roll', id: firstRoll.rollId });
+        setRollLayout(firstRoll.totalLength > 15000 ? 'tile' : 'strip');
       } else {
         setPreviewTarget(null);
       }
     }
-  }, [activeProduct]);
+  }, [activeProduct, viewScope]);
 
   const remnantsByRollId = useMemo(() => {
     const map = new Map<string, any[]>();
@@ -370,19 +386,55 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
     return map;
   }, [activeProduct]);
 
+  const productMatchesQuery = useMemo(() => {
+    if (!activeProduct) return true;
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return `${activeProduct.modelKey} ${activeProduct.materialName} ${activeProduct.color} ${activeProduct.composition}`
+      .toLowerCase()
+      .includes(q);
+  }, [activeProduct, searchQuery]);
+
+  const displayedRolls = useMemo(() => {
+    if (!activeProduct) return [];
+    const q = searchQuery.trim().toLowerCase();
+    return activeProduct.rolls.filter((r) => {
+      if (statusScope === 'READY' && r.inspectionStatus !== 'PASSED') return false;
+      if (statusScope === 'PENDING' && r.inspectionStatus === 'PASSED') return false;
+      if (q && !productMatchesQuery) {
+        return `${r.rollId} ${r.batchNo || ''} ${r.storageLocation || ''}`
+          .toLowerCase()
+          .includes(q);
+      }
+      return true;
+    });
+  }, [activeProduct, statusScope, searchQuery, productMatchesQuery]);
+
   const displayedRemnants = useMemo(() => {
     if (!activeProduct) return [];
+    const q = searchQuery.trim().toLowerCase();
     let list = focusedRollId
       ? activeProduct.remnants.filter((rm) => rm.sourceRollId === focusedRollId)
       : activeProduct.remnants;
-    if (remnantStatusFilter === 'AVAILABLE_FIRST') {
+
+    if (statusScope === 'ALL') {
       list = list.filter(
         (rm) =>
           rm.status === 'AVAILABLE' || rm.status === 'RESERVED' || rm.status === 'QUARANTINED'
       );
+    } else if (statusScope === 'READY') {
+      list = list.filter((rm) => rm.status === 'AVAILABLE');
+    } else if (statusScope === 'PENDING') {
+      list = list.filter((rm) => rm.status === 'QUARANTINED' || rm.status === 'LOST');
+    }
+
+    if (q && !productMatchesQuery) {
+      list = list.filter((rm) =>
+        `${rm.id} ${rm.sourceRollId || ''} ${rm.location || ''}`.toLowerCase().includes(q)
+      );
     }
     return list;
-  }, [activeProduct, focusedRollId, remnantStatusFilter]);
+  }, [activeProduct, focusedRollId, statusScope, searchQuery, productMatchesQuery]);
 
   const previewRoll = useMemo(
     () =>
@@ -719,76 +771,162 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
     setPendingTick((t) => t + 1);
   };
 
+  const viewOptions: SegmentedOption<InventoryViewScope>[] = useMemo(
+    () => [
+      { value: 'ALL', label: '全部台账' },
+      { value: 'ROLLS', label: '母卷', count: rolls.length, accent: 'indigo' },
+      { value: 'REMNANTS', label: '料头', count: availableRemnantTotal, accent: 'emerald' }
+    ],
+    [rolls.length, availableRemnantTotal]
+  );
+
+  const statusOptions: SegmentedOption<InventoryStatusScope>[] = useMemo(
+    () => [
+      { value: 'ALL', label: '在库' },
+      { value: 'READY', label: '合格 / 可用' },
+      { value: 'PENDING', label: '待检 / 异常', count: pendingIssueTotal || undefined },
+      { value: 'HISTORY', label: '含已耗 / 报废' }
+    ],
+    [pendingIssueTotal]
+  );
+
   return (
-    <div className="react-page">
-      {/* Screen-reader live region for splitter resize feedback (Modern Web Guidance: drag) */}
+    <div className="react-page mp-inv-page">
+      {/* Screen-reader live region for splitter resize feedback */}
       <div className="sr-only" aria-live="polite">
         {liveAnnounce}
       </div>
 
-      <div className="ph">
-        <h1>库存</h1>
-        <span className="crumb">选品号查看在库母卷与派生料头 · 点击任意行在右侧预览实物几何与疵点</span>
-        <span className="sp" />
-        {!previewOpen && (
-          <button
-            type="button"
-            className="btn sm"
-            onClick={() => {
-              setPreviewOpen(true);
-              announceResize('右侧实物预览窗格已展开');
-            }}
-          >
-            展开右侧预览
-          </button>
-        )}
-        {picked.size > 0 && (
-          <button type="button" className="btn sm" onClick={() => setPicked(new Set())}>
-            清空勾选 ({picked.size})
-          </button>
-        )}
-        <button
-          type="button"
-          className="btn"
-          disabled={picked.size === 0}
-          title={picked.size === 0 ? '先勾选母卷或料头' : undefined}
-          onClick={() => openActionPanel('transfer')}
-        >
-          移库{picked.size ? ` (${picked.size})` : ''}
-        </button>
-        <button
-          type="button"
-          className="btn"
-          disabled={picked.size === 0}
-          title={picked.size === 0 ? '先勾选母卷或料头' : undefined}
-          onClick={() => openActionPanel('count')}
-        >
-          盘点{picked.size ? ` (${picked.size})` : ''}
-        </button>
-        <button
-          type="button"
-          className="btn pri"
-          onClick={() =>
-            openActionPanel('receive', {
-              rollId: '',
-              rollModel: activeProduct?.modelKey || '',
-              width: activeProduct?.primaryWidthMm || '',
-              length: ''
-            })
-          }
-        >
-          ＋ 母卷入库
-        </button>
+      {/* Light Desktop Page Header & Filter Toolbar */}
+      <div className="mp-inv-header">
+        <div className="mp-inv-head-row">
+          <div className="mp-page-title-block">
+            <h1>库存</h1>
+            <span className="mp-page-summary num">
+              {productGroups.length} 个品号 · {rolls.length} 卷母卷（合格 {passedRollTotal}）·{' '}
+              {availableRemnantTotal} 块可用料头
+            </span>
+          </div>
+
+          <div className="mp-toolbar-actions">
+            {!previewOpen && (
+              <button
+                type="button"
+                className="mp-ghost-btn"
+                onClick={() => {
+                  setPreviewOpen(true);
+                  announceResize('右侧实物预览窗格已展开');
+                }}
+              >
+                展开实物预览
+              </button>
+            )}
+            {picked.size > 0 && (
+              <button
+                type="button"
+                className="mp-ghost-btn"
+                onClick={() => setPicked(new Set())}
+              >
+                清空勾选 ({picked.size})
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn"
+              disabled={picked.size === 0}
+              title={picked.size === 0 ? '先勾选母卷或料头' : undefined}
+              onClick={() => openActionPanel('transfer')}
+            >
+              移库{picked.size ? ` (${picked.size})` : ''}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={picked.size === 0}
+              title={picked.size === 0 ? '先勾选母卷或料头' : undefined}
+              onClick={() => openActionPanel('count')}
+            >
+              盘点{picked.size ? ` (${picked.size})` : ''}
+            </button>
+            <button
+              type="button"
+              className="btn pri"
+              onClick={() =>
+                openActionPanel('receive', {
+                  rollId: '',
+                  rollModel: activeProduct?.modelKey || '',
+                  width: activeProduct?.primaryWidthMm || '',
+                  length: ''
+                })
+              }
+            >
+              ＋ 登记母卷
+            </button>
+          </div>
+        </div>
+
+        <div className="mp-filter-toolbar mp-inv-filter-row">
+          <div className="mp-search-wrap">
+            <span className="mp-search-ico" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="14" height="14">
+                <circle
+                  cx="7.2"
+                  cy="7.2"
+                  r="4.6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                />
+                <path
+                  d="m10.8 10.8 2.8 2.8"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <input
+              type="search"
+              className="mp-search-input"
+              aria-label="搜索物料品号、母卷或料头"
+              placeholder="搜品号、卷号、批号、库位或料头号"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
+          <span className="mp-toolbar-count num">
+            显示 {filteredProducts.length} / {productGroups.length} 品号
+          </span>
+
+          <div className="mp-inv-filter-controls">
+            <SegmentedControl
+              options={viewOptions}
+              value={viewScope}
+              onChange={(next) => setViewScope(next)}
+              ariaLabel="按台账类别筛选"
+              size="sm"
+            />
+            <SegmentedControl
+              options={statusOptions}
+              value={statusScope}
+              onChange={(next) => setStatusScope(next)}
+              ariaLabel="按库存状态筛选"
+              size="sm"
+            />
+          </div>
+        </div>
       </div>
 
       {pendings.length > 0 && (
-        <div className="notice" style={{ margin: '8px 16px 0' }}>
+        <div className="mp-inv-notice">
           {pendings.map(([s]) => (
-            <span key={s} style={{ marginRight: 16 }}>
-              {ACTION_TITLES[s]}提交结果未确认{' '}
+            <span key={s} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <span>{ACTION_TITLES[s]}提交结果未确认</span>
               <button type="button" className="btn sm" onClick={() => handleRetryWrite(s)}>
                 重试原操作
-              </button>{' '}
+              </button>
               <button type="button" className="btn sm" onClick={() => handleDropWrite(s)}>
                 放弃
               </button>
@@ -798,577 +936,503 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
       )}
 
       {error ? (
-        <div className="body">
+        <div className="mp-page-shell">
           <div className="error-box" role="alert">
             <b>读取失败</b>
             <p>{error}</p>
           </div>
         </div>
       ) : loading ? (
-        <div className="body">
-          <div className="loading">正在读取物料品号与母卷料头台账…</div>
+        <div className="mp-page-shell">
+          <div className="mp-doc-card">
+            <div className="loading">正在读取物料品号与母卷料头台账…</div>
+          </div>
         </div>
       ) : (
         <div
           ref={layoutContainerRef}
-          className={`inv-resizable-workspace ${draggingSide ? 'is-resizing' : ''}`}
+          className={`inv-resizable-workspace mp-inv-workspace ${
+            draggingRight ? 'is-resizing' : ''
+          }`}
           style={{
             gridTemplateColumns: previewOpen
-              ? `${leftWidth}px 6px minmax(340px, 1fr) 6px ${previewWidth}px`
-              : `${leftWidth}px 6px minmax(340px, 1fr)`
+              ? `minmax(420px, 1fr) 10px ${previewWidth}px`
+              : 'minmax(0, 1fr)'
           }}
         >
-          {/* Column 1: Product Selector ("选择一个品") */}
-          <section className="pane inv-product-pane">
-            <div className="pane-h">
-              <span>物料品号 ({filteredProducts.length})</span>
-              <span className="sp" />
-              <label className="inv-mini-filter">
-                <input
-                  type="checkbox"
-                  checked={onlyWithRemnants}
-                  onChange={(e) => setOnlyWithRemnants(e.target.checked)}
-                />
-                <span>含料头</span>
-              </label>
-            </div>
-
-            <div className="inv-search-box">
-              <input
-                type="search"
-                className="field"
-                aria-label="搜索物料品号、母卷或料头"
-                placeholder="搜品号 / 面料名 / 卷号 / 料头号…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-
-            <div className="pane-b inv-product-list" role="listbox" aria-label="物料品号列表">
-              {filteredProducts.length > 0 ? (
-                filteredProducts.map((g) => {
-                  const isActive = activeProduct?.modelKey === g.modelKey;
-                  return (
-                    <button
-                      key={g.modelKey}
-                      type="button"
-                      role="option"
-                      aria-selected={isActive}
-                      className="inv-product-card"
-                      onClick={() => {
-                        setSelectedModel(g.modelKey);
-                        setFocusedRollId('');
-                      }}
-                    >
-                      <div className="inv-product-top">
-                        <strong>{g.modelKey}</strong>
-                        {g.primaryWidthMm > 0 && (
-                          <span className="num muted inv-width-tag">
-                            {fmtN(g.primaryWidthMm)} mm
-                          </span>
-                        )}
-                      </div>
-                      {g.materialName && (
-                        <div className="inv-product-name">{g.materialName}</div>
-                      )}
-                      <div className="inv-product-badges num">
-                        <span className="tag kind">
-                          母卷 {g.rolls.length} · {fmtN(g.totalRemainingM, 0)}m
+          {/* Left Pure-White 12px Rounded Aggregated Ledger Card */}
+          <section className="mp-inv-ledger-card" aria-label="母卷与料头聚合台账">
+            {/* Compact Product Model Switcher Strip */}
+            <div className="mp-inv-model-bar">
+              <span className="mp-inv-model-bar-label">品号</span>
+              <div
+                className="mp-inv-model-strip"
+                role="listbox"
+                aria-label="物料品号切换"
+              >
+                {filteredProducts.length > 0 ? (
+                  filteredProducts.map((g) => {
+                    const isActive = activeProduct?.modelKey === g.modelKey;
+                    return (
+                      <button
+                        key={g.modelKey}
+                        type="button"
+                        role="option"
+                        aria-selected={isActive}
+                        className="mp-inv-model-pill"
+                        onClick={() => {
+                          setSelectedModel(g.modelKey);
+                          setFocusedRollId('');
+                        }}
+                      >
+                        <span>{g.modelKey}</span>
+                        <span className="mp-pill-meta num">
+                          {g.rolls.length}卷
+                          {g.availableRemnants.length > 0
+                            ? ` · ${g.availableRemnants.length}料`
+                            : ''}
                         </span>
-                        {g.availableRemnants.length > 0 ? (
-                          <span className="tag ok">料头 {g.availableRemnants.length} 块</span>
-                        ) : g.remnants.length > 0 ? (
-                          <span className="tag">历史料头 {g.remnants.length}</span>
-                        ) : (
-                          <span className="muted" style={{ fontSize: 11 }}>
-                            无料头
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })
-              ) : (
-                <div className="empty">没有匹配的物料品号</div>
-              )}
+                      </button>
+                    );
+                  })
+                ) : (
+                  <span className="mp-inv-section-hint">没有匹配的物料品号</span>
+                )}
+              </div>
             </div>
-          </section>
 
-          {/* Resizer Handle 1: Left Product List <-> Center Tables */}
-          <button
-            type="button"
-            className={`inv-split-handle ${draggingSide === 'left' ? 'dragging' : ''}`}
-            aria-label="调节左侧物料目录宽度，使用左右方向键缩放"
-            title="拖动调节物料目录宽度"
-            onPointerDown={(e) => {
-              if (e.button !== 0) return;
-              dragOriginRef.current = { startX: e.clientX, startW: leftWidth };
-              e.currentTarget.setPointerCapture(e.pointerId);
-              setDraggingSide('left');
-            }}
-            onPointerMove={(e) => {
-              if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-              commitLeftWidth(
-                dragOriginRef.current.startW + (e.clientX - dragOriginRef.current.startX)
-              );
-            }}
-            onLostPointerCapture={() => setDraggingSide(null)}
-            onKeyDown={(e) => {
-              if (e.key === 'ArrowLeft') {
-                e.preventDefault();
-                commitLeftWidth(leftWidth - 20);
-                announceResize('已收窄物料目录列');
-              } else if (e.key === 'ArrowRight') {
-                e.preventDefault();
-                commitLeftWidth(leftWidth + 20);
-                announceResize('已加宽物料目录列');
-              }
-            }}
-          />
-
-          {/* Column 2: Selected Product's Mother Rolls + Linked Remnants */}
-          <section className="pane" style={{ background: 'var(--bg)' }}>
-            <div className="body">
-              {activeProduct ? (
-                <>
-                  <div className="box inv-product-hero">
-                    <div className="inv-hero-main">
-                      <div>
-                        <div className="inv-hero-eyebrow">当前选定物料品号</div>
-                        <h2 className="inv-hero-title">
-                          {activeProduct.modelKey}
-                          {activeProduct.materialName ? (
-                            <span> · {activeProduct.materialName}</span>
-                          ) : null}
-                        </h2>
-                        {(activeProduct.composition || activeProduct.color) && (
-                          <div className="inv-hero-meta">
-                            {[activeProduct.color, activeProduct.composition]
-                              .filter(Boolean)
-                              .join(' · ')}
-                          </div>
-                        )}
-                      </div>
-                      <div className="inv-hero-actions">
-                        <button
-                          type="button"
-                          className="btn sm"
-                          onClick={() =>
-                            openActionPanel('receive', {
-                              rollId: '',
-                              rollModel: activeProduct.modelKey,
-                              width: activeProduct.primaryWidthMm || '',
-                              length: ''
-                            })
-                          }
-                        >
-                          ＋ 补录同品母卷
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="inv-hero-kpis num">
-                      <div>
-                        <small>在库母卷数</small>
-                        <b>
-                          {activeProduct.rolls.length}{' '}
-                          <em>卷（合格 {activeProduct.passedRollCount}）</em>
-                        </b>
-                      </div>
-                      <div>
-                        <small>母卷可用总余长</small>
-                        <b>
-                          {fmtN(activeProduct.totalRemainingM, 2)} <em>m</em>
-                        </b>
-                      </div>
-                      <div>
-                        <small>关联可用料头</small>
-                        <b
-                          style={{
-                            color: activeProduct.availableRemnants.length
-                              ? 'var(--ok)'
-                              : undefined
-                          }}
-                        >
-                          {activeProduct.availableRemnants.length}{' '}
-                          <em>块（共 {activeProduct.remnants.length} 条）</em>
-                        </b>
-                      </div>
-                      <div>
-                        <small>料头可用总面积</small>
-                        <b>
-                          {fmtN(activeProduct.availableRemnantAreaM2, 2)} <em>m²</em>
-                        </b>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Section 1: Mother Rolls */}
-                  <div className="box">
-                    <div className="pane-h">
-                      <span>1. 该品在库母卷（{activeProduct.rolls.length} 卷）</span>
-                      <small className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>
-                        点击母卷行在右侧预览整卷余量与疵点坐标
-                      </small>
-                    </div>
-                    {activeProduct.rolls.length > 0 ? (
-                      <table className="t" style={{ border: 0 }}>
-                        <thead>
-                          <tr>
-                            <th style={{ width: 32 }}>
-                              <input
-                                type="checkbox"
-                                aria-label="全选该品母卷"
-                                checked={
-                                  activeProduct.rolls.length > 0 &&
-                                  activeProduct.rolls.every((r) => picked.has(idOf(true, r)))
-                                }
-                                onChange={(e) => {
-                                  const next = new Set(picked);
-                                  activeProduct.rolls.forEach((r) => {
-                                    const k = idOf(true, r);
-                                    if (e.target.checked) next.add(k);
-                                    else next.delete(k);
-                                  });
-                                  setPicked(next);
-                                }}
-                              />
-                            </th>
-                            <th>母卷编号</th>
-                            <th className="r">门幅</th>
-                            <th className="r">剩余 / 整卷</th>
-                            <th>派生关联料头</th>
-                            <th className="r">疵点</th>
-                            <th>库位</th>
-                            <th>检验</th>
-                            <th>操作</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {activeProduct.rolls.map((r) => {
-                            const itemKey = idOf(true, r);
-                            const isChecked = picked.has(itemKey);
-                            const isPreviewed =
-                              previewTarget?.kind === 'roll' && previewTarget.id === r.rollId;
-                            const remLen =
-                              r.currentRemainingLength ?? r.totalLength - (r.usedLength || 0);
-                            const [qt, qc] = ROLL_QUALITY_MAP[r.inspectionStatus] || [
-                              r.inspectionStatus || '—',
-                              ''
-                            ];
-                            const linkedRems = remnantsByRollId.get(r.rollId) || [];
-                            const availRems = linkedRems.filter(
-                              (rm) => rm.status === 'AVAILABLE'
-                            );
-
-                            return (
-                              <tr
-                                key={r.rollId}
-                                className={`click ${isPreviewed ? 'sel' : ''}`}
-                                onClick={() => handleInspectRoll(r)}
-                              >
-                                <td onClick={(e) => e.stopPropagation()}>
-                                  <input
-                                    type="checkbox"
-                                    aria-label={`选择母卷 ${r.rollId}`}
-                                    checked={isChecked}
-                                    onChange={(e) => togglePick(itemKey, e.target.checked)}
-                                  />
-                                </td>
-                                <td className="num" style={{ fontWeight: 600 }}>
-                                  {r.rollId}
-                                  {r.batchNo && (
-                                    <div>
-                                      <small className="muted">批次 {r.batchNo}</small>
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="r num">{fmtN(r.width)}</td>
-                                <td className="r num">
-                                  <b>{fmtM(remLen)}</b> / {fmtM(r.totalLength)} m
-                                  {(r.usedLength || 0) > 0 && (
-                                    <div>
-                                      <small className="muted">
-                                        已切 {fmtM(r.usedLength)} m
-                                      </small>
-                                    </div>
-                                  )}
-                                </td>
-                                <td onClick={(e) => e.stopPropagation()}>
-                                  {linkedRems.length > 0 ? (
-                                    <button
-                                      type="button"
-                                      className="inv-roll-link num"
-                                      title={
-                                        activeProduct.rolls.length > 1
-                                          ? '点击仅看此母卷派生的料头'
-                                          : '点击预览第一块派生料头'
-                                      }
-                                      onClick={() => {
-                                        if (activeProduct.rolls.length > 1) {
-                                          setFocusedRollId((cur) =>
-                                            cur === r.rollId ? '' : r.rollId
-                                          );
-                                        } else if (linkedRems[0]) {
-                                          handleInspectRemnant(linkedRems[0]);
-                                        }
-                                      }}
-                                    >
-                                      可用 {availRems.length} / 共 {linkedRems.length} 块
-                                    </button>
-                                  ) : (
-                                    <span className="muted">无料头</span>
-                                  )}
-                                </td>
-                                <td className="r num">
-                                  {r.defectsCount ?? (r.defects || []).length}
-                                </td>
-                                <td>{r.storageLocation || '—'}</td>
-                                <td>
-                                  <span className={`tag ${qc}`}>{qt}</span>
-                                </td>
-                                <td onClick={(e) => e.stopPropagation()}>
-                                  <div style={{ display: 'inline-flex', gap: 4 }}>
-                                    <button
-                                      type="button"
-                                      className="btn sm"
-                                      onClick={() => handleInspectRoll(r)}
-                                      title="查看该母卷已切割区域、预占区段与疵点空间图"
-                                    >
-                                      看切割区
-                                    </button>
-                                    <a
-                                      className="btn sm"
-                                      href={`#/inspection/${encodeURIComponent(r.rollId)}`}
-                                    >
-                                      跑疵点
-                                    </a>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <div className="empty" style={{ padding: 16 }}>
-                        该品号暂无整卷母卷记录
-                      </div>
+            {activeProduct ? (
+              <>
+                {/* Selected Product Compact Identity & Inline Metrics */}
+                <div className="mp-inv-product-strip">
+                  <div className="mp-inv-product-identity">
+                    <strong>{activeProduct.modelKey}</strong>
+                    {activeProduct.primaryWidthMm > 0 && (
+                      <CodeBadge>{fmtN(activeProduct.primaryWidthMm)} mm</CodeBadge>
+                    )}
+                    {activeProduct.materialName && (
+                      <span className="mp-inv-product-meta">{activeProduct.materialName}</span>
+                    )}
+                    {(activeProduct.color || activeProduct.composition) && (
+                      <span className="mp-inv-product-meta">
+                        {[activeProduct.color, activeProduct.composition]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </span>
                     )}
                   </div>
+
+                  <div className="mp-inv-metrics-inline num">
+                    <div className="mp-inv-metric-item">
+                      <span>母卷</span>
+                      <b>{activeProduct.rolls.length}</b>
+                      <span>卷（合格 {activeProduct.passedRollCount}）</span>
+                    </div>
+                    <div className="mp-inv-metric-item">
+                      <span>总余长</span>
+                      <b>{fmtN(activeProduct.totalRemainingM, 2)}</b>
+                      <span>m</span>
+                    </div>
+                    <div className="mp-inv-metric-item">
+                      <span>可用料头</span>
+                      <b className={activeProduct.availableRemnants.length ? 'is-ok' : ''}>
+                        {activeProduct.availableRemnants.length}
+                      </b>
+                      <span>块 ({fmtN(activeProduct.availableRemnantAreaM2, 2)} m²)</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn sm"
+                      onClick={() =>
+                        openActionPanel('receive', {
+                          rollId: '',
+                          rollModel: activeProduct.modelKey,
+                          width: activeProduct.primaryWidthMm || '',
+                          length: ''
+                        })
+                      }
+                    >
+                      ＋ 补录同品母卷
+                    </button>
+                  </div>
+                </div>
+
+                {/* Scrollable Aggregated Tables Body */}
+                <div className="mp-inv-ledger-body">
+                  {/* Section 1: Mother Rolls */}
+                  {viewScope !== 'REMNANTS' && (
+                    <div className="mp-inv-section">
+                      <div className="mp-inv-section-head">
+                        <span>在库母卷（{displayedRolls.length} 卷）</span>
+                        <span className="mp-inv-section-hint">
+                          点击任意行在右侧预览整卷余量、切割区段与疵点坐标
+                        </span>
+                      </div>
+                      {displayedRolls.length > 0 ? (
+                        <div className="mp-table-scroll">
+                          <table className="t">
+                            <thead>
+                              <tr>
+                                <th style={{ width: 28 }}>
+                                  <input
+                                    type="checkbox"
+                                    aria-label="全选该品母卷"
+                                    checked={
+                                      displayedRolls.length > 0 &&
+                                      displayedRolls.every((r) => picked.has(idOf(true, r)))
+                                    }
+                                    onChange={(e) => {
+                                      const next = new Set(picked);
+                                      displayedRolls.forEach((r) => {
+                                        const k = idOf(true, r);
+                                        if (e.target.checked) next.add(k);
+                                        else next.delete(k);
+                                      });
+                                      setPicked(next);
+                                    }}
+                                  />
+                                </th>
+                                <th>母卷编号 / 批号</th>
+                                <th className="r" title="门幅 (mm)">门幅</th>
+                                <th className="r">剩余 / 整卷</th>
+                                <th>派生料头</th>
+                                <th className="r">疵点</th>
+                                <th>库位</th>
+                                <th>检验</th>
+                                <th style={{ textAlign: 'right' }}>操作</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {displayedRolls.map((r) => {
+                                const itemKey = idOf(true, r);
+                                const isChecked = picked.has(itemKey);
+                                const isPreviewed =
+                                  previewTarget?.kind === 'roll' && previewTarget.id === r.rollId;
+                                const remLen =
+                                  r.currentRemainingLength ??
+                                  r.totalLength - (r.usedLength || 0);
+                                const [qt, qc] = ROLL_QUALITY_MAP[r.inspectionStatus] || [
+                                  r.inspectionStatus || '—',
+                                  ''
+                                ];
+                                const linkedRems = remnantsByRollId.get(r.rollId) || [];
+                                const availRems = linkedRems.filter(
+                                  (rm) => rm.status === 'AVAILABLE'
+                                );
+
+                                return (
+                                  <tr
+                                    key={r.rollId}
+                                    className={`click ${isPreviewed ? 'sel' : ''}`}
+                                    onClick={() => handleInspectRoll(r)}
+                                  >
+                                    <td onClick={(e) => e.stopPropagation()}>
+                                      <input
+                                        type="checkbox"
+                                        aria-label={`选择母卷 ${r.rollId}`}
+                                        checked={isChecked}
+                                        onChange={(e) => togglePick(itemKey, e.target.checked)}
+                                      />
+                                    </td>
+                                    <td>
+                                      <div className="mp-inv-id-cell">
+                                        <strong className="num mp-inv-roll-id" title={r.rollId}>
+                                          {r.rollId}
+                                        </strong>
+                                        {r.batchNo && <CodeBadge>{r.batchNo}</CodeBadge>}
+                                      </div>
+                                    </td>
+                                    <td className="r num">{fmtN(r.width)}</td>
+                                    <td className="r num">
+                                      <div>
+                                        <b>{fmtM(remLen)}</b>/{fmtM(r.totalLength)}m
+                                      </div>
+                                      {(r.usedLength || 0) > 0 && (
+                                        <div className="mp-inv-sub-meta">
+                                          已切 {fmtM(r.usedLength)}m
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td onClick={(e) => e.stopPropagation()}>
+                                      {linkedRems.length > 0 ? (
+                                        <button
+                                          type="button"
+                                          className={`mp-inv-remnant-link num ${
+                                            focusedRollId === r.rollId ? 'active' : ''
+                                          }`}
+                                          title={
+                                            activeProduct.rolls.length > 1
+                                              ? `可用 ${availRems.length} / 共 ${linkedRems.length} 块，点击仅看此母卷派生的料头`
+                                              : `可用 ${availRems.length} / 共 ${linkedRems.length} 块，点击预览第一块派生料头`
+                                          }
+                                          onClick={() => {
+                                            if (activeProduct.rolls.length > 1) {
+                                              setFocusedRollId((cur) =>
+                                                cur === r.rollId ? '' : r.rollId
+                                              );
+                                            } else if (linkedRems[0]) {
+                                              handleInspectRemnant(linkedRems[0]);
+                                            }
+                                          }}
+                                        >
+                                          {availRems.length}/{linkedRems.length}块
+                                        </button>
+                                      ) : (
+                                        <span className="muted">无</span>
+                                      )}
+                                    </td>
+                                    <td className="r num">
+                                      {r.defectsCount ?? (r.defects || []).length}
+                                    </td>
+                                    <td>
+                                      <span
+                                        className="mp-inv-loc-cell"
+                                        title={r.storageLocation || '—'}
+                                      >
+                                        {r.storageLocation || '—'}
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <span className={`tag ${qc}`}>{qt}</span>
+                                    </td>
+                                    <td
+                                      style={{ textAlign: 'right' }}
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <div className="mp-inv-row-actions">
+                                        <button
+                                          type="button"
+                                          className="btn sm soft-accent"
+                                          onClick={() => handleInspectRoll(r)}
+                                          title="查看该母卷已切割区域、预占区段与疵点空间图"
+                                        >
+                                          看切割区
+                                        </button>
+                                        <a
+                                          className="btn sm"
+                                          href={`#/inspection/${encodeURIComponent(r.rollId)}`}
+                                        >
+                                          跑疵点
+                                        </a>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="mp-empty-inline">当前筛选条件下暂无整卷母卷记录</div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Section 2: Linked Remnants */}
-                  <div className="box">
-                    <div className="pane-h">
-                      <span>2. 关联派生料头（{displayedRemnants.length} 块）</span>
-                      {focusedRollId && (
-                        <span className="tag run" style={{ marginLeft: 8 }}>
-                          来源母卷：{focusedRollId}
-                          <button
-                            type="button"
-                            className="inv-clear-chip"
-                            onClick={() => setFocusedRollId('')}
-                          >
-                            × 全部
-                          </button>
+                  {viewScope !== 'ROLLS' && (
+                    <div className="mp-inv-section">
+                      <div className="mp-inv-section-head">
+                        <span>关联派生料头（{displayedRemnants.length} 块）</span>
+                        {focusedRollId && (
+                          <span className="tag run">
+                            来源母卷：{focusedRollId}
+                            <button
+                              type="button"
+                              className="inv-clear-chip"
+                              onClick={() => setFocusedRollId('')}
+                            >
+                              × 全部
+                            </button>
+                          </span>
+                        )}
+                        <span className="mp-inv-section-hint">
+                          点击料头行在右侧预览单块实尺与疵点
                         </span>
-                      )}
-                      <small className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>
-                        点击料头行在右侧预览单块实尺与疵点
-                      </small>
-                      <span className="sp" />
-                      <div className="seg" role="group" aria-label="料头状态范围">
-                        <button
-                          type="button"
-                          className={remnantStatusFilter === 'AVAILABLE_FIRST' ? 'on' : ''}
-                          aria-pressed={remnantStatusFilter === 'AVAILABLE_FIRST'}
-                          onClick={() => setRemnantStatusFilter('AVAILABLE_FIRST')}
-                        >
-                          在库料头 ({activeProduct.availableRemnants.length})
-                        </button>
-                        <button
-                          type="button"
-                          className={remnantStatusFilter === 'ALL' ? 'on' : ''}
-                          aria-pressed={remnantStatusFilter === 'ALL'}
-                          onClick={() => setRemnantStatusFilter('ALL')}
-                        >
-                          含已耗/报废 ({activeProduct.remnants.length})
-                        </button>
                       </div>
-                    </div>
 
-                    {displayedRemnants.length > 0 ? (
-                      <table className="t" style={{ border: 0 }}>
-                        <thead>
-                          <tr>
-                            <th style={{ width: 32 }}>
-                              <input
-                                type="checkbox"
-                                aria-label="全选当前列表料头"
-                                checked={
-                                  displayedRemnants.length > 0 &&
-                                  displayedRemnants.every((rm) => picked.has(idOf(false, rm)))
-                                }
-                                onChange={(e) => {
-                                  const next = new Set(picked);
-                                  displayedRemnants.forEach((rm) => {
-                                    const k = idOf(false, rm);
-                                    if (e.target.checked) next.add(k);
-                                    else next.delete(k);
-                                  });
-                                  setPicked(next);
-                                }}
-                              />
-                            </th>
-                            <th>料头编号</th>
-                            <th>关联来源母卷 · 谱系</th>
-                            <th className="r">宽 × 长 mm</th>
-                            <th className="r">面积 m²</th>
-                            <th>疵点</th>
-                            <th>状态</th>
-                            <th>操作</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {displayedRemnants.map((rm) => {
-                            const itemKey = idOf(false, rm);
-                            const isChecked = picked.has(itemKey);
-                            const isPreviewed =
-                              previewTarget?.kind === 'remnant' && previewTarget.id === rm.id;
-                            const [stLabel, stClass] = REMNANT_STATUS_MAP[rm.status] || [
-                              rm.status,
-                              ''
-                            ];
-                            return (
-                              <tr
-                                key={rm.id}
-                                className={`click ${isPreviewed ? 'sel' : ''}`}
-                                onClick={() => handleInspectRemnant(rm)}
-                              >
-                                <td onClick={(e) => e.stopPropagation()}>
+                      {displayedRemnants.length > 0 ? (
+                        <div className="mp-table-scroll">
+                          <table className="t">
+                            <thead>
+                              <tr>
+                                <th style={{ width: 28 }}>
                                   <input
                                     type="checkbox"
-                                    aria-label={`选择料头 ${rm.id}`}
-                                    checked={isChecked}
-                                    onChange={(e) => togglePick(itemKey, e.target.checked)}
-                                  />
-                                </td>
-                                <td className="num" style={{ fontWeight: 600 }}>
-                                  {rm.id}
-                                </td>
-                                <td>
-                                  <div
-                                    style={{
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: 5,
-                                      flexWrap: 'wrap'
+                                    aria-label="全选当前列表料头"
+                                    checked={
+                                      displayedRemnants.length > 0 &&
+                                      displayedRemnants.every((rm) =>
+                                        picked.has(idOf(false, rm))
+                                      )
+                                    }
+                                    onChange={(e) => {
+                                      const next = new Set(picked);
+                                      displayedRemnants.forEach((rm) => {
+                                        const k = idOf(false, rm);
+                                        if (e.target.checked) next.add(k);
+                                        else next.delete(k);
+                                      });
+                                      setPicked(next);
                                     }}
-                                  >
-                                    <span className="num muted">
-                                      母卷 {rm.sourceRollId || '—'}
-                                    </span>
-                                    {rm.generation ? (
-                                      <span className="tag">G{rm.generation}</span>
-                                    ) : null}
-                                    {rm.qualityDispositionId && (
-                                      <span className="tag warn">复检回收</span>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className="r num">
-                                  {fmtN(rm.width)} × {fmtN(rm.length)}
-                                </td>
-                                <td className="r num">{fmtN(rm.area, 2)}</td>
-                                <td>
-                                  {rm.hasDefect ? (
-                                    <span className="tag warn">带疵</span>
-                                  ) : (
-                                    <span className="muted">无疵</span>
-                                  )}
-                                </td>
-                                <td>
-                                  <span className={`tag ${stClass}`}>{stLabel}</span>
-                                </td>
-                                <td onClick={(e) => e.stopPropagation()}>
-                                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                                    {rm.status === 'AVAILABLE' && (
-                                      <button
-                                        type="button"
-                                        className="btn sm"
-                                        onClick={() => {
-                                          setCanvasSpec({
-                                            canvasMode: 'REMNANT',
-                                            selectedRemnantId: rm.id,
-                                            canvasWidthMm: rm.width,
-                                            canvasLengthMm: rm.length,
-                                            materialModel2D:
-                                              rm.materialBatch || activeProduct?.modelKey || 'REMNANT'
-                                          });
-                                          location.hash = '#/workbench';
-                                        }}
-                                      >
-                                        排料
-                                      </button>
-                                    )}
-                                    {(rm.status === 'AVAILABLE' ||
-                                      rm.status === 'QUARANTINED') && (
-                                      <button
-                                        type="button"
-                                        className="btn sm"
-                                        onClick={() =>
-                                          openActionPanel('scrap', { scrapId: rm.id })
-                                        }
-                                      >
-                                        报废
-                                      </button>
-                                    )}
-                                  </div>
-                                </td>
+                                  />
+                                </th>
+                                <th>料头编号</th>
+                                <th>来源母卷 · 谱系</th>
+                                <th className="r" title="宽 × 长 (mm)">宽×长 mm</th>
+                                <th className="r" title="面积 (m²)">面积 m²</th>
+                                <th>疵点</th>
+                                <th>状态</th>
+                                <th style={{ textAlign: 'right' }}>操作</th>
                               </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <div className="empty" style={{ padding: 16 }}>
-                        暂无符合当前筛选条件的料头
-                      </div>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <div className="empty">请从左侧选择一个物料品号查看对应母卷与料头</div>
-              )}
-            </div>
+                            </thead>
+                            <tbody>
+                              {displayedRemnants.map((rm) => {
+                                const itemKey = idOf(false, rm);
+                                const isChecked = picked.has(itemKey);
+                                const isPreviewed =
+                                  previewTarget?.kind === 'remnant' &&
+                                  previewTarget.id === rm.id;
+                                const [stLabel, stClass] = REMNANT_STATUS_MAP[rm.status] || [
+                                  rm.status,
+                                  ''
+                                ];
+                                return (
+                                  <tr
+                                    key={rm.id}
+                                    className={`click ${isPreviewed ? 'sel' : ''}`}
+                                    onClick={() => handleInspectRemnant(rm)}
+                                  >
+                                    <td onClick={(e) => e.stopPropagation()}>
+                                      <input
+                                        type="checkbox"
+                                        aria-label={`选择料头 ${rm.id}`}
+                                        checked={isChecked}
+                                        onChange={(e) => togglePick(itemKey, e.target.checked)}
+                                      />
+                                    </td>
+                                    <td>
+                                      <CodeBadge className="mp-inv-rem-id" title={rm.id}>
+                                        {rm.id}
+                                      </CodeBadge>
+                                    </td>
+                                    <td>
+                                      <div className="mp-inv-lineage-cell">
+                                        <span
+                                          className="num muted mp-inv-source-id"
+                                          title={rm.sourceRollId || '—'}
+                                        >
+                                          {rm.sourceRollId || '—'}
+                                        </span>
+                                        {rm.generation ? (
+                                          <CodeBadge>G{rm.generation}</CodeBadge>
+                                        ) : null}
+                                        {rm.qualityDispositionId && (
+                                          <span className="tag warn">复检回收</span>
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td className="r num">
+                                      {fmtN(rm.width)}×{fmtN(rm.length)}
+                                    </td>
+                                    <td className="r num">{fmtN(rm.area, 2)}</td>
+                                    <td>
+                                      {rm.hasDefect ? (
+                                        <span className="tag warn">带疵</span>
+                                      ) : (
+                                        <span className="muted">无疵</span>
+                                      )}
+                                    </td>
+                                    <td>
+                                      <span className={`tag ${stClass}`}>{stLabel}</span>
+                                    </td>
+                                    <td
+                                      style={{ textAlign: 'right' }}
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <div className="mp-inv-row-actions">
+                                        {rm.status === 'AVAILABLE' && (
+                                          <button
+                                            type="button"
+                                            className="btn sm soft-accent"
+                                            onClick={() => {
+                                              setCanvasSpec({
+                                                canvasMode: 'REMNANT',
+                                                selectedRemnantId: rm.id,
+                                                canvasWidthMm: rm.width,
+                                                canvasLengthMm: rm.length,
+                                                materialModel2D:
+                                                  rm.materialBatch ||
+                                                  activeProduct?.modelKey ||
+                                                  'REMNANT'
+                                              });
+                                              location.hash = '#/workbench';
+                                            }}
+                                          >
+                                            排料
+                                          </button>
+                                        )}
+                                        {(rm.status === 'AVAILABLE' ||
+                                          rm.status === 'QUARANTINED') && (
+                                          <button
+                                            type="button"
+                                            className="btn sm"
+                                            onClick={() =>
+                                              openActionPanel('scrap', { scrapId: rm.id })
+                                            }
+                                          >
+                                            报废
+                                          </button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="mp-empty-inline">暂无符合当前筛选条件的料头</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="mp-empty-inline" style={{ padding: 44 }}>
+                <strong>暂无匹配的物料品号</strong>
+                请调整顶部搜索词或切换台账筛选条件，或登记新的在库母卷。
+              </div>
+            )}
           </section>
 
-          {/* Resizer Handle 2 + Column 3: Right Interactive CAD Preview Pane */}
+          {/* Resizer Handle + Right Dark Charcoal 12px CAD Preview Card */}
           {previewOpen && (
             <>
               <button
                 type="button"
-                className={`inv-split-handle ${draggingSide === 'right' ? 'dragging' : ''}`}
+                className={`inv-split-handle mp-inv-splitter ${
+                  draggingRight ? 'dragging' : ''
+                }`}
                 aria-label="左右拖动或按左右方向键调节右侧实物预览区宽度"
-                title="左右拖动调节预览区大小（或按键盘 ← → 键）"
+                title="左右拖动调节预览区宽度（双击切换标准/宽屏，或按方向键）"
                 onPointerDown={(e) => {
                   if (e.button !== 0) return;
                   dragOriginRef.current = { startX: e.clientX, startW: previewWidth };
                   e.currentTarget.setPointerCapture(e.pointerId);
-                  setDraggingSide('right');
+                  setDraggingRight(true);
                 }}
                 onPointerMove={(e) => {
                   if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-                  // Moving pointer left increases right preview width
                   commitPreviewWidth(
                     dragOriginRef.current.startW + (dragOriginRef.current.startX - e.clientX)
                   );
                 }}
-                onLostPointerCapture={() => setDraggingSide(null)}
+                onLostPointerCapture={() => setDraggingRight(false)}
                 onDoubleClick={() => {
-                  const next = previewWidth < 500 ? 580 : 420;
+                  const next = previewWidth < 480 ? 560 : 384;
                   commitPreviewWidth(next);
-                  announceResize(next > 500 ? '预览区已切换为加宽视图' : '预览区已恢复标准宽度');
+                  announceResize(next > 480 ? '预览区已切换为加宽视图' : '预览区已恢复标准宽度');
                 }}
                 onKeyDown={(e) => {
                   const step = e.shiftKey ? 48 : 20;
@@ -1386,22 +1450,25 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                     announceResize('预览区已设为最大宽度');
                   } else if (e.key === 'End') {
                     e.preventDefault();
-                    commitPreviewWidth(420);
+                    commitPreviewWidth(384);
                     announceResize('预览区已恢复标准宽度');
                   }
                 }}
               />
 
-              <aside className="pane inv-preview-pane" aria-label="实物几何与疵点预览">
-                <div className="pane-h inv-preview-head">
+              <aside
+                className="inv-preview-pane mp-inv-preview-card"
+                aria-label="实物几何与疵点预览"
+              >
+                <div className="mp-inv-preview-head">
                   {previewRoll ? (
                     <>
-                      <span className="tag run">母卷预览</span>
+                      <span className="mp-dark-pill-tag roll">母卷预览</span>
                       <strong className="num inv-preview-id">{previewRoll.rollId}</strong>
                     </>
                   ) : previewRemnant ? (
                     <>
-                      <span className="tag ok">料头预览</span>
+                      <span className="mp-dark-pill-tag remnant">料头预览</span>
                       <strong className="num inv-preview-id">{previewRemnant.id}</strong>
                     </>
                   ) : (
@@ -1411,7 +1478,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                   {previewRoll && previewRoll.inspectionStatus === 'PASSED' && (
                     <button
                       type="button"
-                      className="btn sm pri"
+                      className="mp-dark-btn accent"
                       onClick={() => {
                         setCanvasSpec({
                           canvasMode: 'STOCK_ROLL',
@@ -1428,7 +1495,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                   {previewRemnant && previewRemnant.status === 'AVAILABLE' && (
                     <button
                       type="button"
-                      className="btn sm pri"
+                      className="mp-dark-btn accent"
                       onClick={() => {
                         setCanvasSpec({
                           canvasMode: 'REMNANT',
@@ -1436,7 +1503,9 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                           canvasWidthMm: previewRemnant.width,
                           canvasLengthMm: previewRemnant.length,
                           materialModel2D:
-                            previewRemnant.materialBatch || activeProduct?.modelKey || 'REMNANT'
+                            previewRemnant.materialBatch ||
+                            activeProduct?.modelKey ||
+                            'REMNANT'
                         });
                         toast(
                           `已选定在库料头 ${previewRemnant.id} (${previewRemnant.width}×${previewRemnant.length}mm) 进入搭切工作台`
@@ -1449,21 +1518,21 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                   )}
                   <button
                     type="button"
-                    className="btn sm"
-                    title="一键在标准宽度与宽屏大图预览之间切换"
+                    className="mp-dark-btn"
+                    title="在标准宽度与加宽预览之间切换"
                     onClick={() => {
-                      const next = previewWidth < 500 ? 580 : 420;
+                      const next = previewWidth < 480 ? 560 : 384;
                       commitPreviewWidth(next);
                       announceResize(
-                        next > 500 ? '预览区已切换为加宽视图' : '预览区已恢复标准宽度'
+                        next > 480 ? '预览区已切换为加宽视图' : '预览区已恢复标准宽度'
                       );
                     }}
                   >
-                    {previewWidth < 500 ? '⇔ 加宽' : '⇒ 标准'}
+                    {previewWidth < 480 ? '加宽' : '标准'}
                   </button>
                   <button
                     type="button"
-                    className="btn sm"
+                    className="mp-dark-btn"
                     aria-label="收起右侧预览窗格"
                     title="收起预览"
                     onClick={() => {
@@ -1570,7 +1639,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                         </button>
                       </div>
 
-                      {((previewRoll?.defects || previewRemnant?.defects || []).length > 0) && (
+                      {(previewRoll?.defects || previewRemnant?.defects || []).length > 0 && (
                         <>
                           <span className="sp" />
                           <select
@@ -1585,13 +1654,16 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                             }}
                           >
                             <option value="" disabled>
-                              定位疵点 ({(previewRoll?.defects || previewRemnant?.defects || []).length})…
+                              定位疵点 (
+                              {(previewRoll?.defects || previewRemnant?.defects || []).length})…
                             </option>
                             {(previewRoll?.defects || previewRemnant?.defects || []).map(
                               (d: any, idx: number) => (
                                 <option key={d.id || idx} value={idx}>
                                   #{idx + 1} {d.typeName || d.defectType} · Y{' '}
-                                  {previewRoll ? `${(d.y / 1000).toFixed(2)}m` : `${fmtN(d.y)}mm`}
+                                  {previewRoll
+                                    ? `${(d.y / 1000).toFixed(2)}m`
+                                    : `${fmtN(d.y)}mm`}
                                 </option>
                               )
                             )}
@@ -1612,14 +1684,17 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                                 (rollSpatialMap.cutZones || []).reduce(
                                   (s: number, z: any) => s + (z.lengthMm || 0),
                                   0
-                                ) || previewRoll.usedLength || 0
+                                ) ||
+                                  previewRoll.usedLength ||
+                                  0
                               )}
                               m
                             </b>
                           </span>
                           <span className="spatial-dot planned" />
                           <span>
-                            排程预占 <b>{fmtM(rollSpatialMap.summary?.plannedLengthMm || 0)}m</b>
+                            排程预占{' '}
+                            <b>{fmtM(rollSpatialMap.summary?.plannedLengthMm || 0)}m</b>
                           </span>
                           <span className="spatial-dot clean" />
                           <span>
@@ -1650,7 +1725,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                                   handleZoomToSpan(cz.startY, cz.endY, previewRoll.width)
                                 }
                               >
-                                {widthPct > 8 ? '已切' : ''}
+                                {widthPct >= 14 ? '已切' : ''}
                               </button>
                             );
                           })}
@@ -1669,7 +1744,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                                   handleZoomToSpan(pz.startY, pz.endY, previewRoll.width)
                                 }
                               >
-                                {widthPct > 8 ? '预占' : ''}
+                                {widthPct >= 14 ? '预占' : ''}
                               </button>
                             );
                           })}
@@ -1682,6 +1757,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                                 className="spatial-defect-tick"
                                 style={{ left: `${leftPct}%` }}
                                 title={`疵点 #${idx + 1}: ${d.typeName || d.defectType} (Y=${fmtM(d.y)}m)`}
+                                onClick={() => handleZoomToDefect(d, previewRoll.width)}
                               />
                             );
                           })}
@@ -1722,11 +1798,15 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                       {previewRoll
                         ? `幅宽 ${fmtN(previewRoll.width)} mm × 总长 ${fmtM(previewRoll.totalLength)} m（剩余 ${fmtM(previewRoll.currentRemainingLength ?? previewRoll.totalLength - (previewRoll.usedLength || 0))} m · 疵点 ${(previewRoll.defects || []).length} 处）`
                         : `料头尺寸 ${fmtN(previewRemnant?.width)} × ${fmtN(previewRemnant?.length)} mm（${fmtN(previewRemnant?.area, 2)} m²）`}
-                      {cursor ? ` · X=${fmtN(cursor.v, 0)} / Y=${fmtN(cursor.u, 0)} mm` : ''}
+                      {cursor
+                        ? ` · X=${fmtN(cursor.v, 0)} / Y=${fmtN(cursor.u, 0)} mm`
+                        : ''}
                     </div>
                   </div>
                 ) : (
-                  <div className="empty">点击任意母卷或料头查看实物尺寸与疵点图</div>
+                  <div className="mp-inv-preview-empty">
+                    点击左侧任意母卷或料头行，即可在此预览实物几何尺寸与疵点坐标
+                  </div>
                 )}
               </aside>
             </>
@@ -1858,78 +1938,80 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
           <div className="loading">正在校验已选母卷与料头可操作状态…</div>
         ) : (
           <form onSubmit={handleSubmitAction}>
-            <table className="t" style={{ marginBottom: 12 }}>
-              <thead>
-                <tr>
-                  <th>类型</th>
-                  <th>实物编号</th>
-                  <th>当前库位</th>
-                  {action === 'count' && (
-                    <>
-                      <th>实物在库</th>
-                      <th className="r">实测宽 mm</th>
-                      <th className="r">实测长 mm</th>
-                    </>
-                  )}
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {selectedMaterials.map(({ type, id, m }) => {
-                  const rowKey = `${type}:${id}`;
-                  const c = getCountRow(rowKey);
-                  return (
-                    <tr key={rowKey}>
-                      <td>
-                        <span className="tag kind">{type === 'roll' ? '母卷' : '料头'}</span>
-                      </td>
-                      <td className="num">{id}</td>
-                      <td>{m?.location || '—'}</td>
-                      {action === 'count' && (
-                        <>
-                          <td>
-                            <input
-                              type="checkbox"
-                              checked={c.present}
-                              onChange={(e) =>
-                                updateCountRow(rowKey, { present: e.target.checked })
-                              }
-                            />
-                          </td>
-                          <td className="r">
-                            <input
-                              type="number"
-                              className="field num"
-                              value={c.width}
-                              style={{ width: 72, textAlign: 'right' }}
-                              disabled={type === 'roll' || !c.present}
-                              onChange={(e) => updateCountRow(rowKey, { width: e.target.value })}
-                            />
-                          </td>
-                          <td className="r">
-                            <input
-                              type="number"
-                              className="field num"
-                              value={c.length}
-                              style={{ width: 82, textAlign: 'right' }}
-                              disabled={!c.present}
-                              onChange={(e) => updateCountRow(rowKey, { length: e.target.value })}
-                            />
-                          </td>
-                        </>
-                      )}
-                      <td>
-                        {!m?.allowed && (
-                          <span className="tag err" title={m?.reason || '不可操作'}>
-                            不可操作
-                          </span>
+            <div className="mp-table-scroll" style={{ marginBottom: 12 }}>
+              <table className="t">
+                <thead>
+                  <tr>
+                    <th>类型</th>
+                    <th>实物编号</th>
+                    <th>当前库位</th>
+                    {action === 'count' && (
+                      <>
+                        <th>实物在库</th>
+                        <th className="r">实测宽 mm</th>
+                        <th className="r">实测长 mm</th>
+                      </>
+                    )}
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedMaterials.map(({ type, id, m }) => {
+                    const rowKey = `${type}:${id}`;
+                    const c = getCountRow(rowKey);
+                    return (
+                      <tr key={rowKey}>
+                        <td>
+                          <span className="tag kind">{type === 'roll' ? '母卷' : '料头'}</span>
+                        </td>
+                        <td className="num">{id}</td>
+                        <td>{m?.location || '—'}</td>
+                        {action === 'count' && (
+                          <>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={c.present}
+                                onChange={(e) =>
+                                  updateCountRow(rowKey, { present: e.target.checked })
+                                }
+                              />
+                            </td>
+                            <td className="r">
+                              <input
+                                type="number"
+                                className="field num"
+                                value={c.width}
+                                style={{ width: 72, textAlign: 'right' }}
+                                disabled={type === 'roll' || !c.present}
+                                onChange={(e) => updateCountRow(rowKey, { width: e.target.value })}
+                              />
+                            </td>
+                            <td className="r">
+                              <input
+                                type="number"
+                                className="field num"
+                                value={c.length}
+                                style={{ width: 82, textAlign: 'right' }}
+                                disabled={!c.present}
+                                onChange={(e) => updateCountRow(rowKey, { length: e.target.value })}
+                              />
+                            </td>
+                          </>
                         )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        <td>
+                          {!m?.allowed && (
+                            <span className="tag err" title={m?.reason || '不可操作'}>
+                              不可操作
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
 
             {blockedMaterials.length > 0 && (
               <div className="notice" style={{ marginBottom: 10 }}>
