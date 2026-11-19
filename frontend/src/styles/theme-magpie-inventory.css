@@ -459,12 +459,12 @@
   outline: none;
 }
 
-/* Right Dark Charcoal (#181c22) Rounded 12px CAD Preview Card */
+/* Right Unified Light-Grid Rounded 12px CAD Preview Card */
 .mp-inv-preview-card.inv-preview-pane {
-  border: 0;
+  border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: var(--cp-radius-card);
-  background: #181c22;
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.18);
+  background: var(--cp-surface);
+  box-shadow: var(--cp-shadow-card);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -475,9 +475,9 @@
 .mp-inv-preview-card .mp-inv-preview-head {
   height: 42px;
   padding: 0 12px;
-  background: #20252d;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-  color: #f4f5f7;
+  background: var(--cp-surface);
+  border-bottom: 1px solid var(--cp-divider);
+  color: var(--cp-ink);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -485,9 +485,9 @@
 }
 
 .mp-inv-preview-card .inv-preview-id {
-  color: #f4f5f7;
+  color: var(--cp-ink);
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: 650;
 }
 
 .mp-dark-pill-tag {
@@ -502,22 +502,22 @@
 }
 
 .mp-dark-pill-tag.roll {
-  background: rgba(91, 97, 246, 0.24);
-  color: #c7d2fe;
+  background: rgba(91, 97, 246, 0.1);
+  color: #4338ca;
 }
 
 .mp-dark-pill-tag.remnant {
-  background: rgba(16, 185, 129, 0.22);
-  color: #a7f3d0;
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
 }
 
 .mp-dark-btn {
   height: 26px;
   padding: 0 9px;
   border-radius: 7px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: #d4d8e0;
+  border: 1px solid var(--cp-border);
+  background: #ffffff;
+  color: var(--cp-ink-2);
   font-size: 11.5px;
   font-weight: 500;
   cursor: pointer;
@@ -529,30 +529,31 @@
 }
 
 .mp-dark-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.2);
+  background: #f4f5f7;
+  color: var(--cp-ink);
+  border-color: rgba(15, 23, 42, 0.18);
 }
 
 .mp-dark-btn.accent {
-  background: rgba(91, 97, 246, 0.26);
-  border-color: rgba(129, 140, 248, 0.45);
-  color: #e0e7ff;
+  background: rgba(91, 97, 246, 0.1);
+  border-color: rgba(91, 97, 246, 0.28);
+  color: #4338ca;
   font-weight: 600;
 }
 
 .mp-dark-btn.accent:hover {
-  background: rgba(91, 97, 246, 0.4);
-  color: #ffffff;
+  background: rgba(91, 97, 246, 0.16);
+  color: #312e81;
 }
 
-/* Dark CAD Toolbar inside Inventory Preview Card */
+/* Light CAD Toolbar inside Inventory Preview Card */
 .mp-inv-preview-card .ctool.inv-preview-toolbar {
-  background: #1b2028;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: #fafafb;
+  border-bottom: 1px solid var(--cp-divider);
   padding: 5px 10px;
   min-height: 36px;
   gap: 6px;
+  color: var(--cp-ink);
 }
 
 .mp-inv-preview-card .ctool-group {
@@ -561,7 +562,7 @@
   gap: 2px;
   padding: 2px;
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.07);
+  background: #eef0f4;
 }
 
 .mp-inv-preview-card .ctool button {
@@ -571,14 +572,14 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: #cbd5e1;
+  color: var(--cp-ink-2);
   font-size: 11.5px;
   font-weight: 500;
 }
 
 .mp-inv-preview-card .ctool button:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--cp-ink);
 }
 
 .mp-inv-preview-card .ctool button[aria-pressed="true"],
@@ -589,7 +590,7 @@
 }
 
 .mp-inv-preview-card .ctool .div {
-  border-inline-start: 1px solid rgba(255, 255, 255, 0.12);
+  border-inline-start: 1px solid var(--cp-divider);
   background: transparent;
 }
 
@@ -597,30 +598,30 @@
   height: 25px;
   min-block-size: 25px;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: #232933;
-  color: #e2e8f0;
+  border: 1px solid var(--cp-border);
+  background: #ffffff;
+  color: var(--cp-ink);
   font-size: 11.5px;
   padding: 0 7px;
 }
 
-/* Refined Spatial Cut-Zone & Planned-Zone Strip inside Dark Card */
+/* Refined Spatial Cut-Zone & Planned-Zone Strip inside Light Preview Card */
 .mp-inv-preview-card .roll-spatial-panel {
   padding: 8px 12px 9px;
-  background: #1d222b;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-  color: #cbd5e1;
+  background: #ffffff;
+  border-bottom: 1px solid var(--cp-divider);
+  color: var(--cp-ink-2);
   gap: 7px;
 }
 
 .mp-inv-preview-card .roll-spatial-legend {
   gap: 8px;
   font-size: 11px;
-  color: #a1a8b3;
+  color: var(--cp-ink-3);
 }
 
 .mp-inv-preview-card .roll-spatial-legend b {
-  color: #f4f5f7;
+  color: var(--cp-ink);
   font-weight: 600;
 }
 
@@ -632,8 +633,8 @@
 .mp-inv-preview-card .roll-spatial-bar {
   block-size: 22px;
   border-radius: 6px;
-  background: rgba(16, 185, 129, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(15, 23, 42, 0.1);
 }
 
 .mp-inv-preview-card .spatial-seg {
@@ -645,26 +646,29 @@
 .mp-inv-preview-card .spatial-seg.cut {
   background: repeating-linear-gradient(
     -45deg,
-    #4b5563 0 5px,
-    #374151 5px 10px
+    #cbd5e1 0 5px,
+    #94a3b8 5px 10px
   );
-  border-right: 1.5px solid #9ca3af;
-  color: #f3f4f6;
+  border-right: 1.5px solid #64748b;
+  color: #0f172a;
 }
 
 .mp-inv-preview-card .spatial-seg.planned {
-  background: rgba(91, 97, 246, 0.85);
-  border-inline: 1px solid #a5b4fc;
+  background: rgba(91, 97, 246, 0.82);
+  border-inline: 1px solid #818cf8;
+  color: #ffffff;
 }
 
 .mp-inv-preview-card .inv-canvas-box {
-  background: #181c22;
+  background: #f4f5f7;
+  display: flex;
+  flex-direction: column;
 }
 
 .mp-inv-preview-card .studio-canvas-hint {
-  background: #20252d;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
-  color: #9aa4b2;
+  background: #fafafb;
+  border-top: 1px solid var(--cp-divider);
+  color: var(--cp-ink-2);
   padding: 5px 12px;
   font-size: 11.5px;
 }
@@ -677,7 +681,7 @@
   justify-content: center;
   padding: 28px 18px;
   text-align: center;
-  color: #8e96a3;
+  color: var(--cp-ink-3);
   font-size: 12.5px;
 }
 
@@ -770,32 +774,33 @@
   flex-direction: column;
   align-items: center;
   padding: 10px 0 8px;
-  background: #181c22;
+  background: var(--cp-surface);
   border-radius: var(--cp-radius-card);
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.18);
+  box-shadow: var(--cp-shadow-card);
+  border: 1px solid rgba(15, 23, 42, 0.08);
   min-height: 0;
   overflow: hidden;
 }
 
 .mp-insp-track-label {
-  color: #9aa4b2;
+  color: var(--cp-ink-3);
   font-size: 10.5px;
-  font-weight: 500;
+  font-weight: 600;
   margin-bottom: 6px;
 }
 
 .mp-insp-track-card .vtrack {
   border-radius: 4px;
-  background: #272d36;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #f1f5f9;
+  border: 1px solid rgba(15, 23, 42, 0.14);
 }
 
 .mp-insp-track-card .vtrack b {
-  background: rgba(16, 185, 129, 0.28);
+  background: rgba(16, 185, 129, 0.24);
 }
 
 .mp-insp-track-card .vtrack em {
-  background: #34d399;
+  background: #10b981;
 }
 
 .mp-insp-canvas-card {
@@ -803,35 +808,37 @@
   flex-direction: column;
   min-height: 0;
   min-width: 0;
-  background: #181c22;
+  background: var(--cp-surface);
   border-radius: var(--cp-radius-card);
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.18);
+  box-shadow: var(--cp-shadow-card);
+  border: 1px solid rgba(15, 23, 42, 0.08);
   overflow: hidden;
 }
 
 .mp-insp-canvas-card .ctool {
-  min-height: 36px;
+  min-height: 38px;
   padding: 4px 10px;
-  background: #20252d;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: var(--cp-surface);
+  border-bottom: 1px solid var(--cp-divider);
+  color: var(--cp-ink);
   gap: 6px;
 }
 
 .mp-insp-canvas-card .ctool .vseg {
-  border: 0;
+  border: 1px solid var(--cp-border);
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.08);
+  background: #f4f5f7;
   padding: 2px;
   gap: 2px;
 }
 
 .mp-insp-canvas-card .ctool button {
-  height: 24px;
-  min-height: 24px;
-  border: 0;
+  height: 25px;
+  min-height: 25px;
+  border: 1px solid var(--cp-border);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #cbd5e1;
+  background: #ffffff;
+  color: var(--cp-ink-2);
   font-size: 11.5px;
   font-weight: 500;
   padding: 0 9px;
@@ -840,24 +847,26 @@
 .mp-insp-canvas-card .ctool .vseg button {
   height: 22px;
   min-height: 22px;
+  border: 0;
   border-radius: 5px;
   background: transparent;
 }
 
 .mp-insp-canvas-card .ctool button:hover:not([disabled]) {
-  background: rgba(255, 255, 255, 0.13);
-  color: #ffffff;
+  background: #f4f5f7;
+  color: var(--cp-ink);
 }
 
 .mp-insp-canvas-card .ctool button.on,
 .mp-insp-canvas-card .ctool button[aria-pressed="true"] {
   background: var(--cp-accent);
+  border-color: var(--cp-accent);
   color: #ffffff;
   box-shadow: none;
 }
 
 .mp-insp-canvas-card .canvas-wrap {
-  background: #181c22;
+  background: #f4f5f7;
 }
 
 /* Right Pure-White 12px Defect Record & Precision Form Card */

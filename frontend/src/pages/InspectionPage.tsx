@@ -5,7 +5,7 @@ import {
   advance,
   round
 } from '@static/js/inspection/inspection-model.js';
-import { createRollCanvas } from '@static/js/canvas/roll-canvas.js';
+import { CadCanvasView } from '../components/CadCanvasView';
 import { buildInspectionScene } from '@static/app/js/model/roll-scene.js';
 import {
   SegmentedControl,
@@ -87,7 +87,6 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
   const [fType, setFType] = useState<string>('STAIN');
   const [fMargin, setFMargin] = useState<string | number>(20);
 
-  const canvasHostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<any>(null);
   const stateRef = useRef({
     roll,
@@ -277,153 +276,113 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
     };
   }, [rollParam]);
 
-  // Mount / destroy Konva inspection canvas when roll becomes active
-  useEffect(() => {
-    if (!roll || !canvasHostRef.current) {
-      canvasRef.current?.destroy();
-      canvasRef.current = null;
-      return;
-    }
-    const c = createRollCanvas(canvasHostRef.current, {
-      onInteract: () => {
-        if (stateRef.current.running) {
-          setRunning(false);
-          persistDraft(
-            stateRef.current.roll,
-            stateRef.current.pending,
-            stateRef.current.pos
-          );
-        }
-      },
-      onCursor: (p: any) => {
-        const curRoll = stateRef.current.roll;
-        if (!curRoll) return;
-        setPointerText(
-          p
-            ? `距右 ${round(curRoll.width - p.v)} · 距卷头 ${round(p.u)} mm`
-            : '距右 / 距卷头 · mm'
-        );
-      },
-      onDefectSelect: (key: string) => {
-        const st = stateRef.current;
-        if (!st.roll) return;
-        const list = [
-          ...(st.roll.defects || []).map((d: any) => ({ ...d, saved: true })),
-          ...st.pending.map((d: any) => ({ ...d, saved: false }))
-        ];
-        const i = list.findIndex((d) => defectKey(d) === key);
-        setSel(i < 0 ? null : i);
-      },
-      onDefectDraw: (box: any) => {
-        const st = stateRef.current;
-        if (st.saving || !st.roll) return;
-        try {
-          const d = validateDefect(
-            {
-              x: box.v,
-              y: box.u,
-              w: box.dv,
-              h: box.du,
-              margin: st.margin
-            },
-            st.roll
-          );
-          const nextHistory = [
-            ...st.history.slice(-49),
-            structuredClone(st.pending)
-          ];
-          const newItem = {
-            ...d,
-            ...defectAttrs(st.defaultType),
-            captureId: crypto.randomUUID()
-          };
-          const nextPending = [...st.pending, newItem];
-          const savedLen = (st.roll.defects || []).length;
-          setHistory(nextHistory);
-          setPending(nextPending);
-          setSel(savedLen + nextPending.length - 1);
-          persistDraft(st.roll, nextPending, st.pos);
-        } catch (e: any) {
-          toast(e.message, true);
-        }
-      },
-      onDefectEdit: (key: string, box: any) => {
-        const st = stateRef.current;
-        if (st.saving || !st.roll) return;
-        const k = st.pending.findIndex((d: any) => d.captureId === key);
-        if (k < 0) return;
-        try {
-          const next = validateDefect(
-            {
-              ...st.pending[k],
-              x: box.v,
-              y: box.u,
-              w: box.dv,
-              h: box.du
-            },
-            st.roll
-          );
-          if (JSON.stringify(next) !== JSON.stringify(st.pending[k])) {
-            const nextHistory = [
-              ...st.history.slice(-49),
-              structuredClone(st.pending)
-            ];
-            const nextPending = st.pending.map((it: any, idx: number) =>
-              idx === k ? next : it
-            );
-            setHistory(nextHistory);
-            setPending(nextPending);
-            persistDraft(st.roll, nextPending, st.pos);
-          }
-        } catch (e: any) {
-          toast(e.message, true);
-          // Re-render current scene on invalid drag
-          const list = [
-            ...(st.roll.defects || []).map((d: any) => ({ ...d, saved: true })),
-            ...st.pending.map((d: any) => ({ ...d, saved: false }))
-          ];
-          const curD = st.sel != null ? list[st.sel] : null;
-          c.setScene(
-            buildInspectionScene(
-              st.roll,
-              st.pending,
-              st.pos,
-              curD ? defectKey(curD) : null
-            ),
-            { follow: !st.overview }
-          );
-        }
-      }
-    });
-    canvasRef.current = c;
-    return () => {
-      c.destroy();
-      canvasRef.current = null;
-    };
-  }, [roll?.rollId]);
-
-  // Update canvas options & scene whenever inspection state changes
-  useEffect(() => {
-    const c = canvasRef.current;
-    if (!c || !roll) return;
+  const inspectionScene = useMemo(() => {
+    if (!roll) return null;
     const curD = sel != null ? allDefects[sel] : null;
-    c.setOptions({
-      view: overview ? 'full' : 'inspection',
-      tool: tool === 'mark' ? 'defect' : tool,
-      editDefects: true,
-      editable: !saving,
-      minDefectSize: 0.1
-    });
-    c.setScene(
-      buildInspectionScene(
-        roll,
-        pending,
-        pos,
-        curD ? defectKey(curD) : null
-      ),
-      { follow: !overview }
+    return buildInspectionScene(roll, pending, pos, curD ? defectKey(curD) : null);
+  }, [roll, pending, pos, sel, allDefects]);
+
+  const handleCanvasInteract = () => {
+    if (stateRef.current.running) {
+      setRunning(false);
+      persistDraft(
+        stateRef.current.roll,
+        stateRef.current.pending,
+        stateRef.current.pos
+      );
+    }
+  };
+
+  const handleCanvasCursor = (p: { u: number; v: number } | null) => {
+    const curRoll = stateRef.current.roll;
+    if (!curRoll) return;
+    setPointerText(
+      p
+        ? `距右 ${round(curRoll.width - p.v)} · 距卷头 ${round(p.u)} mm`
+        : '距右 / 距卷头 · mm'
     );
-  }, [roll, pending, pos, sel, overview, tool, saving, allDefects]);
+  };
+
+  const handleCanvasDefectSelect = (key: string) => {
+    const st = stateRef.current;
+    if (!st.roll) return;
+    const list = [
+      ...(st.roll.defects || []).map((d: any) => ({ ...d, saved: true })),
+      ...st.pending.map((d: any) => ({ ...d, saved: false }))
+    ];
+    const i = list.findIndex((d) => defectKey(d) === key);
+    setSel(i < 0 ? null : i);
+  };
+
+  const handleCanvasDefectDraw = (box: { u: number; v: number; du: number; dv: number }) => {
+    const st = stateRef.current;
+    if (st.saving || !st.roll) return;
+    try {
+      const d = validateDefect(
+        {
+          x: box.v,
+          y: box.u,
+          w: box.dv,
+          h: box.du,
+          margin: st.margin
+        },
+        st.roll
+      );
+      const nextHistory = [
+        ...st.history.slice(-49),
+        structuredClone(st.pending)
+      ];
+      const newItem = {
+        ...d,
+        ...defectAttrs(st.defaultType),
+        captureId: crypto.randomUUID()
+      };
+      const nextPending = [...st.pending, newItem];
+      const savedLen = (st.roll.defects || []).length;
+      setHistory(nextHistory);
+      setPending(nextPending);
+      setSel(savedLen + nextPending.length - 1);
+      persistDraft(st.roll, nextPending, st.pos);
+    } catch (e: any) {
+      toast(e.message, true);
+    }
+  };
+
+  const handleCanvasDefectEdit = (
+    key: string,
+    box: { u: number; v: number; du: number; dv: number }
+  ) => {
+    const st = stateRef.current;
+    if (st.saving || !st.roll) return;
+    const k = st.pending.findIndex((d: any) => d.captureId === key);
+    if (k < 0) return;
+    try {
+      const next = validateDefect(
+        {
+          ...st.pending[k],
+          x: box.v,
+          y: box.u,
+          w: box.dv,
+          h: box.du
+        },
+        st.roll
+      );
+      if (JSON.stringify(next) !== JSON.stringify(st.pending[k])) {
+        const nextHistory = [
+          ...st.history.slice(-49),
+          structuredClone(st.pending)
+        ];
+        const nextPending = st.pending.map((it: any, idx: number) =>
+          idx === k ? next : it
+        );
+        setHistory(nextHistory);
+        setPending(nextPending);
+        persistDraft(st.roll, nextPending, st.pos);
+      }
+    } catch (e: any) {
+      toast(e.message, true);
+    }
+  };
 
   // Automatic roll running timer
   useEffect(() => {
@@ -488,7 +447,6 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
           stateRef.current.pos
         );
       }
-      canvasRef.current?.setVisible(!document.hidden);
     };
     const onSaved = (ev: any) => {
       const { saved, submitted } = ev.detail || {};
@@ -1160,14 +1118,34 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
               </div>
               <div className="canvas-wrap">
                 <div
-                  ref={canvasHostRef}
                   id="isvg"
                   style={{
                     position: 'absolute',
-                    inset: 0,
-                    cursor: tool === 'mark' ? 'crosshair' : 'default'
+                    inset: 0
                   }}
-                />
+                >
+                  <CadCanvasView
+                    scene={inspectionScene}
+                    viewMode={overview ? 'full' : 'inspection'}
+                    tool={
+                      tool === 'mark'
+                        ? 'defect'
+                        : tool === 'measure'
+                        ? 'measure'
+                        : 'pan'
+                    }
+                    showDimensions={true}
+                    showPath={false}
+                    minHeight={360}
+                    ariaLabel="验布实时画布"
+                    onInteract={handleCanvasInteract}
+                    onCursorMove={handleCanvasCursor}
+                    onDefectSelect={handleCanvasDefectSelect}
+                    onDefectDraw={handleCanvasDefectDraw}
+                    onDefectEdit={handleCanvasDefectEdit}
+                    canvasRefOut={canvasRef}
+                  />
+                </div>
               </div>
             </section>
 

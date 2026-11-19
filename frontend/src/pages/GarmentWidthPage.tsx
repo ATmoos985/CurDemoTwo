@@ -20,7 +20,7 @@ import {
   selectMarkerTrial,
   solveMarkerDirection
 } from '@static/app/js/model/garment.js';
-import { createRollCanvas } from '@static/app/js/canvas/roll-canvas.js';
+import { CadCanvasView } from '../components/CadCanvasView';
 import { showcaseScene } from '@static/app/js/model/showcase.js';
 import { useStudioStore } from '../store/useStudioStore';
 import { CodeBadge } from '../components/ui/MagpiePrimitives';
@@ -132,7 +132,6 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
   const helpRef = useRef<HTMLDetailsElement | null>(null);
   const sizeInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const inputWidthsRef = useRef<HTMLInputElement | null>(null);
-  const canvasHostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<any>(null);
   const sessionRef = useRef<any>(null);
   const revisionRef = useRef<number>(0);
@@ -169,8 +168,6 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
     return () => {
       revisionRef.current++;
       sessionRef.current?.cancel();
-      canvasRef.current?.destroy();
-      canvasRef.current = null;
     };
   }, []);
 
@@ -187,8 +184,6 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
     if (hasBenchmark) {
       setSelectedSource({ kind: 'optimized' });
     } else {
-      canvasRef.current?.destroy();
-      canvasRef.current = null;
       setSelectedSource(null);
     }
   };
@@ -262,18 +257,12 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
     return null;
   }, [selectedSource, rows, optimizedPreview, referencePreview]);
 
-  useEffect(() => {
-    if (!displayedRow?.result?.layout || !canvasHostRef.current) return;
-    if (!canvasRef.current) {
-      canvasRef.current = createRollCanvas(canvasHostRef.current);
-    }
-    canvasRef.current.setScene(
-      (showcaseScene as any)(displayedRow.layoutRequest, displayedRow.result, 0, {
-        occupiedLengthMm: displayedRow.use?.length,
-        gapFillPlacements: displayedRow.result?.marker?.gapFillPlacements
-      }),
-      { refit: true }
-    );
+  const displayedScene = useMemo(() => {
+    if (!displayedRow?.result?.layout) return null;
+    return (showcaseScene as any)(displayedRow.layoutRequest, displayedRow.result, 0, {
+      occupiedLengthMm: displayedRow.use?.length,
+      gapFillPlacements: displayedRow.result?.marker?.gapFillPlacements
+    });
   }, [displayedRow]);
 
   const handleStop = () => {
@@ -1107,6 +1096,14 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
               <button
                 type="button"
                 className="mp-cad-btn"
+                disabled={!displayedScene}
+                onClick={() => canvasRef.current?.fit()}
+              >
+                居中适配
+              </button>
+              <button
+                type="button"
+                className="mp-cad-btn"
                 id="garment-export"
                 disabled={!displayedRow?.result?.layout}
                 onClick={handleExportJson}
@@ -1133,11 +1130,19 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
               </button>
             </div>
             <div
-              ref={canvasHostRef}
               id="garment-canvas"
               className="demo-canvas"
               aria-label="当前候选唛架"
-            />
+            >
+              <CadCanvasView
+                scene={displayedScene}
+                showDimensions={true}
+                showPath={false}
+                minHeight={360}
+                ariaLabel="当前候选唛架"
+                canvasRefOut={canvasRef}
+              />
+            </div>
           </section>
         </div>
       </div>

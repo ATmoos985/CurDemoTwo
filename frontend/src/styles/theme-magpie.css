@@ -51,7 +51,7 @@
   --bar: var(--cp-bg);
   --bar-2: #eef0f4;
   --bar-text: var(--cp-ink-2);
-  --canvas: #181c22;
+  --canvas: #f4f5f7;
   --ok: #10b981;
   --ok-bg: rgba(16, 185, 129, 0.12);
   --warn: #d97706;
@@ -1260,8 +1260,9 @@ dialog.settings-center-dialog {
 }
 
 .studio-split > .pane.studio-center {
-  background: #181c22;
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.18);
+  background: var(--cp-surface);
+  box-shadow: var(--cp-shadow-card);
+  border: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 .studio-split .pane-h {
@@ -1403,26 +1404,41 @@ dialog.settings-center-dialog {
   border-color: var(--cp-accent-hover);
 }
 
-/* CAD Toolbar inside Dark Viewport */
+/* Unified Light CAD Toolbar & Global Light-Grid Interactive Board */
 .studio-center .ctool {
-  height: 36px;
-  background: #20252d;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  height: 38px;
+  background: var(--cp-surface);
+  border-bottom: 1px solid var(--cp-divider);
+  color: var(--cp-ink);
   padding: 0 10px;
 }
 
 .studio-center .ctool .vseg {
-  border: 0;
+  border: 1px solid var(--cp-border);
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.08);
+  background: #f4f5f7;
   padding: 2px;
   gap: 2px;
 }
 
+.studio-center .ctool button {
+  color: var(--cp-ink-2);
+  background: #ffffff;
+  border: 1px solid var(--cp-border);
+  border-radius: 6px;
+}
+
 .studio-center .ctool .vseg button {
   height: 22px;
+  border: 0;
   border-radius: 5px;
   padding: 0 9px;
+  background: transparent;
+}
+
+.studio-center .ctool button:hover:not([disabled]) {
+  background: #f4f5f7;
+  color: var(--cp-ink);
 }
 
 .studio-center .ctool .vseg button[aria-pressed="true"],
@@ -1432,6 +1448,102 @@ dialog.settings-center-dialog {
   background: var(--cp-accent);
   border-color: var(--cp-accent);
   color: #ffffff;
+}
+
+.studio-center .ctool .ctool-readout {
+  color: var(--cp-ink-2);
+}
+
+.studio-center .studio-canvas-hint {
+  background: #fafafb;
+  border-top: 1px solid var(--cp-divider);
+  color: var(--cp-ink-2);
+}
+
+/* Global Unified Light Engineering Grid Canvas (WorkbenchBoardCanvas & CadCanvasView) */
+.react-cad-host {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.wb-board-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  flex: 1;
+  min-height: 240px;
+  background-color: #f4f5f7;
+  background-image:
+    linear-gradient(to right, rgba(15, 23, 42, 0.095) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.095) 1px, transparent 1px),
+    linear-gradient(to right, rgba(15, 23, 42, 0.055) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.055) 1px, transparent 1px);
+  background-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px;
+  background-position: 0 0;
+  overflow: hidden;
+  user-select: none;
+}
+
+.wb-board-konva-host {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  outline: none;
+}
+
+.wb-board-feedback {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  pointer-events: none;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+  white-space: nowrap;
+}
+
+.wb-board-feedback.is-ok {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.wb-board-feedback.is-err {
+  background: #fff1f2;
+  color: #be123c;
+  border: 1px solid rgba(225, 29, 72, 0.35);
+}
+
+.wb-board-feedback.is-return {
+  background: #eef2ff;
+  color: #4338ca;
+  border: 1px solid rgba(91, 97, 246, 0.35);
+}
+
+.wb-board-zoom-pill {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  z-index: 8;
+  pointer-events: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  color: var(--cp-ink-2, #52525b);
+  font-size: 11px;
+  font-weight: 500;
+  backdrop-filter: blur(4px);
 }
 
 /* Compact 1366x768 Guard */

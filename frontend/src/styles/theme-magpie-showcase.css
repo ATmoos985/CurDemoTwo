@@ -85,12 +85,12 @@
   border-bottom: 1px solid var(--cp-divider);
 }
 
-/* Dark Charcoal (#181c22) Rounded CAD Viewport Card */
+/* Unified Light Engineering Grid Rounded CAD Viewport Card */
 .mp-cad-card {
-  background: #181c22;
-  border: 0;
+  background: var(--cp-surface);
+  border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: var(--cp-radius-card);
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.18);
+  box-shadow: var(--cp-shadow-card);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -101,9 +101,9 @@
 .mp-cad-head {
   min-height: 38px;
   padding: 5px 12px;
-  background: #20252d;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-  color: #e4e7ec;
+  background: var(--cp-surface);
+  border-bottom: 1px solid var(--cp-divider);
+  color: var(--cp-ink);
   font-size: 12px;
   font-weight: 600;
   display: flex;
@@ -114,9 +114,9 @@
 }
 
 .mp-cad-title {
-  color: #f1f5f9;
+  color: var(--cp-ink);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 650;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -127,9 +127,9 @@
   height: 26px;
   padding: 0 10px;
   border-radius: 7px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.06);
-  color: #dbe2ea;
+  border: 1px solid var(--cp-border);
+  background: #ffffff;
+  color: var(--cp-ink-2);
   font-size: 11.5px;
   font-weight: 500;
   cursor: pointer;
@@ -141,9 +141,9 @@
 }
 
 .mp-cad-btn:hover:not([disabled]) {
-  background: rgba(255, 255, 255, 0.13);
-  border-color: rgba(255, 255, 255, 0.24);
-  color: #ffffff;
+  background: #f4f5f7;
+  border-color: rgba(15, 23, 42, 0.18);
+  color: var(--cp-ink);
 }
 
 .mp-cad-btn[aria-pressed="true"],
@@ -154,15 +154,16 @@
 }
 
 .mp-cad-btn.accent {
-  background: rgba(91, 97, 246, 0.22);
-  border-color: rgba(129, 140, 248, 0.45);
-  color: #e0e7ff;
+  background: rgba(91, 97, 246, 0.1);
+  border-color: rgba(91, 97, 246, 0.28);
+  color: #4338ca;
+  font-weight: 600;
 }
 
 .mp-cad-btn.accent:hover:not([disabled]) {
-  background: rgba(91, 97, 246, 0.34);
-  border-color: rgba(129, 140, 248, 0.65);
-  color: #ffffff;
+  background: rgba(91, 97, 246, 0.16);
+  border-color: rgba(91, 97, 246, 0.42);
+  color: #312e81;
 }
 
 .mp-cad-btn[disabled] {
@@ -173,9 +174,9 @@
 .mp-cad-foot {
   min-height: 30px;
   padding: 5px 12px;
-  background: #1d222a;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  color: #9aa4b2;
+  background: #fafafb;
+  border-top: 1px solid var(--cp-divider);
+  color: var(--cp-ink-2);
   font-size: 11.5px;
   display: flex;
   align-items: center;
@@ -446,8 +447,10 @@
 
 .mp-garment-canvas-card #garment-canvas {
   flex: 1;
-  min-height: 200px;
-  background: #181c22;
+  min-height: 220px;
+  background: #f4f5f7;
+  display: flex;
+  flex-direction: column;
 }
 
 /* --------------------------------------------------------------------------
@@ -574,8 +577,10 @@ a.mp-case-card:hover {
 
 .mp-demo-canvas-card #demo-canvas {
   flex: 1;
-  min-height: 220px;
-  background: #181c22;
+  min-height: 240px;
+  background: #f4f5f7;
+  display: flex;
+  flex-direction: column;
 }
 
 .mp-demo-split .kv {

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fmtN } from '@static/app/js/util.js';
-import { createRollCanvas } from '@static/app/js/canvas/roll-canvas.js';
+import { CadCanvasView } from '../components/CadCanvasView';
 import { OptimizationSession } from '@static/js/business/optimization/job-client.js';
 import {
   SHOWCASE_CASES,
@@ -740,7 +740,6 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
   const [batchProgressText, setBatchProgressText] = useState<string>('');
   const batchAbortRef = useRef<number>(0);
 
-  const canvasHostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<any>(null);
   const sessionRef = useRef<any>(null);
   const tokenRef = useRef<number>(0);
@@ -751,8 +750,6 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
     if (!selected) {
       tokenRef.current++;
       sessionRef.current?.cancel();
-      canvasRef.current?.destroy();
-      canvasRef.current = null;
       return;
     }
 
@@ -789,45 +786,16 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
       }
     );
 
-    if (canvasHostRef.current) {
-      canvasRef.current?.destroy();
-      canvasRef.current = createRollCanvas(canvasHostRef.current, {
-        onContextMenu: (hit: any) => {
-          const st = stateRef.current;
-          if (!st.request) return;
-          const sc = showcaseScene(st.request, st.result, st.patternIndex);
-          const piece = sc.segments[0]?.pieces?.find(
-            (p: any) => p.id === hit?.entityId
-          );
-          setSelectionText(
-            piece
-              ? `${piece.label} · X ${fmtN(piece.v, 1)} / Y ${fmtN(
-                  piece.u,
-                  1
-                )} mm · ${fmtN(piece.dv, 1)} × ${fmtN(piece.du, 1)} mm`
-              : '右键查看裁片尺寸。'
-          );
-        }
-      });
-      canvasRef.current.setScene(showcaseScene(initReq, initRes, 0), {
-        refit: true
-      });
-    }
-
     return () => {
       disposed = true;
       tokenRef.current++;
       sessionRef.current?.cancel();
-      canvasRef.current?.destroy();
-      canvasRef.current = null;
     };
   }, [selected?.id]);
 
-  useEffect(() => {
-    if (!selected || !request || !canvasRef.current) return;
-    canvasRef.current.setScene(showcaseScene(request, result, patternIndex), {
-      refit: true
-    });
+  const activeScene = useMemo(() => {
+    if (!selected || !request) return null;
+    return showcaseScene(request, result, patternIndex);
   }, [selected, request, result, patternIndex]);
 
   const handleRun = async (profile = 'FAST') => {
@@ -1506,12 +1474,36 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
             </button>
           </div>
           <div
-            ref={canvasHostRef}
             id="demo-canvas"
             className="demo-canvas"
-            tabIndex={0}
             aria-label="演示排料画布"
-          />
+          >
+            <CadCanvasView
+              scene={activeScene}
+              vertical={vertical}
+              showPath={showPath}
+              showDimensions={true}
+              minHeight={360}
+              ariaLabel="演示排料画布"
+              onContextInspect={(hit) => {
+                const st = stateRef.current;
+                if (!st.request) return;
+                const sc = showcaseScene(st.request, st.result, st.patternIndex);
+                const piece = sc.segments[0]?.pieces?.find(
+                  (p: any) => p.id === hit?.entityId
+                );
+                setSelectionText(
+                  piece
+                    ? `${piece.label} · X ${fmtN(piece.v, 1)} / Y ${fmtN(
+                        piece.u,
+                        1
+                      )} mm · ${fmtN(piece.dv, 1)} × ${fmtN(piece.du, 1)} mm`
+                    : '右键查看裁片尺寸。'
+                );
+              }}
+              canvasRefOut={canvasRef}
+            />
+          </div>
           <div className="mp-cad-foot" id="demo-selection">
             {selectionText}
           </div>
