@@ -956,65 +956,136 @@
   padding: 18px 22px 24px;
 }
 
-.mp-insp-empty-card {
+/* Roll board when no roll is selected: fills the whole workspace */
+.mp-insp-board {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 100%;
+}
+
+.mp-insp-board-card {
   background: var(--cp-surface);
   border-radius: var(--cp-radius-card);
   box-shadow: var(--cp-shadow-card);
-  padding: 24px;
-  max-width: 860px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-.mp-insp-empty-card h2 {
-  margin: 0 0 6px;
-  font-size: 15px;
+.mp-insp-board-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid var(--cp-divider);
+}
+
+.mp-insp-board-head h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
   font-weight: 650;
   color: var(--cp-ink);
 }
 
-.mp-insp-empty-card p {
-  margin: 0 0 16px;
+.mp-insp-board-head p {
+  margin: 0;
   font-size: 12.5px;
   color: var(--cp-ink-2);
 }
 
-.mp-insp-quick-grid {
+.mp-insp-board-table td {
+  height: 46px;
+  font-size: 13px;
+}
+
+.mp-ghost-btn.mp-ghost-strong {
+  color: var(--cp-accent-ink);
+  border-color: rgba(91, 97, 246, 0.35);
+}
+
+/* Clickable table rows shared by the roll board and documents ledger */
+.t tr.mp-row-link {
+  cursor: pointer;
+}
+
+/* KPI strip: neutral white cards, click to filter */
+.mp-kpi-row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(142px, 1fr));
   gap: 10px;
 }
 
-.mp-insp-quick-item {
+.mp-kpi {
+  appearance: none;
+  border: 0;
+  font: inherit;
+  text-align: left;
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 11px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--cp-border);
-  background: #fafafb;
-  color: var(--cp-ink);
-  text-decoration: none;
-  transition: border-color 0.14s ease, background-color 0.14s ease, box-shadow 0.14s ease;
-}
-
-.mp-insp-quick-item:hover {
+  gap: 3px;
+  padding: 12px 14px;
   background: var(--cp-surface);
-  border-color: rgba(91, 97, 246, 0.45);
-  box-shadow: 0 2px 6px rgba(91, 97, 246, 0.1);
+  border-radius: var(--cp-radius-card);
+  box-shadow: var(--cp-shadow-card);
+  color: var(--cp-ink);
+  min-width: 0;
 }
 
-.mp-insp-quick-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+button.mp-kpi {
+  cursor: pointer;
+  transition: box-shadow 0.14s ease, background-color 0.14s ease;
 }
 
-.mp-insp-quick-meta {
+button.mp-kpi:hover {
+  background: var(--cp-surface-hover);
+}
+
+button.mp-kpi:focus-visible {
+  outline: 2px solid var(--cp-accent);
+  outline-offset: 2px;
+}
+
+.mp-kpi.on {
+  box-shadow: 0 0 0 1.5px var(--cp-accent), 0 2px 8px rgba(91, 97, 246, 0.12);
+}
+
+.mp-kpi-label {
+  font-size: 12px;
+  color: var(--cp-ink-3);
+  font-weight: 500;
+}
+
+.mp-kpi-value {
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.mp-kpi-value small {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--cp-ink-3);
+  margin-left: 3px;
+}
+
+.mp-kpi[data-tone='err'] .mp-kpi-value {
+  color: var(--err);
+}
+
+.mp-kpi-sub {
   font-size: 11.5px;
   color: var(--cp-ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ==========================================================================
+
    3. DocumentsPage — Light Desktop Shell + Segmented Filter + White Card Table
    ========================================================================== */
 
@@ -1134,5 +1205,350 @@
   .mp-insp-feedbar {
     padding: 6px 12px;
     gap: 8px;
+  }
+}
+
+/* Documents overview: insight row, filter chips, ledger + trace drawer */
+.mp-doc-insight {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: 10px;
+}
+
+.mp-doc-panel {
+  background: var(--cp-surface);
+  border-radius: var(--cp-radius-card);
+  box-shadow: var(--cp-shadow-card);
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.mp-doc-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.mp-doc-panel-head strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cp-ink);
+}
+
+.mp-day-chart {
+  display: grid;
+  grid-template-columns: repeat(14, minmax(0, 1fr));
+  gap: 6px;
+  height: 132px;
+  align-items: end;
+}
+
+.mp-day-col {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  gap: 3px;
+  padding: 0;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.mp-day-col:disabled {
+  cursor: default;
+}
+
+.mp-day-bar {
+  display: block;
+  min-height: 2px;
+  border-radius: 4px 4px 1px 1px;
+  background: #d4d6de;
+  transition: background-color 0.14s ease;
+}
+
+.mp-day-col:not(:disabled):hover .mp-day-bar {
+  background: #a5a8f8;
+}
+
+.mp-day-col.on .mp-day-bar {
+  background: var(--cp-accent);
+}
+
+.mp-day-count {
+  font-size: 11px;
+  color: var(--cp-ink-2);
+  text-align: center;
+  min-height: 15px;
+}
+
+.mp-day-label {
+  font-size: 10.5px;
+  color: var(--cp-ink-3);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.mp-top-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.mp-top-item {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--cp-ink);
+}
+
+.mp-top-item:hover {
+  background: var(--cp-surface-subtle);
+}
+
+.mp-top-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mp-chip-row {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mp-filter-chip {
+  appearance: none;
+  border: 1px solid rgba(91, 97, 246, 0.3);
+  background: var(--cp-accent-soft);
+  color: var(--cp-accent-ink);
+  font: inherit;
+  font-size: 12px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.mp-filter-chip:hover {
+  border-color: var(--cp-accent);
+}
+
+.mp-link-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: var(--cp-accent-ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.mp-link-btn:hover {
+  text-decoration: underline;
+}
+
+.mp-doc-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.mp-doc-main.has-drawer {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 30%);
+}
+
+.mp-doc-agg-cell {
+  white-space: nowrap;
+}
+
+.mp-agg-chip {
+  display: inline-block;
+  padding: 1px 7px;
+  margin-right: 4px;
+  border-radius: 4px;
+  background: var(--cp-surface-subtle);
+  color: var(--cp-ink-2);
+  font-size: 11.5px;
+}
+
+.mp-doc-drawer {
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 120px);
+  display: flex;
+  flex-direction: column;
+  background: var(--cp-surface);
+  border-radius: var(--cp-radius-card);
+  box-shadow: var(--cp-shadow-card);
+  overflow: hidden;
+}
+
+.mp-doc-drawer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--cp-divider);
+}
+
+.mp-doc-drawer-head > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mp-doc-drawer-head strong {
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.mp-doc-drawer-kicker {
+  font-size: 11.5px;
+  color: var(--cp-ink-3);
+}
+
+.mp-doc-drawer-meta {
+  font-size: 11.5px;
+  color: var(--cp-ink-3);
+}
+
+.mp-doc-drawer-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+}
+
+.mp-trace-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 14px 14px;
+  overflow-y: auto;
+}
+
+.mp-trace-item {
+  position: relative;
+  padding: 10px 0 10px 16px;
+  border-left: 2px solid var(--cp-divider);
+}
+
+.mp-trace-item::before {
+  content: '';
+  position: absolute;
+  left: -5px;
+  top: 16px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cp-surface);
+  border: 2px solid #b8bac4;
+}
+
+.mp-trace-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+
+.mp-trace-time {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--cp-ink-3);
+}
+
+.mp-trace-foot {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--cp-ink-3);
+  margin-top: 4px;
+}
+
+.mp-diff-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  background: #fafafb;
+  border-radius: 6px;
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.mp-diff-list li {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.mp-diff-key {
+  color: var(--cp-ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mp-diff-before {
+  color: var(--cp-ink-3);
+  text-decoration: line-through;
+}
+
+.mp-diff-arrow {
+  margin: 0 5px;
+  color: var(--cp-ink-3);
+}
+
+@media (max-width: 1400px) {
+  .mp-doc-insight {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mp-doc-main.has-drawer {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+}
+
+/* Wide desktop (>= 2200 CSS px): slightly larger reading sizes for data pages */
+@media (min-width: 2200px) {
+  .mp-kpi-value {
+    font-size: 28px;
+  }
+
+  .mp-doc-card .mp-table-scroll > table.t td,
+  .mp-insp-board-table td {
+    font-size: 13.5px;
+    height: 50px;
+  }
+
+  .mp-day-chart {
+    height: 160px;
   }
 }
