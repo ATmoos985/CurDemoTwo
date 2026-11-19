@@ -95,8 +95,9 @@ const QUICK_PILL_STYLES = [
   ...MARKER_STYLES
 ];
 
-export const GarmentWidthPage: React.FC<{ exampleId?: string }> = ({
-  exampleId: routeExampleId
+export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean }> = ({
+  exampleId: routeExampleId,
+  embedded = false
 }) => {
   const resolveInitialExample = (id?: string): GarmentExample =>
     EXAMPLES.find((e) => e.id === id) ?? EXAMPLES[0];
@@ -655,12 +656,14 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string }> = ({
   };
 
   return (
-    <div className="react-page mp-garment-page">
-      <div className="mp-sc-topbar">
-        <h1>唛架幅宽试算</h1>
-        <span className="mp-sc-sub">服装工艺测算 · 多门幅单耗与齐套排料对比</span>
-        {activeExample && <CodeBadge>{activeExample.id}</CodeBadge>}
-      </div>
+    <div className={`react-page mp-garment-page ${embedded ? 'mp-garment-embedded' : ''}`.trim()}>
+      {!embedded && (
+        <div className="mp-sc-topbar">
+          <h1>唛架幅宽试算</h1>
+          <span className="mp-sc-sub">服装工艺测算 · 多门幅单耗与齐套排料对比</span>
+          {activeExample && <CodeBadge>{activeExample.id}</CodeBadge>}
+        </div>
+      )}
 
       <div className="split garment-split mp-garment-split">
         <section className="pane mp-float-card mp-garment-left">

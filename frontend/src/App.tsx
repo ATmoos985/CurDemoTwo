@@ -407,6 +407,23 @@ export const App: React.FC = () => {
         label: '示例场景',
         items: [
           {
+            id: 'showcase-all',
+            label: '算法工作台与场景',
+            href: '#/showcase',
+            icon: (
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+                <path
+                  d="M5.2 3.3 12.4 8l-7.2 4.7V3.3Z"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            ),
+            isActive: (r) => r.page === 'showcase'
+          },
+          {
             id: 'garment',
             label: '多门幅工艺对比',
             href: '#/garment',
@@ -422,77 +439,6 @@ export const App: React.FC = () => {
               </svg>
             ),
             isActive: (r) => r.page === 'garment'
-          },
-          {
-            id: 'showcase-all',
-            label: '全部算例总览',
-            href: '#/showcase',
-            icon: (
-              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-                <path
-                  d="M5.2 3.3 12.4 8l-7.2 4.7V3.3Z"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            ),
-            isActive: (r) =>
-              r.page === 'showcase' &&
-              !['服装齐套', '卷材 · 薄膜', '__workflow__'].includes(r.groupQuery)
-          },
-          {
-            id: 'showcase-garment',
-            label: '服装齐套算例',
-            href: `#/showcase?group=${encodeURIComponent('服装齐套')}`,
-            icon: (
-              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-                <path
-                  d="M5.5 2.8 8 4.4l2.5-1.6 2.7 1.9-1.2 2.6-1.4-.6V13.2H5.4V6.7l-1.4.6-1.2-2.6 2.7-1.9Z"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.35"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            ),
-            isActive: (r) => r.page === 'showcase' && r.groupQuery === '服装齐套'
-          },
-          {
-            id: 'showcase-slit',
-            label: '卷材分切算例',
-            href: `#/showcase?group=${encodeURIComponent('卷材 · 薄膜')}`,
-            icon: (
-              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-                <path
-                  d="M2.5 4h11v8h-11V4Zm3.6 0v8m3.8-8v8"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            ),
-            isActive: (r) => r.page === 'showcase' && r.groupQuery === '卷材 · 薄膜'
-          },
-          {
-            id: 'showcase-workflow',
-            label: '业务流程演练',
-            href: '#/showcase?group=__workflow__',
-            icon: (
-              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-                <path
-                  d="M3 4.5h3.5v3H3v-3Zm6.5 4H13v3H9.5v-3ZM6.5 6h2a1 1 0 0 1 1 1v1.5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            ),
-            isActive: (r) => r.page === 'showcase' && r.groupQuery === '__workflow__'
           }
         ]
       }
