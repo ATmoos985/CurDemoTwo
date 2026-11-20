@@ -173,4 +173,22 @@ class LinearSlittingSolverEngineTests {
             assertFalse(r.patterns().isEmpty());
         }
     }
+
+    @Test
+    void childXmxConfigurationAppliesToCommandAndRejectsInvalidValues(@org.junit.jupiter.api.io.TempDir java.nio.file.Path temp) throws Exception {
+        var in = temp.resolve("in.json");
+        var out = temp.resolve("out.json");
+        assertTrue(LinearSlittingSolverEngine.command(in, out, 1L).contains("-Xmx768m"));
+        assertTrue(LinearSlittingSolverEngine.command(in, out, 1L, "384m").contains("-Xmx384m"));
+        assertThrows(IllegalArgumentException.class, () -> new LinearSlittingSolverEngine(""));
+        assertThrows(IllegalArgumentException.class, () -> new LinearSlittingSolverEngine("384m -XX:+UnlockExperimentalVMOptions"));
+        assertThrows(IllegalArgumentException.class, () -> new LinearSlittingSolverEngine("0m"));
+
+        var lowMemEngine = new LinearSlittingSolverEngine("384m");
+        var problem = new SlittingProblem("1", "mm", 1200, 10, 10, 1000, 1180, 10, 10, "FAST",
+                List.of(new SlittingProblem.Order("O1", 500, 3000, 2, "素色")), 10);
+        var result = lowMemEngine.solve(problem);
+        assertEquals("FEASIBLE", result.status());
+        assertEquals(2, result.fulfillment().get(0).produced());
+    }
 }

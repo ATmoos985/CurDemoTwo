@@ -8,6 +8,8 @@ import changyang.cut.apsmodule.service.*;
 import changyang.cut.apsmodule.solver.kernel.*;
 import changyang.cut.apsmodule.solver.kernel.execution.SolverExecutionContext;
 import com.example.cutdemotwo.contracts.slitting.*;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.json.JsonMapper;
 import java.nio.file.*;
@@ -17,7 +19,27 @@ import java.util.concurrent.*;
 /** Pure legacy-kernel adapter. A separate JVM owns all native threads for each computation. */
 @Service
 public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
+    static final String DEFAULT_CHILD_XMX = "768m";
     private static final JsonMapper JSON=JsonMapper.builder().build();
+    private final String childXmx;
+
+    public LinearSlittingSolverEngine() {
+        this(DEFAULT_CHILD_XMX);
+    }
+
+    @Autowired
+    public LinearSlittingSolverEngine(@Value("${cutdemo.slitting.child-xmx:" + DEFAULT_CHILD_XMX + "}") String childXmx) {
+        this.childXmx = normalizeChildXmx(childXmx);
+    }
+
+    static String normalizeChildXmx(String raw) {
+        String value = raw == null ? "" : raw.trim();
+        if (!value.matches("[1-9][0-9]{1,4}[mMgG]")) {
+            throw new IllegalArgumentException("无效的一维子进程堆上限配置 cutdemo.slitting.child-xmx: " + raw);
+        }
+        return value;
+    }
+
     @Override public String getEngineType(){return "ortools-1d";}
     @Override public boolean isAvailable(){return Files.isExecutable(javaExecutable());}
     private static Path javaExecutable() {
@@ -33,7 +55,7 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
             directory=Files.createTempDirectory("cutdemo-slitting-");
             Path input=directory.resolve("input.json"),output=directory.resolve("output.json");
             Files.write(input,JSON.writeValueAsBytes(problem));
-            var command=command(input,output,ProcessHandle.current().pid());
+            var command=command(input,output,ProcessHandle.current().pid(),childXmx);
             process=new ProcessBuilder(command).redirectOutput(ProcessBuilder.Redirect.DISCARD)
                     .redirectError(ProcessBuilder.Redirect.DISCARD).start();
             if(!process.waitFor(problem.timeLimitSeconds(),TimeUnit.SECONDS))
@@ -63,8 +85,11 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
         }
     }
     static List<String> command(Path input,Path output,long parentPid) throws java.io.IOException {
+        return command(input,output,parentPid,DEFAULT_CHILD_XMX);
+    }
+    static List<String> command(Path input,Path output,long parentPid,String childXmx) throws java.io.IOException {
         String cp=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
-        var args=new ArrayList<>(List.of(javaExecutable().toString(),"-Xmx768m","-XX:ActiveProcessorCount=2",
+        var args=new ArrayList<>(List.of(javaExecutable().toString(),"-Xmx"+normalizeChildXmx(childXmx),"-XX:ActiveProcessorCount=2",
                 "-Dcutting.parallel.globalThreads=1"));
         boolean boot=false;
         if(!cp.contains(java.io.File.pathSeparator) && Files.isRegularFile(Path.of(cp)))
