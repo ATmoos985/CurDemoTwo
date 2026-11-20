@@ -8,10 +8,18 @@ import { polygon, rectangle } from '@static/js/canvas/nesting-scene.js';
 import { LINEAR_SCENARIOS } from '@static/js/linear/linear-scenarios.js';
 import { requestJSON } from '@static/app/js/util.js';
 import {
+  SlittingProfile,
+  SlittingWidthMode,
   StudioSettings,
   loadStudioSettings,
   persistStudioSettings
 } from './studioSettings';
+
+function finiteOr(val: unknown, fallback: number): number {
+  if (val == null || val === '') return fallback;
+  const n = Number(val);
+  return Number.isFinite(n) ? n : fallback;
+}
 
 export interface ShapeGeometry {
   type: 'RECTANGLE' | 'POLYGON';
@@ -59,6 +67,14 @@ export interface DemandCluster {
   description: string;
   defaultWidthMm: number;
   defaultLengthMm: number;
+  defaultSlitting?: {
+    leftTrimMm: number;
+    rightTrimMm: number;
+    minWidthMm: number;
+    maxWidthMm: number;
+    widthStepMm: number;
+    totalOverCap: number;
+  };
   materialModel: string;
   availableSizes: string[];
   defaultSizeCounts: Record<string, number>;
@@ -323,6 +339,14 @@ function createInitialClusters(): DemandCluster[] {
     description: '4 个客户同卷长 (2000mm) 不同条宽规格族模板，用于一维分切多组合套裁优化',
     defaultWidthMm: 4600,
     defaultLengthMm: 2000,
+    defaultSlitting: {
+      leftTrimMm: 100,
+      rightTrimMm: 100,
+      minWidthMm: 4200,
+      maxWidthMm: 4400,
+      widthStepMm: 10,
+      totalOverCap: 30
+    },
     materialModel: '光学膜-4600',
     availableSizes: ['标准批次'],
     defaultSizeCounts: { '标准批次': 1 },
@@ -344,6 +368,14 @@ function createInitialClusters(): DemandCluster[] {
     description: '宽窄条混搭一维分切模板（600mm / 700mm / 450mm），直接计算最优分条组合',
     defaultWidthMm: 2000,
     defaultLengthMm: 2000,
+    defaultSlitting: {
+      leftTrimMm: 10,
+      rightTrimMm: 10,
+      minWidthMm: 1800,
+      maxWidthMm: 1980,
+      widthStepMm: 10,
+      totalOverCap: 8
+    },
     materialModel: '涂层面料-2000',
     availableSizes: ['标准批次'],
     defaultSizeCounts: { '标准批次': 1 },
@@ -374,6 +406,14 @@ function createInitialClusters(): DemandCluster[] {
       description,
       defaultWidthMm: src?.motherWidth || 4600,
       defaultLengthMm: 1350000,
+      defaultSlitting: {
+        leftTrimMm: finiteOr(src?.leftTrim, 100),
+        rightTrimMm: finiteOr(src?.rightTrim, 100),
+        minWidthMm: finiteOr(src?.minWidth, 4200),
+        maxWidthMm: finiteOr(src?.maxWidth, 4400),
+        widthStepMm: finiteOr(src?.step, 10),
+        totalOverCap: finiteOr(src?.totalOverCap, 30)
+      },
       materialModel,
       availableSizes: ['标准批次'],
       defaultSizeCounts: { '标准批次': 1 },
@@ -531,6 +571,11 @@ export interface WorkbenchLaunchPreset {
   slitMotherWidthMm?: number;
   slitLeftTrimMm?: number;
   slitRightTrimMm?: number;
+  slitMinWidthMm?: number;
+  slitMaxWidthMm?: number;
+  slitWidthStepMm?: number;
+  slitWidthMode?: SlittingWidthMode;
+  slitProfile?: SlittingProfile;
   slitFixedLengthMm?: number;
   slitRollId?: string;
   slitOverCap?: number;
@@ -567,6 +612,8 @@ interface StudioState {
 
   // 1D Slitting Studio State
   slitMaterialMode: 'VIRTUAL_ROLL' | 'STOCK_ROLL';
+  slitWidthMode: SlittingWidthMode;
+  slitProfile: SlittingProfile;
   slitMotherWidthMm: number;
   slitLeftTrimMm: number;
   slitRightTrimMm: number;
@@ -682,13 +729,15 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   activeSchemeId2D: null,
 
   slitMaterialMode: 'VIRTUAL_ROLL',
+  slitWidthMode: 'FLEXIBLE',
+  slitProfile: initialSettings.slitProfile,
   slitMotherWidthMm: 4600,
   slitLeftTrimMm: 100,
   slitRightTrimMm: 100,
-  slitMinWidthMm: 4200,
+  slitMinWidthMm: 4300,
   slitMaxWidthMm: 4400,
   slitWidthStepMm: 10,
-  slitOverCap: 20,
+  slitOverCap: 30,
   slitFixedLengthMm: 2000,
   slitAvoidDefects: false,
   slitRollId: '',
@@ -943,29 +992,41 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     const allLines = family.lines;
     if (family.dimension === 'SLITTING_1D') {
       const sp = family.slitting || {};
-      const lt = preset?.slitLeftTrimMm ?? (Number(sp.leftTrim) ?? 100);
-      const rt = preset?.slitRightTrimMm ?? (Number(sp.rightTrim) ?? 100);
-      const motherW =
-        preset?.slitMotherWidthMm ?? ((Number(sp.maxWidth) || 4400) + lt + rt);
-      const maxW = Math.max(200, motherW - lt - rt);
+      const lt = preset?.slitLeftTrimMm ?? finiteOr(sp.leftTrim, 100);
+      const rt = preset?.slitRightTrimMm ?? finiteOr(sp.rightTrim, 100);
+      const rawMaxW = preset?.slitMaxWidthMm ?? finiteOr(sp.maxWidth, 4400);
+      const motherW = preset?.slitMotherWidthMm ?? Math.max(rawMaxW + lt + rt, 500);
+      const usableW = Math.max(200, motherW - lt - rt);
+      const maxW = Math.min(usableW, Math.max(200, rawMaxW));
+      const defaultMinW = Math.min(maxW, Math.max(100, Math.floor((maxW * 0.95) / 10) * 10));
+      const minW = Math.min(
+        maxW,
+        Math.max(100, preset?.slitMinWidthMm ?? finiteOr(sp.minWidth, defaultMinW))
+      );
+      const stepW = Math.max(1, preset?.slitWidthStepMm ?? finiteOr(sp.widthStep, 10));
+      const overCap = Math.max(0, preset?.slitOverCap ?? finiteOr(sp.totalOverCap, 30));
       const fixedLen =
         preset?.slitFixedLengthMm ??
-        (allLines[0]?.length || Number(family.process?.bedLength) || 2000);
+        (allLines[0]?.length || finiteOr(family.process?.bedLength, 2000));
+      const widthMode: SlittingWidthMode =
+        preset?.slitWidthMode ?? (minW === maxW ? 'FIXED' : 'FLEXIBLE');
       set({
         activeDimension: '1D',
         slitLoadedTaskId: family.id,
         slitLoadedTaskName: family.name,
         slitMaterialModel: family.materialModel,
         slitMaterialMode: preset?.slitMaterialMode ?? 'VIRTUAL_ROLL',
+        slitWidthMode: widthMode,
+        ...(preset?.slitProfile ? { slitProfile: preset.slitProfile } : {}),
         slitRollId: preset?.slitRollId ?? get().slitRollId,
         slitAvoidDefects: preset?.slitMaterialMode === 'STOCK_ROLL',
         slitMotherWidthMm: motherW,
         slitLeftTrimMm: lt,
         slitRightTrimMm: rt,
-        slitMinWidthMm: Number(sp.minWidth) || Math.floor((maxW * 0.9) / 10) * 10,
+        slitMinWidthMm: widthMode === 'FIXED' ? maxW : minW,
         slitMaxWidthMm: maxW,
-        slitWidthStepMm: Number(sp.widthStep) || 10,
-        slitOverCap: preset?.slitOverCap ?? (Number(sp.totalOverCap) ?? 20),
+        slitWidthStepMm: stepW,
+        slitOverCap: overCap,
         slitFixedLengthMm: fixedLen,
         ...(preset?.scenario1D ? { scenario1D: preset.scenario1D } : {}),
         slitOrders: allLines.map((l) => ({
@@ -1097,19 +1158,23 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         }
       }
       const sp = first.slitting || {};
-      const maxW = Number(sp.maxWidth) || 4400;
-      const lt = Number(sp.leftTrim) ?? 100;
-      const rt = Number(sp.rightTrim) ?? 100;
+      const maxW = finiteOr(sp.maxWidth, 4400);
+      const lt = finiteOr(sp.leftTrim, 100);
+      const rt = finiteOr(sp.rightTrim, 100);
+      const minW = Math.min(maxW, finiteOr(sp.minWidth, Math.floor((maxW * 0.95) / 10) * 10));
       set({
         activeDimension: '1D',
         slitLoadedTaskId: null,
         slitLoadedTaskName: `多族合排 (${families.length} 族 · ${first.materialModel})`,
         slitMaterialModel: first.materialModel,
+        slitWidthMode: minW === maxW ? 'FIXED' : 'FLEXIBLE',
         slitMotherWidthMm: maxW + lt + rt,
         slitLeftTrimMm: lt,
         slitRightTrimMm: rt,
         slitMaxWidthMm: maxW,
-        slitMinWidthMm: Number(sp.minWidth) || Math.floor(maxW * 0.9),
+        slitMinWidthMm: minW,
+        slitWidthStepMm: Math.max(1, finiteOr(sp.widthStep, 10)),
+        slitOverCap: Math.max(0, finiteOr(sp.totalOverCap, 30)),
         slitFixedLengthMm: orders[0]?.lengthMm || 2000,
         slitOrders: orders,
         slitSchemes: [],
@@ -1253,11 +1318,18 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         name: p.name,
         widthMm: g.w,
         lengthMm: g.h,
-        quantity: p.quantityPerUnit * mult
+        quantity: p.quantityPerUnit * mult,
+        surfaceTreatment: p.surfaceTreatment
       };
     });
-    const trim = cluster.defaultWidthMm >= 4000 ? 100 : 10;
-    const usable = cluster.defaultWidthMm - trim * 2;
+    const ds = cluster.defaultSlitting;
+    const lt = ds ? ds.leftTrimMm : cluster.defaultWidthMm >= 4000 ? 100 : 10;
+    const rt = ds ? ds.rightTrimMm : cluster.defaultWidthMm >= 4000 ? 100 : 10;
+    const usable = Math.max(200, cluster.defaultWidthMm - lt - rt);
+    const maxW = ds ? Math.min(usable, ds.maxWidthMm) : usable;
+    const minW = ds ? Math.min(maxW, ds.minWidthMm) : Math.floor((usable * 0.95) / 10) * 10;
+    const stepW = ds ? ds.widthStepMm : 10;
+    const overCap = ds ? ds.totalOverCap : 30;
     set({
       activeDimension: '1D',
       slitLoadedTaskId: append ? st.slitLoadedTaskId : null,
@@ -1266,11 +1338,14 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       ...(append
         ? { slitOrders: [...st.slitOrders, ...orders] }
         : {
+            slitWidthMode: minW === maxW ? 'FIXED' : 'FLEXIBLE',
             slitMotherWidthMm: cluster.defaultWidthMm,
-            slitLeftTrimMm: trim,
-            slitRightTrimMm: trim,
-            slitMaxWidthMm: usable,
-            slitMinWidthMm: Math.floor((usable * 0.92) / 10) * 10,
+            slitLeftTrimMm: lt,
+            slitRightTrimMm: rt,
+            slitMaxWidthMm: maxW,
+            slitMinWidthMm: minW,
+            slitWidthStepMm: stepW,
+            slitOverCap: overCap,
             slitFixedLengthMm: cluster.defaultLengthMm,
             slitOrders: orders,
             slitSchemes: [],
@@ -1334,6 +1409,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     set((st) => ({
       settings: saved,
       selectedStrategies2D: [...saved.enabledStrategies2D],
+      slitProfile: saved.slitProfile,
       ...(st.loadedTaskId
         ? {}
         : {

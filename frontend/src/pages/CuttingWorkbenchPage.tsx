@@ -8,7 +8,16 @@ import {
   Scenario2DType,
   ShapeGeometry
 } from '../store/useStudioStore';
-import { StudioSettings, DEFAULT_STUDIO_SETTINGS } from '../store/studioSettings';
+import {
+  StudioSettings,
+  DEFAULT_STUDIO_SETTINGS,
+  SlittingProfile,
+  SlittingWidthMode,
+  SlittingWidthPreset,
+  loadSlittingPresets,
+  saveCustomSlittingPresets,
+  extractSlittingSolverOptions
+} from '../store/studioSettings';
 import {
   WorkbenchBoardCanvas,
   WorkbenchBoardHandle,
@@ -456,6 +465,8 @@ export const CuttingWorkbenchPage: React.FC<{
     setActiveScheme2D,
     markSchemeDispatched,
     slitMaterialMode,
+    slitWidthMode,
+    slitProfile,
     slitMotherWidthMm,
     slitLeftTrimMm,
     slitRightTrimMm,
@@ -479,8 +490,67 @@ export const CuttingWorkbenchPage: React.FC<{
     setSlitSchemes,
     setActiveSlitScheme,
     markSlitSchemeDispatched,
-    settings
+    settings,
+    updateStudioSettings
   } = useStudioStore();
+
+  const [slitPresets, setSlitPresets] = useState<SlittingWidthPreset[]>(() => loadSlittingPresets());
+  const [selectedSlitPresetId, setSelectedSlitPresetId] = useState<string>('');
+  const [savingPresetOpen, setSavingPresetOpen] = useState(false);
+  const [newPresetName, setNewPresetName] = useState('');
+
+  const handleApplySlitPreset = (presetId: string) => {
+    setSelectedSlitPresetId(presetId);
+    const p = slitPresets.find((item) => item.id === presetId);
+    if (!p) return;
+    setSlitSpec({
+      slitMotherWidthMm: p.motherWidthMm,
+      slitLeftTrimMm: p.leftTrimMm,
+      slitRightTrimMm: p.rightTrimMm,
+      slitMinWidthMm: p.widthMode === 'FIXED' ? p.maxWidthMm : p.minWidthMm,
+      slitMaxWidthMm: p.maxWidthMm,
+      slitWidthStepMm: p.widthStepMm,
+      slitOverCap: p.totalOverCap,
+      slitWidthMode: p.widthMode
+    });
+    toast(`已套用一维预设「${p.name}」`);
+  };
+
+  const handleSaveCurrentSlitPreset = () => {
+    const clean = newPresetName.trim();
+    if (!clean) {
+      toast('请输入预设名称', true);
+      return;
+    }
+    const created: SlittingWidthPreset = {
+      id: `preset-custom-${Date.now()}`,
+      name: clean,
+      motherWidthMm: Math.floor(slitMotherWidthMm),
+      leftTrimMm: Math.floor(slitLeftTrimMm),
+      rightTrimMm: Math.floor(slitRightTrimMm),
+      minWidthMm: slitWidthMode === 'FIXED' ? Math.floor(slitMaxWidthMm) : Math.floor(slitMinWidthMm),
+      maxWidthMm: Math.floor(slitMaxWidthMm),
+      widthStepMm: Math.max(1, Math.floor(slitWidthStepMm)),
+      totalOverCap: Math.max(0, Math.floor(slitOverCap)),
+      widthMode: slitWidthMode,
+      builtin: false
+    };
+    const next = saveCustomSlittingPresets([...slitPresets, created]);
+    setSlitPresets(next);
+    setSelectedSlitPresetId(created.id);
+    setNewPresetName('');
+    setSavingPresetOpen(false);
+    toast(`已保存一维预设「${clean}」`);
+  };
+
+  const handleDeleteSelectedSlitPreset = () => {
+    const target = slitPresets.find((p) => p.id === selectedSlitPresetId);
+    if (!target || target.builtin) return;
+    const next = saveCustomSlittingPresets(slitPresets.filter((p) => p.id !== target.id));
+    setSlitPresets(next);
+    setSelectedSlitPresetId('');
+    toast(`已删除预设「${target.name}」`);
+  };
 
   const extSettings = settings as StudioSettings & {
     showWorkflowGuide?: boolean;
@@ -1327,24 +1397,68 @@ export const CuttingWorkbenchPage: React.FC<{
         return;
       }
     }
-    setRunningSolve(true);
-    setLastConfirmSummary(null);
-    const effMotherW =
+    const effMotherW = Math.floor(
       slitMaterialMode === 'STOCK_ROLL' && currentRoll1D
         ? currentRoll1D.width
-        : slitMotherWidthMm;
-    const effOverCap = scenario1D === 'MAX_UTIL' ? Math.max(slitOverCap, 30) : slitOverCap;
+        : slitMotherWidthMm
+    );
+    const effLeftTrim = Math.max(0, Math.floor(Number(slitLeftTrimMm) || 0));
+    const effRightTrim = Math.max(0, Math.floor(Number(slitRightTrimMm) || 0));
+    const maxUsable = effMotherW - effLeftTrim - effRightTrim;
+    if (!Number.isFinite(effMotherW) || effMotherW <= 0 || maxUsable <= 0) {
+      toast('请检查母卷幅宽与左右切边：扣边后可用幅宽必须大于 0 mm', true);
+      return;
+    }
+
+    const rawMaxW = Math.floor(Number(slitMaxWidthMm) || maxUsable);
+    const effMaxW = Math.min(maxUsable, rawMaxW);
+    const effMinW =
+      slitWidthMode === 'FIXED'
+        ? effMaxW
+        : Math.floor(Number(slitMinWidthMm) || effMaxW);
+    const effStep = Math.max(1, Math.floor(Number(slitWidthStepMm) || 10));
+    const effOverCap =
+      scenario1D === 'MAX_UTIL'
+        ? Math.max(Math.max(0, Math.floor(Number(slitOverCap) || 0)), 30)
+        : Math.max(0, Math.floor(Number(slitOverCap) || 0));
+
+    if (effMinW <= 0 || effMaxW < effMinW || effMaxW > maxUsable) {
+      toast(
+        `组合宽度区间 [${effMinW}, ${effMaxW}] mm 无效，须位于可切幅宽 (≤ ${maxUsable} mm) 内且下限 ≤ 上限`,
+        true
+      );
+      return;
+    }
+    if (Math.floor((effMaxW - effMinW) / effStep) > 1000) {
+      toast('组合幅宽候选步数超过 1001 档，请调大步长或收窄区间', true);
+      return;
+    }
+    const maxOrderW = Math.max(...validOrders.map((o) => Math.floor(o.widthMm)));
+    if (maxOrderW > effMaxW) {
+      toast(
+        `最大订单幅宽 ${maxOrderW} mm 超出当前组合上限 ${effMaxW} mm，请调大母卷幅宽或组合上限`,
+        true
+      );
+      return;
+    }
+
+    setRunningSolve(true);
+    setLastConfirmSummary(null);
+    const advOpts = extractSlittingSolverOptions(settings);
+    const runProfiles: SlittingProfile[] = settings.slitRunBothProfiles
+      ? ['FAST', 'QUALITY']
+      : [slitProfile];
 
     try {
       const baselineInput = {
         motherWidth: effMotherW,
-        leftTrim: slitLeftTrimMm,
-        rightTrim: slitRightTrimMm,
+        leftTrim: effLeftTrim,
+        rightTrim: effRightTrim,
         orderItems: validOrders.map((o) => ({
-          width: o.widthMm,
-          length: slitFixedLengthMm,
-          quantity: o.quantity,
-          surfaceTreatment: '默认'
+          width: Math.floor(o.widthMm),
+          length: Math.floor(o.lengthMm > 0 ? o.lengthMm : slitFixedLengthMm),
+          quantity: Math.floor(o.quantity),
+          surfaceTreatment: o.surfaceTreatment?.trim() || '不电晕/不涂布'
         }))
       };
       const baseGroups = independentBaseline(baselineInput);
@@ -1355,8 +1469,8 @@ export const CuttingWorkbenchPage: React.FC<{
         strategyName: '逐规格独立分切（基线）',
         state: 'SUCCEEDED',
         motherWidthMm: effMotherW,
-        leftTrimMm: slitLeftTrimMm,
-        rightTrimMm: slitRightTrimMm,
+        leftTrimMm: effLeftTrim,
+        rightTrimMm: effRightTrim,
         totalCars: baseSummary.rolls,
         missingRolls: baseSummary.shortage || 0,
         overproducedRolls: baseSummary.surplus || 0,
@@ -1378,7 +1492,7 @@ export const CuttingWorkbenchPage: React.FC<{
             repetitions: g.usageCount || 1,
             stations,
             usedWidthMm: usedW,
-            spareWidthMm: Math.max(0, effMotherW - slitLeftTrimMm - slitRightTrimMm - usedW)
+            spareWidthMm: Math.max(0, effMotherW - effLeftTrim - effRightTrim - usedW)
           };
         }),
         fulfillment: validOrders.map((o) => ({
@@ -1392,37 +1506,41 @@ export const CuttingWorkbenchPage: React.FC<{
         }))
       };
 
-      const pendingFast: SlittingSchemeRun = {
-        id: 'SLIT-FAST',
-        strategyId: 'FAST',
-        strategyName: 'OR-Tools 快速方案 (FAST)',
+      const makePending = (profile: SlittingProfile): SlittingSchemeRun => ({
+        id: `SLIT-${profile}`,
+        strategyId: profile,
+        strategyName:
+          profile === 'FAST'
+            ? 'OR-Tools 快捷解 (FAST)'
+            : 'OR-Tools 精确解 (QUALITY)',
         state: 'RUNNING',
         motherWidthMm: effMotherW,
-        leftTrimMm: slitLeftTrimMm,
-        rightTrimMm: slitRightTrimMm,
+        leftTrimMm: effLeftTrim,
+        rightTrimMm: effRightTrim,
         totalCars: 0,
         missingRolls: 0,
         overproducedRolls: 0,
         avgUtilizationPct: 0,
         patterns: [],
         fulfillment: []
-      };
-      const pendingQuality: SlittingSchemeRun = {
-        ...pendingFast,
-        id: 'SLIT-QUALITY',
-        strategyId: 'QUALITY',
-        strategyName: 'OR-Tools 精细列生成 (QUALITY)'
-      };
-      setSlitSchemes([pendingQuality, pendingFast, baselineRun]);
+      });
+      setSlitSchemes([...runProfiles.map(makePending), baselineRun]);
 
-      const maxUsable = Math.max(100, effMotherW - slitLeftTrimMm - slitRightTrimMm);
-      const effMaxW = Math.min(maxUsable, Math.max(slitMaxWidthMm, ...validOrders.map((o) => o.widthMm)));
-      const effMinW = Math.min(effMaxW, Math.max(100, slitMinWidthMm));
-
-      const runProfile = async (profile: 'FAST' | 'QUALITY'): Promise<SlittingSchemeRun> => {
+      const runProfile = async (profile: SlittingProfile): Promise<SlittingSchemeRun> => {
         const session = new OptimizationSession();
         activeSessionsRef.current.push(session);
         const t0 = performance.now();
+        const effTimeLimit = Math.min(
+          180,
+          Math.max(
+            1,
+            Math.round(
+              profile === 'QUALITY'
+                ? Math.max(settings.slitTimeLimitSeconds, validOrders.length >= 40 ? 180 : 60)
+                : settings.slitTimeLimitSeconds
+            )
+          )
+        );
         const req = {
           schemaVersion: '2.0',
           clientRequestId: `slit-${profile}-${Date.now()}`,
@@ -1432,19 +1550,32 @@ export const CuttingWorkbenchPage: React.FC<{
           problem: {
             schemaVersion: '1',
             unit: 'mm',
-            motherWidthMm: Math.floor(effMotherW),
-            leftTrimMm: Math.floor(slitLeftTrimMm),
-            rightTrimMm: Math.floor(slitRightTrimMm),
-            minWidthMm: Math.floor(effMinW),
-            maxWidthMm: Math.floor(effMaxW),
-            widthStepMm: Math.max(1, Math.floor(slitWidthStepMm)),
-            totalOverCap: Math.floor(effOverCap),
+            motherWidthMm: effMotherW,
+            leftTrimMm: effLeftTrim,
+            rightTrimMm: effRightTrim,
+            minWidthMm: effMinW,
+            maxWidthMm: effMaxW,
+            widthStepMm: effStep,
+            totalOverCap: effOverCap,
             profile,
-            timeLimitSeconds: profile === 'QUALITY' ? 30 : validOrders.length >= 40 ? 20 : 10,
+            timeLimitSeconds: effTimeLimit,
+            topK: advOpts.topK,
+            maxIterations: advOpts.maxIterations,
+            maxPatterns: advOpts.maxPatterns,
+            maxDistinctWidths:
+              profile === 'QUALITY'
+                ? Math.max(advOpts.maxDistinctWidths, 5)
+                : advOpts.maxDistinctWidths,
+            stageTimeLimitMs: advOpts.stageTimeLimitMs,
+            useOptimizedAssignment: advOpts.useOptimizedAssignment,
+            underPenalty: advOpts.underPenalty,
+            seqGroupAlpha: advOpts.seqGroupAlpha,
+            seqGroupBeta: advOpts.seqGroupBeta,
+            lnsEnabled: advOpts.lnsEnabled,
             orders: validOrders.map((o) => ({
               id: o.id,
               widthMm: Math.floor(o.widthMm),
-              lengthMm: Math.floor(slitFixedLengthMm),
+              lengthMm: Math.floor(o.lengthMm > 0 ? o.lengthMm : slitFixedLengthMm),
               quantity: Math.floor(o.quantity),
               surfaceTreatment: o.surfaceTreatment?.trim() || '不电晕/不涂布'
             }))
@@ -1466,12 +1597,12 @@ export const CuttingWorkbenchPage: React.FC<{
             strategyId: profile,
             strategyName:
               profile === 'FAST'
-                ? 'OR-Tools 快速方案 (FAST)'
-                : 'OR-Tools 精细列生成 (QUALITY)',
+                ? 'OR-Tools 快捷解 (FAST)'
+                : 'OR-Tools 精确解 (QUALITY)',
             state: 'SUCCEEDED',
             motherWidthMm: effMotherW,
-            leftTrimMm: slitLeftTrimMm,
-            rightTrimMm: slitRightTrimMm,
+            leftTrimMm: effLeftTrim,
+            rightTrimMm: effRightTrim,
             totalCars,
             missingRolls,
             overproducedRolls,
@@ -1483,10 +1614,7 @@ export const CuttingWorkbenchPage: React.FC<{
               repetitions: p.repetitions,
               stations: p.stations,
               usedWidthMm: p.patternWidthMm,
-              spareWidthMm: Math.max(
-                0,
-                effMotherW - slitLeftTrimMm - slitRightTrimMm - p.patternWidthMm
-              ),
+              spareWidthMm: Math.max(0, effMotherW - effLeftTrim - effRightTrim - p.patternWidthMm),
               allocations: p.allocations
             })),
             fulfillment: s.fulfillment.map((f: any) => {
@@ -1505,23 +1633,31 @@ export const CuttingWorkbenchPage: React.FC<{
           };
         } catch (e: any) {
           return {
-            ...pendingFast,
-            id: `SLIT-${profile}`,
-            strategyId: profile,
-            strategyName: `OR-Tools (${profile}) - ${e.message}`,
+            ...makePending(profile),
+            strategyName: `OR-Tools (${profile}) - ${e.message || '求解失败'}`,
             state: 'FAILED'
           };
         }
       };
 
-      const [fastRes, qualityRes] = await Promise.all([runProfile('FAST'), runProfile('QUALITY')]);
-      setSlitSchemes([qualityRes, fastRes, baselineRun]);
-      toast(
-        `分切排版完成：精细方案 ${qualityRes.totalCars} 车（省 ${Math.max(
-          0,
-          baselineRun.totalCars - qualityRes.totalCars
-        )} 车）`
-      );
+      const results = await Promise.all(runProfiles.map((prof) => runProfile(prof)));
+      const orderedResults = [...results].sort((a, b) => {
+        if (a.state === 'SUCCEEDED' && b.state !== 'SUCCEEDED') return -1;
+        if (b.state === 'SUCCEEDED' && a.state !== 'SUCCEEDED') return 1;
+        return a.totalCars - b.totalCars;
+      });
+      setSlitSchemes([...orderedResults, baselineRun]);
+      const bestSolved = orderedResults.find((r) => r.state === 'SUCCEEDED');
+      if (bestSolved) {
+        toast(
+          `分切排版完成：${bestSolved.strategyName} ${bestSolved.totalCars} 车（较独立分切省 ${Math.max(
+            0,
+            baselineRun.totalCars - bestSolved.totalCars
+          )} 车，利用率 ${bestSolved.avgUtilizationPct}%）`
+        );
+      } else {
+        toast(orderedResults[0]?.strategyName || '一维分切求解未返回有效方案', true);
+      }
     } catch (e: any) {
       toast('一维分切求解失败：' + e.message, true);
     } finally {
@@ -2322,11 +2458,13 @@ export const CuttingWorkbenchPage: React.FC<{
                     value={slitMotherWidthMm}
                     onChange={(e) => {
                       const w = Math.max(500, Number(e.target.value) || 2000);
-                      const usable = Math.max(200, w - slitLeftTrimMm - slitRightTrimMm);
+                      const usable = Math.max(100, w - slitLeftTrimMm - slitRightTrimMm);
+                      const nextMax = Math.min(slitMaxWidthMm, usable);
                       setSlitSpec({
                         slitMotherWidthMm: w,
-                        slitMaxWidthMm: usable,
-                        slitMinWidthMm: Math.floor((usable * 0.9) / 10) * 10
+                        slitMaxWidthMm: nextMax,
+                        slitMinWidthMm:
+                          slitWidthMode === 'FIXED' ? nextMax : Math.min(slitMinWidthMm, nextMax)
                       });
                     }}
                   />
@@ -2353,10 +2491,19 @@ export const CuttingWorkbenchPage: React.FC<{
                     value={currentRoll1D?.rollId || ''}
                     onChange={(e) => {
                       const r = passedRolls.find((x) => x.rollId === e.target.value);
+                      const usable = r ? Math.max(100, r.width - slitLeftTrimMm - slitRightTrimMm) : slitMaxWidthMm;
                       setSlitSpec({
                         slitRollId: e.target.value,
                         ...(r
-                          ? { slitMotherWidthMm: r.width, slitMaterialModel: r.rollModel }
+                          ? {
+                              slitMotherWidthMm: r.width,
+                              slitMaterialModel: r.rollModel,
+                              slitMaxWidthMm: Math.min(slitMaxWidthMm, usable),
+                              slitMinWidthMm:
+                                slitWidthMode === 'FIXED'
+                                  ? Math.min(slitMaxWidthMm, usable)
+                                  : Math.min(slitMinWidthMm, Math.min(slitMaxWidthMm, usable))
+                            }
                           : {})
                       });
                     }}
@@ -2384,36 +2531,136 @@ export const CuttingWorkbenchPage: React.FC<{
 
             <details className="craft-disclosure">
               <summary>
-                切边 <span className="num">{slitLeftTrimMm}+{slitRightTrimMm} · 超≤{slitOverCap}</span>
+                一维参数{' '}
+                <span className="num">
+                  切边 {slitLeftTrimMm}+{slitRightTrimMm} · 宽
+                  {slitWidthMode === 'FIXED'
+                    ? `${slitMaxWidthMm}`
+                    : `${slitMinWidthMm}-${slitMaxWidthMm}/步${slitWidthStepMm}`}{' '}
+                  · 超≤{slitOverCap}
+                </span>
               </summary>
-              <div className="craft-disclosure-panel">
+              <div className="craft-disclosure-panel" style={{ minWidth: 270 }}>
                 <label>
-                  <span>左修边 (mm)</span>
+                  <span>宽度模式</span>
+                  <select
+                    className="field"
+                    value={slitWidthMode}
+                    onChange={(e) => {
+                      const nextMode = e.target.value as SlittingWidthMode;
+                      setSlitSpec({
+                        slitWidthMode: nextMode,
+                        ...(nextMode === 'FIXED' ? { slitMinWidthMm: slitMaxWidthMm } : {})
+                      });
+                    }}
+                  >
+                    <option value="FLEXIBLE">可变宽幅区间</option>
+                    <option value="FIXED">固定组合宽</option>
+                  </select>
+                </label>
+                <label>
+                  <span>左固定切边 (mm)</span>
                   <input
                     type="number"
+                    min={0}
                     className="field num"
                     value={slitLeftTrimMm}
-                    onChange={(e) => setSlitSpec({ slitLeftTrimMm: Number(e.target.value) })}
+                    onChange={(e) => {
+                      const lt = Math.max(0, Number(e.target.value) || 0);
+                      const usable = Math.max(100, slitMotherWidthMm - lt - slitRightTrimMm);
+                      setSlitSpec({
+                        slitLeftTrimMm: lt,
+                        slitMaxWidthMm: Math.min(slitMaxWidthMm, usable),
+                        slitMinWidthMm: Math.min(slitMinWidthMm, usable)
+                      });
+                    }}
                   />
                 </label>
                 <label>
-                  <span>右修边 (mm)</span>
+                  <span>右固定切边 (mm)</span>
                   <input
                     type="number"
+                    min={0}
                     className="field num"
                     value={slitRightTrimMm}
-                    onChange={(e) => setSlitSpec({ slitRightTrimMm: Number(e.target.value) })}
+                    onChange={(e) => {
+                      const rt = Math.max(0, Number(e.target.value) || 0);
+                      const usable = Math.max(100, slitMotherWidthMm - slitLeftTrimMm - rt);
+                      setSlitSpec({
+                        slitRightTrimMm: rt,
+                        slitMaxWidthMm: Math.min(slitMaxWidthMm, usable),
+                        slitMinWidthMm: Math.min(slitMinWidthMm, usable)
+                      });
+                    }}
                   />
                 </label>
+                {slitWidthMode === 'FLEXIBLE' && (
+                  <label>
+                    <span>最小组合宽 (mm)</span>
+                    <input
+                      type="number"
+                      min={100}
+                      className="field num"
+                      value={slitMinWidthMm}
+                      onChange={(e) =>
+                        setSlitSpec({ slitMinWidthMm: Math.max(100, Number(e.target.value) || 100) })
+                      }
+                    />
+                  </label>
+                )}
+                <label>
+                  <span>{slitWidthMode === 'FIXED' ? '固定组合宽 (mm)' : '最大组合宽 (mm)'}</span>
+                  <input
+                    type="number"
+                    min={100}
+                    className="field num"
+                    value={slitMaxWidthMm}
+                    onChange={(e) => {
+                      const v = Math.max(100, Number(e.target.value) || 100);
+                      setSlitSpec({
+                        slitMaxWidthMm: v,
+                        ...(slitWidthMode === 'FIXED' ? { slitMinWidthMm: v } : {})
+                      });
+                    }}
+                  />
+                </label>
+                {slitWidthMode === 'FLEXIBLE' && (
+                  <label>
+                    <span>幅宽步长 (mm)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      className="field num"
+                      value={slitWidthStepMm}
+                      onChange={(e) =>
+                        setSlitSpec({ slitWidthStepMm: Math.max(1, Number(e.target.value) || 10) })
+                      }
+                    />
+                  </label>
+                )}
                 <label>
                   <span>超产上限 (卷)</span>
                   <input
                     type="number"
+                    min={0}
                     className="field num"
                     value={slitOverCap}
-                    onChange={(e) => setSlitSpec({ slitOverCap: Number(e.target.value) })}
+                    onChange={(e) =>
+                      setSlitSpec({ slitOverCap: Math.max(0, Number(e.target.value) || 0) })
+                    }
                   />
                 </label>
+                <button
+                  type="button"
+                  className="btn sm"
+                  style={{ width: '100%', justifyContent: 'center', marginTop: 4 }}
+                  onClick={(e) => {
+                    e.currentTarget.closest('details')?.removeAttribute('open');
+                    openEngineSettings();
+                  }}
+                >
+                  打开 NewSolver 高级参数设置…
+                </button>
               </div>
             </details>
           </>
@@ -3195,6 +3442,410 @@ export const CuttingWorkbenchPage: React.FC<{
               </div>
             )}
 
+            {/* 1D Full Solartron-Cut Parameter Config Section (always visible in 1D mode) */}
+            {!is2D && (
+              <div className="wb-right-section slit-cfg-card" id="wb-slitting-params">
+                <div className="wb-right-section-head">
+                  <span>一维搭切参数配置</span>
+                  <button
+                    type="button"
+                    className="link-btn"
+                    onClick={openEngineSettings}
+                    title="在系统设置中调整 NewSolver 全部参数"
+                  >
+                    高级设置 ↗
+                  </button>
+                </div>
+
+                {/* Preset Loader & Saver */}
+                <div className="slit-preset-row">
+                  <select
+                    className="field"
+                    aria-label="一维幅宽预设"
+                    value={selectedSlitPresetId}
+                    onChange={(e) => handleApplySlitPreset(e.target.value)}
+                  >
+                    <option value="">套用幅宽预设…</option>
+                    {slitPresets.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn sm"
+                    onClick={() => setSavingPresetOpen((v) => !v)}
+                  >
+                    保存
+                  </button>
+                  {selectedSlitPresetId &&
+                    !slitPresets.find((p) => p.id === selectedSlitPresetId)?.builtin && (
+                      <button
+                        type="button"
+                        className="btn sm"
+                        onClick={handleDeleteSelectedSlitPreset}
+                        title="删除当前自定义预设"
+                      >
+                        删
+                      </button>
+                    )}
+                </div>
+                {savingPresetOpen && (
+                  <div className="slit-preset-row">
+                    <input
+                      type="text"
+                      className="field"
+                      placeholder="输入预设名称（如：四线4600光学膜）"
+                      value={newPresetName}
+                      onChange={(e) => setNewPresetName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSaveCurrentSlitPreset();
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn sm pri"
+                      onClick={handleSaveCurrentSlitPreset}
+                    >
+                      确认
+                    </button>
+                  </div>
+                )}
+
+                {/* Solver Profile Switcher (FAST / QUALITY) */}
+                <div className="slit-profile-bar">
+                  <div className="seg" role="group" aria-label="一维求解档位" style={{ flex: 1 }}>
+                    <button
+                      type="button"
+                      className={slitProfile === 'FAST' ? 'on' : ''}
+                      aria-pressed={slitProfile === 'FAST'}
+                      onClick={() => setSlitSpec({ slitProfile: 'FAST' })}
+                    >
+                      快捷解 FAST
+                    </button>
+                    <button
+                      type="button"
+                      className={slitProfile === 'QUALITY' ? 'on' : ''}
+                      aria-pressed={slitProfile === 'QUALITY'}
+                      onClick={() => setSlitSpec({ slitProfile: 'QUALITY' })}
+                    >
+                      精确解 QUALITY
+                    </button>
+                  </div>
+                  <label className="slit-both-toggle" title="同时运行 FAST 与 QUALITY 对比结果">
+                    <input
+                      type="checkbox"
+                      checked={settings.slitRunBothProfiles}
+                      onChange={(e) =>
+                        updateStudioSettings({
+                          ...settings,
+                          slitRunBothProfiles: e.target.checked
+                        })
+                      }
+                    />
+                    <span>双档对比</span>
+                  </label>
+                </div>
+
+                {/* Width Mode + Core Solartron-Cut Primary Inputs */}
+                <div className="seg" role="group" aria-label="幅宽约束模式" style={{ width: '100%' }}>
+                  <button
+                    type="button"
+                    className={slitWidthMode === 'FLEXIBLE' ? 'on' : ''}
+                    onClick={() => setSlitSpec({ slitWidthMode: 'FLEXIBLE' })}
+                  >
+                    可变幅宽区间
+                  </button>
+                  <button
+                    type="button"
+                    className={slitWidthMode === 'FIXED' ? 'on' : ''}
+                    onClick={() =>
+                      setSlitSpec({ slitWidthMode: 'FIXED', slitMinWidthMm: slitMaxWidthMm })
+                    }
+                  >
+                    固定组合宽
+                  </button>
+                </div>
+
+                <div className="slit-cfg-grid">
+                  <label className="slit-cfg-field">
+                    <span>母卷总宽 (mm)</span>
+                    <input
+                      type="number"
+                      min={500}
+                      className="field num"
+                      value={slitMotherWidthMm}
+                      onChange={(e) => {
+                        const w = Math.max(500, Number(e.target.value) || 500);
+                        const usable = Math.max(100, w - slitLeftTrimMm - slitRightTrimMm);
+                        setSlitSpec({
+                          slitMotherWidthMm: w,
+                          slitMaxWidthMm: Math.min(slitMaxWidthMm, usable),
+                          slitMinWidthMm:
+                            slitWidthMode === 'FIXED'
+                              ? Math.min(slitMaxWidthMm, usable)
+                              : Math.min(slitMinWidthMm, usable)
+                        });
+                      }}
+                    />
+                  </label>
+                  <label className="slit-cfg-field">
+                    <span>超产上限 (卷)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={10000}
+                      className="field num"
+                      value={slitOverCap}
+                      onChange={(e) =>
+                        setSlitSpec({ slitOverCap: Math.max(0, Number(e.target.value) || 0) })
+                      }
+                    />
+                  </label>
+                  <label className="slit-cfg-field">
+                    <span>左切边 (mm)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      className="field num"
+                      value={slitLeftTrimMm}
+                      onChange={(e) => {
+                        const lt = Math.max(0, Number(e.target.value) || 0);
+                        const usable = Math.max(100, slitMotherWidthMm - lt - slitRightTrimMm);
+                        setSlitSpec({
+                          slitLeftTrimMm: lt,
+                          slitMaxWidthMm: Math.min(slitMaxWidthMm, usable),
+                          slitMinWidthMm: Math.min(slitMinWidthMm, usable)
+                        });
+                      }}
+                    />
+                  </label>
+                  <label className="slit-cfg-field">
+                    <span>右切边 (mm)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      className="field num"
+                      value={slitRightTrimMm}
+                      onChange={(e) => {
+                        const rt = Math.max(0, Number(e.target.value) || 0);
+                        const usable = Math.max(100, slitMotherWidthMm - slitLeftTrimMm - rt);
+                        setSlitSpec({
+                          slitRightTrimMm: rt,
+                          slitMaxWidthMm: Math.min(slitMaxWidthMm, usable),
+                          slitMinWidthMm: Math.min(slitMinWidthMm, usable)
+                        });
+                      }}
+                    />
+                  </label>
+                  {slitWidthMode === 'FLEXIBLE' ? (
+                    <>
+                      <label className="slit-cfg-field">
+                        <span>最小组合宽 (mm)</span>
+                        <input
+                          type="number"
+                          min={100}
+                          className="field num"
+                          value={slitMinWidthMm}
+                          onChange={(e) =>
+                            setSlitSpec({
+                              slitMinWidthMm: Math.max(100, Number(e.target.value) || 100)
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="slit-cfg-field">
+                        <span>最大组合宽 (mm)</span>
+                        <input
+                          type="number"
+                          min={100}
+                          className="field num"
+                          value={slitMaxWidthMm}
+                          onChange={(e) =>
+                            setSlitSpec({
+                              slitMaxWidthMm: Math.max(100, Number(e.target.value) || 100)
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="slit-cfg-field">
+                        <span>幅宽步长 (mm)</span>
+                        <input
+                          type="number"
+                          min={1}
+                          className="field num"
+                          value={slitWidthStepMm}
+                          onChange={(e) =>
+                            setSlitSpec({
+                              slitWidthStepMm: Math.max(1, Number(e.target.value) || 10)
+                            })
+                          }
+                        />
+                      </label>
+                    </>
+                  ) : (
+                    <label className="slit-cfg-field span-2">
+                      <span>固定组合宽 (mm)</span>
+                      <input
+                        type="number"
+                        min={100}
+                        className="field num"
+                        value={slitMaxWidthMm}
+                        onChange={(e) => {
+                          const v = Math.max(100, Number(e.target.value) || 100);
+                          setSlitSpec({ slitMaxWidthMm: v, slitMinWidthMm: v });
+                        }}
+                      />
+                    </label>
+                  )}
+                  <label className="slit-cfg-field">
+                    <span>求解时限 (秒)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={180}
+                      className="field num"
+                      value={settings.slitTimeLimitSeconds}
+                      onChange={(e) =>
+                        updateStudioSettings({
+                          ...settings,
+                          slitTimeLimitSeconds: Math.min(
+                            180,
+                            Math.max(1, Number(e.target.value) || 30)
+                          )
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+
+                <div className="slit-cfg-summary num">
+                  可切净宽 <b>{Math.max(0, slitMotherWidthMm - slitLeftTrimMm - slitRightTrimMm)}</b>{' '}
+                  mm · 候选宽{' '}
+                  <b>
+                    {slitWidthMode === 'FIXED'
+                      ? 1
+                      : slitMaxWidthMm >= slitMinWidthMm
+                      ? Math.floor((slitMaxWidthMm - slitMinWidthMm) / Math.max(1, slitWidthStepMm)) + 1
+                      : 0}
+                  </b>{' '}
+                  档
+                </div>
+
+                {/* Collapsible Solartron-Cut NewSolver Advanced Parameters */}
+                <details className="slit-adv-fold">
+                  <summary className="num">
+                    NewSolver 参数：TopK {settings.slitTopK} · 迭代 {settings.slitMaxIterations} ·
+                    花型 {settings.slitMaxPatterns} · 宽幅≤
+                    {slitProfile === 'QUALITY'
+                      ? Math.max(settings.slitMaxDistinctWidths, 5)
+                      : settings.slitMaxDistinctWidths}
+                  </summary>
+                  <div className="slit-cfg-grid" style={{ marginTop: 6 }}>
+                    <label className="slit-cfg-field">
+                      <span>TOP K 超产</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={50}
+                        className="field num"
+                        value={settings.slitTopK}
+                        onChange={(e) =>
+                          updateStudioSettings({
+                            ...settings,
+                            slitTopK: Math.min(50, Math.max(0, Number(e.target.value) || 0))
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="slit-cfg-field">
+                      <span>列生成迭代</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={5000}
+                        step={10}
+                        className="field num"
+                        value={settings.slitMaxIterations}
+                        onChange={(e) =>
+                          updateStudioSettings({
+                            ...settings,
+                            slitMaxIterations: Math.min(
+                              5000,
+                              Math.max(1, Number(e.target.value) || 300)
+                            )
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="slit-cfg-field">
+                      <span>最大花型池</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20000}
+                        step={50}
+                        className="field num"
+                        value={settings.slitMaxPatterns}
+                        onChange={(e) =>
+                          updateStudioSettings({
+                            ...settings,
+                            slitMaxPatterns: Math.min(
+                              20000,
+                              Math.max(1, Number(e.target.value) || 800)
+                            )
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="slit-cfg-field">
+                      <span>不同宽幅上限</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        className="field num"
+                        value={settings.slitMaxDistinctWidths}
+                        onChange={(e) =>
+                          updateStudioSettings({
+                            ...settings,
+                            slitMaxDistinctWidths: Math.min(
+                              20,
+                              Math.max(1, Number(e.target.value) || 4)
+                            )
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="slit-cfg-field span-2">
+                      <span>MIP 单阶段安全时限 (ms)</span>
+                      <input
+                        type="number"
+                        min={1000}
+                        max={600000}
+                        step={1000}
+                        className="field num"
+                        value={settings.slitStageTimeLimitMs}
+                        onChange={(e) =>
+                          updateStudioSettings({
+                            ...settings,
+                            slitStageTimeLimitMs: Math.min(
+                              600000,
+                              Math.max(1000, Number(e.target.value) || 120000)
+                            )
+                          })
+                        }
+                      />
+                    </label>
+                  </div>
+                </details>
+              </div>
+            )}
+
             {/* Clean Solving Goal Selector */}
             <div className="wb-right-section">
               <div className="wb-right-section-head">
@@ -3272,13 +3923,21 @@ export const CuttingWorkbenchPage: React.FC<{
                   ? currentRoll1D.width
                   : slitMotherWidthMm}
               </span>
-              {is2D && (
+              {is2D ? (
                 <button
                   type="button"
                   className="wb-algo-config-link"
                   onClick={openEngineSettings}
                 >
                   已启 {activeAlgos.length} 算法 · 配置
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="wb-algo-config-link"
+                  onClick={openEngineSettings}
+                >
+                  {settings.slitRunBothProfiles ? '快/精双档' : slitProfile} · 高级参数
                 </button>
               )}
             </div>

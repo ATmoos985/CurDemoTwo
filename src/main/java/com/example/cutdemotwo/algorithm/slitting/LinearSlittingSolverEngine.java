@@ -64,7 +64,7 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
     }
     static List<String> command(Path input,Path output,long parentPid) throws java.io.IOException {
         String cp=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
-        var args=new ArrayList<>(List.of(javaExecutable().toString(),"-Xmx512m","-XX:ActiveProcessorCount=2",
+        var args=new ArrayList<>(List.of(javaExecutable().toString(),"-Xmx768m","-XX:ActiveProcessorCount=2",
                 "-Dcutting.parallel.globalThreads=1"));
         boolean boot=false;
         if(!cp.contains(java.io.File.pathSeparator) && Files.isRegularFile(Path.of(cp)))
@@ -94,33 +94,91 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
     }
     static SlittingResult solveKernel(SlittingProblem p) {
         SlittingValidation.validateProblem(p);
-        var config=new SolverConfig(p.minWidthMm(),p.maxWidthMm(),p.widthStepMm(),p.motherWidthMm());
+        boolean fast = "FAST".equals(p.profile());
+        var config = new SolverConfig(p.minWidthMm(), p.maxWidthMm(), p.widthStepMm(), p.motherWidthMm());
+        config.setMode(p.minWidthMm() == p.maxWidthMm() ? "fixed" : "variable");
+
         long totalMs = p.timeLimitSeconds() * 1000L;
-        long startupMarginMs = Math.min(4500L, Math.max(2000L, totalMs / 4));
+        long startupMarginMs = Math.min(4500L, Math.max(1500L, totalMs / 4));
         long internalBudgetMs = Math.max(500L, totalMs - startupMarginMs);
-        config.setTotalOverCap(p.totalOverCap());config.setTimeoutMs(internalBudgetMs);config.setUseNewSolver(true);
-        var items=new ArrayList<SolverOrderItem>();
-        long lengthUnit=lengthUnitMm(p);
-        for(var o:p.orders()) {
-            var item=new SolverOrderItem();item.setMessageText(o.id());item.setWidth(o.widthMm());item.setDemand(o.quantity());
-            item.setLength(Math.toIntExact(o.lengthMm()/lengthUnit));item.setSurfaceTreatment(o.surfaceTreatment());
-            item.setGroupKey(item.getLength()+"m+"+o.surfaceTreatment());items.add(item);
+        long stageLimitMs = p.stageTimeLimitMs() != null ? p.stageTimeLimitMs() : 120_000L;
+        // 隔离进程内多阶段串行共享总时限：按档位拆分单阶段帽，避免首阶段耗尽全部预算导致进程被强制终止。
+        long effectiveStageMs = fast
+                ? Math.max(1_000L, Math.min(stageLimitMs, internalBudgetMs))
+                : Math.max(2_000L, Math.min(stageLimitMs, internalBudgetMs / 5));
+        long effectiveStage4Ms = fast
+                ? Math.max(1_000L, Math.min(30_000L, effectiveStageMs / 2))
+                : Math.max(1_500L, Math.min(30_000L, effectiveStageMs / 2));
+        long effectiveFastBudgetMs = fast
+                ? internalBudgetMs
+                : Math.min(10_000L, effectiveStageMs);
+
+        config.setTotalOverCap(p.totalOverCap());
+        config.setTimeoutMs(effectiveStageMs);
+        config.setNewSolverStage4TimeLimit(effectiveStage4Ms);
+        config.setUseNewSolver(true);
+        config.setNewSolverTopK(p.topK() != null ? p.topK() : 3);
+        config.setMaxIterations(p.maxIterations() != null ? p.maxIterations() : 300);
+        config.setNewSolverMaxPatterns(p.maxPatterns() != null ? p.maxPatterns() : 800);
+        int requestedDistinct = p.maxDistinctWidths() != null ? p.maxDistinctWidths() : 4;
+        config.setNewSolverMaxDistinctWidths(fast ? requestedDistinct : Math.max(requestedDistinct, 5));
+        if (p.useOptimizedAssignment() != null) {
+            config.setNewSolverUseOptimizedAssignment(p.useOptimizedAssignment());
         }
-        boolean fast="FAST".equals(p.profile());
-        var options=new HashMap<String,String>();
-        options.put("cutting.fast.preview",Boolean.toString(fast));options.put("cutting.quality.enabled",Boolean.toString(!fast));
-        options.put("cutting.fast.budgetMs",Long.toString(internalBudgetMs));
-        options.put("cutting.aLayerParityPenalties",fast?"0":"0,0.1");
-        options.put("cutting.aLayerAlignmentLambdas","0");options.put("cutting.nestedWidthCandidateSteps","0");
-        options.put("cutting.candidateOrders","1");options.put("cutting.spr.maxIterations","1");
-        for(String key:List.of("cutting.lns.enabled","cutting.phase2.enabled","cutting.demandPeak.enabled",
-                "cutting.demandPeak.smallPolish.enabled","cutting.parallel.aLayer.enabled","cutting.parallel.candidates.enabled",
-                "cutting.parallel.sprCandidates.enabled","cutting.spr.parallel","cutting.lns.parallel","cutting.portfolio.enabled"))options.put(key,"false");
-        options.put("cutting.spr.enabled",Boolean.toString(!fast));options.put("cutting.spr.reverseTiePass","true");
-        var raw=new CurrentNewSolverKernelAdapter(new CuttingSolver()).solve(SolverKernelRequest.from(items,config,SolverExecutionContext.of(options)));
-        if(!Set.of(SolverKernelStatus.SUCCEEDED,SolverKernelStatus.FEASIBLE,SolverKernelStatus.OPTIMAL).contains(raw.status()))
-            throw new IllegalStateException("内核未返回候选结果："+raw.status());
-        return convert(p,raw.instructions());
+        if (p.underPenalty() != null) {
+            config.setNewSolverUnderPenalty(p.underPenalty());
+        }
+        if (p.seqGroupAlpha() != null) {
+            config.setNewSolverSeqGroupAlpha(p.seqGroupAlpha());
+        }
+        if (p.seqGroupBeta() != null) {
+            config.setNewSolverSeqGroupBeta(p.seqGroupBeta());
+        }
+
+        var items = new ArrayList<SolverOrderItem>();
+        long lengthUnit = lengthUnitMm(p);
+        for (var o : p.orders()) {
+            var item = new SolverOrderItem();
+            item.setMessageText(o.id());
+            item.setWidth(o.widthMm());
+            item.setDemand(o.quantity());
+            item.setLength(Math.toIntExact(o.lengthMm() / lengthUnit));
+            item.setSurfaceTreatment(o.surfaceTreatment());
+            item.setGroupKey(item.getLength() + "m+" + o.surfaceTreatment());
+            items.add(item);
+        }
+
+        boolean enableLns = !fast && Boolean.TRUE.equals(p.lnsEnabled());
+        var options = new HashMap<String, String>();
+        options.put("cutting.fast.preview", Boolean.toString(fast));
+        options.put("cutting.quality", Boolean.toString(!fast));
+        options.put("cutting.quality.legacyPipeline", "false");
+        options.put("cutting.fast.budgetMs", Long.toString(effectiveFastBudgetMs));
+        options.put("cutting.quality.budgetMs", Long.toString(internalBudgetMs));
+        options.put("cutting.aLayerParityPenalties", fast ? "0" : "0,0.1");
+        options.put("cutting.aLayerAlignmentLambdas", "0");
+        options.put("cutting.nestedWidthCandidateSteps", "0");
+        options.put("cutting.candidateOrders", "1");
+        options.put("cutting.spr.enabled", "false");
+        options.put("cutting.lns.enabled", Boolean.toString(enableLns));
+        options.put("cutting.lns.enrichPatterns", "false");
+        for (String key : List.of(
+                "cutting.phase2.enabled",
+                "cutting.demandPeak.enabled",
+                "cutting.demandPeak.smallPolish.enabled",
+                "cutting.parallel.aLayer.enabled",
+                "cutting.parallel.candidates.enabled",
+                "cutting.parallel.sprCandidates.enabled",
+                "cutting.spr.parallel",
+                "cutting.lns.parallel",
+                "cutting.portfolio.enabled")) {
+            options.put(key, "false");
+        }
+        var raw = new CurrentNewSolverKernelAdapter(new CuttingSolver())
+                .solve(SolverKernelRequest.from(items, config, SolverExecutionContext.of(options)));
+        if (!Set.of(SolverKernelStatus.SUCCEEDED, SolverKernelStatus.FEASIBLE, SolverKernelStatus.OPTIMAL).contains(raw.status()))
+            throw new IllegalStateException("内核未返回候选结果：" + raw.status());
+        return convert(p, raw.instructions());
     }
     // 内核按整数长度分组并透传；共用精确尺度，不改变整米请求原有编码，不舍入非整米长度。
     private static long lengthUnitMm(SlittingProblem p) {

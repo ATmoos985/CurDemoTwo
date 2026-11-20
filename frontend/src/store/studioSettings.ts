@@ -1,6 +1,120 @@
 export type StartCornerType = 'left-top' | 'right-bottom' | 'right-top' | 'left-bottom';
 export type FirstStageOrientation = 'horizontal' | 'vertical';
 export type SettingsTabId = 'general' | 'craft' | 'remnant' | 'engines' | 'integration';
+export type SlittingProfile = 'FAST' | 'QUALITY';
+export type SlittingWidthMode = 'FLEXIBLE' | 'FIXED';
+
+export interface SlittingWidthPreset {
+  id: string;
+  name: string;
+  motherWidthMm: number;
+  leftTrimMm: number;
+  rightTrimMm: number;
+  minWidthMm: number;
+  maxWidthMm: number;
+  widthStepMm: number;
+  totalOverCap: number;
+  widthMode: SlittingWidthMode;
+  builtin?: boolean;
+}
+
+export const DEFAULT_SLITTING_PRESETS: SlittingWidthPreset[] = [
+  {
+    id: 'preset-film-4600-std',
+    name: '光学膜 4600 · 标准 (4300–4400)',
+    motherWidthMm: 4600,
+    leftTrimMm: 100,
+    rightTrimMm: 100,
+    minWidthMm: 4300,
+    maxWidthMm: 4400,
+    widthStepMm: 10,
+    totalOverCap: 30,
+    widthMode: 'FLEXIBLE',
+    builtin: true
+  },
+  {
+    id: 'preset-film-4600-wide',
+    name: '光学膜 4600 · 宽区 (4200–4400)',
+    motherWidthMm: 4600,
+    leftTrimMm: 100,
+    rightTrimMm: 100,
+    minWidthMm: 4200,
+    maxWidthMm: 4400,
+    widthStepMm: 10,
+    totalOverCap: 30,
+    widthMode: 'FLEXIBLE',
+    builtin: true
+  },
+  {
+    id: 'preset-curtain-2800',
+    name: '窗帘宽幅 2800 (2600–2760)',
+    motherWidthMm: 2800,
+    leftTrimMm: 20,
+    rightTrimMm: 20,
+    minWidthMm: 2600,
+    maxWidthMm: 2760,
+    widthStepMm: 10,
+    totalOverCap: 8,
+    widthMode: 'FLEXIBLE',
+    builtin: true
+  },
+  {
+    id: 'preset-board-1220',
+    name: '标准板材 1220 (1080–1200)',
+    motherWidthMm: 1220,
+    leftTrimMm: 10,
+    rightTrimMm: 10,
+    minWidthMm: 1080,
+    maxWidthMm: 1200,
+    widthStepMm: 10,
+    totalOverCap: 6,
+    widthMode: 'FLEXIBLE',
+    builtin: true
+  }
+];
+
+const SLITTING_PRESETS_KEY = 'cutplan.slitting.widthPresets.v1';
+
+export function loadSlittingPresets(): SlittingWidthPreset[] {
+  try {
+    const raw = localStorage.getItem(SLITTING_PRESETS_KEY);
+    if (!raw) return [...DEFAULT_SLITTING_PRESETS];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [...DEFAULT_SLITTING_PRESETS];
+    const custom = parsed.filter(
+      (p: any) =>
+        p &&
+        typeof p.name === 'string' &&
+        Number.isFinite(Number(p.motherWidthMm)) &&
+        Number.isFinite(Number(p.minWidthMm)) &&
+        Number.isFinite(Number(p.maxWidthMm))
+    );
+    return [...DEFAULT_SLITTING_PRESETS, ...custom.map((p: any) => ({ ...p, builtin: false }))];
+  } catch {
+    return [...DEFAULT_SLITTING_PRESETS];
+  }
+}
+
+export function saveCustomSlittingPresets(allPresets: SlittingWidthPreset[]): SlittingWidthPreset[] {
+  const custom = allPresets.filter((p) => !p.builtin);
+  try {
+    localStorage.setItem(SLITTING_PRESETS_KEY, JSON.stringify(custom));
+  } catch {}
+  return [...DEFAULT_SLITTING_PRESETS, ...custom];
+}
+
+export interface SlittingSolverOptions {
+  topK: number;
+  maxIterations: number;
+  maxPatterns: number;
+  maxDistinctWidths: number;
+  stageTimeLimitMs: number;
+  useOptimizedAssignment: boolean;
+  underPenalty: number;
+  seqGroupAlpha: number;
+  seqGroupBeta: number;
+  lnsEnabled: boolean;
+}
 
 export interface WorkbenchStrategyDef {
   id: string;
@@ -36,15 +150,44 @@ export interface StudioSettings {
   minRemnantWidthMm: number;
   minRemnantLengthMm: number;
 
-  // Tab 4: 求解引擎与配额
+  // Tab 4: 求解引擎与配额（2D + 1D Solartron-Cut NewSolver 全量参数）
   timeLimitSeconds: number;
   allowFallback: boolean;
   enabledStrategies2D: string[];
+  slitProfile: SlittingProfile;
+  slitRunBothProfiles: boolean;
+  slitTimeLimitSeconds: number;
+  slitTopK: number;
+  slitMaxIterations: number;
+  slitMaxPatterns: number;
+  slitMaxDistinctWidths: number;
+  slitStageTimeLimitMs: number;
+  slitUseOptimizedAssignment: boolean;
+  slitUnderPenalty: number;
+  slitSeqGroupAlpha: number;
+  slitSeqGroupBeta: number;
+  slitLnsEnabled: boolean;
 
   // Tab 5: 导出与系统接入
   exportPrefix: string;
   ticketShowCuts: boolean;
 }
+
+export const DEFAULT_SLITTING_SOLVER_SETTINGS = {
+  slitProfile: 'FAST' as SlittingProfile,
+  slitRunBothProfiles: false,
+  slitTimeLimitSeconds: 30,
+  slitTopK: 3,
+  slitMaxIterations: 300,
+  slitMaxPatterns: 800,
+  slitMaxDistinctWidths: 4,
+  slitStageTimeLimitMs: 120000,
+  slitUseOptimizedAssignment: true,
+  slitUnderPenalty: 1000000,
+  slitSeqGroupAlpha: 1.0,
+  slitSeqGroupBeta: 0.0,
+  slitLnsEnabled: false
+};
 
 export const DEFAULT_STUDIO_SETTINGS: StudioSettings = {
   vertical: true,
@@ -65,10 +208,26 @@ export const DEFAULT_STUDIO_SETTINGS: StudioSettings = {
   timeLimitSeconds: 5,
   allowFallback: true,
   enabledStrategies2D: ['PS_FIXED', 'PS_ROT', 'DN_GA', 'JAVA_FAST'],
+  ...DEFAULT_SLITTING_SOLVER_SETTINGS,
 
   exportPrefix: 'CutPlan',
   ticketShowCuts: true
 };
+
+export function extractSlittingSolverOptions(settings: StudioSettings): SlittingSolverOptions {
+  return {
+    topK: Math.min(50, Math.max(0, Math.round(settings.slitTopK))),
+    maxIterations: Math.min(5000, Math.max(1, Math.round(settings.slitMaxIterations))),
+    maxPatterns: Math.min(20000, Math.max(1, Math.round(settings.slitMaxPatterns))),
+    maxDistinctWidths: Math.min(20, Math.max(1, Math.round(settings.slitMaxDistinctWidths))),
+    stageTimeLimitMs: Math.min(600000, Math.max(1000, Math.round(settings.slitStageTimeLimitMs))),
+    useOptimizedAssignment: Boolean(settings.slitUseOptimizedAssignment),
+    underPenalty: Math.max(0, Number(settings.slitUnderPenalty) || 0),
+    seqGroupAlpha: Math.max(0, Number(settings.slitSeqGroupAlpha) || 0),
+    seqGroupBeta: Math.max(0, Number(settings.slitSeqGroupBeta) || 0),
+    lnsEnabled: Boolean(settings.slitLnsEnabled)
+  };
+}
 
 const VALID_CORNERS: StartCornerType[] = ['left-top', 'right-bottom', 'right-top', 'left-bottom'];
 const VALID_STRATEGY_IDS = new Set(WORKBENCH_STRATEGIES_2D.map((s) => s.id));
@@ -182,7 +341,7 @@ export function loadStudioSettings(): StudioSettings {
         localStorage.getItem('cam_timeout'),
         DEFAULT_STUDIO_SETTINGS.timeLimitSeconds,
         1,
-        120
+        60
       ),
       allowFallback:
         rawFallback === '0'
@@ -191,6 +350,83 @@ export function loadStudioSettings(): StudioSettings {
           ? true
           : DEFAULT_STUDIO_SETTINGS.allowFallback,
       enabledStrategies2D: readEnabledStrategies2D(rawEnabledStrategies2D),
+
+      slitProfile:
+        localStorage.getItem('cutplan.slit.profile') === 'QUALITY'
+          ? 'QUALITY'
+          : DEFAULT_STUDIO_SETTINGS.slitProfile,
+      slitRunBothProfiles:
+        localStorage.getItem('cutplan.slit.runBothProfiles') === '1'
+          ? true
+          : localStorage.getItem('cutplan.slit.runBothProfiles') === '0'
+          ? false
+          : DEFAULT_STUDIO_SETTINGS.slitRunBothProfiles,
+      slitTimeLimitSeconds: readNumber(
+        localStorage.getItem('cutplan.slit.timeLimitSeconds'),
+        DEFAULT_STUDIO_SETTINGS.slitTimeLimitSeconds,
+        1,
+        180
+      ),
+      slitTopK: readNumber(
+        localStorage.getItem('cutplan.slit.topK'),
+        DEFAULT_STUDIO_SETTINGS.slitTopK,
+        0,
+        50
+      ),
+      slitMaxIterations: readNumber(
+        localStorage.getItem('cutplan.slit.maxIterations'),
+        DEFAULT_STUDIO_SETTINGS.slitMaxIterations,
+        1,
+        5000
+      ),
+      slitMaxPatterns: readNumber(
+        localStorage.getItem('cutplan.slit.maxPatterns'),
+        DEFAULT_STUDIO_SETTINGS.slitMaxPatterns,
+        1,
+        20000
+      ),
+      slitMaxDistinctWidths: readNumber(
+        localStorage.getItem('cutplan.slit.maxDistinctWidths'),
+        DEFAULT_STUDIO_SETTINGS.slitMaxDistinctWidths,
+        1,
+        20
+      ),
+      slitStageTimeLimitMs: readNumber(
+        localStorage.getItem('cutplan.slit.stageTimeLimitMs'),
+        DEFAULT_STUDIO_SETTINGS.slitStageTimeLimitMs,
+        1000,
+        600000
+      ),
+      slitUseOptimizedAssignment:
+        localStorage.getItem('cutplan.slit.useOptimizedAssignment') === '0'
+          ? false
+          : localStorage.getItem('cutplan.slit.useOptimizedAssignment') === '1'
+          ? true
+          : DEFAULT_STUDIO_SETTINGS.slitUseOptimizedAssignment,
+      slitUnderPenalty: readNumber(
+        localStorage.getItem('cutplan.slit.underPenalty'),
+        DEFAULT_STUDIO_SETTINGS.slitUnderPenalty,
+        0,
+        1e12
+      ),
+      slitSeqGroupAlpha: readNumber(
+        localStorage.getItem('cutplan.slit.seqGroupAlpha'),
+        DEFAULT_STUDIO_SETTINGS.slitSeqGroupAlpha,
+        0,
+        1000
+      ),
+      slitSeqGroupBeta: readNumber(
+        localStorage.getItem('cutplan.slit.seqGroupBeta'),
+        DEFAULT_STUDIO_SETTINGS.slitSeqGroupBeta,
+        0,
+        1000
+      ),
+      slitLnsEnabled:
+        localStorage.getItem('cutplan.slit.lnsEnabled') === '1'
+          ? true
+          : localStorage.getItem('cutplan.slit.lnsEnabled') === '0'
+          ? false
+          : DEFAULT_STUDIO_SETTINGS.slitLnsEnabled,
 
       exportPrefix: rawPrefix || DEFAULT_STUDIO_SETTINGS.exportPrefix,
       ticketShowCuts:
@@ -233,7 +469,54 @@ export function validateStudioSettings(draft: StudioSettings): string | null {
     return '候选料头最小回收长度须在 50–5000 mm 之间';
   }
   if (!Number.isFinite(draft.timeLimitSeconds) || draft.timeLimitSeconds < 1 || draft.timeLimitSeconds > 60) {
-    return '单作业默认求解时限须在 1–60 秒之间';
+    return '二维单作业默认求解时限须在 1–60 秒之间';
+  }
+  if (
+    !Number.isFinite(draft.slitTimeLimitSeconds) ||
+    draft.slitTimeLimitSeconds < 1 ||
+    draft.slitTimeLimitSeconds > 180
+  ) {
+    return '一维分切默认求解时限须在 1–180 秒之间';
+  }
+  if (!Number.isFinite(draft.slitTopK) || draft.slitTopK < 0 || draft.slitTopK > 50) {
+    return '一维 TOP K 超产宽度数须在 0–50 之间';
+  }
+  if (
+    !Number.isFinite(draft.slitMaxIterations) ||
+    draft.slitMaxIterations < 1 ||
+    draft.slitMaxIterations > 5000
+  ) {
+    return '一维列生成最大迭代次数须在 1–5000 之间';
+  }
+  if (
+    !Number.isFinite(draft.slitMaxPatterns) ||
+    draft.slitMaxPatterns < 1 ||
+    draft.slitMaxPatterns > 20000
+  ) {
+    return '一维最大花型池上限须在 1–20000 之间';
+  }
+  if (
+    !Number.isFinite(draft.slitMaxDistinctWidths) ||
+    draft.slitMaxDistinctWidths < 1 ||
+    draft.slitMaxDistinctWidths > 20
+  ) {
+    return '一维单卷不同宽幅上限须在 1–20 之间';
+  }
+  if (
+    !Number.isFinite(draft.slitStageTimeLimitMs) ||
+    draft.slitStageTimeLimitMs < 1000 ||
+    draft.slitStageTimeLimitMs > 600000
+  ) {
+    return '一维 MIP 单阶段安全时限须在 1000–600000 毫秒之间';
+  }
+  if (!Number.isFinite(draft.slitUnderPenalty) || draft.slitUnderPenalty < 0) {
+    return '一维欠产惩罚系数必须为非负数';
+  }
+  if (!Number.isFinite(draft.slitSeqGroupAlpha) || draft.slitSeqGroupAlpha < 0) {
+    return '一维顺序组权重 alpha 必须为非负数';
+  }
+  if (!Number.isFinite(draft.slitSeqGroupBeta) || draft.slitSeqGroupBeta < 0) {
+    return '一维顺序组权重 beta 必须为非负数';
   }
   if (
     !Array.isArray(draft.enabledStrategies2D) ||
@@ -259,6 +542,19 @@ export function persistStudioSettings(next: StudioSettings): StudioSettings {
     minRemnantLengthMm: Math.round(next.minRemnantLengthMm * 10) / 10,
     timeLimitSeconds: Math.min(60, Math.max(1, Math.round(next.timeLimitSeconds))),
     enabledStrategies2D: normalizeEnabledStrategies2D(next.enabledStrategies2D),
+    slitProfile: next.slitProfile === 'QUALITY' ? 'QUALITY' : 'FAST',
+    slitRunBothProfiles: Boolean(next.slitRunBothProfiles),
+    slitTimeLimitSeconds: Math.min(180, Math.max(1, Math.round(next.slitTimeLimitSeconds))),
+    slitTopK: Math.min(50, Math.max(0, Math.round(next.slitTopK))),
+    slitMaxIterations: Math.min(5000, Math.max(1, Math.round(next.slitMaxIterations))),
+    slitMaxPatterns: Math.min(20000, Math.max(1, Math.round(next.slitMaxPatterns))),
+    slitMaxDistinctWidths: Math.min(20, Math.max(1, Math.round(next.slitMaxDistinctWidths))),
+    slitStageTimeLimitMs: Math.min(600000, Math.max(1000, Math.round(next.slitStageTimeLimitMs))),
+    slitUseOptimizedAssignment: Boolean(next.slitUseOptimizedAssignment),
+    slitUnderPenalty: Math.max(0, Number(next.slitUnderPenalty) || 0),
+    slitSeqGroupAlpha: Math.max(0, Number(next.slitSeqGroupAlpha) || 0),
+    slitSeqGroupBeta: Math.max(0, Number(next.slitSeqGroupBeta) || 0),
+    slitLnsEnabled: Boolean(next.slitLnsEnabled),
     exportPrefix: next.exportPrefix.trim() || 'CutPlan'
   };
 
@@ -288,6 +584,31 @@ export function persistStudioSettings(next: StudioSettings): StudioSettings {
       'cutplan.studio.enabledStrategies2D',
       JSON.stringify(sanitized.enabledStrategies2D)
     );
+    localStorage.setItem('cutplan.slit.profile', sanitized.slitProfile);
+    localStorage.setItem(
+      'cutplan.slit.runBothProfiles',
+      sanitized.slitRunBothProfiles ? '1' : '0'
+    );
+    localStorage.setItem('cutplan.slit.timeLimitSeconds', String(sanitized.slitTimeLimitSeconds));
+    localStorage.setItem('cutplan.slit.topK', String(sanitized.slitTopK));
+    localStorage.setItem('cutplan.slit.maxIterations', String(sanitized.slitMaxIterations));
+    localStorage.setItem('cutplan.slit.maxPatterns', String(sanitized.slitMaxPatterns));
+    localStorage.setItem(
+      'cutplan.slit.maxDistinctWidths',
+      String(sanitized.slitMaxDistinctWidths)
+    );
+    localStorage.setItem(
+      'cutplan.slit.stageTimeLimitMs',
+      String(sanitized.slitStageTimeLimitMs)
+    );
+    localStorage.setItem(
+      'cutplan.slit.useOptimizedAssignment',
+      sanitized.slitUseOptimizedAssignment ? '1' : '0'
+    );
+    localStorage.setItem('cutplan.slit.underPenalty', String(sanitized.slitUnderPenalty));
+    localStorage.setItem('cutplan.slit.seqGroupAlpha', String(sanitized.slitSeqGroupAlpha));
+    localStorage.setItem('cutplan.slit.seqGroupBeta', String(sanitized.slitSeqGroupBeta));
+    localStorage.setItem('cutplan.slit.lnsEnabled', sanitized.slitLnsEnabled ? '1' : '0');
     localStorage.setItem('cutplan.studio.exportPrefix', sanitized.exportPrefix);
     localStorage.setItem('cutplan.studio.ticketShowCuts', sanitized.ticketShowCuts ? '1' : '0');
   } catch {}

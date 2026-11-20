@@ -301,8 +301,7 @@ public class OptimizationService implements AutoCloseable {
             int seconds=Math.max(1,(int)Math.ceil(local.lease.remainingMillis()/1000d));
             if("SLITTING_1D".equals(input.problemType())) {
                 var p=input.slittingProblem();
-                var bounded=new com.example.cutdemotwo.contracts.slitting.SlittingProblem(p.schemaVersion(),p.unit(),p.motherWidthMm(),
-                        p.leftTrimMm(),p.rightTrimMm(),p.minWidthMm(),p.maxWidthMm(),p.widthStepMm(),p.totalOverCap(),p.profile(),p.orders(),seconds);
+                var bounded=p.withTimeLimitSeconds(seconds);
                 var result=slitting.solve(bounded);
                 Thread.interrupted();
                 if(!local.lost)shared.update(local.lease,current->finishedSlitting(current,result),true);

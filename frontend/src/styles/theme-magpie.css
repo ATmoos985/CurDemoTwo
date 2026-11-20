@@ -1546,6 +1546,157 @@ dialog.settings-center-dialog {
   backdrop-filter: blur(4px);
 }
 
+/* ==========================================================================
+   1D Slitting Solartron-Cut Parameter Panels (Workbench, Showcase, Settings)
+   ========================================================================== */
+.slit-cfg-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.slit-preset-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.slit-preset-row .field {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  font-size: 12px;
+}
+
+.slit-profile-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.slit-both-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--cp-ink-2, #52525b);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.slit-both-toggle input[type='checkbox'] {
+  accent-color: var(--cp-accent, #5b61f6);
+}
+
+.slit-cfg-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
+}
+
+.slit-cfg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.slit-cfg-field.span-2,
+.slit-both-toggle.span-2 {
+  grid-column: span 2;
+}
+
+.slit-cfg-field > span {
+  font-size: 11px;
+  color: var(--cp-ink-2, #52525b);
+  font-weight: 500;
+}
+
+.slit-cfg-field .field {
+  width: 100%;
+  height: 28px;
+  padding: 2px 7px;
+  font-size: 12px;
+}
+
+.slit-cfg-summary {
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--cp-bg-subtle, #f4f5f8);
+  border: 1px solid var(--cp-border, #e4e6ec);
+  color: var(--cp-ink-2, #52525b);
+  font-size: 11.5px;
+}
+
+.slit-cfg-summary b {
+  color: var(--cp-ink, #18181b);
+}
+
+.slit-adv-fold {
+  border: 1px solid var(--cp-border, #e4e6ec);
+  border-radius: 7px;
+  padding: 6px 8px;
+  background: var(--cp-surface, #ffffff);
+}
+
+.slit-adv-fold > summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--cp-ink-2, #52525b);
+  user-select: none;
+}
+
+.slit-adv-fold[open] > summary {
+  color: var(--cp-ink, #18181b);
+  font-weight: 600;
+}
+
+.sc-slit-profile-note {
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: var(--cp-bg-subtle, #f4f5f8);
+  border: 1px solid var(--cp-border, #e4e6ec);
+  color: var(--cp-ink-2, #52525b);
+  font-size: 12px;
+  line-height: 1.45;
+  margin-bottom: 6px;
+}
+
+.sc-slit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  margin-top: 8px;
+}
+
+.sc-slit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.sc-slit-field.span-2,
+.sc-slit-grid .sc-switch-row.span-2 {
+  grid-column: span 2;
+}
+
+.sc-slit-field > label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cp-ink, #18181b);
+}
+
+.sc-slit-field > small {
+  font-size: 11px;
+  color: var(--cp-ink-3, #71717a);
+}
+
+.sc-slit-field .field {
+  width: 100%;
+}
+
 /* Compact 1366x768 Guard */
 @media (max-width: 1400px) {
   .app.app-magpie {

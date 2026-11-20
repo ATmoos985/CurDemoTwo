@@ -2,9 +2,11 @@ import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { requestJSON, toast, fmtN } from '@static/app/js/util.js';
 import { presets, matchPreset } from '@static/js/industry/industry-profiles.js';
 import {
+  DEFAULT_SLITTING_SOLVER_SETTINGS,
   DEFAULT_STUDIO_SETTINGS,
   FirstStageOrientation,
   SettingsTabId,
+  SlittingProfile,
   StartCornerType,
   StudioSettings,
   WORKBENCH_STRATEGIES_2D,
@@ -1491,6 +1493,268 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </label>
                     );
                   })}
+                </section>
+
+                {/* 1D Solartron-Cut NewSolver / OR-Tools Configuration Card */}
+                <section className="sc-card" id="cfg-slitting-1d-card">
+                  <div className="sc-card-head">
+                    <span>一维分切求解器参数（NewSolver / OR-Tools）</span>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <code className="sc-code-pill num">
+                        {draft.slitProfile === 'QUALITY' ? '精确解 QUALITY' : '快捷解 FAST'}
+                      </code>
+                      <button
+                        type="button"
+                        className="btn sm"
+                        onClick={() => {
+                          patchDraft({ ...DEFAULT_SLITTING_SOLVER_SETTINGS });
+                          toast('已恢复一维分切默认参数');
+                        }}
+                      >
+                        恢复一维默认
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="sc-ctrl-row compact">
+                    <strong>默认求解档位</strong>
+                    <div className="seg" role="group" aria-label="一维默认求解档位">
+                      <button
+                        type="button"
+                        className={draft.slitProfile === 'FAST' ? 'on' : ''}
+                        aria-pressed={draft.slitProfile === 'FAST'}
+                        onClick={() => patchDraft({ slitProfile: 'FAST' as SlittingProfile })}
+                      >
+                        快捷解 (FAST)
+                      </button>
+                      <button
+                        type="button"
+                        className={draft.slitProfile === 'QUALITY' ? 'on' : ''}
+                        aria-pressed={draft.slitProfile === 'QUALITY'}
+                        onClick={() => patchDraft({ slitProfile: 'QUALITY' as SlittingProfile })}
+                      >
+                        精确解 (QUALITY)
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="sc-slit-profile-note">
+                    {draft.slitProfile === 'QUALITY'
+                      ? '精确解：启用多候选与 A 层奇偶惩罚扫描（单卷不同宽幅上限自动 ≥ 5），优先减少换刀组数与总卷数。'
+                      : '快捷解：启用单候选快速基线，优先在较短时间内稳定产出可行好解。'}
+                  </div>
+
+                  <label className="sc-switch-row" htmlFor="cfg-slit-run-both">
+                    <span className="sc-switch-label">
+                      <strong>工作台同时对照快捷解与精确解</strong>
+                      <code className="num">关闭时仅运行所选档位，响应更快</code>
+                    </span>
+                    <input
+                      id="cfg-slit-run-both"
+                      type="checkbox"
+                      role="switch"
+                      {...({ switch: '' } as any)}
+                      className="ux-switch"
+                      checked={draft.slitRunBothProfiles}
+                      onChange={(e) => patchDraft({ slitRunBothProfiles: e.target.checked })}
+                    />
+                  </label>
+
+                  <div className="sc-ctrl-row compact">
+                    <label htmlFor="cfg-slit-time">
+                      <strong>一维总求解时限</strong>
+                      <span className="num muted">1 – 180 秒</span>
+                    </label>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <div className="width-quick-pills" role="group" aria-label="一维时限快捷档">
+                        {[10, 30, 60, 120, 180].map((sec) => (
+                          <button
+                            key={sec}
+                            type="button"
+                            className={draft.slitTimeLimitSeconds === sec ? 'on' : ''}
+                            aria-pressed={draft.slitTimeLimitSeconds === sec}
+                            onClick={() => patchDraft({ slitTimeLimitSeconds: sec })}
+                          >
+                            {sec}s
+                          </button>
+                        ))}
+                      </div>
+                      <div className="settings-unit-input">
+                        <input
+                          id="cfg-slit-time"
+                          type="number"
+                          min={1}
+                          max={180}
+                          step={1}
+                          className="field num"
+                          style={{ width: 60 }}
+                          value={draft.slitTimeLimitSeconds}
+                          onChange={(e) =>
+                            patchDraft({ slitTimeLimitSeconds: Number(e.target.value) })
+                          }
+                        />
+                        <span>s</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="sc-slit-grid">
+                    <div className="sc-slit-field">
+                      <label htmlFor="cfg-slit-topk">TOP K 超产宽度</label>
+                      <input
+                        id="cfg-slit-topk"
+                        type="number"
+                        min={0}
+                        max={50}
+                        className="field num"
+                        value={draft.slitTopK}
+                        onChange={(e) => patchDraft({ slitTopK: Number(e.target.value) })}
+                      />
+                      <small>允许超产的前 K 个大需求宽幅（默认 3）</small>
+                    </div>
+                    <div className="sc-slit-field">
+                      <label htmlFor="cfg-slit-max-iter">列生成最大迭代</label>
+                      <input
+                        id="cfg-slit-max-iter"
+                        type="number"
+                        min={1}
+                        max={5000}
+                        step={10}
+                        className="field num"
+                        value={draft.slitMaxIterations}
+                        onChange={(e) => patchDraft({ slitMaxIterations: Number(e.target.value) })}
+                      />
+                      <small>列生成定价循环上限（默认 300）</small>
+                    </div>
+                    <div className="sc-slit-field">
+                      <label htmlFor="cfg-slit-max-pat">最大花型池</label>
+                      <input
+                        id="cfg-slit-max-pat"
+                        type="number"
+                        min={1}
+                        max={20000}
+                        step={50}
+                        className="field num"
+                        value={draft.slitMaxPatterns}
+                        onChange={(e) => patchDraft({ slitMaxPatterns: Number(e.target.value) })}
+                      />
+                      <small>候选分切花型池上限（默认 800）</small>
+                    </div>
+                    <div className="sc-slit-field">
+                      <label htmlFor="cfg-slit-max-distinct">单卷不同宽幅上限</label>
+                      <input
+                        id="cfg-slit-max-distinct"
+                        type="number"
+                        min={1}
+                        max={20}
+                        className="field num"
+                        value={draft.slitMaxDistinctWidths}
+                        onChange={(e) =>
+                          patchDraft({ slitMaxDistinctWidths: Number(e.target.value) })
+                        }
+                      />
+                      <small>
+                        {draft.slitProfile === 'QUALITY' && draft.slitMaxDistinctWidths < 5
+                          ? '精确解运行时自动提升到 5'
+                          : '单支母卷最多搭切不同规格数（默认 4）'}
+                      </small>
+                    </div>
+                    <div className="sc-slit-field span-2">
+                      <label htmlFor="cfg-slit-stage-ms">MIP 单阶段安全时限（毫秒）</label>
+                      <input
+                        id="cfg-slit-stage-ms"
+                        type="number"
+                        min={1000}
+                        max={600000}
+                        step={1000}
+                        className="field num"
+                        value={draft.slitStageTimeLimitMs}
+                        onChange={(e) =>
+                          patchDraft({ slitStageTimeLimitMs: Number(e.target.value) })
+                        }
+                      />
+                      <small>单个 MIP 求解阶段的安全上限（默认 120000 ms，受总求解时限约束）</small>
+                    </div>
+                  </div>
+
+                  <details className="sc-fold" style={{ marginTop: 6 }}>
+                    <summary>NewSolver 惩罚权重与 B 层搜索微调</summary>
+                    <div className="sc-slit-grid" style={{ marginTop: 8 }}>
+                      <label className="sc-switch-row span-2" htmlFor="cfg-slit-opt-assign">
+                        <span className="sc-switch-label">
+                          <strong>启用 B 层最优换刀分配</strong>
+                          <code className="num">useOptimizedAssignment（默认开启）</code>
+                        </span>
+                        <input
+                          id="cfg-slit-opt-assign"
+                          type="checkbox"
+                          role="switch"
+                          {...({ switch: '' } as any)}
+                          className="ux-switch"
+                          checked={draft.slitUseOptimizedAssignment}
+                          onChange={(e) =>
+                            patchDraft({ slitUseOptimizedAssignment: e.target.checked })
+                          }
+                        />
+                      </label>
+                      <label className="sc-switch-row span-2" htmlFor="cfg-slit-lns">
+                        <span className="sc-switch-label">
+                          <strong>精确解启用 LNS 大邻域搜索</strong>
+                          <code className="num">仅 QUALITY 档位生效，大单会增加耗时</code>
+                        </span>
+                        <input
+                          id="cfg-slit-lns"
+                          type="checkbox"
+                          role="switch"
+                          {...({ switch: '' } as any)}
+                          className="ux-switch"
+                          checked={draft.slitLnsEnabled}
+                          onChange={(e) => patchDraft({ slitLnsEnabled: e.target.checked })}
+                        />
+                      </label>
+                      <div className="sc-slit-field">
+                        <label htmlFor="cfg-slit-under-pen">欠产惩罚系数</label>
+                        <input
+                          id="cfg-slit-under-pen"
+                          type="number"
+                          min={0}
+                          step={10000}
+                          className="field num"
+                          value={draft.slitUnderPenalty}
+                          onChange={(e) => patchDraft({ slitUnderPenalty: Number(e.target.value) })}
+                        />
+                      </div>
+                      <div className="sc-slit-field">
+                        <label htmlFor="cfg-slit-alpha">顺序组权重 α / β</label>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <input
+                            id="cfg-slit-alpha"
+                            type="number"
+                            min={0}
+                            step={0.1}
+                            className="field num"
+                            aria-label="顺序组权重 alpha"
+                            value={draft.slitSeqGroupAlpha}
+                            onChange={(e) =>
+                              patchDraft({ slitSeqGroupAlpha: Number(e.target.value) })
+                            }
+                          />
+                          <input
+                            id="cfg-slit-beta"
+                            type="number"
+                            min={0}
+                            step={0.1}
+                            className="field num"
+                            aria-label="顺序组权重 beta"
+                            value={draft.slitSeqGroupBeta}
+                            onChange={(e) =>
+                              patchDraft({ slitSeqGroupBeta: Number(e.target.value) })
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </details>
                 </section>
 
                 {capError && (

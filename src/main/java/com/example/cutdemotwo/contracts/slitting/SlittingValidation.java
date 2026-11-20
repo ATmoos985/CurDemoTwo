@@ -80,8 +80,32 @@ public final class SlittingValidation {
 
         if (p.orders().stream().mapToLong(SlittingProblem.Order::quantity).sum() + p.totalOverCap() > 100_000)
             throw new ValidationException("INVALID_INPUT", "请求需求与允许超产合计最多 100000 卷");
-        if (p.timeLimitSeconds() < 1 || p.timeLimitSeconds() > 60) {
-            throw new ValidationException("INVALID_INPUT", "求解时限须在 1–60 秒之间");
+        if (p.timeLimitSeconds() < 1 || p.timeLimitSeconds() > 180) {
+            throw new ValidationException("INVALID_INPUT", "求解时限须在 1–180 秒之间");
+        }
+        if (p.topK() != null && (p.topK() < 0 || p.topK() > 50)) {
+            throw new ValidationException("INVALID_INPUT", "TOP K 超产宽度数须在 0–50 之间");
+        }
+        if (p.maxIterations() != null && (p.maxIterations() < 1 || p.maxIterations() > 5_000)) {
+            throw new ValidationException("INVALID_INPUT", "列生成最大迭代次数须在 1–5000 之间");
+        }
+        if (p.maxPatterns() != null && (p.maxPatterns() < 1 || p.maxPatterns() > 20_000)) {
+            throw new ValidationException("INVALID_INPUT", "最大花型池上限须在 1–20000 之间");
+        }
+        if (p.maxDistinctWidths() != null && (p.maxDistinctWidths() < 1 || p.maxDistinctWidths() > 20)) {
+            throw new ValidationException("INVALID_INPUT", "单卷不同宽幅上限须在 1–20 之间");
+        }
+        if (p.stageTimeLimitMs() != null && (p.stageTimeLimitMs() < 1_000L || p.stageTimeLimitMs() > 600_000L)) {
+            throw new ValidationException("INVALID_INPUT", "MIP 单阶段安全时限须在 1000–600000 毫秒之间");
+        }
+        if (p.underPenalty() != null && (!Double.isFinite(p.underPenalty()) || p.underPenalty() < 0.0)) {
+            throw new ValidationException("INVALID_INPUT", "欠产惩罚系数必须为非负有限数");
+        }
+        if (p.seqGroupAlpha() != null && (!Double.isFinite(p.seqGroupAlpha()) || p.seqGroupAlpha() < 0.0)) {
+            throw new ValidationException("INVALID_INPUT", "顺序组惩罚权重 alpha 必须为非负有限数");
+        }
+        if (p.seqGroupBeta() != null && (!Double.isFinite(p.seqGroupBeta()) || p.seqGroupBeta() < 0.0)) {
+            throw new ValidationException("INVALID_INPUT", "顺序组惩罚权重 beta 必须为非负有限数");
         }
     }
 

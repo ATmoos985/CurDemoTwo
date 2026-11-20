@@ -218,11 +218,14 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
   const [trimStartMm, setTrimStartMm] = useState<number>(settings.trimStartMm ?? 0);
 
   const [slitMode1D, setSlitMode1D] = useState<'VIRTUAL_ROLL' | 'STOCK_ROLL'>('VIRTUAL_ROLL');
-  const [motherWidth1D, setMotherWidth1D] = useState(2000);
-  const [fixedLen1D, setFixedLen1D] = useState(2000);
+  const [motherWidth1D, setMotherWidth1D] = useState(4600);
+  const [fixedLen1D, setFixedLen1D] = useState(1350000);
   const [selectedRollId1D, setSelectedRollId1D] = useState('');
-  const [leftTrim1D, setLeftTrim1D] = useState(10);
-  const [rightTrim1D, setRightTrim1D] = useState(10);
+  const [leftTrim1D, setLeftTrim1D] = useState(100);
+  const [rightTrim1D, setRightTrim1D] = useState(100);
+  const [minWidth1D, setMinWidth1D] = useState(4300);
+  const [maxWidth1D, setMaxWidth1D] = useState(4400);
+  const [widthStep1D, setWidthStep1D] = useState(10);
   const [overCap1D, setOverCap1D] = useState(20);
   const [scenario1D, setScenario1D] = useState<Scenario1DType>('MIN_CARS');
 
@@ -519,11 +522,18 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
 
   const buildLaunchPreset = (): WorkbenchLaunchPreset => {
     if (is1D) {
+      const usable = Math.max(100, motherWidth1D - leftTrim1D - rightTrim1D);
+      const effMax = Math.min(usable, Math.max(100, maxWidth1D));
+      const effMin = Math.min(effMax, Math.max(100, minWidth1D));
       return {
         slitMaterialMode: slitMode1D,
         slitMotherWidthMm: motherWidth1D,
         slitLeftTrimMm: leftTrim1D,
         slitRightTrimMm: rightTrim1D,
+        slitMinWidthMm: effMin,
+        slitMaxWidthMm: effMax,
+        slitWidthStepMm: Math.max(1, widthStep1D),
+        slitWidthMode: effMin === effMax ? 'FIXED' : 'FLEXIBLE',
         slitFixedLengthMm: fixedLen1D,
         slitRollId: selectedRollId1D,
         slitOverCap: overCap1D,
@@ -559,9 +569,19 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
         externalRef: externalRef.trim() || undefined,
         dimension: createDim,
         bedLengthMm: is1D ? fixedLen1D : bedLength2D,
+        minWidthMm: is1D
+          ? Math.min(
+              Math.max(100, motherWidth1D - leftTrim1D - rightTrim1D),
+              Math.max(100, minWidth1D)
+            )
+          : undefined,
         maxWidthMm: is1D
-          ? Math.max(200, motherWidth1D - leftTrim1D - rightTrim1D)
+          ? Math.min(
+              Math.max(200, motherWidth1D - leftTrim1D - rightTrim1D),
+              Math.max(200, maxWidth1D)
+            )
           : motherWidth2D,
+        widthStepMm: is1D ? Math.max(1, widthStep1D) : undefined,
         leftTrimMm: is1D ? leftTrim1D : 0,
         rightTrimMm: is1D ? rightTrim1D : 0,
         totalOverCap: is1D ? overCap1D : 0,
@@ -1031,9 +1051,13 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
                           min={500}
                           className="field num"
                           value={motherWidth1D}
-                          onChange={(e) =>
-                            setMotherWidth1D(Math.max(500, Number(e.target.value) || 2000))
-                          }
+                          onChange={(e) => {
+                            const w = Math.max(500, Number(e.target.value) || 2000);
+                            const usable = Math.max(100, w - leftTrim1D - rightTrim1D);
+                            setMotherWidth1D(w);
+                            setMaxWidth1D((prev) => Math.min(prev, usable));
+                            setMinWidth1D((prev) => Math.min(prev, usable));
+                          }}
                         />
                       </div>
                       <div className="dc-field">
@@ -1082,7 +1106,13 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
                             className="field num"
                             aria-label="左修边"
                             value={leftTrim1D}
-                            onChange={(e) => setLeftTrim1D(Math.max(0, Number(e.target.value) || 0))}
+                            onChange={(e) => {
+                              const lt = Math.max(0, Number(e.target.value) || 0);
+                              const usable = Math.max(100, motherWidth1D - lt - rightTrim1D);
+                              setLeftTrim1D(lt);
+                              setMaxWidth1D((prev) => Math.min(prev, usable));
+                              setMinWidth1D((prev) => Math.min(prev, usable));
+                            }}
                           />
                           <input
                             type="number"
@@ -1090,9 +1120,13 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
                             className="field num"
                             aria-label="右修边"
                             value={rightTrim1D}
-                            onChange={(e) =>
-                              setRightTrim1D(Math.max(0, Number(e.target.value) || 0))
-                            }
+                            onChange={(e) => {
+                              const rt = Math.max(0, Number(e.target.value) || 0);
+                              const usable = Math.max(100, motherWidth1D - leftTrim1D - rt);
+                              setRightTrim1D(rt);
+                              setMaxWidth1D((prev) => Math.min(prev, usable));
+                              setMinWidth1D((prev) => Math.min(prev, usable));
+                            }}
                           />
                         </div>
                       </div>
@@ -1106,6 +1140,50 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
                           className="field num"
                           value={overCap1D}
                           onChange={(e) => setOverCap1D(Math.max(0, Number(e.target.value) || 0))}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="dc-grid-2">
+                      <div className="dc-field">
+                        <label>
+                          最小 / 最大组合宽 <small>mm</small>
+                        </label>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <input
+                            type="number"
+                            min={100}
+                            className="field num"
+                            aria-label="最小组合宽"
+                            value={minWidth1D}
+                            onChange={(e) =>
+                              setMinWidth1D(Math.max(100, Number(e.target.value) || 100))
+                            }
+                          />
+                          <input
+                            type="number"
+                            min={100}
+                            className="field num"
+                            aria-label="最大组合宽"
+                            value={maxWidth1D}
+                            onChange={(e) =>
+                              setMaxWidth1D(Math.max(100, Number(e.target.value) || 100))
+                            }
+                          />
+                        </div>
+                      </div>
+                      <div className="dc-field">
+                        <label>
+                          幅宽步长 <small>mm</small>
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          className="field num"
+                          value={widthStep1D}
+                          onChange={(e) =>
+                            setWidthStep1D(Math.max(1, Number(e.target.value) || 10))
+                          }
                         />
                       </div>
                     </div>

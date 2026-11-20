@@ -154,4 +154,23 @@ class LinearSlittingSolverEngineTests {
         assertTrue(System.nanoTime()-start<java.util.concurrent.TimeUnit.SECONDS.toNanos(8));
         assertTrue(newJavaChildren(existing).findAny().isEmpty(),"timeout must leave no owned solver JVM alive");
     }
+
+    @Test
+    void customAdvancedNewSolverParametersSolveCleanlyInFastAndQuality() {
+        for (String profile : List.of("FAST", "QUALITY")) {
+            var p = new SlittingProblem("1", "mm", 4600, 100, 100, 4300, 4400, 10, 30, profile,
+                    List.of(
+                            new SlittingProblem.Order("O1", 860, 1_350_000L, 20, "不电晕/不涂布"),
+                            new SlittingProblem.Order("O2", 990, 1_350_000L, 18, "不电晕/不涂布"),
+                            new SlittingProblem.Order("O3", 1150, 1_350_000L, 16, "不电晕/不涂布"),
+                            new SlittingProblem.Order("O4", 1270, 1_350_000L, 12, "不电晕/不涂布")
+                    ), 25,
+                    3, 300, 800, 4, 120_000L, true, 1e6, 1.0, 0.0, false);
+            var r = engine.solve(p);
+            assertEquals("FEASIBLE", r.status());
+            assertTrue(r.fulfillment().stream().allMatch(f -> f.missing() == 0));
+            assertTrue(r.totalOverproduced() <= 30);
+            assertFalse(r.patterns().isEmpty());
+        }
+    }
 }

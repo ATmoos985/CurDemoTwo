@@ -18,6 +18,113 @@ import {
   SegmentedOption
 } from '../components/ui/MagpiePrimitives';
 import { GarmentWidthPage } from './GarmentWidthPage';
+import {
+  SlittingWidthMode,
+  extractSlittingSolverOptions,
+  loadStudioSettings
+} from '../store/studioSettings';
+
+interface ShowcaseSlitDraft {
+  widthMode: SlittingWidthMode;
+  motherWidthMm: number;
+  leftTrimMm: number;
+  rightTrimMm: number;
+  minWidthMm: number;
+  maxWidthMm: number;
+  widthStepMm: number;
+  totalOverCap: number;
+  timeLimitSeconds: number;
+  topK: number;
+  maxIterations: number;
+  maxPatterns: number;
+  maxDistinctWidths: number;
+  stageTimeLimitMs: number;
+  useOptimizedAssignment: boolean;
+  underPenalty: number;
+  seqGroupAlpha: number;
+  seqGroupBeta: number;
+  lnsEnabled: boolean;
+}
+
+function buildSlitDraftFromRequest(req: any): ShowcaseSlitDraft {
+  const p = req?.problem || {};
+  const studio = loadStudioSettings();
+  const adv = extractSlittingSolverOptions(studio);
+  const minW = Number(p.minWidthMm) || 4300;
+  const maxW = Number(p.maxWidthMm) || 4400;
+  return {
+    widthMode: minW === maxW ? 'FIXED' : 'FLEXIBLE',
+    motherWidthMm: Number(p.motherWidthMm) || 4600,
+    leftTrimMm: Number(p.leftTrimMm) ?? 100,
+    rightTrimMm: Number(p.rightTrimMm) ?? 100,
+    minWidthMm: minW,
+    maxWidthMm: maxW,
+    widthStepMm: Math.max(1, Number(p.widthStepMm) || 10),
+    totalOverCap: Math.max(0, Number(p.totalOverCap) ?? 30),
+    timeLimitSeconds: Math.min(180, Math.max(1, Number(p.timeLimitSeconds) || studio.slitTimeLimitSeconds || 30)),
+    topK: p.topK != null ? Number(p.topK) : adv.topK,
+    maxIterations: p.maxIterations != null ? Number(p.maxIterations) : adv.maxIterations,
+    maxPatterns: p.maxPatterns != null ? Number(p.maxPatterns) : adv.maxPatterns,
+    maxDistinctWidths: p.maxDistinctWidths != null ? Number(p.maxDistinctWidths) : adv.maxDistinctWidths,
+    stageTimeLimitMs: p.stageTimeLimitMs != null ? Number(p.stageTimeLimitMs) : adv.stageTimeLimitMs,
+    useOptimizedAssignment:
+      p.useOptimizedAssignment != null ? Boolean(p.useOptimizedAssignment) : adv.useOptimizedAssignment,
+    underPenalty: p.underPenalty != null ? Number(p.underPenalty) : adv.underPenalty,
+    seqGroupAlpha: p.seqGroupAlpha != null ? Number(p.seqGroupAlpha) : adv.seqGroupAlpha,
+    seqGroupBeta: p.seqGroupBeta != null ? Number(p.seqGroupBeta) : adv.seqGroupBeta,
+    lnsEnabled: p.lnsEnabled != null ? Boolean(p.lnsEnabled) : adv.lnsEnabled
+  };
+}
+
+function applySlitDraftToRequest(baseReq: any, draft: ShowcaseSlitDraft, profile: string): any {
+  const motherW = Math.max(100, Math.floor(Number(draft.motherWidthMm) || 4600));
+  const leftTrim = Math.max(0, Math.floor(Number(draft.leftTrimMm) || 0));
+  const rightTrim = Math.max(0, Math.floor(Number(draft.rightTrimMm) || 0));
+  const usable = Math.max(1, motherW - leftTrim - rightTrim);
+  const maxW = Math.min(usable, Math.max(1, Math.floor(Number(draft.maxWidthMm) || usable)));
+  const minW =
+    draft.widthMode === 'FIXED'
+      ? maxW
+      : Math.min(maxW, Math.max(1, Math.floor(Number(draft.minWidthMm) || maxW)));
+  const step = Math.max(1, Math.floor(Number(draft.widthStepMm) || 10));
+  const overCap = Math.max(0, Math.floor(Number(draft.totalOverCap) || 0));
+  const rawTime = Math.floor(Number(draft.timeLimitSeconds) || 30);
+  const orderCount = (baseReq?.problem?.orders || []).length;
+  const effTime = Math.min(
+    180,
+    Math.max(1, profile === 'QUALITY' ? Math.max(rawTime, orderCount >= 40 ? 180 : 60) : rawTime)
+  );
+  const rawDistinct = Math.min(20, Math.max(1, Math.floor(Number(draft.maxDistinctWidths) || 4)));
+
+  return {
+    ...baseReq,
+    problem: {
+      ...baseReq.problem,
+      motherWidthMm: motherW,
+      leftTrimMm: leftTrim,
+      rightTrimMm: rightTrim,
+      minWidthMm: minW,
+      maxWidthMm: maxW,
+      widthStepMm: step,
+      totalOverCap: overCap,
+      profile,
+      timeLimitSeconds: effTime,
+      topK: Math.min(50, Math.max(0, Math.floor(Number(draft.topK) || 0))),
+      maxIterations: Math.min(5000, Math.max(1, Math.floor(Number(draft.maxIterations) || 300))),
+      maxPatterns: Math.min(20000, Math.max(1, Math.floor(Number(draft.maxPatterns) || 800))),
+      maxDistinctWidths: profile === 'QUALITY' ? Math.max(rawDistinct, 5) : rawDistinct,
+      stageTimeLimitMs: Math.min(
+        600000,
+        Math.max(1000, Math.floor(Number(draft.stageTimeLimitMs) || 120000))
+      ),
+      useOptimizedAssignment: Boolean(draft.useOptimizedAssignment),
+      underPenalty: Math.max(0, Number(draft.underPenalty) || 0),
+      seqGroupAlpha: Math.max(0, Number(draft.seqGroupAlpha) || 0),
+      seqGroupBeta: Math.max(0, Number(draft.seqGroupBeta) || 0),
+      lnsEnabled: Boolean(draft.lnsEnabled)
+    }
+  };
+}
 
 const METRIC_LABELS: Record<string, [string, string]> = {
   processingAreaUtilization: ['加工区占用率', '裁片净面积 / 本次加工区面积'],
@@ -761,6 +868,9 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
     '滚轮缩放，拖动平移；右键查看裁片尺寸。'
   );
   const [slitRuns, setSlitRuns] = useState<Record<string, any>>({});
+  const [slitDraft, setSlitDraft] = useState<ShowcaseSlitDraft | null>(() =>
+    selected?.kind === 'slitting' ? buildSlitDraftFromRequest(showcaseRequest(selected.id)) : null
+  );
 
   // Cached verification records across cases
   const [verifications, setVerifications] = useState<
@@ -805,6 +915,7 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
     setVertical(true);
     setShowPath(false);
     setSlitRuns(initRes && selected.kind === 'slitting' ? { FAST: initRes } : {});
+    setSlitDraft(selected.kind === 'slitting' ? buildSlitDraftFromRequest(initReq) : null);
     setSelectionText('滚轮缩放，拖动平移；右键查看裁片尺寸。');
 
     let disposed = false;
@@ -828,10 +939,49 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
     return showcaseScene(request, result, patternIndex);
   }, [selected, request, result, patternIndex]);
 
+  const patchSlitDraft = (patch: Partial<ShowcaseSlitDraft>) => {
+    setSlitDraft((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, ...patch };
+      if (selected?.kind === 'slitting' && request) {
+        setRequest(applySlitDraftToRequest(request, next, request.problem?.profile || 'FAST'));
+      }
+      return next;
+    });
+  };
+
+  const handleResetSlitDraft = () => {
+    if (!selected || selected.kind !== 'slitting') return;
+    const base = showcaseRequest(selected.id, 'FAST');
+    const fresh = buildSlitDraftFromRequest(base);
+    setSlitDraft(fresh);
+    setRequest(applySlitDraftToRequest(base, fresh, 'FAST'));
+    setErrorText(null);
+  };
+
   const handleRun = async (profile = 'FAST') => {
     if (!selected || busy) return;
     const mine = ++tokenRef.current;
-    const nextReq = showcaseRequest(selected.id, profile);
+    const baseReq = showcaseRequest(selected.id, profile);
+    let nextReq = baseReq;
+    if (selected.kind === 'slitting' && slitDraft) {
+      const usable = slitDraft.motherWidthMm - slitDraft.leftTrimMm - slitDraft.rightTrimMm;
+      const effMax = Math.min(usable, slitDraft.maxWidthMm);
+      const effMin = slitDraft.widthMode === 'FIXED' ? effMax : slitDraft.minWidthMm;
+      const maxOrderW = Math.max(
+        ...((baseReq as any).problem?.orders || []).map((o: any) => Number(o.widthMm) || 0),
+        0
+      );
+      if (usable <= 0 || effMin <= 0 || effMax < effMin) {
+        setErrorText('请检查母卷幅宽、左右切边与组合宽区间：可切幅宽须大于 0 且最小组合宽 ≤ 最大组合宽。');
+        return;
+      }
+      if (maxOrderW > effMax) {
+        setErrorText(`当前订单最大宽幅 ${maxOrderW} mm 超过组合上限 ${effMax} mm，请调大母卷总宽或最大组合宽。`);
+        return;
+      }
+      nextReq = applySlitDraftToRequest(baseReq, slitDraft, profile);
+    }
     setRequest(nextReq);
     setResult(null);
     setErrorText(null);
@@ -1778,6 +1928,300 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                 })()
               )}
             </div>
+
+            {slit && slitDraft && (
+              <div className="mp-side-section slit-cfg-card" id="demo-slit-params">
+                <div className="wb-right-section-head">
+                  <span>一维搭切参数设置</span>
+                  <button
+                    type="button"
+                    className="link-btn"
+                    onClick={handleResetSlitDraft}
+                    title="恢复此示例默认参数"
+                  >
+                    恢复示例默认
+                  </button>
+                </div>
+
+                <div className="seg" role="group" aria-label="示例幅宽模式" style={{ width: '100%' }}>
+                  <button
+                    type="button"
+                    className={slitDraft.widthMode === 'FLEXIBLE' ? 'on' : ''}
+                    onClick={() => patchSlitDraft({ widthMode: 'FLEXIBLE' })}
+                  >
+                    可变幅宽区间
+                  </button>
+                  <button
+                    type="button"
+                    className={slitDraft.widthMode === 'FIXED' ? 'on' : ''}
+                    onClick={() =>
+                      patchSlitDraft({
+                        widthMode: 'FIXED',
+                        minWidthMm: slitDraft.maxWidthMm
+                      })
+                    }
+                  >
+                    固定组合宽
+                  </button>
+                </div>
+
+                <div className="slit-cfg-grid">
+                  <label className="slit-cfg-field">
+                    <span>母卷总宽 (mm)</span>
+                    <input
+                      type="number"
+                      min={200}
+                      className="field num"
+                      value={slitDraft.motherWidthMm}
+                      onChange={(e) => {
+                        const w = Math.max(200, Number(e.target.value) || 200);
+                        const usable = Math.max(100, w - slitDraft.leftTrimMm - slitDraft.rightTrimMm);
+                        const nextMax = Math.min(slitDraft.maxWidthMm, usable);
+                        patchSlitDraft({
+                          motherWidthMm: w,
+                          maxWidthMm: nextMax,
+                          minWidthMm:
+                            slitDraft.widthMode === 'FIXED'
+                              ? nextMax
+                              : Math.min(slitDraft.minWidthMm, nextMax)
+                        });
+                      }}
+                    />
+                  </label>
+                  <label className="slit-cfg-field">
+                    <span>超产上限 (卷)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={10000}
+                      className="field num"
+                      value={slitDraft.totalOverCap}
+                      onChange={(e) =>
+                        patchSlitDraft({ totalOverCap: Math.max(0, Number(e.target.value) || 0) })
+                      }
+                    />
+                  </label>
+                  <label className="slit-cfg-field">
+                    <span>左切边 (mm)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      className="field num"
+                      value={slitDraft.leftTrimMm}
+                      onChange={(e) => {
+                        const lt = Math.max(0, Number(e.target.value) || 0);
+                        const usable = Math.max(100, slitDraft.motherWidthMm - lt - slitDraft.rightTrimMm);
+                        patchSlitDraft({
+                          leftTrimMm: lt,
+                          maxWidthMm: Math.min(slitDraft.maxWidthMm, usable),
+                          minWidthMm: Math.min(slitDraft.minWidthMm, usable)
+                        });
+                      }}
+                    />
+                  </label>
+                  <label className="slit-cfg-field">
+                    <span>右切边 (mm)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      className="field num"
+                      value={slitDraft.rightTrimMm}
+                      onChange={(e) => {
+                        const rt = Math.max(0, Number(e.target.value) || 0);
+                        const usable = Math.max(100, slitDraft.motherWidthMm - slitDraft.leftTrimMm - rt);
+                        patchSlitDraft({
+                          rightTrimMm: rt,
+                          maxWidthMm: Math.min(slitDraft.maxWidthMm, usable),
+                          minWidthMm: Math.min(slitDraft.minWidthMm, usable)
+                        });
+                      }}
+                    />
+                  </label>
+                  {slitDraft.widthMode === 'FLEXIBLE' ? (
+                    <>
+                      <label className="slit-cfg-field">
+                        <span>最小组合宽 (mm)</span>
+                        <input
+                          type="number"
+                          min={100}
+                          className="field num"
+                          value={slitDraft.minWidthMm}
+                          onChange={(e) =>
+                            patchSlitDraft({
+                              minWidthMm: Math.max(100, Number(e.target.value) || 100)
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="slit-cfg-field">
+                        <span>最大组合宽 (mm)</span>
+                        <input
+                          type="number"
+                          min={100}
+                          className="field num"
+                          value={slitDraft.maxWidthMm}
+                          onChange={(e) =>
+                            patchSlitDraft({
+                              maxWidthMm: Math.max(100, Number(e.target.value) || 100)
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="slit-cfg-field">
+                        <span>幅宽步长 (mm)</span>
+                        <input
+                          type="number"
+                          min={1}
+                          className="field num"
+                          value={slitDraft.widthStepMm}
+                          onChange={(e) =>
+                            patchSlitDraft({
+                              widthStepMm: Math.max(1, Number(e.target.value) || 10)
+                            })
+                          }
+                        />
+                      </label>
+                    </>
+                  ) : (
+                    <label className="slit-cfg-field span-2">
+                      <span>固定组合宽 (mm)</span>
+                      <input
+                        type="number"
+                        min={100}
+                        className="field num"
+                        value={slitDraft.maxWidthMm}
+                        onChange={(e) => {
+                          const v = Math.max(100, Number(e.target.value) || 100);
+                          patchSlitDraft({ maxWidthMm: v, minWidthMm: v });
+                        }}
+                      />
+                    </label>
+                  )}
+                  <label className="slit-cfg-field">
+                    <span>求解时限 (秒)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={180}
+                      className="field num"
+                      value={slitDraft.timeLimitSeconds}
+                      onChange={(e) =>
+                        patchSlitDraft({
+                          timeLimitSeconds: Math.min(180, Math.max(1, Number(e.target.value) || 30))
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+
+                <details className="slit-adv-fold">
+                  <summary className="num">
+                    NewSolver 参数：TopK {slitDraft.topK} · 迭代 {slitDraft.maxIterations} · 花型{' '}
+                    {slitDraft.maxPatterns} · 宽幅≤{slitDraft.maxDistinctWidths}
+                  </summary>
+                  <div className="slit-cfg-grid" style={{ marginTop: 6 }}>
+                    <label className="slit-cfg-field">
+                      <span>TOP K 超产</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={50}
+                        className="field num"
+                        value={slitDraft.topK}
+                        onChange={(e) =>
+                          patchSlitDraft({
+                            topK: Math.min(50, Math.max(0, Number(e.target.value) || 0))
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="slit-cfg-field">
+                      <span>列生成迭代</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={5000}
+                        step={10}
+                        className="field num"
+                        value={slitDraft.maxIterations}
+                        onChange={(e) =>
+                          patchSlitDraft({
+                            maxIterations: Math.min(
+                              5000,
+                              Math.max(1, Number(e.target.value) || 300)
+                            )
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="slit-cfg-field">
+                      <span>最大花型池</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20000}
+                        step={50}
+                        className="field num"
+                        value={slitDraft.maxPatterns}
+                        onChange={(e) =>
+                          patchSlitDraft({
+                            maxPatterns: Math.min(
+                              20000,
+                              Math.max(1, Number(e.target.value) || 800)
+                            )
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="slit-cfg-field">
+                      <span>不同宽幅上限</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        className="field num"
+                        value={slitDraft.maxDistinctWidths}
+                        onChange={(e) =>
+                          patchSlitDraft({
+                            maxDistinctWidths: Math.min(
+                              20,
+                              Math.max(1, Number(e.target.value) || 4)
+                            )
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="slit-cfg-field span-2">
+                      <span>MIP 单阶段安全时限 (ms)</span>
+                      <input
+                        type="number"
+                        min={1000}
+                        max={600000}
+                        step={1000}
+                        className="field num"
+                        value={slitDraft.stageTimeLimitMs}
+                        onChange={(e) =>
+                          patchSlitDraft({
+                            stageTimeLimitMs: Math.min(
+                              600000,
+                              Math.max(1000, Number(e.target.value) || 120000)
+                            )
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="slit-both-toggle span-2">
+                      <input
+                        type="checkbox"
+                        checked={slitDraft.lnsEnabled}
+                        onChange={(e) => patchSlitDraft({ lnsEnabled: e.target.checked })}
+                      />
+                      <span>精细优化启用 LNS 大邻域搜索</span>
+                    </label>
+                  </div>
+                </details>
+              </div>
+            )}
 
             <div className="mp-side-section" id="demo-input">
               <div className="sec">输入规格与需求 ({inputRows.length})</div>

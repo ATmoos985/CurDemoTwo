@@ -95,4 +95,32 @@ class SlittingValidationTests {
                 new SlittingResult.Fulfillment("A",1,2,0,1),new SlittingResult.Fulfillment("B",1,0,1,0)),1000000,1000000,1000000,1);
         assertThrows(SlittingValidation.ValidationException.class,()->SlittingValidation.validateResult(p,r));
     }
+
+    @Test void advancedNewSolverParametersAreValidatedWhenPresent() {
+        var base = validProblem();
+        var validAdvanced = new SlittingProblem("1", "mm", 4600, 100, 100, 4300, 4400, 10, 30, "QUALITY",
+                List.of(new SlittingProblem.Order("O1", 840, 1_350_000L, 40, "不电晕/不涂布")), 120,
+                3, 300, 800, 4, 120_000L, true, 1e6, 1.0, 0.0, false);
+        assertDoesNotThrow(() -> SlittingValidation.validateProblem(validAdvanced));
+        assertEquals(60, validAdvanced.withTimeLimitSeconds(60).timeLimitSeconds());
+        assertEquals(3, validAdvanced.withTimeLimitSeconds(60).topK());
+
+        assertThrows(SlittingValidation.ValidationException.class, () -> SlittingValidation.validateProblem(
+                new SlittingProblem("1", "mm", 1200, 10, 10, 1000, 1180, 10, 20, "FAST", base.orders(), 5,
+                        -1, null, null, null, null, null, null, null, null, null)));
+        assertThrows(SlittingValidation.ValidationException.class, () -> SlittingValidation.validateProblem(
+                new SlittingProblem("1", "mm", 1200, 10, 10, 1000, 1180, 10, 20, "FAST", base.orders(), 5,
+                        null, 0, null, null, null, null, null, null, null, null)));
+        assertThrows(SlittingValidation.ValidationException.class, () -> SlittingValidation.validateProblem(
+                new SlittingProblem("1", "mm", 1200, 10, 10, 1000, 1180, 10, 20, "FAST", base.orders(), 5,
+                        null, null, 0, null, null, null, null, null, null, null)));
+        assertThrows(SlittingValidation.ValidationException.class, () -> SlittingValidation.validateProblem(
+                new SlittingProblem("1", "mm", 1200, 10, 10, 1000, 1180, 10, 20, "FAST", base.orders(), 5,
+                        null, null, null, 0, null, null, null, null, null, null)));
+        assertThrows(SlittingValidation.ValidationException.class, () -> SlittingValidation.validateProblem(
+                new SlittingProblem("1", "mm", 1200, 10, 10, 1000, 1180, 10, 20, "FAST", base.orders(), 5,
+                        null, null, null, null, 500L, null, null, null, null, null)));
+        assertThrows(SlittingValidation.ValidationException.class, () -> SlittingValidation.validateProblem(
+                new SlittingProblem("1", "mm", 1200, 10, 10, 1000, 1180, 10, 20, "FAST", base.orders(), 181)));
+    }
 }

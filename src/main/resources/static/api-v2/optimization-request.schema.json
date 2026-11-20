@@ -455,7 +455,50 @@
         "timeLimitSeconds": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 60
+          "maximum": 180
+        },
+        "topK": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50
+        },
+        "maxIterations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000
+        },
+        "maxPatterns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20000
+        },
+        "maxDistinctWidths": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "stageTimeLimitMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 600000
+        },
+        "useOptimizedAssignment": {
+          "type": "boolean"
+        },
+        "underPenalty": {
+          "type": "number",
+          "minimum": 0
+        },
+        "seqGroupAlpha": {
+          "type": "number",
+          "minimum": 0
+        },
+        "seqGroupBeta": {
+          "type": "number",
+          "minimum": 0
+        },
+        "lnsEnabled": {
+          "type": "boolean"
         }
       },
       "required": [

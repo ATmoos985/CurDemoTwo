@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useStudioStore, SlittingSchemeRun } from '../store/useStudioStore';
+import { extractSlittingSolverOptions, loadStudioSettings } from '../store/studioSettings';
 import { OptimizationSession } from '@static/js/business/optimization/job-client.js';
 import { independentBaseline, planSummary } from '@static/js/linear/linear-model.js';
 import { carStart, assignCar, patternStrips, carRequest } from '@static/app/js/model/slitting.js';
@@ -243,6 +244,19 @@ export const SlittingStudio1DPage: React.FC = () => {
       const runProfile = async (profile: 'FAST' | 'QUALITY'): Promise<SlittingSchemeRun> => {
         const session = new OptimizationSession();
         const t0 = performance.now();
+        const studioCfg = loadStudioSettings();
+        const advOpts = extractSlittingSolverOptions(studioCfg);
+        const effTimeLimit = Math.min(
+          180,
+          Math.max(
+            1,
+            Math.round(
+              profile === 'QUALITY'
+                ? Math.max(studioCfg.slitTimeLimitSeconds, 30)
+                : studioCfg.slitTimeLimitSeconds
+            )
+          )
+        );
         const req = {
           schemaVersion: '2.0',
           clientRequestId: `slit-${profile}-${Date.now()}`,
@@ -257,16 +271,29 @@ export const SlittingStudio1DPage: React.FC = () => {
             rightTrimMm: Math.floor(slitRightTrimMm),
             minWidthMm: Math.floor(slitMinWidthMm),
             maxWidthMm: Math.floor(slitMaxWidthMm),
-            widthStepMm: Math.floor(slitWidthStepMm),
+            widthStepMm: Math.max(1, Math.floor(slitWidthStepMm)),
             totalOverCap: Math.floor(slitOverCap),
             profile,
-            timeLimitSeconds: profile === 'QUALITY' ? 12 : 5,
+            timeLimitSeconds: effTimeLimit,
+            topK: advOpts.topK,
+            maxIterations: advOpts.maxIterations,
+            maxPatterns: advOpts.maxPatterns,
+            maxDistinctWidths:
+              profile === 'QUALITY'
+                ? Math.max(advOpts.maxDistinctWidths, 5)
+                : advOpts.maxDistinctWidths,
+            stageTimeLimitMs: advOpts.stageTimeLimitMs,
+            useOptimizedAssignment: advOpts.useOptimizedAssignment,
+            underPenalty: advOpts.underPenalty,
+            seqGroupAlpha: advOpts.seqGroupAlpha,
+            seqGroupBeta: advOpts.seqGroupBeta,
+            lnsEnabled: advOpts.lnsEnabled,
             orders: slitOrders.map((o) => ({
               id: o.id,
               widthMm: Math.floor(o.widthMm),
-              lengthMm: Math.floor(slitFixedLengthMm),
+              lengthMm: Math.floor(o.lengthMm > 0 ? o.lengthMm : slitFixedLengthMm),
               quantity: Math.floor(o.quantity),
-              surfaceTreatment: '默认'
+              surfaceTreatment: o.surfaceTreatment?.trim() || '不电晕/不涂布'
             }))
           }
         };
