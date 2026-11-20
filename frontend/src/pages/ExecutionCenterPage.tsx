@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { requestJSON, shortId, fmtTime, fmtN, toast } from '@static/app/js/util.js';
+import { requestJSON, shortId, fmtTime, fmtN, toast, createUuid } from '@static/app/js/util.js';
 import {
   defaultReport,
   applyBulk,
@@ -404,7 +404,7 @@ export const ExecutionCenterPage: React.FC<{
         toast(probs[0], true);
         return;
       }
-      cmd = buildQualityCommand(qualityDraft, crypto.randomUUID());
+      cmd = buildQualityCommand(qualityDraft, createUuid());
     }
     setBusy(true);
     try {

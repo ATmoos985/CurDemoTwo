@@ -1,5 +1,6 @@
 import {workspaceReady} from '../workspace/page-bridge.js';
 import {requestJSON} from '../core/api-request.js';
+import {createUuid} from '../core/uuid.js';
 import {showToast} from '../core/toast.js';
 import {round,clamp,validateDefect,advance} from './inspection-model.js';
 import {mountInspectionCanvas} from './inspection-canvas.js';
@@ -12,7 +13,7 @@ const current=()=>pending.find(d=>key(d)===selected) || roll?.defects?.find(d=>k
 const draftKey=id=>'fabric-inspection:'+id;
 const fmt=n=>Number(n).toLocaleString('zh-CN',{maximumFractionDigits:1});
 const canvas=mountInspectionCanvas(el('inspection-canvas'),{
-    onMark:d=>{if(busy)return;try{const margin=field('margin').valueAsNumber;validateDefect({...d,margin},roll);checkpoint();const created={...d,...attributes(),margin,captureId:crypto.randomUUID()};pending.push(created);selected=key(created);update();}catch(e){error(e);}},
+    onMark:d=>{if(busy)return;try{const margin=field('margin').valueAsNumber;validateDefect({...d,margin},roll);checkpoint();const created={...d,...attributes(),margin,captureId:createUuid()};pending.push(created);selected=key(created);update();}catch(e){error(e);}},
     onSelect:id=>select(id),
     onEdit:(id,d)=>{if(busy)return;try{validateDefect(d,roll);checkpoint();pending=pending.map(p=>key(p)===id?d:p);selected=id;update();}catch(e){error(e);}},
     onBrowse:()=>stop('浏览 / 调整中 · 自动滚动已暂停'),
@@ -66,7 +67,7 @@ function editorDefect(){
 function applyEditor(){
     if(!roll||busy)return false;
     try{if(!form.reportValidity())return false;const d=editorDefect(),old=pending.find(p=>key(p)===selected);checkpoint();
-        if(old){pending=pending.map(p=>p===old?{...old,...d}:p);}else{d.captureId=crypto.randomUUID();pending.push(d);selected=key(d);}
+        if(old){pending=pending.map(p=>p===old?{...old,...d}:p);}else{d.captureId=createUuid();pending.push(d);selected=key(d);}
         editorDirty=false;update();return true;
     }catch(e){error(e);return false;}
 }

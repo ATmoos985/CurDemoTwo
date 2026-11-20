@@ -7,7 +7,8 @@ import {
   idempotentPost,
   pendingWrite,
   retryWrite,
-  dropWrite
+  dropWrite,
+  createUuid
 } from '@static/app/js/util.js';
 import { buildRollScene, remnantAsRoll } from '@static/app/js/model/roll-scene.js';
 import { workflowTemplate } from '@static/app/js/model/showcase.js';
@@ -211,7 +212,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
         tpl
           ? {
               ...tpl.material,
-              rollId: 'DEMO-' + crypto.randomUUID().slice(0, 8)
+              rollId: 'DEMO-' + createUuid().slice(0, 8)
             }
           : {}
       );

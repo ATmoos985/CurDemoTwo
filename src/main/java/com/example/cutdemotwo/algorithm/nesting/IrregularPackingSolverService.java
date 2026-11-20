@@ -23,6 +23,8 @@ public class IrregularPackingSolverService implements ICutSolverEngine {
     private final JsonMapper json = new JsonMapper();
     @Value("${packingsolver.irregular.executable.path:data/solver/packingsolver_irregular.exe}")
     private String solverPath;
+    @Value("${packingsolver.irregular.memory-limit-mb:512}")
+    private int memoryLimitMb = 512;
 
     @Override public String getEngineType() { return "packingsolver-irregular"; }
     @Override public boolean isAvailable() {
@@ -48,9 +50,10 @@ public class IrregularPackingSolverService implements ICutSolverEngine {
             temp = Files.createTempDirectory("ps_irregular_").toAbsolutePath();
             Path input = temp.resolve("input.json"), certificate = temp.resolve("certificate.json");
             Files.writeString(input, json.writeValueAsString(nativeInput(problem, objective)));
+            int memMb = Math.min(4096, Math.max(128, memoryLimitMb));
             process = new ProcessBuilder(Path.of(solverPath).toAbsolutePath().toString(), "--input", input.toString(),
                     "--certificate", certificate.toString(), "--time-limit", nativeTimeLimitSeconds(problem.timeLimitSeconds()),
-                    "--verbosity-level", "0", "--only-write-at-the-end", "--memory-limit", "512")
+                    "--verbosity-level", "0", "--only-write-at-the-end", "--memory-limit", Integer.toString(memMb))
                     .directory(temp.toFile()).redirectErrorStream(true).redirectOutput(temp.resolve("solver.log").toFile()).start();
             if (!process.waitFor(problem.timeLimitSeconds() + 5L, TimeUnit.SECONDS))
                 return failure("FAILED", "异形求解超过时限，已终止");

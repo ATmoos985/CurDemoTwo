@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { requestJSON, shortId, fmtN, toast } from '@static/app/js/util.js';
+import { requestJSON, shortId, fmtN, toast, createUuid } from '@static/app/js/util.js';
 import {
   reviewablePieces,
   effectivePieceResults,
@@ -83,7 +83,7 @@ export const ReconciliationPage: React.FC = () => {
       toast(probs[0], true);
       return;
     }
-    const cmd = buildQualityCommand(qualityDraft, crypto.randomUUID());
+    const cmd = buildQualityCommand(qualityDraft, createUuid());
     setBusy(true);
     try {
       await requestJSON(

@@ -1,4 +1,5 @@
 import {shapeArea, rectangle} from '../../canvas/nesting-scene.js';
+import {createUuid} from '../../core/uuid.js';
 import {currentExecution,openTaskExecutions} from './execution-panel.js';
 import {executionForPlan} from './execution-client.js';
 import { renderTaskRemnants } from '../../plugins/remnant/remnant-modal.js';
@@ -374,8 +375,13 @@ export async function saveToolpathAdjustment(cuts) {
     const pending = state.pendingPlan, geometry = planGeometry();
     const localCuts = offsetCuts(cuts, -pending.windowStartY);
     const signature = JSON.stringify(localCuts);
-    if (pending.toolpathOperation?.signature !== signature)
-        pending.toolpathOperation = {id:crypto.randomUUID(), signature};
+    if (pending.toolpathOperation?.signature !== signature) {
+        const opId = globalThis.crypto?.randomUUID?.() || (typeof createUuid === 'function' ? createUuid()
+            : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, ch => {
+                const r = (Math.random() * 16) | 0; return (ch === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+            }));
+        pending.toolpathOperation = {id:opId, signature};
+    }
     validatingAdjustment = true;
     const wasInert = document.body.inert; document.body.inert = true;
     try {
@@ -400,7 +406,7 @@ export async function validatePlanAdjustment() {
     if (validatingAdjustment || !pending || !currentPlanContext()) return;
     if (canUseCurrentPlan()) return;
     const geometry = planGeometry();
-    pending.adjustmentId ||= crypto.randomUUID();
+    pending.adjustmentId ||= createUuid();
     const pieces = state.getCurrentCaseData().pieces.filter(p => !p.confirmed && p.planId === pending.result.planId)
         .map(p => ({id:p.sourcePieceId, x:p.x, y:p.y-pending.windowStartY, rotated:!!p.rotated, rotationDegrees:p.shape ? p.rotationDegrees : null}));
     validatingAdjustment = true;

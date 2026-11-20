@@ -1,4 +1,5 @@
 import {requestJSON} from '../../core/api-request.js';
+import {createUuid} from '../../core/uuid.js';
 import {reviewablePieces} from './quality-projection.js';
 export {reviewablePieces, effectivePieceResults} from './quality-projection.js';
 
@@ -34,7 +35,7 @@ export function openQualityReview(report, onSaved) {
     form.onsubmit = async event => {
         event.preventDefault(); if (pending) return;
         if (!command) {
-            command = {operationId:crypto.randomUUID(),expectedRevision:report.qualityRevision ?? (report.qualityDispositions || []).length,
+            command = {operationId:createUuid(),expectedRevision:report.qualityRevision ?? (report.qualityDispositions || []).length,
                 pieceId:Number(fields.pieceId.value),disposition:fields.disposition.value,inspector:fields.inspector.value.trim(),reason:fields.reason.value.trim(),recovery:null};
             if (command.disposition === 'REMNANT') command.recovery = Object.fromEntries(['x','y','width','length','location','quality'].map(n => [n,['x','y','width','length'].includes(n) ? Number(fields.namedItem(n).value) : fields.namedItem(n).value.trim()]));
         }

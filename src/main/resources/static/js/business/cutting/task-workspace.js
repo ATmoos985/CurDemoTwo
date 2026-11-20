@@ -1,6 +1,7 @@
 import {taskLabels} from './task-list-model.js';
 import {openQualityReview, reviewablePieces} from './quality-review.js';
 import { state } from '../../core/state.js';
+import { createUuid } from '../../core/uuid.js';
 import { getInitialScenarios } from '../../plugins/presets/scenarios.js';
 import { renderDemandsUI, getDemandsFromUI, updateDemandCompletionFromPieces } from './quota-manager.js';
 import { switchCutMode } from '../../plugins/remnant/remnant-shelf.js';
@@ -62,7 +63,7 @@ export function persistTaskDraft() {
     draftDirty = JSON.stringify(snapshot.task) !== draftBaseline;
     try {
         if (draftDirty) {
-            draftId ||= crypto.randomUUID();
+            draftId ||= createUuid();
             draftStore().write({version:1, id:draftId, updatedAt:Date.now(), ...snapshot});
             localStorage.setItem(DRAFT_ACTIVE, draftId);
             draftStored = true;

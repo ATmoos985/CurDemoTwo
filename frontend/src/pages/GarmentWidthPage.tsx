@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fmtN, toast } from '@static/app/js/util.js';
+import { fmtN, toast, createUuid } from '@static/app/js/util.js';
 import {
   DXF_TRIAL_STYLES,
   GARMENT_TRIAL_STYLES,
@@ -433,7 +433,7 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
           styleId,
           width,
           sizes,
-          crypto.randomUUID(),
+          createUuid(),
           ht,
           filling
         )

@@ -61,3 +61,37 @@ test('polling failure cancels accepted work before dropping its handle', async (
     assert.deepEqual(calls,['/api/v2/optimization-jobs',
         '/api/v2/optimization-jobs/network-failure','/api/v2/optimization-jobs/network-failure/cancellations']);
 });
+test('non-HTTPS origin without crypto.randomUUID still generates a valid Idempotency-Key and surfaces non-JSON proxy errors', async () => {
+    const desc = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    const origRandomUUID = globalThis.crypto?.randomUUID;
+    let patched = false;
+    try {
+        if (globalThis.crypto) {
+            Object.defineProperty(globalThis.crypto, 'randomUUID', {value: undefined, configurable: true});
+            patched = true;
+        }
+        const headersSeen = [];
+        const client = new OptimizationSession(async (path, options = {}) => {
+            if (path.endsWith('/optimization-jobs')) {
+                headersSeen.push(options.headers['Idempotency-Key']);
+                return response({id: 'http-ok', state: 'SUCCEEDED', resultRef: '/api/v2/optimization-results/http-ok'});
+            }
+            return response({layout: {placements: []}});
+        }, 0);
+        await client.solve({});
+        assert.match(headersSeen[0], /^[0-9a-f-]{36}$/i);
+
+        const proxyErrorClient = new OptimizationSession(async () => ({
+            ok: false,
+            status: 401,
+            json: async () => { throw new SyntaxError('Unexpected end of JSON input'); }
+        }), 0);
+        await assert.rejects(proxyErrorClient.solve({}), /401/);
+    } finally {
+        if (patched && globalThis.crypto) {
+            Object.defineProperty(globalThis.crypto, 'randomUUID', {value: origRandomUUID, configurable: true});
+        } else if (desc) {
+            Object.defineProperty(globalThis, 'crypto', desc);
+        }
+    }
+});

@@ -1,4 +1,5 @@
 import {identity,emptyDraft,validateSnapshot,observationFor,commandFor,differences,fingerprint,readDraft} from './count-model.js';
+import {createUuid} from '../../core/uuid.js';
 const $=id=>document.getElementById(id),storageKey='cutdemo.inventory-count.v1';
 const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const typeName=type=>type==='roll'?'母卷':'料头';
@@ -136,7 +137,7 @@ async function submit(retry=false){
             if(state.pending)throw Error('已有待确认请求，请先确认原请求结果');
             const command=commandFor(state);
             if(!review||review!==fingerprint(command))throw Error('输入或账面已改变，请重新核对差异');
-            if(!save({...state,pending:{key:crypto.randomUUID(),body:command}}))return;
+            if(!save({...state,pending:{key:createUuid(),body:command}}))return;
         }
         // Recheck durable storage even for retries before issuing any network write.
         if(!save(state))return;

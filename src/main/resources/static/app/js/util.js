@@ -1,5 +1,7 @@
 // 宿主层公共工具：请求、转义、格式化、提示、偏好。
 export {requestJSON, ApiError} from '../../js/core/api-request.js';
+import {createUuid} from '../../js/core/uuid.js';
+export {createUuid};
 
 export const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 export const fmtM = (mm, d = 1) => (Number(mm) / 1000).toLocaleString('zh-CN', {maximumFractionDigits: d});
@@ -42,7 +44,7 @@ export async function idempotentPost(slot, url, body) {
     const key = 'cutplan.app.pending.' + slot;
     const old = JSON.parse(localStorage.getItem(key) || 'null');
     if (old && JSON.stringify(old.body) !== JSON.stringify(body)) throw new Error('上次提交结果尚未确认，请先重试原操作或放弃后再提交新内容');
-    const intent = old || {url, body, idempotencyKey: crypto.randomUUID()};
+    const intent = old || {url, body, idempotencyKey: createUuid()};
     localStorage.setItem(key, JSON.stringify(intent));
     return sendIntent(key, intent);
 }

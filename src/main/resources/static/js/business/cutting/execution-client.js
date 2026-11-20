@@ -1,4 +1,5 @@
 import {requestJSON} from '../../core/api-request.js';
+import {createUuid} from '../../core/uuid.js';
 
 export const executionLabels = {DRAFT:'待下达',RELEASED:'已下达 · 预约中',RUNNING:'加工中',EXPIRED:'预约已过期',CANCELLED:'已取消',REPORTED:'已报工',REVERSED:'报工已冲销'};
 export function executionForPlan(views = [], planId) {
@@ -8,7 +9,7 @@ export function executionForPlan(views = [], planId) {
 export const executionLocksPlan=(views,planId)=>views.some(v=>v.execution.planId===planId && v.reservationActive);
 
 // Store before sending. An uncertain response can be retried after reload with the exact same identity and body.
-export function executionWriter(storage = localStorage, send = requestJSON, uuid = () => crypto.randomUUID()) {
+export function executionWriter(storage = localStorage, send = requestJSON, uuid = () => createUuid()) {
     const key='cutting-execution-commands-v1';
     const read=()=>JSON.parse(storage.getItem(key) || '{}');
     const save=rows=>storage.setItem(key,JSON.stringify(rows));

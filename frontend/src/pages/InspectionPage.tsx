@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { requestJSON, fmtM, fmtN, toast } from '@static/app/js/util.js';
+import { requestJSON, fmtM, fmtN, toast, createUuid } from '@static/app/js/util.js';
 import {
   validateDefect,
   advance,
@@ -335,7 +335,7 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
       const newItem = {
         ...d,
         ...defectAttrs(st.defaultType),
-        captureId: crypto.randomUUID()
+        captureId: createUuid()
       };
       const nextPending = [...st.pending, newItem];
       const savedLen = (st.roll.defects || []).length;
@@ -585,7 +585,7 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
       } else {
         nextPending = [
           ...pending,
-          { ...item, captureId: crypto.randomUUID() }
+          { ...item, captureId: createUuid() }
         ];
         nextSel = savedCount + nextPending.length - 1;
       }

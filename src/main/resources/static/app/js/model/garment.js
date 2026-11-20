@@ -2,6 +2,7 @@ import {DXF_TRIAL_STYLES, markerExample, markerSizeLabels} from '../../../js/nes
 import {dxfParts} from '../../../js/nesting/dxf-patterns.js';
 import {fourPieceSeed} from '../../../js/nesting/four-piece-seed.js';
 import {shapeArea} from '../../../js/canvas/nesting-scene.js';
+import {createUuid} from '../../../js/core/uuid.js';
 
 function reportComparison(style) {
     if (!style.benchmark) return;
@@ -115,7 +116,7 @@ export async function solveMarkerDirection(request, fixed, solve, isActive, onRe
     onRetry();
     let label = first.job.state === 'TIMED_OUT' ? '紧窗限时未齐套 · 原起长复试' : '紧窗未齐套 · 原起长复试';
     try {
-        const retry = await solve({...request, clientRequestId:crypto.randomUUID()});
+        const retry = await solve({...request, clientRequestId:createUuid()});
         if (retry.job.state === 'FAILED' || retry.job.state === 'CANCELLED') {
             label += retry.job.state === 'FAILED' ? '失败' : '已取消';
             return {trial:first, retryNote:label};

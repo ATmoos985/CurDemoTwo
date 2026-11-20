@@ -1,6 +1,7 @@
 import {MARKER_STYLES, markerExample, markerSummary} from './marker-demo.js';
 import {createNestingScene} from '../canvas/nesting-scene.js';
 import {OptimizationSession} from '../business/optimization/job-client.js';
+import {createUuid} from '../core/uuid.js';
 import {mountNestingViewer} from './nesting-viewer.js';
 
 const $ = id => document.getElementById(id);
@@ -14,7 +15,7 @@ const initialStyle = new URLSearchParams(location.search).get('style');
 if (MARKER_STYLES.some(style => style.id === initialStyle)) $('marker-style').value = initialStyle;
 let problem = markerExample(), best = null, controller = null, revision = 0;
 function markerRequest() {
-    return {schemaVersion:'2.0',problemType:'NESTING_2D',clientRequestId:crypto.randomUUID(),
+    return {schemaVersion:'2.0',problemType:'NESTING_2D',clientRequestId:createUuid(),
         problem:{...problem,timeLimitSeconds:10},allowFallback:true,requireComplete:true,
         strategy:{id:'marker-shortening',version:'1',maxTrials:5}};
 }

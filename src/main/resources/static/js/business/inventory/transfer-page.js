@@ -1,4 +1,5 @@
 const $=id=>document.getElementById(id),storageKey='cutdemo.inventory-transfer.v1';
+const createUuid=()=>globalThis.crypto?.randomUUID?.()||(Array.from(globalThis.crypto?.getRandomValues?.(new Uint8Array(16))||Array.from({length:16},()=>(Math.random()*256)|0),(b,i)=>((i===6?(b&15)|64:i===8?(b&63)|128:b)).toString(16).padStart(2,'0')).join('').replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/,'$1-$2-$3-$4-$5'));
 const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let state={destination:'',reason:'',operator:'',selected:[],pending:null},options=null,busy=false,storageBroken=false,lastStoredRaw=null;
 const error=message=>{$('transfer-error').textContent=message;$('transfer-error').hidden=!message;};
@@ -86,7 +87,7 @@ $('transfer-form').addEventListener('submit',async event=>{
     event.preventDefault();if(busy||storageBroken||!options||state.pending)return;
     const selected=options.materials.filter(item=>state.selected.includes(item.type+'/'+item.id));
     if(!selected.length||selected.length>100||selected.length!==state.selected.length||selected.some(item=>!item.allowed||item.location===state.destination)){error('请选择 1–100 项可移库材料，目标库位不能与原库位相同；失效选择请重新核对。');return;}
-    state.pending={key:crypto.randomUUID(),body:{expectedRevision:options.revision,destination:state.destination,reason:state.reason,operator:state.operator,materials:selected.map(({type,id})=>({type,id}))}};
+    state.pending={key:createUuid(),body:{expectedRevision:options.revision,destination:state.destination,reason:state.reason,operator:state.operator,materials:selected.map(({type,id})=>({type,id}))}};
     controls();if(await persist())submitPending();else controls();
 });
 $('retry-transfer').addEventListener('click',submitPending);
