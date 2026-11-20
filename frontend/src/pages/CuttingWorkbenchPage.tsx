@@ -1236,15 +1236,16 @@ export const CuttingWorkbenchPage: React.FC<{
         : [];
 
     const createdSchemes: SavedScheme2D[] = [];
+    const failureMessages: string[] = [];
 
     await Promise.all(
       jobsToRun.map(async ({ def, width, runKey, label }) => {
         if (validDemands.some((d) => d.width > width && !d.allowRotation && !def.forceRotateRect)) {
+          const msg = `存在裁片宽超门幅 ${width}mm`;
+          failureMessages.push(`${label}：${msg}`);
           setStrategyRuns2D((prev) =>
             prev.map((r) =>
-              r.strategyId === runKey
-                ? { ...r, state: 'FAILED', phaseText: `存在裁片宽超门幅 ${width}mm` }
-                : r
+              r.strategyId === runKey ? { ...r, state: 'FAILED', phaseText: msg } : r
             )
           );
           return;
@@ -1311,7 +1312,9 @@ export const CuttingWorkbenchPage: React.FC<{
                     state: job.state as any,
                     phaseText: complete
                       ? `齐套 · ${fmtN(occupiedLengthMm, 1)}mm · ${utilizationPct}%`
-                      : `已排 ${placements.length}/${totalRequested} · ${utilizationPct}%`,
+                      : placements.length > 0
+                      ? `已排 ${placements.length}/${totalRequested} · ${utilizationPct}%`
+                      : layout?.message || '未排入任何裁片（请检查门幅与版长）',
                     elapsedMs,
                     occupiedLengthMm,
                     utilizationPct,
@@ -1358,15 +1361,27 @@ export const CuttingWorkbenchPage: React.FC<{
               request: req,
               result
             });
+          } else {
+            failureMessages.push(
+              `${label}：${layout?.message || '未能排入裁片，请增大版长或调整旋转规则'}`
+            );
           }
         } catch (err: any) {
+          const rawMsg = err?.message || '求解未完成';
+          const friendlyMsg =
+            /failed to fetch|networkerror|connection|无法连接|fetch/i.test(rawMsg)
+              ? '无法连接后端求解服务（请确认 8080 端口服务已启动）'
+              : rawMsg;
+          if (err?.name !== 'AbortError') {
+            failureMessages.push(`${label}：${friendlyMsg}`);
+          }
           setStrategyRuns2D((prev) =>
             prev.map((r) =>
               r.strategyId === runKey
                 ? {
                     ...r,
                     state: err.name === 'AbortError' ? 'CANCELLED' : 'FAILED',
-                    phaseText: err.message || '求解未完成'
+                    phaseText: friendlyMsg
                   }
                 : r
             )
@@ -1378,6 +1393,8 @@ export const CuttingWorkbenchPage: React.FC<{
     if (createdSchemes.length > 0) {
       addSchemes2D(createdSchemes);
       toast(`排版完成：生成 ${createdSchemes.length} 套候选方案`);
+    } else if (failureMessages.length > 0) {
+      toast(`排版未生成方案：${failureMessages[0]}`, true);
     }
     setRunningSolve(false);
   };
@@ -3430,17 +3447,32 @@ export const CuttingWorkbenchPage: React.FC<{
               </div>
             ) : null}
 
-            {/* Live Solve Progress Strip (only visible while solving) */}
-            {is2D && runningSolve && strategyRuns2D.length > 0 && (
-              <div className="wb-solve-progress">
-                {strategyRuns2D.map((r) => (
-                  <div key={r.strategyId} className="wb-solve-progress-row">
-                    <span className="wb-solve-progress-name">{r.strategyName}</span>
-                    <span className="wb-solve-progress-phase num">{r.phaseText}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            {/* Live Solve Progress Strip (also persists failure/empty feedback after solving stops) */}
+            {is2D &&
+              strategyRuns2D.length > 0 &&
+              (runningSolve ||
+                (!activeScheme2D &&
+                  strategyRuns2D.some(
+                    (r) => r.state === 'FAILED' || r.state === 'TIMED_OUT' || r.placedCount === 0
+                  ))) && (
+                <div className="wb-solve-progress">
+                  {strategyRuns2D.map((r) => (
+                    <div key={r.strategyId} className="wb-solve-progress-row">
+                      <span className="wb-solve-progress-name">{r.strategyName}</span>
+                      <span
+                        className="wb-solve-progress-phase num"
+                        style={
+                          r.state === 'FAILED' || r.state === 'TIMED_OUT'
+                            ? { color: '#dc2626' }
+                            : undefined
+                        }
+                      >
+                        {r.phaseText}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
             {/* 1D Full Solartron-Cut Parameter Config Section (always visible in 1D mode) */}
             {!is2D && (
