@@ -28,6 +28,11 @@ import {
 } from '../components/WorkbenchBoardCanvas';
 import { ModalDialog } from '../components/ModalDialog';
 import { OptimizationSession } from '@static/js/business/optimization/job-client.js';
+import {
+  buildSafeNestingRequest2D,
+  unpadGuillotineResult,
+  quantize01
+} from '@static/js/business/optimization/nesting-request-adapter.js';
 import { rectangle, shapeArea } from '@static/js/canvas/nesting-scene.js';
 import { gcodeText, dxfText } from '@static/js/plugins/export/cam-format.js';
 import { independentBaseline, planSummary } from '@static/js/linear/linear-model.js';
@@ -238,11 +243,11 @@ function rotateShapeGeometry(
     const minX = Math.min(...raw.map((p) => p.x));
     const minY = Math.min(...raw.map((p) => p.y));
     const normalized = raw.map((p) => ({
-      x: Math.max(0, Math.round((p.x - minX) * 100) / 100),
-      y: Math.max(0, Math.round((p.y - minY) * 100) / 100)
+      x: Math.max(0, quantize01(p.x - minX)),
+      y: Math.max(0, quantize01(p.y - minY))
     }));
-    const newW = Math.max(...normalized.map((p) => p.x));
-    const newH = Math.max(...normalized.map((p) => p.y));
+    const newW = quantize01(Math.max(...normalized.map((p) => p.x)));
+    const newH = quantize01(Math.max(...normalized.map((p) => p.y)));
     return {
       type: 'POLYGON',
       width: newW,
@@ -251,169 +256,8 @@ function rotateShapeGeometry(
     };
   }
   return stepDeg === 90
-    ? { type: 'RECTANGLE', width: h, height: w }
-    : { type: 'RECTANGLE', width: w, height: h };
-}
-
-function buildOptimizationRequest2D(
-  strategy: SolverStrategyDef,
-  scenario: Scenario2DType,
-  widthMm: number,
-  lengthMm: number,
-  pieceGapMm: number,
-  trimStartMm: number,
-  demands: DemandItem[],
-  defects: any[] = [],
-  maxLengthCapMm?: number,
-  settings: StudioSettings = DEFAULT_STUDIO_SETTINGS
-) {
-  const hasPolygon = demands.some((d) => d.shape?.type === 'POLYGON');
-  const mode = hasPolygon ? 'CONTOUR' : 'GUILLOTINE';
-  const engine =
-    strategy.enginePref === 'deepnest'
-      ? mode === 'CONTOUR'
-        ? 'deepnest'
-        : 'javaguillotine'
-      : strategy.enginePref === 'java'
-      ? mode === 'CONTOUR'
-        ? 'javairregular'
-        : 'javaguillotine'
-      : 'auto';
-
-  const openLengthScenario = scenario !== 'FIXED_BED';
-  const useShorten = openLengthScenario && (strategy.shorten || scenario === 'MULTI_WIDTH');
-  const useGapFill = scenario === 'SHORTEN_GAP_FILL' || strategy.gapFill;
-
-  const parts = demands
-    .filter((d) => d.quantity > 0 && d.width > 0 && d.length > 0)
-    .map((d, idx) => {
-      const baseShape = d.shape
-        ? structuredClone(d.shape)
-        : mode === 'CONTOUR'
-        ? {
-            type: 'POLYGON' as const,
-            width: Number(d.width),
-            height: Number(d.length),
-            vertices: [
-              { x: 0, y: 0 },
-              { x: Number(d.width), y: 0 },
-              { x: Number(d.width), y: Number(d.length) },
-              { x: 0, y: Number(d.length) }
-            ]
-          }
-        : rectangle(Number(d.width), Number(d.length));
-      return {
-        id: d.id || idx + 1,
-        name: d.name,
-        quantity: Math.max(1, Math.floor(d.quantity)),
-        allowRotation:
-          mode === 'GUILLOTINE'
-            ? Boolean(strategy.forceRotateRect || d.allowRotation)
-            : Boolean(d.allowRotation),
-        ...(mode === 'CONTOUR' && (strategy.halfTurn || d.allowHalfTurn) ? { allowHalfTurn: true } : {}),
-        shape: baseShape
-      };
-    });
-
-  let rowX = 0;
-  let rowY = trimStartMm;
-  let rowH = 0;
-  for (const p of parts) {
-    for (let i = 0; i < p.quantity; i++) {
-      if (rowX + p.shape.width > widthMm) {
-        rowY += rowH + pieceGapMm;
-        rowX = 0;
-        rowH = 0;
-      }
-      rowX += p.shape.width + pieceGapMm;
-      rowH = Math.max(rowH, p.shape.height);
-    }
-  }
-  const rawHeight = openLengthScenario
-    ? Math.max(lengthMm, Math.ceil(rowY + rowH + 180))
-    : lengthMm;
-  const safeStartHeight =
-    maxLengthCapMm != null && maxLengthCapMm > 0 ? Math.min(rawHeight, maxLengthCapMm) : rawHeight;
-
-  const exclusions = defects
-    .map((d, i) => {
-      const margin = d.margin ?? settings.defectMarginMm;
-      const x0 = Math.max(0, d.x - margin);
-      const y0 = Math.max(0, d.y - margin);
-      const x1 = Math.min(widthMm, d.x + d.w + margin);
-      const y1 = Math.min(safeStartHeight, d.y + d.h + margin);
-      const ew = Math.round((x1 - x0) * 10) / 10;
-      const eh = Math.round((y1 - y0) * 10) / 10;
-      if (ew <= 0.1 || eh <= 0.1) return null;
-      return {
-        id: d.id || i + 1,
-        x: Math.round(x0 * 10) / 10,
-        y: Math.round(y0 * 10) / 10,
-        shape: rectangle(ew, eh),
-        clearance: 0
-      };
-    })
-    .filter(Boolean);
-
-  const timeScale = Math.max(0.2, (settings.timeLimitSeconds || 5) / 5);
-  const scaledTimeLimit = Math.min(60, Math.max(1, Math.round(strategy.timeLimit * timeScale)));
-
-  const problem = {
-    schemaVersion: '1',
-    unit: 'mm',
-    engine,
-    timeLimitSeconds: scaledTimeLimit,
-    material: {
-      id: `CANVAS-${widthMm}x${safeStartHeight}`,
-      shape: rectangle(widthMm, safeStartHeight),
-      continuesAfterRegion: false,
-      exclusions
-    },
-    parts,
-    process: {
-      mode,
-      feedMode: 'SHEET',
-      startCorner: settings.startCorner,
-      firstStageOrientation: mode === 'CONTOUR' ? 'none' : settings.firstStageOrientation,
-      trimStart: mode === 'CONTOUR' ? 0 : trimStartMm,
-      minReusableWidth: mode === 'CONTOUR' ? 0 : settings.minRemnantWidthMm,
-      minReusableHeight: mode === 'CONTOUR' ? 0 : settings.minRemnantLengthMm,
-      kerf: 0,
-      objective: 'MAXIMIZE_PIECE_AREA',
-      pieceGap: pieceGapMm
-    }
-  };
-
-  const canUseMarkerStrategy =
-    mode === 'CONTOUR' &&
-    useShorten &&
-    strategy.enginePref !== 'java' &&
-    parts.every((p) => p.shape.width <= widthMm);
-
-  const strategyBlock = canUseMarkerStrategy
-    ? {
-        id: 'marker-shortening',
-        version: '2',
-        maxTrials: 7,
-        ...(useGapFill
-          ? {
-              gapFillLimits: Object.fromEntries(
-                parts.slice(0, 80).map((p) => [p.id, Math.min(80, Math.max(2, p.quantity))])
-              )
-            }
-          : {})
-      }
-    : undefined;
-
-  return {
-    schemaVersion: '2.0',
-    clientRequestId: `studio-${strategy.id}-${widthMm}-${Date.now()}`,
-    problemType: 'NESTING_2D',
-    allowFallback: settings.allowFallback,
-    requireComplete: Boolean(canUseMarkerStrategy),
-    problem,
-    ...(strategyBlock ? { strategy: strategyBlock } : {})
-  };
+    ? { type: 'RECTANGLE', width: quantize01(h), height: quantize01(w) }
+    : { type: 'RECTANGLE', width: quantize01(w), height: quantize01(h) };
 }
 
 export const CuttingWorkbenchPage: React.FC<{
@@ -918,20 +762,34 @@ export const CuttingWorkbenchPage: React.FC<{
       activeOpenDemands.length > 0 &&
       activeOpenDemands.every((d) => (placedCounts.get(d.id) || 0) >= d.quantity);
 
-    const baseReq =
-      existingEditable?.request ||
-      buildOptimizationRequest2D(
-        STRATEGIES_2D[4],
-        'FIXED_BED',
-        effW,
-        Math.max(effL, occupiedLengthMm || effL),
-        pieceGapMm,
-        trimStartMm,
-        activeOpenDemands.length > 0 ? activeOpenDemands : activeDemands2D,
-        windowDefects2D,
-        undefined,
-        settings
-      );
+    const manualBuilt = existingEditable?.request
+      ? null
+      : buildSafeNestingRequest2D({
+          strategy: STRATEGIES_2D[4],
+          scenario: 'FIXED_BED',
+          widthMm: effW,
+          lengthMm: Math.max(effL, occupiedLengthMm || effL),
+          pieceGapMm,
+          trimStartMm,
+          demands: activeOpenDemands.length > 0 ? activeOpenDemands : activeDemands2D,
+          defects: windowDefects2D,
+          settings
+        });
+    const baseReq = existingEditable?.request || manualBuilt?.request || {
+      schemaVersion: '2.0',
+      problemType: 'NESTING_2D',
+      problem: {
+        schemaVersion: '1',
+        unit: 'mm',
+        material: {
+          id: `CANVAS-${effW}x${Math.max(effL, occupiedLengthMm || effL)}`,
+          shape: rectangle(effW, Math.max(effL, occupiedLengthMm || effL)),
+          exclusions: []
+        },
+        parts: [],
+        process: { mode: 'GUILLOTINE', startCorner: 'left-top', trimStart: 0 }
+      }
+    };
 
     const nextResult = {
       ...(existingEditable?.result || {
@@ -1240,7 +1098,14 @@ export const CuttingWorkbenchPage: React.FC<{
 
     await Promise.all(
       jobsToRun.map(async ({ def, width, runKey, label }) => {
-        if (validDemands.some((d) => d.width > width && !d.allowRotation && !def.forceRotateRect)) {
+        const tooWide = validDemands.some((d) => {
+          const isPoly = d.shape?.type === 'POLYGON';
+          const canRot90 = isPoly
+            ? Boolean(d.allowRotation)
+            : Boolean(d.allowRotation || def.forceRotateRect);
+          return canRot90 ? Math.min(d.width, d.length) > width : d.width > width;
+        });
+        if (tooWide) {
           const msg = `存在裁片宽超门幅 ${width}mm`;
           failureMessages.push(`${label}：${msg}`);
           setStrategyRuns2D((prev) =>
@@ -1256,21 +1121,32 @@ export const CuttingWorkbenchPage: React.FC<{
           canvasMode === 'STOCK_ROLL' && currentRoll2D
             ? Math.max(200, currentRoll2D.currentRemainingLength ?? currentRoll2D.totalLength)
             : undefined;
-        const req = buildOptimizationRequest2D(
-          def,
-          effectiveScenario,
-          width,
-          effLength,
+        const built = buildSafeNestingRequest2D({
+          strategy: def,
+          scenario: effectiveScenario,
+          widthMm: width,
+          lengthMm: effLength,
           pieceGapMm,
           trimStartMm,
-          validDemands,
-          windowDefects,
-          stockMaxCap,
+          demands: validDemands,
+          defects: windowDefects,
+          maxLengthCapMm: stockMaxCap,
           settings
-        );
+        });
+        if (built.error || !built.request) {
+          const msg = built.error || '请求参数无法构造有效求解问题';
+          failureMessages.push(`${label}：${msg}`);
+          setStrategyRuns2D((prev) =>
+            prev.map((r) =>
+              r.strategyId === runKey ? { ...r, state: 'FAILED', phaseText: msg } : r
+            )
+          );
+          return;
+        }
+        const req = built.request;
         const t0 = performance.now();
         try {
-          const { job, result } = await (session as any).solve(req, {
+          const { job, result: rawResult } = await (session as any).solve(req, {
             onProgress: (j: any) => {
               setStrategyRuns2D((prev) =>
                 prev.map((r) =>
@@ -1286,6 +1162,7 @@ export const CuttingWorkbenchPage: React.FC<{
               );
             }
           });
+          const result = unpadGuillotineResult(rawResult, built);
           const elapsedMs = Math.round(performance.now() - t0);
           const layout = result?.layout;
           const placements = layout?.placements || [];
@@ -1302,6 +1179,7 @@ export const CuttingWorkbenchPage: React.FC<{
           const denomAreaMm2 = width * Math.max(1, occupiedLengthMm);
           const utilizationPct = Number(((netAreaMm2 / denomAreaMm2) * 100).toFixed(2));
           const complete = result?.fulfillmentStatus === 'COMPLETE';
+          const fallbackHint = layout?.fallbackReason ? ' · 已降级' : '';
 
           setStrategyRuns2D((prev) =>
             prev.map((r) =>
@@ -1311,9 +1189,9 @@ export const CuttingWorkbenchPage: React.FC<{
                     jobId: job.id,
                     state: job.state as any,
                     phaseText: complete
-                      ? `齐套 · ${fmtN(occupiedLengthMm, 1)}mm · ${utilizationPct}%`
+                      ? `齐套 · ${fmtN(occupiedLengthMm, 1)}mm · ${utilizationPct}%${fallbackHint}`
                       : placements.length > 0
-                      ? `已排 ${placements.length}/${totalRequested} · ${utilizationPct}%`
+                      ? `已排 ${placements.length}/${totalRequested} · ${utilizationPct}%${fallbackHint}`
                       : layout?.message || '未排入任何裁片（请检查门幅与版长）',
                     elapsedMs,
                     occupiedLengthMm,

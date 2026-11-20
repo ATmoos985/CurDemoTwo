@@ -96,4 +96,35 @@ class NativeSolverFallbackTests {
             assertNotNull(response.getFallbackReason(), "gap " + gap);
         }
     }
+
+    @Test void runtimeNativeCrashFallsBackExplicitlyWhenAllowedAndRespectsDisabledFallback() {
+        var crashingNative = new com.example.cutdemotwo.algorithm.nesting.ICutSolverEngine() {
+            @Override public String getEngineType() { return "packingsolver"; }
+            @Override public boolean isAvailable() { return true; }
+            @Override public com.example.cutdemotwo.contracts.nesting.EngineCapabilities capabilities() {
+                return new com.example.cutdemotwo.contracts.nesting.EngineCapabilities(
+                        "packingsolver", "1", List.of("RECTANGLE"), List.of("GUILLOTINE"),
+                        List.of("MAXIMIZE_PIECE_AREA"), 0.1, true);
+            }
+            @Override public com.example.cutdemotwo.algorithm.nesting.EngineResult solve(NestingProblem p) {
+                var r = new com.example.cutdemotwo.algorithm.nesting.EngineResult();
+                r.setSuccess(false);
+                r.setFailureStatus("FAILED");
+                r.setMessage("模拟原生进程 OOM 退出码 137");
+                return r;
+            }
+        };
+        var factory = new SolverFactory(List.of(crashingNative, new JavaGuillotineSolverEngine()));
+        var ok = factory.solve(guillotine("packingsolver"), true);
+        assertEquals("FEASIBLE", ok.status(), ok.message());
+        assertEquals("javaguillotine", ok.engine());
+        assertEquals("packingsolver", ok.requestedEngine());
+        assertNotNull(ok.fallbackReason());
+        assertTrue(ok.fallbackReason().contains("137"), ok.fallbackReason());
+
+        var noFallback = factory.solve(guillotine("packingsolver"), false);
+        assertEquals("FAILED", noFallback.status());
+        assertEquals("packingsolver", noFallback.engine());
+        assertNull(noFallback.fallbackReason());
+    }
 }

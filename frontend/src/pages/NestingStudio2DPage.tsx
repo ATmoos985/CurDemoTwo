@@ -6,6 +6,10 @@ import {
 } from '../store/useStudioStore';
 import { CadCanvasView } from '../components/CadCanvasView';
 import { OptimizationSession } from '@static/js/business/optimization/job-client.js';
+import {
+  buildSafeNestingRequest2D,
+  unpadGuillotineResult
+} from '@static/js/business/optimization/nesting-request-adapter.js';
 import { showcaseScene } from '@static/app/js/model/showcase.js';
 import { rectangle, shapeArea } from '@static/js/canvas/nesting-scene.js';
 import { gcodeText, dxfText } from '@static/js/plugins/export/cam-format.js';
@@ -119,138 +123,6 @@ const STRATEGIES_2D: SolverStrategyDef[] = [
   }
 ];
 
-function buildOptimizationRequest2D(
-  strategy: SolverStrategyDef,
-  widthMm: number,
-  lengthMm: number,
-  pieceGapMm: number,
-  trimStartMm: number,
-  demands: DemandItem[],
-  defects: any[] = []
-) {
-  const hasPolygon = demands.some((d) => d.shape?.type === 'POLYGON');
-  const mode = hasPolygon ? 'CONTOUR' : 'GUILLOTINE';
-  const engine =
-    strategy.enginePref === 'deepnest'
-      ? mode === 'CONTOUR'
-        ? 'deepnest'
-        : 'javaguillotine'
-      : strategy.enginePref === 'java'
-      ? mode === 'CONTOUR'
-        ? 'javairregular'
-        : 'javaguillotine'
-      : 'auto';
-
-  const parts = demands
-    .filter((d) => d.quantity > 0 && d.width > 0 && d.length > 0)
-    .map((d, idx) => ({
-      id: d.id || idx + 1,
-      name: d.name,
-      quantity: Math.max(1, Math.floor(d.quantity)),
-      allowRotation:
-        mode === 'GUILLOTINE'
-          ? Boolean(strategy.forceRotateRect || d.allowRotation)
-          : Boolean(d.allowRotation),
-      ...(mode === 'CONTOUR' && (strategy.halfTurn || d.allowHalfTurn) ? { allowHalfTurn: true } : {}),
-      shape: d.shape ? structuredClone(d.shape) : rectangle(Number(d.width), Number(d.length))
-    }));
-
-  let rowX = 0;
-  let rowY = trimStartMm;
-  let rowH = 0;
-  for (const p of parts) {
-    for (let i = 0; i < p.quantity; i++) {
-      if (rowX + p.shape.width > widthMm) {
-        rowY += rowH + pieceGapMm;
-        rowX = 0;
-        rowH = 0;
-      }
-      rowX += p.shape.width + pieceGapMm;
-      rowH = Math.max(rowH, p.shape.height);
-    }
-  }
-  const safeStartHeight = strategy.shorten
-    ? Math.max(lengthMm, Math.ceil(rowY + rowH + 150))
-    : lengthMm;
-
-  const exclusions = defects
-    .map((d, i) => {
-      const m = d.margin || 0;
-      const x0 = Math.max(0, d.x - m);
-      const y0 = Math.max(0, d.y - m);
-      const x1 = Math.min(widthMm, d.x + d.w + m);
-      const y1 = Math.min(safeStartHeight, d.y + d.h + m);
-      const ew = Math.round((x1 - x0) * 10) / 10;
-      const eh = Math.round((y1 - y0) * 10) / 10;
-      if (ew <= 0.1 || eh <= 0.1) return null;
-      return {
-        id: d.id || i + 1,
-        x: Math.round(x0 * 10) / 10,
-        y: Math.round(y0 * 10) / 10,
-        shape: rectangle(ew, eh),
-        clearance: 0
-      };
-    })
-    .filter(Boolean);
-
-  const problem = {
-    schemaVersion: '1',
-    unit: 'mm',
-    engine,
-    timeLimitSeconds: Math.min(60, Math.max(1, strategy.timeLimit)),
-    material: {
-      id: `CANVAS-${widthMm}x${safeStartHeight}`,
-      shape: rectangle(widthMm, safeStartHeight),
-      continuesAfterRegion: false,
-      exclusions
-    },
-    parts,
-    process: {
-      mode,
-      feedMode: 'SHEET',
-      startCorner: 'left-top',
-      firstStageOrientation: mode === 'CONTOUR' ? 'none' : 'horizontal',
-      trimStart: mode === 'CONTOUR' ? 0 : trimStartMm,
-      minReusableWidth: mode === 'CONTOUR' ? 0 : 150,
-      minReusableHeight: mode === 'CONTOUR' ? 0 : 150,
-      kerf: 0,
-      objective: 'MAXIMIZE_PIECE_AREA',
-      pieceGap: pieceGapMm
-    }
-  };
-
-  const canUseMarkerStrategy =
-    mode === 'CONTOUR' &&
-    strategy.shorten &&
-    strategy.enginePref !== 'java' &&
-    parts.every((p) => p.shape.width <= widthMm);
-
-  const strategyBlock = canUseMarkerStrategy
-    ? {
-        id: 'marker-shortening',
-        version: '2',
-        maxTrials: 7,
-        ...(strategy.gapFill
-          ? {
-              gapFillLimits: Object.fromEntries(
-                parts.slice(0, 80).map((p) => [p.id, Math.min(80, Math.max(2, p.quantity))])
-              )
-            }
-          : {})
-      }
-    : undefined;
-
-  return {
-    schemaVersion: '2.0',
-    clientRequestId: `studio-${strategy.id}-${Date.now()}`,
-    problemType: 'NESTING_2D',
-    allowFallback: true,
-    requireComplete: Boolean(canUseMarkerStrategy),
-    problem,
-    ...(strategyBlock ? { strategy: strategyBlock } : {})
-  };
-}
-
 export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) => {
   const {
     clusters,
@@ -271,6 +143,7 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
     strategyRuns2D,
     schemes2D,
     activeSchemeId2D,
+    settings,
     setCanvasSpec,
     setActiveDemands2D,
     updateDemand2D,
@@ -402,14 +275,31 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
 
         if (latestPlan?.result?.pieces?.length) {
           const r = latestPlan.result;
-          const reqObj = buildOptimizationRequest2D(
-            STRATEGIES_2D[0],
-            latestPlan.request?.rollW || canvasWidthMm,
-            latestPlan.request?.rollL || t.process?.bedLength || 2000,
-            t.process?.pieceGap || 0,
-            t.process?.trimStart || 0,
-            items
-          );
+          const builtPlan = buildSafeNestingRequest2D({
+            strategy: STRATEGIES_2D[0],
+            scenario: 'SHORTEN_KIT',
+            widthMm: latestPlan.request?.rollW || canvasWidthMm,
+            lengthMm: latestPlan.request?.rollL || t.process?.bedLength || 2000,
+            pieceGapMm: t.process?.pieceGap || 0,
+            trimStartMm: t.process?.trimStart || 0,
+            demands: items,
+            settings
+          });
+          const reqObj = builtPlan.request || {
+            schemaVersion: '2.0',
+            problemType: 'NESTING_2D',
+            problem: {
+              schemaVersion: '1',
+              unit: 'mm',
+              material: {
+                id: `CANVAS-${latestPlan.request?.rollW || canvasWidthMm}x${latestPlan.request?.rollL || 2000}`,
+                shape: rectangle(latestPlan.request?.rollW || canvasWidthMm, latestPlan.request?.rollL || 2000),
+                exclusions: []
+              },
+              parts: [],
+              process: { mode: 'GUILLOTINE', startCorner: 'left-top', trimStart: 0 }
+            }
+          };
           const layout = {
             schemaVersion: '1',
             unit: 'mm',
@@ -505,15 +395,32 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
         gapFillPlacements: activeScheme.result?.marker?.gapFillPlacements
       });
     }
-    const previewReq = buildOptimizationRequest2D(
-      STRATEGIES_2D[6],
-      canvasWidthMm,
-      canvasLengthMm,
+    const previewBuilt = buildSafeNestingRequest2D({
+      strategy: STRATEGIES_2D[6],
+      scenario: 'FIXED_BED',
+      widthMm: canvasWidthMm,
+      lengthMm: canvasLengthMm,
       pieceGapMm,
       trimStartMm,
-      activeDemands2D,
-      canvasMode === 'STOCK_ROLL' && currentRoll ? currentRoll.defects || [] : []
-    );
+      demands: activeDemands2D,
+      defects: canvasMode === 'STOCK_ROLL' && currentRoll ? currentRoll.defects || [] : [],
+      settings
+    });
+    const previewReq = previewBuilt.request || {
+      schemaVersion: '2.0',
+      problemType: 'NESTING_2D',
+      problem: {
+        schemaVersion: '1',
+        unit: 'mm',
+        material: {
+          id: `CANVAS-${canvasWidthMm}x${canvasLengthMm}`,
+          shape: rectangle(canvasWidthMm, canvasLengthMm),
+          exclusions: []
+        },
+        parts: [],
+        process: { mode: 'GUILLOTINE', startCorner: 'left-top', trimStart: 0 }
+      }
+    };
     return projectScene(previewReq, null);
   }, [
     activeScheme,
@@ -523,7 +430,8 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
     trimStartMm,
     activeDemands2D,
     canvasMode,
-    currentRoll
+    currentRoll,
+    settings
   ]);
 
   const handleQuickDxfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -594,23 +502,37 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
         : [];
 
     const createdSchemes: SavedScheme2D[] = [];
+    const failureMessages: string[] = [];
 
     await Promise.all(
       chosenDefs.map(async (def) => {
         const session = new OptimizationSession();
         activeSessionsRef.current.push(session);
-        const req = buildOptimizationRequest2D(
-          def,
-          canvasWidthMm,
-          canvasLengthMm,
+        const built = buildSafeNestingRequest2D({
+          strategy: def,
+          scenario: def.shorten ? (def.gapFill ? 'SHORTEN_GAP_FILL' : 'SHORTEN_KIT') : 'FIXED_BED',
+          widthMm: canvasWidthMm,
+          lengthMm: canvasLengthMm,
           pieceGapMm,
           trimStartMm,
-          validDemands,
-          defects
-        );
+          demands: validDemands,
+          defects,
+          settings
+        });
+        if (built.error || !built.request) {
+          const msg = built.error || '请求参数无效';
+          failureMessages.push(`${def.name}：${msg}`);
+          setStrategyRuns2D((prev) =>
+            prev.map((r) =>
+              r.strategyId === def.id ? { ...r, state: 'FAILED', phaseText: msg } : r
+            )
+          );
+          return;
+        }
+        const req = built.request;
         const t0 = performance.now();
         try {
-          const { job, result } = await (session as any).solve(req, {
+          const { job, result: rawResult } = await (session as any).solve(req, {
             onProgress: (j: any) => {
               setStrategyRuns2D((prev) =>
                 prev.map((r) =>
@@ -626,6 +548,7 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
               );
             }
           });
+          const result = unpadGuillotineResult(rawResult, built);
           const elapsedMs = Math.round(performance.now() - t0);
           const layout = result?.layout;
           const placements = layout?.placements || [];
@@ -642,6 +565,7 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
           const denomAreaMm2 = canvasWidthMm * Math.max(1, occupiedLengthMm);
           const utilizationPct = Number(((netAreaMm2 / denomAreaMm2) * 100).toFixed(2));
           const complete = result?.fulfillmentStatus === 'COMPLETE';
+          const fallbackHint = layout?.fallbackReason ? ' · 已降级' : '';
 
           setStrategyRuns2D((prev) =>
             prev.map((r) =>
@@ -651,8 +575,8 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
                     jobId: job.id,
                     state: job.state as any,
                     phaseText: complete
-                      ? `齐套 · ${fmtN(occupiedLengthMm, 1)}mm · ${utilizationPct}%`
-                      : `已排 ${placements.length}/${totalRequested} · ${utilizationPct}%`,
+                      ? `齐套 · ${fmtN(occupiedLengthMm, 1)}mm · ${utilizationPct}%${fallbackHint}`
+                      : `已排 ${placements.length}/${totalRequested} · ${utilizationPct}%${fallbackHint}`,
                     elapsedMs,
                     occupiedLengthMm,
                     utilizationPct,
@@ -688,15 +612,19 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
               request: req,
               result
             });
+          } else {
+            failureMessages.push(`${def.name}：${layout?.message || '未排入任何裁片'}`);
           }
         } catch (err: any) {
+          const msg = err?.message || '求解未完成';
+          if (err?.name !== 'AbortError') failureMessages.push(`${def.name}：${msg}`);
           setStrategyRuns2D((prev) =>
             prev.map((r) =>
               r.strategyId === def.id
                 ? {
                     ...r,
                     state: err.name === 'AbortError' ? 'CANCELLED' : 'FAILED',
-                    phaseText: err.message || '求解未完成'
+                    phaseText: msg
                   }
                 : r
             )
@@ -708,6 +636,8 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
     if (createdSchemes.length > 0) {
       addSchemes2D(createdSchemes);
       toast(`并行求解完成：生成 ${createdSchemes.length} 套候选排料方案`);
+    } else if (failureMessages.length > 0) {
+      toast(`求解未生成方案：${failureMessages[0]}`, true);
     }
     setRunningParallel(false);
   };

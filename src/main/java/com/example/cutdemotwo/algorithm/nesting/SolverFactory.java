@@ -220,6 +220,28 @@ public class SolverFactory implements NestingSolver {
                     ? deepnest.solveStripCandidate(problem)
                     : engine.solve(problem);
             com.example.cutdemotwo.algorithm.ComputationCancellation.check();
+            if (!result.isSuccess() && !"NO_SOLUTION_FOUND".equals(result.getFailureStatus())
+                    && allowFallback && fallbackEnabled && fallbackReason == null) {
+                String standInId = FALLBACKS.get(engine.getEngineType().toLowerCase());
+                ICutSolverEngine standIn = standInId == null ? null : engineMap.get(standInId);
+                if (standIn != null && standIn.isAvailable()) {
+                    try {
+                        checkSupport(problem, standIn.capabilities());
+                        String cause = result.getMessage() != null && !result.getMessage().isBlank()
+                                ? result.getMessage() : result.getFailureStatus();
+                        log.warn("Runtime fallback from {} to {} after native failure: {}", selected, standInId, cause);
+                        fallbackReason = requested + " 运行失败（" + cause + "），已自动降级由 " + standInId + " 求解";
+                        engine = standIn;
+                        selected = standIn.getEngineType();
+                        capabilities = standIn.capabilities();
+                        result = engine.solve(problem);
+                        com.example.cutdemotwo.algorithm.ComputationCancellation.check();
+                    } catch (Rejected unsupportedByStandIn) {
+                        log.warn("Stand-in engine {} cannot handle problem after {} failed: {}",
+                                standInId, selected, unsupportedByStandIn.getMessage());
+                    }
+                }
+            }
             if (!result.isSuccess() && !"NO_SOLUTION_FOUND".equals(result.getFailureStatus()))
                 return NestingResult.failure(result.getFailureStatus(), result.getMessage(), selected, requested, fallbackReason, elapsed(start));
             String error = "CONTOUR".equals(problem.process().mode()) ? PolygonResultValidator.validate(problem, result)
