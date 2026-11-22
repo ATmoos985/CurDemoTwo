@@ -18,7 +18,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.awt.geom.Area;
-import java.awt.geom.Line2D;
 import java.util.*;
 
 /**
@@ -114,15 +113,12 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
         final double minX, maxX, minY, maxY;
 
         ExclusionRecord(Exclusion d) {
-            Shape s = d.clearance() == 0 ? d.shape() :
-                    Shape.rectangle(d.shape().width() + 2 * d.clearance(), d.shape().height() + 2 * d.clearance());
-            double x = d.x() - d.clearance();
-            double y = d.y() - d.clearance();
-            this.worldArea = PolygonGeometry.region(s, x, y);
-            this.minX = x;
-            this.maxX = x + s.width();
-            this.minY = y;
-            this.maxY = y + s.height();
+            var expanded = ContourGeometrySupport.expandExclusion(d);
+            this.worldArea = expanded.worldArea();
+            this.minX = expanded.minX();
+            this.maxX = expanded.maxX();
+            this.minY = expanded.minY();
+            this.maxY = expanded.maxY();
         }
     }
 
@@ -407,76 +403,39 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
         Area candidateArea = PolygonGeometry.region(ori.shape(), x, y);
 
         // 2. Non-rectangular material containment
-        if (!isRectMat) {
-            Area outside = new Area(candidateArea);
-            outside.subtract(matArea);
-            if (PolygonGeometry.area(outside) > EPS) return false;
+        if (!isRectMat && !ContourGeometrySupport.isWithinMaterial(candidateArea, matArea, EPS)) {
+            return false;
         }
 
         // 3. Exclusions intersection
         for (ExclusionRecord exc : exclusions) {
             ComputationCancellation.check();
-            if (x + w > exc.minX - EPS && x < exc.maxX + EPS && y + h > exc.minY - EPS && y < exc.maxY + EPS) {
-                Area overlap = new Area(candidateArea);
-                overlap.intersect(exc.worldArea);
-                if (PolygonGeometry.area(overlap) > EPS) return false;
+            if (ContourGeometrySupport.aabbOverlaps(x, x + w, y, y + h, exc.minX, exc.maxX, exc.minY, exc.maxY, EPS)
+                    && ContourGeometrySupport.overlapsArea(candidateArea, exc.worldArea, EPS)) {
+                return false;
             }
         }
 
         // 4. Collision & pieceGap check with placed parts
         List<Point> candVerts = ori.vertices();
-        int cvSize = candVerts.size();
+        double buf = Math.max(0.0, gap) + EPS;
 
         for (PlacedRecord placed : placedList) {
             ComputationCancellation.check();
-            double pMinX = placed.minX;
-            double pMaxX = placed.maxX;
-            double pMinY = placed.minY;
-            double pMaxY = placed.maxY;
-
-            // AABB fast filter (with gap buffer)
-            double buf = Math.max(0.0, gap);
-            if (x + w < pMinX - buf - EPS || x > pMaxX + buf + EPS ||
-                    y + h < pMinY - buf - EPS || y > pMaxY + buf + EPS) {
+            if (!ContourGeometrySupport.aabbOverlaps(
+                    x, x + w, y, y + h, placed.minX, placed.maxX, placed.minY, placed.maxY, buf)) {
                 continue;
             }
 
-            // Direct area intersection
-            Area overlap = new Area(candidateArea);
-            overlap.intersect(placed.worldArea);
-            if (PolygonGeometry.area(overlap) > EPS) return false;
+            if (ContourGeometrySupport.overlapsArea(candidateArea, placed.worldArea, EPS)) {
+                return false;
+            }
 
-            // Strict pieceGap edge distance check
-            if (gap > 0) {
-                List<Point> pVerts = placed.orientedShape.vertices();
-                int pvSize = pVerts.size();
-                double px = placed.placement.x();
-                double py = placed.placement.y();
-
-                for (int i = 0; i < cvSize; i++) {
-                    ComputationCancellation.check();
-                    Point p1 = candVerts.get(i);
-                    Point p2 = candVerts.get((i + 1) % cvSize);
-                    double ax = p1.x() + x, ay = p1.y() + y;
-                    double bx = p2.x() + x, by = p2.y() + y;
-
-                    for (int j = 0; j < pvSize; j++) {
-                        ComputationCancellation.check();
-                        Point q1 = pVerts.get(j);
-                        Point q2 = pVerts.get((j + 1) % pvSize);
-                        double cx = q1.x() + px, cy = q1.y() + py;
-                        double dx = q2.x() + px, dy = q2.y() + py;
-
-                        double dist = Line2D.linesIntersect(ax, ay, bx, by, cx, cy, dx, dy) ? 0 : Math.min(
-                                Math.min(Line2D.ptSegDist(ax, ay, bx, by, cx, cy), Line2D.ptSegDist(ax, ay, bx, by, dx, dy)),
-                                Math.min(Line2D.ptSegDist(cx, cy, dx, dy, ax, ay), Line2D.ptSegDist(cx, cy, dx, dy, bx, by))
-                        );
-
-                        if (dist + EPS < gap) {
-                            return false;
-                        }
-                    }
-                }
+            if (gap > 0 && ContourGeometrySupport.violatesMinEdgeGap(
+                    candVerts, x, y,
+                    placed.orientedShape.vertices(), placed.placement.x(), placed.placement.y(),
+                    gap, EPS)) {
+                return false;
             }
         }
 

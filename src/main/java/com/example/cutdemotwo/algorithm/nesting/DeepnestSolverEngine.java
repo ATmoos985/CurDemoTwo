@@ -13,7 +13,6 @@ import com.example.cutdemotwo.contracts.nesting.NestingResult.Placement;
 import org.springframework.stereotype.Service;
 
 import java.awt.geom.Area;
-import java.awt.geom.Line2D;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -39,7 +38,7 @@ import java.util.Objects;
  * </ol>
  */
 @Service
-public class DeepnestSolverEngine implements ICutSolverEngine {
+public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapable {
     private static final double VALIDATOR_AREA_TOL = EngineGeometry.AREA_EPS_MM2 * 0.5; // Strictly tighter than PolygonResultValidator's 0.001 mm^2
     private static final double VALIDATOR_GAP_TOL = EngineGeometry.COORDINATE_EPS_MM * 0.5; // Strictly tighter than PolygonResultValidator's 0.001 mm
     private static final int DEFAULT_POPULATION_SIZE = 10;
@@ -75,6 +74,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine {
     }
 
     /** Direct fixed-width open-strip minimization entry for {@code MarkerOptimization} STRIP_SEARCH. */
+    @Override
     public EngineResult solveStripCandidate(NestingProblem problem) {
         return runDeepnest(problem, true);
     }
@@ -124,17 +124,12 @@ public class DeepnestSolverEngine implements ICutSolverEngine {
         final double minX, maxX, minY, maxY;
 
         ExclusionObstacle(Exclusion exc) {
-            double clr = exc.clearance();
-            Shape s = clr == 0
-                    ? exc.shape()
-                    : Shape.rectangle(exc.shape().width() + 2 * clr, exc.shape().height() + 2 * clr);
-            double x = exc.x() - clr;
-            double y = exc.y() - clr;
-            this.worldArea = PolygonGeometry.region(s, x, y);
-            this.minX = x;
-            this.maxX = x + s.width();
-            this.minY = y;
-            this.maxY = y + s.height();
+            var expanded = ContourGeometrySupport.expandExclusion(exc);
+            this.worldArea = expanded.worldArea();
+            this.minX = expanded.minX();
+            this.maxX = expanded.maxX();
+            this.minY = expanded.minY();
+            this.maxY = expanded.maxY();
         }
     }
 
@@ -784,65 +779,36 @@ public class DeepnestSolverEngine implements ICutSolverEngine {
 
         Area candArea = PolygonGeometry.region(ori.shape(), x, y);
 
-        if (!ctx.isRectMat) {
-            Area outside = new Area(candArea);
-            outside.subtract(ctx.matArea);
-            if (PolygonGeometry.area(outside) > VALIDATOR_AREA_TOL) {
-                return false;
-            }
+        if (!ctx.isRectMat && !ContourGeometrySupport.isWithinMaterial(candArea, ctx.matArea, VALIDATOR_AREA_TOL)) {
+            return false;
         }
 
         for (ExclusionObstacle exc : ctx.exclusions) {
             ComputationCancellation.check();
-            if (x + w > exc.minX - 1e-6 && x < exc.maxX + 1e-6
-                    && y + h > exc.minY - 1e-6 && y < exc.maxY + 1e-6) {
-                Area overlap = new Area(candArea);
-                overlap.intersect(exc.worldArea);
-                if (PolygonGeometry.area(overlap) > VALIDATOR_AREA_TOL) {
-                    return false;
-                }
+            if (ContourGeometrySupport.aabbOverlaps(x, x + w, y, y + h, exc.minX, exc.maxX, exc.minY, exc.maxY, 1e-6)
+                    && ContourGeometrySupport.overlapsArea(candArea, exc.worldArea, VALIDATOR_AREA_TOL)) {
+                return false;
             }
         }
 
         double gap = ctx.pieceGap;
         List<Point> cVerts = ori.vertices();
-        int cn = cVerts.size();
+        double margin = gap + 1e-6;
 
         for (PlacedInstance p : placedList) {
             ComputationCancellation.check();
-            if (x + w < p.minX - gap - 1e-6 || x > p.maxX + gap + 1e-6
-                    || y + h < p.minY - gap - 1e-6 || y > p.maxY + gap + 1e-6) {
+            if (!ContourGeometrySupport.aabbOverlaps(
+                    x, x + w, y, y + h, p.minX, p.maxX, p.minY, p.maxY, margin)) {
                 continue;
             }
 
-            Area overlap = new Area(candArea);
-            overlap.intersect(p.worldArea);
-            if (PolygonGeometry.area(overlap) > VALIDATOR_AREA_TOL) {
+            if (ContourGeometrySupport.overlapsArea(candArea, p.worldArea, VALIDATOR_AREA_TOL)) {
                 return false;
             }
 
-            if (gap > 0) {
-                List<Point> pVerts = p.worldVertices;
-                int pn = pVerts.size();
-                for (int i = 0; i < cn; i++) {
-                    Point c1 = cVerts.get(i);
-                    Point c2 = cVerts.get((i + 1) % cn);
-                    double ax = c1.x() + x, ay = c1.y() + y;
-                    double bx = c2.x() + x, by = c2.y() + y;
-                    for (int j = 0; j < pn; j++) {
-                        Point q1 = pVerts.get(j);
-                        Point q2 = pVerts.get((j + 1) % pn);
-                        double cx = q1.x(), cy = q1.y();
-                        double dx = q2.x(), dy = q2.y();
-                        double dist = Line2D.linesIntersect(ax, ay, bx, by, cx, cy, dx, dy) ? 0.0 : Math.min(
-                                Math.min(Line2D.ptSegDist(ax, ay, bx, by, cx, cy), Line2D.ptSegDist(ax, ay, bx, by, dx, dy)),
-                                Math.min(Line2D.ptSegDist(cx, cy, dx, dy, ax, ay), Line2D.ptSegDist(cx, cy, dx, dy, bx, by))
-                        );
-                        if (dist + VALIDATOR_GAP_TOL < gap) {
-                            return false;
-                        }
-                    }
-                }
+            if (gap > 0 && ContourGeometrySupport.violatesMinEdgeGap(
+                    cVerts, x, y, p.worldVertices, 0.0, 0.0, gap, VALIDATOR_GAP_TOL)) {
+                return false;
             }
         }
 

@@ -1,6 +1,8 @@
 package com.example.cutdemotwo.algorithm.nesting;
 
+import com.example.cutdemotwo.algorithm.ComputationCancellation;
 import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
+import com.example.cutdemotwo.algorithm.runtime.IsolatedProcessRunner;
 
 import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
 
@@ -10,15 +12,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CancellationException;
 
 /** Stateless adapter for PackingSolver's straight-edge irregular packing engine. */
 @Service
-public class IrregularPackingSolverService implements ICutSolverEngine {
+public class IrregularPackingSolverService implements ICutSolverEngine, StripSearchCapable {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(IrregularPackingSolverService.class);
     private final JsonMapper json = new JsonMapper();
     @Value("${packingsolver.irregular.executable.path:data/solver/packingsolver_irregular.exe}")
@@ -39,46 +40,44 @@ public class IrregularPackingSolverService implements ICutSolverEngine {
     }
 
     /** Seek a short complete strip at a fixed width. The caller validates it against the finite trial material. */
+    @Override
     public EngineResult solveStripCandidate(NestingProblem problem) {
         return solveNative(problem, "open-dimension-y");
     }
 
     private EngineResult solveNative(NestingProblem problem, String objective) {
+        ComputationCancellation.check();
         if (!isAvailable()) return failure("UNAVAILABLE", "异形引擎尚未安装或不可执行");
-        Path temp = null; Process process = null;
+        Path temp = null;
         try {
             temp = Files.createTempDirectory("ps_irregular_").toAbsolutePath();
             Path input = temp.resolve("input.json"), certificate = temp.resolve("certificate.json");
             Files.writeString(input, json.writeValueAsString(nativeInput(problem, objective)));
             int memMb = Math.min(4096, Math.max(128, memoryLimitMb));
-            process = new ProcessBuilder(Path.of(solverPath).toAbsolutePath().toString(), "--input", input.toString(),
+            ProcessBuilder pb = new ProcessBuilder(Path.of(solverPath).toAbsolutePath().toString(), "--input", input.toString(),
                     "--certificate", certificate.toString(), "--time-limit", nativeTimeLimitSeconds(problem.timeLimitSeconds()),
                     "--verbosity-level", "0", "--only-write-at-the-end", "--memory-limit", Integer.toString(memMb))
-                    .directory(temp.toFile()).redirectErrorStream(true).redirectOutput(temp.resolve("solver.log").toFile()).start();
-            if (!process.waitFor(problem.timeLimitSeconds() + 5L, TimeUnit.SECONDS))
+                    .directory(temp.toFile()).redirectErrorStream(true).redirectOutput(temp.resolve("solver.log").toFile());
+            IsolatedProcessRunner.RunResult run = IsolatedProcessRunner.run(pb, (problem.timeLimitSeconds() + 5L) * 1000L);
+            if (run.timedOut())
                 return failure("FAILED", "异形求解超过时限，已终止");
-            if (process.exitValue() != 0 || !Files.isRegularFile(certificate)) {
-                log.warn("Irregular solver exited with code {}", process.exitValue());
-                return failure("FAILED", "异形引擎未生成有效结果，请检查运行环境；退出码 " + process.exitValue());
+            if (run.exitCode() != 0 || !Files.isRegularFile(certificate)) {
+                log.warn("Irregular solver exited with code {}", run.exitCode());
+                return failure("FAILED", "异形引擎未生成有效结果，请检查运行环境；退出码 " + run.exitCode());
             }
             try { return parseCertificate(json.readTree(certificate.toFile()), problem); }
             catch (RuntimeException invalid) {
                 log.warn("Invalid irregular certificate", invalid);
                 return failure("INVALID_RESULT", "异形引擎返回了无效轮廓");
             }
+        } catch (CancellationException cancelled) {
+            throw cancelled;
         } catch (Exception error) {
             if (error instanceof InterruptedException) Thread.currentThread().interrupt();
             log.error("Irregular solver execution failed", error);
             return failure("FAILED", "异形求解执行失败，请检查运行环境");
         } finally {
-            if (process != null && process.isAlive()) {
-                process.descendants().forEach(ProcessHandle::destroyForcibly); process.destroyForcibly();
-                try { process.waitFor(2, TimeUnit.SECONDS); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
-            }
-            // Only this invocation's new temporary directory; Files.walk does not follow symlinks.
-            if (temp != null) try (var files = Files.walk(temp)) {
-                for (Path path : files.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
-            } catch (IOException cleanup) { log.warn("Unable to clean irregular solver temporary files", cleanup); }
+            IsolatedProcessRunner.deleteTempDirectory(temp);
         }
     }
     static String nativeTimeLimitSeconds(int requestedSeconds) {
@@ -100,14 +99,8 @@ public class IrregularPackingSolverService implements ICutSolverEngine {
     static Map<String, Object> nativeInput(NestingProblem p, String objective) {
         var bin = polygon(p.material().shape(), 0, 0); bin.put("copies", 1);
         bin.put("defects", p.material().exclusions().stream().map(d -> {
-            double left = Math.max(0, d.x() - d.clearance());
-            double top = Math.max(0, d.y() - d.clearance());
-            double right = Math.min(p.width(), d.x() + d.shape().width() + d.clearance());
-            double bottom = Math.min(p.height(), d.y() + d.shape().height() + d.clearance());
-            var shape = d.clearance() == 0
-                    ? d.shape()
-                    : NestingProblem.Shape.rectangle(Math.max(0.1, right - left), Math.max(0.1, bottom - top));
-            var defect = polygon(shape, d.clearance() == 0 ? d.x() : left, d.clearance() == 0 ? d.y() : top);
+            var expanded = ContourGeometrySupport.expandExclusionClipped(d, p.width(), p.height(), 0.1);
+            var defect = polygon(expanded.shape(), expanded.x(), expanded.y());
             defect.put("defect_type", -1); defect.put("item_defect_minimum_spacing", 0); return defect;
         }).toList());
         var items = p.parts().stream().map(part -> {

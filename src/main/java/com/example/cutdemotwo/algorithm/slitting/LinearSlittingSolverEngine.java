@@ -1,7 +1,9 @@
 package com.example.cutdemotwo.algorithm.slitting;
 
+import com.example.cutdemotwo.algorithm.ComputationCancellation;
 import com.example.cutdemotwo.algorithm.api.ISlittingSolverEngine;
 import com.example.cutdemotwo.algorithm.api.ComputationTimeout;
+import com.example.cutdemotwo.algorithm.runtime.IsolatedProcessRunner;
 
 import changyang.cut.apsmodule.generator.NewSolver.CuttingSolver;
 import changyang.cut.apsmodule.service.*;
@@ -49,39 +51,30 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
 
     @Override public SlittingResult solve(SlittingProblem problem) {
         SlittingValidation.validateProblem(problem);
-        Path directory=null;Process process=null;
+        Path directory = null;
         try {
-            if(Thread.currentThread().isInterrupted())throw new CancellationException("计算开始前已取消");
-            directory=Files.createTempDirectory("cutdemo-slitting-");
-            Path input=directory.resolve("input.json"),output=directory.resolve("output.json");
-            Files.write(input,JSON.writeValueAsBytes(problem));
-            var command=command(input,output,ProcessHandle.current().pid(),childXmx);
-            process=new ProcessBuilder(command).redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                    .redirectError(ProcessBuilder.Redirect.DISCARD).start();
-            if(!process.waitFor(problem.timeLimitSeconds(),TimeUnit.SECONDS))
-                throw new ComputationTimeout();
-            if(process.exitValue()==124)throw new ComputationTimeout();
-            if(process.exitValue()==2)throw new SlittingValidation.ValidationException("INVALID_RESULT","内核候选结果未通过独立验收，未发布结果");
-            if(process.exitValue()!=0 || !Files.isRegularFile(output) || Files.size(output)>8_388_608)
-                throw new IllegalStateException("一维计算进程失败或输出超限，exit="+process.exitValue());
-            var result=JSON.readValue(Files.readAllBytes(output),SlittingResult.class);
-            SlittingValidation.validateResult(problem,result);
-            return result;
-        } catch(InterruptedException interrupted) {
-            Thread.currentThread().interrupt();throw new CancellationException("一维计算已取消");
-        } catch(java.io.IOException error) {throw new IllegalStateException("一维计算进程启动或结果读取失败",error);}
-        finally {
+            ComputationCancellation.check();
+            directory = Files.createTempDirectory("cutdemo-slitting-");
+            Path input = directory.resolve("input.json"), output = directory.resolve("output.json");
+            Files.write(input, JSON.writeValueAsBytes(problem));
+            var command = command(input, output, ProcessHandle.current().pid(), childXmx);
+            ProcessBuilder pb = new ProcessBuilder(command)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD);
             // Keep the worker permit until the JVM and all its native solver threads are gone.
-            boolean interrupted=Thread.interrupted();
-            if(process!=null && process.isAlive()) {
-                process.destroyForcibly();
-                for(;;)try {process.waitFor();break;}catch(InterruptedException again){interrupted=true;}
-            }
-            if(directory!=null)try {
-                Files.deleteIfExists(directory.resolve("input.json"));Files.deleteIfExists(directory.resolve("output.json"));
-                Files.deleteIfExists(directory);
-            }catch(java.io.IOException cleanup){org.slf4j.LoggerFactory.getLogger(getClass()).warn("Cannot remove computation directory {}",directory);}
-            if(interrupted)Thread.currentThread().interrupt();
+            var run = IsolatedProcessRunner.run(pb, TimeUnit.SECONDS.toMillis(problem.timeLimitSeconds()),
+                    IsolatedProcessRunner.DEFAULT_POLL_MILLIS, true);
+            if (run.timedOut() || run.exitCode() == 124) throw new ComputationTimeout();
+            if (run.exitCode() == 2) throw new SlittingValidation.ValidationException("INVALID_RESULT", "内核候选结果未通过独立验收，未发布结果");
+            if (run.exitCode() != 0 || !Files.isRegularFile(output) || Files.size(output) > 8_388_608)
+                throw new IllegalStateException("一维计算进程失败或输出超限，exit=" + run.exitCode());
+            var result = JSON.readValue(Files.readAllBytes(output), SlittingResult.class);
+            SlittingValidation.validateResult(problem, result);
+            return result;
+        } catch (java.io.IOException error) {
+            throw new IllegalStateException("一维计算进程启动或结果读取失败", error);
+        } finally {
+            IsolatedProcessRunner.deleteTempDirectory(directory);
         }
     }
     static List<String> command(Path input,Path output,long parentPid) throws java.io.IOException {

@@ -32,14 +32,14 @@ public final class PolygonResultValidator {
             expected.exclusiveOr(PolygonGeometry.region(p.shape(), 0, 0));
             if (PolygonGeometry.area(expected) > AREA_EPS) return "异形结果改变了零件轮廓";
             var placed = PolygonGeometry.region(p.shape(), p.x(), p.y());
-            var outside = new Area(placed); outside.subtract(material);
-            if (PolygonGeometry.area(outside) > AREA_EPS) return "异形结果超出材料实际轮廓";
-            for (Area prior : occupied) { var overlap = new Area(placed); overlap.intersect(prior); if (PolygonGeometry.area(overlap) > AREA_EPS) return "异形结果裁片重叠"; }
+            if (!ContourGeometrySupport.isWithinMaterial(placed, material, AREA_EPS)) return "异形结果超出材料实际轮廓";
+            for (Area prior : occupied) {
+                if (ContourGeometrySupport.overlapsArea(placed, prior, AREA_EPS)) return "异形结果裁片重叠";
+            }
             for (var d : input.material().exclusions()) {
                 ComputationCancellation.check();
-                var shape = d.clearance() == 0 ? d.shape() : NestingProblem.Shape.rectangle(d.shape().width() + d.clearance()*2, d.shape().height() + d.clearance()*2);
-                var overlap = new Area(placed); overlap.intersect(PolygonGeometry.region(shape, d.x() - d.clearance(), d.y() - d.clearance()));
-                if (PolygonGeometry.area(overlap) > AREA_EPS) return "异形结果进入禁入区域";
+                var expanded = ContourGeometrySupport.expandExclusion(d);
+                if (ContourGeometrySupport.overlapsArea(placed, expanded.worldArea(), AREA_EPS)) return "异形结果进入禁入区域";
             }
             occupied.add(placed);
         }
@@ -49,16 +49,10 @@ public final class PolygonResultValidator {
                 ComputationCancellation.check();
                 var a = pieces.get(i); var b = pieces.get(j);
                 var av = PolygonGeometry.vertices(a.shape()); var bv = PolygonGeometry.vertices(b.shape());
-                for (int ai = 0; ai < av.size(); ai++) for (int bi = 0; bi < bv.size(); bi++) {
-                    ComputationCancellation.check();
-                    var p = av.get(ai); var q = av.get((ai + 1) % av.size());
-                    var r = bv.get(bi); var t = bv.get((bi + 1) % bv.size());
-                    double ax=p.x()+a.x(), ay=p.y()+a.y(), bx=q.x()+a.x(), by=q.y()+a.y();
-                    double cx=r.x()+b.x(), cy=r.y()+b.y(), dx=t.x()+b.x(), dy=t.y()+b.y();
-                    double distance = java.awt.geom.Line2D.linesIntersect(ax,ay,bx,by,cx,cy,dx,dy) ? 0 : Math.min(
-                        Math.min(java.awt.geom.Line2D.ptSegDist(ax,ay,bx,by,cx,cy), java.awt.geom.Line2D.ptSegDist(ax,ay,bx,by,dx,dy)),
-                        Math.min(java.awt.geom.Line2D.ptSegDist(cx,cy,dx,dy,ax,ay), java.awt.geom.Line2D.ptSegDist(cx,cy,dx,dy,bx,by)));
-                    if (distance + EngineGeometry.COORDINATE_EPS_MM < input.process().pieceGap()) return "轮廓裁片间距不足";
+                if (ContourGeometrySupport.violatesMinEdgeGap(
+                        av, a.x(), a.y(), bv, b.x(), b.y(),
+                        input.process().pieceGap(), EngineGeometry.COORDINATE_EPS_MM)) {
+                    return "轮廓裁片间距不足";
                 }
             }
         }

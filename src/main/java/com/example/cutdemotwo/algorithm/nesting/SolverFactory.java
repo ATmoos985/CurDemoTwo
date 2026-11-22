@@ -118,7 +118,7 @@ public class SolverFactory implements NestingSolver {
     @Override
     public Optional<Function<NestingProblem, NestingResult>> stripSearch(NestingProblem problem, boolean allowFallback) {
         var engine = select(problem, allowFallback).engine();
-        if (!(engine instanceof IrregularPackingSolverService || engine instanceof DeepnestSolverEngine) || !engine.isAvailable())
+        if (!(engine instanceof StripSearchCapable) || !engine.isAvailable())
             return Optional.empty();
         return Optional.of(candidate -> solve(candidate, false, true));
     }
@@ -214,10 +214,8 @@ public class SolverFactory implements NestingSolver {
             var capabilities = engine.capabilities();
             if (!engine.isAvailable())
                 return NestingResult.failure("UNAVAILABLE", "求解引擎尚未就绪", selected, requested, fallbackReason, elapsed(start));
-            EngineResult result = stripSearch && engine instanceof IrregularPackingSolverService irregular
-                    ? irregular.solveStripCandidate(problem)
-                    : stripSearch && engine instanceof DeepnestSolverEngine deepnest
-                    ? deepnest.solveStripCandidate(problem)
+            EngineResult result = stripSearch && engine instanceof StripSearchCapable stripCapable
+                    ? stripCapable.solveStripCandidate(problem)
                     : engine.solve(problem);
             com.example.cutdemotwo.algorithm.ComputationCancellation.check();
             if (!result.isSuccess() && !"NO_SOLUTION_FOUND".equals(result.getFailureStatus())

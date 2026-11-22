@@ -83,9 +83,10 @@ class ModuleBoundaryTests {
     }
 
     @Test void oneAndTwoDimensionalImplementationsStayIndependent() throws IOException {
-        assertAlgorithmBoundary("algorithm/nesting", Set.of("nesting", "api", "geometry", "toolpath"));
-        assertAlgorithmBoundary("algorithm/slitting", Set.of("slitting", "api"));
+        assertAlgorithmBoundary("algorithm/nesting", Set.of("nesting", "api", "geometry", "toolpath", "runtime"));
+        assertAlgorithmBoundary("algorithm/slitting", Set.of("slitting", "api", "runtime"));
         assertAlgorithmBoundary("algorithm/toolpath", Set.of("toolpath", "api", "geometry"));
+        assertAlgorithmBoundary("algorithm/runtime", Set.of("runtime"));
     }
 
     @Test void implementationGuardCatchesWildcardAndInlineConstruction() {

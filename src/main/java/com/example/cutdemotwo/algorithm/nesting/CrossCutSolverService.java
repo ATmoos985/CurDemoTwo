@@ -9,6 +9,7 @@ import com.example.cutdemotwo.contracts.geometry.RemnantPiece;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import com.example.cutdemotwo.algorithm.nesting.EngineResult;
 import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
+import com.example.cutdemotwo.algorithm.geometry.CoordinateFrame;
 import com.example.cutdemotwo.algorithm.geometry.EngineGeometry;
 import com.example.cutdemotwo.algorithm.nesting.ICutSolverEngine;
 import com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService;
@@ -98,9 +99,8 @@ public class CrossCutSolverService implements ICutSolverEngine {
         }
         if (req.height() > cursor && req.width() >= req.process().minReusableWidth() && req.height() - cursor >= req.process().minReusableHeight()) addRemnant(remnants, req.width(), cursor, req.height() - cursor,
                 overlaps(blocked, cursor, req.height()));
-        double homeX = req.process().startCorner().startsWith("right") ? req.width() : 0.0;
-        double homeY = req.process().startCorner().endsWith("bottom") ? req.height() : 0.0;
-        List<CutStep> continuousCuts = toolpathOptimizerService.optimizeAndChain(cuts, homeX, homeY, false);
+        CoordinateFrame frame = CoordinateFrame.of(req);
+        List<CutStep> continuousCuts = GuillotinePostProcessor.optimizeCuts(toolpathOptimizerService, cuts, frame, false);
         res.setPieces(pieces);
         res.setRemnants(remnants);
         res.setCuts(continuousCuts);

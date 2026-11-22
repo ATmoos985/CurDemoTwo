@@ -1,13 +1,15 @@
 package com.example.cutdemotwo.algorithm.nesting;
 
+import com.example.cutdemotwo.algorithm.ComputationCancellation;
+import com.example.cutdemotwo.algorithm.geometry.CoordinateFrame;
+import com.example.cutdemotwo.algorithm.geometry.EngineGeometry;
+import com.example.cutdemotwo.algorithm.runtime.IsolatedProcessRunner;
 import com.example.cutdemotwo.contracts.geometry.CutStep;
 import com.example.cutdemotwo.contracts.geometry.Defect;
 import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
 import com.example.cutdemotwo.contracts.geometry.RemnantPiece;
-import com.example.cutdemotwo.contracts.nesting.NestingProblem;
-import com.example.cutdemotwo.algorithm.nesting.EngineResult;
 import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
-import com.example.cutdemotwo.algorithm.geometry.EngineGeometry;
+import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,6 +19,7 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.CancellationException;
 
 @Service
 public class PackingSolverService implements com.example.cutdemotwo.algorithm.nesting.ICutSolverEngine {
@@ -61,6 +64,7 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
 
     @Override
     public EngineResult solve(NestingProblem req) {
+        ComputationCancellation.check();
         if (!isAvailable()) {
             EngineResult err = new EngineResult();
             err.setSuccess(false);
@@ -70,7 +74,6 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
         }
 
         Path tmpDir = null;
-        Process process = null;
         try {
             tmpDir = Files.createTempDirectory("ps_cut_");
             File binsCsv = tmpDir.resolve("bins.csv").toFile();
@@ -78,7 +81,8 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
             File defectsCsv = tmpDir.resolve("defects.csv").toFile();
             File certCsv = tmpDir.resolve("certificate.csv").toFile();
 
-            double activeL = req.height() - req.process().trimStart();
+            CoordinateFrame frame = CoordinateFrame.of(req);
+            double activeL = frame.activeLength();
             if (activeL <= 0) {
                 EngineResult err = new EngineResult();
                 err.setSuccess(false);
@@ -95,18 +99,12 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
             // 2. items.csv
             List<NestingProblem.Part> itemTypes = writeItems(itemsCsv, req.parts());
 
-            String origin = EngineGeometry.normalizeStartCorner(req.process().startCorner());
-            boolean isRightOrigin = origin.startsWith("right");
-            boolean isBottomOrigin = origin.endsWith("bottom");
-            boolean isSheet = req.sheet();
-            boolean mirrorY = isSheet && isBottomOrigin;
-
             // 3. defects.csv (offset Y by trimStart)
             try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(new FileOutputStream(defectsCsv), java.nio.charset.StandardCharsets.UTF_8))) {
                 pw.println("ID,BIN,X,Y,WIDTH,HEIGHT");
                 for (Defect d : EngineGeometry.defects(req)) {
-                    double x = isRightOrigin ? req.width() - d.getX() - d.getW() - d.getMargin() : d.getX() - d.getMargin();
-                    double y = mirrorY ? activeL - d.getY() - d.getH() - d.getMargin() : d.getY() - req.process().trimStart() - d.getMargin();
+                    double x = frame.toLocalX(d.getSafeX(), d.getSafeW());
+                    double y = frame.toLocalY(d.getSafeY(), d.getSafeH());
                     double left = Math.max(0, x), top = Math.max(0, y);
                     double width = Math.min(req.width(), x + d.getSafeW()) - left;
                     double height = Math.min(activeL, y + d.getSafeH()) - top;
@@ -121,10 +119,11 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
             pb.redirectErrorStream(true);
             Path output = tmpDir.resolve("solver.log");
             pb.redirectOutput(output.toFile());
-            process = pb.start();
-            if (!process.waitFor(req.timeLimitSeconds() + 5L, java.util.concurrent.TimeUnit.SECONDS))
+            IsolatedProcessRunner.RunResult run = IsolatedProcessRunner.run(pb, (req.timeLimitSeconds() + 5L) * 1000L);
+            if (run.timedOut()) {
                 throw new IOException("求解超过时限，已终止；库存未变更");
-            int exitCode = process.exitValue();
+            }
+            int exitCode = run.exitCode();
             log.info("PackingSolver finished with code {}", exitCode);
 
             if (exitCode != 0 || !certCsv.exists() || certCsv.length() == 0) {
@@ -138,6 +137,8 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
 
             return parseCertificate(certCsv, req, itemTypes);
 
+        } catch (CancellationException cancelled) {
+            throw cancelled;
         } catch (Exception e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             log.error("Execution error", e);
@@ -146,18 +147,7 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
             err.setMessage("求解执行异常: " + e.getMessage());
             return err;
         } finally {
-            if (process != null && process.isAlive()) {
-                process.descendants().forEach(ProcessHandle::destroyForcibly);
-                process.destroyForcibly();
-                try { process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS); }
-                catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
-            }
-            // Only delete files created in this invocation's fresh temporary directory; never follow links.
-            if (tmpDir != null) {
-                try (var files = Files.walk(tmpDir)) {
-                    for (Path file : files.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(file);
-                } catch (IOException cleanup) { log.warn("Unable to clean solver temporary directory", cleanup); }
-            }
+            IsolatedProcessRunner.deleteTempDirectory(tmpDir);
         }
     }
 
@@ -246,33 +236,13 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
         List<CutStep> rawCutSteps = new ArrayList<>();
 
         int remIndex = 1;
-        String origin = EngineGeometry.normalizeStartCorner(req.process().startCorner());
-        boolean isRightOrigin = origin.startsWith("right");
-        boolean isBottomOrigin = origin.endsWith("bottom");
-        boolean isSheet = req.sheet();
-        
+        CoordinateFrame frame = CoordinateFrame.of(req);
+        List<Defect> allDefects = EngineGeometry.defects(req);
         String remPrefix = "LEFTOVER";
-        
-        // 连续送料沿 Y 正方向排料；整块材料允许按底部起刀基准镜像排列。
-        boolean mirrorY = isSheet && isBottomOrigin;
-        double trim = req.process().trimStart();
 
-        if (trim > 0) {
-            double trimArea = (req.width() * trim) / 1_000_000.0;
-            double trimY = mirrorY ? (req.height() - trim) : 0;
-            remnants.add(new RemnantPiece(
-                    String.format("TRIM-%02d", remIndex++),
-                    "卷头修齐料头",
-                    0, trimY, req.width(), trim, trimArea, false
-            ));
-            rawCutSteps.add(new CutStep(
-                    1,
-                    "横切",
-                    mirrorY ? (req.height() - trim) : trim,
-                    0,
-                    req.width(),
-                    String.format("第 0 阶段：卷头修齐横切断刀，切除 0~%.0f mm 不规则料头并确立绝对测量原点", trim)
-            ));
+        if (frame.trimStart() > 0) {
+            remnants.add(GuillotinePostProcessor.createTrimRemnant(frame, remIndex++));
+            rawCutSteps.add(GuillotinePostProcessor.createTrimCut(frame, 1));
         }
 
         Map<Integer, CertNode> nodeMap = new LinkedHashMap<>();
@@ -303,8 +273,8 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
                 nodeMap.put(n.nodeId, n);
                 allNodes.add(n);
 
-                double physX = EngineGeometry.normalizeZero(isRightOrigin ? (req.width() - n.x - n.w) : n.x);
-                double physY = EngineGeometry.normalizeZero(mirrorY ? (req.height() - n.y - n.h - trim) : (n.y + trim));
+                double physX = frame.toPhysicalX(n.x, n.w);
+                double physY = frame.toPhysicalY(n.y, n.h);
 
                 if (n.type >= 0 && n.cut > 0) {
                     if (n.type >= itemTypes.size()) throw new IOException("求解器返回了未知裁片类型 " + n.type);
@@ -312,17 +282,12 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
                     boolean rotated = Math.abs(n.w - part.shape().width()) > .001 || Math.abs(n.h - part.shape().height()) > .001;
                     pieces.add(new PlacedPiece(nextPieceId[n.type]++, part.name(), physX, physY, n.w, n.h, rotated, part.id()));
                 } else if (n.type == -1 || n.type == -3) {
-                    // Remnant / waste
-                    // 后续仍连接材料时，全幅尾部保留为连续材料，不生成独立回收块。
-                    boolean isContinuousTail = !isSheet &&
-                            req.material().continuesAfterRegion() &&
-                            (n.w >= req.width() - 30) &&
-                            (physY + n.h >= req.height() - 30 || n.y + n.h >= req.height() - 30);
-                    if (!isContinuousTail && n.w >= req.process().minReusableWidth() && n.h >= req.process().minReusableHeight()) {
-                        double area = (n.w * n.h) / 1_000_000.0;
-                        boolean hasDefect = checkDefectOverlap(physX, physY, n.w, n.h, EngineGeometry.defects(req));
-                        String status = hasDefect ? "带疵料头" : "可用料头";
-                        remnants.add(new RemnantPiece(String.format("%s-%02d", remPrefix, remIndex++), status, physX, physY, n.w, n.h, area, hasDefect));
+                    RemnantPiece remnant = GuillotinePostProcessor.tryCreateRemnant(
+                            req, frame, remPrefix, remIndex, n.y, physX, physY, n.w, n.h, allDefects
+                    );
+                    if (remnant != null) {
+                        remIndex++;
+                        remnants.add(remnant);
                     }
                 }
             }
@@ -359,13 +324,12 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
                     double minX = chList.stream().mapToDouble(c -> c.x).min().orElse(p.x);
                     double maxX = chList.stream().mapToDouble(c -> c.x + c.w).max().orElse(p.x + p.w);
 
-                    double physPos = mirrorY ? (req.height() - cutY - trim) : (cutY + trim);
-                    double physStart = isRightOrigin ? (req.width() - maxX) : minX;
-                    double physEnd = isRightOrigin ? (req.width() - minX) : maxX;
+                    double physPos = frame.toPhysicalHorizontalCutY(cutY);
+                    double[] span = frame.toPhysicalXSpan(minX, maxX);
                     int cutLvl = Math.max(1, c2.cut);
 
                     rawCutSteps.add(new CutStep(
-                            rawCutSteps.size() + 1, "横切", physPos, Math.min(physStart, physEnd), Math.max(physStart, physEnd),
+                            rawCutSteps.size() + 1, "横切", physPos, span[0], span[1],
                             String.format("第 %d 阶段横切，裁切范围 [%.0f × %.0f mm]", cutLvl, maxX - minX, p.h)
                     ));
                     rawCutSteps.get(rawCutSteps.size() - 1).setStage(cutLvl);
@@ -382,13 +346,12 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
                     double minY = chList.stream().mapToDouble(c -> c.y).min().orElse(p.y);
                     double maxY = chList.stream().mapToDouble(c -> c.y + c.h).max().orElse(p.y + p.h);
 
-                    double physPos = isRightOrigin ? (req.width() - cutX) : cutX;
-                    double physStart = mirrorY ? (req.height() - maxY - trim) : (minY + trim);
-                    double physEnd = mirrorY ? (req.height() - minY - trim) : (maxY + trim);
+                    double physPos = frame.toPhysicalVerticalCutX(cutX);
+                    double[] span = frame.toPhysicalYSpan(minY, maxY);
                     int cutLvl = Math.max(1, c2.cut);
 
                     rawCutSteps.add(new CutStep(
-                            rawCutSteps.size() + 1, "纵切", physPos, Math.min(physStart, physEnd), Math.max(physStart, physEnd),
+                            rawCutSteps.size() + 1, "纵切", physPos, span[0], span[1],
                             String.format("第 %d 阶段纵切，裁切范围 [%.0f × %.0f mm]", cutLvl, p.w, maxY - minY)
                     ));
                     rawCutSteps.get(rawCutSteps.size() - 1).setStage(cutLvl);
@@ -396,33 +359,18 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
             }
         }
 
-        // 100% 完整切断自愈检查 (确保无粘连)
-        List<CutStep> fullySeparatedCuts = cutBoundaryCompletionService.ensureCompleteSeparation(
-                pieces, remnants, rawCutSteps, req.width(), req.height(), isSheet
+        // 100% 完整切断自愈检查 + 刀路连续平滑优化
+        List<CutStep> continuousCuts = GuillotinePostProcessor.completeAndOptimizeCuts(
+                cutBoundaryCompletionService, toolpathOptimizerService, pieces, remnants, rawCutSteps, frame, true
         );
-
-        // 刀路连续平滑优化 (赋予 startX, startY, endX, endY, airDistance，消除乱跳)
-        double homeX = isRightOrigin ? req.width() : 0.0;
-        double homeY = isBottomOrigin ? req.height() : 0.0;
-        List<CutStep> continuousCuts = toolpathOptimizerService.optimizeAndChain(fullySeparatedCuts, homeX, homeY, true);
 
         res.setPieces(pieces);
         res.setRemnants(remnants);
         res.setCuts(continuousCuts);
 
         // 面积由统一结果层核算；此处只给出当前策略的进给范围提示。
-        double maxY = pieces.stream().mapToDouble(p -> p.getY() + p.getL()).max().orElse(0);
-        res.setSuggestedFeedLength(maxY);
+        res.setSuggestedFeedLength(GuillotinePostProcessor.suggestedFeedLength(pieces));
 
         return res;
-    }
-
-    private boolean checkDefectOverlap(double x, double y, double w, double h, List<Defect> defects) {
-        for (Defect d : defects) {
-            boolean noOverlap = (x + w <= d.getSafeX() || x >= d.getSafeX() + d.getSafeW() ||
-                    y + h <= d.getSafeY() || y >= d.getSafeY() + d.getSafeH());
-            if (!noOverlap) return true;
-        }
-        return false;
     }
 }

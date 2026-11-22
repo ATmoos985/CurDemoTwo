@@ -1,5 +1,6 @@
 package com.example.cutdemotwo.algorithm.nesting;
 
+import com.example.cutdemotwo.algorithm.geometry.CoordinateFrame;
 import com.example.cutdemotwo.algorithm.geometry.EngineGeometry;
 
 import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
@@ -103,10 +104,11 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
         EngineResult res = new EngineResult();
         res.setSuccess(true);
 
-        double rollW = req.width();
-        double rollL = req.height();
-        double trim = Math.max(0, req.process().trimStart());
-        double activeL = rollL - trim;
+        CoordinateFrame frame = CoordinateFrame.of(req);
+        double rollW = frame.width();
+        double rollL = frame.height();
+        double trim = frame.trimStart();
+        double activeL = frame.activeLength();
 
         if (rollW <= 0 || rollL <= 0 || activeL <= 0) {
             res.setSuccess(false);
@@ -115,11 +117,7 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
             return res;
         }
 
-        String origin = EngineGeometry.normalizeStartCorner(req.process().startCorner());
-        boolean isRightOrigin = origin.startsWith("right");
-        boolean isBottomOrigin = origin.endsWith("bottom");
-        boolean isRemnantFeed = req.sheet();
-        boolean mirrorY = isRemnantFeed && isBottomOrigin;
+        boolean isRemnantFeed = frame.isSheet();
         boolean horizontalFirst = !"vertical".equalsIgnoreCase(req.process().firstStageOrientation());
 
         // 收集待排单件
@@ -146,8 +144,8 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
         for (Defect d : allDefects) {
             ComputationCancellation.check();
             // 转换到 [0, activeL] 的局部坐标
-            double defLocalY = mirrorY ? (rollL - (d.getSafeY() + d.getSafeH()) - trim) : (d.getSafeY() - trim);
-            double defLocalX = isRightOrigin ? (rollW - (d.getSafeX() + d.getSafeW())) : d.getSafeX();
+            double defLocalY = frame.toLocalY(d.getSafeY(), d.getSafeH());
+            double defLocalX = frame.toLocalX(d.getSafeX(), d.getSafeW());
             // 构造局部安全瑕疵实体
             Defect ld = new Defect(d.getId(), defLocalX, defLocalY, d.getSafeW(), d.getSafeH(), 0);
             localDefects.add(ld);
@@ -277,12 +275,11 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
         }
 
         // 映射裁片物理坐标 (考虑基准点对齐与反转)
-        // 映射裁片物理坐标 (考虑基准点对齐与反转)
         List<PlacedPiece> finalPieces = new ArrayList<>();
         for (PlacedPiece p : rawPieces) {
             ComputationCancellation.check();
-            double physX = EngineGeometry.normalizeZero(isRightOrigin ? (rollW - p.getX() - p.getW()) : p.getX());
-            double physY = EngineGeometry.normalizeZero(mirrorY ? (rollL - p.getY() - p.getL() - trim) : (p.getY() + trim));
+            double physX = frame.toPhysicalX(p.getX(), p.getW());
+            double physY = frame.toPhysicalY(p.getY(), p.getL());
             finalPieces.add(new PlacedPiece(p.getId(), p.getName(), physX, physY, p.getW(), p.getL(), p.isRotated(), p.getDemandId()));
         }
 
@@ -292,38 +289,22 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
         String remPrefix = isRemnantFeed ? "REM-SUB" : "REM-JAVA";
 
         if (trim > 0) {
-            double trimArea = (rollW * trim) / 1_000_000.0;
-            double trimY = mirrorY ? (rollL - trim) : 0;
-            remnants.add(new RemnantPiece(
-                    String.format("TRIM-%02d", remSeq++),
-                    "卷头修齐料头",
-                    0, trimY, rollW, trim, trimArea, false
-            ));
+            remnants.add(GuillotinePostProcessor.createTrimRemnant(frame, remSeq++));
         }
 
         for (FreeRect fr : freeRects) {
             ComputationCancellation.check();
             if (fr.w < 10 || fr.h < 10) continue;
 
-            double physX = EngineGeometry.normalizeZero(isRightOrigin ? (rollW - fr.x - fr.w) : fr.x);
-            double physY = EngineGeometry.normalizeZero(mirrorY ? (rollL - fr.y - fr.h - trim) : (fr.y + trim));
+            double physX = frame.toPhysicalX(fr.x, fr.w);
+            double physY = frame.toPhysicalY(fr.y, fr.h);
 
-            // 检查母卷长卷工位尾部全幅贯通连续段
-            boolean isContinuousMotherRollTail = !isRemnantFeed &&
-                    req.material().continuesAfterRegion() &&
-                    (fr.w >= rollW - 30) &&
-                    (physY + fr.h >= rollL - 30 || fr.y + fr.h >= activeL - 30);
-
-            double minW = req.process().minReusableWidth();
-            double minH = req.process().minReusableHeight();
-            if (!isContinuousMotherRollTail && fr.w >= minW && fr.h >= minH) {
-                double area = (fr.w * fr.h) / 1_000_000.0;
-                boolean hasDefect = checkDefectOverlap(physX, physY, fr.w, fr.h, allDefects);
-                String status = hasDefect ? "带疵料头" : "可用料头";
-                remnants.add(new RemnantPiece(
-                        String.format("%s-%02d", remPrefix, remSeq++),
-                        status, physX, physY, fr.w, fr.h, area, hasDefect
-                ));
+            RemnantPiece remnant = GuillotinePostProcessor.tryCreateRemnant(
+                    req, frame, remPrefix, remSeq, fr.y, physX, physY, fr.w, fr.h, allDefects
+            );
+            if (remnant != null) {
+                remSeq++;
+                remnants.add(remnant);
             }
         }
 
@@ -331,51 +312,30 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
         List<CutStep> mappedCuts = new ArrayList<>();
         int stepIdx = 1;
         if (trim > 0) {
-            mappedCuts.add(new CutStep(
-                    stepIdx++,
-                    "横切",
-                    mirrorY ? (rollL - trim) : trim,
-                    0,
-                    rollW,
-                    String.format("第 0 阶段：卷头修齐横切断刀，切除 0~%.0f mm 不规则料头并确立绝对测量原点", trim)
-            ));
+            mappedCuts.add(GuillotinePostProcessor.createTrimCut(frame, stepIdx++));
         }
         for (CutStep cs : rawCutSteps) {
             ComputationCancellation.check();
             if ("横切".equals(cs.getType())) {
-                double cutY = cs.getPos();
-                double physPos = mirrorY ? (rollL - cutY - trim) : (cutY + trim);
-                double physStart = isRightOrigin ? (rollW - cs.getEnd()) : cs.getStart();
-                double physEnd = isRightOrigin ? (rollW - cs.getStart()) : cs.getEnd();
-                mappedCuts.add(new CutStep(
-                        stepIdx++, "横切", physPos, Math.min(physStart, physEnd), Math.max(physStart, physEnd), cs.getDesc()
-                ));
+                double physPos = frame.toPhysicalHorizontalCutY(cs.getPos());
+                double[] span = frame.toPhysicalXSpan(cs.getStart(), cs.getEnd());
+                mappedCuts.add(new CutStep(stepIdx++, "横切", physPos, span[0], span[1], cs.getDesc()));
             } else {
-                double cutX = cs.getPos();
-                double physPos = isRightOrigin ? (rollW - cutX) : cutX;
-                double physStart = mirrorY ? (rollL - cs.getEnd() - trim) : (cs.getStart() + trim);
-                double physEnd = mirrorY ? (rollL - cs.getStart() - trim) : (cs.getEnd() + trim);
-                mappedCuts.add(new CutStep(
-                        stepIdx++, "纵切", physPos, Math.min(physStart, physEnd), Math.max(physStart, physEnd), cs.getDesc()
-                ));
+                double physPos = frame.toPhysicalVerticalCutX(cs.getPos());
+                double[] span = frame.toPhysicalYSpan(cs.getStart(), cs.getEnd());
+                mappedCuts.add(new CutStep(stepIdx++, "纵切", physPos, span[0], span[1], cs.getDesc()));
             }
         }
 
-        // 100% 完整切断自愈检查 (确保无粘连)
-        List<CutStep> fullySeparatedCuts = cutBoundaryCompletionService.ensureCompleteSeparation(
-                finalPieces, remnants, mappedCuts, rollW, rollL, isRemnantFeed
+        // 100% 完整切断自愈检查 + 刀路平滑与空行程优化
+        List<CutStep> continuousCuts = GuillotinePostProcessor.completeAndOptimizeCuts(
+                cutBoundaryCompletionService, toolpathOptimizerService, finalPieces, remnants, mappedCuts, frame, true
         );
-
-        // 刀路平滑与空行程优化
-        double homeX = isRightOrigin ? rollW : 0.0;
-        double homeY = isBottomOrigin ? rollL : 0.0;
-        List<CutStep> continuousCuts = toolpathOptimizerService.optimizeAndChain(fullySeparatedCuts, homeX, homeY, true);
 
         res.setPieces(finalPieces);
         res.setRemnants(remnants);
         res.setCuts(continuousCuts);
-        double maxY = finalPieces.stream().mapToDouble(p -> p.getY() + p.getL()).max().orElse(0);
-        res.setSuggestedFeedLength(maxY);
+        res.setSuggestedFeedLength(GuillotinePostProcessor.suggestedFeedLength(finalPieces));
 
         return res;
     }
@@ -479,16 +439,5 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
             }
         }
         return list;
-    }
-
-    private boolean checkDefectOverlap(double x, double y, double w, double h, List<Defect> defects) {
-        if (defects == null) return false;
-        for (Defect d : defects) {
-            ComputationCancellation.check();
-            boolean noOverlap = (x + w <= d.getSafeX() || x >= d.getSafeX() + d.getSafeW() ||
-                    y + h <= d.getSafeY() || y >= d.getSafeY() + d.getSafeH());
-            if (!noOverlap) return true;
-        }
-        return false;
     }
 }
