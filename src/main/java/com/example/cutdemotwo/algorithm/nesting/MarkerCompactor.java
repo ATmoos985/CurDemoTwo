@@ -11,6 +11,8 @@ import java.util.*;
 /** Reinsert one cut piece at a time into gaps of an already complete fixed-width marker. */
 final class MarkerCompactor {
     private static final double EPS = 1e-8;
+    /** 压紧器 pieceGap/2 欧氏外扩单侧安全裕量（双侧合计 0.004mm > 校验器 0.001mm 容差）。 */
+    static final double GAP_HALF_SAFETY_MM = 0.002;
     // Match the standard contour problem limit when validating the fixed pieces and spares together.
     private static final int MAX_FILLED_PIECES = 200;
 
@@ -19,41 +21,90 @@ final class MarkerCompactor {
     }
     record Slab(double left, double right, Edge top, Edge bottom) {}
     private record Interval(double low, double high) {}
-    record Oriented(Shape shape, int angle, List<Slab> slabs, double[] xs) {
-        static Oriented of(Shape shape, int angle) {
-            var vertices = PolygonGeometry.vertices(shape);
-            double[] xs = vertices.stream().mapToDouble(Point::x).distinct().sorted().toArray();
+
+    record SlabProfile(List<Slab> slabs, double[] xs, double minX, double maxX) {
+        static SlabProfile ofShape(Shape shape) {
+            return ofRings(List.of(PolygonGeometry.vertices(shape)));
+        }
+
+        static SlabProfile ofInflated(Shape shape, double inradius) {
+            var rings = DeepnestNfpGeometry.inflateShapeRings(shape, inradius);
+            if (rings.isEmpty()) return ofShape(shape);
+            var pointRings = rings.stream().map(DeepnestNfpGeometry.Ring::vertices).toList();
+            return ofRings(pointRings);
+        }
+
+        static SlabProfile ofSwappedRings(List<List<Point>> rings) {
+            var swapped = rings.stream()
+                    .map(r -> r.stream().map(p -> new Point(p.y(), p.x())).toList())
+                    .toList();
+            return ofRings(swapped);
+        }
+
+        static SlabProfile ofRings(List<List<Point>> rings) {
+            double[] rawXs = rings.stream()
+                    .flatMap(List::stream)
+                    .mapToDouble(Point::x)
+                    .sorted()
+                    .toArray();
+            if (rawXs.length == 0) {
+                return new SlabProfile(List.of(), new double[0], 0.0, 0.0);
+            }
+            var dedup = new double[rawXs.length];
+            int count = 0;
+            for (double v : rawXs) {
+                if (count == 0 || v - dedup[count - 1] > 1e-10) {
+                    dedup[count++] = v;
+                }
+            }
+            double[] xs = Arrays.copyOf(dedup, count);
             var slabs = new ArrayList<Slab>();
             // Between two consecutive vertex x-coordinates the contour edges are straight and never cross.
-            // Each pair of intersections bounds one filled trapezoid, also for concave outlines.
+            // Each pair of intersections bounds one filled trapezoid, also for concave outlines and holes.
             for (int i = 1; i < xs.length; i++) {
-                double middle = (xs[i - 1] + xs[i]) / 2;
+                double middle = (xs[i - 1] + xs[i]) / 2.0;
                 var crossings = new ArrayList<Edge>();
-                for (int j = 0; j < vertices.size(); j++) {
-                    var a = vertices.get(j);
-                    var b = vertices.get((j + 1) % vertices.size());
-                    if (Math.min(a.x(), b.x()) < middle && middle < Math.max(a.x(), b.x()))
-                        crossings.add(new Edge(a, b));
+                for (var ring : rings) {
+                    int n = ring.size();
+                    for (int j = 0; j < n; j++) {
+                        var a = ring.get(j);
+                        var b = ring.get((j + 1) % n);
+                        if (Math.min(a.x(), b.x()) < middle && middle < Math.max(a.x(), b.x()))
+                            crossings.add(new Edge(a, b));
+                    }
                 }
                 crossings.sort(Comparator.comparingDouble(e -> e.y(middle)));
                 for (int j = 1; j < crossings.size(); j += 2)
                     slabs.add(new Slab(xs[i - 1], xs[i], crossings.get(j - 1), crossings.get(j)));
             }
-            return new Oriented(shape, angle, slabs, xs);
+            return new SlabProfile(slabs, xs, xs[0], xs[xs.length - 1]);
         }
     }
-    private record Positioned(Oriented oriented, double x, double y) {}
 
-    private static List<Oriented> orientations(NestingProblem.Part part) {
+    record Oriented(Shape shape, int angle, SlabProfile raw, SlabProfile collision) {
+        static Oriented of(Shape shape, int angle) {
+            return of(shape, angle, 0.0);
+        }
+
+        static Oriented of(Shape shape, int angle, double pieceGap) {
+            SlabProfile raw = SlabProfile.ofShape(shape);
+            SlabProfile collision = pieceGap > 0.0
+                    ? SlabProfile.ofInflated(shape, pieceGap / 2.0 + GAP_HALF_SAFETY_MM)
+                    : raw;
+            return new Oriented(shape, angle, raw, collision);
+        }
+    }
+
+    private record Positioned(Oriented oriented, double x, double y, boolean defect) {}
+
+    private static List<Oriented> orientations(NestingProblem.Part part, double pieceGap) {
         return part.contourAngles().stream()
-                .map(angle -> Oriented.of(PolygonGeometry.rotate(part.shape(), angle), angle)).toList();
+                .map(angle -> Oriented.of(PolygonGeometry.rotate(part.shape(), angle), angle, pieceGap)).toList();
     }
 
     private static Positioned obstacle(NestingProblem.Exclusion defect) {
-        double clearance = defect.clearance();
-        var shape = clearance == 0 ? defect.shape() : Shape.rectangle(
-                defect.shape().width() + 2 * clearance, defect.shape().height() + 2 * clearance);
-        return new Positioned(Oriented.of(shape, 0), defect.x() - clearance, defect.y() - clearance);
+        var expanded = ContourGeometrySupport.expandExclusion(defect);
+        return new Positioned(Oriented.of(expanded.shape(), 0, 0.0), expanded.x(), expanded.y(), true);
     }
 
     static boolean supports(NestingProblem problem, List<Placement> incumbent) {
@@ -61,19 +112,27 @@ final class MarkerCompactor {
     }
 
     static boolean supportsGapSearch(NestingProblem problem) {
-        // The translation intervals below model contour contact at zero spacing.
-        return problem.process().pieceGap() == 0 && "RECTANGLE".equals(problem.material().shape().type())
+        return "RECTANGLE".equals(problem.material().shape().type())
                 && problem.parts().stream().allMatch(p -> p.shape().vertices().size() <= 48)
                 && problem.material().exclusions().stream().allMatch(d -> d.shape().vertices().size() <= 48);
+    }
+
+    static List<Placement> validateOrFallback(NestingProblem problem, List<Placement> incumbent, List<Placement> candidate) {
+        if (candidate == incumbent) return incumbent;
+        var engine = new EngineResult();
+        engine.setSuccess(true);
+        engine.setPlacements(candidate);
+        return PolygonResultValidator.validate(problem, engine) == null ? candidate : incumbent;
     }
 
     static List<Placement> compact(NestingProblem problem, List<Placement> incumbent, long deadline) {
         if (!supportsGapSearch(problem))
             return AxisMarkerCompactor.compact(problem, incumbent, deadline);
+        double pieceGap = problem.process().pieceGap();
         var choices = new HashMap<Integer, List<Oriented>>();
         for (var part : problem.parts()) {
             if (expired(deadline)) return incumbent;
-            choices.put(part.id(), orientations(part));
+            choices.put(part.id(), orientations(part, pieceGap));
         }
         var defects = new ArrayList<Positioned>();
         for (var d : problem.material().exclusions()) {
@@ -82,7 +141,7 @@ final class MarkerCompactor {
         }
         var pieces = new ArrayList<Positioned>();
         for (var p : incumbent) pieces.add(new Positioned(choices.get(p.demandId()).stream()
-                .filter(o -> o.angle == p.rotationDegrees()).findFirst().orElseThrow(), p.x(), p.y()));
+                .filter(o -> o.angle == p.rotationDegrees()).findFirst().orElseThrow(), p.x(), p.y(), false));
         var order = new ArrayList<Integer>();
         for (int i = 0; i < pieces.size(); i++) order.add(i);
         for (int pass = 0; pass < 4 && !expired(deadline); pass++) {
@@ -115,7 +174,7 @@ final class MarkerCompactor {
                 if (expired(deadline)) break;
                 var options = choices.get(incumbent.get(index).demandId());
                 var first = options.get(0);
-                var absent = new Positioned(first, 0, limit + .001 - first.shape.height());
+                var absent = new Positioned(first, 0, limit + .001 - first.shape.height(), false);
                 var placed = bestPosition(problem.width(), absent, options, obstacles, true, deadline);
                 if (placed == absent || bottom(placed) >= limit - EPS) break;
                 rebuilt[index] = placed;
@@ -132,7 +191,7 @@ final class MarkerCompactor {
             var old = incumbent.get(i);
             result.add(new Placement(old.id(), old.demandId(), old.name(), p.x, p.y, p.oriented.shape, p.oriented.angle));
         }
-        return result;
+        return validateOrFallback(problem, incumbent, result);
     }
 
     private static boolean expired(long deadline) {
@@ -143,6 +202,7 @@ final class MarkerCompactor {
 
     static List<Placement> fillGaps(NestingProblem problem, List<Placement> fixed, Map<Integer, Integer> limits,
                                     double length, long deadline) {
+        double pieceGap = problem.process().pieceGap();
         double freeArea = problem.width() * length - fixed.stream().mapToDouble(p -> p.shape().areaMm2()).sum();
         var candidates = problem.parts().stream()
                 .filter(p -> limits.getOrDefault(p.id(), 0) > 0 && p.shape().areaMm2() <= freeArea + EPS)
@@ -154,7 +214,8 @@ final class MarkerCompactor {
         for (var piece : fixed) {
             if (expired(deadline)) return List.of();
             usedIds.add(piece.id());
-            obstacles.add(new Positioned(Oriented.of(piece.shape(), piece.rotationDegrees()), piece.x(), piece.y()));
+            obstacles.add(new Positioned(Oriented.of(piece.shape(), piece.rotationDegrees(), pieceGap),
+                    piece.x(), piece.y(), false));
         }
         for (var defect : problem.material().exclusions()) obstacles.add(obstacle(defect));
         var extras = new ArrayList<Placement>();
@@ -162,10 +223,10 @@ final class MarkerCompactor {
         double remainingArea = freeArea;
         for (var part : candidates) {
             if (expired(deadline) || fixed.size() + extras.size() >= MAX_FILLED_PIECES) break;
-            var choices = orientations(part);
+            var choices = orientations(part, pieceGap);
             var first = choices.get(0);
             // A sentinel to the right of every legal x also accepts a piece ending exactly at the marker edge.
-            var absent = new Positioned(first, problem.width() + 1, length - first.shape.height());
+            var absent = new Positioned(first, problem.width() + 1, length - first.shape.height(), false);
             double area = part.shape().areaMm2();
             for (int i = 0; i < limits.get(part.id()) && area <= remainingArea + EPS; i++) {
                 if (expired(deadline) || fixed.size() + extras.size() >= MAX_FILLED_PIECES) break;
@@ -192,7 +253,9 @@ final class MarkerCompactor {
             if (best.x <= maxX) xs.add(best.x);
             for (var obstacle : obstacles) {
                 if (expired(deadline)) return best;
-                for (double ox : obstacle.oriented.xs) for (double sx : orientation.xs) {
+                var obsProfile = obstacle.defect ? obstacle.oriented.raw : obstacle.oriented.collision;
+                var selfProfile = obstacle.defect ? orientation.raw : orientation.collision;
+                for (double ox : obsProfile.xs) for (double sx : selfProfile.xs) {
                     double x = obstacle.x + ox - sx;
                     if (x > 0 && x < maxX) xs.add(x);
                 }
@@ -203,7 +266,7 @@ final class MarkerCompactor {
                 double y = firstFreeY(orientation, x, obstacles, limit, deadline);
                 if (y > limit + EPS) continue;
                 if (y < limit - EPS || (preferLeft ? x < best.x - EPS : x > best.x + EPS))
-                    best = new Positioned(orientation, x, y);
+                    best = new Positioned(orientation, x, y, false);
             }
         }
         return best;
@@ -212,10 +275,12 @@ final class MarkerCompactor {
     private static double firstFreeY(Oriented shape, double x, List<Positioned> obstacles, double limit, long deadline) {
         var forbidden = new ArrayList<Interval>();
         for (var o : obstacles) {
-            if (x >= o.x + o.oriented.shape.width() || x + shape.shape.width() <= o.x) continue;
-            for (var a : shape.slabs) {
+            var aProfile = o.defect ? shape.raw : shape.collision;
+            var bProfile = o.defect ? o.oriented.raw : o.oriented.collision;
+            if (x + aProfile.minX >= o.x + bProfile.maxX || x + aProfile.maxX <= o.x + bProfile.minX) continue;
+            for (var a : aProfile.slabs) {
               if (expired(deadline) || forbidden.size() > 8192) return Double.POSITIVE_INFINITY;
-              for (var b : o.oriented.slabs) {
+              for (var b : bProfile.slabs) {
                 double left = Math.max(x + a.left, o.x + b.left);
                 double right = Math.min(x + a.right, o.x + b.right);
                 if (right - left <= EPS) continue;

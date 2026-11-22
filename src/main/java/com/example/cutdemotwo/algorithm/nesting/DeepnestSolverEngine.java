@@ -19,6 +19,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Pure-Java 2D Irregular / Contour Nesting Engine migrated from {@code D:\GitHub\Deepnest}.
@@ -88,7 +90,8 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             double height,
             double area,
             List<Point> vertices,
-            List<List<Point>> convexPieces
+            List<List<Point>> convexPieces,
+            DeepnestNfpGeometry.ShapeSignature signature
     ) {}
 
     private static final class ExpandedPart implements DeepnestGeneticAlgorithm.PartDescriptor {
@@ -182,13 +185,14 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         final List<ExpandedPart> items;
         final double totalRequestedArea;
         final double sheetArea;
-        final Map<NfpInnerKey, Area> innerNfpCache = new HashMap<>();
-        final Map<NfpOuterKey, Area> outerNfpCache = new HashMap<>();
+        final Map<NfpInnerKey, Area> innerNfpCache = new ConcurrentHashMap<>();
+        final Map<NfpOuterKey, Area> outerNfpCache = new ConcurrentHashMap<>();
 
         ProblemContext(NestingProblem problem, boolean stripMode) {
             this.problem = problem;
             this.matShape = problem.material().shape();
             this.matArea = PolygonGeometry.region(matShape, 0, 0);
+            this.matArea.getBounds2D();
             this.isRectMat = "RECTANGLE".equals(matShape.type());
             this.matW = matShape.width();
             this.matH = matShape.height();
@@ -228,7 +232,8 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                                 rotated.height(),
                                 a,
                                 PolygonGeometry.vertices(rotated),
-                                DeepnestNfpGeometry.decomposeConvex(rotated)
+                                DeepnestNfpGeometry.decomposeConvex(rotated),
+                                DeepnestNfpGeometry.ShapeSignature.of(rotated)
                         );
                     });
                     oriMap.put(angle, op);
@@ -253,12 +258,13 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         Area getInnerNfp(OrientedPart ori) {
             NfpInnerKey key = new NfpInnerKey(ori.demandId(), ori.angle());
             Area cached = innerNfpCache.get(key);
-            if (cached != null) return cached;
+            if (cached != null) return new Area(cached);
             Area computed = DeepnestNfpGeometry.computeInnerNfp(
                     matShape, problem.material().exclusions(), ori.shape(), ori.convexPieces()
             );
-            innerNfpCache.put(key, computed);
-            return computed;
+            computed.getBounds2D();
+            Area existing = innerNfpCache.putIfAbsent(key, computed);
+            return new Area(existing != null ? existing : computed);
         }
 
         Area getOuterNfp(OrientedPart placedOri, OrientedPart candOri) {
@@ -266,14 +272,15 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                     placedOri.demandId(), placedOri.angle(), candOri.demandId(), candOri.angle()
             );
             Area cached = outerNfpCache.get(key);
-            if (cached != null) return cached;
-            Area computed = DeepnestNfpGeometry.computeOuterNfp(
-                    placedOri.shape(), placedOri.convexPieces(),
-                    candOri.shape(), candOri.convexPieces(),
+            if (cached != null) return new Area(cached);
+            Area computed = DeepnestNfpGeometry.getOrComputeOuterNfp(
+                    placedOri.shape(), placedOri.convexPieces(), placedOri.signature(),
+                    candOri.shape(), candOri.convexPieces(), candOri.signature(),
                     pieceGap
             );
-            outerNfpCache.put(key, computed);
-            return computed;
+            computed.getBounds2D();
+            Area existing = outerNfpCache.putIfAbsent(key, computed);
+            return new Area(existing != null ? existing : computed);
         }
     }
 
@@ -320,26 +327,43 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             boolean improvedInGen = false;
 
             List<DeepnestGeneticAlgorithm.Individual> pop = ga.population();
-            for (int idx = 0; idx < pop.size(); idx++) {
+            List<DeepnestGeneticAlgorithm.Individual> pending = new ArrayList<>(pop.size());
+            for (DeepnestGeneticAlgorithm.Individual ind : pop) {
+                if (!ind.evaluated) {
+                    pending.add(ind);
+                }
+            }
+
+            int batchSize = NestingParallelExecutor.MAX_PARALLELISM;
+            for (int start = 0; start < pending.size(); start += batchSize) {
                 ComputationCancellation.check();
                 if (bestEval != null && System.nanoTime() >= searchDeadline) {
                     break outerSearch;
                 }
-                DeepnestGeneticAlgorithm.Individual ind = pop.get(idx);
-                if (ind.evaluated) continue;
-
-                EvaluationResult eval = evaluateIndividual(ctx, ind, searchDeadline, bestEval != null);
-                ind.fitness = eval.fitness();
-                ind.evaluated = true;
-
-                if (bestEval == null || eval.fitness() < bestEval.fitness() - 1e-6) {
-                    bestEval = eval;
-                    improvedInGen = true;
+                int end = Math.min(pending.size(), start + batchSize);
+                final boolean hasIncumbent = bestEval != null;
+                List<Callable<EvaluationResult>> tasks = new ArrayList<>(end - start);
+                for (int i = start; i < end; i++) {
+                    final DeepnestGeneticAlgorithm.Individual ind = pending.get(i);
+                    tasks.add(() -> evaluateIndividual(ctx, ind, searchDeadline, hasIncumbent));
                 }
 
-                // Stop immediately if 100% of pieces are placed and theoretical lower bound is achieved
-                if (bestEval.placed().size() == n && bestEval.extentY() <= theoreticalMinY + 0.2) {
-                    break outerSearch;
+                List<EvaluationResult> batchResults = NestingParallelExecutor.runDeterministic(tasks);
+                for (int i = 0; i < batchResults.size(); i++) {
+                    DeepnestGeneticAlgorithm.Individual ind = pending.get(start + i);
+                    EvaluationResult eval = batchResults.get(i);
+                    ind.fitness = eval.fitness();
+                    ind.evaluated = true;
+
+                    if (bestEval == null || eval.fitness() < bestEval.fitness() - 1e-6) {
+                        bestEval = eval;
+                        improvedInGen = true;
+                    }
+
+                    // Stop immediately if 100% of pieces are placed and theoretical lower bound is achieved
+                    if (bestEval.placed().size() == n && bestEval.extentY() <= theoreticalMinY + 0.2) {
+                        break outerSearch;
+                    }
                 }
             }
 
@@ -777,17 +801,24 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             return false;
         }
 
-        Area candArea = PolygonGeometry.region(ori.shape(), x, y);
+        Area candArea = null;
 
-        if (!ctx.isRectMat && !ContourGeometrySupport.isWithinMaterial(candArea, ctx.matArea, VALIDATOR_AREA_TOL)) {
-            return false;
+        if (!ctx.isRectMat) {
+            candArea = PolygonGeometry.region(ori.shape(), x, y);
+            if (!ContourGeometrySupport.isWithinMaterial(candArea, ctx.matArea, VALIDATOR_AREA_TOL)) {
+                return false;
+            }
         }
 
         for (ExclusionObstacle exc : ctx.exclusions) {
             ComputationCancellation.check();
-            if (ContourGeometrySupport.aabbOverlaps(x, x + w, y, y + h, exc.minX, exc.maxX, exc.minY, exc.maxY, 1e-6)
-                    && ContourGeometrySupport.overlapsArea(candArea, exc.worldArea, VALIDATOR_AREA_TOL)) {
-                return false;
+            if (ContourGeometrySupport.aabbOverlaps(x, x + w, y, y + h, exc.minX, exc.maxX, exc.minY, exc.maxY, 1e-6)) {
+                if (candArea == null) {
+                    candArea = PolygonGeometry.region(ori.shape(), x, y);
+                }
+                if (ContourGeometrySupport.overlapsArea(candArea, exc.worldArea, VALIDATOR_AREA_TOL)) {
+                    return false;
+                }
             }
         }
 
@@ -802,6 +833,9 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 continue;
             }
 
+            if (candArea == null) {
+                candArea = PolygonGeometry.region(ori.shape(), x, y);
+            }
             if (ContourGeometrySupport.overlapsArea(candArea, p.worldArea, VALIDATOR_AREA_TOL)) {
                 return false;
             }

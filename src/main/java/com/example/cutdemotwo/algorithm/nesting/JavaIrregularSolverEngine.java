@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 
 import java.awt.geom.Area;
 import java.util.*;
+import java.util.concurrent.Callable;
 
 /**
  * 纯 Java 工业级二维异形与轮廓（Contour/Irregular）排样求解引擎
@@ -131,6 +132,7 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
 
         Shape matShape = problem.material().shape();
         Area matArea = PolygonGeometry.region(matShape, 0, 0);
+        matArea.getBounds2D();
         boolean isRectMat = "RECTANGLE".equals(matShape.type());
         double matW = matShape.width();
         double matH = matShape.height();
@@ -170,21 +172,32 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                 Comparator.comparingDouble((PartItem a) -> a.orientations.get(0).width() + a.orientations.get(0).height()).reversed()
         );
 
+        List<Callable<List<PlacedRecord>>> passTasks = new ArrayList<>(strategies.size());
+        for (int pass = 0; pass < strategies.size(); pass++) {
+            final Comparator<PartItem> strategy = strategies.get(pass);
+            passTasks.add(() -> {
+                ComputationCancellation.check();
+                if (System.currentTimeMillis() - startTime > timeBudgetMs) {
+                    return List.of();
+                }
+                List<PartItem> sortedItems = new ArrayList<>(items);
+                sortedItems.sort(strategy);
+                Area localMatArea = isRectMat ? matArea : new Area(matArea);
+                return runPlacementPass(
+                        sortedItems, localMatArea, isRectMat, matW, matH, gap, exclusionRecords, startTime, timeBudgetMs
+                );
+            });
+        }
+
+        List<List<PlacedRecord>> passResults = NestingParallelExecutor.runDeterministic(passTasks);
+
         List<PlacedRecord> bestPlan = null;
         int bestPlacedCount = -1;
         double bestPlacedArea = -1;
         double bestMaxY = Double.MAX_VALUE;
 
-        for (int pass = 0; pass < strategies.size(); pass++) {
-            ComputationCancellation.check();
-            if (System.currentTimeMillis() - startTime > timeBudgetMs) break;
-
-            List<PartItem> sortedItems = new ArrayList<>(items);
-            sortedItems.sort(strategies.get(pass));
-
-            List<PlacedRecord> currentPlacements = runPlacementPass(
-                    sortedItems, matArea, isRectMat, matW, matH, gap, exclusionRecords, startTime, timeBudgetMs
-            );
+        for (List<PlacedRecord> currentPlacements : passResults) {
+            if (currentPlacements.isEmpty()) continue;
 
             int placedCount = currentPlacements.size();
             double placedArea = currentPlacements.stream().mapToDouble(p -> p.orientedShape.area()).sum();
@@ -207,8 +220,6 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                 bestPlacedArea = placedArea;
                 bestMaxY = maxY;
             }
-
-            // If all pieces placed, we can still try other passes to minimize length, but we know it's complete
         }
 
         EngineResult result = new EngineResult();
@@ -394,25 +405,29 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
         double w = ori.width();
         double h = ori.height();
 
-        // 1. Boundary check
-        if (x < -EPS || y < -EPS) return false;
-        if (isRectMat) {
-            if (x + w > matW + EPS || y + h > matH + EPS) return false;
-        }
+        // 1. Boundary check (AABB outer bound applies to both rectangular and polygon materials)
+        if (x < -EPS || y < -EPS || x + w > matW + EPS || y + h > matH + EPS) return false;
 
-        Area candidateArea = PolygonGeometry.region(ori.shape(), x, y);
+        Area candidateArea = null;
 
         // 2. Non-rectangular material containment
-        if (!isRectMat && !ContourGeometrySupport.isWithinMaterial(candidateArea, matArea, EPS)) {
-            return false;
+        if (!isRectMat) {
+            candidateArea = PolygonGeometry.region(ori.shape(), x, y);
+            if (!ContourGeometrySupport.isWithinMaterial(candidateArea, matArea, EPS)) {
+                return false;
+            }
         }
 
         // 3. Exclusions intersection
         for (ExclusionRecord exc : exclusions) {
             ComputationCancellation.check();
-            if (ContourGeometrySupport.aabbOverlaps(x, x + w, y, y + h, exc.minX, exc.maxX, exc.minY, exc.maxY, EPS)
-                    && ContourGeometrySupport.overlapsArea(candidateArea, exc.worldArea, EPS)) {
-                return false;
+            if (ContourGeometrySupport.aabbOverlaps(x, x + w, y, y + h, exc.minX, exc.maxX, exc.minY, exc.maxY, EPS)) {
+                if (candidateArea == null) {
+                    candidateArea = PolygonGeometry.region(ori.shape(), x, y);
+                }
+                if (ContourGeometrySupport.overlapsArea(candidateArea, exc.worldArea, EPS)) {
+                    return false;
+                }
             }
         }
 
@@ -427,6 +442,9 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                 continue;
             }
 
+            if (candidateArea == null) {
+                candidateArea = PolygonGeometry.region(ori.shape(), x, y);
+            }
             if (ContourGeometrySupport.overlapsArea(candidateArea, placed.worldArea, EPS)) {
                 return false;
             }

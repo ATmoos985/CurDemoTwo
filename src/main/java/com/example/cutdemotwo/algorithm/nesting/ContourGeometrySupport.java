@@ -40,6 +40,7 @@ public final class ContourGeometrySupport {
         double x = exc.x() - clr;
         double y = exc.y() - clr;
         Area worldArea = PolygonGeometry.region(shape, x, y);
+        worldArea.getBounds2D();
         return new ExpandedExclusion(shape, x, y, x, x + shape.width(), y, y + shape.height(), worldArea);
     }
 
@@ -101,18 +102,25 @@ public final class ContourGeometrySupport {
         }
         int an = vertsA.size();
         int bn = vertsB.size();
+        double pad = minGap + gapTol;
         for (int i = 0; i < an; i++) {
             ComputationCancellation.check();
             Point a1 = vertsA.get(i);
             Point a2 = vertsA.get((i + 1) % an);
             double ax = a1.x() + offsetAx, ay = a1.y() + offsetAy;
             double bx = a2.x() + offsetAx, by = a2.y() + offsetAy;
+            double aMinX = Math.min(ax, bx) - pad, aMaxX = Math.max(ax, bx) + pad;
+            double aMinY = Math.min(ay, by) - pad, aMaxY = Math.max(ay, by) + pad;
             for (int j = 0; j < bn; j++) {
                 ComputationCancellation.check();
                 Point b1 = vertsB.get(j);
                 Point b2 = vertsB.get((j + 1) % bn);
                 double cx = b1.x() + offsetBx, cy = b1.y() + offsetBy;
                 double dx = b2.x() + offsetBx, dy = b2.y() + offsetBy;
+                if (Math.max(cx, dx) < aMinX || Math.min(cx, dx) > aMaxX
+                        || Math.max(cy, dy) < aMinY || Math.min(cy, dy) > aMaxY) {
+                    continue;
+                }
                 double dist = Line2D.linesIntersect(ax, ay, bx, by, cx, cy, dx, dy)
                         ? 0.0
                         : Math.min(

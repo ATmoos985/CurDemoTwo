@@ -6,13 +6,18 @@ import com.example.cutdemotwo.contracts.nesting.NestingProblem.Exclusion;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Point;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Shape;
 
+import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
 import java.awt.geom.Path2D;
 import java.awt.geom.PathIterator;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Computational geometry and No-Fit Polygon (NFP) kernel migrated from Deepnest
@@ -36,11 +41,94 @@ final class DeepnestNfpGeometry {
     /** Extra safety margin on pieceGap circumscribed disk so discrete NFP edges strictly exceed pieceGap. */
     private static final double GAP_SAFETY_MM = 0.015;
     private static final int GAP_DISK_SIDES = 16;
+    static final int MAX_OUTER_NFP_CACHE_SIZE = 2048;
+
+    private static final Object OUTER_NFP_CACHE_LOCK = new Object();
+    private static final Map<OuterNfpCacheKey, Area> OUTER_NFP_CACHE =
+            new LinkedHashMap<>(256, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<OuterNfpCacheKey, Area> eldest) {
+                    return size() > MAX_OUTER_NFP_CACHE_SIZE;
+                }
+            };
+    private static final AtomicLong OUTER_NFP_HITS = new AtomicLong();
+    private static final AtomicLong OUTER_NFP_MISSES = new AtomicLong();
+    private static final AtomicLong OUTER_NFP_SYMMETRY_HITS = new AtomicLong();
 
     private DeepnestNfpGeometry() {}
 
     /** A closed polygon ring extracted from an {@link Area}, with signed area indicating winding. */
     record Ring(List<Point> vertices, double signedArea) {}
+
+    /**
+     * 归一化多边形顶点签名，用于跨求解会话复用的 Outer NFP LRU 缓存键与对称性规范排序。
+     */
+    static final class ShapeSignature implements Comparable<ShapeSignature> {
+        private final long[] quantizedCoords;
+        private final int hash;
+
+        private ShapeSignature(long[] quantizedCoords) {
+            this.quantizedCoords = quantizedCoords;
+            this.hash = Arrays.hashCode(quantizedCoords);
+        }
+
+        static ShapeSignature of(Shape shape) {
+            List<Point> pts = normalizePositiveWinding(PolygonGeometry.vertices(shape));
+            long[] coords = new long[pts.size() * 2];
+            for (int i = 0; i < pts.size(); i++) {
+                Point p = pts.get(i);
+                coords[i * 2] = Math.round(p.x() * 100_000.0);
+                coords[i * 2 + 1] = Math.round(p.y() * 100_000.0);
+            }
+            return new ShapeSignature(coords);
+        }
+
+        @Override
+        public int compareTo(ShapeSignature other) {
+            return Arrays.compare(this.quantizedCoords, other.quantizedCoords);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof ShapeSignature that)) return false;
+            return this.hash == that.hash && Arrays.equals(this.quantizedCoords, that.quantizedCoords);
+        }
+
+        @Override
+        public int hashCode() {
+            return hash;
+        }
+    }
+
+    private record OuterNfpCacheKey(ShapeSignature sigA, ShapeSignature sigB, long pieceGapMicros) {}
+
+    static long outerNfpCacheHits() {
+        return OUTER_NFP_HITS.get();
+    }
+
+    static long outerNfpCacheMisses() {
+        return OUTER_NFP_MISSES.get();
+    }
+
+    static long outerNfpSymmetryHits() {
+        return OUTER_NFP_SYMMETRY_HITS.get();
+    }
+
+    static int outerNfpCacheSize() {
+        synchronized (OUTER_NFP_CACHE_LOCK) {
+            return OUTER_NFP_CACHE.size();
+        }
+    }
+
+    static void clearOuterNfpCache() {
+        synchronized (OUTER_NFP_CACHE_LOCK) {
+            OUTER_NFP_CACHE.clear();
+        }
+        OUTER_NFP_HITS.set(0);
+        OUTER_NFP_MISSES.set(0);
+        OUTER_NFP_SYMMETRY_HITS.set(0);
+    }
 
     /**
      * Ensures vertices have positive {@link PolygonGeometry#signedArea(List)}
@@ -345,6 +433,106 @@ final class DeepnestNfpGeometry {
     }
 
     /**
+     * 对齐正交边的正多边形外接圆盘（内切圆半径严格等于 {@code inradius}，且 0°/90°/180°/270° 方向为平边）。
+     * 用于压紧器在 {@code pieceGap > 0} 时对裁片执行精确欧氏外扩，防止斜边间距不足。
+     */
+    static List<Point> alignedOffsetDisk(double inradius) {
+        if (inradius <= 0) return List.of();
+        double circumradius = inradius / Math.cos(Math.PI / GAP_DISK_SIDES);
+        List<Point> pts = new ArrayList<>(GAP_DISK_SIDES);
+        for (int i = 0; i < GAP_DISK_SIDES; i++) {
+            double theta = (2.0 * Math.PI * (i + 0.5)) / GAP_DISK_SIDES;
+            pts.add(new Point(circumradius * Math.cos(theta), circumradius * Math.sin(theta)));
+        }
+        return pts;
+    }
+
+    /**
+     * 对简单多边形（含凹多边形）按半径 {@code inradius} 执行欧氏外扩（Minkowski 和），
+     * 保留原局部原点 {@code (0, 0)} 坐标系并返回所有闭合轮廓环（含外环与可能的内洞环）。
+     */
+    static List<Ring> inflateShapeRings(Shape shape, double inradius) {
+        ComputationCancellation.check();
+        if (inradius <= 0) {
+            List<Point> raw = PolygonGeometry.vertices(shape);
+            return List.of(new Ring(raw, PolygonGeometry.signedArea(raw)));
+        }
+        List<Point> disk = alignedOffsetDisk(inradius);
+        List<List<Point>> convex = decomposeConvex(shape);
+        Area inflated;
+        if (!convex.isEmpty()) {
+            List<Area> parts = new ArrayList<>(convex.size());
+            for (List<Point> c : convex) {
+                ComputationCancellation.check();
+                List<Point> sum = minkowskiSumConvex(c, disk);
+                if (sum.size() >= 3) {
+                    parts.add(toArea(sum, 0, 0));
+                }
+            }
+            inflated = unionBalanced(parts);
+        } else {
+            Shape diskShape = toNormalizedShape(disk);
+            double minX = disk.stream().mapToDouble(Point::x).min().orElse(0);
+            double minY = disk.stream().mapToDouble(Point::y).min().orElse(0);
+            Area expanded = convolveAreaWithNegatedShape(PolygonGeometry.region(shape, 0, 0), diskShape);
+            inflated = translateArea(expanded, -minX, -minY);
+        }
+        return extractRings(inflated);
+    }
+
+    /**
+     * 中心反演 {@code p -> -p}：因为 {@code OuterNFP(A, B) = A ⊕ (-B) ⊕ D} 且 {@code D = -D}，
+     * 对 {@code OuterNFP(A, B)} 做中心反演即精确等价于 {@code OuterNFP(B, A)}。
+     */
+    static Area invertArea(Area src) {
+        if (src == null || src.isEmpty()) return new Area();
+        return src.createTransformedArea(AffineTransform.getScaleInstance(-1.0, -1.0));
+    }
+
+    /**
+     * 线程安全的跨会话有界 LRU Outer NFP 查询，自动利用中心反演对称性避免 {@code (B, A)} 重复计算。
+     * 每次返回独立防御性拷贝，避免多线程并发访问 {@link Area} 内部缓存字段。
+     */
+    static Area getOrComputeOuterNfp(Shape shapeA, List<List<Point>> convexA, ShapeSignature sigA,
+                                     Shape shapeB, List<List<Point>> convexB, ShapeSignature sigB,
+                                     double pieceGap) {
+        ComputationCancellation.check();
+        long gapMicros = Math.round(Math.max(0.0, pieceGap) * 1_000_000.0);
+        boolean inverted = sigA.compareTo(sigB) > 0;
+        OuterNfpCacheKey canonicalKey = inverted
+                ? new OuterNfpCacheKey(sigB, sigA, gapMicros)
+                : new OuterNfpCacheKey(sigA, sigB, gapMicros);
+
+        Area cached;
+        synchronized (OUTER_NFP_CACHE_LOCK) {
+            cached = OUTER_NFP_CACHE.get(canonicalKey);
+        }
+        if (cached != null) {
+            OUTER_NFP_HITS.incrementAndGet();
+            if (inverted) {
+                OUTER_NFP_SYMMETRY_HITS.incrementAndGet();
+                return invertArea(cached);
+            }
+            return new Area(cached);
+        }
+
+        OUTER_NFP_MISSES.incrementAndGet();
+        Area computed = inverted
+                ? computeOuterNfp(shapeB, convexB, shapeA, convexA, pieceGap)
+                : computeOuterNfp(shapeA, convexA, shapeB, convexB, pieceGap);
+        // 预热 cachedBounds，防止后续只读并发访问触发 Area 内部懒写入
+        computed.getBounds2D();
+
+        synchronized (OUTER_NFP_CACHE_LOCK) {
+            Area existing = OUTER_NFP_CACHE.putIfAbsent(canonicalKey, computed);
+            if (existing != null) {
+                computed = existing;
+            }
+        }
+        return inverted ? invertArea(computed) : new Area(computed);
+    }
+
+    /**
      * Computes the Outer No-Fit Polygon $\text{OuterNFP}(A, B) = A \oplus (-B)$ (plus {@code pieceGap} disk if $>0$).
      * Represents the forbidden open region of $B$'s local top-left origin when $A$ is placed at $(0, 0)$.
      * Interior holes (e.g., when $B$ fits inside a deep cavity of $A$) are naturally preserved in the returned {@link Area}.
@@ -643,6 +831,39 @@ final class DeepnestNfpGeometry {
     static double mergedLength(List<List<Point>> placedWorldPolygons,
                                List<Point> candidateLocalVerts, double candX, double candY,
                                double minLength, double tolerance) {
+        if (placedWorldPolygons.isEmpty() || candidateLocalVerts.size() < 2) {
+            return 0.0;
+        }
+        double candMinX = Double.POSITIVE_INFINITY, candMaxX = Double.NEGATIVE_INFINITY;
+        double candMinY = Double.POSITIVE_INFINITY, candMaxY = Double.NEGATIVE_INFINITY;
+        for (Point p : candidateLocalVerts) {
+            double wx = p.x() + candX, wy = p.y() + candY;
+            if (wx < candMinX) candMinX = wx;
+            if (wx > candMaxX) candMaxX = wx;
+            if (wy < candMinY) candMinY = wy;
+            if (wy > candMaxY) candMaxY = wy;
+        }
+
+        List<List<Point>> nearbyPolys = new ArrayList<>(placedWorldPolygons.size());
+        for (List<Point> placed : placedWorldPolygons) {
+            if (placed.size() < 2) continue;
+            double pMinX = Double.POSITIVE_INFINITY, pMaxX = Double.NEGATIVE_INFINITY;
+            double pMinY = Double.POSITIVE_INFINITY, pMaxY = Double.NEGATIVE_INFINITY;
+            for (Point bp : placed) {
+                if (bp.x() < pMinX) pMinX = bp.x();
+                if (bp.x() > pMaxX) pMaxX = bp.x();
+                if (bp.y() < pMinY) pMinY = bp.y();
+                if (bp.y() > pMaxY) pMaxY = bp.y();
+            }
+            if (ContourGeometrySupport.aabbOverlaps(candMinX, candMaxX, candMinY, candMaxY,
+                    pMinX, pMaxX, pMinY, pMaxY, tolerance)) {
+                nearbyPolys.add(placed);
+            }
+        }
+        if (nearbyPolys.isEmpty()) {
+            return 0.0;
+        }
+
         double minLenSq = minLength * minLength;
         double totalLength = 0.0;
         int cn = candidateLocalVerts.size();
@@ -656,14 +877,23 @@ final class DeepnestNfpGeometry {
             double lenSq = dx * dx + dy * dy;
             if (lenSq < minLenSq) continue;
 
+            double edgeMinX = Math.min(a1x, a2x) - tolerance;
+            double edgeMaxX = Math.max(a1x, a2x) + tolerance;
+            double edgeMinY = Math.min(a1y, a2y) - tolerance;
+            double edgeMaxY = Math.max(a1y, a2y) + tolerance;
+
             double lenA = Math.sqrt(lenSq);
             double ux = dx / lenA, uy = dy / lenA; // unit tangent along A1->A2
 
-            for (List<Point> placed : placedWorldPolygons) {
+            for (List<Point> placed : nearbyPolys) {
                 int pn = placed.size();
                 for (int k = 0; k < pn; k++) {
                     Point b1 = placed.get(k);
                     Point b2 = placed.get((k + 1) % pn);
+                    if (Math.max(b1.x(), b2.x()) < edgeMinX || Math.min(b1.x(), b2.x()) > edgeMaxX
+                            || Math.max(b1.y(), b2.y()) < edgeMinY || Math.min(b1.y(), b2.y()) > edgeMaxY) {
+                        continue;
+                    }
                     double bdx = b2.x() - b1.x(), bdy = b2.y() - b1.y();
                     if (bdx * bdx + bdy * bdy < minLenSq) continue;
 
