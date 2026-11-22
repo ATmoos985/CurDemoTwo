@@ -3,8 +3,11 @@ package com.example.cutdemotwo.algorithm.nesting;
 import com.example.cutdemotwo.algorithm.geometry.EngineGeometry;
 
 import com.example.cutdemotwo.algorithm.ComputationCancellation;
+import com.example.cutdemotwo.algorithm.nesting.constraints.ConstraintPipeline;
+import com.example.cutdemotwo.algorithm.nesting.constraints.CurtainConstraintPack;
 
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
+import com.example.cutdemotwo.contracts.nesting.NestingResult;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -17,6 +20,7 @@ final class RectangularResultValidator {
     private static final double EPS = EngineGeometry.COORDINATE_EPS_MM;
     static String validate(NestingProblem input, EngineResult output) {
         ComputationCancellation.check();
+        ConstraintPipeline pipeline = CurtainConstraintPack.forProblem(input);
         Map<Integer, NestingProblem.Part> demands = new HashMap<>();
         input.parts().forEach(p -> demands.put(p.id(), p));
         Map<Integer, Integer> counts = new HashMap<>();
@@ -33,7 +37,8 @@ final class RectangularResultValidator {
                 return "求解结果改变了裁片尺寸或违反旋转约束";
             double[] rect = {p.getX(), p.getY(), p.getW(), p.getL()};
             if (!inside(rect, input) || occupied.stream().anyMatch(r -> overlap(r, rect))) return "求解结果裁片越界或重叠";
-            for (var d : input.material().exclusions()) {
+            var hardExclusions = pipeline.isNoop() ? input.material().exclusions() : pipeline.hardExclusionsFor(input, demand);
+            for (var d : hardExclusions) {
                 ComputationCancellation.check();
                 double[] excluded = {d.x() - d.clearance(), d.y() - d.clearance(),
                         d.shape().width() + d.clearance() * 2, d.shape().height() + d.clearance() * 2};
@@ -61,6 +66,16 @@ final class RectangularResultValidator {
             double y2 = c.getEndY() == null ? (horizontal ? c.getPos() : c.getEnd()) : c.getEndY();
             if (!pointInside(x1, y1, input) || !pointInside(x2, y2, input)
                     || (horizontal ? Math.abs(y1-y2) > EPS : Math.abs(x1-x2) > EPS)) return "求解结果刀路越界或方向无效";
+        }
+        if (!pipeline.isNoop()) {
+            var placements = output.getPieces().stream().map(p -> new NestingResult.Placement(
+                    p.getId(), p.getDemandId(), p.getName(), p.getX(), p.getY(),
+                    NestingProblem.Shape.rectangle(p.getW(), p.getL()), p.isRotated() ? 90 : 0)).toList();
+            var remnantList = output.getRemnants().stream().map(r -> new NestingResult.Leftover(
+                    r.getId(), r.getX(), r.getY(),
+                    NestingProblem.Shape.rectangle(r.getW(), r.getL()), r.isHasDefect())).toList();
+            String constraintError = pipeline.validateResult(input, placements, remnantList);
+            if (constraintError != null) return constraintError;
         }
         return null;
     }

@@ -6,6 +6,9 @@ import com.example.cutdemotwo.algorithm.geometry.EngineGeometry;
 import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
 
 import com.example.cutdemotwo.algorithm.ComputationCancellation;
+import com.example.cutdemotwo.algorithm.nesting.constraints.ConstraintPipeline;
+import com.example.cutdemotwo.algorithm.nesting.constraints.CurtainConstraintPack;
+import com.example.cutdemotwo.algorithm.nesting.constraints.PatternRepeatRule;
 
 import com.example.cutdemotwo.contracts.geometry.CutStep;
 import com.example.cutdemotwo.contracts.geometry.Defect;
@@ -87,14 +90,26 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
         double l;
         boolean allowRotation;
         Integer demandId;
+        com.example.cutdemotwo.contracts.nesting.NestingProblem.Part part;
+        double localMinX;
+        double localMaxX;
+        List<Defect> hardLocalDefects;
+        boolean patternMatch;
 
-        DemItem(int id, String name, double w, double l, boolean allowRotation, Integer demandId) {
+        DemItem(int id, String name, double w, double l, boolean allowRotation, Integer demandId,
+                com.example.cutdemotwo.contracts.nesting.NestingProblem.Part part,
+                double localMinX, double localMaxX, List<Defect> hardLocalDefects, boolean patternMatch) {
             this.id = id;
             this.name = name;
             this.w = w;
             this.l = l;
             this.allowRotation = allowRotation;
             this.demandId = demandId;
+            this.part = part;
+            this.localMinX = localMinX;
+            this.localMaxX = localMaxX;
+            this.hardLocalDefects = hardLocalDefects;
+            this.patternMatch = patternMatch;
         }
     }
 
@@ -119,28 +134,12 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
 
         boolean isRemnantFeed = frame.isSheet();
         boolean horizontalFirst = !"vertical".equalsIgnoreCase(req.process().firstStageOrientation());
-
-        // 收集待排单件
-        List<DemItem> items = new ArrayList<>();
-        int itemSeq = 0;
-        if (req.parts() != null) {
-            for (com.example.cutdemotwo.contracts.nesting.NestingProblem.Part p : req.parts()) {
-                ComputationCancellation.check();
-                int count = Math.max(0, p.quantity());
-                for (int c = 0; c < count; c++) {
-                    ComputationCancellation.check();
-                    boolean rot = p.allowRotation();
-                    items.add(new DemItem(itemSeq++, p.name(), p.shape().width(), p.shape().height(), rot, p.id()));
-                }
-            }
-        }
-
-        // 按大件优先排序 (Best Fit Decreasing)
-        items.sort((a, b) -> Double.compare(b.w * b.l, a.w * a.l));
+        ConstraintPipeline pipeline = CurtainConstraintPack.forProblem(req);
 
         // 转换局部瑕疵安全框 (相对于局部有效加工区 activeL)
         List<Defect> allDefects = EngineGeometry.defects(req);
         List<Defect> localDefects = new ArrayList<>();
+        Map<Integer, Defect> localDefectById = new HashMap<>();
         for (Defect d : allDefects) {
             ComputationCancellation.check();
             // 转换到 [0, activeL] 的局部坐标
@@ -149,7 +148,48 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
             // 构造局部安全瑕疵实体
             Defect ld = new Defect(d.getId(), defLocalX, defLocalY, d.getSafeW(), d.getSafeH(), 0);
             localDefects.add(ld);
+            localDefectById.put(d.getId(), ld);
         }
+
+        // 收集待排单件
+        List<DemItem> items = new ArrayList<>();
+        int itemSeq = 0;
+        if (req.parts() != null) {
+            for (com.example.cutdemotwo.contracts.nesting.NestingProblem.Part p : req.parts()) {
+                ComputationCancellation.check();
+                double localMinX = 0.0;
+                double localMaxX = rollW;
+                List<Defect> hardLocal = localDefects;
+                boolean patternMatch = false;
+                if (!pipeline.isNoop()) {
+                    double[] physBounds = pipeline.clipXBounds(req, p, 0.0, rollW);
+                    if (frame.isRightOrigin()) {
+                        localMinX = rollW - physBounds[1];
+                        localMaxX = rollW - physBounds[0];
+                    } else {
+                        localMinX = physBounds[0];
+                        localMaxX = physBounds[1];
+                    }
+                    var hardRaw = pipeline.hardExclusionsFor(req, p);
+                    hardLocal = new ArrayList<>(hardRaw.size());
+                    for (var he : hardRaw) {
+                        Defect ld = localDefectById.get(he.id());
+                        if (ld != null) hardLocal.add(ld);
+                    }
+                    patternMatch = PatternRepeatRule.requiresPatternMatch(req, p);
+                }
+                int count = Math.max(0, p.quantity());
+                for (int c = 0; c < count; c++) {
+                    ComputationCancellation.check();
+                    boolean rot = p.allowRotation();
+                    items.add(new DemItem(itemSeq++, p.name(), p.shape().width(), p.shape().height(), rot, p.id(),
+                            p, localMinX, localMaxX, hardLocal, patternMatch));
+                }
+            }
+        }
+
+        // 按大件优先排序 (Best Fit Decreasing)
+        items.sort((a, b) -> Double.compare(b.w * b.l, a.w * a.l));
 
         List<FreeRect> freeRects = new ArrayList<>();
         freeRects.add(new FreeRect(0, 0, rollW, activeL, 1));
@@ -161,6 +201,46 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
         for (DemItem it : items) {
             ComputationCancellation.check();
             boolean placed = false;
+            if (!pipeline.isNoop()) {
+                // 带窗帘约束路径：先尝试避开全部疵点（无软惩罚），避不开再放宽为仅避让硬疵点（辅片放行轻微疵点）
+                List<List<Defect>> defectPasses = it.hardLocalDefects.size() < localDefects.size()
+                        ? List.of(localDefects, it.hardLocalDefects)
+                        : List.of(it.hardLocalDefects);
+                for (List<Defect> activeDefects : defectPasses) {
+                    for (int rIdx = 0; rIdx < freeRects.size(); rIdx++) {
+                        ComputationCancellation.check();
+                        FreeRect r = freeRects.get(rIdx);
+                        double[] pos = findConstrainedPositionInRect(req, frame, pipeline, it, r, it.w, it.l, 0, activeDefects);
+                        double chosenW = it.w, chosenL = it.l;
+                        boolean chosenRot = false;
+                        if (pos == null && it.allowRotation) {
+                            pos = findConstrainedPositionInRect(req, frame, pipeline, it, r, it.l, it.w, 90, activeDefects);
+                            if (pos != null) {
+                                chosenW = it.l;
+                                chosenL = it.w;
+                                chosenRot = true;
+                            }
+                        }
+                        if (pos != null) {
+                            freeRects.remove(rIdx);
+                            if (Math.abs(pos[0] - r.x) < 1e-6 && Math.abs(pos[1] - r.y) < 1e-6) {
+                                rawPieces.add(new PlacedPiece(it.id, it.name, r.x, r.y, chosenW, chosenL, chosenRot, it.demandId));
+                                splitAfterOriginPlacement(r, chosenW, chosenL, rawCutSteps, freeRects, horizontalFirst);
+                            } else {
+                                List<FreeRect> dissected = dissectRectAt(r, pos[0], pos[1], chosenW, chosenL, rawCutSteps, horizontalFirst);
+                                FreeRect pieceRect = dissected.remove(0);
+                                rawPieces.add(new PlacedPiece(it.id, it.name, pieceRect.x, pieceRect.y, chosenW, chosenL, chosenRot, it.demandId));
+                                freeRects.addAll(dissected);
+                            }
+                            placed = true;
+                            break;
+                        }
+                    }
+                    if (placed) break;
+                }
+                freeRects.sort(Comparator.comparingDouble(FreeRect::area));
+                continue;
+            }
             // 尝试在现有可用空间中寻找适格位置
             for (int rIdx = 0; rIdx < freeRects.size(); rIdx++) {
                 ComputationCancellation.check();
@@ -338,6 +418,140 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
         res.setSuggestedFeedLength(GuillotinePostProcessor.suggestedFeedLength(finalPieces));
 
         return res;
+    }
+
+    private void splitAfterOriginPlacement(FreeRect r, double chosenW, double chosenL,
+                                           List<CutStep> rawCutSteps, List<FreeRect> freeRects, boolean horizontalFirst) {
+        if (horizontalFirst) {
+            double cutY = r.y + chosenL;
+            if (r.h - chosenL > 0.5) {
+                rawCutSteps.add(new CutStep(
+                        rawCutSteps.size() + 1, "横切", cutY, r.x, r.x + r.w,
+                        String.format("第 %d 阶段横切，分切行条 [%.0f × %.0f mm]", r.level, r.w, chosenL)
+                ));
+                freeRects.add(new FreeRect(r.x, cutY, r.w, r.h - chosenL, r.level + 1));
+            }
+            double cutX = r.x + chosenW;
+            if (r.w - chosenW > 0.5) {
+                rawCutSteps.add(new CutStep(
+                        rawCutSteps.size() + 1, "纵切", cutX, r.y, r.y + chosenL,
+                        String.format("第 %d 阶段纵切，切断裁片与侧料 [%.0f × %.0f mm]", r.level + 1, chosenW, chosenL)
+                ));
+                freeRects.add(new FreeRect(cutX, r.y, r.w - chosenW, chosenL, r.level + 2));
+            }
+        } else {
+            double cutX = r.x + chosenW;
+            if (r.w - chosenW > 0.5) {
+                rawCutSteps.add(new CutStep(
+                        rawCutSteps.size() + 1, "纵切", cutX, r.y, r.y + r.h,
+                        String.format("第 %d 阶段纵切，分切纵列 [%.0f × %.0f mm]", r.level, chosenW, r.h)
+                ));
+                freeRects.add(new FreeRect(cutX, r.y, r.w - chosenW, r.h, r.level + 1));
+            }
+            double cutY = r.y + chosenL;
+            if (r.h - chosenL > 0.5) {
+                rawCutSteps.add(new CutStep(
+                        rawCutSteps.size() + 1, "横切", cutY, r.x, r.x + chosenW,
+                        String.format("第 %d 阶段横切，切断裁片与顶料 [%.0f × %.0f mm]", r.level + 1, chosenW, chosenL)
+                ));
+                freeRects.add(new FreeRect(r.x, cutY, chosenW, r.h - chosenL, r.level + 2));
+            }
+        }
+    }
+
+    private double[] findConstrainedPositionInRect(
+            com.example.cutdemotwo.contracts.nesting.NestingProblem req,
+            CoordinateFrame frame,
+            ConstraintPipeline pipeline,
+            DemItem it,
+            FreeRect r,
+            double pw,
+            double pl,
+            int angleDeg,
+            List<Defect> defects) {
+        double effMinX = Math.max(r.x, it.localMinX);
+        double effMaxX = Math.min(r.x + r.w, it.localMaxX);
+        if (effMaxX - effMinX < pw - 1e-6 || r.h < pl - 1e-6) {
+            return null;
+        }
+        List<Defect> colliding = new ArrayList<>();
+        for (Defect d : defects) {
+            ComputationCancellation.check();
+            boolean inRect = !(effMaxX <= d.getX() || effMinX >= d.getX() + d.getW() ||
+                    r.y + r.h <= d.getY() || r.y >= d.getY() + d.getH());
+            if (inRect) colliding.add(d);
+        }
+        List<Double> candX = new ArrayList<>();
+        candX.add(effMinX);
+        List<Double> candY = new ArrayList<>();
+        candY.add(r.y);
+        for (Defect d : colliding) {
+            double rx = d.getX() + d.getW();
+            if (rx >= effMinX && rx + pw <= effMaxX + 1e-6) candX.add(rx);
+            double by = d.getY() + d.getH();
+            if (by >= r.y && by + pl <= r.y + r.h + 1e-6) candY.add(by);
+        }
+        candX.sort(Double::compare);
+        candY.sort(Double::compare);
+
+        for (double rawY : candY) {
+            for (double cx : candX) {
+                ComputationCancellation.check();
+                if (cx + pw > effMaxX + 1e-6) continue;
+                double cy = rawY;
+                for (int iter = 0; iter < 4; iter++) {
+                    if (it.patternMatch) {
+                        cy = snapLocalY(req, frame, pipeline, it.part, angleDeg, cy, pl);
+                    }
+                    if (cy + pl > r.y + r.h + 1e-6) {
+                        cy = Double.POSITIVE_INFINITY;
+                        break;
+                    }
+                    Defect hit = firstOverlappingDefect(cx, cy, pw, pl, colliding);
+                    if (hit == null) {
+                        return new double[]{cx, cy};
+                    }
+                    double nextY = hit.getY() + hit.getH();
+                    if (nextY <= cy + 1e-6) {
+                        cy = Double.POSITIVE_INFINITY;
+                        break;
+                    }
+                    cy = nextY;
+                }
+            }
+        }
+        return null;
+    }
+
+    private Defect firstOverlappingDefect(double px, double py, double pw, double pl, List<Defect> defects) {
+        for (Defect d : defects) {
+            boolean overlaps = !(px + pw <= d.getX() || px >= d.getX() + d.getW() ||
+                    py + pl <= d.getY() || py >= d.getY() + d.getH());
+            if (overlaps) return d;
+        }
+        return null;
+    }
+
+    private double snapLocalY(com.example.cutdemotwo.contracts.nesting.NestingProblem req,
+                              CoordinateFrame frame,
+                              ConstraintPipeline pipeline,
+                              com.example.cutdemotwo.contracts.nesting.NestingProblem.Part part,
+                              int angleDeg,
+                              double localY,
+                              double pl) {
+        double physY = frame.toPhysicalY(localY, pl);
+        if (!frame.isMirrorY()) {
+            double snappedPhys = pipeline.snapY(req, part, angleDeg, physY);
+            return snappedPhys - frame.trimStart();
+        }
+        if (PatternRepeatRule.isAligned(req, part, physY)) {
+            return localY;
+        }
+        double repeatY = req.material().fabricRule().repeatYMm();
+        double phaseY = req.material().fabricRule().phaseYMm() == null ? 0.0 : req.material().fabricRule().phaseYMm();
+        double anchorY = part.rule().patternAnchorYMm() == null ? 0.0 : part.rule().patternAnchorYMm();
+        double rem = (((physY + anchorY - phaseY) % repeatY) + repeatY) % repeatY;
+        return localY + rem;
     }
 
     private boolean isSafeFromDefects(double px, double py, double pw, double pl, List<Defect> defects) {

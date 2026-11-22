@@ -1,6 +1,7 @@
 package com.example.cutdemotwo.algorithm.nesting;
 
 import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
+import com.example.cutdemotwo.algorithm.nesting.constraints.CurtainConstraintPack;
 
 import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
 import com.example.cutdemotwo.algorithm.api.NestingSolver;
@@ -80,6 +81,7 @@ public class SolverFactory implements NestingSolver {
 
     private Selection select(NestingProblem problem, boolean allowFallback) {
         validate(problem);
+        CurtainConstraintPack.forProblem(problem).checkProblem(problem);
         String requested = problem.engine();
         if (requested == null || requested.isBlank() || "auto".equals(requested))
             requested = switch (problem.process().mode()) {
@@ -185,9 +187,9 @@ public class SolverFactory implements NestingSolver {
         var counts = new HashMap<>(baseCounts);
         for (var extra : extras) counts.merge(extra.demandId(), 1, Integer::sum);
         var parts = problem.parts().stream().map(p -> new NestingProblem.Part(p.id(), p.name(), p.shape(),
-                counts.get(p.id()), p.allowRotation(), p.allowHalfTurn())).toList();
+                counts.get(p.id()), p.allowRotation(), p.allowHalfTurn(), p.rule())).toList();
         var material = new NestingProblem.Material(problem.material().id(), NestingProblem.Shape.rectangle(problem.width(), length),
-                problem.material().exclusions(), problem.material().continuesAfterRegion());
+                problem.material().exclusions(), problem.material().continuesAfterRegion(), problem.material().fabricRule());
         var filled = new NestingProblem(problem.schemaVersion(), problem.unit(), material, parts,
                 problem.process(), problem.engine(), problem.timeLimitSeconds());
         var combined = new ArrayList<>(fixed);

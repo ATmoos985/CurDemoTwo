@@ -2,6 +2,7 @@ package com.example.cutdemotwo.algorithm.nesting;
 
 import com.example.cutdemotwo.algorithm.ComputationCancellation;
 import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
+import com.example.cutdemotwo.algorithm.nesting.constraints.CurtainConstraintPack;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Point;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Shape;
@@ -113,6 +114,7 @@ final class MarkerCompactor {
 
     static boolean supportsGapSearch(NestingProblem problem) {
         return "RECTANGLE".equals(problem.material().shape().type())
+                && CurtainConstraintPack.forProblem(problem).isNoop()
                 && problem.parts().stream().allMatch(p -> p.shape().vertices().size() <= 48)
                 && problem.material().exclusions().stream().allMatch(d -> d.shape().vertices().size() <= 48);
     }

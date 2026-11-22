@@ -2,6 +2,7 @@ package com.example.cutdemotwo.algorithm.nesting;
 
 import com.example.cutdemotwo.algorithm.ComputationCancellation;
 import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
+import com.example.cutdemotwo.algorithm.nesting.constraints.CurtainConstraintPack;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Point;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Shape;
@@ -39,7 +40,8 @@ final class AxisMarkerCompactor {
     }
 
     static boolean supports(NestingProblem p) {
-        return "RECTANGLE".equals(p.material().shape().type());
+        return "RECTANGLE".equals(p.material().shape().type())
+                && CurtainConstraintPack.forProblem(p).isNoop();
     }
 
     static List<Placement> compact(NestingProblem problem, List<Placement> original, long deadline) {

@@ -6,6 +6,9 @@ import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
 import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
 
 import com.example.cutdemotwo.algorithm.ComputationCancellation;
+import com.example.cutdemotwo.algorithm.nesting.constraints.ConstraintPipeline;
+import com.example.cutdemotwo.algorithm.nesting.constraints.CurtainConstraintPack;
+import com.example.cutdemotwo.algorithm.nesting.constraints.PatternRepeatRule;
 
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Exclusion;
@@ -62,14 +65,24 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                                  List<Point> vertices, double area, int rotationDegrees) {}
 
     private static class PartItem {
+        final Part part;
         final int demandId;
         final String name;
         final List<OrientedShape> orientations;
         final double maxArea;
+        final double minX;
+        final double maxX;
+        final List<ExclusionRecord> hardExclusions;
+        final boolean patternMatch;
 
-        PartItem(Part part) {
+        PartItem(Part part, double minX, double maxX, List<ExclusionRecord> hardExclusions, boolean patternMatch) {
+            this.part = part;
             this.demandId = part.id();
             this.name = part.name();
+            this.minX = minX;
+            this.maxX = maxX;
+            this.hardExclusions = hardExclusions;
+            this.patternMatch = patternMatch;
             List<OrientedShape> list = new ArrayList<>();
             double maxA = 0;
             for (int angle : part.contourAngles()) {
@@ -110,10 +123,12 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
     }
 
     private static class ExclusionRecord {
+        final int id;
         final Area worldArea;
         final double minX, maxX, minY, maxY;
 
         ExclusionRecord(Exclusion d) {
+            this.id = d.id();
             var expanded = ContourGeometrySupport.expandExclusion(d);
             this.worldArea = expanded.worldArea();
             this.minX = expanded.minX();
@@ -138,17 +153,34 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
         double matH = matShape.height();
         double gap = problem.process().pieceGap();
 
+        ConstraintPipeline pipeline = CurtainConstraintPack.forProblem(problem);
         List<ExclusionRecord> exclusionRecords = new ArrayList<>();
+        Map<Integer, ExclusionRecord> exclusionById = new HashMap<>();
         for (Exclusion d : problem.material().exclusions()) {
             ComputationCancellation.check();
-            exclusionRecords.add(new ExclusionRecord(d));
+            ExclusionRecord rec = new ExclusionRecord(d);
+            exclusionRecords.add(rec);
+            exclusionById.put(d.id(), rec);
         }
 
         // Expand demands to individual instances
         List<PartItem> items = new ArrayList<>();
         for (Part p : problem.parts()) {
             ComputationCancellation.check();
-            PartItem pi = new PartItem(p);
+            double[] xBounds = pipeline.isNoop() ? new double[]{0.0, matW} : pipeline.clipXBounds(problem, p, 0.0, matW);
+            List<ExclusionRecord> hardRecs;
+            if (pipeline.isNoop()) {
+                hardRecs = exclusionRecords;
+            } else {
+                List<Exclusion> hardRaw = pipeline.hardExclusionsFor(problem, p);
+                hardRecs = new ArrayList<>(hardRaw.size());
+                for (Exclusion he : hardRaw) {
+                    ExclusionRecord r = exclusionById.get(he.id());
+                    if (r != null) hardRecs.add(r);
+                }
+            }
+            boolean patternMatch = !pipeline.isNoop() && PatternRepeatRule.requiresPatternMatch(problem, p);
+            PartItem pi = new PartItem(p, xBounds[0], xBounds[1], hardRecs, patternMatch);
             for (int i = 0; i < p.quantity(); i++) {
                 ComputationCancellation.check();
                 items.add(pi);
@@ -184,7 +216,7 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                 sortedItems.sort(strategy);
                 Area localMatArea = isRectMat ? matArea : new Area(matArea);
                 return runPlacementPass(
-                        sortedItems, localMatArea, isRectMat, matW, matH, gap, exclusionRecords, startTime, timeBudgetMs
+                        problem, pipeline, sortedItems, localMatArea, isRectMat, matW, matH, gap, exclusionRecords, startTime, timeBudgetMs
                 );
             });
         }
@@ -251,6 +283,7 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
     }
 
     private List<PlacedRecord> runPlacementPass(
+            NestingProblem problem, ConstraintPipeline pipeline,
             List<PartItem> items, Area matArea, boolean isRectMat, double matW, double matH,
             double gap, List<ExclusionRecord> exclusions, long startTime, long timeBudgetMs) {
 
@@ -266,19 +299,19 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
             // Collect candidate anchor points
             SortedSet<Double> xAnchors = new TreeSet<>();
             SortedSet<Double> yAnchors = new TreeSet<>();
-            xAnchors.add(0.0);
+            xAnchors.add(item.minX);
             yAnchors.add(0.0);
 
             for (PlacedRecord p : placedList) {
                 ComputationCancellation.check();
-                xAnchors.add(Math.min(matW, p.maxX + gap));
+                xAnchors.add(Math.max(item.minX, Math.min(item.maxX, p.maxX + gap)));
                 yAnchors.add(Math.min(matH, p.maxY + gap));
-                xAnchors.add(Math.min(matW, p.minX));
+                xAnchors.add(Math.max(item.minX, Math.min(item.maxX, p.minX)));
                 yAnchors.add(Math.min(matH, p.minY));
             }
             for (ExclusionRecord e : exclusions) {
                 ComputationCancellation.check();
-                xAnchors.add(Math.min(matW, e.maxX + gap));
+                xAnchors.add(Math.max(item.minX, Math.min(item.maxX, e.maxX + gap)));
                 yAnchors.add(Math.min(matH, e.maxY + gap));
             }
 
@@ -290,25 +323,31 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                 ComputationCancellation.check();
                 double pw = orientation.width();
                 double ph = orientation.height();
-                if (pw > matW + EPS || ph > matH + EPS) continue;
+                if (pw > (item.maxX - item.minX) + EPS || ph > matH + EPS) continue;
 
                 // Try corner anchors
-                for (double cy : yList) {
+                for (double rawY : yList) {
                     ComputationCancellation.check();
-                    if (cy + ph > matH + EPS) break;
+                    double cy = item.patternMatch
+                            ? pipeline.snapY(problem, item.part, orientation.rotationDegrees(), rawY)
+                            : rawY;
+                    if (cy + ph > matH + EPS) continue;
 
                     // Try key x positions
                     for (double cx : xList) {
                         ComputationCancellation.check();
-                        if (cx + pw > matW + EPS) break;
+                        if (cx < item.minX - EPS) continue;
+                        if (cx + pw > item.maxX + EPS) break;
 
-                        if (isPositionValid(cx, cy, orientation, matArea, isRectMat, matW, matH, gap, placedList, exclusions)) {
+                        if (isPositionValid(cx, cy, orientation, matArea, isRectMat, item.minX, item.maxX, matH, gap, placedList, item.hardExclusions)) {
                             // Local squeeze to left and up
-                            double[] squeezed = squeezeLeftUp(cx, cy, orientation, matArea, isRectMat, matW, matH, gap, placedList, exclusions);
+                            double[] squeezed = squeezeLeftUp(problem, pipeline, item, cx, cy, orientation, matArea, isRectMat, matH, gap, placedList);
                             double sx = squeezed[0];
                             double sy = squeezed[1];
 
-                            double score = calculateScore(sx, sy, pw, ph);
+                            double softPen = pipeline.isNoop() ? 0.0
+                                    : pipeline.penalty(problem, item.part, sx, sy, orientation.rotationDegrees(), orientation.shape());
+                            double score = calculateScore(sx, sy, pw, ph) + softPen * 1_000_000.0;
                             if (bestCandidate == null || score < bestCandidate.score) {
                                 bestCandidate = new CandidateBest(sx, sy, orientation, score);
                             }
@@ -316,15 +355,18 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                     }
 
                     // Also try a few stepped x positions if xList didn't yield a solution at this y
-                    if (bestCandidate == null && matW - pw > 50) {
-                        double step = Math.max(30.0, (matW - pw) / 15.0);
-                        for (double cx = 0; cx + pw <= matW + EPS; cx += step) {
+                    double availSpan = item.maxX - item.minX - pw;
+                    if (bestCandidate == null && availSpan > 50) {
+                        double step = Math.max(30.0, availSpan / 15.0);
+                        for (double cx = item.minX; cx + pw <= item.maxX + EPS; cx += step) {
                             ComputationCancellation.check();
-                            if (isPositionValid(cx, cy, orientation, matArea, isRectMat, matW, matH, gap, placedList, exclusions)) {
-                                double[] squeezed = squeezeLeftUp(cx, cy, orientation, matArea, isRectMat, matW, matH, gap, placedList, exclusions);
+                            if (isPositionValid(cx, cy, orientation, matArea, isRectMat, item.minX, item.maxX, matH, gap, placedList, item.hardExclusions)) {
+                                double[] squeezed = squeezeLeftUp(problem, pipeline, item, cx, cy, orientation, matArea, isRectMat, matH, gap, placedList);
                                 double sx = squeezed[0];
                                 double sy = squeezed[1];
-                                double score = calculateScore(sx, sy, pw, ph);
+                                double softPen = pipeline.isNoop() ? 0.0
+                                        : pipeline.penalty(problem, item.part, sx, sy, orientation.rotationDegrees(), orientation.shape());
+                                double score = calculateScore(sx, sy, pw, ph) + softPen * 1_000_000.0;
                                 if (bestCandidate == null || score < bestCandidate.score) {
                                     bestCandidate = new CandidateBest(sx, sy, orientation, score);
                                 }
@@ -364,11 +406,14 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
     }
 
     private static double[] squeezeLeftUp(
+            NestingProblem problem, ConstraintPipeline pipeline, PartItem item,
             double startX, double startY, OrientedShape ori, Area matArea, boolean isRectMat,
-            double matW, double matH, double gap, List<PlacedRecord> placed, List<ExclusionRecord> exclusions) {
+            double matH, double gap, List<PlacedRecord> placed) {
 
         double currX = startX;
         double currY = startY;
+        double currPenalty = pipeline.isNoop() ? 0.0
+                : pipeline.penalty(problem, item.part, currX, currY, ori.rotationDegrees(), ori.shape());
 
         // Step sizes for multi-resolution squeeze
         double[] steps = {50.0, 10.0, 2.0, 0.5};
@@ -376,37 +421,53 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
         for (double step : steps) {
             ComputationCancellation.check();
             // Squeeze left
-            while (currX - step >= 0) {
+            while (currX - step >= item.minX - 1e-9) {
                 ComputationCancellation.check();
-                if (isPositionValid(currX - step, currY, ori, matArea, isRectMat, matW, matH, gap, placed, exclusions)) {
-                    currX -= step;
+                double nx = Math.max(item.minX, currX - step);
+                if (isPositionValid(nx, currY, ori, matArea, isRectMat, item.minX, item.maxX, matH, gap, placed, item.hardExclusions)) {
+                    if (!pipeline.isNoop()) {
+                        double np = pipeline.penalty(problem, item.part, nx, currY, ori.rotationDegrees(), ori.shape());
+                        if (np > currPenalty + 1e-6) break;
+                        currPenalty = np;
+                    }
+                    currX = nx;
                 } else {
                     break;
                 }
             }
-            // Squeeze up
-            while (currY - step >= 0) {
-                ComputationCancellation.check();
-                if (isPositionValid(currX, currY - step, ori, matArea, isRectMat, matW, matH, gap, placed, exclusions)) {
-                    currY -= step;
-                } else {
-                    break;
+            // Squeeze up (skip if Y is locked to pattern repeat grid)
+            if (!item.patternMatch) {
+                while (currY - step >= 0) {
+                    ComputationCancellation.check();
+                    double ny = currY - step;
+                    if (isPositionValid(currX, ny, ori, matArea, isRectMat, item.minX, item.maxX, matH, gap, placed, item.hardExclusions)) {
+                        if (!pipeline.isNoop()) {
+                            double np = pipeline.penalty(problem, item.part, currX, ny, ori.rotationDegrees(), ori.shape());
+                            if (np > currPenalty + 1e-6) break;
+                            currPenalty = np;
+                        }
+                        currY = ny;
+                    } else {
+                        break;
+                    }
                 }
             }
         }
 
-        return new double[]{Math.round(currX * 10.0) / 10.0, Math.round(currY * 10.0) / 10.0};
+        double roundedX = Math.max(item.minX, Math.round(currX * 10.0) / 10.0);
+        double roundedY = item.patternMatch ? currY : Math.round(currY * 10.0) / 10.0;
+        return new double[]{roundedX, roundedY};
     }
 
     private static boolean isPositionValid(
             double x, double y, OrientedShape ori, Area matArea, boolean isRectMat,
-            double matW, double matH, double gap, List<PlacedRecord> placedList, List<ExclusionRecord> exclusions) {
+            double minX, double maxX, double matH, double gap, List<PlacedRecord> placedList, List<ExclusionRecord> exclusions) {
 
         double w = ori.width();
         double h = ori.height();
 
         // 1. Boundary check (AABB outer bound applies to both rectangular and polygon materials)
-        if (x < -EPS || y < -EPS || x + w > matW + EPS || y + h > matH + EPS) return false;
+        if (x < minX - EPS || y < -EPS || x + w > maxX + EPS || y + h > matH + EPS) return false;
 
         Area candidateArea = null;
 
