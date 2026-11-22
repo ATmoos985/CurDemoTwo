@@ -95,7 +95,7 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
             // 2. items.csv
             List<NestingProblem.Part> itemTypes = writeItems(itemsCsv, req.parts());
 
-            String origin = req.process().startCorner() != null ? req.process().startCorner().trim().toLowerCase() : "right-top";
+            String origin = EngineGeometry.normalizeStartCorner(req.process().startCorner());
             boolean isRightOrigin = origin.startsWith("right");
             boolean isBottomOrigin = origin.endsWith("bottom");
             boolean isSheet = req.sheet();
@@ -246,7 +246,7 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
         List<CutStep> rawCutSteps = new ArrayList<>();
 
         int remIndex = 1;
-        String origin = req.process().startCorner() != null ? req.process().startCorner().trim().toLowerCase() : "right-top";
+        String origin = EngineGeometry.normalizeStartCorner(req.process().startCorner());
         boolean isRightOrigin = origin.startsWith("right");
         boolean isBottomOrigin = origin.endsWith("bottom");
         boolean isSheet = req.sheet();

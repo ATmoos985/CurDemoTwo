@@ -1,6 +1,7 @@
 package com.example.cutdemotwo.algorithm.nesting;
 
 import com.example.cutdemotwo.algorithm.ComputationCancellation;
+import com.example.cutdemotwo.algorithm.geometry.EngineGeometry;
 import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
 import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
@@ -39,8 +40,8 @@ import java.util.Objects;
  */
 @Service
 public class DeepnestSolverEngine implements ICutSolverEngine {
-    private static final double VALIDATOR_AREA_TOL = 0.0005; // Strictly tighter than PolygonResultValidator's 0.001 mm^2
-    private static final double VALIDATOR_GAP_TOL = 0.0005;  // Strictly tighter than PolygonResultValidator's 0.001 mm
+    private static final double VALIDATOR_AREA_TOL = EngineGeometry.AREA_EPS_MM2 * 0.5; // Strictly tighter than PolygonResultValidator's 0.001 mm^2
+    private static final double VALIDATOR_GAP_TOL = EngineGeometry.COORDINATE_EPS_MM * 0.5; // Strictly tighter than PolygonResultValidator's 0.001 mm
     private static final int DEFAULT_POPULATION_SIZE = 10;
     private static final int DEFAULT_MUTATION_RATE = 15;
     private static final int TOP_CANDIDATES_TO_VALIDATE = 28;

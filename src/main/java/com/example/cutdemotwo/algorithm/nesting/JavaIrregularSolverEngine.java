@@ -1,5 +1,6 @@
 package com.example.cutdemotwo.algorithm.nesting;
 
+import com.example.cutdemotwo.algorithm.geometry.EngineGeometry;
 import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
 
 import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
@@ -32,7 +33,7 @@ import java.util.*;
 @Service
 public class JavaIrregularSolverEngine implements ICutSolverEngine {
     private static final Logger log = LoggerFactory.getLogger(JavaIrregularSolverEngine.class);
-    private static final double EPS = 0.001;
+    private static final double EPS = EngineGeometry.COORDINATE_EPS_MM;
 
     @Override
     public String getEngineType() {
@@ -140,12 +141,9 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
         double gap = problem.process().pieceGap();
 
         List<ExclusionRecord> exclusionRecords = new ArrayList<>();
-        Area forbiddenArea = new Area();
         for (Exclusion d : problem.material().exclusions()) {
             ComputationCancellation.check();
-            ExclusionRecord rec = new ExclusionRecord(d);
-            exclusionRecords.add(rec);
-            forbiddenArea.add(rec.worldArea);
+            exclusionRecords.add(new ExclusionRecord(d));
         }
 
         // Expand demands to individual instances

@@ -1,5 +1,6 @@
 package com.example.cutdemotwo.algorithm.nesting;
 
+import com.example.cutdemotwo.algorithm.geometry.EngineGeometry;
 import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
 
 import com.example.cutdemotwo.algorithm.ComputationCancellation;
@@ -12,7 +13,7 @@ import java.util.HashSet;
 
 public final class PolygonResultValidator {
     // Boolean area tolerance only; it is not a user-configurable cutting allowance.
-    private static final double AREA_EPS = .001;
+    private static final double AREA_EPS = EngineGeometry.AREA_EPS_MM2;
     public static String validate(NestingProblem input, EngineResult output) {
         ComputationCancellation.check();
         if (!output.getPieces().isEmpty() || !output.getRemnants().isEmpty() || !output.getCuts().isEmpty())
@@ -57,7 +58,7 @@ public final class PolygonResultValidator {
                     double distance = java.awt.geom.Line2D.linesIntersect(ax,ay,bx,by,cx,cy,dx,dy) ? 0 : Math.min(
                         Math.min(java.awt.geom.Line2D.ptSegDist(ax,ay,bx,by,cx,cy), java.awt.geom.Line2D.ptSegDist(ax,ay,bx,by,dx,dy)),
                         Math.min(java.awt.geom.Line2D.ptSegDist(cx,cy,dx,dy,ax,ay), java.awt.geom.Line2D.ptSegDist(cx,cy,dx,dy,bx,by)));
-                    if (distance + .001 < input.process().pieceGap()) return "轮廓裁片间距不足";
+                    if (distance + EngineGeometry.COORDINATE_EPS_MM < input.process().pieceGap()) return "轮廓裁片间距不足";
                 }
             }
         }

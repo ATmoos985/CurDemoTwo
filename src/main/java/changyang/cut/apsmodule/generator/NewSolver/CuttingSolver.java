@@ -108,7 +108,9 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
         List<CuttingInstruction> allInstructions = new ArrayList<>();
 
         try (SolveReportWriter report = SolveReportWriter.create()) {
-            log.info("Solve report: {}", report.getFilePath());
+            if (!"disabled".equals(report.getFilePath())) {
+                log.info("Solve report: {}", report.getFilePath());
+            }
 
             int totalGroups = groups.size();
             int groupIndex = 0;

@@ -115,7 +115,7 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
             return res;
         }
 
-        String origin = req.process().startCorner() != null ? req.process().startCorner().trim().toLowerCase() : "right-bottom";
+        String origin = EngineGeometry.normalizeStartCorner(req.process().startCorner());
         boolean isRightOrigin = origin.startsWith("right");
         boolean isBottomOrigin = origin.endsWith("bottom");
         boolean isRemnantFeed = req.sheet();
@@ -314,8 +314,8 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
                     (fr.w >= rollW - 30) &&
                     (physY + fr.h >= rollL - 30 || fr.y + fr.h >= activeL - 30);
 
-            double minW = Math.max(100, req.process().minReusableWidth());
-            double minH = Math.max(100, req.process().minReusableHeight());
+            double minW = req.process().minReusableWidth();
+            double minH = req.process().minReusableHeight();
             if (!isContinuousMotherRollTail && fr.w >= minW && fr.h >= minH) {
                 double area = (fr.w * fr.h) / 1_000_000.0;
                 boolean hasDefect = checkDefectOverlap(physX, physY, fr.w, fr.h, allDefects);
