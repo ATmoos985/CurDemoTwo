@@ -62,43 +62,52 @@ public class ColumnGenerationSolver {
                     initialPatternCount, configuredMaxPatterns, softLimit);
         }
 
-        while (iterationCount < maxIterations && patterns.size() < softLimit) {
-            iterationCount++;
-
-            MasterLPResult masterResult = solveMasterProblemLP(patterns, demands, allowOverSet);
-            if (!masterResult.feasible) {
-                log.info("  主问题LP不可行");
-                break;
-            }
-
-            List<PatternCandidate> newPatterns = solvePricingSubproblem(
-                    masterResult.dualPrices, demands.keySet(), demands, allowOverSet);
-
-            int added = 0;
-            for (PatternCandidate np : newPatterns) {
-                if (seen.add(np.signature())) {
-                    patterns.add(np);
-                    added++;
-                    if (iterationCount <= 5 || iterationCount % 20 == 0) {
-                        double rc = calculateReducedCost(np, masterResult.dualPrices);
-                        log.info("  Iteration {}: add {} rc={}",
-                                iterationCount, np, String.format("%.4f", rc));
-                    }
-                }
-            }
-
-            if (added > 0) {
-                noImprovementCount = 0;
-                if (patterns.size() >= softLimit) {
-                    log.info("  Reached working pattern limit {}, stop", softLimit);
-                    break;
-                }
+        try (IncrementalMasterLP masterLP = IncrementalMasterLP.create(demands, allowOverSet, params)) {
+            if (masterLP == null) {
+                log.info("  主问题LP求解器(GLOP)不可用");
             } else {
-                noImprovementCount++;
-                if (noImprovementCount >= NO_IMPROVEMENT_LIMIT) {
-                    log.info("  Iteration {}: no new columns for {} rounds, stop",
-                            iterationCount, NO_IMPROVEMENT_LIMIT);
-                    break;
+                for (PatternCandidate initial : patterns) {
+                    masterLP.addPattern(initial);
+                }
+
+                while (iterationCount < maxIterations && patterns.size() < softLimit) {
+                    iterationCount++;
+
+                    MasterLPResult masterResult = masterLP.solve();
+                    if (!masterResult.feasible) {
+                        log.info("  主问题LP不可行");
+                        break;
+                    }
+
+                    List<PatternCandidate> newPatterns = solvePricingSubproblem(
+                            masterResult.dualPrices, demands.keySet(), demands, allowOverSet);
+
+                    int added = 0;
+                    for (PatternCandidate np : newPatterns) {
+                        if (seen.add(np.signature())) {
+                            patterns.add(np);
+                            masterLP.addPattern(np);
+                            added++;
+                            if (iterationCount <= 5 || iterationCount % 20 == 0) {
+                                double rc = calculateReducedCost(np, masterResult.dualPrices);
+                                log.info("  Iteration {}: add {} rc={}",
+                                        iterationCount, np, String.format("%.4f", rc));
+                            }
+                        }
+                    }
+
+                    if (added > 0) {
+                        noImprovementCount = 0;
+                        if (patterns.size() >= softLimit) {
+                            log.info("  Reached working pattern limit {}, stop", softLimit);
+                            break;
+                        }
+                    } else {
+                        // 主问题LP未增加任何新列，对偶价与确定性定价结果均已收敛，无需重复求解。
+                        noImprovementCount++;
+                        log.info("  Iteration {}: no new columns added, LP converged, stop", iterationCount);
+                        break;
+                    }
                 }
             }
         }
@@ -122,93 +131,125 @@ public class ColumnGenerationSolver {
         return Math.max(configuredMaxPatterns, initialPatternCount + buffer);
     }
 
-    private MasterLPResult solveMasterProblemLP(List<PatternCandidate> patterns,
-            Map<Integer, Integer> demands,
-            Set<Integer> allowOverSet) {
-        try {
+    /**
+     * 复用同一个 GLOP MPSolver 实例的增量列生成主问题：
+     * 仅构建一次基础约束与欠/超产变量，每轮定价只追加新列变量及约束/目标系数，
+     * 借助 GLOP 单纯形热启动避免每轮从零重建 LP。
+     */
+    private static final class IncrementalMasterLP implements AutoCloseable {
+        private final MPSolver solver;
+        private final MPObjective objective;
+        private final Map<Integer, MPConstraint> demandConstraints;
+        private final int xUpperBound;
+        private final int totalWidth;
+        private int columnCount;
+
+        private IncrementalMasterLP(MPSolver solver,
+                MPObjective objective,
+                Map<Integer, MPConstraint> demandConstraints,
+                int xUpperBound,
+                int totalWidth) {
+            this.solver = solver;
+            this.objective = objective;
+            this.demandConstraints = demandConstraints;
+            this.xUpperBound = xUpperBound;
+            this.totalWidth = totalWidth;
+        }
+
+        static IncrementalMasterLP create(Map<Integer, Integer> demands,
+                Set<Integer> allowOverSet,
+                SolverParameters params) {
             MPSolver solver = MPSolver.createSolver("GLOP");
             if (solver == null) {
-                return new MasterLPResult(0, new HashMap<>(), false);
+                return null;
             }
+            try {
+                int totalDemand = demands.values().stream().mapToInt(Integer::intValue).sum();
+                int maxDemand = demands.values().stream().mapToInt(Integer::intValue).max().orElse(1);
+                int totalOverCap = params.getTotalOverCap();
 
-            int totalDemand = demands.values().stream().mapToInt(Integer::intValue).sum();
-            int maxDemand = demands.values().stream().mapToInt(Integer::intValue).max().orElse(1);
-            int totalOverCap = params.getTotalOverCap();
+                Map<Integer, MPVariable> underVars = new HashMap<>();
+                for (int width : demands.keySet()) {
+                    underVars.put(width, solver.makeNumVar(0, totalDemand, "under_" + width));
+                }
 
-            List<MPVariable> xVars = new ArrayList<>();
-            for (int i = 0; i < patterns.size(); i++) {
-                xVars.add(solver.makeNumVar(0, totalDemand + totalOverCap, "x_" + i));
-            }
+                Map<Integer, MPVariable> overVars = new HashMap<>();
+                for (int width : demands.keySet()) {
+                    double overUpperBound = allowOverSet.contains(width) ? totalOverCap : 0;
+                    overVars.put(width, solver.makeNumVar(0, overUpperBound, "over_" + width));
+                }
 
-            Map<Integer, MPVariable> underVars = new HashMap<>();
-            for (int width : demands.keySet()) {
-                underVars.put(width, solver.makeNumVar(0, totalDemand, "under_" + width));
-            }
+                Map<Integer, MPConstraint> demandConstraints = new HashMap<>();
+                for (Map.Entry<Integer, Integer> demandEntry : demands.entrySet()) {
+                    int width = demandEntry.getKey();
+                    int demand = demandEntry.getValue();
+                    MPConstraint constraint = solver.makeConstraint(demand, demand, "demand_" + width);
+                    constraint.setCoefficient(underVars.get(width), 1);
+                    constraint.setCoefficient(overVars.get(width), -1);
+                    demandConstraints.put(width, constraint);
+                }
 
-            Map<Integer, MPVariable> overVars = new HashMap<>();
-            for (int width : demands.keySet()) {
-                double overUpperBound = allowOverSet.contains(width) ? totalOverCap : 0;
-                overVars.put(width, solver.makeNumVar(0, overUpperBound, "over_" + width));
-            }
+                MPConstraint overCapConstraint = solver.makeConstraint(0, totalOverCap, "overCap");
+                for (MPVariable overVar : overVars.values()) {
+                    overCapConstraint.setCoefficient(overVar, 1);
+                }
 
-            Map<Integer, MPConstraint> demandConstraints = new HashMap<>();
-            for (Map.Entry<Integer, Integer> demandEntry : demands.entrySet()) {
-                int width = demandEntry.getKey();
-                int demand = demandEntry.getValue();
-                MPConstraint constraint = solver.makeConstraint(demand, demand, "demand_" + width);
-                constraint.setCoefficient(underVars.get(width), 1);
-                constraint.setCoefficient(overVars.get(width), -1);
-                demandConstraints.put(width, constraint);
-            }
-
-            for (int i = 0; i < patterns.size(); i++) {
-                PatternCandidate candidate = patterns.get(i);
-                for (Map.Entry<Integer, Integer> cut : candidate.getPattern().entrySet()) {
-                    MPConstraint constraint = demandConstraints.get(cut.getKey());
-                    if (constraint != null) {
-                        constraint.setCoefficient(xVars.get(i), cut.getValue());
+                MPObjective objective = solver.objective();
+                for (MPVariable underVar : underVars.values()) {
+                    objective.setCoefficient(underVar, params.getUnderPenalty());
+                }
+                for (Map.Entry<Integer, Integer> demandEntry : demands.entrySet()) {
+                    int width = demandEntry.getKey();
+                    int demand = demandEntry.getValue();
+                    double ratio = (double) maxDemand / Math.max(demand, 1);
+                    double penalty = OVER_PENALTY_BASE * ratio * ratio;
+                    if (!allowOverSet.contains(width)) {
+                        penalty *= 100;
                     }
+                    objective.setCoefficient(overVars.get(width), penalty);
+                }
+                objective.setMinimization();
+
+                return new IncrementalMasterLP(
+                        solver, objective, demandConstraints, totalDemand + totalOverCap, params.getTotalWidth());
+            } catch (Exception e) {
+                log.error("Failed to initialize incremental column-generation LP", e);
+                solver.delete();
+                return null;
+            }
+        }
+
+        void addPattern(PatternCandidate candidate) {
+            MPVariable x = solver.makeNumVar(0, xUpperBound, "x_" + (columnCount++));
+            for (Map.Entry<Integer, Integer> cut : candidate.getPattern().entrySet()) {
+                MPConstraint constraint = demandConstraints.get(cut.getKey());
+                if (constraint != null) {
+                    constraint.setCoefficient(x, cut.getValue());
                 }
             }
+            objective.setCoefficient(x, candidate.getCost(totalWidth));
+        }
 
-            MPConstraint overCapConstraint = solver.makeConstraint(0, totalOverCap, "overCap");
-            for (MPVariable overVar : overVars.values()) {
-                overCapConstraint.setCoefficient(overVar, 1);
-            }
-
-            MPObjective objective = solver.objective();
-            for (int i = 0; i < patterns.size(); i++) {
-                objective.setCoefficient(xVars.get(i), patterns.get(i).getCost(params.getTotalWidth()));
-            }
-            for (MPVariable underVar : underVars.values()) {
-                objective.setCoefficient(underVar, params.getUnderPenalty());
-            }
-            for (Map.Entry<Integer, Integer> demandEntry : demands.entrySet()) {
-                int width = demandEntry.getKey();
-                int demand = demandEntry.getValue();
-                double ratio = (double) maxDemand / Math.max(demand, 1);
-                double penalty = OVER_PENALTY_BASE * ratio * ratio;
-                if (!allowOverSet.contains(width)) {
-                    penalty *= 100;
+        MasterLPResult solve() {
+            try {
+                MPSolver.ResultStatus status = solver.solve();
+                if (status != MPSolver.ResultStatus.OPTIMAL && status != MPSolver.ResultStatus.FEASIBLE) {
+                    return new MasterLPResult(0, new HashMap<>(), false);
                 }
-                objective.setCoefficient(overVars.get(width), penalty);
-            }
-            objective.setMinimization();
-
-            MPSolver.ResultStatus status = solver.solve();
-            if (status != MPSolver.ResultStatus.OPTIMAL && status != MPSolver.ResultStatus.FEASIBLE) {
+                Map<Integer, Double> dualPrices = new HashMap<>(demandConstraints.size() * 2);
+                for (Map.Entry<Integer, MPConstraint> entry : demandConstraints.entrySet()) {
+                    dualPrices.put(entry.getKey(), entry.getValue().dualValue());
+                }
+                return new MasterLPResult(objective.value(), dualPrices, true);
+            } catch (Exception e) {
+                log.error("Column-generation LP solve failed", e);
                 return new MasterLPResult(0, new HashMap<>(), false);
             }
+        }
 
-            Map<Integer, Double> dualPrices = new HashMap<>();
-            for (Map.Entry<Integer, MPConstraint> entry : demandConstraints.entrySet()) {
-                dualPrices.put(entry.getKey(), entry.getValue().dualValue());
-            }
-
-            return new MasterLPResult(objective.value(), dualPrices, true);
-        } catch (Exception e) {
-            log.error("Column-generation LP solve failed", e);
-            return new MasterLPResult(0, new HashMap<>(), false);
+        @Override
+        public void close() {
+            solver.delete();
         }
     }
 

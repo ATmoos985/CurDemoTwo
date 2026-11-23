@@ -5,25 +5,40 @@ import com.example.cutdemotwo.algorithm.api.ISlittingSolverEngine;
 import com.example.cutdemotwo.algorithm.api.ComputationTimeout;
 import com.example.cutdemotwo.algorithm.runtime.IsolatedProcessRunner;
 
+import com.google.ortools.Loader;
 import changyang.cut.apsmodule.generator.NewSolver.CuttingSolver;
 import changyang.cut.apsmodule.service.*;
 import changyang.cut.apsmodule.solver.kernel.*;
 import changyang.cut.apsmodule.solver.kernel.execution.SolverExecutionContext;
 import com.example.cutdemotwo.contracts.slitting.*;
+import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.json.JsonMapper;
+import java.io.*;
+import java.lang.ref.WeakReference;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
-/** Pure legacy-kernel adapter. A separate JVM owns all native threads for each computation. */
+/** Pure legacy-kernel adapter. Reuses warm isolated JVMs while enforcing hard kill on timeout/cancel. */
 @Service
-public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
+public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCloseable {
     static final String DEFAULT_CHILD_XMX = "768m";
-    private static final JsonMapper JSON=JsonMapper.builder().build();
+    private static final String WORKER_FLAG = "--worker";
+    private static final String WARM_WORKER_PROP = "cutdemo.slitting.warmWorker";
+    private static final int MAX_IDLE_WORKERS = 2;
+    private static final long WORKER_READY_TIMEOUT_MS = 15_000L;
+    private static final JsonMapper JSON = JsonMapper.builder().build();
+
     private final String childXmx;
+    private final ConcurrentLinkedDeque<WarmWorker> idleWorkers = new ConcurrentLinkedDeque<>();
+    private final Set<WarmWorker> activeWorkers = ConcurrentHashMap.newKeySet();
+    private final AtomicBoolean closed = new AtomicBoolean(false);
 
     public LinearSlittingSolverEngine() {
         this(DEFAULT_CHILD_XMX);
@@ -32,6 +47,21 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
     @Autowired
     public LinearSlittingSolverEngine(@Value("${cutdemo.slitting.child-xmx:" + DEFAULT_CHILD_XMX + "}") String childXmx) {
         this.childXmx = normalizeChildXmx(childXmx);
+        registerShutdownCleanup(this);
+    }
+
+    private static void registerShutdownCleanup(LinearSlittingSolverEngine engine) {
+        WeakReference<LinearSlittingSolverEngine> ref = new WeakReference<>(engine);
+        try {
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                LinearSlittingSolverEngine target = ref.get();
+                if (target != null) {
+                    target.close();
+                }
+            }, "slitting-worker-pool-shutdown"));
+        } catch (IllegalStateException ignored) {
+            // JVM already shutting down
+        }
     }
 
     static String normalizeChildXmx(String raw) {
@@ -49,66 +79,379 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
         return Path.of(System.getProperty("java.home"), "bin", launcher);
     }
 
+    @Override
+    @PreDestroy
+    public void close() {
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
+        WarmWorker idle;
+        while ((idle = idleWorkers.poll()) != null) {
+            idle.shutdownQuietly();
+        }
+        for (WarmWorker active : List.copyOf(activeWorkers)) {
+            active.destroyAndWait();
+        }
+        activeWorkers.clear();
+    }
+
+    int idleWorkerCount() {
+        return idleWorkers.size();
+    }
+
     @Override public SlittingResult solve(SlittingProblem problem) {
         SlittingValidation.validateProblem(problem);
+        if (closed.get()) {
+            throw new IllegalStateException("一维计算引擎已关闭");
+        }
         Path directory = null;
         try {
             ComputationCancellation.check();
             directory = Files.createTempDirectory("cutdemo-slitting-");
             Path input = directory.resolve("input.json"), output = directory.resolve("output.json");
             Files.write(input, JSON.writeValueAsBytes(problem));
-            var command = command(input, output, ProcessHandle.current().pid(), childXmx);
-            ProcessBuilder pb = new ProcessBuilder(command)
-                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                    .redirectError(ProcessBuilder.Redirect.DISCARD);
-            // Keep the worker permit until the JVM and all its native solver threads are gone.
-            var run = IsolatedProcessRunner.run(pb, TimeUnit.SECONDS.toMillis(problem.timeLimitSeconds()),
-                    IsolatedProcessRunner.DEFAULT_POLL_MILLIS, true);
-            if (run.timedOut() || run.exitCode() == 124) throw new ComputationTimeout();
-            if (run.exitCode() == 2) throw new SlittingValidation.ValidationException("INVALID_RESULT", "内核候选结果未通过独立验收，未发布结果");
-            if (run.exitCode() != 0 || !Files.isRegularFile(output) || Files.size(output) > 8_388_608)
-                throw new IllegalStateException("一维计算进程失败或输出超限，exit=" + run.exitCode());
+
+            long totalTimeoutNanos = TimeUnit.SECONDS.toNanos(Math.max(1, problem.timeLimitSeconds()));
+            long deadlineNanos = System.nanoTime() + totalTimeoutNanos;
+            String response = executeOnWarmWorker(input, output, problem.timeLimitSeconds(), deadlineNanos);
+
+            if ("INVALID".equals(response)) {
+                throw new SlittingValidation.ValidationException("INVALID_RESULT", "内核候选结果未通过独立验收，未发布结果");
+            }
+            if (!"OK".equals(response) || !Files.isRegularFile(output) || Files.size(output) > 8_388_608) {
+                throw new IllegalStateException("一维计算进程失败或输出超限，response=" + response);
+            }
             var result = JSON.readValue(Files.readAllBytes(output), SlittingResult.class);
             SlittingValidation.validateResult(problem, result);
             return result;
-        } catch (java.io.IOException error) {
+        } catch (IOException error) {
             throw new IllegalStateException("一维计算进程启动或结果读取失败", error);
         } finally {
             IsolatedProcessRunner.deleteTempDirectory(directory);
         }
     }
-    static List<String> command(Path input,Path output,long parentPid) throws java.io.IOException {
-        return command(input,output,parentPid,DEFAULT_CHILD_XMX);
+
+    private String executeOnWarmWorker(Path input, Path output, int timeLimitSeconds, long deadlineNanos) throws IOException {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            boolean reused = false;
+            WarmWorker worker = pollAliveIdleWorker();
+            if (worker != null) {
+                reused = true;
+            } else {
+                worker = startWarmWorker(deadlineNanos);
+            }
+            activeWorkers.add(worker);
+            boolean keepWarm = false;
+            try {
+                String response = worker.solve(input, output, timeLimitSeconds, deadlineNanos);
+                keepWarm = ("OK".equals(response) || "INVALID".equals(response)) && worker.isAlive() && !closed.get();
+                return response;
+            } catch (IOException ioError) {
+                if (reused && attempt == 0) {
+                    // 空闲复用的子进程若在等待期间意外退出，立即销毁并冷启动一个新实例重试一次。
+                    continue;
+                }
+                throw ioError;
+            } finally {
+                activeWorkers.remove(worker);
+                if (keepWarm) {
+                    returnToPool(worker);
+                } else {
+                    // 超时、取消或异常退出时立即阻塞强杀子进程树，确保 native 求解线程彻底释放。
+                    worker.destroyAndWait();
+                }
+            }
+        }
+        throw new IllegalStateException("一维温热子进程重试失败");
     }
-    static List<String> command(Path input,Path output,long parentPid,String childXmx) throws java.io.IOException {
-        String cp=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
-        var args=new ArrayList<>(List.of(javaExecutable().toString(),"-Xmx"+normalizeChildXmx(childXmx),"-XX:ActiveProcessorCount=2",
+
+    private WarmWorker pollAliveIdleWorker() {
+        WarmWorker worker;
+        while ((worker = idleWorkers.pollFirst()) != null) {
+            if (worker.isAlive()) {
+                return worker;
+            }
+            worker.destroyAndWait();
+        }
+        return null;
+    }
+
+    private void returnToPool(WarmWorker worker) {
+        if (closed.get() || !worker.isAlive() || idleWorkers.size() >= MAX_IDLE_WORKERS) {
+            worker.shutdownQuietly();
+            return;
+        }
+        idleWorkers.offerFirst(worker);
+        if (closed.get()) {
+            WarmWorker drained;
+            while ((drained = idleWorkers.poll()) != null) {
+                drained.shutdownQuietly();
+            }
+        }
+    }
+
+    private WarmWorker startWarmWorker(long requestDeadlineNanos) throws IOException {
+        ComputationCancellation.check();
+        var cmd = workerCommand(ProcessHandle.current().pid(), childXmx);
+        ProcessBuilder pb = new ProcessBuilder(cmd)
+                .redirectError(ProcessBuilder.Redirect.DISCARD);
+        Process process = pb.start();
+        WarmWorker worker = new WarmWorker(process);
+        long readyDeadlineNanos = Math.min(
+                requestDeadlineNanos,
+                System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(WORKER_READY_TIMEOUT_MS));
+        try {
+            String ready = worker.awaitLine(readyDeadlineNanos);
+            if (!"READY".equals(ready)) {
+                throw new IOException("一维常驻子进程握手失败: " + ready);
+            }
+            return worker;
+        } catch (RuntimeException | IOException error) {
+            worker.destroyAndWait();
+            throw error;
+        }
+    }
+
+    static List<String> command(Path input, Path output, long parentPid) throws IOException {
+        return command(input, output, parentPid, DEFAULT_CHILD_XMX);
+    }
+
+    static List<String> command(Path input, Path output, long parentPid, String childXmx) throws IOException {
+        var args = baseJvmCommand(childXmx, false);
+        args.addAll(List.of(input.toString(), output.toString(), Long.toString(parentPid)));
+        return args;
+    }
+
+    static List<String> workerCommand(long parentPid, String childXmx) throws IOException {
+        var args = baseJvmCommand(childXmx, true);
+        args.addAll(List.of(WORKER_FLAG, Long.toString(parentPid)));
+        return args;
+    }
+
+    private static List<String> baseJvmCommand(String childXmx, boolean warmWorker) throws IOException {
+        String cp = System.getProperty("surefire.test.class.path", System.getProperty("java.class.path"));
+        var args = new ArrayList<>(List.of(
+                javaExecutable().toString(),
+                "-Xmx" + normalizeChildXmx(childXmx),
+                "-XX:ActiveProcessorCount=2",
                 "-Dcutting.parallel.globalThreads=1"));
-        boolean boot=false;
-        if(!cp.contains(java.io.File.pathSeparator) && Files.isRegularFile(Path.of(cp)))
-            try(var jar=new java.util.zip.ZipFile(cp)){boot=jar.getEntry("BOOT-INF/classes/")!=null;}
-        if(boot)args.add("-Dloader.main="+LinearSlittingSolverEngine.class.getName());
-        args.addAll(List.of("-cp",cp,boot?"org.springframework.boot.loader.launch.PropertiesLauncher":LinearSlittingSolverEngine.class.getName(),
-                input.toString(),output.toString(),Long.toString(parentPid)));
+        if (warmWorker) {
+            args.add("-D" + WARM_WORKER_PROP + "=true");
+        }
+        boolean boot = false;
+        if (!cp.contains(java.io.File.pathSeparator) && Files.isRegularFile(Path.of(cp))) {
+            try (var jar = new java.util.zip.ZipFile(cp)) {
+                boot = jar.getEntry("BOOT-INF/classes/") != null;
+            }
+        }
+        if (boot) {
+            args.add("-Dloader.main=" + LinearSlittingSolverEngine.class.getName());
+        }
+        args.addAll(List.of(
+                "-cp",
+                cp,
+                boot ? "org.springframework.boot.loader.launch.PropertiesLauncher"
+                        : LinearSlittingSolverEngine.class.getName()));
         return args;
     }
 
     /** Child entry point deliberately starts no HTTP server, inventory service or Spring context. */
     public static void main(String[] args) throws Exception {
-        var p=JSON.readValue(Files.readAllBytes(Path.of(args[0])),SlittingProblem.class);
+        if (args.length >= 2 && WORKER_FLAG.equals(args[0])) {
+            runWorkerLoop(Long.parseLong(args[1]));
+            return;
+        }
+        var p = JSON.readValue(Files.readAllBytes(Path.of(args[0])), SlittingProblem.class);
         SlittingValidation.validateProblem(p);
-        long parent=Long.parseLong(args[2]),deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(p.timeLimitSeconds());
-        var watchdog=new Thread(()->{
-            for(;;) {
-                if(System.nanoTime()>=deadline || ProcessHandle.of(parent).filter(ProcessHandle::isAlive).isEmpty())Runtime.getRuntime().halt(124);
-                try{Thread.sleep(100);}catch(InterruptedException ignored){return;}
+        long parent = Long.parseLong(args[2]), deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(p.timeLimitSeconds());
+        var watchdog = new Thread(() -> {
+            for (;;) {
+                if (System.nanoTime() >= deadline || ProcessHandle.of(parent).filter(ProcessHandle::isAlive).isEmpty()) {
+                    Runtime.getRuntime().halt(124);
+                }
+                try { Thread.sleep(100); } catch (InterruptedException ignored) { return; }
             }
-        },"slitting-parent-watch");watchdog.setDaemon(true);watchdog.start();
+        }, "slitting-parent-watch");
+        watchdog.setDaemon(true);
+        watchdog.start();
         try {
-            var result=solveKernel(p);
-            Files.write(Path.of(args[1]),JSON.writeValueAsBytes(result));
-        } catch(SlittingValidation.ValidationException rejected) { System.exit(2); }
+            var result = solveKernel(p);
+            Files.write(Path.of(args[1]), JSON.writeValueAsBytes(result));
+        } catch (SlittingValidation.ValidationException rejected) {
+            System.exit(2);
+        }
         System.exit(0);
+    }
+
+    private static void runWorkerLoop(long parentPid) throws Exception {
+        // 保留原始 stdout 仅用于协议通信，将常规 stdout 重定向到 stderr（已被父进程丢弃），防止日志污染协议流。
+        PrintStream protocolOut = System.out;
+        System.setOut(System.err);
+
+        AtomicLong requestDeadlineNanos = new AtomicLong(0L);
+        Thread watchdog = new Thread(() -> {
+            for (;;) {
+                long deadline = requestDeadlineNanos.get();
+                if ((deadline > 0L && System.nanoTime() >= deadline)
+                        || ProcessHandle.of(parentPid).filter(ProcessHandle::isAlive).isEmpty()) {
+                    Runtime.getRuntime().halt(124);
+                }
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException ignored) {
+                    return;
+                }
+            }
+        }, "slitting-worker-watch");
+        watchdog.setDaemon(true);
+        watchdog.start();
+
+        // 预先加载 OR-Tools native 库，消除首次求解冷启动延迟。
+        Loader.loadNativeLibraries();
+        protocolOut.println("READY");
+        protocolOut.flush();
+
+        var decoder = Base64.getDecoder();
+        try (BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = in.readLine()) != null) {
+                if ("QUIT".equals(line)) {
+                    break;
+                }
+                if (!line.startsWith("SOLVE ")) {
+                    protocolOut.println("ERROR");
+                    protocolOut.flush();
+                    continue;
+                }
+                String[] parts = line.split(" ");
+                if (parts.length != 4) {
+                    protocolOut.println("ERROR");
+                    protocolOut.flush();
+                    continue;
+                }
+                Path inputPath = Path.of(new String(decoder.decode(parts[1]), StandardCharsets.UTF_8));
+                Path outputPath = Path.of(new String(decoder.decode(parts[2]), StandardCharsets.UTF_8));
+                int timeLimitSeconds = Integer.parseInt(parts[3]);
+                requestDeadlineNanos.set(System.nanoTime() + TimeUnit.SECONDS.toNanos(Math.max(1, timeLimitSeconds)));
+                try {
+                    SlittingProblem problem = JSON.readValue(Files.readAllBytes(inputPath), SlittingProblem.class);
+                    SlittingValidation.validateProblem(problem);
+                    SlittingResult result = solveKernel(problem);
+                    Files.write(outputPath, JSON.writeValueAsBytes(result));
+                    protocolOut.println("OK");
+                } catch (SlittingValidation.ValidationException rejected) {
+                    protocolOut.println("INVALID");
+                } catch (Throwable err) {
+                    protocolOut.println("ERROR");
+                } finally {
+                    requestDeadlineNanos.set(0L);
+                    protocolOut.flush();
+                }
+            }
+        }
+        System.exit(0);
+    }
+
+    private static final class WarmWorker {
+        private final Process process;
+        private final BufferedWriter stdin;
+        private final BufferedReader stdout;
+        private final ExecutorService readerExecutor;
+
+        WarmWorker(Process process) {
+            this.process = process;
+            this.stdin = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
+            this.stdout = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+            this.readerExecutor = Executors.newSingleThreadExecutor(runnable -> {
+                Thread t = new Thread(runnable, "slitting-worker-io-" + process.pid());
+                t.setDaemon(true);
+                return t;
+            });
+        }
+
+        boolean isAlive() {
+            return process.isAlive();
+        }
+
+        String solve(Path input, Path output, int timeLimitSeconds, long deadlineNanos) throws IOException {
+            var encoder = Base64.getEncoder();
+            String commandLine = "SOLVE "
+                    + encoder.encodeToString(input.toString().getBytes(StandardCharsets.UTF_8))
+                    + " "
+                    + encoder.encodeToString(output.toString().getBytes(StandardCharsets.UTF_8))
+                    + " "
+                    + timeLimitSeconds;
+            stdin.write(commandLine);
+            stdin.newLine();
+            stdin.flush();
+            return awaitLine(deadlineNanos);
+        }
+
+        String awaitLine(long deadlineNanos) throws IOException {
+            Future<String> future = readerExecutor.submit(stdout::readLine);
+            try {
+                while (true) {
+                    ComputationCancellation.check();
+                    long remainingNanos = deadlineNanos - System.nanoTime();
+                    if (remainingNanos <= 0L) {
+                        throw new ComputationTimeout();
+                    }
+                    long waitMs = Math.min(
+                            IsolatedProcessRunner.DEFAULT_POLL_MILLIS,
+                            Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remainingNanos)));
+                    try {
+                        String line = future.get(waitMs, TimeUnit.MILLISECONDS);
+                        if (line == null) {
+                            int exit = process.isAlive() ? -1 : process.exitValue();
+                            if (exit == 124) {
+                                throw new ComputationTimeout();
+                            }
+                            throw new IOException("一维常驻子进程提前关闭，exit=" + exit);
+                        }
+                        return line;
+                    } catch (TimeoutException ignored) {
+                        if (!process.isAlive()) {
+                            int exit = process.exitValue();
+                            if (exit == 124) {
+                                throw new ComputationTimeout();
+                            }
+                            throw new IOException("一维常驻子进程意外退出，exit=" + exit);
+                        }
+                    }
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new CancellationException("计算收到停止请求");
+            } catch (ExecutionException execError) {
+                if (execError.getCause() instanceof IOException io) {
+                    throw io;
+                }
+                throw new IOException("读取一维常驻子进程响应失败", execError.getCause());
+            } finally {
+                future.cancel(true);
+            }
+        }
+
+        void shutdownQuietly() {
+            try {
+                if (process.isAlive()) {
+                    stdin.write("QUIT");
+                    stdin.newLine();
+                    stdin.flush();
+                    process.waitFor(500, TimeUnit.MILLISECONDS);
+                }
+            } catch (Exception ignored) {
+            } finally {
+                destroyAndWait();
+            }
+        }
+
+        void destroyAndWait() {
+            try { stdin.close(); } catch (Exception ignored) {}
+            try { stdout.close(); } catch (Exception ignored) {}
+            IsolatedProcessRunner.destroyProcessTree(process, -1L);
+            readerExecutor.shutdownNow();
+        }
     }
     static SlittingResult solveKernel(SlittingProblem p) {
         SlittingValidation.validateProblem(p);
@@ -117,19 +460,22 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
         config.setMode(p.minWidthMm() == p.maxWidthMm() ? "fixed" : "variable");
 
         long totalMs = p.timeLimitSeconds() * 1000L;
-        long startupMarginMs = Math.min(4500L, Math.max(1500L, totalMs / 4));
+        boolean warmWorker = Boolean.getBoolean(WARM_WORKER_PROP);
+        long startupMarginMs = warmWorker
+                ? Math.min(1_000L, Math.max(300L, totalMs / 10))
+                : Math.min(4_500L, Math.max(1_500L, totalMs / 4));
         long internalBudgetMs = Math.max(500L, totalMs - startupMarginMs);
         long stageLimitMs = p.stageTimeLimitMs() != null ? p.stageTimeLimitMs() : 120_000L;
-        // 隔离进程内多阶段串行共享总时限：按档位拆分单阶段帽，避免首阶段耗尽全部预算导致进程被强制终止。
+        // 隔离进程内多阶段串行共享总时限：精修模式压缩单阶段帽，为 B 层 Stage5 与受控 LNS 预留充裕预算。
         long effectiveStageMs = fast
                 ? Math.max(1_000L, Math.min(stageLimitMs, internalBudgetMs))
-                : Math.max(2_000L, Math.min(stageLimitMs, internalBudgetMs / 5));
+                : Math.max(2_000L, Math.min(stageLimitMs, Math.min(15_000L, internalBudgetMs / 6)));
         long effectiveStage4Ms = fast
                 ? Math.max(1_000L, Math.min(30_000L, effectiveStageMs / 2))
-                : Math.max(1_500L, Math.min(30_000L, effectiveStageMs / 2));
+                : Math.max(1_500L, Math.min(10_000L, effectiveStageMs / 2));
         long effectiveFastBudgetMs = fast
                 ? internalBudgetMs
-                : Math.min(10_000L, effectiveStageMs);
+                : Math.min(8_000L, effectiveStageMs);
 
         config.setTotalOverCap(p.totalOverCap());
         config.setTimeoutMs(effectiveStageMs);
@@ -166,7 +512,8 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine {
             items.add(item);
         }
 
-        boolean enableLns = !fast && Boolean.TRUE.equals(p.lnsEnabled());
+        // 精修模式默认自动启用受控 LNS 压缩序号组（仅当请求显式设置 lnsEnabled=false 时关闭）。
+        boolean enableLns = !fast && !Boolean.FALSE.equals(p.lnsEnabled());
         var options = new HashMap<String, String>();
         options.put("cutting.fast.preview", Boolean.toString(fast));
         options.put("cutting.quality", Boolean.toString(!fast));

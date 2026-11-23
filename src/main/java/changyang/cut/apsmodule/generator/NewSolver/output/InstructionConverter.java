@@ -244,8 +244,10 @@ public class InstructionConverter {
             }
         }
 
-        if (LocalNeighborhoodSequenceOptimizer.isEnabled()
-                || changyang.cut.apsmodule.generator.NewSolver.CuttingSolver.qualityMode()) {
+        boolean lnsActive = LocalNeighborhoodSequenceOptimizer.isEnabledExplicitlyConfigured()
+                ? LocalNeighborhoodSequenceOptimizer.isEnabled()
+                : changyang.cut.apsmodule.generator.NewSolver.CuttingSolver.qualityMode();
+        if (lnsActive) {
             LocalNeighborhoodSequenceOptimizer optimizer =
                     new LocalNeighborhoodSequenceOptimizer(params, this::arrangeForSequenceGroups);
             final List<CuttingInstruction> lnsInput = selectedInstructions;
@@ -381,11 +383,11 @@ public class InstructionConverter {
     }
 
     /**
-     * B 层 LNS 变体评优。快路径：按全局属性单跑（现状不变）。质量模式
-     * （cutting.quality=true）：默认邻域与扩大邻域（12/20/40/60）各跑一遍，
-     * 按 组→odd→1车→small 字典序拣优——两套邻域参数在不同数据集上互有胜负
-     * （sixian 扩大邻域胜，t9est188 默认邻域胜 69 vs 72，笔记13），
-     * 单一调参路径不可靠，评优后结构上永不劣于任一单路径。
+     * B 层受控渐进式 LNS 压缩序号组。
+     * 快路径：按全局属性单跑（现状不变）。
+     * 质量模式（cutting.quality=true）：先以标准受控邻域快速收敛，若剩余时间预算充足，
+     * 直接在第 1 段最优解的基础上接续扩大邻域（12/20/40/60）进一步压缩序号组。
+     * 两段均严格保持车数与废料守恒，按 组→odd→1车→small 字典序单调不劣化。
      */
     private LocalNeighborhoodSequenceOptimizer.LnsResult runLnsVariants(
             LocalNeighborhoodSequenceOptimizer optimizer,
@@ -394,36 +396,72 @@ public class InstructionConverter {
         if (!changyang.cut.apsmodule.generator.NewSolver.CuttingSolver.qualityMode()) {
             return optimizer.improve(instructions, groupItems);
         }
-        Map<String, String> defaultVariant = Map.of("cutting.lns.enabled", "true");
-        // 扩大邻域变体收敛后长尾空转是新时间瓶颈（t9est188 实测末次改善后仍跑满
-        // maxNoImprove=12 空迭代 ×~35s ≈ 6min）。该变体单迭代重（60 邻域/40 车），
-        // 早停阈值收紧到 6（默认变体与快路径不变）——砍长尾 ~3min，改善多在前段命中。
-        Map<String, String> qualityVariant = Map.of(
-                "cutting.lns.enabled", "true",
-                "cutting.lns.maxFreeOrders", "12",
-                "cutting.lns.maxFreePatterns", "20",
-                "cutting.lns.maxFreeCars", "40",
-                "cutting.lns.maxNeighborhoods", "60",
-                "cutting.lns.maxNoImprove", "6");
-        LocalNeighborhoodSequenceOptimizer.LnsResult resultDefault =
-                LocalNeighborhoodSequenceOptimizer.withPropertyOverrides(defaultVariant,
+        long totalBudgetMs = SolverRuntimeProperties.getLong("cutting.lns.budgetMs", 0L);
+        long startMs = System.currentTimeMillis();
+        SequenceGroupPostProcessor.GroupStats initialStats =
+                SequenceGroupPostProcessor.computeGroupStats(instructions);
+
+        Map<String, String> stage1Overrides = new HashMap<>();
+        stage1Overrides.put("cutting.lns.enabled", "true");
+        if (totalBudgetMs > 0L) {
+            long stage1Budget = Math.max(2_000L, totalBudgetMs * 45 / 100);
+            stage1Overrides.put("cutting.lns.budgetMs", Long.toString(stage1Budget));
+        }
+
+        LocalNeighborhoodSequenceOptimizer.LnsResult resultStage1 =
+                LocalNeighborhoodSequenceOptimizer.withPropertyOverrides(stage1Overrides,
                         () -> optimizer.improve(instructions, groupItems));
-        LocalNeighborhoodSequenceOptimizer.LnsResult resultQuality =
-                LocalNeighborhoodSequenceOptimizer.withPropertyOverrides(qualityVariant,
-                        () -> optimizer.improve(instructions, groupItems));
-        SolverRunColumnArchive.recordInstructions(resultDefault.instructions());
-        SolverRunColumnArchive.recordInstructions(resultQuality.instructions());
-        SequenceGroupPostProcessor.GroupStats statsDefault =
-                SequenceGroupPostProcessor.computeGroupStats(resultDefault.instructions());
-        SequenceGroupPostProcessor.GroupStats statsQuality =
-                SequenceGroupPostProcessor.computeGroupStats(resultQuality.instructions());
-        boolean qualityWins = compareGroupStats(statsQuality, statsDefault) < 0;
-        log.info("LNS variants: default={}/{}/{}/{} quality={}/{}/{}/{} -> winner={}",
-                statsDefault.groups(), statsDefault.oddCarGroups(), statsDefault.oneCarGroups(),
-                statsDefault.smallCarGroups(), statsQuality.groups(), statsQuality.oddCarGroups(),
-                statsQuality.oneCarGroups(), statsQuality.smallCarGroups(),
-                qualityWins ? "quality" : "default");
-        return qualityWins ? resultQuality : resultDefault;
+        List<CuttingInstruction> bestInstructions = resultStage1.instructions();
+        SolverRunColumnArchive.recordInstructions(bestInstructions);
+        SequenceGroupPostProcessor.GroupStats statsStage1 =
+                SequenceGroupPostProcessor.computeGroupStats(bestInstructions);
+
+        long remainingMs = totalBudgetMs > 0L
+                ? totalBudgetMs - (System.currentTimeMillis() - startMs)
+                : Long.MAX_VALUE;
+        if (totalBudgetMs > 0L && remainingMs < 3_000L) {
+            log.info("LNS stage2 skipped (remainingBudgetMs={}): stage1={}/{}/{}/{}",
+                    remainingMs,
+                    statsStage1.groups(), statsStage1.oddCarGroups(),
+                    statsStage1.oneCarGroups(), statsStage1.smallCarGroups());
+            return resultStage1;
+        }
+
+        int baseNoImprove = SolverRuntimeProperties.getInt("cutting.lns.maxNoImprove", 6);
+        Map<String, String> stage2Overrides = new HashMap<>();
+        stage2Overrides.put("cutting.lns.enabled", "true");
+        stage2Overrides.put("cutting.lns.maxFreeOrders", "12");
+        stage2Overrides.put("cutting.lns.maxFreePatterns", "20");
+        stage2Overrides.put("cutting.lns.maxFreeCars", "40");
+        stage2Overrides.put("cutting.lns.maxNeighborhoods", "60");
+        stage2Overrides.put("cutting.lns.maxNoImprove", Integer.toString(Math.min(baseNoImprove, 4)));
+        if (totalBudgetMs > 0L) {
+            stage2Overrides.put("cutting.lns.budgetMs", Long.toString(remainingMs));
+        }
+
+        final List<CuttingInstruction> stage2Input = bestInstructions;
+        LocalNeighborhoodSequenceOptimizer.LnsResult resultStage2 =
+                LocalNeighborhoodSequenceOptimizer.withPropertyOverrides(stage2Overrides,
+                        () -> optimizer.improve(stage2Input, groupItems));
+        SolverRunColumnArchive.recordInstructions(resultStage2.instructions());
+        SequenceGroupPostProcessor.GroupStats statsStage2 =
+                SequenceGroupPostProcessor.computeGroupStats(resultStage2.instructions());
+        boolean stage2Wins = compareGroupStats(statsStage2, statsStage1) < 0;
+        log.info("LNS progressive variants: stage1={}/{}/{}/{} stage2={}/{}/{}/{} -> winner={}",
+                statsStage1.groups(), statsStage1.oddCarGroups(), statsStage1.oneCarGroups(),
+                statsStage1.smallCarGroups(), statsStage2.groups(), statsStage2.oddCarGroups(),
+                statsStage2.oneCarGroups(), statsStage2.smallCarGroups(),
+                stage2Wins ? "stage2" : "stage1");
+
+        List<CuttingInstruction> winnerInstructions = stage2Wins ? resultStage2.instructions() : bestInstructions;
+        SequenceGroupPostProcessor.GroupStats winnerStats = stage2Wins ? statsStage2 : statsStage1;
+        boolean overallImproved = compareGroupStats(winnerStats, initialStats) < 0;
+        if (overallImproved) {
+            return new LocalNeighborhoodSequenceOptimizer.LnsResult(
+                    true, winnerInstructions, initialStats.groups(), winnerStats.groups(), "improved");
+        }
+        return LocalNeighborhoodSequenceOptimizer.LnsResult.notImproved(
+                instructions, stage2Wins ? resultStage2.reason() : resultStage1.reason());
     }
 
     /**

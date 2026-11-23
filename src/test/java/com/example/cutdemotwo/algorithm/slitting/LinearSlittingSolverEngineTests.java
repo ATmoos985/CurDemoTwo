@@ -2,6 +2,7 @@ package com.example.cutdemotwo.algorithm.slitting;
 
 import com.example.cutdemotwo.contracts.slitting.SlittingProblem;
 import com.example.cutdemotwo.contracts.slitting.SlittingResult;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -11,6 +12,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class LinearSlittingSolverEngineTests {
 
     private final LinearSlittingSolverEngine engine = new LinearSlittingSolverEngine();
+
+    @AfterEach
+    void closeEngine() {
+        engine.close();
+    }
 
     @Test
     void standardProblemSolvesFeasibleWithValidFulfillment() {
@@ -184,11 +190,60 @@ class LinearSlittingSolverEngineTests {
         assertThrows(IllegalArgumentException.class, () -> new LinearSlittingSolverEngine("384m -XX:+UnlockExperimentalVMOptions"));
         assertThrows(IllegalArgumentException.class, () -> new LinearSlittingSolverEngine("0m"));
 
-        var lowMemEngine = new LinearSlittingSolverEngine("384m");
+        try (var lowMemEngine = new LinearSlittingSolverEngine("384m")) {
+            var problem = new SlittingProblem("1", "mm", 1200, 10, 10, 1000, 1180, 10, 10, "FAST",
+                    List.of(new SlittingProblem.Order("O1", 500, 3000, 2, "素色")), 10);
+            var result = lowMemEngine.solve(problem);
+            assertEquals("FEASIBLE", result.status());
+            assertEquals(2, result.fulfillment().get(0).produced());
+        }
+    }
+
+    @Test
+    void warmWorkerPoolReusesLiveChildAndCleansUpOnClose() throws Exception {
         var problem = new SlittingProblem("1", "mm", 1200, 10, 10, 1000, 1180, 10, 10, "FAST",
-                List.of(new SlittingProblem.Order("O1", 500, 3000, 2, "素色")), 10);
-        var result = lowMemEngine.solve(problem);
-        assertEquals("FEASIBLE", result.status());
-        assertEquals(2, result.fulfillment().get(0).produced());
+                List.of(
+                        new SlittingProblem.Order("O1", 500, 3000, 4, "素色"),
+                        new SlittingProblem.Order("O2", 600, 3000, 2, "素色")
+                ), 15);
+        var existing = ProcessHandle.current().children().map(ProcessHandle::pid).collect(java.util.stream.Collectors.toSet());
+        try (var pooled = new LinearSlittingSolverEngine()) {
+            assertEquals(0, pooled.idleWorkerCount());
+            var r1 = pooled.solve(problem);
+            assertEquals("FEASIBLE", r1.status());
+            assertEquals(1, pooled.idleWorkerCount());
+            var firstPid = newJavaChildren(existing).map(ProcessHandle::pid).findFirst().orElseThrow();
+
+            long warmStart = System.nanoTime();
+            var r2 = pooled.solve(problem);
+            long warmMs = (System.nanoTime() - warmStart) / 1_000_000L;
+            assertEquals("FEASIBLE", r2.status());
+            assertEquals(1, pooled.idleWorkerCount());
+            var secondPid = newJavaChildren(existing).map(ProcessHandle::pid).findFirst().orElseThrow();
+            assertEquals(firstPid, secondPid, "连续请求应复用同一温热常驻子进程");
+            assertTrue(warmMs < 3_000L, "温热复用求解应显著快于冷启动，实际=" + warmMs + "ms");
+        }
+        assertTrue(newJavaChildren(existing).findAny().isEmpty(), "关闭引擎后应清理全部常驻子进程");
+    }
+
+    @Test
+    void qualityModeAutoEnablesControlledLnsAndRespectsExplicitDisable() {
+        var problem = new SlittingProblem("1", "mm", 2800, 20, 20, 2660, 2760, 10, 30, "QUALITY",
+                List.of(
+                        new SlittingProblem.Order("A", 900, 50_000L, 20, "涂层"),
+                        new SlittingProblem.Order("B", 1200, 50_000L, 16, "涂层"),
+                        new SlittingProblem.Order("C", 1500, 50_000L, 12, "涂层"),
+                        new SlittingProblem.Order("D", 600, 50_000L, 30, "涂层")
+                ), 30);
+        var withAutoLns = engine.solve(problem);
+        assertEquals("FEASIBLE", withAutoLns.status());
+        assertTrue(withAutoLns.patterns().size() <= 4, "精修自动 LNS 应将窗帘算例压缩至 <= 4 组");
+
+        var disabledLnsProblem = new SlittingProblem("1", "mm", 2800, 20, 20, 2660, 2760, 10, 30, "QUALITY",
+                problem.orders(), 30, null, null, null, null, null, null, null, null, null, false);
+        var withoutLns = engine.solve(disabledLnsProblem);
+        assertEquals("FEASIBLE", withoutLns.status());
+        assertTrue(withAutoLns.patterns().size() <= withoutLns.patterns().size(),
+                "自动 LNS 压缩后的序号组数不应劣于关闭 LNS");
     }
 }

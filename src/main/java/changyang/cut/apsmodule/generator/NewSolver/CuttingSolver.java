@@ -102,6 +102,10 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
         long fastDeadlineMs = fastPreviewMode()
                 ? startTime + fastBudgetMs()
                 : Long.MAX_VALUE;
+        long qualityBudget = qualityBudgetMs();
+        long qualityDeadlineMs = qualityMode() && qualityBudget > 0L
+                ? startTime + qualityBudget
+                : Long.MAX_VALUE;
 
         log.info("Group count: {}", groups.size());
 
@@ -119,7 +123,12 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
                 List<SolverOrderItem> groupItems = group.getValue();
                 long groupStart = System.currentTimeMillis();
                 int groupsRemaining = Math.max(1, totalGroups - groupIndex++);
-                long aLayerDeadlineMs = allocateALayerDeadline(fastDeadlineMs, groupsRemaining);
+                long groupDeadlineMs = fastPreviewMode()
+                        ? allocateALayerDeadline(fastDeadlineMs, groupsRemaining)
+                        : allocateGroupDeadline(qualityDeadlineMs, groupsRemaining);
+                long aLayerDeadlineMs = fastPreviewMode()
+                        ? groupDeadlineMs
+                        : allocateQualityALayerDeadline(groupDeadlineMs);
 
                 log.info("--- Processing group: {} ({} items) ---", groupKey, groupItems.size());
 
@@ -231,8 +240,17 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
                             "a-layer", "cutting.parallel.aLayer.enabled",
                             "cutting.parallel.aLayer.threads", aLayerTasks.size())) {
                         logParallelStage("A-layer quality search", executor, aLayerTasks.size());
+                        final boolean hasBaseline = baseline != null;
                         rawCandidates.addAll(executor.mapOrdered(aLayerTasks,
-                                        task -> solveALayerTask(task, params, aLayerDeadlineMs)).stream()
+                                        task -> {
+                                            if (hasBaseline && aLayerDeadlineMs != Long.MAX_VALUE
+                                                    && System.currentTimeMillis() >= aLayerDeadlineMs) {
+                                                log.info("Skipping A-layer task {} because A-layer budget is exhausted",
+                                                        task.namePrefix());
+                                                return null;
+                                            }
+                                            return solveALayerTask(task, params, aLayerDeadlineMs);
+                                        }).stream()
                                 .filter(Objects::nonNull)
                                 .toList());
                     }
@@ -273,7 +291,7 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
                 List<SolveReportWriter.CandidateRow> reportRows = new ArrayList<>();
                 List<SolveReportWriter.SequenceCandidateRow> sequenceReportRows = new ArrayList<>();
                 List<CandidateEvaluation> candidateEvaluations = evaluateCandidates(
-                        solveCandidates, groupKey, groupItems, demands, params);
+                        solveCandidates, groupKey, groupItems, demands, params, groupDeadlineMs);
                 for (CandidateEvaluation evaluation : candidateEvaluations) {
                     int candidateIndex = evaluation.order();
                     MultiStageMIPSolver.SolveCandidate solveCandidate = evaluation.candidate();
@@ -440,7 +458,8 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
             String groupKey,
             List<SolverOrderItem> groupItems,
             Map<Integer, Integer> demands,
-            SolverParameters params) {
+            SolverParameters params,
+            long groupDeadlineMs) {
         List<CandidateTask> tasks = new ArrayList<>(solveCandidates.size());
         for (int i = 0; i < solveCandidates.size(); i++) {
             tasks.add(new CandidateTask(i, solveCandidates.get(i)));
@@ -454,9 +473,11 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
             logParallelStage(fastPreviewMode()
                     ? "FAST preview candidates"
                     : "Stage5+LNS candidates", executor, tasks.size());
+            int totalCandidates = Math.max(1, tasks.size());
             baseEvaluations = executor.mapOrdered(tasks,
                             task -> evaluateBaseCandidate(
-                                    task, groupKey, groupItems, demands, params, outerParallel))
+                                    task, groupKey, groupItems, demands, params, outerParallel,
+                                    groupDeadlineMs, totalCandidates))
                     .stream()
                     .filter(Objects::nonNull)
                     .toList();
@@ -499,7 +520,9 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
             List<SolverOrderItem> groupItems,
             Map<Integer, Integer> demands,
             SolverParameters params,
-            boolean outerParallel) {
+            boolean outerParallel,
+            long groupDeadlineMs,
+            int totalCandidates) {
         try {
             InstructionConverter converter = new InstructionConverter(params);
             InstructionConverter.ConversionResult fastBaseline = null;
@@ -518,11 +541,20 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
 
             InstructionConverter.ConversionResult conversion;
             try {
+                Map<String, String> overrides = new HashMap<>();
                 if (outerParallel) {
+                    overrides.put("cutting.lns.parallel", "false");
+                    overrides.put("cutting.spr.parallel", "false");
+                }
+                if (qualityMode() && groupDeadlineMs != Long.MAX_VALUE) {
+                    int remainingCandidates = Math.max(1, totalCandidates - task.order());
+                    long remainingMs = groupDeadlineMs - System.currentTimeMillis() - 1_000L;
+                    long perCandidateBudgetMs = remainingMs > 0L ? remainingMs / remainingCandidates : 0L;
+                    overrides.putAll(buildControlledLnsOverrides(perCandidateBudgetMs));
+                }
+                if (!overrides.isEmpty()) {
                     conversion = SolverRuntimeProperties.withOverrides(
-                            Map.of(
-                                    "cutting.lns.parallel", "false",
-                                    "cutting.spr.parallel", "false"),
+                            overrides,
                             () -> converter.convertWithoutSetPartition(
                                     task.candidate().result().getSolution(),
                                     groupKey,
@@ -717,6 +749,10 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
                 "cutting.fast.budgetMs", 10_000L));
     }
 
+    private static long qualityBudgetMs() {
+        return SolverRuntimeProperties.getLong("cutting.quality.budgetMs", 0L);
+    }
+
     private long allocateALayerDeadline(long requestDeadlineMs, int groupsRemaining) {
         if (requestDeadlineMs == Long.MAX_VALUE) {
             return Long.MAX_VALUE;
@@ -724,6 +760,69 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
         long now = System.currentTimeMillis();
         long remainingMs = Math.max(1_000L, requestDeadlineMs - now);
         return now + Math.max(1_000L, remainingMs / Math.max(1, groupsRemaining));
+    }
+
+    private long allocateGroupDeadline(long qualityDeadlineMs, int groupsRemaining) {
+        if (qualityDeadlineMs == Long.MAX_VALUE) {
+            return Long.MAX_VALUE;
+        }
+        long now = System.currentTimeMillis();
+        long remainingMs = Math.max(1_000L, qualityDeadlineMs - now);
+        return now + Math.max(1_000L, remainingMs / Math.max(1, groupsRemaining));
+    }
+
+    private long allocateQualityALayerDeadline(long groupDeadlineMs) {
+        if (groupDeadlineMs == Long.MAX_VALUE) {
+            return Long.MAX_VALUE;
+        }
+        long now = System.currentTimeMillis();
+        long remainingMs = Math.max(1_000L, groupDeadlineMs - now);
+        return now + Math.max(2_000L, remainingMs * 40 / 100);
+    }
+
+    /**
+     * 按剩余时间预算为精修模式动态构造确定性受控 LNS 参数（节点上限、迭代数、早停步数、墙钟安全帽）。
+     * 若调用方显式禁用了 LNS，则不重新开启；若剩余预算不足 3s，则自动跳过 LNS 保底零超时。
+     */
+    static Map<String, String> buildControlledLnsOverrides(long remainingBudgetMs) {
+        Map<String, String> overrides = new HashMap<>();
+        String explicitEnabled = SolverRuntimeProperties.get("cutting.lns.enabled");
+        if (explicitEnabled != null && !explicitEnabled.isBlank() && !Boolean.parseBoolean(explicitEnabled.trim())) {
+            return overrides;
+        }
+        if (remainingBudgetMs < 3_000L) {
+            overrides.put("cutting.lns.enabled", "false");
+            return overrides;
+        }
+        overrides.put("cutting.lns.enabled", "true");
+        overrides.put("cutting.lns.budgetMs", Long.toString(remainingBudgetMs));
+
+        long nodeLimit;
+        int maxIterations;
+        int maxNoImprove;
+        if (remainingBudgetMs >= 35_000L) {
+            nodeLimit = 8_000L;
+            maxIterations = 24;
+            maxNoImprove = 5;
+        } else if (remainingBudgetMs >= 15_000L) {
+            nodeLimit = 4_000L;
+            maxIterations = 16;
+            maxNoImprove = 4;
+        } else {
+            nodeLimit = 1_500L;
+            maxIterations = 10;
+            maxNoImprove = 3;
+        }
+        if (SolverRuntimeProperties.get("cutting.lns.scipNodeLimit") == null) {
+            overrides.put("cutting.lns.scipNodeLimit", Long.toString(nodeLimit));
+        }
+        if (SolverRuntimeProperties.get("cutting.lns.maxIterations") == null) {
+            overrides.put("cutting.lns.maxIterations", Integer.toString(maxIterations));
+        }
+        if (SolverRuntimeProperties.get("cutting.lns.maxNoImprove") == null) {
+            overrides.put("cutting.lns.maxNoImprove", Integer.toString(maxNoImprove));
+        }
+        return overrides;
     }
 
     static int nestedWidthCandidateCap(SolverParameters params) {
