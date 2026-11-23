@@ -277,24 +277,56 @@ final class MarkerCompactor {
     private static Positioned bestPosition(double width, Positioned best, List<Oriented> orientations,
                                            List<Positioned> obstacles, boolean preferLeft, long deadline) {
         AabbBvh obstacleBvh = buildObstacleBvh(obstacles);
+        double[] xBuf = new double[256];
         for (var orientation : orientations) {
             double maxX = width - orientation.shape.width();
             if (maxX < 0 || orientation.shape.height() > bottom(best) + EPS) continue;
-            var xs = new TreeSet<Double>();
-            xs.add(0d);
-            xs.add(maxX);
-            if (best.x <= maxX) xs.add(best.x);
+            int xCount = 0;
+            xBuf[xCount++] = 0d;
+            xBuf[xCount++] = maxX;
+            if (best.x <= maxX) xBuf[xCount++] = best.x;
+            double currentLimit = bottom(best) - orientation.shape.height();
             for (var obstacle : obstacles) {
                 if (expired(deadline)) return best;
                 var obsProfile = obstacle.defect ? obstacle.oriented.raw : obstacle.oriented.collision;
                 var selfProfile = obstacle.defect ? orientation.raw : orientation.collision;
-                for (double ox : obsProfile.xs) for (double sx : selfProfile.xs) {
-                    double x = obstacle.x + ox - sx;
-                    if (x > 0 && x < maxX) xs.add(x);
+                if (obstacle.y + obsProfile.minY > currentLimit + selfProfile.maxY + EPS) {
+                    continue;
+                }
+                double[] oxs = obsProfile.xs;
+                double[] sxs = selfProfile.xs;
+                int needed = xCount + oxs.length * sxs.length;
+                if (needed > xBuf.length) {
+                    xBuf = Arrays.copyOf(xBuf, Math.max(needed, xBuf.length * 2));
+                }
+                double obX = obstacle.x;
+                for (double ox : oxs) {
+                    double base = obX + ox;
+                    for (double sx : sxs) {
+                        double x = base - sx;
+                        if (x > 0 && x < maxX) {
+                            xBuf[xCount++] = x;
+                        }
+                    }
                 }
             }
-            for (double x : preferLeft ? xs : xs.descendingSet()) {
+            Arrays.sort(xBuf, 0, xCount);
+            // 原地线性去重；当圆弧外扩导致密集 X 采样点过多时，跳过间距极小的冗余邻近点，同时保留首尾点
+            int uniqueCount = 0;
+            double dedupTol = xCount > 1200 ? 0.25 : 1e-9;
+            for (int i = 0; i < xCount; i++) {
+                double v = xBuf[i];
+                if (uniqueCount == 0 || v - xBuf[uniqueCount - 1] > dedupTol || i == xCount - 1) {
+                    if (uniqueCount == 0 || v - xBuf[uniqueCount - 1] > 1e-10) {
+                        xBuf[uniqueCount++] = v;
+                    }
+                }
+            }
+            int start = preferLeft ? 0 : uniqueCount - 1;
+            int step = preferLeft ? 1 : -1;
+            for (int idx = start; idx >= 0 && idx < uniqueCount; idx += step) {
                 if (expired(deadline)) return best;
+                double x = xBuf[idx];
                 double limit = bottom(best) - orientation.shape.height();
                 double y = firstFreeY(orientation, x, obstacles, obstacleBvh, limit, deadline);
                 if (y > limit + EPS) continue;
@@ -320,11 +352,25 @@ final class MarkerCompactor {
             if (x + aProfile.minX >= o.x + bProfile.maxX || x + aProfile.maxX <= o.x + bProfile.minX) {
                 return false;
             }
-            for (var a : aProfile.slabs) {
+            // 双指针利用 slabs 按 left 升序特性，将 O(|A|*|B|) 降至近线性扫描
+            var aSlabs = aProfile.slabs;
+            var bSlabs = bProfile.slabs;
+            int bStart = 0;
+            int bLen = bSlabs.size();
+            for (int ai = 0, aLen = aSlabs.size(); ai < aLen; ai++) {
                 if (expired(deadline) || forbidden.size() > 8192) return true;
-                for (var b : bProfile.slabs) {
-                    double left = Math.max(x + a.left, o.x + b.left);
-                    double right = Math.min(x + a.right, o.x + b.right);
+                var a = aSlabs.get(ai);
+                double aLeft = x + a.left;
+                double aRight = x + a.right;
+                while (bStart < bLen && o.x + bSlabs.get(bStart).right <= aLeft + EPS) {
+                    bStart++;
+                }
+                for (int bi = bStart; bi < bLen; bi++) {
+                    var b = bSlabs.get(bi);
+                    double bLeft = o.x + b.left;
+                    if (bLeft >= aRight - EPS) break;
+                    double left = Math.max(aLeft, bLeft);
+                    double right = Math.min(aRight, o.x + b.right);
                     if (right - left <= EPS) continue;
                     // Over this shared x interval, the range of colliding y translations is the
                     // difference between the two trapezoids' linear upper/lower envelopes.

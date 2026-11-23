@@ -6,9 +6,11 @@ import com.example.cutdemotwo.contracts.nesting.NestingProblem.Exclusion;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Point;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Shape;
 import org.locationtech.jts.geom.Coordinate;
+import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.LinearRing;
+import org.locationtech.jts.geom.MultiPolygon;
 import org.locationtech.jts.geom.Polygon;
 import org.locationtech.jts.geom.TopologyException;
 import org.locationtech.jts.geom.util.AffineTransformation;
@@ -486,33 +488,137 @@ final class DeepnestNfpGeometry {
     }
 
     /**
+     * 将已知严格凸多边形直接转换为 JTS {@link Polygon}，省去无意义的 {@code isValid()} 全边自交检查。
+     */
+    private static Geometry toJtsConvexPolygon(List<Point> points) {
+        if (points == null || points.size() < 3) return EMPTY_GEOM;
+        int n = points.size();
+        List<Coordinate> coords = new ArrayList<>(n + 1);
+        for (int i = 0; i < n; i++) {
+            Point p = points.get(i);
+            if (coords.isEmpty()) {
+                coords.add(new Coordinate(p.x(), p.y()));
+            } else {
+                Coordinate prev = coords.get(coords.size() - 1);
+                if (Math.abs(prev.x - p.x()) > 1e-12 || Math.abs(prev.y - p.y()) > 1e-12) {
+                    coords.add(new Coordinate(p.x(), p.y()));
+                }
+            }
+        }
+        if (coords.size() > 1 && coords.get(0).equals2D(coords.get(coords.size() - 1), 1e-12)) {
+            coords.remove(coords.size() - 1);
+        }
+        if (coords.size() < 3) return EMPTY_GEOM;
+        coords.add(new Coordinate(coords.get(0).x, coords.get(0).y));
+        Polygon poly = GEOM_FACTORY.createPolygon(coords.toArray(Coordinate[]::new));
+        poly.getEnvelopeInternal();
+        return poly;
+    }
+
+    /**
+     * 零分配外接框平移相交预判：在平移 {@code geom} 前检查其外接框平移 {@code (dx, dy)} 后是否与 {@code targetEnv} 相交。
+     */
+    static boolean translatedEnvelopeIntersects(Geometry geom, double dx, double dy, Envelope targetEnv) {
+        if (geom == null || geom.isEmpty() || targetEnv == null || targetEnv.isNull()) {
+            return false;
+        }
+        Envelope e = geom.getEnvelopeInternal();
+        return e.getMaxX() + dx >= targetEnv.getMinX()
+                && e.getMinX() + dx <= targetEnv.getMaxX()
+                && e.getMaxY() + dy >= targetEnv.getMinY()
+                && e.getMinY() + dy <= targetEnv.getMaxY();
+    }
+
+    /**
+     * 仅提取纯二维面状几何（Polygon / MultiPolygon）并预热 envelope；
+     * 若输入已是 Polygon 或 MultiPolygon 则直接复用，避免冗余拷贝与重复外接框计算。
+     */
+    private static Geometry extractPolygonal(Geometry geom) {
+        if (geom == null || geom.isEmpty()) return EMPTY_GEOM;
+        if (geom instanceof Polygon || geom instanceof MultiPolygon) {
+            geom.getEnvelopeInternal();
+            return geom;
+        }
+        @SuppressWarnings("unchecked")
+        List<Polygon> polys = PolygonExtracter.getPolygons(geom);
+        if (polys.isEmpty()) {
+            return EMPTY_GEOM;
+        }
+        Geometry result = polys.size() == 1
+                ? polys.get(0)
+                : GEOM_FACTORY.createMultiPolygon(polys.toArray(Polygon[]::new));
+        result.getEnvelopeInternal();
+        return result;
+    }
+
+    /**
+     * 将两个已知合法且外接框严格分离的面状几何直接拼装为 {@link MultiPolygon}（$O(1)$ 零布尔运算）。
+     */
+    private static Geometry combineDisjointPolygonal(Geometry a, Geometry b) {
+        int countA = a instanceof Polygon ? 1 : (a instanceof MultiPolygon ? a.getNumGeometries() : -1);
+        int countB = b instanceof Polygon ? 1 : (b instanceof MultiPolygon ? b.getNumGeometries() : -1);
+        if (countA > 0 && countB > 0) {
+            Polygon[] polys = new Polygon[countA + countB];
+            int idx = 0;
+            if (a instanceof Polygon pa) {
+                polys[idx++] = pa;
+            } else {
+                for (int i = 0; i < countA; i++) {
+                    polys[idx++] = (Polygon) a.getGeometryN(i);
+                }
+            }
+            if (b instanceof Polygon pb) {
+                polys[idx++] = pb;
+            } else {
+                for (int i = 0; i < countB; i++) {
+                    polys[idx++] = (Polygon) b.getGeometryN(i);
+                }
+            }
+            MultiPolygon mp = GEOM_FACTORY.createMultiPolygon(polys);
+            mp.getEnvelopeInternal();
+            return mp;
+        }
+        List<Polygon> polys = new ArrayList<>();
+        PolygonExtracter.getPolygons(a, polys);
+        PolygonExtracter.getPolygons(b, polys);
+        if (polys.isEmpty()) return EMPTY_GEOM;
+        Geometry res = polys.size() == 1
+                ? polys.get(0)
+                : GEOM_FACTORY.createMultiPolygon(polys.toArray(Polygon[]::new));
+        res.getEnvelopeInternal();
+        return res;
+    }
+
+    /**
      * 校验并修复任意 JTS 几何，仅保留合法的二维面状部分（Polygon / MultiPolygon），并预热 envelope 保证多线程只读安全。
      */
     static Geometry ensureValidPolygonal(Geometry geom) {
         if (geom == null || geom.isEmpty()) return EMPTY_GEOM;
         Geometry valid = geom.isValid() ? geom : GeometryFixer.fix(geom);
-        if (valid == null || valid.isEmpty()) return EMPTY_GEOM;
-
-        Geometry result;
-        if (valid instanceof Polygon) {
-            result = valid;
-        } else {
-            @SuppressWarnings("unchecked")
-            List<Polygon> polys = PolygonExtracter.getPolygons(valid);
-            if (polys.isEmpty()) {
-                return EMPTY_GEOM;
-            }
-            if (polys.size() == 1) {
-                result = polys.get(0);
-            } else {
-                result = GEOM_FACTORY.createMultiPolygon(polys.toArray(Polygon[]::new));
-            }
-        }
-        result.getEnvelopeInternal();
-        return result;
+        return extractPolygonal(valid);
     }
 
-    /** 使用 JTS {@link UnaryUnionOp}（OverlayNG 内核）批量合并多边形集合，带合法性修复兜底。 */
+    /**
+     * 双几何并集快慢双轨分流：
+     * 外接框严格不相交时 $O(1)$ 直拼；相交时走轻量单次 {@link OverlayNG#overlay(Geometry, Geometry, int)}，
+     * 仅在抛出 {@link TopologyException} 时回退 {@link OverlayNGRobust} + {@link GeometryFixer}。
+     */
+    static Geometry unionTwoGeometries(Geometry a, Geometry b) {
+        if (a == null || a.isEmpty()) return extractPolygonal(b);
+        if (b == null || b.isEmpty()) return extractPolygonal(a);
+        if (!a.getEnvelopeInternal().intersects(b.getEnvelopeInternal())) {
+            return combineDisjointPolygonal(a, b);
+        }
+        ComputationCancellation.check();
+        try {
+            return extractPolygonal(OverlayNG.overlay(a, b, OverlayNG.UNION));
+        } catch (TopologyException ignored) {
+            return ensureValidPolygonal(OverlayNGRobust.overlay(
+                    ensureValidPolygonal(a), ensureValidPolygonal(b), OverlayNG.UNION));
+        }
+    }
+
+    /** 使用 JTS 快慢双轨分流批量合并多边形集合，带合法性修复兜底。 */
     static Geometry unionGeometries(List<Geometry> geoms) {
         if (geoms == null || geoms.isEmpty()) return EMPTY_GEOM;
         List<Geometry> valid = new ArrayList<>(geoms.size());
@@ -522,11 +628,12 @@ final class DeepnestNfpGeometry {
             }
         }
         if (valid.isEmpty()) return EMPTY_GEOM;
-        if (valid.size() == 1) return ensureValidPolygonal(valid.get(0));
+        if (valid.size() == 1) return extractPolygonal(valid.get(0));
+        if (valid.size() == 2) return unionTwoGeometries(valid.get(0), valid.get(1));
         ComputationCancellation.check();
         try {
-            return ensureValidPolygonal(UnaryUnionOp.union(valid));
-        } catch (TopologyException ex) {
+            return extractPolygonal(UnaryUnionOp.union(valid));
+        } catch (TopologyException ignored) {
             List<Geometry> fixed = new ArrayList<>(valid.size());
             for (Geometry g : valid) {
                 Geometry fg = ensureValidPolygonal(g);
@@ -538,23 +645,55 @@ final class DeepnestNfpGeometry {
         }
     }
 
-    /** 使用 JTS {@link OverlayNGRobust} 执行高精度布尔差集 {@code a \ b}，带外接框快速剪枝。 */
+    /**
+     * 布尔差集 {@code a \ b} 快慢双轨分流：
+     * 先执行外接框剪枝及 MultiPolygon 子分量外接框预筛，再走轻量单次 {@link OverlayNG#overlay(Geometry, Geometry, int)}，
+     * 仅在抛出 {@link TopologyException} 时回退 {@link OverlayNGRobust} + {@link GeometryFixer}。
+     */
     static Geometry differenceGeometry(Geometry a, Geometry b) {
         if (a == null || a.isEmpty()) return EMPTY_GEOM;
         if (b == null || b.isEmpty()) return a;
-        if (!a.getEnvelopeInternal().intersects(b.getEnvelopeInternal())) {
+        Envelope envA = a.getEnvelopeInternal();
+        if (!envA.intersects(b.getEnvelopeInternal())) {
             return a;
+        }
+        Geometry effB = b;
+        if (b instanceof MultiPolygon mp) {
+            int num = mp.getNumGeometries();
+            List<Polygon> overlapping = null;
+            for (int i = 0; i < num; i++) {
+                Polygon sub = (Polygon) mp.getGeometryN(i);
+                if (envA.intersects(sub.getEnvelopeInternal())) {
+                    if (overlapping == null) {
+                        overlapping = new ArrayList<>(num);
+                    }
+                    overlapping.add(sub);
+                }
+            }
+            if (overlapping == null) {
+                return a;
+            }
+            if (overlapping.size() == 1) {
+                effB = overlapping.get(0);
+            } else if (overlapping.size() < num) {
+                effB = GEOM_FACTORY.createMultiPolygon(overlapping.toArray(Polygon[]::new));
+                effB.getEnvelopeInternal();
+            }
         }
         ComputationCancellation.check();
         try {
-            return ensureValidPolygonal(OverlayNGRobust.overlay(a, b, OverlayNG.DIFFERENCE));
-        } catch (TopologyException ex) {
+            return extractPolygonal(OverlayNG.overlay(a, effB, OverlayNG.DIFFERENCE));
+        } catch (TopologyException ignored) {
             return ensureValidPolygonal(OverlayNGRobust.overlay(
-                    ensureValidPolygonal(a), ensureValidPolygonal(b), OverlayNG.DIFFERENCE));
+                    ensureValidPolygonal(a), ensureValidPolygonal(effB), OverlayNG.DIFFERENCE));
         }
     }
 
-    /** 使用 JTS {@link OverlayNGRobust} 执行高精度布尔交集 {@code a ∩ b}，带外接框快速剪枝。 */
+    /**
+     * 布尔交集 {@code a ∩ b} 快慢双轨分流：
+     * 先外接框剪枝，再走轻量单次 {@link OverlayNG#overlay(Geometry, Geometry, int)}，
+     * 仅在抛出 {@link TopologyException} 时回退 {@link OverlayNGRobust} + {@link GeometryFixer}。
+     */
     static Geometry intersectionGeometry(Geometry a, Geometry b) {
         if (a == null || a.isEmpty() || b == null || b.isEmpty()) return EMPTY_GEOM;
         if (!a.getEnvelopeInternal().intersects(b.getEnvelopeInternal())) {
@@ -562,8 +701,8 @@ final class DeepnestNfpGeometry {
         }
         ComputationCancellation.check();
         try {
-            return ensureValidPolygonal(OverlayNGRobust.overlay(a, b, OverlayNG.INTERSECTION));
-        } catch (TopologyException ex) {
+            return extractPolygonal(OverlayNG.overlay(a, b, OverlayNG.INTERSECTION));
+        } catch (TopologyException ignored) {
             return ensureValidPolygonal(OverlayNGRobust.overlay(
                     ensureValidPolygonal(a), ensureValidPolygonal(b), OverlayNG.INTERSECTION));
         }
@@ -689,7 +828,7 @@ final class DeepnestNfpGeometry {
                             : shrinkConvexMicro(negateConvex(cb), OPEN_CHANNEL_EPS);
                     List<Point> sum = minkowskiSumConvex(effA, negB);
                     if (sum.size() >= 3) {
-                        Geometry poly = toJtsPolygon(sum, 0.0, 0.0);
+                        Geometry poly = toJtsConvexPolygon(sum);
                         if (!poly.isEmpty()) {
                             pieces.add(poly);
                         }

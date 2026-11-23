@@ -13,6 +13,7 @@ import com.example.cutdemotwo.contracts.nesting.NestingProblem.Part;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Point;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Shape;
 import com.example.cutdemotwo.contracts.nesting.NestingResult.Placement;
+import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.Geometry;
 import org.springframework.stereotype.Service;
 
@@ -179,8 +180,12 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
     }
 
     private static final class ClipCacheEntry {
-        Geometry combinedNfp = DeepnestNfpGeometry.EMPTY_GEOM;
+        Geometry feasibleNfp;
         int nextPlacedIndex = 0;
+
+        ClipCacheEntry(Geometry initialFeasible) {
+            this.feasibleNfp = initialFeasible;
+        }
     }
 
     private record NfpOuterKey(int aDemand, int aAngle, int bDemand, int bAngle) {}
@@ -529,7 +534,8 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         if (bestEval.placed().size() >= 2
                 && !reachedTheoreticalBound(bestEval, n, theoreticalMinY)
                 && System.nanoTime() < stage3Deadline) {
-            long remainingStage3 = stage3Deadline - System.nanoTime();
+            long stage3CapDeadline = Math.min(stage3Deadline, System.nanoTime() + stage3Reserve);
+            long remainingStage3 = stage3CapDeadline - System.nanoTime();
             long polishDeadline = System.nanoTime() + Math.min(120_000_000L, Math.max(25_000_000L, remainingStage3 / 4));
             List<PlacedInstance> polished = polishPlacements(ctx, bestEval.placed(), polishDeadline);
             finalPlacements = toPlacements(polished);
@@ -537,8 +543,8 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             if (!ctx.preferBottom
                     && ctx.pipeline.isNoop()
                     && finalPlacements.size() <= MarkerCompactor.MAX_COMPACT_PIECES
-                    && System.nanoTime() < stage3Deadline) {
-                finalPlacements = runLinkedCompaction(problem, finalPlacements, stage3Deadline);
+                    && System.nanoTime() < stage3CapDeadline) {
+                finalPlacements = runLinkedCompaction(problem, finalPlacements, stage3CapDeadline);
             }
         }
 
@@ -703,8 +709,8 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 }
             }
 
-            // 预计算 kept 集合的基础状态与 NFP 增量缓存（同一轮 Ruin 的多种 Recreate 序共享）
-            Map<NfpInnerKey, Geometry> keptNfpCache = new HashMap<>();
+            // 预计算 kept 集合的基础状态与剩余可行域缓存（同一轮 Ruin 的多种 Recreate 序共享）
+            Map<NfpInnerKey, Geometry> keptFeasibleCache = new HashMap<>();
             List<List<ExpandedPart>> recreateOrders = buildRecreateOrders(removedParts);
             DeepnestGeneticAlgorithm.PlacementMode recreateMode = (round % 4 == 3)
                     ? DeepnestGeneticAlgorithm.PlacementMode.TIGHT_CORNER
@@ -717,7 +723,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                     break;
                 }
                 EvaluationResult candidate = recreateFromPartial(
-                        ctx, kept, order, keptNfpCache, recreateMode, best, deadlineNanos);
+                        ctx, kept, order, keptFeasibleCache, recreateMode, best, deadlineNanos);
                 if (isStrictlyBetter(candidate, best)) {
                     best = candidate;
                     improvedRound = true;
@@ -824,7 +830,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
     private static EvaluationResult recreateFromPartial(ProblemContext ctx,
                                                         List<PlacedInstance> kept,
                                                         List<ExpandedPart> toReinsert,
-                                                        Map<NfpInnerKey, Geometry> keptNfpCache,
+                                                        Map<NfpInnerKey, Geometry> keptFeasibleCache,
                                                         DeepnestGeneticAlgorithm.PlacementMode mode,
                                                         EvaluationResult incumbent,
                                                         long deadlineNanos) {
@@ -858,6 +864,10 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         }
 
         boolean incumbentComplete = incumbent.placed().size() == ctx.items.size();
+        // 满件且无软惩罚权衡时，任何超出当前最优版长的候选点都不可能产生更优解，直接启用严格 Y 上界剪枝与视窗裁剪
+        double maxAllowedExtentY = (incumbentComplete && ctx.pipeline.isNoop())
+                ? (incumbent.extentY() + 1e-3)
+                : Double.POSITIVE_INFINITY;
         int keptSize = kept.size();
         Map<NfpInnerKey, ClipCacheEntry> clipCache = new HashMap<>();
 
@@ -872,34 +882,41 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 ComputationCancellation.check();
                 OrientedPart ori = item.byAngle.get(angle);
 
-                // 利用 keptNfpCache 复用 kept 集合的联合 OuterNFP，避免同一轮多启发序重复做布尔并集
+                // 数学界限快速过滤：该角度自身高度已超过允许版长上界则直接跳过
+                if (ori.height() > maxAllowedExtentY + 1e-6) {
+                    continue;
+                }
+
+                // 利用 keptFeasibleCache 复用 kept 集合的剩余可行域（已按视窗裁剪并跳过不相交 OuterNFP）
                 if (keptSize > 0) {
                     NfpInnerKey key = new NfpInnerKey(ori.demandId(), ori.angle());
                     if (!clipCache.containsKey(key)) {
-                        Geometry baseCombined = keptNfpCache.get(key);
-                        if (baseCombined == null) {
-                            List<Geometry> keptGeoms = new ArrayList<>(keptSize);
-                            for (int j = 0; j < keptSize; j++) {
+                        Geometry baseFeasible = keptFeasibleCache.get(key);
+                        if (baseFeasible == null) {
+                            Geometry rem = clipSheetNfpToExtentWindow(ctx, ori, ctx.getInnerNfp(ori), maxAllowedExtentY);
+                            for (int j = 0; j < keptSize && !rem.isEmpty(); j++) {
                                 ComputationCancellation.check();
                                 PlacedInstance p = kept.get(j);
                                 Geometry outer = ctx.getOuterNfp(p.ori, ori);
-                                if (!outer.isEmpty()) {
-                                    keptGeoms.add(DeepnestNfpGeometry.translateGeometry(outer, p.x, p.y));
+                                if (DeepnestNfpGeometry.translatedEnvelopeIntersects(outer, p.x, p.y, rem.getEnvelopeInternal())) {
+                                    Geometry translated = DeepnestNfpGeometry.translateGeometry(outer, p.x, p.y);
+                                    rem = DeepnestNfpGeometry.differenceGeometry(rem, translated);
                                 }
                             }
-                            baseCombined = DeepnestNfpGeometry.unionGeometries(keptGeoms);
-                            keptNfpCache.put(key, baseCombined);
+                            baseFeasible = rem;
+                            keptFeasibleCache.put(key, baseFeasible);
                         }
-                        ClipCacheEntry entry = new ClipCacheEntry();
-                        entry.combinedNfp = baseCombined;
+                        ClipCacheEntry entry = new ClipCacheEntry(baseFeasible);
                         entry.nextPlacedIndex = keptSize;
                         clipCache.put(key, entry);
                     }
                 }
 
+                double upperBoundScore = bestSpot != null ? bestSpot.score() : Double.POSITIVE_INFINITY;
                 ChosenSpot candidate = findBestSpotForOrientation(
                         ctx, ori, mode, placed, placedWorldPolys, placedBvh, clipCache,
-                        currentMinX, currentMaxX, currentMinY, currentMaxY, LNS_CANDIDATES_TO_VALIDATE
+                        currentMinX, currentMaxX, currentMinY, currentMaxY, LNS_CANDIDATES_TO_VALIDATE,
+                        maxAllowedExtentY, upperBoundScore
                 );
                 if (candidate != null && (bestSpot == null || candidate.score() < bestSpot.score())) {
                     bestSpot = candidate;
@@ -1037,9 +1054,11 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 for (int angle : item.allowedAngles) {
                     ComputationCancellation.check();
                     OrientedPart ori = item.byAngle.get(angle);
+                    double upperBoundScore = bestSpot != null ? bestSpot.score() : Double.POSITIVE_INFINITY;
                     ChosenSpot candidate = findBestSpotForOrientation(
                             ctx, ori, ind.placementMode, placed, placedWorldPolys, placedBvh, clipCache,
-                            currentMinX, currentMaxX, currentMinY, currentMaxY, candidateLimit
+                            currentMinX, currentMaxX, currentMinY, currentMaxY, candidateLimit,
+                            Double.POSITIVE_INFINITY, upperBoundScore
                     );
                     if (candidate != null && (bestSpot == null || candidate.score() < bestSpot.score())) {
                         bestSpot = candidate;
@@ -1050,7 +1069,8 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 OrientedPart prefOri = item.byAngle.getOrDefault(preferredAngle, item.primary);
                 bestSpot = findBestSpotForOrientation(
                         ctx, prefOri, ind.placementMode, placed, placedWorldPolys, placedBvh, clipCache,
-                        currentMinX, currentMaxX, currentMinY, currentMaxY, candidateLimit
+                        currentMinX, currentMaxX, currentMinY, currentMaxY, candidateLimit,
+                        Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY
                 );
                 // Fallback to other allowed rotations if preferred orientation cannot fit on remaining sheet
                 if (bestSpot == null && item.allowedAngles.size() > 1) {
@@ -1058,9 +1078,11 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                         if (angle == prefOri.angle()) continue;
                         ComputationCancellation.check();
                         OrientedPart altOri = item.byAngle.get(angle);
+                        double upperBoundScore = bestSpot != null ? bestSpot.score() : Double.POSITIVE_INFINITY;
                         ChosenSpot candidate = findBestSpotForOrientation(
                                 ctx, altOri, ind.placementMode, placed, placedWorldPolys, placedBvh, clipCache,
-                                currentMinX, currentMaxX, currentMinY, currentMaxY, candidateLimit
+                                currentMinX, currentMaxX, currentMinY, currentMaxY, candidateLimit,
+                                Double.POSITIVE_INFINITY, upperBoundScore
                         );
                         if (candidate != null && (bestSpot == null || candidate.score() < bestSpot.score())) {
                             bestSpot = candidate;
@@ -1109,6 +1131,52 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         return new EvaluationResult(placed, placedArea, extentY, fitness);
     }
 
+    /**
+     * 当存在严格版长上界 {@code maxAllowedExtentY} 时，将 {@code sheetNfp} 裁剪至有效 Y 视窗，
+     * 避免后续布尔差集与顶点采样浪费在已不可能优于当前最优解的高 Y 废区域上。
+     */
+    private static Geometry clipSheetNfpToExtentWindow(ProblemContext ctx,
+                                                        OrientedPart ori,
+                                                        Geometry sheetNfp,
+                                                        double maxAllowedExtentY) {
+        if (sheetNfp == null || sheetNfp.isEmpty() || !Double.isFinite(maxAllowedExtentY)) {
+            return sheetNfp;
+        }
+        Envelope env = sheetNfp.getEnvelopeInternal();
+        double pad = DeepnestNfpGeometry.OPEN_CHANNEL_EPS * 4.0 + 1e-4;
+        if (!ctx.preferBottom) {
+            double maxOriginY = maxAllowedExtentY - ori.height();
+            if (maxOriginY < env.getMinY() - 1e-6) {
+                return DeepnestNfpGeometry.EMPTY_GEOM;
+            }
+            if (maxOriginY + pad >= env.getMaxY()) {
+                return sheetNfp;
+            }
+            Geometry win = DeepnestNfpGeometry.rectGeometry(
+                    env.getMinX() - pad,
+                    env.getMinY() - pad,
+                    (env.getMaxX() - env.getMinX()) + 2.0 * pad,
+                    Math.max(2.0 * pad, (maxOriginY - env.getMinY()) + 2.0 * pad)
+            );
+            return DeepnestNfpGeometry.intersectionGeometry(sheetNfp, win);
+        } else {
+            double minOriginY = ctx.matH - maxAllowedExtentY;
+            if (minOriginY > env.getMaxY() + 1e-6) {
+                return DeepnestNfpGeometry.EMPTY_GEOM;
+            }
+            if (minOriginY - pad <= env.getMinY()) {
+                return sheetNfp;
+            }
+            Geometry win = DeepnestNfpGeometry.rectGeometry(
+                    env.getMinX() - pad,
+                    minOriginY - pad,
+                    (env.getMaxX() - env.getMinX()) + 2.0 * pad,
+                    Math.max(2.0 * pad, (env.getMaxY() - minOriginY) + 2.0 * pad)
+            );
+            return DeepnestNfpGeometry.intersectionGeometry(sheetNfp, win);
+        }
+    }
+
     private static ChosenSpot findBestSpotForOrientation(ProblemContext ctx,
                                                          OrientedPart ori,
                                                          DeepnestGeneticAlgorithm.PlacementMode mode,
@@ -1118,7 +1186,9 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                                                          Map<NfpInnerKey, ClipCacheEntry> clipCache,
                                                          double currentMinX, double currentMaxX,
                                                          double currentMinY, double currentMaxY,
-                                                         int maxCandidatesToValidate) {
+                                                         int maxCandidatesToValidate,
+                                                         double maxAllowedExtentY,
+                                                         double upperBoundScore) {
         Geometry sheetNfp = ctx.getInnerNfp(ori);
         if (sheetNfp.isEmpty()) return null;
 
@@ -1146,6 +1216,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             }
 
             ChosenSpot bestFirst = null;
+            double bestScoreBound = upperBoundScore;
             for (Point pt : rawPts) {
                 ComputationCancellation.check();
                 double cx = snapCoord(pt.x(), minValidX, maxValidX);
@@ -1155,6 +1226,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                     if (cy > maxValidY + 1e-6) continue;
                 }
                 double primaryY = ctx.preferBottom ? (ctx.matH - cy) : (cy + ori.height());
+                if (primaryY > maxAllowedExtentY) continue;
                 double secondaryX = ctx.preferRight ? (ctx.matW - cx) : (cx + ori.width());
                 double score = mode == DeepnestGeneticAlgorithm.PlacementMode.GRAVITY_X
                         ? (secondaryX * ctx.gravityWeight + primaryY)
@@ -1162,41 +1234,58 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 if (!ctx.pipeline.isNoop() && part != null) {
                     score += ctx.pipeline.penalty(ctx.problem, part, cx, cy, ori.angle(), ori.shape()) * ctx.gravityWeight;
                 }
-                if (bestFirst != null && score >= bestFirst.score() - 1e-9) continue;
+                if (score >= bestScoreBound - 1e-9) continue;
                 if (isPlacementValid(ctx, cx, cy, ori, placed, null, -1)) {
                     bestFirst = new ChosenSpot(cx, cy, ori, score, 0.0);
+                    bestScoreBound = score;
                 }
             }
             return bestFirst;
         }
 
-        // Incremental union of OuterNFPs via clipCache (JTS UnaryUnionOp + OverlayNG difference)
+        // Incremental feasible region update via clipCache:
+        // 维护剩余可行域 feasibleNfp = ((sheetNfp \ nfp_0) \ nfp_1) ...，
+        // 对每个新增已放件先做零分配外接框相交预判，跳过与当前剩余可行域无交集的 NFP 并集与差集运算。
         NfpInnerKey cacheKey = new NfpInnerKey(ori.demandId(), ori.angle());
-        ClipCacheEntry entry = clipCache.computeIfAbsent(cacheKey, k -> new ClipCacheEntry());
-        if (entry.nextPlacedIndex < placed.size()) {
-            List<Geometry> deltaGeoms = new ArrayList<>(placed.size() - entry.nextPlacedIndex + 1);
-            if (!entry.combinedNfp.isEmpty()) {
-                deltaGeoms.add(entry.combinedNfp);
-            }
-            for (int j = entry.nextPlacedIndex; j < placed.size(); j++) {
+        ClipCacheEntry entry = clipCache.get(cacheKey);
+        if (entry == null) {
+            Geometry initFeasible = Double.isFinite(maxAllowedExtentY)
+                    ? clipSheetNfpToExtentWindow(ctx, ori, sheetNfp, maxAllowedExtentY)
+                    : sheetNfp;
+            entry = new ClipCacheEntry(initFeasible);
+            clipCache.put(cacheKey, entry);
+        }
+        if (entry.nextPlacedIndex < placed.size() && !entry.feasibleNfp.isEmpty()) {
+            Geometry rem = entry.feasibleNfp;
+            for (int j = entry.nextPlacedIndex; j < placed.size() && !rem.isEmpty(); j++) {
                 ComputationCancellation.check();
                 PlacedInstance p = placed.get(j);
                 Geometry outer = ctx.getOuterNfp(p.ori, ori);
-                if (!outer.isEmpty()) {
-                    deltaGeoms.add(DeepnestNfpGeometry.translateGeometry(outer, p.x, p.y));
+                if (DeepnestNfpGeometry.translatedEnvelopeIntersects(outer, p.x, p.y, rem.getEnvelopeInternal())) {
+                    Geometry translated = DeepnestNfpGeometry.translateGeometry(outer, p.x, p.y);
+                    rem = DeepnestNfpGeometry.differenceGeometry(rem, translated);
                 }
             }
-            entry.combinedNfp = DeepnestNfpGeometry.unionGeometries(deltaGeoms);
+            entry.feasibleNfp = rem;
             entry.nextPlacedIndex = placed.size();
         }
 
-        Geometry finalNfp = entry.combinedNfp.isEmpty()
-                ? sheetNfp
-                : DeepnestNfpGeometry.differenceGeometry(sheetNfp, entry.combinedNfp);
+        Geometry finalNfp = entry.feasibleNfp;
         if (finalNfp.isEmpty()) return null;
 
         List<DeepnestNfpGeometry.Ring> rings = DeepnestNfpGeometry.extractRings(finalNfp);
         if (rings.isEmpty()) return null;
+
+        boolean checkMerged = ctx.pieceGap == 0.0;
+        double mergeWeight = switch (mode) {
+            case TIGHT_CORNER -> 1.8;
+            case BOX_AREA -> ctx.matW * 0.5;
+            default -> 0.35;
+        };
+        double maxPossibleBonus = checkMerged ? (ori.width() + ori.height()) * 2.0 * mergeWeight : 0.0;
+        double maxAllowedBaseScore = Double.isFinite(upperBoundScore)
+                ? (upperBoundScore + maxPossibleBonus)
+                : Double.POSITIVE_INFINITY;
 
         double creaseY = ctx.preferBottom ? currentMinY : (currentMaxY - ori.height());
         double creaseX = ctx.preferRight ? currentMinX : (currentMaxX - ori.width());
@@ -1208,22 +1297,25 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             int vn = verts.size();
             for (int k = 0; k < vn; k++) {
                 Point p1 = verts.get(k);
-                addScoredCandidate(ctx, ori, mode, p1.x(), p1.y(), maxValidX, maxValidY,
-                        currentMinX, currentMaxX, currentMinY, currentMaxY, candidates);
+                addScoredCandidate(ctx, ori, mode, p1.x(), p1.y(), minValidX, maxValidX, maxValidY,
+                        currentMinX, currentMaxX, currentMinY, currentMaxY,
+                        maxAllowedExtentY, maxAllowedBaseScore, candidates);
 
                 Point p2 = verts.get((k + 1) % vn);
                 // Crease-line intersection along diagonal NFP edge for tight tucking without growing extentY/extentX
                 if ((p1.y() - creaseY) * (p2.y() - creaseY) < -1e-12) {
                     double t = (creaseY - p1.y()) / (p2.y() - p1.y());
                     double ix = p1.x() + t * (p2.x() - p1.x());
-                    addScoredCandidate(ctx, ori, mode, ix, creaseY, maxValidX, maxValidY,
-                            currentMinX, currentMaxX, currentMinY, currentMaxY, candidates);
+                    addScoredCandidate(ctx, ori, mode, ix, creaseY, minValidX, maxValidX, maxValidY,
+                            currentMinX, currentMaxX, currentMinY, currentMaxY,
+                            maxAllowedExtentY, maxAllowedBaseScore, candidates);
                 }
                 if ((p1.x() - creaseX) * (p2.x() - creaseX) < -1e-12) {
                     double t = (creaseX - p1.x()) / (p2.x() - p1.x());
                     double iy = p1.y() + t * (p2.y() - p1.y());
-                    addScoredCandidate(ctx, ori, mode, creaseX, iy, maxValidX, maxValidY,
-                            currentMinX, currentMaxX, currentMinY, currentMaxY, candidates);
+                    addScoredCandidate(ctx, ori, mode, creaseX, iy, minValidX, maxValidX, maxValidY,
+                            currentMinX, currentMaxX, currentMinY, currentMaxY,
+                            maxAllowedExtentY, maxAllowedBaseScore, candidates);
                 }
             }
         }
@@ -1231,14 +1323,18 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         if (!ctx.pipeline.isNoop() && part != null && part.isAuxiliary()
                 && ctx.hardObstaclesFor(ori.demandId()).size() < ctx.exclusions.size()) {
             for (ExclusionObstacle obs : ctx.exclusions) {
-                addScoredCandidate(ctx, ori, mode, obs.maxX, 0.0, maxValidX, maxValidY,
-                        currentMinX, currentMaxX, currentMinY, currentMaxY, candidates);
-                addScoredCandidate(ctx, ori, mode, minValidX, obs.maxY, maxValidX, maxValidY,
-                        currentMinX, currentMaxX, currentMinY, currentMaxY, candidates);
-                addScoredCandidate(ctx, ori, mode, obs.maxX, currentMinY, maxValidX, maxValidY,
-                        currentMinX, currentMaxX, currentMinY, currentMaxY, candidates);
-                addScoredCandidate(ctx, ori, mode, minValidX, currentMaxY, maxValidX, maxValidY,
-                        currentMinX, currentMaxX, currentMinY, currentMaxY, candidates);
+                addScoredCandidate(ctx, ori, mode, obs.maxX, 0.0, minValidX, maxValidX, maxValidY,
+                        currentMinX, currentMaxX, currentMinY, currentMaxY,
+                        maxAllowedExtentY, maxAllowedBaseScore, candidates);
+                addScoredCandidate(ctx, ori, mode, minValidX, obs.maxY, minValidX, maxValidX, maxValidY,
+                        currentMinX, currentMaxX, currentMinY, currentMaxY,
+                        maxAllowedExtentY, maxAllowedBaseScore, candidates);
+                addScoredCandidate(ctx, ori, mode, obs.maxX, currentMinY, minValidX, maxValidX, maxValidY,
+                        currentMinX, currentMaxX, currentMinY, currentMaxY,
+                        maxAllowedExtentY, maxAllowedBaseScore, candidates);
+                addScoredCandidate(ctx, ori, mode, minValidX, currentMaxY, minValidX, maxValidX, maxValidY,
+                        currentMinX, currentMaxX, currentMinY, currentMaxY,
+                        maxAllowedExtentY, maxAllowedBaseScore, candidates);
             }
         }
 
@@ -1246,18 +1342,12 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         candidates.sort(Comparator.comparingDouble(CandidatePoint::baseScore));
 
         ChosenSpot best = null;
+        double bestScoreBound = upperBoundScore;
         int checked = 0;
         double lastX = Double.NaN, lastY = Double.NaN;
-        boolean checkMerged = ctx.pieceGap == 0.0;
-        double mergeWeight = switch (mode) {
-            case TIGHT_CORNER -> 1.8;
-            case BOX_AREA -> ctx.matW * 0.5;
-            default -> 0.35;
-        };
 
         AabbBvh placedBvh = placedBvhTracker.get();
         List<List<Point>> nearbyScratch = (checkMerged && placedBvh != null) ? new ArrayList<>(16) : null;
-        double maxPossibleBonus = checkMerged ? (ori.width() + ori.height()) * 2.0 * mergeWeight : 0.0;
 
         int stoppedAt = candidates.size();
         boolean truncatedByLimit = false;
@@ -1271,12 +1361,15 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             lastX = cp.x();
             lastY = cp.y();
 
-            if (best != null && cp.baseScore() - maxPossibleBonus >= best.score()) {
+            if (cp.baseScore() - maxPossibleBonus >= bestScoreBound) {
                 break;
             }
 
             if (isPlacementValid(ctx, cp.x(), cp.y(), ori, placed, placedBvh, -1)) {
                 best = updateBestSpot(best, cp, ori, checkMerged, mergeWeight, placedBvh, placedWorldPolys, nearbyScratch);
+                if (best != null && best.score() < bestScoreBound) {
+                    bestScoreBound = best.score();
+                }
                 checked++;
                 if (checked >= maxCandidatesToValidate) {
                     stoppedAt = idx + 1;
@@ -1304,7 +1397,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             for (int idx = stoppedAt; idx < candidates.size() && extraChecked < STRATIFIED_EXTRA_CANDIDATES; idx++) {
                 CandidatePoint cp = candidates.get(idx);
                 ComputationCancellation.check();
-                if (best != null && cp.baseScore() - maxPossibleBonus >= best.score()) {
+                if (cp.baseScore() - maxPossibleBonus >= bestScoreBound) {
                     break;
                 }
                 if (Math.abs(cp.x() - prevExtraX) < 1e-3 && Math.abs(cp.y() - prevExtraY) < 1e-3) {
@@ -1320,6 +1413,9 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 extraChecked++;
                 if (isPlacementValid(ctx, cp.x(), cp.y(), ori, placed, placedBvh, -1)) {
                     best = updateBestSpot(best, cp, ori, checkMerged, mergeWeight, placedBvh, placedWorldPolys, nearbyScratch);
+                    if (best != null && best.score() < bestScoreBound) {
+                        bestScoreBound = best.score();
+                    }
                     bestExtentY = ctx.preferBottom
                             ? Math.max(ctx.matH - currentMinY, ctx.matH - best.y())
                             : Math.max(currentMaxY, best.y() + ori.height());
@@ -1361,12 +1457,13 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
     private static void addScoredCandidate(ProblemContext ctx, OrientedPart ori,
                                            DeepnestGeneticAlgorithm.PlacementMode mode,
                                            double rawX, double rawY,
-                                           double maxValidX, double maxValidY,
+                                           double minValidX, double maxValidX, double maxValidY,
                                            double currentMinX, double currentMaxX,
                                            double currentMinY, double currentMaxY,
+                                           double maxAllowedExtentY,
+                                           double maxAllowedBaseScore,
                                            List<CandidatePoint> out) {
         if (!Double.isFinite(rawX) || !Double.isFinite(rawY)) return;
-        double minValidX = ctx.minValidX(ori.demandId());
         if (rawX < minValidX - 0.05 || rawX > maxValidX + 0.05 || rawY < -0.05 || rawY > maxValidY + 0.05) return;
 
         double cx = snapCoord(rawX, minValidX, maxValidX);
@@ -1382,6 +1479,11 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         double newExtentY = ctx.preferBottom
                 ? Math.max(ctx.matH - currentMinY, ctx.matH - cy)
                 : Math.max(currentMaxY, cy + ori.height());
+        // Bound-and-Prune：超出已知最优版长上界的候选点直接数学剪枝丢弃
+        if (newExtentY > maxAllowedExtentY) {
+            return;
+        }
+
         double newExtentX = ctx.preferRight
                 ? Math.max(ctx.matW - currentMinX, ctx.matW - cx)
                 : Math.max(currentMaxX, cx + ori.width());
@@ -1399,6 +1501,10 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         };
         if (softPenalty > 0.0) {
             baseScore += softPenalty * ctx.gravityWeight;
+        }
+        // Bound-and-Prune：即便拿满最大可能共边奖励也无法优于同件已有角度解时直接丢弃
+        if (baseScore >= maxAllowedBaseScore) {
+            return;
         }
 
         out.add(new CandidatePoint(cx, cy, baseScore, newExtentY));

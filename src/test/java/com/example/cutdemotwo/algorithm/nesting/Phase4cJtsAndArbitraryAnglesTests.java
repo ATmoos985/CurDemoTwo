@@ -313,4 +313,31 @@ class Phase4cJtsAndArbitraryAnglesTests {
         assertNull(roundTrip.parts().get(1).rule().allowedAnglesDeg());
         assertEquals(List.of(0, 180), roundTrip.parts().get(1).contourAngles());
     }
+
+    @Test
+    void fastSlowDualTrackBooleanOpsAndEnvelopePruningAreExact() {
+        Geometry r1 = DeepnestNfpGeometry.rectGeometry(0, 0, 100, 100);
+        Geometry r2Disjoint = DeepnestNfpGeometry.rectGeometry(300, 0, 100, 100);
+        Geometry r3Overlap = DeepnestNfpGeometry.rectGeometry(50, 0, 100, 100);
+
+        // 1. 外接框严格不相交：O(1) 直拼 MultiPolygon，拓扑合法且面积精确等于两者之和
+        Geometry disjointUnion = DeepnestNfpGeometry.unionTwoGeometries(r1, r2Disjoint);
+        assertTrue(disjointUnion.isValid(), "不相交直拼结果必须拓扑合法");
+        assertEquals(20000.0, disjointUnion.getArea(), 1e-6);
+
+        // 2. 外接框相交：快轨 OverlayNG 并集面积精确
+        Geometry overlapUnion = DeepnestNfpGeometry.unionTwoGeometries(r1, r3Overlap);
+        assertTrue(overlapUnion.isValid(), "相交并集结果必须拓扑合法");
+        assertEquals(15000.0, overlapUnion.getArea(), 1e-6);
+
+        // 3. MultiPolygon 子分量预筛差集：仅 r1 与 target 相交，r2Disjoint 被跳过，结果精确等于 50x100
+        Geometry target = DeepnestNfpGeometry.rectGeometry(50, 0, 100, 100);
+        Geometry diff = DeepnestNfpGeometry.differenceGeometry(target, disjointUnion);
+        assertTrue(diff.isValid(), "MultiPolygon 预筛差集结果必须拓扑合法");
+        assertEquals(5000.0, diff.getArea(), 1e-6);
+
+        // 4. 零分配平移外接框相交预判
+        assertTrue(DeepnestNfpGeometry.translatedEnvelopeIntersects(r1, 80, 0, target.getEnvelopeInternal()));
+        assertFalse(DeepnestNfpGeometry.translatedEnvelopeIntersects(r1, 200, 0, target.getEnvelopeInternal()));
+    }
 }
