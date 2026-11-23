@@ -73,6 +73,7 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
         final double minX;
         final double maxX;
         final List<ExclusionRecord> hardExclusions;
+        final AabbBvh hardExclusionBvh;
         final boolean patternMatch;
 
         PartItem(Part part, double minX, double maxX, List<ExclusionRecord> hardExclusions, boolean patternMatch) {
@@ -82,6 +83,7 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
             this.minX = minX;
             this.maxX = maxX;
             this.hardExclusions = hardExclusions;
+            this.hardExclusionBvh = buildExclusionBvh(hardExclusions);
             this.patternMatch = patternMatch;
             List<OrientedShape> list = new ArrayList<>();
             double maxA = 0;
@@ -282,12 +284,36 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
         return result;
     }
 
+    private static AabbBvh buildExclusionBvh(List<ExclusionRecord> exclusions) {
+        int count = exclusions.size();
+        if (count <= AabbBvh.LINEAR_THRESHOLD) {
+            return AabbBvh.EMPTY;
+        }
+        double[] minX = new double[count];
+        double[] minY = new double[count];
+        double[] maxX = new double[count];
+        double[] maxY = new double[count];
+        for (int i = 0; i < count; i++) {
+            ExclusionRecord e = exclusions.get(i);
+            minX[i] = e.minX;
+            minY[i] = e.minY;
+            maxX[i] = e.maxX;
+            maxY[i] = e.maxY;
+        }
+        return AabbBvh.build(minX, minY, maxX, maxY, count);
+    }
+
     private List<PlacedRecord> runPlacementPass(
             NestingProblem problem, ConstraintPipeline pipeline,
             List<PartItem> items, Area matArea, boolean isRectMat, double matW, double matH,
             double gap, List<ExclusionRecord> exclusions, long startTime, long timeBudgetMs) {
 
         List<PlacedRecord> placedList = new ArrayList<>();
+        double[] placedMinX = new double[items.size()];
+        double[] placedMinY = new double[items.size()];
+        double[] placedMaxX = new double[items.size()];
+        double[] placedMaxY = new double[items.size()];
+        AabbBvh placedBvh = null;
         int placementId = 1;
 
         for (PartItem item : items) {
@@ -339,9 +365,9 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                         if (cx < item.minX - EPS) continue;
                         if (cx + pw > item.maxX + EPS) break;
 
-                        if (isPositionValid(cx, cy, orientation, matArea, isRectMat, item.minX, item.maxX, matH, gap, placedList, item.hardExclusions)) {
+                        if (isPositionValid(cx, cy, orientation, matArea, isRectMat, item.minX, item.maxX, matH, gap, placedList, placedBvh, item.hardExclusions, item.hardExclusionBvh)) {
                             // Local squeeze to left and up
-                            double[] squeezed = squeezeLeftUp(problem, pipeline, item, cx, cy, orientation, matArea, isRectMat, matH, gap, placedList);
+                            double[] squeezed = squeezeLeftUp(problem, pipeline, item, cx, cy, orientation, matArea, isRectMat, matH, gap, placedList, placedBvh);
                             double sx = squeezed[0];
                             double sy = squeezed[1];
 
@@ -360,8 +386,8 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                         double step = Math.max(30.0, availSpan / 15.0);
                         for (double cx = item.minX; cx + pw <= item.maxX + EPS; cx += step) {
                             ComputationCancellation.check();
-                            if (isPositionValid(cx, cy, orientation, matArea, isRectMat, item.minX, item.maxX, matH, gap, placedList, item.hardExclusions)) {
-                                double[] squeezed = squeezeLeftUp(problem, pipeline, item, cx, cy, orientation, matArea, isRectMat, matH, gap, placedList);
+                            if (isPositionValid(cx, cy, orientation, matArea, isRectMat, item.minX, item.maxX, matH, gap, placedList, placedBvh, item.hardExclusions, item.hardExclusionBvh)) {
+                                double[] squeezed = squeezeLeftUp(problem, pipeline, item, cx, cy, orientation, matArea, isRectMat, matH, gap, placedList, placedBvh);
                                 double sx = squeezed[0];
                                 double sy = squeezed[1];
                                 double softPen = pipeline.isNoop() ? 0.0
@@ -391,7 +417,16 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                         chosenOri.shape(),
                         chosenOri.rotationDegrees
                 );
-                placedList.add(new PlacedRecord(pl, chosenOri, worldArea));
+                PlacedRecord rec = new PlacedRecord(pl, chosenOri, worldArea);
+                int idx = placedList.size();
+                placedMinX[idx] = rec.minX;
+                placedMinY[idx] = rec.minY;
+                placedMaxX[idx] = rec.maxX;
+                placedMaxY[idx] = rec.maxY;
+                placedList.add(rec);
+                if (placedList.size() > AabbBvh.LINEAR_THRESHOLD) {
+                    placedBvh = AabbBvh.build(placedMinX, placedMinY, placedMaxX, placedMaxY, placedList.size());
+                }
             }
         }
 
@@ -408,7 +443,7 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
     private static double[] squeezeLeftUp(
             NestingProblem problem, ConstraintPipeline pipeline, PartItem item,
             double startX, double startY, OrientedShape ori, Area matArea, boolean isRectMat,
-            double matH, double gap, List<PlacedRecord> placed) {
+            double matH, double gap, List<PlacedRecord> placed, AabbBvh placedBvh) {
 
         double currX = startX;
         double currY = startY;
@@ -424,7 +459,7 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
             while (currX - step >= item.minX - 1e-9) {
                 ComputationCancellation.check();
                 double nx = Math.max(item.minX, currX - step);
-                if (isPositionValid(nx, currY, ori, matArea, isRectMat, item.minX, item.maxX, matH, gap, placed, item.hardExclusions)) {
+                if (isPositionValid(nx, currY, ori, matArea, isRectMat, item.minX, item.maxX, matH, gap, placed, placedBvh, item.hardExclusions, item.hardExclusionBvh)) {
                     if (!pipeline.isNoop()) {
                         double np = pipeline.penalty(problem, item.part, nx, currY, ori.rotationDegrees(), ori.shape());
                         if (np > currPenalty + 1e-6) break;
@@ -440,7 +475,7 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                 while (currY - step >= 0) {
                     ComputationCancellation.check();
                     double ny = currY - step;
-                    if (isPositionValid(currX, ny, ori, matArea, isRectMat, item.minX, item.maxX, matH, gap, placed, item.hardExclusions)) {
+                    if (isPositionValid(currX, ny, ori, matArea, isRectMat, item.minX, item.maxX, matH, gap, placed, placedBvh, item.hardExclusions, item.hardExclusionBvh)) {
                         if (!pipeline.isNoop()) {
                             double np = pipeline.penalty(problem, item.part, currX, ny, ori.rotationDegrees(), ori.shape());
                             if (np > currPenalty + 1e-6) break;
@@ -461,7 +496,9 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
 
     private static boolean isPositionValid(
             double x, double y, OrientedShape ori, Area matArea, boolean isRectMat,
-            double minX, double maxX, double matH, double gap, List<PlacedRecord> placedList, List<ExclusionRecord> exclusions) {
+            double minX, double maxX, double matH, double gap,
+            List<PlacedRecord> placedList, AabbBvh placedBvh,
+            List<ExclusionRecord> exclusions, AabbBvh exclusionBvh) {
 
         double w = ori.width();
         double h = ori.height();
@@ -469,25 +506,38 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
         // 1. Boundary check (AABB outer bound applies to both rectangular and polygon materials)
         if (x < minX - EPS || y < -EPS || x + w > maxX + EPS || y + h > matH + EPS) return false;
 
-        Area candidateArea = null;
+        Area[] candidateAreaRef = new Area[1];
 
         // 2. Non-rectangular material containment
         if (!isRectMat) {
-            candidateArea = PolygonGeometry.region(ori.shape(), x, y);
-            if (!ContourGeometrySupport.isWithinMaterial(candidateArea, matArea, EPS)) {
+            candidateAreaRef[0] = PolygonGeometry.region(ori.shape(), x, y);
+            if (!ContourGeometrySupport.isWithinMaterial(candidateAreaRef[0], matArea, EPS)) {
                 return false;
             }
         }
 
         // 3. Exclusions intersection
-        for (ExclusionRecord exc : exclusions) {
-            ComputationCancellation.check();
-            if (ContourGeometrySupport.aabbOverlaps(x, x + w, y, y + h, exc.minX, exc.maxX, exc.minY, exc.maxY, EPS)) {
-                if (candidateArea == null) {
-                    candidateArea = PolygonGeometry.region(ori.shape(), x, y);
+        if (exclusionBvh != null && !exclusionBvh.isEmpty()) {
+            if (exclusionBvh.queryAnyExpanded(x, y, x + w, y + h, EPS, idx -> {
+                ComputationCancellation.check();
+                ExclusionRecord exc = exclusions.get(idx);
+                if (candidateAreaRef[0] == null) {
+                    candidateAreaRef[0] = PolygonGeometry.region(ori.shape(), x, y);
                 }
-                if (ContourGeometrySupport.overlapsArea(candidateArea, exc.worldArea, EPS)) {
-                    return false;
+                return ContourGeometrySupport.overlapsArea(candidateAreaRef[0], exc.worldArea, EPS);
+            })) {
+                return false;
+            }
+        } else {
+            for (ExclusionRecord exc : exclusions) {
+                ComputationCancellation.check();
+                if (ContourGeometrySupport.aabbOverlaps(x, x + w, y, y + h, exc.minX, exc.maxX, exc.minY, exc.maxY, EPS)) {
+                    if (candidateAreaRef[0] == null) {
+                        candidateAreaRef[0] = PolygonGeometry.region(ori.shape(), x, y);
+                    }
+                    if (ContourGeometrySupport.overlapsArea(candidateAreaRef[0], exc.worldArea, EPS)) {
+                        return false;
+                    }
                 }
             }
         }
@@ -496,6 +546,23 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
         List<Point> candVerts = ori.vertices();
         double buf = Math.max(0.0, gap) + EPS;
 
+        if (placedBvh != null) {
+            return !placedBvh.queryAnyExpanded(x, y, x + w, y + h, buf, idx -> {
+                ComputationCancellation.check();
+                PlacedRecord placed = placedList.get(idx);
+                if (candidateAreaRef[0] == null) {
+                    candidateAreaRef[0] = PolygonGeometry.region(ori.shape(), x, y);
+                }
+                if (ContourGeometrySupport.overlapsArea(candidateAreaRef[0], placed.worldArea, EPS)) {
+                    return true;
+                }
+                return gap > 0 && ContourGeometrySupport.violatesMinEdgeGap(
+                        candVerts, x, y,
+                        placed.orientedShape.vertices(), placed.placement.x(), placed.placement.y(),
+                        gap, EPS);
+            });
+        }
+
         for (PlacedRecord placed : placedList) {
             ComputationCancellation.check();
             if (!ContourGeometrySupport.aabbOverlaps(
@@ -503,10 +570,10 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                 continue;
             }
 
-            if (candidateArea == null) {
-                candidateArea = PolygonGeometry.region(ori.shape(), x, y);
+            if (candidateAreaRef[0] == null) {
+                candidateAreaRef[0] = PolygonGeometry.region(ori.shape(), x, y);
             }
-            if (ContourGeometrySupport.overlapsArea(candidateArea, placed.worldArea, EPS)) {
+            if (ContourGeometrySupport.overlapsArea(candidateAreaRef[0], placed.worldArea, EPS)) {
                 return false;
             }
 

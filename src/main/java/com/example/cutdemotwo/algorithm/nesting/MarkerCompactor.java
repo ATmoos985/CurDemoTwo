@@ -15,7 +15,8 @@ final class MarkerCompactor {
     /** 压紧器 pieceGap/2 欧氏外扩单侧安全裕量（双侧合计 0.004mm > 校验器 0.001mm 容差）。 */
     static final double GAP_HALF_SAFETY_MM = 0.002;
     // Match the standard contour problem limit when validating the fixed pieces and spares together.
-    private static final int MAX_FILLED_PIECES = 200;
+    static final int MAX_FILLED_PIECES = 200;
+    static final int MAX_COMPACT_PIECES = MAX_FILLED_PIECES;
 
     record Edge(Point a, Point b) {
         double y(double x) { return a.y() + (b.y() - a.y()) * ((x - a.x()) / (b.x() - a.x())); }
@@ -23,7 +24,7 @@ final class MarkerCompactor {
     record Slab(double left, double right, Edge top, Edge bottom) {}
     private record Interval(double low, double high) {}
 
-    record SlabProfile(List<Slab> slabs, double[] xs, double minX, double maxX) {
+    record SlabProfile(List<Slab> slabs, double[] xs, double minX, double maxX, double minY, double maxY) {
         static SlabProfile ofShape(Shape shape) {
             return ofRings(List.of(PolygonGeometry.vertices(shape)));
         }
@@ -49,7 +50,16 @@ final class MarkerCompactor {
                     .sorted()
                     .toArray();
             if (rawXs.length == 0) {
-                return new SlabProfile(List.of(), new double[0], 0.0, 0.0);
+                return new SlabProfile(List.of(), new double[0], 0.0, 0.0, 0.0, 0.0);
+            }
+            double minY = Double.POSITIVE_INFINITY;
+            double maxY = Double.NEGATIVE_INFINITY;
+            for (var ring : rings) {
+                for (var pt : ring) {
+                    double py = pt.y();
+                    if (py < minY) minY = py;
+                    if (py > maxY) maxY = py;
+                }
             }
             var dedup = new double[rawXs.length];
             int count = 0;
@@ -78,7 +88,7 @@ final class MarkerCompactor {
                 for (int j = 1; j < crossings.size(); j += 2)
                     slabs.add(new Slab(xs[i - 1], xs[i], crossings.get(j - 1), crossings.get(j)));
             }
-            return new SlabProfile(slabs, xs, xs[0], xs[xs.length - 1]);
+            return new SlabProfile(slabs, xs, xs[0], xs[xs.length - 1], minY, maxY);
         }
     }
 
@@ -109,7 +119,7 @@ final class MarkerCompactor {
     }
 
     static boolean supports(NestingProblem problem, List<Placement> incumbent) {
-        return incumbent.size() <= 80 && (supportsGapSearch(problem) || AxisMarkerCompactor.supports(problem));
+        return incumbent.size() <= MAX_COMPACT_PIECES && (supportsGapSearch(problem) || AxisMarkerCompactor.supports(problem));
     }
 
     static boolean supportsGapSearch(NestingProblem problem) {
@@ -244,8 +254,29 @@ final class MarkerCompactor {
         return List.copyOf(extras);
     }
 
+    private static AabbBvh buildObstacleBvh(List<Positioned> obstacles) {
+        int count = obstacles.size();
+        if (count == 0) {
+            return AabbBvh.EMPTY;
+        }
+        double[] minX = new double[count];
+        double[] minY = new double[count];
+        double[] maxX = new double[count];
+        double[] maxY = new double[count];
+        for (int i = 0; i < count; i++) {
+            var o = obstacles.get(i);
+            var profile = o.defect ? o.oriented.raw : o.oriented.collision;
+            minX[i] = o.x + profile.minX;
+            maxX[i] = o.x + profile.maxX;
+            minY[i] = o.y + profile.minY;
+            maxY[i] = o.y + profile.maxY;
+        }
+        return AabbBvh.build(minX, minY, maxX, maxY, count);
+    }
+
     private static Positioned bestPosition(double width, Positioned best, List<Oriented> orientations,
                                            List<Positioned> obstacles, boolean preferLeft, long deadline) {
+        AabbBvh obstacleBvh = buildObstacleBvh(obstacles);
         for (var orientation : orientations) {
             double maxX = width - orientation.shape.width();
             if (maxX < 0 || orientation.shape.height() > bottom(best) + EPS) continue;
@@ -265,7 +296,7 @@ final class MarkerCompactor {
             for (double x : preferLeft ? xs : xs.descendingSet()) {
                 if (expired(deadline)) return best;
                 double limit = bottom(best) - orientation.shape.height();
-                double y = firstFreeY(orientation, x, obstacles, limit, deadline);
+                double y = firstFreeY(orientation, x, obstacles, obstacleBvh, limit, deadline);
                 if (y > limit + EPS) continue;
                 if (y < limit - EPS || (preferLeft ? x < best.x - EPS : x > best.x + EPS))
                     best = new Positioned(orientation, x, y, false);
@@ -274,28 +305,41 @@ final class MarkerCompactor {
         return best;
     }
 
-    private static double firstFreeY(Oriented shape, double x, List<Positioned> obstacles, double limit, long deadline) {
+    private static double firstFreeY(Oriented shape, double x, List<Positioned> obstacles,
+                                     AabbBvh obstacleBvh, double limit, long deadline) {
         var forbidden = new ArrayList<Interval>();
-        for (var o : obstacles) {
+        double qMinX = x + Math.min(shape.raw.minX, shape.collision.minX);
+        double qMaxX = x + Math.max(shape.raw.maxX, shape.collision.maxX);
+        double qMinY = Math.min(shape.raw.minY, shape.collision.minY);
+        double qMaxY = limit + Math.max(shape.raw.maxY, shape.collision.maxY) + EPS;
+
+        boolean aborted = obstacleBvh.queryAnyExpanded(qMinX, qMinY, qMaxX, qMaxY, EPS, idx -> {
+            var o = obstacles.get(idx);
             var aProfile = o.defect ? shape.raw : shape.collision;
             var bProfile = o.defect ? o.oriented.raw : o.oriented.collision;
-            if (x + aProfile.minX >= o.x + bProfile.maxX || x + aProfile.maxX <= o.x + bProfile.minX) continue;
-            for (var a : aProfile.slabs) {
-              if (expired(deadline) || forbidden.size() > 8192) return Double.POSITIVE_INFINITY;
-              for (var b : bProfile.slabs) {
-                double left = Math.max(x + a.left, o.x + b.left);
-                double right = Math.min(x + a.right, o.x + b.right);
-                if (right - left <= EPS) continue;
-                // Over this shared x interval, the range of colliding y translations is the
-                // difference between the two trapezoids' linear upper/lower envelopes.
-                double low = o.y + Math.min(b.top.y(left - o.x) - a.bottom.y(left - x),
-                        b.top.y(right - o.x) - a.bottom.y(right - x));
-                double high = o.y + Math.max(b.bottom.y(left - o.x) - a.top.y(left - x),
-                        b.bottom.y(right - o.x) - a.top.y(right - x));
-                if (low < -EPS && high > limit + EPS) return Double.POSITIVE_INFINITY;
-                if (high > 0 && low < limit + EPS) forbidden.add(new Interval(low, high));
-              }
+            if (x + aProfile.minX >= o.x + bProfile.maxX || x + aProfile.maxX <= o.x + bProfile.minX) {
+                return false;
             }
+            for (var a : aProfile.slabs) {
+                if (expired(deadline) || forbidden.size() > 8192) return true;
+                for (var b : bProfile.slabs) {
+                    double left = Math.max(x + a.left, o.x + b.left);
+                    double right = Math.min(x + a.right, o.x + b.right);
+                    if (right - left <= EPS) continue;
+                    // Over this shared x interval, the range of colliding y translations is the
+                    // difference between the two trapezoids' linear upper/lower envelopes.
+                    double low = o.y + Math.min(b.top.y(left - o.x) - a.bottom.y(left - x),
+                            b.top.y(right - o.x) - a.bottom.y(right - x));
+                    double high = o.y + Math.max(b.bottom.y(left - o.x) - a.top.y(left - x),
+                            b.bottom.y(right - o.x) - a.top.y(right - x));
+                    if (low < -EPS && high > limit + EPS) return true;
+                    if (high > 0 && low < limit + EPS) forbidden.add(new Interval(low, high));
+                }
+            }
+            return false;
+        });
+        if (aborted) {
+            return Double.POSITIVE_INFINITY;
         }
         forbidden.sort(Comparator.comparingDouble(Interval::low));
         double y = 0;

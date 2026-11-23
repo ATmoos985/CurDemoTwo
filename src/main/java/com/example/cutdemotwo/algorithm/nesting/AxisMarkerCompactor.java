@@ -45,7 +45,7 @@ final class AxisMarkerCompactor {
     }
 
     static List<Placement> compact(NestingProblem problem, List<Placement> original, long deadline) {
-        if (!supports(problem) || original.isEmpty() || original.size() > 80 || expired(deadline)) return original;
+        if (!supports(problem) || original.isEmpty() || original.size() > MarkerCompactor.MAX_COMPACT_PIECES || expired(deadline)) return original;
         int n = original.size();
         double pieceGap = problem.process().pieceGap();
 
@@ -122,16 +122,33 @@ final class AxisMarkerCompactor {
             }
         }
 
+        double[] bvhMinX = new double[total];
+        double[] bvhMinY = new double[total];
+        double[] bvhMaxX = new double[total];
+        double[] bvhMaxY = new double[total];
+        for (int i = 0; i < total; i++) {
+            double loX = Math.min(rawOutlines[i].minX(), collOutlines[i].minX());
+            double hiX = Math.max(rawOutlines[i].maxX(), collOutlines[i].maxX());
+            bvhMinX[i] = fixed[i] + loX;
+            bvhMaxX[i] = fixed[i] + hiX;
+            bvhMinY[i] = 0.0;
+            bvhMaxY[i] = 0.0;
+        }
+        AabbBvh fixedAxisBvh = AabbBvh.build(bvhMinX, bvhMinY, bvhMaxX, bvhMaxY, total);
+
         double inflateSlack = pieceGap > 0.0 ? pieceGap * 0.03 + 0.02 : 0.0;
         var bounds = new ArrayList<Bound>();
         for (int i = 0; i < movableCount; i++) {
-            for (int j = i + 1; j < total; j++) {
-                if (expired(deadline)) return false;
+            if (expired(deadline)) return false;
+            int idxI = i;
+            boolean failed = fixedAxisBvh.queryAny(bvhMinX[idxI], 0.0, bvhMaxX[idxI], 0.0, j -> {
+                if (j <= idxI) return false;
+                if (expired(deadline)) return true;
                 boolean withObstacle = j >= movableCount;
-                var a = withObstacle ? rawOutlines[i] : collOutlines[i];
+                var a = withObstacle ? rawOutlines[idxI] : collOutlines[idxI];
                 var b = withObstacle ? rawOutlines[j] : collOutlines[j];
-                double dx = fixed[j] - fixed[i], dy = moving[j] - moving[i];
-                if (dx + b.minX() >= a.maxX() || dx + b.maxX() <= a.minX()) continue;
+                double dx = fixed[j] - fixed[idxI], dy = moving[j] - moving[idxI];
+                if (dx + b.minX() >= a.maxX() || dx + b.maxX() <= a.minX()) return false;
 
                 double lower = Double.NEGATIVE_INFINITY, upper = Double.POSITIVE_INFINITY;
                 for (var s : a.slabs()) {
@@ -155,20 +172,23 @@ final class AxisMarkerCompactor {
                             } else if (pushUp <= inflateSlack) {
                                 upper = Math.min(upper, lo);
                             } else {
-                                return false;
+                                return true;
                             }
                         } else {
-                            return false;
+                            return true;
                         }
                     }
                 }
-                if (Double.isFinite(lower)) bounds.add(new Bound(i, j, lower));
-                if (Double.isFinite(upper)) bounds.add(new Bound(j, i, -upper));
-            }
+                if (Double.isFinite(lower)) bounds.add(new Bound(idxI, j, lower));
+                if (Double.isFinite(upper)) bounds.add(new Bound(j, idxI, -upper));
+                return false;
+            });
+            if (failed) return false;
         }
 
         // Each bound is p[to] >= p[from] + distance. Fixed obstacles (index >= movableCount) stay locked.
         for (int pass = 0; pass < total; pass++) {
+            if (expired(deadline)) return false;
             boolean changed = false;
             for (var b : bounds) {
                 if (positions[b.to] + EPS >= positions[b.from] + b.distance) continue;

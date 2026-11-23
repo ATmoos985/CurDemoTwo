@@ -188,10 +188,12 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         final boolean preferBottom;
         final double gravityWeight;
         final List<ExclusionObstacle> exclusions;
+        final AabbBvh exclusionBvh;
         final Map<Integer, Part> partById;
         final Map<Integer, double[]> xBoundsByDemand;
         final Map<Integer, List<Exclusion>> hardRawExclusionsByDemand;
         final Map<Integer, List<ExclusionObstacle>> hardObstaclesByDemand;
+        final Map<Integer, AabbBvh> hardObstacleBvhByDemand;
         final List<ExpandedPart> items;
         final double totalRequestedArea;
         final double sheetArea;
@@ -220,11 +222,13 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 this.exclusions.add(obs);
                 obstacleById.put(exc.id(), obs);
             }
+            this.exclusionBvh = buildExclusionBvh(this.exclusions);
 
             this.partById = new HashMap<>(problem.parts().size() * 2);
             this.xBoundsByDemand = new HashMap<>(problem.parts().size() * 2);
             this.hardRawExclusionsByDemand = new HashMap<>(problem.parts().size() * 2);
             this.hardObstaclesByDemand = new HashMap<>(problem.parts().size() * 2);
+            this.hardObstacleBvhByDemand = new HashMap<>(problem.parts().size() * 2);
 
             Map<NfpInnerKey, OrientedPart> uniqueOrientations = new HashMap<>();
             this.items = new ArrayList<>();
@@ -245,6 +249,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                         if (obs != null) hardObs.add(obs);
                     }
                     this.hardObstaclesByDemand.put(part.id(), hardObs);
+                    this.hardObstacleBvhByDemand.put(part.id(), buildExclusionBvh(hardObs));
                 }
                 List<Integer> angles = part.contourAngles();
                 Map<Integer, OrientedPart> oriMap = new HashMap<>();
@@ -301,6 +306,30 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         List<ExclusionObstacle> hardObstaclesFor(int demandId) {
             if (pipeline.isNoop()) return exclusions;
             return hardObstaclesByDemand.getOrDefault(demandId, exclusions);
+        }
+
+        AabbBvh hardObstacleBvhFor(int demandId) {
+            if (pipeline.isNoop()) return exclusionBvh;
+            return hardObstacleBvhByDemand.getOrDefault(demandId, exclusionBvh);
+        }
+
+        private static AabbBvh buildExclusionBvh(List<ExclusionObstacle> list) {
+            int count = list.size();
+            if (count <= AabbBvh.LINEAR_THRESHOLD) {
+                return AabbBvh.EMPTY;
+            }
+            double[] minX = new double[count];
+            double[] minY = new double[count];
+            double[] maxX = new double[count];
+            double[] maxY = new double[count];
+            for (int i = 0; i < count; i++) {
+                ExclusionObstacle obs = list.get(i);
+                minX[i] = obs.minX;
+                minY[i] = obs.minY;
+                maxX[i] = obs.maxX;
+                maxY[i] = obs.maxY;
+            }
+            return AabbBvh.build(minX, minY, maxX, maxY, count);
         }
 
         Area getInnerNfp(OrientedPart ori) {
@@ -489,6 +518,51 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         return out;
     }
 
+    private static final class PlacedBvhTracker {
+        private final double[] minX;
+        private final double[] minY;
+        private final double[] maxX;
+        private final double[] maxY;
+        private int count;
+        private AabbBvh cachedBvh = AabbBvh.EMPTY;
+        private boolean dirty;
+
+        PlacedBvhTracker(int capacity) {
+            this.minX = new double[capacity];
+            this.minY = new double[capacity];
+            this.maxX = new double[capacity];
+            this.maxY = new double[capacity];
+        }
+
+        void add(PlacedInstance pi) {
+            minX[count] = pi.minX;
+            minY[count] = pi.minY;
+            maxX[count] = pi.maxX;
+            maxY[count] = pi.maxY;
+            count++;
+            dirty = true;
+        }
+
+        void set(int idx, PlacedInstance pi) {
+            minX[idx] = pi.minX;
+            minY[idx] = pi.minY;
+            maxX[idx] = pi.maxX;
+            maxY[idx] = pi.maxY;
+            dirty = true;
+        }
+
+        AabbBvh get() {
+            if (count <= AabbBvh.LINEAR_THRESHOLD) {
+                return null;
+            }
+            if (dirty) {
+                cachedBvh = AabbBvh.build(minX, minY, maxX, maxY, count);
+                dirty = false;
+            }
+            return cachedBvh;
+        }
+    }
+
     /**
      * Evaluates one GA chromosome using Deepnest's NFP boolean difference placement rule
      * ({@code placeParts} in {@code background.js:804-1173}).
@@ -499,6 +573,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                                                        boolean hasIncumbent) {
         List<PlacedInstance> placed = new ArrayList<>(ind.order.length);
         List<List<Point>> placedWorldPolys = new ArrayList<>(ind.order.length);
+        PlacedBvhTracker placedBvh = new PlacedBvhTracker(ind.order.length);
         Map<NfpInnerKey, ClipCacheEntry> clipCache = new HashMap<>();
 
         double currentMaxX = 0.0;
@@ -526,7 +601,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                     ComputationCancellation.check();
                     OrientedPart ori = item.byAngle.get(angle);
                     ChosenSpot candidate = findBestSpotForOrientation(
-                            ctx, ori, ind.placementMode, placed, placedWorldPolys, clipCache,
+                            ctx, ori, ind.placementMode, placed, placedWorldPolys, placedBvh, clipCache,
                             currentMinX, currentMaxX, currentMinY, currentMaxY
                     );
                     if (candidate != null && (bestSpot == null || candidate.score() < bestSpot.score())) {
@@ -537,7 +612,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 // Evaluate chromosome's evolved rotation first
                 OrientedPart prefOri = item.byAngle.getOrDefault(preferredAngle, item.primary);
                 bestSpot = findBestSpotForOrientation(
-                        ctx, prefOri, ind.placementMode, placed, placedWorldPolys, clipCache,
+                        ctx, prefOri, ind.placementMode, placed, placedWorldPolys, placedBvh, clipCache,
                         currentMinX, currentMaxX, currentMinY, currentMaxY
                 );
                 // Fallback to other allowed rotations if preferred orientation cannot fit on remaining sheet
@@ -547,7 +622,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                         ComputationCancellation.check();
                         OrientedPart altOri = item.byAngle.get(angle);
                         ChosenSpot candidate = findBestSpotForOrientation(
-                                ctx, altOri, ind.placementMode, placed, placedWorldPolys, clipCache,
+                                ctx, altOri, ind.placementMode, placed, placedWorldPolys, placedBvh, clipCache,
                                 currentMinX, currentMaxX, currentMinY, currentMaxY
                         );
                         if (candidate != null && (bestSpot == null || candidate.score() < bestSpot.score())) {
@@ -562,6 +637,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 PlacedInstance pi = new PlacedInstance(item.instanceId, bestSpot.ori(), bestSpot.x(), bestSpot.y());
                 placed.add(pi);
                 placedWorldPolys.add(pi.worldVertices);
+                placedBvh.add(pi);
                 placedArea += bestSpot.ori().area();
                 totalMergedLength += bestSpot.mergedLen();
                 if (!ctx.pipeline.isNoop()) {
@@ -601,6 +677,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                                                          DeepnestGeneticAlgorithm.PlacementMode mode,
                                                          List<PlacedInstance> placed,
                                                          List<List<Point>> placedWorldPolys,
+                                                         PlacedBvhTracker placedBvhTracker,
                                                          Map<NfpInnerKey, ClipCacheEntry> clipCache,
                                                          double currentMinX, double currentMaxX,
                                                          double currentMinY, double currentMaxY) {
@@ -648,7 +725,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                     score += ctx.pipeline.penalty(ctx.problem, part, cx, cy, ori.angle(), ori.shape()) * ctx.gravityWeight;
                 }
                 if (bestFirst != null && score >= bestFirst.score() - 1e-9) continue;
-                if (isPlacementValid(ctx, cx, cy, ori, placed)) {
+                if (isPlacementValid(ctx, cx, cy, ori, placed, null, -1)) {
                     bestFirst = new ChosenSpot(cx, cy, ori, score, 0.0);
                 }
             }
@@ -741,6 +818,9 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             default -> 0.35;
         };
 
+        AabbBvh placedBvh = placedBvhTracker.get();
+        List<List<Point>> nearbyScratch = (checkMerged && placedBvh != null) ? new ArrayList<>(16) : null;
+
         for (CandidatePoint cp : candidates) {
             ComputationCancellation.check();
             if (Math.abs(cp.x() - lastX) < 1e-4 && Math.abs(cp.y() - lastY) < 1e-4) {
@@ -754,10 +834,20 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 break;
             }
 
-            if (isPlacementValid(ctx, cp.x(), cp.y(), ori, placed)) {
-                double merged = checkMerged
-                        ? DeepnestNfpGeometry.mergedLength(placedWorldPolys, ori.vertices(), cp.x(), cp.y(), 10.0, 0.05)
-                        : 0.0;
+            if (isPlacementValid(ctx, cp.x(), cp.y(), ori, placed, placedBvh, -1)) {
+                double merged;
+                if (!checkMerged) {
+                    merged = 0.0;
+                } else if (placedBvh != null) {
+                    nearbyScratch.clear();
+                    placedBvh.queryExpanded(cp.x(), cp.y(), cp.x() + ori.width(), cp.y() + ori.height(), 0.05,
+                            idx -> nearbyScratch.add(placedWorldPolys.get(idx)));
+                    merged = nearbyScratch.isEmpty()
+                            ? 0.0
+                            : DeepnestNfpGeometry.mergedLength(nearbyScratch, ori.vertices(), cp.x(), cp.y(), 10.0, 0.05);
+                } else {
+                    merged = DeepnestNfpGeometry.mergedLength(placedWorldPolys, ori.vertices(), cp.x(), cp.y(), 10.0, 0.05);
+                }
                 double totalScore = cp.baseScore() - merged * mergeWeight;
                 if (best == null || totalScore < best.score()) {
                     best = new ChosenSpot(cp.x(), cp.y(), ori, totalScore, merged);
@@ -845,6 +935,11 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         double dirY = ctx.preferBottom ? 1.0 : -1.0;
         double dirX = ctx.preferRight ? 1.0 : -1.0;
 
+        PlacedBvhTracker workBvh = new PlacedBvhTracker(work.size());
+        for (PlacedInstance pi : work) {
+            workBvh.add(pi);
+        }
+
         // Sort indices so upstream pieces (closer to startCorner) settle first, then downstream pieces slide into them
         List<Integer> order = new ArrayList<>(work.size());
         for (int i = 0; i < work.size(); i++) order.add(i);
@@ -862,10 +957,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             double curPenalty = ctx.pipeline.isNoop() ? 0.0
                     : ctx.pipeline.penalty(ctx.problem, part, current.x, current.y, current.ori.angle(), current.ori.shape());
 
-            List<PlacedInstance> others = new ArrayList<>(work.size() - 1);
-            for (int j = 0; j < work.size(); j++) {
-                if (j != idx) others.add(work.get(j));
-            }
+            AabbBvh currentBvh = workBvh.get();
 
             double bestX = current.x;
             double bestY = current.y;
@@ -879,7 +971,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                         ComputationCancellation.check();
                         double ny = snapCoord(bestY + dirY * step, 0.0, maxValidY);
                         if (Math.abs(ny - bestY) < 1e-6) break;
-                        if (isPlacementValid(ctx, bestX, ny, current.ori, others)) {
+                        if (isPlacementValid(ctx, bestX, ny, current.ori, work, currentBvh, idx)) {
                             if (!ctx.pipeline.isNoop() && ctx.pipeline.penalty(ctx.problem, part, bestX, ny, current.ori.angle(), current.ori.shape()) > curPenalty + 1e-6) {
                                 break;
                             }
@@ -895,7 +987,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                     ComputationCancellation.check();
                     double nx = snapCoord(bestX + dirX * step, minValidX, maxValidX);
                     if (Math.abs(nx - bestX) < 1e-6) break;
-                    if (isPlacementValid(ctx, nx, bestY, current.ori, others)) {
+                    if (isPlacementValid(ctx, nx, bestY, current.ori, work, currentBvh, idx)) {
                         if (!ctx.pipeline.isNoop() && ctx.pipeline.penalty(ctx.problem, part, nx, bestY, current.ori.angle(), current.ori.shape()) > curPenalty + 1e-6) {
                             break;
                         }
@@ -908,7 +1000,9 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             }
 
             if (moved) {
-                work.set(idx, new PlacedInstance(current.instanceId, current.ori, bestX, bestY));
+                PlacedInstance updated = new PlacedInstance(current.instanceId, current.ori, bestX, bestY);
+                work.set(idx, updated);
+                workBvh.set(idx, updated);
             }
         }
         return work;
@@ -921,7 +1015,9 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
     private static boolean isPlacementValid(ProblemContext ctx,
                                             double x, double y,
                                             OrientedPart ori,
-                                            List<PlacedInstance> placedList) {
+                                            List<PlacedInstance> placedList,
+                                            AabbBvh placedBvh,
+                                            int skipIndex) {
         double w = ori.width();
         double h = ori.height();
         double minValidX = ctx.minValidX(ori.demandId());
@@ -936,23 +1032,38 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             }
         }
 
-        Area candArea = null;
+        Area[] candAreaRef = new Area[1];
 
         if (!ctx.isRectMat) {
-            candArea = PolygonGeometry.region(ori.shape(), x, y);
-            if (!ContourGeometrySupport.isWithinMaterial(candArea, ctx.matArea, VALIDATOR_AREA_TOL)) {
+            candAreaRef[0] = PolygonGeometry.region(ori.shape(), x, y);
+            if (!ContourGeometrySupport.isWithinMaterial(candAreaRef[0], ctx.matArea, VALIDATOR_AREA_TOL)) {
                 return false;
             }
         }
 
-        for (ExclusionObstacle exc : ctx.hardObstaclesFor(ori.demandId())) {
-            ComputationCancellation.check();
-            if (ContourGeometrySupport.aabbOverlaps(x, x + w, y, y + h, exc.minX, exc.maxX, exc.minY, exc.maxY, 1e-6)) {
-                if (candArea == null) {
-                    candArea = PolygonGeometry.region(ori.shape(), x, y);
+        List<ExclusionObstacle> hardObstacles = ctx.hardObstaclesFor(ori.demandId());
+        AabbBvh obstacleBvh = ctx.hardObstacleBvhFor(ori.demandId());
+        if (obstacleBvh != null && !obstacleBvh.isEmpty()) {
+            if (obstacleBvh.queryAnyExpanded(x, y, x + w, y + h, 1e-6, idx -> {
+                ComputationCancellation.check();
+                ExclusionObstacle exc = hardObstacles.get(idx);
+                if (candAreaRef[0] == null) {
+                    candAreaRef[0] = PolygonGeometry.region(ori.shape(), x, y);
                 }
-                if (ContourGeometrySupport.overlapsArea(candArea, exc.worldArea, VALIDATOR_AREA_TOL)) {
-                    return false;
+                return ContourGeometrySupport.overlapsArea(candAreaRef[0], exc.worldArea, VALIDATOR_AREA_TOL);
+            })) {
+                return false;
+            }
+        } else {
+            for (ExclusionObstacle exc : hardObstacles) {
+                ComputationCancellation.check();
+                if (ContourGeometrySupport.aabbOverlaps(x, x + w, y, y + h, exc.minX, exc.maxX, exc.minY, exc.maxY, 1e-6)) {
+                    if (candAreaRef[0] == null) {
+                        candAreaRef[0] = PolygonGeometry.region(ori.shape(), x, y);
+                    }
+                    if (ContourGeometrySupport.overlapsArea(candAreaRef[0], exc.worldArea, VALIDATOR_AREA_TOL)) {
+                        return false;
+                    }
                 }
             }
         }
@@ -961,17 +1072,38 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         List<Point> cVerts = ori.vertices();
         double margin = gap + 1e-6;
 
-        for (PlacedInstance p : placedList) {
+        if (placedBvh != null) {
+            return !placedBvh.queryAnyExpanded(x, y, x + w, y + h, margin, idx -> {
+                if (idx == skipIndex) {
+                    return false;
+                }
+                ComputationCancellation.check();
+                PlacedInstance p = placedList.get(idx);
+                if (candAreaRef[0] == null) {
+                    candAreaRef[0] = PolygonGeometry.region(ori.shape(), x, y);
+                }
+                if (ContourGeometrySupport.overlapsArea(candAreaRef[0], p.worldArea, VALIDATOR_AREA_TOL)) {
+                    return true;
+                }
+                return gap > 0 && ContourGeometrySupport.violatesMinEdgeGap(
+                        cVerts, x, y, p.worldVertices, 0.0, 0.0, gap, VALIDATOR_GAP_TOL);
+            });
+        }
+
+        int n = placedList.size();
+        for (int i = 0; i < n; i++) {
+            if (i == skipIndex) continue;
             ComputationCancellation.check();
+            PlacedInstance p = placedList.get(i);
             if (!ContourGeometrySupport.aabbOverlaps(
                     x, x + w, y, y + h, p.minX, p.maxX, p.minY, p.maxY, margin)) {
                 continue;
             }
 
-            if (candArea == null) {
-                candArea = PolygonGeometry.region(ori.shape(), x, y);
+            if (candAreaRef[0] == null) {
+                candAreaRef[0] = PolygonGeometry.region(ori.shape(), x, y);
             }
-            if (ContourGeometrySupport.overlapsArea(candArea, p.worldArea, VALIDATOR_AREA_TOL)) {
+            if (ContourGeometrySupport.overlapsArea(candAreaRef[0], p.worldArea, VALIDATOR_AREA_TOL)) {
                 return false;
             }
 

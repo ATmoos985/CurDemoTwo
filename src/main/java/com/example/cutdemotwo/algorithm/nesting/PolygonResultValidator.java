@@ -24,6 +24,26 @@ public final class PolygonResultValidator {
     private record ExpectedKey(int demandId, int rotationDegrees) {}
     private record CheckedPiece(Placement placement, Area worldArea, List<Point> localVerts,
                                 double minX, double maxX, double minY, double maxY) {}
+    private record ExclusionIndex(List<ContourGeometrySupport.ExpandedExclusion> list, AabbBvh bvh) {}
+
+    private static AabbBvh buildExclusionBvh(List<ContourGeometrySupport.ExpandedExclusion> list) {
+        int count = list.size();
+        if (count == 0) {
+            return AabbBvh.EMPTY;
+        }
+        double[] minX = new double[count];
+        double[] minY = new double[count];
+        double[] maxX = new double[count];
+        double[] maxY = new double[count];
+        for (int i = 0; i < count; i++) {
+            var e = list.get(i);
+            minX[i] = e.minX();
+            minY[i] = e.minY();
+            maxX[i] = e.maxX();
+            maxY[i] = e.maxY();
+        }
+        return AabbBvh.build(minX, minY, maxX, maxY, count);
+    }
 
     public static String validate(NestingProblem input, EngineResult output) {
         ComputationCancellation.check();
@@ -46,13 +66,20 @@ public final class PolygonResultValidator {
             expandedExclusions.add(exp);
             expandedById.put(d.id(), exp);
         }
+        AabbBvh allExclusionsBvh = pipeline.isNoop() ? buildExclusionBvh(expandedExclusions) : AabbBvh.EMPTY;
+        var demandExclusionCache = pipeline.isNoop() ? null : new HashMap<Integer, ExclusionIndex>();
 
         var demandsById = new HashMap<Integer, NestingProblem.Part>();
         for (var part : input.parts()) {
             demandsById.put(part.id(), part);
         }
         var expectedShapeAreas = new HashMap<ExpectedKey, Area>();
-        var occupied = new ArrayList<CheckedPiece>(output.getPlacements().size());
+        int placementCount = output.getPlacements().size();
+        var occupied = new ArrayList<CheckedPiece>(placementCount);
+        double[] pieceMinX = new double[placementCount];
+        double[] pieceMinY = new double[placementCount];
+        double[] pieceMaxX = new double[placementCount];
+        double[] pieceMaxY = new double[placementCount];
         var counts = new HashMap<Integer, Integer>();
         var ids = new HashSet<Integer>();
 
@@ -87,54 +114,80 @@ public final class PolygonResultValidator {
                 }
             }
 
-            for (var prior : occupied) {
-                if (ContourGeometrySupport.aabbOverlaps(minX, maxX, minY, maxY,
-                        prior.minX, prior.maxX, prior.minY, prior.maxY, COORD_EPS)
-                        && ContourGeometrySupport.overlapsArea(placed, prior.worldArea, AREA_EPS)) {
-                    return "异形结果裁片重叠";
-                }
-            }
             if (pipeline.isNoop()) {
-                for (var expanded : expandedExclusions) {
-                    ComputationCancellation.check();
-                    if (ContourGeometrySupport.aabbOverlaps(minX, maxX, minY, maxY,
-                            expanded.minX(), expanded.maxX(), expanded.minY(), expanded.maxY(), COORD_EPS)
-                            && ContourGeometrySupport.overlapsArea(placed, expanded.worldArea(), AREA_EPS)) {
-                        return "异形结果进入禁入区域";
-                    }
+                if (!allExclusionsBvh.isEmpty() && allExclusionsBvh.queryAnyExpanded(
+                        minX, minY, maxX, maxY, COORD_EPS, idx -> {
+                            ComputationCancellation.check();
+                            return ContourGeometrySupport.overlapsArea(placed, expandedExclusions.get(idx).worldArea(), AREA_EPS);
+                        })) {
+                    return "异形结果进入禁入区域";
                 }
             } else {
-                for (var hardExc : pipeline.hardExclusionsFor(input, demand)) {
-                    ComputationCancellation.check();
-                    var expanded = expandedById.get(hardExc.id());
-                    if (expanded != null && ContourGeometrySupport.aabbOverlaps(minX, maxX, minY, maxY,
-                            expanded.minX(), expanded.maxX(), expanded.minY(), expanded.maxY(), COORD_EPS)
-                            && ContourGeometrySupport.overlapsArea(placed, expanded.worldArea(), AREA_EPS)) {
-                        return "异形结果进入禁入区域";
+                var excIndex = demandExclusionCache.computeIfAbsent(demand.id(), id -> {
+                    var hardRaw = pipeline.hardExclusionsFor(input, demand);
+                    var list = new ArrayList<ContourGeometrySupport.ExpandedExclusion>(hardRaw.size());
+                    for (var hardExc : hardRaw) {
+                        var exp = expandedById.get(hardExc.id());
+                        if (exp != null) {
+                            list.add(exp);
+                        }
                     }
+                    return new ExclusionIndex(list, buildExclusionBvh(list));
+                });
+                if (!excIndex.bvh.isEmpty() && excIndex.bvh.queryAnyExpanded(
+                        minX, minY, maxX, maxY, COORD_EPS, idx -> {
+                            ComputationCancellation.check();
+                            return ContourGeometrySupport.overlapsArea(placed, excIndex.list.get(idx).worldArea(), AREA_EPS);
+                        })) {
+                    return "异形结果进入禁入区域";
                 }
             }
+
+            int idx = occupied.size();
+            pieceMinX[idx] = minX;
+            pieceMinY[idx] = minY;
+            pieceMaxX[idx] = maxX;
+            pieceMaxY[idx] = maxY;
             occupied.add(new CheckedPiece(p, placed, PolygonGeometry.vertices(p.shape()), minX, maxX, minY, maxY));
+        }
+
+        int n = occupied.size();
+        AabbBvh pieceBvh = AabbBvh.build(pieceMinX, pieceMinY, pieceMaxX, pieceMaxY, n);
+
+        for (int i = 0; i < n; i++) {
+            ComputationCancellation.check();
+            int currentIdx = i;
+            var a = occupied.get(currentIdx);
+            if (pieceBvh.queryAnyExpanded(a.minX, a.minY, a.maxX, a.maxY, COORD_EPS, j -> {
+                if (j <= currentIdx) {
+                    return false;
+                }
+                ComputationCancellation.check();
+                return ContourGeometrySupport.overlapsArea(a.worldArea, occupied.get(j).worldArea, AREA_EPS);
+            })) {
+                return "异形结果裁片重叠";
+            }
         }
 
         double pieceGap = input.process().pieceGap();
         if (pieceGap > 0) {
             double gapMargin = pieceGap + COORD_EPS;
-            for (int i = 0; i < occupied.size(); i++) {
-                var a = occupied.get(i);
-                for (int j = i + 1; j < occupied.size(); j++) {
+            for (int i = 0; i < n; i++) {
+                ComputationCancellation.check();
+                int currentIdx = i;
+                var a = occupied.get(currentIdx);
+                if (pieceBvh.queryAnyExpanded(a.minX, a.minY, a.maxX, a.maxY, gapMargin, j -> {
+                    if (j <= currentIdx) {
+                        return false;
+                    }
                     ComputationCancellation.check();
                     var b = occupied.get(j);
-                    if (!ContourGeometrySupport.aabbOverlaps(a.minX, a.maxX, a.minY, a.maxY,
-                            b.minX, b.maxX, b.minY, b.maxY, gapMargin)) {
-                        continue;
-                    }
-                    if (ContourGeometrySupport.violatesMinEdgeGap(
+                    return ContourGeometrySupport.violatesMinEdgeGap(
                             a.localVerts, a.placement.x(), a.placement.y(),
                             b.localVerts, b.placement.x(), b.placement.y(),
-                            pieceGap, COORD_EPS)) {
-                        return "轮廓裁片间距不足";
-                    }
+                            pieceGap, COORD_EPS);
+                })) {
+                    return "轮廓裁片间距不足";
                 }
             }
         }
