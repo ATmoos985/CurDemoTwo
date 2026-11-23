@@ -60,6 +60,15 @@ public final class NestingValidation {
         for (var part : p.parts()) {
             require(part != null && ids.add(part.id()), "需求标识重复或为空");
             supported(contour || !Boolean.TRUE.equals(part.allowHalfTurn()), "180° 掉头仅适用于轮廓排料");
+            if (part.rule() != null && part.rule().allowedAnglesDeg() != null) {
+                supported(contour, "自定义允许旋转角度集仅适用于轮廓排料");
+                var customAngles = part.rule().allowedAnglesDeg();
+                require(!customAngles.isEmpty(), "自定义允许旋转角度集不能为空");
+                require(customAngles.size() <= 72, "单个裁片最多声明 72 个离散旋转角度");
+                for (Integer deg : customAngles) {
+                    require(deg != null && deg >= 0 && deg <= 359, "允许旋转角度必须为 0–359 的整数度");
+                }
+            }
             shape(part.shape(), contour);
             require(part.quantity() > 0, "需求数量必须为正整数");
             quantity += part.quantity();

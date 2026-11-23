@@ -13,6 +13,7 @@ import com.example.cutdemotwo.contracts.nesting.NestingProblem.Part;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Point;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Shape;
 import com.example.cutdemotwo.contracts.nesting.NestingResult.Placement;
+import org.locationtech.jts.geom.Geometry;
 import org.springframework.stereotype.Service;
 
 import java.awt.geom.Area;
@@ -178,7 +179,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
     }
 
     private static final class ClipCacheEntry {
-        Area combinedNfp = new Area();
+        Geometry combinedNfp = DeepnestNfpGeometry.EMPTY_GEOM;
         int nextPlacedIndex = 0;
     }
 
@@ -206,8 +207,8 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         final List<ExpandedPart> items;
         final double totalRequestedArea;
         final double sheetArea;
-        final Map<NfpInnerKey, Area> innerNfpCache = new ConcurrentHashMap<>();
-        final Map<NfpOuterKey, Area> outerNfpCache = new ConcurrentHashMap<>();
+        final Map<NfpInnerKey, Geometry> innerNfpCache = new ConcurrentHashMap<>();
+        final Map<NfpOuterKey, Geometry> outerNfpCache = new ConcurrentHashMap<>();
 
         ProblemContext(NestingProblem problem, boolean stripMode) {
             this.problem = problem;
@@ -341,48 +342,49 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             return AabbBvh.build(minX, minY, maxX, maxY, count);
         }
 
-        Area getInnerNfp(OrientedPart ori) {
+        Geometry getInnerNfp(OrientedPart ori) {
             NfpInnerKey key = new NfpInnerKey(ori.demandId(), ori.angle());
-            Area cached = innerNfpCache.get(key);
-            if (cached != null) return new Area(cached);
+            Geometry cached = innerNfpCache.get(key);
+            if (cached != null) return cached;
             List<Exclusion> hardRaw = pipeline.isNoop()
                     ? problem.material().exclusions()
                     : hardRawExclusionsByDemand.getOrDefault(ori.demandId(), problem.material().exclusions());
-            Area computed = DeepnestNfpGeometry.computeInnerNfp(
+            Geometry computed = DeepnestNfpGeometry.computeInnerNfpGeom(
                     matShape, hardRaw, ori.shape(), ori.convexPieces()
             );
-            if (!pipeline.isNoop()) {
+            if (!pipeline.isNoop() && !computed.isEmpty()) {
                 double lo = minValidX(ori.demandId());
                 double hi = maxValidXEdge(ori.demandId());
                 if (lo > 0.0 || hi < matW) {
                     double maxStartX = hi - ori.width();
                     if (maxStartX < lo - 1e-6) {
-                        computed = new Area();
+                        computed = DeepnestNfpGeometry.EMPTY_GEOM;
                     } else {
-                        computed.intersect(new Area(new java.awt.geom.Rectangle2D.Double(
-                                lo - 1e-4, -1e-4, Math.max(2e-4, maxStartX - lo + 2e-4), matH + 2e-4)));
+                        Geometry xClip = DeepnestNfpGeometry.rectGeometry(
+                                lo - 1e-4, -1e-4, Math.max(2e-4, maxStartX - lo + 2e-4), matH + 2e-4);
+                        computed = DeepnestNfpGeometry.intersectionGeometry(computed, xClip);
                     }
                 }
             }
-            computed.getBounds2D();
-            Area existing = innerNfpCache.putIfAbsent(key, computed);
-            return new Area(existing != null ? existing : computed);
+            computed.getEnvelopeInternal();
+            Geometry existing = innerNfpCache.putIfAbsent(key, computed);
+            return existing != null ? existing : computed;
         }
 
-        Area getOuterNfp(OrientedPart placedOri, OrientedPart candOri) {
+        Geometry getOuterNfp(OrientedPart placedOri, OrientedPart candOri) {
             NfpOuterKey key = new NfpOuterKey(
                     placedOri.demandId(), placedOri.angle(), candOri.demandId(), candOri.angle()
             );
-            Area cached = outerNfpCache.get(key);
-            if (cached != null) return new Area(cached);
-            Area computed = DeepnestNfpGeometry.getOrComputeOuterNfp(
+            Geometry cached = outerNfpCache.get(key);
+            if (cached != null) return cached;
+            Geometry computed = DeepnestNfpGeometry.getOrComputeOuterNfpGeom(
                     placedOri.shape(), placedOri.convexPieces(), placedOri.signature(),
                     candOri.shape(), candOri.convexPieces(), candOri.signature(),
                     pieceGap
             );
-            computed.getBounds2D();
-            Area existing = outerNfpCache.putIfAbsent(key, computed);
-            return new Area(existing != null ? existing : computed);
+            computed.getEnvelopeInternal();
+            Geometry existing = outerNfpCache.putIfAbsent(key, computed);
+            return existing != null ? existing : computed;
         }
     }
 
@@ -702,7 +704,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             }
 
             // 预计算 kept 集合的基础状态与 NFP 增量缓存（同一轮 Ruin 的多种 Recreate 序共享）
-            Map<NfpInnerKey, Area> keptNfpCache = new HashMap<>();
+            Map<NfpInnerKey, Geometry> keptNfpCache = new HashMap<>();
             List<List<ExpandedPart>> recreateOrders = buildRecreateOrders(removedParts);
             DeepnestGeneticAlgorithm.PlacementMode recreateMode = (round % 4 == 3)
                     ? DeepnestGeneticAlgorithm.PlacementMode.TIGHT_CORNER
@@ -822,7 +824,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
     private static EvaluationResult recreateFromPartial(ProblemContext ctx,
                                                         List<PlacedInstance> kept,
                                                         List<ExpandedPart> toReinsert,
-                                                        Map<NfpInnerKey, Area> keptNfpCache,
+                                                        Map<NfpInnerKey, Geometry> keptNfpCache,
                                                         DeepnestGeneticAlgorithm.PlacementMode mode,
                                                         EvaluationResult incumbent,
                                                         long deadlineNanos) {
@@ -874,22 +876,22 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 if (keptSize > 0) {
                     NfpInnerKey key = new NfpInnerKey(ori.demandId(), ori.angle());
                     if (!clipCache.containsKey(key)) {
-                        Area baseCombined = keptNfpCache.get(key);
+                        Geometry baseCombined = keptNfpCache.get(key);
                         if (baseCombined == null) {
-                            List<Area> keptAreas = new ArrayList<>(keptSize);
+                            List<Geometry> keptGeoms = new ArrayList<>(keptSize);
                             for (int j = 0; j < keptSize; j++) {
                                 ComputationCancellation.check();
                                 PlacedInstance p = kept.get(j);
-                                Area outer = ctx.getOuterNfp(p.ori, ori);
+                                Geometry outer = ctx.getOuterNfp(p.ori, ori);
                                 if (!outer.isEmpty()) {
-                                    keptAreas.add(DeepnestNfpGeometry.translateArea(outer, p.x, p.y));
+                                    keptGeoms.add(DeepnestNfpGeometry.translateGeometry(outer, p.x, p.y));
                                 }
                             }
-                            baseCombined = DeepnestNfpGeometry.unionBalanced(keptAreas);
+                            baseCombined = DeepnestNfpGeometry.unionGeometries(keptGeoms);
                             keptNfpCache.put(key, baseCombined);
                         }
                         ClipCacheEntry entry = new ClipCacheEntry();
-                        entry.combinedNfp = baseCombined.isEmpty() ? new Area() : new Area(baseCombined);
+                        entry.combinedNfp = baseCombined;
                         entry.nextPlacedIndex = keptSize;
                         clipCache.put(key, entry);
                     }
@@ -1117,7 +1119,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                                                          double currentMinX, double currentMaxX,
                                                          double currentMinY, double currentMaxY,
                                                          int maxCandidatesToValidate) {
-        Area sheetNfp = ctx.getInnerNfp(ori);
+        Geometry sheetNfp = ctx.getInnerNfp(ori);
         if (sheetNfp.isEmpty()) return null;
 
         double minValidX = ctx.minValidX(ori.demandId());
@@ -1168,30 +1170,29 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             return bestFirst;
         }
 
-        // Incremental union of OuterNFPs via clipCache (background.js:920-968)
+        // Incremental union of OuterNFPs via clipCache (JTS UnaryUnionOp + OverlayNG difference)
         NfpInnerKey cacheKey = new NfpInnerKey(ori.demandId(), ori.angle());
         ClipCacheEntry entry = clipCache.computeIfAbsent(cacheKey, k -> new ClipCacheEntry());
         if (entry.nextPlacedIndex < placed.size()) {
-            List<Area> deltaAreas = new ArrayList<>(placed.size() - entry.nextPlacedIndex + 1);
+            List<Geometry> deltaGeoms = new ArrayList<>(placed.size() - entry.nextPlacedIndex + 1);
             if (!entry.combinedNfp.isEmpty()) {
-                deltaAreas.add(entry.combinedNfp);
+                deltaGeoms.add(entry.combinedNfp);
             }
             for (int j = entry.nextPlacedIndex; j < placed.size(); j++) {
                 ComputationCancellation.check();
                 PlacedInstance p = placed.get(j);
-                Area outer = ctx.getOuterNfp(p.ori, ori);
+                Geometry outer = ctx.getOuterNfp(p.ori, ori);
                 if (!outer.isEmpty()) {
-                    deltaAreas.add(DeepnestNfpGeometry.translateArea(outer, p.x, p.y));
+                    deltaGeoms.add(DeepnestNfpGeometry.translateGeometry(outer, p.x, p.y));
                 }
             }
-            entry.combinedNfp = DeepnestNfpGeometry.unionBalanced(deltaAreas);
+            entry.combinedNfp = DeepnestNfpGeometry.unionGeometries(deltaGeoms);
             entry.nextPlacedIndex = placed.size();
         }
 
-        Area finalNfp = new Area(sheetNfp);
-        if (!entry.combinedNfp.isEmpty()) {
-            finalNfp.subtract(entry.combinedNfp);
-        }
+        Geometry finalNfp = entry.combinedNfp.isEmpty()
+                ? sheetNfp
+                : DeepnestNfpGeometry.differenceGeometry(sheetNfp, entry.combinedNfp);
         if (finalNfp.isEmpty()) return null;
 
         List<DeepnestNfpGeometry.Ring> rings = DeepnestNfpGeometry.extractRings(finalNfp);

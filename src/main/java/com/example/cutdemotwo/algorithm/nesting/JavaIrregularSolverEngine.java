@@ -491,6 +491,11 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
 
         double roundedX = Math.max(item.minX, Math.round(currX * 10.0) / 10.0);
         double roundedY = item.patternMatch ? currY : Math.round(currY * 10.0) / 10.0;
+        if ((Math.abs(roundedX - currX) > 1e-9 || Math.abs(roundedY - currY) > 1e-9)
+                && !isPositionValid(roundedX, roundedY, ori, matArea, isRectMat, item.minX, item.maxX, matH, gap,
+                        placed, placedBvh, item.hardExclusions, item.hardExclusionBvh)) {
+            return new double[]{currX, currY};
+        }
         return new double[]{roundedX, roundedY};
     }
 

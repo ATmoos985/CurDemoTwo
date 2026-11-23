@@ -166,7 +166,13 @@ final class DeepnestGeneticAlgorithm {
             if (allowed.contains(target)) {
                 rot[i] = target;
             } else {
-                rot[i] = allowed.get(occ % allowed.size());
+                int base = allowed.get(0);
+                int opposite = (base + 180) % 360;
+                if (allowed.contains(opposite)) {
+                    rot[i] = (occ % 2 == 0) ? base : opposite;
+                } else {
+                    rot[i] = allowed.get(occ % allowed.size());
+                }
             }
         }
         return rot;

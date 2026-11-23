@@ -5,11 +5,24 @@ import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Exclusion;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Point;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Shape;
+import org.locationtech.jts.geom.Coordinate;
+import org.locationtech.jts.geom.Geometry;
+import org.locationtech.jts.geom.GeometryFactory;
+import org.locationtech.jts.geom.LinearRing;
+import org.locationtech.jts.geom.Polygon;
+import org.locationtech.jts.geom.TopologyException;
+import org.locationtech.jts.geom.util.AffineTransformation;
+import org.locationtech.jts.geom.util.GeometryFixer;
+import org.locationtech.jts.geom.util.PolygonExtracter;
+import org.locationtech.jts.operation.buffer.BufferOp;
+import org.locationtech.jts.operation.buffer.BufferParameters;
+import org.locationtech.jts.operation.overlayng.OverlayNG;
+import org.locationtech.jts.operation.overlayng.OverlayNGRobust;
+import org.locationtech.jts.operation.union.UnaryUnionOp;
 
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
 import java.awt.geom.Path2D;
-import java.awt.geom.PathIterator;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -20,34 +33,43 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Computational geometry and No-Fit Polygon (NFP) kernel migrated from Deepnest
- * ({@code minkowski.cc}, {@code background.js}, and {@code util/geometryutil.js}).
+ * Computational geometry and No-Fit Polygon (NFP) kernel backed by JTS ({@code OverlayNG} / {@code UnaryUnionOp}
+ * / {@code BufferOp}), migrated from Deepnest ({@code minkowski.cc}, {@code background.js}, {@code geometryutil.js}).
  *
  * <p>Core capabilities:
  * <ul>
  *   <li>Ear-clipping triangulation + Hertel-Mehlhorn convex polygon decomposition;</li>
- *   <li>Linear-time rotating-calipers Minkowski sum for convex pieces plus direct edge-segment
- *       convolution ({@code minkowski.cc}) for polygons with holes;</li>
- *   <li>Outer NFP with optional circumscribed spacing disk for strict Euclidean {@code pieceGap};</li>
- *   <li>Inner-Fit Polygon (IFP / Sheet NFP) supporting both rectangular and concave polygon sheets
- *       as well as arbitrary defect exclusions with clearance;</li>
+ *   <li>Linear-time rotating-calipers Minkowski sum for convex pieces merged via JTS {@link UnaryUnionOp};</li>
+ *   <li>High-precision Euclidean offset via JTS {@link BufferOp} (32-segment round join, &lt;0.5% chord overhead);</li>
+ *   <li>Outer NFP with center-inversion symmetry ({@link AffineTransformation#scaleInstance(double, double)})
+ *       and thread-safe bounded LRU cache (2048 entries);</li>
+ *   <li>Inner-Fit Polygon (IFP / Sheet NFP) supporting rectangular fast-path, concave polygon sheets,
+ *       and arbitrary defect exclusions with clearance;</li>
  *   <li>Collinear shared-edge length detection ({@code mergedLength}) and Andrew monotone-chain convex hull.</li>
  * </ul>
  */
 final class DeepnestNfpGeometry {
     private static final double EPS = 1e-9;
-    /** Micro-tolerance keeping exact zero-slack contact channels open during boolean Area subtraction. */
+    /** Micro-tolerance keeping exact zero-slack contact channels open during boolean subtraction. */
     static final double OPEN_CHANNEL_EPS = 5e-7;
-    /** Extra safety margin on pieceGap circumscribed disk so discrete NFP edges strictly exceed pieceGap. */
+    /** Extra safety margin on pieceGap offset so discrete NFP edges strictly exceed pieceGap. */
     private static final double GAP_SAFETY_MM = 0.015;
-    private static final int GAP_DISK_SIDES = 16;
+    /** JTS round-buffer segments per quadrant (8/quadrant = 32-gon, chord compensation 1/cos(pi/32) ≈ 1.00484). */
+    static final int BUFFER_QUADRANT_SEGMENTS = 8;
+    private static final double BUFFER_CIRCUM_FACTOR = 1.0 / Math.cos(Math.PI / (4.0 * BUFFER_QUADRANT_SEGMENTS));
     static final int MAX_OUTER_NFP_CACHE_SIZE = 2048;
 
+    private static final GeometryFactory GEOM_FACTORY = new GeometryFactory();
+    static final Geometry EMPTY_GEOM = GEOM_FACTORY.createPolygon();
+    static {
+        EMPTY_GEOM.getEnvelopeInternal();
+    }
+
     private static final Object OUTER_NFP_CACHE_LOCK = new Object();
-    private static final Map<OuterNfpCacheKey, Area> OUTER_NFP_CACHE =
+    private static final Map<OuterNfpCacheKey, Geometry> OUTER_NFP_CACHE =
             new LinkedHashMap<>(256, 0.75f, true) {
                 @Override
-                protected boolean removeEldestEntry(Map.Entry<OuterNfpCacheKey, Area> eldest) {
+                protected boolean removeEldestEntry(Map.Entry<OuterNfpCacheKey, Geometry> eldest) {
                     return size() > MAX_OUTER_NFP_CACHE_SIZE;
                 }
             };
@@ -57,7 +79,7 @@ final class DeepnestNfpGeometry {
 
     private DeepnestNfpGeometry() {}
 
-    /** A closed polygon ring extracted from an {@link Area}, with signed area indicating winding. */
+    /** A closed polygon ring extracted from a JTS {@link Geometry}, with signed area indicating winding. */
     record Ring(List<Point> vertices, double signedArea) {}
 
     /**
@@ -245,7 +267,6 @@ final class DeepnestNfpGeometry {
                 triangles.add(List.of(prev, curr, next));
                 rem.remove(i);
             } else if (edgeTol > -1e-4) {
-                // Relax boundary inclusion slightly if near-collinear reflex vertices graze an ear diagonal
                 edgeTol *= 10.0;
             } else {
                 return List.of();
@@ -291,7 +312,6 @@ final class DeepnestNfpGeometry {
             for (int ib = 0; ib < nb; ib++) {
                 Point b1 = b.get(ib);
                 Point b2 = b.get((ib + 1) % nb);
-                // Shared internal diagonal has opposite orientation in two positively-wound pieces: a1==b2 && a2==b1
                 if (samePoint(a1, b2) && samePoint(a2, b1)) {
                     List<Point> merged = new ArrayList<>(na + nb - 2);
                     for (int k = 0; k < na; k++) {
@@ -415,40 +435,182 @@ final class DeepnestNfpGeometry {
         return out;
     }
 
-    /**
-     * Builds a positively-wound regular polygon circumscribing a circle of radius {@code gap + GAP_SAFETY_MM}.
-     * Because its inradius strictly exceeds {@code gap}, any placement outside the Minkowski sum with this disk
-     * guarantees Euclidean distance $> \text{gap}$ at every edge and sharp vertex.
-     */
-    static List<Point> spacingDisk(double gap) {
-        if (gap <= 0) return List.of();
-        double inradius = gap + GAP_SAFETY_MM;
-        double circumradius = inradius / Math.cos(Math.PI / GAP_DISK_SIDES);
-        List<Point> pts = new ArrayList<>(GAP_DISK_SIDES);
-        for (int i = 0; i < GAP_DISK_SIDES; i++) {
-            double theta = (2.0 * Math.PI * i) / GAP_DISK_SIDES;
-            pts.add(new Point(circumradius * Math.cos(theta), circumradius * Math.sin(theta)));
+    // ==================== JTS 高精度几何内核 ====================
+
+    static Geometry toJtsPolygon(List<Point> points, double dx, double dy) {
+        if (points == null || points.size() < 3) return EMPTY_GEOM;
+        List<Coordinate> coords = new ArrayList<>(points.size() + 1);
+        for (Point p : points) {
+            double x = p.x() + dx;
+            double y = p.y() + dy;
+            if (coords.isEmpty()) {
+                coords.add(new Coordinate(x, y));
+            } else {
+                Coordinate prev = coords.get(coords.size() - 1);
+                if (Math.abs(prev.x - x) > 1e-12 || Math.abs(prev.y - y) > 1e-12) {
+                    coords.add(new Coordinate(x, y));
+                }
+            }
         }
-        return pts;
+        if (coords.size() > 1 && coords.get(0).equals2D(coords.get(coords.size() - 1), 1e-12)) {
+            coords.remove(coords.size() - 1);
+        }
+        if (coords.size() < 3) return EMPTY_GEOM;
+        coords.add(new Coordinate(coords.get(0).x, coords.get(0).y));
+        Polygon poly = GEOM_FACTORY.createPolygon(coords.toArray(Coordinate[]::new));
+        return ensureValidPolygonal(poly);
+    }
+
+    static Geometry toJtsPolygon(Shape shape, double dx, double dy) {
+        if (shape == null) return EMPTY_GEOM;
+        if ("RECTANGLE".equals(shape.type())) {
+            return rectGeometry(dx, dy, shape.width(), shape.height());
+        }
+        return toJtsPolygon(PolygonGeometry.vertices(shape), dx, dy);
+    }
+
+    static Geometry rectGeometry(double x, double y, double w, double h) {
+        if (w <= 0.0 || h <= 0.0 || !Double.isFinite(w) || !Double.isFinite(h)) {
+            return EMPTY_GEOM;
+        }
+        Coordinate[] coords = new Coordinate[]{
+                new Coordinate(x, y),
+                new Coordinate(x + w, y),
+                new Coordinate(x + w, y + h),
+                new Coordinate(x, y + h),
+                new Coordinate(x, y)
+        };
+        Polygon poly = GEOM_FACTORY.createPolygon(coords);
+        poly.getEnvelopeInternal();
+        return poly;
     }
 
     /**
-     * 对齐正交边的正多边形外接圆盘（内切圆半径严格等于 {@code inradius}，且 0°/90°/180°/270° 方向为平边）。
-     * 用于压紧器在 {@code pieceGap > 0} 时对裁片执行精确欧氏外扩，防止斜边间距不足。
+     * 校验并修复任意 JTS 几何，仅保留合法的二维面状部分（Polygon / MultiPolygon），并预热 envelope 保证多线程只读安全。
      */
-    static List<Point> alignedOffsetDisk(double inradius) {
-        if (inradius <= 0) return List.of();
-        double circumradius = inradius / Math.cos(Math.PI / GAP_DISK_SIDES);
-        List<Point> pts = new ArrayList<>(GAP_DISK_SIDES);
-        for (int i = 0; i < GAP_DISK_SIDES; i++) {
-            double theta = (2.0 * Math.PI * (i + 0.5)) / GAP_DISK_SIDES;
-            pts.add(new Point(circumradius * Math.cos(theta), circumradius * Math.sin(theta)));
+    static Geometry ensureValidPolygonal(Geometry geom) {
+        if (geom == null || geom.isEmpty()) return EMPTY_GEOM;
+        Geometry valid = geom.isValid() ? geom : GeometryFixer.fix(geom);
+        if (valid == null || valid.isEmpty()) return EMPTY_GEOM;
+
+        Geometry result;
+        if (valid instanceof Polygon) {
+            result = valid;
+        } else {
+            @SuppressWarnings("unchecked")
+            List<Polygon> polys = PolygonExtracter.getPolygons(valid);
+            if (polys.isEmpty()) {
+                return EMPTY_GEOM;
+            }
+            if (polys.size() == 1) {
+                result = polys.get(0);
+            } else {
+                result = GEOM_FACTORY.createMultiPolygon(polys.toArray(Polygon[]::new));
+            }
         }
-        return pts;
+        result.getEnvelopeInternal();
+        return result;
+    }
+
+    /** 使用 JTS {@link UnaryUnionOp}（OverlayNG 内核）批量合并多边形集合，带合法性修复兜底。 */
+    static Geometry unionGeometries(List<Geometry> geoms) {
+        if (geoms == null || geoms.isEmpty()) return EMPTY_GEOM;
+        List<Geometry> valid = new ArrayList<>(geoms.size());
+        for (Geometry g : geoms) {
+            if (g != null && !g.isEmpty()) {
+                valid.add(g);
+            }
+        }
+        if (valid.isEmpty()) return EMPTY_GEOM;
+        if (valid.size() == 1) return ensureValidPolygonal(valid.get(0));
+        ComputationCancellation.check();
+        try {
+            return ensureValidPolygonal(UnaryUnionOp.union(valid));
+        } catch (TopologyException ex) {
+            List<Geometry> fixed = new ArrayList<>(valid.size());
+            for (Geometry g : valid) {
+                Geometry fg = ensureValidPolygonal(g);
+                if (!fg.isEmpty()) fixed.add(fg);
+            }
+            if (fixed.isEmpty()) return EMPTY_GEOM;
+            if (fixed.size() == 1) return fixed.get(0);
+            return ensureValidPolygonal(UnaryUnionOp.union(fixed));
+        }
+    }
+
+    /** 使用 JTS {@link OverlayNGRobust} 执行高精度布尔差集 {@code a \ b}，带外接框快速剪枝。 */
+    static Geometry differenceGeometry(Geometry a, Geometry b) {
+        if (a == null || a.isEmpty()) return EMPTY_GEOM;
+        if (b == null || b.isEmpty()) return a;
+        if (!a.getEnvelopeInternal().intersects(b.getEnvelopeInternal())) {
+            return a;
+        }
+        ComputationCancellation.check();
+        try {
+            return ensureValidPolygonal(OverlayNGRobust.overlay(a, b, OverlayNG.DIFFERENCE));
+        } catch (TopologyException ex) {
+            return ensureValidPolygonal(OverlayNGRobust.overlay(
+                    ensureValidPolygonal(a), ensureValidPolygonal(b), OverlayNG.DIFFERENCE));
+        }
+    }
+
+    /** 使用 JTS {@link OverlayNGRobust} 执行高精度布尔交集 {@code a ∩ b}，带外接框快速剪枝。 */
+    static Geometry intersectionGeometry(Geometry a, Geometry b) {
+        if (a == null || a.isEmpty() || b == null || b.isEmpty()) return EMPTY_GEOM;
+        if (!a.getEnvelopeInternal().intersects(b.getEnvelopeInternal())) {
+            return EMPTY_GEOM;
+        }
+        ComputationCancellation.check();
+        try {
+            return ensureValidPolygonal(OverlayNGRobust.overlay(a, b, OverlayNG.INTERSECTION));
+        } catch (TopologyException ex) {
+            return ensureValidPolygonal(OverlayNGRobust.overlay(
+                    ensureValidPolygonal(a), ensureValidPolygonal(b), OverlayNG.INTERSECTION));
+        }
     }
 
     /**
-     * 对简单多边形（含凹多边形）按半径 {@code inradius} 执行欧氏外扩（Minkowski 和），
+     * 使用 JTS {@link BufferOp} 对多边形执行精确欧氏圆角外扩。
+     * 通过外接补偿因子 {@code 1 / cos(π / (4 * quadrantSegments))} 保证离散折线的内切圆半径严格不小于 {@code distance + safetyMm}，
+     * 消除旧版 16 边形圆盘 1.0196x 过膨胀（降至 ~1.0048x）。
+     */
+    static Geometry bufferPrecise(Geometry geom, double distance, double safetyMm) {
+        if (geom == null || geom.isEmpty()) return EMPTY_GEOM;
+        double total = distance + safetyMm;
+        if (total <= 0.0) return geom;
+        ComputationCancellation.check();
+        double circumRadius = total * BUFFER_CIRCUM_FACTOR;
+        BufferParameters params = new BufferParameters(
+                BUFFER_QUADRANT_SEGMENTS,
+                BufferParameters.CAP_ROUND,
+                BufferParameters.JOIN_ROUND,
+                BufferParameters.DEFAULT_MITRE_LIMIT
+        );
+        Geometry buffered = BufferOp.bufferOp(geom, circumRadius, params);
+        return ensureValidPolygonal(buffered);
+    }
+
+    /** 中心反演 {@code p -> -p}：返回新几何实例，不修改源对象。 */
+    static Geometry invertGeometry(Geometry src) {
+        if (src == null || src.isEmpty()) return EMPTY_GEOM;
+        Geometry inverted = AffineTransformation.scaleInstance(-1.0, -1.0).transform(src);
+        inverted.getEnvelopeInternal();
+        return inverted;
+    }
+
+    /** 平移几何：零偏移直接返回只读源对象，否则返回新几何实例。 */
+    static Geometry translateGeometry(Geometry src, double dx, double dy) {
+        if (src == null || src.isEmpty()) return EMPTY_GEOM;
+        if (Math.abs(dx) < 1e-15 && Math.abs(dy) < 1e-15) {
+            return src;
+        }
+        Geometry translated = AffineTransformation.translationInstance(dx, dy).transform(src);
+        translated.getEnvelopeInternal();
+        return translated;
+    }
+
+    /**
+     * 对简单多边形（含凹多边形）按半径 {@code inradius} 执行精确 JTS 欧氏外扩，
      * 保留原局部原点 {@code (0, 0)} 坐标系并返回所有闭合轮廓环（含外环与可能的内洞环）。
      */
     static List<Ring> inflateShapeRings(Shape shape, double inradius) {
@@ -457,45 +619,21 @@ final class DeepnestNfpGeometry {
             List<Point> raw = PolygonGeometry.vertices(shape);
             return List.of(new Ring(raw, PolygonGeometry.signedArea(raw)));
         }
-        List<Point> disk = alignedOffsetDisk(inradius);
-        List<List<Point>> convex = decomposeConvex(shape);
-        Area inflated;
-        if (!convex.isEmpty()) {
-            List<Area> parts = new ArrayList<>(convex.size());
-            for (List<Point> c : convex) {
-                ComputationCancellation.check();
-                List<Point> sum = minkowskiSumConvex(c, disk);
-                if (sum.size() >= 3) {
-                    parts.add(toArea(sum, 0, 0));
-                }
-            }
-            inflated = unionBalanced(parts);
-        } else {
-            Shape diskShape = toNormalizedShape(disk);
-            double minX = disk.stream().mapToDouble(Point::x).min().orElse(0);
-            double minY = disk.stream().mapToDouble(Point::y).min().orElse(0);
-            Area expanded = convolveAreaWithNegatedShape(PolygonGeometry.region(shape, 0, 0), diskShape);
-            inflated = translateArea(expanded, -minX, -minY);
+        Geometry base = toJtsPolygon(shape, 0.0, 0.0);
+        if (base.isEmpty()) {
+            return List.of();
         }
+        Geometry inflated = bufferPrecise(base, inradius, 0.0);
         return extractRings(inflated);
     }
 
     /**
-     * 中心反演 {@code p -> -p}：因为 {@code OuterNFP(A, B) = A ⊕ (-B) ⊕ D} 且 {@code D = -D}，
-     * 对 {@code OuterNFP(A, B)} 做中心反演即精确等价于 {@code OuterNFP(B, A)}。
+     * 线程安全的跨会话有界 LRU Outer NFP 查询（JTS 内核），自动利用中心反演对称性避免 {@code (B, A)} 重复计算。
+     * 返回的 JTS {@link Geometry} 已预热 envelope 且仅作只读使用，多线程并发绝对安全。
      */
-    static Area invertArea(Area src) {
-        if (src == null || src.isEmpty()) return new Area();
-        return src.createTransformedArea(AffineTransform.getScaleInstance(-1.0, -1.0));
-    }
-
-    /**
-     * 线程安全的跨会话有界 LRU Outer NFP 查询，自动利用中心反演对称性避免 {@code (B, A)} 重复计算。
-     * 每次返回独立防御性拷贝，避免多线程并发访问 {@link Area} 内部缓存字段。
-     */
-    static Area getOrComputeOuterNfp(Shape shapeA, List<List<Point>> convexA, ShapeSignature sigA,
-                                     Shape shapeB, List<List<Point>> convexB, ShapeSignature sigB,
-                                     double pieceGap) {
+    static Geometry getOrComputeOuterNfpGeom(Shape shapeA, List<List<Point>> convexA, ShapeSignature sigA,
+                                             Shape shapeB, List<List<Point>> convexB, ShapeSignature sigB,
+                                             double pieceGap) {
         ComputationCancellation.check();
         long gapMicros = Math.round(Math.max(0.0, pieceGap) * 1_000_000.0);
         boolean inverted = sigA.compareTo(sigB) > 0;
@@ -503,7 +641,7 @@ final class DeepnestNfpGeometry {
                 ? new OuterNfpCacheKey(sigB, sigA, gapMicros)
                 : new OuterNfpCacheKey(sigA, sigB, gapMicros);
 
-        Area cached;
+        Geometry cached;
         synchronized (OUTER_NFP_CACHE_LOCK) {
             cached = OUTER_NFP_CACHE.get(canonicalKey);
         }
@@ -511,83 +649,89 @@ final class DeepnestNfpGeometry {
             OUTER_NFP_HITS.incrementAndGet();
             if (inverted) {
                 OUTER_NFP_SYMMETRY_HITS.incrementAndGet();
-                return invertArea(cached);
+                return invertGeometry(cached);
             }
-            return new Area(cached);
+            return cached;
         }
 
         OUTER_NFP_MISSES.incrementAndGet();
-        Area computed = inverted
-                ? computeOuterNfp(shapeB, convexB, shapeA, convexA, pieceGap)
-                : computeOuterNfp(shapeA, convexA, shapeB, convexB, pieceGap);
-        // 预热 cachedBounds，防止后续只读并发访问触发 Area 内部懒写入
-        computed.getBounds2D();
+        Geometry computed = inverted
+                ? computeOuterNfpGeom(shapeB, convexB, shapeA, convexA, pieceGap)
+                : computeOuterNfpGeom(shapeA, convexA, shapeB, convexB, pieceGap);
+        computed.getEnvelopeInternal();
 
         synchronized (OUTER_NFP_CACHE_LOCK) {
-            Area existing = OUTER_NFP_CACHE.putIfAbsent(canonicalKey, computed);
+            Geometry existing = OUTER_NFP_CACHE.putIfAbsent(canonicalKey, computed);
             if (existing != null) {
                 computed = existing;
             }
         }
-        return inverted ? invertArea(computed) : new Area(computed);
+        return inverted ? invertGeometry(computed) : computed;
     }
 
     /**
-     * Computes the Outer No-Fit Polygon $\text{OuterNFP}(A, B) = A \oplus (-B)$ (plus {@code pieceGap} disk if $>0$).
-     * Represents the forbidden open region of $B$'s local top-left origin when $A$ is placed at $(0, 0)$.
-     * Interior holes (e.g., when $B$ fits inside a deep cavity of $A$) are naturally preserved in the returned {@link Area}.
+     * Computes the Outer No-Fit Polygon $\text{OuterNFP}(A, B) = A \oplus (-B)$ (plus JTS precise {@link BufferOp}
+     * when {@code pieceGap > 0}) as a JTS {@link Geometry}.
      */
-    static Area computeOuterNfp(Shape shapeA, List<List<Point>> convexA,
-                                Shape shapeB, List<List<Point>> convexB,
-                                double pieceGap) {
+    static Geometry computeOuterNfpGeom(Shape shapeA, List<List<Point>> convexA,
+                                        Shape shapeB, List<List<Point>> convexB,
+                                        double pieceGap) {
         ComputationCancellation.check();
-        List<Point> disk = pieceGap > 0 ? spacingDisk(pieceGap) : List.of();
-
+        Geometry baseNfp;
         if (!convexA.isEmpty() && !convexB.isEmpty()) {
-            List<Area> pieces = new ArrayList<>(convexA.size() * convexB.size());
+            List<Geometry> pieces = new ArrayList<>(convexA.size() * convexB.size());
             for (List<Point> ca : convexA) {
                 ComputationCancellation.check();
-                List<Point> effA = pieceGap > 0 ? minkowskiSumConvex(ca, disk) : shrinkConvexMicro(ca, OPEN_CHANNEL_EPS);
+                List<Point> effA = pieceGap > 0 ? ca : shrinkConvexMicro(ca, OPEN_CHANNEL_EPS);
                 for (List<Point> cb : convexB) {
                     List<Point> negB = pieceGap > 0
                             ? negateConvex(cb)
                             : shrinkConvexMicro(negateConvex(cb), OPEN_CHANNEL_EPS);
                     List<Point> sum = minkowskiSumConvex(effA, negB);
                     if (sum.size() >= 3) {
-                        pieces.add(toArea(sum, 0, 0));
+                        Geometry poly = toJtsPolygon(sum, 0.0, 0.0);
+                        if (!poly.isEmpty()) {
+                            pieces.add(poly);
+                        }
                     }
                 }
             }
-            return unionBalanced(pieces);
+            baseNfp = unionGeometries(pieces);
+        } else {
+            baseNfp = convolveGeomWithNegatedShape(toJtsPolygon(shapeA, 0.0, 0.0), shapeB);
         }
 
-        // Fallback to direct segment convolution from minkowski.cc if decomposition was degenerate
-        return convolveSimpleShapes(shapeA, shapeB, disk);
+        if (pieceGap > 0.0 && !baseNfp.isEmpty()) {
+            return bufferPrecise(baseNfp, pieceGap, GAP_SAFETY_MM);
+        }
+        return baseNfp;
     }
 
     /**
-     * Direct segment-pair Minkowski convolution migrated from {@code D:\GitHub\Deepnest\minkowski.cc}
-     * ({@code convolve_two_polygon_sets}), supporting arbitrary polygons with holes.
+     * Direct segment-pair Minkowski convolution migrated from {@code minkowski.cc}, backed by JTS {@link UnaryUnionOp},
+     * supporting arbitrary polygons with holes.
      */
-    static Area convolveAreaWithNegatedShape(Area areaA, Shape shapeB) {
+    static Geometry convolveGeomWithNegatedShape(Geometry geomA, Shape shapeB) {
         ComputationCancellation.check();
-        List<Ring> ringsA = extractRings(areaA);
+        List<Ring> ringsA = extractRings(geomA);
         List<Point> negB = new ArrayList<>();
         for (Point p : PolygonGeometry.vertices(shapeB)) {
             negB.add(new Point(-p.x(), -p.y()));
         }
-        if (ringsA.isEmpty() || negB.size() < 3) return new Area();
+        if (ringsA.isEmpty() || negB.size() < 3) return EMPTY_GEOM;
 
-        List<Area> parts = new ArrayList<>();
+        List<Geometry> parts = new ArrayList<>();
         Point b0 = negB.get(0);
-        parts.add(translateArea(areaA, b0.x(), b0.y()));
+        parts.add(translateGeometry(geomA, b0.x(), b0.y()));
 
-        Area negBArea = toArea(negB, 0, 0);
+        Geometry negBGeom = toJtsPolygon(negB, 0.0, 0.0);
         for (Ring ringA : ringsA) {
             ComputationCancellation.check();
             List<Point> va = ringA.vertices();
             if (va.isEmpty()) continue;
-            parts.add(translateArea(negBArea, va.get(0).x(), va.get(0).y()));
+            if (!negBGeom.isEmpty()) {
+                parts.add(translateGeometry(negBGeom, va.get(0).x(), va.get(0).y()));
+            }
             int na = va.size(), nb = negB.size();
             for (int i = 0; i < na; i++) {
                 ComputationCancellation.check();
@@ -596,7 +740,6 @@ final class DeepnestNfpGeometry {
                 for (int j = 0; j < nb; j++) {
                     Point p1 = negB.get(j);
                     Point p2 = negB.get((j + 1) % nb);
-                    // Parallelogram swept by edge (a1->a2) and edge (p1->p2) as in minkowski.cc:convolve_two_segments
                     double cross = (a2.x() - a1.x()) * (p2.y() - p1.y()) - (a2.y() - a1.y()) * (p2.x() - p1.x());
                     if (Math.abs(cross) <= 1e-9) continue;
                     List<Point> quad = List.of(
@@ -605,41 +748,22 @@ final class DeepnestNfpGeometry {
                             new Point(a2.x() + p1.x(), a2.y() + p1.y()),
                             new Point(a2.x() + p2.x(), a2.y() + p2.y())
                     );
-                    parts.add(toArea(quad, 0, 0));
+                    Geometry quadGeom = toJtsPolygon(quad, 0.0, 0.0);
+                    if (!quadGeom.isEmpty()) {
+                        parts.add(quadGeom);
+                    }
                 }
             }
         }
-        return unionBalanced(parts);
-    }
-
-    private static Area convolveSimpleShapes(Shape shapeA, Shape shapeB, List<Point> disk) {
-        Area base = convolveAreaWithNegatedShape(PolygonGeometry.region(shapeA, 0, 0), shapeB);
-        if (disk.isEmpty()) return base;
-        Shape diskShape = toNormalizedShape(disk);
-        double minX = disk.stream().mapToDouble(Point::x).min().orElse(0);
-        double minY = disk.stream().mapToDouble(Point::y).min().orElse(0);
-        // disk is symmetric (-disk == disk); convolving with negated normalized disk shifted back
-        Area expanded = convolveAreaWithNegatedShape(base, diskShape);
-        return translateArea(expanded, -minX, -minY);
-    }
-
-    private static Shape toNormalizedShape(List<Point> pts) {
-        double minX = pts.stream().mapToDouble(Point::x).min().orElse(0);
-        double minY = pts.stream().mapToDouble(Point::y).min().orElse(0);
-        double maxX = pts.stream().mapToDouble(Point::x).max().orElse(0);
-        double maxY = pts.stream().mapToDouble(Point::y).max().orElse(0);
-        List<Point> norm = pts.stream().map(p -> new Point(p.x() - minX, p.y() - minY)).toList();
-        return new Shape("POLYGON", maxX - minX, maxY - minY, norm);
+        return unionGeometries(parts);
     }
 
     /**
-     * Computes the Inner-Fit Polygon (IFP / Sheet NFP) representing all valid origins $(x, y)$
+     * Computes the Inner-Fit Polygon (IFP / Sheet NFP) as a JTS {@link Geometry} representing all valid origins $(x, y)$
      * where {@code partShape} lies completely inside {@code materialShape} and outside all {@code exclusions}.
-     * Migrated from {@code getFrame} + {@code getInnerNfp} ({@code background.js}) and
-     * {@code noFitPolygonRectangle} ({@code geometryutil.js}), generalized for exact zero-slack fits.
      */
-    static Area computeInnerNfp(Shape materialShape, List<Exclusion> exclusions,
-                                Shape partShape, List<List<Point>> partConvex) {
+    static Geometry computeInnerNfpGeom(Shape materialShape, List<Exclusion> exclusions,
+                                        Shape partShape, List<List<Point>> partConvex) {
         ComputationCancellation.check();
         double matW = materialShape.width();
         double matH = materialShape.height();
@@ -647,48 +771,45 @@ final class DeepnestNfpGeometry {
         double partH = partShape.height();
 
         if (partW > matW + 1e-6 || partH > matH + 1e-6) {
-            return new Area();
+            return EMPTY_GEOM;
         }
 
-        Area innerFeasible;
+        Geometry innerFeasible;
         double maxX = Math.max(0.0, matW - partW);
         double maxY = Math.max(0.0, matH - partH);
 
         if ("RECTANGLE".equals(materialShape.type())) {
-            // Fast exact IFP for rectangular sheet, expanded by OPEN_CHANNEL_EPS so 0-width/0-height exact fits survive Area
-            innerFeasible = rectArea(
+            // Fast exact IFP for rectangular sheet
+            innerFeasible = rectGeometry(
                     -OPEN_CHANNEL_EPS,
                     -OPEN_CHANNEL_EPS,
                     maxX + 2 * OPEN_CHANNEL_EPS,
                     maxY + 2 * OPEN_CHANNEL_EPS
             );
         } else {
-            // Concave / general polygon sheet: frame \ sheet convolution as in Deepnest getFrame + calculateNFP
             double margin = partW + partH + 20.0;
-            Area frame = rectArea(-margin, -margin, matW + 2 * margin, matH + 2 * margin);
-            Area sheetRegion = PolygonGeometry.region(materialShape, 0, 0);
-            frame.subtract(sheetRegion);
+            Geometry frame = rectGeometry(-margin, -margin, matW + 2 * margin, matH + 2 * margin);
+            Geometry sheetRegion = toJtsPolygon(materialShape, 0.0, 0.0);
+            Geometry frameMinusSheet = differenceGeometry(frame, sheetRegion);
 
-            // Shrink part slightly around its centroid so exact boundary-fitting placements (e.g. L-part in identical L-sheet) survive
             Shape shrunkPart = shrinkShapeMicro(partShape, OPEN_CHANNEL_EPS * 2);
-            Area forbiddenOutside = convolveAreaWithNegatedShape(frame, shrunkPart);
+            Geometry forbiddenOutside = convolveGeomWithNegatedShape(frameMinusSheet, shrunkPart);
 
-            innerFeasible = rectArea(
+            Geometry boundingRect = rectGeometry(
                     -OPEN_CHANNEL_EPS,
                     -OPEN_CHANNEL_EPS,
                     maxX + 2 * OPEN_CHANNEL_EPS,
                     maxY + 2 * OPEN_CHANNEL_EPS
             );
-            innerFeasible.subtract(forbiddenOutside);
+            innerFeasible = differenceGeometry(boundingRect, forbiddenOutside);
         }
 
         if (innerFeasible.isEmpty()) {
-            return innerFeasible;
+            return EMPTY_GEOM;
         }
 
-        // Subtract OuterNFP(exclusion, part) for each material defect exclusion (including its clearance)
         if (exclusions != null && !exclusions.isEmpty()) {
-            List<Area> defectNfps = new ArrayList<>(exclusions.size());
+            List<Geometry> defectNfps = new ArrayList<>(exclusions.size());
             for (Exclusion exc : exclusions) {
                 ComputationCancellation.check();
                 double clr = exc.clearance();
@@ -698,17 +819,100 @@ final class DeepnestNfpGeometry {
                 double ex = exc.x() - clr;
                 double ey = exc.y() - clr;
                 List<List<Point>> excConvex = decomposeConvex(excShape);
-                Area rawExcNfp = computeOuterNfp(excShape, excConvex, partShape, partConvex, 0.0);
+                Geometry rawExcNfp = computeOuterNfpGeom(excShape, excConvex, partShape, partConvex, 0.0);
                 if (!rawExcNfp.isEmpty()) {
-                    defectNfps.add(translateArea(rawExcNfp, ex, ey));
+                    defectNfps.add(translateGeometry(rawExcNfp, ex, ey));
                 }
             }
             if (!defectNfps.isEmpty()) {
-                innerFeasible.subtract(unionBalanced(defectNfps));
+                innerFeasible = differenceGeometry(innerFeasible, unionGeometries(defectNfps));
             }
         }
 
         return innerFeasible;
+    }
+
+    /** Extracts all closed polygonal rings (exterior shells and interior holes) from a JTS {@link Geometry}. */
+    static List<Ring> extractRings(Geometry geom) {
+        if (geom == null || geom.isEmpty()) return List.of();
+        @SuppressWarnings("unchecked")
+        List<Polygon> polys = PolygonExtracter.getPolygons(geom);
+        if (polys.isEmpty()) return List.of();
+        List<Ring> rings = new ArrayList<>(polys.size());
+        for (Polygon poly : polys) {
+            appendRing(poly.getExteriorRing(), rings);
+            int numHoles = poly.getNumInteriorRing();
+            for (int i = 0; i < numHoles; i++) {
+                appendRing(poly.getInteriorRingN(i), rings);
+            }
+        }
+        return rings;
+    }
+
+    private static void appendRing(LinearRing lr, List<Ring> out) {
+        if (lr == null || lr.isEmpty()) return;
+        Coordinate[] coords = lr.getCoordinates();
+        if (coords.length < 4) return;
+        int n = coords.length - 1; // last coordinate repeats first
+        List<Point> pts = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            Point p = new Point(coords[i].x, coords[i].y);
+            if (pts.isEmpty() || distSq(pts.get(pts.size() - 1), p) > 1e-18) {
+                pts.add(p);
+            }
+        }
+        if (pts.size() > 1 && distSq(pts.get(0), pts.get(pts.size() - 1)) <= 1e-18) {
+            pts.remove(pts.size() - 1);
+        }
+        if (pts.size() >= 3) {
+            double sa = PolygonGeometry.signedArea(pts);
+            out.add(new Ring(List.copyOf(pts), sa));
+        }
+    }
+
+    /** 将 JTS 面状几何转换为 {@link Area}（仅用于向后兼容旧测试签名，不在求解热路径使用）。 */
+    static Area toArea(Geometry geom) {
+        if (geom == null || geom.isEmpty()) return new Area();
+        @SuppressWarnings("unchecked")
+        List<Polygon> polys = PolygonExtracter.getPolygons(geom);
+        if (polys.isEmpty()) return new Area();
+        Path2D.Double path = new Path2D.Double(Path2D.WIND_EVEN_ODD);
+        for (Polygon poly : polys) {
+            appendLinearRingToPath(poly.getExteriorRing(), path);
+            for (int i = 0; i < poly.getNumInteriorRing(); i++) {
+                appendLinearRingToPath(poly.getInteriorRingN(i), path);
+            }
+        }
+        return new Area(path);
+    }
+
+    private static void appendLinearRingToPath(LinearRing lr, Path2D.Double path) {
+        Coordinate[] coords = lr.getCoordinates();
+        if (coords.length < 4) return;
+        path.moveTo(coords[0].x, coords[0].y);
+        for (int i = 1; i < coords.length - 1; i++) {
+            path.lineTo(coords[i].x, coords[i].y);
+        }
+        path.closePath();
+    }
+
+    // ==================== 向后兼容包装方法（供既有单测调用） ====================
+
+    static Area invertArea(Area src) {
+        if (src == null || src.isEmpty()) return new Area();
+        return src.createTransformedArea(AffineTransform.getScaleInstance(-1.0, -1.0));
+    }
+
+    static Area getOrComputeOuterNfp(Shape shapeA, List<List<Point>> convexA, ShapeSignature sigA,
+                                     Shape shapeB, List<List<Point>> convexB, ShapeSignature sigB,
+                                     double pieceGap) {
+        return toArea(getOrComputeOuterNfpGeom(shapeA, convexA, sigA, shapeB, convexB, sigB, pieceGap));
+    }
+
+    static Area computeOuterNfp(Shape shapeA, List<List<Point>> convexA,
+                                Shape shapeB, List<List<Point>> convexB,
+                                double pieceGap) {
+        return toArea(computeOuterNfpGeom(shapeA, convexA, shapeB, convexB, pieceGap));
     }
 
     private static Shape shrinkShapeMicro(Shape shape, double delta) {
@@ -737,90 +941,6 @@ final class DeepnestNfpGeometry {
         final double ox = minX, oy = minY;
         List<Point> shifted = scaled.stream().map(p -> new Point(p.x() - ox, p.y() - oy)).toList();
         return new Shape("POLYGON", Math.max(1e-6, maxX - minX), Math.max(1e-6, maxY - minY), shifted);
-    }
-
-    /** Pairwise divide-and-conquer boolean union reducing {@link Area#add(Area)} complexity from $O(K^2)$ to $O(K \log K)$. */
-    static Area unionBalanced(List<Area> areas) {
-        if (areas.isEmpty()) return new Area();
-        if (areas.size() == 1) return new Area(areas.get(0));
-        List<Area> current = new ArrayList<>(areas.size());
-        for (Area a : areas) {
-            if (a != null && !a.isEmpty()) current.add(new Area(a));
-        }
-        if (current.isEmpty()) return new Area();
-        while (current.size() > 1) {
-            ComputationCancellation.check();
-            List<Area> next = new ArrayList<>((current.size() + 1) / 2);
-            for (int i = 0; i < current.size(); i += 2) {
-                ComputationCancellation.check();
-                if (i + 1 < current.size()) {
-                    Area merged = current.get(i);
-                    merged.add(current.get(i + 1));
-                    next.add(merged);
-                } else {
-                    next.add(current.get(i));
-                }
-            }
-            current = next;
-        }
-        return current.get(0);
-    }
-
-    static Area toArea(List<Point> points, double dx, double dy) {
-        Path2D.Double path = new Path2D.Double();
-        path.moveTo(points.get(0).x() + dx, points.get(0).y() + dy);
-        for (int i = 1; i < points.size(); i++) {
-            path.lineTo(points.get(i).x() + dx, points.get(i).y() + dy);
-        }
-        path.closePath();
-        return new Area(path);
-    }
-
-    static Area rectArea(double x, double y, double w, double h) {
-        Path2D.Double path = new Path2D.Double();
-        path.moveTo(x, y);
-        path.lineTo(x + w, y);
-        path.lineTo(x + w, y + h);
-        path.lineTo(x, y + h);
-        path.closePath();
-        return new Area(path);
-    }
-
-    static Area translateArea(Area src, double dx, double dy) {
-        if (src.isEmpty() || (Math.abs(dx) < 1e-15 && Math.abs(dy) < 1e-15)) {
-            return new Area(src);
-        }
-        return src.createTransformedArea(java.awt.geom.AffineTransform.getTranslateInstance(dx, dy));
-    }
-
-    /** Extracts all closed polygonal rings from a boolean {@link Area}. */
-    static List<Ring> extractRings(Area area) {
-        if (area == null || area.isEmpty()) return List.of();
-        List<Ring> rings = new ArrayList<>();
-        List<Point> current = new ArrayList<>();
-        double[] coords = new double[6];
-        for (PathIterator it = area.getPathIterator(null); !it.isDone(); it.next()) {
-            int type = it.currentSegment(coords);
-            if (type == PathIterator.SEG_MOVETO) {
-                current.clear();
-                current.add(new Point(coords[0], coords[1]));
-            } else if (type == PathIterator.SEG_LINETO) {
-                Point p = new Point(coords[0], coords[1]);
-                if (current.isEmpty() || distSq(current.get(current.size() - 1), p) > 1e-18) {
-                    current.add(p);
-                }
-            } else if (type == PathIterator.SEG_CLOSE) {
-                if (current.size() > 1 && distSq(current.get(0), current.get(current.size() - 1)) <= 1e-18) {
-                    current.remove(current.size() - 1);
-                }
-                if (current.size() >= 3) {
-                    double sa = PolygonGeometry.signedArea(current);
-                    rings.add(new Ring(List.copyOf(current), sa));
-                }
-                current.clear();
-            }
-        }
-        return rings;
     }
 
     /**
@@ -883,7 +1003,7 @@ final class DeepnestNfpGeometry {
             double edgeMaxY = Math.max(a1y, a2y) + tolerance;
 
             double lenA = Math.sqrt(lenSq);
-            double ux = dx / lenA, uy = dy / lenA; // unit tangent along A1->A2
+            double ux = dx / lenA, uy = dy / lenA;
 
             for (List<Point> placed : nearbyPolys) {
                 int pn = placed.size();
@@ -900,13 +1020,11 @@ final class DeepnestNfpGeometry {
                     double relB1x = b1.x() - a1x, relB1y = b1.y() - a1y;
                     double relB2x = b2.x() - a1x, relB2y = b2.y() - a1y;
 
-                    // Perpendicular signed distance to infinite line A1->A2
                     double perp1 = -relB1x * uy + relB1y * ux;
                     if (Math.abs(perp1) > tolerance) continue;
                     double perp2 = -relB2x * uy + relB2y * ux;
                     if (Math.abs(perp2) > tolerance) continue;
 
-                    // Parallel projection onto A1->A2 ([0, lenA])
                     double proj1 = relB1x * ux + relB1y * uy;
                     double proj2 = relB2x * ux + relB2y * uy;
                     double minB = Math.min(proj1, proj2);

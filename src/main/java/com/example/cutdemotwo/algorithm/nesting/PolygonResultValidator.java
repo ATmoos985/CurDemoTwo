@@ -88,7 +88,10 @@ public final class PolygonResultValidator {
             var demand = demandsById.get(p.demandId());
             if (demand == null || !ids.add(p.id()) || counts.merge(demand.id(), 1, Integer::sum) > demand.quantity())
                 return "异形结果的需求归属、标识或数量无效";
-            if (!demand.contourAngles().contains(p.rotationDegrees())) return "异形结果违反旋转约束";
+            if (p.rotationDegrees() < 0 || p.rotationDegrees() >= 360
+                    || !demand.contourAngles().contains(p.rotationDegrees())) {
+                return "异形结果违反旋转约束";
+            }
             if (!Double.isFinite(p.x()) || !Double.isFinite(p.y())) return "异形结果坐标无效";
             try { PolygonGeometry.validate(p.shape()); } catch (RuntimeException e) { return "异形结果轮廓无效"; }
 

@@ -121,7 +121,11 @@ public class IrregularPackingSolverService implements ICutSolverEngine, StripSea
             for (var item : bin.path("items")) {
                 int type = integer(item, "id"); check(type >= 0 && type < problem.parts().size());
                 check(item.path("mirror").isBoolean() && !item.path("mirror").asBoolean());
-                double angle = number(item, "angle"); check(Set.of(0d, 90d, 180d, 270d).contains(angle));
+                double angle = number(item, "angle");
+                check(Math.abs(angle - Math.rint(angle)) < 1e-7);
+                int angleDeg = Math.floorMod((int) Math.rint(angle), 360);
+                var part = problem.parts().get(type);
+                check(part.contourAngles().contains(angleDeg));
                 var shapes = item.path("item_shapes"); check(shapes.isArray() && shapes.size() == 1);
                 var outline = shapes.get(0); check(outline.path("holes").isMissingNode() || outline.path("holes").isEmpty());
                 var edges = outline.path("shape"); check(edges.isArray() && edges.size() >= 3 && edges.size() <= 128);
@@ -135,9 +139,8 @@ public class IrregularPackingSolverService implements ICutSolverEngine, StripSea
                 double x = points.stream().mapToDouble(NestingProblem.Point::x).min().orElseThrow(), y = points.stream().mapToDouble(NestingProblem.Point::y).min().orElseThrow();
                 double w = points.stream().mapToDouble(NestingProblem.Point::x).max().orElseThrow() - x, h = points.stream().mapToDouble(NestingProblem.Point::y).max().orElseThrow() - y;
                 var shape = new NestingProblem.Shape("POLYGON", w, h, points.stream().map(v -> new NestingProblem.Point(v.x() - x, v.y() - y)).toList());
-                var part = problem.parts().get(type);
                 result.getPlacements().add(new NestingResult.Placement(result.getPlacements().size() + 1, part.id(), part.name(),
-                        worldOrigin(x), worldOrigin(y), shape, (int) angle));
+                        worldOrigin(x), worldOrigin(y), shape, angleDeg));
             }
         }
         return result;

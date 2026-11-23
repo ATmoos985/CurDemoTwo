@@ -75,16 +75,34 @@ public final class PolygonGeometry {
     }
     /** Positive angles follow x-right/y-down source coordinates (clockwise on the canvas). */
     public static Shape rotate(Shape shape, int degrees) {
-        var points = vertices(shape).stream().map(p -> switch (degrees) {
-            case 0 -> p;
-            case 90 -> new Point(-p.y(), p.x());
-            case 180 -> new Point(-p.x(), -p.y());
-            case 270 -> new Point(p.y(), -p.x());
-            default -> throw new IllegalArgumentException("仅支持 90 度步进旋转");
-        }).toList();
-        double minX = points.stream().mapToDouble(Point::x).min().orElseThrow(), minY = points.stream().mapToDouble(Point::y).min().orElseThrow();
-        double w = points.stream().mapToDouble(Point::x).max().orElseThrow() - minX, h = points.stream().mapToDouble(Point::y).max().orElseThrow() - minY;
-        return "RECTANGLE".equals(shape.type()) ? Shape.rectangle(w, h) : new Shape("POLYGON", w, h,
-                points.stream().map(p -> new Point(p.x() - minX, p.y() - minY)).toList());
+        int norm = Math.floorMod(degrees, 360);
+        List<Point> rawVerts = vertices(shape);
+        boolean orthogonal = norm == 0 || norm == 90 || norm == 180 || norm == 270;
+        List<Point> points;
+        if (orthogonal) {
+            points = rawVerts.stream().map(p -> switch (norm) {
+                case 0 -> p;
+                case 90 -> new Point(-p.y(), p.x());
+                case 180 -> new Point(-p.x(), -p.y());
+                case 270 -> new Point(p.y(), -p.x());
+                default -> throw new IllegalStateException();
+            }).toList();
+        } else {
+            double rad = Math.toRadians(norm);
+            double cos = Math.cos(rad);
+            double sin = Math.sin(rad);
+            points = rawVerts.stream()
+                    .map(p -> new Point(p.x() * cos - p.y() * sin, p.x() * sin + p.y() * cos))
+                    .toList();
+        }
+        double minX = points.stream().mapToDouble(Point::x).min().orElseThrow();
+        double minY = points.stream().mapToDouble(Point::y).min().orElseThrow();
+        double w = points.stream().mapToDouble(Point::x).max().orElseThrow() - minX;
+        double h = points.stream().mapToDouble(Point::y).max().orElseThrow() - minY;
+        if (orthogonal && "RECTANGLE".equals(shape.type())) {
+            return Shape.rectangle(w, h);
+        }
+        return new Shape("POLYGON", w, h,
+                points.stream().map(p -> new Point(Math.max(0.0, p.x() - minX), Math.max(0.0, p.y() - minY))).toList());
     }
 }

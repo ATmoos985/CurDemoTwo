@@ -65,7 +65,7 @@ public record NestingProblem(
         }
     }
 
-    /** Optional per-part rule (e.g. role MAIN/AUXILIARY and pattern-matching alignment). */
+    /** Optional per-part rule (e.g. role MAIN/AUXILIARY, pattern-matching alignment, and custom discrete angles). */
     public record PartRule(
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
             String role,
@@ -74,8 +74,19 @@ public record NestingProblem(
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
             Double patternAnchorYMm,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-            Double patternToleranceMm
-    ) {}
+            Double patternToleranceMm,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            List<Integer> allowedAnglesDeg
+    ) {
+        public PartRule {
+            allowedAnglesDeg = allowedAnglesDeg == null
+                    ? null
+                    : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(allowedAnglesDeg));
+        }
+        public PartRule(String role, Boolean patternMatch, Double patternAnchorYMm, Double patternToleranceMm) {
+            this(role, patternMatch, patternAnchorYMm, patternToleranceMm, null);
+        }
+    }
 
     public record Part(
             int id, String name, Shape shape, int quantity, boolean allowRotation,
@@ -91,6 +102,17 @@ public record NestingProblem(
             this(id, name, shape, quantity, allowRotation, allowHalfTurn, null);
         }
         public List<Integer> contourAngles() {
+            if (rule != null && rule.allowedAnglesDeg() != null && !rule.allowedAnglesDeg().isEmpty()) {
+                var normalized = new java.util.LinkedHashSet<Integer>(rule.allowedAnglesDeg().size() * 2);
+                for (Integer deg : rule.allowedAnglesDeg()) {
+                    if (deg != null) {
+                        normalized.add(Math.floorMod(deg, 360));
+                    }
+                }
+                if (!normalized.isEmpty()) {
+                    return List.copyOf(normalized);
+                }
+            }
             if (allowRotation) return List.of(0, 90, 180, 270);
             return Boolean.TRUE.equals(allowHalfTurn) ? List.of(0, 180) : List.of(0);
         }
