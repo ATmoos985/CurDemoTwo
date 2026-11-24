@@ -12,11 +12,9 @@ import {
 } from '@static/app/js/model/report.js';
 import {
   reviewablePieces,
-  effectivePieceResults,
   emptyQualityForm,
   qualityProblems,
   buildQualityCommand,
-  receiptSummary,
   DISPOSITIONS
 } from '@static/app/js/model/quality.js';
 import {

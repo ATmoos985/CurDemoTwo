@@ -46,6 +46,7 @@ export const CuttingWorkbenchPage: React.FC<{
     loadClusterInto1D,
     loadDemandFamilyIntoWorkbench,
     syncDemandFamilyProgress,
+    syncMergedDemandFamiliesProgress,
     activeDimension,
     setActiveDimension,
     scenario2D,
@@ -449,14 +450,17 @@ export const CuttingWorkbenchPage: React.FC<{
     markSlitSchemeDispatched,
     settings,
     reloadReferenceData,
-    syncDemandFamilyProgress
+    syncDemandFamilyProgress,
+    syncMergedDemandFamiliesProgress
   });
 
   const {
+    validatingLayout,
     handleDropStagingPiece,
     handleMovePlacedPiece,
     handleRotatePlacedPiece,
-    handleRemovePlacedPiece
+    handleRemovePlacedPiece,
+    handleValidateAndRebuildLayout
   } = useWorkbenchBoardEdit({
     activeScheme2D,
     activeDemands2D,
@@ -652,6 +656,8 @@ export const CuttingWorkbenchPage: React.FC<{
           onMovePlacedPiece={handleMovePlacedPiece}
           onRotatePlacedPiece={handleRotatePlacedPiece}
           onRemovePlacedPiece={handleRemovePlacedPiece}
+          validatingLayout={validatingLayout}
+          onValidateAndRebuildLayout={handleValidateAndRebuildLayout}
           slitSchemes={slitSchemes}
           activeScheme1D={activeScheme1D}
           setActiveSlitScheme={setActiveSlitScheme}
@@ -678,12 +684,14 @@ export const CuttingWorkbenchPage: React.FC<{
           runningSolve={runningSolve}
           solveElapsedMs={solveElapsedMs}
           confirmingScheme={confirmingScheme}
+          validatingLayout={validatingLayout}
           lastConfirmSummary={lastConfirmSummary}
           onContinueAfterConfirm={() => {
             setLastConfirmSummary(null);
             if (is2D) clearSchemes2D();
             else setSlitSchemes([]);
           }}
+          onValidateAndRebuildLayout={handleValidateAndRebuildLayout}
           onConfirmSelectedScheme2D={handleConfirmSelectedScheme2D}
           onConfirmSelectedScheme1D={handleConfirmSelectedScheme1D}
           onQuickExportCam={(kind) => exportCam2D(activeScheme2D, settings, kind)}

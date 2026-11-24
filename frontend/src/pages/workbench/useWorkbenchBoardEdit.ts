@@ -1,18 +1,21 @@
-import { Dispatch, SetStateAction } from 'react';
+import { Dispatch, SetStateAction, useState } from 'react';
 import {
   useStudioStore,
   DemandItem,
   SavedScheme2D,
-  Scenario2DType,
-  ShapeGeometry
+  Scenario2DType
 } from '../../store/useStudioStore';
 import { StudioSettings } from '../../store/studioSettings';
 import { BoardDefect } from '../../components/WorkbenchBoardCanvas';
 import { buildSafeNestingRequest2D } from '@static/js/business/optimization/nesting-request-adapter.js';
 import { rectangle, shapeArea } from '@static/js/canvas/nesting-scene.js';
-import { toast } from '@static/app/js/util.js';
+import { requestJSON, toast } from '@static/app/js/util.js';
 import { LastConfirmSummary, STRATEGIES_2D } from './workbenchTypes';
-import { rotateShapeGeometry } from './workbenchUtils';
+import {
+  tryRotatePlacedPiece,
+  ValidationPlacedPiece
+} from './boardPlacementValidation';
+import { buildValidateLayoutPayload } from './schemeConfirmUtils';
 
 export interface UseWorkbenchBoardEditOptions {
   activeScheme2D: SavedScheme2D | null;
@@ -31,6 +34,82 @@ export interface UseWorkbenchBoardEditOptions {
   removeScheme2D: (id: string) => void;
   setSelectedPieceIndex: Dispatch<SetStateAction<number | null>>;
   setLastConfirmSummary: Dispatch<SetStateAction<LastConfirmSummary | null>>;
+}
+
+export interface ValidateLayoutResponse {
+  feasible: boolean;
+  errors?: string[];
+  cuts?: Array<{
+    sequence?: number;
+    kind?: string;
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+  }>;
+  leftovers?: Array<{
+    id?: string | number;
+    x: number;
+    y: number;
+    w?: number;
+    l?: number;
+    shape?: { type: 'RECTANGLE' | 'POLYGON'; width: number; height: number };
+    hasDefect?: boolean;
+  }>;
+}
+
+/** 将后端 validate-layout 响应规范化并合并回方案结构，便于单测直接验证。 */
+export function applyLayoutValidationResult(
+  scheme: SavedScheme2D,
+  res: ValidateLayoutResponse
+): SavedScheme2D {
+  if (!res?.feasible) {
+    const errors =
+      Array.isArray(res?.errors) && res.errors.length > 0
+        ? res.errors
+        : ['手调布局几何校验未通过，请检查裁片边界、旋转许可与碰撞情况'];
+    return {
+      ...scheme,
+      layoutDirty: true,
+      layoutValidationErrors: errors
+    };
+  }
+
+  const normalizedCuts = (res.cuts || []).map((c, idx) => ({
+    sequence: c.sequence ?? idx + 1,
+    kind: c.kind || 'CONTOUR',
+    startX: Number(c.startX) || 0,
+    startY: Number(c.startY) || 0,
+    endX: Number(c.endX) || 0,
+    endY: Number(c.endY) || 0
+  }));
+  const normalizedLeftovers = (res.leftovers || []).map((rm, idx) => {
+    const w = Number(rm.shape?.width ?? rm.w) || 0;
+    const l = Number(rm.shape?.height ?? rm.l) || 0;
+    return {
+      id: String(rm.id ?? idx + 1),
+      x: Number(rm.x) || 0,
+      y: Number(rm.y) || 0,
+      w,
+      l,
+      shape: rm.shape || rectangle(w, l),
+      hasDefect: Boolean(rm.hasDefect)
+    };
+  });
+
+  return {
+    ...scheme,
+    layoutDirty: false,
+    layoutValidationErrors: [],
+    result: {
+      ...(scheme.result || {}),
+      layout: {
+        ...(scheme.result?.layout || {}),
+        cuts: normalizedCuts,
+        leftovers: normalizedLeftovers
+      }
+    }
+  };
 }
 
 export function useWorkbenchBoardEdit(opts: UseWorkbenchBoardEditOptions) {
@@ -52,6 +131,8 @@ export function useWorkbenchBoardEdit(opts: UseWorkbenchBoardEditOptions) {
     setSelectedPieceIndex,
     setLastConfirmSummary
   } = opts;
+
+  const [validatingLayout, setValidatingLayout] = useState(false);
 
   const commitBoardPlacements = (
     mutate: (mainPlacements: any[], gapPlacements: any[]) => {
@@ -75,7 +156,7 @@ export function useWorkbenchBoardEdit(opts: UseWorkbenchBoardEditOptions) {
     const { mainPlacements, gapPlacements, notice } = mutated;
     const allPieces = [...mainPlacements, ...gapPlacements];
 
-    // If manual board becomes completely empty, remove the empty manual scheme cleanly
+    // 手工白板全部退回后自动清除空方案
     if (allPieces.length === 0 && existingEditable?.strategyId === 'MANUAL_BOARD') {
       removeScheme2D(existingEditable.id);
       setSelectedPieceIndex(null);
@@ -91,10 +172,15 @@ export function useWorkbenchBoardEdit(opts: UseWorkbenchBoardEditOptions) {
 
     const occupiedLengthMm = allPieces.length
       ? Math.round(
-          Math.max(...allPieces.map((p: any) => (Number(p.y) || 0) + (p.shape?.height || 0))) * 10
+          Math.max(
+            ...allPieces.map((p: any) => (Number(p.y) || 0) + (Number(p.shape?.height ?? p.l) || 0))
+          ) * 10
         ) / 10
       : 0;
-    const netAreaMm2 = allPieces.reduce((s: number, p: any) => s + shapeArea(p.shape), 0);
+    const netAreaMm2 = allPieces.reduce(
+      (s: number, p: any) => s + (p.shape ? shapeArea(p.shape) : (Number(p.w) || 0) * (Number(p.l) || 0)),
+      0
+    );
     const utilizationPct =
       occupiedLengthMm > 0
         ? Number(((netAreaMm2 / (effW * occupiedLengthMm)) * 100).toFixed(2))
@@ -160,10 +246,10 @@ export function useWorkbenchBoardEdit(opts: UseWorkbenchBoardEditOptions) {
       layout: {
         ...(existingEditable?.result?.layout || {
           processingRegion: rectangle(effW, Math.max(effL, occupiedLengthMm || effL)),
-          leftovers: [],
           contours: []
         }),
         placements: mainPlacements,
+        leftovers: [],
         cuts: []
       },
       marker: {
@@ -219,7 +305,9 @@ export function useWorkbenchBoardEdit(opts: UseWorkbenchBoardEditOptions) {
       complete,
       demands: structuredClone(activeOpenDemands.length > 0 ? activeOpenDemands : activeDemands2D),
       request: baseReq,
-      result: nextResult
+      result: nextResult,
+      layoutDirty: true,
+      layoutValidationErrors: undefined
     };
 
     useStudioStore.setState((st) => {
@@ -254,6 +342,8 @@ export function useWorkbenchBoardEdit(opts: UseWorkbenchBoardEditOptions) {
         x: localX,
         y: localY,
         rotationDegrees: 0,
+        allowRotation: Boolean(demand.allowRotation),
+        allowHalfTurn: Boolean(demand.allowHalfTurn),
         shape
       });
       setSelectedPieceIndex(mainPlacements.length - 1);
@@ -293,52 +383,50 @@ export function useWorkbenchBoardEdit(opts: UseWorkbenchBoardEditOptions) {
         : gapPlacements[pieceIndex - mainPlacements.length];
       if (!target) return null;
 
-      const curShape: ShapeGeometry | undefined = target.shape;
-      const curW = Number(curShape?.width ?? target.w) || 0;
-      const curH = Number(curShape?.height ?? target.l) || 0;
-      const demand = activeDemands2D.find((d) => d.id === target.demandId);
-      const isPoly = curShape?.type === 'POLYGON';
-      const stepDeg: 90 | 180 = isPoly && !demand?.allowRotation ? 180 : 90;
+      const demand =
+        activeDemands2D.find((d) => d.id === target.demandId) ||
+        activeScheme2D?.demands?.find((d) => d.id === target.demandId);
 
-      const rotatedShape = rotateShapeGeometry(curShape, curW, curH, stepDeg);
-      if (rotatedShape.width > effectiveRollWidthMm + 0.5) {
-        toast(
-          `旋转后宽度 ${Math.round(rotatedShape.width)}mm 超过母卷门幅 ${effectiveRollWidthMm}mm`,
-          true
-        );
-        return null;
-      }
-      if (rotatedShape.height > effectiveRollLengthMm - trimStartMm + 0.5) {
-        toast(
-          `旋转后长度 ${Math.round(rotatedShape.height)}mm 超过当前母卷可用版长`,
-          true
-        );
-        return null;
-      }
-
-      const cx = (Number(target.x) || 0) + curW / 2;
-      const cy = (Number(target.y) || 0) + curH / 2;
-      const nextX = Math.max(
-        0,
-        Math.min(
-          effectiveRollWidthMm - rotatedShape.width,
-          Math.round((cx - rotatedShape.width / 2) * 10) / 10
-        )
+      const allPlaced: ValidationPlacedPiece[] = [...mainPlacements, ...gapPlacements].map(
+        (p: any, idx: number) => ({
+          index: idx,
+          name: p.name || `#${p.id ?? idx + 1}`,
+          x: Number(p.x) || 0,
+          y: Number(p.y) || 0,
+          width: Number(p.shape?.width ?? p.w) || 0,
+          height: Number(p.shape?.height ?? p.l) || 0,
+          shape: p.shape
+        })
       );
-      const nextY = Math.max(
+
+      const effW = activeScheme2D ? activeScheme2D.widthMm : effectiveRollWidthMm;
+      const effL = activeScheme2D
+        ? Math.max(activeScheme2D.canvasLengthMm, effectiveRollLengthMm)
+        : effectiveRollLengthMm;
+
+      const attempt = tryRotatePlacedPiece({
+        target,
+        pieceIndex,
+        demand,
+        placedPieces: allPlaced,
+        rollWidthMm: effW,
+        rollLengthMm: effL,
         trimStartMm,
-        Math.min(
-          effectiveRollLengthMm - rotatedShape.height,
-          Math.round((cy - rotatedShape.height / 2) * 10) / 10
-        )
-      );
+        pieceGapMm,
+        defects: windowDefects2D
+      });
+
+      if (!attempt.ok) {
+        toast(attempt.reason, true);
+        return null;
+      }
 
       const updated = {
         ...target,
-        x: nextX,
-        y: nextY,
-        rotationDegrees: ((Number(target.rotationDegrees) || 0) + stepDeg) % 360,
-        shape: rotatedShape
+        x: attempt.nextX,
+        y: attempt.nextY,
+        rotationDegrees: attempt.nextRotationDegrees,
+        shape: attempt.rotatedShape
       };
       if (isMain) mainPlacements[pieceIndex] = updated;
       else gapPlacements[pieceIndex - mainPlacements.length] = updated;
@@ -364,10 +452,58 @@ export function useWorkbenchBoardEdit(opts: UseWorkbenchBoardEditOptions) {
     });
   };
 
+  const handleValidateAndRebuildLayout = async () => {
+    if (!activeScheme2D || activeScheme2D.confirmedSchemeId || validatingLayout) return;
+    setValidatingLayout(true);
+    try {
+      const payload = buildValidateLayoutPayload({
+        scheme: activeScheme2D,
+        demands: activeDemands2D,
+        trimStartMm,
+        pieceGapMm,
+        defects: windowDefects2D,
+        defaultDefectMarginMm: settings.defectMarginMm
+      });
+      const res: ValidateLayoutResponse = await requestJSON(
+        '/api/v2/schemes/validate-layout',
+        payload
+      );
+      const targetId = activeScheme2D.id;
+      useStudioStore.setState((st) => ({
+        schemes2D: st.schemes2D.map((s) =>
+          s.id === targetId ? applyLayoutValidationResult(s, res) : s
+        )
+      }));
+      if (res?.feasible) {
+        const cutCount = Array.isArray(res.cuts) ? res.cuts.length : 0;
+        const remCount = Array.isArray(res.leftovers) ? res.leftovers.length : 0;
+        toast(`校验通过，已重建刀路（${cutCount} 道）与余料（${remCount} 块）`);
+      } else {
+        const firstErr = res?.errors?.[0] || '手调布局几何校验未通过';
+        toast(firstErr, true);
+      }
+    } catch (err: any) {
+      const msg = err?.message || '刀路校验与重建请求失败';
+      const targetId = activeScheme2D.id;
+      useStudioStore.setState((st) => ({
+        schemes2D: st.schemes2D.map((s) =>
+          s.id === targetId
+            ? { ...s, layoutDirty: true, layoutValidationErrors: [msg] }
+            : s
+        )
+      }));
+      toast('校验重建失败：' + msg, true);
+    } finally {
+      setValidatingLayout(false);
+    }
+  };
+
   return {
+    validatingLayout,
     handleDropStagingPiece,
     handleMovePlacedPiece,
     handleRotatePlacedPiece,
-    handleRemovePlacedPiece
+    handleRemovePlacedPiece,
+    handleValidateAndRebuildLayout
   };
 }

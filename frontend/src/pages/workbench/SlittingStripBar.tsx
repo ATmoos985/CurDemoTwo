@@ -1,5 +1,3 @@
-import React from 'react';
-
 export interface SlittingStripBarProps {
   motherWidthMm: number;
   leftTrimMm: number;

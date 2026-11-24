@@ -42,6 +42,9 @@ export interface DemandItem {
   shape?: ShapeGeometry;
   clusterId?: string;
   clusterName?: string;
+  sourceTaskId?: string;
+  sourceTaskName?: string;
+  sourceLineId?: number;
   sizeLabel?: string;
   fabric?: string;
   surfaceTreatment?: string;
@@ -124,6 +127,8 @@ export interface SavedScheme2D {
   demands: DemandItem[];
   request: any;
   result: any;
+  layoutDirty?: boolean;
+  layoutValidationErrors?: string[];
   dispatchedTaskId?: string;
   confirmedSchemeId?: string;
 }
@@ -137,6 +142,9 @@ export interface SlittingOrderLine {
   orderedQty?: number;
   plannedQty?: number;
   completedQty?: number;
+  sourceTaskId?: string;
+  sourceTaskName?: string;
+  sourceLineId?: number;
   surfaceTreatment?: string;
 }
 
@@ -606,6 +614,7 @@ interface StudioState {
   loadedTaskId: string | null;
   loadedTaskName: string | null;
   loadedExternalRef: string | null;
+  mergedSourceTaskIds: string[];
   activeDemands2D: DemandItem[];
   selectedStrategies2D: string[];
   strategyRuns2D: StrategyJobRun[];
@@ -629,6 +638,7 @@ interface StudioState {
   slitMaterialModel: string;
   slitLoadedTaskId: string | null;
   slitLoadedTaskName: string | null;
+  slitMergedSourceTaskIds: string[];
   slitOrders: SlittingOrderLine[];
   slitSchemes: SlittingSchemeRun[];
   activeSlitSchemeId: string | null;
@@ -650,6 +660,7 @@ interface StudioState {
     preset?: WorkbenchLaunchPreset
   ) => void;
   syncDemandFamilyProgress: (family: DemandFamilySummary) => void;
+  syncMergedDemandFamiliesProgress: (families: DemandFamilySummary[]) => void;
   loadDemandFamiliesMergedIntoWorkbench: (families: DemandFamilySummary[]) => void;
 
   setCanvasSpec: (spec: Partial<{
@@ -727,6 +738,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   loadedTaskId: null,
   loadedTaskName: null,
   loadedExternalRef: null,
+  mergedSourceTaskIds: [],
   activeDemands2D: defaultDemands2D,
   selectedStrategies2D: [...initialSettings.enabledStrategies2D],
   strategyRuns2D: [],
@@ -749,6 +761,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   slitMaterialModel: defaultSlitCluster.materialModel,
   slitLoadedTaskId: null,
   slitLoadedTaskName: null,
+  slitMergedSourceTaskIds: [],
   slitOrders: defaultSlitCluster.pieces.map((p, idx) => ({
     id: String(idx + 1),
     name: p.name,
@@ -935,6 +948,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       loadedTaskId: append ? st.loadedTaskId : null,
       loadedTaskName: append ? st.loadedTaskName : null,
       loadedExternalRef: append ? st.loadedExternalRef : null,
+      mergedSourceTaskIds: append ? st.mergedSourceTaskIds : [],
       activeDemands2D: append ? [...st.activeDemands2D, ...expanded] : expanded,
       canvasWidthMm: append ? st.canvasWidthMm : cluster.defaultWidthMm,
       canvasLengthMm: append ? st.canvasLengthMm : cluster.defaultLengthMm,
@@ -979,6 +993,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         loadedTaskId: null,
         loadedTaskName: null,
         loadedExternalRef: null,
+        mergedSourceTaskIds: [],
         activeDemands2D: list,
         ...(firstCluster && !append
           ? {
@@ -1019,6 +1034,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         activeDimension: '1D',
         slitLoadedTaskId: family.id,
         slitLoadedTaskName: family.name,
+        slitMergedSourceTaskIds: [],
         slitMaterialModel: family.materialModel,
         slitMaterialMode: preset?.slitMaterialMode ?? 'VIRTUAL_ROLL',
         slitWidthMode: widthMode,
@@ -1043,6 +1059,9 @@ export const useStudioStore = create<StudioState>((set, get) => ({
           orderedQty: l.orderedQty,
           plannedQty: l.plannedQty,
           completedQty: l.completedQty,
+          sourceTaskId: family.id,
+          sourceTaskName: family.name,
+          sourceLineId: l.id,
           surfaceTreatment: l.surfaceTreatment
         })),
         slitSchemes: [],
@@ -1062,6 +1081,9 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         allowHalfTurn: Boolean(l.allowHalfTurn),
         shape: l.shape,
         clusterName: family.name,
+        sourceTaskId: family.id,
+        sourceTaskName: family.name,
+        sourceLineId: l.id,
         sizeLabel: l.sizeLabel
       }));
       const targetW = preset?.canvasWidthMm || get().canvasWidthMm || 1650;
@@ -1075,6 +1097,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         loadedTaskId: family.id,
         loadedTaskName: family.name,
         loadedExternalRef: family.externalRef || null,
+        mergedSourceTaskIds: [],
         materialModel2D: family.materialModel,
         canvasMode: preset?.canvasMode ?? 'FREE_CANVAS',
         canvasWidthMm: targetW,
@@ -1102,6 +1125,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       set({
         slitLoadedTaskId: family.id,
         slitLoadedTaskName: family.name,
+        slitMergedSourceTaskIds: [],
         slitOrders: family.lines.map((l) => ({
           id: String(l.id),
           name: l.name,
@@ -1111,6 +1135,9 @@ export const useStudioStore = create<StudioState>((set, get) => ({
           orderedQty: l.orderedQty,
           plannedQty: l.plannedQty,
           completedQty: l.completedQty,
+          sourceTaskId: family.id,
+          sourceTaskName: family.name,
+          sourceLineId: l.id,
           surfaceTreatment: l.surfaceTreatment
         }))
       });
@@ -1119,6 +1146,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         loadedTaskId: family.id,
         loadedTaskName: family.name,
         loadedExternalRef: family.externalRef || null,
+        mergedSourceTaskIds: [],
         activeDemands2D: family.lines.map((l) => ({
           id: l.id,
           name: l.name,
@@ -1132,10 +1160,52 @@ export const useStudioStore = create<StudioState>((set, get) => ({
           allowHalfTurn: Boolean(l.allowHalfTurn),
           shape: l.shape,
           clusterName: family.name,
+          sourceTaskId: family.id,
+          sourceTaskName: family.name,
+          sourceLineId: l.id,
           sizeLabel: l.sizeLabel
         }))
       });
     }
+  },
+
+  syncMergedDemandFamiliesProgress: (families) => {
+    const familyById = new Map<string, DemandFamilySummary>();
+    for (const f of families) {
+      familyById.set(f.id, f);
+    }
+    set((st) => {
+      const nextDemands2D = st.activeDemands2D.map((d) => {
+        if (!d.sourceTaskId || d.sourceLineId == null) return d;
+        const fam = familyById.get(d.sourceTaskId);
+        const ln = fam?.lines.find((l) => l.id === d.sourceLineId);
+        if (!ln) return d;
+        return {
+          ...d,
+          quantity: ln.openQty,
+          orderedQty: ln.orderedQty,
+          plannedQty: ln.plannedQty,
+          completedQty: ln.completedQty
+        };
+      });
+      const nextSlitOrders = st.slitOrders.map((o) => {
+        if (!o.sourceTaskId || o.sourceLineId == null) return o;
+        const fam = familyById.get(o.sourceTaskId);
+        const ln = fam?.lines.find((l) => l.id === o.sourceLineId);
+        if (!ln) return o;
+        return {
+          ...o,
+          quantity: ln.openQty,
+          orderedQty: ln.orderedQty,
+          plannedQty: ln.plannedQty,
+          completedQty: ln.completedQty
+        };
+      });
+      return {
+        activeDemands2D: nextDemands2D,
+        slitOrders: nextSlitOrders
+      };
+    });
   },
 
   loadDemandFamiliesMergedIntoWorkbench: (families) => {
@@ -1148,19 +1218,29 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     if (first.dimension === 'SLITTING_1D') {
       let nextId = 1;
       const orders: SlittingOrderLine[] = [];
+      const includedIds: string[] = [];
       for (const fam of families) {
         if (fam.dimension !== 'SLITTING_1D') continue;
+        let hasOpen = false;
         for (const l of fam.lines) {
           if (l.openQty <= 0) continue;
+          hasOpen = true;
           orders.push({
             id: String(nextId++),
             name: `${fam.name} · ${l.name}`,
             widthMm: l.width,
             lengthMm: l.length,
             quantity: l.openQty,
+            orderedQty: l.orderedQty,
+            plannedQty: l.plannedQty,
+            completedQty: l.completedQty,
+            sourceTaskId: fam.id,
+            sourceTaskName: fam.name,
+            sourceLineId: l.id,
             surfaceTreatment: l.surfaceTreatment
           });
         }
+        if (hasOpen) includedIds.push(fam.id);
       }
       const sp = first.slitting || {};
       const maxW = finiteOr(sp.maxWidth, 4400);
@@ -1171,6 +1251,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         activeDimension: '1D',
         slitLoadedTaskId: null,
         slitLoadedTaskName: `多族合排 (${families.length} 族 · ${first.materialModel})`,
+        slitMergedSourceTaskIds: includedIds,
         slitMaterialModel: first.materialModel,
         slitWidthMode: minW === maxW ? 'FIXED' : 'FLEXIBLE',
         slitMotherWidthMm: maxW + lt + rt,
@@ -1188,29 +1269,40 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     } else {
       let nextId = 1;
       const demands: DemandItem[] = [];
+      const includedIds: string[] = [];
       for (const fam of families) {
         if (fam.dimension === 'SLITTING_1D') continue;
+        let hasOpen = false;
         for (const l of fam.lines) {
           if (l.openQty <= 0) continue;
+          hasOpen = true;
           demands.push({
             id: nextId++,
             name: `${fam.name} · ${l.name}`,
             width: l.width,
             length: l.length,
             quantity: l.openQty,
+            orderedQty: l.orderedQty,
+            plannedQty: l.plannedQty,
+            completedQty: l.completedQty,
             allowRotation: Boolean(l.allowRotation),
             allowHalfTurn: Boolean(l.allowHalfTurn),
             shape: l.shape,
             clusterName: fam.name,
+            sourceTaskId: fam.id,
+            sourceTaskName: fam.name,
+            sourceLineId: l.id,
             sizeLabel: l.sizeLabel
           });
         }
+        if (hasOpen) includedIds.push(fam.id);
       }
       set({
         activeDimension: '2D',
         loadedTaskId: null,
         loadedTaskName: `多族合排 (${families.length} 族 · ${first.materialModel})`,
         loadedExternalRef: families.map((f) => f.externalRef || f.name).join(' + '),
+        mergedSourceTaskIds: includedIds,
         materialModel2D: first.materialModel,
         activeDemands2D: demands,
         schemes2D: [],
@@ -1354,6 +1446,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       activeDimension: '1D',
       slitLoadedTaskId: append ? st.slitLoadedTaskId : null,
       slitLoadedTaskName: append ? st.slitLoadedTaskName : null,
+      slitMergedSourceTaskIds: append ? st.slitMergedSourceTaskIds : [],
       slitMaterialModel: append ? st.slitMaterialModel : cluster.materialModel,
       ...(append
         ? { slitOrders: [...st.slitOrders, ...orders] }

@@ -104,7 +104,7 @@ export const ModalDialog: React.FC<ModalDialogProps> = ({
       closedby="any"
       aria-labelledby={titleId}
       className="native-modal-dialog"
-      style={{ maxInlineSize: `min(calc(100dvw - 2rem), ${maxWidth}px)` }}
+      style={{ ['--modal-max-w' as string]: `${maxWidth}px` } as React.CSSProperties}
     >
       <div className="native-modal-head">
         <h2 id={titleId}>{title}</h2>

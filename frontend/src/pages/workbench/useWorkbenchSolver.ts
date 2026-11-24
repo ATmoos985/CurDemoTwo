@@ -22,8 +22,14 @@ import {
 } from '@static/js/business/optimization/nesting-request-adapter.js';
 import { shapeArea } from '@static/js/canvas/nesting-scene.js';
 import { independentBaseline, planSummary } from '@static/js/linear/linear-model.js';
-import { requestJSON, toast, fmtN } from '@static/app/js/util.js';
+import { idempotentPost, toast, fmtN } from '@static/app/js/util.js';
 import { LastConfirmSummary, SolverStrategyDef } from './workbenchTypes';
+import {
+  buildConfirm1DIdempotencyKey,
+  buildConfirm2DIdempotencyKey,
+  buildSourceAllocations1D,
+  buildSourceAllocations2D
+} from './schemeConfirmUtils';
 
 export interface UseWorkbenchSolverOptions {
   // 2D inputs
@@ -83,6 +89,7 @@ export interface UseWorkbenchSolverOptions {
   settings: StudioSettings;
   reloadReferenceData: (explicitTaskId?: string | null) => Promise<DemandFamilySummary[]>;
   syncDemandFamilyProgress: (fam: DemandFamilySummary) => void;
+  syncMergedDemandFamiliesProgress?: (fams: DemandFamilySummary[]) => void;
 }
 
 export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
@@ -129,7 +136,8 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
     markSlitSchemeDispatched,
     settings,
     reloadReferenceData,
-    syncDemandFamilyProgress
+    syncDemandFamilyProgress,
+    syncMergedDemandFamiliesProgress
   } = opts;
 
   const [runningSolve, setRunningSolve] = useState(false);
@@ -752,12 +760,19 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
       location.hash = `#/results/${encodeURIComponent(activeScheme2D.confirmedSchemeId)}`;
       return;
     }
+    if (activeScheme2D.layoutDirty) {
+      toast('已手调，请先点击「校验并重建刀路」通过后再选定方案', true);
+      return;
+    }
     setConfirmingScheme(true);
     try {
       const layout = activeScheme2D.result?.layout;
       const rawMain: any[] = layout?.placements || [];
       const rawGap: any[] = activeScheme2D.result?.marker?.gapFillPlacements || [];
-      const hasPoly = activeScheme2D.demands.some((d) => d.shape?.type === 'POLYGON');
+      const effectiveDemands = activeScheme2D.demands?.length
+        ? activeScheme2D.demands
+        : activeDemands2D;
+      const hasPoly = effectiveDemands.some((d) => d.shape?.type === 'POLYGON');
 
       const placementsPayload = [
         ...rawMain.map((p, idx) => ({
@@ -766,8 +781,8 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
           name: p.name,
           x: p.x,
           y: p.y,
-          w: p.shape?.width || 0,
-          l: p.shape?.height || 0,
+          w: p.shape?.width || p.w || 0,
+          l: p.shape?.height || p.l || 0,
           rotationDegrees: p.rotationDegrees || 0,
           gapFill: false,
           shape: hasPoly ? p.shape : undefined
@@ -778,24 +793,42 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
           name: p.name,
           x: p.x,
           y: p.y,
-          w: p.shape?.width || 0,
-          l: p.shape?.height || 0,
+          w: p.shape?.width || p.w || 0,
+          l: p.shape?.height || p.l || 0,
           rotationDegrees: p.rotationDegrees || 0,
           gapFill: true,
           shape: hasPoly ? p.shape : undefined
         }))
       ];
 
-      const res = await requestJSON('/api/v2/schemes/confirm', {
-        idempotencyKey: `CONFIRM-${activeScheme2D.id}`,
+      const allocSummary = buildSourceAllocations2D(
+        placementsPayload,
+        effectiveDemands,
+        loadedTaskId
+      );
+      const sourceAllocations = allocSummary.shouldSendSourceAllocations
+        ? allocSummary.allocations
+        : undefined;
+      const idempotencyKey = buildConfirm2DIdempotencyKey({
+        scheme: activeScheme2D,
+        taskId: allocSummary.resolvedTaskId,
+        sourceAllocations,
+        trimStartMm,
+        pieceGapMm,
+        placements: placementsPayload
+      });
+
+      const confirmBody = {
+        idempotencyKey,
         title: activeScheme2D.title,
         dimension: hasPoly ? 'CONTOUR_2D' : 'RECT_2D',
         scenarioId: activeScheme2D.scenarioId || scenario2D,
         strategyId: activeScheme2D.strategyId || 'AUTO',
         strategyName: activeScheme2D.strategyName,
-        taskId: loadedTaskId || undefined,
+        taskId: allocSummary.resolvedTaskId,
         taskName: loadedTaskName || `${activeScheme2D.materialModel} · 排料需求族`,
         externalOrderNo: loadedExternalRef || undefined,
+        ...(sourceAllocations ? { sourceAllocations } : {}),
         materialMode:
           activeScheme2D.canvasMode === 'FREE_CANVAS'
             ? 'VIRTUAL_ROLL'
@@ -811,7 +844,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         pieceGapMm,
         utilizationPct: activeScheme2D.utilizationPct,
         pieceAreaM2: activeScheme2D.pieceAreaM2,
-        demands: activeDemands2D.map((d) => ({
+        demands: effectiveDemands.map((d) => ({
           id: d.id,
           name: d.name,
           width: d.width,
@@ -841,14 +874,32 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
             endY: c.endY
           }))
         }
-      });
+      };
+
+      const res = await idempotentPost(
+        `confirm-2d-${idempotencyKey}`,
+        '/api/v2/schemes/confirm',
+        confirmBody
+      );
 
       const savedScheme = res.scheme;
       const updatedFamily: DemandFamilySummary | undefined = res.demandFamily;
       markSchemeDispatched(activeScheme2D.id, savedScheme.taskId, savedScheme.id);
 
-      await reloadReferenceData(savedScheme.taskId);
-      if (updatedFamily) {
+      const refreshedFamilies = await reloadReferenceData(
+        allocSummary.isMultiFamily ? null : savedScheme.taskId
+      );
+      if (allocSummary.isMultiFamily) {
+        syncMergedDemandFamiliesProgress?.(refreshedFamilies);
+        const remainingAcrossMerged = refreshedFamilies
+          .filter((f) => allocSummary.uniqueTaskIds.includes(f.id))
+          .reduce((sum, f) => sum + (Number(f.openTotal) || 0), 0);
+        setLastConfirmSummary({
+          schemeId: savedScheme.id,
+          openRemaining: remainingAcrossMerged,
+          state: savedScheme.state
+        });
+      } else if (updatedFamily) {
         syncDemandFamilyProgress(updatedFamily);
         setLastConfirmSummary({
           schemeId: savedScheme.id,
@@ -873,18 +924,38 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
     }
     setConfirmingScheme(true);
     try {
-      const res = await requestJSON('/api/v2/schemes/confirm', {
-        idempotencyKey: `CONFIRM-1D-${activeScheme1D.id}-${Date.now()}`,
+      const allocSummary = buildSourceAllocations1D(
+        activeScheme1D.fulfillment || [],
+        slitOrders,
+        slitLoadedTaskId
+      );
+      const sourceAllocations = allocSummary.shouldSendSourceAllocations
+        ? allocSummary.allocations
+        : undefined;
+      const boundRollId =
+        slitMaterialMode === 'STOCK_ROLL' && currentRoll1D ? currentRoll1D.rollId : undefined;
+      const idempotencyKey = buildConfirm1DIdempotencyKey({
+        scheme: activeScheme1D,
+        taskId: allocSummary.resolvedTaskId,
+        sourceAllocations,
+        materialMode: slitMaterialMode,
+        rollId: boundRollId,
+        fixedLengthMm: slitFixedLengthMm,
+        avoidDefects: slitAvoidDefects
+      });
+
+      const confirmBody = {
+        idempotencyKey,
         title: `${activeScheme1D.strategyName} (${activeScheme1D.motherWidthMm}mm · ${activeScheme1D.totalCars}车)`,
         dimension: 'SLITTING_1D',
         scenarioId: scenario1D,
         strategyId: activeScheme1D.strategyId,
         strategyName: activeScheme1D.strategyName,
-        taskId: slitLoadedTaskId || undefined,
+        taskId: allocSummary.resolvedTaskId,
         taskName: slitLoadedTaskName || `${slitMaterialModel} · 一维分切需求族`,
+        ...(sourceAllocations ? { sourceAllocations } : {}),
         materialMode: slitMaterialMode,
-        rollId:
-          slitMaterialMode === 'STOCK_ROLL' && currentRoll1D ? currentRoll1D.rollId : undefined,
+        rollId: boundRollId,
         materialModel:
           slitMaterialMode === 'STOCK_ROLL' && currentRoll1D
             ? currentRoll1D.rollModel
@@ -930,17 +1001,36 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
             repetitions: p.repetitions,
             usedWidthMm: p.usedWidthMm,
             spareWidthMm: p.spareWidthMm,
-            stations: p.stations
+            stations: p.stations,
+            ...(p.allocations ? { allocations: p.allocations } : {})
           })),
           fulfillment: activeScheme1D.fulfillment
         }
-      });
+      };
+
+      const res = await idempotentPost(
+        `confirm-1d-${idempotencyKey}`,
+        '/api/v2/schemes/confirm',
+        confirmBody
+      );
 
       const savedScheme = res.scheme;
       const updatedFamily: DemandFamilySummary | undefined = res.demandFamily;
       markSlitSchemeDispatched(activeScheme1D.id, savedScheme.taskId, savedScheme.id);
-      await reloadReferenceData(savedScheme.taskId);
-      if (updatedFamily) {
+      const refreshedFamilies = await reloadReferenceData(
+        allocSummary.isMultiFamily ? null : savedScheme.taskId
+      );
+      if (allocSummary.isMultiFamily) {
+        syncMergedDemandFamiliesProgress?.(refreshedFamilies);
+        const remainingAcrossMerged = refreshedFamilies
+          .filter((f) => allocSummary.uniqueTaskIds.includes(f.id))
+          .reduce((sum, f) => sum + (Number(f.openTotal) || 0), 0);
+        setLastConfirmSummary({
+          schemeId: savedScheme.id,
+          openRemaining: remainingAcrossMerged,
+          state: savedScheme.state
+        });
+      } else if (updatedFamily) {
         syncDemandFamilyProgress(updatedFamily);
         setLastConfirmSummary({
           schemeId: savedScheme.id,

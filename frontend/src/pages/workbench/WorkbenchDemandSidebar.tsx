@@ -363,7 +363,18 @@ export const WorkbenchDemandSidebar: React.FC<WorkbenchDemandSidebarProps> = ({
                       <span className="wb-row-name" title={row.name}>
                         {row.name}
                       </span>
-                      <span className="wb-row-dim num">{row.compactDim}</span>
+                      <span className="wb-row-dim num">
+                        {row.compactDim}
+                        {row.sourceTaskName && (
+                          <span
+                            className="wb-source-badge"
+                            title={`来源需求族：${row.sourceTaskName}${row.sourceLineId != null ? ` (#${row.sourceLineId})` : ''}`}
+                          >
+                            {row.sourceTaskName}
+                            {row.sourceLineId != null ? ` #${row.sourceLineId}` : ''}
+                          </span>
+                        )}
+                      </span>
                     </div>
                     <span
                       className={`wb-row-count num ${

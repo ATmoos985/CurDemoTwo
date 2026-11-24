@@ -79,6 +79,9 @@ export function computeDemandRowsView(params: {
         rawId: d.id,
         index: idx + 1,
         name: d.name,
+        sourceTaskId: d.sourceTaskId,
+        sourceTaskName: d.sourceTaskName,
+        sourceLineId: d.sourceLineId,
         width: d.width,
         length: d.length,
         shape: d.shape,
@@ -121,6 +124,9 @@ export function computeDemandRowsView(params: {
       rawId: o.id,
       index: idx + 1,
       name: o.name,
+      sourceTaskId: o.sourceTaskId,
+      sourceTaskName: o.sourceTaskName,
+      sourceLineId: o.sourceLineId,
       width: o.widthMm,
       length: slitFixedLengthMm,
       shape: undefined as ShapeGeometry | undefined,
@@ -224,26 +230,32 @@ export function exportCam2D(
   kind: 'dxf' | 'nc'
 ) {
   if (!activeScheme2D?.result?.layout) return;
+  if (kind === 'nc' && activeScheme2D.layoutDirty) {
+    toast('已手调，请先校验并重建刀路后再导出 G-Code', true);
+    return;
+  }
   const layout = activeScheme2D.result.layout;
   const placements = [
     ...(layout.placements || []),
     ...(activeScheme2D.result?.marker?.gapFillPlacements || [])
   ];
+  const mappedPieces = placements.map((p: any) => ({
+    id: p.id,
+    name: p.name,
+    x: p.x,
+    y: p.y,
+    w: p.shape?.width ?? p.w ?? 0,
+    l: p.shape?.height ?? p.l ?? 0,
+    shape: p.shape
+  }));
   const data = {
     rollId: activeScheme2D.rollId || 'VIRTUAL-NEW-ROLL',
     rollW: activeScheme2D.widthMm,
     bedL: activeScheme2D.occupiedLengthMm,
     windowStartY: activeScheme2D.windowStartY || 0,
     cutOrigin: settings.startCorner,
-    pieces: placements.map((p: any) => ({
-      id: p.id,
-      name: p.name,
-      x: p.x,
-      y: p.y,
-      w: p.shape.width,
-      l: p.shape.height,
-      shape: p.shape
-    })),
+    pieces: mappedPieces,
+    placements: mappedPieces,
     remnants: layout.leftovers || [],
     defects: [],
     cuts: (layout.cuts || []).map((c: any) => ({

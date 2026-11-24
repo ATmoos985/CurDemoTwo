@@ -16,8 +16,100 @@ const cutEnds = c => {
         : [isHoriz ? c.start : c.pos, isHoriz ? c.pos : c.start, isHoriz ? c.end : c.pos, isHoriz ? c.pos : c.end];
 };
 
+/** 归一化轮廓顶点列表，去除连续重合及与起点重合的尾点，确保闭合轮廓至少 3 个有效顶点。 */
+function normalizeContourPoints(rawPoints) {
+    const pts = [];
+    for (const pt of rawPoints || []) {
+        const x = Array.isArray(pt) ? Number(pt[0]) : Number(pt?.x);
+        const y = Array.isArray(pt) ? Number(pt[1]) : Number(pt?.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        const prev = pts[pts.length - 1];
+        if (!prev || Math.hypot(x - prev.x, y - prev.y) > 1e-4) {
+            pts.push({x, y});
+        }
+    }
+    while (pts.length > 1 && Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y) <= 1e-4) {
+        pts.pop();
+    }
+    return pts.length >= 3 ? pts : [];
+}
+
+/** 从裁片对象提取工位局部 mm 坐标下的闭合轮廓顶点（兼容 shape.vertices、polygon 与标准矩形）。 */
+function extractPieceContour(piece) {
+    if (!piece || typeof piece !== 'object') return [];
+    const ox = Number(piece.x) || 0;
+    const oy = Number(piece.y) || 0;
+    const w = Number(piece.shape?.width ?? piece.w ?? piece.width) || 0;
+    const h = Number(piece.shape?.height ?? piece.l ?? piece.height) || 0;
+
+    if (Array.isArray(piece.shape?.vertices) && piece.shape.vertices.length >= 3) {
+        return normalizeContourPoints(
+            piece.shape.vertices.map(v => ({
+                x: ox + (Array.isArray(v) ? Number(v[0]) : Number(v?.x || 0)),
+                y: oy + (Array.isArray(v) ? Number(v[1]) : Number(v?.y || 0))
+            }))
+        );
+    }
+
+    if (Array.isArray(piece.polygon) && piece.polygon.length >= 3) {
+        const raw = normalizeContourPoints(piece.polygon);
+        if (raw.length >= 3) {
+            let applyOffset = piece.polygonRelative === true;
+            if (piece.polygonRelative === undefined && (ox !== 0 || oy !== 0)) {
+                const minX = Math.min(...raw.map(pt => pt.x));
+                const minY = Math.min(...raw.map(pt => pt.y));
+                const maxX = Math.max(...raw.map(pt => pt.x));
+                const maxY = Math.max(...raw.map(pt => pt.y));
+                if (w > 0 && h > 0 && minX >= -0.5 && minY >= -0.5 && maxX <= w + 0.5 && maxY <= h + 0.5) {
+                    applyOffset = true;
+                }
+            }
+            return applyOffset ? raw.map(pt => ({x: ox + pt.x, y: oy + pt.y})) : raw;
+        }
+    }
+
+    if (w > 0 && h > 0) {
+        return [
+            {x: ox, y: oy},
+            {x: ox + w, y: oy},
+            {x: ox + w, y: oy + h},
+            {x: ox, y: oy + h}
+        ];
+    }
+    return [];
+}
+
+function buildContourOperations(data) {
+    const rawList = Array.isArray(data.placements) && data.placements.length > 0
+        ? data.placements
+        : Array.isArray(data.pieces)
+            ? data.pieces
+            : [];
+    const ops = [];
+    for (let i = 0; i < rawList.length; i++) {
+        const p = rawList[i];
+        const points = extractPieceContour(p);
+        if (points.length < 3) continue;
+        let perimeter = 0;
+        for (let k = 0; k < points.length; k++) {
+            const a = points[k];
+            const b = points[(k + 1) % points.length];
+            perimeter += Math.hypot(b.x - a.x, b.y - a.y);
+        }
+        ops.push({
+            index: ops.length + 1,
+            label: p.name || `Piece #${p.id ?? i + 1}`,
+            points,
+            perimeter
+        });
+    }
+    return ops;
+}
+
 export function gcodeText(data, {cutFeed = 4000, rapidFeed = 15000, plungeDelay = 200, retractDelay = 100, optimized = false, home, now = new Date()} = {}) {
     const cuts = data.cuts || [];
+    const contourOps = cuts.length === 0 ? buildContourOperations(data) : [];
+    const totalContourSteps = contourOps.reduce((sum, op) => sum + op.points.length, 0);
     const rollId = data.rollId || 'ROLL-2026-0920', rollW = data.rollW || 2000, bedL = data.bedL || 5000, winStartY = data.windowStartY || 0;
     const h = home || homePoint({cutOrigin: data.cutOrigin, width: rollW, length: bedL, windowStartY: winStartY});
     const dateStr = now.toISOString().replace('T', ' ').substring(0, 19);
@@ -29,7 +121,11 @@ export function gcodeText(data, {cutFeed = 4000, rapidFeed = 15000, plungeDelay 
     const mm = n => Math.round(n * 10) / 10; // 全局坐标累加会带浮点尾差，程序头只保留 0.1 mm
     g.push(`( BED STATION   : 0 ~ ${bedL} mm (Global Y: ${mm(winStartY)} ~ ${mm(winStartY + bedL)} mm) )`);
     g.push(`( ORIGIN DATUM  : ${data.cutOrigin || 'right-bottom'}                                  )`);
-    g.push(`( TOTAL CUTS    : ${cuts.length} STEPS                                   )`);
+    if (cuts.length > 0 || contourOps.length === 0) {
+        g.push(`( TOTAL CUTS    : ${cuts.length} STEPS                                   )`);
+    } else {
+        g.push(`( TOTAL CUTS    : ${contourOps.length} CONTOURS (${totalContourSteps} STEPS)                         )`);
+    }
     g.push(`( OPTIMIZED     : ${optimized ? 'YES (Segment-TSP 2-Opt)' : 'NO (Sequential)'}            )`);
     g.push('( CONTROL TYPE  : 2D CUTTING - VERIFY MACHINE POSTPROCESSOR BEFORE USE )');
     g.push('(------------------------------------------------------------------)');
@@ -45,19 +141,42 @@ export function gcodeText(data, {cutFeed = 4000, rapidFeed = 15000, plungeDelay 
     g.push(`G00 X${h.x.toFixed(3)} Y${h.y.toFixed(3)} Z50.000 F${rapidFeed}`);
     g.push('');
     let lastX = h.x, lastY = h.y, totalCutDist = 0, totalAirDist = 0;
-    for (const c of cuts) {
-        const [startX, startY, endX, endY] = cutEnds(c);
-        const airDist = Math.hypot(startX - lastX, startY - lastY), cutDist = Math.hypot(endX - startX, endY - startY);
-        totalAirDist += airDist; totalCutDist += cutDist;
-        g.push(`(--- STEP ${c.step}: ${c.type} L=${Math.round(cutDist)}mm | ${c.info || ''} ---)`);
-        g.push(`G00 X${startX.toFixed(3)} Y${startY.toFixed(3)} Z10.000 (Rapid Air Move)`);
-        g.push('M03 S1        (Tool Down / Laser ON)');
-        g.push(`G04 P${plungeDelay}     (Plunge Dwell)`);
-        g.push(`G01 X${endX.toFixed(3)} Y${endY.toFixed(3)} Z0.000 F${cutFeed} (Cutting Feed)`);
-        g.push('M05          (Tool Up / Laser OFF)');
-        g.push(`G04 P${retractDelay}     (Retract Dwell)`);
-        g.push('');
-        lastX = endX; lastY = endY;
+    if (cuts.length > 0) {
+        for (const c of cuts) {
+            const [startX, startY, endX, endY] = cutEnds(c);
+            const airDist = Math.hypot(startX - lastX, startY - lastY), cutDist = Math.hypot(endX - startX, endY - startY);
+            totalAirDist += airDist; totalCutDist += cutDist;
+            g.push(`(--- STEP ${c.step}: ${c.type} L=${Math.round(cutDist)}mm | ${c.info || ''} ---)`);
+            g.push(`G00 X${startX.toFixed(3)} Y${startY.toFixed(3)} Z10.000 (Rapid Air Move)`);
+            g.push('M03 S1        (Tool Down / Laser ON)');
+            g.push(`G04 P${plungeDelay}     (Plunge Dwell)`);
+            g.push(`G01 X${endX.toFixed(3)} Y${endY.toFixed(3)} Z0.000 F${cutFeed} (Cutting Feed)`);
+            g.push('M05          (Tool Up / Laser OFF)');
+            g.push(`G04 P${retractDelay}     (Retract Dwell)`);
+            g.push('');
+            lastX = endX; lastY = endY;
+        }
+    } else if (contourOps.length > 0) {
+        for (const op of contourOps) {
+            const startPt = op.points[0];
+            const airDist = Math.hypot(startPt.x - lastX, startPt.y - lastY);
+            totalAirDist += airDist;
+            g.push(`(--- CONTOUR ${op.index}: ${op.label} (${op.points.length} PTS, L=${Math.round(op.perimeter)}mm) ---)`);
+            g.push(`G00 X${startPt.x.toFixed(3)} Y${startPt.y.toFixed(3)} Z10.000 (Rapid Air Move)`);
+            g.push('M03 S1        (Tool Down / Laser ON)');
+            g.push(`G04 P${plungeDelay}     (Plunge Dwell)`);
+            let curX = startPt.x, curY = startPt.y;
+            for (let k = 1; k <= op.points.length; k++) {
+                const nextPt = op.points[k % op.points.length];
+                totalCutDist += Math.hypot(nextPt.x - curX, nextPt.y - curY);
+                g.push(`G01 X${nextPt.x.toFixed(3)} Y${nextPt.y.toFixed(3)} Z0.000 F${cutFeed} (Contour Cut)`);
+                curX = nextPt.x; curY = nextPt.y;
+            }
+            g.push('M05          (Tool Up / Laser OFF)');
+            g.push(`G04 P${retractDelay}     (Retract Dwell)`);
+            g.push('');
+            lastX = curX; lastY = curY;
+        }
     }
     g.push('(--- RETURN TO HOME AND FINISH ---)');
     g.push(`G00 X${h.x.toFixed(3)} Y${h.y.toFixed(3)} Z50.000 F${rapidFeed}`);

@@ -104,6 +104,9 @@ export interface DemandRowView {
   rawId: number | string;
   index: number;
   name: string;
+  sourceTaskId?: string;
+  sourceTaskName?: string;
+  sourceLineId?: number;
   width: number;
   length: number;
   shape: ShapeGeometry | undefined;

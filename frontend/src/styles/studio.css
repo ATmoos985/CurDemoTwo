@@ -711,6 +711,7 @@ dialog.native-modal-dialog {
   background: var(--panel);
   color: var(--text);
   inline-size: 100%;
+  max-inline-size: min(calc(100dvw - 2rem), var(--modal-max-w, 640px));
   max-block-size: min(88dvh, 760px);
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.28);
 }
@@ -1134,15 +1135,42 @@ dialog::backdrop {
 
   dialog.native-modal-dialog {
     position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    inline-size: 100% !important;
     max-width: none !important;
+    max-inline-size: none !important;
+    max-height: none !important;
     max-block-size: none !important;
+    margin: 0 !important;
     border: 0 !important;
+    border-radius: 0 !important;
     box-shadow: none !important;
+    overflow: visible !important;
+  }
+
+  dialog::backdrop,
+  dialog.native-modal-dialog::backdrop {
+    display: none !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
   }
 
   .native-modal-body {
     padding: 0 !important;
     overflow: visible !important;
+  }
+
+  .print-ticket-sheet .ticket-diagram,
+  .print-ticket-sheet .ticket-meta,
+  .print-ticket-sheet .ticket-sign-row,
+  .print-ticket-sheet tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .print-ticket-sheet thead {
+    display: table-header-group;
   }
 }
 

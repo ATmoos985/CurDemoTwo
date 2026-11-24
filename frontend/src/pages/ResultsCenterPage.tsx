@@ -7,8 +7,10 @@ import { NumberInput } from '../components/ui/NumberInput';
 import { showcaseScene } from '@static/app/js/model/showcase.js';
 import { rectangle } from '@static/js/canvas/nesting-scene.js';
 import { gcodeText, dxfText } from '@static/js/plugins/export/cam-format.js';
-import { requestJSON, toast, fmtN, fmtM, loadSheetLib } from '@static/app/js/util.js';
+import { requestJSON, idempotentPost, toast, fmtN, fmtM, loadSheetLib } from '@static/app/js/util.js';
 import { useStudioStore } from '../store/useStudioStore';
+import { buildCompleteSchemeIdempotencyKey } from './workbench/schemeConfirmUtils';
+import { buildCutTicketModel } from './results/cutTicketUtils';
 
 const STATE_BADGE: Record<string, { label: string; cls: string }> = {
   AWAITING_ROLL: { label: '待绑实卷 (虚拟母卷)', cls: 'warn' },
@@ -172,6 +174,8 @@ export const ResultsCenterPage: React.FC<{
   const [newRollCode, setNewRollCode] = useState<string>('');
 
   // Custom Settlement Modal State
+  const [showQuickCompleteConfirm, setShowQuickCompleteConfirm] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [showCompleteModal, setShowCompleteModal] = useState(false);
   const [actualCutLenInput, setActualCutLenInput] = useState<number>(0);
   const [rejectedIds, setRejectedIds] = useState<Set<number>>(new Set());
@@ -264,6 +268,22 @@ export const ResultsCenterPage: React.FC<{
     [activeScheme]
   );
 
+  const boundRoll = useMemo(
+    () => (activeScheme?.rollId ? rolls.find((r) => r.rollId === activeScheme.rollId) || null : null),
+    [rolls, activeScheme?.rollId]
+  );
+
+  const ticketModel = useMemo(
+    () =>
+      activeScheme
+        ? buildCutTicketModel(activeScheme, {
+            cutOrigin: settings.startCorner,
+            boundRoll
+          })
+        : null,
+    [activeScheme, settings.startCorner, boundRoll]
+  );
+
   // ==================== Actions: Bind Roll / Complete / Dispatch MES / Cancel ====================
 
   const handleBindStockRoll = async (autoCreate: boolean) => {
@@ -297,23 +317,37 @@ export const ResultsCenterPage: React.FC<{
     if (!activeScheme || busy) return;
     setBusy(true);
     try {
-      const res = await requestJSON(
+      const rejectedList = customMode ? [...rejectedIds] : [];
+      const effRecover = customMode ? recoverRems : true;
+      const effRemLoc = customMode ? remnantLoc : '裁床余料架 A-01';
+      const completeBody = customMode
+        ? {
+            actualCutLenMm: actualCutLenInput,
+            rejectedPieceIds: rejectedList,
+            recoverRemnants: effRecover,
+            remnantLocation: effRemLoc,
+            operator: '现场排料员'
+          }
+        : {
+            recoverRemnants: effRecover,
+            remnantLocation: effRemLoc,
+            operator: '一键完工核销'
+          };
+      const idemKey = buildCompleteSchemeIdempotencyKey({
+        schemeId: activeScheme.id,
+        customMode,
+        actualCutLenMm: customMode ? actualCutLenInput : undefined,
+        rejectedPieceIds: rejectedList,
+        recoverRemnants: effRecover,
+        remnantLocation: effRemLoc
+      });
+      const res = await idempotentPost(
+        `complete-${idemKey}`,
         `/api/v2/schemes/${encodeURIComponent(activeScheme.id)}/complete`,
-        customMode
-          ? {
-              actualCutLenMm: actualCutLenInput,
-              rejectedPieceIds: [...rejectedIds],
-              recoverRemnants: recoverRems,
-              remnantLocation: remnantLoc,
-              operator: '现场排料员'
-            }
-          : {
-              recoverRemnants: true,
-              remnantLocation: '裁床余料架 A-01',
-              operator: '一键完工核销'
-            }
+        completeBody
       );
       setShowCompleteModal(false);
+      setShowQuickCompleteConfirm(false);
       const openRem = res.demandFamily?.openTotal ?? 0;
       toast(
         openRem > 0
@@ -330,12 +364,12 @@ export const ResultsCenterPage: React.FC<{
 
   const handleCancelScheme = async () => {
     if (!activeScheme || busy) return;
-    if (!confirm(`确认作废方案「${activeScheme.id}」并将预占需求退回待排需求池？`)) return;
     setBusy(true);
     try {
       await requestJSON(`/api/v2/schemes/${encodeURIComponent(activeScheme.id)}/cancel`, {
         reason: '结果管理手动取消重排'
       });
+      setShowCancelConfirm(false);
       toast('方案已作废，母卷预占已释放，待排需求量已恢复');
       await loadAll();
     } catch (err: any) {
@@ -374,21 +408,23 @@ export const ResultsCenterPage: React.FC<{
 
   const handleExport2DCam = (kind: 'dxf' | 'nc') => {
     if (!activeScheme?.layout2D?.placements?.length) return;
+    const mappedPieces = activeScheme.layout2D.placements.map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      x: p.x,
+      y: p.y,
+      w: p.shape?.width || p.w,
+      l: p.shape?.height || p.l,
+      shape: p.shape
+    }));
     const data = {
       rollId: activeScheme.rollId || 'VIRTUAL-ROLL',
       rollW: activeScheme.widthMm,
       bedL: activeScheme.occupiedLengthMm,
       windowStartY: activeScheme.windowStartY || 0,
       cutOrigin: settings.startCorner,
-      pieces: activeScheme.layout2D.placements.map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        x: p.x,
-        y: p.y,
-        w: p.shape?.width || p.w,
-        l: p.shape?.height || p.l,
-        shape: p.shape
-      })),
+      pieces: mappedPieces,
+      placements: mappedPieces,
       remnants: activeScheme.layout2D.leftovers || [],
       defects: [],
       cuts: (activeScheme.layout2D.cuts || []).map((c: any) => ({
@@ -738,7 +774,7 @@ export const ResultsCenterPage: React.FC<{
                             type="button"
                             className="btn pri"
                             disabled={busy}
-                            onClick={() => handleCompleteScheme(false)}
+                            onClick={() => setShowQuickCompleteConfirm(true)}
                           >
                             一键完工记账
                           </button>
@@ -769,7 +805,7 @@ export const ResultsCenterPage: React.FC<{
                           type="button"
                           className="mp-ghost-btn mp-btn-danger-ghost"
                           disabled={busy}
-                          onClick={handleCancelScheme}
+                          onClick={() => setShowCancelConfirm(true)}
                         >
                           作废并退回需求
                         </button>
@@ -1133,6 +1169,105 @@ export const ResultsCenterPage: React.FC<{
         )}
       </ModalDialog>
 
+      {/* One-Click Completion Summary Confirmation Modal */}
+      <ModalDialog
+        open={showQuickCompleteConfirm}
+        title="确认一键完工记账"
+        onClose={() => setShowQuickCompleteConfirm(false)}
+        maxWidth={520}
+      >
+        {activeScheme && (
+          <div>
+            <p style={{ margin: '0 0 12px', fontSize: 13 }}>
+              请核对本次完工过账摘要。确认后将正式扣减材料库存并结转需求族良品完成量：
+            </p>
+            <div
+              className="form num"
+              style={{
+                gridTemplateColumns: '124px 1fr',
+                padding: '10px 12px',
+                background: 'var(--panel-2)',
+                borderRadius: 8,
+                border: '1px solid var(--line-2)',
+                marginBottom: 14
+              }}
+            >
+              <label>排程方案号</label>
+              <b>{activeScheme.id}</b>
+              <label>领用母卷 / 料头</label>
+              <b>{activeScheme.remnantId ? `料头 ${activeScheme.remnantId}` : activeScheme.rollId || '未绑定'}</b>
+              <label>实切消耗</label>
+              <b>
+                {activeScheme.remnantId
+                  ? `整块料头 (${activeScheme.widthMm} × ${fmtN(activeScheme.occupiedLengthMm, 1)} mm)`
+                  : activeScheme.dimension === 'SLITTING_1D' && activeScheme.slitting1D
+                  ? `${activeScheme.slitting1D.totalCars} 车 · 共 ${fmtN(activeScheme.occupiedLengthMm, 1)} mm`
+                  : `${fmtN(activeScheme.occupiedLengthMm, 1)} mm (Y=${fmtN(activeScheme.windowStartY || 0, 0)}~${fmtN((activeScheme.windowStartY || 0) + activeScheme.occupiedLengthMm, 0)})`}
+              </b>
+              <label>预计合格产出</label>
+              <b>
+                {activeScheme.placedCount}{' '}
+                {activeScheme.dimension === 'SLITTING_1D' ? '卷' : '件'}
+              </b>
+              <label>派生余料处理</label>
+              <span>自动回收达标余料至「裁床余料架 A-01」</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => setShowQuickCompleteConfirm(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn pri"
+                disabled={busy}
+                onClick={() => handleCompleteScheme(false)}
+              >
+                {busy ? '过账中…' : '确认一键完工记账'}
+              </button>
+            </div>
+          </div>
+        )}
+      </ModalDialog>
+
+      {/* Cancel Scheme Confirmation Modal */}
+      <ModalDialog
+        open={showCancelConfirm}
+        title="确认作废排程方案"
+        onClose={() => setShowCancelConfirm(false)}
+        maxWidth={460}
+      >
+        {activeScheme && (
+          <div>
+            <p style={{ margin: '0 0 14px', fontSize: 13 }}>
+              确认作废方案「<b>{activeScheme.id}</b>」并将预占需求退回待排需求池吗？作废后将释放关联母卷或料头的预占区段。
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => setShowCancelConfirm(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn pri"
+                disabled={busy}
+                onClick={handleCancelScheme}
+              >
+                {busy ? '处理中…' : '确认作废'}
+              </button>
+            </div>
+          </div>
+        )}
+      </ModalDialog>
+
       {/* Clean A4 Shop-Floor Cut Ticket Modal & Print Surface */}
       <ModalDialog
         open={showTicketModal}
@@ -1140,7 +1275,7 @@ export const ResultsCenterPage: React.FC<{
         onClose={() => setShowTicketModal(false)}
         maxWidth={820}
       >
-        {activeScheme && (
+        {activeScheme && ticketModel && (
           <div className="print-ticket-sheet">
             <header
               style={{
@@ -1158,8 +1293,10 @@ export const ResultsCenterPage: React.FC<{
                 </div>
               </div>
               <div style={{ textAlign: 'right' }} className="num">
-                <div style={{ fontSize: 15, fontWeight: 700 }}>单号：{activeScheme.id}</div>
-                <div style={{ fontSize: 11.5 }}>打印时间：{new Date().toLocaleString('zh-CN')}</div>
+                <div style={{ fontSize: 15, fontWeight: 700 }}>工单号：{ticketModel.workOrderNo}</div>
+                <div style={{ fontSize: 11.5 }}>
+                  方案号：{activeScheme.id} · 打印时间：{new Date().toLocaleString('zh-CN')}
+                </div>
               </div>
             </header>
 
@@ -1189,56 +1326,178 @@ export const ResultsCenterPage: React.FC<{
               </div>
             </div>
 
-            {activeScheme.layout2D?.placements?.length > 0 && (
+            {ticketModel.placements.length > 0 && (
               <div className="ticket-diagram" style={{ marginBottom: 12 }}>
                 <svg
-                  viewBox={`-10 -10 ${activeScheme.widthMm + 20} ${activeScheme.occupiedLengthMm + 20}`}
+                  viewBox={ticketModel.viewBox}
+                  preserveAspectRatio="xMidYMid meet"
+                  role="img"
+                  aria-label={`排料示意图 ${ticketModel.workOrderNo}`}
                   style={{
                     width: '100%',
-                    maxHeight: 240,
+                    height: 'auto',
+                    maxHeight: 280,
                     border: '1px solid #94a3b8',
-                    background: '#f8fafc'
+                    background: '#f8fafc',
+                    display: 'block'
                   }}
                 >
+                  <text
+                    x={0}
+                    y={ticketModel.headerY}
+                    fontSize={ticketModel.headerFontSize}
+                    fontWeight="700"
+                    fill="#0f172a"
+                  >
+                    {ticketModel.workOrderNo} · {ticketModel.widthMm}×{fmtN(ticketModel.occupiedLengthMm, 1)}mm · 共 {ticketModel.placements.length} 件
+                  </text>
                   <rect
                     x={0}
                     y={0}
-                    width={activeScheme.widthMm}
-                    height={activeScheme.occupiedLengthMm}
+                    width={ticketModel.widthMm}
+                    height={ticketModel.occupiedLengthMm}
                     fill="#ffffff"
                     stroke="#0f172a"
-                    strokeWidth={4}
+                    strokeWidth={ticketModel.borderStroke}
                   />
-                  {activeScheme.layout2D.placements.map((p: any) => {
-                    const w = p.shape?.width || p.w;
-                    const h = p.shape?.height || p.l;
-                    if (p.shape?.vertices?.length >= 3) {
-                      const pts = p.shape.vertices
-                        .map((pt: any) => `${p.x + pt.x},${p.y + pt.y}`)
-                        .join(' ');
-                      return (
-                        <polygon
-                          key={p.id}
-                          points={pts}
-                          fill="rgba(2,132,199,0.15)"
-                          stroke="#0284c7"
-                          strokeWidth={3}
-                        />
-                      );
-                    }
-                    return (
+
+                  {/* 疵点禁入区标示 */}
+                  {ticketModel.defects.map((d) => (
+                    <g key={`def-${d.id}`}>
                       <rect
-                        key={p.id}
-                        x={p.x}
-                        y={p.y}
-                        width={w}
-                        height={h}
-                        fill="rgba(2,132,199,0.15)"
-                        stroke="#0284c7"
-                        strokeWidth={3}
+                        x={Math.max(0, d.x - d.margin)}
+                        y={Math.max(0, d.y - d.margin)}
+                        width={d.w + d.margin * 2}
+                        height={d.h + d.margin * 2}
+                        fill="rgba(239,68,68,0.14)"
+                        stroke="#dc2626"
+                        strokeWidth={ticketModel.pieceStroke}
+                        strokeDasharray={`${ticketModel.borderStroke * 3} ${ticketModel.borderStroke * 2}`}
                       />
-                    );
-                  })}
+                      <text
+                        x={d.x + d.w / 2}
+                        y={d.y + d.h / 2}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fontSize={Math.max(16, ticketModel.cutBadgeFontSize)}
+                        fontWeight="700"
+                        fill="#b91c1c"
+                      >
+                        疵#{d.id}
+                      </text>
+                    </g>
+                  ))}
+
+                  {/* 裁片轮廓 + 件号 + 尺寸标注 */}
+                  {ticketModel.placements.map((p) => (
+                    <g key={`p-${p.id}`}>
+                      {p.pointsAttr ? (
+                        <polygon
+                          points={p.pointsAttr}
+                          fill="rgba(2,132,199,0.14)"
+                          stroke="#0284c7"
+                          strokeWidth={ticketModel.pieceStroke}
+                        />
+                      ) : (
+                        <rect
+                          x={p.x}
+                          y={p.y}
+                          width={p.w}
+                          height={p.h}
+                          fill="rgba(2,132,199,0.14)"
+                          stroke="#0284c7"
+                          strokeWidth={ticketModel.pieceStroke}
+                        />
+                      )}
+                      <text
+                        x={p.cx}
+                        y={p.showDimLabel ? p.cy - p.fontSize * 0.52 : p.cy}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fontSize={p.fontSize}
+                        fontWeight="700"
+                        fill="#0f172a"
+                      >
+                        {p.pieceLabel}
+                      </text>
+                      {p.showDimLabel && (
+                        <text
+                          x={p.cx}
+                          y={p.cy + p.fontSize * 0.62}
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fontSize={Math.max(12, Math.round(p.fontSize * 0.78))}
+                          fill="#334155"
+                        >
+                          {p.dimLabel}
+                        </text>
+                      )}
+                    </g>
+                  ))}
+
+                  {/* 贯通直刀刀路与刀序圆标 */}
+                  {ticketModel.cuts.map((c, idx) => (
+                    <g key={`cut-${idx}`}>
+                      <line
+                        x1={c.startX}
+                        y1={c.startY}
+                        x2={c.endX}
+                        y2={c.endY}
+                        stroke="#d97706"
+                        strokeWidth={ticketModel.cutStroke}
+                        strokeDasharray={`${ticketModel.borderStroke * 4} ${ticketModel.borderStroke * 2}`}
+                      />
+                      <circle
+                        cx={c.labelX}
+                        cy={c.labelY}
+                        r={ticketModel.cutBadgeRadius}
+                        fill="#ffffff"
+                        stroke="#d97706"
+                        strokeWidth={ticketModel.pieceStroke}
+                      />
+                      <text
+                        x={c.labelX}
+                        y={c.labelY}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fontSize={ticketModel.cutBadgeFontSize}
+                        fontWeight="700"
+                        fill="#b45309"
+                      >
+                        {c.sequence}
+                      </text>
+                    </g>
+                  ))}
+
+                  {/* 切割起点基准标示 */}
+                  <g>
+                    <circle
+                      cx={ticketModel.originPoint.x}
+                      cy={ticketModel.originPoint.y}
+                      r={ticketModel.cutBadgeRadius * 0.85}
+                      fill="#dc2626"
+                      stroke="#ffffff"
+                      strokeWidth={ticketModel.pieceStroke}
+                    />
+                    <text
+                      x={
+                        ticketModel.originPoint.x === 0
+                          ? ticketModel.cutBadgeRadius * 1.3
+                          : ticketModel.widthMm - ticketModel.cutBadgeRadius * 1.3
+                      }
+                      y={
+                        ticketModel.originPoint.y === 0
+                          ? ticketModel.cutBadgeRadius * 1.4
+                          : ticketModel.occupiedLengthMm - ticketModel.cutBadgeRadius * 1.1
+                      }
+                      textAnchor={ticketModel.originPoint.x === 0 ? 'start' : 'end'}
+                      fontSize={ticketModel.cutBadgeFontSize}
+                      fontWeight="700"
+                      fill="#dc2626"
+                    >
+                      {ticketModel.originPoint.label}
+                    </text>
+                  </g>
                 </svg>
               </div>
             )}
@@ -1269,12 +1528,12 @@ export const ResultsCenterPage: React.FC<{
                           <td>________</td>
                         </tr>
                       ))
-                    : (activeScheme.layout2D?.placements || []).slice(0, 25).map((p: any, i: number) => (
-                        <tr key={p.id}>
-                          <td className="num">#{p.id || i + 1}</td>
+                    : ticketModel.placements.map((p, i) => (
+                        <tr key={`${p.id}-${i}`}>
+                          <td className="num">{p.pieceLabel}</td>
                           <td>{p.name}</td>
                           <td className="r num">
-                            {fmtN(p.shape?.width || p.w, 0)} × {fmtN(p.shape?.height || p.l, 0)}
+                            {fmtN(p.w, 0)} × {fmtN(p.h, 0)}
                           </td>
                           <td className="r num">1 件</td>
                           <td>□ 合格</td>
@@ -1285,40 +1544,40 @@ export const ResultsCenterPage: React.FC<{
               </table>
             </div>
 
-            {settings.ticketShowCuts &&
-              activeScheme.layout2D?.cuts?.length > 0 && (
-                <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>
-                    贯通直刀下刀顺序明细（共 {activeScheme.layout2D.cuts.length} 刀）
-                  </div>
-                  <table className="t">
-                    <thead>
-                      <tr>
-                        <th>刀序</th>
-                        <th>方向</th>
-                        <th className="r">起点坐标 (X, Y mm)</th>
-                        <th className="r">终点坐标 (X, Y mm)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {activeScheme.layout2D.cuts.slice(0, 16).map((c: any, idx: number) => (
-                        <tr key={idx}>
-                          <td className="num">第 {c.sequence || idx + 1} 刀</td>
-                          <td>{c.kind === 'HORIZONTAL' ? '横切' : '纵切'}</td>
-                          <td className="r num">
-                            ({fmtN(c.startX, 1)}, {fmtN(c.startY, 1)})
-                          </td>
-                          <td className="r num">
-                            ({fmtN(c.endX, 1)}, {fmtN(c.endY, 1)})
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            {settings.ticketShowCuts && ticketModel.cuts.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>
+                  贯通直刀下刀顺序明细（共 {ticketModel.cuts.length} 刀）
                 </div>
-              )}
+                <table className="t">
+                  <thead>
+                    <tr>
+                      <th>刀序</th>
+                      <th>方向</th>
+                      <th className="r">起点坐标 (X, Y mm)</th>
+                      <th className="r">终点坐标 (X, Y mm)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ticketModel.cuts.map((c, idx) => (
+                      <tr key={idx}>
+                        <td className="num">第 {c.sequence} 刀</td>
+                        <td>{c.directionLabel}</td>
+                        <td className="r num">
+                          ({fmtN(c.startX, 1)}, {fmtN(c.startY, 1)})
+                        </td>
+                        <td className="r num">
+                          ({fmtN(c.endX, 1)}, {fmtN(c.endY, 1)})
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             <div
+              className="ticket-sign-row"
               style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(3, 1fr)',

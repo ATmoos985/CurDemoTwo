@@ -34,10 +34,15 @@ const api = async (path) => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 860 } });
   page.setDefaultTimeout(15000);
   const pageErrors = [];
+  const nativeDialogs = [];
   const browseWrites = [];
   let allowWrites = false;
 
   page.on('pageerror', (e) => pageErrors.push(e.message));
+  page.on('dialog', async (d) => {
+    nativeDialogs.push(`${d.type()}: ${d.message()}`);
+    await d.dismiss();
+  });
   page.on('response', async (res) => {
     if (res.status() >= 400) {
       const txt = await res.text().catch(() => '');
@@ -260,10 +265,23 @@ const api = async (path) => {
       assert.equal(myScheme.state, 'AWAITING_ROLL');
       confirmedSchemeId = myScheme.id;
 
-      // Test Cut Ticket print modal preview
+      // Test Cut Ticket print modal preview (verify full table, work order no, SVG diagram annotations)
       await page.getByRole('button', { name: '打印 A4 车间派工裁切单' }).click();
       await page.locator('.print-ticket-sheet').waitFor();
-      assert.ok((await page.locator('.print-ticket-sheet').innerText()).includes(confirmedSchemeId));
+      const ticketText = await page.locator('.print-ticket-sheet').innerText();
+      assert.ok(ticketText.includes(`WO-${confirmedSchemeId}`), 'Cut ticket must display work order number');
+      assert.ok(
+        await page.locator('.print-ticket-sheet .ticket-diagram svg').isVisible(),
+        'Cut ticket SVG diagram must render'
+      );
+      const renderedTicketRows = await page
+        .locator('.print-ticket-sheet .mp-table-scroll tbody tr')
+        .count();
+      assert.equal(
+        renderedTicketRows,
+        myScheme.placedCount,
+        'Cut ticket must render all placed pieces without 25-row truncation'
+      );
       await page.locator('dialog[open] .native-modal-head button').click();
 
       // Bind Virtual Mother Roll -> One-click auto-create & bind physical roll
@@ -276,9 +294,16 @@ const api = async (path) => {
       assert.ok(boundDetail.scheme.rollId, 'Physical rollId bound');
       autoBoundRollId = boundDetail.scheme.rollId;
 
-      // One-click complete accounting
+      // One-click complete accounting now requires explicit ModalDialog summary confirmation
       await page.getByRole('button', { name: '一键完工记账' }).click();
+      const confirmDialog = page.locator('dialog[open]', { hasText: '确认一键完工记账' });
+      await confirmDialog.waitFor();
+      const confirmText = await confirmDialog.innerText();
+      assert.ok(confirmText.includes(autoBoundRollId), 'Confirmation modal must list bound rollId');
+      assert.ok(confirmText.includes(String(myScheme.placedCount)), 'Confirmation modal must list expected qualified pieces');
+      await confirmDialog.getByRole('button', { name: '确认一键完工记账' }).click();
       await page.locator('.tag', { hasText: '已完工记账' }).first().waitFor({ timeout: 10000 });
+      assert.deepEqual(nativeDialogs, [], 'Workflow must never invoke native window.confirm/alert');
 
       const poolAfterComplete = await api('/api/v2/demand-pool');
       const familyAfterComplete = poolAfterComplete.find((f) => f.id === createdTaskId);

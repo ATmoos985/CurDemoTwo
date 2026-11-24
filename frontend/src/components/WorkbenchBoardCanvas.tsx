@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { validateRollPlacement as validateRollPlacementPure } from '../pages/workbench/boardPlacementValidation';
 
 export interface BoardPoint {
   x: number;
@@ -149,138 +150,6 @@ function styleForDemand(demandId: number | undefined, fallbackIdx: number, gapFi
 
 function round1(v: number): number {
   return Math.round(v * 10) / 10;
-}
-
-function getWorldVertices(
-  shape: BoardShapeGeometry | undefined,
-  w: number,
-  h: number,
-  ox: number,
-  oy: number
-): BoardPoint[] {
-  if (shape?.type === 'POLYGON' && shape.vertices && shape.vertices.length >= 3) {
-    return shape.vertices.map((pt) => ({ x: pt.x + ox, y: pt.y + oy }));
-  }
-  return [
-    { x: ox, y: oy },
-    { x: ox + w, y: oy },
-    { x: ox + w, y: oy + h },
-    { x: ox, y: oy + h }
-  ];
-}
-
-function pointInPolygonStrict(px: number, py: number, poly: BoardPoint[]): boolean {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const a = poly[j];
-    const b = poly[i];
-    // Exclude points right on an edge (within epsilon) so touching pieces are permitted
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const lenSq = dx * dx + dy * dy;
-    if (lenSq > 1e-6) {
-      const t = Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / lenSq));
-      const distSq = (px - (a.x + t * dx)) ** 2 + (py - (a.y + t * dy)) ** 2;
-      if (distSq <= 0.36) return false;
-    }
-    if ((a.y > py) !== (b.y > py) && px < ((b.x - a.x) * (py - a.y)) / (b.y - a.y) + a.x) {
-      inside = !inside;
-    }
-  }
-  return inside;
-}
-
-function segmentsProperlyIntersect(a: BoardPoint, b: BoardPoint, c: BoardPoint, d: BoardPoint): boolean {
-  const cross = (p: BoardPoint, q: BoardPoint, r: BoardPoint) =>
-    (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
-  const d1 = cross(a, b, c);
-  const d2 = cross(a, b, d);
-  const d3 = cross(c, d, a);
-  const d4 = cross(c, d, b);
-  const eps = 1e-2;
-  return ((d1 > eps && d2 < -eps) || (d1 < -eps && d2 > eps)) &&
-    ((d3 > eps && d4 < -eps) || (d3 < -eps && d4 > eps));
-}
-
-function pointToSegmentDistSq(p: BoardPoint, a: BoardPoint, b: BoardPoint): number {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lenSq = dx * dx + dy * dy;
-  if (lenSq < 1e-6) return (p.x - a.x) ** 2 + (p.y - a.y) ** 2;
-  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
-  return (p.x - (a.x + t * dx)) ** 2 + (p.y - (a.y + t * dy)) ** 2;
-}
-
-function polygonsOverlapOrViolateGap(
-  polyA: BoardPoint[],
-  polyB: BoardPoint[],
-  minGap: number
-): boolean {
-  for (let i = 0; i < polyA.length; i++) {
-    const a1 = polyA[i];
-    const a2 = polyA[(i + 1) % polyA.length];
-    for (let j = 0; j < polyB.length; j++) {
-      const b1 = polyB[j];
-      const b2 = polyB[(j + 1) % polyB.length];
-      if (segmentsProperlyIntersect(a1, a2, b1, b2)) return true;
-    }
-  }
-  for (const p of polyA) {
-    if (pointInPolygonStrict(p.x, p.y, polyB)) return true;
-  }
-  for (const p of polyB) {
-    if (pointInPolygonStrict(p.x, p.y, polyA)) return true;
-  }
-  // Check centroid of A inside B and vice versa (handles identical overlapping polygons)
-  const cA = polyA.reduce((acc, p) => ({ x: acc.x + p.x / polyA.length, y: acc.y + p.y / polyA.length }), { x: 0, y: 0 });
-  const cB = polyB.reduce((acc, p) => ({ x: acc.x + p.x / polyB.length, y: acc.y + p.y / polyB.length }), { x: 0, y: 0 });
-  if (pointInPolygonStrict(cA.x, cA.y, polyB) || pointInPolygonStrict(cB.x, cB.y, polyA)) {
-    return true;
-  }
-
-  if (minGap > 0.6) {
-    const thresholdSq = (minGap - 0.5) ** 2;
-    for (const p of polyA) {
-      for (let j = 0; j < polyB.length; j++) {
-        if (pointToSegmentDistSq(p, polyB[j], polyB[(j + 1) % polyB.length]) < thresholdSq) {
-          return true;
-        }
-      }
-    }
-    for (const p of polyB) {
-      for (let i = 0; i < polyA.length; i++) {
-        if (pointToSegmentDistSq(p, polyA[i], polyA[(i + 1) % polyA.length]) < thresholdSq) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-function shapesCollide(
-  shapeA: BoardShapeGeometry | undefined,
-  wA: number,
-  hA: number,
-  xA: number,
-  yA: number,
-  shapeB: BoardShapeGeometry | undefined,
-  wB: number,
-  hB: number,
-  xB: number,
-  yB: number,
-  gapMm: number
-): boolean {
-  const pad = Math.max(0, gapMm) - 0.5;
-  if (xA + wA + pad <= xB || xB + wB + pad <= xA || yA + hA + pad <= yB || yB + hB + pad <= yA) {
-    return false;
-  }
-  if (shapeA?.type !== 'POLYGON' && shapeB?.type !== 'POLYGON') {
-    return true;
-  }
-  const polyA = getWorldVertices(shapeA, wA, hA, xA, yA);
-  const polyB = getWorldVertices(shapeB, wB, hB, xB, yB);
-  return polygonsOverlapOrViolateGap(polyA, polyB, Math.max(0, gapMm));
 }
 
 function createHatchTile(background: string | null, stroke: string, size = 10): HTMLCanvasElement {
@@ -1216,49 +1085,20 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
     ignorePieceIndex: number
   ): { ok: boolean; reason: string } => {
     const p = propsRef.current;
-    if (w > p.rollWidthMm + 0.5) {
-      return { ok: false, reason: `裁片宽 ${Math.round(w)}mm 超过母卷门幅 ${p.rollWidthMm}mm` };
-    }
-    if (localX < -0.5 || localX + w > p.rollWidthMm + 0.5) {
-      return { ok: false, reason: '超出母卷左右边界' };
-    }
-    if (localY < p.trimStartMm - 0.5) {
-      return { ok: false, reason: `进入切头修边区 (Y < ${p.trimStartMm}mm)` };
-    }
-    if (localY + h > p.rollLengthMm + 0.5) {
-      return { ok: false, reason: '超出当前母卷版长上限' };
-    }
-    for (const d of p.defects) {
-      const m = d.margin ?? 0;
-      const dx = Math.max(0, d.x - m);
-      const dy = Math.max(0, d.y - m);
-      const dw = d.w + m * 2;
-      const dh = d.h + m * 2;
-      if (shapesCollide(shape, w, h, localX, localY, undefined, dw, dh, dx, dy, 0)) {
-        return { ok: false, reason: '与母卷疵点禁入区重叠' };
-      }
-    }
-    for (const other of p.placedPieces) {
-      if (other.index === ignorePieceIndex) continue;
-      if (
-        shapesCollide(
-          shape,
-          w,
-          h,
-          localX,
-          localY,
-          other.shape,
-          other.width,
-          other.height,
-          other.x,
-          other.y,
-          p.pieceGapMm
-        )
-      ) {
-        return { ok: false, reason: `与裁片「${other.name}」重叠或间距不足` };
-      }
-    }
-    return { ok: true, reason: '' };
+    return validateRollPlacementPure({
+      shape,
+      w,
+      h,
+      localX,
+      localY,
+      ignorePieceIndex,
+      rollWidthMm: p.rollWidthMm,
+      rollLengthMm: p.rollLengthMm,
+      trimStartMm: p.trimStartMm,
+      pieceGapMm: p.pieceGapMm,
+      defects: p.defects,
+      placedPieces: p.placedPieces
+    });
   };
 
   // Magnetic snapping inside mother roll

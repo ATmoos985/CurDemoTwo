@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { ModalDialog } from '../components/ModalDialog';
 import { NumberInput } from '../components/ui/NumberInput';
 import { requestJSON, fmtN, toast, loadSheetLib } from '@static/app/js/util.js';
 import {
@@ -68,6 +69,11 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
   const [imp, setImp] = useState<ImportState | null>(null);
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
+  const [pendingPackChangeId, setPendingPackChangeId] = useState<string | null>(null);
+  const [pendingImportConfirm, setPendingImportConfirm] = useState<{
+    groupModel: string;
+    currentModel: string;
+  } | null>(null);
 
   const storageKey = useMemo(
     () => draftKey(original?.id || (routeTemplate ? 'demo-' + templateId : null)),
@@ -167,18 +173,20 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
     0
   );
 
-  const handlePackChange = (nextId: string) => {
-    if (
-      (hasChangesFromBaseline || imp) &&
-      !confirm('切换示例包会替换当前草稿，继续切换？')
-    ) {
-      return;
-    }
+  const applyPackChange = (nextId: string) => {
     const fresh = buildNewForm(nextId);
     setPackId(nextId);
     setBaseline(fresh);
     setImp(null);
     updateAndPersist(fresh, nextId);
+  };
+
+  const handlePackChange = (nextId: string) => {
+    if (hasChangesFromBaseline || imp) {
+      setPendingPackChangeId(nextId);
+      return;
+    }
+    applyPackChange(nextId);
   };
 
   const handleDiscard = () => {
@@ -305,19 +313,10 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
     }
   };
 
-  const handleApplyImport = () => {
+  const executeApplyImport = () => {
     if (!imp) return;
     try {
       const g = imp.groups[imp.gi] || imp.groups[0];
-      if (
-        form.materialModel &&
-        g.materialModel !== form.materialModel &&
-        !confirm(
-          `导入的型号 ${g.materialModel} 与当前任务 ${form.materialModel} 不同，仍要导入吗？（型号保持当前值）`
-        )
-      ) {
-        return;
-      }
       const t = importedTask(imp.result, g.index, imp.source, [...imp.selected]);
       const next = mergeImport(form, t, { replace: !imp.append, completed });
       updateAndPersist(next);
@@ -326,6 +325,19 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
     } catch (err: any) {
       toast(err.message, true);
     }
+  };
+
+  const handleApplyImport = () => {
+    if (!imp) return;
+    const g = imp.groups[imp.gi] || imp.groups[0];
+    if (form.materialModel && g.materialModel !== form.materialModel) {
+      setPendingImportConfirm({
+        groupModel: g.materialModel || '未识别型号',
+        currentModel: form.materialModel
+      });
+      return;
+    }
+    executeApplyImport();
   };
 
   const handleSave = async () => {
@@ -1100,6 +1112,66 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
           </div>
         </div>
       </div>
+
+      <ModalDialog
+        open={pendingPackChangeId !== null}
+        title="确认切换示例包"
+        onClose={() => setPendingPackChangeId(null)}
+        maxWidth={440}
+      >
+        <p style={{ margin: '0 0 16px' }}>切换示例包会替换当前未保存的草稿内容，确认继续切换吗？</p>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button type="button" className="btn" onClick={() => setPendingPackChangeId(null)}>
+            取消
+          </button>
+          <button
+            type="button"
+            className="btn pri"
+            onClick={() => {
+              const nextId = pendingPackChangeId;
+              setPendingPackChangeId(null);
+              if (nextId !== null) applyPackChange(nextId);
+            }}
+          >
+            确认切换
+          </button>
+        </div>
+      </ModalDialog>
+
+      <ModalDialog
+        open={pendingImportConfirm !== null}
+        title="确认跨型号导入需求"
+        onClose={() => setPendingImportConfirm(null)}
+        maxWidth={480}
+      >
+        {pendingImportConfirm && (
+          <>
+            <p style={{ margin: '0 0 16px' }}>
+              导入文件的材料型号「<b>{pendingImportConfirm.groupModel}</b>」与当前任务型号「
+              <b>{pendingImportConfirm.currentModel}</b>」不一致，仍要继续导入吗？（导入后材料型号保持当前任务值）
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setPendingImportConfirm(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn pri"
+                onClick={() => {
+                  setPendingImportConfirm(null);
+                  executeApplyImport();
+                }}
+              >
+                仍要导入
+              </button>
+            </div>
+          </>
+        )}
+      </ModalDialog>
     </div>
   );
 };

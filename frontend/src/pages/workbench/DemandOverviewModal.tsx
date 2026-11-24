@@ -230,7 +230,15 @@ export const DemandOverviewModal: React.FC<DemandOverviewModalProps> = ({
                     return (
                       <tr key={r.key}>
                         <td className="num muted">{r.index}</td>
-                        <td style={{ fontWeight: 600 }}>{r.name}</td>
+                        <td style={{ fontWeight: 600 }}>
+                          {r.name}
+                          {r.sourceTaskName && (
+                            <div className="muted" style={{ fontSize: 11, fontWeight: 400 }}>
+                              来源需求族：{r.sourceTaskName}
+                              {r.sourceLineId != null ? ` · 行 #${r.sourceLineId}` : ''}
+                            </div>
+                          )}
+                        </td>
                         <td className="num">{r.specText}</td>
                         <td>
                           <span className="muted" style={{ fontSize: 11.5 }}>

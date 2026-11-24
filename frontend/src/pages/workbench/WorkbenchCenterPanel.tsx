@@ -47,6 +47,8 @@ export interface WorkbenchCenterPanelProps {
   onMovePlacedPiece: (pieceIndex: number, localX: number, localY: number) => void;
   onRotatePlacedPiece: (pieceIndex: number) => void;
   onRemovePlacedPiece: (pieceIndex: number) => void;
+  validatingLayout: boolean;
+  onValidateAndRebuildLayout: () => void;
 
   // 1D view
   slitSchemes: SlittingSchemeRun[];
@@ -104,6 +106,8 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
   onMovePlacedPiece,
   onRotatePlacedPiece,
   onRemovePlacedPiece,
+  validatingLayout,
+  onValidateAndRebuildLayout,
   slitSchemes,
   activeScheme1D,
   setActiveSlitScheme,
@@ -197,6 +201,20 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
             </>
           )}
 
+          {activeScheme2D?.layoutDirty && !activeScheme2D.confirmedSchemeId && (
+            <>
+              <span className="div" role="separator" aria-orientation="vertical" />
+              <button
+                type="button"
+                className="ctool-piece-act"
+                disabled={validatingLayout}
+                onClick={onValidateAndRebuildLayout}
+              >
+                {validatingLayout ? '校验重建中…' : '校验并重建刀路'}
+              </button>
+            </>
+          )}
+
           <span className="sp" />
 
           <span className="num ctool-readout">
@@ -263,6 +281,7 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
                       <b>{s.utilizationPct}%</b> · {fmtN(s.occupiedLengthMm, 0)}mm
                     </span>
                     {isBest && <span className="tag ok">最优</span>}
+                    {s.layoutDirty && !s.confirmedSchemeId && <span className="tag warn">待校验</span>}
                     {s.confirmedSchemeId && <span className="tag run">已选定</span>}
                     <button
                       type="button"

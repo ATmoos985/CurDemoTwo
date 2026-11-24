@@ -27,8 +27,10 @@ export interface WorkbenchRightPanelProps {
   runningSolve: boolean;
   solveElapsedMs: number;
   confirmingScheme: boolean;
+  validatingLayout: boolean;
   lastConfirmSummary: LastConfirmSummary | null;
   onContinueAfterConfirm: () => void;
+  onValidateAndRebuildLayout: () => void;
   onConfirmSelectedScheme2D: () => void;
   onConfirmSelectedScheme1D: () => void;
   onQuickExportCam: (kind: 'dxf' | 'nc') => void;
@@ -73,8 +75,10 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
   runningSolve,
   solveElapsedMs,
   confirmingScheme,
+  validatingLayout,
   lastConfirmSummary,
   onContinueAfterConfirm,
+  onValidateAndRebuildLayout,
   onConfirmSelectedScheme2D,
   onConfirmSelectedScheme1D,
   onQuickExportCam,
@@ -150,10 +154,38 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
           <div className="value-hero-panel">
             <div className="value-hero-head">
               <div className="value-hero-title">{activeScheme2D.strategyName}</div>
-              <span className={`tag ${activeScheme2D.complete ? 'ok' : 'kind'}`}>
-                {activeScheme2D.complete ? '齐套' : '部分'}
-              </span>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                {activeScheme2D.layoutDirty && !activeScheme2D.confirmedSchemeId && (
+                  <span className="tag warn">待校验</span>
+                )}
+                <span className={`tag ${activeScheme2D.complete ? 'ok' : 'kind'}`}>
+                  {activeScheme2D.complete ? '齐套' : '部分'}
+                </span>
+              </div>
             </div>
+
+            {activeScheme2D.layoutDirty && !activeScheme2D.confirmedSchemeId && (
+              <div className="wb-dirty-banner" role="status">
+                <div className="wb-dirty-banner-title">已手调，需校验并重建刀路</div>
+                {activeScheme2D.layoutValidationErrors &&
+                  activeScheme2D.layoutValidationErrors.length > 0 && (
+                    <ul className="wb-dirty-error-list">
+                      {activeScheme2D.layoutValidationErrors.map((err, idx) => (
+                        <li key={idx}>{err}</li>
+                      ))}
+                    </ul>
+                  )}
+                <button
+                  type="button"
+                  className="btn sm soft-accent"
+                  style={{ width: '100%', justifyContent: 'center' }}
+                  disabled={validatingLayout}
+                  onClick={onValidateAndRebuildLayout}
+                >
+                  {validatingLayout ? '校验重建中…' : '校验并重建刀路'}
+                </button>
+              </div>
+            )}
 
             <div className="value-kpi-grid num">
               <div className="value-kpi-cell highlight">
@@ -191,8 +223,15 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
               <button
                 type="button"
                 className="btn pri value-primary-cta"
-                disabled={confirmingScheme}
-                title="扣减待排需求并保存至结果管理"
+                disabled={
+                  confirmingScheme ||
+                  Boolean(activeScheme2D.layoutDirty && !activeScheme2D.confirmedSchemeId)
+                }
+                title={
+                  activeScheme2D.layoutDirty && !activeScheme2D.confirmedSchemeId
+                    ? '已手调，需校验并重建刀路后才可选定此方案'
+                    : '扣减待排需求并保存至结果管理'
+                }
                 onClick={onConfirmSelectedScheme2D}
               >
                 {confirmingScheme
@@ -209,7 +248,17 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
                 >
                   导出 DXF
                 </button>
-                <button type="button" className="btn sm" onClick={() => onQuickExportCam('nc')}>
+                <button
+                  type="button"
+                  className="btn sm"
+                  disabled={Boolean(activeScheme2D.layoutDirty && !activeScheme2D.confirmedSchemeId)}
+                  title={
+                    activeScheme2D.layoutDirty && !activeScheme2D.confirmedSchemeId
+                      ? '已手调，需校验并重建刀路后再导出 G-Code'
+                      : undefined
+                  }
+                  onClick={() => onQuickExportCam('nc')}
+                >
                   导出 G-Code
                 </button>
               </div>
