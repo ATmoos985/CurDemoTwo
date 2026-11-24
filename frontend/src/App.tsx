@@ -139,6 +139,28 @@ export const App: React.FC = () => {
     inventory: true,
     showcase: false
   });
+  const [navCollapsed, setNavCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('cutplan.nav.collapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleNavCollapsed = () => {
+    setNavCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('cutplan.nav.collapsed', next ? '1' : '0');
+      } catch {
+        // ignore storage quota errors
+      }
+      return next;
+    });
+    window.setTimeout(() => {
+      window.dispatchEvent(new Event('resize'));
+    }, 200);
+  };
 
   const schemes2D = useStudioStore((s) => s.schemes2D);
   const slitSchemes = useStudioStore((s) => s.slitSchemes);
@@ -563,7 +585,7 @@ export const App: React.FC = () => {
   const isModalVisible = settingsOpen || isSettingsRoute;
 
   return (
-    <div className="app app-magpie">
+    <div className={`app app-magpie ${navCollapsed ? 'nav-collapsed' : ''}`}>
       <nav className="nav" id="nav" aria-label="功能导航">
         <a className="mp-nav-brand" href="#/workbench" title="CutPlan 智能排料与裁切协同系统">
           <span className="mp-brand-mark" aria-hidden="true">
@@ -574,13 +596,13 @@ export const App: React.FC = () => {
               />
             </svg>
           </span>
-          <span>CutPlan</span>
+          <span className="mp-nav-label">CutPlan</span>
           <span className="mp-brand-ver num">v2</span>
         </a>
 
         <div className="nav-main">
           {categories.map((cat) => {
-            const isOpen = Boolean(expandedCats[cat.id]);
+            const isOpen = navCollapsed || Boolean(expandedCats[cat.id]);
             const subListId = `nav-sub-${cat.id}`;
             return (
               <div key={cat.id} className="nav-group">
@@ -596,15 +618,18 @@ export const App: React.FC = () => {
                 <ul id={subListId} className="nav-sublist" hidden={!isOpen}>
                   {cat.items.map((item) => {
                     const active = item.isActive(route);
+                    const tip =
+                      item.badge !== undefined ? `${item.label} (${item.badge})` : item.label;
                     return (
                       <li key={item.id}>
                         <a
                           href={item.href}
                           className={active ? 'on' : undefined}
                           aria-current={active ? 'page' : undefined}
+                          title={navCollapsed ? tip : undefined}
                         >
                           <span className="mp-nav-ico">{item.icon}</span>
-                          <span>{item.label}</span>
+                          <span className="mp-nav-label">{item.label}</span>
                           {item.badge !== undefined && (
                             <span className="cnt num">{item.badge}</span>
                           )}
@@ -625,6 +650,7 @@ export const App: React.FC = () => {
             aria-current={isSettingsRoute ? 'page' : undefined}
             aria-haspopup="dialog"
             aria-expanded={isModalVisible}
+            title={navCollapsed ? '系统与引擎设置' : undefined}
             onClick={(e) => {
               if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
                 e.preventDefault();
@@ -642,7 +668,7 @@ export const App: React.FC = () => {
                 strokeLinecap="round"
               />
             </svg>
-            <span>系统与引擎设置</span>
+            <span className="mp-nav-label">系统与引擎设置</span>
           </a>
 
           <button
@@ -650,10 +676,12 @@ export const App: React.FC = () => {
             id="engine-status"
             className="mp-engine-foot-btn"
             onClick={() => openSettings('engines')}
-            title="点击管理并行排版算法、引擎并发状态与系统配额"
+            title={`${health.ok ? '引擎就绪' : '引擎连接中'} · ${enabledAlgoCount}算法${
+              health.workers ? ` · ${health.workers}并发` : ''
+            }（点击管理并行排版算法与系统配额）`}
           >
             <span className={`dot ${health.ok ? 'ok' : 'warn'}`} aria-hidden="true" />
-            <span className="mp-engine-label num">
+            <span className="mp-engine-label mp-nav-label num">
               {health.ok ? '引擎就绪' : '引擎连接中'}
               {` · ${enabledAlgoCount}算法`}
               {health.workers ? ` · ${health.workers}并发` : ''}
@@ -663,6 +691,49 @@ export const App: React.FC = () => {
       </nav>
 
       <header className="topbar">
+        <button
+          type="button"
+          className="mp-icon-btn mp-nav-toggle"
+          onClick={toggleNavCollapsed}
+          aria-expanded={!navCollapsed}
+          aria-controls="nav"
+          aria-label={navCollapsed ? '展开左侧导航' : '收起左侧导航'}
+          title={navCollapsed ? '展开左侧导航' : '收起左侧导航'}
+        >
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+            <rect
+              x="2"
+              y="2.5"
+              width="12"
+              height="11"
+              rx="2"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+            />
+            <path d="M6 2.5v11" stroke="currentColor" strokeWidth="1.4" />
+            {navCollapsed ? (
+              <path
+                d="M8.8 6.2 10.6 8l-1.8 1.8"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            ) : (
+              <path
+                d="M10.4 6.2 8.6 8l1.8 1.8"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            )}
+          </svg>
+        </button>
+
         <div className="topbar-context" aria-label="当前工作区位置">
           <span>{activeBreadcrumb.cat}</span>
           <span className="topbar-context-sep" aria-hidden="true">/</span>

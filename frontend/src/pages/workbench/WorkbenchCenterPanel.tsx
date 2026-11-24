@@ -309,8 +309,8 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
                   </div>
                   <b className="num">{s.state === 'RUNNING' ? '…' : `${s.totalCars} 车`}</b>
                   <div className="d num">
-                    利用率 {s.avgUtilizationPct}% · 缺口 {s.missingRolls} · 超产{' '}
-                    {s.overproducedRolls}
+                    组数 {s.patterns?.length ?? 0} · 利用率 {s.avgUtilizationPct}% · 缺口{' '}
+                    {s.missingRolls} · 超产 {s.overproducedRolls}
                   </div>
                 </div>
               ))}

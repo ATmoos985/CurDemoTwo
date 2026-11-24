@@ -83,6 +83,58 @@ body {
   height: 100vh;
   background: var(--cp-bg);
   color: var(--cp-ink);
+  transition: grid-template-columns 0.18s ease;
+}
+
+.app.app-magpie.nav-collapsed {
+  grid-template-columns: 56px minmax(0, 1fr);
+}
+
+.app.app-magpie.nav-collapsed .mp-nav-brand {
+  justify-content: center;
+  padding: 0;
+}
+
+.app.app-magpie.nav-collapsed .mp-nav-label,
+.app.app-magpie.nav-collapsed .mp-brand-ver,
+.app.app-magpie.nav-collapsed .nav a .cnt {
+  display: none;
+}
+
+.app.app-magpie.nav-collapsed .nav .nav-main {
+  padding: 6px 8px 12px;
+  gap: 8px;
+}
+
+.app.app-magpie.nav-collapsed .nav-group {
+  padding-top: 6px;
+  border-top: 1px solid var(--cp-divider);
+}
+
+.app.app-magpie.nav-collapsed .nav-group:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.app.app-magpie.nav-collapsed .nav-group-trigger {
+  display: none;
+}
+
+.app.app-magpie.nav-collapsed .nav .nav-sublist a,
+.app.app-magpie.nav-collapsed .nav .nav-settings-link,
+.app.app-magpie.nav-collapsed .mp-engine-foot-btn {
+  justify-content: center;
+  padding: 6px 0;
+  gap: 0;
+}
+
+.app.app-magpie.nav-collapsed .nav .nav-foot {
+  padding: 8px;
+  align-items: center;
+}
+
+.mp-nav-toggle {
+  margin-right: 8px;
 }
 
 .app.app-magpie .nav {
