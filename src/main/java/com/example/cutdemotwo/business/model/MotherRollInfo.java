@@ -50,6 +50,10 @@ public class MotherRollInfo {
     private String scrappedAt;
     private String scrapIdempotencyKey;
 
+    // 采购单价信息（历史数据为 null 不序列化，确保旧账本快照零漂移）
+    private Double unitPricePerMeter;       // 采购单价 (元/米)
+    private Double unitPricePerSqm;         // 采购单价 (元/平方米)
+
     public MotherRollInfo() {}
 
     public MotherRollInfo(String rollId, String rollModel, double width, double totalLength, int remnantCount, double remnantTotalArea) {
@@ -179,6 +183,14 @@ public class MotherRollInfo {
     @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
     public String getScrapIdempotencyKey() { return scrapIdempotencyKey; }
     public void setScrapIdempotencyKey(String scrapIdempotencyKey) { this.scrapIdempotencyKey = scrapIdempotencyKey; }
+
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public Double getUnitPricePerMeter() { return unitPricePerMeter; }
+    public void setUnitPricePerMeter(Double unitPricePerMeter) { this.unitPricePerMeter = unitPricePerMeter; }
+
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public Double getUnitPricePerSqm() { return unitPricePerSqm; }
+    public void setUnitPricePerSqm(Double unitPricePerSqm) { this.unitPricePerSqm = unitPricePerSqm; }
 
     public int getDefectsCount() {
         return defects != null ? defects.size() : 0;

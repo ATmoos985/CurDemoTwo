@@ -1877,6 +1877,12 @@ public class RemnantService implements CuttingStatePort {
         if (!Double.isFinite(roll.getShrinkageRate()) || roll.getShrinkageRate() < 0 || roll.getShrinkageRate() > 100) {
             throw new IllegalArgumentException("母卷缩水率必须为 0 至 100 之间的有限数值");
         }
+        if (roll.getUnitPricePerMeter() != null && (!Double.isFinite(roll.getUnitPricePerMeter()) || roll.getUnitPricePerMeter() < 0)) {
+            throw new IllegalArgumentException("母卷每米采购单价必须为非负有限数值");
+        }
+        if (roll.getUnitPricePerSqm() != null && (!Double.isFinite(roll.getUnitPricePerSqm()) || roll.getUnitPricePerSqm() < 0)) {
+            throw new IllegalArgumentException("母卷每平方米采购单价必须为非负有限数值");
+        }
         ensureMaterialNotReserved("roll",roll.getRollId(),null);
         MotherRollInfo existing = motherRolls.get(roll.getRollId());
         if (existing != null) {
@@ -1895,6 +1901,8 @@ public class RemnantService implements CuttingStatePort {
             existing.setGrammage(roll.getGrammage());
             existing.setComposition(roll.getComposition());
             existing.setShrinkageRate(roll.getShrinkageRate());
+            existing.setUnitPricePerMeter(roll.getUnitPricePerMeter());
+            existing.setUnitPricePerSqm(roll.getUnitPricePerSqm());
             existing.setWidth(roll.getWidth());
             existing.setRawWidth(roll.getRawWidth());
             existing.setTotalLength(roll.getTotalLength());
