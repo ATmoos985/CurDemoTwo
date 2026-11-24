@@ -60,6 +60,12 @@ const GarmentWidthPage = lazy(() =>
 const ShowcasePage = lazy(() =>
   import('./pages/ShowcasePage').then((m) => ({ default: m.ShowcasePage }))
 );
+const GlobalPlanningPage = lazy(() =>
+  import('./pages/GlobalPlanningPage').then((m) => ({ default: m.GlobalPlanningPage }))
+);
+const CostAnalyticsPage = lazy(() =>
+  import('./pages/CostAnalyticsPage').then((m) => ({ default: m.CostAnalyticsPage }))
+);
 
 const RouteLoadingFallback: React.FC = () => (
   <div
@@ -126,8 +132,10 @@ function parseHashRoute(hash: string): ParsedRoute {
     'clusters',
     'workbench',
     'slitting',
+    'planning',
     'results',
     'reconciliation',
+    'cost-analytics',
     'inventory',
     'inspection',
     'documents',
@@ -449,6 +457,23 @@ export const App: React.FC = () => {
             ),
             badge: candidateCount || undefined,
             isActive: (r) => r.page === 'workbench' || r.page === 'slitting'
+          },
+          {
+            id: 'planning',
+            label: '联合排产与自动分床',
+            href: '#/planning',
+            icon: (
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+                <path
+                  d="M2.5 3.5h11M2.5 8h7.5M2.5 12.5h5.5M11.8 7v5.5M9.5 9.8h4.6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+            ),
+            isActive: (r) => r.page === 'planning'
           }
         ]
       },
@@ -492,6 +517,23 @@ export const App: React.FC = () => {
             ),
             isActive: (r) =>
               r.page === 'reconciliation' || r.page === 'quality' || r.page === 'analysis'
+          },
+          {
+            id: 'cost-analytics',
+            label: '成本与备料分析',
+            href: '#/cost-analytics',
+            icon: (
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+                <path
+                  d="M2.5 13h11M4.2 13V8.2M8 13V5.2M11.8 13V3.2"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            ),
+            isActive: (r) => r.page === 'cost-analytics'
           }
         ]
       },
@@ -639,6 +681,8 @@ export const App: React.FC = () => {
         return <CuttingWorkbenchPage taskId={effectiveRoute.params[0] || undefined} />;
       case 'slitting':
         return <CuttingWorkbenchPage forceDimension="1D" />;
+      case 'planning':
+        return <GlobalPlanningPage />;
       case 'results':
         return (
           <ResultsCenterPage
@@ -648,6 +692,8 @@ export const App: React.FC = () => {
         );
       case 'reconciliation':
         return <ReconciliationPage />;
+      case 'cost-analytics':
+        return <CostAnalyticsPage />;
       case 'inventory':
         return <InventoryPage params={effectiveRoute.params} />;
       case 'inspection':

@@ -30,6 +30,7 @@ import {
   buildSourceAllocations1D,
   buildSourceAllocations2D
 } from './schemeConfirmUtils';
+import { formatSolverProgressText } from './solverProgressUtils';
 
 export interface UseWorkbenchSolverOptions {
   // 2D inputs
@@ -338,14 +339,24 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         try {
           const { job, result: rawResult } = await (session as any).solve(req, {
             onProgress: (j: any) => {
+              const liveState = j.state || j.status || 'RUNNING';
+              const livePhase = formatSolverProgressText({
+                state: liveState,
+                phase: j.phase,
+                elapsedMs: j.elapsedMs,
+                transport: j.transport
+              });
               setStrategyRuns2D((prev) =>
                 prev.map((r) =>
                   r.strategyId === runKey
                     ? {
                         ...r,
                         jobId: j.id,
-                        state: j.state === 'QUEUED' ? 'QUEUED' : 'RUNNING',
-                        phaseText: ''
+                        state: liveState === 'QUEUED' ? 'QUEUED' : 'RUNNING',
+                        phaseText: livePhase,
+                        ...(typeof j.elapsedMs === 'number' && Number.isFinite(j.elapsedMs)
+                          ? { elapsedMs: Math.round(j.elapsedMs) }
+                          : {})
                       }
                     : r
                 )
@@ -669,7 +680,25 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
           }
         };
         try {
-          const { result } = await (session as any).solve(req);
+          const { result } = await (session as any).solve(req, {
+            onProgress: (j: any) => {
+              const liveElapsed =
+                typeof j?.elapsedMs === 'number' && Number.isFinite(j.elapsedMs)
+                  ? Math.round(j.elapsedMs)
+                  : Math.round(performance.now() - t0);
+              const prevRun = liveRuns.get(profile) || makePending(profile);
+              if (prevRun.state === 'RUNNING') {
+                liveRuns.set(profile, {
+                  ...prevRun,
+                  elapsedMs: liveElapsed
+                });
+                const currentOrdered = sortSchemes(
+                  runProfiles.map((p) => liveRuns.get(p) || makePending(p))
+                );
+                setSlitSchemes([...currentOrdered, baselineRun]);
+              }
+            }
+          });
           const s = result.slitting;
           const utilMetric =
             result.metrics?.find((m: any) => m.name === 'motherAreaUtilization')?.value || 0;

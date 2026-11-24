@@ -1098,7 +1098,11 @@
                 "REPORT",
                 "CHECKPOINT",
                 "TRANSFER",
-                "COUNT"
+                "COUNT",
+                "QUALITY_RELEASE",
+                "RECEIPT_IN",
+                "MATERIAL_ISSUE",
+                "ROLL_SCRAP"
               ]
             }
           },
@@ -4414,6 +4418,278 @@
           },
           "429": {
             "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/optimization-jobs/{jobId}/events": {
+      "get": {
+        "summary": "订阅标准优化作业实时进度事件流（SSE，支持 progress 与 done 事件）",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "jobId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events 进度与终态事件流",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizationJobSseEvent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "作业不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "实时推送通道暂不可用，客户端可平滑降级至轮询",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/planning/multi-material": {
+      "post": {
+        "summary": "多料头接力消耗与多门幅母卷联合排产试算（只读预览，不扣减库存）",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultiMaterialPlanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "联合排产方案评估结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultiMaterialPlanResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "指定任务不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/planning/cut-plan": {
+      "post": {
+        "summary": "服装订单自动分床与尺码配比规划（只读预览，严格校核尺码守恒）",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CutPlanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "自动分床结果与尺码核对表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CutPlanResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "尺码或分床约束无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/analytics/cost-summary": {
+      "get": {
+        "summary": "按任务与品号统计实绩成本、废料损失与回收料头残值抵扣",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "defaultUnitPricePerSqm",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "default": 25
+            }
+          },
+          {
+            "in": "query",
+            "name": "remnantResidualFactor",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.7
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "实绩成本核算汇总",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostSummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "成本参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/analytics/procurement-suggestions": {
+      "get": {
+        "summary": "跨订单缺口汇总与采购备料建议",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "safetyBufferPct",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 200,
+              "default": 15
+            }
+          },
+          {
+            "in": "query",
+            "name": "defaultRollLengthM",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "minimum": 1,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "跨订单采购备料建议列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcurementSuggestionsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "备料参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
             "content": {
               "application/json": {
                 "schema": {
@@ -8551,6 +8827,639 @@
           },
           "hasMore": {
             "type": "boolean"
+          }
+        }
+      },
+      "OptimizationJobSseEvent": {
+        "type": "object",
+        "required": [
+          "jobId",
+          "status",
+          "elapsedMs"
+        ],
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "phase": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "elapsedMs": {
+            "type": "number"
+          }
+        }
+      },
+      "MultiMaterialDemandItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "width",
+          "length",
+          "quantity"
+        ],
+        "properties": {
+          "id": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "width": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "length": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "allowRotation": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MultiMaterialPlanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "materialModel": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "requiredBatchNo": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "requiredColor": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "preferRemnants": {
+            "type": "boolean"
+          },
+          "maxRemnants": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50
+          },
+          "timeBudgetMs": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 60000
+          },
+          "pieceGapMm": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 200
+          },
+          "trimStartMm": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500
+          },
+          "demands": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/MultiMaterialDemandItem"
+            }
+          }
+        }
+      },
+      "MultiMaterialRemnantAllocation": {
+        "type": "object",
+        "required": [
+          "remnantId",
+          "widthMm",
+          "lengthMm",
+          "utilizationPct",
+          "placedCount",
+          "piecesAreaM2",
+          "allocatedItems"
+        ],
+        "properties": {
+          "remnantId": {
+            "type": "string"
+          },
+          "widthMm": {
+            "type": "number"
+          },
+          "lengthMm": {
+            "type": "number"
+          },
+          "utilizationPct": {
+            "type": "number"
+          },
+          "placedCount": {
+            "type": "integer"
+          },
+          "piecesAreaM2": {
+            "type": "number"
+          },
+          "allocatedItems": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "MultiMaterialRollOption": {
+        "type": "object",
+        "required": [
+          "rollId",
+          "widthMm",
+          "availableLengthMm",
+          "estimatedCutLengthMm",
+          "utilizationPct",
+          "placedCount",
+          "feasible",
+          "recommended"
+        ],
+        "properties": {
+          "rollId": {
+            "type": "string"
+          },
+          "widthMm": {
+            "type": "number"
+          },
+          "availableLengthMm": {
+            "type": "number"
+          },
+          "estimatedCutLengthMm": {
+            "type": "number"
+          },
+          "utilizationPct": {
+            "type": "number"
+          },
+          "placedCount": {
+            "type": "integer"
+          },
+          "feasible": {
+            "type": "boolean"
+          },
+          "recommended": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MultiMaterialPlanResponse": {
+        "type": "object",
+        "required": [
+          "materialModel",
+          "totalRequestedPieces",
+          "placedByRemnants",
+          "placedByRoll",
+          "unplacedPieces",
+          "remnantAllocations",
+          "rollOptions",
+          "totalSavedAreaM2",
+          "elapsedMs",
+          "warnings"
+        ],
+        "properties": {
+          "materialModel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "totalRequestedPieces": {
+            "type": "integer"
+          },
+          "placedByRemnants": {
+            "type": "integer"
+          },
+          "placedByRoll": {
+            "type": "integer"
+          },
+          "unplacedPieces": {
+            "type": "integer"
+          },
+          "remnantAllocations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MultiMaterialRemnantAllocation"
+            }
+          },
+          "rollOptions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MultiMaterialRollOption"
+            }
+          },
+          "totalSavedAreaM2": {
+            "type": "number"
+          },
+          "elapsedMs": {
+            "type": "number"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "CutPlanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "styleName",
+          "colorName",
+          "fabricWidthMm",
+          "maxPliesPerLay",
+          "maxGarmentsPerMarker",
+          "sizeQuantities"
+        ],
+        "properties": {
+          "styleName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "colorName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "fabricWidthMm": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "maxPliesPerLay": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxGarmentsPerMarker": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxLayLengthMm": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "endAllowanceMm": {
+            "type": "number",
+            "minimum": 0
+          },
+          "grammageGsm": {
+            "type": "number",
+            "minimum": 0
+          },
+          "sizeQuantities": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "sizeUnitAreaM2": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "defaultUnitAreaM2": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "targetUtilizationPct": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 100
+          },
+          "allowOvercutPct": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          }
+        }
+      },
+      "CutPlanLay": {
+        "type": "object",
+        "required": [
+          "layNo",
+          "plies",
+          "ratio",
+          "garmentsPerMarker",
+          "layGarments",
+          "estimatedMarkerLengthMm",
+          "fabricLengthM",
+          "fabricAreaM2"
+        ],
+        "properties": {
+          "layNo": {
+            "type": "integer"
+          },
+          "plies": {
+            "type": "integer"
+          },
+          "ratio": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "garmentsPerMarker": {
+            "type": "integer"
+          },
+          "layGarments": {
+            "type": "integer"
+          },
+          "estimatedMarkerLengthMm": {
+            "type": "number"
+          },
+          "fabricLengthM": {
+            "type": "number"
+          },
+          "fabricAreaM2": {
+            "type": "number"
+          }
+        }
+      },
+      "CutPlanSizeAudit": {
+        "type": "object",
+        "required": [
+          "size",
+          "ordered",
+          "planned",
+          "delta"
+        ],
+        "properties": {
+          "size": {
+            "type": "string"
+          },
+          "ordered": {
+            "type": "integer"
+          },
+          "planned": {
+            "type": "integer"
+          },
+          "delta": {
+            "type": "integer"
+          }
+        }
+      },
+      "CutPlanResponse": {
+        "type": "object",
+        "required": [
+          "styleName",
+          "colorName",
+          "totalOrderedGarments",
+          "totalPlannedGarments",
+          "overcutGarments",
+          "layCount",
+          "totalPlies",
+          "totalFabricLengthM",
+          "totalFabricAreaM2",
+          "estimatedWeightKg",
+          "averageEfficiencyPct",
+          "lays",
+          "sizeAudit"
+        ],
+        "properties": {
+          "styleName": {
+            "type": "string"
+          },
+          "colorName": {
+            "type": "string"
+          },
+          "totalOrderedGarments": {
+            "type": "integer"
+          },
+          "totalPlannedGarments": {
+            "type": "integer"
+          },
+          "overcutGarments": {
+            "type": "integer"
+          },
+          "layCount": {
+            "type": "integer"
+          },
+          "totalPlies": {
+            "type": "integer"
+          },
+          "totalFabricLengthM": {
+            "type": "number"
+          },
+          "totalFabricAreaM2": {
+            "type": "number"
+          },
+          "estimatedWeightKg": {
+            "type": "number"
+          },
+          "averageEfficiencyPct": {
+            "type": "number"
+          },
+          "lays": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CutPlanLay"
+            }
+          },
+          "sizeAudit": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CutPlanSizeAudit"
+            }
+          }
+        }
+      },
+      "CostSummaryTotals": {
+        "type": "object",
+        "required": [
+          "totalReports",
+          "totalConsumedAreaM2",
+          "netGoodAreaM2",
+          "recoveredRemnantAreaM2",
+          "wasteAreaM2",
+          "totalMaterialCost",
+          "recoveredResidualValue",
+          "netEffectiveCost",
+          "wasteCost",
+          "avgCostPerGoodSqm"
+        ],
+        "properties": {
+          "totalReports": {
+            "type": "integer"
+          },
+          "totalConsumedAreaM2": {
+            "type": "number"
+          },
+          "netGoodAreaM2": {
+            "type": "number"
+          },
+          "recoveredRemnantAreaM2": {
+            "type": "number"
+          },
+          "wasteAreaM2": {
+            "type": "number"
+          },
+          "totalMaterialCost": {
+            "type": "number"
+          },
+          "recoveredResidualValue": {
+            "type": "number"
+          },
+          "netEffectiveCost": {
+            "type": "number"
+          },
+          "wasteCost": {
+            "type": "number"
+          },
+          "avgCostPerGoodSqm": {
+            "type": "number"
+          }
+        }
+      },
+      "CostSummaryResponse": {
+        "type": "object",
+        "required": [
+          "currency",
+          "defaultUnitPricePerSqm",
+          "remnantResidualFactor",
+          "summary",
+          "byTask",
+          "byMaterialModel"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "defaultUnitPricePerSqm": {
+            "type": "number"
+          },
+          "remnantResidualFactor": {
+            "type": "number"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/CostSummaryTotals"
+          },
+          "byTask": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "byMaterialModel": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "ProcurementSuggestionItem": {
+        "type": "object",
+        "required": [
+          "materialModel",
+          "demandAreaM2",
+          "requiredWithBufferAreaM2",
+          "availableRollAreaM2",
+          "availableRemnantAreaM2",
+          "netAvailableAreaM2",
+          "shortageAreaM2",
+          "recommendedWidthMm",
+          "recommendedLengthM",
+          "recommendedRolls",
+          "alertLevel",
+          "pendingTaskCount",
+          "activeBatches"
+        ],
+        "properties": {
+          "materialModel": {
+            "type": "string"
+          },
+          "demandAreaM2": {
+            "type": "number"
+          },
+          "requiredWithBufferAreaM2": {
+            "type": "number"
+          },
+          "availableRollAreaM2": {
+            "type": "number"
+          },
+          "availableRemnantAreaM2": {
+            "type": "number"
+          },
+          "netAvailableAreaM2": {
+            "type": "number"
+          },
+          "shortageAreaM2": {
+            "type": "number"
+          },
+          "recommendedWidthMm": {
+            "type": "number"
+          },
+          "recommendedLengthM": {
+            "type": "number"
+          },
+          "recommendedRolls": {
+            "type": "integer"
+          },
+          "alertLevel": {
+            "type": "string"
+          },
+          "pendingTaskCount": {
+            "type": "integer"
+          },
+          "activeBatches": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ProcurementSuggestionsResponse": {
+        "type": "object",
+        "required": [
+          "safetyBufferPct",
+          "defaultRollLengthM",
+          "totalModels",
+          "shortageModels",
+          "items"
+        ],
+        "properties": {
+          "safetyBufferPct": {
+            "type": "number"
+          },
+          "defaultRollLengthM": {
+            "type": "number"
+          },
+          "totalModels": {
+            "type": "integer"
+          },
+          "shortageModels": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProcurementSuggestionItem"
+            }
           }
         }
       }
