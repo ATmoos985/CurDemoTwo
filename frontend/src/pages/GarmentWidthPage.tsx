@@ -870,7 +870,7 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
                 name="gsm"
                 type="number"
                 min="0.1"
-                step="0.1"
+                step="any"
                 aria-describedby="weight-help"
                 required={!isDxfStyleActive}
                 placeholder={isDxfStyleActive ? '选填（留空不计克重）' : undefined}

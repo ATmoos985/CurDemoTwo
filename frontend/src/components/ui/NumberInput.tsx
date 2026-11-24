@@ -73,7 +73,19 @@ function formatNum(v: number): string {
 }
 
 export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(function NumberInput(
-  { value, onValueChange, min, max, fallback, integer, onFocus, onBlur, onKeyDown, ...rest },
+  {
+    value,
+    onValueChange,
+    min,
+    max,
+    fallback,
+    integer,
+    step: _step,
+    onFocus,
+    onBlur,
+    onKeyDown,
+    ...rest
+  },
   ref
 ) {
   const [text, setText] = useState<string>(() => formatNum(value));
@@ -106,6 +118,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(functi
       {...rest}
       ref={ref}
       type="number"
+      step="any"
       min={min}
       max={max}
       value={text}

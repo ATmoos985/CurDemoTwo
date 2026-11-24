@@ -1857,6 +1857,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                 id="inv-rec-width"
                 data-form="width"
                 type="number"
+                step="any"
                 required
                 className="field num"
                 value={widthInput}
@@ -1867,7 +1868,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                 id="inv-rec-len"
                 data-form="length"
                 type="number"
-                step="0.01"
+                step="any"
                 required
                 className="field num"
                 value={lengthInput}
