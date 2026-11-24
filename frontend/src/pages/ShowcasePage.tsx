@@ -242,7 +242,7 @@ const CASE_META: Record<string, CaseMeta> = {
     capLabel: '异形与密排',
     featureTag: '凹角嵌合',
     thumb: 'contour',
-    algorithm: '2D 真实多边形包络与凹角互补嵌套（Polygon NFP）',
+    algorithm: '2D 真实多边形包络与凹角互补嵌套',
     scenario: '服装/箱包 L 形、斜边与非矩形异形样板排料',
     why: '对比外接矩形排料，验证非矩形折线轮廓的凹角嵌合借位能力。',
     verifyRule: 'L 形与斜边异形片在同一个加工区内无重叠紧凑嵌合。',
@@ -317,7 +317,7 @@ const CASE_META: Record<string, CaseMeta> = {
     capLabel: '一维分切搭切',
     featureTag: '列生成合卷',
     thumb: 'slitting',
-    algorithm: '1D 列生成（Column Generation）+ 整数规划合卷搭切',
+    algorithm: '1D 多规格合卷分切优化',
     scenario: '6000m 光学膜母卷多规格条宽同卷长订单合卷分切',
     why: '对比传统「逐规格独立分切」，通过不同条宽组合搭切大幅减少开卷车数与边丝损耗。',
     verifyRule: '订单 100% 齐套（COMPLETE），搭切车数显著低于逐规格独立分切基线。',
@@ -2093,8 +2093,7 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
 
                 <details className="slit-adv-fold">
                   <summary className="num">
-                    NewSolver 参数：TopK {slitDraft.topK} · 迭代 {slitDraft.maxIterations} · 花型{' '}
-                    {slitDraft.maxPatterns} · 宽幅≤{slitDraft.maxDistinctWidths}
+                    高级参数 · 宽幅≤{slitDraft.maxDistinctWidths}
                   </summary>
                   <div className="slit-cfg-grid" style={{ marginTop: 6 }}>
                     <label className="slit-cfg-field">
@@ -2148,7 +2147,7 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                       />
                     </label>
                     <label className="slit-cfg-field span-2">
-                      <span>MIP 单阶段安全时限 (ms)</span>
+                      <span>单阶段时限 (ms)</span>
                       <NumberInput
                         min={1000}
                         max={600000}
@@ -2166,7 +2165,7 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                         checked={slitDraft.lnsEnabled}
                         onChange={(e) => patchSlitDraft({ lnsEnabled: e.target.checked })}
                       />
-                      <span>精细优化启用 LNS 大邻域搜索</span>
+                      <span>精细优化启用深度邻域搜索</span>
                     </label>
                   </div>
                 </details>

@@ -555,7 +555,7 @@ export const WorkbenchTopBar: React.FC<WorkbenchTopBarProps> = ({
                   openEngineSettings();
                 }}
               >
-                打开 NewSolver 高级参数设置…
+                高级求解参数设置…
               </button>
             </div>
           </details>

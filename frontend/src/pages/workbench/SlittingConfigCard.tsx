@@ -418,7 +418,7 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
             />
           </label>
           <label className="slit-cfg-field span-2">
-            <span>MIP 单阶段安全时限 (ms)</span>
+            <span>单阶段时限 (ms)</span>
             <NumberInput
               min={1000}
               max={600000}

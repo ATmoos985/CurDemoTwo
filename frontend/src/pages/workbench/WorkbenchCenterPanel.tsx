@@ -314,9 +314,9 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
                     : 0;
                 const techTitle =
                   s.strategyId === 'FAST'
-                    ? 'OR-Tools 快捷解 (FAST)'
+                    ? '快捷分切方案'
                     : s.strategyId === 'QUALITY'
-                    ? 'OR-Tools 精确解 (QUALITY)'
+                    ? '精细分切方案'
                     : '逐规格独立分切基线';
 
                 return (

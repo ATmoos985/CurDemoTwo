@@ -23,7 +23,7 @@ public class OptimizationResultAssembler {
         response.put("efficiency", result.getUtilizationRate());
         response.put("executionTimeMs", result.getExecutionTimeMs());
         response.put("totalWidth", result.getTotalWidth());
-        response.put("algorithmType", "OR-Tools 列生成");
+        response.put("algorithmType", "列生成分切优化");
         response.put("iterations", 0);
 
         List<CuttingOptimizationResult.CuttingInstruction> instructions = result.getCuttingInstructions();

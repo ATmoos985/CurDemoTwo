@@ -165,6 +165,34 @@ const CORNERS: {
   }
 ];
 
+const ENGINE_DISPLAY_NAMES: Record<string, string> = {
+  crosscut: '通幅横切引擎',
+  deepnest: '异形轮廓排料引擎',
+  javaguillotine: '二维直刀排料引擎',
+  javairregular: '异形快速排料引擎',
+  packingsolver: '高精度直刀引擎',
+  'packingsolver-irregular': '高精度异形引擎',
+  'ortools-1d': '一维分切搭切引擎'
+};
+
+const ENGINE_MODE_LABELS: Record<string, string> = {
+  CROSSCUT: '横切',
+  GUILLOTINE: '直刀',
+  CONTOUR: '异形',
+  SLITTING: '分切',
+  RECTANGLE: '矩形',
+  POLYGON: '多边形',
+  '1D STRIP': '一维分条'
+};
+
+function formatEngineDisplayName(id: string): string {
+  return ENGINE_DISPLAY_NAMES[id] || '内置求解引擎';
+}
+
+function formatEngineModeLabel(mode: string): string {
+  return ENGINE_MODE_LABELS[mode] || mode;
+}
+
 function countChangedFields(a: StudioSettings, b: StudioSettings): number {
   let diff = 0;
   (Object.keys(DEFAULT_STUDIO_SETTINGS) as (keyof StudioSettings)[]).forEach((k) => {
@@ -1437,7 +1465,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
 
                     <label className="sc-budget-fallback">
-                      <span>缺原生内核时回退 Java</span>
+                      <span>主引擎不可用时自动切换备用引擎</span>
                       <input
                         type="checkbox"
                         role="switch"
@@ -1453,7 +1481,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {/* 2D Parallel Strategy Management Card */}
                 <section className="sc-card">
                   <div className="sc-card-head">
-                    <span>二维并行排版算法管理</span>
+                    <span>二维并行排料策略</span>
                     <code className="sc-code-pill num">
                       已启用 {draft.enabledStrategies2D.length} / {WORKBENCH_STRATEGIES_2D.length}
                     </code>
@@ -1495,13 +1523,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   })}
                 </section>
 
-                {/* 1D Solartron-Cut NewSolver / OR-Tools Configuration Card */}
+                {/* 1D Slitting Configuration Card */}
                 <section className="sc-card" id="cfg-slitting-1d-card">
                   <div className="sc-card-head">
-                    <span>一维分切求解器参数（NewSolver / OR-Tools）</span>
+                    <span>一维分切求解参数</span>
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                       <code className="sc-code-pill num">
-                        {draft.slitProfile === 'QUALITY' ? '精确解 QUALITY' : '快捷解 FAST'}
+                        {draft.slitProfile === 'QUALITY' ? '精确解' : '快捷解'}
                       </code>
                       <button
                         type="button"
@@ -1525,7 +1553,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         aria-pressed={draft.slitProfile === 'FAST'}
                         onClick={() => patchDraft({ slitProfile: 'FAST' as SlittingProfile })}
                       >
-                        快捷解 (FAST)
+                        快捷解
                       </button>
                       <button
                         type="button"
@@ -1533,15 +1561,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         aria-pressed={draft.slitProfile === 'QUALITY'}
                         onClick={() => patchDraft({ slitProfile: 'QUALITY' as SlittingProfile })}
                       >
-                        精确解 (QUALITY)
+                        精确解
                       </button>
                     </div>
                   </div>
 
                   <div className="sc-slit-profile-note">
                     {draft.slitProfile === 'QUALITY'
-                      ? '精确解：启用多候选与 A 层奇偶惩罚扫描（单卷不同宽幅上限自动 ≥ 5），优先减少换刀组数与总卷数。'
-                      : '快捷解：启用单候选快速基线，优先在较短时间内稳定产出可行好解。'}
+                      ? '精确解：多候选深度寻优，优先压低排产车数与换刀组数。'
+                      : '快捷解：轻量快速求解，优先在较短时间内产出稳定方案。'}
                   </div>
 
                   <label className="sc-switch-row" htmlFor="cfg-slit-run-both">
@@ -1611,7 +1639,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <small>允许超产的前 K 个大需求宽幅（默认 3）</small>
                     </div>
                     <div className="sc-slit-field">
-                      <label htmlFor="cfg-slit-max-iter">列生成最大迭代</label>
+                      <label htmlFor="cfg-slit-max-iter">最大迭代轮次</label>
                       <NumberInput
                         id="cfg-slit-max-iter"
                         min={1}
@@ -1622,7 +1650,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         value={draft.slitMaxIterations}
                         onValueChange={(v) => patchDraft({ slitMaxIterations: v })}
                       />
-                      <small>列生成定价循环上限（默认 300）</small>
+                      <small>方案生成循环上限（默认 300）</small>
                     </div>
                     <div className="sc-slit-field">
                       <label htmlFor="cfg-slit-max-pat">最大花型池</label>
@@ -1649,14 +1677,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         value={draft.slitMaxDistinctWidths}
                         onValueChange={(v) => patchDraft({ slitMaxDistinctWidths: v })}
                       />
-                      <small>
-                        {draft.slitProfile === 'QUALITY' && draft.slitMaxDistinctWidths < 5
-                          ? '精确解运行时自动提升到 5'
-                          : '单支母卷最多搭切不同规格数（默认 4）'}
-                      </small>
+                      <small>单支母卷最多搭切不同规格数（默认 4）</small>
                     </div>
                     <div className="sc-slit-field span-2">
-                      <label htmlFor="cfg-slit-stage-ms">MIP 单阶段安全时限（毫秒）</label>
+                      <label htmlFor="cfg-slit-stage-ms">单阶段求解时限（毫秒）</label>
                       <NumberInput
                         id="cfg-slit-stage-ms"
                         min={1000}
@@ -1667,17 +1691,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         value={draft.slitStageTimeLimitMs}
                         onValueChange={(v) => patchDraft({ slitStageTimeLimitMs: v })}
                       />
-                      <small>单个 MIP 求解阶段的安全上限（默认 120000 ms，受总求解时限约束）</small>
+                      <small>单个求解阶段的安全上限（默认 120000 ms，受总求解时限约束）</small>
                     </div>
                   </div>
 
                   <details className="sc-fold" style={{ marginTop: 6 }}>
-                    <summary>NewSolver 惩罚权重与 B 层搜索微调</summary>
+                    <summary>高级权重与搜索微调</summary>
                     <div className="sc-slit-grid" style={{ marginTop: 8 }}>
                       <label className="sc-switch-row span-2" htmlFor="cfg-slit-opt-assign">
                         <span className="sc-switch-label">
-                          <strong>启用 B 层最优换刀分配</strong>
-                          <code className="num">useOptimizedAssignment（默认开启）</code>
+                          <strong>启用最优换刀分配</strong>
+                          <code className="num">优先压减换刀次数（默认开启）</code>
                         </span>
                         <input
                           id="cfg-slit-opt-assign"
@@ -1693,8 +1717,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </label>
                       <label className="sc-switch-row span-2" htmlFor="cfg-slit-lns">
                         <span className="sc-switch-label">
-                          <strong>精确解启用 LNS 大邻域搜索</strong>
-                          <code className="num">仅 QUALITY 档位生效，大单会增加耗时</code>
+                          <strong>启用深度邻域优化</strong>
+                          <code className="num">仅精确解生效，大单会增加耗时</code>
                         </span>
                         <input
                           id="cfg-slit-lns"
@@ -1753,34 +1777,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 )}
 
-                {/* Spacious Full 7-Engine Table (All Visible Without Clipping) */}
+                {/* Engine Availability Table (business-friendly labels, internal solver ids hidden) */}
                 <section className="sc-card sc-table-card">
                   {cap ? (
                     <table className="sc-engine-table">
                       <thead>
                         <tr>
-                          <th>内核标识</th>
+                          <th>求解引擎</th>
                           <th>运行状态</th>
-                          <th>工艺与几何模式</th>
+                          <th>支持工艺</th>
                           <th className="r">坐标精度</th>
                         </tr>
                       </thead>
                       <tbody id="engine-rows">
                         {allEngines.map((e: any) => (
                           <tr key={e.id}>
-                            <td className="num sc-eng-id">{e.id}</td>
+                            <td className="sc-eng-id">{formatEngineDisplayName(e.id)}</td>
                             <td>
                               <span className={`sc-status-pill ${e.available ? 'ok' : 'err'}`}>
                                 <i aria-hidden="true" />
-                                {e.available ? '隔离进程就绪' : '未就绪'}
+                                {e.available ? '就绪' : '未就绪'}
                               </span>
                             </td>
                             <td>
                               <div className="sc-mode-tags">
                                 {[...(e.modes || []), ...(e.shapes || [])].map((m: string) => (
-                                  <span key={m} className="num">
-                                    {m}
-                                  </span>
+                                  <span key={m}>{formatEngineModeLabel(m)}</span>
                                 ))}
                               </div>
                             </td>
@@ -1790,7 +1812,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </tbody>
                     </table>
                   ) : !capError ? (
-                    <div className="loading">正在检测多线程求解池…</div>
+                    <div className="loading">正在检测求解引擎…</div>
                   ) : null}
                 </section>
               </div>

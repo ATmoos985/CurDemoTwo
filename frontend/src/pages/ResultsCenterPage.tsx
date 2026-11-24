@@ -18,6 +18,19 @@ const STATE_BADGE: Record<string, { label: string; cls: string }> = {
   CANCELLED: { label: '已作废释放', cls: '' }
 };
 
+function sanitizeSchemeTitle(raw?: string): string {
+  if (!raw) return '';
+  return raw
+    .replace(/OR-?Tools\s*/gi, '')
+    .replace(/Deepnest\s*(NFP\+GA\s*)?/gi, '异形')
+    .replace(/PackingSolver\s*/gi, '')
+    .replace(/NewSolver\s*/gi, '')
+    .replace(/Java\s*天际线\/直刀/gi, '')
+    .replace(/\s*\((FAST|QUALITY)\)/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function buildReplayScene2D(scheme: any) {
   if (!scheme?.layout2D?.placements?.length) return null;
   try {
@@ -431,7 +444,7 @@ export const ResultsCenterPage: React.FC<{
         book,
         XLSX.utils.aoa_to_sheet([
           ['排程方案号', activeScheme.id],
-          ['方案标题', activeScheme.title],
+          ['方案标题', sanitizeSchemeTitle(activeScheme.title)],
           ['所属需求族', activeScheme.taskName],
           ['关联外部/MES单号', activeScheme.externalOrderNo || '—'],
           ['物料品号', activeScheme.materialModel],
@@ -659,7 +672,7 @@ export const ResultsCenterPage: React.FC<{
                       onClick={() => setSelectedId(s.id)}
                     >
                       <div className="mp-res-item-top">
-                        <span className="mp-res-item-title">{s.title}</span>
+                        <span className="mp-res-item-title">{sanitizeSchemeTitle(s.title)}</span>
                         <span className={`tag ${st.cls}`}>{st.label}</span>
                       </div>
                       <div className="mp-res-item-code-row">
@@ -697,7 +710,7 @@ export const ResultsCenterPage: React.FC<{
                   <div className="mp-res-detail-head">
                     <div className="mp-res-detail-identity">
                       <div className="mp-res-detail-title-row">
-                        <h2 className="mp-res-detail-title">{activeScheme.title}</h2>
+                        <h2 className="mp-res-detail-title">{sanitizeSchemeTitle(activeScheme.title)}</h2>
                         <CodeBadge>{activeScheme.id}</CodeBadge>
                         <span
                           className={`tag ${STATE_BADGE[activeScheme.state]?.cls || ''}`}

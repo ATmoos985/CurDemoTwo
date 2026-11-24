@@ -124,11 +124,11 @@ export interface WorkbenchStrategyDef {
 }
 
 export const WORKBENCH_STRATEGIES_2D: WorkbenchStrategyDef[] = [
-  { id: 'PS_FIXED', name: '经向缩长', badge: 'C++', shortTag: '0° 保丝缕 · 二分缩长' },
-  { id: 'PS_ROT', name: '旋转缩长', badge: 'C++', shortTag: '异形 180° / 矩形 90°' },
-  { id: 'DN_GA', name: '异形进化', badge: 'NFP', shortTag: '临界多边形 + 遗传共边' },
-  { id: 'DN_FIXED', name: '异形经向', badge: 'NFP', shortTag: '0° 严保纱向 · 紧贴直排' },
-  { id: 'JAVA_FAST', name: '快速基线', badge: '极速', shortTag: '直刀/天际线秒出对照' }
+  { id: 'PS_FIXED', name: '经向缩长', badge: '经向', shortTag: '0° 保丝缕 · 缩长压紧' },
+  { id: 'PS_ROT', name: '旋转缩长', badge: '旋转', shortTag: '异形 180° / 矩形 90°' },
+  { id: 'DN_GA', name: '异形进化', badge: '异形', shortTag: '凹凸嵌合 · 进化寻优' },
+  { id: 'DN_FIXED', name: '异形经向', badge: '异形', shortTag: '0° 保丝缕 · 凹凸嵌合' },
+  { id: 'JAVA_FAST', name: '快速基线', badge: '极速', shortTag: '极速秒出对照' }
 ];
 
 export interface StudioSettings {
@@ -507,7 +507,7 @@ export function validateStudioSettings(draft: StudioSettings): string | null {
     draft.slitStageTimeLimitMs < 1000 ||
     draft.slitStageTimeLimitMs > 600000
   ) {
-    return '一维 MIP 单阶段安全时限须在 1000–600000 毫秒之间';
+    return '单阶段求解时限须在 1000–600000 毫秒之间';
   }
   if (!Number.isFinite(draft.slitUnderPenalty) || draft.slitUnderPenalty < 0) {
     return '一维欠产惩罚系数必须为非负数';
