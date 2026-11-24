@@ -1,7 +1,7 @@
 package com.example.cutdemotwo.persistence;
 
-import com.example.cutdemotwo.business.optimization.OptimizationService.Failure;
-import com.example.cutdemotwo.business.optimization.StoredOptimizationJob;
+import com.example.cutdemotwo.contracts.jobs.OptimizationFailure;
+import com.example.cutdemotwo.contracts.jobs.StoredOptimizationJob;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -77,18 +77,18 @@ public final class JdbcOptimizationJobStore implements LeasedOptimizationJobStor
             if(!old.isEmpty()) {
                 var found=find(old.get(0));
                 if(!found.job().inputHash().equals(document.job().inputHash()))
-                    throw new Failure("IDEMPOTENCY_CONFLICT","同一幂等键已绑定不同请求",409,false);
+                    throw new OptimizationFailure("IDEMPOTENCY_CONFLICT","同一幂等键已绑定不同请求",409,false);
                 return found;
             }
             long nowMs=now();
             long active=jdbc.queryForObject("SELECT COUNT(*) FROM optimization_job WHERE state IN ('QUEUED','RUNNING','CANCEL_REQUESTED')",Long.class);
-            if(active>=workers+queue)throw new Failure("QUOTA_EXCEEDED","共享作业并发/排队限额已满",429,true);
+            if(active>=workers+queue)throw new OptimizationFailure("QUOTA_EXCEEDED","共享作业并发/排队限额已满",429,true);
             long stored=jdbc.queryForObject("SELECT COUNT(*) FROM optimization_job",Long.class);
             if(stored>=archive) {
                 int minToFree=(int)Math.min(Integer.MAX_VALUE,stored-archive+1);
                 stored-=evictTerminalLocked(nowMs,terminalRetentionMillis,minToFree);
             }
-            if(stored>=archive)throw new Failure("QUOTA_EXCEEDED","共享作业归档限额已满且无可清理的终态作业",429,true);
+            if(stored>=archive)throw new OptimizationFailure("QUOTA_EXCEEDED","共享作业归档限额已满且无可清理的终态作业",429,true);
             jdbc.update("INSERT INTO optimization_job(id,key_digest,state,created_at,token,document_json) VALUES(?,?,?,?,0,?)",
                     document.job().id(),digest,"QUEUED",nowMs,json.writeValueAsString(document));
             return document;

@@ -27,9 +27,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-@RestController
-@RequestMapping("/api/cutting")
-@CrossOrigin(origins = "*")
+/**
+ * 一维分切兼容区内部导出与调整委托类（由 LinearCutService 显式实例化调用，不直接作为 Spring Web 控制器暴露）。
+ */
 public class CuttingExportController {
 
     private static final Logger log = LoggerFactory.getLogger(CuttingExportController.class);

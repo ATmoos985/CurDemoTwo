@@ -1,6 +1,6 @@
 package com.example.cutdemotwo.persistence;
 
-import com.example.cutdemotwo.business.optimization.StoredOptimizationJob;
+import com.example.cutdemotwo.contracts.jobs.StoredOptimizationJob;
 import com.example.cutdemotwo.contracts.jobs.OptimizationJob;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

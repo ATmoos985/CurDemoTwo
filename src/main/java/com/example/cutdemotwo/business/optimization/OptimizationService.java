@@ -14,9 +14,8 @@ import java.util.concurrent.*;
 /** Job application layer. File mode is exclusive; shared mode uses transactional leases. No inventory writes. */
 @Service
 public class OptimizationService implements AutoCloseable {
-    public static class Failure extends RuntimeException {
-        public final String code; public final int status; public final boolean retryable;
-        public Failure(String code, String message, int status, boolean retryable) { super(message);this.code=code;this.status=status;this.retryable=retryable; }
+    public static class Failure extends OptimizationFailure {
+        public Failure(String code, String message, int status, boolean retryable) { super(code, message, status, retryable); }
     }
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(OptimizationService.class);
     private final NestingSolver solvers;
@@ -178,7 +177,12 @@ public class OptimizationService implements AutoCloseable {
             String id=UUID.randomUUID().toString();
             var job=new OptimizationJob(id,"2.0",input.clientRequestId(),hash(input),"QUEUED","QUEUED",Instant.now().toString(),null,null,
                     input.problem().timeLimitSeconds(),null,null,"已持久化，等待计算");
-            return shared.submitOrGet(new StoredOptimizationJob(key,input,job,null)).job();
+            try {
+                return shared.submitOrGet(new StoredOptimizationJob(key,input,job,null)).job();
+            } catch (OptimizationFailure failure) {
+                if (failure instanceof Failure typed) throw typed;
+                throw new Failure(failure.code, failure.getMessage(), failure.status, failure.retryable);
+            }
         }
         String hash=hash(input), existing=keys.get(key);
         if (existing!=null) {

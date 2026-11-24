@@ -10,19 +10,8 @@ import org.springframework.http.MediaType;
 
 import java.util.*;
 
-@RestController
-@RequestMapping("/api/cutting")
-@CrossOrigin(origins = "*")
 /**
- * 模块：数据导入与验证控制器
- * <p>
- * 职责：
- * 1. 处理 Excel 文件上传与解析 (/api/cutting/parse-excel)
- * 2. 执行数据完整性与业务规则验证 (/api/cutting/validate-data)
- * 3. 提供数据分组诊断功能 (/api/cutting/diagnose-grouping)
- * 4. 提供系统配置信息 (/api/cutting/config)
- * <p>
- * 此控制器负责所有“进入系统前”的数据处理工作。
+ * 模块：一维分切兼容区 Excel 导入委托类（由 LinearCutService 显式实例化调用，不直接作为 Spring Web 控制器暴露）。
  */
 public class CuttingImportController {
 

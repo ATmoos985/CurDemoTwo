@@ -101,6 +101,98 @@
         "height"
       ]
     },
+    "FabricRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional fabric-level rule for curtain selvedge exclusion and vertical pattern repeat.",
+      "properties": {
+        "leftSelvedgeMm": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "rightSelvedgeMm": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "allowAuxiliaryInSelvedge": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "repeatYMm": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "phaseYMm": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "PartRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional per-part rule for MAIN/AUXILIARY role, vertical pattern matching, and discrete allowed angles.",
+      "properties": {
+        "role": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "MAIN",
+            "AUXILIARY",
+            null
+          ]
+        },
+        "patternMatch": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "patternAnchorYMm": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "patternToleranceMm": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "allowedAnglesDeg": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "minItems": 1,
+          "maxItems": 72,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 359
+          },
+          "description": "CONTOUR only. Discrete allowed rotation angles in integer degrees [0, 359]."
+        }
+      }
+    },
     "Exclusion": {
       "type": "object",
       "additionalProperties": false,
@@ -122,6 +214,30 @@
         "clearance": {
           "type": "number",
           "minimum": 0
+        },
+        "severity": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 4,
+          "description": "Optional defect severity level: 1=minor, 2=moderate, 3=severe, 4=fatal."
+        },
+        "avoidancePolicy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "HARD_FORBID",
+            "MUST_AVOID",
+            "ALLOW_AUXILIARY",
+            "ALLOW_REMNANT",
+            "PENETRABLE",
+            null
+          ],
+          "description": "Optional defect avoidance policy overriding default severity rules."
         }
       },
       "required": [
@@ -150,6 +266,16 @@
         },
         "continuesAfterRegion": {
           "type": "boolean"
+        },
+        "fabricRule": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/FabricRule"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -184,6 +310,16 @@
         "allowHalfTurn": {
           "type": "boolean",
           "description": "CONTOUR only. With allowRotation false, true permits 0 and 180 degrees. Full rotation permission still permits all four quarter turns."
+        },
+        "rule": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PartRule"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [

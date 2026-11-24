@@ -53,7 +53,7 @@ class JdbcOptimizationTests {
         var results=race(()->a.submitOrGet(document("same-key","same")),()->b.submitOrGet(document("same-key","same")));
         assertEquals(results.get(0).job().id(),results.get(1).job().id());
         assertEquals(1,sql.queryForObject("SELECT COUNT(*) FROM optimization_job",Integer.class));
-        assertEquals("IDEMPOTENCY_CONFLICT",assertThrows(OptimizationService.Failure.class,
+        assertEquals("IDEMPOTENCY_CONFLICT",assertThrows(OptimizationFailure.class,
                 ()->b.submitOrGet(document("same-key","different"))).code);
         assertNotEquals(results.get(0).job().id(),b.submitOrGet(document("SAME-key","same")).job().id());
     }
@@ -162,7 +162,7 @@ class JdbcOptimizationTests {
     }
     @Test void globalQuotaIsSharedAndQueuedCancellationReleasesCapacity()throws Exception {
         var accepted=race(()->a.submitOrGet(document("quota-key-a","hash")),()->b.submitOrGet(document("quota-key-b","hash")));
-        assertEquals("QUOTA_EXCEEDED",assertThrows(OptimizationService.Failure.class,()->a.submitOrGet(document("quota-key-c","hash"))).code);
+        assertEquals("QUOTA_EXCEEDED",assertThrows(OptimizationFailure.class,()->a.submitOrGet(document("quota-key-c","hash"))).code);
         assertEquals("CANCELLED",b.cancel(accepted.get(0).job().id()).job().state());
         assertNotNull(a.submitOrGet(document("quota-key-c","hash")));
         assertThrows(IllegalStateException.class,()->new JdbcOptimizationJobStore(source).configure(2,1,100));
@@ -245,7 +245,7 @@ class JdbcOptimizationTests {
         assertEquals("QUEUED",store.find(fourth.job().id()).job().state());
 
         // 当全部已存作业均为活跃态达到 archive=2 上限时，必须严格返回 429 QUOTA_EXCEEDED 且不删除活跃作业
-        var rejected=assertThrows(OptimizationService.Failure.class,()->store.submitOrGet(document("jdbc-evict-5","hash-5")));
+        var rejected=assertThrows(OptimizationFailure.class,()->store.submitOrGet(document("jdbc-evict-5","hash-5")));
         assertEquals("QUOTA_EXCEEDED",rejected.code);
         assertEquals(429,rejected.status);
         assertNotNull(store.find(third.job().id()));

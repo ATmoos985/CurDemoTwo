@@ -55,7 +55,7 @@ class ModuleBoundaryTests {
     }
 
     @Test void controllersStayInHttpLayerAndNeverTouchLegacyLinearOrStoreImplementations() throws IOException {
-        assertBoundary("controller", Set.of("controller", "business", "algorithm", "contracts", "persistence"));
+        assertBoundary("controller", Set.of("controller", "business", "algorithm", "contracts", "persistence", "config"));
         var errors = new ArrayList<String>();
         for (var file : javaFiles(ROOT.resolve("controller"))) {
             for (var ref : persistenceMemberReferences(Files.readString(file))) {
@@ -69,29 +69,16 @@ class ModuleBoundaryTests {
 
     @Test void persistenceDoesNotDependOnControllersAlgorithmsOrBusinessServices() throws IOException {
         assertBoundary("persistence", Set.of("persistence", "business", "contracts"));
-        // 既有作业持久化对 StoredOptimizationJob 与 OptimizationService.Failure 的历史登记依赖先守住不扩大；
-        // 严禁新增对 business.cutting / business.integration 或其他 business.optimization 服务类的越层引用。
-        Set<String> legacyJobFiles = Set.of(
-                "FileOptimizationJobStore.java",
-                "JdbcOptimizationJobStore.java",
-                "LeasedOptimizationJobStore.java",
-                "OptimizationArchiveImport.java",
-                "OptimizationJobStore.java"
-        );
+        // 持久化层严禁反向依赖 business.optimization / business.cutting / business.integration 等任何业务服务包，
+        // 仅允许引用 business.model 数据模型（作业共享文档与异常已迁入 contracts.jobs）。
         var errors = new ArrayList<String>();
         for (var file : javaFiles(ROOT.resolve("persistence"))) {
-            String fileName = file.getFileName().toString();
             for (var ref : businessSubReferences(Files.readString(file))) {
                 if (ref.startsWith("model.")) continue;
-                boolean allowedLegacy = legacyJobFiles.contains(fileName)
-                        && (ref.equals("optimization.StoredOptimizationJob")
-                        || (fileName.equals("JdbcOptimizationJobStore.java") && ref.equals("optimization.OptimizationService")));
-                if (!allowedLegacy) {
-                    errors.add(file + " -> business." + ref);
-                }
+                errors.add(file + " -> business." + ref);
             }
         }
-        assertTrue(errors.isEmpty(), "持久化层越层依赖业务服务：\n" + String.join("\n", errors));
+        assertTrue(errors.isEmpty(), "持久化层严禁越层依赖业务服务或 business.optimization：\n" + String.join("\n", errors));
     }
 
     @Test void changyangReferencesStayWhitelistedToSlittingKernelAndLegacyLinear() throws IOException {
@@ -223,6 +210,9 @@ class ModuleBoundaryTests {
                 persistenceMemberReferences("import com.example.cutdemotwo.persistence.JdbcInventoryStore;"));
         assertEquals(List.of("cutting.RemnantService"),
                 businessSubReferences("import com.example.cutdemotwo.business.cutting.RemnantService;"));
+        assertEquals(List.of("optimization.StoredOptimizationJob", "optimization.OptimizationService"),
+                businessSubReferences("import com.example.cutdemotwo.business.optimization.StoredOptimizationJob;\n"
+                        + "import com.example.cutdemotwo.business.optimization.OptimizationService;"));
         assertEquals(List.of("changyang.cut.rest.CuttingExportController"),
                 changyangReferences("import changyang.cut.rest.CuttingExportController;"));
         assertTrue(changyangReferences("// changyang.cut.rest.Example").isEmpty());

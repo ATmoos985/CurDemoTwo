@@ -3,7 +3,7 @@
   "info": {
     "title": "CurDemoTwo Computation and Execution API",
     "version": "2.0.0",
-    "description": "标准计算作业不写库存；文件模式单实例，JDBC 模式支持租约调度。二维、唛架与一维适配能力以 capabilities 为准。执行单接口关联已保存的二维业务任务方案，与库存共享事务；整卷/整块预约、开工、报工和取消已实现。不可变库存/需求流水与内部对账已实现；本机 stdio MCP 适配器调用相同 REST 用例；库存事务 Outbox 与独立回执支持单集成方按序拉取，集成接口使用专用 Bearer 凭据且默认关闭；全站身份认证、多材料、外部权威库存预约/对账及远程 MCP 尚待实现。"
+    "description": "标准计算作业不写库存；文件模式单实例，JDBC 模式支持租约调度。二维、唛架、窗帘织物规则与一维分切适配能力以 capabilities 为准。统一排程工作台覆盖需求模板、多维需求池、无副作用手调校验、方案生命周期、母卷空间图、MES 鉴权协同、采购入库/领退料/母卷报废/隔离料头放行/复检撤销/同缸补片/聚合报工分页等工厂闭环单据。支持可选企业级轻量 HMAC Bearer 认证与 5 角色 RBAC（默认关闭以兼容本地与既有自动化）；集成与 MES 通道分别使用专用 Bearer 凭据。"
   },
   "servers": [
     {
@@ -1291,6 +1291,16 @@
               }
             }
           },
+          "400": {
+            "description": "Missing or blank result identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Unknown result",
             "content": {
@@ -1303,16 +1313,6 @@
           },
           "409": {
             "description": "Result not yet archived",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing or blank result identifier",
             "content": {
               "application/json": {
                 "schema": {
@@ -1656,6 +1656,2774 @@
           }
         }
       }
+    },
+    "/api/v2/auth/me": {
+      "get": {
+        "summary": "查询当前企业认证开关与登录主体信息（未开启认证时返回 LOCAL/ADMIN）",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthMe"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/auth/login": {
+      "post": {
+        "summary": "校验账号口令并签发 HMAC-SHA256 Bearer 访问令牌",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthLoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "登录成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthLoginResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "用户名或密码错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/demand-templates": {
+      "get": {
+        "summary": "查询需求模板库列表",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DemandTemplate"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "创建或更新需求模板（需 ADMIN/PLANNER）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DemandTemplate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemandTemplate"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/demand-templates/{id}": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "description": "需求模板编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "delete": {
+        "summary": "删除需求模板（需 ADMIN/PLANNER）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已删除",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/demand-pool": {
+      "get": {
+        "summary": "查询多维待排需求池（支持可选 limit/offset 分页）",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "创建或合并多维待排需求族（含交期/优先级/缸号/色号/同缸强约束与机台班组）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DemandFamilyCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "保存成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/demand-pool/{id}": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "description": "需求族编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "summary": "查询单个待排需求族详情",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/schemes": {
+      "get": {
+        "summary": "查询排程结果方案列表（支持 state/taskId 过滤与可选 summary/limit/offset）",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "taskId",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "summary",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/schemes/{id}": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "description": "方案编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "summary": "查询单个排程结果方案详情",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/schemes/validate-layout": {
+      "post": {
+        "summary": "纯计算只读手调布局几何校验与刀路/余料重建（绝不写库存）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateLayoutRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "校验结果与重建刀路/余料",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/schemes/confirm": {
+      "post": {
+        "summary": "确认排程候选方案并落库（支持单单与多族合排）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmSchemeCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "确认成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/schemes/{id}/bind-roll": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "description": "方案编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "为排程方案绑定实卷（支持按缸号/色号防呆校核或按规格新建待检母卷）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindRollCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "绑卷结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/schemes/{id}/complete": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "description": "方案编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "方案完工确认与实物扣减报工（需 ADMIN/PLANNER/OPERATOR）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteSchemeCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "完工结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/schemes/{id}/cancel": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "description": "方案编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "作废排程方案并释放预约锁（需 ADMIN/PLANNER）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelSchemeCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "已作废",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/schemes/{id}/replenish-task": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "description": "源完工方案编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "基于源方案判废或未齐套缺口一键生成高优先级同缸加急补片任务",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplenishTaskCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "已创建同缸加急补片任务",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplenishTaskResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/rolls/{rollId}/spatial-map": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "rollId",
+          "required": true,
+          "description": "母卷编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "summary": "查询母卷全长切割区、预占区与疵点空间分布图",
+        "responses": {
+          "200": {
+            "description": "母卷空间图",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/mes/orders": {
+      "post": {
+        "summary": "MES 下发或同步裁切订单至需求池（走专用 MES Bearer 鉴权）",
+        "security": [
+          {
+            "MesBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MesOrderSyncCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "同步成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/mes/schemes/{id}/dispatch": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "description": "方案编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "将方案派发至 MES 生成可执行工单包（走专用 MES Bearer 鉴权）",
+        "security": [
+          {
+            "MesBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MesDispatchCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "派发成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/mes/dispatch-packages/{id}": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "description": "MES 派发包编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "summary": "查询 MES 派发工单包详情（走专用 MES Bearer 鉴权）",
+        "security": [
+          {
+            "MesBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "工单包详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/mes/execution-feedback": {
+      "post": {
+        "summary": "接收 MES 裁床执行回执并单事务原子入账（走专用 MES Bearer 鉴权）",
+        "security": [
+          {
+            "MesBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MesFeedbackCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "回执入账成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/quality/remnants/{id}/release": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "description": "隔离料头编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "隔离料头质量复验放行或判废（幂等，写 QualityReleaseDocument 与 QUALITY_RELEASE 流水）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QualityReleaseCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "放行/报废结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityReleaseResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/quality/releases": {
+      "get": {
+        "summary": "查询历史隔离料头质量放行单列表",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "放行单列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/cutting/reports/{reportId}/dispositions/{dispositionId}/revoke": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "reportId",
+          "required": true,
+          "description": "裁切报工编号",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "in": "path",
+          "name": "dispositionId",
+          "required": true,
+          "description": "复检处置记录编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "受控撤销复检处置（保留原始记录，原子恢复良品量并作废派生料头，不恢复已消耗母卷）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DispositionRevokeCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "撤销结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/inventory-receipts": {
+      "get": {
+        "summary": "查询采购批量入库单列表（支持可选 limit/offset 分页）",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "入库单列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "提交采购批量入库单（原子建多卷母卷并写 RECEIPT_IN 流水，需 ADMIN/WAREHOUSE）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryReceiptCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "入库成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryReceiptResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/material-issues": {
+      "get": {
+        "summary": "查询车间领料/退料单列表（支持可选 limit/offset 分页）",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "领退料单列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "提交车间领料或退料单（ISSUE/RETURN，记录机台/班组/库位与流水，需 ADMIN/WAREHOUSE）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaterialIssueCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "领退料成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialIssueResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/rolls/{rollId}/scrap": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "rollId",
+          "required": true,
+          "description": "母卷编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "母卷级受控报废单（拦截活跃预约/方案，清零未切余量并写 ROLL_SCRAP 流水，需 ADMIN/WAREHOUSE）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RollScrapCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "母卷报废成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RollScrapResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/reconciliation/reports": {
+      "get": {
+        "summary": "聚合报工与复检台账分页查询（消除 N+1 查询风暴）",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 50
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "聚合报工分页结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationReportPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等或库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求正文超过全局字节上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "写操作频率受限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1733,6 +4501,30 @@
           "clearance": {
             "type": "number",
             "minimum": 0
+          },
+          "severity": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 4,
+            "description": "Optional defect severity level: 1=minor, 2=moderate, 3=severe, 4=fatal."
+          },
+          "avoidancePolicy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "HARD_FORBID",
+              "MUST_AVOID",
+              "ALLOW_AUXILIARY",
+              "ALLOW_REMNANT",
+              "PENETRABLE",
+              null
+            ],
+            "description": "Optional defect avoidance policy overriding default severity rules."
           }
         },
         "required": [
@@ -1761,6 +4553,16 @@
           },
           "continuesAfterRegion": {
             "type": "boolean"
+          },
+          "fabricRule": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FabricRule"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1795,6 +4597,16 @@
           "allowHalfTurn": {
             "type": "boolean",
             "description": "CONTOUR only. With allowRotation false, true permits 0 and 180 degrees. Full rotation permission still permits all four quarter turns."
+          },
+          "rule": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PartRule"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -2709,6 +5521,18 @@
               },
               "maxTimeLimitSeconds": {
                 "type": "integer"
+              },
+              "terminalRetentionHours": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxNestingTimeLimitSeconds": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "maxSlittingTimeLimitSeconds": {
+                "type": "integer",
+                "minimum": 1
               }
             },
             "required": [
@@ -2838,6 +5662,10 @@
               "maxHeapMiB": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "maxTimeLimitSeconds": {
+                "type": "integer",
+                "minimum": 1
               }
             },
             "required": [
@@ -2864,8 +5692,27 @@
       "Strategy": {
         "type": "object",
         "additionalProperties": false,
-        "if": {"anyOf": [{"required": ["gapFillLimits"]}, {"required": ["initialPlacements"]}]},
-        "then": {"properties": {"version": {"const": "2"}}},
+        "if": {
+          "anyOf": [
+            {
+              "required": [
+                "gapFillLimits"
+              ]
+            },
+            {
+              "required": [
+                "initialPlacements"
+              ]
+            }
+          ]
+        },
+        "then": {
+          "properties": {
+            "version": {
+              "const": "2"
+            }
+          }
+        },
         "properties": {
           "id": {
             "type": "string",
@@ -2873,18 +5720,46 @@
           },
           "version": {
             "type": "string",
-            "enum": ["1", "2"]
+            "enum": [
+              "1",
+              "2"
+            ]
           },
           "initialPlacements": {
-            "type": "array", "minItems": 1, "maxItems": 200,
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
             "description": "Optional complete starting layout. The server rebuilds the outlines from the order and validates the geometry before using it.",
             "items": {
-              "type": "object", "additionalProperties": false,
-              "required": ["demandId", "x", "y", "rotationDegrees"],
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "demandId",
+                "x",
+                "y",
+                "rotationDegrees"
+              ],
               "properties": {
-                "demandId": {"type": "integer"},
-                "x": {"type": "number", "minimum": 0}, "y": {"type": "number", "minimum": 0},
-                "rotationDegrees": {"type": "integer", "enum": [0, 90, 180, 270]}
+                "demandId": {
+                  "type": "integer"
+                },
+                "x": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "y": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "rotationDegrees": {
+                  "type": "integer",
+                  "enum": [
+                    0,
+                    90,
+                    180,
+                    270
+                  ]
+                }
               }
             }
           },
@@ -2893,8 +5768,14 @@
             "description": "Marker v2 only. Maximum extra pieces for each existing part ID within the complete marker. Job fulfillment excludes these spare pieces.",
             "minProperties": 1,
             "maxProperties": 80,
-            "propertyNames": {"pattern": "^-?(0|[1-9][0-9]*)$"},
-            "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 80}
+            "propertyNames": {
+              "pattern": "^-?(0|[1-9][0-9]*)$"
+            },
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 80
+            }
           },
           "maxTrials": {
             "type": "integer",
@@ -2911,13 +5792,38 @@
       "MarkerTrial": {
         "type": "object",
         "additionalProperties": false,
-        "if": {"required": ["phase"], "properties": {"phase": {"const": "SEED"}}},
-        "then": {"properties": {"timeLimitSeconds": {"const": 0}}},
-        "else": {"properties": {"timeLimitSeconds": {"minimum": 1}}},
+        "if": {
+          "required": [
+            "phase"
+          ],
+          "properties": {
+            "phase": {
+              "const": "SEED"
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "timeLimitSeconds": {
+              "const": 0
+            }
+          }
+        },
+        "else": {
+          "properties": {
+            "timeLimitSeconds": {
+              "minimum": 1
+            }
+          }
+        },
         "properties": {
           "phase": {
             "type": "string",
-            "enum": ["SEED", "STRIP_SEARCH", "COMPACTION"],
+            "enum": [
+              "SEED",
+              "STRIP_SEARCH",
+              "COMPACTION"
+            ],
             "description": "Identifies a validated starting layout, a fixed-width strip search, or a contour compaction attempt. Omitted for ordinary length-search trials."
           },
           "index": {
@@ -3006,7 +5912,9 @@
           "gapFillPlacements": {
             "type": "array",
             "description": "Verified spare pieces inside the occupied marker, separate from layout.placements. Returned with markerAreaUtilizationWithFill. An empty list contributes zero spare area.",
-            "items": {"$ref": "#/components/schemas/Placement"}
+            "items": {
+              "$ref": "#/components/schemas/Placement"
+            }
           },
           "optimalityProven": {
             "type": "boolean",
@@ -4468,14 +7376,14 @@
           "width": {
             "type": "number",
             "minimum": 0,
-            "maximum": 1000000000.0,
+            "maximum": 1000000000,
             "description": "Millimetres",
             "exclusiveMinimum": 0
           },
           "length": {
             "type": "number",
             "minimum": 0,
-            "maximum": 1000000000.0,
+            "maximum": 1000000000,
             "description": "Millimetres"
           }
         },
@@ -4547,13 +7455,13 @@
           "beforeWidth": {
             "type": "number",
             "minimum": 0,
-            "maximum": 1000000000.0,
+            "maximum": 1000000000,
             "description": "Millimetres"
           },
           "beforeLength": {
             "type": "number",
             "minimum": 0,
-            "maximum": 1000000000.0,
+            "maximum": 1000000000,
             "description": "Millimetres"
           },
           "beforeStatus": {
@@ -4565,13 +7473,13 @@
           "measuredWidth": {
             "type": "number",
             "minimum": 0,
-            "maximum": 1000000000.0,
+            "maximum": 1000000000,
             "description": "Millimetres"
           },
           "measuredLength": {
             "type": "number",
             "minimum": 0,
-            "maximum": 1000000000.0,
+            "maximum": 1000000000,
             "description": "Millimetres"
           },
           "afterStatus": {
@@ -4587,19 +7495,19 @@
           "usedLength": {
             "type": "number",
             "minimum": 0,
-            "maximum": 1000000000.0,
+            "maximum": 1000000000,
             "description": "Millimetres"
           },
           "beforeTotalLength": {
             "type": "number",
             "minimum": 0,
-            "maximum": 1000000000.0,
+            "maximum": 1000000000,
             "description": "Millimetres"
           },
           "afterTotalLength": {
             "type": "number",
             "minimum": 0,
-            "maximum": 1000000000.0,
+            "maximum": 1000000000,
             "description": "Millimetres"
           }
         }
@@ -4682,13 +7590,13 @@
                 "width": {
                   "type": "number",
                   "minimum": 0,
-                  "maximum": 1000000000.0,
+                  "maximum": 1000000000,
                   "description": "Millimetres"
                 },
                 "length": {
                   "type": "number",
                   "minimum": 0,
-                  "maximum": 1000000000.0,
+                  "maximum": 1000000000,
                   "description": "Millimetres"
                 },
                 "status": {
@@ -4711,6 +7619,940 @@
           }
         },
         "description": "One read-only inventory snapshot; includes unavailable and LOST items with eligibility/reason. LOST dimensions are historical geometry, not available stock. Never silently update expectedRevision after physical measurements have been checked."
+      },
+      "FabricRule": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Optional fabric-level rule for curtain selvedge exclusion and vertical pattern repeat.",
+        "properties": {
+          "leftSelvedgeMm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "rightSelvedgeMm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "allowAuxiliaryInSelvedge": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "repeatYMm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "exclusiveMinimum": 0
+          },
+          "phaseYMm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          }
+        }
+      },
+      "PartRule": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Optional per-part rule for MAIN/AUXILIARY role, vertical pattern matching, and discrete allowed angles.",
+        "properties": {
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "MAIN",
+              "AUXILIARY",
+              null
+            ]
+          },
+          "patternMatch": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "patternAnchorYMm": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "patternToleranceMm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "allowedAnglesDeg": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "minItems": 1,
+            "maxItems": 72,
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 359
+            },
+            "description": "CONTOUR only. Discrete allowed rotation angles in integer degrees [0, 359]."
+          }
+        }
+      },
+      "ApiError": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message",
+          "traceId",
+          "retryable"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "traceId": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AuthMe": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "enabled",
+          "authenticated",
+          "username",
+          "displayName",
+          "role",
+          "roles"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "authenticated": {
+            "type": "boolean"
+          },
+          "username": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AuthLoginRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string",
+            "minLength": 1
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "AuthLoginResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "token",
+          "username",
+          "displayName",
+          "role",
+          "expiresAt"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "ADMIN",
+              "PLANNER",
+              "OPERATOR",
+              "INSPECTOR",
+              "WAREHOUSE"
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DemandTemplate": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "2D",
+              "1D"
+            ]
+          },
+          "materialModel": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "updatedAt": {
+            "type": "integer"
+          }
+        }
+      },
+      "DemandFamilyCommand": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "2D",
+              "1D"
+            ]
+          },
+          "materialModel": {
+            "type": "string"
+          },
+          "dueDate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "priority": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "NORMAL",
+              "HIGH",
+              "URGENT",
+              null
+            ]
+          },
+          "customerName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kittingGroup": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requiredBatchNo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requiredColor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "strictBatchMatch": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "machineId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shiftTeam": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "ValidateLayoutRequest": {
+        "type": "object",
+        "description": "纯计算只读手调布局几何校验与刀路/余料重建请求（绝不写库存）。",
+        "properties": {
+          "materialWidth": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "materialHeight": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "mode": {
+            "type": "string"
+          },
+          "startCorner": {
+            "type": "string"
+          },
+          "kerf": {
+            "type": "number",
+            "minimum": 0
+          },
+          "pieceGap": {
+            "type": "number",
+            "minimum": 0
+          },
+          "minReusableWidth": {
+            "type": "number",
+            "minimum": 0
+          },
+          "minReusableHeight": {
+            "type": "number",
+            "minimum": 0
+          },
+          "placements": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "defects": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "ConfirmSchemeCommand": {
+        "type": "object",
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "2D",
+              "1D"
+            ]
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "sourceTaskIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "materialModel": {
+            "type": "string"
+          },
+          "rollId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remnantId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "layout2D": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "slittingPlan": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        }
+      },
+      "BindRollCommand": {
+        "type": "object",
+        "properties": {
+          "rollId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "autoCreateRoll": {
+            "type": "boolean"
+          },
+          "expectedRevision": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      },
+      "CompleteSchemeCommand": {
+        "type": "object",
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "operator": {
+            "type": "string"
+          },
+          "actualLengthMm": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "remarks": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "CancelSchemeCommand": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "MesOrderSyncCommand": {
+        "type": "object",
+        "properties": {
+          "mesOrderNo": {
+            "type": "string"
+          },
+          "materialModel": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "2D",
+              "1D"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "MesDispatchCommand": {
+        "type": "object",
+        "properties": {
+          "mesWorkOrderNo": {
+            "type": "string"
+          }
+        }
+      },
+      "MesFeedbackCommand": {
+        "type": "object",
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "dispatchPackageId": {
+            "type": "string"
+          },
+          "schemeId": {
+            "type": "string"
+          },
+          "operator": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "actualLengthMm": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        }
+      },
+      "QualityReleaseCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "decision",
+          "inspector",
+          "reason"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "RELEASE_AVAILABLE",
+              "SCRAP"
+            ]
+          },
+          "inspector": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "QualityReleaseResponse": {
+        "type": "object",
+        "required": [
+          "document",
+          "remnant",
+          "revision"
+        ],
+        "properties": {
+          "document": {
+            "type": "object"
+          },
+          "remnant": {
+            "type": "object"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        }
+      },
+      "DispositionRevokeCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "operator",
+          "reason"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "operator": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "InventoryReceiptRollItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "materialModel": {
+            "type": "string",
+            "minLength": 1
+          },
+          "materialType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "batchNo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "widthMm": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "totalLengthMm": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "grammage": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "shrinkageRate": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "storageLocation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inspectionStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "PENDING",
+              "PASSED",
+              null
+            ]
+          },
+          "inspector": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "materialModel",
+          "widthMm",
+          "totalLengthMm"
+        ]
+      },
+      "InventoryReceiptCommand": {
+        "type": "object",
+        "required": [
+          "idempotencyKey",
+          "supplierName",
+          "deliveryNoteNo",
+          "operator",
+          "rolls"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "supplierName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "deliveryNoteNo": {
+            "type": "string",
+            "minLength": 1
+          },
+          "operator": {
+            "type": "string",
+            "minLength": 1
+          },
+          "remarks": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rolls": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/InventoryReceiptRollItem"
+            }
+          }
+        }
+      },
+      "InventoryReceiptResponse": {
+        "type": "object",
+        "required": [
+          "document",
+          "createdRolls",
+          "revision"
+        ],
+        "properties": {
+          "document": {
+            "type": "object"
+          },
+          "createdRolls": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "revision": {
+            "type": "integer"
+          }
+        }
+      },
+      "MaterialIssueCommand": {
+        "type": "object",
+        "required": [
+          "idempotencyKey",
+          "direction",
+          "rollId",
+          "operator"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "ISSUE",
+              "RETURN"
+            ]
+          },
+          "rollId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "machineId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shiftTeam": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operator": {
+            "type": "string",
+            "minLength": 1
+          },
+          "targetLocation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "MaterialIssueResponse": {
+        "type": "object",
+        "required": [
+          "document",
+          "roll",
+          "revision"
+        ],
+        "properties": {
+          "document": {
+            "type": "object"
+          },
+          "roll": {
+            "type": "object"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        }
+      },
+      "RollScrapCommand": {
+        "type": "object",
+        "required": [
+          "idempotencyKey",
+          "operator",
+          "reason"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "operator": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "RollScrapResponse": {
+        "type": "object",
+        "required": [
+          "roll",
+          "revision"
+        ],
+        "properties": {
+          "roll": {
+            "type": "object"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        }
+      },
+      "ReplenishTaskCommand": {
+        "type": "object",
+        "required": [
+          "idempotencyKey",
+          "operator",
+          "reason"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "operator": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "ReplenishTaskResponse": {
+        "type": "object",
+        "required": [
+          "task",
+          "sourceSchemeId",
+          "revision"
+        ],
+        "properties": {
+          "task": {
+            "type": "object"
+          },
+          "sourceSchemeId": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        }
+      },
+      "ReconciliationReportPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset",
+          "hasMore"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -4718,6 +8560,17 @@
         "type": "http",
         "scheme": "bearer",
         "description": "Dedicated host-configured credential for one external consumer. Disabled by default; this is not authentication for the other APIs."
+      },
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "HMAC-SHA256",
+        "description": "企业级轻量认证 Bearer 令牌（cutdemo.auth.enabled=true 时生效，通过 POST /api/v2/auth/login 获取，支持 ADMIN/PLANNER/OPERATOR/INSPECTOR/WAREHOUSE 五角色 RBAC）。"
+      },
+      "MesBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "MES 协同接口专用 Bearer 令牌（cutdemo.mes.auth-required / cutdemo.mes.token）。"
       }
     }
   }

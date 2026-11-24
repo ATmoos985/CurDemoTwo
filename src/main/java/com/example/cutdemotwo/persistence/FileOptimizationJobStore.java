@@ -1,6 +1,6 @@
 package com.example.cutdemotwo.persistence;
 
-import com.example.cutdemotwo.business.optimization.StoredOptimizationJob;
+import com.example.cutdemotwo.contracts.jobs.StoredOptimizationJob;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.DeserializationFeature;
 import java.nio.channels.*;
