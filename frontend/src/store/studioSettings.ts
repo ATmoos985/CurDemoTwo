@@ -3,6 +3,21 @@ export type FirstStageOrientation = 'horizontal' | 'vertical';
 export type SettingsTabId = 'general' | 'craft' | 'remnant' | 'engines' | 'integration';
 export type SlittingProfile = 'FAST' | 'QUALITY';
 export type SlittingWidthMode = 'FLEXIBLE' | 'FIXED';
+export type StudioThemeMode = 'light' | 'dark';
+
+export interface CncPostOptions {
+  cutFeed: number;
+  rapidFeed: number;
+  plungeDelay: number;
+  retractDelay: number;
+}
+
+export const DEFAULT_CNC_POST_OPTIONS: CncPostOptions = {
+  cutFeed: 4000,
+  rapidFeed: 15000,
+  plungeDelay: 200,
+  retractDelay: 100
+};
 
 export interface SlittingWidthPreset {
   id: string;
@@ -133,6 +148,7 @@ export const WORKBENCH_STRATEGIES_2D: WorkbenchStrategyDef[] = [
 
 export interface StudioSettings {
   // Tab 1: 画布与常规
+  theme: StudioThemeMode;
   vertical: boolean;
   showDimensions: boolean;
   showPath: boolean;
@@ -168,9 +184,13 @@ export interface StudioSettings {
   slitSeqGroupBeta: number;
   slitLnsEnabled: boolean;
 
-  // Tab 5: 导出与系统接入
+  // Tab 5: 导出与系统接入（含 CNC 后处理参数）
   exportPrefix: string;
   ticketShowCuts: boolean;
+  cncCutFeed: number;
+  cncRapidFeed: number;
+  cncPlungeDelay: number;
+  cncRetractDelay: number;
 }
 
 export const DEFAULT_SLITTING_SOLVER_SETTINGS = {
@@ -190,6 +210,7 @@ export const DEFAULT_SLITTING_SOLVER_SETTINGS = {
 };
 
 export const DEFAULT_STUDIO_SETTINGS: StudioSettings = {
+  theme: 'light',
   vertical: true,
   showDimensions: true,
   showPath: false,
@@ -211,8 +232,26 @@ export const DEFAULT_STUDIO_SETTINGS: StudioSettings = {
   ...DEFAULT_SLITTING_SOLVER_SETTINGS,
 
   exportPrefix: 'CutPlan',
-  ticketShowCuts: true
+  ticketShowCuts: true,
+  cncCutFeed: DEFAULT_CNC_POST_OPTIONS.cutFeed,
+  cncRapidFeed: DEFAULT_CNC_POST_OPTIONS.rapidFeed,
+  cncPlungeDelay: DEFAULT_CNC_POST_OPTIONS.plungeDelay,
+  cncRetractDelay: DEFAULT_CNC_POST_OPTIONS.retractDelay
 };
+
+export function extractCncPostOptions(settings: StudioSettings): CncPostOptions {
+  return {
+    cutFeed: Math.min(60000, Math.max(100, Math.round(Number(settings.cncCutFeed) || DEFAULT_CNC_POST_OPTIONS.cutFeed))),
+    rapidFeed: Math.min(100000, Math.max(500, Math.round(Number(settings.cncRapidFeed) || DEFAULT_CNC_POST_OPTIONS.rapidFeed))),
+    plungeDelay: Math.min(10000, Math.max(0, Math.round(Number(settings.cncPlungeDelay ?? DEFAULT_CNC_POST_OPTIONS.plungeDelay)))),
+    retractDelay: Math.min(10000, Math.max(0, Math.round(Number(settings.cncRetractDelay ?? DEFAULT_CNC_POST_OPTIONS.retractDelay))))
+  };
+}
+
+export function applyThemeToDocument(theme: StudioThemeMode): void {
+  if (typeof document === 'undefined') return;
+  document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : 'light';
+}
 
 export function extractSlittingSolverOptions(settings: StudioSettings): SlittingSolverOptions {
   return {
@@ -274,8 +313,10 @@ export function loadStudioSettings(): StudioSettings {
     const rawEnabledStrategies2D = localStorage.getItem('cutplan.studio.enabledStrategies2D');
     const rawTicketCuts = localStorage.getItem('cutplan.studio.ticketShowCuts');
     const rawPrefix = (localStorage.getItem('cutplan.studio.exportPrefix') || '').trim();
+    const rawTheme = localStorage.getItem('cutplan.studio.theme');
 
     return {
+      theme: rawTheme === 'dark' ? 'dark' : 'light',
       vertical:
         typeof rawPrefs.vertical === 'boolean'
           ? rawPrefs.vertical
@@ -434,7 +475,31 @@ export function loadStudioSettings(): StudioSettings {
           ? false
           : rawTicketCuts === '1'
           ? true
-          : DEFAULT_STUDIO_SETTINGS.ticketShowCuts
+          : DEFAULT_STUDIO_SETTINGS.ticketShowCuts,
+      cncCutFeed: readNumber(
+        localStorage.getItem('cutplan.studio.cncCutFeed'),
+        DEFAULT_STUDIO_SETTINGS.cncCutFeed,
+        100,
+        60000
+      ),
+      cncRapidFeed: readNumber(
+        localStorage.getItem('cutplan.studio.cncRapidFeed'),
+        DEFAULT_STUDIO_SETTINGS.cncRapidFeed,
+        500,
+        100000
+      ),
+      cncPlungeDelay: readNumber(
+        localStorage.getItem('cutplan.studio.cncPlungeDelay'),
+        DEFAULT_STUDIO_SETTINGS.cncPlungeDelay,
+        0,
+        10000
+      ),
+      cncRetractDelay: readNumber(
+        localStorage.getItem('cutplan.studio.cncRetractDelay'),
+        DEFAULT_STUDIO_SETTINGS.cncRetractDelay,
+        0,
+        10000
+      )
     };
   } catch {
     return {
@@ -528,12 +593,25 @@ export function validateStudioSettings(draft: StudioSettings): string | null {
   if (!cleanPrefix || cleanPrefix.length > 32 || /[\\/:*?"<>|]/.test(cleanPrefix)) {
     return '导出文件名前缀须为 1–32 个合法文件名字符（不含 \\ / : * ? " < > |）';
   }
+  if (!Number.isFinite(draft.cncCutFeed) || draft.cncCutFeed < 100 || draft.cncCutFeed > 60000) {
+    return 'CNC 切割进给速度须在 100–60000 mm/min 之间';
+  }
+  if (!Number.isFinite(draft.cncRapidFeed) || draft.cncRapidFeed < 500 || draft.cncRapidFeed > 100000) {
+    return 'CNC 空程进给速度须在 500–100000 mm/min 之间';
+  }
+  if (!Number.isFinite(draft.cncPlungeDelay) || draft.cncPlungeDelay < 0 || draft.cncPlungeDelay > 10000) {
+    return 'CNC 下刀延时须在 0–10000 ms 之间';
+  }
+  if (!Number.isFinite(draft.cncRetractDelay) || draft.cncRetractDelay < 0 || draft.cncRetractDelay > 10000) {
+    return 'CNC 抬刀延时须在 0–10000 ms 之间';
+  }
   return null;
 }
 
 export function persistStudioSettings(next: StudioSettings): StudioSettings {
   const sanitized: StudioSettings = {
     ...next,
+    theme: next.theme === 'dark' ? 'dark' : 'light',
     showWorkflowGuide: Boolean(next.showWorkflowGuide),
     defectMarginMm: Math.round(next.defectMarginMm * 10) / 10,
     trimStartMm: Math.round(next.trimStartMm * 10) / 10,
@@ -555,8 +633,14 @@ export function persistStudioSettings(next: StudioSettings): StudioSettings {
     slitSeqGroupAlpha: Math.max(0, Number(next.slitSeqGroupAlpha) || 0),
     slitSeqGroupBeta: Math.max(0, Number(next.slitSeqGroupBeta) || 0),
     slitLnsEnabled: Boolean(next.slitLnsEnabled),
-    exportPrefix: next.exportPrefix.trim() || 'CutPlan'
+    exportPrefix: next.exportPrefix.trim() || 'CutPlan',
+    cncCutFeed: Math.min(60000, Math.max(100, Math.round(Number(next.cncCutFeed) || DEFAULT_CNC_POST_OPTIONS.cutFeed))),
+    cncRapidFeed: Math.min(100000, Math.max(500, Math.round(Number(next.cncRapidFeed) || DEFAULT_CNC_POST_OPTIONS.rapidFeed))),
+    cncPlungeDelay: Math.min(10000, Math.max(0, Math.round(Number(next.cncPlungeDelay ?? DEFAULT_CNC_POST_OPTIONS.plungeDelay)))),
+    cncRetractDelay: Math.min(10000, Math.max(0, Math.round(Number(next.cncRetractDelay ?? DEFAULT_CNC_POST_OPTIONS.retractDelay))))
   };
+
+  applyThemeToDocument(sanitized.theme);
 
   try {
     const existingPrefs = JSON.parse(localStorage.getItem(PREF_KEY) || '{}');
@@ -569,6 +653,7 @@ export function persistStudioSettings(next: StudioSettings): StudioSettings {
         showPath: sanitized.showPath
       })
     );
+    localStorage.setItem('cutplan.studio.theme', sanitized.theme);
     localStorage.setItem('cutplan.studio.showWorkflowGuide', sanitized.showWorkflowGuide ? '1' : '0');
     localStorage.setItem('cam_origin', sanitized.startCorner);
     localStorage.setItem('cam_margin', String(sanitized.defectMarginMm));
@@ -611,6 +696,10 @@ export function persistStudioSettings(next: StudioSettings): StudioSettings {
     localStorage.setItem('cutplan.slit.lnsEnabled', sanitized.slitLnsEnabled ? '1' : '0');
     localStorage.setItem('cutplan.studio.exportPrefix', sanitized.exportPrefix);
     localStorage.setItem('cutplan.studio.ticketShowCuts', sanitized.ticketShowCuts ? '1' : '0');
+    localStorage.setItem('cutplan.studio.cncCutFeed', String(sanitized.cncCutFeed));
+    localStorage.setItem('cutplan.studio.cncRapidFeed', String(sanitized.cncRapidFeed));
+    localStorage.setItem('cutplan.studio.cncPlungeDelay', String(sanitized.cncPlungeDelay));
+    localStorage.setItem('cutplan.studio.cncRetractDelay', String(sanitized.cncRetractDelay));
   } catch {}
 
   return sanitized;

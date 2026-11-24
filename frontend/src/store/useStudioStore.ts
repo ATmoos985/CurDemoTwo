@@ -14,6 +14,7 @@ import {
   loadStudioSettings,
   persistStudioSettings
 } from './studioSettings';
+import type { WorkbenchDraftPayload } from './workbenchDraft';
 
 function finiteOr(val: unknown, fallback: number): number {
   if (val == null || val === '') return fallback;
@@ -607,6 +608,8 @@ interface StudioState {
   canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
   canvasWidthMm: number;
   canvasLengthMm: number;
+  /** 连续开卷可调起切点（mm），null 表示自动跟随实卷已切终点 usedLength */
+  windowStartY2D: number | null;
   pieceGapMm: number;
   trimStartMm: number;
   selectedRollId: string;
@@ -669,6 +672,7 @@ interface StudioState {
     canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
     canvasWidthMm: number;
     canvasLengthMm: number;
+    windowStartY2D: number | null;
     pieceGapMm: number;
     trimStartMm: number;
     selectedRollId: string;
@@ -678,6 +682,7 @@ interface StudioState {
     loadedTaskName: string | null;
     loadedExternalRef: string | null;
   }>) => void;
+  restoreWorkbenchDraft: (draft: WorkbenchDraftPayload) => void;
   setActiveDemands2D: (demands: DemandItem[]) => void;
   updateDemand2D: (id: number, patch: Partial<DemandItem>) => void;
   removeDemand2D: (id: number) => void;
@@ -731,6 +736,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   canvasMode: 'FREE_CANVAS',
   canvasWidthMm: defaultCluster2D.defaultWidthMm,
   canvasLengthMm: defaultCluster2D.defaultLengthMm,
+  windowStartY2D: null,
   pieceGapMm: initialSettings.pieceGapMm,
   trimStartMm: initialSettings.trimStartMm,
   selectedRollId: 'ROLL-2026-0920',
@@ -1313,6 +1319,55 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   },
 
   setCanvasSpec: (spec) => set((st) => ({ ...st, ...spec })),
+
+  restoreWorkbenchDraft: (draft) =>
+    set((st) => ({
+      activeDimension: draft.activeDimension || st.activeDimension,
+      scenario2D: draft.scenario2D || st.scenario2D,
+      multiWidthsText2D: draft.multiWidthsText2D ?? st.multiWidthsText2D,
+      canvasMode: draft.canvasMode || st.canvasMode,
+      canvasWidthMm: Number(draft.canvasWidthMm) > 0 ? draft.canvasWidthMm : st.canvasWidthMm,
+      canvasLengthMm: Number(draft.canvasLengthMm) > 0 ? draft.canvasLengthMm : st.canvasLengthMm,
+      windowStartY2D: draft.windowStartY2D ?? null,
+      pieceGapMm: Number.isFinite(draft.pieceGapMm) ? draft.pieceGapMm : st.pieceGapMm,
+      trimStartMm: Number.isFinite(draft.trimStartMm) ? draft.trimStartMm : st.trimStartMm,
+      selectedRollId: draft.selectedRollId ?? st.selectedRollId,
+      selectedRemnantId: draft.selectedRemnantId ?? st.selectedRemnantId,
+      materialModel2D: draft.materialModel2D || st.materialModel2D,
+      activeDemands2D:
+        Array.isArray(draft.activeDemands2D) && draft.activeDemands2D.length > 0
+          ? draft.activeDemands2D
+          : st.activeDemands2D,
+      schemes2D: Array.isArray(draft.unconfirmedSchemes2D)
+        ? draft.unconfirmedSchemes2D
+        : st.schemes2D,
+      activeSchemeId2D: draft.activeSchemeId2D ?? draft.unconfirmedSchemes2D?.[0]?.id ?? null,
+      scenario1D: draft.scenario1D || st.scenario1D,
+      slitMaterialMode: draft.slitMaterialMode || st.slitMaterialMode,
+      slitWidthMode: draft.slitWidthMode || st.slitWidthMode,
+      slitProfile: draft.slitProfile || st.slitProfile,
+      slitMotherWidthMm:
+        Number(draft.slitMotherWidthMm) > 0 ? draft.slitMotherWidthMm : st.slitMotherWidthMm,
+      slitLeftTrimMm: Number.isFinite(draft.slitLeftTrimMm) ? draft.slitLeftTrimMm : st.slitLeftTrimMm,
+      slitRightTrimMm: Number.isFinite(draft.slitRightTrimMm)
+        ? draft.slitRightTrimMm
+        : st.slitRightTrimMm,
+      slitMinWidthMm: Number(draft.slitMinWidthMm) > 0 ? draft.slitMinWidthMm : st.slitMinWidthMm,
+      slitMaxWidthMm: Number(draft.slitMaxWidthMm) > 0 ? draft.slitMaxWidthMm : st.slitMaxWidthMm,
+      slitWidthStepMm:
+        Number(draft.slitWidthStepMm) > 0 ? draft.slitWidthStepMm : st.slitWidthStepMm,
+      slitOverCap: Number.isFinite(draft.slitOverCap) ? draft.slitOverCap : st.slitOverCap,
+      slitFixedLengthMm:
+        Number(draft.slitFixedLengthMm) > 0 ? draft.slitFixedLengthMm : st.slitFixedLengthMm,
+      slitAvoidDefects:
+        typeof draft.slitAvoidDefects === 'boolean' ? draft.slitAvoidDefects : st.slitAvoidDefects,
+      slitRollId: draft.slitRollId ?? st.slitRollId,
+      slitMaterialModel: draft.slitMaterialModel || st.slitMaterialModel,
+      slitOrders:
+        Array.isArray(draft.slitOrders) && draft.slitOrders.length > 0
+          ? draft.slitOrders
+          : st.slitOrders
+    })),
 
   setActiveDemands2D: (demands) => set({ activeDemands2D: demands }),
 

@@ -2,6 +2,7 @@ import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { requestJSON, toast, fmtN } from '@static/app/js/util.js';
 import { presets, matchPreset } from '@static/js/industry/industry-profiles.js';
 import {
+  DEFAULT_CNC_POST_OPTIONS,
   DEFAULT_SLITTING_SOLVER_SETTINGS,
   DEFAULT_STUDIO_SETTINGS,
   FirstStageOrientation,
@@ -9,7 +10,9 @@ import {
   SlittingProfile,
   StartCornerType,
   StudioSettings,
+  StudioThemeMode,
   WORKBENCH_STRATEGIES_2D,
+  applyThemeToDocument,
   loadStudioSettings,
   validateStudioSettings
 } from '../store/studioSettings';
@@ -377,6 +380,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
     const handleClose = () => {
       dialog.returnValue = '';
+      applyThemeToDocument(useStudioStore.getState().settings.theme);
       onCloseRef.current();
     };
     dialog.addEventListener('close', handleClose);
@@ -825,6 +829,45 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                   {/* Right Visual Stack: Orientation Cards + Layer Switches */}
                   <div className="sc-col-stack">
+                    <section className="sc-card">
+                      <div className="sc-card-head">
+                        <span>界面外观主题</span>
+                        <code className="sc-code-pill num">
+                          {draft.theme === 'dark' ? '暗色车间大屏' : '浅色工业'}
+                        </code>
+                      </div>
+                      <div className="sc-orient-grid" role="radiogroup" aria-label="界面外观主题切换">
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={draft.theme === 'light'}
+                          className={`sc-orient-card ${draft.theme === 'light' ? 'on' : ''}`}
+                          onClick={() => {
+                            const nextTheme: StudioThemeMode = 'light';
+                            patchDraft({ theme: nextTheme });
+                            applyThemeToDocument(nextTheme);
+                          }}
+                        >
+                          <strong>浅色工业</strong>
+                          <span className="num">高亮办公室 / 明亮工位</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={draft.theme === 'dark'}
+                          className={`sc-orient-card ${draft.theme === 'dark' ? 'on' : ''}`}
+                          onClick={() => {
+                            const nextTheme: StudioThemeMode = 'dark';
+                            patchDraft({ theme: nextTheme });
+                            applyThemeToDocument(nextTheme);
+                          }}
+                        >
+                          <strong>暗色车间大屏</strong>
+                          <span className="num">低光护眼 / 工业高对比</span>
+                        </button>
+                      </div>
+                    </section>
+
                     <section className="sc-card">
                       <div className="sc-card-head">
                         <span>画布铺布视角</span>
@@ -1872,6 +1915,87 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         onChange={(e) => patchDraft({ ticketShowCuts: e.target.checked })}
                       />
                     </label>
+                  </div>
+                </section>
+
+                {/* CNC Post-Processor Parameters Card */}
+                <section className="sc-card" id="cfg-cnc-post-card">
+                  <div className="sc-card-head">
+                    <span>CNC 后处理参数（G-Code 导出）</span>
+                    <button
+                      type="button"
+                      className="btn sm"
+                      onClick={() => {
+                        patchDraft({
+                          cncCutFeed: DEFAULT_CNC_POST_OPTIONS.cutFeed,
+                          cncRapidFeed: DEFAULT_CNC_POST_OPTIONS.rapidFeed,
+                          cncPlungeDelay: DEFAULT_CNC_POST_OPTIONS.plungeDelay,
+                          cncRetractDelay: DEFAULT_CNC_POST_OPTIONS.retractDelay
+                        });
+                        toast('已恢复默认 CNC 后处理参数');
+                      }}
+                    >
+                      恢复默认
+                    </button>
+                  </div>
+
+                  <div className="sc-slit-grid">
+                    <div className="sc-slit-field">
+                      <label htmlFor="cfg-cnc-cut-feed">切割进给 cutFeed (mm/min)</label>
+                      <NumberInput
+                        id="cfg-cnc-cut-feed"
+                        min={100}
+                        max={60000}
+                        step={100}
+                        integer
+                        className="field num"
+                        value={draft.cncCutFeed}
+                        onValueChange={(v) => patchDraft({ cncCutFeed: v })}
+                      />
+                      <small>G01 切削进给率 F 值（默认 4000 mm/min）</small>
+                    </div>
+                    <div className="sc-slit-field">
+                      <label htmlFor="cfg-cnc-rapid-feed">空程进给 rapidFeed (mm/min)</label>
+                      <NumberInput
+                        id="cfg-cnc-rapid-feed"
+                        min={500}
+                        max={100000}
+                        step={500}
+                        integer
+                        className="field num"
+                        value={draft.cncRapidFeed}
+                        onValueChange={(v) => patchDraft({ cncRapidFeed: v })}
+                      />
+                      <small>G00 提刀空程速度 F 值（默认 15000 mm/min）</small>
+                    </div>
+                    <div className="sc-slit-field">
+                      <label htmlFor="cfg-cnc-plunge-delay">下刀延时 plungeDelay (ms)</label>
+                      <NumberInput
+                        id="cfg-cnc-plunge-delay"
+                        min={0}
+                        max={10000}
+                        step={50}
+                        integer
+                        className="field num"
+                        value={draft.cncPlungeDelay}
+                        onValueChange={(v) => patchDraft({ cncPlungeDelay: v })}
+                      />
+                      <small>M03 落刀/开光后的 G04 稳定延时（默认 200 ms）</small>
+                    </div>
+                    <div className="sc-slit-field">
+                      <label htmlFor="cfg-cnc-retract-delay">抬刀延时 retractDelay (ms)</label>
+                      <NumberInput
+                        id="cfg-cnc-retract-delay"
+                        min={0}
+                        max={10000}
+                        step={50}
+                        integer
+                        className="field num"
+                        value={draft.cncRetractDelay}
+                        onValueChange={(v) => patchDraft({ cncRetractDelay: v })}
+                      />
+                      <small>M05 抬刀/关光后的 G04 复位延时（默认 100 ms）</small>
+                    </div>
                   </div>
                 </section>
 

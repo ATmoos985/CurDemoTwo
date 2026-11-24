@@ -1,9 +1,12 @@
-import React, { Dispatch, RefObject, SetStateAction, useMemo, useState } from 'react';
+import React, { Dispatch, RefObject, SetStateAction, useEffect, useMemo, useState } from 'react';
 import { SavedScheme2D, SlittingOrderLine, SlittingSchemeRun } from '../../store/useStudioStore';
+import { StartCornerType } from '../../store/studioSettings';
 import {
   WorkbenchBoardCanvas,
   WorkbenchBoardHandle,
+  BoardContextMenuEvent,
   BoardDemandSpec,
+  BoardLeftover,
   BoardPlacedPiece,
   BoardDefect,
   BoardCutLine
@@ -11,6 +14,8 @@ import {
 import { toast, fmtN } from '@static/app/js/util.js';
 import { SlittingStripBar } from './SlittingStripBar';
 import { DefectScheduleRow } from './workbenchTypes';
+import { WorkbenchContextMenu } from './WorkbenchContextMenu';
+import { ToolpathPlayerBar } from './ToolpathPlayerBar';
 
 export interface WorkbenchCenterPanelProps {
   is2D: boolean;
@@ -18,12 +23,17 @@ export interface WorkbenchCenterPanelProps {
   boardRef: RefObject<WorkbenchBoardHandle | null>;
 
   // 2D view
+  vertical: boolean;
+  onToggleVertical: () => void;
+  startCorner: StartCornerType;
   showDimensions: boolean;
   setShowDimensions: Dispatch<SetStateAction<boolean>>;
   showPath: boolean;
   setShowPath: Dispatch<SetStateAction<boolean>>;
   selectedPieceIndex: number | null;
   setSelectedPieceIndex: Dispatch<SetStateAction<number | null>>;
+  selectedLeftoverId: string | null;
+  setSelectedLeftoverId: Dispatch<SetStateAction<string | null>>;
   cursor: { x: number; y: number } | null;
   setCursor: Dispatch<SetStateAction<{ x: number; y: number } | null>>;
   activeScheme2D: SavedScheme2D | null;
@@ -40,13 +50,22 @@ export interface WorkbenchCenterPanelProps {
   windowDefects2D: BoardDefect[];
   boardStagingDemands: BoardDemandSpec[];
   boardPlacedPieces: BoardPlacedPiece[];
+  boardLeftovers: BoardLeftover[];
   boardCuts: BoardCutLine[];
   activeHighlightKey: string | null;
   setHoveredDemandKey: (key: string | null) => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  canRestoreOriginal: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  onRestoreOriginalPreview: () => void;
   onDropStagingPiece: (demandKey: string, localX: number, localY: number) => void;
   onMovePlacedPiece: (pieceIndex: number, localX: number, localY: number) => void;
+  onNudgePlacedPiece: (pieceIndex: number, dxMm: number, dyMm: number) => void;
   onRotatePlacedPiece: (pieceIndex: number) => void;
   onRemovePlacedPiece: (pieceIndex: number) => void;
+  onDiscardLeftover: (leftoverId: string) => void;
   validatingLayout: boolean;
   onValidateAndRebuildLayout: () => void;
 
@@ -77,12 +96,17 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
   is2D,
   stripRef,
   boardRef,
+  vertical,
+  onToggleVertical,
+  startCorner,
   showDimensions,
   setShowDimensions,
   showPath,
   setShowPath,
   selectedPieceIndex,
   setSelectedPieceIndex,
+  selectedLeftoverId,
+  setSelectedLeftoverId,
   cursor,
   setCursor,
   activeScheme2D,
@@ -99,13 +123,22 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
   windowDefects2D,
   boardStagingDemands,
   boardPlacedPieces,
+  boardLeftovers,
   boardCuts,
   activeHighlightKey,
   setHoveredDemandKey,
+  canUndo,
+  canRedo,
+  canRestoreOriginal,
+  onUndo,
+  onRedo,
+  onRestoreOriginalPreview,
   onDropStagingPiece,
   onMovePlacedPiece,
+  onNudgePlacedPiece,
   onRotatePlacedPiece,
   onRemovePlacedPiece,
+  onDiscardLeftover,
   validatingLayout,
   onValidateAndRebuildLayout,
   slitSchemes,
@@ -124,6 +157,38 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
   onQuickExportExcel1D
 }) => {
   const [hoveredStripWidth1D, setHoveredStripWidth1D] = useState<number | null>(null);
+  const [contextMenu, setContextMenu] = useState<BoardContextMenuEvent | null>(null);
+  const [simCutStep, setSimCutStep] = useState<number | null>(null);
+
+  // 切换方案时自动复位走刀动画与右键菜单
+  useEffect(() => {
+    setSimCutStep(null);
+    setContextMenu(null);
+  }, [activeScheme2D?.id]);
+
+  const selectedLeftover = useMemo(
+    () =>
+      selectedLeftoverId != null
+        ? boardLeftovers.find((rm) => String(rm.id) === String(selectedLeftoverId)) || null
+        : null,
+    [selectedLeftoverId, boardLeftovers]
+  );
+
+  const contextPiece = useMemo(
+    () =>
+      contextMenu?.kind === 'piece' && contextMenu.pieceIndex != null
+        ? boardPlacedPieces.find((p) => p.index === contextMenu.pieceIndex) || null
+        : null,
+    [contextMenu, boardPlacedPieces]
+  );
+
+  const contextLeftover = useMemo(
+    () =>
+      contextMenu?.kind === 'leftover' && contextMenu.leftoverId != null
+        ? boardLeftovers.find((rm) => String(rm.id) === String(contextMenu.leftoverId)) || null
+        : null,
+    [contextMenu, boardLeftovers]
+  );
 
   const widthBounds1D = useMemo(() => {
     const widths: number[] = [];
@@ -166,6 +231,44 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
             <button type="button" onClick={() => boardRef.current?.resetRollOffset()}>
               重置卷位
             </button>
+            <button
+              type="button"
+              aria-pressed={!vertical}
+              title="切换纵向走布 / 横向台板视角"
+              onClick={onToggleVertical}
+            >
+              {vertical ? '纵向走布' : '横向台板'}
+            </button>
+          </div>
+
+          <span className="div" role="separator" aria-orientation="vertical" />
+
+          <div className="ctool-group" role="group" aria-label="手调撤销重做">
+            <button
+              type="button"
+              disabled={!canUndo}
+              title="撤销手调 (Ctrl+Z)"
+              onClick={onUndo}
+            >
+              ↶ 撤销
+            </button>
+            <button
+              type="button"
+              disabled={!canRedo}
+              title="重做手调 (Ctrl+Y / Ctrl+Shift+Z)"
+              onClick={onRedo}
+            >
+              ↷ 重做
+            </button>
+            {canRestoreOriginal && (
+              <button
+                type="button"
+                title="一键还原到初始求解预览"
+                onClick={onRestoreOriginalPreview}
+              >
+                恢复原预览
+              </button>
+            )}
           </div>
 
           <span className="div" role="separator" aria-orientation="vertical" />
@@ -176,7 +279,7 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
               aria-pressed={showDimensions}
               onClick={() => setShowDimensions((s) => !s)}
             >
-              尺寸标注
+              标尺尺寸
             </button>
             <button type="button" aria-pressed={showPath} onClick={() => setShowPath((s) => !s)}>
               切割刀路
@@ -197,6 +300,12 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
                 <button type="button" onClick={() => onRemovePlacedPiece(selectedPieceIndex)}>
                   退回待排
                 </button>
+                <span
+                  className="ctool-nudge-hint num"
+                  title="选中裁片后可用方向键微调 1mm，按住 Shift 微调 0.1mm"
+                >
+                  ←↑↓→ 微调
+                </span>
               </div>
             </>
           )}
@@ -225,6 +334,35 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
           </span>
         </div>
 
+        {/* 选中计划余料属性条 */}
+        {selectedLeftover && (
+          <div className="wb-leftover-banner" role="status">
+            <span className="num">
+              已选计划余料 <b>#{selectedLeftover.id}</b> · {Math.round(selectedLeftover.width)}×
+              {Math.round(selectedLeftover.height)} mm（
+              {((selectedLeftover.width * selectedLeftover.height) / 1_000_000).toFixed(3)} m²）
+              {selectedLeftover.hasDefect ? ' · 含疵点' : ''}
+            </span>
+            <span className="sp" />
+            {!activeScheme2D?.confirmedSchemeId && (
+              <button
+                type="button"
+                className="btn sm"
+                onClick={() => onDiscardLeftover(selectedLeftover.id)}
+              >
+                从预览抛弃此余料
+              </button>
+            )}
+            <button
+              type="button"
+              className="wb-tiny-ghost"
+              onClick={() => setSelectedLeftoverId(null)}
+            >
+              关闭
+            </button>
+          </div>
+        )}
+
         <div className="canvas-wrap" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
           <WorkbenchBoardCanvas
             rollTitle={effectiveRollTitle}
@@ -236,22 +374,86 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
             defects={windowDefects2D}
             demands={boardStagingDemands}
             placedPieces={boardPlacedPieces}
+            leftovers={boardLeftovers}
             cuts={boardCuts}
+            selectedLeftoverId={selectedLeftoverId}
+            simCutStep={simCutStep}
+            startCorner={startCorner}
+            vertical={vertical}
             showDimensions={showDimensions}
             showPath={showPath}
             highlightedDemandKey={activeHighlightKey}
             selectedPieceIndex={selectedPieceIndex}
             onDropStagingPiece={onDropStagingPiece}
             onMovePlacedPiece={onMovePlacedPiece}
+            onNudgePlacedPiece={onNudgePlacedPiece}
             onRotatePlacedPiece={onRotatePlacedPiece}
             onRemovePlacedPiece={onRemovePlacedPiece}
+            onUndo={onUndo}
+            onRedo={onRedo}
+            onSelectLeftover={setSelectedLeftoverId}
             onHoverDemandKey={setHoveredDemandKey}
             onSelectPiece={setSelectedPieceIndex}
             onCursorMove={setCursor}
+            onContextMenu={setContextMenu}
             onCollisionNotice={(msg) => toast(msg, true)}
             boardRef={boardRef}
           />
         </div>
+
+        {/* 走刀动画仿真控制条（仅在当前方案含刀路时呈现） */}
+        {boardCuts.length > 0 && (
+          <ToolpathPlayerBar
+            cuts={boardCuts}
+            startCorner={startCorner}
+            rollWidthMm={effectiveRollWidthMm}
+            rollLengthMm={activeScheme2D?.occupiedLengthMm || effectiveRollLengthMm}
+            simCutStep={simCutStep}
+            onChangeSimCutStep={(next) => {
+              setSimCutStep(next);
+              if (next != null && !showPath) setShowPath(true);
+            }}
+          />
+        )}
+
+        {/* 右键上下文快捷操作菜单 */}
+        <WorkbenchContextMenu
+          menu={contextMenu}
+          piece={contextPiece}
+          leftover={contextLeftover}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          canRestoreOriginal={canRestoreOriginal}
+          showDimensions={showDimensions}
+          showPath={showPath}
+          onClose={() => setContextMenu(null)}
+          onRotatePiece={onRotatePlacedPiece}
+          onFocusPiece={(pc) =>
+            boardRef.current?.focusRange(
+              Math.max(0, pc.y - 120),
+              pc.y + pc.height + 120,
+              Math.max(0, pc.x - 120),
+              pc.x + pc.width + 120
+            )
+          }
+          onRemovePiece={onRemovePlacedPiece}
+          onDiscardLeftover={onDiscardLeftover}
+          onFocusLeftover={(rm) =>
+            boardRef.current?.focusRange(
+              Math.max(0, rm.y - 120),
+              rm.y + rm.height + 120,
+              Math.max(0, rm.x - 120),
+              rm.x + rm.width + 120
+            )
+          }
+          onUndo={onUndo}
+          onRedo={onRedo}
+          onRestoreOriginal={onRestoreOriginalPreview}
+          onFitView={() => boardRef.current?.fit()}
+          onResetRollOffset={() => boardRef.current?.resetRollOffset()}
+          onToggleDimensions={() => setShowDimensions((s) => !s)}
+          onTogglePath={() => setShowPath((s) => !s)}
+        />
 
         {/* Minimal Floating Candidate Switcher Pills (only when candidates exist) */}
         {schemes2D.length > 0 && (

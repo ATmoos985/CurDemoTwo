@@ -2,12 +2,20 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useStudioStore, DemandFamilySummary } from '../store/useStudioStore';
 import { StudioSettings } from '../store/studioSettings';
 import {
+  clearWorkbenchDraft,
+  loadWorkbenchDraft,
+  saveWorkbenchDraft,
+  WorkbenchDraftPayload
+} from '../store/workbenchDraft';
+import {
   WorkbenchBoardHandle,
   BoardDemandSpec,
+  BoardLeftover,
   BoardPlacedPiece,
   BoardDefect,
   BoardCutLine
 } from '../components/WorkbenchBoardCanvas';
+import { ModalDialog } from '../components/ModalDialog';
 import { requestJSON, toast } from '@static/app/js/util.js';
 import '../styles/theme-workbench-v2.css';
 
@@ -20,6 +28,7 @@ import {
   computeDefectSchedules1D,
   computeDemandRowsView,
   computeOverviewStats,
+  computeSuggestedFeedWindow,
   exportCam2D,
   exportExcel1D
 } from './workbench/workbenchUtils';
@@ -32,6 +41,12 @@ import { WorkbenchRightPanel } from './workbench/WorkbenchRightPanel';
 import { DemandOverviewModal } from './workbench/DemandOverviewModal';
 
 export { SlittingStripBar } from './workbench/SlittingStripBar';
+
+interface PendingConfirmAction {
+  title: string;
+  description: string;
+  action: () => void;
+}
 
 export const CuttingWorkbenchPage: React.FC<{
   taskId?: string;
@@ -58,6 +73,7 @@ export const CuttingWorkbenchPage: React.FC<{
     canvasMode,
     canvasWidthMm,
     canvasLengthMm,
+    windowStartY2D,
     pieceGapMm,
     trimStartMm,
     selectedRollId,
@@ -72,6 +88,7 @@ export const CuttingWorkbenchPage: React.FC<{
     schemes2D,
     activeSchemeId2D,
     setCanvasSpec,
+    restoreWorkbenchDraft,
     updateDemand2D,
     removeDemand2D,
     addBlankDemand2D,
@@ -144,6 +161,19 @@ export const CuttingWorkbenchPage: React.FC<{
   const [hoveredDemandKey, setHoveredDemandKey] = useState<string | null>(null);
   const [pinnedDemandKey, setPinnedDemandKey] = useState<string | null>(null);
   const [selectedPieceIndex, setSelectedPieceIndex] = useState<number | null>(null);
+  const [selectedLeftoverId, setSelectedLeftoverId] = useState<string | null>(null);
+
+  // 左右侧栏折叠状态（1024px 工业平板可一键折叠腾出最大画布视野）
+  const [leftCollapsed, setLeftCollapsed] = useState<boolean>(false);
+  const [rightCollapsed, setRightCollapsed] = useState<boolean>(false);
+
+  // 按 taskId 隔离的本机草稿恢复提示状态
+  const [recoverableDraft, setRecoverableDraft] = useState<WorkbenchDraftPayload | null>(null);
+  const draftHydratedKeyRef = useRef<string>('');
+  const allowAutoSaveRef = useRef<boolean>(false);
+
+  // 破坏性切换二次确认弹窗（切料 / 重载需求族 / 重载模板）
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirmAction | null>(null);
 
   useEffect(() => {
     setShowPath(settings.showPath);
@@ -220,6 +250,102 @@ export const CuttingWorkbenchPage: React.FC<{
       .catch(() => setTaskSchemes([]));
   }, [activeDimension, loadedTaskId, slitLoadedTaskId]);
 
+  const is2D = activeDimension === '2D';
+  const activeDraftTaskKey = (is2D ? loadedTaskId : slitLoadedTaskId) || taskId || 'scratch';
+
+  // 进入工作台或切换 taskId 时检测该 taskId 隔离的本机草稿
+  useEffect(() => {
+    if (draftHydratedKeyRef.current === activeDraftTaskKey) return;
+    draftHydratedKeyRef.current = activeDraftTaskKey;
+    allowAutoSaveRef.current = false;
+    const found = loadWorkbenchDraft(activeDraftTaskKey);
+    if (
+      found &&
+      ((found.unconfirmedSchemes2D && found.unconfirmedSchemes2D.length > 0) ||
+        (found.activeDemands2D && found.activeDemands2D.length > 0) ||
+        (found.slitOrders && found.slitOrders.length > 0))
+    ) {
+      setRecoverableDraft(found);
+    } else {
+      setRecoverableDraft(null);
+      allowAutoSaveRef.current = true;
+    }
+  }, [activeDraftTaskKey]);
+
+  // 防抖自动保存当前未落库状态至按 taskId 隔离的 localStorage 草稿
+  useEffect(() => {
+    if (!allowAutoSaveRef.current) return;
+    const timer = window.setTimeout(() => {
+      saveWorkbenchDraft(activeDraftTaskKey, {
+        activeDimension,
+        scenario2D,
+        multiWidthsText2D,
+        canvasMode,
+        canvasWidthMm,
+        canvasLengthMm,
+        windowStartY2D,
+        pieceGapMm,
+        trimStartMm,
+        selectedRollId,
+        selectedRemnantId,
+        materialModel2D,
+        activeDemands2D,
+        unconfirmedSchemes2D: schemes2D.filter((s) => !s.confirmedSchemeId),
+        activeSchemeId2D,
+        scenario1D,
+        slitMaterialMode,
+        slitWidthMode,
+        slitProfile,
+        slitMotherWidthMm,
+        slitLeftTrimMm,
+        slitRightTrimMm,
+        slitMinWidthMm,
+        slitMaxWidthMm,
+        slitWidthStepMm,
+        slitOverCap,
+        slitFixedLengthMm,
+        slitAvoidDefects,
+        slitRollId,
+        slitMaterialModel,
+        slitOrders
+      });
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [
+    activeDraftTaskKey,
+    activeDimension,
+    scenario2D,
+    multiWidthsText2D,
+    canvasMode,
+    canvasWidthMm,
+    canvasLengthMm,
+    windowStartY2D,
+    pieceGapMm,
+    trimStartMm,
+    selectedRollId,
+    selectedRemnantId,
+    materialModel2D,
+    activeDemands2D,
+    schemes2D,
+    activeSchemeId2D,
+    scenario1D,
+    slitMaterialMode,
+    slitWidthMode,
+    slitProfile,
+    slitMotherWidthMm,
+    slitLeftTrimMm,
+    slitRightTrimMm,
+    slitMinWidthMm,
+    slitMaxWidthMm,
+    slitWidthStepMm,
+    slitOverCap,
+    slitFixedLengthMm,
+    slitAvoidDefects,
+    slitRollId,
+    slitMaterialModel,
+    slitOrders
+  ]);
+
   const passedRolls = useMemo(
     () => rolls.filter((r) => r.inspectionStatus === 'PASSED'),
     [rolls]
@@ -253,7 +379,17 @@ export const CuttingWorkbenchPage: React.FC<{
 
   useEffect(() => {
     setSelectedPieceIndex(null);
+    setSelectedLeftoverId(null);
   }, [activeSchemeId2D]);
+
+  // 实卷连续开卷工位起切点（支持用户调节，受 >= usedLength 且 < totalLength - 100 约束）
+  const effectiveWindowStartY = useMemo(() => {
+    if (canvasMode !== 'STOCK_ROLL' || !currentRoll2D) return 0;
+    const used = Math.max(0, Number(currentRoll2D.usedLength) || 0);
+    const total = Math.max(used, Number(currentRoll2D.totalLength) || used);
+    if (windowStartY2D == null || !Number.isFinite(windowStartY2D)) return used;
+    return Math.max(used, Math.min(Math.max(used, total - 100), windowStartY2D));
+  }, [canvasMode, currentRoll2D, windowStartY2D]);
 
   const effectiveRollWidthMm = useMemo(() => {
     if (activeScheme2D?.widthMm) return activeScheme2D.widthMm;
@@ -289,8 +425,11 @@ export const CuttingWorkbenchPage: React.FC<{
   }, [activeScheme2D, canvasMode, currentRoll2D, currentRemnant2D]);
 
   const windowDefects2D: BoardDefect[] = useMemo(() => {
+    const startY =
+      activeScheme2D?.canvasMode === 'STOCK_ROLL' && activeScheme2D.windowStartY != null
+        ? activeScheme2D.windowStartY
+        : effectiveWindowStartY;
     if (canvasMode === 'STOCK_ROLL' && currentRoll2D) {
-      const startY = currentRoll2D.usedLength || 0;
       return (currentRoll2D.defects || [])
         .filter((d: any) => d.y < startY + effectiveRollLengthMm && d.y + d.h > startY)
         .map((d: any, idx: number) => ({
@@ -299,7 +438,8 @@ export const CuttingWorkbenchPage: React.FC<{
           y: Math.max(0, (Number(d.y) || 0) - startY),
           w: Number(d.w) || 0,
           h: Number(d.h) || 0,
-          margin: d.margin ?? settings.defectMarginMm
+          margin: d.margin ?? settings.defectMarginMm,
+          label: d.typeName || d.defectType || '疵点'
         }));
     }
     if (canvasMode === 'REMNANT' && currentRemnant2D) {
@@ -309,11 +449,21 @@ export const CuttingWorkbenchPage: React.FC<{
         y: Number(d.y) || 0,
         w: Number(d.w) || 0,
         h: Number(d.h) || 0,
-        margin: d.margin ?? settings.defectMarginMm
+        margin: d.margin ?? settings.defectMarginMm,
+        label: d.typeName || d.defectType || '疵点'
       }));
     }
     return [];
-  }, [canvasMode, currentRoll2D, currentRemnant2D, effectiveRollLengthMm, settings.defectMarginMm]);
+  }, [
+    activeScheme2D?.canvasMode,
+    activeScheme2D?.windowStartY,
+    canvasMode,
+    currentRoll2D,
+    currentRemnant2D,
+    effectiveWindowStartY,
+    effectiveRollLengthMm,
+    settings.defectMarginMm
+  ]);
 
   const boardPlacedPieces: BoardPlacedPiece[] = useMemo(() => {
     if (!activeScheme2D?.result?.layout) return [];
@@ -354,6 +504,21 @@ export const CuttingWorkbenchPage: React.FC<{
       });
     });
     return combined;
+  }, [activeScheme2D]);
+
+  const boardLeftovers: BoardLeftover[] = useMemo(() => {
+    const raw = activeScheme2D?.result?.layout?.leftovers || [];
+    return raw
+      .map((rm: any, idx: number) => ({
+        id: String(rm.id ?? idx + 1),
+        x: Number(rm.x) || 0,
+        y: Number(rm.y) || 0,
+        width: Number(rm.shape?.width ?? rm.w) || 0,
+        height: Number(rm.shape?.height ?? rm.l) || 0,
+        hasDefect: Boolean(rm.hasDefect),
+        shape: rm.shape
+      }))
+      .filter((rm: BoardLeftover) => rm.width > 0 && rm.height > 0);
   }, [activeScheme2D]);
 
   const boardCuts: BoardCutLine[] = useMemo(() => {
@@ -415,6 +580,7 @@ export const CuttingWorkbenchPage: React.FC<{
     multiWidthsText2D,
     canvasWidthMm,
     canvasLengthMm,
+    windowStartY2D: effectiveWindowStartY,
     pieceGapMm,
     trimStartMm,
     materialModel2D,
@@ -454,12 +620,28 @@ export const CuttingWorkbenchPage: React.FC<{
     syncMergedDemandFamiliesProgress
   });
 
+  // 确认方案落库后清除当前任务草稿，防止后续误提示恢复旧草稿
+  useEffect(() => {
+    if (lastConfirmSummary?.schemeId) {
+      clearWorkbenchDraft(activeDraftTaskKey);
+      setRecoverableDraft(null);
+    }
+  }, [lastConfirmSummary?.schemeId, activeDraftTaskKey]);
+
   const {
     validatingLayout,
+    canUndo,
+    canRedo,
+    canRestoreOriginal,
     handleDropStagingPiece,
     handleMovePlacedPiece,
+    handleNudgePlacedPiece,
     handleRotatePlacedPiece,
     handleRemovePlacedPiece,
+    handleDiscardLeftover,
+    handleUndoBoardEdit,
+    handleRedoBoardEdit,
+    handleRestoreOriginalPreview,
     handleValidateAndRebuildLayout
   } = useWorkbenchBoardEdit({
     activeScheme2D,
@@ -471,16 +653,116 @@ export const CuttingWorkbenchPage: React.FC<{
     materialModel2D,
     effectiveRollWidthMm,
     effectiveRollLengthMm,
+    effectiveWindowStartY,
     pieceGapMm,
     trimStartMm,
     windowDefects2D,
     settings,
     removeScheme2D,
     setSelectedPieceIndex,
+    setSelectedLeftoverId,
     setLastConfirmSummary
   });
 
-  const is2D = activeDimension === '2D';
+  // 存在未落库候选方案或手排脏修改时，切换母卷来源或重载需求族/模板必须二次确认
+  const hasUnsavedPreviewWork = useMemo(() => {
+    if (is2D) {
+      return schemes2D.some((s) => !s.confirmedSchemeId) || Boolean(activeScheme2D?.layoutDirty);
+    }
+    return slitSchemes.some(
+      (s) => s.state === 'SUCCEEDED' && !s.confirmedSchemeId && s.strategyId !== 'BASELINE'
+    );
+  }, [is2D, schemes2D, activeScheme2D?.layoutDirty, slitSchemes]);
+
+  const guardDestructiveSwitch = (title: string, description: string, action: () => void) => {
+    if (!hasUnsavedPreviewWork) {
+      action();
+      return;
+    }
+    setPendingConfirm({ title, description, action });
+  };
+
+  const handleRequestChangeMaterial2D = (spec: Record<string, any>, label: string) => {
+    guardDestructiveSwitch(
+      `确认${label}？`,
+      '当前工作台存在未选定落库的候选方案或手调排布修改。切换母卷/料头来源后将清空当前未确认预览方案，是否继续？',
+      () => {
+        clearSchemes2D();
+        setLastConfirmSummary(null);
+        setCanvasSpec(spec);
+      }
+    );
+  };
+
+  const handleRequestChangeMaterial1D = (spec: Record<string, any>, label: string) => {
+    guardDestructiveSwitch(
+      `确认${label}？`,
+      '当前存在未落库的一维分切候选方案。切换母卷来源后将清空当前候选方案，是否继续？',
+      () => {
+        setSlitSchemes([]);
+        setLastConfirmSummary(null);
+        setSlitSpec(spec);
+      }
+    );
+  };
+
+  const handleSuggestFeedWindow = () => {
+    if (canvasMode !== 'STOCK_ROLL' || !currentRoll2D) return;
+    const suggestion = computeSuggestedFeedWindow({
+      roll: currentRoll2D,
+      demands: activeDemands2D,
+      windowStartY: effectiveWindowStartY,
+      trimStartMm,
+      defaultDefectMarginMm: settings.defectMarginMm
+    });
+    setCanvasSpec({
+      canvasLengthMm: suggestion.suggestedLengthMm,
+      windowStartY2D: suggestion.suggestedStartY
+    });
+    toast(suggestion.reason);
+  };
+
+  const handleGuardedLoadFamily = (fam: DemandFamilySummary) => {
+    guardDestructiveSwitch(
+      `确认载入需求族「${fam.name}」？`,
+      '当前工作台存在未落库的候选方案或手排修改。切换需求族将替换当前需求列表并清空未确认预览，是否继续？',
+      () => {
+        setLastConfirmSummary(null);
+        loadDemandFamilyIntoWorkbench(fam);
+      }
+    );
+  };
+
+  const handleGuardedLoadCluster2D = (clusterId: string, append: boolean) => {
+    if (append) {
+      loadClusterInto2D(clusterId, true);
+      return;
+    }
+    guardDestructiveSwitch(
+      '确认重载需求模板？',
+      '当前工作台存在未落库的候选方案或手排修改。重新载入模板将清空当前候选预览并替换需求清单，是否继续？',
+      () => {
+        setLastConfirmSummary(null);
+        loadClusterInto2D(clusterId, false);
+      }
+    );
+  };
+
+  const handleGuardedLoadCluster1D = (clusterId: string, append: boolean) => {
+    if (append) {
+      loadClusterInto1D(clusterId, true);
+      return;
+    }
+    guardDestructiveSwitch(
+      '确认重载一维分切模板？',
+      '当前存在未落库的一维分切候选方案。重新载入模板将清空当前候选方案，是否继续？',
+      () => {
+        setLastConfirmSummary(null);
+        loadClusterInto1D(clusterId, false);
+      }
+    );
+  };
+
   const filteredClusters = clusters.filter((c) => c.dimension === activeDimension);
   const quickCluster =
     filteredClusters.find((c) => c.id === activeClusterQuickId) || filteredClusters[0];
@@ -551,6 +833,14 @@ export const CuttingWorkbenchPage: React.FC<{
 
   const activeHighlightKey = hoveredDemandKey || pinnedDemandKey;
 
+  const splitCls = [
+    'studio-split',
+    leftCollapsed ? 'is-left-collapsed' : '',
+    rightCollapsed ? 'is-right-collapsed' : ''
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
     <div className="react-page studio-2d-page wb-v2">
       <WorkbenchTopBar
@@ -561,15 +851,22 @@ export const CuttingWorkbenchPage: React.FC<{
         leftPaneRef={leftPaneRef}
         rightPaneRef={rightPaneRef}
         stripRef={stripRef}
+        leftCollapsed={leftCollapsed}
+        rightCollapsed={rightCollapsed}
+        onToggleLeftPane={() => setLeftCollapsed((v) => !v)}
+        onToggleRightPane={() => setRightCollapsed((v) => !v)}
         canvasMode={canvasMode}
         scenario2D={scenario2D}
         multiWidthsText2D={multiWidthsText2D}
         setMultiWidthsText2D={setMultiWidthsText2D}
         canvasWidthMm={canvasWidthMm}
         canvasLengthMm={canvasLengthMm}
+        effectiveWindowStartY={effectiveWindowStartY}
         pieceGapMm={pieceGapMm}
         trimStartMm={trimStartMm}
         setCanvasSpec={setCanvasSpec}
+        onRequestChangeMaterial2D={handleRequestChangeMaterial2D}
+        onSuggestFeedWindow={handleSuggestFeedWindow}
         passedRolls={passedRolls}
         availableRemnants={availableRemnants}
         currentRoll2D={currentRoll2D}
@@ -584,55 +881,103 @@ export const CuttingWorkbenchPage: React.FC<{
         slitMaxWidthMm={slitMaxWidthMm}
         currentRoll1D={currentRoll1D}
         setSlitSpec={setSlitSpec}
+        onRequestChangeMaterial1D={handleRequestChangeMaterial1D}
       />
 
-      <div className="studio-split">
-        <WorkbenchDemandSidebar
-          leftPaneRef={leftPaneRef}
-          is2D={is2D}
-          demandSourceTab={demandSourceTab}
-          setDemandSourceTab={setDemandSourceTab}
-          filteredPoolFamilies={filteredPoolFamilies}
-          filteredClusters={filteredClusters}
-          loadedTaskId={loadedTaskId}
-          loadedTaskName={loadedTaskName}
-          slitLoadedTaskId={slitLoadedTaskId}
-          slitLoadedTaskName={slitLoadedTaskName}
-          loadDemandFamilyIntoWorkbench={loadDemandFamilyIntoWorkbench}
-          onClearConfirmSummary={() => setLastConfirmSummary(null)}
-          quickCluster={quickCluster}
-          quickCounts={quickCounts}
-          setActiveClusterQuickId={setActiveClusterQuickId}
-          setClusterCount={setClusterCount}
-          loadClusterInto2D={loadClusterInto2D}
-          loadClusterInto1D={loadClusterInto1D}
-          overviewStats={overviewStats}
-          demandRowsView={demandRowsView}
-          activeHighlightKey={activeHighlightKey}
-          setHoveredDemandKey={setHoveredDemandKey}
-          setPinnedDemandKey={setPinnedDemandKey}
-          onOpenOverview={(tab) => {
-            setOverviewTab(tab);
-            setOverviewModalOpen(true);
-          }}
-          onAddBlankDemand={() => {
-            if (is2D) addBlankDemand2D();
-            else addSlitOrder();
-            setOverviewTab('edit');
-            setOverviewModalOpen(true);
-          }}
-        />
+      {/* 按 taskId 隔离的本机草稿自动恢复提示条 */}
+      {recoverableDraft && (
+        <div className="wb-draft-banner" role="status">
+          <span>
+            检测到本机未落库工作台草稿（保存于{' '}
+            <b className="num">
+              {new Date(recoverableDraft.savedAt).toLocaleString('zh-CN', { hour12: false })}
+            </b>
+            ，含 {recoverableDraft.activeDemands2D?.length || 0} 条二维需求 /{' '}
+            {recoverableDraft.unconfirmedSchemes2D?.length || 0} 套未确认手调方案）
+          </span>
+          <span className="sp" />
+          <button
+            type="button"
+            className="btn sm pri"
+            onClick={() => {
+              restoreWorkbenchDraft(recoverableDraft);
+              setRecoverableDraft(null);
+              allowAutoSaveRef.current = true;
+              toast('已恢复本机工作台草稿');
+            }}
+          >
+            恢复草稿
+          </button>
+          <button
+            type="button"
+            className="btn sm"
+            onClick={() => {
+              clearWorkbenchDraft(activeDraftTaskKey);
+              setRecoverableDraft(null);
+              allowAutoSaveRef.current = true;
+            }}
+          >
+            忽略并清除
+          </button>
+        </div>
+      )}
+
+      <div className={splitCls}>
+        {!leftCollapsed && (
+          <WorkbenchDemandSidebar
+            leftPaneRef={leftPaneRef}
+            is2D={is2D}
+            demandSourceTab={demandSourceTab}
+            setDemandSourceTab={setDemandSourceTab}
+            filteredPoolFamilies={filteredPoolFamilies}
+            filteredClusters={filteredClusters}
+            loadedTaskId={loadedTaskId}
+            loadedTaskName={loadedTaskName}
+            slitLoadedTaskId={slitLoadedTaskId}
+            slitLoadedTaskName={slitLoadedTaskName}
+            loadDemandFamilyIntoWorkbench={handleGuardedLoadFamily}
+            onClearConfirmSummary={() => setLastConfirmSummary(null)}
+            quickCluster={quickCluster}
+            quickCounts={quickCounts}
+            setActiveClusterQuickId={setActiveClusterQuickId}
+            setClusterCount={setClusterCount}
+            loadClusterInto2D={handleGuardedLoadCluster2D}
+            loadClusterInto1D={handleGuardedLoadCluster1D}
+            overviewStats={overviewStats}
+            demandRowsView={demandRowsView}
+            activeHighlightKey={activeHighlightKey}
+            setHoveredDemandKey={setHoveredDemandKey}
+            setPinnedDemandKey={setPinnedDemandKey}
+            onOpenOverview={(tab) => {
+              setOverviewTab(tab);
+              setOverviewModalOpen(true);
+            }}
+            onAddBlankDemand={() => {
+              if (is2D) addBlankDemand2D();
+              else addSlitOrder();
+              setOverviewTab('edit');
+              setOverviewModalOpen(true);
+            }}
+          />
+        )}
 
         <WorkbenchCenterPanel
           is2D={is2D}
           stripRef={stripRef}
           boardRef={boardRef}
+          vertical={settings.vertical}
+          onToggleVertical={() =>
+            updateStudioSettings({ ...settings, vertical: !settings.vertical })
+          }
+          startCorner={settings.startCorner}
           showDimensions={showDimensions}
           setShowDimensions={setShowDimensions}
           showPath={showPath}
           setShowPath={setShowPath}
           selectedPieceIndex={selectedPieceIndex}
           setSelectedPieceIndex={setSelectedPieceIndex}
+          selectedLeftoverId={selectedLeftoverId}
+          setSelectedLeftoverId={setSelectedLeftoverId}
           cursor={cursor}
           setCursor={setCursor}
           activeScheme2D={activeScheme2D}
@@ -649,13 +994,22 @@ export const CuttingWorkbenchPage: React.FC<{
           windowDefects2D={windowDefects2D}
           boardStagingDemands={boardStagingDemands}
           boardPlacedPieces={boardPlacedPieces}
+          boardLeftovers={boardLeftovers}
           boardCuts={boardCuts}
           activeHighlightKey={activeHighlightKey}
           setHoveredDemandKey={setHoveredDemandKey}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          canRestoreOriginal={canRestoreOriginal}
+          onUndo={handleUndoBoardEdit}
+          onRedo={handleRedoBoardEdit}
+          onRestoreOriginalPreview={handleRestoreOriginalPreview}
           onDropStagingPiece={handleDropStagingPiece}
           onMovePlacedPiece={handleMovePlacedPiece}
+          onNudgePlacedPiece={handleNudgePlacedPiece}
           onRotatePlacedPiece={handleRotatePlacedPiece}
           onRemovePlacedPiece={handleRemovePlacedPiece}
+          onDiscardLeftover={handleDiscardLeftover}
           validatingLayout={validatingLayout}
           onValidateAndRebuildLayout={handleValidateAndRebuildLayout}
           slitSchemes={slitSchemes}
@@ -674,54 +1028,84 @@ export const CuttingWorkbenchPage: React.FC<{
           onQuickExportExcel1D={() => exportExcel1D(activeScheme1D)}
         />
 
-        <WorkbenchRightPanel
-          rightPaneRef={rightPaneRef}
-          is2D={is2D}
-          schemes2D={schemes2D}
-          activeScheme2D={activeScheme2D}
-          activeScheme1D={activeScheme1D}
-          strategyRuns2D={strategyRuns2D}
-          runningSolve={runningSolve}
-          solveElapsedMs={solveElapsedMs}
-          confirmingScheme={confirmingScheme}
-          validatingLayout={validatingLayout}
-          lastConfirmSummary={lastConfirmSummary}
-          onContinueAfterConfirm={() => {
-            setLastConfirmSummary(null);
-            if (is2D) clearSchemes2D();
-            else setSlitSchemes([]);
-          }}
-          onValidateAndRebuildLayout={handleValidateAndRebuildLayout}
-          onConfirmSelectedScheme2D={handleConfirmSelectedScheme2D}
-          onConfirmSelectedScheme1D={handleConfirmSelectedScheme1D}
-          onQuickExportCam={(kind) => exportCam2D(activeScheme2D, settings, kind)}
-          onStopSolve={handleStopSolve}
-          onRunSolve2D={handleRunSolve2D}
-          onRunSolve1D={handleRunSolve1D}
-          canvasMode={canvasMode}
-          scenario2D={scenario2D}
-          setScenario2D={setScenario2D}
-          scenario1D={scenario1D}
-          setScenario1D={setScenario1D}
-          overviewStats={overviewStats}
-          effectiveRollWidthMm={effectiveRollWidthMm}
-          activeAlgos={activeAlgos}
-          slitMaterialMode={slitMaterialMode}
-          slitProfile={slitProfile}
-          slitWidthMode={slitWidthMode}
-          slitMotherWidthMm={slitMotherWidthMm}
-          slitLeftTrimMm={slitLeftTrimMm}
-          slitRightTrimMm={slitRightTrimMm}
-          slitMinWidthMm={slitMinWidthMm}
-          slitMaxWidthMm={slitMaxWidthMm}
-          slitWidthStepMm={slitWidthStepMm}
-          slitOverCap={slitOverCap}
-          currentRoll1D={currentRoll1D}
-          setSlitSpec={setSlitSpec}
-          settings={settings}
-          updateStudioSettings={updateStudioSettings}
-        />
+        {!rightCollapsed && (
+          <WorkbenchRightPanel
+            rightPaneRef={rightPaneRef}
+            is2D={is2D}
+            schemes2D={schemes2D}
+            activeScheme2D={activeScheme2D}
+            activeScheme1D={activeScheme1D}
+            strategyRuns2D={strategyRuns2D}
+            runningSolve={runningSolve}
+            solveElapsedMs={solveElapsedMs}
+            confirmingScheme={confirmingScheme}
+            validatingLayout={validatingLayout}
+            lastConfirmSummary={lastConfirmSummary}
+            onContinueAfterConfirm={() => {
+              setLastConfirmSummary(null);
+              if (is2D) clearSchemes2D();
+              else setSlitSchemes([]);
+            }}
+            onValidateAndRebuildLayout={handleValidateAndRebuildLayout}
+            onConfirmSelectedScheme2D={handleConfirmSelectedScheme2D}
+            onConfirmSelectedScheme1D={handleConfirmSelectedScheme1D}
+            onQuickExportCam={(kind) => exportCam2D(activeScheme2D, settings, kind, windowDefects2D)}
+            onStopSolve={handleStopSolve}
+            onRunSolve2D={handleRunSolve2D}
+            onRunSolve1D={handleRunSolve1D}
+            canvasMode={canvasMode}
+            scenario2D={scenario2D}
+            setScenario2D={setScenario2D}
+            scenario1D={scenario1D}
+            setScenario1D={setScenario1D}
+            overviewStats={overviewStats}
+            effectiveRollWidthMm={effectiveRollWidthMm}
+            activeAlgos={activeAlgos}
+            slitMaterialMode={slitMaterialMode}
+            slitProfile={slitProfile}
+            slitWidthMode={slitWidthMode}
+            slitMotherWidthMm={slitMotherWidthMm}
+            slitLeftTrimMm={slitLeftTrimMm}
+            slitRightTrimMm={slitRightTrimMm}
+            slitMinWidthMm={slitMinWidthMm}
+            slitMaxWidthMm={slitMaxWidthMm}
+            slitWidthStepMm={slitWidthStepMm}
+            slitOverCap={slitOverCap}
+            currentRoll1D={currentRoll1D}
+            setSlitSpec={setSlitSpec}
+            settings={settings}
+            updateStudioSettings={updateStudioSettings}
+          />
+        )}
       </div>
+
+      {/* 切料 / 重载需求二次防呆确认弹窗 */}
+      <ModalDialog
+        open={Boolean(pendingConfirm)}
+        title={pendingConfirm?.title || '确认切换操作'}
+        onClose={() => setPendingConfirm(null)}
+        maxWidth={440}
+      >
+        <p style={{ margin: '0 0 16px', fontSize: 13, lineHeight: 1.6 }}>
+          {pendingConfirm?.description}
+        </p>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button type="button" className="btn" onClick={() => setPendingConfirm(null)}>
+            取消
+          </button>
+          <button
+            type="button"
+            className="btn pri"
+            onClick={() => {
+              const fn = pendingConfirm?.action;
+              setPendingConfirm(null);
+              fn?.();
+            }}
+          >
+            确认切换
+          </button>
+        </div>
+      </ModalDialog>
 
       <DemandOverviewModal
         open={overviewModalOpen}

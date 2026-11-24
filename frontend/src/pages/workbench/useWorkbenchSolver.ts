@@ -40,6 +40,7 @@ export interface UseWorkbenchSolverOptions {
   multiWidthsText2D: string;
   canvasWidthMm: number;
   canvasLengthMm: number;
+  windowStartY2D?: number | null;
   pieceGapMm: number;
   trimStartMm: number;
   materialModel2D: string;
@@ -101,6 +102,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
     multiWidthsText2D,
     canvasWidthMm,
     canvasLengthMm,
+    windowStartY2D,
     pieceGapMm,
     trimStartMm,
     materialModel2D,
@@ -244,8 +246,20 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
       }))
     );
 
+    const rollUsedLen =
+      canvasMode === 'STOCK_ROLL' && currentRoll2D ? Number(currentRoll2D.usedLength) || 0 : 0;
+    const rollTotalLen =
+      canvasMode === 'STOCK_ROLL' && currentRoll2D ? Number(currentRoll2D.totalLength) || 0 : 0;
     const startOffset =
-      canvasMode === 'STOCK_ROLL' && currentRoll2D ? currentRoll2D.usedLength || 0 : 0;
+      canvasMode === 'STOCK_ROLL' && currentRoll2D
+        ? Math.max(
+            rollUsedLen,
+            Math.min(
+              Math.max(rollUsedLen, rollTotalLen - 100),
+              windowStartY2D != null && Number.isFinite(windowStartY2D) ? windowStartY2D : rollUsedLen
+            )
+          )
+        : 0;
     const windowDefects =
       canvasMode === 'STOCK_ROLL' && currentRoll2D
         ? (currentRoll2D.defects || [])
@@ -287,7 +301,13 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         activeSessionsRef.current.push(session);
         const stockMaxCap =
           canvasMode === 'STOCK_ROLL' && currentRoll2D
-            ? Math.max(200, currentRoll2D.currentRemainingLength ?? currentRoll2D.totalLength)
+            ? Math.max(
+                200,
+                Math.min(
+                  Math.max(200, (currentRoll2D.totalLength || 0) - startOffset),
+                  currentRoll2D.currentRemainingLength ?? currentRoll2D.totalLength
+                )
+              )
             : undefined;
         const built = buildSafeNestingRequest2D({
           strategy: def,

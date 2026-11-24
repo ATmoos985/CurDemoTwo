@@ -287,6 +287,30 @@
   min-height: 0;
 }
 
+/* 屏幕贴边固定标尺与画布触控防抢占 */
+.wb-board-konva-host {
+  touch-action: none;
+}
+
+.wb-board-ruler-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 6;
+}
+
+@media (max-width: 1100px) {
+  .studio-split {
+    grid-template-columns: 216px minmax(0, 1fr) 228px;
+  }
+  .studio-top-bar .btn,
+  .ctool button {
+    touch-action: manipulation;
+  }
+}
+
 .studio-canvas-hint {
   min-block-size: 24px;
   padding: 3px 12px;

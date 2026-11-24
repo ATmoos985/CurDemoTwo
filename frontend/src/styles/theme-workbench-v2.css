@@ -1342,15 +1342,244 @@
   white-space: nowrap;
 }
 
-/* ---------- 6. Responsive Compact Guard (1366x768) ---------- */
+/* ---------- 6. Responsive Compact Guard (1366x768 & 1024px Industrial Tablet) ---------- */
+.studio-2d-page.wb-v2 .wb-pane-toggles {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.studio-2d-page.wb-v2 .wb-starty-slider {
+  width: 78px;
+  accent-color: var(--cp-accent, #5b61f6);
+  cursor: pointer;
+}
+
+.studio-2d-page.wb-v2 .wb-draft-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: #eff6ff;
+  border-bottom: 1px solid rgba(59, 130, 246, 0.25);
+  color: #1e40af;
+  font-size: 12px;
+}
+
+.studio-2d-page.wb-v2 .wb-leftover-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  background: #ecfdf5;
+  border-bottom: 1px solid rgba(16, 185, 129, 0.28);
+  color: #065f46;
+  font-size: 11.5px;
+}
+
+.studio-2d-page.wb-v2 .ctool-nudge-hint {
+  font-size: 10.5px;
+  color: var(--cp-ink-3, #8e929b);
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+/* 走刀动画仿真控制条 */
+.wb-sim-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #f8f9fb;
+  border-top: 1px solid var(--cp-divider, rgba(15, 23, 42, 0.08));
+  color: var(--cp-ink-2, #52525b);
+  font-size: 11.5px;
+  flex-wrap: wrap;
+}
+
+.wb-sim-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.wb-sim-speeds {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0 2px;
+}
+
+.wb-sim-bar button {
+  height: 25px;
+  min-block-size: 25px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #ffffff;
+  color: var(--cp-ink-2, #52525b);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.wb-sim-bar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.wb-sim-bar button.on {
+  background: var(--cp-accent-soft, rgba(91, 97, 246, 0.12));
+  border-color: var(--cp-accent, #5b61f6);
+  color: var(--cp-accent-ink, #4338ca);
+  font-weight: 600;
+}
+
+.wb-sim-status {
+  font-size: 11px;
+  color: var(--cp-ink-2, #52525b);
+  white-space: nowrap;
+}
+
+/* 右键上下文菜单 */
+.wb-context-menu {
+  position: fixed;
+  z-index: 80;
+  min-width: 196px;
+  padding: 5px;
+  border-radius: 9px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wb-context-menu .wb-ctx-header {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 8px 6px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  margin-bottom: 2px;
+  font-size: 11.5px;
+}
+
+.wb-context-menu .wb-ctx-header span {
+  font-size: 10.5px;
+  color: var(--cp-ink-3, #71717a);
+}
+
+.wb-context-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cp-ink, #18181b);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-context-menu button:hover:not(:disabled) {
+  background: rgba(91, 97, 246, 0.08);
+  color: var(--cp-accent-ink, #4338ca);
+}
+
+.wb-context-menu button.is-danger:hover:not(:disabled) {
+  background: rgba(225, 29, 72, 0.08);
+  color: #be123c;
+}
+
+.wb-context-menu button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.wb-context-menu kbd {
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--cp-ink-3, #8e929b);
+}
+
+.wb-context-menu .wb-ctx-sep {
+  height: 1px;
+  background: rgba(15, 23, 42, 0.08);
+  margin: 3px 4px;
+}
+
+/* 侧栏一键折叠布局状态 */
+.studio-2d-page.wb-v2 .studio-split.is-left-collapsed {
+  grid-template-columns: minmax(0, 1fr) 292px;
+}
+
+.studio-2d-page.wb-v2 .studio-split.is-right-collapsed {
+  grid-template-columns: 272px minmax(0, 1fr);
+}
+
+.studio-2d-page.wb-v2 .studio-split.is-left-collapsed.is-right-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 @media (max-width: 1400px) {
   .studio-2d-page.wb-v2 .studio-split {
     grid-template-columns: 244px minmax(0, 1fr) 264px;
     gap: 8px;
     padding: 8px 10px 10px;
   }
+  .studio-2d-page.wb-v2 .studio-split.is-left-collapsed {
+    grid-template-columns: minmax(0, 1fr) 264px;
+  }
+  .studio-2d-page.wb-v2 .studio-split.is-right-collapsed {
+    grid-template-columns: 244px minmax(0, 1fr);
+  }
+  .studio-2d-page.wb-v2 .studio-split.is-left-collapsed.is-right-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .studio-2d-page.wb-v2 .studio-top-bar {
     padding: 6px 12px;
     gap: 7px;
+  }
+}
+
+/* 1024px 工业平板断点与触控友好规则 */
+@media (max-width: 1100px) {
+  .studio-2d-page.wb-v2 .studio-top-bar {
+    padding: 6px 10px;
+    gap: 6px;
+  }
+  .studio-2d-page.wb-v2 .studio-split {
+    grid-template-columns: 214px minmax(0, 1fr) 226px;
+    gap: 6px;
+    padding: 6px 8px 8px;
+  }
+  .studio-2d-page.wb-v2 .studio-split.is-left-collapsed {
+    grid-template-columns: minmax(0, 1fr) 226px;
+  }
+  .studio-2d-page.wb-v2 .studio-split.is-right-collapsed {
+    grid-template-columns: 214px minmax(0, 1fr);
+  }
+  .studio-2d-page.wb-v2 .studio-split.is-left-collapsed.is-right-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .studio-2d-page.wb-v2 .width-quick-pills {
+    display: none;
+  }
+  .studio-2d-page.wb-v2 .studio-center .ctool button,
+  .studio-2d-page.wb-v2 .wb-sim-bar button {
+    min-block-size: 32px;
+    touch-action: manipulation;
   }
 }

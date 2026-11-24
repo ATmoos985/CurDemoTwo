@@ -5,9 +5,13 @@ import {
   advance,
   round
 } from '@static/js/inspection/inspection-model.js';
-import { CadCanvasView } from '../components/CadCanvasView';
+import {
+  WorkbenchBoardCanvas,
+  WorkbenchBoardHandle,
+  BoardDefect,
+  BoardZone
+} from '../components/WorkbenchBoardCanvas';
 import { NumberInput } from '../components/ui/NumberInput';
-import { buildInspectionScene } from '@static/app/js/model/roll-scene.js';
 import {
   SegmentedControl,
   CodeBadge,
@@ -88,7 +92,7 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
   const [fType, setFType] = useState<string>('STAIN');
   const [fMargin, setFMargin] = useState<string | number>(20);
 
-  const canvasRef = useRef<any>(null);
+  const canvasRef = useRef<WorkbenchBoardHandle | null>(null);
   const stateRef = useRef({
     roll,
     pending,
@@ -277,11 +281,57 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
     };
   }, [rollParam]);
 
-  const inspectionScene = useMemo(() => {
-    if (!roll) return null;
+  // 静态疵点与已用区段独立 memo（绝不依赖 10Hz 变化的 pos，确保跑布期间零节点销毁重建）
+  const inspectionDefects: BoardDefect[] = useMemo(() => {
+    if (!roll) return [];
+    return allDefects.map((d: any) => ({
+      id: defectKey(d),
+      x: Number(d.x) || 0,
+      y: Number(d.y) || 0,
+      w: Math.max(0.5, Number(d.w) || 10),
+      h: Math.max(0.5, Number(d.h) || 10),
+      margin: Number(d.margin ?? 0),
+      label: d.typeName || d.defectType || '疵点',
+      editable: !d.saved,
+      fresh: !d.saved
+    }));
+  }, [roll, allDefects]);
+
+  const inspectionZones: BoardZone[] = useMemo(() => {
+    if (!roll) return [];
+    const usedLen = Number(roll.usedLength || 0);
+    const totalLen = Math.max(10, Number(roll.totalLength || 3000));
+    if (usedLen <= 0) return [];
+    return [
+      {
+        id: 'roll-used-band',
+        startY: 0,
+        lengthMm: Math.min(usedLen, totalLen),
+        kind: 'used',
+        label: `已使用 ${(usedLen / 1000).toFixed(2)} m`
+      }
+    ];
+  }, [roll?.rollId, roll?.usedLength, roll?.totalLength]);
+
+  const emptyDemands = useMemo(() => [], []);
+  const emptyPlaced = useMemo(() => [], []);
+  const selectedDefectKey = useMemo(() => {
     const curD = sel != null ? allDefects[sel] : null;
-    return buildInspectionScene(roll, pending, pos, curD ? defectKey(curD) : null);
-  }, [roll, pending, pos, sel, allDefects]);
+    return curD ? String(defectKey(curD)) : null;
+  }, [sel, allDefects]);
+
+  // 跟随验布线模式：仅在非全卷视图下平滑移动视口，不触发静态底图/疵点层重建
+  const prevOverviewRef = useRef(overview);
+  useEffect(() => {
+    if (!roll) return;
+    const prevOverview = prevOverviewRef.current;
+    prevOverviewRef.current = overview;
+    if (!overview) {
+      canvasRef.current?.followPosition(pos);
+    } else if (!prevOverview && overview) {
+      canvasRef.current?.fit();
+    }
+  }, [roll?.rollId, overview, pos]);
 
   const handleCanvasInteract = () => {
     if (stateRef.current.running) {
@@ -294,12 +344,12 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
     }
   };
 
-  const handleCanvasCursor = (p: { u: number; v: number } | null) => {
+  const handleCanvasCursor = (pt: { x: number; y: number } | null) => {
     const curRoll = stateRef.current.roll;
     if (!curRoll) return;
     setPointerText(
-      p
-        ? `距右 ${round(curRoll.width - p.v)} · 距卷头 ${round(p.u)} mm`
+      pt
+        ? `距右 ${round(curRoll.width - pt.x)} · 距卷头 ${round(pt.y)} mm`
         : '距右 / 距卷头 · mm'
     );
   };
@@ -1011,7 +1061,7 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                   } else {
                     setOverview(false);
                     setRunning(true);
-                    canvasRef.current?.fit();
+                    canvasRef.current?.followPosition(pos);
                   }
                 }}
               >
@@ -1080,7 +1130,7 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                     className={!overview ? 'on' : ''}
                     onClick={() => {
                       setOverview(false);
-                      setTimeout(() => canvasRef.current?.fit(), 0);
+                      setTimeout(() => canvasRef.current?.followPosition(stateRef.current.pos), 0);
                     }}
                   >
                     跟随验布线
@@ -1129,9 +1179,22 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                     inset: 0
                   }}
                 >
-                  <CadCanvasView
-                    scene={inspectionScene}
-                    viewMode={overview ? 'full' : 'inspection'}
+                  <WorkbenchBoardCanvas
+                    rollTitle={roll.rollId ? String(roll.rollId) : '验布母卷'}
+                    rollWidthMm={Math.max(10, Number(roll.width || 1500))}
+                    rollLengthMm={Math.max(10, Number(roll.totalLength || 3000))}
+                    occupiedLengthMm={0}
+                    trimStartMm={0}
+                    pieceGapMm={0}
+                    defects={inspectionDefects}
+                    demands={emptyDemands}
+                    placedPieces={emptyPlaced}
+                    zones={inspectionZones}
+                    feedPositionMm={pos}
+                    selectedDefectId={selectedDefectKey}
+                    showStaging={false}
+                    interactivePieces={false}
+                    vertical={true}
                     tool={
                       tool === 'mark'
                         ? 'defect'
@@ -1141,14 +1204,15 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                     }
                     showDimensions={true}
                     showPath={false}
-                    minHeight={360}
+                    highlightedDemandKey={null}
+                    selectedPieceIndex={null}
                     ariaLabel="验布实时画布"
                     onInteract={handleCanvasInteract}
                     onCursorMove={handleCanvasCursor}
                     onDefectSelect={handleCanvasDefectSelect}
                     onDefectDraw={handleCanvasDefectDraw}
                     onDefectEdit={handleCanvasDefectEdit}
-                    canvasRefOut={canvasRef}
+                    boardRef={canvasRef}
                   />
                 </div>
               </div>
@@ -1376,7 +1440,7 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                               setPos(nextPos);
                               setOverview(false);
                               persistDraft(roll, pending, nextPos);
-                              setTimeout(() => canvasRef.current?.fit(), 0);
+                              setTimeout(() => canvasRef.current?.followPosition(nextPos), 0);
                             }}
                           >
                             <td className="num">{(d.y / 1000).toFixed(2)}</td>
