@@ -47,6 +47,8 @@ interface CuttingStatePort {
     interface ReadView {
         long operationTime();
 
+        long currentRevision();
+
         List<DemandTemplate> listTemplates();
 
         List<SchedulingScheme> listSchemes();
@@ -62,6 +64,11 @@ interface CuttingStatePort {
         Optional<CuttingTask> findTask(String id);
 
         Optional<CuttingTask> findTaskByExternalRef(String externalRef);
+
+        Optional<CuttingTask> findTaskByReplenishIdempotencyKey(String idempotencyKey);
+
+        /** 校验目标母卷或料头的缸号/色号是否满足任务的防色差约束（不匹配抛 IllegalArgumentException）。 */
+        void validateBatchAndColorForTask(CuttingTask task, MotherRollInfo roll, RemnantStock remnant);
 
         List<CuttingPlan> listPlans();
 

@@ -86,7 +86,11 @@ public class FabricCutController {
     public Map<String, Object> plan(@PathVariable String id) { return workflowService.getPlan(id); }
 
     @GetMapping("/cutting/tasks/{id}/plans")
-    public java.util.List<com.example.cutdemotwo.business.model.CuttingPlan> taskPlans(@PathVariable String id) { return remnantService.taskPlans(id); }
+    public java.util.List<com.example.cutdemotwo.business.model.CuttingPlan> taskPlans(
+            @PathVariable String id,
+            @RequestParam(defaultValue = "false") boolean summary) {
+        return remnantService.taskPlans(id, summary);
+    }
 
     /** 待报工候选的有效性：失效的方案编号 → 原因。 */
     @GetMapping("/cutting/tasks/{id}/plan-checks")
@@ -137,6 +141,20 @@ public class FabricCutController {
         return remnantService.disposeQuality(id, command);
     }
 
+    @PostMapping("/cutting/reports/{reportId}/dispositions/{dispositionId}/revoke")
+    public Map<String, Object> revokeQualityDisposition(
+            @PathVariable String reportId,
+            @PathVariable String dispositionId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String headerKey,
+            @RequestBody com.example.cutdemotwo.business.cutting.RemnantService.RevokeDispositionCommand body) {
+        var cmd = body == null ? null : new com.example.cutdemotwo.business.cutting.RemnantService.RevokeDispositionCommand(
+                FactoryDocumentController.resolveIdempotencyKey(body.idempotencyKey(), headerKey),
+                body.operator(),
+                body.reason()
+        );
+        return remnantService.revokeQualityDisposition(reportId, dispositionId, cmd);
+    }
+
     @PostMapping("/cutting/reports/{id}/reverse")
     public Map<String, Object> reverseReport(@PathVariable String id, @RequestBody Map<String, String> body) {
         return remnantService.reverseReport(id, body.get("reason"));
@@ -182,8 +200,10 @@ public class FabricCutController {
     }
 
     @GetMapping("/rolls")
-    public java.util.List<com.example.cutdemotwo.business.model.MotherRollInfo> listRolls() {
-        return remnantService.getMotherRolls();
+    public java.util.List<com.example.cutdemotwo.business.model.MotherRollInfo> listRolls(
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) Integer offset) {
+        return FactoryDocumentController.slicePage(remnantService.getMotherRolls(), limit, offset);
     }
 
     @GetMapping("/rolls/{rollId}")
@@ -241,13 +261,21 @@ public class FabricCutController {
     }
 
     @GetMapping("/remnants")
-    public java.util.List<com.example.cutdemotwo.business.model.RemnantStock> listRemnants(@RequestParam(required = false) String rollId,
-            @RequestParam(defaultValue = "false") boolean includeQuarantined) {
-        if (!includeQuarantined) return remnantService.getRemnantsByRollId(rollId);
-        return remnantService.getAllRemnants().stream()
-                .filter(r -> "AVAILABLE".equals(r.getStatus()) || "QUARANTINED".equals(r.getStatus()))
-                .filter(r -> rollId == null || rollId.isBlank() || "ALL".equalsIgnoreCase(rollId) || rollId.trim().equalsIgnoreCase(r.getSourceRollId()))
-                .sorted(java.util.Comparator.comparing(com.example.cutdemotwo.business.model.RemnantStock::getId)).toList();
+    public java.util.List<com.example.cutdemotwo.business.model.RemnantStock> listRemnants(
+            @RequestParam(required = false) String rollId,
+            @RequestParam(defaultValue = "false") boolean includeQuarantined,
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) Integer offset) {
+        java.util.List<com.example.cutdemotwo.business.model.RemnantStock> all;
+        if (!includeQuarantined) {
+            all = remnantService.getRemnantsByRollId(rollId);
+        } else {
+            all = remnantService.getAllRemnants().stream()
+                    .filter(r -> "AVAILABLE".equals(r.getStatus()) || "QUARANTINED".equals(r.getStatus()) || "LOST".equals(r.getStatus()))
+                    .filter(r -> rollId == null || rollId.isBlank() || "ALL".equalsIgnoreCase(rollId) || rollId.trim().equalsIgnoreCase(r.getSourceRollId()))
+                    .sorted(java.util.Comparator.comparing(com.example.cutdemotwo.business.model.RemnantStock::getId)).toList();
+        }
+        return FactoryDocumentController.slicePage(all, limit, offset);
     }
 
     @PostMapping("/remnants/scan")

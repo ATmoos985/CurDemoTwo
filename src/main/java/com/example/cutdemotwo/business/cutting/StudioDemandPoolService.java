@@ -241,6 +241,16 @@ final class StudioDemandPoolService {
             slit = new CuttingTask.Slitting(lt, rt, minW, maxW, step, overCap);
         }
 
+        String dueDate = blankToNull(cmd.dueDate()) != null ? blankToNull(cmd.dueDate()) : (existing != null ? existing.dueDate() : null);
+        String priority = blankToNull(cmd.priority()) != null ? blankToNull(cmd.priority()) : (existing != null ? existing.priority() : null);
+        String customerName = blankToNull(cmd.customerName()) != null ? blankToNull(cmd.customerName()) : (existing != null ? existing.customerName() : null);
+        String kittingGroup = blankToNull(cmd.kittingGroup()) != null ? blankToNull(cmd.kittingGroup()) : (existing != null ? existing.kittingGroup() : null);
+        String requiredBatchNo = blankToNull(cmd.requiredBatchNo()) != null ? blankToNull(cmd.requiredBatchNo()) : (existing != null ? existing.requiredBatchNo() : null);
+        String requiredColor = blankToNull(cmd.requiredColor()) != null ? blankToNull(cmd.requiredColor()) : (existing != null ? existing.requiredColor() : null);
+        Boolean strictBatchMatch = cmd.strictBatchMatch() != null ? cmd.strictBatchMatch() : (existing != null ? existing.strictBatchMatch() : null);
+        String machineId = blankToNull(cmd.machineId()) != null ? blankToNull(cmd.machineId()) : (existing != null ? existing.machineId() : null);
+        String shiftTeam = blankToNull(cmd.shiftTeam()) != null ? blankToNull(cmd.shiftTeam()) : (existing != null ? existing.shiftTeam() : null);
+
         CuttingTask payload = new CuttingTask(
                 existing != null ? existing.id() : null,
                 name,
@@ -250,7 +260,18 @@ final class StudioDemandPoolService {
                 lines,
                 proc,
                 isSlit ? CuttingTask.SLITTING_1D : null,
-                slit
+                slit,
+                dueDate,
+                priority,
+                customerName,
+                kittingGroup,
+                requiredBatchNo,
+                requiredColor,
+                strictBatchMatch,
+                machineId,
+                shiftTeam,
+                existing != null ? existing.sourceSchemeId() : null,
+                existing != null ? existing.replenishIdempotencyKey() : null
         );
         return tx.saveTask(payload);
     }
@@ -325,6 +346,18 @@ final class StudioDemandPoolService {
         view.put("openTotal", openTotal);
         view.put("schemeCount", activeSchemes);
         view.put("status", status);
+        view.put("dueDate", task.dueDate());
+        view.put("priority", task.priority() != null ? task.priority() : CuttingTask.PRIORITY_NORMAL);
+        view.put("customerName", task.customerName());
+        view.put("kittingGroup", task.kittingGroup());
+        view.put("requiredBatchNo", task.requiredBatchNo());
+        view.put("requiredColor", task.requiredColor());
+        view.put("strictBatchMatch", Boolean.TRUE.equals(task.strictBatchMatch()));
+        view.put("machineId", task.machineId());
+        view.put("shiftTeam", task.shiftTeam());
+        if (task.sourceSchemeId() != null) {
+            view.put("sourceSchemeId", task.sourceSchemeId());
+        }
         view.put("lines", lineViews);
         return view;
     }

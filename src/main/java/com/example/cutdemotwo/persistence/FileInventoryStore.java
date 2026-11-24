@@ -83,6 +83,12 @@ public class FileInventoryStore implements InventoryStore {
                 previous == null ? java.util.List.of() : previous.outbox(), snapshot.outbox());
         com.example.cutdemotwo.business.model.InventoryCount.requireAppendOnly(
                 previous == null ? java.util.Map.of() : previous.counts(), snapshot.counts());
+        com.example.cutdemotwo.business.model.QualityReleaseDocument.requireAppendOnly(
+                previous == null ? java.util.Map.of() : previous.qualityReleases(), snapshot.qualityReleases());
+        com.example.cutdemotwo.business.model.InventoryReceiptDocument.requireAppendOnly(
+                previous == null ? java.util.Map.of() : previous.inventoryReceipts(), snapshot.inventoryReceipts());
+        com.example.cutdemotwo.business.model.MaterialIssueDocument.requireAppendOnly(
+                previous == null ? java.util.Map.of() : previous.materialIssues(), snapshot.materialIssues());
         try {
             Path parent = file.toAbsolutePath().getParent();
             Files.createDirectories(parent);

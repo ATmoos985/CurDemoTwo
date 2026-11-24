@@ -20,7 +20,11 @@ public class InventoryCountController {
             .enable(tools.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT).disable(MapperFeature.ALLOW_COERCION_OF_SCALARS).build();
     public InventoryCountController(RemnantService inventory){this.inventory=inventory;}
-    @GetMapping public Object list(){return inventory.inventoryCounts();}
+    @GetMapping public Object list(
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) Integer offset){
+        return FactoryDocumentController.slicePage(inventory.inventoryCounts(), limit, offset);
+    }
     @GetMapping("/options") public Object options(){return inventory.countOptions();}
     @PostMapping public Object post(@RequestHeader(value="Idempotency-Key",required=false) String key,InputStream body) {
         try {

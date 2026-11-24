@@ -8,7 +8,10 @@ import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
 import com.example.cutdemotwo.business.model.InventoryTransfer;
 import com.example.cutdemotwo.business.model.InventoryEvent;
 import com.example.cutdemotwo.business.model.InventoryCount;
+import com.example.cutdemotwo.business.model.InventoryReceiptDocument;
+import com.example.cutdemotwo.business.model.MaterialIssueDocument;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
+import com.example.cutdemotwo.business.model.QualityReleaseDocument;
 import com.example.cutdemotwo.business.model.RemnantStock;
 import com.example.cutdemotwo.business.model.SchedulingScheme;
 import com.example.cutdemotwo.business.model.SolveRequest;
@@ -52,6 +55,9 @@ public class RemnantService implements CuttingStatePort {
     private final Map<String,InventoryCount> counts=new LinkedHashMap<>();
     private final Map<String,DemandTemplate> templates=new LinkedHashMap<>();
     private final Map<String,SchedulingScheme> schemes=new LinkedHashMap<>();
+    private final Map<String,QualityReleaseDocument> qualityReleases=new LinkedHashMap<>();
+    private final Map<String,InventoryReceiptDocument> inventoryReceipts=new LinkedHashMap<>();
+    private final Map<String,MaterialIssueDocument> materialIssues=new LinkedHashMap<>();
     private volatile long revision;
     private boolean accessing;
     private long operationTime;
@@ -78,7 +84,8 @@ public class RemnantService implements CuttingStatePort {
             if (!motherRolls.isEmpty() || !remnantPool.isEmpty() || !tasks.isEmpty()
                     || !plans.isEmpty() || !receipts.isEmpty() || !executions.isEmpty()
                     || !transfers.isEmpty() || !counts.isEmpty()
-                    || !templates.isEmpty() || !schemes.isEmpty()) {
+                    || !templates.isEmpty() || !schemes.isEmpty()
+                    || !qualityReleases.isEmpty() || !inventoryReceipts.isEmpty() || !materialIssues.isEmpty()) {
                 throw new IllegalArgumentException("当前库已有业务数据，不能创建整套示例材料；请使用已有库存或单独准备演示库");
             }
             initMotherRolls();
@@ -149,7 +156,8 @@ public class RemnantService implements CuttingStatePort {
 
     private InventorySnapshot snapshot() {
         return new InventorySnapshot(new ArrayList<>(motherRolls.values()), new ArrayList<>(remnantPool.values()),
-                receipts, remnantSeq.get(), defectSeq.get(), tasks, plans, revision, executions, ledger, transfers, outbox, counts, templates, schemes);
+                receipts, remnantSeq.get(), defectSeq.get(), tasks, plans, revision, executions, ledger, transfers,
+                outbox, counts, templates, schemes, qualityReleases, inventoryReceipts, materialIssues);
     }
 
     private void restore(InventorySnapshot snapshot) {
@@ -165,6 +173,9 @@ public class RemnantService implements CuttingStatePort {
         transfers.clear();transfers.putAll(snapshot.transfers());
         templates.clear(); if (snapshot.templates() != null) templates.putAll(snapshot.templates());
         schemes.clear(); if (snapshot.schemes() != null) schemes.putAll(snapshot.schemes());
+        qualityReleases.clear(); if (snapshot.qualityReleases() != null) qualityReleases.putAll(snapshot.qualityReleases());
+        inventoryReceipts.clear(); if (snapshot.inventoryReceipts() != null) inventoryReceipts.putAll(snapshot.inventoryReceipts());
+        materialIssues.clear(); if (snapshot.materialIssues() != null) materialIssues.putAll(snapshot.materialIssues());
         revision = snapshot.revision();
         remnantSeq.set(snapshot.remnantSeq()); defectSeq.set(snapshot.defectSeq());
     }
@@ -277,6 +288,7 @@ public class RemnantService implements CuttingStatePort {
         if("roll".equals(type)) {
             var roll=motherRolls.get(id);
             if(roll==null)return "母卷不存在";
+            if("SCRAPPED".equalsIgnoreCase(roll.getInspectionStatus()))return "母卷已报废";
             if(roll.getCurrentRemainingLength()<=0)return "母卷已用尽";
         } else if("remnant".equals(type)) {
             var remnant=remnantPool.get(id);
@@ -334,7 +346,11 @@ public class RemnantService implements CuttingStatePort {
                 .mapToLong(InventoryCount::inventoryRevision).max().orElse(0);
     }
     private String countBlock(String type,String id) {
-        if("roll".equals(type)) {if(!motherRolls.containsKey(id))return "母卷不存在";}
+        if("roll".equals(type)) {
+            var r=motherRolls.get(id);
+            if(r==null)return "母卷不存在";
+            if("SCRAPPED".equalsIgnoreCase(r.getInspectionStatus()))return "母卷已报废，不能盘点";
+        }
         else if("remnant".equals(type)) {
             var r=remnantPool.get(id);if(r==null)return "料头不存在";
             if(!Set.of("AVAILABLE","QUARANTINED","LOST").contains(r.getStatus()))return "仅在库、隔离或盘亏料头可盘点";
@@ -827,6 +843,11 @@ public class RemnantService implements CuttingStatePort {
         return events.stream().map(event -> json.convertValue(event, QualityDisposition.class)).toList();
     }
 
+    private int qualityRevisionOf(List<QualityDisposition> events) {
+        int revoked = (int) events.stream().filter(QualityDisposition::hasRevocation).count();
+        return events.size() + revoked;
+    }
+
     /** Read projection: original production facts are never overwritten by reinspection. Areas are m². */
     private Map<String, Object> qualityProjection(Map<String, Object> receipt) {
         if (receipt == null) return null;
@@ -835,13 +856,14 @@ public class RemnantService implements CuttingStatePort {
         if(receipt.get("inventoryCountRevision") instanceof Number counted)
             result.put("inventoryCountRevision",counted.longValue());
         var events = qualityEvents(receipt);
-        var removed = events.stream().filter(e -> "QUALIFIED".equals(e.originalOutcome())).toList();
+        var activeEvents = events.stream().filter(e -> !e.hasRevocation()).toList();
+        var removed = activeEvents.stream().filter(e -> "QUALIFIED".equals(e.originalOutcome())).toList();
         double removedArea = removed.stream().mapToDouble(QualityDisposition::pieceAreaMm2).sum() / 1_000_000;
-        double recovered = events.stream().mapToDouble(QualityDisposition::recoveredAreaMm2).sum() / 1_000_000;
+        double recovered = activeEvents.stream().mapToDouble(QualityDisposition::recoveredAreaMm2).sum() / 1_000_000;
         double goodArea = ((Number) receipt.get("pieceArea")).doubleValue() - removedArea;
         double usedArea = ((Number) receipt.get("usedArea")).doubleValue();
         result.put("qualityDispositions", events);
-        result.put("qualityRevision", events.size());
+        result.put("qualityRevision", qualityRevisionOf(events));
         result.put("netFinishedPieceCount", ((Number) receipt.get("finishedPieceCount")).intValue() - removed.size());
         result.put("netPieceArea", Math.max(0, goodArea));
         result.put("netRemArea", ((Number) receipt.get("remArea")).doubleValue() + recovered);
@@ -869,8 +891,8 @@ public class RemnantService implements CuttingStatePort {
                 throw new InventoryConflictException("此操作编号已用于其他复检内容，请刷新记录");
             }
             if (!"CONFIRMED".equals(receipt.get("status"))) throw new IllegalArgumentException("仅已确认报工可以复检处置");
-            if (command.expectedRevision() != events.size()) throw new InventoryConflictException("复检记录已更新，请重新打开报工记录");
-            if (events.stream().anyMatch(e -> e.command().pieceId() == command.pieceId()))
+            if (command.expectedRevision() != qualityRevisionOf(events)) throw new InventoryConflictException("复检记录已更新，请重新打开报工记录");
+            if (events.stream().anyMatch(e -> !e.hasRevocation() && e.command().pieceId() == command.pieceId()))
                 throw new InventoryConflictException("该裁片已处置，不能重复转料头或报废");
             if (!(receipt.get("pieceResults") instanceof List<?> pieces)) throw new IllegalArgumentException("历史记录缺少逐件产出，不能自动复检处置");
             var piece = pieces.stream().map(p -> json.convertValue(p, ReportOutput.ReportedPiece.class))
@@ -889,6 +911,7 @@ public class RemnantService implements CuttingStatePort {
                 var parent = remnantPool.get(request.getSourceRemnantId() == null ? "" : request.getSourceRemnantId());
                 child.setParentRemnantId(parent == null ? null : parent.getId());
                 child.setGeneration(parent == null ? 1 : parent.getGeneration() + 1);
+                inheritLineageMetadata(child, motherRolls.get(request.getRollId()), parent);
                 child.setCreatedAt(now); child.setSourceReportId(planId); child.setSourcePieceId(piece.pieceId());
                 child.setQualityDispositionId(eventId);
                 remnantPool.put(remnantId, child);
@@ -1030,7 +1053,7 @@ public class RemnantService implements CuttingStatePort {
             accumulateReceiptDemandForTask(receipt, taskId, counts);
             Map<?, ?> pieceSources = receipt.get("pieceSources") instanceof Map<?, ?> ps ? ps : null;
             for (var event : qualityEvents(receipt)) {
-                if (!"QUALIFIED".equals(event.originalOutcome())) continue;
+                if (event.hasRevocation() || !"QUALIFIED".equals(event.originalOutcome())) continue;
                 if (multiTask && pieceSources != null) {
                     Object srcObj = pieceSources.get(String.valueOf(event.command().pieceId()));
                     if (srcObj == null) srcObj = pieceSources.get(event.command().pieceId());
@@ -1180,6 +1203,17 @@ public class RemnantService implements CuttingStatePort {
                     line.quantity() <= 0 || line.quantity() > 10000)
                 throw new IllegalArgumentException("需求编号应唯一，尺寸和件数必须为正数，单项最多 10000 件");
         }
+        String normalizedPriority = normalizePriority(input.priority());
+        String normalizedDueDate = blankToNull(input.dueDate());
+        String normalizedCustomer = blankToNull(input.customerName());
+        String normalizedKitting = blankToNull(input.kittingGroup());
+        String normalizedReqBatch = blankToNull(input.requiredBatchNo());
+        String normalizedReqColor = blankToNull(input.requiredColor());
+        Boolean normalizedStrictBatch = input.strictBatchMatch();
+        String normalizedMachine = blankToNull(input.machineId());
+        String normalizedShift = blankToNull(input.shiftTeam());
+        String normalizedSourceScheme = blankToNull(input.sourceSchemeId());
+        String normalizedReplenishKey = blankToNull(input.replenishIdempotencyKey());
         if (previous != null) {
             Map<String, Integer> completed = completedQuantities(id);
             if (!completed.isEmpty() && !previous.materialModel().equals(input.materialModel()))
@@ -1195,6 +1229,12 @@ public class RemnantService implements CuttingStatePort {
             if (Objects.equals(previous.name(), input.name()) && Objects.equals(previous.materialModel(), input.materialModel()) &&
                     Objects.equals(previous.externalRef(), input.externalRef()) && Objects.equals(previous.process(), process) &&
                     Objects.equals(previous.problemType(), type) && Objects.equals(previous.slitting(), slitting) &&
+                    Objects.equals(previous.dueDate(), normalizedDueDate) && Objects.equals(previous.priority(), normalizedPriority) &&
+                    Objects.equals(previous.customerName(), normalizedCustomer) && Objects.equals(previous.kittingGroup(), normalizedKitting) &&
+                    Objects.equals(previous.requiredBatchNo(), normalizedReqBatch) && Objects.equals(previous.requiredColor(), normalizedReqColor) &&
+                    Objects.equals(previous.strictBatchMatch(), normalizedStrictBatch) && Objects.equals(previous.machineId(), normalizedMachine) &&
+                    Objects.equals(previous.shiftTeam(), normalizedShift) && Objects.equals(previous.sourceSchemeId(), normalizedSourceScheme) &&
+                    Objects.equals(previous.replenishIdempotencyKey(), normalizedReplenishKey) &&
                     previous.demands().equals(input.demands())) return previous;
         }
         if (previous != null && executions.values().stream().anyMatch(e->e.taskId().equals(id) && e.reserves(operationTime)))
@@ -1203,7 +1243,10 @@ public class RemnantService implements CuttingStatePort {
                 && s.occupiesDemand() && s.involvesTask(id)))
             throw new InventoryConflictException("任务已有活跃排程方案占用，请先完工或作废对应方案后再编辑");
         CuttingTask task = new CuttingTask(id, input.name().trim(), input.materialModel().trim(), input.externalRef(),
-                previous == null ? 1 : previous.revision() + 1, List.copyOf(input.demands()), process, type, slitting);
+                previous == null ? 1 : previous.revision() + 1, List.copyOf(input.demands()), process, type, slitting,
+                normalizedDueDate, normalizedPriority, normalizedCustomer, normalizedKitting,
+                normalizedReqBatch, normalizedReqColor, normalizedStrictBatch, normalizedMachine, normalizedShift,
+                normalizedSourceScheme, normalizedReplenishKey);
         tasks.put(id, task);
         return task;
     }
@@ -1221,10 +1264,11 @@ public class RemnantService implements CuttingStatePort {
         if (!remnant && !"roll".equals(request.getFeedPortType())) throw new IllegalArgumentException("无效的材料来源");
         MotherRollInfo roll = motherRolls.get(request.getRollId());
         RemnantStock stock = remnant ? remnantPool.get(request.getSourceRemnantId()) : null;
-        if (remnant ? stock == null || !"AVAILABLE".equals(stock.getStatus()) : roll == null)
-            throw new IllegalArgumentException("所选材料已不可用，请重新选料");
+        if (remnant ? stock == null || !"AVAILABLE".equals(stock.getStatus()) : roll == null || "SCRAPPED".equalsIgnoreCase(roll.getInspectionStatus()))
+            throw new IllegalArgumentException("所选材料已不可用或已报废，请重新选料");
         String model = remnant ? stock.getMaterialBatch() : roll.getRollModel();
         if (!task.materialModel().equals(model)) throw new IllegalArgumentException("材料型号与任务需求不一致");
+        validateBatchAndColorInternal(task, roll, stock);
         double width = remnant ? stock.getWidth() : roll.getWidth();
         if (!Double.isFinite(request.getRollW()) || Math.abs(request.getRollW() - width) > .001 ||
                 !Double.isFinite(request.getRollL()) || request.getRollL() <= 0 ||
@@ -1260,6 +1304,7 @@ public class RemnantService implements CuttingStatePort {
         String model = remnant ? (stock == null ? null : stock.getMaterialBatch()) : (roll == null ? null : roll.getRollModel());
         if (!Objects.equals(task.materialModel(), model)) throw new IllegalArgumentException("材料型号与任务需求不一致");
         if (remnant && !Objects.equals(stock.getSourceRollId(), request.getRollId())) throw new IllegalArgumentException("料头来源母卷不一致");
+        validateBatchAndColorInternal(task, roll, remnant ? stock : null);
         if (plan.getPieces().stream().anyMatch(p -> p.getDemandId() == null)) throw new IllegalArgumentException("裁片缺少需求归属");
         Map<Integer, Long> good = result.qualified().stream().collect(Collectors.groupingBy(p -> p.getDemandId(), Collectors.counting()));
         Map<String, Integer> completed = completedQuantities(task.id());
@@ -1282,14 +1327,18 @@ public class RemnantService implements CuttingStatePort {
     private List<Map<String, Object>> materialCandidatesInternal(SolveRequest request) {
         if (request == null || request.getRollModel() == null || request.getDemands() == null)
             throw new IllegalArgumentException("请先填写材料型号和需求");
+        CuttingTask task = request.getTaskId() != null ? tasks.get(request.getTaskId()) : null;
         List<Map<String, Object>> result = new ArrayList<>();
         for (RemnantStock stock : getAvailableRemnants()) {
             if (!request.getRollModel().equals(stock.getMaterialBatch())) continue;
+            if (task != null && !matchesBatchAndColor(task, motherRolls.get(stock.getSourceRollId()), stock)) continue;
             addCandidate(result, request, "remnant", stock.getId(), stock.getSourceRollId(), stock.getWidth(), stock.getLength(), stock.getLocation(), stock.isHasDefect());
         }
         result.sort(Comparator.comparingDouble(c -> ((Number)c.get("width")).doubleValue() * ((Number)c.get("length")).doubleValue()));
         for (MotherRollInfo roll : motherRolls.values()) {
-            if (!request.getRollModel().equals(roll.getRollModel()) || roll.getCurrentRemainingLength() <= 0) continue;
+            if (!request.getRollModel().equals(roll.getRollModel()) || roll.getCurrentRemainingLength() <= 0
+                    || "SCRAPPED".equalsIgnoreCase(roll.getInspectionStatus())) continue;
+            if (task != null && !matchesBatchAndColor(task, roll, null)) continue;
             addCandidate(result, request, "roll", roll.getRollId(), roll.getRollId(), roll.getWidth(), roll.getCurrentRemainingLength(), roll.getStorageLocation(), !roll.getDefects().isEmpty());
         }
         return result;
@@ -1490,6 +1539,7 @@ public class RemnantService implements CuttingStatePort {
             child.setDefects(childDefects);
             child.setParentRemnantId(remnantFeed ? parent.getId() : null);
             child.setGeneration(remnantFeed ? parent.getGeneration() + 1 : 1);
+            inheritLineageMetadata(child, roll, parent);
             child.setCreatedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
             remnantPool.put(id, child);
             children.add(child);
@@ -1572,6 +1622,12 @@ public class RemnantService implements CuttingStatePort {
             throw new InventoryConflictException("材料已有执行单追溯，禁止演示重置");
         if(schemes.values().stream().anyMatch(s->rollId.equals(s.rollId())))
             throw new InventoryConflictException("材料已有排程方案追溯，禁止演示重置");
+        if(qualityReleases.values().stream().anyMatch(q->remnantPool.containsKey(q.remnantId()) && rollId.equals(remnantPool.get(q.remnantId()).getSourceRollId())))
+            throw new InventoryConflictException("材料已有质量放行单追溯，禁止演示重置");
+        if(inventoryReceipts.values().stream().flatMap(r->r.lines().stream()).anyMatch(l->rollId.equals(l.rollId())))
+            throw new InventoryConflictException("母卷已有采购入库单追溯，禁止演示重置");
+        if(materialIssues.values().stream().anyMatch(m->rollId.equals(m.rollId())))
+            throw new InventoryConflictException("母卷已有车间领退料单追溯，禁止演示重置");
         MotherRollInfo roll = motherRolls.get(rollId);
         if (roll == null) return false;
         if (receipts.values().stream().anyMatch(r -> rollId.equals(r.get("rollId")) && !qualityEvents(r).isEmpty()))
@@ -1818,9 +1874,15 @@ public class RemnantService implements CuttingStatePort {
                 roll.getWidth() <= 0 || roll.getTotalLength() <= 0) {
             throw new IllegalArgumentException("母卷幅宽和总长度必须大于零");
         }
+        if (!Double.isFinite(roll.getShrinkageRate()) || roll.getShrinkageRate() < 0 || roll.getShrinkageRate() > 100) {
+            throw new IllegalArgumentException("母卷缩水率必须为 0 至 100 之间的有限数值");
+        }
         ensureMaterialNotReserved("roll",roll.getRollId(),null);
         MotherRollInfo existing = motherRolls.get(roll.getRollId());
         if (existing != null) {
+            if ("SCRAPPED".equalsIgnoreCase(existing.getInspectionStatus())) {
+                throw new InventoryConflictException("已报废母卷不可修改档案");
+            }
             if (Math.abs(existing.getWidth() - roll.getWidth()) > 0.001 ||
                     Math.abs(existing.getTotalLength() - roll.getTotalLength()) > 0.001) {
                 throw new IllegalArgumentException("已登记母卷的物理尺寸不可直接覆盖");
@@ -1832,6 +1894,7 @@ public class RemnantService implements CuttingStatePort {
             existing.setColor(roll.getColor());
             existing.setGrammage(roll.getGrammage());
             existing.setComposition(roll.getComposition());
+            existing.setShrinkageRate(roll.getShrinkageRate());
             existing.setWidth(roll.getWidth());
             existing.setRawWidth(roll.getRawWidth());
             existing.setTotalLength(roll.getTotalLength());
@@ -2061,6 +2124,8 @@ public class RemnantService implements CuttingStatePort {
         if (item.getStatus() == null) {
             item.setStatus("AVAILABLE");
         }
+        inheritLineageMetadata(item, item.getSourceRollId() != null ? motherRolls.get(item.getSourceRollId()) : null,
+                item.getParentRemnantId() != null ? remnantPool.get(item.getParentRemnantId()) : null);
         remnantPool.put(item.getId(), item);
         return item;
     }
@@ -2079,6 +2144,8 @@ public class RemnantService implements CuttingStatePort {
         rs.setParentRemnantId(parentRemnantId);
         rs.setGeneration(parentRemnantId != null ? 2 : 1);
         rs.setQualityGrade(hasDefect ? "GRADE_DEFECT" : "GRADE_A");
+        inheritLineageMetadata(rs, rollId != null ? motherRolls.get(rollId) : null,
+                parentRemnantId != null ? remnantPool.get(parentRemnantId) : null);
         rs.setCreatedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
         remnantPool.put(rs.getId(), rs);
         return rs;
@@ -2121,6 +2188,863 @@ public class RemnantService implements CuttingStatePort {
             return true;
         }
         return false;
+    }
+
+    // ==================== 工厂生产闭环：隔离放行 / 复检撤销 / 采购入库 / 领退料 / 母卷报废 / 聚合报工 ====================
+
+    public record QualityReleaseCommand(String idempotencyKey, String decision, String inspector, String reason) {}
+
+    public record RevokeDispositionCommand(String idempotencyKey, String operator, String reason) {}
+
+    public record InventoryReceiptRollInput(
+            String id,
+            String materialModel,
+            String materialType,
+            String color,
+            String batchNo,
+            double widthMm,
+            double totalLengthMm,
+            Double grammage,
+            Double shrinkageRate,
+            String storageLocation,
+            String inspectionStatus,
+            String inspector
+    ) {}
+
+    public record InventoryReceiptCommand(
+            String idempotencyKey,
+            String supplierName,
+            String deliveryNoteNo,
+            String operator,
+            String remarks,
+            String inspector,
+            List<InventoryReceiptRollInput> rolls
+    ) {
+        public InventoryReceiptCommand(
+                String idempotencyKey, String supplierName, String deliveryNoteNo,
+                String operator, String remarks, List<InventoryReceiptRollInput> rolls
+        ) {
+            this(idempotencyKey, supplierName, deliveryNoteNo, operator, remarks, null, rolls);
+        }
+    }
+
+    public record MaterialIssueCommand(
+            String idempotencyKey,
+            String direction,
+            String rollId,
+            String machineId,
+            String shiftTeam,
+            String operator,
+            String targetLocation,
+            String reason
+    ) {}
+
+    public record ScrapRollCommand(String idempotencyKey, String operator, String reason) {}
+
+    /** 查询历史隔离料头质量复验放行单（按库存版本倒序）。 */
+    public synchronized List<QualityReleaseDocument> listQualityReleases() {
+        return read(() -> qualityReleases.values().stream()
+                .sorted(Comparator.comparingLong(QualityReleaseDocument::inventoryRevision).reversed()
+                        .thenComparing(QualityReleaseDocument::id))
+                .toList());
+    }
+
+    /** 隔离料头质量复验放行或判废：仅允许 QUARANTINED 且未被占用的料头，原子持久化单据与不可变流水。 */
+    public synchronized Map<String, Object> releaseQuarantinedRemnant(String remnantId, QualityReleaseCommand cmd) {
+        if (remnantId == null || remnantId.isBlank()) throw new IllegalArgumentException("请指定待放行料头编号");
+        if (cmd == null) throw new IllegalArgumentException("请提供质量放行请求体");
+        String key = requireIdempotencyKey(cmd.idempotencyKey());
+        String decision = cmd.decision() == null ? "" : cmd.decision().trim().toUpperCase(Locale.ROOT);
+        if (!Set.of(QualityReleaseDocument.DECISION_RELEASE_AVAILABLE, QualityReleaseDocument.DECISION_SCRAP).contains(decision)) {
+            throw new IllegalArgumentException("复验决策仅支持 RELEASE_AVAILABLE 或 SCRAP");
+        }
+        String inspector = requireText(cmd.inspector(), 80, "请填写 1–80 字检验员姓名");
+        String reason = requireText(cmd.reason(), 500, "请填写 1–500 字放行或报废原因");
+        String targetRemnantId = remnantId.trim();
+        String docId = "QREL-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
+
+        QualityReleaseDocument doc = mutate("QUALITY_RELEASE", docId, "DECLARED:" + inspector, () -> {
+            for (QualityReleaseDocument prev : qualityReleases.values()) {
+                if (prev.idempotencyKey().equals(key)) {
+                    if (!prev.remnantId().equals(targetRemnantId) || !prev.decision().equals(decision)
+                            || !prev.inspector().equals(inspector) || !prev.reason().equals(reason)) {
+                        throw new InventoryConflictException("同一幂等键已用于其他质量放行内容");
+                    }
+                    return prev;
+                }
+            }
+            return null;
+        }, () -> {
+            RemnantStock stock = remnantPool.get(targetRemnantId);
+            if (stock == null) throw new IllegalArgumentException("料头不存在: " + targetRemnantId);
+            if (!"QUARANTINED".equals(stock.getStatus())) {
+                throw new InventoryConflictException("仅处于隔离状态(QUARANTINED)的料头可执行复验放行，当前状态：" + stock.getStatus());
+            }
+            ensureMaterialNotReserved("remnant", targetRemnantId, null);
+            String fromStatus = stock.getStatus();
+            String toStatus = QualityReleaseDocument.DECISION_RELEASE_AVAILABLE.equals(decision) ? "AVAILABLE" : "SCRAPPED";
+            stock.setStatus(toStatus);
+            if ("AVAILABLE".equals(toStatus)) {
+                if (stock.getDefects() == null || stock.getDefects().isEmpty()) {
+                    stock.setHasDefect(false);
+                    stock.setQualityGrade("GRADE_A");
+                }
+                stock.setDefectDesc((blankToNull(stock.getDefectDesc()) != null ? stock.getDefectDesc() + " | " : "")
+                        + "复验放行(" + inspector + "): " + reason);
+            } else {
+                stock.setDefectDesc((blankToNull(stock.getDefectDesc()) != null ? stock.getDefectDesc() + " | " : "")
+                        + "复验判废(" + inspector + "): " + reason);
+            }
+            QualityReleaseDocument created = new QualityReleaseDocument(
+                    docId, key, targetRemnantId, decision, fromStatus, toStatus, inspector, reason, operationTime, revision + 1
+            );
+            qualityReleases.put(created.id(), created);
+            return created;
+        });
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("document", doc);
+        out.put("remnant", remnantPool.get(doc.remnantId()));
+        out.put("revision", revision);
+        return out;
+    }
+
+    /** 复检处置受控撤销：保留原始处置事实、追加撤销痕迹与反向流水，恢复良品完成量，派生料头转 REVOKED，原母卷消耗不变。 */
+    public synchronized Map<String, Object> revokeQualityDisposition(String reportId, String dispositionId, RevokeDispositionCommand cmd) {
+        if (reportId == null || reportId.isBlank() || dispositionId == null || dispositionId.isBlank()) {
+            throw new IllegalArgumentException("请提供有效的报工编号和复检处置编号");
+        }
+        if (cmd == null) throw new IllegalArgumentException("请提供撤销请求体");
+        String key = requireIdempotencyKey(cmd.idempotencyKey());
+        String operator = requireText(cmd.operator(), 100, "请填写 1–100 字操作人");
+        String reason = requireText(cmd.reason(), 500, "请填写 1–500 字撤销原因");
+        String cleanReportId = reportId.trim();
+        String cleanDispositionId = dispositionId.trim();
+
+        Map<String, Object> result = mutate("QUALITY_DISPOSITION_REVOKE", cleanReportId, "DECLARED:" + operator, () -> {
+            // 跨所有报工检查该幂等键是否已用于撤销
+            for (var entry : receipts.entrySet()) {
+                for (QualityDisposition ev : qualityEvents(entry.getValue())) {
+                    if (ev.hasRevocation() && key.equals(ev.revocation().idempotencyKey())) {
+                        if (cleanReportId.equals(entry.getKey()) && cleanDispositionId.equals(ev.id())
+                                && operator.equals(ev.revocation().operator()) && reason.equals(ev.revocation().reason())) {
+                            return buildRevokeDispositionPayload(entry.getValue());
+                        }
+                        throw new InventoryConflictException("同一幂等键已用于其他复检处置撤销内容");
+                    }
+                }
+            }
+            return null;
+        }, () -> {
+            Map<String, Object> receipt = receipts.get(cleanReportId);
+            if (receipt == null) throw new IllegalArgumentException("报工记录不存在: " + cleanReportId);
+            if (!"CONFIRMED".equals(receipt.get("status"))) {
+                throw new InventoryConflictException("仅已确认报工的复检处置允许撤销");
+            }
+            List<QualityDisposition> events = new ArrayList<>(qualityEvents(receipt));
+            int targetIdx = -1;
+            for (int i = 0; i < events.size(); i++) {
+                if (cleanDispositionId.equals(events.get(i).id())) {
+                    targetIdx = i;
+                    break;
+                }
+            }
+            if (targetIdx < 0) throw new IllegalArgumentException("复检处置记录不存在: " + cleanDispositionId);
+            QualityDisposition target = events.get(targetIdx);
+            if (target.hasRevocation()) {
+                throw new InventoryConflictException("该复检处置已撤销，不可重复撤销");
+            }
+
+            // 1. 若原处置派生了回收料头，校验其仍在库且未被预约、消耗、报废、放行、移库或盘点
+            RemnantStock derived = null;
+            if (target.remnantId() != null && !target.remnantId().isBlank()) {
+                derived = remnantPool.get(target.remnantId());
+                if (derived == null) {
+                    throw new InventoryConflictException("派生回收料头缺失，无法撤销原复检处置");
+                }
+                String expectedStatus = (target.command().recovery() != null && "QUARANTINED".equals(target.command().recovery().quality()))
+                        ? "QUARANTINED" : "AVAILABLE";
+                if (!expectedStatus.equals(derived.getStatus())) {
+                    throw new InventoryConflictException("派生回收料头 " + derived.getId() + " 状态已变更为 " + derived.getStatus() + "，无法撤销原复检处置");
+                }
+                ensureMaterialNotReserved("remnant", derived.getId(), null);
+                String derivedId = derived.getId();
+                if (countRevision("remnant", derivedId) > 0) {
+                    throw new InventoryConflictException("派生回收料头 " + derivedId + " 已有盘点单追溯，无法撤销原复检处置");
+                }
+                if (transfers.values().stream().flatMap(t -> t.lines().stream())
+                        .anyMatch(l -> "remnant".equals(l.type()) && derivedId.equals(l.id()))) {
+                    throw new InventoryConflictException("派生回收料头 " + derivedId + " 已发生移库变更，无法撤销原复检处置");
+                }
+                if (qualityReleases.values().stream().anyMatch(q -> derivedId.equals(q.remnantId()))) {
+                    throw new InventoryConflictException("派生回收料头 " + derivedId + " 已完成质量放行或判废，无法撤销原复检处置");
+                }
+                String expectedLoc = target.command().recovery() != null ? Objects.toString(target.command().recovery().location(), "").trim() : "";
+                if (!expectedLoc.isEmpty() && !expectedLoc.equals(Objects.toString(derived.getLocation(), "").trim())) {
+                    throw new InventoryConflictException("派生回收料头 " + derivedId + " 库位已变更，无法撤销原复检处置");
+                }
+            }
+
+            // 2. 校验恢复良品完成量后不超过对应任务需求总量
+            if ("QUALIFIED".equals(target.originalOutcome())) {
+                validateTaskCapacityForDispositionRevoke(receipt, target);
+            }
+
+            // 3. 原子标记撤销痕迹（不删除原处置），派生料头转 REVOKED 不再可用，原母卷消耗保持绝对不变
+            QualityDisposition revoked = target.withRevocation(new QualityDisposition.Revocation(
+                    key, operator, reason, LocalDateTime.now().toString()
+            ));
+            events.set(targetIdx, revoked);
+            receipt.put("qualityDispositions", events);
+            if (derived != null) {
+                derived.setStatus("REVOKED");
+                derived.setDefectDesc((blankToNull(derived.getDefectDesc()) != null ? derived.getDefectDesc() + " | " : "")
+                        + "复检撤销作废(" + operator + "): " + reason);
+            }
+            return buildRevokeDispositionPayload(receipt);
+        });
+
+        result.put("revision", revision);
+        return result;
+    }
+
+    private void validateTaskCapacityForDispositionRevoke(Map<String, Object> receipt, QualityDisposition target) {
+        String affectedTaskId = null;
+        Integer affectedLineId = target.demandId();
+        if (receipt.get("taskDemandQuantities") instanceof Map<?, ?> && receipt.get("pieceSources") instanceof Map<?, ?> ps) {
+            Object srcObj = ps.get(String.valueOf(target.command().pieceId()));
+            if (srcObj == null) srcObj = ps.get(target.command().pieceId());
+            if (srcObj instanceof Map<?, ?> srcMap && srcMap.get("taskId") != null && srcMap.get("lineId") instanceof Number ln) {
+                affectedTaskId = srcMap.get("taskId").toString();
+                affectedLineId = ln.intValue();
+            }
+        } else if (receipt.get("taskId") != null) {
+            affectedTaskId = receipt.get("taskId").toString();
+        }
+        if (affectedTaskId == null || affectedLineId == null) return;
+        CuttingTask task = tasks.get(affectedTaskId);
+        if (task == null) return;
+        int targetLineId = affectedLineId;
+        CuttingTask.Line line = task.demands().stream().filter(d -> d.id() == targetLineId).findFirst().orElse(null);
+        if (line == null) return;
+        int currentCompleted = completedQuantitiesInternal(affectedTaskId).getOrDefault(String.valueOf(targetLineId), 0);
+        if (currentCompleted + 1 > line.quantity()) {
+            throw new InventoryConflictException("撤销后任务「" + task.name() + "」需求「" + line.name()
+                    + "」合格完成量将超过订单总数(" + line.quantity() + ")，请先核对补排或任务数量");
+        }
+    }
+
+    private Map<String, Object> buildRevokeDispositionPayload(Map<String, Object> receipt) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("report", qualityProjection(receipt));
+        Object tidObj = receipt.get("taskId");
+        Map<String, Object> taskView = null;
+        if (tidObj != null && tasks.containsKey(tidObj.toString())) {
+            CuttingTask t = tasks.get(tidObj.toString());
+            Map<String, Integer> completed = completedQuantitiesInternal(t.id());
+            int orderedTotal = t.demands().stream().mapToInt(CuttingTask.Line::quantity).sum();
+            int completedTotal = t.demands().stream().mapToInt(l -> completed.getOrDefault(String.valueOf(l.id()), 0)).sum();
+            taskView = new LinkedHashMap<>();
+            taskView.put("id", t.id());
+            taskView.put("name", t.name());
+            taskView.put("materialModel", t.materialModel());
+            taskView.put("externalRef", t.externalRef());
+            taskView.put("revision", t.revision());
+            taskView.put("demands", t.demands());
+            taskView.put("completed", completed);
+            taskView.put("orderedTotal", orderedTotal);
+            taskView.put("completedTotal", completedTotal);
+            taskView.put("remaining", Math.max(0, orderedTotal - completedTotal));
+        }
+        out.put("task", taskView);
+        return out;
+    }
+
+    /** 查询历史采购批量入库单（按库存版本倒序）。 */
+    public synchronized List<InventoryReceiptDocument> listInventoryReceipts() {
+        return read(() -> inventoryReceipts.values().stream()
+                .sorted(Comparator.comparingLong(InventoryReceiptDocument::inventoryRevision).reversed()
+                        .thenComparing(InventoryReceiptDocument::id))
+                .toList());
+    }
+
+    /** 采购批量入库单：整批原子创建多卷母卷（默认 PENDING，显式 PASSED 需带检验员），持久化不可变入库单与 RECEIPT_IN 流水。 */
+    public synchronized Map<String, Object> receiveInventoryBatch(InventoryReceiptCommand cmd) {
+        if (cmd == null) throw new IllegalArgumentException("采购入库请求不能为空");
+        String key = requireIdempotencyKey(cmd.idempotencyKey());
+        String supplier = requireText(cmd.supplierName(), 120, "请填写 1–120 字供应商名称");
+        String deliveryNo = requireText(cmd.deliveryNoteNo(), 120, "请填写 1–120 字送货单号");
+        String operator = requireText(cmd.operator(), 100, "请填写 1–100 字收货经办人");
+        String remarks = cmd.remarks() == null ? "" : cmd.remarks().trim();
+        if (remarks.length() > 500) throw new IllegalArgumentException("入库备注不能超过 500 字");
+        if (cmd.rolls() == null || cmd.rolls().isEmpty() || cmd.rolls().size() > 100) {
+            throw new IllegalArgumentException("采购入库单必须包含 1 至 100 卷母卷明细");
+        }
+
+        List<InventoryReceiptDocument.Line> normalizedLines = new ArrayList<>(cmd.rolls().size());
+        Set<String> explicitIds = new HashSet<>();
+        String defaultInspector = blankToNull(cmd.inspector());
+        for (int i = 0; i < cmd.rolls().size(); i++) {
+            InventoryReceiptRollInput in = cmd.rolls().get(i);
+            if (in == null) throw new IllegalArgumentException("第 " + (i + 1) + " 行母卷明细不能为空");
+            String rollId = blankToNull(in.id());
+            if (rollId != null && !explicitIds.add(rollId)) {
+                throw new IllegalArgumentException("同一入库单内存在重复母卷编号: " + rollId);
+            }
+            String model = requireText(in.materialModel(), 120, "第 " + (i + 1) + " 行缺少材料型号 materialModel");
+            String matType = blankToNull(in.materialType()) != null ? in.materialType().trim() : model;
+            String color = blankToNull(in.color()) != null ? in.color().trim() : "标准色";
+            String batchNo = blankToNull(in.batchNo()) != null ? in.batchNo().trim()
+                    : "BAT-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+            if (!Double.isFinite(in.widthMm()) || in.widthMm() <= 0 || in.widthMm() > 1e9
+                    || !Double.isFinite(in.totalLengthMm()) || in.totalLengthMm() <= 0 || in.totalLengthMm() > 1e9) {
+                throw new IllegalArgumentException("第 " + (i + 1) + " 行母卷门幅与总长必须为有效正数");
+            }
+            double grammage = in.grammage() == null ? 220.0 : in.grammage();
+            if (!Double.isFinite(grammage) || grammage < 0 || grammage > 100000) {
+                throw new IllegalArgumentException("第 " + (i + 1) + " 行克重数值无效");
+            }
+            double shrinkage = in.shrinkageRate() == null ? 0.0 : in.shrinkageRate();
+            if (!Double.isFinite(shrinkage) || shrinkage < 0 || shrinkage > 100) {
+                throw new IllegalArgumentException("第 " + (i + 1) + " 行缩水率必须为 0 至 100 之间");
+            }
+            String location = blankToNull(in.storageLocation()) != null ? in.storageLocation().trim() : "原料收货区 R-IN";
+            String inspStatus = blankToNull(in.inspectionStatus()) == null ? "PENDING" : in.inspectionStatus().trim().toUpperCase(Locale.ROOT);
+            if (!Set.of("PENDING", "PASSED", "QUARANTINED").contains(inspStatus)) {
+                throw new IllegalArgumentException("第 " + (i + 1) + " 行验布状态仅支持 PENDING、PASSED 或 QUARANTINED");
+            }
+            String lineInspector = blankToNull(in.inspector()) != null ? in.inspector().trim() : defaultInspector;
+            if ("PASSED".equals(inspStatus) && lineInspector == null) {
+                throw new IllegalArgumentException("第 " + (i + 1) + " 行入库直通合格(PASSED)必须填写检验员 inspector");
+            }
+            normalizedLines.add(new InventoryReceiptDocument.Line(
+                    rollId, model, matType, color, batchNo, in.widthMm(), in.totalLengthMm(),
+                    grammage, shrinkage, location, inspStatus, "PASSED".equals(inspStatus) ? lineInspector : null
+            ));
+        }
+
+        String docId = "RCV-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
+        InventoryReceiptDocument doc = mutate("RECEIPT_IN", docId, "DECLARED:" + operator, () -> {
+            for (InventoryReceiptDocument prev : inventoryReceipts.values()) {
+                if (prev.idempotencyKey().equals(key)) {
+                    if (!matchesReceiptDocument(prev, supplier, deliveryNo, operator, remarks, normalizedLines)) {
+                        throw new InventoryConflictException("同一幂等键已用于其他采购入库单内容");
+                    }
+                    return prev;
+                }
+            }
+            return null;
+        }, () -> {
+            List<InventoryReceiptDocument.Line> finalLines = new ArrayList<>(normalizedLines.size());
+            String nowTs = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+            String today = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+            Set<String> batchIds = new HashSet<>();
+            for (int i = 0; i < normalizedLines.size(); i++) {
+                InventoryReceiptDocument.Line line = normalizedLines.get(i);
+                String rollId = line.rollId();
+                if (rollId == null) {
+                    String prefix = "ROLL-RCV-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")) + "-";
+                    do {
+                        rollId = prefix + UUID.randomUUID().toString().substring(0, 4).toUpperCase(Locale.ROOT);
+                    } while (motherRolls.containsKey(rollId) || !batchIds.add(rollId));
+                } else {
+                    if (motherRolls.containsKey(rollId)) {
+                        throw new InventoryConflictException("母卷编号已存在，不能重复入库: " + rollId);
+                    }
+                    if (!batchIds.add(rollId)) {
+                        throw new IllegalArgumentException("同一入库单内存在重复母卷编号: " + rollId);
+                    }
+                }
+                finalLines.add(new InventoryReceiptDocument.Line(
+                        rollId, line.materialModel(), line.materialType(), line.color(), line.batchNo(),
+                        line.widthMm(), line.totalLengthMm(), line.grammage(), line.shrinkageRate(),
+                        line.storageLocation(), line.inspectionStatus(), line.inspector()
+                ));
+            }
+            for (InventoryReceiptDocument.Line line : finalLines) {
+                MotherRollInfo fresh = new MotherRollInfo(
+                        line.rollId(), line.materialModel(), line.batchNo(), supplier, line.materialType(),
+                        line.color(), line.grammage(), line.materialType(), line.widthMm(), line.totalLengthMm(),
+                        line.storageLocation()
+                );
+                fresh.setShrinkageRate(line.shrinkageRate());
+                fresh.setInspectionStatus(line.inspectionStatus());
+                if ("PASSED".equals(line.inspectionStatus())) {
+                    fresh.setInspector(line.inspector());
+                    fresh.setInspectionDate(today);
+                } else {
+                    fresh.setInspector("");
+                    fresh.setInspectionDate(null);
+                }
+                fresh.setCreatedAt(nowTs);
+                motherRolls.put(fresh.getRollId(), fresh);
+            }
+            InventoryReceiptDocument created = new InventoryReceiptDocument(
+                    docId, key, supplier, deliveryNo, operator, remarks, operationTime, revision + 1, finalLines
+            );
+            inventoryReceipts.put(created.id(), created);
+            return created;
+        });
+
+        List<MotherRollInfo> createdRolls = doc.lines().stream()
+                .map(l -> getMotherRollInternal(l.rollId()))
+                .filter(Objects::nonNull)
+                .toList();
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("document", doc);
+        out.put("createdRolls", createdRolls);
+        out.put("revision", revision);
+        return out;
+    }
+
+    private static boolean matchesReceiptDocument(
+            InventoryReceiptDocument prev, String supplier, String deliveryNo, String operator,
+            String remarks, List<InventoryReceiptDocument.Line> incoming
+    ) {
+        if (!Objects.equals(prev.supplierName(), supplier) || !Objects.equals(prev.deliveryNoteNo(), deliveryNo)
+                || !Objects.equals(prev.operator(), operator) || !Objects.equals(prev.remarks(), remarks)
+                || prev.lines().size() != incoming.size()) {
+            return false;
+        }
+        for (int i = 0; i < incoming.size(); i++) {
+            InventoryReceiptDocument.Line a = prev.lines().get(i);
+            InventoryReceiptDocument.Line b = incoming.get(i);
+            if (b.rollId() != null && !Objects.equals(a.rollId(), b.rollId())) return false;
+            if (!Objects.equals(a.materialModel(), b.materialModel()) || !Objects.equals(a.materialType(), b.materialType())
+                    || !Objects.equals(a.color(), b.color()) || !Objects.equals(a.batchNo(), b.batchNo())
+                    || Math.abs(a.widthMm() - b.widthMm()) > 0.001 || Math.abs(a.totalLengthMm() - b.totalLengthMm()) > 0.001
+                    || Math.abs(a.grammage() - b.grammage()) > 0.001 || Math.abs(a.shrinkageRate() - b.shrinkageRate()) > 0.001
+                    || !Objects.equals(a.storageLocation(), b.storageLocation())
+                    || !Objects.equals(a.inspectionStatus(), b.inspectionStatus())
+                    || !Objects.equals(a.inspector(), b.inspector())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 查询历史车间领料/退料单（按库存版本倒序）。 */
+    public synchronized List<MaterialIssueDocument> listMaterialIssues() {
+        return read(() -> materialIssues.values().stream()
+                .sorted(Comparator.comparingLong(MaterialIssueDocument::inventoryRevision).reversed()
+                        .thenComparing(MaterialIssueDocument::id))
+                .toList());
+    }
+
+    /** 车间领料 / 退料单：维护母卷在制机台/班组去向与库位，拦截非法状态与活跃占用，写不可变单据与流水。 */
+    public synchronized Map<String, Object> postMaterialIssue(MaterialIssueCommand cmd) {
+        if (cmd == null) throw new IllegalArgumentException("车间领退料请求不能为空");
+        String key = requireIdempotencyKey(cmd.idempotencyKey());
+        String direction = cmd.direction() == null ? "" : cmd.direction().trim().toUpperCase(Locale.ROOT);
+        if (!Set.of(MaterialIssueDocument.DIRECTION_ISSUE, MaterialIssueDocument.DIRECTION_RETURN).contains(direction)) {
+            throw new IllegalArgumentException("领退料方向仅支持 ISSUE 或 RETURN");
+        }
+        String rollId = requireText(cmd.rollId(), 128, "请指定母卷编号 rollId");
+        String operator = requireText(cmd.operator(), 100, "请填写 1–100 字经办人");
+        String reason = requireText(cmd.reason(), 500, "请填写 1–500 字领料或退料原因");
+        String machineId = blankToNull(cmd.machineId());
+        String shiftTeam = blankToNull(cmd.shiftTeam());
+        String targetLocation = blankToNull(cmd.targetLocation());
+        if (MaterialIssueDocument.DIRECTION_ISSUE.equals(direction)) {
+            if (machineId == null || machineId.length() > 80) {
+                throw new IllegalArgumentException("车间领料必须填写 1–80 字领用机台 machineId");
+            }
+            if (targetLocation == null) targetLocation = "车间:" + machineId;
+        } else {
+            if (targetLocation == null || targetLocation.length() > 120) {
+                throw new IllegalArgumentException("车间退料必须填写 1–120 字退回仓库目标库位 targetLocation");
+            }
+        }
+        if (shiftTeam != null && shiftTeam.length() > 80) {
+            throw new IllegalArgumentException("班组名称不能超过 80 字");
+        }
+
+        String finalTargetLocation = targetLocation;
+        String eventType = MaterialIssueDocument.DIRECTION_ISSUE.equals(direction) ? "MATERIAL_ISSUE" : "MATERIAL_RETURN";
+        String docId = (MaterialIssueDocument.DIRECTION_ISSUE.equals(direction) ? "ISS-" : "RET-")
+                + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
+
+        MaterialIssueDocument doc = mutate(eventType, docId, "DECLARED:" + operator, () -> {
+            for (MaterialIssueDocument prev : materialIssues.values()) {
+                if (prev.idempotencyKey().equals(key)) {
+                    boolean sameMachine = machineId == null || Objects.equals(prev.machineId(), machineId);
+                    boolean sameShift = shiftTeam == null || Objects.equals(prev.shiftTeam(), shiftTeam);
+                    if (!prev.direction().equals(direction) || !prev.rollId().equals(rollId)
+                            || !prev.operator().equals(operator) || !prev.toLocation().equals(finalTargetLocation)
+                            || !prev.reason().equals(reason) || !sameMachine || !sameShift) {
+                        throw new InventoryConflictException("同一幂等键已用于其他领退料单内容");
+                    }
+                    return prev;
+                }
+            }
+            return null;
+        }, () -> {
+            MotherRollInfo roll = motherRolls.get(rollId);
+            if (roll == null) throw new IllegalArgumentException("母卷不存在: " + rollId);
+            if ("SCRAPPED".equalsIgnoreCase(roll.getInspectionStatus())) {
+                throw new InventoryConflictException("母卷 " + rollId + " 已报废，禁止办理领退料");
+            }
+            String fromLocation = Objects.toString(roll.getStorageLocation(), "");
+            String recordedMachine;
+            String recordedShift;
+            if (MaterialIssueDocument.DIRECTION_ISSUE.equals(direction)) {
+                if (roll.getCurrentRemainingLength() <= 0.001) {
+                    throw new InventoryConflictException("母卷 " + rollId + " 已用尽，禁止发料出库");
+                }
+                if (blankToNull(roll.getIssuedMachineId()) != null) {
+                    throw new InventoryConflictException("母卷 " + rollId + " 当前已发料至机台「" + roll.getIssuedMachineId() + "」，请先办理退料");
+                }
+                roll.setIssuedMachineId(machineId);
+                roll.setIssuedShiftTeam(shiftTeam);
+                roll.setStorageLocation(finalTargetLocation);
+                recordedMachine = machineId;
+                recordedShift = shiftTeam;
+            } else {
+                if (blankToNull(roll.getIssuedMachineId()) == null) {
+                    throw new InventoryConflictException("母卷 " + rollId + " 当前未处于车间领用状态，无需办理退料");
+                }
+                ensureMaterialNotReserved("roll", rollId, null);
+                recordedMachine = machineId != null ? machineId : roll.getIssuedMachineId();
+                recordedShift = shiftTeam != null ? shiftTeam : roll.getIssuedShiftTeam();
+                roll.setIssuedMachineId(null);
+                roll.setIssuedShiftTeam(null);
+                roll.setStorageLocation(finalTargetLocation);
+            }
+            MaterialIssueDocument created = new MaterialIssueDocument(
+                    docId, key, direction, roll.getRollId(), roll.getRollModel(), roll.getBatchNo(),
+                    recordedMachine, recordedShift, operator, fromLocation, finalTargetLocation,
+                    roll.getCurrentRemainingLength(), reason, operationTime, revision + 1
+            );
+            materialIssues.put(created.id(), created);
+            return created;
+        });
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("document", doc);
+        out.put("roll", getMotherRollInternal(doc.rollId()));
+        out.put("revision", revision);
+        return out;
+    }
+
+    /** 母卷级报废单：拦截活跃预约/活跃方案，清零未切余量并置 SCRAPPED（保留已用长度与历史报工），写不可变 ROLL_SCRAP 流水。 */
+    public synchronized Map<String, Object> scrapMotherRoll(String rollId, ScrapRollCommand cmd) {
+        if (rollId == null || rollId.isBlank()) throw new IllegalArgumentException("请指定母卷编号 rollId");
+        if (cmd == null) throw new IllegalArgumentException("请提供母卷报废请求体");
+        String key = requireIdempotencyKey(cmd.idempotencyKey());
+        String operator = requireText(cmd.operator(), 100, "请填写 1–100 字操作人");
+        String reason = requireText(cmd.reason(), 500, "请填写 1–500 字报废原因");
+        String targetRollId = rollId.trim();
+
+        MotherRollInfo scrapped = mutate("ROLL_SCRAP", targetRollId, "DECLARED:" + operator, () -> {
+            for (MotherRollInfo existing : motherRolls.values()) {
+                if (key.equals(existing.getScrapIdempotencyKey())) {
+                    if (!targetRollId.equals(existing.getRollId())
+                            || !operator.equals(existing.getScrappedBy())
+                            || !reason.equals(existing.getScrapReason())) {
+                        throw new InventoryConflictException("同一幂等键已用于其他母卷报废内容");
+                    }
+                    return existing;
+                }
+            }
+            return null;
+        }, () -> {
+            MotherRollInfo roll = motherRolls.get(targetRollId);
+            if (roll == null) throw new IllegalArgumentException("母卷不存在: " + targetRollId);
+            if ("SCRAPPED".equalsIgnoreCase(roll.getInspectionStatus())) {
+                throw new InventoryConflictException("母卷 " + targetRollId + " 已报废，不能重复报废");
+            }
+            ensureMaterialNotReserved("roll", targetRollId, null);
+            double remainingToScrap = Math.max(0.0, roll.getCurrentRemainingLength());
+            roll.setCurrentRemainingLength(0.0);
+            roll.setScrappedLengthMm(remainingToScrap);
+            roll.setInspectionStatus("SCRAPPED");
+            roll.setScrapReason(reason);
+            roll.setScrappedBy(operator);
+            roll.setScrappedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+            roll.setScrapIdempotencyKey(key);
+            roll.setIssuedMachineId(null);
+            roll.setIssuedShiftTeam(null);
+            return roll;
+        });
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("roll", getMotherRollInternal(scrapped.getRollId()));
+        out.put("revision", revision);
+        return out;
+    }
+
+    /** 聚合报工分页查询（消灭前端循环查 /api/cutting/tasks/{id} 的 N+1 请求风暴）。 */
+    public synchronized Map<String, Object> reconciliationReports(int limit, int offset, String statusFilter, String taskIdFilter) {
+        if (limit < 1 || limit > 200 || offset < 0) {
+            throw new IllegalArgumentException("分页参数无效：limit 需在 1–200 之间，offset 不得为负");
+        }
+        return read(() -> {
+            Map<String, String> planToSchemeId = new HashMap<>();
+            for (SchedulingScheme sc : schemes.values()) {
+                for (String pid : sc.linkedPlanIds()) {
+                    planToSchemeId.put(pid, sc.id());
+                }
+            }
+
+            List<Map<String, Object>> all = new ArrayList<>();
+            for (Map<String, Object> raw : receipts.values()) {
+                String status = Objects.toString(raw.get("status"), "CONFIRMED");
+                if (statusFilter != null && !statusFilter.isBlank() && !"ALL".equalsIgnoreCase(statusFilter)
+                        && !statusFilter.equalsIgnoreCase(status)) {
+                    continue;
+                }
+                String taskId = raw.get("taskId") != null ? raw.get("taskId").toString() : null;
+                if (taskIdFilter != null && !taskIdFilter.isBlank()) {
+                    boolean matchesTask = taskIdFilter.equals(taskId)
+                            || (raw.get("taskDemandQuantities") instanceof Map<?, ?> multi && multi.containsKey(taskIdFilter));
+                    if (!matchesTask) continue;
+                }
+
+                Map<String, Object> projected = qualityProjection(raw);
+                String planId = Objects.toString(raw.get("planId"), "");
+                CuttingTask task = taskId != null ? tasks.get(taskId) : null;
+                CuttingPlan plan = plans.get(planId);
+                String rollId = raw.get("rollId") != null ? raw.get("rollId").toString() : null;
+                MotherRollInfo roll = rollId != null ? motherRolls.get(rollId) : null;
+                String sourceRemnantId = raw.get("sourceRemnantId") != null ? raw.get("sourceRemnantId").toString() : null;
+                RemnantStock sourceRemnant = sourceRemnantId != null ? remnantPool.get(sourceRemnantId) : null;
+
+                String materialModel = task != null ? task.materialModel()
+                        : (plan != null && plan.request() != null && blankToNull(plan.request().getRollModel()) != null
+                        ? plan.request().getRollModel()
+                        : (roll != null ? roll.getRollModel() : (sourceRemnant != null ? sourceRemnant.getMaterialBatch() : "")));
+                String batchNo = sourceRemnant != null && blankToNull(sourceRemnant.getBatchNo()) != null
+                        ? sourceRemnant.getBatchNo()
+                        : (roll != null ? roll.getBatchNo() : null);
+                String color = sourceRemnant != null && blankToNull(sourceRemnant.getColor()) != null
+                        ? sourceRemnant.getColor()
+                        : (roll != null ? roll.getColor() : null);
+
+                List<QualityDisposition> dispositions = qualityEvents(raw);
+                Set<Integer> activeDisposedPieceIds = dispositions.stream()
+                        .filter(d -> !d.hasRevocation())
+                        .map(d -> d.command().pieceId())
+                        .collect(Collectors.toSet());
+                int activeDispCount = activeDisposedPieceIds.size();
+                int revokedDispCount = dispositions.size() - activeDispCount;
+                int reinspectionRemaining = 0;
+                if (!"REVERSED".equals(status) && raw.get("pieceResults") instanceof List<?> pieceList) {
+                    for (Object pObj : pieceList) {
+                        var piece = json.convertValue(pObj, ReportOutput.ReportedPiece.class);
+                        if (Set.of("QUALIFIED", "REJECTED").contains(piece.outcome())
+                                && !activeDisposedPieceIds.contains(piece.pieceId())) {
+                            reinspectionRemaining++;
+                        }
+                    }
+                }
+
+                Map<String, Object> item = new LinkedHashMap<>(projected);
+                item.put("reportId", planId);
+                item.put("schemeId", planToSchemeId.get(planId));
+                item.put("taskId", taskId);
+                item.put("taskName", task != null ? task.name() : "独立裁切");
+                item.put("externalRef", task != null ? task.externalRef() : null);
+                item.put("materialModel", materialModel);
+                item.put("batchNo", batchNo);
+                item.put("color", color);
+                item.put("dispositions", dispositions);
+                item.put("activeDispositionCount", activeDispCount);
+                item.put("revokedDispositionCount", revokedDispCount);
+                item.put("reinspectionRemainingCount", reinspectionRemaining);
+                item.put("availableForReinspection", reinspectionRemaining);
+                all.add(item);
+            }
+
+            all.sort((a, b) -> Objects.toString(b.get("confirmedAt"), "")
+                    .compareTo(Objects.toString(a.get("confirmedAt"), "")));
+            int total = all.size();
+            int from = Math.min(offset, total);
+            int to = Math.min(from + limit, total);
+            List<Map<String, Object>> page = List.copyOf(all.subList(from, to));
+
+            Map<String, Object> res = new LinkedHashMap<>();
+            res.put("items", page);
+            res.put("total", total);
+            res.put("limit", limit);
+            res.put("offset", offset);
+            res.put("hasMore", to < total);
+            return res;
+        });
+    }
+
+    /** 任务计划列表（支持 summary=true 省略大体积 cuts/pieces/remnants 坐标数组）。 */
+    public synchronized List<CuttingPlan> taskPlans(String taskId, boolean summary) {
+        return read(() -> plans.values().stream()
+                .filter(p -> Objects.equals(taskId, p.request().getTaskId()))
+                .map(p -> summary ? summarizePlan(p) : p)
+                .toList());
+    }
+
+    private CuttingPlan summarizePlan(CuttingPlan plan) {
+        SolveResponse orig = plan.result();
+        if (orig == null) return plan;
+        SolveResponse slim = new SolveResponse();
+        slim.setSuccess(orig.isSuccess());
+        slim.setMessage(orig.getMessage());
+        slim.setStatus(orig.getStatus());
+        slim.setFulfillment(orig.getFulfillment() == null ? List.of() : List.copyOf(orig.getFulfillment()));
+        slim.setPlanId(orig.getPlanId());
+        slim.setEngine(orig.getEngine());
+        slim.setRequestedEngine(orig.getRequestedEngine());
+        slim.setFallbackReason(orig.getFallbackReason());
+        slim.setRollW(orig.getRollW());
+        slim.setRollL(orig.getRollL());
+        slim.setFeedPortType(orig.getFeedPortType());
+        slim.setSourceRemnantId(orig.getSourceRemnantId());
+        slim.setDeductLen(orig.getDeductLen());
+        slim.setTotalArea(orig.getTotalArea());
+        slim.setPieceArea(orig.getPieceArea());
+        slim.setRemArea(orig.getRemArea());
+        slim.setWasteArea(orig.getWasteArea());
+        slim.setCuts(List.of());
+        slim.setPieces(List.of());
+        slim.setRemnants(List.of());
+        slim.setDefects(List.of());
+        slim.setDerivedRemnants(List.of());
+        return new CuttingPlan(plan.id(), plan.request(), slim, plan.baseline(), plan.status(),
+                plan.createdAt(), plan.parentPlanId(), plan.version());
+    }
+
+    // ==================== 缸号 / 色号防呆与谱系继承 ====================
+
+    private void inheritLineageMetadata(RemnantStock target, MotherRollInfo roll, RemnantStock parent) {
+        if (target == null) return;
+        if (blankToNull(target.getBatchNo()) == null) {
+            String inheritedBatch = (parent != null && blankToNull(parent.getBatchNo()) != null)
+                    ? parent.getBatchNo().trim()
+                    : (roll != null ? blankToNull(roll.getBatchNo()) : null);
+            target.setBatchNo(inheritedBatch);
+        }
+        if (blankToNull(target.getColor()) == null) {
+            String inheritedColor = (parent != null && blankToNull(parent.getColor()) != null)
+                    ? parent.getColor().trim()
+                    : (roll != null ? blankToNull(roll.getColor()) : null);
+            target.setColor(inheritedColor);
+        }
+    }
+
+    private boolean matchesBatchAndColor(CuttingTask task, MotherRollInfo roll, RemnantStock remnant) {
+        try {
+            validateBatchAndColorInternal(task, roll, remnant);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    private void validateBatchAndColorInternal(CuttingTask task, MotherRollInfo roll, RemnantStock remnant) {
+        if (task == null) return;
+        String reqBatch = blankToNull(task.requiredBatchNo());
+        String reqColor = blankToNull(task.requiredColor());
+        boolean strict = Boolean.TRUE.equals(task.strictBatchMatch());
+        if (reqBatch == null && reqColor == null && !strict) return;
+
+        MotherRollInfo effectiveRoll = roll;
+        if (effectiveRoll == null && remnant != null && remnant.getSourceRollId() != null) {
+            effectiveRoll = motherRolls.get(remnant.getSourceRollId());
+        }
+        String actualBatch = (remnant != null && blankToNull(remnant.getBatchNo()) != null)
+                ? remnant.getBatchNo().trim()
+                : (effectiveRoll != null ? blankToNull(effectiveRoll.getBatchNo()) : null);
+        String actualColor = (remnant != null && blankToNull(remnant.getColor()) != null)
+                ? remnant.getColor().trim()
+                : (effectiveRoll != null ? blankToNull(effectiveRoll.getColor()) : null);
+        String label = remnant != null ? ("料头 " + remnant.getId())
+                : (effectiveRoll != null ? ("母卷 " + effectiveRoll.getRollId()) : "所选材料");
+
+        if (reqBatch != null) {
+            if (actualBatch == null || !reqBatch.equalsIgnoreCase(actualBatch)) {
+                throw new IllegalArgumentException("缸号不匹配（防色差拦截）：任务「" + task.name() + "」要求缸号「"
+                        + reqBatch + "」，但" + label + "缸号为「" + Objects.toString(actualBatch, "未登记") + "」");
+            }
+        }
+        if (reqColor != null) {
+            if (actualColor == null || !reqColor.equalsIgnoreCase(actualColor)) {
+                throw new IllegalArgumentException("色号不匹配（防色差拦截）：任务「" + task.name() + "」要求色号「"
+                        + reqColor + "」，但" + label + "色号为「" + Objects.toString(actualColor, "未登记") + "」");
+            }
+        }
+        if (strict) {
+            if (actualBatch == null) {
+                throw new IllegalArgumentException("同单同缸强约束拦截：任务「" + task.name() + "」要求严格同缸，但" + label + "未登记缸号");
+            }
+            String establishedBatch = findEstablishedTaskBatchNo(task.id());
+            if (establishedBatch != null && !establishedBatch.equalsIgnoreCase(actualBatch)) {
+                throw new IllegalArgumentException("同单同缸强约束拦截（防色差）：任务「" + task.name() + "」已锁定缸号「"
+                        + establishedBatch + "」，不能混用缸号「" + actualBatch + "」");
+            }
+        }
+    }
+
+    private String findEstablishedTaskBatchNo(String taskId) {
+        if (taskId == null) return null;
+        for (Map<String, Object> rec : receipts.values()) {
+            if ("REVERSED".equals(rec.get("status"))) continue;
+            boolean belongs = taskId.equals(rec.get("taskId"))
+                    || (rec.get("taskDemandQuantities") instanceof Map<?, ?> multi && multi.containsKey(taskId));
+            if (!belongs) continue;
+            String batch = resolveMaterialBatchNo(
+                    rec.get("rollId") != null ? rec.get("rollId").toString() : null,
+                    rec.get("sourceRemnantId") != null ? rec.get("sourceRemnantId").toString() : null
+            );
+            if (batch != null) return batch;
+        }
+        for (SchedulingScheme sc : schemes.values()) {
+            if (!sc.isMaterialLockActive() || !sc.involvesTask(taskId)) continue;
+            String batch = resolveMaterialBatchNo(sc.rollId(), sc.remnantId());
+            if (batch != null) return batch;
+        }
+        return null;
+    }
+
+    private String resolveMaterialBatchNo(String rollId, String remnantId) {
+        if (remnantId != null && remnantPool.containsKey(remnantId)) {
+            RemnantStock rem = remnantPool.get(remnantId);
+            if (blankToNull(rem.getBatchNo()) != null) return rem.getBatchNo().trim();
+            if (rem.getSourceRollId() != null && motherRolls.containsKey(rem.getSourceRollId())) {
+                String rb = blankToNull(motherRolls.get(rem.getSourceRollId()).getBatchNo());
+                if (rb != null) return rb;
+            }
+        }
+        if (rollId != null && motherRolls.containsKey(rollId)) {
+            return blankToNull(motherRolls.get(rollId).getBatchNo());
+        }
+        return null;
+    }
+
+    private static String normalizePriority(String priority) {
+        String clean = blankToNull(priority);
+        if (clean == null) return null;
+        String upper = clean.toUpperCase(Locale.ROOT);
+        if (!Set.of(CuttingTask.PRIORITY_NORMAL, CuttingTask.PRIORITY_HIGH, CuttingTask.PRIORITY_URGENT).contains(upper)) {
+            throw new IllegalArgumentException("任务优先级仅支持 NORMAL、HIGH 或 URGENT");
+        }
+        return upper;
+    }
+
+    private static String requireIdempotencyKey(String key) {
+        String clean = blankToNull(key);
+        if (clean == null || clean.length() > 128) {
+            throw new IllegalArgumentException("请提供 1–128 字符的有效幂等键 idempotencyKey");
+        }
+        return clean;
+    }
+
+    private static String requireText(String value, int maxLen, String message) {
+        String clean = blankToNull(value);
+        if (clean == null || clean.length() > maxLen) {
+            throw new IllegalArgumentException(message);
+        }
+        return clean;
+    }
+
+    private static String blankToNull(String value) {
+        return (value == null || value.isBlank()) ? null : value.trim();
     }
 
     // ---- Controlled CuttingStatePort implementation ----
@@ -2207,6 +3131,12 @@ public class RemnantService implements CuttingStatePort {
         }
 
         @Override
+        public long currentRevision() {
+            ensureActive();
+            return revision;
+        }
+
+        @Override
         public List<DemandTemplate> listTemplates() {
             ensureActive();
             return List.copyOf(templates.values());
@@ -2268,6 +3198,22 @@ public class RemnantService implements CuttingStatePort {
             return tasks.values().stream()
                     .filter(t -> externalRef.equals(t.externalRef()))
                     .findFirst();
+        }
+
+        @Override
+        public Optional<CuttingTask> findTaskByReplenishIdempotencyKey(String idempotencyKey) {
+            ensureActive();
+            if (idempotencyKey == null || idempotencyKey.isBlank()) return Optional.empty();
+            String clean = idempotencyKey.trim();
+            return tasks.values().stream()
+                    .filter(t -> clean.equals(t.replenishIdempotencyKey()))
+                    .findFirst();
+        }
+
+        @Override
+        public void validateBatchAndColorForTask(CuttingTask task, MotherRollInfo roll, RemnantStock remnant) {
+            ensureActive();
+            validateBatchAndColorInternal(task, roll, remnant);
         }
 
         @Override

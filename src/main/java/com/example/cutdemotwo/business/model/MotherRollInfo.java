@@ -41,6 +41,15 @@ public class MotherRollInfo {
     private int remnantCount;                             // 从本卷切下并入库的料头数量
     private double remnantTotalArea;                      // 在库料头总面积 (m²)
 
+    // 车间领用去向与母卷级报废追溯（历史数据为 null 不序列化，确保旧账本快照零漂移）
+    private String issuedMachineId;
+    private String issuedShiftTeam;
+    private Double scrappedLengthMm;
+    private String scrapReason;
+    private String scrappedBy;
+    private String scrappedAt;
+    private String scrapIdempotencyKey;
+
     public MotherRollInfo() {}
 
     public MotherRollInfo(String rollId, String rollModel, double width, double totalLength, int remnantCount, double remnantTotalArea) {
@@ -142,6 +151,34 @@ public class MotherRollInfo {
 
     public double getRemnantTotalArea() { return remnantTotalArea; }
     public void setRemnantTotalArea(double remnantTotalArea) { this.remnantTotalArea = remnantTotalArea; }
+
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public String getIssuedMachineId() { return issuedMachineId; }
+    public void setIssuedMachineId(String issuedMachineId) { this.issuedMachineId = issuedMachineId; }
+
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public String getIssuedShiftTeam() { return issuedShiftTeam; }
+    public void setIssuedShiftTeam(String issuedShiftTeam) { this.issuedShiftTeam = issuedShiftTeam; }
+
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public Double getScrappedLengthMm() { return scrappedLengthMm; }
+    public void setScrappedLengthMm(Double scrappedLengthMm) { this.scrappedLengthMm = scrappedLengthMm; }
+
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public String getScrapReason() { return scrapReason; }
+    public void setScrapReason(String scrapReason) { this.scrapReason = scrapReason; }
+
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public String getScrappedBy() { return scrappedBy; }
+    public void setScrappedBy(String scrappedBy) { this.scrappedBy = scrappedBy; }
+
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public String getScrappedAt() { return scrappedAt; }
+    public void setScrappedAt(String scrappedAt) { this.scrappedAt = scrappedAt; }
+
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public String getScrapIdempotencyKey() { return scrapIdempotencyKey; }
+    public void setScrapIdempotencyKey(String scrapIdempotencyKey) { this.scrapIdempotencyKey = scrapIdempotencyKey; }
 
     public int getDefectsCount() {
         return defects != null ? defects.size() : 0;

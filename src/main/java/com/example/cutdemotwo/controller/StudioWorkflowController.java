@@ -50,8 +50,11 @@ public class StudioWorkflowController {
 
     // 2. 多维待排需求池 (Demand Pool)
     @GetMapping("/v2/demand-pool")
-    public List<Map<String, Object>> listDemandPool() {
-        return studioService.listDemandPool();
+    public List<Map<String, Object>> listDemandPool(
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) Integer offset
+    ) {
+        return FactoryDocumentController.slicePage(studioService.listDemandPool(), limit, offset);
     }
 
     @GetMapping("/v2/demand-pool/{id}")
@@ -68,9 +71,12 @@ public class StudioWorkflowController {
     @GetMapping("/v2/schemes")
     public List<Map<String, Object>> listSchemes(
             @RequestParam(required = false) String state,
-            @RequestParam(required = false) String taskId
+            @RequestParam(required = false) String taskId,
+            @RequestParam(defaultValue = "false") boolean summary,
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) Integer offset
     ) {
-        return studioService.listSchemes(state, taskId);
+        return FactoryDocumentController.slicePage(studioService.listSchemes(state, taskId, summary), limit, offset);
     }
 
     @GetMapping("/v2/schemes/{id}")
@@ -111,6 +117,21 @@ public class StudioWorkflowController {
             @RequestBody(required = false) Map<String, String> body
     ) {
         return studioService.cancelScheme(id, body != null ? body.get("reason") : null);
+    }
+
+    /** 基于源方案报工/复检判废或未满足缺口一键创建同缸加急补片任务。 */
+    @PostMapping("/v2/schemes/{id}/replenish-task")
+    public Map<String, Object> replenishTaskFromScheme(
+            @PathVariable String id,
+            @RequestHeader(value = "Idempotency-Key", required = false) String headerKey,
+            @RequestBody SchedulingStudioService.ReplenishTaskCommand body
+    ) {
+        var cmd = body == null ? null : new SchedulingStudioService.ReplenishTaskCommand(
+                FactoryDocumentController.resolveIdempotencyKey(body.idempotencyKey(), headerKey),
+                body.operator(),
+                body.reason()
+        );
+        return studioService.createReplenishTaskFromScheme(id, cmd);
     }
 
     // 4. 母卷全长切割/预占/疵点空间图 (Mother Roll Spatial Map)

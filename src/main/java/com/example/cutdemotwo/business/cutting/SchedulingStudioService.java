@@ -7,6 +7,7 @@ import com.example.cutdemotwo.business.model.CuttingPlan;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.DemandTemplate;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
+import com.example.cutdemotwo.business.model.QualityDisposition;
 import com.example.cutdemotwo.business.model.RemnantStock;
 import com.example.cutdemotwo.business.model.SchedulingScheme;
 import com.example.cutdemotwo.contracts.geometry.Defect;
@@ -91,8 +92,28 @@ public class SchedulingStudioService {
             Integer maxWidthMm,
             Integer widthStepMm,
             Integer totalOverCap,
-            List<DemandLineInput> demands
-    ) {}
+            List<DemandLineInput> demands,
+            String dueDate,
+            String priority,
+            String customerName,
+            String kittingGroup,
+            String requiredBatchNo,
+            String requiredColor,
+            Boolean strictBatchMatch,
+            String machineId,
+            String shiftTeam
+    ) {
+        public SaveDemandFamilyCommand(
+                String id, String mergeIntoTaskId, String name, String materialModel, String externalRef,
+                String dimension, Double bedLengthMm, Double trimStartMm, Double pieceGapMm,
+                Integer leftTrimMm, Integer rightTrimMm, Integer minWidthMm, Integer maxWidthMm,
+                Integer widthStepMm, Integer totalOverCap, List<DemandLineInput> demands
+        ) {
+            this(id, mergeIntoTaskId, name, materialModel, externalRef, dimension, bedLengthMm, trimStartMm,
+                    pieceGapMm, leftTrimMm, rightTrimMm, minWidthMm, maxWidthMm, widthStepMm, totalOverCap, demands,
+                    null, null, null, null, null, null, null, null, null);
+        }
+    }
 
     public record DemandLineInput(
             Integer id,
@@ -225,7 +246,13 @@ public class SchedulingStudioService {
         return statePort.inRead(tx -> materializer.validateManualLayout(tx, req));
     }
 
+    public record ReplenishTaskCommand(String idempotencyKey, String operator, String reason) {}
+
     public List<Map<String, Object>> listSchemes(String stateFilter, String taskIdFilter) {
+        return listSchemes(stateFilter, taskIdFilter, false);
+    }
+
+    public List<Map<String, Object>> listSchemes(String stateFilter, String taskIdFilter, boolean summary) {
         return statePort.inRead(tx -> {
             List<SchedulingScheme> list = new ArrayList<>(tx.listSchemes());
             Collections.reverse(list);
@@ -238,10 +265,24 @@ public class SchedulingStudioService {
                 if (taskIdFilter != null && !taskIdFilter.isBlank() && !s.involvesTask(taskIdFilter)) {
                     continue;
                 }
-                out.add(enrichSchemeView(tx, s));
+                out.add(enrichSchemeView(tx, summary ? summarizeScheme(s) : s));
             }
             return out;
         });
+    }
+
+    private static SchedulingScheme summarizeScheme(SchedulingScheme s) {
+        if (s.layout2D() == null) return s;
+        return new SchedulingScheme(
+                s.id(), s.idempotencyKey(), s.title(), s.dimension(), s.scenarioId(), s.strategyId(), s.strategyName(),
+                s.taskId(), s.taskName(), s.externalOrderNo(), s.materialMode(), s.rollId(), s.remnantId(),
+                s.materialModel(), s.widthMm(), s.canvasLengthMm(), s.windowStartY(), s.occupiedLengthMm(),
+                s.trimStartMm(), s.pieceGapMm(), s.utilizationPct(), s.pieceAreaM2(), s.placedCount(),
+                s.requestedCount(), s.gapFillCount(), s.complete(), s.allocatedDemands(), s.linkedPlanIds(),
+                s.linkedExecutionId(), s.state(), s.suggestedRoll(), null, s.slitting1D(), s.mesWorkOrderNo(),
+                s.createdAt(), s.dispatchedAt(), s.completedAt(), s.cancelledAt(), s.cancelReason(),
+                s.sourceAllocations(), s.mesReceiptNo()
+        );
     }
 
     public Map<String, Object> getSchemeDetail(String id) {
@@ -308,10 +349,7 @@ public class SchedulingStudioService {
             if (!multiTask && ("STOCK_ROLL".equals(mode) || "REMNANT".equals(mode))
                     && !Objects.equals(primaryTask.materialModel(), effectiveMaterialModel)
                     && tx.completedQuantities(primaryTask.id()).isEmpty()) {
-                CuttingTask aligned = new CuttingTask(
-                        primaryTask.id(), primaryTask.name(), effectiveMaterialModel, primaryTask.externalRef(),
-                        primaryTask.revision(), primaryTask.demands(), primaryTask.process(), primaryTask.problemType(), primaryTask.slitting()
-                );
+                CuttingTask aligned = primaryTask.withMaterialModel(effectiveMaterialModel);
                 primaryTask = tx.saveTaskForScheme(aligned, null);
                 sourceTasks.put(primaryTask.id(), primaryTask);
             }
@@ -446,6 +484,9 @@ public class SchedulingStudioService {
             if (!"PASSED".equals(roll.getInspectionStatus())) {
                 throw new IllegalArgumentException("母卷 " + roll.getRollId() + " 尚未验布合格，请先完成跑布验疵或选用合格母卷");
             }
+            for (CuttingTask t : sourceTasks.values()) {
+                tx.validateBatchAndColorForTask(t, roll, null);
+            }
             if (tx.isMaterialReservedByExecution("roll", roll.getRollId(), null)) {
                 throw new InventoryConflictException("母卷 " + roll.getRollId() + " 已被执行单预约或正在加工，不能重复锁卷");
             }
@@ -462,6 +503,10 @@ public class SchedulingStudioService {
             RemnantStock rem = tx.findRemnant(cmd.remnantId()).orElse(null);
             if (rem == null || !"AVAILABLE".equals(rem.getStatus())) {
                 throw new IllegalArgumentException("所选在库料头不可用: " + cmd.remnantId());
+            }
+            MotherRollInfo parentRoll = rem.getSourceRollId() != null ? tx.findRoll(rem.getSourceRollId()).orElse(null) : null;
+            for (CuttingTask t : sourceTasks.values()) {
+                tx.validateBatchAndColorForTask(t, parentRoll, rem);
             }
             // P0-6：料头整块互斥锁检查（执行单 + 其他活跃排程方案）
             if (tx.isMaterialReservedByExecution("remnant", rem.getId(), null)) {
@@ -586,13 +631,19 @@ public class SchedulingStudioService {
             double totalLen = (cmd.newRollLengthMm() != null && cmd.newRollLengthMm() >= minReqLen)
                     ? cmd.newRollLengthMm()
                     : Math.max(minReqLen, Math.ceil(minReqLen / 1000.0) * 1000.0 + 10000);
+            String defaultBatch = (primaryTask.requiredBatchNo() != null && !primaryTask.requiredBatchNo().isBlank())
+                    ? primaryTask.requiredBatchNo()
+                    : "BAT-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+            String defaultColor = (primaryTask.requiredColor() != null && !primaryTask.requiredColor().isBlank())
+                    ? primaryTask.requiredColor()
+                    : "标准色";
             MotherRollInfo fresh = new MotherRollInfo(
                     newRollId,
                     scheme.materialModel(),
-                    "BAT-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")),
+                    defaultBatch,
                     "按方案备料入库",
                     scheme.materialModel(),
-                    "标准色",
+                    defaultColor,
                     220.0,
                     "标准材质",
                     scheme.widthMm(),
@@ -623,12 +674,12 @@ public class SchedulingStudioService {
             if (Math.abs(roll.getWidth() - scheme.widthMm()) > 1.0) {
                 throw new IllegalArgumentException("所选母卷幅宽 (" + roll.getWidth() + "mm) 与方案设定门幅 (" + scheme.widthMm() + "mm) 不一致");
             }
+            for (CuttingTask t : sourceTasks.values()) {
+                tx.validateBatchAndColorForTask(t, roll, null);
+            }
             if (!multiTask && !Objects.equals(primaryTask.materialModel(), roll.getRollModel())
                     && tx.completedQuantities(primaryTask.id()).isEmpty()) {
-                CuttingTask aligned = new CuttingTask(
-                        primaryTask.id(), primaryTask.name(), roll.getRollModel(), primaryTask.externalRef(),
-                        primaryTask.revision(), primaryTask.demands(), primaryTask.process(), primaryTask.problemType(), primaryTask.slitting()
-                );
+                CuttingTask aligned = primaryTask.withMaterialModel(roll.getRollModel());
                 primaryTask = tx.saveTaskForScheme(aligned, scheme.id());
                 sourceTasks.put(primaryTask.id(), primaryTask);
             }
@@ -818,6 +869,214 @@ public class SchedulingStudioService {
         Map<String, Object> out = new LinkedHashMap<>(enrichWithDemandFamilies(tx, completedScheme));
         out.put("receipts", receiptsOut);
         return out;
+    }
+
+    /**
+     * 基于源方案报工/复检判废或未满足缺口，一键创建高优先级（URGENT）、强制同缸匹配（strictBatchMatch=true）的同缸补片任务。
+     */
+    public Map<String, Object> createReplenishTaskFromScheme(String schemeId, ReplenishTaskCommand cmd) {
+        if (schemeId == null || schemeId.isBlank()) throw new IllegalArgumentException("请指定源排程方案编号");
+        if (cmd == null || cmd.idempotencyKey() == null || cmd.idempotencyKey().isBlank() || cmd.idempotencyKey().trim().length() > 128) {
+            throw new IllegalArgumentException("请提供 1–128 字符的有效幂等键 idempotencyKey");
+        }
+        String cleanSchemeId = schemeId.trim();
+        String key = cmd.idempotencyKey().trim();
+        String reason = cmd.reason() == null ? "" : cmd.reason().trim();
+        if (reason.length() > 500) throw new IllegalArgumentException("补片原因不能超过 500 字");
+        String actor = resolveActor(cmd.operator(), "UNAUTHENTICATED_LOCAL");
+
+        return statePort.inWrite(
+                "REPLENISH_TASK",
+                cleanSchemeId,
+                actor,
+                tx -> {
+                    Optional<CuttingTask> existing = tx.findTaskByReplenishIdempotencyKey(key);
+                    if (existing.isPresent()) {
+                        CuttingTask hit = existing.get();
+                        if (!cleanSchemeId.equals(hit.sourceSchemeId())) {
+                            throw new InventoryConflictException("同一幂等键已用于其他排程方案的补片任务: " + hit.sourceSchemeId());
+                        }
+                        Map<String, Object> replayOut = new LinkedHashMap<>();
+                        replayOut.put("task", hit);
+                        replayOut.put("sourceSchemeId", cleanSchemeId);
+                        replayOut.put("revision", tx.currentRevision());
+                        return replayOut;
+                    }
+                    return null;
+                },
+                tx -> {
+                    SchedulingScheme source = tx.findScheme(cleanSchemeId)
+                            .orElseThrow(() -> new IllegalArgumentException("排程方案不存在: " + cleanSchemeId));
+                    if (SchedulingScheme.STATE_CANCELLED.equals(source.state()) || SchedulingScheme.STATE_REVERSED.equals(source.state())) {
+                        throw new InventoryConflictException("已作废或已冲销方案不能发起同缸补片");
+                    }
+
+                    Map<String, CuttingTask> sourceTasks = loadSourceTasksForScheme(tx, source);
+                    CuttingTask primaryTask = sourceTasks.get(source.taskId());
+                    if (primaryTask == null && !sourceTasks.isEmpty()) {
+                        primaryTask = sourceTasks.values().iterator().next();
+                    }
+
+                    // 1. 优先精确汇总源方案关联有效报工中的判废、未切与复检淘汰缺口
+                    Map<String, Integer> shortageQty = new LinkedHashMap<>();
+                    Map<String, CuttingTask.Line> shortageLineDef = new LinkedHashMap<>();
+
+                    for (String pid : source.linkedPlanIds()) {
+                        Map<String, Object> rawReceipt = tx.findReceipt(pid).orElse(null);
+                        if (rawReceipt == null || "REVERSED".equals(rawReceipt.get("status"))) continue;
+                        Map<String, Object> projected = tx.projectQuality(rawReceipt);
+                        Map<?, ?> pieceSources = rawReceipt.get("pieceSources") instanceof Map<?, ?> ps ? ps : null;
+                        String receiptTaskId = rawReceipt.get("taskId") != null ? rawReceipt.get("taskId").toString() : source.taskId();
+
+                        Set<Integer> activeDisposedGoodPieceIds = new HashSet<>();
+                        if (projected.get("qualityDispositions") instanceof List<?> qList) {
+                            for (Object qObj : qList) {
+                                if (qObj instanceof QualityDisposition qd
+                                        && !qd.hasRevocation()
+                                        && "QUALIFIED".equals(qd.originalOutcome())) {
+                                    activeDisposedGoodPieceIds.add(qd.command().pieceId());
+                                }
+                            }
+                        }
+
+                        if (rawReceipt.get("pieceResults") instanceof List<?> pieces) {
+                            for (Object pObj : pieces) {
+                                int pieceId;
+                                Integer demandId;
+                                String outcome;
+                                if (pObj instanceof ReportOutput.ReportedPiece rp) {
+                                    pieceId = rp.pieceId();
+                                    demandId = rp.demandId();
+                                    outcome = rp.outcome();
+                                } else if (pObj instanceof Map<?, ?> pm) {
+                                    pieceId = pm.get("pieceId") instanceof Number n ? n.intValue() : -1;
+                                    demandId = pm.get("demandId") instanceof Number n ? n.intValue() : null;
+                                    outcome = Objects.toString(pm.get("outcome"), "");
+                                } else {
+                                    continue;
+                                }
+                                boolean needsReplenish = "REJECTED".equals(outcome)
+                                        || "UNCUT".equals(outcome)
+                                        || ("QUALIFIED".equals(outcome) && activeDisposedGoodPieceIds.contains(pieceId));
+                                if (!needsReplenish) continue;
+
+                                String targetTaskId = receiptTaskId;
+                                Integer targetLineId = demandId;
+                                if (pieceSources != null) {
+                                    Object srcObj = pieceSources.get(String.valueOf(pieceId));
+                                    if (srcObj == null) srcObj = pieceSources.get(pieceId);
+                                    if (srcObj instanceof Map<?, ?> sm && sm.get("taskId") != null && sm.get("lineId") instanceof Number ln) {
+                                        targetTaskId = sm.get("taskId").toString();
+                                        targetLineId = ln.intValue();
+                                    }
+                                }
+                                if (targetTaskId == null || targetLineId == null) continue;
+                                CuttingTask srcTask = sourceTasks.computeIfAbsent(targetTaskId, id -> tx.findTask(id).orElse(null));
+                                if (srcTask == null) continue;
+                                int finalLineId = targetLineId;
+                                CuttingTask.Line srcLine = srcTask.demands().stream().filter(l -> l.id() == finalLineId).findFirst().orElse(null);
+                                if (srcLine == null) continue;
+                                String lineKey = targetTaskId + ":" + finalLineId;
+                                shortageQty.merge(lineKey, 1, Integer::sum);
+                                shortageLineDef.putIfAbsent(lineKey, srcLine);
+                            }
+                        }
+                    }
+
+                    // 2. 若报工/复检无判废缺口，则检查源方案关联任务的未满足缺口（openQty > 0）
+                    if (shortageQty.isEmpty()) {
+                        for (CuttingTask t : sourceTasks.values()) {
+                            if (t == null) continue;
+                            Map<String, Integer> completedMap = tx.completedQuantities(t.id());
+                            Map<String, Integer> plannedMap = demandPoolService.plannedQuantitiesForTask(tx, t.id(), null);
+                            for (CuttingTask.Line line : t.demands()) {
+                                String k = String.valueOf(line.id());
+                                int open = Math.max(0, line.quantity() - completedMap.getOrDefault(k, 0) - plannedMap.getOrDefault(k, 0));
+                                if (open > 0) {
+                                    String lineKey = t.id() + ":" + line.id();
+                                    shortageQty.merge(lineKey, open, Integer::sum);
+                                    shortageLineDef.putIfAbsent(lineKey, line);
+                                }
+                            }
+                        }
+                    }
+
+                    if (shortageQty.isEmpty()) {
+                        throw new IllegalArgumentException("源方案暂无判废或未满足缺口，无需创建补片任务");
+                    }
+
+                    MotherRollInfo roll = source.rollId() != null ? tx.findRoll(source.rollId()).orElse(null) : null;
+                    RemnantStock rem = source.remnantId() != null ? tx.findRemnant(source.remnantId()).orElse(null) : null;
+                    String inheritedBatch = (rem != null && rem.getBatchNo() != null && !rem.getBatchNo().isBlank())
+                            ? rem.getBatchNo().trim()
+                            : (roll != null && roll.getBatchNo() != null && !roll.getBatchNo().isBlank())
+                            ? roll.getBatchNo().trim()
+                            : (primaryTask != null ? primaryTask.requiredBatchNo() : null);
+                    String inheritedColor = (rem != null && rem.getColor() != null && !rem.getColor().isBlank())
+                            ? rem.getColor().trim()
+                            : (roll != null && roll.getColor() != null && !roll.getColor().isBlank())
+                            ? roll.getColor().trim()
+                            : (primaryTask != null ? primaryTask.requiredColor() : null);
+                    String inheritedModel = (roll != null && roll.getRollModel() != null && !roll.getRollModel().isBlank())
+                            ? roll.getRollModel().trim()
+                            : source.materialModel();
+
+                    List<CuttingTask.Line> replenishLines = new ArrayList<>();
+                    int nextId = 1;
+                    for (Map.Entry<String, Integer> e : shortageQty.entrySet()) {
+                        CuttingTask.Line orig = shortageLineDef.get(e.getKey());
+                        replenishLines.add(new CuttingTask.Line(
+                                nextId++,
+                                orig.name(),
+                                orig.width(),
+                                orig.length(),
+                                e.getValue(),
+                                orig.allowRotation(),
+                                orig.shape(),
+                                orig.allowHalfTurn(),
+                                orig.sizeLabel(),
+                                orig.sourceTemplateId(),
+                                orig.surfaceTreatment()
+                        ));
+                    }
+
+                    String titleSuffix = reason.isEmpty() ? "" : ("（" + (reason.length() > 30 ? reason.substring(0, 30) : reason) + "）");
+                    String taskName = "同缸补片 · " + source.title() + titleSuffix;
+                    String kittingGroup = (primaryTask != null && primaryTask.kittingGroup() != null && !primaryTask.kittingGroup().isBlank())
+                            ? primaryTask.kittingGroup()
+                            : ("补片-" + source.id());
+
+                    CuttingTask payload = new CuttingTask(
+                            null,
+                            taskName,
+                            inheritedModel,
+                            "REPLENISH-" + source.id(),
+                            0,
+                            replenishLines,
+                            primaryTask != null ? primaryTask.process() : null,
+                            primaryTask != null ? primaryTask.problemType() : null,
+                            primaryTask != null ? primaryTask.slitting() : null,
+                            primaryTask != null ? primaryTask.dueDate() : null,
+                            CuttingTask.PRIORITY_URGENT,
+                            primaryTask != null ? primaryTask.customerName() : null,
+                            kittingGroup,
+                            inheritedBatch,
+                            inheritedColor,
+                            Boolean.TRUE,
+                            primaryTask != null ? primaryTask.machineId() : null,
+                            primaryTask != null ? primaryTask.shiftTeam() : null,
+                            source.id(),
+                            key
+                    );
+
+                    CuttingTask created = tx.saveTask(payload);
+                    Map<String, Object> out = new LinkedHashMap<>();
+                    out.put("task", created);
+                    out.put("sourceSchemeId", cleanSchemeId);
+                    out.put("revision", tx.currentRevision() + 1);
+                    return out;
+                }
+        );
     }
 
     /**
@@ -1260,10 +1519,7 @@ public class SchedulingStudioService {
             if (!Objects.equals(existing.materialModel(), effectiveModel)
                     && ("STOCK_ROLL".equalsIgnoreCase(cmd.materialMode()) || "REMNANT".equalsIgnoreCase(cmd.materialMode()))
                     && tx.completedQuantities(existing.id()).isEmpty()) {
-                CuttingTask aligned = new CuttingTask(
-                        existing.id(), existing.name(), effectiveModel, existing.externalRef(),
-                        existing.revision(), existing.demands(), existing.process(), existing.problemType(), existing.slitting()
-                );
+                CuttingTask aligned = existing.withMaterialModel(effectiveModel);
                 return tx.saveTaskForScheme(aligned, null);
             }
             return existing;

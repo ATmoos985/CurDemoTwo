@@ -6,9 +6,12 @@ import com.example.cutdemotwo.business.model.InventoryTransfer;
 import com.example.cutdemotwo.business.model.InventoryEvent;
 import com.example.cutdemotwo.business.model.InventoryCount;
 import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
+import com.example.cutdemotwo.business.model.InventoryReceiptDocument;
+import com.example.cutdemotwo.business.model.MaterialIssueDocument;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.DemandTemplate;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
+import com.example.cutdemotwo.business.model.QualityReleaseDocument;
 import com.example.cutdemotwo.business.model.RemnantStock;
 import com.example.cutdemotwo.business.model.SchedulingScheme;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -80,8 +83,30 @@ public class JdbcInventoryStore implements InventoryStore {
             Map<String,SchedulingScheme> schemes=new LinkedHashMap<>();
             rows("scheduling_scheme",SchedulingScheme.class).forEach(s->schemes.put(s.id(),s));
             return new InventorySnapshot(rolls, remnants, receipts, ((Number)meta.get("remnant_seq")).intValue(),
-                    ((Number)meta.get("defect_seq")).intValue(), tasks, plans, revision, executions, ledger(), transfers(), outbox(), counts(), templates, schemes);
+                    ((Number)meta.get("defect_seq")).intValue(), tasks, plans, revision, executions, ledger(), transfers(),
+                    outbox(), counts(), templates, schemes, qualityReleases(), inventoryReceipts(), materialIssues());
         });
+    }
+    private Map<String,QualityReleaseDocument> qualityReleases() {
+        var result=new LinkedHashMap<String,QualityReleaseDocument>();
+        jdbc.query("SELECT id,data_json FROM quality_release_document ORDER BY inventory_revision,id", rs -> {
+            result.put(rs.getString(1),json.readValue(rs.getString(2),QualityReleaseDocument.class));
+        });
+        return result;
+    }
+    private Map<String,InventoryReceiptDocument> inventoryReceipts() {
+        var result=new LinkedHashMap<String,InventoryReceiptDocument>();
+        jdbc.query("SELECT id,data_json FROM inventory_receipt_document ORDER BY inventory_revision,id", rs -> {
+            result.put(rs.getString(1),json.readValue(rs.getString(2),InventoryReceiptDocument.class));
+        });
+        return result;
+    }
+    private Map<String,MaterialIssueDocument> materialIssues() {
+        var result=new LinkedHashMap<String,MaterialIssueDocument>();
+        jdbc.query("SELECT id,data_json FROM material_issue_document ORDER BY inventory_revision,id", rs -> {
+            result.put(rs.getString(1),json.readValue(rs.getString(2),MaterialIssueDocument.class));
+        });
+        return result;
     }
     private Map<String,InventoryCount> counts() {
         var result=new LinkedHashMap<String,InventoryCount>();
@@ -142,6 +167,21 @@ public class JdbcInventoryStore implements InventoryStore {
             for(var document:snapshot.counts().values())if(!counted.containsKey(document.id()))
                 jdbc.update("INSERT INTO inventory_count (id,idempotency_key,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?)",
                         document.id(),document.idempotencyKey(),document.postedAt(),document.inventoryRevision(),json.writeValueAsString(document));
+            var released=qualityReleases();
+            QualityReleaseDocument.requireAppendOnly(released,snapshot.qualityReleases());
+            for(var document:snapshot.qualityReleases().values())if(!released.containsKey(document.id()))
+                jdbc.update("INSERT INTO quality_release_document (id,idempotency_key,remnant_id,decision,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?)",
+                        document.id(),document.idempotencyKey(),document.remnantId(),document.decision(),document.postedAt(),document.inventoryRevision(),json.writeValueAsString(document));
+            var invReceipts=inventoryReceipts();
+            InventoryReceiptDocument.requireAppendOnly(invReceipts,snapshot.inventoryReceipts());
+            for(var document:snapshot.inventoryReceipts().values())if(!invReceipts.containsKey(document.id()))
+                jdbc.update("INSERT INTO inventory_receipt_document (id,idempotency_key,supplier_name,delivery_note_no,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?)",
+                        document.id(),document.idempotencyKey(),document.supplierName(),document.deliveryNoteNo(),document.postedAt(),document.inventoryRevision(),json.writeValueAsString(document));
+            var matIssues=materialIssues();
+            MaterialIssueDocument.requireAppendOnly(matIssues,snapshot.materialIssues());
+            for(var document:snapshot.materialIssues().values())if(!matIssues.containsKey(document.id()))
+                jdbc.update("INSERT INTO material_issue_document (id,idempotency_key,direction,roll_id,machine_id,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?,?)",
+                        document.id(),document.idempotencyKey(),document.direction(),document.rollId(),document.machineId(),document.postedAt(),document.inventoryRevision(),json.writeValueAsString(document));
             var previous = ledger();
             InventoryLedgerEntry.requireAppendOnly(previous,snapshot.ledger());
             for (var entry : snapshot.ledger().subList(previous.size(),snapshot.ledger().size())) {

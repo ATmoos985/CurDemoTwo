@@ -829,10 +829,7 @@ final class StudioMaterializer {
             }
         }
         if (!changed) return task;
-        return tx.saveTaskForScheme(new CuttingTask(
-                task.id(), task.name(), task.materialModel(), task.externalRef(),
-                task.revision(), nextLines, task.process(), task.problemType(), task.slitting()
-        ), exceptSchemeId);
+        return tx.saveTaskForScheme(task.withDemands(nextLines), exceptSchemeId);
     }
 
     // ==================== 区间互斥、几何碰撞与分切匹配辅助 ====================
