@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { NumberInput } from '../components/ui/NumberInput';
 import { fmtN, toast, createUuid } from '@static/app/js/util.js';
 import {
   DXF_TRIAL_STYLES,
@@ -801,23 +802,24 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
                   return (
                     <React.Fragment key={size}>
                       <label htmlFor={inputId}>{size} 码（件/版）</label>
-                      <input
+                      <NumberInput
                         ref={(el) => {
                           sizeInputRefs.current[size] = el;
                         }}
                         className="field"
                         id={inputId}
                         name={size}
-                        type="number"
                         min={0}
                         max={12}
+                        fallback={0}
+                        integer
                         required
                         disabled={isBusy}
                         value={sizeCounts[size] ?? 0}
-                        onChange={(e) => {
+                        onValueChange={(v) => {
                           setSizeCounts((prev) => ({
                             ...prev,
-                            [size]: Number(e.target.value)
+                            [size]: v
                           }));
                           setCurrentExampleId('');
                           resetResults(false);
@@ -845,18 +847,18 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
                 }}
               />
               <label htmlFor="garment-edge">两侧布边合计（mm）</label>
-              <input
+              <NumberInput
                 className="field"
                 id="garment-edge"
                 name="edge"
-                type="number"
                 min={0}
                 step="0.1"
+                fallback={0}
                 required
                 disabled={isBusy}
                 value={edgeMm}
-                onChange={(e) => {
-                  setEdgeMm(Number(e.target.value));
+                onValueChange={(v) => {
+                  setEdgeMm(v);
                   setCurrentExampleId('');
                   resetResults(false);
                 }}

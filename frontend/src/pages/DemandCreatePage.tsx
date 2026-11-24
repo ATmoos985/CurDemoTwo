@@ -8,6 +8,7 @@ import {
   expandClusterToDemands
 } from '../store/useStudioStore';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
+import { NumberInput } from '../components/ui/NumberInput';
 import { requestJSON, toast, fmtN, fmtM, loadSheetLib } from '@static/app/js/util.js';
 import {
   parseDemandSheet,
@@ -822,14 +823,15 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
                         </option>
                       ))}
                     </select>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={1}
                       max={999}
+                      fallback={1}
+                      integer
                       className="field num dc-tpl-sets"
                       aria-label="套数"
                       value={templateQuickSets}
-                      onChange={(e) => setTemplateQuickSets(Math.max(1, Number(e.target.value) || 1))}
+                      onValueChange={setTemplateQuickSets}
                     />
                     <button
                       type="button"
@@ -873,30 +875,26 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
                             <label htmlFor="dc-w2d">
                               新母卷门幅 <small>mm</small>
                             </label>
-                            <input
+                            <NumberInput
                               id="dc-w2d"
-                              type="number"
                               min={200}
+                              fallback={1650}
                               className="field num"
                               value={motherWidth2D}
-                              onChange={(e) =>
-                                setMotherWidth2D(Math.max(200, Number(e.target.value) || 1650))
-                              }
+                              onValueChange={setMotherWidth2D}
                             />
                           </div>
                           <div className="dc-field">
                             <label htmlFor="dc-l2d">
                               版长上限 <small>mm</small>
                             </label>
-                            <input
+                            <NumberInput
                               id="dc-l2d"
-                              type="number"
                               min={500}
+                              fallback={2400}
                               className="field num"
                               value={bedLength2D}
-                              onChange={(e) =>
-                                setBedLength2D(Math.max(500, Number(e.target.value) || 2400))
-                              }
+                              onValueChange={setBedLength2D}
                             />
                           </div>
                         </div>
@@ -976,32 +974,28 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
                         <label htmlFor="dc-gap">
                           裁片间距 <small>mm</small>
                         </label>
-                        <input
+                        <NumberInput
                           id="dc-gap"
-                          type="number"
                           min={0}
                           max={50}
+                          fallback={0}
                           className="field num"
                           value={pieceGapMm}
-                          onChange={(e) =>
-                            setPieceGapMm(Math.max(0, Number(e.target.value) || 0))
-                          }
+                          onValueChange={setPieceGapMm}
                         />
                       </div>
                       <div className="dc-field">
                         <label htmlFor="dc-trim">
                           首端切头 <small>mm</small>
                         </label>
-                        <input
+                        <NumberInput
                           id="dc-trim"
-                          type="number"
                           min={0}
                           max={500}
+                          fallback={0}
                           className="field num"
                           value={trimStartMm}
-                          onChange={(e) =>
-                            setTrimStartMm(Math.max(0, Number(e.target.value) || 0))
-                          }
+                          onValueChange={setTrimStartMm}
                         />
                       </div>
                     </div>
@@ -1046,13 +1040,12 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
                         <label>
                           母卷幅宽 <small>mm</small>
                         </label>
-                        <input
-                          type="number"
+                        <NumberInput
                           min={500}
+                          fallback={2000}
                           className="field num"
                           value={motherWidth1D}
-                          onChange={(e) => {
-                            const w = Math.max(500, Number(e.target.value) || 2000);
+                          onValueChange={(w) => {
                             const usable = Math.max(100, w - leftTrim1D - rightTrim1D);
                             setMotherWidth1D(w);
                             setMaxWidth1D((prev) => Math.min(prev, usable));
@@ -1064,14 +1057,12 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
                         <label>
                           定长卷长 <small>mm</small>
                         </label>
-                        <input
-                          type="number"
+                        <NumberInput
                           min={100}
+                          fallback={2000}
                           className="field num"
                           value={fixedLen1D}
-                          onChange={(e) =>
-                            setFixedLen1D(Math.max(100, Number(e.target.value) || 2000))
-                          }
+                          onValueChange={setFixedLen1D}
                         />
                       </div>
                     </div>
@@ -1100,28 +1091,26 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
                           左/右修边 <small>mm</small>
                         </label>
                         <div style={{ display: 'flex', gap: 4 }}>
-                          <input
-                            type="number"
+                          <NumberInput
                             min={0}
+                            fallback={0}
                             className="field num"
                             aria-label="左修边"
                             value={leftTrim1D}
-                            onChange={(e) => {
-                              const lt = Math.max(0, Number(e.target.value) || 0);
+                            onValueChange={(lt) => {
                               const usable = Math.max(100, motherWidth1D - lt - rightTrim1D);
                               setLeftTrim1D(lt);
                               setMaxWidth1D((prev) => Math.min(prev, usable));
                               setMinWidth1D((prev) => Math.min(prev, usable));
                             }}
                           />
-                          <input
-                            type="number"
+                          <NumberInput
                             min={0}
+                            fallback={0}
                             className="field num"
                             aria-label="右修边"
                             value={rightTrim1D}
-                            onChange={(e) => {
-                              const rt = Math.max(0, Number(e.target.value) || 0);
+                            onValueChange={(rt) => {
                               const usable = Math.max(100, motherWidth1D - leftTrim1D - rt);
                               setRightTrim1D(rt);
                               setMaxWidth1D((prev) => Math.min(prev, usable));
@@ -1134,12 +1123,13 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
                         <label>
                           超产上限 <small>卷</small>
                         </label>
-                        <input
-                          type="number"
+                        <NumberInput
                           min={0}
+                          fallback={0}
+                          integer
                           className="field num"
                           value={overCap1D}
-                          onChange={(e) => setOverCap1D(Math.max(0, Number(e.target.value) || 0))}
+                          onValueChange={setOverCap1D}
                         />
                       </div>
                     </div>
@@ -1150,25 +1140,21 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
                           最小 / 最大组合宽 <small>mm</small>
                         </label>
                         <div style={{ display: 'flex', gap: 4 }}>
-                          <input
-                            type="number"
+                          <NumberInput
                             min={100}
+                            fallback={100}
                             className="field num"
                             aria-label="最小组合宽"
                             value={minWidth1D}
-                            onChange={(e) =>
-                              setMinWidth1D(Math.max(100, Number(e.target.value) || 100))
-                            }
+                            onValueChange={setMinWidth1D}
                           />
-                          <input
-                            type="number"
+                          <NumberInput
                             min={100}
+                            fallback={100}
                             className="field num"
                             aria-label="最大组合宽"
                             value={maxWidth1D}
-                            onChange={(e) =>
-                              setMaxWidth1D(Math.max(100, Number(e.target.value) || 100))
-                            }
+                            onValueChange={setMaxWidth1D}
                           />
                         </div>
                       </div>
@@ -1176,14 +1162,12 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
                         <label>
                           幅宽步长 <small>mm</small>
                         </label>
-                        <input
-                          type="number"
+                        <NumberInput
                           min={1}
+                          fallback={10}
                           className="field num"
                           value={widthStep1D}
-                          onChange={(e) =>
-                            setWidthStep1D(Math.max(1, Number(e.target.value) || 10))
-                          }
+                          onValueChange={setWidthStep1D}
                         />
                       </div>
                     </div>
@@ -1352,15 +1336,13 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
                               </span>
                             </td>
                             <td>
-                              <input
-                                type="number"
+                              <NumberInput
                                 min={1}
                                 className="dc-cell-in num-in"
                                 style={over ? { borderColor: '#e11d48', color: '#be123c' } : undefined}
                                 value={ln.width}
-                                onChange={(e) => {
+                                onValueChange={(v) => {
                                   setIsPristineDraft(false);
-                                  const v = Number(e.target.value);
                                   setDraftLines((p) =>
                                     p.map((x, i) => (i === idx ? { ...x, width: v } : x))
                                   );
@@ -1369,14 +1351,12 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
                             </td>
                             {!is1D && (
                               <td>
-                                <input
-                                  type="number"
+                                <NumberInput
                                   min={1}
                                   className="dc-cell-in num-in"
                                   value={ln.length}
-                                  onChange={(e) => {
+                                  onValueChange={(v) => {
                                     setIsPristineDraft(false);
-                                    const v = Number(e.target.value);
                                     setDraftLines((p) =>
                                       p.map((x, i) => (i === idx ? { ...x, length: v } : x))
                                     );
@@ -1385,14 +1365,13 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
                               </td>
                             )}
                             <td>
-                              <input
-                                type="number"
+                              <NumberInput
                                 min={1}
+                                integer
                                 className="dc-cell-in num-in"
                                 value={ln.quantity}
-                                onChange={(e) => {
+                                onValueChange={(v) => {
                                   setIsPristineDraft(false);
-                                  const v = Number(e.target.value);
                                   setDraftLines((p) =>
                                     p.map((x, i) => (i === idx ? { ...x, quantity: v } : x))
                                   );

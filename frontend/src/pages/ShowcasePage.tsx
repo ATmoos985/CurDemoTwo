@@ -17,6 +17,7 @@ import {
   CodeBadge,
   SegmentedOption
 } from '../components/ui/MagpiePrimitives';
+import { NumberInput } from '../components/ui/NumberInput';
 import { GarmentWidthPage } from './GarmentWidthPage';
 import {
   SlittingWidthMode,
@@ -1968,13 +1969,12 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                 <div className="slit-cfg-grid">
                   <label className="slit-cfg-field">
                     <span>母卷总宽 (mm)</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={200}
+                      fallback={200}
                       className="field num"
                       value={slitDraft.motherWidthMm}
-                      onChange={(e) => {
-                        const w = Math.max(200, Number(e.target.value) || 200);
+                      onValueChange={(w) => {
                         const usable = Math.max(100, w - slitDraft.leftTrimMm - slitDraft.rightTrimMm);
                         const nextMax = Math.min(slitDraft.maxWidthMm, usable);
                         patchSlitDraft({
@@ -1990,26 +1990,24 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                   </label>
                   <label className="slit-cfg-field">
                     <span>超产上限 (卷)</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={0}
                       max={10000}
+                      fallback={0}
+                      integer
                       className="field num"
                       value={slitDraft.totalOverCap}
-                      onChange={(e) =>
-                        patchSlitDraft({ totalOverCap: Math.max(0, Number(e.target.value) || 0) })
-                      }
+                      onValueChange={(v) => patchSlitDraft({ totalOverCap: v })}
                     />
                   </label>
                   <label className="slit-cfg-field">
                     <span>左切边 (mm)</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={0}
+                      fallback={0}
                       className="field num"
                       value={slitDraft.leftTrimMm}
-                      onChange={(e) => {
-                        const lt = Math.max(0, Number(e.target.value) || 0);
+                      onValueChange={(lt) => {
                         const usable = Math.max(100, slitDraft.motherWidthMm - lt - slitDraft.rightTrimMm);
                         patchSlitDraft({
                           leftTrimMm: lt,
@@ -2021,13 +2019,12 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                   </label>
                   <label className="slit-cfg-field">
                     <span>右切边 (mm)</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={0}
+                      fallback={0}
                       className="field num"
                       value={slitDraft.rightTrimMm}
-                      onChange={(e) => {
-                        const rt = Math.max(0, Number(e.target.value) || 0);
+                      onValueChange={(rt) => {
                         const usable = Math.max(100, slitDraft.motherWidthMm - slitDraft.leftTrimMm - rt);
                         patchSlitDraft({
                           rightTrimMm: rt,
@@ -2041,75 +2038,57 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                     <>
                       <label className="slit-cfg-field">
                         <span>最小组合宽 (mm)</span>
-                        <input
-                          type="number"
+                        <NumberInput
                           min={100}
+                          fallback={100}
                           className="field num"
                           value={slitDraft.minWidthMm}
-                          onChange={(e) =>
-                            patchSlitDraft({
-                              minWidthMm: Math.max(100, Number(e.target.value) || 100)
-                            })
-                          }
+                          onValueChange={(v) => patchSlitDraft({ minWidthMm: v })}
                         />
                       </label>
                       <label className="slit-cfg-field">
                         <span>最大组合宽 (mm)</span>
-                        <input
-                          type="number"
+                        <NumberInput
                           min={100}
+                          fallback={100}
                           className="field num"
                           value={slitDraft.maxWidthMm}
-                          onChange={(e) =>
-                            patchSlitDraft({
-                              maxWidthMm: Math.max(100, Number(e.target.value) || 100)
-                            })
-                          }
+                          onValueChange={(v) => patchSlitDraft({ maxWidthMm: v })}
                         />
                       </label>
                       <label className="slit-cfg-field">
                         <span>幅宽步长 (mm)</span>
-                        <input
-                          type="number"
+                        <NumberInput
                           min={1}
+                          fallback={10}
                           className="field num"
                           value={slitDraft.widthStepMm}
-                          onChange={(e) =>
-                            patchSlitDraft({
-                              widthStepMm: Math.max(1, Number(e.target.value) || 10)
-                            })
-                          }
+                          onValueChange={(v) => patchSlitDraft({ widthStepMm: v })}
                         />
                       </label>
                     </>
                   ) : (
                     <label className="slit-cfg-field span-2">
                       <span>固定组合宽 (mm)</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={100}
+                        fallback={100}
                         className="field num"
                         value={slitDraft.maxWidthMm}
-                        onChange={(e) => {
-                          const v = Math.max(100, Number(e.target.value) || 100);
-                          patchSlitDraft({ maxWidthMm: v, minWidthMm: v });
-                        }}
+                        onValueChange={(v) => patchSlitDraft({ maxWidthMm: v, minWidthMm: v })}
                       />
                     </label>
                   )}
                   <label className="slit-cfg-field">
                     <span>求解时限 (秒)</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={1}
                       max={180}
+                      fallback={30}
+                      integer
                       className="field num"
                       value={slitDraft.timeLimitSeconds}
-                      onChange={(e) =>
-                        patchSlitDraft({
-                          timeLimitSeconds: Math.min(180, Math.max(1, Number(e.target.value) || 30))
-                        })
-                      }
+                      onValueChange={(v) => patchSlitDraft({ timeLimitSeconds: v })}
                     />
                   </label>
                 </div>
@@ -2122,92 +2101,65 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                   <div className="slit-cfg-grid" style={{ marginTop: 6 }}>
                     <label className="slit-cfg-field">
                       <span>TOP K 超产</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={0}
                         max={50}
+                        fallback={0}
+                        integer
                         className="field num"
                         value={slitDraft.topK}
-                        onChange={(e) =>
-                          patchSlitDraft({
-                            topK: Math.min(50, Math.max(0, Number(e.target.value) || 0))
-                          })
-                        }
+                        onValueChange={(v) => patchSlitDraft({ topK: v })}
                       />
                     </label>
                     <label className="slit-cfg-field">
                       <span>列生成迭代</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={1}
                         max={5000}
                         step={10}
+                        fallback={300}
+                        integer
                         className="field num"
                         value={slitDraft.maxIterations}
-                        onChange={(e) =>
-                          patchSlitDraft({
-                            maxIterations: Math.min(
-                              5000,
-                              Math.max(1, Number(e.target.value) || 300)
-                            )
-                          })
-                        }
+                        onValueChange={(v) => patchSlitDraft({ maxIterations: v })}
                       />
                     </label>
                     <label className="slit-cfg-field">
                       <span>最大花型池</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={1}
                         max={20000}
                         step={50}
+                        fallback={800}
+                        integer
                         className="field num"
                         value={slitDraft.maxPatterns}
-                        onChange={(e) =>
-                          patchSlitDraft({
-                            maxPatterns: Math.min(
-                              20000,
-                              Math.max(1, Number(e.target.value) || 800)
-                            )
-                          })
-                        }
+                        onValueChange={(v) => patchSlitDraft({ maxPatterns: v })}
                       />
                     </label>
                     <label className="slit-cfg-field">
                       <span>不同宽幅上限</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={1}
                         max={20}
+                        fallback={4}
+                        integer
                         className="field num"
                         value={slitDraft.maxDistinctWidths}
-                        onChange={(e) =>
-                          patchSlitDraft({
-                            maxDistinctWidths: Math.min(
-                              20,
-                              Math.max(1, Number(e.target.value) || 4)
-                            )
-                          })
-                        }
+                        onValueChange={(v) => patchSlitDraft({ maxDistinctWidths: v })}
                       />
                     </label>
                     <label className="slit-cfg-field span-2">
                       <span>MIP 单阶段安全时限 (ms)</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={1000}
                         max={600000}
                         step={1000}
+                        fallback={120000}
+                        integer
                         className="field num"
                         value={slitDraft.stageTimeLimitMs}
-                        onChange={(e) =>
-                          patchSlitDraft({
-                            stageTimeLimitMs: Math.min(
-                              600000,
-                              Math.max(1000, Number(e.target.value) || 120000)
-                            )
-                          })
-                        }
+                        onValueChange={(v) => patchSlitDraft({ stageTimeLimitMs: v })}
                       />
                     </label>
                     <label className="slit-both-toggle span-2">

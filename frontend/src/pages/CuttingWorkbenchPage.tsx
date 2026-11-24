@@ -27,6 +27,7 @@ import {
   BoardCutLine
 } from '../components/WorkbenchBoardCanvas';
 import { ModalDialog } from '../components/ModalDialog';
+import { NumberInput } from '../components/ui/NumberInput';
 import { OptimizationSession } from '@static/js/business/optimization/job-client.js';
 import {
   buildSafeNestingRequest2D,
@@ -2165,16 +2166,13 @@ export const CuttingWorkbenchPage: React.FC<{
                   <>
                     <label>
                       <span>门幅 W</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         className="field num"
                         style={{ width: 68 }}
+                        min={300}
+                        fallback={1500}
                         value={canvasWidthMm}
-                        onChange={(e) =>
-                          setCanvasSpec({
-                            canvasWidthMm: Math.max(300, Number(e.target.value) || 1500)
-                          })
-                        }
+                        onValueChange={(w) => setCanvasSpec({ canvasWidthMm: w })}
                       />
                       <em>mm</em>
                     </label>
@@ -2195,16 +2193,13 @@ export const CuttingWorkbenchPage: React.FC<{
                 )}
                 <label>
                   <span>版长 L</span>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
                     style={{ width: 70 }}
+                    min={500}
+                    fallback={2000}
                     value={canvasLengthMm}
-                    onChange={(e) =>
-                      setCanvasSpec({
-                        canvasLengthMm: Math.max(500, Number(e.target.value) || 2000)
-                      })
-                    }
+                    onValueChange={(l) => setCanvasSpec({ canvasLengthMm: l })}
                   />
                   <em>mm</em>
                 </label>
@@ -2233,16 +2228,13 @@ export const CuttingWorkbenchPage: React.FC<{
                 </label>
                 <label>
                   <span>拉布长 L</span>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
                     style={{ width: 70 }}
+                    min={500}
+                    fallback={2000}
                     value={canvasLengthMm}
-                    onChange={(e) =>
-                      setCanvasSpec({
-                        canvasLengthMm: Math.max(500, Number(e.target.value) || 2000)
-                      })
-                    }
+                    onValueChange={(l) => setCanvasSpec({ canvasLengthMm: l })}
                   />
                   <em>mm</em>
                 </label>
@@ -2273,28 +2265,24 @@ export const CuttingWorkbenchPage: React.FC<{
               <div className="craft-disclosure-panel">
                 <label>
                   <span>裁片安全间距 (mm)</span>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
                     min={0}
                     max={50}
+                    fallback={0}
                     value={pieceGapMm}
-                    onChange={(e) =>
-                      setCanvasSpec({ pieceGapMm: Math.max(0, Number(e.target.value) || 0) })
-                    }
+                    onValueChange={(v) => setCanvasSpec({ pieceGapMm: v })}
                   />
                 </label>
                 <label>
                   <span>首端修边切头 (mm)</span>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
                     min={0}
                     max={200}
+                    fallback={0}
                     value={trimStartMm}
-                    onChange={(e) =>
-                      setCanvasSpec({ trimStartMm: Math.max(0, Number(e.target.value) || 0) })
-                    }
+                    onValueChange={(v) => setCanvasSpec({ trimStartMm: v })}
                   />
                 </label>
                 <button
@@ -2346,13 +2334,13 @@ export const CuttingWorkbenchPage: React.FC<{
               <div className="studio-canvas-inputs">
                 <label>
                   <span>母卷幅宽</span>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
                     style={{ width: 72 }}
+                    min={500}
+                    fallback={2000}
                     value={slitMotherWidthMm}
-                    onChange={(e) => {
-                      const w = Math.max(500, Number(e.target.value) || 2000);
+                    onValueChange={(w) => {
                       const usable = Math.max(100, w - slitLeftTrimMm - slitRightTrimMm);
                       const nextMax = Math.min(slitMaxWidthMm, usable);
                       setSlitSpec({
@@ -2367,12 +2355,12 @@ export const CuttingWorkbenchPage: React.FC<{
                 </label>
                 <label>
                   <span>定长</span>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
                     style={{ width: 72 }}
+                    min={100}
                     value={slitFixedLengthMm}
-                    onChange={(e) => setSlitSpec({ slitFixedLengthMm: Number(e.target.value) })}
+                    onValueChange={(v) => setSlitSpec({ slitFixedLengthMm: v })}
                   />
                   <em>mm</em>
                 </label>
@@ -2412,12 +2400,12 @@ export const CuttingWorkbenchPage: React.FC<{
                 </label>
                 <label>
                   <span>定长</span>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
                     style={{ width: 70 }}
+                    min={100}
                     value={slitFixedLengthMm}
-                    onChange={(e) => setSlitSpec({ slitFixedLengthMm: Number(e.target.value) })}
+                    onValueChange={(v) => setSlitSpec({ slitFixedLengthMm: v })}
                   />
                   <em>mm</em>
                 </label>
@@ -2455,13 +2443,12 @@ export const CuttingWorkbenchPage: React.FC<{
                 </label>
                 <label>
                   <span>左固定切边 (mm)</span>
-                  <input
-                    type="number"
+                  <NumberInput
                     min={0}
+                    fallback={0}
                     className="field num"
                     value={slitLeftTrimMm}
-                    onChange={(e) => {
-                      const lt = Math.max(0, Number(e.target.value) || 0);
+                    onValueChange={(lt) => {
                       const usable = Math.max(100, slitMotherWidthMm - lt - slitRightTrimMm);
                       setSlitSpec({
                         slitLeftTrimMm: lt,
@@ -2473,13 +2460,12 @@ export const CuttingWorkbenchPage: React.FC<{
                 </label>
                 <label>
                   <span>右固定切边 (mm)</span>
-                  <input
-                    type="number"
+                  <NumberInput
                     min={0}
+                    fallback={0}
                     className="field num"
                     value={slitRightTrimMm}
-                    onChange={(e) => {
-                      const rt = Math.max(0, Number(e.target.value) || 0);
+                    onValueChange={(rt) => {
                       const usable = Math.max(100, slitMotherWidthMm - slitLeftTrimMm - rt);
                       setSlitSpec({
                         slitRightTrimMm: rt,
@@ -2492,26 +2478,23 @@ export const CuttingWorkbenchPage: React.FC<{
                 {slitWidthMode === 'FLEXIBLE' && (
                   <label>
                     <span>最小组合宽 (mm)</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={100}
+                      fallback={100}
                       className="field num"
                       value={slitMinWidthMm}
-                      onChange={(e) =>
-                        setSlitSpec({ slitMinWidthMm: Math.max(100, Number(e.target.value) || 100) })
-                      }
+                      onValueChange={(v) => setSlitSpec({ slitMinWidthMm: v })}
                     />
                   </label>
                 )}
                 <label>
                   <span>{slitWidthMode === 'FIXED' ? '固定组合宽 (mm)' : '最大组合宽 (mm)'}</span>
-                  <input
-                    type="number"
+                  <NumberInput
                     min={100}
+                    fallback={100}
                     className="field num"
                     value={slitMaxWidthMm}
-                    onChange={(e) => {
-                      const v = Math.max(100, Number(e.target.value) || 100);
+                    onValueChange={(v) => {
                       setSlitSpec({
                         slitMaxWidthMm: v,
                         ...(slitWidthMode === 'FIXED' ? { slitMinWidthMm: v } : {})
@@ -2522,27 +2505,23 @@ export const CuttingWorkbenchPage: React.FC<{
                 {slitWidthMode === 'FLEXIBLE' && (
                   <label>
                     <span>幅宽步长 (mm)</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={1}
+                      fallback={10}
                       className="field num"
                       value={slitWidthStepMm}
-                      onChange={(e) =>
-                        setSlitSpec({ slitWidthStepMm: Math.max(1, Number(e.target.value) || 10) })
-                      }
+                      onValueChange={(v) => setSlitSpec({ slitWidthStepMm: v })}
                     />
                   </label>
                 )}
                 <label>
                   <span>超产上限 (卷)</span>
-                  <input
-                    type="number"
+                  <NumberInput
                     min={0}
+                    fallback={0}
                     className="field num"
                     value={slitOverCap}
-                    onChange={(e) =>
-                      setSlitSpec({ slitOverCap: Math.max(0, Number(e.target.value) || 0) })
-                    }
+                    onValueChange={(v) => setSlitSpec({ slitOverCap: v })}
                   />
                 </label>
                 <button
@@ -2650,14 +2629,13 @@ export const CuttingWorkbenchPage: React.FC<{
                       {quickCluster.availableSizes.map((sz) => (
                         <label key={sz} className={(quickCounts[sz] || 0) > 0 ? 'on' : ''}>
                           <span>{sz}</span>
-                          <input
-                            type="number"
+                          <NumberInput
                             min={0}
                             max={100}
+                            fallback={0}
+                            integer
                             value={quickCounts[sz] ?? 0}
-                            onChange={(e) =>
-                              setClusterCount(quickCluster.id, sz, Number(e.target.value))
-                            }
+                            onValueChange={(v) => setClusterCount(quickCluster.id, sz, v)}
                           />
                         </label>
                       ))}
@@ -3484,13 +3462,12 @@ export const CuttingWorkbenchPage: React.FC<{
                 <div className="slit-cfg-grid">
                   <label className="slit-cfg-field">
                     <span>母卷总宽 (mm)</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={500}
+                      fallback={500}
                       className="field num"
                       value={slitMotherWidthMm}
-                      onChange={(e) => {
-                        const w = Math.max(500, Number(e.target.value) || 500);
+                      onValueChange={(w) => {
                         const usable = Math.max(100, w - slitLeftTrimMm - slitRightTrimMm);
                         setSlitSpec({
                           slitMotherWidthMm: w,
@@ -3505,26 +3482,24 @@ export const CuttingWorkbenchPage: React.FC<{
                   </label>
                   <label className="slit-cfg-field">
                     <span>超产上限 (卷)</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={0}
                       max={10000}
+                      fallback={0}
+                      integer
                       className="field num"
                       value={slitOverCap}
-                      onChange={(e) =>
-                        setSlitSpec({ slitOverCap: Math.max(0, Number(e.target.value) || 0) })
-                      }
+                      onValueChange={(v) => setSlitSpec({ slitOverCap: v })}
                     />
                   </label>
                   <label className="slit-cfg-field">
                     <span>左切边 (mm)</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={0}
+                      fallback={0}
                       className="field num"
                       value={slitLeftTrimMm}
-                      onChange={(e) => {
-                        const lt = Math.max(0, Number(e.target.value) || 0);
+                      onValueChange={(lt) => {
                         const usable = Math.max(100, slitMotherWidthMm - lt - slitRightTrimMm);
                         setSlitSpec({
                           slitLeftTrimMm: lt,
@@ -3536,13 +3511,12 @@ export const CuttingWorkbenchPage: React.FC<{
                   </label>
                   <label className="slit-cfg-field">
                     <span>右切边 (mm)</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={0}
+                      fallback={0}
                       className="field num"
                       value={slitRightTrimMm}
-                      onChange={(e) => {
-                        const rt = Math.max(0, Number(e.target.value) || 0);
+                      onValueChange={(rt) => {
                         const usable = Math.max(100, slitMotherWidthMm - slitLeftTrimMm - rt);
                         setSlitSpec({
                           slitRightTrimMm: rt,
@@ -3556,78 +3530,58 @@ export const CuttingWorkbenchPage: React.FC<{
                     <>
                       <label className="slit-cfg-field">
                         <span>最小组合宽 (mm)</span>
-                        <input
-                          type="number"
+                        <NumberInput
                           min={100}
+                          fallback={100}
                           className="field num"
                           value={slitMinWidthMm}
-                          onChange={(e) =>
-                            setSlitSpec({
-                              slitMinWidthMm: Math.max(100, Number(e.target.value) || 100)
-                            })
-                          }
+                          onValueChange={(v) => setSlitSpec({ slitMinWidthMm: v })}
                         />
                       </label>
                       <label className="slit-cfg-field">
                         <span>最大组合宽 (mm)</span>
-                        <input
-                          type="number"
+                        <NumberInput
                           min={100}
+                          fallback={100}
                           className="field num"
                           value={slitMaxWidthMm}
-                          onChange={(e) =>
-                            setSlitSpec({
-                              slitMaxWidthMm: Math.max(100, Number(e.target.value) || 100)
-                            })
-                          }
+                          onValueChange={(v) => setSlitSpec({ slitMaxWidthMm: v })}
                         />
                       </label>
                       <label className="slit-cfg-field">
                         <span>幅宽步长 (mm)</span>
-                        <input
-                          type="number"
+                        <NumberInput
                           min={1}
+                          fallback={10}
                           className="field num"
                           value={slitWidthStepMm}
-                          onChange={(e) =>
-                            setSlitSpec({
-                              slitWidthStepMm: Math.max(1, Number(e.target.value) || 10)
-                            })
-                          }
+                          onValueChange={(v) => setSlitSpec({ slitWidthStepMm: v })}
                         />
                       </label>
                     </>
                   ) : (
                     <label className="slit-cfg-field span-2">
                       <span>固定组合宽 (mm)</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={100}
+                        fallback={100}
                         className="field num"
                         value={slitMaxWidthMm}
-                        onChange={(e) => {
-                          const v = Math.max(100, Number(e.target.value) || 100);
-                          setSlitSpec({ slitMaxWidthMm: v, slitMinWidthMm: v });
-                        }}
+                        onValueChange={(v) => setSlitSpec({ slitMaxWidthMm: v, slitMinWidthMm: v })}
                       />
                     </label>
                   )}
                   <label className="slit-cfg-field">
                     <span>求解时限 (秒)</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={1}
                       max={180}
+                      fallback={30}
+                      integer
                       className="field num"
                       value={settings.slitTimeLimitSeconds}
-                      onChange={(e) =>
-                        updateStudioSettings({
-                          ...settings,
-                          slitTimeLimitSeconds: Math.min(
-                            180,
-                            Math.max(1, Number(e.target.value) || 30)
-                          )
-                        })
+                      onValueChange={(v) =>
+                        updateStudioSettings({ ...settings, slitTimeLimitSeconds: v })
                       }
                     />
                   </label>
@@ -3658,96 +3612,72 @@ export const CuttingWorkbenchPage: React.FC<{
                   <div className="slit-cfg-grid" style={{ marginTop: 6 }}>
                     <label className="slit-cfg-field">
                       <span>TOP K 超产</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={0}
                         max={50}
+                        fallback={0}
+                        integer
                         className="field num"
                         value={settings.slitTopK}
-                        onChange={(e) =>
-                          updateStudioSettings({
-                            ...settings,
-                            slitTopK: Math.min(50, Math.max(0, Number(e.target.value) || 0))
-                          })
-                        }
+                        onValueChange={(v) => updateStudioSettings({ ...settings, slitTopK: v })}
                       />
                     </label>
                     <label className="slit-cfg-field">
                       <span>列生成迭代</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={1}
                         max={5000}
                         step={10}
+                        fallback={300}
+                        integer
                         className="field num"
                         value={settings.slitMaxIterations}
-                        onChange={(e) =>
-                          updateStudioSettings({
-                            ...settings,
-                            slitMaxIterations: Math.min(
-                              5000,
-                              Math.max(1, Number(e.target.value) || 300)
-                            )
-                          })
+                        onValueChange={(v) =>
+                          updateStudioSettings({ ...settings, slitMaxIterations: v })
                         }
                       />
                     </label>
                     <label className="slit-cfg-field">
                       <span>最大花型池</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={1}
                         max={20000}
                         step={50}
+                        fallback={800}
+                        integer
                         className="field num"
                         value={settings.slitMaxPatterns}
-                        onChange={(e) =>
-                          updateStudioSettings({
-                            ...settings,
-                            slitMaxPatterns: Math.min(
-                              20000,
-                              Math.max(1, Number(e.target.value) || 800)
-                            )
-                          })
+                        onValueChange={(v) =>
+                          updateStudioSettings({ ...settings, slitMaxPatterns: v })
                         }
                       />
                     </label>
                     <label className="slit-cfg-field">
                       <span>不同宽幅上限</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={1}
                         max={20}
+                        fallback={4}
+                        integer
                         className="field num"
                         value={settings.slitMaxDistinctWidths}
-                        onChange={(e) =>
-                          updateStudioSettings({
-                            ...settings,
-                            slitMaxDistinctWidths: Math.min(
-                              20,
-                              Math.max(1, Number(e.target.value) || 4)
-                            )
-                          })
+                        onValueChange={(v) =>
+                          updateStudioSettings({ ...settings, slitMaxDistinctWidths: v })
                         }
                       />
                     </label>
                     <label className="slit-cfg-field span-2">
                       <span>MIP 单阶段安全时限 (ms)</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={1000}
                         max={600000}
                         step={1000}
+                        fallback={120000}
+                        integer
                         className="field num"
                         value={settings.slitStageTimeLimitMs}
-                        onChange={(e) =>
-                          updateStudioSettings({
-                            ...settings,
-                            slitStageTimeLimitMs: Math.min(
-                              600000,
-                              Math.max(1000, Number(e.target.value) || 120000)
-                            )
-                          })
+                        onValueChange={(v) =>
+                          updateStudioSettings({ ...settings, slitStageTimeLimitMs: v })
                         }
                       />
                     </label>
@@ -4154,14 +4084,12 @@ export const CuttingWorkbenchPage: React.FC<{
                               {isPoly ? (
                                 fmtN(d.width, 1)
                               ) : (
-                                <input
-                                  type="number"
+                                <NumberInput
                                   className="field num"
                                   style={{ width: 90, textAlign: 'right' }}
+                                  min={1}
                                   value={d.width}
-                                  onChange={(e) =>
-                                    updateDemand2D(d.id, { width: Number(e.target.value) })
-                                  }
+                                  onValueChange={(v) => updateDemand2D(d.id, { width: v })}
                                 />
                               )}
                             </td>
@@ -4169,27 +4097,25 @@ export const CuttingWorkbenchPage: React.FC<{
                               {isPoly ? (
                                 fmtN(d.length, 1)
                               ) : (
-                                <input
-                                  type="number"
+                                <NumberInput
                                   className="field num"
                                   style={{ width: 90, textAlign: 'right' }}
+                                  min={1}
                                   value={d.length}
-                                  onChange={(e) =>
-                                    updateDemand2D(d.id, { length: Number(e.target.value) })
-                                  }
+                                  onValueChange={(v) => updateDemand2D(d.id, { length: v })}
                                 />
                               )}
                             </td>
                             <td className="r">
-                              <input
-                                type="number"
+                              <NumberInput
                                 min={0}
                                 max={5000}
+                                fallback={0}
+                                integer
                                 className="field num"
                                 style={{ width: 84, textAlign: 'right' }}
                                 value={d.quantity}
-                                onChange={(e) => {
-                                  const nextQ = Math.max(0, Number(e.target.value));
+                                onValueChange={(nextQ) => {
                                   const nextOrd = Math.max(
                                     d.orderedQty || 0,
                                     (d.completedQty || 0) + (d.plannedQty || 0) + nextQ
@@ -4251,25 +4177,23 @@ export const CuttingWorkbenchPage: React.FC<{
                             />
                           </td>
                           <td className="r">
-                            <input
-                              type="number"
+                            <NumberInput
                               className="field num"
                               style={{ width: 100, textAlign: 'right' }}
+                              min={1}
                               value={o.widthMm}
-                              onChange={(e) =>
-                                updateSlitOrder(o.id, { widthMm: Number(e.target.value) })
-                              }
+                              onValueChange={(v) => updateSlitOrder(o.id, { widthMm: v })}
                             />
                           </td>
                           <td className="r">
-                            <input
-                              type="number"
+                            <NumberInput
                               min={0}
+                              fallback={0}
+                              integer
                               className="field num"
                               style={{ width: 90, textAlign: 'right' }}
                               value={o.quantity}
-                              onChange={(e) => {
-                                const nextQ = Math.max(0, Number(e.target.value));
+                              onValueChange={(nextQ) => {
                                 const nextOrd = Math.max(
                                   o.orderedQty || 0,
                                   (o.completedQty || 0) + (o.plannedQty || 0) + nextQ

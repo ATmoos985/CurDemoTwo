@@ -5,6 +5,7 @@ import {
   SavedScheme2D
 } from '../store/useStudioStore';
 import { CadCanvasView } from '../components/CadCanvasView';
+import { NumberInput } from '../components/ui/NumberInput';
 import { OptimizationSession } from '@static/js/business/optimization/job-client.js';
 import {
   buildSafeNestingRequest2D,
@@ -862,14 +863,13 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
           <div className="studio-canvas-inputs">
             <label>
               <span>门幅 W</span>
-              <input
-                type="number"
+              <NumberInput
                 className="field num"
                 style={{ width: 74 }}
+                min={300}
+                fallback={1500}
                 value={canvasWidthMm}
-                onChange={(e) =>
-                  setCanvasSpec({ canvasWidthMm: Math.max(300, Number(e.target.value) || 1500) })
-                }
+                onValueChange={(v) => setCanvasSpec({ canvasWidthMm: v })}
               />
               <em>mm</em>
             </label>
@@ -888,14 +888,13 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
             </div>
             <label>
               <span>版长上限 L</span>
-              <input
-                type="number"
+              <NumberInput
                 className="field num"
                 style={{ width: 78 }}
+                min={500}
+                fallback={2000}
                 value={canvasLengthMm}
-                onChange={(e) =>
-                  setCanvasSpec({ canvasLengthMm: Math.max(500, Number(e.target.value) || 2000) })
-                }
+                onValueChange={(v) => setCanvasSpec({ canvasLengthMm: v })}
               />
               <em>mm</em>
             </label>
@@ -924,14 +923,13 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
             </label>
             <label>
               <span>拉布长 L</span>
-              <input
-                type="number"
+              <NumberInput
                 className="field num"
                 style={{ width: 78 }}
+                min={500}
+                fallback={2000}
                 value={canvasLengthMm}
-                onChange={(e) =>
-                  setCanvasSpec({ canvasLengthMm: Math.max(500, Number(e.target.value) || 2000) })
-                }
+                onValueChange={(v) => setCanvasSpec({ canvasLengthMm: v })}
               />
               <em>mm</em>
             </label>
@@ -946,28 +944,24 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
           <div className="craft-disclosure-panel">
             <label>
               <span>裁片安全间距 (mm)</span>
-              <input
-                type="number"
+              <NumberInput
                 className="field num"
                 min={0}
                 max={50}
+                fallback={0}
                 value={pieceGapMm}
-                onChange={(e) =>
-                  setCanvasSpec({ pieceGapMm: Math.max(0, Number(e.target.value) || 0) })
-                }
+                onValueChange={(v) => setCanvasSpec({ pieceGapMm: v })}
               />
             </label>
             <label>
               <span>首端修边切头 (mm)</span>
-              <input
-                type="number"
+              <NumberInput
                 className="field num"
                 min={0}
                 max={200}
+                fallback={0}
                 value={trimStartMm}
-                onChange={(e) =>
-                  setCanvasSpec({ trimStartMm: Math.max(0, Number(e.target.value) || 0) })
-                }
+                onValueChange={(v) => setCanvasSpec({ trimStartMm: v })}
               />
             </label>
           </div>
@@ -1043,14 +1037,13 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
                     {quickCluster.availableSizes.map((sz) => (
                       <label key={sz} className={(quickCounts[sz] || 0) > 0 ? 'on' : ''}>
                         <span>{sz}</span>
-                        <input
-                          type="number"
+                        <NumberInput
                           min={0}
                           max={30}
+                          fallback={0}
+                          integer
                           value={quickCounts[sz] ?? 0}
-                          onChange={(e) =>
-                            setClusterCount(quickCluster.id, sz, Number(e.target.value))
-                          }
+                          onValueChange={(v) => setClusterCount(quickCluster.id, sz, v)}
                         />
                       </label>
                     ))}
@@ -1123,44 +1116,37 @@ export const NestingStudio2DPage: React.FC<{ taskId?: string }> = ({ taskId }) =
                           `${fmtN(d.width, 0)}×${fmtN(d.length, 0)}`
                         ) : (
                           <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center' }}>
-                            <input
-                              type="number"
+                            <NumberInput
                               className="field num"
                               aria-label={`${d.name} 宽度`}
                               style={{ width: 44, height: 22, padding: '0 2px' }}
+                              min={1}
                               value={d.width}
-                              onChange={(e) =>
-                                updateDemand2D(d.id, { width: Number(e.target.value) })
-                              }
+                              onValueChange={(v) => updateDemand2D(d.id, { width: v })}
                             />
                             ×
-                            <input
-                              type="number"
+                            <NumberInput
                               className="field num"
                               aria-label={`${d.name} 长度`}
                               style={{ width: 44, height: 22, padding: '0 2px' }}
+                              min={1}
                               value={d.length}
-                              onChange={(e) =>
-                                updateDemand2D(d.id, { length: Number(e.target.value) })
-                              }
+                              onValueChange={(v) => updateDemand2D(d.id, { length: v })}
                             />
                           </span>
                         )}
                       </td>
                       <td className="r">
-                        <input
-                          type="number"
+                        <NumberInput
                           min={0}
                           max={200}
+                          fallback={0}
+                          integer
                           aria-label={`${d.name} 数量`}
                           className="field num"
                           style={{ width: 44, height: 22, textAlign: 'right' }}
                           value={d.quantity}
-                          onChange={(e) =>
-                            updateDemand2D(d.id, {
-                              quantity: Math.max(0, Number(e.target.value))
-                            })
-                          }
+                          onValueChange={(v) => updateDemand2D(d.id, { quantity: v })}
                         />
                       </td>
                       <td style={{ textAlign: 'center' }}>

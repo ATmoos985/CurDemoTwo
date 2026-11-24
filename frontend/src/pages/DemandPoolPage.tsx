@@ -6,6 +6,7 @@ import {
 } from '../store/useStudioStore';
 import { ModalDialog } from '../components/ModalDialog';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
+import { NumberInput } from '../components/ui/NumberInput';
 import { requestJSON, toast, fmtN, shortId, loadSheetLib } from '@static/app/js/util.js';
 import {
   parseDemandSheet,
@@ -700,26 +701,24 @@ export const DemandPoolPage: React.FC = () => {
                         <label className="dp-field-label" htmlFor="dp-slit-w">
                           母卷幅宽 (mm)
                         </label>
-                        <input
+                        <NumberInput
                           id="dp-slit-w"
-                          type="number"
                           min={100}
                           className="field num"
                           value={motherWidthMm}
-                          onChange={(e) => setMotherWidthMm(Number(e.target.value))}
+                          onValueChange={setMotherWidthMm}
                         />
                       </div>
                       <div className="dp-field-block">
                         <label className="dp-field-label" htmlFor="dp-slit-l">
                           定长卷长 (mm)
                         </label>
-                        <input
+                        <NumberInput
                           id="dp-slit-l"
-                          type="number"
                           min={100}
                           className="field num"
                           value={fixedLenMm}
-                          onChange={(e) => setFixedLenMm(Number(e.target.value))}
+                          onValueChange={setFixedLenMm}
                         />
                       </div>
                     </>
@@ -733,26 +732,24 @@ export const DemandPoolPage: React.FC = () => {
                     <label className="dp-field-label" htmlFor="dp-slit-w">
                       母卷幅宽 (mm)
                     </label>
-                    <input
+                    <NumberInput
                       id="dp-slit-w"
-                      type="number"
                       min={100}
                       className="field num"
                       value={motherWidthMm}
-                      onChange={(e) => setMotherWidthMm(Number(e.target.value))}
+                      onValueChange={setMotherWidthMm}
                     />
                   </div>
                   <div className="dp-field-block">
                     <label className="dp-field-label" htmlFor="dp-slit-l">
                       定长卷长 (mm)
                     </label>
-                    <input
+                    <NumberInput
                       id="dp-slit-l"
-                      type="number"
                       min={100}
                       className="field num"
                       value={fixedLenMm}
-                      onChange={(e) => setFixedLenMm(Number(e.target.value))}
+                      onValueChange={setFixedLenMm}
                     />
                   </div>
                 </div>
@@ -775,14 +772,15 @@ export const DemandPoolPage: React.FC = () => {
                       </option>
                     ))}
                   </select>
-                  <input
-                    type="number"
+                  <NumberInput
                     min={1}
                     max={100}
+                    fallback={1}
+                    integer
                     aria-label="模板套数"
                     className="field num dp-tpl-sets"
                     value={templateQuickSets}
-                    onChange={(e) => setTemplateQuickSets(Number(e.target.value))}
+                    onValueChange={setTemplateQuickSets}
                   />
                   <span className="dp-tpl-unit">套</span>
                   <button
@@ -851,43 +849,35 @@ export const DemandPoolPage: React.FC = () => {
                               )}
                             </td>
                             <td>
-                              <input
-                                type="number"
+                              <NumberInput
                                 min={1}
                                 aria-label={`规格行 ${idx + 1} 宽度`}
                                 className="dp-cell-input dp-cell-num num"
                                 value={ln.width}
                                 disabled={Boolean(ln.shape)}
-                                onChange={(e) =>
-                                  updateDraftLine(idx, { width: Number(e.target.value) })
-                                }
+                                onValueChange={(v) => updateDraftLine(idx, { width: v })}
                               />
                             </td>
                             {createDim !== 'SLITTING_1D' && (
                               <td>
-                                <input
-                                  type="number"
+                                <NumberInput
                                   min={1}
                                   aria-label={`规格行 ${idx + 1} 长度`}
                                   className="dp-cell-input dp-cell-num num"
                                   value={ln.length}
                                   disabled={Boolean(ln.shape)}
-                                  onChange={(e) =>
-                                    updateDraftLine(idx, { length: Number(e.target.value) })
-                                  }
+                                  onValueChange={(v) => updateDraftLine(idx, { length: v })}
                                 />
                               </td>
                             )}
                             <td>
-                              <input
-                                type="number"
+                              <NumberInput
                                 min={1}
+                                integer
                                 aria-label={`规格行 ${idx + 1} 数量`}
                                 className="dp-cell-input dp-cell-num num"
                                 value={ln.quantity}
-                                onChange={(e) =>
-                                  updateDraftLine(idx, { quantity: Number(e.target.value) })
-                                }
+                                onValueChange={(v) => updateDraftLine(idx, { quantity: v })}
                               />
                             </td>
                             {createDim !== 'SLITTING_1D' && (

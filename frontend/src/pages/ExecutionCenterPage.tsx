@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { NumberInput } from '../components/ui/NumberInput';
 import { requestJSON, shortId, fmtTime, fmtN, toast, createUuid } from '@static/app/js/util.js';
 import {
   defaultReport,
@@ -582,14 +583,15 @@ export const ExecutionCenterPage: React.FC<{
                       }}
                     >
                       执行预约时长(分)
-                      <input
-                        type="number"
+                      <NumberInput
                         className="field num"
                         style={{ width: 56, height: 24 }}
                         min={5}
                         max={480}
+                        fallback={30}
+                        integer
                         value={reserveMin}
-                        onChange={(e) => setReserveMin(Number(e.target.value) || 30)}
+                        onValueChange={setReserveMin}
                       />
                     </label>
                     <a
@@ -1185,22 +1187,14 @@ export const ExecutionCenterPage: React.FC<{
                         <>
                           <label>实切总长度 mm</label>
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                            <input
-                              type="number"
+                            <NumberInput
                               className="field num"
                               style={{ width: 140 }}
+                              min={0}
                               value={reportDraft.draft.len}
-                              onChange={(e) =>
+                              onValueChange={(v) =>
                                 setReportDraft((r) =>
-                                  r
-                                    ? {
-                                        ...r,
-                                        draft: {
-                                          ...r.draft,
-                                          len: Number(e.target.value)
-                                        }
-                                      }
-                                    : null
+                                  r ? { ...r, draft: { ...r.draft, len: v } } : null
                                 )
                               }
                             />
@@ -1447,13 +1441,13 @@ export const ExecutionCenterPage: React.FC<{
                                     ≤ {fmtN(c.w)}×{fmtN(c.l)}
                                   </td>
                                   <td className="r">
-                                    <input
-                                      type="number"
+                                    <NumberInput
                                       className="field num"
                                       style={{ width: 80, height: 22, textAlign: 'right' }}
+                                      min={0}
                                       disabled={!m.use}
                                       value={m.w}
-                                      onChange={(e) =>
+                                      onValueChange={(v) =>
                                         setReportDraft((r) =>
                                           r
                                             ? {
@@ -1462,10 +1456,7 @@ export const ExecutionCenterPage: React.FC<{
                                                   ...r.draft,
                                                   rem: {
                                                     ...r.draft.rem,
-                                                    [c.id]: {
-                                                      ...m,
-                                                      w: Number(e.target.value)
-                                                    }
+                                                    [c.id]: { ...m, w: v }
                                                   }
                                                 }
                                               }
@@ -1475,13 +1466,13 @@ export const ExecutionCenterPage: React.FC<{
                                     />
                                   </td>
                                   <td className="r">
-                                    <input
-                                      type="number"
+                                    <NumberInput
                                       className="field num"
                                       style={{ width: 80, height: 22, textAlign: 'right' }}
+                                      min={0}
                                       disabled={!m.use}
                                       value={m.l}
-                                      onChange={(e) =>
+                                      onValueChange={(v) =>
                                         setReportDraft((r) =>
                                           r
                                             ? {
@@ -1490,10 +1481,7 @@ export const ExecutionCenterPage: React.FC<{
                                                   ...r.draft,
                                                   rem: {
                                                     ...r.draft.rem,
-                                                    [c.id]: {
-                                                      ...m,
-                                                      l: Number(e.target.value)
-                                                    }
+                                                    [c.id]: { ...m, l: v }
                                                   }
                                                 }
                                               }

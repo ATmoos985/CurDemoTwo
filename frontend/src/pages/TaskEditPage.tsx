@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { NumberInput } from '../components/ui/NumberInput';
 import { requestJSON, fmtN, toast, loadSheetLib } from '@static/app/js/util.js';
 import {
   fromTask,
@@ -563,87 +564,74 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
                 </div>
                 <div className="form" style={{ gridTemplateColumns: '110px 1fr' }}>
                   <label>左切边 mm</label>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
+                    min={0}
+                    fallback={0}
                     value={sp.leftTrim ?? 0}
-                    onChange={(e) =>
-                      updateAndPersist({
-                        ...form,
-                        slitting: { ...sp, leftTrim: Number(e.target.value) }
-                      })
+                    onValueChange={(v) =>
+                      updateAndPersist({ ...form, slitting: { ...sp, leftTrim: v } })
                     }
                   />
                   <label>右切边 mm</label>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
+                    min={0}
+                    fallback={0}
                     value={sp.rightTrim ?? 0}
-                    onChange={(e) =>
-                      updateAndPersist({
-                        ...form,
-                        slitting: { ...sp, rightTrim: Number(e.target.value) }
-                      })
+                    onValueChange={(v) =>
+                      updateAndPersist({ ...form, slitting: { ...sp, rightTrim: v } })
                     }
                   />
                   <label>组合宽度下限</label>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
+                    min={0}
+                    fallback={0}
                     value={sp.minWidth ?? 0}
-                    onChange={(e) =>
-                      updateAndPersist({
-                        ...form,
-                        slitting: { ...sp, minWidth: Number(e.target.value) }
-                      })
+                    onValueChange={(v) =>
+                      updateAndPersist({ ...form, slitting: { ...sp, minWidth: v } })
                     }
                   />
                   <label>组合宽度上限</label>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
+                    min={0}
+                    fallback={0}
                     value={sp.maxWidth ?? 0}
-                    onChange={(e) =>
-                      updateAndPersist({
-                        ...form,
-                        slitting: { ...sp, maxWidth: Number(e.target.value) }
-                      })
+                    onValueChange={(v) =>
+                      updateAndPersist({ ...form, slitting: { ...sp, maxWidth: v } })
                     }
                   />
                   <label>宽度步长</label>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
+                    min={1}
+                    fallback={1}
                     value={sp.widthStep ?? 1}
-                    onChange={(e) =>
-                      updateAndPersist({
-                        ...form,
-                        slitting: { ...sp, widthStep: Number(e.target.value) }
-                      })
+                    onValueChange={(v) =>
+                      updateAndPersist({ ...form, slitting: { ...sp, widthStep: v } })
                     }
                   />
                   <label>超产上限 卷</label>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
+                    min={0}
+                    fallback={0}
+                    integer
                     value={sp.totalOverCap ?? 0}
-                    onChange={(e) =>
-                      updateAndPersist({
-                        ...form,
-                        slitting: { ...sp, totalOverCap: Number(e.target.value) }
-                      })
+                    onValueChange={(v) =>
+                      updateAndPersist({ ...form, slitting: { ...sp, totalOverCap: v } })
                     }
                   />
                   <label>切头 mm</label>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
+                    min={0}
+                    fallback={0}
                     value={p.trimStart ?? 0}
-                    onChange={(e) =>
-                      updateAndPersist({
-                        ...form,
-                        process: { ...p, trimStart: Number(e.target.value) }
-                      })
+                    onValueChange={(v) =>
+                      updateAndPersist({ ...form, process: { ...p, trimStart: v } })
                     }
                   />
                   <label>切割基准</label>
@@ -670,39 +658,33 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
                 <div className="pane-h">工艺参数</div>
                 <div className="form" style={{ gridTemplateColumns: '100px 1fr' }}>
                   <label>拉布长度 mm</label>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
+                    min={1}
+                    fallback={3000}
                     value={p.bedLength ?? 3000}
-                    onChange={(e) =>
-                      updateAndPersist({
-                        ...form,
-                        process: { ...p, bedLength: Number(e.target.value) }
-                      })
+                    onValueChange={(v) =>
+                      updateAndPersist({ ...form, process: { ...p, bedLength: v } })
                     }
                   />
                   <label>切头 mm</label>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
+                    min={0}
+                    fallback={0}
                     value={p.trimStart ?? 0}
-                    onChange={(e) =>
-                      updateAndPersist({
-                        ...form,
-                        process: { ...p, trimStart: Number(e.target.value) }
-                      })
+                    onValueChange={(v) =>
+                      updateAndPersist({ ...form, process: { ...p, trimStart: v } })
                     }
                   />
                   <label>件间距 mm</label>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
+                    min={0}
+                    fallback={0}
                     value={p.pieceGap ?? 0}
-                    onChange={(e) =>
-                      updateAndPersist({
-                        ...form,
-                        process: { ...p, pieceGap: Number(e.target.value) }
-                      })
+                    onValueChange={(v) =>
+                      updateAndPersist({ ...form, process: { ...p, pieceGap: v } })
                     }
                   />
                   <label>切割基准</label>
@@ -1010,62 +992,54 @@ export const TaskEditPage: React.FC<{ params?: string[] }> = ({ params = [] }) =
                           />
                         </td>
                         <td className="r">
-                          <input
-                            type="number"
+                          <NumberInput
                             className="field num"
+                            min={1}
                             value={d.width}
                             style={{ width: 80, height: 22, textAlign: 'right' }}
                             disabled={Boolean(l.locked || d.shape)}
-                            onChange={(e) =>
+                            onValueChange={(v) =>
                               updateAndPersist({
                                 ...form,
                                 demands: form.demands.map((item: any, j: number) =>
-                                  j === i
-                                    ? { ...item, width: Number(e.target.value) }
-                                    : item
+                                  j === i ? { ...item, width: v } : item
                                 )
                               })
                             }
                           />
                         </td>
                         <td className="r">
-                          <input
-                            type="number"
+                          <NumberInput
                             className="field num"
+                            min={1}
                             value={d.length}
                             style={{ width: 80, height: 22, textAlign: 'right' }}
                             disabled={Boolean(l.locked || d.shape)}
-                            onChange={(e) =>
+                            onValueChange={(v) =>
                               updateAndPersist({
                                 ...form,
                                 demands: form.demands.map((item: any, j: number) =>
-                                  j === i
-                                    ? { ...item, length: Number(e.target.value) }
-                                    : item
+                                  j === i ? { ...item, length: v } : item
                                 )
                               })
                             }
                           />
                         </td>
                         <td className="r">
-                          <input
-                            type="number"
+                          <NumberInput
                             className="field num"
+                            min={0}
+                            integer
                             value={d.quantity}
                             style={{ width: 64, height: 22, textAlign: 'right' }}
                             title={
                               l.locked ? `不得少于已报工 ${l.minQuantity} 件` : ''
                             }
-                            onChange={(e) =>
+                            onValueChange={(v) =>
                               updateAndPersist({
                                 ...form,
                                 demands: form.demands.map((item: any, j: number) =>
-                                  j === i
-                                    ? {
-                                        ...item,
-                                        quantity: Math.round(Number(e.target.value))
-                                      }
-                                    : item
+                                  j === i ? { ...item, quantity: v } : item
                                 )
                               })
                             }

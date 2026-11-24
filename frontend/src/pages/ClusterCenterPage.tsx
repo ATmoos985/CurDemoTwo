@@ -7,6 +7,7 @@ import {
 } from '../store/useStudioStore';
 import { ModalDialog } from '../components/ModalDialog';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
+import { NumberInput } from '../components/ui/NumberInput';
 import { requestJSON, toast } from '@static/app/js/util.js';
 
 const CATEGORY_LABELS: Record<DemandCluster['category'], { label: string; tagClass: string }> = {
@@ -478,13 +479,14 @@ export const ClusterCenterPage: React.FC = () => {
                           className={`mp-tpl-size-pill ${(counts[sz] || 0) > 0 ? 'active' : ''}`}
                         >
                           <span>{sz}</span>
-                          <input
-                            type="number"
+                          <NumberInput
                             min={0}
                             max={200}
+                            fallback={0}
+                            integer
                             className="num"
                             value={counts[sz] ?? 0}
-                            onChange={(e) => setClusterCount(cluster.id, sz, Number(e.target.value))}
+                            onValueChange={(v) => setClusterCount(cluster.id, sz, v)}
                           />
                         </label>
                       ))}
@@ -586,22 +588,22 @@ export const ClusterCenterPage: React.FC = () => {
               placeholder="用于自动匹配同材质需求族与在库母卷"
             />
             <label htmlFor="new-cluster-w">推荐母卷门幅 mm</label>
-            <input
+            <NumberInput
               id="new-cluster-w"
-              type="number"
+              min={100}
               className="field num"
               value={newWidth}
-              onChange={(e) => setNewWidth(Number(e.target.value))}
+              onValueChange={setNewWidth}
             />
             <label htmlFor="new-cluster-l">
               {newCategory === 'SLITTING_1D' ? '标准定长卷长 mm' : '预设画布版长 mm'}
             </label>
-            <input
+            <NumberInput
               id="new-cluster-l"
-              type="number"
+              min={100}
               className="field num"
               value={newLength}
-              onChange={(e) => setNewLength(Number(e.target.value))}
+              onValueChange={setNewLength}
             />
             {newCategory !== 'SLITTING_1D' && (
               <>
@@ -647,48 +649,43 @@ export const ClusterCenterPage: React.FC = () => {
                       />
                     </td>
                     <td className="r">
-                      <input
-                        type="number"
+                      <NumberInput
+                        min={1}
                         className="field num"
                         style={{ width: 82 }}
                         value={p.w}
-                        onChange={(e) =>
+                        onValueChange={(v) =>
                           setNewPieces((arr) =>
-                            arr.map((item, i) =>
-                              i === idx ? { ...item, w: Number(e.target.value) } : item
-                            )
+                            arr.map((item, i) => (i === idx ? { ...item, w: v } : item))
                           )
                         }
                       />
                     </td>
                     {newCategory !== 'SLITTING_1D' && (
                       <td className="r">
-                        <input
-                          type="number"
+                        <NumberInput
+                          min={1}
                           className="field num"
                           style={{ width: 82 }}
                           value={p.h}
-                          onChange={(e) =>
+                          onValueChange={(v) =>
                             setNewPieces((arr) =>
-                              arr.map((item, i) =>
-                                i === idx ? { ...item, h: Number(e.target.value) } : item
-                              )
+                              arr.map((item, i) => (i === idx ? { ...item, h: v } : item))
                             )
                           }
                         />
                       </td>
                     )}
                     <td className="r">
-                      <input
-                        type="number"
+                      <NumberInput
+                        min={1}
+                        integer
                         className="field num"
                         style={{ width: 64 }}
                         value={p.qty}
-                        onChange={(e) =>
+                        onValueChange={(v) =>
                           setNewPieces((arr) =>
-                            arr.map((item, i) =>
-                              i === idx ? { ...item, qty: Number(e.target.value) } : item
-                            )
+                            arr.map((item, i) => (i === idx ? { ...item, qty: v } : item))
                           )
                         }
                       />

@@ -14,6 +14,7 @@ import {
   validateStudioSettings
 } from '../store/studioSettings';
 import { useStudioStore } from '../store/useStudioStore';
+import { NumberInput } from './ui/NumberInput';
 
 export interface SettingsModalProps {
   open: boolean;
@@ -203,15 +204,14 @@ const StepperNumberInput: React.FC<{
       >
         −
       </button>
-      <input
+      <NumberInput
         id={id}
-        type="number"
         min={min}
         max={max}
         step={step}
         className="sc-step-input num"
         value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
+        onValueChange={onChange}
       />
       <button
         type="button"
@@ -1421,16 +1421,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         ))}
                       </div>
                       <div className="settings-unit-input">
-                        <input
+                        <NumberInput
                           id="s-time"
-                          type="number"
                           min={1}
                           max={60}
                           step={1}
+                          integer
                           className="field num"
                           style={{ width: 54 }}
                           value={draft.timeLimitSeconds}
-                          onChange={(e) => patchDraft({ timeLimitSeconds: Number(e.target.value) })}
+                          onValueChange={(v) => patchDraft({ timeLimitSeconds: v })}
                         />
                         <span>s</span>
                       </div>
@@ -1580,18 +1580,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         ))}
                       </div>
                       <div className="settings-unit-input">
-                        <input
+                        <NumberInput
                           id="cfg-slit-time"
-                          type="number"
                           min={1}
                           max={180}
                           step={1}
+                          integer
                           className="field num"
                           style={{ width: 60 }}
                           value={draft.slitTimeLimitSeconds}
-                          onChange={(e) =>
-                            patchDraft({ slitTimeLimitSeconds: Number(e.target.value) })
-                          }
+                          onValueChange={(v) => patchDraft({ slitTimeLimitSeconds: v })}
                         />
                         <span>s</span>
                       </div>
@@ -1601,57 +1599,55 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="sc-slit-grid">
                     <div className="sc-slit-field">
                       <label htmlFor="cfg-slit-topk">TOP K 超产宽度</label>
-                      <input
+                      <NumberInput
                         id="cfg-slit-topk"
-                        type="number"
                         min={0}
                         max={50}
+                        integer
                         className="field num"
                         value={draft.slitTopK}
-                        onChange={(e) => patchDraft({ slitTopK: Number(e.target.value) })}
+                        onValueChange={(v) => patchDraft({ slitTopK: v })}
                       />
                       <small>允许超产的前 K 个大需求宽幅（默认 3）</small>
                     </div>
                     <div className="sc-slit-field">
                       <label htmlFor="cfg-slit-max-iter">列生成最大迭代</label>
-                      <input
+                      <NumberInput
                         id="cfg-slit-max-iter"
-                        type="number"
                         min={1}
                         max={5000}
                         step={10}
+                        integer
                         className="field num"
                         value={draft.slitMaxIterations}
-                        onChange={(e) => patchDraft({ slitMaxIterations: Number(e.target.value) })}
+                        onValueChange={(v) => patchDraft({ slitMaxIterations: v })}
                       />
                       <small>列生成定价循环上限（默认 300）</small>
                     </div>
                     <div className="sc-slit-field">
                       <label htmlFor="cfg-slit-max-pat">最大花型池</label>
-                      <input
+                      <NumberInput
                         id="cfg-slit-max-pat"
-                        type="number"
                         min={1}
                         max={20000}
                         step={50}
+                        integer
                         className="field num"
                         value={draft.slitMaxPatterns}
-                        onChange={(e) => patchDraft({ slitMaxPatterns: Number(e.target.value) })}
+                        onValueChange={(v) => patchDraft({ slitMaxPatterns: v })}
                       />
                       <small>候选分切花型池上限（默认 800）</small>
                     </div>
                     <div className="sc-slit-field">
                       <label htmlFor="cfg-slit-max-distinct">单卷不同宽幅上限</label>
-                      <input
+                      <NumberInput
                         id="cfg-slit-max-distinct"
-                        type="number"
                         min={1}
                         max={20}
+                        integer
                         className="field num"
                         value={draft.slitMaxDistinctWidths}
-                        onChange={(e) =>
-                          patchDraft({ slitMaxDistinctWidths: Number(e.target.value) })
-                        }
+                        onValueChange={(v) => patchDraft({ slitMaxDistinctWidths: v })}
                       />
                       <small>
                         {draft.slitProfile === 'QUALITY' && draft.slitMaxDistinctWidths < 5
@@ -1661,17 +1657,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
                     <div className="sc-slit-field span-2">
                       <label htmlFor="cfg-slit-stage-ms">MIP 单阶段安全时限（毫秒）</label>
-                      <input
+                      <NumberInput
                         id="cfg-slit-stage-ms"
-                        type="number"
                         min={1000}
                         max={600000}
                         step={1000}
+                        integer
                         className="field num"
                         value={draft.slitStageTimeLimitMs}
-                        onChange={(e) =>
-                          patchDraft({ slitStageTimeLimitMs: Number(e.target.value) })
-                        }
+                        onValueChange={(v) => patchDraft({ slitStageTimeLimitMs: v })}
                       />
                       <small>单个 MIP 求解阶段的安全上限（默认 120000 ms，受总求解时限约束）</small>
                     </div>
@@ -1714,42 +1708,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </label>
                       <div className="sc-slit-field">
                         <label htmlFor="cfg-slit-under-pen">欠产惩罚系数</label>
-                        <input
+                        <NumberInput
                           id="cfg-slit-under-pen"
-                          type="number"
                           min={0}
                           step={10000}
                           className="field num"
                           value={draft.slitUnderPenalty}
-                          onChange={(e) => patchDraft({ slitUnderPenalty: Number(e.target.value) })}
+                          onValueChange={(v) => patchDraft({ slitUnderPenalty: v })}
                         />
                       </div>
                       <div className="sc-slit-field">
                         <label htmlFor="cfg-slit-alpha">顺序组权重 α / β</label>
                         <div style={{ display: 'flex', gap: 6 }}>
-                          <input
+                          <NumberInput
                             id="cfg-slit-alpha"
-                            type="number"
                             min={0}
                             step={0.1}
                             className="field num"
                             aria-label="顺序组权重 alpha"
                             value={draft.slitSeqGroupAlpha}
-                            onChange={(e) =>
-                              patchDraft({ slitSeqGroupAlpha: Number(e.target.value) })
-                            }
+                            onValueChange={(v) => patchDraft({ slitSeqGroupAlpha: v })}
                           />
-                          <input
+                          <NumberInput
                             id="cfg-slit-beta"
-                            type="number"
                             min={0}
                             step={0.1}
                             className="field num"
                             aria-label="顺序组权重 beta"
                             value={draft.slitSeqGroupBeta}
-                            onChange={(e) =>
-                              patchDraft({ slitSeqGroupBeta: Number(e.target.value) })
-                            }
+                            onValueChange={(v) => patchDraft({ slitSeqGroupBeta: v })}
                           />
                         </div>
                       </div>

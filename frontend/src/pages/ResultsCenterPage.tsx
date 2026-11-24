@@ -3,6 +3,7 @@ import { CadCanvasView } from '../components/CadCanvasView';
 import { SlittingStripBar } from './CuttingWorkbenchPage';
 import { ModalDialog } from '../components/ModalDialog';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
+import { NumberInput } from '../components/ui/NumberInput';
 import { showcaseScene } from '@static/app/js/model/showcase.js';
 import { rectangle } from '@static/js/canvas/nesting-scene.js';
 import { gcodeText, dxfText } from '@static/js/plugins/export/cam-format.js';
@@ -1011,11 +1012,11 @@ export const ResultsCenterPage: React.FC<{
               {activeScheme.dimension !== 'SLITTING_1D' && !activeScheme.remnantId && (
                 <>
                   <label>实切耗用长度 mm</label>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
+                    min={0}
                     value={actualCutLenInput}
-                    onChange={(e) => setActualCutLenInput(Number(e.target.value))}
+                    onValueChange={setActualCutLenInput}
                   />
                 </>
               )}

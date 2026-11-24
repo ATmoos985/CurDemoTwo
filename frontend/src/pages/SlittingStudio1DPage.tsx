@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useStudioStore, SlittingSchemeRun } from '../store/useStudioStore';
 import { extractSlittingSolverOptions, loadStudioSettings } from '../store/studioSettings';
+import { NumberInput } from '../components/ui/NumberInput';
 import { OptimizationSession } from '@static/js/business/optimization/job-client.js';
 import { independentBaseline, planSummary } from '@static/js/linear/linear-model.js';
 import { carStart, assignCar, patternStrips, carRequest } from '@static/app/js/model/slitting.js';
@@ -577,18 +578,18 @@ export const SlittingStudio1DPage: React.FC = () => {
           <div className="pane-b">
             <div className="form" style={{ gridTemplateColumns: '100px 1fr', gap: '6px 10px' }}>
               <label>母卷幅宽 mm</label>
-              <input
-                type="number"
+              <NumberInput
                 className="field num"
+                min={100}
                 value={slitMotherWidthMm}
-                onChange={(e) => setSlitSpec({ slitMotherWidthMm: Number(e.target.value) })}
+                onValueChange={(v) => setSlitSpec({ slitMotherWidthMm: v })}
               />
               <label>固定卷长 mm</label>
-              <input
-                type="number"
+              <NumberInput
                 className="field num"
+                min={100}
                 value={slitFixedLengthMm}
-                onChange={(e) => setSlitSpec({ slitFixedLengthMm: Number(e.target.value) })}
+                onValueChange={(v) => setSlitSpec({ slitFixedLengthMm: v })}
               />
             </div>
 
@@ -602,45 +603,49 @@ export const SlittingStudio1DPage: React.FC = () => {
               <div className="form" style={{ gridTemplateColumns: '100px 1fr', gap: '6px 10px' }}>
                 <label>左右切边 mm</label>
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
                     style={{ width: '50%' }}
+                    min={0}
+                    fallback={0}
                     value={slitLeftTrimMm}
-                    onChange={(e) => setSlitSpec({ slitLeftTrimMm: Number(e.target.value) })}
+                    onValueChange={(v) => setSlitSpec({ slitLeftTrimMm: v })}
                   />
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
                     style={{ width: '50%' }}
+                    min={0}
+                    fallback={0}
                     value={slitRightTrimMm}
-                    onChange={(e) => setSlitSpec({ slitRightTrimMm: Number(e.target.value) })}
+                    onValueChange={(v) => setSlitSpec({ slitRightTrimMm: v })}
                   />
                 </div>
                 <label>组合宽范围</label>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
                     style={{ width: '46%' }}
+                    min={100}
                     value={slitMinWidthMm}
-                    onChange={(e) => setSlitSpec({ slitMinWidthMm: Number(e.target.value) })}
+                    onValueChange={(v) => setSlitSpec({ slitMinWidthMm: v })}
                   />
                   <span>–</span>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
                     style={{ width: '46%' }}
+                    min={100}
                     value={slitMaxWidthMm}
-                    onChange={(e) => setSlitSpec({ slitMaxWidthMm: Number(e.target.value) })}
+                    onValueChange={(v) => setSlitSpec({ slitMaxWidthMm: v })}
                   />
                 </div>
                 <label>超产上限 (卷)</label>
-                <input
-                  type="number"
+                <NumberInput
                   className="field num"
+                  min={0}
+                  fallback={0}
+                  integer
                   value={slitOverCap}
-                  onChange={(e) => setSlitSpec({ slitOverCap: Number(e.target.value) })}
+                  onValueChange={(v) => setSlitSpec({ slitOverCap: v })}
                 />
               </div>
             </details>
@@ -690,21 +695,23 @@ export const SlittingStudio1DPage: React.FC = () => {
                       />
                     </td>
                     <td className="r">
-                      <input
-                        type="number"
+                      <NumberInput
                         className="field num"
                         style={{ width: 62, height: 22, textAlign: 'right' }}
+                        min={1}
                         value={o.widthMm}
-                        onChange={(e) => updateSlitOrder(o.id, { widthMm: Number(e.target.value) })}
+                        onValueChange={(v) => updateSlitOrder(o.id, { widthMm: v })}
                       />
                     </td>
                     <td className="r">
-                      <input
-                        type="number"
+                      <NumberInput
                         className="field num"
                         style={{ width: 52, height: 22, textAlign: 'right' }}
+                        min={0}
+                        fallback={0}
+                        integer
                         value={o.quantity}
-                        onChange={(e) => updateSlitOrder(o.id, { quantity: Number(e.target.value) })}
+                        onValueChange={(v) => updateSlitOrder(o.id, { quantity: v })}
                       />
                     </td>
                     <td>

@@ -6,6 +6,7 @@ import {
   round
 } from '@static/js/inspection/inspection-model.js';
 import { CadCanvasView } from '../components/CadCanvasView';
+import { NumberInput } from '../components/ui/NumberInput';
 import { buildInspectionScene } from '@static/app/js/model/roll-scene.js';
 import {
   SegmentedControl,
@@ -957,14 +958,16 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
 
             <div className="mp-insp-feed-group">
               <span className="muted">步进</span>
-              <input
-                type="number"
+              <NumberInput
                 className="field num"
                 id="step"
                 aria-label="每次前进米数"
+                min={0.1}
+                step={0.1}
+                fallback={1}
                 style={{ width: 54, textAlign: 'right' }}
                 value={step}
-                onChange={(e) => setStep(Math.max(0.1, Number(e.target.value) || 1))}
+                onValueChange={setStep}
               />
               <span className="muted">m</span>
               <button
@@ -985,14 +988,16 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
 
             <div className="mp-insp-feed-group">
               <span className="muted">速度</span>
-              <input
-                type="number"
+              <NumberInput
                 className="field num"
                 id="speed"
                 aria-label="自动跑布速度"
+                min={0.1}
+                step={0.1}
+                fallback={3}
                 style={{ width: 54, textAlign: 'right' }}
                 value={speed}
-                onChange={(e) => setSpeed(Math.max(0.1, Number(e.target.value) || 3))}
+                onValueChange={setSpeed}
               />
               <span className="muted">m/min</span>
               <button
