@@ -24,7 +24,7 @@ public class IrregularPackingSolverService implements ICutSolverEngine, StripSea
     private final JsonMapper json = new JsonMapper();
     @Value("${packingsolver.irregular.executable.path:data/solver/packingsolver_irregular.exe}")
     private String solverPath;
-    @Value("${packingsolver.irregular.memory-limit-mb:512}")
+    @Value("${packingsolver.irregular.memory-limit-mb:${packingsolver.memory-limit-mb:512}}")
     private int memoryLimitMb = 512;
 
     @Override public String getEngineType() { return "packingsolver-irregular"; }
@@ -49,20 +49,34 @@ public class IrregularPackingSolverService implements ICutSolverEngine, StripSea
         ComputationCancellation.check();
         if (!isAvailable()) return failure("UNAVAILABLE", "异形引擎尚未安装或不可执行");
         Path temp = null;
+        Path solverLog = null;
         try {
             temp = Files.createTempDirectory("ps_irregular_").toAbsolutePath();
+            solverLog = temp.resolve("solver.log");
             Path input = temp.resolve("input.json"), certificate = temp.resolve("certificate.json");
             Files.writeString(input, json.writeValueAsString(nativeInput(problem, objective)));
             int memMb = Math.min(4096, Math.max(128, memoryLimitMb));
             ProcessBuilder pb = new ProcessBuilder(Path.of(solverPath).toAbsolutePath().toString(), "--input", input.toString(),
                     "--certificate", certificate.toString(), "--time-limit", nativeTimeLimitSeconds(problem.timeLimitSeconds()),
                     "--verbosity-level", "0", "--only-write-at-the-end", "--memory-limit", Integer.toString(memMb))
-                    .directory(temp.toFile()).redirectErrorStream(true).redirectOutput(temp.resolve("solver.log").toFile());
+                    .directory(temp.toFile()).redirectErrorStream(true).redirectOutput(solverLog.toFile());
             IsolatedProcessRunner.RunResult run = IsolatedProcessRunner.run(pb, (problem.timeLimitSeconds() + 5L) * 1000L);
-            if (run.timedOut())
+            if (run.timedOut()) {
+                String tail = PackingSolverService.readLogTail(solverLog, PackingSolverService.DIAGNOSTIC_LOG_TAIL_BYTES);
+                if (!tail.isEmpty()) {
+                    log.warn("Irregular solver timed out, solver.log 尾部 4KB：\n{}", tail);
+                } else {
+                    log.warn("Irregular solver timed out, solver.log 为空或不可读");
+                }
                 return failure("FAILED", "异形求解超过时限，已终止");
+            }
             if (run.exitCode() != 0 || !Files.isRegularFile(certificate)) {
-                log.warn("Irregular solver exited with code {}", run.exitCode());
+                String tail = PackingSolverService.readLogTail(solverLog, PackingSolverService.DIAGNOSTIC_LOG_TAIL_BYTES);
+                if (!tail.isEmpty()) {
+                    log.warn("Irregular solver exited with code {}, solver.log 尾部 4KB：\n{}", run.exitCode(), tail);
+                } else {
+                    log.warn("Irregular solver exited with code {}, solver.log 为空或不可读", run.exitCode());
+                }
                 return failure("FAILED", "异形引擎未生成有效结果，请检查运行环境；退出码 " + run.exitCode());
             }
             try { return parseCertificate(json.readTree(certificate.toFile()), problem); }
@@ -74,7 +88,12 @@ public class IrregularPackingSolverService implements ICutSolverEngine, StripSea
             throw cancelled;
         } catch (Exception error) {
             if (error instanceof InterruptedException) Thread.currentThread().interrupt();
-            log.error("Irregular solver execution failed", error);
+            String tail = PackingSolverService.readLogTail(solverLog, PackingSolverService.DIAGNOSTIC_LOG_TAIL_BYTES);
+            if (!tail.isEmpty()) {
+                log.error("Irregular solver execution failed, solver.log 尾部 4KB：\n{}", tail, error);
+            } else {
+                log.error("Irregular solver execution failed", error);
+            }
             return failure("FAILED", "异形求解执行失败，请检查运行环境");
         } finally {
             IsolatedProcessRunner.deleteTempDirectory(temp);

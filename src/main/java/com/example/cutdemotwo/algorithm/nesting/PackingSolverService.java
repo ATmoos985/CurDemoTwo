@@ -26,6 +26,7 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
     private static final Logger log = LoggerFactory.getLogger(PackingSolverService.class);
     // Native rectangle coordinates are integers; one native unit represents 0.1 mm.
     private static final int UNITS_PER_MM = 10;
+    static final int DIAGNOSTIC_LOG_TAIL_BYTES = 4096;
 
     @Override
     public String getEngineType() {
@@ -34,6 +35,9 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
 
     @Value("${packingsolver.executable.path:data/solver/packingsolver_rectangleguillotine.exe}")
     private String solverPath;
+
+    @Value("${packingsolver.memory-limit-mb:512}")
+    private int memoryLimitMb = 512;
 
     private final com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService toolpathOptimizerService;
     private final com.example.cutdemotwo.algorithm.toolpath.CutBoundaryCompletionService cutBoundaryCompletionService;
@@ -74,8 +78,10 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
         }
 
         Path tmpDir = null;
+        Path solverLog = null;
         try {
             tmpDir = Files.createTempDirectory("ps_cut_");
+            solverLog = tmpDir.resolve("solver.log");
             File binsCsv = tmpDir.resolve("bins.csv").toFile();
             File itemsCsv = tmpDir.resolve("items.csv").toFile();
             File defectsCsv = tmpDir.resolve("defects.csv").toFile();
@@ -117,10 +123,10 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
 
             ProcessBuilder pb = new ProcessBuilder(command(req, itemsCsv, binsCsv, defectsCsv, certCsv));
             pb.redirectErrorStream(true);
-            Path output = tmpDir.resolve("solver.log");
-            pb.redirectOutput(output.toFile());
+            pb.redirectOutput(solverLog.toFile());
             IsolatedProcessRunner.RunResult run = IsolatedProcessRunner.run(pb, (req.timeLimitSeconds() + 5L) * 1000L);
             if (run.timedOut()) {
+                logDiagnosticTail("PackingSolver timed out", solverLog, -1);
                 throw new IOException("求解超过时限，已终止；库存未变更");
             }
             int exitCode = run.exitCode();
@@ -129,7 +135,7 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
             if (exitCode != 0 || !certCsv.exists() || certCsv.length() == 0) {
                 EngineResult err = new EngineResult();
                 err.setSuccess(false);
-                log.warn("Solver failure code {} (0x{})", exitCode, Integer.toHexString(exitCode));
+                logDiagnosticTail("PackingSolver failure", solverLog, exitCode);
                 err.setMessage(exitCode == -1073741515 ? "求解器缺少运行库（0xC0000135），请检查服务器的 C++ 运行环境；库存未变更" :
                         "求解器退出码 " + exitCode + "，未生成有效方案；请检查求解器运行环境和输入");
                 return err;
@@ -141,7 +147,12 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
             throw cancelled;
         } catch (Exception e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
-            log.error("Execution error", e);
+            String tail = readLogTail(solverLog, DIAGNOSTIC_LOG_TAIL_BYTES);
+            if (!tail.isEmpty()) {
+                log.error("Execution error, solver.log 尾部 4KB：\n{}", tail, e);
+            } else {
+                log.error("Execution error", e);
+            }
             EngineResult err = new EngineResult();
             err.setSuccess(false);
             err.setMessage("求解执行异常: " + e.getMessage());
@@ -151,12 +162,42 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
         }
     }
 
+    private static void logDiagnosticTail(String summary, Path solverLog, int exitCode) {
+        String tail = readLogTail(solverLog, DIAGNOSTIC_LOG_TAIL_BYTES);
+        if (!tail.isEmpty()) {
+            log.warn("{} (code={} / 0x{})，solver.log 尾部 4KB：\n{}", summary, exitCode, Integer.toHexString(exitCode), tail);
+        } else {
+            log.warn("{} (code={} / 0x{})，solver.log 为空或不可读", summary, exitCode, Integer.toHexString(exitCode));
+        }
+    }
+
+    static String readLogTail(Path logFile, int maxBytes) {
+        if (logFile == null || maxBytes <= 0 || !Files.isRegularFile(logFile)) {
+            return "";
+        }
+        try (var channel = java.nio.channels.FileChannel.open(logFile, java.nio.file.StandardOpenOption.READ)) {
+            long size = channel.size();
+            if (size <= 0L) return "";
+            long start = Math.max(0L, size - maxBytes);
+            int length = (int) Math.min(maxBytes, size - start);
+            var buffer = java.nio.ByteBuffer.allocate(length);
+            channel.position(start);
+            while (buffer.hasRemaining()) {
+                if (channel.read(buffer) < 0) break;
+            }
+            return new String(buffer.array(), 0, buffer.position(), java.nio.charset.StandardCharsets.UTF_8).trim();
+        } catch (IOException readError) {
+            return "<无法读取 solver.log: " + readError.getMessage() + ">";
+        }
+    }
+
     /**
      * The solver writes the certificate once, when it exits normally: by default it rewrites the whole file after every
      * improvement, which on large instances takes most of the search time. Only a normal exit's certificate is read.
      */
     private List<String> command(NestingProblem req, File itemsCsv, File binsCsv, File defectsCsv, File certCsv) {
         String firstStage = "vertical".equalsIgnoreCase(req.process().firstStageOrientation()) ? "vertical" : "horizontal";
+        int memMb = Math.min(4096, Math.max(128, memoryLimitMb));
 
         List<String> cmd = new ArrayList<>();
         cmd.add(solverPath);
@@ -171,6 +212,7 @@ public class PackingSolverService implements com.example.cutdemotwo.algorithm.ne
         cmd.add("--certificate"); cmd.add(certCsv.getAbsolutePath());
         cmd.add("--only-write-at-the-end");
         cmd.add("--time-limit"); cmd.add(nativeTimeLimitSeconds(req.timeLimitSeconds()));
+        cmd.add("--memory-limit"); cmd.add(Integer.toString(memMb));
 
         if (!req.parts().stream().anyMatch(NestingProblem.Part::allowRotation)) {
             cmd.add("--no-item-rotation");

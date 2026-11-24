@@ -18,14 +18,25 @@ import java.util.function.*;
  * Database time, lease ownership and increasing attempt tokens guard every worker write.
  */
 public final class JdbcOptimizationJobStore implements LeasedOptimizationJobStore {
+    public static final long DEFAULT_TERMINAL_RETENTION_HOURS = 168L;
+    private static final int MAX_PURGE_BATCH = 200;
+    private static final String TERMINAL_STATES_SQL = "'SUCCEEDED','FAILED','CANCELLED','TIMED_OUT','LEASE_LOST'";
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
     private final JsonMapper json=JsonMapper.builder().build();
     private final boolean mysql;
+    private final long terminalRetentionMillis;
     private int workers, queue, archive;
     private record Row(StoredOptimizationJob document, long token, String owner, Long lease, Long deadline) {}
+    private record TerminalEntry(String id, long finishedAt) {}
 
     public JdbcOptimizationJobStore(DataSource source) {
+        this(source, DEFAULT_TERMINAL_RETENTION_HOURS);
+    }
+
+    public JdbcOptimizationJobStore(DataSource source, long terminalRetentionHours) {
+        if (terminalRetentionHours < 0) throw new IllegalArgumentException("终态作业保留时长不能为负数");
+        this.terminalRetentionMillis = java.util.concurrent.TimeUnit.HOURS.toMillis(terminalRetentionHours);
         jdbc=new JdbcTemplate(source);
         String product=jdbc.execute((org.springframework.jdbc.core.ConnectionCallback<String>)connection->connection.getMetaData().getDatabaseProductName());
         mysql="MySQL".equals(product);
@@ -69,13 +80,51 @@ public final class JdbcOptimizationJobStore implements LeasedOptimizationJobStor
                     throw new Failure("IDEMPOTENCY_CONFLICT","同一幂等键已绑定不同请求",409,false);
                 return found;
             }
+            long nowMs=now();
             long active=jdbc.queryForObject("SELECT COUNT(*) FROM optimization_job WHERE state IN ('QUEUED','RUNNING','CANCEL_REQUESTED')",Long.class);
+            if(active>=workers+queue)throw new Failure("QUOTA_EXCEEDED","共享作业并发/排队限额已满",429,true);
             long stored=jdbc.queryForObject("SELECT COUNT(*) FROM optimization_job",Long.class);
-            if(active>=workers+queue || stored>=archive)throw new Failure("QUOTA_EXCEEDED","共享作业并发/排队或归档限额已满",429,true);
+            if(stored>=archive) {
+                int minToFree=(int)Math.min(Integer.MAX_VALUE,stored-archive+1);
+                stored-=evictTerminalLocked(nowMs,terminalRetentionMillis,minToFree);
+            }
+            if(stored>=archive)throw new Failure("QUOTA_EXCEEDED","共享作业归档限额已满且无可清理的终态作业",429,true);
             jdbc.update("INSERT INTO optimization_job(id,key_digest,state,created_at,token,document_json) VALUES(?,?,?,?,0,?)",
-                    document.job().id(),digest,"QUEUED",now(),json.writeValueAsString(document));
+                    document.job().id(),digest,"QUEUED",nowMs,json.writeValueAsString(document));
             return document;
         });
+    }
+    @Override public int purgeExpiredTerminal(long retentionMillis) {
+        if(retentionMillis<0)throw new IllegalArgumentException("终态作业保留时长不能为负数");
+        return locked(()->evictTerminalLocked(now(),retentionMillis,0));
+    }
+    private int evictTerminalLocked(long nowMs,long retentionMillis,int minRequiredToFree) {
+        long cutoff=nowMs-retentionMillis;
+        int limit=Math.max(MAX_PURGE_BATCH,minRequiredToFree);
+        var candidates=jdbc.query(
+                "SELECT j.id, COALESCE(MAX(a.finished_at), j.created_at) AS finished_ts " +
+                "FROM optimization_job j " +
+                "LEFT JOIN optimization_attempt a ON a.job_id = j.id " +
+                "WHERE j.state IN (" + TERMINAL_STATES_SQL + ") " +
+                "GROUP BY j.id, j.created_at " +
+                "ORDER BY finished_ts ASC, j.created_at ASC, j.id ASC",
+                (rs,n)->new TerminalEntry(rs.getString(1),rs.getLong(2)));
+        int removed=0;
+        for(var entry:candidates) {
+            if(removed>=limit)break;
+            boolean expired=entry.finishedAt()<=cutoff;
+            if(!expired && removed>=minRequiredToFree)break;
+            deleteJobById(entry.id());
+            removed++;
+        }
+        return removed;
+    }
+    private void deleteJobById(String id) {
+        // 严格按外键依赖顺序清理子表后再删主表，避免外键冲突并连带移除幂等键映射。
+        jdbc.update("DELETE FROM optimization_result WHERE job_id=?",id);
+        jdbc.update("DELETE FROM optimization_attempt WHERE job_id=?",id);
+        jdbc.update("DELETE FROM optimization_archive_entry WHERE job_id=?",id);
+        jdbc.update("DELETE FROM optimization_job WHERE id=?",id);
     }
     private Row row(String id) {
         var rows=jdbc.query("SELECT document_json,token,owner_id,lease_until,deadline_at FROM optimization_job WHERE id=?",

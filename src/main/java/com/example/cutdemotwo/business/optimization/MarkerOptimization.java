@@ -102,7 +102,7 @@ final class MarkerOptimization {
                     / (searchTrials - i)));
             var candidate = new NestingProblem(original.schemaVersion(), original.unit(),
                     new NestingProblem.Material(original.material().id(), NestingProblem.Shape.rectangle(original.width(), length),
-                            original.material().exclusions(), original.material().continuesAfterRegion()),
+                            original.material().exclusions(), original.material().continuesAfterRegion(), original.material().fabricRule()),
                     original.parts(), original.process(), original.engine(), seconds);
             progress.accept("试排 " + (history.size() + 1) + " / " + input.strategy().maxTrials() + "，长度 " + length + " mm");
             latest = solve.apply(candidate, input.allowFallback());

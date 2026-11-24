@@ -25,6 +25,11 @@ public class OptimizationService implements AutoCloseable {
     private final LeasedOptimizationJobStore shared;
     private final String owner=UUID.randomUUID().toString();
     private static final long LEASE_MILLIS=15000;
+    private static final long CLEANUP_INTERVAL_MINUTES=5;
+    private static final long DEFAULT_TERMINAL_RETENTION_HOURS=168;
+    private static final String DEFAULT_SLITTING_CHILD_XMX="768m";
+    private static final int MAX_NESTING_TIME_LIMIT_SECONDS=60;
+    private static final int MAX_SLITTING_TIME_LIMIT_SECONDS=180;
     private static final class LocalLease {
         final LeasedOptimizationJobStore.Lease lease;
         volatile boolean lost;
@@ -32,6 +37,8 @@ public class OptimizationService implements AutoCloseable {
     }
     private final Map<String,LocalLease> leases=new HashMap<>();
     private final int workers, queueCapacity, maxStored;
+    private final long terminalRetentionHours, terminalRetentionMillis;
+    private final int slittingMaxHeapMiB;
     private final ThreadPoolExecutor executor;
     private final ScheduledExecutorService timer;
     private final Map<String,StoredOptimizationJob> documents = new LinkedHashMap<>();
@@ -40,18 +47,35 @@ public class OptimizationService implements AutoCloseable {
     private final Map<String,Thread> running = new HashMap<>();
     private boolean closing, storageFailed;
 
+    public OptimizationService(NestingSolver solvers,
+            com.example.cutdemotwo.algorithm.api.ISlittingSolverEngine slitting,
+            OptimizationJobStore store,
+            int workers, int queueCapacity, int maxStored) {
+        this(solvers, slitting, store, workers, queueCapacity, maxStored, DEFAULT_TERMINAL_RETENTION_HOURS, DEFAULT_SLITTING_CHILD_XMX);
+    }
+
     @Autowired
     public OptimizationService(NestingSolver solvers,
             com.example.cutdemotwo.algorithm.api.ISlittingSolverEngine slitting,
             OptimizationJobStore store,
             @Value("${cutdemo.jobs.workers:6}") int workers,
             @Value("${cutdemo.jobs.queue-capacity:32}") int queueCapacity,
-            @Value("${cutdemo.jobs.max-stored:1000}") int maxStored) {
+            @Value("${cutdemo.jobs.max-stored:1000}") int maxStored,
+            @Value("${cutdemo.jobs.terminal-retention-hours:168}") long terminalRetentionHours,
+            @Value("${cutdemo.slitting.child-xmx:768m}") String slittingChildXmx) {
         this.solvers=solvers;this.slitting=slitting;this.store=store;this.workers=workers;this.queueCapacity=queueCapacity;this.maxStored=maxStored;
         this.shared=store instanceof LeasedOptimizationJobStore leased?leased:null;
-        if (workers<1 || workers>16 || queueCapacity<1 || queueCapacity>1000 || maxStored<1) {
-            store.close();throw new IllegalArgumentException("计算作业并发、排队或归档限额配置无效");
+        if (workers<1 || workers>16 || queueCapacity<1 || queueCapacity>1000 || maxStored<1 || terminalRetentionHours<0) {
+            store.close();throw new IllegalArgumentException("计算作业并发、排队、归档限额或保留时长配置无效");
         }
+        try {
+            this.slittingMaxHeapMiB = parseHeapMiB(slittingChildXmx);
+        } catch (IllegalArgumentException invalidXmx) {
+            store.close();
+            throw invalidXmx;
+        }
+        this.terminalRetentionHours = terminalRetentionHours;
+        this.terminalRetentionMillis = TimeUnit.HOURS.toMillis(terminalRetentionHours);
         // pending bounds accepted work to workers + queueCapacity. A finishing task releases
         // that permit just before ThreadPoolExecutor releases its worker; reserve handoff slots
         // so an already persisted replacement cannot be rejected during that brief interval.
@@ -67,16 +91,37 @@ public class OptimizationService implements AutoCloseable {
                     throw new IllegalStateException("作业存储中存在重复身份或幂等键");
                 if (!job.terminal()) persist(transition(document,"FAILED","STOPPED", "PROCESS_RESTARTED","服务重启打断了作业；未自动重算，请使用新的幂等键重试",null));
             }
+            timer.scheduleWithFixedDelay(this::cleanupExpiredTerminalJobs, CLEANUP_INTERVAL_MINUTES, CLEANUP_INTERVAL_MINUTES, TimeUnit.MINUTES);
         } catch(RuntimeException error) {executor.shutdownNow();timer.shutdownNow();store.close();throw error;}
+    }
+
+    static int parseHeapMiB(String raw) {
+        String value = raw == null ? "" : raw.trim();
+        if (!value.matches("([1-9][0-9]{1,4}[mM]|[1-9][0-9]{0,1}[gG])")) {
+            throw new IllegalArgumentException("无效的一维子进程堆上限配置 cutdemo.slitting.child-xmx: " + raw);
+        }
+        int amount = Integer.parseInt(value.substring(0, value.length() - 1));
+        char unit = Character.toLowerCase(value.charAt(value.length() - 1));
+        return unit == 'g' ? Math.multiplyExact(amount, 1024) : amount;
     }
 
     public Map<String,Object> capabilities() {
         return Map.of("schemaVersion","2.0","problemTypes",List.of("NESTING_2D","SLITTING_1D"),"inputProfile","nesting-v1",
                 "inputProfiles",List.of("nesting-v1","slitting-v1"),
                 "slittingEngine",Map.of("id",slitting.getEngineType(),"available",slitting.isAvailable(),"cancellation","isolated-process",
-                        "maxOrders",500,"maxTotalProducedRolls",100000,"lengthResolutionMm",1,"maxHeapMiB",512),
-                "engines",solvers.capabilities(),"limits",Map.of("workers",workers,"queueCapacity",queueCapacity,"maxStoredJobs",maxStored,
-                        "maxRequestBytes",262144,"maxPieces",10000,"maxContourPieces",200,"maxTimeLimitSeconds",60),
+                        "maxOrders",500,"maxTotalProducedRolls",100000,"lengthResolutionMm",1,"maxHeapMiB",slittingMaxHeapMiB,
+                        "maxTimeLimitSeconds",MAX_SLITTING_TIME_LIMIT_SECONDS),
+                "engines",solvers.capabilities(),"limits",Map.ofEntries(
+                        Map.entry("workers",workers),
+                        Map.entry("queueCapacity",queueCapacity),
+                        Map.entry("maxStoredJobs",maxStored),
+                        Map.entry("terminalRetentionHours",terminalRetentionHours),
+                        Map.entry("maxRequestBytes",262144),
+                        Map.entry("maxPieces",10000),
+                        Map.entry("maxContourPieces",200),
+                        Map.entry("maxTimeLimitSeconds",MAX_NESTING_TIME_LIMIT_SECONDS),
+                        Map.entry("maxNestingTimeLimitSeconds",MAX_NESTING_TIME_LIMIT_SECONDS),
+                        Map.entry("maxSlittingTimeLimitSeconds",MAX_SLITTING_TIME_LIMIT_SECONDS)),
                 "features",Map.of("polling",true,"cancellation","cooperative-request","hardPreemption",false,"progress","phase-only",
                         "storage",shared==null?"single-dispatcher-local-files":"jdbc-leases","distributedWorkers",shared!=null,"sse",false,"inventoryWrites",false),
                 "units",Map.of("length","mm","area","mm2"),
@@ -143,8 +188,13 @@ public class OptimizationService implements AutoCloseable {
         }
         if (closing || storageFailed) throw new Failure("SERVICE_UNAVAILABLE","作业服务暂不可受理，请检查服务与持久化状态",503,true);
         validate(input);
-        if (pending.size()>=workers+queueCapacity || documents.size()>=maxStored)
-            throw new Failure("QUOTA_EXCEEDED","作业并发/排队或归档限额已满；查询已有作业后重试，归档限额需运维扩容",429,true);
+        if (pending.size()>=workers+queueCapacity)
+            throw new Failure("QUOTA_EXCEEDED","作业并发/排队限额已满；请稍后重试",429,true);
+        if (documents.size()>=maxStored) {
+            evictTerminalJobsFileMode(true);
+        }
+        if (documents.size()>=maxStored)
+            throw new Failure("QUOTA_EXCEEDED","作业归档限额已满且无终态作业可清理；请等待活跃作业完成后重试",429,true);
         String id=UUID.randomUUID().toString();
         var job=new OptimizationJob(id,"2.0",input.clientRequestId(),hash,"QUEUED","QUEUED",Instant.now().toString(),null,null,input.problem().timeLimitSeconds(),null,null,"已持久化，等待计算");
         persist(new StoredOptimizationJob(key,input,job,null));keys.put(key,id);
@@ -401,6 +451,64 @@ public class OptimizationService implements AutoCloseable {
                 complete?"COMPLETE":placed>0?"PARTIAL":"NONE",layout.feasible() && (!document.input().requireComplete() || complete),termination,
                 List.copyOf(metrics),layout,marker);
     }
+    int cleanupExpiredTerminalJobs() {
+        try {
+            if (shared != null) {
+                if (closing) return 0;
+                return store.purgeExpiredTerminal(terminalRetentionMillis);
+            }
+            synchronized (this) {
+                if (closing || storageFailed) return 0;
+                return evictTerminalJobsFileMode(false);
+            }
+        } catch (RuntimeException error) {
+            log.warn("定时清理过期终态作业失败", error);
+            return 0;
+        }
+    }
+
+    private int evictTerminalJobsFileMode(boolean enforceCapacity) {
+        long cutoff = System.currentTimeMillis() - terminalRetentionMillis;
+        var candidates = new ArrayList<StoredOptimizationJob>();
+        for (var entry : documents.entrySet()) {
+            String id = entry.getKey();
+            var doc = entry.getValue();
+            if (isEvictableTerminal(doc) && !pending.containsKey(id) && !running.containsKey(id)) {
+                candidates.add(doc);
+            }
+        }
+        if (candidates.isEmpty()) return 0;
+        candidates.sort(Comparator.comparingLong(OptimizationService::terminalTimestampMillis)
+                .thenComparing(doc -> doc.job().id()));
+        int removed = 0;
+        for (var doc : candidates) {
+            boolean expired = terminalTimestampMillis(doc) <= cutoff;
+            boolean needSpace = enforceCapacity && documents.size() >= maxStored;
+            if (!expired && !needSpace) break;
+            String id = doc.job().id();
+            store.delete(id);
+            documents.remove(id);
+            keys.remove(doc.idempotencyKey(), id);
+            removed++;
+        }
+        return removed;
+    }
+
+    private static boolean isEvictableTerminal(StoredOptimizationJob doc) {
+        if (doc == null || doc.job() == null) return false;
+        return doc.job().terminal() || "LEASE_LOST".equals(doc.job().state());
+    }
+
+    private static long terminalTimestampMillis(StoredOptimizationJob doc) {
+        String raw = doc.job().finishedAt() != null ? doc.job().finishedAt() : doc.job().createdAt();
+        if (raw == null) return 0L;
+        try {
+            return Instant.parse(raw).toEpochMilli();
+        } catch (RuntimeException ignored) {
+            return 0L;
+        }
+    }
+
     private StoredOptimizationJob transition(StoredOptimizationJob d,String state,String phase,String code,String message,OptimizationResult result) {
         return d.transition(state,phase,code,message,result,System.currentTimeMillis());
     }

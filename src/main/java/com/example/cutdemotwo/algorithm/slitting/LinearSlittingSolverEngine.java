@@ -12,6 +12,8 @@ import changyang.cut.apsmodule.solver.kernel.*;
 import changyang.cut.apsmodule.solver.kernel.execution.SolverExecutionContext;
 import com.example.cutdemotwo.contracts.slitting.*;
 import jakarta.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -28,42 +30,103 @@ import java.util.concurrent.atomic.AtomicLong;
 /** Pure legacy-kernel adapter. Reuses warm isolated JVMs while enforcing hard kill on timeout/cancel. */
 @Service
 public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCloseable {
+    private static final Logger log = LoggerFactory.getLogger(LinearSlittingSolverEngine.class);
     static final String DEFAULT_CHILD_XMX = "768m";
     static final int MAX_CHILD_THREADS = 8;
+    static final int DEFAULT_MAX_IDLE_WORKERS = 2;
+    static final long DEFAULT_IDLE_TTL_SECONDS = 120L;
+    static final int DEFAULT_MAX_ACTIVE_WORKERS = 2;
+    static final int STDERR_RING_CAPACITY_BYTES = 4096;
+    private static final int MAX_WORKERS_LIMIT = 16;
     private static final String WORKER_FLAG = "--worker";
     private static final String WARM_WORKER_PROP = "cutdemo.slitting.warmWorker";
-    private static final int MAX_IDLE_WORKERS = 2;
     private static final long WORKER_READY_TIMEOUT_MS = 15_000L;
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     private final String childXmx;
     private final int childThreads;
+    private final int maxIdleWorkers;
+    private final long idleTtlSeconds;
+    private final long idleTtlNanos;
+    private final int maxActiveWorkers;
+    private final Semaphore activeWorkerPermits;
+    private final ScheduledExecutorService idleReaper;
     private final ConcurrentLinkedDeque<WarmWorker> idleWorkers = new ConcurrentLinkedDeque<>();
     private final Set<WarmWorker> activeWorkers = ConcurrentHashMap.newKeySet();
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     public LinearSlittingSolverEngine() {
-        this(DEFAULT_CHILD_XMX, defaultChildThreads());
+        this(DEFAULT_CHILD_XMX, defaultChildThreads(), DEFAULT_MAX_IDLE_WORKERS, DEFAULT_IDLE_TTL_SECONDS, DEFAULT_MAX_ACTIVE_WORKERS);
     }
 
     public LinearSlittingSolverEngine(String childXmx) {
-        this(childXmx, defaultChildThreads());
+        this(childXmx, defaultChildThreads(), DEFAULT_MAX_IDLE_WORKERS, DEFAULT_IDLE_TTL_SECONDS, DEFAULT_MAX_ACTIVE_WORKERS);
     }
 
     public LinearSlittingSolverEngine(String childXmx, int childThreads) {
+        this(childXmx, childThreads, DEFAULT_MAX_IDLE_WORKERS, DEFAULT_IDLE_TTL_SECONDS, DEFAULT_MAX_ACTIVE_WORKERS);
+    }
+
+    public LinearSlittingSolverEngine(String childXmx, int childThreads, int maxIdleWorkers, long idleTtlSeconds, int maxActiveWorkers) {
         this.childXmx = normalizeChildXmx(childXmx);
         this.childThreads = normalizeChildThreads(childThreads);
+        this.maxIdleWorkers = normalizeMaxIdleWorkers(maxIdleWorkers);
+        this.idleTtlSeconds = normalizeIdleTtlSeconds(idleTtlSeconds);
+        this.idleTtlNanos = TimeUnit.SECONDS.toNanos(this.idleTtlSeconds);
+        this.maxActiveWorkers = normalizeMaxActiveWorkers(maxActiveWorkers);
+        this.activeWorkerPermits = new Semaphore(this.maxActiveWorkers, true);
+        this.idleReaper = createIdleReaper(this.maxIdleWorkers, this.idleTtlSeconds);
         registerShutdownCleanup(this);
     }
 
     @Autowired
     public LinearSlittingSolverEngine(
             @Value("${cutdemo.slitting.child-xmx:" + DEFAULT_CHILD_XMX + "}") String childXmx,
-            @Value("${cutdemo.slitting.child-threads:auto}") String childThreads) {
-        this.childXmx = normalizeChildXmx(childXmx);
-        this.childThreads = normalizeChildThreads(childThreads);
-        registerShutdownCleanup(this);
+            @Value("${cutdemo.slitting.child-threads:auto}") String childThreads,
+            @Value("${cutdemo.slitting.max-idle-workers:" + DEFAULT_MAX_IDLE_WORKERS + "}") int maxIdleWorkers,
+            @Value("${cutdemo.slitting.idle-ttl-seconds:" + DEFAULT_IDLE_TTL_SECONDS + "}") long idleTtlSeconds,
+            @Value("${cutdemo.slitting.max-active-workers:" + DEFAULT_MAX_ACTIVE_WORKERS + "}") int maxActiveWorkers) {
+        this(childXmx, normalizeChildThreads(childThreads), maxIdleWorkers, idleTtlSeconds, maxActiveWorkers);
     }
+
+    private ScheduledExecutorService createIdleReaper(int maxIdle, long ttlSeconds) {
+        if (maxIdle <= 0) {
+            return null;
+        }
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "slitting-idle-reaper");
+            t.setDaemon(true);
+            return t;
+        });
+        long periodMs = Math.max(250L, Math.min(10_000L, TimeUnit.SECONDS.toMillis(ttlSeconds) / 2));
+        scheduler.scheduleWithFixedDelay(this::evictExpiredIdleWorkers, periodMs, periodMs, TimeUnit.MILLISECONDS);
+        return scheduler;
+    }
+
+    static int normalizeMaxIdleWorkers(int raw) {
+        if (raw < 0 || raw > MAX_WORKERS_LIMIT) {
+            throw new IllegalArgumentException("无效的一维空闲子进程上限配置 cutdemo.slitting.max-idle-workers: " + raw);
+        }
+        return raw;
+    }
+
+    static long normalizeIdleTtlSeconds(long raw) {
+        if (raw < 1L || raw > 86_400L) {
+            throw new IllegalArgumentException("无效的一维空闲子进程存活时间配置 cutdemo.slitting.idle-ttl-seconds: " + raw);
+        }
+        return raw;
+    }
+
+    static int normalizeMaxActiveWorkers(int raw) {
+        if (raw < 1 || raw > MAX_WORKERS_LIMIT) {
+            throw new IllegalArgumentException("无效的一维并发活跃子进程上限配置 cutdemo.slitting.max-active-workers: " + raw);
+        }
+        return raw;
+    }
+
+    int maxIdleWorkers() { return maxIdleWorkers; }
+    long idleTtlSeconds() { return idleTtlSeconds; }
+    int maxActiveWorkers() { return maxActiveWorkers; }
 
     static int defaultChildThreads() {
         return defaultChildThreads(Runtime.getRuntime().availableProcessors());
@@ -126,7 +189,7 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
 
     static String normalizeChildXmx(String raw) {
         String value = raw == null ? "" : raw.trim();
-        if (!value.matches("[1-9][0-9]{1,4}[mMgG]")) {
+        if (!value.matches("([1-9][0-9]{1,4}[mM]|[1-9][0-9]{0,1}[gG])")) {
             throw new IllegalArgumentException("无效的一维子进程堆上限配置 cutdemo.slitting.child-xmx: " + raw);
         }
         return value;
@@ -145,6 +208,9 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
         if (!closed.compareAndSet(false, true)) {
             return;
         }
+        if (idleReaper != null) {
+            idleReaper.shutdownNow();
+        }
         WarmWorker idle;
         while ((idle = idleWorkers.poll()) != null) {
             idle.shutdownQuietly();
@@ -157,6 +223,22 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
 
     int idleWorkerCount() {
         return idleWorkers.size();
+    }
+
+    int evictExpiredIdleWorkers() {
+        if (closed.get() || idleWorkers.isEmpty()) {
+            return 0;
+        }
+        long now = System.nanoTime();
+        int evicted = 0;
+        for (WarmWorker worker : idleWorkers) {
+            boolean expired = !worker.isAlive() || (now - worker.lastReturnedNanos() >= idleTtlNanos);
+            if (expired && idleWorkers.remove(worker)) {
+                worker.shutdownQuietly();
+                evicted++;
+            }
+        }
+        return evicted;
     }
 
     @Override public SlittingResult solve(SlittingProblem problem) {
@@ -192,56 +274,114 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
     }
 
     private String executeOnWarmWorker(Path input, Path output, int timeLimitSeconds, long deadlineNanos) throws IOException {
-        for (int attempt = 0; attempt < 2; attempt++) {
-            boolean reused = false;
-            WarmWorker worker = pollAliveIdleWorker();
-            if (worker != null) {
-                reused = true;
-            } else {
-                worker = startWarmWorker(deadlineNanos);
-            }
-            activeWorkers.add(worker);
-            boolean keepWarm = false;
-            try {
-                String response = worker.solve(input, output, timeLimitSeconds, deadlineNanos);
-                keepWarm = ("OK".equals(response) || "INVALID".equals(response)) && worker.isAlive() && !closed.get();
-                return response;
-            } catch (IOException ioError) {
-                if (reused && attempt == 0) {
-                    // 空闲复用的子进程若在等待期间意外退出，立即销毁并冷启动一个新实例重试一次。
-                    continue;
-                }
-                throw ioError;
-            } finally {
-                activeWorkers.remove(worker);
-                if (keepWarm) {
-                    returnToPool(worker);
+        acquireActivePermit(deadlineNanos);
+        try {
+            for (int attempt = 0; attempt < 2; attempt++) {
+                boolean reused = false;
+                WarmWorker worker = pollAliveIdleWorker();
+                if (worker != null) {
+                    reused = true;
                 } else {
-                    // 超时、取消或异常退出时立即阻塞强杀子进程树，确保 native 求解线程彻底释放。
-                    worker.destroyAndWait();
+                    worker = startWarmWorker(deadlineNanos);
                 }
+                activeWorkers.add(worker);
+                boolean keepWarm = false;
+                boolean abnormalExit = false;
+                String response = null;
+                try {
+                    response = worker.solve(input, output, timeLimitSeconds, deadlineNanos);
+                    keepWarm = ("OK".equals(response) || "INVALID".equals(response)) && worker.isAlive() && !closed.get();
+                    if (!keepWarm && !"OK".equals(response) && !"INVALID".equals(response)) {
+                        abnormalExit = true;
+                    }
+                    return response;
+                } catch (IOException ioError) {
+                    abnormalExit = true;
+                    if (reused && attempt == 0) {
+                        // 空闲复用的子进程若在等待期间意外退出，立即销毁并冷启动一个新实例重试一次。
+                        continue;
+                    }
+                    throw ioError;
+                } catch (ComputationTimeout timeout) {
+                    abnormalExit = true;
+                    throw timeout;
+                } catch (RuntimeException runtimeError) {
+                    if (!(runtimeError instanceof CancellationException)) {
+                        abnormalExit = true;
+                    }
+                    throw runtimeError;
+                } finally {
+                    activeWorkers.remove(worker);
+                    if (keepWarm) {
+                        returnToPool(worker);
+                    } else {
+                        // 超时、取消或异常退出时立即阻塞强杀子进程树，确保 native 求解线程彻底释放。
+                        worker.destroyAndWait();
+                        if (abnormalExit) {
+                            logWorkerDiagnostic("一维求解子进程异常结束", worker, response);
+                        }
+                    }
+                }
+            }
+            throw new IllegalStateException("一维温热子进程重试失败");
+        } finally {
+            activeWorkerPermits.release();
+        }
+    }
+
+    private void acquireActivePermit(long deadlineNanos) {
+        while (true) {
+            ComputationCancellation.check();
+            if (closed.get()) {
+                throw new IllegalStateException("一维计算引擎已关闭");
+            }
+            long remainingNanos = deadlineNanos - System.nanoTime();
+            if (remainingNanos <= 0L) {
+                throw new ComputationTimeout();
+            }
+            long waitMs = Math.min(
+                    IsolatedProcessRunner.DEFAULT_POLL_MILLIS,
+                    Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remainingNanos)));
+            try {
+                if (activeWorkerPermits.tryAcquire(waitMs, TimeUnit.MILLISECONDS)) {
+                    if (closed.get()) {
+                        activeWorkerPermits.release();
+                        throw new IllegalStateException("一维计算引擎已关闭");
+                    }
+                    return;
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new CancellationException("计算收到停止请求");
             }
         }
-        throw new IllegalStateException("一维温热子进程重试失败");
     }
 
     private WarmWorker pollAliveIdleWorker() {
+        long now = System.nanoTime();
         WarmWorker worker;
         while ((worker = idleWorkers.pollFirst()) != null) {
-            if (worker.isAlive()) {
+            if (worker.isAlive() && (now - worker.lastReturnedNanos() < idleTtlNanos)) {
                 return worker;
             }
-            worker.destroyAndWait();
+            worker.shutdownQuietly();
         }
         return null;
     }
 
     private void returnToPool(WarmWorker worker) {
-        if (closed.get() || !worker.isAlive() || idleWorkers.size() >= MAX_IDLE_WORKERS) {
+        if (closed.get() || maxIdleWorkers <= 0 || !worker.isAlive() || idleWorkers.size() >= maxIdleWorkers) {
             worker.shutdownQuietly();
             return;
         }
+        worker.markReturned();
         idleWorkers.offerFirst(worker);
+        while (idleWorkers.size() > maxIdleWorkers) {
+            WarmWorker extra = idleWorkers.pollLast();
+            if (extra != null) {
+                extra.shutdownQuietly();
+            }
+        }
         if (closed.get()) {
             WarmWorker drained;
             while ((drained = idleWorkers.poll()) != null) {
@@ -253,8 +393,7 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
     private WarmWorker startWarmWorker(long requestDeadlineNanos) throws IOException {
         ComputationCancellation.check();
         var cmd = workerCommand(ProcessHandle.current().pid(), childXmx, childThreads);
-        ProcessBuilder pb = new ProcessBuilder(cmd)
-                .redirectError(ProcessBuilder.Redirect.DISCARD);
+        ProcessBuilder pb = new ProcessBuilder(cmd);
         Process process = pb.start();
         WarmWorker worker = new WarmWorker(process);
         long readyDeadlineNanos = Math.min(
@@ -268,7 +407,22 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
             return worker;
         } catch (RuntimeException | IOException error) {
             worker.destroyAndWait();
+            if (!(error instanceof CancellationException)) {
+                logWorkerDiagnostic("一维常驻子进程启动/握手失败", worker, null);
+            }
             throw error;
+        }
+    }
+
+    private static void logWorkerDiagnostic(String reason, WarmWorker worker, String response) {
+        String stderrTail = worker.stderrTail();
+        int exitCode = worker.exitCodeOrMinusOne();
+        if (!stderrTail.isEmpty()) {
+            log.warn("{} (pid={}, exitCode={}, response={})，stderr 尾部 4KB：\n{}",
+                    reason, worker.pid(), exitCode, response, stderrTail);
+        } else {
+            log.warn("{} (pid={}, exitCode={}, response={})，子进程无 stderr 输出",
+                    reason, worker.pid(), exitCode, response);
         }
     }
 
@@ -422,21 +576,108 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
         System.exit(0);
     }
 
-    private static final class WarmWorker {
+    static final class BoundedStderrBuffer {
+        private final byte[] ring;
+        private int writePos;
+        private int count;
+
+        BoundedStderrBuffer(int capacity) {
+            this.ring = new byte[Math.max(64, capacity)];
+        }
+
+        synchronized void append(byte[] data, int offset, int length) {
+            if (length <= 0) return;
+            if (length >= ring.length) {
+                System.arraycopy(data, offset + length - ring.length, ring, 0, ring.length);
+                writePos = 0;
+                count = ring.length;
+                return;
+            }
+            int firstPart = Math.min(length, ring.length - writePos);
+            System.arraycopy(data, offset, ring, writePos, firstPart);
+            int remaining = length - firstPart;
+            if (remaining > 0) {
+                System.arraycopy(data, offset + firstPart, ring, 0, remaining);
+            }
+            writePos = (writePos + length) % ring.length;
+            count = Math.min(ring.length, count + length);
+        }
+
+        synchronized void reset() {
+            writePos = 0;
+            count = 0;
+        }
+
+        synchronized String snapshotUtf8() {
+            if (count == 0) return "";
+            byte[] ordered = new byte[count];
+            int start = (writePos - count + ring.length) % ring.length;
+            int firstPart = Math.min(count, ring.length - start);
+            System.arraycopy(ring, start, ordered, 0, firstPart);
+            int remaining = count - firstPart;
+            if (remaining > 0) {
+                System.arraycopy(ring, 0, ordered, firstPart, remaining);
+            }
+            return new String(ordered, StandardCharsets.UTF_8).trim();
+        }
+    }
+
+    static final class WarmWorker {
         private final Process process;
         private final BufferedWriter stdin;
         private final BufferedReader stdout;
+        private final InputStream stderr;
         private final ExecutorService readerExecutor;
+        private final BoundedStderrBuffer stderrBuffer;
+        private final Thread stderrDrainThread;
+        private volatile long lastReturnedNanos = System.nanoTime();
 
         WarmWorker(Process process) {
             this.process = process;
             this.stdin = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
             this.stdout = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+            this.stderr = process.getErrorStream();
+            this.stderrBuffer = new BoundedStderrBuffer(STDERR_RING_CAPACITY_BYTES);
             this.readerExecutor = Executors.newSingleThreadExecutor(runnable -> {
                 Thread t = new Thread(runnable, "slitting-worker-io-" + process.pid());
                 t.setDaemon(true);
                 return t;
             });
+            this.stderrDrainThread = new Thread(this::drainStderr, "slitting-worker-err-" + process.pid());
+            this.stderrDrainThread.setDaemon(true);
+            this.stderrDrainThread.start();
+        }
+
+        private void drainStderr() {
+            byte[] chunk = new byte[1024];
+            try {
+                int n;
+                while ((n = stderr.read(chunk)) != -1) {
+                    stderrBuffer.append(chunk, 0, n);
+                }
+            } catch (IOException ignored) {
+                // 子进程退出关闭管道时自然结束读取。
+            }
+        }
+
+        long pid() {
+            return process.pid();
+        }
+
+        int exitCodeOrMinusOne() {
+            return process.isAlive() ? -1 : process.exitValue();
+        }
+
+        String stderrTail() {
+            return stderrBuffer.snapshotUtf8();
+        }
+
+        void markReturned() {
+            this.lastReturnedNanos = System.nanoTime();
+        }
+
+        long lastReturnedNanos() {
+            return lastReturnedNanos;
         }
 
         boolean isAlive() {
@@ -444,6 +685,7 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
         }
 
         String solve(Path input, Path output, int timeLimitSeconds, long deadlineNanos) throws IOException {
+            stderrBuffer.reset();
             var encoder = Base64.getEncoder();
             String commandLine = "SOLVE "
                     + encoder.encodeToString(input.toString().getBytes(StandardCharsets.UTF_8))
@@ -517,10 +759,29 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
         }
 
         void destroyAndWait() {
-            try { stdin.close(); } catch (Exception ignored) {}
-            try { stdout.close(); } catch (Exception ignored) {}
-            IsolatedProcessRunner.destroyProcessTree(process, -1L);
-            readerExecutor.shutdownNow();
+            boolean interrupted = Thread.interrupted();
+            try {
+                // 先销毁子进程树切断 stdout/stderr 管道，使阻塞在 BufferedReader.readLine() 的读取线程立刻收到 EOF 释放内部锁，避免 close() 死锁。
+                IsolatedProcessRunner.destroyProcessTree(process, -1L);
+                readerExecutor.shutdownNow();
+                try {
+                    readerExecutor.awaitTermination(1, TimeUnit.SECONDS);
+                } catch (InterruptedException again) {
+                    interrupted = true;
+                }
+                try {
+                    stderrDrainThread.join(500L);
+                } catch (InterruptedException again) {
+                    interrupted = true;
+                }
+                try { stdin.close(); } catch (Exception ignored) {}
+                try { stdout.close(); } catch (Exception ignored) {}
+                try { stderr.close(); } catch (Exception ignored) {}
+            } finally {
+                if (interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
         }
     }
     static SlittingResult solveKernel(SlittingProblem p) {

@@ -81,6 +81,31 @@ public final class FileOptimizationJobStore implements OptimizationJobStore {
             }
         }
     }
+    @Override public void delete(String id) {
+        if (id == null || !id.matches("[0-9a-f-]{36}")) throw new IllegalArgumentException("无效的作业标识");
+        try {
+            deleteSnapshot(directory.resolve(id + ".json"));
+        } catch (IOException error) {
+            throw new IllegalStateException("计算作业删除失败", error);
+        }
+    }
+    private void deleteSnapshot(Path target) throws IOException {
+        for (int delayMillis = 10; ; delayMillis *= 2) {
+            try {
+                Files.deleteIfExists(target);
+                return;
+            } catch (AccessDeniedException denied) {
+                if (delayMillis > 160) throw denied;
+                try {
+                    Thread.sleep(delayMillis);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    denied.addSuppressed(interrupted);
+                    throw denied;
+                }
+            }
+        }
+    }
     @Override public void close() {
         try { lock.release(); channel.close(); }
         catch (IOException error) { throw new IllegalStateException("作业存储关闭失败",error); }

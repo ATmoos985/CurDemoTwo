@@ -259,4 +259,40 @@ class MarkerOptimizationTests {
             assertFalse(result.metrics().stream().anyMatch(m->m.name().equals("markerAreaUtilization")));
         }
     }
+    @Test void markerTrialsPreserveMaterialFabricRuleAcrossEveryShorteningStep() {
+        var fabricRule = new NestingProblem.FabricRule(30.0, 20.0, false, 400.0, 50.0);
+        var material = new NestingProblem.Material("curtain-fabric", NestingProblem.Shape.rectangle(1000, 1200),
+                List.of(), false, fabricRule);
+        var part = new NestingProblem.Part(1, "主帘", NestingProblem.Shape.rectangle(400, 250), 2, false, false,
+                new NestingProblem.PartRule("MAIN", true, 10.0, 1.0));
+        var problem = new NestingProblem("1", "mm", material, List.of(part),
+                new NestingProblem.Process("CONTOUR", "SHEET", "left-top", "none", 0, 0, 0, 0, "MAXIMIZE_PIECE_AREA", 0),
+                "javairregular", 8);
+        var input = new OptimizationRequest("2.0", "NESTING_2D", "marker-fabric-rule", problem, false, true,
+                new OptimizationRequest.Strategy("marker-shortening", "1", 4));
+
+        var observedRules = new ArrayList<NestingProblem.FabricRule>();
+        var delegate = new JavaIrregularSolverEngine();
+        var spySolver = new SolverFactory(List.of(new ICutSolverEngine() {
+            @Override public String getEngineType() { return "javairregular"; }
+            @Override public boolean isAvailable() { return true; }
+            @Override public EngineCapabilities capabilities() { return delegate.capabilities(); }
+            @Override public EngineResult solve(NestingProblem candidate) {
+                observedRules.add(candidate.material().fabricRule());
+                return delegate.solve(candidate);
+            }
+        }));
+
+        var outcome = MarkerOptimization.solve(input, spySolver, ignored -> {});
+        assertFalse(observedRules.isEmpty(), "必须执行至少一次缩长试排");
+        assertTrue(observedRules.size() >= 2, "齐套后应继续缩短并透传 fabricRule，实际试排数=" + observedRules.size());
+        for (var seenRule : observedRules) {
+            assertEquals(fabricRule, seenRule, "每次缩长试排的 Material 均须完整保留 fabricRule");
+        }
+        assertTrue(MarkerOptimization.complete(outcome.layout()), outcome.layout().message());
+        for (var placed : outcome.layout().placements()) {
+            assertTrue(placed.x() >= 30.0 - 0.001, "唛架结果不得侵占左布边，实际 x=" + placed.x());
+            assertTrue(placed.x() + placed.shape().width() <= 980.0 + 0.001, "唛架结果不得侵占右布边");
+        }
+    }
 }

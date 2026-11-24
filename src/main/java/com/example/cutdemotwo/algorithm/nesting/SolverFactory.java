@@ -23,6 +23,7 @@ import java.util.function.Function;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Set;
 import static com.example.cutdemotwo.algorithm.geometry.NestingValidation.*;
 
 /**
@@ -37,6 +38,11 @@ public class SolverFactory implements NestingSolver {
     private static final Map<String, String> FALLBACKS = Map.of(
             "packingsolver", "javaguillotine",
             "packingsolver-irregular", "deepnest"
+    );
+    /** 原生 C++ 引擎尚未支持窗帘声明式约束，检测到窗帘规则时需跳过并路由至自主引擎。 */
+    private static final Set<String> NATIVE_ENGINES_WITHOUT_CURTAIN_SUPPORT = Set.of(
+            "packingsolver",
+            "packingsolver-irregular"
     );
 
     private final Map<String, ICutSolverEngine> engineMap = new ConcurrentHashMap<>();
@@ -81,22 +87,43 @@ public class SolverFactory implements NestingSolver {
 
     private Selection select(NestingProblem problem, boolean allowFallback) {
         validate(problem);
-        CurtainConstraintPack.forProblem(problem).checkProblem(problem);
+        var curtainConstraints = CurtainConstraintPack.forProblem(problem);
+        curtainConstraints.checkProblem(problem);
+        boolean hasCurtainConstraints = !curtainConstraints.isNoop();
         String requested = problem.engine();
-        if (requested == null || requested.isBlank() || "auto".equals(requested))
+        boolean autoRequested = requested == null || requested.isBlank() || "auto".equals(requested);
+        if (autoRequested)
             requested = switch (problem.process().mode()) {
                 case "CROSSCUT" -> "crosscut";
                 case "CONTOUR" -> "deepnest";
-                default -> "packingsolver";
+                default -> hasCurtainConstraints ? "javaguillotine" : "packingsolver";
             };
-        ICutSolverEngine engine = engineMap.get(requested);
-        supported(engine != null, "系统未找到排料引擎: " + requested);
-        checkSupport(problem, engine.capabilities());
-        String fallback = allowFallback ? fallbackFor(requested) : null, reason = null;
-        if (fallback != null) {
-            reason = requested + " 未就绪（原生可执行文件缺失或不可执行），本次由 " + fallback + " 求解";
-            engine = engineMap.get(fallback);
+        String requestedLower = requested.toLowerCase();
+        ICutSolverEngine engine;
+        String reason = null;
+        if (hasCurtainConstraints && NATIVE_ENGINES_WITHOUT_CURTAIN_SUPPORT.contains(requestedLower)) {
+            String autonomousId = FALLBACKS.get(requestedLower);
+            ICutSolverEngine autonomous = autonomousId == null ? null : engineMap.get(autonomousId);
+            supported(allowFallback && autonomous != null && autonomous.isAvailable(),
+                    requested + " 不支持窗帘工艺约束（布边/对花/疵点分级），请使用 " + autonomousId + " 或开启自动回退");
+            reason = requested + " 不支持窗帘工艺约束，已自动跳过原生引擎并路由至 " + autonomous.getEngineType() + " 求解";
+            log.info("窗帘约束自动路由：{}", reason);
+            engine = autonomous;
             checkSupport(problem, engine.capabilities());
+        } else {
+            if (hasCurtainConstraints && autoRequested && "javaguillotine".equals(requestedLower)) {
+                reason = "检测到窗帘工艺约束，已自动跳过不支持该约束的原生引擎 packingsolver，路由至 javaguillotine 求解";
+                log.info("窗帘约束自动路由：{}", reason);
+            }
+            engine = engineMap.get(requestedLower);
+            supported(engine != null, "系统未找到排料引擎: " + requested);
+            checkSupport(problem, engine.capabilities());
+            String fallback = allowFallback ? fallbackFor(requested) : null;
+            if (fallback != null) {
+                reason = requested + " 未就绪（原生可执行文件缺失或不可执行），本次由 " + fallback + " 求解";
+                engine = engineMap.get(fallback);
+                checkSupport(problem, engine.capabilities());
+            }
         }
         if ("CROSSCUT".equals(problem.process().mode())) {
             supported("horizontal".equals(problem.process().firstStageOrientation()), "横切策略仅支持水平首刀");

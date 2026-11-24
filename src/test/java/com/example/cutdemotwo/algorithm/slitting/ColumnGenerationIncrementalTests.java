@@ -54,4 +54,48 @@ class ColumnGenerationIncrementalTests {
             assertTrue(pc.getRollWidth() >= 4200 && pc.getRollWidth() <= 4400);
         }
     }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(10)
+    void singlePassGcdCompressedDpHandlesLargeRollWidthsWithoutOomAndRespectsDeadline() {
+        com.google.ortools.Loader.loadNativeLibraries();
+        assertEquals(100, ColumnGenerationSolver.computeWidthScale(List.of(500, 600, 1200)));
+        assertEquals(10, ColumnGenerationSolver.computeWidthScale(List.of(860, 990, 1150, 1270)));
+        assertEquals(3, ColumnGenerationSolver.computeWidthScale(List.of(501, 600)));
+        assertEquals(1, ColumnGenerationSolver.computeWidthScale(List.of(503, 600)));
+        assertEquals(1015, ColumnGenerationSolver.alignRollWidth(1012, 1005, 1185, 10));
+        assertEquals(4210, ColumnGenerationSolver.alignRollWidth(4205, 4200, 4400, 10));
+
+        // 1. 合法大宽幅输入（maxRollWidth=100000, step=10, 50种宽幅互质+非互质混合），在有界内存与时限内稳定完成不 OOM
+        SolverParameters largeParams = SolverParameters.createDefault();
+        largeParams.setTotalWidth(100_000);
+        largeParams.setMinRollWidth(90_000);
+        largeParams.setMaxRollWidth(100_000);
+        largeParams.setStepSize(10);
+        largeParams.setTotalOverCap(20);
+        largeParams.setMaxDistinctWidths(6);
+        largeParams.setMaxIterations(30);
+        largeParams.setMaxPatterns(200);
+        largeParams.setTimeoutMs(3_000L);
+
+        Map<Integer, Integer> demands = new TreeMap<>();
+        for (int i = 0; i < 40; i++) {
+            demands.put(2001 + i * 137, 10);
+        }
+        List<PatternCandidate> seeds = List.of(new PatternCandidate(Map.of(2001, 45), 90_050));
+
+        long start = System.nanoTime();
+        List<PatternCandidate> result = new ColumnGenerationSolver(largeParams).solve(seeds, demands, Set.of());
+        long elapsedMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+
+        assertFalse(result.isEmpty());
+        assertTrue(elapsedMs < 8_000L, "大宽幅列生成应受 deadline 与单次 DP 保护，实际耗时=" + elapsedMs + "ms");
+        for (PatternCandidate pc : result) {
+            assertTrue(pc.getPatternWidth() >= 90_000 && pc.getPatternWidth() <= pc.getRollWidth(),
+                    "生成模式宽幅非法: " + pc);
+            assertTrue(pc.getRollWidth() >= 90_000 && pc.getRollWidth() <= 100_000,
+                    "生成卷宽越界: " + pc);
+            assertEquals(0, (pc.getRollWidth() - 90_000) % 10, "生成卷宽必须对齐步长: " + pc);
+        }
+    }
 }

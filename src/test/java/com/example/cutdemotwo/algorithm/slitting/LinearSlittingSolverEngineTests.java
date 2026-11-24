@@ -347,4 +347,115 @@ class LinearSlittingSolverEngineTests {
             assertEquals(run1, singleRun, "低配单线程模式与多核并发模式 QUALITY 输出必须 100% 一致");
         }
     }
+
+    public static class SilentBlockingChildMain {
+        public static void main(String[] args) throws Exception {
+            System.err.println("DIAG_START_MARKER: slitting worker diagnostic line");
+            System.err.flush();
+            Thread.sleep(30_000L);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(10)
+    void destroyAndWaitDoesNotDeadlockWhileReaderIsBlockedOnStdoutAndCapturesStderr() throws Exception {
+        String javaBin = java.nio.file.Path.of(System.getProperty("java.home"), "bin",
+                System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java").toString();
+        String cp = System.getProperty("surefire.test.class.path", System.getProperty("java.class.path"));
+        Process process = new ProcessBuilder(javaBin, "-cp", cp, SilentBlockingChildMain.class.getName()).start();
+        var worker = new LinearSlittingSolverEngine.WarmWorker(process);
+        var readerError = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var started = new java.util.concurrent.CountDownLatch(1);
+        Thread reader = new Thread(() -> {
+            started.countDown();
+            try {
+                worker.awaitLine(System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(20));
+            } catch (Throwable t) {
+                readerError.set(t);
+            }
+        }, "test-await-line");
+        reader.start();
+        assertTrue(started.await(2, java.util.concurrent.TimeUnit.SECONDS));
+        // 等待后台线程切实进入 BufferedReader.readLine() 阻塞并收到子进程 stderr 诊断输出
+        long waitDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(4);
+        while (worker.stderrTail().isEmpty() && System.nanoTime() < waitDeadline) {
+            Thread.sleep(20);
+        }
+        assertTrue(worker.stderrTail().contains("DIAG_START_MARKER"),
+                "应通过有限环形缓冲捕获子进程 stderr 诊断信息，实际=" + worker.stderrTail());
+
+        long destroyStart = System.nanoTime();
+        Thread.currentThread().interrupt();
+        try {
+            worker.destroyAndWait();
+            assertTrue(Thread.currentThread().isInterrupted(), "destroyAndWait 必须保留调用线程中断标志");
+        } finally {
+            Thread.interrupted();
+        }
+        long elapsedMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - destroyStart);
+        assertTrue(elapsedMs < 3_000L, "destroyAndWait 不得因 stdout.readLine() 锁竞争发生死锁，实际耗时=" + elapsedMs + "ms");
+        assertFalse(worker.isAlive(), "子进程必须已彻底终止");
+        reader.join(2_000L);
+        assertFalse(reader.isAlive(), "读取线程必须随管道关闭立即退出");
+        assertNotNull(readerError.get());
+    }
+
+    @Test
+    void boundedStderrBufferRetainsLatestTailWithinCapacity() {
+        var buffer = new LinearSlittingSolverEngine.BoundedStderrBuffer(64);
+        byte[] prefix = "A".repeat(100).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] suffix = "TAIL_DIAG_12345".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        buffer.append(prefix, 0, prefix.length);
+        buffer.append(suffix, 0, suffix.length);
+        String tail = buffer.snapshotUtf8();
+        assertEquals(64, tail.length());
+        assertTrue(tail.endsWith("TAIL_DIAG_12345"), tail);
+        buffer.reset();
+        assertEquals("", buffer.snapshotUtf8());
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(25)
+    void workerPoolRespectsExternalizedMaxIdleTtlAndActiveConcurrencyLimits() throws Exception {
+        assertThrows(IllegalArgumentException.class, () -> new LinearSlittingSolverEngine("384m", 1, -1, 120, 2));
+        assertThrows(IllegalArgumentException.class, () -> new LinearSlittingSolverEngine("384m", 1, 2, 0, 2));
+        assertThrows(IllegalArgumentException.class, () -> new LinearSlittingSolverEngine("384m", 1, 2, 120, 0));
+
+        var problem = new SlittingProblem("1", "mm", 1200, 10, 10, 1000, 1180, 10, 10, "FAST",
+                List.of(new SlittingProblem.Order("O1", 500, 3000, 4, "素色")), 15);
+        var existing = ProcessHandle.current().children().map(ProcessHandle::pid).collect(java.util.stream.Collectors.toSet());
+
+        // 1. maxIdleWorkers=0 时不缓存空闲子进程
+        try (var noIdle = new LinearSlittingSolverEngine("384m", 1, 0, 120, 1)) {
+            assertEquals("FEASIBLE", noIdle.solve(problem).status());
+            assertEquals(0, noIdle.idleWorkerCount());
+            assertTrue(newJavaChildren(existing).findAny().isEmpty(), "maxIdleWorkers=0 时用完应立即回收子进程");
+        }
+
+        // 2. idleTtlSeconds=1 时到期自动回收空闲子进程
+        try (var shortTtl = new LinearSlittingSolverEngine("384m", 1, 1, 1, 1)) {
+            assertEquals("FEASIBLE", shortTtl.solve(problem).status());
+            assertEquals(1, shortTtl.idleWorkerCount());
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while (shortTtl.idleWorkerCount() > 0 && System.nanoTime() < deadline) {
+                Thread.sleep(100);
+            }
+            assertEquals(0, shortTtl.idleWorkerCount(), "超过 idleTtlSeconds 后应自动回收过期空闲子进程");
+            assertTrue(newJavaChildren(existing).findAny().isEmpty());
+        }
+
+        // 3. maxActiveWorkers=1 时并发请求受信号量限流，最多仅 1 个活跃子进程且均成功
+        try (var serialized = new LinearSlittingSolverEngine("384m", 1, 1, 60, 1)) {
+            var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+            try {
+                var f1 = pool.submit(() -> serialized.solve(problem));
+                var f2 = pool.submit(() -> serialized.solve(problem));
+                assertEquals("FEASIBLE", f1.get(20, java.util.concurrent.TimeUnit.SECONDS).status());
+                assertEquals("FEASIBLE", f2.get(20, java.util.concurrent.TimeUnit.SECONDS).status());
+                assertTrue(serialized.idleWorkerCount() <= 1);
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+    }
 }

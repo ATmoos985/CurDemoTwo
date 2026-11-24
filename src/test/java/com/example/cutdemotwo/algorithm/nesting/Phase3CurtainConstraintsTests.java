@@ -339,4 +339,83 @@ class Phase3CurtainConstraintsTests {
         assertEquals(1, e2.severity());
         assertEquals("PENETRABLE", e2.avoidancePolicy());
     }
+
+    @Test
+    void p09_curtainConstraintsSkipAvailableNativeEnginesAndRouteToAutonomousEngines() {
+        var nativeGuillotineCalls = new java.util.concurrent.atomic.AtomicInteger();
+        ICutSolverEngine availableNativeRect = new ICutSolverEngine() {
+            @Override public String getEngineType() { return "packingsolver"; }
+            @Override public boolean isAvailable() { return true; }
+            @Override public com.example.cutdemotwo.contracts.nesting.EngineCapabilities capabilities() {
+                return new com.example.cutdemotwo.contracts.nesting.EngineCapabilities(
+                        "packingsolver", "2", List.of("RECTANGLE"), List.of("GUILLOTINE"),
+                        List.of("MAXIMIZE_PIECE_AREA"), 0.1, true);
+            }
+            @Override public EngineResult solve(NestingProblem p) {
+                nativeGuillotineCalls.incrementAndGet();
+                var res = new JavaGuillotineSolverEngine().solve(p);
+                return res;
+            }
+        };
+        var nativeIrregularCalls = new java.util.concurrent.atomic.AtomicInteger();
+        ICutSolverEngine availableNativeContour = new ICutSolverEngine() {
+            @Override public String getEngineType() { return "packingsolver-irregular"; }
+            @Override public boolean isAvailable() { return true; }
+            @Override public com.example.cutdemotwo.contracts.nesting.EngineCapabilities capabilities() {
+                return new com.example.cutdemotwo.contracts.nesting.EngineCapabilities(
+                        "packingsolver-irregular", "1", List.of("RECTANGLE", "POLYGON"), List.of("CONTOUR"),
+                        List.of("MAXIMIZE_PIECE_AREA"), 0.1, true);
+            }
+            @Override public EngineResult solve(NestingProblem p) {
+                nativeIrregularCalls.incrementAndGet();
+                return new DeepnestSolverEngine().solve(p);
+            }
+        };
+        SolverFactory factory = new SolverFactory(List.of(
+                availableNativeRect, availableNativeContour,
+                new JavaGuillotineSolverEngine(), new DeepnestSolverEngine()), true);
+
+        FabricRule selvedge = new FabricRule(30.0, 20.0, false, null, null);
+        Material curtainMat = new Material("m-p09", Shape.rectangle(1000, 800), List.of(), false, selvedge);
+        Part part = new Part(1, "主帘", Shape.rectangle(900, 300), 2, false);
+
+        // 1. GUILLOTINE + auto + 窗帘规则：自动跳过可用原生 packingsolver，路由至 javaguillotine
+        NestingResult autoRect = factory.solve(new NestingProblem("1", "mm", curtainMat, List.of(part), guillotineProcess(), "auto", 5), false);
+        assertTrue(autoRect.feasible(), autoRect.message());
+        assertEquals("javaguillotine", autoRect.engine());
+        assertNotNull(autoRect.fallbackReason());
+        assertTrue(autoRect.fallbackReason().contains("窗帘"), autoRect.fallbackReason());
+        assertEquals(0, nativeGuillotineCalls.get(), "带窗帘约束时不得调用原生 packingsolver");
+        for (var p : autoRect.placements()) {
+            assertTrue(p.x() >= 30.0 - 0.001 && p.x() + p.shape().width() <= 980.0 + 0.001);
+        }
+
+        // 2. GUILLOTINE + 显式 packingsolver + 窗帘规则（allowFallback=true）：跳过原生并路由至 javaguillotine
+        NestingResult explicitRect = factory.solve(new NestingProblem("1", "mm", curtainMat, List.of(part), guillotineProcess(), "packingsolver", 5), true);
+        assertTrue(explicitRect.feasible(), explicitRect.message());
+        assertEquals("javaguillotine", explicitRect.engine());
+        assertEquals("packingsolver", explicitRect.requestedEngine());
+        assertNotNull(explicitRect.fallbackReason());
+        assertEquals(0, nativeGuillotineCalls.get());
+
+        // 3. GUILLOTINE + 显式 packingsolver + 窗帘规则（allowFallback=false）：明确拒绝 UNSUPPORTED，不误发给原生引擎
+        NestingResult strictRect = factory.solve(new NestingProblem("1", "mm", curtainMat, List.of(part), guillotineProcess(), "packingsolver", 5), false);
+        assertEquals("UNSUPPORTED", strictRect.status());
+        assertEquals(0, nativeGuillotineCalls.get());
+
+        // 4. CONTOUR + 显式 packingsolver-irregular + 窗帘规则（allowFallback=true）：跳过原生并路由至 deepnest
+        NestingResult explicitContour = factory.solve(new NestingProblem("1", "mm", curtainMat, List.of(part), contourProcess(), "packingsolver-irregular", 5), true);
+        assertTrue(explicitContour.feasible(), explicitContour.message());
+        assertEquals("deepnest", explicitContour.engine());
+        assertEquals("packingsolver-irregular", explicitContour.requestedEngine());
+        assertNotNull(explicitContour.fallbackReason());
+        assertEquals(0, nativeIrregularCalls.get());
+
+        // 5. 无窗帘规则的常规直刀问题仍照常命中可用原生 packingsolver，向后兼容
+        Material plainMat = new Material("m-plain", Shape.rectangle(1000, 800), List.of(), false);
+        NestingResult plainRect = factory.solve(new NestingProblem("1", "mm", plainMat, List.of(part), guillotineProcess(), "auto", 5), true);
+        assertTrue(plainRect.feasible());
+        assertEquals("packingsolver", plainRect.engine());
+        assertEquals(1, nativeGuillotineCalls.get());
+    }
 }
