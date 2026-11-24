@@ -123,8 +123,14 @@ class OptimizationIsolationAndSseTests {
             assertEquals("SUCCEEDED", n1Done.state());
             assertEquals("SUCCEEDED", n2Done.state());
             assertTrue(elapsedMs < 3_000L, "2D 实时排样不得被长耗时 1D 阻塞，实际耗时=" + elapsedMs + "ms");
-            assertEquals("RUNNING", service.get(s1.id()).state());
-            assertEquals("RUNNING", service.get(s2.id()).state());
+            List<String> slittingStates = List.of(
+                    service.get(s1.id()).state(),
+                    service.get(s2.id()).state(),
+                    service.get(s3.id()).state());
+            assertEquals(2, slittingStates.stream().filter("RUNNING"::equals).count(),
+                    "1D 隔离池满载时应恰好有 2 个 1D 作业处于 RUNNING，实际状态=" + slittingStates);
+            assertEquals(1, slittingStates.stream().filter("QUEUED"::equals).count(),
+                    "第 3 个 1D 作业应处于排队中，实际状态=" + slittingStates);
             assertTrue(maxObservedSlitting.get() <= 2, "1D 隔离池并发度必须严格受限于 slittingWorkers=2");
 
             // 放行 1D 作业，全部收尾成功
@@ -184,9 +190,13 @@ class OptimizationIsolationAndSseTests {
             assertNotNull(emitter2);
             assertEquals(2, service.activeEventSubscriberCount());
 
-            // 3. 作业结束进入终态 -> 自动推送 done 并注销全部监听器，零内存泄漏
+            // 3. 作业结束进入终态 -> 锁外异步推送 done 并注销全部监听器，零内存泄漏
             gate.release.countDown();
             assertEquals("SUCCEEDED", finished(service, job.id()).state());
+            long sseDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (service.activeEventSubscriberCount() > 0 && System.nanoTime() < sseDeadline) {
+                Thread.sleep(10);
+            }
             assertEquals(0, service.activeEventSubscriberCount(), "作业进入终态后必须彻底注销所有 SSE 监听器");
 
             // 4. 订阅已终态作业 -> 直接完结且不残留任何监听器

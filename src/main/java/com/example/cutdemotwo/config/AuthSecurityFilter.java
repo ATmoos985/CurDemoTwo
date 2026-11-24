@@ -229,9 +229,10 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
             return AuthContext.ROLE_OPERATOR.equals(role) || AuthContext.ROLE_PLANNER.equals(role);
         }
 
-        // 5. 排程计划、需求池、模板、方案确认/绑卷/手调/取消/补片与算法求解作业：ADMIN / PLANNER
+        // 5. 排程计划、需求池、模板、联合排产/自动分床、方案确认/绑卷/手调/取消/补片与算法求解作业：ADMIN / PLANNER
         if (path.equals("/api/v2/demand-templates") || path.startsWith("/api/v2/demand-templates/")
                 || path.equals("/api/v2/demand-pool") || path.startsWith("/api/v2/demand-pool/")
+                || path.equals("/api/v2/planning") || path.startsWith("/api/v2/planning/")
                 || path.startsWith("/api/v2/schemes/")
                 || path.equals("/api/v2/problem-validations")
                 || path.equals("/api/v2/optimization-jobs") || path.startsWith("/api/v2/optimization-jobs/")

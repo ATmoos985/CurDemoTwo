@@ -222,13 +222,26 @@ class AuthSecurityFilterTests {
         assertEquals(403, invoke(filter, "POST", "/api/v2/inventory-receipts", inspectorToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/v2/schemes/confirm", inspectorToken).getStatus());
 
-        // PLANNER：允许需求池、模板、方案确认、同缸补片、计算作业，严禁采购入库、质检放行、演示重置
+        // PLANNER：允许需求池、模板、联合排产/自动分床、方案确认、同缸补片、计算作业与只读分析/SSE，严禁采购入库、质检放行、演示重置
         assertEquals(200, invoke(filter, "POST", "/api/v2/demand-pool", plannerToken).getStatus());
+        assertEquals(200, invoke(filter, "POST", "/api/v2/planning/multi-material", plannerToken).getStatus());
+        assertEquals(200, invoke(filter, "POST", "/api/v2/planning/cut-plan", plannerToken).getStatus());
+        assertEquals(200, invoke(filter, "GET", "/api/v2/analytics/cost-summary", plannerToken).getStatus());
+        assertEquals(200, invoke(filter, "GET", "/api/v2/analytics/procurement-suggestions", plannerToken).getStatus());
+        assertEquals(200, invoke(filter, "GET", "/api/v2/optimization-jobs/JOB-1/events", plannerToken).getStatus());
         assertEquals(200, invoke(filter, "POST", "/api/v2/schemes/confirm", plannerToken).getStatus());
         assertEquals(200, invoke(filter, "POST", "/api/v2/schemes/SCH-1/replenish-task", plannerToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/v2/inventory-receipts", plannerToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/v2/quality/remnants/REM-1/release", plannerToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/demo/inventory", plannerToken).getStatus());
+
+        // 阶段四只读分析与 SSE 对已认证其他角色开放，而联合排产/分床 POST 仅限 ADMIN / PLANNER
+        assertEquals(200, invoke(filter, "POST", "/api/v2/planning/multi-material", adminToken).getStatus());
+        assertEquals(200, invoke(filter, "POST", "/api/v2/planning/cut-plan", adminToken).getStatus());
+        assertEquals(200, invoke(filter, "GET", "/api/v2/analytics/cost-summary", operatorToken).getStatus());
+        assertEquals(200, invoke(filter, "GET", "/api/v2/optimization-jobs/JOB-1/events", operatorToken).getStatus());
+        assertEquals(403, invoke(filter, "POST", "/api/v2/planning/multi-material", operatorToken).getStatus());
+        assertEquals(403, invoke(filter, "POST", "/api/v2/planning/cut-plan", warehouseToken).getStatus());
 
         // 下游抛异常时也必须写入并在 finally 清理 AuthContext
         var req = new MockHttpServletRequest("POST", "/api/v2/schemes/confirm");

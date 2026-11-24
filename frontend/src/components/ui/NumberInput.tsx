@@ -1,4 +1,4 @@
-import React, { forwardRef, useEffect, useRef, useState } from 'react';
+import React, { forwardRef, useState } from 'react';
 
 export interface NumericBounds {
   min?: number;
@@ -89,24 +89,21 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(functi
   ref
 ) {
   const [text, setText] = useState<string>(() => formatNum(value));
-  const focusedRef = useRef(false);
-  const lastCommittedRef = useRef<number>(value);
+  const [syncedValue, setSyncedValue] = useState<number>(value);
+  const [focused, setFocused] = useState<boolean>(false);
 
-  useEffect(() => {
-    if (!focusedRef.current) {
-      lastCommittedRef.current = value;
-      setText(formatNum(value));
-      return;
-    }
-    if (value !== lastCommittedRef.current) {
-      lastCommittedRef.current = value;
+  // 渲染阶段即时同步外部受控 value 变化，消除 useEffect 一帧滞后与闪烁，同时保留聚焦输入中间态
+  if (!Object.is(value, syncedValue)) {
+    setSyncedValue(value);
+    const liveParsed = parseLiveNumericDraft(text, { min, max, integer });
+    if (!focused || liveParsed !== value) {
       setText(formatNum(value));
     }
-  }, [value]);
+  }
 
   const commit = (raw: string) => {
     const finalized = finalizeNumericDraft(raw, value, { min, max, fallback, integer });
-    lastCommittedRef.current = finalized;
+    setSyncedValue(finalized);
     setText(formatNum(finalized));
     if (finalized !== value) {
       onValueChange(finalized);
@@ -123,7 +120,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(functi
       max={max}
       value={text}
       onFocus={(e) => {
-        focusedRef.current = true;
+        setFocused(true);
         onFocus?.(e);
       }}
       onChange={(e) => {
@@ -131,14 +128,14 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(functi
         setText(raw);
         const live = parseLiveNumericDraft(raw, { min, max, integer });
         if (live !== null) {
-          lastCommittedRef.current = live;
+          setSyncedValue(live);
           if (live !== value) {
             onValueChange(live);
           }
         }
       }}
       onBlur={(e) => {
-        focusedRef.current = false;
+        setFocused(false);
         commit(e.currentTarget.value);
         onBlur?.(e);
       }}

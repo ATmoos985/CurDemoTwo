@@ -290,7 +290,14 @@ function formatAllocatedItems(items: any[]): string {
   return items
     .map((it) => {
       if (typeof it === 'string') return it;
-      const label = it?.name || it?.partName || (it?.partId != null ? `裁片#${it.partId}` : '裁片');
+      const label =
+        it?.name ||
+        it?.partName ||
+        (it?.demandId != null
+          ? `裁片#${it.demandId}`
+          : it?.partId != null
+          ? `裁片#${it.partId}`
+          : '裁片');
       const count = it?.count ?? it?.quantity;
       return count != null ? `${label}×${count}` : String(label);
     })
@@ -402,11 +409,10 @@ export const GlobalPlanningPage: React.FC = () => {
     setMultiBusy(true);
     setMultiError(null);
     try {
-      const data: MultiMaterialPlanResponse = await requestJSON('/api/v2/planning/multi-material', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const data: MultiMaterialPlanResponse = await requestJSON(
+        '/api/v2/planning/multi-material',
+        payload
+      );
       setMultiResult(data);
       toast(
         `联合排产测算完成：料头消化 ${data.placedByRemnants} 件、母卷承接 ${data.placedByRoll} 件（耗时 ${fmtN(
@@ -435,11 +441,7 @@ export const GlobalPlanningPage: React.FC = () => {
     setCutBusy(true);
     setCutError(null);
     try {
-      const data: CutPlanResponse = await requestJSON('/api/v2/planning/cut-plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const data: CutPlanResponse = await requestJSON('/api/v2/planning/cut-plan', payload);
       setCutResult(data);
       toast(`自动分床完成：共 ${data.layCount} 床 / ${data.totalPlies} 层，计划产出 ${data.totalPlannedGarments} 件`);
     } catch (err: any) {
@@ -614,7 +616,7 @@ export const GlobalPlanningPage: React.FC = () => {
                       type="number"
                       className="num"
                       min={0}
-                      step="0.5"
+                      step="any"
                       value={multiForm.pieceGapMm}
                       onChange={(e) => setMultiForm((p) => ({ ...p, pieceGapMm: Number(e.target.value) }))}
                     />
@@ -625,7 +627,7 @@ export const GlobalPlanningPage: React.FC = () => {
                       type="number"
                       className="num"
                       min={0}
-                      step="1"
+                      step="any"
                       value={multiForm.trimStartMm}
                       onChange={(e) => setMultiForm((p) => ({ ...p, trimStartMm: Number(e.target.value) }))}
                     />
@@ -637,7 +639,7 @@ export const GlobalPlanningPage: React.FC = () => {
                       className="num"
                       min={200}
                       max={60000}
-                      step={500}
+                      step="any"
                       value={multiForm.timeBudgetMs}
                       onChange={(e) => setMultiForm((p) => ({ ...p, timeBudgetMs: Number(e.target.value) }))}
                     />
@@ -1087,7 +1089,7 @@ export const GlobalPlanningPage: React.FC = () => {
                       className="num"
                       min={30}
                       max={99}
-                      step="0.5"
+                      step="any"
                       value={cutForm.targetUtilizationPct}
                       onChange={(e) =>
                         setCutForm((p) => ({ ...p, targetUtilizationPct: Number(e.target.value) }))
@@ -1101,7 +1103,7 @@ export const GlobalPlanningPage: React.FC = () => {
                       className="num"
                       min={0}
                       max={20}
-                      step="0.5"
+                      step="any"
                       value={cutForm.allowOvercutPct}
                       onChange={(e) =>
                         setCutForm((p) => ({ ...p, allowOvercutPct: Number(e.target.value) }))

@@ -316,7 +316,7 @@ export const CostAnalyticsPage: React.FC = () => {
                 type="number"
                 className="num"
                 min={0}
-                step="0.5"
+                step="any"
                 value={unitPrice}
                 onChange={(e) => setUnitPrice(Number(e.target.value))}
               />
@@ -328,7 +328,7 @@ export const CostAnalyticsPage: React.FC = () => {
                 className="num"
                 min={0}
                 max={1}
-                step="0.05"
+                step="any"
                 value={residualFactor}
                 onChange={(e) => setResidualFactor(Number(e.target.value))}
               />
@@ -340,7 +340,7 @@ export const CostAnalyticsPage: React.FC = () => {
                 className="num"
                 min={0}
                 max={200}
-                step="1"
+                step="any"
                 value={safetyBufferPct}
                 onChange={(e) => setSafetyBufferPct(Number(e.target.value))}
               />
@@ -351,7 +351,7 @@ export const CostAnalyticsPage: React.FC = () => {
                 type="number"
                 className="num"
                 min={1}
-                step="5"
+                step="any"
                 value={defaultRollLengthM}
                 onChange={(e) => setDefaultRollLengthM(Number(e.target.value))}
               />

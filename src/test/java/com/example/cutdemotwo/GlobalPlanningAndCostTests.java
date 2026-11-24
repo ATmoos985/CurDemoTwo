@@ -527,4 +527,32 @@ class GlobalPlanningAndCostTests {
         assertEquals(0.0, result.items().get(2).shortageAreaM2(), 0.001);
         assertEquals(0, result.items().get(2).recommendedRolls());
     }
+
+    @Test
+    void multiMaterialHandlesSubTenthMillimeterRemnantAndRollDimensionsGracefully() {
+        FileInventoryStore store = new FileInventoryStore(temp.resolve("sub-tenth-precision.json").toString());
+        RemnantService inv = new RemnantService(store, false);
+        GlobalPlanningService planner = new GlobalPlanningService(inv, createSolver());
+
+        MotherRollInfo roll = new MotherRollInfo(
+                "ROLL-FRAC", "FRAC-M", "BAT-F", "织厂", "面料F", "灰", 200.0, "涤", 1500.0, 20000.0, "P-F");
+        roll.setUsedLength(1234.57); // 非 0.1 mm 对齐的实切余长
+        roll.setCurrentRemainingLength(18765.43);
+        inv.saveOrUpdateMotherRoll(roll);
+
+        RemnantStock rem = new RemnantStock(
+                "REM-FRAC-1", 612.34, 1523.78, "A-01", "FRAC-M", "AVAILABLE", "ROLL-FRAC", false, "");
+        rem.setBatchNo("BAT-F");
+        inv.registerRemnant(rem);
+
+        var res = planner.planMultiMaterial(new GlobalPlanningService.MultiMaterialPlanRequest(
+                null, "FRAC-M", null, null, true, 5, null, 3000L, 4.0, 20.0,
+                List.of(new GlobalPlanningService.DemandItem(1, "片A", 580, 740, 4, true, null, null))
+        ));
+
+        assertEquals(4, res.totalRequestedPieces());
+        assertEquals(0, res.unplacedPieces());
+        assertTrue(res.placedByRemnants() >= 1, "应保守对齐 0.1mm 格网并成功消耗非整数尾数料头");
+        assertFalse(res.rollOptions().isEmpty());
+    }
 }

@@ -4748,6 +4748,20 @@
             "items": {
               "$ref": "#/components/schemas/Point"
             }
+          },
+          "holes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "description": "CONTOUR only. Optional interior hole rings (each ring >= 3 vertices, strictly inside outer contour).",
+            "items": {
+              "type": "array",
+              "minItems": 3,
+              "items": {
+                "$ref": "#/components/schemas/Point"
+              }
+            }
           }
         },
         "required": [
@@ -4941,7 +4955,9 @@
           },
           "kerf": {
             "type": "number",
-            "const": 0
+            "minimum": 0,
+            "maximum": 50,
+            "multipleOf": 0.1
           },
           "objective": {
             "type": "string"
@@ -4951,6 +4967,15 @@
             "minimum": 0,
             "maximum": 100,
             "multipleOf": 0.1
+          },
+          "maxStages": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 16,
+            "description": "GUILLOTINE only. Optional maximum guillotine cutting stages (1-16)."
           }
         },
         "required": [
@@ -5780,6 +5805,14 @@
               "workers": {
                 "type": "integer"
               },
+              "nestingWorkers": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "slittingWorkers": {
+                "type": "integer",
+                "minimum": 1
+              },
               "queueCapacity": {
                 "type": "integer"
               },
@@ -6349,6 +6382,81 @@
           },
           "lnsEnabled": {
             "type": "boolean"
+          },
+          "maxKnives": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Optional maximum simultaneous strips/knives per slitting car (1-100)."
+          },
+          "minBladeSpacingMm": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 100000,
+            "description": "Optional minimum physical blade spacing in mm (1-100000)."
+          },
+          "forbiddenNarrowEdgeMinMm": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000,
+            "description": "Optional forbidden narrow tail edge lower bound in mm (paired with forbiddenNarrowEdgeMaxMm)."
+          },
+          "forbiddenNarrowEdgeMaxMm": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000,
+            "description": "Optional forbidden narrow tail edge upper bound in mm (paired with forbiddenNarrowEdgeMinMm)."
+          },
+          "kerfMm": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 500,
+            "description": "Optional kerf loss per cut between adjacent strips in mm (0-500)."
+          },
+          "candidateRollWidths": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 50,
+            "description": "Optional multi-width mother roll pool for joint width selection.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "widthMm": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100000
+                },
+                "availableRolls": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1,
+                  "maximum": 100000
+                }
+              },
+              "required": [
+                "widthMm"
+              ]
+            }
           }
         },
         "required": [
@@ -6421,7 +6529,7 @@
                 },
                 "lengthMm": {
                   "type": "integer",
-                  "minimum": 1000
+                  "minimum": 1
                 },
                 "surfaceTreatment": {
                   "type": "string",
@@ -6474,6 +6582,14 @@
                       "quantity"
                     ]
                   }
+                },
+                "motherWidthMm": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1,
+                  "maximum": 100000
                 }
               },
               "required": [
@@ -6539,6 +6655,20 @@
           },
           "totalOverproduced": {
             "type": "integer",
+            "minimum": 0
+          },
+          "estimatedKnifeChanges": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "knifeChangesSaved": {
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 0
           }
         },
@@ -7899,7 +8029,7 @@
       "FabricRule": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Optional fabric-level rule for curtain selvedge exclusion and vertical pattern repeat.",
+        "description": "Optional fabric-level rule for curtain selvedge exclusion and bi-axial pattern repeat.",
         "properties": {
           "leftSelvedgeMm": {
             "type": [
@@ -7934,13 +8064,27 @@
               "null"
             ],
             "minimum": 0
+          },
+          "repeatXMm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "exclusiveMinimum": 0
+          },
+          "phaseXMm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
           }
         }
       },
       "PartRule": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Optional per-part rule for MAIN/AUXILIARY role, vertical pattern matching, and discrete allowed angles.",
+        "description": "Optional per-part rule for MAIN/AUXILIARY role, bi-axial pattern matching, discrete allowed angles, and consistent grain group.",
         "properties": {
           "role": {
             "type": [
@@ -7985,6 +8129,20 @@
               "maximum": 359
             },
             "description": "CONTOUR only. Discrete allowed rotation angles in integer degrees [0, 359]."
+          },
+          "patternAnchorXMm": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "grainGroupId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128,
+            "description": "Optional consistent nap/grain group identifier; all parts sharing a grainGroupId use the same warp orientation (0 or 180 deg)."
           }
         }
       },
@@ -8852,6 +9010,34 @@
           },
           "elapsedMs": {
             "type": "number"
+          },
+          "attempt": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resultRef": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -8888,6 +9074,12 @@
           },
           "allowRotation": {
             "type": "boolean"
+          },
+          "allowHalfTurn": {
+            "type": "boolean"
+          },
+          "shape": {
+            "$ref": "#/components/schemas/Shape"
           }
         }
       },
@@ -8920,6 +9112,14 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 50
+          },
+          "candidateRollIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
           },
           "timeBudgetMs": {
             "type": "integer",
@@ -9025,7 +9225,6 @@
       "MultiMaterialPlanResponse": {
         "type": "object",
         "required": [
-          "materialModel",
           "totalRequestedPieces",
           "placedByRemnants",
           "placedByRoll",
@@ -9331,6 +9530,18 @@
           },
           "avgCostPerGoodSqm": {
             "type": "number"
+          },
+          "netGoodPieceCount": {
+            "type": "integer"
+          },
+          "avgCostPerGoodPiece": {
+            "type": "number"
+          },
+          "estimatedWeightKg": {
+            "type": "number"
+          },
+          "estimatedPricing": {
+            "type": "boolean"
           }
         }
       },
@@ -9353,6 +9564,9 @@
           },
           "remnantResidualFactor": {
             "type": "number"
+          },
+          "estimatedPricing": {
+            "type": "boolean"
           },
           "summary": {
             "$ref": "#/components/schemas/CostSummaryTotals"

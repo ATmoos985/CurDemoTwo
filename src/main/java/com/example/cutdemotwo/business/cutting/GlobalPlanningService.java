@@ -838,7 +838,11 @@ public class GlobalPlanningService {
             double trimStartMm,
             int timeLimitSeconds
     ) {
-        if (demands.isEmpty() || width <= 0 || length <= 0 || (!isRemnant && trimStartMm >= length)) {
+        double matW = floor1(width);
+        double matL = floor1(length);
+        double effTrim = isRemnant ? 0.0 : ceil1(Math.max(0.0, trimStartMm));
+        double effGap = ceil1(Math.max(0.0, pieceGapMm));
+        if (demands.isEmpty() || matW <= 0 || matL <= 0 || (!isRemnant && effTrim >= matL)) {
             return NestingResult.failure("NO_SOLUTION_FOUND", "有效加工区不足", "auto", 0);
         }
 
@@ -846,25 +850,30 @@ public class GlobalPlanningService {
         for (Defect d : defects) {
             if (d == null || d.getW() <= 0 || d.getH() <= 0) continue;
             if (isContour) {
-                double x = Math.max(0.0, d.getX() - d.getMargin());
-                double y = Math.max(0.0, d.getY() - d.getMargin());
-                double right = Math.min(width, d.getX() + d.getW() + d.getMargin());
-                double bottom = Math.min(length, d.getY() + d.getH() + d.getMargin());
-                if (right > x && bottom > y) {
+                double x = floor1(Math.max(0.0, d.getX() - d.getMargin()));
+                double y = floor1(Math.max(0.0, d.getY() - d.getMargin()));
+                double right = Math.min(matW, ceil1(d.getX() + d.getW() + d.getMargin()));
+                double bottom = Math.min(matL, ceil1(d.getY() + d.getH() + d.getMargin()));
+                double w = round1(right - x);
+                double h = round1(bottom - y);
+                if (w > 0 && h > 0 && x < matW && y < matL) {
                     exclusions.add(new NestingProblem.Exclusion(
                             exclusions.size() + 1, x, y,
-                            NestingProblem.Shape.rectangle(right - x, bottom - y), 0.0
+                            NestingProblem.Shape.rectangle(w, h), 0.0
                     ));
                 }
             } else {
-                double x = Math.max(0.0, d.getX());
-                double y = Math.max(0.0, d.getY());
-                double w = Math.min(width - x, d.getW());
-                double h = Math.min(length - y, d.getH());
-                if (w > 0 && h > 0) {
+                double x = floor1(Math.max(0.0, d.getX()));
+                double y = floor1(Math.max(0.0, d.getY()));
+                double right = Math.min(matW, ceil1(d.getX() + d.getW()));
+                double bottom = Math.min(matL, ceil1(d.getY() + d.getH()));
+                double w = round1(right - x);
+                double h = round1(bottom - y);
+                double margin = ceil1(Math.max(0.0, d.getMargin()));
+                if (w > 0 && h > 0 && x < matW && y < matL) {
                     exclusions.add(new NestingProblem.Exclusion(
-                            d.getId() > 0 ? d.getId() : exclusions.size() + 1,
-                            x, y, NestingProblem.Shape.rectangle(w, h), Math.max(0.0, d.getMargin()),
+                            exclusions.size() + 1,
+                            x, y, NestingProblem.Shape.rectangle(w, h), margin,
                             d.getSeverity(), d.getAvoidanceStrategy()
                     ));
                 }
@@ -872,17 +881,17 @@ public class GlobalPlanningService {
         }
 
         if (isContour) {
-            if (trimStartMm > 0) {
+            if (effTrim > 0 && effTrim < matL) {
                 exclusions.add(new NestingProblem.Exclusion(
                         exclusions.size() + 1, 0.0, 0.0,
-                        NestingProblem.Shape.rectangle(width, trimStartMm), 0.0
+                        NestingProblem.Shape.rectangle(matW, effTrim), 0.0
                 ));
             }
             List<NestingProblem.Part> parts = demands.stream()
                     .map(d -> new NestingProblem.Part(
                             d.id(),
                             d.name(),
-                            d.shape() != null ? d.shape() : NestingProblem.Shape.rectangle(d.width(), d.length()),
+                            d.shape() != null ? d.shape() : NestingProblem.Shape.rectangle(ceil1(d.width()), ceil1(d.length())),
                             d.quantity(),
                             d.allowRotation(),
                             d.allowHalfTurn()
@@ -890,30 +899,34 @@ public class GlobalPlanningService {
                     .toList();
             NestingProblem problem = new NestingProblem(
                     "1", "mm",
-                    new NestingProblem.Material(materialId, NestingProblem.Shape.rectangle(width, length), exclusions, false),
+                    new NestingProblem.Material(materialId, NestingProblem.Shape.rectangle(matW, matL), exclusions, false),
                     parts,
                     new NestingProblem.Process("CONTOUR", "SHEET", "left-top", "none", 0.0, 0.0, 0.0, 0.0,
-                            "MAXIMIZE_PIECE_AREA", pieceGapMm),
+                            "MAXIMIZE_PIECE_AREA", effGap),
                     resolveAvailableEngine(true),
                     timeLimitSeconds
             );
-            return nestingSolver.solve(problem, true);
+            try {
+                return nestingSolver.solve(problem, true);
+            } catch (IllegalArgumentException rejected) {
+                return NestingResult.failure("NO_SOLUTION_FOUND", rejected.getMessage(), "auto", 0);
+            }
         }
 
-        // 矩形直刀（GUILLOTINE）：参照 FabricSolveAdapter 通过扩边等价实现 pieceGapMm
-        double pad = pieceGapMm > 0 ? pieceGapMm : 0.0;
+        // 矩形直刀（GUILLOTINE）：参照 FabricSolveAdapter 通过扩边等价实现 pieceGapMm（统一保守量化至 0.1 mm）
+        double pad = effGap > 0 ? effGap : 0.0;
         List<NestingProblem.Part> parts = demands.stream()
                 .map(d -> new NestingProblem.Part(
                         d.id(),
                         d.name(),
-                        NestingProblem.Shape.rectangle(d.width() + pad, d.length() + pad),
+                        NestingProblem.Shape.rectangle(round1(ceil1(d.width()) + pad), round1(ceil1(d.length()) + pad)),
                         d.quantity(),
                         d.allowRotation()
                 ))
                 .toList();
         NestingProblem.Material material = new NestingProblem.Material(
                 materialId,
-                NestingProblem.Shape.rectangle(width + pad, length + pad),
+                NestingProblem.Shape.rectangle(round1(matW + pad), round1(matL + pad)),
                 exclusions,
                 !isRemnant
         );
@@ -922,7 +935,7 @@ public class GlobalPlanningService {
                 isRemnant ? "SHEET" : "CONTINUOUS",
                 "right-top",
                 "horizontal",
-                isRemnant ? 0.0 : trimStartMm,
+                effTrim,
                 200.0,
                 300.0,
                 0.0,
@@ -931,7 +944,11 @@ public class GlobalPlanningService {
         );
         NestingProblem problem = new NestingProblem("1", "mm", material, parts, process,
                 resolveAvailableEngine(false), timeLimitSeconds);
-        return nestingSolver.solve(problem, true);
+        try {
+            return nestingSolver.solve(problem, true);
+        } catch (IllegalArgumentException rejected) {
+            return NestingResult.failure("NO_SOLUTION_FOUND", rejected.getMessage(), "auto", 0);
+        }
     }
 
     /** 严格通过 NestingSolver.capabilities() 选择已就绪的可用引擎，兼容原生就绪与纯 Java 降级环境。 */
@@ -1129,6 +1146,16 @@ public class GlobalPlanningService {
 
     private static double round1(double v) {
         return Math.rint(v * 10.0) / 10.0;
+    }
+
+    private static double floor1(double v) {
+        if (!Double.isFinite(v)) return 0.0;
+        return Math.floor(v * 10.0 + 1e-9) / 10.0;
+    }
+
+    private static double ceil1(double v) {
+        if (!Double.isFinite(v)) return 0.0;
+        return Math.ceil(v * 10.0 - 1e-9) / 10.0;
     }
 
     private static double round2(double v) {

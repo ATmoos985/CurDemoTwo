@@ -18,6 +18,7 @@ const PHASE_LABELS: Record<string, string> = {
   FINALIZING: '结果归档中',
   COMPLETED: '已完成',
   SUCCEEDED: '已完成',
+  STOPPING: '正在停止',
   STOPPED: '已停止',
   CANCEL_REQUESTED: '正在取消',
   CANCELLED: '已取消',
