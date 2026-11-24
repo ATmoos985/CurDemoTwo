@@ -989,13 +989,13 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
     setCancelledHint(false);
     setPatternIndex(0);
     setBusy(true);
-    setStateText('正在提交计算…');
+    setStateText('排队中');
     const t0 = performance.now();
     try {
       const response = await sessionRef.current.solve(nextReq, {
         onProgress: (j: any) => {
           if (mine === tokenRef.current) {
-            setStateText(j.message || j.phase || j.state);
+            setStateText(j.state === 'QUEUED' ? '排队中' : '计算中');
           }
         }
       });
@@ -1009,18 +1009,16 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
       const record = evaluateCaseResult(selected, nextReq, res, elapsedMs);
       setVerifications((prev) => ({ ...prev, [selected.id]: record }));
       setStateText(
-        `${
-          res.fulfillmentStatus === 'COMPLETE'
-            ? '计算完成 · 齐套'
-            : '计算结束 · 未齐套'
-        }${response.job.state !== 'SUCCEEDED' ? ' · 搜索提前结束' : ''}`
+        `${res.fulfillmentStatus === 'COMPLETE' ? '齐套' : '未齐套'}${
+          response.job.state !== 'SUCCEEDED' ? ' · 提前结束' : ''
+        }`
       );
     } catch (e: any) {
       if (mine !== tokenRef.current) return;
       if (e.name === 'AbortError') {
-        setStateText('已停止计算');
+        setStateText('已停止');
       } else {
-        setStateText('计算未完成，可重试');
+        setStateText('未完成');
         setErrorText(e.message);
       }
     } finally {
@@ -1036,10 +1034,10 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
     if (batchRunning) {
       batchAbortRef.current++;
       setBatchRunning(false);
-      setBatchProgressText('已停止快检');
+      setBatchProgressText('已停止');
     }
     setBusy(false);
-    setStateText('已请求停止计算');
+    setStateText('已停止');
     setResult(null);
     setErrorText(null);
     setCancelledHint(true);

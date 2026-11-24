@@ -46,7 +46,10 @@ export interface UseWorkbenchSolverOptions {
   setStrategyRuns2D: (
     runs: StrategyJobRun[] | ((prev: StrategyJobRun[]) => StrategyJobRun[])
   ) => void;
-  addSchemes2D: (schemes: SavedScheme2D[]) => void;
+  addSchemes2D: (
+    schemes: SavedScheme2D[],
+    options?: { selectIfBetter?: boolean; batchIds?: ReadonlySet<string> }
+  ) => void;
   markSchemeDispatched: (schemeId: string, taskId: string, confirmedSchemeId: string) => void;
 
   // 1D inputs
@@ -130,9 +133,21 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
   } = opts;
 
   const [runningSolve, setRunningSolve] = useState(false);
+  const [solveElapsedMs, setSolveElapsedMs] = useState(0);
   const [confirmingScheme, setConfirmingScheme] = useState(false);
   const [lastConfirmSummary, setLastConfirmSummary] = useState<LastConfirmSummary | null>(null);
   const activeSessionsRef = useRef<OptimizationSession[]>([]);
+  const solveStartedAtRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (!runningSolve) return;
+    solveStartedAtRef.current = performance.now();
+    setSolveElapsedMs(0);
+    const timer = window.setInterval(() => {
+      setSolveElapsedMs(Math.max(0, Math.round(performance.now() - solveStartedAtRef.current)));
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [runningSolve]);
 
   useEffect(() => {
     return () => {
@@ -151,16 +166,16 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         .map((d) => ({ ...d, quantity: d.orderedQty || 1 }));
       if (retrial.length > 0) {
         validDemands = retrial;
-        toast('该需求族已排齐，按原单总量进行重排试算');
+        toast('已排齐，按原单试算');
       } else {
-        toast('请先在左侧选择需求族、载入模板或添加裁片需求', true);
+        toast('请先载入或添加需求', true);
         return;
       }
     }
 
     const chosenDefs = activeAlgos;
     if (!chosenDefs.length) {
-      toast('请在系统设置中至少启用一种二维排版算法', true);
+      toast('请先启用至少一种算法', true);
       return;
     }
 
@@ -180,7 +195,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
           ];
 
     if (!candidateWidths.length) {
-      toast('请填写有效候选门幅（400–6000 mm）', true);
+      toast('门幅需在 400–6000 mm 内', true);
       return;
     }
 
@@ -201,7 +216,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
             def: chosenDefs[0],
             width: w,
             runKey: `${chosenDefs[0].id}-W${w}`,
-            label: `门幅 ${w}mm · ${chosenDefs[0].name}`
+            label: `W${w} · ${chosenDefs[0].name}`
           }))
         : chosenDefs.map((def) => ({
             def,
@@ -216,7 +231,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         strategyName: j.label,
         description: j.def.description,
         state: 'QUEUED',
-        phaseText: '排队提交…',
+        phaseText: '',
         requestedCount: totalRequested
       }))
     );
@@ -235,6 +250,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         ? currentRemnant2D.defects || []
         : [];
 
+    const batchSchemeIds = new Set<string>();
     const createdSchemes: SavedScheme2D[] = [];
     const failureMessages: string[] = [];
 
@@ -248,11 +264,13 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
           return canRot90 ? Math.min(d.width, d.length) > width : d.width > width;
         });
         if (tooWide) {
-          const msg = `存在裁片宽超门幅 ${width}mm`;
-          failureMessages.push(`${label}：${msg}`);
+          const detail = `存在裁片宽超门幅 ${width}mm`;
+          failureMessages.push(`${label}：${detail}`);
           setStrategyRuns2D((prev) =>
             prev.map((r) =>
-              r.strategyId === runKey ? { ...r, state: 'FAILED', phaseText: msg } : r
+              r.strategyId === runKey
+                ? { ...r, state: 'FAILED', phaseText: '超门幅', errorDetail: detail }
+                : r
             )
           );
           return;
@@ -276,11 +294,13 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
           settings
         });
         if (built.error || !built.request) {
-          const msg = built.error || '请求参数无法构造有效求解问题';
-          failureMessages.push(`${label}：${msg}`);
+          const detail = built.error || '参数无效';
+          failureMessages.push(`${label}：${detail}`);
           setStrategyRuns2D((prev) =>
             prev.map((r) =>
-              r.strategyId === runKey ? { ...r, state: 'FAILED', phaseText: msg } : r
+              r.strategyId === runKey
+                ? { ...r, state: 'FAILED', phaseText: '参数无效', errorDetail: detail }
+                : r
             )
           );
           return;
@@ -297,7 +317,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
                         ...r,
                         jobId: j.id,
                         state: j.state === 'QUEUED' ? 'QUEUED' : 'RUNNING',
-                        phaseText: j.message || j.phase || '计算中…'
+                        phaseText: ''
                       }
                     : r
                 )
@@ -321,7 +341,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
           const denomAreaMm2 = width * Math.max(1, occupiedLengthMm);
           const utilizationPct = Number(((netAreaMm2 / denomAreaMm2) * 100).toFixed(2));
           const complete = result?.fulfillmentStatus === 'COMPLETE';
-          const fallbackHint = layout?.fallbackReason ? ' · 已降级' : '';
+          const fallbackHint = layout?.fallbackReason ? ' · 降级' : '';
 
           setStrategyRuns2D((prev) =>
             prev.map((r) =>
@@ -330,11 +350,16 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
                     ...r,
                     jobId: job.id,
                     state: job.state as any,
-                    phaseText: complete
-                      ? `齐套 · ${fmtN(occupiedLengthMm, 1)}mm · ${utilizationPct}%${fallbackHint}`
-                      : placements.length > 0
-                      ? `已排 ${placements.length}/${totalRequested} · ${utilizationPct}%${fallbackHint}`
-                      : layout?.message || '未排入任何裁片（请检查门幅与版长）',
+                    phaseText:
+                      placements.length > 0
+                        ? complete
+                          ? `${utilizationPct}% · ${fmtN(occupiedLengthMm, 0)}mm${fallbackHint}`
+                          : `${placements.length}/${totalRequested} · ${utilizationPct}%${fallbackHint}`
+                        : '未排入',
+                    errorDetail:
+                      placements.length === 0
+                        ? layout?.message || '未排入任何裁片，请检查门幅或版长'
+                        : undefined,
                     elapsedMs,
                     occupiedLengthMm,
                     utilizationPct,
@@ -350,7 +375,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
 
           if (placements.length > 0) {
             const schemeId = `CAND-${runKey}-${Date.now().toString(36).slice(-4)}`;
-            createdSchemes.push({
+            const scheme: SavedScheme2D = {
               id: schemeId,
               title: `${label} (${width}×${Math.round(occupiedLengthMm)}mm)`,
               strategyId: def.id,
@@ -381,28 +406,36 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
               demands: structuredClone(validDemands),
               request: req,
               result
-            });
+            };
+            batchSchemeIds.add(schemeId);
+            createdSchemes.push(scheme);
+            addSchemes2D([scheme], { selectIfBetter: true, batchIds: batchSchemeIds });
           } else {
-            failureMessages.push(
-              `${label}：${layout?.message || '未能排入裁片，请增大版长或调整旋转规则'}`
-            );
+            failureMessages.push(`${label}：${layout?.message || '未排入裁片'}`);
           }
         } catch (err: any) {
-          const rawMsg = err?.message || '求解未完成';
-          const friendlyMsg =
-            /failed to fetch|networkerror|connection|无法连接|fetch/i.test(rawMsg)
-              ? '无法连接后端求解服务（请确认 8080 端口服务已启动）'
-              : rawMsg;
-          if (err?.name !== 'AbortError') {
-            failureMessages.push(`${label}：${friendlyMsg}`);
+          const isAbort = err?.name === 'AbortError';
+          const rawMsg = err?.message || '求解失败';
+          const isNetErr = /failed to fetch|networkerror|connection|无法连接|fetch/i.test(rawMsg);
+          const friendlyDetail = isNetErr ? '无法连接后端求解服务（8080）' : rawMsg;
+          const shortTag = isAbort
+            ? '已停止'
+            : isNetErr
+            ? '未连接'
+            : /超时|timeout|TIMED_OUT/i.test(rawMsg)
+            ? '超时'
+            : '失败';
+          if (!isAbort) {
+            failureMessages.push(`${label}：${friendlyDetail}`);
           }
           setStrategyRuns2D((prev) =>
             prev.map((r) =>
               r.strategyId === runKey
                 ? {
                     ...r,
-                    state: err.name === 'AbortError' ? 'CANCELLED' : 'FAILED',
-                    phaseText: friendlyMsg
+                    state: isAbort ? 'CANCELLED' : 'FAILED',
+                    phaseText: shortTag,
+                    errorDetail: friendlyDetail
                   }
                 : r
             )
@@ -411,11 +444,8 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
       })
     );
 
-    if (createdSchemes.length > 0) {
-      addSchemes2D(createdSchemes);
-      toast(`排版完成：生成 ${createdSchemes.length} 套候选方案`);
-    } else if (failureMessages.length > 0) {
-      toast(`排版未生成方案：${failureMessages[0]}`, true);
+    if (createdSchemes.length === 0 && failureMessages.length > 0) {
+      toast(failureMessages[0], true);
     }
     setRunningSolve(false);
   };
@@ -429,9 +459,9 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         .map((o) => ({ ...o, quantity: o.orderedQty || 1 }));
       if (retrial.length > 0) {
         validOrders = retrial;
-        toast('该分条需求族已排齐，按原单总量进行重排试算');
+        toast('已排齐，按原单试算');
       } else {
-        toast('请先在左侧载入分条需求族或添加分条规格', true);
+        toast('请先载入或添加分条规格', true);
         return;
       }
     }
@@ -444,7 +474,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
     const effRightTrim = Math.max(0, Math.floor(Number(slitRightTrimMm) || 0));
     const maxUsable = effMotherW - effLeftTrim - effRightTrim;
     if (!Number.isFinite(effMotherW) || effMotherW <= 0 || maxUsable <= 0) {
-      toast('请检查母卷幅宽与左右切边：扣边后可用幅宽必须大于 0 mm', true);
+      toast('扣边后可用幅宽须 > 0 mm', true);
       return;
     }
 
@@ -461,22 +491,16 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         : Math.max(0, Math.floor(Number(slitOverCap) || 0));
 
     if (effMinW <= 0 || effMaxW < effMinW || effMaxW > maxUsable) {
-      toast(
-        `组合宽度区间 [${effMinW}, ${effMaxW}] mm 无效，须位于可切幅宽 (≤ ${maxUsable} mm) 内且下限 ≤ 上限`,
-        true
-      );
+      toast(`组合宽 [${effMinW}, ${effMaxW}] 超出可切幅宽 ${maxUsable} mm`, true);
       return;
     }
     if (Math.floor((effMaxW - effMinW) / effStep) > 1000) {
-      toast('组合幅宽候选步数超过 1001 档，请调大步长或收窄区间', true);
+      toast('候选宽档位超过 1000，请调大步长', true);
       return;
     }
     const maxOrderW = Math.max(...validOrders.map((o) => Math.floor(o.widthMm)));
     if (maxOrderW > effMaxW) {
-      toast(
-        `最大订单幅宽 ${maxOrderW} mm 超出当前组合上限 ${effMaxW} mm，请调大母卷幅宽或组合上限`,
-        true
-      );
+      toast(`最大规格 ${maxOrderW} mm 超出上限 ${effMaxW} mm`, true);
       return;
     }
 
@@ -504,7 +528,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
       const baselineRun: SlittingSchemeRun = {
         id: 'SLIT-BASELINE',
         strategyId: 'BASELINE',
-        strategyName: '逐规格独立分切（基线）',
+        strategyName: '独立分切',
         state: 'SUCCEEDED',
         motherWidthMm: effMotherW,
         leftTrimMm: effLeftTrim,
@@ -544,11 +568,13 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         }))
       };
 
+      const profileLabel = (profile: SlittingProfile) =>
+        profile === 'FAST' ? '快捷解' : '精确解';
+
       const makePending = (profile: SlittingProfile): SlittingSchemeRun => ({
         id: `SLIT-${profile}`,
         strategyId: profile,
-        strategyName:
-          profile === 'FAST' ? 'OR-Tools 快捷解 (FAST)' : 'OR-Tools 精确解 (QUALITY)',
+        strategyName: profileLabel(profile),
         state: 'RUNNING',
         motherWidthMm: effMotherW,
         leftTrimMm: effLeftTrim,
@@ -628,8 +654,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
           return {
             id: `SLIT-${profile}`,
             strategyId: profile,
-            strategyName:
-              profile === 'FAST' ? 'OR-Tools 快捷解 (FAST)' : 'OR-Tools 精确解 (QUALITY)',
+            strategyName: profileLabel(profile),
             state: 'SUCCEEDED',
             motherWidthMm: effMotherW,
             leftTrimMm: effLeftTrim,
@@ -668,8 +693,8 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         } catch (e: any) {
           return {
             ...makePending(profile),
-            strategyName: `OR-Tools (${profile}) - ${e.message || '求解失败'}`,
-            state: 'FAILED'
+            state: 'FAILED',
+            errorMessage: e.message || '求解失败'
           };
         }
       };
@@ -690,21 +715,14 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
           return 0;
         });
 
-      let completedCount = 0;
       const results = await Promise.all(
         runProfiles.map((prof) =>
           runProfile(prof).then((done) => {
-            completedCount += 1;
             liveRuns.set(prof, done);
             const currentOrdered = sortSchemes(
               runProfiles.map((p) => liveRuns.get(p) || makePending(p))
             );
             setSlitSchemes([...currentOrdered, baselineRun]);
-            if (completedCount < runProfiles.length && done.state === 'SUCCEEDED') {
-              toast(
-                `${done.strategyName} 已先行就绪：${done.totalCars} 车 · ${done.patterns.length} 组（利用率 ${done.avgUtilizationPct}%），其余方案仍在后台计算…`
-              );
-            }
             return done;
           })
         )
@@ -712,18 +730,11 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
       const orderedResults = sortSchemes(results);
       setSlitSchemes([...orderedResults, baselineRun]);
       const bestSolved = orderedResults.find((r) => r.state === 'SUCCEEDED');
-      if (bestSolved) {
-        toast(
-          `分切排版完成：${bestSolved.strategyName} ${bestSolved.totalCars} 车 · ${bestSolved.patterns.length} 组（较独立分切省 ${Math.max(
-            0,
-            baselineRun.totalCars - bestSolved.totalCars
-          )} 车，利用率 ${bestSolved.avgUtilizationPct}%）`
-        );
-      } else {
-        toast(orderedResults[0]?.strategyName || '一维分切求解未返回有效方案', true);
+      if (!bestSolved) {
+        toast(orderedResults[0]?.errorMessage || '分切求解未返回有效方案', true);
       }
     } catch (e: any) {
-      toast('一维分切求解失败：' + e.message, true);
+      toast('求解失败：' + e.message, true);
     } finally {
       setRunningSolve(false);
     }
@@ -732,7 +743,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
   const handleStopSolve = () => {
     activeSessionsRef.current.forEach((s) => s.cancel());
     setRunningSolve(false);
-    toast('已中止当前排版计算');
+    toast('已停止');
   };
 
   const handleConfirmSelectedScheme2D = async () => {
@@ -846,13 +857,9 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         });
       }
 
-      toast(
-        savedScheme.state === 'AWAITING_ROLL'
-          ? `已确认方案「${savedScheme.id}」并扣减待排需求`
-          : `已确认方案「${savedScheme.id}」并锁定实卷区段`
-      );
+      toast(`已确认 ${savedScheme.id}`);
     } catch (err: any) {
-      toast('选定方案确认失败：' + err.message, true);
+      toast('确认失败：' + err.message, true);
     } finally {
       setConfirmingScheme(false);
     }
@@ -941,9 +948,9 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
           state: savedScheme.state
         });
       }
-      toast(`已选定分切方案「${savedScheme.id}」并扣减待排需求`);
+      toast(`已确认 ${savedScheme.id}`);
     } catch (err: any) {
-      toast('选定分切方案失败：' + err.message, true);
+      toast('确认失败：' + err.message, true);
     } finally {
       setConfirmingScheme(false);
     }
@@ -951,6 +958,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
 
   return {
     runningSolve,
+    solveElapsedMs,
     confirmingScheme,
     lastConfirmSummary,
     setLastConfirmSummary,

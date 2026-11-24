@@ -52,7 +52,8 @@ export interface WorkbenchCenterPanelProps {
   slitSchemes: SlittingSchemeRun[];
   activeScheme1D: SlittingSchemeRun | null;
   setActiveSlitScheme: (id: string) => void;
-  savedCars1D: number;
+  baselineCars1D: number;
+  solveElapsedMs: number;
   slitMaterialMode: 'VIRTUAL_ROLL' | 'STOCK_ROLL';
   slitMotherWidthMm: number;
   slitFixedLengthMm: number;
@@ -62,6 +63,12 @@ export interface WorkbenchCenterPanelProps {
   defectSchedules1D: DefectScheduleRow[];
   onRunSolve1D: () => void;
   onQuickExportExcel1D: () => void;
+}
+
+function fmtElapsed(ms?: number): string {
+  const n = Math.max(0, Math.round(ms || 0));
+  if (n < 1000) return `${n}ms`;
+  return `${(n / 1000).toFixed(1)}s`;
 }
 
 export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
@@ -100,7 +107,8 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
   slitSchemes,
   activeScheme1D,
   setActiveSlitScheme,
-  savedCars1D,
+  baselineCars1D,
+  solveElapsedMs,
   slitMaterialMode,
   slitMotherWidthMm,
   slitFixedLengthMm,
@@ -258,76 +266,136 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
     );
   }
 
+  const bestSolved1DId =
+    slitSchemes.find((s) => s.state === 'SUCCEEDED' && s.strategyId !== 'BASELINE')?.id || null;
+
   return (
     /* 1D Slitting Center View */
     <section ref={stripRef as any} className="pane" style={{ background: 'var(--bg)' }}>
       <div className="body" style={{ overflowY: 'auto' }}>
         {slitSchemes.length === 0 ? (
-          <div className="box" style={{ padding: 36, textAlign: 'center' }}>
-            <strong style={{ fontSize: 15 }}>一维定长分切</strong>
-            <p className="muted num" style={{ maxWidth: 460, margin: '8px auto 16px', fontSize: 12.5 }}>
-              {slitMaterialMode === 'VIRTUAL_ROLL'
-                ? `新母卷 ${slitMotherWidthMm} mm`
-                : `实卷 ${currentRoll1D?.rollId || ''} (${
-                    currentRoll1D?.width || slitMotherWidthMm
-                  } mm)`}{' '}
-              · 定长 {slitFixedLengthMm} mm · 待排 {slitOrders.length} 项共 {totalRolls1D} 卷
-            </p>
+          <div className="box slit-empty-box">
+            <div className="slit-empty-meta num">
+              <span>
+                {slitMaterialMode === 'VIRTUAL_ROLL'
+                  ? `W${slitMotherWidthMm}`
+                  : `${currentRoll1D?.rollId || '实卷'} · W${
+                      currentRoll1D?.width || slitMotherWidthMm
+                    }`}
+              </span>
+              <span className="slit-empty-sep" aria-hidden="true" />
+              <span>L{slitFixedLengthMm}</span>
+              <span className="slit-empty-sep" aria-hidden="true" />
+              <span>
+                {slitOrders.length} 规格 · {totalRolls1D} 卷
+              </span>
+            </div>
             <button type="button" className="btn pri" onClick={onRunSolve1D}>
               开始排版
             </button>
           </div>
         ) : (
           <>
-            {savedCars1D > 0 && (
-              <div className="roi-banner num">
-                <span className="tag ok">省车收益</span>
-                <span>
-                  较逐规格独立分切减少 <b>{savedCars1D} 车</b> 上机排刀
-                </span>
-              </div>
-            )}
+            <div
+              className="cards slit-scheme-grid"
+              style={{
+                gridTemplateColumns: `repeat(${Math.min(3, Math.max(1, slitSchemes.length))}, minmax(0, 1fr))`
+              }}
+            >
+              {slitSchemes.map((s) => {
+                const isRunning = s.state === 'RUNNING';
+                const isFailed = s.state === 'FAILED' || s.state === 'TIMED_OUT';
+                const isSolved = s.state === 'SUCCEEDED';
+                const isBaseline = s.strategyId === 'BASELINE';
+                const isBest = isSolved && !isBaseline && s.id === bestSolved1DId;
+                const savedCars =
+                  isSolved && !isBaseline && baselineCars1D > 0
+                    ? Math.max(0, baselineCars1D - s.totalCars)
+                    : 0;
+                const techTitle =
+                  s.strategyId === 'FAST'
+                    ? 'OR-Tools 快捷解 (FAST)'
+                    : s.strategyId === 'QUALITY'
+                    ? 'OR-Tools 精确解 (QUALITY)'
+                    : '逐规格独立分切基线';
 
-            <div className="cards" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
-              {slitSchemes.map((s) => (
-                <div
-                  key={s.id}
-                  className={`card slit-scheme-card ${activeScheme1D?.id === s.id ? 'on' : ''}`}
-                  onClick={() => {
-                    if (s.state !== 'RUNNING') setActiveSlitScheme(s.id);
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <small style={{ flex: 1, fontWeight: 600, color: 'var(--text)' }}>
-                      {s.strategyName}
-                    </small>
-                    <span
-                      className={`tag ${
-                        s.state === 'SUCCEEDED' ? 'ok' : s.state === 'RUNNING' ? 'run' : 'err'
-                      }`}
-                    >
-                      {s.state === 'SUCCEEDED'
-                        ? `${s.elapsedMs}ms`
-                        : s.state === 'RUNNING'
-                        ? '计算中…'
-                        : '失败'}
-                    </span>
+                return (
+                  <div
+                    key={s.id}
+                    className={`card slit-scheme-card ${activeScheme1D?.id === s.id ? 'on' : ''} ${
+                      isRunning ? 'is-running' : ''
+                    } ${isFailed ? 'is-failed' : ''}`}
+                    title={s.errorMessage || techTitle}
+                    onClick={() => {
+                      if (!isRunning) setActiveSlitScheme(s.id);
+                    }}
+                  >
+                    {isRunning && <span className="slit-progress-line" aria-hidden="true" />}
+                    <div className="slit-card-head">
+                      <span className="slit-card-name">{s.strategyName}</span>
+                      {isBest && <span className="tag ok">最优</span>}
+                      <span className="sp" />
+                      {isRunning ? (
+                        <span className="slit-card-timer num">
+                          <i className="wb-status-dot is-running" aria-hidden="true" />
+                          {fmtElapsed(solveElapsedMs)}
+                        </span>
+                      ) : isSolved ? (
+                        <span className="slit-card-time num">{fmtElapsed(s.elapsedMs)}</span>
+                      ) : (
+                        <span className="tag err">失败</span>
+                      )}
+                    </div>
+
+                    {isRunning ? (
+                      <>
+                        <div className="slit-skeleton-num" aria-hidden="true" />
+                        <div className="slit-skeleton-sub" aria-hidden="true" />
+                      </>
+                    ) : isFailed ? (
+                      <>
+                        <b className="num slit-card-main is-muted">—</b>
+                        <div className="d slit-card-err">{s.errorMessage || '求解未完成'}</div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="slit-card-main-row">
+                          <b className="num slit-card-main">
+                            {s.totalCars}
+                            <em>车</em>
+                          </b>
+                          {savedCars > 0 && (
+                            <span
+                              className="slit-save-pill num"
+                              title={`较独立分切节省 ${savedCars} 车`}
+                            >
+                              −{savedCars}车
+                            </span>
+                          )}
+                        </div>
+                        <div className="d num slit-card-meta">
+                          <span>{s.avgUtilizationPct}%</span>
+                          <span>·</span>
+                          <span>{s.patterns?.length ?? 0} 组</span>
+                          {s.missingRolls > 0 && (
+                            <span className="slit-warn-pill is-err">缺 {s.missingRolls}</span>
+                          )}
+                          {s.overproducedRolls > 0 && (
+                            <span className="slit-warn-pill">超 {s.overproducedRolls}</span>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
-                  <b className="num">{s.state === 'RUNNING' ? '计算中…' : `${s.totalCars} 车`}</b>
-                  <div className="d num">
-                    {s.state === 'RUNNING'
-                      ? '后台并行求解中，完成后自动上屏'
-                      : `组数 ${s.patterns?.length ?? 0} · 利用率 ${s.avgUtilizationPct}% · 缺口 ${s.missingRolls} · 超产 ${s.overproducedRolls}`}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {activeScheme1D && activeScheme1D.state === 'SUCCEEDED' && (
               <div className="box" style={{ margin: '12px 0 0' }}>
                 <div className="pane-h">
                   <span>
-                    刀组排布（{activeScheme1D.patterns.length} 组 · {activeScheme1D.totalCars} 车）
+                    刀组排布 · {activeScheme1D.patterns.length} 组 · {activeScheme1D.totalCars} 车
                   </span>
                   <span className="sp" />
                   <button type="button" className="btn sm" onClick={onQuickExportExcel1D}>

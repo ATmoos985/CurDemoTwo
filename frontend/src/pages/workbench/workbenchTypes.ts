@@ -17,10 +17,10 @@ export interface SolverStrategyDef {
 export const STRATEGIES_2D: SolverStrategyDef[] = [
   {
     id: 'PS_FIXED',
-    name: 'PackingSolver 严格经向缩长',
-    shortTag: '0° 保丝缕 · 二分缩长压紧',
-    badge: 'C++ 原生',
-    description: '保持全部裁片严格 0° 丝缕方向，多轮二分缩短并压紧唛架长度',
+    name: '经向缩长',
+    shortTag: '0° 经向 · 缩长',
+    badge: 'C++',
+    description: '保持全部裁片严格 0° 丝缕方向，多轮二分缩短并压紧版长',
     halfTurn: false,
     forceRotateRect: false,
     shorten: true,
@@ -30,9 +30,9 @@ export const STRATEGIES_2D: SolverStrategyDef[] = [
   },
   {
     id: 'PS_ROT',
-    name: 'PackingSolver 180°/90° 倒顺缩长',
-    shortTag: '异形 180° / 矩形 90° · 最短版长',
-    badge: 'C++ 原生',
+    name: '旋转缩长',
+    shortTag: '180°/90° · 最短版长',
+    badge: 'C++',
     description: '异形片允许 180° 倒顺对排、矩形允许 90° 旋转，追求最短版长',
     halfTurn: true,
     forceRotateRect: true,
@@ -43,10 +43,10 @@ export const STRATEGIES_2D: SolverStrategyDef[] = [
   },
   {
     id: 'DN_GA',
-    name: 'Deepnest NFP+GA 进化嵌套',
-    shortTag: 'Minkowski 临界多边形 + 遗传共边寻优',
-    badge: 'NFP+GA',
-    description: '使用临界多边形卷积与遗传算法进化搜索凹凸互补与共边奖励',
+    name: '异形进化',
+    shortTag: 'NFP + GA 嵌套',
+    badge: 'NFP',
+    description: '临界多边形卷积与遗传进化搜索凹凸互补与共边压紧',
     halfTurn: true,
     forceRotateRect: true,
     shorten: true,
@@ -56,10 +56,10 @@ export const STRATEGIES_2D: SolverStrategyDef[] = [
   },
   {
     id: 'DN_FIXED',
-    name: 'Deepnest 严格经向直排',
-    shortTag: '0° 严保纱向 · 临界多边形紧贴',
-    badge: 'NFP 经向',
-    description: '保持 0° 丝缕方向，采用 Deepnest NFP 精确凹凸嵌套直排对照',
+    name: '异形经向',
+    shortTag: '0° NFP 直排',
+    badge: 'NFP',
+    description: '保持 0° 丝缕方向，采用 NFP 精确凹凸嵌套直排',
     halfTurn: false,
     forceRotateRect: false,
     shorten: false,
@@ -69,10 +69,10 @@ export const STRATEGIES_2D: SolverStrategyDef[] = [
   },
   {
     id: 'JAVA_FAST',
-    name: 'Java 天际线/直刀快速基线',
-    shortTag: '极速秒出基线对照与降级兜底',
-    badge: 'Java 内置',
-    description: '内置天际线/直刀快速启发式引擎，作多算法对照与极速基线',
+    name: '快速基线',
+    shortTag: '直刀/天际线',
+    badge: '极速',
+    description: '内置直刀/天际线启发式引擎，秒出基线对照与兜底',
     halfTurn: false,
     forceRotateRect: false,
     shorten: false,
@@ -93,10 +93,10 @@ export const LEGACY_STRATEGY_ALIAS: Record<string, string> = {
 export const DEFAULT_ENABLED_STRATEGIES = ['PS_FIXED', 'PS_ROT', 'DN_GA', 'JAVA_FAST'];
 
 export const SCENARIOS_2D: { id: Scenario2DType; label: string; desc: string }[] = [
-  { id: 'SHORTEN_KIT', label: '齐套最短版长', desc: '装入全部待排需求并压紧用料长度' },
-  { id: 'SHORTEN_GAP_FILL', label: '齐套 + 空隙补备片', desc: '齐套后在空隙填补小件提升利用率' },
-  { id: 'FIXED_BED', label: '定长台板装入', desc: '按版长上限单次装入最大裁片面积' },
-  { id: 'MULTI_WIDTH', label: '多门幅阶梯比选', desc: '批量对比多个门幅的单耗与版长' }
+  { id: 'SHORTEN_KIT', label: '齐套最短', desc: '装入全部待排需求并压紧用料长度' },
+  { id: 'SHORTEN_GAP_FILL', label: '齐套补空', desc: '齐套后在空隙填补小件提升利用率' },
+  { id: 'FIXED_BED', label: '定长装满', desc: '按版长上限单次装入最大裁片面积' },
+  { id: 'MULTI_WIDTH', label: '多幅比选', desc: '批量对比多个门幅的单耗与版长' }
 ];
 
 export const STRIP_COLORS = [

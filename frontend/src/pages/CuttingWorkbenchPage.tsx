@@ -397,6 +397,7 @@ export const CuttingWorkbenchPage: React.FC<{
 
   const {
     runningSolve,
+    solveElapsedMs,
     confirmingScheme,
     lastConfirmSummary,
     setLastConfirmSummary,
@@ -521,13 +522,6 @@ export const CuttingWorkbenchPage: React.FC<{
     () => slitSchemes.find((s) => s.strategyId === 'BASELINE') || null,
     [slitSchemes]
   );
-  const savedCars1D =
-    activeScheme1D &&
-    baseline1D &&
-    activeScheme1D.strategyId !== 'BASELINE' &&
-    activeScheme1D.state === 'SUCCEEDED'
-      ? Math.max(0, baseline1D.totalCars - activeScheme1D.totalCars)
-      : 0;
 
   const defectSchedules1D = useMemo(
     () =>
@@ -663,7 +657,8 @@ export const CuttingWorkbenchPage: React.FC<{
           slitSchemes={slitSchemes}
           activeScheme1D={activeScheme1D}
           setActiveSlitScheme={setActiveSlitScheme}
-          savedCars1D={savedCars1D}
+          baselineCars1D={baseline1D?.totalCars || 0}
+          solveElapsedMs={solveElapsedMs}
           slitMaterialMode={slitMaterialMode}
           slitMotherWidthMm={slitMotherWidthMm}
           slitFixedLengthMm={slitFixedLengthMm}
@@ -683,6 +678,7 @@ export const CuttingWorkbenchPage: React.FC<{
           activeScheme1D={activeScheme1D}
           strategyRuns2D={strategyRuns2D}
           runningSolve={runningSolve}
+          solveElapsedMs={solveElapsedMs}
           confirmingScheme={confirmingScheme}
           lastConfirmSummary={lastConfirmSummary}
           onContinueAfterConfirm={() => {

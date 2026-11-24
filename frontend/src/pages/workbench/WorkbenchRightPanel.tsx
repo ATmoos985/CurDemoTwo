@@ -25,6 +25,7 @@ export interface WorkbenchRightPanelProps {
   activeScheme1D: SlittingSchemeRun | null;
   strategyRuns2D: StrategyJobRun[];
   runningSolve: boolean;
+  solveElapsedMs: number;
   confirmingScheme: boolean;
   lastConfirmSummary: LastConfirmSummary | null;
   onContinueAfterConfirm: () => void;
@@ -70,6 +71,7 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
   activeScheme1D,
   strategyRuns2D,
   runningSolve,
+  solveElapsedMs,
   confirmingScheme,
   lastConfirmSummary,
   onContinueAfterConfirm,
@@ -116,16 +118,15 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
         {/* Post-Confirm Continuation Banner */}
         {lastConfirmSummary && (
           <div className="wb-confirm-banner">
-            <div>
-              <span className="tag ok" style={{ marginRight: 6 }}>
-                已落库
-              </span>
+            <div className="wb-confirm-head">
+              <span className="tag ok">已落库</span>
               <b className="num">{lastConfirmSummary.schemeId}</b>
-            </div>
-            <div>
-              {lastConfirmSummary.openRemaining > 0
-                ? `剩余 ${lastConfirmSummary.openRemaining} 件待排，可继续排下一卷`
-                : '当前需求族待排量已全部排齐'}
+              <span className="sp" />
+              <span className="num wb-confirm-rem">
+                {lastConfirmSummary.openRemaining > 0
+                  ? `余 ${lastConfirmSummary.openRemaining} 件`
+                  : '已排齐'}
+              </span>
             </div>
             <div style={{ display: 'flex', gap: 6, width: '100%' }}>
               <a
@@ -133,7 +134,7 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
                 style={{ flex: 1, justifyContent: 'center' }}
                 href={`#/results/${encodeURIComponent(lastConfirmSummary.schemeId)}`}
               >
-                去结果管理查看/导出
+                查看结果
               </a>
               {lastConfirmSummary.openRemaining > 0 && (
                 <button type="button" className="btn sm" onClick={onContinueAfterConfirm}>
@@ -150,7 +151,7 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
             <div className="value-hero-head">
               <div className="value-hero-title">{activeScheme2D.strategyName}</div>
               <span className={`tag ${activeScheme2D.complete ? 'ok' : 'kind'}`}>
-                {activeScheme2D.complete ? '齐套' : '部分排入'}
+                {activeScheme2D.complete ? '齐套' : '部分'}
               </span>
             </div>
 
@@ -191,13 +192,14 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
                 type="button"
                 className="btn pri value-primary-cta"
                 disabled={confirmingScheme}
+                title="扣减待排需求并保存至结果管理"
                 onClick={onConfirmSelectedScheme2D}
               >
                 {confirmingScheme
-                  ? '正在保存并扣减…'
+                  ? '保存中…'
                   : activeScheme2D.confirmedSchemeId
-                  ? `已选定 (${activeScheme2D.confirmedSchemeId}) · 查看结果`
-                  : '选定此方案（扣减需求并保存结果）'}
+                  ? `查看结果 · ${activeScheme2D.confirmedSchemeId}`
+                  : '选定此方案'}
               </button>
               <div className="value-export-row">
                 <button
@@ -257,46 +259,82 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
                 type="button"
                 className="btn pri value-primary-cta"
                 disabled={confirmingScheme}
+                title="扣减待排需求并保存至结果管理"
                 onClick={onConfirmSelectedScheme1D}
               >
                 {confirmingScheme
-                  ? '正在保存并扣减…'
+                  ? '保存中…'
                   : activeScheme1D.confirmedSchemeId
-                  ? `已选定 (${activeScheme1D.confirmedSchemeId}) · 查看结果`
-                  : '选定此方案（扣减需求并保存结果）'}
+                  ? `查看结果 · ${activeScheme1D.confirmedSchemeId}`
+                  : '选定此方案'}
               </button>
             </div>
           </div>
         ) : null}
 
-        {/* Live Solve Progress Strip (also persists failure/empty feedback after solving stops) */}
+        {/* Live Solve Progress Strip (minimal status dots + live metrics, zero verbose copy) */}
         {is2D &&
           strategyRuns2D.length > 0 &&
           (runningSolve ||
             (!activeScheme2D &&
               strategyRuns2D.some(
                 (r) => r.state === 'FAILED' || r.state === 'TIMED_OUT' || r.placedCount === 0
-              ))) && (
-            <div className="wb-solve-progress">
-              {strategyRuns2D.map((r) => (
-                <div key={r.strategyId} className="wb-solve-progress-row">
-                  <span className="wb-solve-progress-name">{r.strategyName}</span>
-                  <span
-                    className="wb-solve-progress-phase num"
-                    style={
-                      r.state === 'FAILED' || r.state === 'TIMED_OUT'
-                        ? { color: '#dc2626' }
-                        : undefined
-                    }
-                  >
-                    {r.phaseText}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
+              ))) && (() => {
+            const doneCount = strategyRuns2D.filter(
+              (r) => r.state !== 'QUEUED' && r.state !== 'RUNNING'
+            ).length;
+            const pct = Math.round((doneCount / strategyRuns2D.length) * 100);
+            const liveSec = `${(solveElapsedMs / 1000).toFixed(1)}s`;
+            return (
+              <div className="wb-solve-progress">
+                {runningSolve && (
+                  <div className="wb-solve-bar" aria-hidden="true">
+                    <i style={{ width: `${Math.max(8, pct)}%` }} />
+                  </div>
+                )}
+                {strategyRuns2D.map((r) => {
+                  const isRunning = r.state === 'RUNNING';
+                  const isQueued = r.state === 'QUEUED';
+                  const isOk = r.state === 'SUCCEEDED' && (r.placedCount ?? 0) > 0;
+                  const isErr =
+                    r.state === 'FAILED' ||
+                    r.state === 'TIMED_OUT' ||
+                    (r.state === 'SUCCEEDED' && (r.placedCount ?? 0) === 0);
+                  const dotClass = isRunning
+                    ? 'is-running'
+                    : isOk
+                    ? 'is-ok'
+                    : isErr
+                    ? 'is-err'
+                    : 'is-queued';
+                  const rightText = isRunning
+                    ? liveSec
+                    : isQueued
+                    ? ''
+                    : r.phaseText;
+                  return (
+                    <div
+                      key={r.strategyId}
+                      className="wb-solve-progress-row"
+                      title={r.errorDetail || r.description}
+                    >
+                      <i className={`wb-status-dot ${dotClass}`} aria-hidden="true" />
+                      <span className="wb-solve-progress-name">{r.strategyName}</span>
+                      <span
+                        className={`wb-solve-progress-phase num ${
+                          isErr ? 'is-err' : isOk ? 'is-ok' : ''
+                        }`}
+                      >
+                        {rightText}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
-        {/* 1D Full Solartron-Cut Parameter Config Section (always visible in 1D mode) */}
+        {/* 1D Full Parameter Config Section */}
         {!is2D && (
           <SlittingConfigCard
             slitProfile={slitProfile}
@@ -314,64 +352,56 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
           />
         )}
 
-        {/* Clean Solving Goal Selector */}
+        {/* Compact Solving Goal Selector (self-explanatory labels, tooltips on hover) */}
         <div className="wb-right-section">
           <div className="wb-right-section-head">
             <span>求解目标</span>
           </div>
-          <div className="wb-goal-list">
-            {is2D ? (
-              SCENARIOS_2D.map((sc) => {
+          {is2D ? (
+            <div className="wb-goal-grid" role="radiogroup" aria-label="二维求解目标">
+              {SCENARIOS_2D.map((sc) => {
                 const disabled = sc.id === 'MULTI_WIDTH' && canvasMode !== 'FREE_CANVAS';
+                const checked = scenario2D === sc.id;
                 return (
-                  <label
+                  <button
                     key={sc.id}
-                    className="wb-goal-item"
-                    style={disabled ? { opacity: 0.5 } : undefined}
+                    type="button"
+                    role="radio"
+                    aria-checked={checked}
+                    disabled={disabled}
+                    title={sc.desc}
+                    className={`wb-goal-pill ${checked ? 'on' : ''}`}
+                    onClick={() => setScenario2D(sc.id)}
                   >
-                    <input
-                      type="radio"
-                      name="scenario2d"
-                      disabled={disabled}
-                      checked={scenario2D === sc.id}
-                      onChange={() => setScenario2D(sc.id)}
-                    />
-                    <div className="wb-goal-body">
-                      <div className="wb-goal-title">{sc.label}</div>
-                      <div className="wb-goal-desc">{sc.desc}</div>
-                    </div>
-                  </label>
+                    {sc.label}
+                  </button>
                 );
-              })
-            ) : (
-              <>
-                <label className="wb-goal-item">
-                  <input
-                    type="radio"
-                    name="scenario1d"
-                    checked={scenario1D === 'MIN_CARS'}
-                    onChange={() => setScenario1D('MIN_CARS')}
-                  />
-                  <div className="wb-goal-body">
-                    <div className="wb-goal-title">最少换刀车数</div>
-                    <div className="wb-goal-desc">控制超产上限，减少上机换刀次数</div>
-                  </div>
-                </label>
-                <label className="wb-goal-item">
-                  <input
-                    type="radio"
-                    name="scenario1d"
-                    checked={scenario1D === 'MAX_UTIL'}
-                    onChange={() => setScenario1D('MAX_UTIL')}
-                  />
-                  <div className="wb-goal-body">
-                    <div className="wb-goal-title">最高幅宽利用率</div>
-                    <div className="wb-goal-desc">适度放宽超产以减少窄边余料</div>
-                  </div>
-                </label>
-              </>
-            )}
-          </div>
+              })}
+            </div>
+          ) : (
+            <div className="seg" role="radiogroup" aria-label="一维求解目标" style={{ width: '100%' }}>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={scenario1D === 'MIN_CARS'}
+                title="控制超产上限，减少上机换刀车数"
+                className={scenario1D === 'MIN_CARS' ? 'on' : ''}
+                onClick={() => setScenario1D('MIN_CARS')}
+              >
+                最少车数
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={scenario1D === 'MAX_UTIL'}
+                title="适度放宽超产以提升幅宽利用率"
+                className={scenario1D === 'MAX_UTIL' ? 'on' : ''}
+                onClick={() => setScenario1D('MAX_UTIL')}
+              >
+                最高利用
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -392,12 +422,22 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
               : slitMotherWidthMm}
           </span>
           {is2D ? (
-            <button type="button" className="wb-algo-config-link" onClick={openEngineSettings}>
-              已启 {activeAlgos.length} 算法 · 配置
+            <button
+              type="button"
+              className="wb-algo-config-link"
+              title="配置二维求解算法"
+              onClick={openEngineSettings}
+            >
+              {activeAlgos.length} 算法 ↗
             </button>
           ) : (
-            <button type="button" className="wb-algo-config-link" onClick={openEngineSettings}>
-              {settings.slitRunBothProfiles ? '快/精双档' : slitProfile} · 高级参数
+            <button
+              type="button"
+              className="wb-algo-config-link"
+              title="配置一维求解参数"
+              onClick={openEngineSettings}
+            >
+              {settings.slitRunBothProfiles ? '双档' : slitProfile === 'FAST' ? '快捷' : '精确'} ↗
             </button>
           )}
         </div>
@@ -414,7 +454,7 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
             disabled={runningSolve}
             onClick={is2D ? onRunSolve2D : onRunSolve1D}
           >
-            {runningSolve ? '正在排版…' : '开始排版'}
+            {runningSolve ? '计算中…' : '开始排版'}
           </button>
         </div>
       </div>

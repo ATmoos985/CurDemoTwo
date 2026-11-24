@@ -89,6 +89,7 @@ export interface StrategyJobRun {
   jobId?: string;
   state: 'IDLE' | 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'TIMED_OUT' | 'FAILED' | 'CANCELLED';
   phaseText: string;
+  errorDetail?: string;
   elapsedMs?: number;
   occupiedLengthMm?: number;
   utilizationPct?: number;
@@ -152,6 +153,7 @@ export interface SlittingSchemeRun {
   overproducedRolls: number;
   avgUtilizationPct: number;
   elapsedMs?: number;
+  errorMessage?: string;
   patterns: {
     id: string;
     lengthMm: number;
@@ -670,7 +672,10 @@ interface StudioState {
   addBlankDemand2D: () => void;
   toggleStrategy2D: (strategyId: string) => void;
   setStrategyRuns2D: (runs: StrategyJobRun[] | ((prev: StrategyJobRun[]) => StrategyJobRun[])) => void;
-  addSchemes2D: (newSchemes: SavedScheme2D[]) => void;
+  addSchemes2D: (
+    newSchemes: SavedScheme2D[],
+    options?: { selectIfBetter?: boolean; batchIds?: ReadonlySet<string> }
+  ) => void;
   removeScheme2D: (id: string) => void;
   clearSchemes2D: () => void;
   setActiveScheme2D: (id: string | null) => void;
@@ -1269,16 +1274,31 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       strategyRuns2D: typeof runs === 'function' ? runs(st.strategyRuns2D) : runs
     })),
 
-  addSchemes2D: (newSchemes) =>
+  addSchemes2D: (newSchemes, options) =>
     set((st) => {
       if (!newSchemes.length) return st;
       const merged = [...newSchemes, ...st.schemes2D];
       const completeOnes = newSchemes.filter((x) => x.complete);
       const pool = completeOnes.length ? completeOnes : newSchemes;
-      const best = [...pool].sort((a, b) => b.utilizationPct - a.utilizationPct)[0];
+      const bestNew = [...pool].sort((a, b) => b.utilizationPct - a.utilizationPct)[0];
+
+      let nextActiveId = bestNew.id;
+      if (options?.selectIfBetter && st.activeSchemeId2D) {
+        const cur = st.schemes2D.find((s) => s.id === st.activeSchemeId2D);
+        const curInBatch = cur && (!options.batchIds || options.batchIds.has(cur.id));
+        if (cur && curInBatch) {
+          const curBetter =
+            (cur.complete && !bestNew.complete) ||
+            (cur.complete === bestNew.complete && cur.utilizationPct >= bestNew.utilizationPct);
+          if (curBetter) {
+            nextActiveId = cur.id;
+          }
+        }
+      }
+
       return {
         schemes2D: merged,
-        activeSchemeId2D: best.id
+        activeSchemeId2D: nextActiveId
       };
     }),
 

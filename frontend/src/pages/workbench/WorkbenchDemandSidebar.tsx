@@ -5,7 +5,6 @@ import {
   ShapeGeometry
 } from '../../store/useStudioStore';
 import { NumberInput } from '../../components/ui/NumberInput';
-import { toast } from '@static/app/js/util.js';
 import { DemandRowView, OverviewStats } from './workbenchTypes';
 
 const DemandShapeThumb: React.FC<{
@@ -160,7 +159,6 @@ export const WorkbenchDemandSidebar: React.FC<WorkbenchDemandSidebarProps> = ({
                     if (fam) {
                       loadDemandFamilyIntoWorkbench(fam);
                       onClearConfirmSummary();
-                      toast(`已载入「${fam.name}」（待排 ${fam.openTotal}）`);
                     }
                   }}
                 >
@@ -221,7 +219,6 @@ export const WorkbenchDemandSidebar: React.FC<WorkbenchDemandSidebarProps> = ({
                       onClearConfirmSummary();
                       if (is2D) loadClusterInto2D(quickCluster.id, false);
                       else loadClusterInto1D(quickCluster.id, false);
-                      toast(`已载入「${quickCluster.name}」`);
                     }}
                   >
                     载入
@@ -232,7 +229,6 @@ export const WorkbenchDemandSidebar: React.FC<WorkbenchDemandSidebarProps> = ({
                     onClick={() => {
                       if (is2D) loadClusterInto2D(quickCluster.id, true);
                       else loadClusterInto1D(quickCluster.id, true);
-                      toast(`已追加「${quickCluster.name}」`);
                     }}
                   >
                     ＋ 追加

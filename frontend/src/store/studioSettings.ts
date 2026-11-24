@@ -124,11 +124,11 @@ export interface WorkbenchStrategyDef {
 }
 
 export const WORKBENCH_STRATEGIES_2D: WorkbenchStrategyDef[] = [
-  { id: 'PS_FIXED', name: 'PackingSolver 严格经向缩长', badge: 'C++ 原生', shortTag: '0° 保丝缕 · 二分缩长压紧' },
-  { id: 'PS_ROT', name: 'PackingSolver 180°/90° 倒顺缩长', badge: 'C++ 原生', shortTag: '异形 180° / 矩形 90° · 最短版长' },
-  { id: 'DN_GA', name: 'Deepnest NFP+GA 进化嵌套', badge: 'NFP+GA', shortTag: 'Minkowski 临界多边形 + 遗传共边寻优' },
-  { id: 'DN_FIXED', name: 'Deepnest 严格经向直排', badge: 'NFP 经向', shortTag: '0° 严保纱向 · 临界多边形紧贴' },
-  { id: 'JAVA_FAST', name: 'Java 天际线/直刀快速基线', badge: 'Java 内置', shortTag: '极速秒出基线对照与降级兜底' }
+  { id: 'PS_FIXED', name: '经向缩长', badge: 'C++', shortTag: '0° 保丝缕 · 二分缩长' },
+  { id: 'PS_ROT', name: '旋转缩长', badge: 'C++', shortTag: '异形 180° / 矩形 90°' },
+  { id: 'DN_GA', name: '异形进化', badge: 'NFP', shortTag: '临界多边形 + 遗传共边' },
+  { id: 'DN_FIXED', name: '异形经向', badge: 'NFP', shortTag: '0° 严保纱向 · 紧贴直排' },
+  { id: 'JAVA_FAST', name: '快速基线', badge: '极速', shortTag: '直刀/天际线秒出对照' }
 ];
 
 export interface StudioSettings {

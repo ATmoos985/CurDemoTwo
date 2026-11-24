@@ -61,7 +61,6 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
       slitOverCap: p.totalOverCap,
       slitWidthMode: p.widthMode
     });
-    toast(`已套用一维预设「${p.name}」`);
   };
 
   const handleSaveCurrentSlitPreset = () => {
@@ -104,14 +103,14 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
   return (
     <div className="wb-right-section slit-cfg-card" id="wb-slitting-params">
       <div className="wb-right-section-head">
-        <span>一维搭切参数配置</span>
+        <span>分切参数</span>
         <button
           type="button"
           className="link-btn"
           onClick={openEngineSettings}
-          title="在系统设置中调整 NewSolver 全部参数"
+          title="在系统设置中调整全部求解参数"
         >
-          高级设置 ↗
+          高级 ↗
         </button>
       </div>
 
@@ -123,7 +122,7 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
           value={selectedSlitPresetId}
           onChange={(e) => handleApplySlitPreset(e.target.value)}
         >
-          <option value="">套用幅宽预设…</option>
+          <option value="">预设…</option>
           {slitPresets.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
@@ -150,7 +149,7 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
           <input
             type="text"
             className="field"
-            placeholder="输入预设名称（如：四线4600光学膜）"
+            placeholder="预设名称"
             value={newPresetName}
             onChange={(e) => setNewPresetName(e.target.value)}
             onKeyDown={(e) => {
@@ -173,20 +172,22 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
             type="button"
             className={slitProfile === 'FAST' ? 'on' : ''}
             aria-pressed={slitProfile === 'FAST'}
+            title="快捷解 (FAST)"
             onClick={() => setSlitSpec({ slitProfile: 'FAST' })}
           >
-            快捷解 FAST
+            快捷
           </button>
           <button
             type="button"
             className={slitProfile === 'QUALITY' ? 'on' : ''}
             aria-pressed={slitProfile === 'QUALITY'}
+            title="精确解 (QUALITY)"
             onClick={() => setSlitSpec({ slitProfile: 'QUALITY' })}
           >
-            精确解 QUALITY
+            精确
           </button>
         </div>
-        <label className="slit-both-toggle" title="同时运行 FAST 与 QUALITY 对比结果">
+        <label className="slit-both-toggle" title="同时运行快捷与精确解对比">
           <input
             type="checkbox"
             checked={settings.slitRunBothProfiles}
@@ -201,21 +202,21 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
         </label>
       </div>
 
-      {/* Width Mode + Core Solartron-Cut Primary Inputs */}
+      {/* Width Mode */}
       <div className="seg" role="group" aria-label="幅宽约束模式" style={{ width: '100%' }}>
         <button
           type="button"
           className={slitWidthMode === 'FLEXIBLE' ? 'on' : ''}
           onClick={() => setSlitSpec({ slitWidthMode: 'FLEXIBLE' })}
         >
-          可变幅宽区间
+          可变宽
         </button>
         <button
           type="button"
           className={slitWidthMode === 'FIXED' ? 'on' : ''}
           onClick={() => setSlitSpec({ slitWidthMode: 'FIXED', slitMinWidthMm: slitMaxWidthMm })}
         >
-          固定组合宽
+          固定宽
         </button>
       </div>
 
@@ -358,14 +359,10 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
         档
       </div>
 
-      {/* Collapsible Solartron-Cut NewSolver Advanced Parameters */}
+      {/* Collapsible Advanced Solver Parameters */}
       <details className="slit-adv-fold">
         <summary className="num">
-          NewSolver 参数：TopK {settings.slitTopK} · 迭代 {settings.slitMaxIterations} · 花型{' '}
-          {settings.slitMaxPatterns} · 宽幅≤
-          {slitProfile === 'QUALITY'
-            ? Math.max(settings.slitMaxDistinctWidths, 5)
-            : settings.slitMaxDistinctWidths}
+          高级参数 · 宽幅≤{settings.slitMaxDistinctWidths}
         </summary>
         <div className="slit-cfg-grid" style={{ marginTop: 6 }}>
           <label className="slit-cfg-field">

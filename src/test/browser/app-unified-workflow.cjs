@@ -239,8 +239,8 @@ const api = async (path) => {
       assert.ok(await page.locator('canvas').first().isVisible(), 'CAD canvas rendered');
 
       // Confirm selected scheme -> zero re-solve & immediate demand deduction + left progress bars update to done!
-      await page.getByRole('button', { name: '选定此方案（扣减需求并保存结果）' }).click();
-      await page.getByRole('link', { name: '去结果管理查看/导出' }).waitFor({ timeout: 10000 });
+      await page.getByRole('button', { name: '选定此方案' }).click();
+      await page.getByRole('link', { name: '查看结果' }).waitFor({ timeout: 10000 });
       assert.equal(await page.locator('.wb-demand-prog-row.is-done').count(), 2, 'All items stay visible and turn done on left progress list');
 
       const poolAfterConfirm = await api('/api/v2/demand-pool');
@@ -250,7 +250,7 @@ const api = async (path) => {
     });
 
     await runStep('Results Center: auto-bind real mother roll -> ticket preview -> complete accounting', async () => {
-      await page.getByRole('link', { name: '去结果管理查看/导出' }).click();
+      await page.getByRole('link', { name: '查看结果' }).click();
       await page.waitForURL('**/#/results/**');
       await page.getByRole('heading', { name: '结果管理', exact: true, level: 1 }).waitFor();
 
