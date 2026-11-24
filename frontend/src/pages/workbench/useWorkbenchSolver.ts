@@ -682,7 +682,15 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
                 0,
                 effMotherW - effLeftTrim - effRightTrim - p.patternWidthMm
               ),
-              allocations: p.allocations
+              ...(p.surfaceTreatment ? { surfaceTreatment: p.surfaceTreatment } : {}),
+              ...(Array.isArray(p.allocations) && p.allocations.length > 0
+                ? {
+                    allocations: p.allocations.map((a: any) => ({
+                      orderId: String(a.orderId),
+                      quantity: Number(a.quantity ?? a.count) || 0
+                    }))
+                  }
+                : {})
             })),
             fulfillment: s.fulfillment.map((f: any) => {
               const ord = validOrders.find((o) => o.id === String(f.orderId));
@@ -774,31 +782,53 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         : activeDemands2D;
       const hasPoly = effectiveDemands.some((d) => d.shape?.type === 'POLYGON');
 
+      const demandById = new Map<number, DemandItem>();
+      for (const d of effectiveDemands) {
+        demandById.set(Number(d.id), d);
+      }
       const placementsPayload = [
-        ...rawMain.map((p, idx) => ({
-          id: idx + 1,
-          demandId: p.demandId,
-          name: p.name,
-          x: p.x,
-          y: p.y,
-          w: p.shape?.width || p.w || 0,
-          l: p.shape?.height || p.l || 0,
-          rotationDegrees: p.rotationDegrees || 0,
-          gapFill: false,
-          shape: hasPoly ? p.shape : undefined
-        })),
-        ...rawGap.map((p, idx) => ({
-          id: rawMain.length + idx + 1,
-          demandId: p.demandId,
-          name: p.name,
-          x: p.x,
-          y: p.y,
-          w: p.shape?.width || p.w || 0,
-          l: p.shape?.height || p.l || 0,
-          rotationDegrees: p.rotationDegrees || 0,
-          gapFill: true,
-          shape: hasPoly ? p.shape : undefined
-        }))
+        ...rawMain.map((p, idx) => {
+          const srcDemand = p.demandId != null ? demandById.get(Number(p.demandId)) : undefined;
+          return {
+            id: idx + 1,
+            demandId: p.demandId,
+            name: p.name,
+            x: p.x,
+            y: p.y,
+            w: p.shape?.width || p.w || 0,
+            l: p.shape?.height || p.l || 0,
+            rotationDegrees: p.rotationDegrees || 0,
+            gapFill: false,
+            shape: hasPoly ? p.shape : undefined,
+            ...(srcDemand?.sourceTaskId && srcDemand.sourceLineId != null
+              ? {
+                  sourceTaskId: srcDemand.sourceTaskId,
+                  sourceLineId: Number(srcDemand.sourceLineId)
+                }
+              : {})
+          };
+        }),
+        ...rawGap.map((p, idx) => {
+          const srcDemand = p.demandId != null ? demandById.get(Number(p.demandId)) : undefined;
+          return {
+            id: rawMain.length + idx + 1,
+            demandId: p.demandId,
+            name: p.name,
+            x: p.x,
+            y: p.y,
+            w: p.shape?.width || p.w || 0,
+            l: p.shape?.height || p.l || 0,
+            rotationDegrees: p.rotationDegrees || 0,
+            gapFill: true,
+            shape: hasPoly ? p.shape : undefined,
+            ...(srcDemand?.sourceTaskId && srcDemand.sourceLineId != null
+              ? {
+                  sourceTaskId: srcDemand.sourceTaskId,
+                  sourceLineId: Number(srcDemand.sourceLineId)
+                }
+              : {})
+          };
+        })
       ];
 
       const allocSummary = buildSourceAllocations2D(
@@ -853,7 +883,11 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
           allowRotation: Boolean(d.allowRotation),
           allowHalfTurn: Boolean(d.allowHalfTurn),
           sizeLabel: d.sizeLabel,
-          shape: d.shape
+          surfaceTreatment: d.surfaceTreatment,
+          shape: d.shape,
+          ...(d.sourceTaskId && d.sourceLineId != null
+            ? { sourceTaskId: d.sourceTaskId, sourceLineId: Number(d.sourceLineId) }
+            : {})
         })),
         layout2D: {
           placements: placementsPayload,
@@ -944,6 +978,21 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         avoidDefects: slitAvoidDefects
       });
 
+      const slitOrderById = new Map<string, SlittingOrderLine>();
+      for (const o of slitOrders) {
+        slitOrderById.set(String(o.id), o);
+      }
+      const mapSlitOrderId = (rawOrderId: string | number): string => {
+        const key = String(rawOrderId);
+        const ord = slitOrderById.get(key);
+        if (ord?.sourceTaskId && ord.sourceLineId != null) {
+          return allocSummary.isMultiFamily
+            ? `${ord.sourceTaskId}:${ord.sourceLineId}`
+            : String(ord.sourceLineId);
+        }
+        return key;
+      };
+
       const confirmBody = {
         idempotencyKey,
         title: `${activeScheme1D.strategyName} (${activeScheme1D.motherWidthMm}mm · ${activeScheme1D.totalCars}车)`,
@@ -982,7 +1031,11 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
           width: o.widthMm,
           length: slitFixedLengthMm,
           quantity: Math.max(1, o.orderedQty || o.quantity),
-          allowRotation: false
+          allowRotation: false,
+          surfaceTreatment: o.surfaceTreatment,
+          ...(o.sourceTaskId && o.sourceLineId != null
+            ? { sourceTaskId: o.sourceTaskId, sourceLineId: Number(o.sourceLineId) }
+            : {})
         })),
         slitting1D: {
           leftTrimMm: activeScheme1D.leftTrimMm,
@@ -1002,9 +1055,20 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
             usedWidthMm: p.usedWidthMm,
             spareWidthMm: p.spareWidthMm,
             stations: p.stations,
-            ...(p.allocations ? { allocations: p.allocations } : {})
+            ...(p.surfaceTreatment ? { surfaceTreatment: p.surfaceTreatment } : {}),
+            ...(p.allocations && p.allocations.length > 0
+              ? {
+                  allocations: p.allocations.map((a) => ({
+                    orderId: mapSlitOrderId(a.orderId),
+                    quantity: Number(a.quantity) || 0
+                  }))
+                }
+              : {})
           })),
-          fulfillment: activeScheme1D.fulfillment
+          fulfillment: activeScheme1D.fulfillment.map((f) => ({
+            ...f,
+            orderId: mapSlitOrderId(f.orderId)
+          }))
         }
       };
 

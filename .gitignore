@@ -41,6 +41,8 @@ scratch*
 *.log
 *.log.*
 logs/
+!docs/logs/
+!docs/logs/**
 app.log
 nohup.out
 *.dump

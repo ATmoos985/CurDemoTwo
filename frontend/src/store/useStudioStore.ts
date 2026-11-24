@@ -169,7 +169,8 @@ export interface SlittingSchemeRun {
     stations: { widthMm: number; countPerRepetition: number }[];
     usedWidthMm: number;
     spareWidthMm: number;
-    allocations?: { orderId: string; count: number }[];
+    surfaceTreatment?: string;
+    allocations?: { orderId: string; quantity: number }[];
   }[];
   fulfillment: {
     orderId: string;

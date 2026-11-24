@@ -13,6 +13,16 @@ const api = async (path) => {
   return r.json();
 };
 
+const apiPost = async (path, body) => {
+  const r = await fetch(base + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  assert.ok(r.ok, `POST ${path} failed: ${r.status}`);
+  return r.json();
+};
+
 (async () => {
   const browser = await chromium.launch({
     headless: true,
@@ -284,14 +294,38 @@ const api = async (path) => {
       );
       await page.locator('dialog[open] .native-modal-head button').click();
 
-      // Bind Virtual Mother Roll -> One-click auto-create & bind physical roll
-      await page.getByRole('button', { name: '＋ 按方案规格一键建卷并绑定' }).click();
+      // Bind Virtual Mother Roll -> Create pending physical roll (P0-8: must NOT auto-pass inspection) -> Inspect & PASS -> Bind
+      await page.getByRole('button', { name: '＋ 按方案规格新建待检母卷' }).click();
+      const pendingHint = page.locator('.mp-res-pending-roll-hint');
+      await pendingHint.waitFor({ timeout: 10000 });
+      const createdPendingRollId = await pendingHint.getAttribute('data-pending-roll-id');
+      assert.ok(createdPendingRollId, 'Created pending rollId must be displayed for inspection release');
+
+      // Verify scheme remains AWAITING_ROLL and newly created roll is PENDING without inspector
+      const pendingDetail = await api('/api/v2/schemes/' + encodeURIComponent(confirmedSchemeId));
+      assert.equal(pendingDetail.scheme.state, 'AWAITING_ROLL', 'Auto-created roll must not bypass inspection into READY_TO_CUT');
+      assert.ok(!pendingDetail.scheme.rollId, 'Uninspected roll must not be locked onto scheme');
+      const createdRoll = await api('/api/rolls/' + encodeURIComponent(createdPendingRollId));
+      assert.equal(createdRoll.inspectionStatus, 'PENDING', 'Auto-created roll must default to PENDING');
+      assert.equal(createdRoll.inspector || '', '', 'Auto-created roll must not forge an inspector');
+
+      // Complete real inspection release on the pending roll, refresh Results Center, then bind it
+      await apiPost('/api/rolls', {
+        ...createdRoll,
+        inspectionStatus: 'PASSED',
+        inspector: 'E2E验布员'
+      });
+      await page.getByRole('button', { name: '刷新列表' }).click();
+      const rollSelect = page.locator('select[aria-label="选择在库合格母卷"]');
+      await rollSelect.waitFor({ timeout: 10000 });
+      await rollSelect.selectOption(createdPendingRollId);
+      await page.getByRole('button', { name: '绑定所选在库母卷并校验疵点' }).click();
 
       // Wait for state badge to become 已锁实卷待切
       await page.locator('.tag', { hasText: '已锁实卷待切' }).first().waitFor({ timeout: 10000 });
       const boundDetail = await api('/api/v2/schemes/' + encodeURIComponent(confirmedSchemeId));
       assert.equal(boundDetail.scheme.state, 'READY_TO_CUT');
-      assert.ok(boundDetail.scheme.rollId, 'Physical rollId bound');
+      assert.equal(boundDetail.scheme.rollId, createdPendingRollId, 'Physical rollId bound after inspection pass');
       autoBoundRollId = boundDetail.scheme.rollId;
 
       // One-click complete accounting now requires explicit ModalDialog summary confirmation

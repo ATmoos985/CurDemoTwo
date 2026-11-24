@@ -464,7 +464,7 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
                     const matchedAlloc =
                       hasOrderHighlight && hasAlloc
                         ? p.allocations!.find(
-                            (a) => String(a.orderId) === String(highlightedOrder1D!.id) && a.count > 0
+                            (a) => String(a.orderId) === String(highlightedOrder1D!.id) && a.quantity > 0
                           )
                         : null;
                     const hasWidthInPattern =
@@ -497,7 +497,7 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
                           </span>
                           {matchedAlloc && (
                             <span className="slit-alloc-pill num">
-                              本单 {matchedAlloc.count} 卷
+                              本单 {matchedAlloc.quantity} 卷
                             </span>
                           )}
                           <span className="sp" />

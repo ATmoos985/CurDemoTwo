@@ -17,7 +17,8 @@ const STATE_BADGE: Record<string, { label: string; cls: string }> = {
   READY_TO_CUT: { label: '已锁实卷待切', cls: 'run' },
   DISPATCHED_MES: { label: '已下发 MES', cls: 'kind' },
   COMPLETED: { label: '已完工记账', cls: 'ok' },
-  CANCELLED: { label: '已作废释放', cls: '' }
+  CANCELLED: { label: '已作废释放', cls: '' },
+  REVERSED: { label: '已冲销释放', cls: 'warn' }
 };
 
 function sanitizeSchemeTitle(raw?: string): string {
@@ -172,6 +173,7 @@ export const ResultsCenterPage: React.FC<{
   // Bind Roll Form State
   const [bindRollId, setBindRollId] = useState<string>('');
   const [newRollCode, setNewRollCode] = useState<string>('');
+  const [pendingCreatedRollId, setPendingCreatedRollId] = useState<string>('');
 
   // Custom Settlement Modal State
   const [showQuickCompleteConfirm, setShowQuickCompleteConfirm] = useState(false);
@@ -248,9 +250,25 @@ export const ResultsCenterPage: React.FC<{
     );
   }, [rolls, activeScheme]);
 
+  const matchingPendingRolls = useMemo(() => {
+    if (!activeScheme) return [];
+    return rolls.filter(
+      (r) =>
+        r.inspectionStatus === 'PENDING' &&
+        Math.abs(r.width - activeScheme.widthMm) <= 1.0 &&
+        (r.currentRemainingLength ?? r.totalLength) >= activeScheme.occupiedLengthMm
+    );
+  }, [rolls, activeScheme]);
+
+  useEffect(() => {
+    setPendingCreatedRollId('');
+  }, [activeScheme?.id]);
+
   useEffect(() => {
     if (matchingPassedRolls.length > 0) {
-      setBindRollId(matchingPassedRolls[0].rollId);
+      setBindRollId((prev) =>
+        matchingPassedRolls.some((r) => r.rollId === prev) ? prev : matchingPassedRolls[0].rollId
+      );
     } else {
       setBindRollId('');
     }
@@ -303,7 +321,22 @@ export const ResultsCenterPage: React.FC<{
               autoCreateRoll: false
             }
       );
-      toast(`已成功锁卷绑定：${updated.scheme.rollId}（区间 Y=${fmtN(updated.scheme.windowStartY)}~${fmtN(updated.scheme.windowStartY + updated.scheme.occupiedLengthMm)}mm）`);
+      if (updated?.awaitingInspection || updated?.scheme?.state === 'AWAITING_ROLL') {
+        const createdId =
+          updated?.createdRoll?.rollId ||
+          updated?.rollInfo?.rollId ||
+          newRollCode.trim();
+        if (createdId) setPendingCreatedRollId(createdId);
+        toast(
+          updated?.message ||
+            `已按方案规格新建待检母卷 ${createdId || ''}（PENDING），请完成跑布验疵并质检放行后再执行锁卷绑定`
+        );
+      } else {
+        setPendingCreatedRollId('');
+        toast(
+          `已成功锁卷绑定：${updated.scheme.rollId}（区间 Y=${fmtN(updated.scheme.windowStartY)}~${fmtN(updated.scheme.windowStartY + updated.scheme.occupiedLengthMm)}mm）`
+        );
+      }
       setNewRollCode('');
       await loadAll();
     } catch (err: any) {
@@ -959,9 +992,49 @@ export const ResultsCenterPage: React.FC<{
                         disabled={busy}
                         onClick={() => handleBindStockRoll(true)}
                       >
-                        ＋ 按方案规格一键建卷并绑定
+                        ＋ 按方案规格新建待检母卷
                       </button>
                     </div>
+                    {(pendingCreatedRollId || matchingPendingRolls.length > 0) && (() => {
+                      const focusPendingId =
+                        pendingCreatedRollId &&
+                        rolls.some(
+                          (r) => r.rollId === pendingCreatedRollId && r.inspectionStatus === 'PENDING'
+                        )
+                          ? pendingCreatedRollId
+                          : matchingPendingRolls[0]?.rollId || pendingCreatedRollId;
+                      if (!focusPendingId) return null;
+                      return (
+                        <div
+                          className="mp-res-pending-roll-hint"
+                          data-pending-roll-id={focusPendingId}
+                          style={{
+                            marginTop: 8,
+                            padding: '8px 10px',
+                            borderRadius: 6,
+                            background: 'rgba(245, 158, 11, 0.1)',
+                            border: '1px solid rgba(245, 158, 11, 0.35)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 10,
+                            flexWrap: 'wrap',
+                            fontSize: 12
+                          }}
+                        >
+                          <span>
+                            <span className="tag warn" style={{ marginRight: 6 }}>待质检放行</span>
+                            母卷 <b className="num">{focusPendingId}</b> 已按方案规格入库（状态 PENDING），须完成跑布验疵并质检放行后，再刷新并选择该合格卷执行锁卷绑定。
+                          </span>
+                          <a
+                            className="mp-ghost-btn mp-ghost-sm"
+                            href={`#/inspection/${encodeURIComponent(focusPendingId)}`}
+                          >
+                            前往跑布验疵放行 →
+                          </a>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
