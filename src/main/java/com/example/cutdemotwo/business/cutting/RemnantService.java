@@ -34,7 +34,7 @@ import java.util.stream.Collectors;
  * 维护母卷物理规格、多道工序验布疵点、现场料头库存货架与代际派生血统
  */
 @Service
-public class RemnantService {
+public class RemnantService implements CuttingStatePort {
 
     private final Map<String, RemnantStock> remnantPool = new ConcurrentHashMap<>();
     private final Map<String, MotherRollInfo> motherRolls = new LinkedHashMap<>();
@@ -1929,32 +1929,249 @@ public class RemnantService {
         return false;
     }
 
-    // ---- Package-private transactional hooks for SchedulingStudioService ----
-    synchronized <T> T studioRead(java.util.function.Supplier<T> query) {
-        return read(query);
+    // ---- Controlled CuttingStatePort implementation ----
+
+    @Override
+    public synchronized <T> T inRead(java.util.function.Function<CuttingStatePort.ReadView, T> query) {
+        return read(() -> {
+            TxContext tx = new TxContext(false);
+            try {
+                return query.apply(tx);
+            } finally {
+                tx.close();
+            }
+        });
     }
 
-    synchronized <T> T studioMutate(String eventType, String businessId, String actor, java.util.function.Supplier<T> command) {
-        return mutate(eventType, businessId, actor, command);
+    @Override
+    public synchronized <T> T inWrite(
+            String eventType,
+            String businessId,
+            String actor,
+            java.util.function.Function<CuttingStatePort.WriteTx, T> command
+    ) {
+        return mutate(eventType, businessId, actor, () -> {
+            TxContext tx = new TxContext(true);
+            try {
+                return command.apply(tx);
+            } finally {
+                tx.close();
+            }
+        });
     }
 
-    Map<String, DemandTemplate> templateMap() { return templates; }
-    Map<String, SchedulingScheme> schemeMap() { return schemes; }
-    Map<String, CuttingTask> taskMap() { return tasks; }
-    Map<String, CuttingPlan> planMap() { return plans; }
-    Map<String, ExecutionOrder> executionMap() { return executions; }
-    Map<String, MotherRollInfo> rollMap() { return motherRolls; }
-    Map<String, RemnantStock> remnantMap() { return remnantPool; }
-    Map<String, Map<String, Object>> receiptMap() { return receipts; }
-    long currentOperationTime() { return operationTime; }
-    long currentRevision() { return revision; }
-    ObjectMapper jsonMapper() { return json; }
-    CuttingTask saveTaskInTx(CuttingTask input) { return saveTaskInternal(input); }
-    MotherRollInfo saveRollInTx(MotherRollInfo roll) { return saveOrUpdateMotherRollInternal(roll); }
-    void prepareTaskSolveInTx(SolveRequest request) { prepareTaskSolveInternal(request); }
-    String materialFingerprintInTx(SolveRequest request) { return materialFingerprintInternal(request); }
-    Map<String, Integer> completedQuantitiesInTx(String taskId) { return completedQuantitiesInternal(taskId); }
-    Map<String, Integer> executionReservedQuantitiesInTx(String taskId, String exceptPlan) { return reservedQuantities(taskId, exceptPlan); }
-    Map<String, Object> confirmPlanInTx(CutReport report, Set<String> pendingBatchPlans) { return confirmPlanInternal(report, pendingBatchPlans); }
-    Map<String, Object> projectQualityInTx(Map<String, Object> receipt) { return qualityProjection(receipt); }
+    private final class TxContext implements CuttingStatePort.WriteTx {
+        private final boolean writable;
+        private boolean active = true;
+
+        private TxContext(boolean writable) {
+            this.writable = writable;
+        }
+
+        private void close() {
+            this.active = false;
+        }
+
+        private void ensureActive() {
+            if (!active) throw new IllegalStateException("事务上下文已关闭，禁止在事务外访问状态");
+        }
+
+        private void ensureWritable() {
+            ensureActive();
+            if (!writable) throw new IllegalStateException("只读事务上下文禁止写入操作");
+        }
+
+        @Override
+        public long operationTime() {
+            ensureActive();
+            return operationTime;
+        }
+
+        @Override
+        public List<DemandTemplate> listTemplates() {
+            ensureActive();
+            return List.copyOf(templates.values());
+        }
+
+        @Override
+        public List<SchedulingScheme> listSchemes() {
+            ensureActive();
+            return List.copyOf(schemes.values());
+        }
+
+        @Override
+        public Optional<SchedulingScheme> findScheme(String id) {
+            ensureActive();
+            return id == null ? Optional.empty() : Optional.ofNullable(schemes.get(id));
+        }
+
+        @Override
+        public Optional<SchedulingScheme> findSchemeByIdempotencyKey(String idempotencyKey) {
+            ensureActive();
+            if (idempotencyKey == null) return Optional.empty();
+            for (SchedulingScheme existing : schemes.values()) {
+                if (idempotencyKey.equals(existing.idempotencyKey())) {
+                    return Optional.of(existing);
+                }
+            }
+            return Optional.empty();
+        }
+
+        @Override
+        public List<CuttingTask> listTasks() {
+            ensureActive();
+            return List.copyOf(tasks.values());
+        }
+
+        @Override
+        public Optional<CuttingTask> findTask(String id) {
+            ensureActive();
+            return id == null ? Optional.empty() : Optional.ofNullable(tasks.get(id));
+        }
+
+        @Override
+        public Optional<CuttingTask> findTaskByExternalRef(String externalRef) {
+            ensureActive();
+            if (externalRef == null) return Optional.empty();
+            return tasks.values().stream()
+                    .filter(t -> externalRef.equals(t.externalRef()))
+                    .findFirst();
+        }
+
+        @Override
+        public List<CuttingPlan> listPlans() {
+            ensureActive();
+            return List.copyOf(plans.values());
+        }
+
+        @Override
+        public Optional<CuttingPlan> findPlan(String id) {
+            ensureActive();
+            return id == null ? Optional.empty() : Optional.ofNullable(plans.get(id));
+        }
+
+        @Override
+        public List<ExecutionOrder> listExecutions() {
+            ensureActive();
+            return List.copyOf(executions.values());
+        }
+
+        @Override
+        public Optional<MotherRollInfo> findRoll(String id) {
+            ensureActive();
+            return id == null ? Optional.empty() : Optional.ofNullable(motherRolls.get(id));
+        }
+
+        @Override
+        public Optional<RemnantStock> findRemnant(String id) {
+            ensureActive();
+            return id == null ? Optional.empty() : Optional.ofNullable(remnantPool.get(id));
+        }
+
+        @Override
+        public List<RemnantStock> listRemnantsBySourceRoll(String rollId) {
+            ensureActive();
+            if (rollId == null) return List.of();
+            return remnantPool.values().stream()
+                    .filter(rm -> rollId.equalsIgnoreCase(rm.getSourceRollId()))
+                    .toList();
+        }
+
+        @Override
+        public Optional<Map<String, Object>> findReceipt(String planId) {
+            ensureActive();
+            return planId == null ? Optional.empty() : Optional.ofNullable(receipts.get(planId));
+        }
+
+        @Override
+        public List<Map<String, Object>> listReceipts() {
+            ensureActive();
+            return List.copyOf(receipts.values());
+        }
+
+        @Override
+        public Map<String, Integer> completedQuantities(String taskId) {
+            ensureActive();
+            return completedQuantitiesInternal(taskId);
+        }
+
+        @Override
+        public Map<String, Object> projectQuality(Map<String, Object> receipt) {
+            ensureActive();
+            return qualityProjection(receipt);
+        }
+
+        @Override
+        public void putTemplate(DemandTemplate template) {
+            ensureWritable();
+            if (template == null || template.id() == null || template.id().isBlank()) {
+                throw new IllegalArgumentException("需求模板及其编号不能为空");
+            }
+            templates.put(template.id(), template);
+        }
+
+        @Override
+        public boolean removeTemplate(String id) {
+            ensureWritable();
+            if (id == null || id.isBlank()) return false;
+            return templates.remove(id.trim()) != null;
+        }
+
+        @Override
+        public void putScheme(SchedulingScheme scheme) {
+            ensureWritable();
+            if (scheme == null || scheme.id() == null || scheme.id().isBlank()) {
+                throw new IllegalArgumentException("排程方案及其编号不能为空");
+            }
+            schemes.put(scheme.id(), scheme);
+        }
+
+        @Override
+        public CuttingTask saveTask(CuttingTask input) {
+            ensureWritable();
+            return saveTaskInternal(input);
+        }
+
+        @Override
+        public MotherRollInfo saveRoll(MotherRollInfo roll) {
+            ensureWritable();
+            return saveOrUpdateMotherRollInternal(roll);
+        }
+
+        @Override
+        public void prepareTaskSolve(SolveRequest request) {
+            ensureWritable();
+            prepareTaskSolveInternal(request);
+        }
+
+        @Override
+        public String savePendingPlan(SolveRequest request, SolveResponse validated) {
+            ensureWritable();
+            String planId = UUID.randomUUID().toString();
+            validated.setPlanId(planId);
+            String baseline = materialFingerprintInternal(request);
+            CuttingPlan savedPlan = new CuttingPlan(planId, request, validated, baseline, "PENDING", LocalDateTime.now().toString());
+            plans.put(planId, json.readValue(json.writeValueAsBytes(savedPlan), CuttingPlan.class));
+            return planId;
+        }
+
+        @Override
+        public void cancelPendingPlan(String planId) {
+            ensureWritable();
+            Map<String, Object> receipt = receipts.get(planId);
+            if (receipt != null && !"REVERSED".equals(receipt.get("status"))) {
+                throw new InventoryConflictException("方案包含已实切报工记录，无法直接作废");
+            }
+            CuttingPlan plan = plans.get(planId);
+            if (plan != null && "PENDING".equals(plan.status())) {
+                plans.put(planId, plan.withStatus("CANCELLED"));
+            }
+        }
+
+        @Override
+        public Map<String, Object> confirmPlan(CutReport report, Set<String> pendingBatchPlans) {
+            ensureWritable();
+            return confirmPlanInternal(report, pendingBatchPlans);
+        }
+    }
 }
