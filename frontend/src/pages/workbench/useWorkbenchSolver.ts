@@ -598,10 +598,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
             topK: advOpts.topK,
             maxIterations: advOpts.maxIterations,
             maxPatterns: advOpts.maxPatterns,
-            maxDistinctWidths:
-              profile === 'QUALITY'
-                ? Math.max(advOpts.maxDistinctWidths, 5)
-                : advOpts.maxDistinctWidths,
+            maxDistinctWidths: advOpts.maxDistinctWidths,
             stageTimeLimitMs: advOpts.stageTimeLimitMs,
             useOptimizedAssignment: advOpts.useOptimizedAssignment,
             underPenalty: advOpts.underPenalty,
@@ -677,17 +674,47 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         }
       };
 
-      const results = await Promise.all(runProfiles.map((prof) => runProfile(prof)));
-      const orderedResults = [...results].sort((a, b) => {
-        if (a.state === 'SUCCEEDED' && b.state !== 'SUCCEEDED') return -1;
-        if (b.state === 'SUCCEEDED' && a.state !== 'SUCCEEDED') return 1;
-        return a.totalCars - b.totalCars;
-      });
+      const liveRuns = new Map<SlittingProfile, SlittingSchemeRun>(
+        runProfiles.map((prof) => [prof, makePending(prof)])
+      );
+      const sortSchemes = (list: SlittingSchemeRun[]) =>
+        [...list].sort((a, b) => {
+          const rank = (s: SlittingSchemeRun) =>
+            s.state === 'SUCCEEDED' ? 0 : s.state === 'RUNNING' ? 1 : 2;
+          const rDiff = rank(a) - rank(b);
+          if (rDiff !== 0) return rDiff;
+          if (a.state === 'SUCCEEDED' && b.state === 'SUCCEEDED') {
+            if (a.totalCars !== b.totalCars) return a.totalCars - b.totalCars;
+            return (a.patterns?.length ?? 0) - (b.patterns?.length ?? 0);
+          }
+          return 0;
+        });
+
+      let completedCount = 0;
+      const results = await Promise.all(
+        runProfiles.map((prof) =>
+          runProfile(prof).then((done) => {
+            completedCount += 1;
+            liveRuns.set(prof, done);
+            const currentOrdered = sortSchemes(
+              runProfiles.map((p) => liveRuns.get(p) || makePending(p))
+            );
+            setSlitSchemes([...currentOrdered, baselineRun]);
+            if (completedCount < runProfiles.length && done.state === 'SUCCEEDED') {
+              toast(
+                `${done.strategyName} 已先行就绪：${done.totalCars} 车 · ${done.patterns.length} 组（利用率 ${done.avgUtilizationPct}%），其余方案仍在后台计算…`
+              );
+            }
+            return done;
+          })
+        )
+      );
+      const orderedResults = sortSchemes(results);
       setSlitSchemes([...orderedResults, baselineRun]);
       const bestSolved = orderedResults.find((r) => r.state === 'SUCCEEDED');
       if (bestSolved) {
         toast(
-          `分切排版完成：${bestSolved.strategyName} ${bestSolved.totalCars} 车（较独立分切省 ${Math.max(
+          `分切排版完成：${bestSolved.strategyName} ${bestSolved.totalCars} 车 · ${bestSolved.patterns.length} 组（较独立分切省 ${Math.max(
             0,
             baselineRun.totalCars - bestSolved.totalCars
           )} 车，利用率 ${bestSolved.avgUtilizationPct}%）`

@@ -1384,13 +1384,24 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     })),
 
   setSlitSchemes: (schemes) =>
-    set({
-      slitSchemes: schemes,
-      activeSlitSchemeId:
-        schemes.find((s) => s.state === 'SUCCEEDED' && s.strategyId !== 'BASELINE')?.id ||
-        schemes.find((s) => s.state === 'SUCCEEDED')?.id ||
-        schemes[0]?.id ||
-        null
+    set((st) => {
+      const keepActive =
+        st.activeSlitSchemeId != null &&
+        schemes.some(
+          (s) =>
+            s.id === st.activeSlitSchemeId &&
+            s.state === 'SUCCEEDED' &&
+            s.strategyId !== 'BASELINE'
+        );
+      return {
+        slitSchemes: schemes,
+        activeSlitSchemeId: keepActive
+          ? st.activeSlitSchemeId
+          : schemes.find((s) => s.state === 'SUCCEEDED' && s.strategyId !== 'BASELINE')?.id ||
+            schemes.find((s) => s.state === 'SUCCEEDED')?.id ||
+            schemes[0]?.id ||
+            null
+      };
     }),
 
   setActiveSlitScheme: (id) => set({ activeSlitSchemeId: id }),

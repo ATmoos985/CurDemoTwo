@@ -293,7 +293,9 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
                 <div
                   key={s.id}
                   className={`card slit-scheme-card ${activeScheme1D?.id === s.id ? 'on' : ''}`}
-                  onClick={() => setActiveSlitScheme(s.id)}
+                  onClick={() => {
+                    if (s.state !== 'RUNNING') setActiveSlitScheme(s.id);
+                  }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <small style={{ flex: 1, fontWeight: 600, color: 'var(--text)' }}>
@@ -304,13 +306,18 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
                         s.state === 'SUCCEEDED' ? 'ok' : s.state === 'RUNNING' ? 'run' : 'err'
                       }`}
                     >
-                      {s.state === 'SUCCEEDED' ? `${s.elapsedMs}ms` : s.state}
+                      {s.state === 'SUCCEEDED'
+                        ? `${s.elapsedMs}ms`
+                        : s.state === 'RUNNING'
+                        ? '计算中…'
+                        : '失败'}
                     </span>
                   </div>
-                  <b className="num">{s.state === 'RUNNING' ? '…' : `${s.totalCars} 车`}</b>
+                  <b className="num">{s.state === 'RUNNING' ? '计算中…' : `${s.totalCars} 车`}</b>
                   <div className="d num">
-                    组数 {s.patterns?.length ?? 0} · 利用率 {s.avgUtilizationPct}% · 缺口{' '}
-                    {s.missingRolls} · 超产 {s.overproducedRolls}
+                    {s.state === 'RUNNING'
+                      ? '后台并行求解中，完成后自动上屏'
+                      : `组数 ${s.patterns?.length ?? 0} · 利用率 ${s.avgUtilizationPct}% · 缺口 ${s.missingRolls} · 超产 ${s.overproducedRolls}`}
                   </div>
                 </div>
               ))}

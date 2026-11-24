@@ -113,7 +113,7 @@ function applySlitDraftToRequest(baseReq: any, draft: ShowcaseSlitDraft, profile
       topK: Math.min(50, Math.max(0, Math.floor(Number(draft.topK) || 0))),
       maxIterations: Math.min(5000, Math.max(1, Math.floor(Number(draft.maxIterations) || 300))),
       maxPatterns: Math.min(20000, Math.max(1, Math.floor(Number(draft.maxPatterns) || 800))),
-      maxDistinctWidths: profile === 'QUALITY' ? Math.max(rawDistinct, 5) : rawDistinct,
+      maxDistinctWidths: rawDistinct,
       stageTimeLimitMs: Math.min(
         600000,
         Math.max(1000, Math.floor(Number(draft.stageTimeLimitMs) || 120000))
