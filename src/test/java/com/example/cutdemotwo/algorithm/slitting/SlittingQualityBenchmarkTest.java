@@ -100,6 +100,40 @@ class SlittingQualityBenchmarkTest {
         }
     }
 
+    @Test
+    void compareFastVsQualityOnT2985() {
+        var fastProblem = new SlittingProblem(
+                "1", "mm", 4600, 100, 100, 4200, 4400, 10, 0, "FAST", t2985Orders(), 60);
+        var qualityProblem = new SlittingProblem(
+                "1", "mm", 4600, 100, 100, 4200, 4400, 10, 0, "QUALITY", t2985Orders(), 60);
+        LinearSlittingSolverEngine engine = new LinearSlittingSolverEngine();
+        try {
+            long t0 = System.nanoTime();
+            SlittingResult fast = engine.solve(fastProblem);
+            long fastMs = (System.nanoTime() - t0) / 1_000_000L;
+
+            long t1 = System.nanoTime();
+            SlittingResult quality = engine.solve(qualityProblem);
+            long qualityMs = (System.nanoTime() - t1) / 1_000_000L;
+
+            int fastCars = fast.patterns().stream().mapToInt(SlittingResult.Pattern::repetitions).sum();
+            int qualityCars = quality.patterns().stream().mapToInt(SlittingResult.Pattern::repetitions).sum();
+            double fastUtil = 100.0 * fast.pieceAreaMm2() / fast.motherAreaMm2();
+            double qualityUtil = 100.0 * quality.pieceAreaMm2() / quality.motherAreaMm2();
+            System.out.printf(Locale.ROOT,
+                    "%n=== T29-85 (overCap=0, 60s) FAST vs QUALITY ===%n"
+                            + "FAST   : %5dms | cars=%d | util=%.2f%% | over=%d | pats=%d | seqGrp=%d%n"
+                            + "QUALITY: %5dms | cars=%d | util=%.2f%% | over=%d | pats=%d | seqGrp=%d%n",
+                    fastMs, fastCars, fastUtil, fast.totalOverproduced(), fast.patterns().size(), countSequenceGroups(fast),
+                    qualityMs, qualityCars, qualityUtil, quality.totalOverproduced(), quality.patterns().size(), countSequenceGroups(quality));
+            assertTrue(quality.totalOverproduced() <= fast.totalOverproduced());
+            assertTrue(qualityCars <= fastCars, "QUALITY 车数不应劣于 FAST: quality=" + qualityCars + " fast=" + fastCars);
+            assertTrue(qualityUtil + 1e-4 >= fastUtil, "QUALITY 利用率不应低于 FAST");
+        } finally {
+            closeIfAutoCloseable(engine);
+        }
+    }
+
     private static void closeIfAutoCloseable(Object engine) {
         if (engine instanceof AutoCloseable closeable) {
             try {

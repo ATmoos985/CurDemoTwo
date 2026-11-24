@@ -462,20 +462,21 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
         long totalMs = p.timeLimitSeconds() * 1000L;
         boolean warmWorker = Boolean.getBoolean(WARM_WORKER_PROP);
         long startupMarginMs = warmWorker
-                ? Math.min(1_000L, Math.max(300L, totalMs / 10))
+                ? Math.min(3_000L, Math.max(1_000L, totalMs / 15))
                 : Math.min(4_500L, Math.max(1_500L, totalMs / 4));
         long internalBudgetMs = Math.max(500L, totalMs - startupMarginMs);
         long stageLimitMs = p.stageTimeLimitMs() != null ? p.stageTimeLimitMs() : 120_000L;
-        // 隔离进程内多阶段串行共享总时限：精修模式压缩单阶段帽，为 B 层 Stage5 与受控 LNS 预留充裕预算。
+        // 隔离进程内多阶段串行共享总时限：精修模式须先保底与 FAST 同等强度的 A 层基线（避免截断倒挂），
+        // 再将剩余预算用于多候选选型与 B 层受控 LNS 压缩序号组。
         long effectiveStageMs = fast
                 ? Math.max(1_000L, Math.min(stageLimitMs, internalBudgetMs))
-                : Math.max(2_000L, Math.min(stageLimitMs, Math.min(15_000L, internalBudgetMs / 6)));
+                : Math.max(2_000L, Math.min(stageLimitMs, Math.min(internalBudgetMs, Math.max(25_000L, internalBudgetMs / 3))));
         long effectiveStage4Ms = fast
                 ? Math.max(1_000L, Math.min(30_000L, effectiveStageMs / 2))
-                : Math.max(1_500L, Math.min(10_000L, effectiveStageMs / 2));
+                : Math.max(1_500L, Math.min(15_000L, effectiveStageMs / 2));
         long effectiveFastBudgetMs = fast
                 ? internalBudgetMs
-                : Math.min(8_000L, effectiveStageMs);
+                : Math.min(internalBudgetMs, Math.max(effectiveStageMs, internalBudgetMs / 2));
 
         config.setTotalOverCap(p.totalOverCap());
         config.setTimeoutMs(effectiveStageMs);
@@ -485,7 +486,8 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
         config.setMaxIterations(p.maxIterations() != null ? p.maxIterations() : 300);
         config.setNewSolverMaxPatterns(p.maxPatterns() != null ? p.maxPatterns() : 800);
         int requestedDistinct = p.maxDistinctWidths() != null ? p.maxDistinctWidths() : 4;
-        config.setNewSolverMaxDistinctWidths(fast ? requestedDistinct : Math.max(requestedDistinct, 5));
+        // 保持 QUALITY 与 FAST 相同的列生成规格上限，避免擅自放大组合空间导致短时限内 SCIP 收敛劣化。
+        config.setNewSolverMaxDistinctWidths(requestedDistinct);
         if (p.useOptimizedAssignment() != null) {
             config.setNewSolverUseOptimizedAssignment(p.useOptimizedAssignment());
         }

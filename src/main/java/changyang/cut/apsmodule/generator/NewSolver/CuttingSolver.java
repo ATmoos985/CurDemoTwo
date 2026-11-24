@@ -777,7 +777,7 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
         }
         long now = System.currentTimeMillis();
         long remainingMs = Math.max(1_000L, groupDeadlineMs - now);
-        return now + Math.max(2_000L, remainingMs * 40 / 100);
+        return now + Math.max(2_000L, remainingMs * 55 / 100);
     }
 
     /**

@@ -246,4 +246,41 @@ class LinearSlittingSolverEngineTests {
         assertTrue(withAutoLns.patterns().size() <= withoutLns.patterns().size(),
                 "自动 LNS 压缩后的序号组数不应劣于关闭 LNS");
     }
+
+    @Test
+    void qualityModeNeverDegradesCarsOrUtilizationComparedToFastMode() {
+        var orders = List.of(
+                new SlittingProblem.Order("O1", 750, 50_000L, 40, "S"),
+                new SlittingProblem.Order("O2", 790, 50_000L, 28, "S"),
+                new SlittingProblem.Order("O3", 830, 50_000L, 32, "S"),
+                new SlittingProblem.Order("O4", 910, 50_000L, 26, "S"),
+                new SlittingProblem.Order("O5", 960, 50_000L, 30, "S"),
+                new SlittingProblem.Order("O6", 1020, 50_000L, 22, "S"),
+                new SlittingProblem.Order("O7", 1090, 50_000L, 18, "S"),
+                new SlittingProblem.Order("O8", 1160, 50_000L, 20, "S"),
+                new SlittingProblem.Order("O9", 1260, 50_000L, 16, "S"),
+                new SlittingProblem.Order("O10", 1480, 50_000L, 14, "S")
+        );
+        var fastProblem = new SlittingProblem("1", "mm", 4500, 50, 50, 4200, 4400, 10, 0, "FAST", orders, 60);
+        var qualityProblem = new SlittingProblem("1", "mm", 4500, 50, 50, 4200, 4400, 10, 0, "QUALITY", orders, 60);
+
+        var fastRes = engine.solve(fastProblem);
+        var qualityRes = engine.solve(qualityProblem);
+        assertEquals("FEASIBLE", fastRes.status());
+        assertEquals("FEASIBLE", qualityRes.status());
+
+        int fastCars = fastRes.patterns().stream().mapToInt(SlittingResult.Pattern::repetitions).sum();
+        int qualityCars = qualityRes.patterns().stream().mapToInt(SlittingResult.Pattern::repetitions).sum();
+        double fastUtil = fastRes.pieceAreaMm2() / (double) fastRes.motherAreaMm2();
+        double qualityUtil = qualityRes.pieceAreaMm2() / (double) qualityRes.motherAreaMm2();
+
+        assertTrue(qualityRes.totalOverproduced() <= fastRes.totalOverproduced(),
+                "QUALITY 超产不应高于 FAST: quality=" + qualityRes.totalOverproduced() + " fast=" + fastRes.totalOverproduced());
+        if (qualityRes.totalOverproduced() == fastRes.totalOverproduced()) {
+            assertTrue(qualityCars <= fastCars,
+                    "QUALITY 车数不应劣于 FAST: quality=" + qualityCars + " fast=" + fastCars);
+            assertTrue(qualityUtil + 1e-6 >= fastUtil,
+                    "QUALITY 利用率不应低于 FAST: quality=" + qualityUtil + " fast=" + fastUtil);
+        }
+    }
 }
