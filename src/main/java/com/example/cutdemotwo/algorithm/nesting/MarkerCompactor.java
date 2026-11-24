@@ -24,7 +24,8 @@ final class MarkerCompactor {
     record Slab(double left, double right, Edge top, Edge bottom) {}
     private record Interval(double low, double high) {}
 
-    record SlabProfile(List<Slab> slabs, double[] xs, double minX, double maxX, double minY, double maxY) {
+    record SlabProfile(List<Slab> slabs, double[] xs, double[] coarseXs,
+                       double minX, double maxX, double minY, double maxY) {
         static SlabProfile ofShape(Shape shape) {
             return ofRings(List.of(PolygonGeometry.vertices(shape)));
         }
@@ -50,7 +51,7 @@ final class MarkerCompactor {
                     .sorted()
                     .toArray();
             if (rawXs.length == 0) {
-                return new SlabProfile(List.of(), new double[0], 0.0, 0.0, 0.0, 0.0);
+                return new SlabProfile(List.of(), new double[0], new double[0], 0.0, 0.0, 0.0, 0.0);
             }
             double minY = Double.POSITIVE_INFINITY;
             double maxY = Double.NEGATIVE_INFINITY;
@@ -69,6 +70,7 @@ final class MarkerCompactor {
                 }
             }
             double[] xs = Arrays.copyOf(dedup, count);
+            double[] coarseXs = extractCoarseXs(xs);
             var slabs = new ArrayList<Slab>();
             // Between two consecutive vertex x-coordinates the contour edges are straight and never cross.
             // Each pair of intersections bounds one filled trapezoid, also for concave outlines and holes.
@@ -88,7 +90,31 @@ final class MarkerCompactor {
                 for (int j = 1; j < crossings.size(); j += 2)
                     slabs.add(new Slab(xs[i - 1], xs[i], crossings.get(j - 1), crossings.get(j)));
             }
-            return new SlabProfile(slabs, xs, xs[0], xs[xs.length - 1], minY, maxY);
+            return new SlabProfile(slabs, xs, coarseXs, xs[0], xs[xs.length - 1], minY, maxY);
+        }
+
+        /**
+         * 仅用于大批量无疵点（{@code >= 48} 件）压紧的粗粒度关键 X 抽稀，
+         * 避免圆弧外扩后百万级笛卡尔积爆炸；小批量及带疵点算例始终使用全量 {@code xs}，精确碰撞检测始终使用全量 {@code slabs}。
+         */
+        private static double[] extractCoarseXs(double[] xs) {
+            if (xs.length <= 6) {
+                return xs;
+            }
+            double span = xs[xs.length - 1] - xs[0];
+            double minStep = Math.max(2.0, span / 4.0);
+            double[] buf = new double[xs.length];
+            int k = 0;
+            buf[k++] = xs[0];
+            for (int i = 1; i < xs.length - 1; i++) {
+                if (xs[i] - buf[k - 1] >= minStep) {
+                    buf[k++] = xs[i];
+                }
+            }
+            if (xs[xs.length - 1] - buf[k - 1] > 1e-10) {
+                buf[k++] = xs[xs.length - 1];
+            }
+            return Arrays.copyOf(buf, k);
         }
     }
 
@@ -156,44 +182,70 @@ final class MarkerCompactor {
                 .filter(o -> o.angle == p.rotationDegrees()).findFirst().orElseThrow(), p.x(), p.y(), false));
         var order = new ArrayList<Integer>();
         for (int i = 0; i < pieces.size(); i++) order.add(i);
-        for (int pass = 0; pass < 4 && !expired(deadline); pass++) {
-            order.sort(Comparator.comparingDouble((Integer i) -> bottom(pieces.get(i))).reversed());
+        // 严格门控：仅 >= 48 件且无疵点算例启用大批量末端剥皮与抽稀采样；< 48 件或带疵点算例 100% 沿用原路径零变化
+        boolean largeBatch = pieces.size() >= ContourPartitionSolver.MIN_PARTITION_PIECES && defects.isEmpty();
+        int maxPasses = largeBatch ? 2 : 4;
+        for (int pass = 0; pass < maxPasses && !expired(deadline); pass++) {
+            order.sort(largeBatch
+                    ? Comparator.comparingDouble((Integer i) -> bottom(pieces.get(i))).reversed()
+                            .thenComparingInt(Integer::intValue)
+                    : Comparator.comparingDouble((Integer i) -> bottom(pieces.get(i))).reversed());
             boolean moved = false;
-            for (int index : order) {
+            int limitCount = largeBatch ? Math.min(order.size(), 10) : order.size();
+            int consecutiveNoYDrop = 0;
+            for (int k = 0; k < limitCount; k++) {
+                int index = order.get(k);
                 if (expired(deadline)) break;
                 var old = pieces.get(index);
+                double oldBottom = bottom(old);
                 var obstacles = new ArrayList<>(pieces);
                 obstacles.remove(index);
                 obstacles.addAll(defects);
                 var best = bestPosition(problem.width(), old, choices.get(incumbent.get(index).demandId()),
-                        obstacles, pass % 2 == 0, deadline);
-                if (!best.equals(old)) { pieces.set(index, best); moved = true; }
+                        obstacles, pass % 2 == 0, largeBatch, deadline);
+                if (!best.equals(old)) {
+                    pieces.set(index, best);
+                    if (!largeBatch || bottom(best) < oldBottom - 0.5) {
+                        moved = true;
+                        consecutiveNoYDrop = 0;
+                    } else {
+                        consecutiveNoYDrop++;
+                    }
+                } else if (largeBatch) {
+                    consecutiveNoYDrop++;
+                }
+                // 大批量末端剥皮：仅靠 X 方向微挪不降低 Y 时，最末端瓶颈件连续 3 件无法降高即确定性早停
+                if (largeBatch && consecutiveNoYDrop >= 3 && !moved) {
+                    break;
+                }
             }
             if (!moved) break;
         }
         double before = incumbent.stream().mapToDouble(p -> p.y() + p.shape().height()).max().orElse(0);
         // When sliding individual pieces is locally stuck, try rebuilding from the largest pieces.
         // Only a full marker shorter than the incumbent is accepted, even if the budget expires mid-pass.
-        var byHeight = Comparator.comparingDouble((Integer i) -> pieces.get(i).oriented.shape.height());
-        var byWidth = Comparator.comparingDouble((Integer i) -> pieces.get(i).oriented.shape.width());
-        for (var sorting : List.of(byHeight.thenComparing(byWidth), byWidth.thenComparing(byHeight))) {
-            if (expired(deadline)) break;
-            order.sort(sorting.reversed());
-            double limit = pieces.stream().mapToDouble(MarkerCompactor::bottom).max().orElse(0);
-            var obstacles = new ArrayList<>(defects);
-            var rebuilt = new Positioned[pieces.size()];
-            for (int index : order) {
+        if (!largeBatch) {
+            var byHeight = Comparator.comparingDouble((Integer i) -> pieces.get(i).oriented.shape.height());
+            var byWidth = Comparator.comparingDouble((Integer i) -> pieces.get(i).oriented.shape.width());
+            for (var sorting : List.of(byHeight.thenComparing(byWidth), byWidth.thenComparing(byHeight))) {
                 if (expired(deadline)) break;
-                var options = choices.get(incumbent.get(index).demandId());
-                var first = options.get(0);
-                var absent = new Positioned(first, 0, limit + .001 - first.shape.height(), false);
-                var placed = bestPosition(problem.width(), absent, options, obstacles, true, deadline);
-                if (placed == absent || bottom(placed) >= limit - EPS) break;
-                rebuilt[index] = placed;
-                obstacles.add(placed);
-            }
-            if (!Arrays.asList(rebuilt).contains(null)) {
-                for (int index : order) pieces.set(index, rebuilt[index]);
+                order.sort(sorting.reversed());
+                double limit = pieces.stream().mapToDouble(MarkerCompactor::bottom).max().orElse(0);
+                var obstacles = new ArrayList<>(defects);
+                var rebuilt = new Positioned[pieces.size()];
+                for (int index : order) {
+                    if (expired(deadline)) break;
+                    var options = choices.get(incumbent.get(index).demandId());
+                    var first = options.get(0);
+                    var absent = new Positioned(first, 0, limit + .001 - first.shape.height(), false);
+                    var placed = bestPosition(problem.width(), absent, options, obstacles, true, false, deadline);
+                    if (placed == absent || bottom(placed) >= limit - EPS) break;
+                    rebuilt[index] = placed;
+                    obstacles.add(placed);
+                }
+                if (!Arrays.asList(rebuilt).contains(null)) {
+                    for (int index : order) pieces.set(index, rebuilt[index]);
+                }
             }
         }
         if (pieces.stream().mapToDouble(MarkerCompactor::bottom).max().orElse(0) >= before - EPS) return incumbent;
@@ -242,7 +294,7 @@ final class MarkerCompactor {
             double area = part.shape().areaMm2();
             for (int i = 0; i < limits.get(part.id()) && area <= remainingArea + EPS; i++) {
                 if (expired(deadline) || fixed.size() + extras.size() >= MAX_FILLED_PIECES) break;
-                var placed = bestPosition(problem.width(), absent, choices, obstacles, true, deadline);
+                var placed = bestPosition(problem.width(), absent, choices, obstacles, true, false, deadline);
                 if (placed == absent || bottom(placed) > length) break;
                 while (usedIds.contains(nextId)) nextId++;
                 extras.add(new Placement(nextId++, part.id(), part.name(), placed.x, placed.y,
@@ -275,7 +327,7 @@ final class MarkerCompactor {
     }
 
     private static Positioned bestPosition(double width, Positioned best, List<Oriented> orientations,
-                                           List<Positioned> obstacles, boolean preferLeft, long deadline) {
+                                           List<Positioned> obstacles, boolean preferLeft, boolean largeBatch, long deadline) {
         AabbBvh obstacleBvh = buildObstacleBvh(obstacles);
         double[] xBuf = new double[256];
         for (var orientation : orientations) {
@@ -293,8 +345,8 @@ final class MarkerCompactor {
                 if (obstacle.y + obsProfile.minY > currentLimit + selfProfile.maxY + EPS) {
                     continue;
                 }
-                double[] oxs = obsProfile.xs;
-                double[] sxs = selfProfile.xs;
+                double[] oxs = largeBatch ? obsProfile.coarseXs : obsProfile.xs;
+                double[] sxs = largeBatch ? selfProfile.coarseXs : selfProfile.xs;
                 int needed = xCount + oxs.length * sxs.length;
                 if (needed > xBuf.length) {
                     xBuf = Arrays.copyOf(xBuf, Math.max(needed, xBuf.length * 2));
@@ -311,9 +363,11 @@ final class MarkerCompactor {
                 }
             }
             Arrays.sort(xBuf, 0, xCount);
-            // 原地线性去重；当圆弧外扩导致密集 X 采样点过多时，跳过间距极小的冗余邻近点，同时保留首尾点
+            // 原地线性去重；仅大批量无疵点时提高去重步长防超时，小批量与带疵点算例严格保持原有精细采样
             int uniqueCount = 0;
-            double dedupTol = xCount > 1200 ? 0.25 : 1e-9;
+            double dedupTol = largeBatch && xCount > 160
+                    ? Math.max(8.0, width / 100.0)
+                    : (xCount > 1200 ? 0.25 : 1e-9);
             for (int i = 0; i < xCount; i++) {
                 double v = xBuf[i];
                 if (uniqueCount == 0 || v - xBuf[uniqueCount - 1] > dedupTol || i == xCount - 1) {

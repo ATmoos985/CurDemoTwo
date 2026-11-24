@@ -72,21 +72,31 @@ final class AxisMarkerCompactor {
             y[n + k] = expanded.y();
         }
 
+        // 严格门控：仅 >= 48 件且无疵点（m == 0）启用大批量早停与斜边微擦碰保距；< 48 件或带疵点 100% 沿用原逻辑
+        boolean largeNoDefect = n >= ContourPartitionSolver.MIN_PARTITION_PIECES && m == 0;
         double bestLength = length(original, y);
         List<Placement> best = original;
+        int stagnantPasses = 0;
         for (int pass = 0; pass < 12 && !expired(deadline); pass++) {
-            if (!slide(profiles, n, x, y, true, false, problem.height(), pieceGap, deadline)) break;
+            if (!slide(profiles, n, x, y, true, false, problem.height(), pieceGap, largeNoDefect, deadline)) break;
             double occupied = length(original, y);
             if (occupied < bestLength - EPS) {
                 bestLength = occupied;
+                stagnantPasses = 0;
                 var improved = new ArrayList<Placement>(n);
                 for (int i = 0; i < n; i++) {
                     var p = original.get(i);
                     improved.add(new Placement(p.id(), p.demandId(), p.name(), x[i], y[i], p.shape(), p.rotationDegrees()));
                 }
                 best = improved;
+            } else if (largeNoDefect) {
+                stagnantPasses++;
+                // 大批量无疵点：连续 3 轮（覆盖左右双向 X 错位松动）均无版长缩短即确定性收敛早停
+                if (stagnantPasses >= 3) {
+                    break;
+                }
             }
-            if (!slide(profiles, n, y, x, false, pass % 2 != 0, problem.width(), pieceGap, deadline)) break;
+            if (!slide(profiles, n, y, x, false, pass % 2 != 0, problem.width(), pieceGap, largeNoDefect, deadline)) break;
         }
         return MarkerCompactor.validateOrFallback(problem, original, best);
     }
@@ -103,7 +113,8 @@ final class AxisMarkerCompactor {
     }
 
     private static boolean slide(Profile[] profiles, int movableCount, double[] fixed, double[] moving,
-                                 boolean vertical, boolean towardEnd, double limit, double pieceGap, long deadline) {
+                                 boolean vertical, boolean towardEnd, double limit, double pieceGap,
+                                 boolean largeNoDefect, long deadline) {
         int total = profiles.length;
         var rawOutlines = new MarkerCompactor.SlabProfile[total];
         var collOutlines = new MarkerCompactor.SlabProfile[total];
@@ -136,7 +147,9 @@ final class AxisMarkerCompactor {
         }
         AabbBvh fixedAxisBvh = AabbBvh.build(bvhMinX, bvhMinY, bvhMaxX, bvhMaxY, total);
 
-        double inflateSlack = pieceGap > 0.0 ? pieceGap * 0.03 + 0.02 : 0.0;
+        double inflateSlack = pieceGap > 0.0
+                ? (largeNoDefect ? Math.max(0.35, pieceGap * 0.12 + 0.15) : pieceGap * 0.03 + 0.02)
+                : 0.0;
         var bounds = new ArrayList<Bound>();
         for (int i = 0; i < movableCount; i++) {
             if (expired(deadline)) return false;
@@ -151,8 +164,17 @@ final class AxisMarkerCompactor {
                 if (dx + b.minX() >= a.maxX() || dx + b.maxX() <= a.minX()) return false;
 
                 double lower = Double.NEGATIVE_INFINITY, upper = Double.POSITIVE_INFINITY;
-                for (var s : a.slabs()) {
-                    for (var t : b.slabs()) {
+                var aSlabs = a.slabs();
+                var bSlabs = b.slabs();
+                int bStart = 0;
+                int bLen = bSlabs.size();
+                for (int ai = 0, aLen = aSlabs.size(); ai < aLen; ai++) {
+                    var s = aSlabs.get(ai);
+                    while (bStart < bLen && dx + bSlabs.get(bStart).right() <= s.left() + EPS) {
+                        bStart++;
+                    }
+                    for (int bi = bStart; bi < bLen; bi++) {
+                        var t = bSlabs.get(bi);
                         if (dx + t.left() >= s.right()) break;
                         double l = Math.max(s.left(), dx + t.left()), r = Math.min(s.right(), dx + t.right());
                         if (r - l <= EPS) continue;
@@ -164,13 +186,13 @@ final class AxisMarkerCompactor {
                         } else if (lo >= dy - EPS) {
                             upper = Math.min(upper, Math.max(lo, dy));
                         } else if (!withObstacle && pieceGap > 0.0) {
-                            // 紧贴 pieceGap 的初始解在多边形外接圆盘近似下可能出现极微小重叠，按最近方向安全推开
                             double pushDown = hi - dy;
                             double pushUp = dy - lo;
                             if (pushDown <= inflateSlack && pushDown <= pushUp) {
-                                lower = Math.max(lower, hi);
+                                // 大批量无疵点保持当前合法相对间距 dy 防多顶点斜边撑爆板宽；小批量/带疵点严格保持原有 hi 推开语义
+                                lower = Math.max(lower, largeNoDefect ? dy : hi);
                             } else if (pushUp <= inflateSlack) {
-                                upper = Math.min(upper, lo);
+                                upper = Math.min(upper, largeNoDefect ? dy : lo);
                             } else {
                                 return true;
                             }

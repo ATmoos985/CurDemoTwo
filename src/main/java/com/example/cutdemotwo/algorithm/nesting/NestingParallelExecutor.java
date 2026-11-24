@@ -25,6 +25,7 @@ final class NestingParallelExecutor {
     static final int MAX_PARALLELISM = Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors()));
 
     private static final AtomicInteger THREAD_SEQ = new AtomicInteger(1);
+    private static final ThreadLocal<Boolean> IN_POOL_WORKER = ThreadLocal.withInitial(() -> Boolean.FALSE);
     private static final ExecutorService POOL = MAX_PARALLELISM <= 1
             ? null
             : Executors.newFixedThreadPool(MAX_PARALLELISM, r -> {
@@ -41,7 +42,8 @@ final class NestingParallelExecutor {
         if (count == 0) {
             return List.of();
         }
-        if (count == 1 || POOL == null) {
+        // 已处于工作线程池内部时直接顺序执行，从根源杜绝嵌套提交同一固定线程池导致的死锁或饥饿
+        if (count == 1 || POOL == null || Boolean.TRUE.equals(IN_POOL_WORKER.get())) {
             List<T> sequential = new ArrayList<>(count);
             for (Callable<T> task : tasks) {
                 ComputationCancellation.check();
@@ -54,8 +56,13 @@ final class NestingParallelExecutor {
         for (int i = 1; i < count; i++) {
             final Callable<T> task = tasks.get(i);
             futures.add(POOL.submit(() -> {
-                ComputationCancellation.check();
-                return task.call();
+                IN_POOL_WORKER.set(Boolean.TRUE);
+                try {
+                    ComputationCancellation.check();
+                    return task.call();
+                } finally {
+                    IN_POOL_WORKER.remove();
+                }
             }));
         }
 

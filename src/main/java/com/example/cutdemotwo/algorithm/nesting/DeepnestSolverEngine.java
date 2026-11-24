@@ -86,13 +86,256 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
 
     @Override
     public EngineResult solve(NestingProblem problem) {
-        return runDeepnest(problem, false);
+        return runDeepnest(problem, SearchOptions.standard(false, true));
     }
 
     /** Direct fixed-width open-strip minimization entry for {@code MarkerOptimization} STRIP_SEARCH. */
     @Override
     public EngineResult solveStripCandidate(NestingProblem problem) {
-        return runDeepnest(problem, true);
+        return runDeepnest(problem, SearchOptions.standard(true, true));
+    }
+
+    /** 包级直跑入口（显式关闭大批量分区，供分区基准对比测试与独立验证使用）。 */
+    EngineResult solveDirect(NestingProblem problem, boolean stripMode) {
+        return runDeepnest(problem, SearchOptions.standard(stripMode, false));
+    }
+
+    /** 包级子区求解入口，供 {@link ContourPartitionSolver} 复用 NFP/GA/LNS/压紧核心。 */
+    EngineResult solveSubproblem(NestingProblem subProblem,
+                                 boolean stripMode,
+                                 boolean allowParallel,
+                                 long deadlineNanos,
+                                 int popSizeCap,
+                                 int maxGenerations,
+                                 int maxStagnantComplete,
+                                 int maxLnsRounds,
+                                 int maxLnsStagnant) {
+        return runDeepnest(subProblem, new SearchOptions(
+                stripMode, false, allowParallel, deadlineNanos,
+                popSizeCap, maxGenerations, maxStagnantComplete, maxLnsRounds, maxLnsStagnant
+        ));
+    }
+
+    /**
+     * 包级局部跨缝与末端精确 NFP 微调（供 {@link ContourPartitionSolver} 拼接压紧后打通子区接缝、压缩锯齿尾端）。
+     * 采用确定性轮次与局部 Y 视窗裁剪，仅保留严格缩短版长且零容忍校验通过的改进解。
+     */
+    List<Placement> refineSeamAndTail(NestingProblem problem,
+                                      List<Placement> incumbent,
+                                      List<Double> seamYs,
+                                      int maxRounds,
+                                      long deadlineNanos) {
+        ComputationCancellation.check();
+        if (incumbent == null || incumbent.size() < LNS_MIN_PIECES || maxRounds <= 0 || System.nanoTime() >= deadlineNanos) {
+            return incumbent;
+        }
+        ProblemContext ctx = new ProblemContext(problem, false);
+        if (ctx.items.size() != incumbent.size() || !ctx.pipeline.isNoop() || ctx.preferBottom) {
+            return incumbent;
+        }
+
+        // 将既有 Placement 一一映射到 ProblemContext.items 的确定性 instanceId
+        Map<Integer, List<ExpandedPart>> poolByDemand = new HashMap<>();
+        for (ExpandedPart ep : ctx.items) {
+            poolByDemand.computeIfAbsent(ep.demandId, k -> new ArrayList<>()).add(ep);
+        }
+        Map<Integer, Integer> cursorByDemand = new HashMap<>();
+        List<PlacedInstance> initialPlaced = new ArrayList<>(incumbent.size());
+        double initialArea = 0.0;
+        double initialMaxY = 0.0;
+        double initialMaxX = 0.0;
+        for (Placement p : incumbent) {
+            List<ExpandedPart> list = poolByDemand.get(p.demandId());
+            if (list == null) return incumbent;
+            int idx = cursorByDemand.getOrDefault(p.demandId(), 0);
+            if (idx >= list.size()) return incumbent;
+            cursorByDemand.put(p.demandId(), idx + 1);
+            ExpandedPart ep = list.get(idx);
+            OrientedPart ori = ep.byAngle.get(p.rotationDegrees());
+            if (ori == null) return incumbent;
+            PlacedInstance pi = new PlacedInstance(ep.instanceId, ori, p.x(), p.y());
+            initialPlaced.add(pi);
+            initialArea += ori.area();
+            if (pi.maxY > initialMaxY) initialMaxY = pi.maxY;
+            if (pi.maxX > initialMaxX) initialMaxX = pi.maxX;
+        }
+
+        double initialFitness = initialMaxY * 1000.0 + initialMaxX;
+        EvaluationResult best = new EvaluationResult(initialPlaced, initialArea, initialMaxY, initialFitness);
+        boolean improved = false;
+        int n = ctx.items.size();
+
+        // 阶段 A：接缝“门闩拔除 → 剩余全体轴向整体推进 → 精确 NFP 回插”
+        // 专治分区接缝处少数突出件卡死整块后区无法上推的瓶颈，尤其对交替 180° 翻转后的双锯齿接缝威力极大
+        if (seamYs != null && !seamYs.isEmpty() && AxisMarkerCompactor.supports(problem)) {
+            int boltCount = n >= 100 ? 6 : 8;
+            for (int si = 0; si < seamYs.size(); si++) {
+                ComputationCancellation.check();
+                if (System.nanoTime() >= deadlineNanos) break;
+                double seamY = seamYs.get(si);
+                // 随已有压紧比例缩放接缝位置，跟踪压紧后的真实接缝带
+                double scaledSeamY = initialMaxY > 1e-6 ? seamY * (best.extentY() / initialMaxY) : seamY;
+                List<PlacedInstance> currentPlaced = best.placed();
+
+                // 精选接缝上下两侧紧邻的门闩件（优先选与接缝最近且跨度较大的阻挡件）
+                List<PlacedInstance> above = new ArrayList<>();
+                List<PlacedInstance> below = new ArrayList<>();
+                for (PlacedInstance pi : currentPlaced) {
+                    double cy = (pi.minY + pi.maxY) * 0.5;
+                    if (cy <= scaledSeamY) {
+                        above.add(pi);
+                    } else {
+                        below.add(pi);
+                    }
+                }
+                above.sort(Comparator.comparingDouble((PlacedInstance p) -> Math.abs(scaledSeamY - p.maxY))
+                        .thenComparingInt(p -> p.instanceId));
+                below.sort(Comparator.comparingDouble((PlacedInstance p) -> Math.abs(p.minY - scaledSeamY))
+                        .thenComparingInt(p -> p.instanceId));
+
+                Set<Integer> boltIds = new HashSet<>(boltCount * 2);
+                int half = boltCount / 2;
+                for (int i = 0; i < half && i < above.size(); i++) {
+                    boltIds.add(above.get(i).instanceId);
+                }
+                for (int i = 0; i < half && i < below.size(); i++) {
+                    boltIds.add(below.get(i).instanceId);
+                }
+                for (int i = half; boltIds.size() < boltCount && i < above.size(); i++) {
+                    boltIds.add(above.get(i).instanceId);
+                }
+                for (int i = half; boltIds.size() < boltCount && i < below.size(); i++) {
+                    boltIds.add(below.get(i).instanceId);
+                }
+
+                List<PlacedInstance> keptRaw = new ArrayList<>(currentPlaced.size() - boltIds.size());
+                List<ExpandedPart> removed = new ArrayList<>(boltIds.size());
+                for (PlacedInstance pi : currentPlaced) {
+                    if (boltIds.contains(pi.instanceId)) {
+                        removed.add(ctx.items.get(pi.instanceId));
+                    } else {
+                        keptRaw.add(pi);
+                    }
+                }
+                if (removed.isEmpty() || keptRaw.isEmpty()) continue;
+
+                // 摘除门闩件后，用 AxisMarkerCompactor 把整个后区顺滑推进前区凹腔（按剩余预算合理放宽至最高 350ms 使其自然收敛）
+                List<Placement> keptPlacements = toPlacements(keptRaw);
+                long nowAxis = System.nanoTime();
+                long remainingAxis = deadlineNanos - nowAxis;
+                long axisBudget = Math.min(350_000_000L, Math.max(120_000_000L, remainingAxis / 2));
+                long axisCap = Math.min(deadlineNanos, nowAxis + axisBudget);
+                List<Placement> slidPlacements = AxisMarkerCompactor.compact(problem, keptPlacements, axisCap);
+                if (slidPlacements == keptPlacements) {
+                    continue;
+                }
+                List<PlacedInstance> slidKept = new ArrayList<>(keptRaw.size());
+                for (int i = 0; i < keptRaw.size(); i++) {
+                    PlacedInstance orig = keptRaw.get(i);
+                    Placement sp = slidPlacements.get(i);
+                    slidKept.add(new PlacedInstance(orig.instanceId, orig.ori, sp.x(), sp.y()));
+                }
+
+                // 将摘出的门闩件用精确 NFP 按多种启发序插回腾出的接缝与新尾部
+                Map<NfpInnerKey, Geometry> keptFeasibleCache = new HashMap<>();
+                double windowMinY = n > 80
+                        ? Math.max(0.0, scaledSeamY - Math.max(900.0, best.extentY() * 0.22))
+                        : 0.0;
+                List<List<ExpandedPart>> allOrders = buildRecreateOrders(removed);
+                int ordersToTry = Math.min(2, allOrders.size());
+                for (int oi = 0; oi < ordersToTry; oi++) {
+                    ComputationCancellation.check();
+                    if (System.nanoTime() >= deadlineNanos) break;
+                    EvaluationResult cand = recreateFromPartialWindowed(
+                            ctx, slidKept, allOrders.get(oi), keptFeasibleCache,
+                            DeepnestGeneticAlgorithm.PlacementMode.GRAVITY_Y, best, windowMinY, deadlineNanos);
+                    if (cand != null
+                            && cand.placed().size() == n
+                            && cand.extentY() < best.extentY() - 1e-4) {
+                        best = cand;
+                        improved = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 阶段 B：末端聚焦 LNS 微调（压缩最底端锯齿突出件）
+        int ruinTarget = n >= 100 ? 8 : 10;
+        int tailRounds = Math.min(2, maxRounds);
+        for (int round = 0; round < tailRounds; round++) {
+            ComputationCancellation.check();
+            if (System.nanoTime() >= deadlineNanos) {
+                break;
+            }
+            List<PlacedInstance> currentPlaced = best.placed();
+            Set<Integer> ruinIds = new HashSet<>(ruinTarget * 2);
+            List<PlacedInstance> byTail = new ArrayList<>(currentPlaced);
+            byTail.sort(Comparator.comparingDouble((PlacedInstance p) -> -p.maxY)
+                    .thenComparingInt(p -> p.instanceId));
+
+            int tailPick = Math.min(ruinTarget + (round == 1 ? 2 : 0), currentPlaced.size());
+            for (int i = 0; i < tailPick && i < byTail.size(); i++) {
+                ruinIds.add(byTail.get(i).instanceId);
+            }
+            double windowMinY = n > 80
+                    ? Math.max(0.0, best.extentY() - Math.max(1400.0, best.extentY() * 0.30))
+                    : 0.0;
+
+            List<PlacedInstance> kept = new ArrayList<>(currentPlaced.size() - ruinIds.size());
+            List<ExpandedPart> removed = new ArrayList<>(ruinIds.size());
+            for (PlacedInstance pi : currentPlaced) {
+                if (ruinIds.contains(pi.instanceId)) {
+                    removed.add(ctx.items.get(pi.instanceId));
+                } else {
+                    kept.add(pi);
+                }
+            }
+            if (removed.isEmpty()) continue;
+
+            Map<NfpInnerKey, Geometry> keptFeasibleCache = new HashMap<>();
+            List<List<ExpandedPart>> allOrders = buildRecreateOrders(removed);
+            int ordersToTry = Math.min(2, allOrders.size());
+            for (int oi = 0; oi < ordersToTry; oi++) {
+                ComputationCancellation.check();
+                if (System.nanoTime() >= deadlineNanos) break;
+                EvaluationResult cand = recreateFromPartialWindowed(
+                        ctx, kept, allOrders.get(oi), keptFeasibleCache,
+                        DeepnestGeneticAlgorithm.PlacementMode.GRAVITY_Y, best, windowMinY, deadlineNanos);
+                if (cand != null
+                        && cand.placed().size() == n
+                        && cand.extentY() < best.extentY() - 1e-4) {
+                    best = cand;
+                    improved = true;
+                    break;
+                }
+            }
+        }
+
+        if (!improved) {
+            return incumbent;
+        }
+        List<Placement> refined = toPlacements(best.placed());
+        EngineResult check = new EngineResult();
+        check.setSuccess(true);
+        check.setPlacements(refined);
+        return PolygonResultValidator.validate(problem, check) == null ? refined : incumbent;
+    }
+
+    private record SearchOptions(
+            boolean stripMode,
+            boolean allowPartition,
+            boolean allowParallel,
+            long deadlineNanos,
+            int popSizeCap,
+            int maxGenerations,
+            int maxStagnantComplete,
+            int maxLnsRounds,
+            int maxLnsStagnant
+    ) {
+        static SearchOptions standard(boolean stripMode, boolean allowPartition) {
+            return new SearchOptions(stripMode, allowPartition, true, 0L, 0, 0, 0, 0, 0);
+        }
     }
 
     private record OrientedPart(
@@ -397,8 +640,12 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
     private record ChosenSpot(double x, double y, OrientedPart ori, double score, double mergedLen) {}
     private record EvaluationResult(List<PlacedInstance> placed, double placedArea, double extentY, double fitness) {}
 
-    private EngineResult runDeepnest(NestingProblem problem, boolean stripMode) {
+    private EngineResult runDeepnest(NestingProblem problem, SearchOptions options) {
         ComputationCancellation.check();
+        if (options.deadlineNanos() <= 0L) {
+            ContourPartitionSolver.clearDiagnostics();
+        }
+        boolean stripMode = options.stripMode();
         long startNanos = System.nanoTime();
         long budgetNanos = Math.max(1L, problem.timeLimitSeconds()) * 1_000_000_000L;
 
@@ -412,17 +659,44 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
 
         int n = ctx.items.size();
         // 三阶段预算划分：留出出口安全裕量，确保阶段1(构造+GA)、阶段2(LNS大邻域精修)、阶段3(联动压紧+终检)严格不超时
-        long exitMarginNanos = Math.min(600_000_000L, Math.max(200_000_000L, budgetNanos / 6));
-        long effectiveBudget = Math.max(200_000_000L, budgetNanos - exitMarginNanos);
-        long stage3Deadline = startNanos + effectiveBudget;
-        long stage3Reserve = n >= 2 ? Math.min(450_000_000L, Math.max(120_000_000L, effectiveBudget / 5)) : 0L;
+        long effectiveBudget;
+        long stage3Deadline;
+        if (options.deadlineNanos() > 0L) {
+            effectiveBudget = Math.max(150_000_000L, options.deadlineNanos() - startNanos);
+            stage3Deadline = startNanos + effectiveBudget;
+        } else {
+            long exitMarginNanos = Math.min(600_000_000L, Math.max(200_000_000L, budgetNanos / 6));
+            effectiveBudget = Math.max(200_000_000L, budgetNanos - exitMarginNanos);
+            stage3Deadline = startNanos + effectiveBudget;
+        }
+
+        // 大批量均衡互补分区路径（仅 >=48 件、矩形无疵点、窗帘 NOOP、left-top 且剩余预算充足时触发；不满足或校验未过则无缝回退常规直跑）
+        if (options.allowPartition() && ContourPartitionSolver.isEligible(
+                problem, ctx.isRectMat, ctx.pipeline.isNoop(), ctx.preferRight, ctx.preferBottom,
+                n, ctx.totalRequestedArea, ctx.sheetArea, stage3Deadline - System.nanoTime())) {
+            EngineResult partitioned = ContourPartitionSolver.solve(this, problem, n, stripMode, stage3Deadline);
+            if (partitioned != null) {
+                return partitioned;
+            }
+            // 分区未满排或拼接压紧超限时，用剩余预算安全回退至常规单床直跑
+            startNanos = System.nanoTime();
+            effectiveBudget = Math.max(200_000_000L, stage3Deadline - startNanos);
+            stage3Deadline = startNanos + effectiveBudget;
+        }
+
+        long stage3Reserve = n >= 2
+                ? (options.deadlineNanos() > 0L
+                    ? Math.min(250_000_000L, Math.max(60_000_000L, effectiveBudget / 6))
+                    : Math.min(450_000_000L, Math.max(120_000_000L, effectiveBudget / 5)))
+                : 0L;
         long stage2Deadline = stage3Deadline - stage3Reserve;
         long stage1Budget = n >= LNS_MIN_PIECES
                 ? Math.max(150_000_000L, (long) ((stage2Deadline - startNanos) * 0.65))
                 : Math.max(150_000_000L, stage2Deadline - startNanos);
         long stage1Deadline = startNanos + stage1Budget;
 
-        int popSize = n == 1 ? 1 : (n <= 4 ? 6 : 12);
+        int defaultPopSize = n == 1 ? 1 : (n <= 4 ? 6 : 12);
+        int popSize = options.popSizeCap() > 0 ? Math.min(defaultPopSize, options.popSizeCap()) : defaultPopSize;
         long seed = computeDeterministicSeed(problem);
         DeepnestGeneticAlgorithm ga = new DeepnestGeneticAlgorithm(ctx.items, popSize, DEFAULT_MUTATION_RATE, seed);
 
@@ -435,7 +709,10 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         // ==================== 阶段 1：构造 + 并行 GA 初解 ====================
         EvaluationResult bestEval = null;
         int stagnantGenerations = 0;
-        int maxStagnantComplete = stripMode ? 6 : 4;
+        int maxStagnantComplete = options.maxStagnantComplete() > 0
+                ? options.maxStagnantComplete()
+                : (stripMode ? 6 : 4);
+        int maxGenerations = options.maxGenerations() > 0 ? options.maxGenerations() : 120;
 
         int generation = 0;
         outerSearch:
@@ -451,7 +728,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 }
             }
 
-            int batchSize = NestingParallelExecutor.MAX_PARALLELISM;
+            int batchSize = options.allowParallel() ? NestingParallelExecutor.MAX_PARALLELISM : 1;
             for (int start = 0; start < pending.size(); start += batchSize) {
                 ComputationCancellation.check();
                 if (bestEval != null && System.nanoTime() >= stage1Deadline) {
@@ -459,13 +736,17 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 }
                 int end = Math.min(pending.size(), start + batchSize);
                 final boolean hasIncumbent = bestEval != null;
-                List<Callable<EvaluationResult>> tasks = new ArrayList<>(end - start);
-                for (int i = start; i < end; i++) {
-                    final DeepnestGeneticAlgorithm.Individual ind = pending.get(i);
-                    tasks.add(() -> evaluateIndividual(ctx, ind, stage1Deadline, hasIncumbent));
+                List<EvaluationResult> batchResults;
+                if (batchSize <= 1 || end - start == 1) {
+                    batchResults = List.of(evaluateIndividual(ctx, pending.get(start), stage1Deadline, hasIncumbent));
+                } else {
+                    List<Callable<EvaluationResult>> tasks = new ArrayList<>(end - start);
+                    for (int i = start; i < end; i++) {
+                        final DeepnestGeneticAlgorithm.Individual ind = pending.get(i);
+                        tasks.add(() -> evaluateIndividual(ctx, ind, stage1Deadline, hasIncumbent));
+                    }
+                    batchResults = NestingParallelExecutor.runDeterministic(tasks);
                 }
-
-                List<EvaluationResult> batchResults = NestingParallelExecutor.runDeterministic(tasks);
                 for (int i = 0; i < batchResults.size(); i++) {
                     DeepnestGeneticAlgorithm.Individual ind = pending.get(start + i);
                     EvaluationResult eval = batchResults.get(i);
@@ -508,7 +789,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             }
 
             generation++;
-            if (generation >= 120) break;
+            if (generation >= maxGenerations) break;
         }
 
         EngineResult out = new EngineResult();
@@ -523,7 +804,8 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         if (n >= LNS_MIN_PIECES
                 && !reachedTheoreticalBound(bestEval, n, theoreticalMinY)
                 && System.nanoTime() < stage2Deadline) {
-            bestEval = runLnsRefinement(ctx, bestEval, theoreticalMinY, seed, stage2Deadline);
+            bestEval = runLnsRefinement(ctx, bestEval, theoreticalMinY, seed, stage2Deadline,
+                    options.maxLnsRounds(), options.maxLnsStagnant());
         }
 
         // ==================== 阶段 3：微滑 + 联动压紧 + 独立终检 ====================
@@ -534,17 +816,35 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         if (bestEval.placed().size() >= 2
                 && !reachedTheoreticalBound(bestEval, n, theoreticalMinY)
                 && System.nanoTime() < stage3Deadline) {
-            long stage3CapDeadline = Math.min(stage3Deadline, System.nanoTime() + stage3Reserve);
-            long remainingStage3 = stage3CapDeadline - System.nanoTime();
-            long polishDeadline = System.nanoTime() + Math.min(120_000_000L, Math.max(25_000_000L, remainingStage3 / 4));
-            List<PlacedInstance> polished = polishPlacements(ctx, bestEval.placed(), polishDeadline);
-            finalPlacements = toPlacements(polished);
+            if (options.deadlineNanos() > 0L) {
+                // 分区子区内部仅执行确定性快速收尾（完整微滑 + 轴向同步压紧），避免子区级重插超时截断破坏确定性；
+                // 跨缝空隙重插留给全局三明治压紧阶段统一执行。
+                List<PlacedInstance> polished = polishPlacements(ctx, bestEval.placed(), stage3Deadline);
+                finalPlacements = toPlacements(polished);
+                if (!ctx.preferBottom
+                        && ctx.pipeline.isNoop()
+                        && finalPlacements.size() <= MarkerCompactor.MAX_COMPACT_PIECES
+                        && AxisMarkerCompactor.supports(problem)
+                        && System.nanoTime() < stage3Deadline) {
+                    List<Placement> axisCompacted = AxisMarkerCompactor.compact(problem, finalPlacements, stage3Deadline);
+                    if (axisCompacted != finalPlacements && axisCompacted.size() == finalPlacements.size()
+                            && placementsExtentY(axisCompacted) < placementsExtentY(finalPlacements) - 1e-6) {
+                        finalPlacements = axisCompacted;
+                    }
+                }
+            } else {
+                long stage3CapDeadline = Math.min(stage3Deadline, System.nanoTime() + stage3Reserve);
+                long remainingStage3 = stage3CapDeadline - System.nanoTime();
+                long polishDeadline = System.nanoTime() + Math.min(120_000_000L, Math.max(25_000_000L, remainingStage3 / 4));
+                List<PlacedInstance> polished = polishPlacements(ctx, bestEval.placed(), polishDeadline);
+                finalPlacements = toPlacements(polished);
 
-            if (!ctx.preferBottom
-                    && ctx.pipeline.isNoop()
-                    && finalPlacements.size() <= MarkerCompactor.MAX_COMPACT_PIECES
-                    && System.nanoTime() < stage3CapDeadline) {
-                finalPlacements = runLinkedCompaction(problem, finalPlacements, stage3CapDeadline);
+                if (!ctx.preferBottom
+                        && ctx.pipeline.isNoop()
+                        && finalPlacements.size() <= MarkerCompactor.MAX_COMPACT_PIECES
+                        && System.nanoTime() < stage3CapDeadline) {
+                    finalPlacements = runLinkedCompaction(problem, finalPlacements, stage3CapDeadline);
+                }
             }
         }
 
@@ -655,12 +955,16 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                                                      EvaluationResult incumbent,
                                                      double theoreticalMinY,
                                                      long seed,
-                                                     long deadlineNanos) {
+                                                     long deadlineNanos,
+                                                     int maxRoundsOverride,
+                                                     int maxStagnantOverride) {
         int n = ctx.items.size();
         SplittableRandom rng = new SplittableRandom(seed ^ 0x517CC1B727220A95L);
         EvaluationResult best = incumbent;
-        int maxRounds = Math.min(28, Math.max(8, n * 2));
-        int maxStagnant = n <= 12 ? 6 : 8;
+        int defaultMaxRounds = Math.min(28, Math.max(8, n * 2));
+        int defaultMaxStagnant = n <= 12 ? 6 : 8;
+        int maxRounds = maxRoundsOverride > 0 ? Math.min(defaultMaxRounds, maxRoundsOverride) : defaultMaxRounds;
+        int maxStagnant = maxStagnantOverride > 0 ? Math.min(defaultMaxStagnant, maxStagnantOverride) : defaultMaxStagnant;
         int stagnant = 0;
 
         for (int round = 0; round < maxRounds; round++) {
@@ -834,6 +1138,17 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                                                         DeepnestGeneticAlgorithm.PlacementMode mode,
                                                         EvaluationResult incumbent,
                                                         long deadlineNanos) {
+        return recreateFromPartialWindowed(ctx, kept, toReinsert, keptFeasibleCache, mode, incumbent, 0.0, deadlineNanos);
+    }
+
+    private static EvaluationResult recreateFromPartialWindowed(ProblemContext ctx,
+                                                                List<PlacedInstance> kept,
+                                                                List<ExpandedPart> toReinsert,
+                                                                Map<NfpInnerKey, Geometry> keptFeasibleCache,
+                                                                DeepnestGeneticAlgorithm.PlacementMode mode,
+                                                                EvaluationResult incumbent,
+                                                                double windowMinY,
+                                                                long deadlineNanos) {
         int totalCapacity = kept.size() + toReinsert.size();
         List<PlacedInstance> placed = new ArrayList<>(totalCapacity);
         List<List<Point>> placedWorldPolys = new ArrayList<>(totalCapacity);
@@ -894,6 +1209,23 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                         Geometry baseFeasible = keptFeasibleCache.get(key);
                         if (baseFeasible == null) {
                             Geometry rem = clipSheetNfpToExtentWindow(ctx, ori, ctx.getInnerNfp(ori), maxAllowedExtentY);
+                            if (windowMinY > 1e-6 && !ctx.preferBottom && !rem.isEmpty()) {
+                                Envelope env = rem.getEnvelopeInternal();
+                                if (windowMinY > env.getMinY() + 1e-4) {
+                                    double pad = DeepnestNfpGeometry.OPEN_CHANNEL_EPS * 4.0 + 1e-4;
+                                    if (windowMinY > env.getMaxY() + 1e-6) {
+                                        rem = DeepnestNfpGeometry.EMPTY_GEOM;
+                                    } else {
+                                        Geometry lowerClip = DeepnestNfpGeometry.rectGeometry(
+                                                env.getMinX() - pad,
+                                                windowMinY - pad,
+                                                (env.getMaxX() - env.getMinX()) + 2.0 * pad,
+                                                Math.max(2.0 * pad, (env.getMaxY() - windowMinY) + 2.0 * pad)
+                                        );
+                                        rem = DeepnestNfpGeometry.intersectionGeometry(rem, lowerClip);
+                                    }
+                                }
+                            }
                             for (int j = 0; j < keptSize && !rem.isEmpty(); j++) {
                                 ComputationCancellation.check();
                                 PlacedInstance p = kept.get(j);
