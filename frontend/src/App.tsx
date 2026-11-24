@@ -132,6 +132,7 @@ export const App: React.FC = () => {
   const [health, setHealth] = useState<{ ok: boolean; workers?: number; engineCount?: number }>({
     ok: false
   });
+  const [refreshingHealth, setRefreshingHealth] = useState(false);
   const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({
     demand: true,
     solving: true,
@@ -201,19 +202,24 @@ export const App: React.FC = () => {
   }, []);
 
   const refreshHealth = () => {
+    setRefreshingHealth(true);
     Promise.all([
       requestJSON('/api/health').catch(() => null),
       requestJSON('/api/v2/capabilities').catch(() => null)
-    ]).then(([h, c]) => {
-      const availableEngines =
-        (c?.engines || []).filter((e: any) => e.available).length +
-        (c?.slittingEngine?.available ? 1 : 0);
-      setHealth({
-        ok: h?.status === 'UP',
-        workers: c?.limits?.workers,
-        engineCount: availableEngines || undefined
+    ])
+      .then(([h, c]) => {
+        const availableEngines =
+          (c?.engines || []).filter((e: any) => e.available).length +
+          (c?.slittingEngine?.available ? 1 : 0);
+        setHealth({
+          ok: h?.status === 'UP',
+          workers: c?.limits?.workers,
+          engineCount: availableEngines || undefined
+        });
+      })
+      .finally(() => {
+        window.setTimeout(() => setRefreshingHealth(false), 320);
       });
-    });
   };
 
   useEffect(() => {
@@ -499,17 +505,6 @@ export const App: React.FC = () => {
     }
   }, [route, categories]);
 
-  const activeBreadcrumb = useMemo(() => {
-    if (route.page === 'settings') {
-      return { cat: '系统设置', sub: '系统与引擎设置' };
-    }
-    for (const cat of categories) {
-      const sub = cat.items.find((it) => it.isActive(route));
-      if (sub) return { cat: cat.label, sub: sub.label };
-    }
-    return { cat: '搭切工作台', sub: '智能搭切排程' };
-  }, [categories, route]);
-
   const toggleCategory = (id: string) => {
     setExpandedCats((prev) => ({ ...prev, [id]: !prev[id] }));
   };
@@ -644,32 +639,63 @@ export const App: React.FC = () => {
         </div>
 
         <div className="nav-foot">
-          <a
-            href="#/settings"
-            className={`nav-settings-link ${isSettingsRoute || isModalVisible ? 'on' : ''}`}
-            aria-current={isSettingsRoute ? 'page' : undefined}
-            aria-haspopup="dialog"
-            aria-expanded={isModalVisible}
-            title={navCollapsed ? '系统与引擎设置' : undefined}
-            onClick={(e) => {
-              if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
-                e.preventDefault();
-                openSettings('general');
-              }
-            }}
-          >
-            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-              <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
-              <path
-                d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-              />
-            </svg>
-            <span className="mp-nav-label">系统与引擎设置</span>
-          </a>
+          <div className="mp-nav-foot-actions">
+            <a
+              href="#/settings"
+              className={`nav-settings-link mp-foot-action ${
+                isSettingsRoute || isModalVisible ? 'on' : ''
+              }`}
+              aria-current={isSettingsRoute ? 'page' : undefined}
+              aria-haspopup="dialog"
+              aria-expanded={isModalVisible}
+              title="系统与引擎设置"
+              onClick={(e) => {
+                if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+                  e.preventDefault();
+                  openSettings('general');
+                }
+              }}
+            >
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                <path
+                  d="M8 2.1 13.1 5v6L8 13.9 2.9 11V5L8 2.1Z"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.35"
+                  strokeLinejoin="round"
+                />
+                <circle
+                  cx="8"
+                  cy="8"
+                  r="2.1"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.35"
+                />
+              </svg>
+              <span className="mp-nav-label">设置</span>
+            </a>
+
+            <button
+              type="button"
+              className={`mp-foot-action mp-foot-refresh ${refreshingHealth ? 'is-spinning' : ''}`}
+              onClick={refreshHealth}
+              title="刷新引擎与服务状态"
+              aria-label="刷新引擎与服务状态"
+            >
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                <path
+                  d="M13.2 8A5.2 5.2 0 1 1 11.7 4.3M13.2 2.8v2.6h-2.6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span className="mp-nav-label">刷新</span>
+            </button>
+          </div>
 
           <button
             type="button"
@@ -721,57 +747,6 @@ export const App: React.FC = () => {
           )}
         </svg>
       </button>
-
-      <header className="topbar">
-        <div className="topbar-context" aria-label="当前工作区位置">
-          <span>{activeBreadcrumb.cat}</span>
-          <span className="topbar-context-sep" aria-hidden="true">/</span>
-          <strong>{activeBreadcrumb.sub}</strong>
-        </div>
-
-        <span className="topbar-sp" />
-
-        <div className="mp-top-actions">
-          <button
-            type="button"
-            className="mp-icon-btn"
-            onClick={refreshHealth}
-            title="刷新引擎与服务状态"
-            aria-label="刷新引擎与服务状态"
-          >
-            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-              <path
-                d="M13.2 8A5.2 5.2 0 1 1 11.7 4.3M13.2 2.8v2.6h-2.6"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="mp-icon-btn"
-            onClick={() => openSettings('craft')}
-            title="打开裁切工艺与全局设置"
-            aria-label="打开裁切工艺与全局设置"
-          >
-            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-              <path
-                d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-              />
-              <circle cx="5.5" cy="4.5" r="1.4" fill="var(--cp-bg)" stroke="currentColor" strokeWidth="1.3" />
-              <circle cx="10.5" cy="8" r="1.4" fill="var(--cp-bg)" stroke="currentColor" strokeWidth="1.3" />
-              <circle cx="6.5" cy="11.5" r="1.4" fill="var(--cp-bg)" stroke="currentColor" strokeWidth="1.3" />
-            </svg>
-          </button>
-        </div>
-      </header>
 
       <main className="main" id="main">
         {renderMain()}
