@@ -334,12 +334,15 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
             );
           })()}
 
-        {/* 1D Full Parameter Config Section */}
+        {/* 1D Parameter Config Section */}
         {!is2D && (
           <SlittingConfigCard
-            slitProfile={slitProfile}
             slitWidthMode={slitWidthMode}
-            slitMotherWidthMm={slitMotherWidthMm}
+            slitMotherWidthMm={
+              slitMaterialMode === 'STOCK_ROLL' && currentRoll1D
+                ? currentRoll1D.width
+                : slitMotherWidthMm
+            }
             slitLeftTrimMm={slitLeftTrimMm}
             slitRightTrimMm={slitRightTrimMm}
             slitMinWidthMm={slitMinWidthMm}
@@ -352,12 +355,12 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
           />
         )}
 
-        {/* Compact Solving Goal Selector (self-explanatory labels, tooltips on hover) */}
-        <div className="wb-right-section">
-          <div className="wb-right-section-head">
-            <span>求解目标</span>
-          </div>
-          {is2D ? (
+        {/* Compact Solving Strategy / Goal Card */}
+        {is2D ? (
+          <div className="wb-param-card">
+            <div className="wb-param-head">
+              <span>求解目标</span>
+            </div>
             <div className="wb-goal-grid" role="radiogroup" aria-label="二维求解目标">
               {SCENARIOS_2D.map((sc) => {
                 const disabled = sc.id === 'MULTI_WIDTH' && canvasMode !== 'FREE_CANVAS';
@@ -378,8 +381,55 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
                 );
               })}
             </div>
-          ) : (
-            <div className="seg" role="radiogroup" aria-label="一维求解目标" style={{ width: '100%' }}>
+          </div>
+        ) : (
+          <div className="wb-param-card">
+            <div className="wb-param-head">
+              <span>求解策略</span>
+            </div>
+            <div className="seg" role="radiogroup" aria-label="一维求解档位">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={!settings.slitRunBothProfiles && slitProfile === 'FAST'}
+                title="仅运行快捷解，快速出图"
+                className={!settings.slitRunBothProfiles && slitProfile === 'FAST' ? 'on' : ''}
+                onClick={() => {
+                  setSlitSpec({ slitProfile: 'FAST' });
+                  if (settings.slitRunBothProfiles) {
+                    updateStudioSettings({ ...settings, slitRunBothProfiles: false, slitProfile: 'FAST' });
+                  }
+                }}
+              >
+                快捷
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={!settings.slitRunBothProfiles && slitProfile === 'QUALITY'}
+                title="仅运行精确解，深度压车"
+                className={!settings.slitRunBothProfiles && slitProfile === 'QUALITY' ? 'on' : ''}
+                onClick={() => {
+                  setSlitSpec({ slitProfile: 'QUALITY' });
+                  if (settings.slitRunBothProfiles) {
+                    updateStudioSettings({ ...settings, slitRunBothProfiles: false, slitProfile: 'QUALITY' });
+                  }
+                }}
+              >
+                精确
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={settings.slitRunBothProfiles}
+                title="并行运行快捷解与精确解，先出先看"
+                className={settings.slitRunBothProfiles ? 'on' : ''}
+                onClick={() => updateStudioSettings({ ...settings, slitRunBothProfiles: true })}
+              >
+                双档
+              </button>
+            </div>
+            <div className="seg" role="radiogroup" aria-label="一维求解目标">
               <button
                 type="button"
                 role="radio"
@@ -401,8 +451,8 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
                 最高利用
               </button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Sticky Bottom-Right Primary Action Bar */}

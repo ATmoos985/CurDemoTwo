@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-  SlittingProfile,
   SlittingWidthMode,
   SlittingWidthPreset,
   StudioSettings,
@@ -9,10 +8,8 @@ import {
 } from '../../store/studioSettings';
 import { NumberInput } from '../../components/ui/NumberInput';
 import { toast } from '@static/app/js/util.js';
-import { openEngineSettings } from './workbenchUtils';
 
 export interface SlittingConfigCardProps {
-  slitProfile: SlittingProfile;
   slitWidthMode: SlittingWidthMode;
   slitMotherWidthMm: number;
   slitLeftTrimMm: number;
@@ -27,7 +24,6 @@ export interface SlittingConfigCardProps {
 }
 
 export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
-  slitProfile,
   slitWidthMode,
   slitMotherWidthMm,
   slitLeftTrimMm,
@@ -46,6 +42,14 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
   const [selectedSlitPresetId, setSelectedSlitPresetId] = useState<string>('');
   const [savingPresetOpen, setSavingPresetOpen] = useState(false);
   const [newPresetName, setNewPresetName] = useState('');
+
+  const usableWidthMm = Math.max(0, slitMotherWidthMm - slitLeftTrimMm - slitRightTrimMm);
+  const widthStepsCount =
+    slitWidthMode === 'FIXED'
+      ? 1
+      : slitMaxWidthMm >= slitMinWidthMm
+      ? Math.floor((slitMaxWidthMm - slitMinWidthMm) / Math.max(1, slitWidthStepMm)) + 1
+      : 0;
 
   const handleApplySlitPreset = (presetId: string) => {
     setSelectedSlitPresetId(presetId);
@@ -88,7 +92,7 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
     setSelectedSlitPresetId(created.id);
     setNewPresetName('');
     setSavingPresetOpen(false);
-    toast(`已保存一维预设「${clean}」`);
+    toast(`已保存预设「${clean}」`);
   };
 
   const handleDeleteSelectedSlitPreset = () => {
@@ -101,17 +105,12 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
   };
 
   return (
-    <div className="wb-right-section slit-cfg-card" id="wb-slitting-params">
-      <div className="wb-right-section-head">
-        <span>分切参数</span>
-        <button
-          type="button"
-          className="link-btn"
-          onClick={openEngineSettings}
-          title="在系统设置中调整全部求解参数"
-        >
-          高级 ↗
-        </button>
+    <div className="wb-param-card" id="wb-slitting-params">
+      <div className="wb-param-head">
+        <span>分切工艺</span>
+        <span className="wb-param-badge num" title={`母卷 ${slitMotherWidthMm}mm 扣切边后可切净宽`}>
+          净宽 {usableWidthMm}mm{slitWidthMode === 'FLEXIBLE' ? ` · ${widthStepsCount}档` : ''}
+        </span>
       </div>
 
       {/* Preset Loader & Saver */}
@@ -122,14 +121,19 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
           value={selectedSlitPresetId}
           onChange={(e) => handleApplySlitPreset(e.target.value)}
         >
-          <option value="">预设…</option>
+          <option value="">套用工艺预设…</option>
           {slitPresets.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
             </option>
           ))}
         </select>
-        <button type="button" className="btn sm" onClick={() => setSavingPresetOpen((v) => !v)}>
+        <button
+          type="button"
+          className="btn sm"
+          title="将当前工艺保存为预设"
+          onClick={() => setSavingPresetOpen((v) => !v)}
+        >
           保存
         </button>
         {selectedSlitPresetId &&
@@ -144,6 +148,7 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
             </button>
           )}
       </div>
+
       {savingPresetOpen && (
         <div className="slit-preset-row">
           <input
@@ -160,169 +165,113 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
             }}
           />
           <button type="button" className="btn sm pri" onClick={handleSaveCurrentSlitPreset}>
-            确认
+            确定
           </button>
         </div>
       )}
 
-      {/* Solver Profile Switcher (FAST / QUALITY) */}
-      <div className="slit-profile-bar">
-        <div className="seg" role="group" aria-label="一维求解档位" style={{ flex: 1 }}>
-          <button
-            type="button"
-            className={slitProfile === 'FAST' ? 'on' : ''}
-            aria-pressed={slitProfile === 'FAST'}
-            title="快捷解 (FAST)"
-            onClick={() => setSlitSpec({ slitProfile: 'FAST' })}
-          >
-            快捷
-          </button>
-          <button
-            type="button"
-            className={slitProfile === 'QUALITY' ? 'on' : ''}
-            aria-pressed={slitProfile === 'QUALITY'}
-            title="精确解 (QUALITY)"
-            onClick={() => setSlitSpec({ slitProfile: 'QUALITY' })}
-          >
-            精确
-          </button>
-        </div>
-        <label className="slit-both-toggle" title="同时运行快捷与精确解对比">
-          <input
-            type="checkbox"
-            checked={settings.slitRunBothProfiles}
-            onChange={(e) =>
-              updateStudioSettings({
-                ...settings,
-                slitRunBothProfiles: e.target.checked
-              })
-            }
-          />
-          <span>双档对比</span>
+      {/* Left / Right Trim Pair */}
+      <div className="wb-param-grid-2">
+        <label className="wb-field">
+          <span>左切边</span>
+          <div className="wb-input-unit">
+            <NumberInput
+              min={0}
+              fallback={0}
+              className="field num"
+              value={slitLeftTrimMm}
+              onValueChange={(lt) => {
+                const usable = Math.max(100, slitMotherWidthMm - lt - slitRightTrimMm);
+                setSlitSpec({
+                  slitLeftTrimMm: lt,
+                  slitMaxWidthMm: Math.min(slitMaxWidthMm, usable),
+                  slitMinWidthMm: Math.min(slitMinWidthMm, usable)
+                });
+              }}
+            />
+            <em>mm</em>
+          </div>
+        </label>
+        <label className="wb-field">
+          <span>右切边</span>
+          <div className="wb-input-unit">
+            <NumberInput
+              min={0}
+              fallback={0}
+              className="field num"
+              value={slitRightTrimMm}
+              onValueChange={(rt) => {
+                const usable = Math.max(100, slitMotherWidthMm - slitLeftTrimMm - rt);
+                setSlitSpec({
+                  slitRightTrimMm: rt,
+                  slitMaxWidthMm: Math.min(slitMaxWidthMm, usable),
+                  slitMinWidthMm: Math.min(slitMinWidthMm, usable)
+                });
+              }}
+            />
+            <em>mm</em>
+          </div>
         </label>
       </div>
 
-      {/* Width Mode */}
-      <div className="seg" role="group" aria-label="幅宽约束模式" style={{ width: '100%' }}>
+      {/* Width Mode Switcher */}
+      <div className="seg" role="group" aria-label="幅宽约束模式">
         <button
           type="button"
           className={slitWidthMode === 'FLEXIBLE' ? 'on' : ''}
+          aria-pressed={slitWidthMode === 'FLEXIBLE'}
           onClick={() => setSlitSpec({ slitWidthMode: 'FLEXIBLE' })}
         >
-          可变宽
+          可变组合宽
         </button>
         <button
           type="button"
           className={slitWidthMode === 'FIXED' ? 'on' : ''}
+          aria-pressed={slitWidthMode === 'FIXED'}
           onClick={() => setSlitSpec({ slitWidthMode: 'FIXED', slitMinWidthMm: slitMaxWidthMm })}
         >
-          固定宽
+          固定组合宽
         </button>
       </div>
 
-      <div className="slit-cfg-grid">
-        <label className="slit-cfg-field">
-          <span>母卷总宽 (mm)</span>
-          <NumberInput
-            min={500}
-            fallback={500}
-            className="field num"
-            value={slitMotherWidthMm}
-            onValueChange={(w) => {
-              const usable = Math.max(100, w - slitLeftTrimMm - slitRightTrimMm);
-              setSlitSpec({
-                slitMotherWidthMm: w,
-                slitMaxWidthMm: Math.min(slitMaxWidthMm, usable),
-                slitMinWidthMm:
-                  slitWidthMode === 'FIXED'
-                    ? Math.min(slitMaxWidthMm, usable)
-                    : Math.min(slitMinWidthMm, usable)
-              });
-            }}
-          />
-        </label>
-        <label className="slit-cfg-field">
-          <span>超产上限 (卷)</span>
-          <NumberInput
-            min={0}
-            max={10000}
-            fallback={0}
-            integer
-            className="field num"
-            value={slitOverCap}
-            onValueChange={(v) => setSlitSpec({ slitOverCap: v })}
-          />
-        </label>
-        <label className="slit-cfg-field">
-          <span>左切边 (mm)</span>
-          <NumberInput
-            min={0}
-            fallback={0}
-            className="field num"
-            value={slitLeftTrimMm}
-            onValueChange={(lt) => {
-              const usable = Math.max(100, slitMotherWidthMm - lt - slitRightTrimMm);
-              setSlitSpec({
-                slitLeftTrimMm: lt,
-                slitMaxWidthMm: Math.min(slitMaxWidthMm, usable),
-                slitMinWidthMm: Math.min(slitMinWidthMm, usable)
-              });
-            }}
-          />
-        </label>
-        <label className="slit-cfg-field">
-          <span>右切边 (mm)</span>
-          <NumberInput
-            min={0}
-            fallback={0}
-            className="field num"
-            value={slitRightTrimMm}
-            onValueChange={(rt) => {
-              const usable = Math.max(100, slitMotherWidthMm - slitLeftTrimMm - rt);
-              setSlitSpec({
-                slitRightTrimMm: rt,
-                slitMaxWidthMm: Math.min(slitMaxWidthMm, usable),
-                slitMinWidthMm: Math.min(slitMinWidthMm, usable)
-              });
-            }}
-          />
-        </label>
-        {slitWidthMode === 'FLEXIBLE' ? (
-          <>
-            <label className="slit-cfg-field">
-              <span>最小组合宽 (mm)</span>
-              <NumberInput
-                min={100}
-                fallback={100}
-                className="field num"
-                value={slitMinWidthMm}
-                onValueChange={(v) => setSlitSpec({ slitMinWidthMm: v })}
-              />
-            </label>
-            <label className="slit-cfg-field">
-              <span>最大组合宽 (mm)</span>
-              <NumberInput
-                min={100}
-                fallback={100}
-                className="field num"
-                value={slitMaxWidthMm}
-                onValueChange={(v) => setSlitSpec({ slitMaxWidthMm: v })}
-              />
-            </label>
-            <label className="slit-cfg-field">
-              <span>幅宽步长 (mm)</span>
-              <NumberInput
-                min={1}
-                fallback={10}
-                className="field num"
-                value={slitWidthStepMm}
-                onValueChange={(v) => setSlitSpec({ slitWidthStepMm: v })}
-              />
-            </label>
-          </>
-        ) : (
-          <label className="slit-cfg-field span-2">
-            <span>固定组合宽 (mm)</span>
+      {/* Width Bounds (always symmetric, zero half-empty row) */}
+      {slitWidthMode === 'FLEXIBLE' ? (
+        <div className="wb-param-grid-3">
+          <label className="wb-field">
+            <span>最小宽</span>
+            <NumberInput
+              min={100}
+              fallback={100}
+              className="field num"
+              value={slitMinWidthMm}
+              onValueChange={(v) => setSlitSpec({ slitMinWidthMm: v })}
+            />
+          </label>
+          <label className="wb-field">
+            <span>最大宽</span>
+            <NumberInput
+              min={100}
+              fallback={100}
+              className="field num"
+              value={slitMaxWidthMm}
+              onValueChange={(v) => setSlitSpec({ slitMaxWidthMm: v })}
+            />
+          </label>
+          <label className="wb-field">
+            <span>步长</span>
+            <NumberInput
+              min={1}
+              fallback={10}
+              className="field num"
+              value={slitWidthStepMm}
+              onValueChange={(v) => setSlitSpec({ slitWidthStepMm: v })}
+            />
+          </label>
+        </div>
+      ) : (
+        <label className="wb-field-inline">
+          <span>组合宽</span>
+          <div className="wb-input-unit">
             <NumberInput
               min={100}
               fallback={100}
@@ -330,42 +279,50 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
               value={slitMaxWidthMm}
               onValueChange={(v) => setSlitSpec({ slitMaxWidthMm: v, slitMinWidthMm: v })}
             />
-          </label>
-        )}
-        <label className="slit-cfg-field">
-          <span>求解时限 (秒)</span>
-          <NumberInput
-            min={1}
-            max={180}
-            fallback={30}
-            integer
-            className="field num"
-            value={settings.slitTimeLimitSeconds}
-            onValueChange={(v) => updateStudioSettings({ ...settings, slitTimeLimitSeconds: v })}
-          />
+            <em>mm</em>
+          </div>
+        </label>
+      )}
+
+      {/* Overproduction Cap & Time Budget Pair */}
+      <div className="wb-param-grid-2">
+        <label className="wb-field">
+          <span>超产上限</span>
+          <div className="wb-input-unit">
+            <NumberInput
+              min={0}
+              max={10000}
+              fallback={0}
+              integer
+              className="field num"
+              value={slitOverCap}
+              onValueChange={(v) => setSlitSpec({ slitOverCap: v })}
+            />
+            <em>卷</em>
+          </div>
+        </label>
+        <label className="wb-field">
+          <span>求解时限</span>
+          <div className="wb-input-unit">
+            <NumberInput
+              min={1}
+              max={180}
+              fallback={30}
+              integer
+              className="field num"
+              value={settings.slitTimeLimitSeconds}
+              onValueChange={(v) => updateStudioSettings({ ...settings, slitTimeLimitSeconds: v })}
+            />
+            <em>秒</em>
+          </div>
         </label>
       </div>
 
-      <div className="slit-cfg-summary num">
-        可切净宽 <b>{Math.max(0, slitMotherWidthMm - slitLeftTrimMm - slitRightTrimMm)}</b> mm ·
-        候选宽{' '}
-        <b>
-          {slitWidthMode === 'FIXED'
-            ? 1
-            : slitMaxWidthMm >= slitMinWidthMm
-            ? Math.floor((slitMaxWidthMm - slitMinWidthMm) / Math.max(1, slitWidthStepMm)) + 1
-            : 0}
-        </b>{' '}
-        档
-      </div>
-
-      {/* Collapsible Advanced Solver Parameters */}
-      <details className="slit-adv-fold">
-        <summary className="num">
-          高级参数 · 宽幅≤{settings.slitMaxDistinctWidths}
-        </summary>
-        <div className="slit-cfg-grid" style={{ marginTop: 6 }}>
-          <label className="slit-cfg-field">
+      {/* Collapsible Advanced Tuning */}
+      <details className="wb-param-fold">
+        <summary>更多参数</summary>
+        <div className="wb-param-grid-2" style={{ marginTop: 7 }}>
+          <label className="wb-field">
             <span>TOP K 超产</span>
             <NumberInput
               min={0}
@@ -377,34 +334,8 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
               onValueChange={(v) => updateStudioSettings({ ...settings, slitTopK: v })}
             />
           </label>
-          <label className="slit-cfg-field">
-            <span>列生成迭代</span>
-            <NumberInput
-              min={1}
-              max={5000}
-              step={10}
-              fallback={300}
-              integer
-              className="field num"
-              value={settings.slitMaxIterations}
-              onValueChange={(v) => updateStudioSettings({ ...settings, slitMaxIterations: v })}
-            />
-          </label>
-          <label className="slit-cfg-field">
-            <span>最大花型池</span>
-            <NumberInput
-              min={1}
-              max={20000}
-              step={50}
-              fallback={800}
-              integer
-              className="field num"
-              value={settings.slitMaxPatterns}
-              onValueChange={(v) => updateStudioSettings({ ...settings, slitMaxPatterns: v })}
-            />
-          </label>
-          <label className="slit-cfg-field">
-            <span>不同宽幅上限</span>
+          <label className="wb-field">
+            <span>宽幅上限</span>
             <NumberInput
               min={1}
               max={20}
@@ -417,18 +348,47 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
               }
             />
           </label>
-          <label className="slit-cfg-field span-2">
-            <span>单阶段时限 (ms)</span>
+          <label className="wb-field">
+            <span>迭代上限</span>
             <NumberInput
-              min={1000}
-              max={600000}
-              step={1000}
-              fallback={120000}
+              min={1}
+              max={5000}
+              step={10}
+              fallback={300}
               integer
               className="field num"
-              value={settings.slitStageTimeLimitMs}
-              onValueChange={(v) => updateStudioSettings({ ...settings, slitStageTimeLimitMs: v })}
+              value={settings.slitMaxIterations}
+              onValueChange={(v) => updateStudioSettings({ ...settings, slitMaxIterations: v })}
             />
+          </label>
+          <label className="wb-field">
+            <span>花型池上限</span>
+            <NumberInput
+              min={1}
+              max={20000}
+              step={50}
+              fallback={800}
+              integer
+              className="field num"
+              value={settings.slitMaxPatterns}
+              onValueChange={(v) => updateStudioSettings({ ...settings, slitMaxPatterns: v })}
+            />
+          </label>
+          <label className="wb-field span-2">
+            <span>单阶段时限</span>
+            <div className="wb-input-unit">
+              <NumberInput
+                min={1000}
+                max={600000}
+                step={1000}
+                fallback={120000}
+                integer
+                className="field num"
+                value={settings.slitStageTimeLimitMs}
+                onValueChange={(v) => updateStudioSettings({ ...settings, slitStageTimeLimitMs: v })}
+              />
+              <em>ms</em>
+            </div>
           </label>
         </div>
       </details>

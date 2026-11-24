@@ -578,8 +578,6 @@ export const CuttingWorkbenchPage: React.FC<{
         slitWidthMode={slitWidthMode}
         slitMinWidthMm={slitMinWidthMm}
         slitMaxWidthMm={slitMaxWidthMm}
-        slitWidthStepMm={slitWidthStepMm}
-        slitOverCap={slitOverCap}
         currentRoll1D={currentRoll1D}
         setSlitSpec={setSlitSpec}
       />

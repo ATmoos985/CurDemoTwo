@@ -3,7 +3,7 @@ import { Scenario2DType } from '../../store/useStudioStore';
 import { SlittingWidthMode } from '../../store/studioSettings';
 import { NumberInput } from '../../components/ui/NumberInput';
 import { fmtM } from '@static/app/js/util.js';
-import { openCraftSettings, openEngineSettings } from './workbenchUtils';
+import { openCraftSettings } from './workbenchUtils';
 
 export interface WorkbenchTopBarProps {
   is2D: boolean;
@@ -38,8 +38,6 @@ export interface WorkbenchTopBarProps {
   slitWidthMode: SlittingWidthMode;
   slitMinWidthMm: number;
   slitMaxWidthMm: number;
-  slitWidthStepMm: number;
-  slitOverCap: number;
   currentRoll1D: any;
   setSlitSpec: (spec: Record<string, any>) => void;
 }
@@ -73,8 +71,6 @@ export const WorkbenchTopBar: React.FC<WorkbenchTopBarProps> = ({
   slitWidthMode,
   slitMinWidthMm,
   slitMaxWidthMm,
-  slitWidthStepMm,
-  slitOverCap,
   currentRoll1D,
   setSlitSpec
 }) => {
@@ -433,132 +429,6 @@ export const WorkbenchTopBar: React.FC<WorkbenchTopBarProps> = ({
               </label>
             </div>
           )}
-
-          <details className="craft-disclosure">
-            <summary>
-              一维参数{' '}
-              <span className="num">
-                切边 {slitLeftTrimMm}+{slitRightTrimMm} · 宽
-                {slitWidthMode === 'FIXED'
-                  ? `${slitMaxWidthMm}`
-                  : `${slitMinWidthMm}-${slitMaxWidthMm}/步${slitWidthStepMm}`}{' '}
-                · 超≤{slitOverCap}
-              </span>
-            </summary>
-            <div className="craft-disclosure-panel" style={{ minWidth: 270 }}>
-              <label>
-                <span>宽度模式</span>
-                <select
-                  className="field"
-                  value={slitWidthMode}
-                  onChange={(e) => {
-                    const nextMode = e.target.value as SlittingWidthMode;
-                    setSlitSpec({
-                      slitWidthMode: nextMode,
-                      ...(nextMode === 'FIXED' ? { slitMinWidthMm: slitMaxWidthMm } : {})
-                    });
-                  }}
-                >
-                  <option value="FLEXIBLE">可变宽幅区间</option>
-                  <option value="FIXED">固定组合宽</option>
-                </select>
-              </label>
-              <label>
-                <span>左固定切边 (mm)</span>
-                <NumberInput
-                  min={0}
-                  fallback={0}
-                  className="field num"
-                  value={slitLeftTrimMm}
-                  onValueChange={(lt) => {
-                    const usable = Math.max(100, slitMotherWidthMm - lt - slitRightTrimMm);
-                    setSlitSpec({
-                      slitLeftTrimMm: lt,
-                      slitMaxWidthMm: Math.min(slitMaxWidthMm, usable),
-                      slitMinWidthMm: Math.min(slitMinWidthMm, usable)
-                    });
-                  }}
-                />
-              </label>
-              <label>
-                <span>右固定切边 (mm)</span>
-                <NumberInput
-                  min={0}
-                  fallback={0}
-                  className="field num"
-                  value={slitRightTrimMm}
-                  onValueChange={(rt) => {
-                    const usable = Math.max(100, slitMotherWidthMm - slitLeftTrimMm - rt);
-                    setSlitSpec({
-                      slitRightTrimMm: rt,
-                      slitMaxWidthMm: Math.min(slitMaxWidthMm, usable),
-                      slitMinWidthMm: Math.min(slitMinWidthMm, usable)
-                    });
-                  }}
-                />
-              </label>
-              {slitWidthMode === 'FLEXIBLE' && (
-                <label>
-                  <span>最小组合宽 (mm)</span>
-                  <NumberInput
-                    min={100}
-                    fallback={100}
-                    className="field num"
-                    value={slitMinWidthMm}
-                    onValueChange={(v) => setSlitSpec({ slitMinWidthMm: v })}
-                  />
-                </label>
-              )}
-              <label>
-                <span>{slitWidthMode === 'FIXED' ? '固定组合宽 (mm)' : '最大组合宽 (mm)'}</span>
-                <NumberInput
-                  min={100}
-                  fallback={100}
-                  className="field num"
-                  value={slitMaxWidthMm}
-                  onValueChange={(v) => {
-                    setSlitSpec({
-                      slitMaxWidthMm: v,
-                      ...(slitWidthMode === 'FIXED' ? { slitMinWidthMm: v } : {})
-                    });
-                  }}
-                />
-              </label>
-              {slitWidthMode === 'FLEXIBLE' && (
-                <label>
-                  <span>幅宽步长 (mm)</span>
-                  <NumberInput
-                    min={1}
-                    fallback={10}
-                    className="field num"
-                    value={slitWidthStepMm}
-                    onValueChange={(v) => setSlitSpec({ slitWidthStepMm: v })}
-                  />
-                </label>
-              )}
-              <label>
-                <span>超产上限 (卷)</span>
-                <NumberInput
-                  min={0}
-                  fallback={0}
-                  className="field num"
-                  value={slitOverCap}
-                  onValueChange={(v) => setSlitSpec({ slitOverCap: v })}
-                />
-              </label>
-              <button
-                type="button"
-                className="btn sm"
-                style={{ width: '100%', justifyContent: 'center', marginTop: 4 }}
-                onClick={(e) => {
-                  e.currentTarget.closest('details')?.removeAttribute('open');
-                  openEngineSettings();
-                }}
-              >
-                高级求解参数设置…
-              </button>
-            </div>
-          </details>
         </>
       )}
     </div>

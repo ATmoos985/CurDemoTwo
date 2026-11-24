@@ -663,7 +663,164 @@
   color: var(--cp-ink, #18181b);
 }
 
-/* ---------- 5. Right Column: Clean Goal Selector & Active Scheme Decision ---------- */
+/* ---------- 5. Right Column: Grouped Parameter Cards & Active Scheme Decision ---------- */
+.studio-2d-page.wb-v2 .studio-right .seg {
+  width: 100%;
+  display: flex;
+}
+
+.studio-2d-page.wb-v2 .studio-right .seg button {
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
+  text-align: center;
+}
+
+.studio-2d-page.wb-v2 .wb-param-card {
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: #f8f9fb;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.studio-2d-page.wb-v2 .wb-param-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--cp-ink-2, #52525b);
+}
+
+.studio-2d-page.wb-v2 .wb-param-badge {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--cp-ink-3, #71717a);
+  white-space: nowrap;
+}
+
+.studio-2d-page.wb-v2 .wb-param-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 8px;
+}
+
+.studio-2d-page.wb-v2 .wb-param-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.studio-2d-page.wb-v2 .wb-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.studio-2d-page.wb-v2 .wb-field.span-2 {
+  grid-column: span 2;
+}
+
+.studio-2d-page.wb-v2 .wb-field > span {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--cp-ink-3, #71717a);
+  line-height: 1.25;
+}
+
+.studio-2d-page.wb-v2 .wb-field .field {
+  width: 100%;
+  height: 29px;
+  padding: 2px 7px;
+  font-size: 12px;
+  background: #ffffff;
+}
+
+.studio-2d-page.wb-v2 .wb-field-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.studio-2d-page.wb-v2 .wb-field-inline > span {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--cp-ink-2, #52525b);
+  white-space: nowrap;
+}
+
+.studio-2d-page.wb-v2 .wb-field-inline .wb-input-unit {
+  flex: 1;
+  max-width: 152px;
+}
+
+.studio-2d-page.wb-v2 .wb-input-unit {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.studio-2d-page.wb-v2 .wb-input-unit .field {
+  width: 100%;
+  height: 29px;
+  padding: 2px 30px 2px 8px;
+  font-size: 12px;
+  background: #ffffff;
+}
+
+.studio-2d-page.wb-v2 .wb-input-unit em {
+  position: absolute;
+  right: 7px;
+  font-style: normal;
+  font-size: 10.5px;
+  color: #9ca3af;
+  pointer-events: none;
+  user-select: none;
+}
+
+.studio-2d-page.wb-v2 .wb-param-fold {
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  padding-top: 7px;
+  margin-top: 1px;
+}
+
+.studio-2d-page.wb-v2 .wb-param-fold > summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--cp-ink-3, #71717a);
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.studio-2d-page.wb-v2 .wb-param-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.studio-2d-page.wb-v2 .wb-param-fold > summary::after {
+  content: '▸';
+  font-size: 10px;
+  color: #9ca3af;
+  transition: transform 0.14s ease;
+}
+
+.studio-2d-page.wb-v2 .wb-param-fold[open] > summary {
+  color: var(--cp-ink, #18181b);
+}
+
+.studio-2d-page.wb-v2 .wb-param-fold[open] > summary::after {
+  transform: rotate(90deg);
+}
+
 .studio-2d-page.wb-v2 .wb-right-section {
   display: flex;
   flex-direction: column;
