@@ -1,7 +1,8 @@
 FROM ubuntu:24.04 AS solver
 ARG PACKINGSOLVER_REVISION=3f4faae1a4bc42e2276c5729878933010d37ca14
 RUN apt-get -o Acquire::Retries=5 update \
-    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends ca-certificates cmake g++ git make curl
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends ca-certificates cmake g++ git make curl \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /solver
 RUN git init && git remote add origin https://github.com/fontanf/packingsolver.git \
     && git fetch --depth 1 origin ${PACKINGSOLVER_REVISION} && git checkout --detach FETCH_HEAD
@@ -18,14 +19,19 @@ WORKDIR /workspace
 COPY src ./src
 COPY frontend ./frontend
 COPY integrations/mcp ./integrations/mcp
+COPY benchmark ./benchmark
 RUN npm ci --ignore-scripts --prefix frontend \
+    && npm run typecheck --prefix frontend \
+    && npm test --prefix frontend \
     && npm run build --prefix frontend \
     && node --test src/test/js/*.test.mjs \
+    && node --test benchmark/*.test.mjs \
     && npm ci --ignore-scripts --prefix integrations/mcp \
     && npm test --prefix integrations/mcp \
     && touch /frontend-tests-passed
 
 FROM maven:3.9-eclipse-temurin-17-noble AS build
+ARG REQUIRE_NATIVE_SOLVERS=true
 WORKDIR /workspace
 COPY --from=solver /output /opt/solver
 COPY --from=frontend-tests /frontend-tests-passed /tmp/frontend-tests-passed
@@ -34,12 +40,13 @@ ENV PACKINGSOLVER_IRREGULAR_PATH=/opt/solver/packingsolver_irregular
 COPY pom.xml .
 COPY src ./src
 COPY --from=frontend-tests /workspace/src/main/resources/static/app/dist ./src/main/resources/static/app/dist
-RUN mvn -B verify
+RUN mvn -B -Dcutdemo.requireNativeSolvers=${REQUIRE_NATIVE_SOLVERS} verify
 
 FROM eclipse-temurin:17-jre-noble
 WORKDIR /app
 RUN apt-get -o Acquire::Retries=5 update \
     && apt-get -o Acquire::Retries=5 install -y --no-install-recommends curl libstdc++6 libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
     && groupadd --system cutdemo && useradd --system --gid cutdemo cutdemo \
     && mkdir /app/data && chown cutdemo:cutdemo /app/data
 COPY --from=build /workspace/target/CutDemoTwo-0.0.1-SNAPSHOT.jar /app/app.jar

@@ -78,8 +78,11 @@ function distinct(pieces) {
 
 const FIXED = {
     guillotine: { title: '裁切试验台默认：二维避疵，1 件', build: guillotine },
-    contour14: { title: '裁切试验台异形示例：L 形 8 件 + 三角 6 件', build: contour14 },
-    contour200: { title: '异形上限：L 形与三角各 100 件，3000×4000 板', build: contour200 },
+    'guillotine-java': { title: '自主二维直刀（javaguillotine）：二维避疵，1 件', build: () => ({ ...guillotine(), engine: 'javaguillotine' }) },
+    'scenario4-java': { title: '自主二维直刀（javaguillotine）：预设案例 4（74 件）', build: () => ({ ...scenarioExample(4), engine: 'javaguillotine' }) },
+    contour14: { title: '裁切试验台异形示例（自主 deepnest）：L 形 8 件 + 三角 6 件', build: contour14 },
+    'contour14-native': { title: '异形原生对照（packingsolver-irregular）：L 形 8 件 + 三角 6 件', build: () => ({ ...contour14(), engine: 'packingsolver-irregular' }) },
+    contour200: { title: '异形上限（自主 deepnest）：L 形与三角各 100 件，3000×4000 板', build: contour200 },
 };
 const FAMILIES = [
     { pattern: /^scenario(\d+)$/, title: n => getInitialScenarios()[n]?.name, build: n => {
@@ -91,15 +94,16 @@ const FAMILIES = [
 ];
 
 export const SETS = {
-    smoke: ['guillotine', 'contour14', 'scenario4', 'synthetic2000'],
+    smoke: ['guillotine', 'guillotine-java', 'contour14', 'scenario4', 'synthetic2000'],
     demo: ['guillotine', 'contour14', ...Object.keys(getInitialScenarios()).map(id => `scenario${id}`)],
     large: ['synthetic2000', 'synthetic10000', 'contour200'],
+    compare: ['guillotine-java', 'scenario4-java', 'contour14', 'contour14-native'],
 };
 SETS.all = [...SETS.demo, ...SETS.large];
 
 /** Named problems for --list; the scenario/synthetic/distinct families also accept other sizes. */
 export function problemNames() {
-    return [...new Set([...SETS.all, 'distinct2000'])];
+    return [...new Set([...SETS.all, ...SETS.compare, 'distinct2000'])];
 }
 
 export function problem(name) {
@@ -117,7 +121,7 @@ export function problem(name) {
 /** The engine SolverFactory dispatches to: an explicit engine, otherwise by process mode. */
 export function expectedEngine(body) {
     if (body.engine && body.engine !== 'auto') return body.engine;
-    return { CROSSCUT: 'crosscut', CONTOUR: 'packingsolver-irregular' }[body.process.mode] ?? 'packingsolver';
+    return { CROSSCUT: 'crosscut', CONTOUR: 'deepnest' }[body.process.mode] ?? 'packingsolver';
 }
 
 export function hash(body) {

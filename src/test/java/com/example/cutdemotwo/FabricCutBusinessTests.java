@@ -201,9 +201,16 @@ class FabricCutBusinessTests {
         assertEquals(initialCount, updatedRemnants.size(), "仅求解不能生成库存料头");
     }
 
+    private static void requireOrAssumeNativeSolver(boolean available, String reason) {
+        if (!available && Boolean.parseBoolean(System.getProperty("cutdemo.requireNativeSolvers", "false"))) {
+            fail("已启用 -Dcutdemo.requireNativeSolvers=true，但原生求解器不可用：" + reason);
+        }
+        org.junit.jupiter.api.Assumptions.assumeTrue(available, reason);
+    }
+
     @Test
     void testRightOriginCutCoordinatesUseFarCertificateEdge() {
-        org.junit.jupiter.api.Assumptions.assumeTrue(packingSolverService.isAvailable());
+        requireOrAssumeNativeSolver(packingSolverService.isAvailable(), "需要原生矩形直刀求解器");
         SolveRequest req = new SolveRequest();
         req.setRollW(2000);
         req.setRollL(4000);
@@ -219,7 +226,7 @@ class FabricCutBusinessTests {
 
     @Test
     void testFullWidthRemnantDoesNotCutAlongMaterialEdge() {
-        org.junit.jupiter.api.Assumptions.assumeTrue(packingSolverService.isAvailable());
+        requireOrAssumeNativeSolver(packingSolverService.isAvailable(), "需要原生矩形直刀求解器");
         SolveRequest req = new SolveRequest();
         req.setRollW(2000);
         req.setRollL(1600);
@@ -233,7 +240,7 @@ class FabricCutBusinessTests {
 
     @Test
     void testTwoDimensionalPlanCanBeReportedWithoutOverlappingStock(@org.junit.jupiter.api.io.TempDir java.nio.file.Path temp) {
-        org.junit.jupiter.api.Assumptions.assumeTrue(packingSolverService.isAvailable());
+        requireOrAssumeNativeSolver(packingSolverService.isAvailable(), "需要原生矩形直刀求解器");
         SolveRequest req = new SolveRequest();
         req.setRollId("ROLL-DEMO-2D");
         req.setRollW(2000);

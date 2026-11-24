@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { SETS, problem, problemNames, expectedEngine, hash, prepare } from './problems.mjs';
-import { parseBase, schedule, measure, summarize, formatTable, formatProblems, formatHeader, formatRun, formatReport } from './lib.mjs';
+import {
+    parseBase, schedule, measure, summarize, evaluateThresholds,
+    formatTable, formatProblems, formatHeader, formatRun, formatThresholdReport, formatReport
+} from './lib.mjs';
 
 // Hashes of the exact request bodies sent in the earlier ad-hoc runs (02 and 05 notes), so results stay comparable.
 test('synthetic problems reproduce the request bodies of the earlier COPIES and -e runs', () => {
@@ -32,7 +36,10 @@ test('presets come from the front-end scenario data and keep their engine', () =
     assert.equal(scenario4.parts.reduce((sum, p) => sum + p.quantity, 0), 74);
     assert.equal(expectedEngine(scenario4), 'packingsolver');
     assert.equal(expectedEngine(problem('scenario1').body), 'crosscut');
-    assert.equal(expectedEngine(problem('contour14').body), 'packingsolver-irregular');
+    assert.equal(expectedEngine(problem('contour14').body), 'deepnest');
+    assert.equal(expectedEngine(problem('contour14-native').body), 'packingsolver-irregular');
+    assert.equal(expectedEngine(problem('guillotine-java').body), 'javaguillotine');
+    assert.equal(expectedEngine(problem('scenario4-java').body), 'javaguillotine');
     assert.equal(expectedEngine({ ...scenario4, engine: 'javaguillotine' }), 'javaguillotine');
 });
 
@@ -179,4 +186,62 @@ test('one run per side is not reported as separated ranges', () => {
     assert.match(formatTable(summary), /\| synthetic2000 \| \+533 \| \+60.26 \| \+6 \| 单次 \|/);
     const same = summarize([row('A', 34, 96.75, 2149), row('B', 34, 96.75, 2162)]);
     assert.equal(same.comparisons[0].utilization.verdict, 'same');
+});
+
+test('thresholds.json 仅声明题库内有效题目并具备合法数值红线', () => {
+    const config = JSON.parse(readFileSync(new URL('./thresholds.json', import.meta.url), 'utf8'));
+    assert.equal(config.schemaVersion, 1);
+    const catalogue = new Set(problemNames());
+    const entries = Object.entries(config.problems);
+    assert.ok(entries.length >= 6);
+    for (const [name, rule] of entries) {
+        assert.ok(catalogue.has(name), `未知红线题目：${name}`);
+        assert.ok(typeof rule.minUtilization === 'number' && rule.minUtilization > 0 && rule.minUtilization <= 100);
+        assert.ok(typeof rule.maxElapsedMs === 'number' && rule.maxElapsedMs > 0);
+        if (rule.minPlacedRatio != null) {
+            assert.ok(typeof rule.minPlacedRatio === 'number' && rule.minPlacedRatio > 0 && rule.minPlacedRatio <= 1);
+        }
+    }
+});
+
+test('evaluateThresholds 校验利用率、耗时、排入比例与无有效运行违约并输出中文报告', () => {
+    const config = JSON.parse(readFileSync(new URL('./thresholds.json', import.meta.url), 'utf8'));
+    const okSummary = summarize([
+        row('A', 1106, 92.5, 20300),
+        { ...row('A', 1, 56.25, 450), problem: 'guillotine-java', requested: 1, engine: 'javaguillotine' },
+        { ...row('A', 14, 52.0, 1200), problem: 'contour14', requested: 14, engine: 'deepnest' },
+        { ...row('A', 5, 80.0, 500), problem: 'scenario1', requested: 5, engine: 'crosscut' },
+    ]);
+    const passed = evaluateThresholds(okSummary, config);
+    assert.equal(passed.passed, true);
+    assert.equal(passed.checked, 3);
+    assert.deepEqual(passed.violations, []);
+    assert.match(formatThresholdReport(passed), /全部通过（共校验 3 组）/);
+
+    const failSummary = summarize([
+        row('A', 500, 62.0, 26500),
+        { ...row('A', 0, 0, 500, false), problem: 'contour14-native', requested: 14, engine: 'packingsolver-irregular' },
+        { ...row('A', 0, 55.0, 400), problem: 'guillotine-java', requested: 1, engine: 'javaguillotine' },
+    ]);
+    const failed = evaluateThresholds(failSummary, config);
+    assert.equal(failed.passed, false);
+    assert.equal(failed.checked, 3);
+    assert.deepEqual(failed.violations.map(v => `${v.problem}:${v.metric}`), [
+        'synthetic2000:utilization',
+        'synthetic2000:elapsedMs',
+        'contour14-native:validRuns',
+        'guillotine-java:placedRatio',
+    ]);
+    const text = formatThresholdReport(failed);
+    assert.match(text, /未通过（共校验 3 组，发现 4 项违约）/);
+    assert.match(text, /synthetic2000/);
+    assert.match(text, /contour14-native/);
+
+    const reportText = formatReport({
+        suiteCheckout: { commit: 'abc1234', dirty: false }, startedAt: 'T',
+        options: { rounds: 1, warmup: 0, timeLimitSeconds: null },
+        host: { os: 'o', cpu: 'c', logicalCpus: 1, node: 'n' }, services: [], complete: true,
+        rows: [row('A', 1106, 92.5, 20300)],
+    }, config);
+    assert.match(reportText, /质量红线：全部通过/);
 });

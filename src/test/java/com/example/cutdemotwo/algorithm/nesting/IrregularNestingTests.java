@@ -142,8 +142,15 @@ class IrregularNestingTests {
             assertThrows(IllegalArgumentException.class, () -> IrregularPackingSolverService.parseCertificate(json.readTree(bad),sample()));
         assertTrue(IrregularPackingSolverService.parseCertificate(json.readTree("null"), sample()).getPlacements().isEmpty());
     }
+    private static void requireOrAssumeNativeSolver(boolean available, String reason) {
+        if (!available && Boolean.parseBoolean(System.getProperty("cutdemo.requireNativeSolvers", "false"))) {
+            fail("已启用 -Dcutdemo.requireNativeSolvers=true，但原生异形求解器不可用：" + reason);
+        }
+        org.junit.jupiter.api.Assumptions.assumeTrue(available, reason);
+    }
+
     @Test void nativeStripCandidateKeepsKitWidthAndFixedGrain() {
-        org.junit.jupiter.api.Assumptions.assumeTrue(nativeEngine.isAvailable(), "Install the irregular native engine");
+        requireOrAssumeNativeSolver(nativeEngine.isAvailable(), "Install the irregular native engine");
         var input = problem(Shape.rectangle(300,500), List.of(
                 new Part(42, "panel", Shape.rectangle(150,200), 2, false)), List.of());
         var candidate = nativeEngine.solveStripCandidate(input);
@@ -155,7 +162,7 @@ class IrregularNestingTests {
         assertEquals(200, length, .001);
     }
     @Test void nativeConcaveMaterialAvoidsDefectsAndReportsActualAreaWithoutInventingRemnants() {
-        org.junit.jupiter.api.Assumptions.assumeTrue(nativeEngine.isAvailable(), "Install the irregular native engine; this test must execute, not skip");
+        requireOrAssumeNativeSolver(nativeEngine.isAvailable(), "Install the irregular native engine; this test must execute, not skip");
         var material = polygon(0,0, 600,0, 600,300, 300,300, 300,600, 0,600);
         var input = problem(material,sample().parts(),List.of(new Exclusion(1,200,100,Shape.rectangle(50,50),10)));
         var result = kernel.solve(input);

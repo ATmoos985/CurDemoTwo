@@ -12,6 +12,49 @@ concurrency:
   group: image-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  mysql-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Start MySQL 8.4 with production utf8mb4_bin collation
+        run: |
+          set -euo pipefail
+          docker run -d --name cutdemo-mysql-ci \
+            -p 127.0.0.1:13306:3306 \
+            -e MYSQL_ROOT_PASSWORD=cutdemo_ci_root_pw \
+            mysql:8.4 \
+            --character-set-server=utf8mb4 \
+            --collation-server=utf8mb4_bin \
+            --default-storage-engine=InnoDB
+          for i in $(seq 1 60); do
+            if docker exec cutdemo-mysql-ci mysqladmin ping -h 127.0.0.1 -uroot -pcutdemo_ci_root_pw --silent; then
+              break
+            fi
+            sleep 2
+          done
+          docker exec cutdemo-mysql-ci mysql -h 127.0.0.1 -uroot -pcutdemo_ci_root_pw \
+            -e "SELECT VERSION(), @@character_set_server, @@collation_server;"
+      - name: Run JDBC and Flyway tests against MySQL 8.4
+        run: |
+          ./mvnw -B test \
+            -Dcutdemo.test.mysql.url=jdbc:mysql://127.0.0.1:13306/ \
+            -Dcutdemo.test.mysql.user=root \
+            -Dcutdemo.test.mysql.password=cutdemo_ci_root_pw \
+            -Dtest="JdbcInventoryTests,OptimizationJdbcApiTests,JdbcOptimizationTests,OptimizationArchiveImportTests,OptimizationImportConfigurationTests,ExecutionOrderTests,InventoryLedgerTests,InventoryTransferTests,InventoryCountTests,InventoryOutboxTests,IntegrationDeliveryTests,SchedulingStudioWorkflowTests,SlittingOptimizationTests"
+      - name: Cleanup MySQL 8.4 container
+        if: always()
+        run: |
+          if [[ "${{ job.status }}" != "success" ]]; then
+            docker logs --tail 100 cutdemo-mysql-ci || true
+          fi
+          docker rm -f cutdemo-mysql-ci || true
+
   image:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -24,33 +67,54 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Verify restricted deployment command
         run: bash src/test/deploy/actions-ssh-command.test.sh
-      - name: Build Linux solver and execute Java and JavaScript tests
-        env:
-          COMMIT: ${{ github.sha }}
-        run: |
-          docker build --label "org.opencontainers.image.revision=$COMMIT" -t "cutdemo:git-$COMMIT" .
-      - name: Publish immutable image
-        id: publish
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GitHub Container Registry
         if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Prepare immutable image tag
+        id: meta
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_ACTOR: ${{ github.actor }}
           REPOSITORY: ${{ github.repository }}
           COMMIT: ${{ github.sha }}
         run: |
           registry_image="ghcr.io/${REPOSITORY,,}"
-          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
-          docker tag "cutdemo:git-$COMMIT" "$registry_image:git-$COMMIT"
-          docker push "$registry_image:git-$COMMIT"
-          digest=$(docker inspect --format '{{index .RepoDigests 0}}' "$registry_image:git-$COMMIT")
-          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
-          printf 'Verified image: `%s`\n\nDeploy using the Deploy workflow and this digest.\n' "$digest" >> "$GITHUB_STEP_SUMMARY"
-      - name: Registry logout
-        if: always()
-        run: docker logout ghcr.io
+          printf 'image=%s\n' "$registry_image" >> "$GITHUB_OUTPUT"
+          printf 'tag=%s:git-%s\n' "$registry_image" "$COMMIT" >> "$GITHUB_OUTPUT"
+      - name: Build Linux solver, execute full test gates and publish image
+        id: build_push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tag }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          build-args: REQUIRE_NATIVE_SOLVERS=true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Record published immutable digest
+        id: publish
+        if: github.event_name != 'pull_request'
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.build_push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            printf '::error::Unexpected image digest output: %s\n' "$DIGEST"
+            exit 1
+          fi
+          full_digest="${IMAGE}@${DIGEST}"
+          printf 'digest=%s\n' "$full_digest" >> "$GITHUB_OUTPUT"
+          printf 'Verified image: `%s`\n\nDeploy using the Deploy workflow and this digest.\n' "$full_digest" >> "$GITHUB_STEP_SUMMARY"
+
   deploy:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
-    needs: image
+    needs: [image, mysql-integration]
     uses: ./.github/workflows/deploy.yml
     with:
       image: ${{ needs.image.outputs.digest }}

@@ -3,14 +3,15 @@
 // per problem and service. The results file is rewritten after every solve, so an interrupted run keeps what it has.
 import { parseArgs } from 'node:util';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SETS, prepare, problemNames } from './problems.mjs';
-import { parseBase, schedule, measure, formatRun, formatReport, formatProblems } from './lib.mjs';
+import { parseBase, schedule, measure, summarize, evaluateThresholds, formatRun, formatReport, formatProblems } from './lib.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_THRESHOLDS = path.join(HERE, 'thresholds.json');
 const USAGE = `用法：node benchmark/run.mjs [选项] <A 服务> [B 服务]
   服务写作 [标签=]http://主机:端口，例如 30e3d4b=http://127.0.0.1:18310；给两个服务时输出 B − A。
 
@@ -19,12 +20,14 @@ const USAGE = `用法：node benchmark/run.mjs [选项] <A 服务> [B 服务]
   --rounds <n>        轮数，默认 4。两个服务时奇数轮 A 先、偶数轮 B 先，取偶数先后才平衡
   --warmup <n>        每个服务、每个引擎先以 1 s 限时预热几次，不计入结果（默认 1）
   --time-limit <s>    统一改写各题限时；请求体随之改变，哈希不再与默认题目相同
+  --check-thresholds  启用质量红线校验（默认读取 benchmark/thresholds.json）
+  --thresholds <文件> 指定质量红线 JSON 文件并启用红线校验
   --out <文件>        结果 JSON（默认 benchmark/results/<开始时间>.json）
   --smoke             冒烟：--set smoke --rounds 1 --warmup 0 --time-limit 2，可再用上面的选项覆盖
   --list              列出题目、预期引擎与请求体哈希后退出（可配合 --set、--problems、--time-limit）
   -h, --help          显示本说明
 
-退出码：0 全部有效；1 有无效运行（非 FEASIBLE、引擎不符、降级或裁片编号重复）；2 参数错误、服务不可用或请求中断。`;
+退出码：0 全部有效且红线通过；1 有无效运行或质量红线未通过；2 参数错误、服务不可用或请求中断。`;
 
 class Abort extends Error {}
 const log = message => process.stderr.write(`${message}\n`);
@@ -41,7 +44,8 @@ function readOptions() {
     try {
         parsed = parseArgs({ allowPositionals: true, options: {
             set: { type: 'string' }, problems: { type: 'string' }, rounds: { type: 'string' }, warmup: { type: 'string' },
-            'time-limit': { type: 'string' }, out: { type: 'string' }, smoke: { type: 'boolean' }, list: { type: 'boolean' },
+            'time-limit': { type: 'string' }, 'check-thresholds': { type: 'boolean' }, thresholds: { type: 'string' },
+            out: { type: 'string' }, smoke: { type: 'boolean' }, list: { type: 'boolean' },
             help: { type: 'boolean', short: 'h' } } });
     } catch (error) {
         throw new Abort(`${error.message}\n\n${USAGE}`);
@@ -53,11 +57,12 @@ function readOptions() {
     // --list on its own shows every named problem rather than the default set.
     const names = values.problems ? values.problems.split(',').map(s => s.trim()).filter(Boolean)
         : values.list && !values.set && !values.smoke ? problemNames() : SETS[set];
+    const thresholdsPath = values.thresholds ? path.resolve(values.thresholds) : values['check-thresholds'] ? DEFAULT_THRESHOLDS : null;
     return { help: values.help, list: values.list, set: values.problems ? null : set, names,
         rounds: values.rounds == null ? defaults.rounds : integer('rounds', values.rounds, 1),
         warmup: values.warmup == null ? defaults.warmup : integer('warmup', values.warmup, 0),
         timeLimitSeconds: values['time-limit'] == null ? defaults.timeLimit : integer('time-limit', values['time-limit'], 1),
-        out: values.out, bases: positionals };
+        thresholdsPath, out: values.out, bases: positionals };
 }
 
 function prepareAll(names, timeLimitSeconds) {
@@ -150,6 +155,7 @@ async function main() {
 
     save();
     log(`结果写入 ${out}`);
+    const thresholds = options.thresholdsPath ? JSON.parse(readFileSync(options.thresholdsPath, 'utf8')) : null;
     try {
         for (const id of engines) {
             const first = problems.find(p => p.expectedEngine === id), body = { ...first.body, timeLimitSeconds: 1 };
@@ -178,12 +184,14 @@ async function main() {
         record.abortReason = error.message;
         log(error.message);
     } finally {
+        if (thresholds) record.thresholdEvaluation = evaluateThresholds(summarize(record.rows), thresholds);
         record.finishedAt = new Date().toISOString();
         save();
     }
-    console.log(formatReport(record));
+    console.log(formatReport(record, thresholds));
     log(`结果：${out}`);
-    return record.complete ? (record.rows.every(r => r.ok) ? 0 : 1) : 2;
+    const thresholdOk = !record.thresholdEvaluation || record.thresholdEvaluation.passed;
+    return record.complete ? (record.rows.every(r => r.ok) && thresholdOk ? 0 : 1) : 2;
 }
 
 main().then(code => { process.exitCode = code ?? 0; }, error => {

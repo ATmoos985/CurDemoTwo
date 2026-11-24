@@ -23,8 +23,15 @@ class PackingSolverPrecisionTests {
                 "PACKINGSOLVER_PATH", "data/solver/packingsolver_rectangleguillotine.exe"));
     }
 
+    private static void requireOrAssumeNativeSolver(boolean available, String reason) {
+        if (!available && Boolean.parseBoolean(System.getProperty("cutdemo.requireNativeSolvers", "false"))) {
+            fail("已启用 -Dcutdemo.requireNativeSolvers=true，但原生求解器不可用：" + reason);
+        }
+        org.junit.jupiter.api.Assumptions.assumeTrue(available, reason);
+    }
+
     @Test void fabric893292FirstStationAcceptsItsOriginalFractionalDefect() {
-        org.junit.jupiter.api.Assumptions.assumeTrue(engine.isAvailable(), "Native solver is required for this regression");
+        requireOrAssumeNativeSolver(engine.isAvailable(), "Native solver is required for this regression");
         SolveRequest request = new SolveRequest();
         request.setRollW(2800); request.setRollL(5000); request.setTotalRollL(100000);
         request.setCutOrigin("right-bottom"); request.setTimeLimitSeconds(2);
@@ -49,7 +56,7 @@ class PackingSolverPrecisionTests {
     }
 
     @Test void fractionalSheetAndTrimRoundTripInMillimetersAtEveryOrigin() {
-        org.junit.jupiter.api.Assumptions.assumeTrue(engine.isAvailable(), "Native solver is required for this regression");
+        requireOrAssumeNativeSolver(engine.isAvailable(), "Native solver is required for this regression");
         for (String origin : List.of("left-top", "right-top", "left-bottom", "right-bottom")) {
             var result = kernel.solve(problem(600.5, 800.7, 600.5, 200.2, false, 10.1, origin));
             assertTrue(result.feasible(), origin + ": " + result.message());
@@ -66,7 +73,7 @@ class PackingSolverPrecisionTests {
     }
 
     @Test void fractionalPartCanRotateWithoutChangingItsPhysicalSize() {
-        org.junit.jupiter.api.Assumptions.assumeTrue(engine.isAvailable(), "Native solver is required for this regression");
+        requireOrAssumeNativeSolver(engine.isAvailable(), "Native solver is required for this regression");
         var result = kernel.solve(problem(300.3, 500.5, 500.5, 300.3, true, 0, "right-top"));
         assertTrue(result.feasible(), result.message());
         assertEquals(90, result.placements().get(0).rotationDegrees());

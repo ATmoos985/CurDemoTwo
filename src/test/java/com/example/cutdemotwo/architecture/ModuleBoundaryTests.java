@@ -50,6 +50,111 @@ class ModuleBoundaryTests {
         assertBoundary("business", Set.of("business", "algorithm", "contracts", "persistence"));
     }
 
+    @Test void configStaysInfrastructureOnly() throws IOException {
+        assertBoundary("config", Set.of("config"));
+    }
+
+    @Test void controllersStayInHttpLayerAndNeverTouchLegacyLinearOrStoreImplementations() throws IOException {
+        assertBoundary("controller", Set.of("controller", "business", "algorithm", "contracts", "persistence"));
+        var errors = new ArrayList<String>();
+        for (var file : javaFiles(ROOT.resolve("controller"))) {
+            for (var ref : persistenceMemberReferences(Files.readString(file))) {
+                if (!"InventoryConflictException".equals(ref)) {
+                    errors.add(file + " -> persistence." + ref);
+                }
+            }
+        }
+        assertTrue(errors.isEmpty(), "控制器禁止直接依赖持久化实现类（仅允许捕获 InventoryConflictException）：\n" + String.join("\n", errors));
+    }
+
+    @Test void persistenceDoesNotDependOnControllersAlgorithmsOrBusinessServices() throws IOException {
+        assertBoundary("persistence", Set.of("persistence", "business", "contracts"));
+        // 既有作业持久化对 StoredOptimizationJob 与 OptimizationService.Failure 的历史登记依赖先守住不扩大；
+        // 严禁新增对 business.cutting / business.integration 或其他 business.optimization 服务类的越层引用。
+        Set<String> legacyJobFiles = Set.of(
+                "FileOptimizationJobStore.java",
+                "JdbcOptimizationJobStore.java",
+                "LeasedOptimizationJobStore.java",
+                "OptimizationArchiveImport.java",
+                "OptimizationJobStore.java"
+        );
+        var errors = new ArrayList<String>();
+        for (var file : javaFiles(ROOT.resolve("persistence"))) {
+            String fileName = file.getFileName().toString();
+            for (var ref : businessSubReferences(Files.readString(file))) {
+                if (ref.startsWith("model.")) continue;
+                boolean allowedLegacy = legacyJobFiles.contains(fileName)
+                        && (ref.equals("optimization.StoredOptimizationJob")
+                        || (fileName.equals("JdbcOptimizationJobStore.java") && ref.equals("optimization.OptimizationService")));
+                if (!allowedLegacy) {
+                    errors.add(file + " -> business." + ref);
+                }
+            }
+        }
+        assertTrue(errors.isEmpty(), "持久化层越层依赖业务服务：\n" + String.join("\n", errors));
+    }
+
+    @Test void changyangReferencesStayWhitelistedToSlittingKernelAndLegacyLinear() throws IOException {
+        Set<String> legacyLinearFiles = Set.of("LinearCutRequest.java", "LinearCutService.java");
+        var errors = new ArrayList<String>();
+        for (var file : javaFiles(ROOT)) {
+            String rel = ROOT.relativize(file).toString().replace('\\', '/');
+            for (var ref : changyangReferences(Files.readString(file))) {
+                if (rel.startsWith("algorithm/slitting/")) {
+                    // 标准一维适配层仅允许引用 changyang 纯计算内核，严禁引用 rest/excel 越层包
+                    boolean allowedKernel = ref.startsWith("changyang.cut.apsmodule.")
+                            && !ref.startsWith("changyang.cut.apsmodule.service.excel.");
+                    if (!allowedKernel) errors.add(rel + " -> " + ref);
+                } else if (rel.startsWith("linear/") && legacyLinearFiles.contains(file.getFileName().toString())) {
+                    // 既有旧一维兼容宿主保持受控登记，不向新文件扩散
+                } else {
+                    errors.add(rel + " -> " + ref);
+                }
+            }
+        }
+        assertTrue(errors.isEmpty(), "检测到未经白名单许可的 changyang.* 依赖：\n" + String.join("\n", errors));
+    }
+
+    private static final Pattern PERSISTENCE_MEMBER_REF = Pattern.compile(
+            "\\bcom\\.example\\.cutdemotwo\\.persistence\\.([A-Za-z0-9_*]+)");
+    private static final Pattern BUSINESS_SUB_REF = Pattern.compile(
+            "\\bcom\\.example\\.cutdemotwo\\.business\\.([a-z][a-z0-9_]*\\.[A-Za-z0-9_*]+)");
+    private static final Pattern CHANGYANG_REF = Pattern.compile(
+            "\\b(changyang\\.[A-Za-z0-9_.*]+)");
+
+    private static String stripComments(String source) {
+        return source.replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("(?m)//[^\\n]*", "");
+    }
+
+    private static List<Path> javaFiles(Path dir) throws IOException {
+        try (var stream = Files.walk(dir)) {
+            var files = stream.filter(p -> p.toString().endsWith(".java")).toList();
+            assertFalse(files.isEmpty(), "模块未被扫描，不能以零文件通过：" + dir);
+            return files;
+        }
+    }
+
+    private static List<String> persistenceMemberReferences(String source) {
+        var result = new ArrayList<String>();
+        var matcher = PERSISTENCE_MEMBER_REF.matcher(stripComments(source));
+        while (matcher.find()) result.add(matcher.group(1));
+        return result;
+    }
+
+    private static List<String> businessSubReferences(String source) {
+        var result = new ArrayList<String>();
+        var matcher = BUSINESS_SUB_REF.matcher(stripComments(source));
+        while (matcher.find()) result.add(matcher.group(1));
+        return result;
+    }
+
+    private static List<String> changyangReferences(String source) {
+        var result = new ArrayList<String>();
+        var matcher = CHANGYANG_REF.matcher(stripComments(source));
+        while (matcher.find()) result.add(matcher.group(1));
+        return result;
+    }
+
     private static final Pattern ALGORITHM_REFERENCE = Pattern.compile(
             "\\bcom\\.example\\.cutdemotwo\\.algorithm\\.([a-z][a-z0-9_]*)\\.");
 
@@ -111,5 +216,15 @@ class ModuleBoundaryTests {
         assertTrue(violations("// com.example.cutdemotwo.business.model.Example\n"
                 + "import com.example.cutdemotwo.contracts.nesting.NestingProblem;",
                 Set.of("contracts")).isEmpty());
+    }
+
+    @Test void extendedGuardsCatchPersistenceControllerAndChangyangViolations() {
+        assertEquals(List.of("JdbcInventoryStore"),
+                persistenceMemberReferences("import com.example.cutdemotwo.persistence.JdbcInventoryStore;"));
+        assertEquals(List.of("cutting.RemnantService"),
+                businessSubReferences("import com.example.cutdemotwo.business.cutting.RemnantService;"));
+        assertEquals(List.of("changyang.cut.rest.CuttingExportController"),
+                changyangReferences("import changyang.cut.rest.CuttingExportController;"));
+        assertTrue(changyangReferences("// changyang.cut.rest.Example").isEmpty());
     }
 }
