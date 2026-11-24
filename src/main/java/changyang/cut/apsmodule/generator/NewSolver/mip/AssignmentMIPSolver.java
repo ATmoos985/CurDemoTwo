@@ -177,8 +177,9 @@ public class AssignmentMIPSolver {
         }
         log.debug("Stage5 patterns={} detailedDemands={}", patternList.size(), detailedDemands.size());
 
+        MPSolver solver = null;
         try {
-            MPSolver solver = MPSolver.createSolver("SCIP");
+            solver = MPSolver.createSolver("SCIP");
             if (solver != null) {
                 String scipParams = SCIP_DETERMINISTIC_PARAMS;
                 long nodeLimit = longProperty("cutting.stage5.scipNodeLimit", DEFAULT_STAGE5_NODE_LIMIT);
@@ -346,6 +347,10 @@ public class AssignmentMIPSolver {
         } catch (Exception e) {
             log.error("Stage5 failed", e);
             return null;
+        } finally {
+            if (solver != null) {
+                solver.delete();
+            }
         }
     }
 

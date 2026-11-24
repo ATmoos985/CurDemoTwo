@@ -283,4 +283,68 @@ class LinearSlittingSolverEngineTests {
                     "QUALITY 利用率不应低于 FAST: quality=" + qualityUtil + " fast=" + fastUtil);
         }
     }
+
+    @Test
+    void childThreadsConfigurationAppliesAdaptiveDefaultsAndCommandFlags(@org.junit.jupiter.api.io.TempDir java.nio.file.Path temp) throws Exception {
+        assertEquals(1, LinearSlittingSolverEngine.defaultChildThreads(1));
+        assertEquals(1, LinearSlittingSolverEngine.defaultChildThreads(2));
+        assertEquals(1, LinearSlittingSolverEngine.defaultChildThreads(3));
+        assertEquals(2, LinearSlittingSolverEngine.defaultChildThreads(4));
+        assertEquals(3, LinearSlittingSolverEngine.defaultChildThreads(6));
+        assertEquals(3, LinearSlittingSolverEngine.defaultChildThreads(8));
+        assertEquals(3, LinearSlittingSolverEngine.defaultChildThreads(16));
+
+        assertEquals(LinearSlittingSolverEngine.defaultChildThreads(), LinearSlittingSolverEngine.normalizeChildThreads("auto"));
+        assertEquals(1, LinearSlittingSolverEngine.normalizeChildThreads("1"));
+        assertEquals(3, LinearSlittingSolverEngine.normalizeChildThreads("3"));
+        assertThrows(IllegalArgumentException.class, () -> LinearSlittingSolverEngine.normalizeChildThreads("0"));
+        assertThrows(IllegalArgumentException.class, () -> LinearSlittingSolverEngine.normalizeChildThreads("-1"));
+        assertThrows(IllegalArgumentException.class, () -> LinearSlittingSolverEngine.normalizeChildThreads("9"));
+        assertThrows(IllegalArgumentException.class, () -> LinearSlittingSolverEngine.normalizeChildThreads("abc"));
+
+        var in = temp.resolve("in.json");
+        var out = temp.resolve("out.json");
+        var singleCmd = LinearSlittingSolverEngine.command(in, out, 1L, "384m", 1);
+        assertTrue(singleCmd.contains("-Xmx384m"));
+        assertTrue(singleCmd.contains("-XX:ActiveProcessorCount=2"));
+        assertTrue(singleCmd.contains("-Dcutting.parallel.globalThreads=1"));
+
+        var multiCmd = LinearSlittingSolverEngine.command(in, out, 1L, "768m", 3);
+        assertTrue(multiCmd.contains("-XX:ActiveProcessorCount=3"));
+        assertTrue(multiCmd.contains("-Dcutting.parallel.globalThreads=3"));
+
+        var workerCmd = LinearSlittingSolverEngine.workerCommand(1L, "512m", 3);
+        assertTrue(workerCmd.contains("-Xmx512m"));
+        assertTrue(workerCmd.contains("-XX:ActiveProcessorCount=3"));
+        assertTrue(workerCmd.contains("-Dcutting.parallel.globalThreads=3"));
+        assertTrue(workerCmd.contains("--worker"));
+    }
+
+    @Test
+    void qualityModeIsDeterministicAcrossRepeatedRunsAndSingleVsMultiThreads() {
+        var orders = List.of(
+                new SlittingProblem.Order("C1", 750, 50_000L, 40, "S"),
+                new SlittingProblem.Order("C2", 790, 50_000L, 28, "S"),
+                new SlittingProblem.Order("C3", 830, 50_000L, 32, "S"),
+                new SlittingProblem.Order("C4", 910, 50_000L, 26, "S"),
+                new SlittingProblem.Order("C5", 960, 50_000L, 30, "S"),
+                new SlittingProblem.Order("C6", 1020, 50_000L, 22, "S"),
+                new SlittingProblem.Order("C7", 1090, 50_000L, 18, "S"),
+                new SlittingProblem.Order("C8", 1160, 50_000L, 20, "S"),
+                new SlittingProblem.Order("C9", 1260, 50_000L, 16, "S"),
+                new SlittingProblem.Order("C10", 1480, 50_000L, 14, "S")
+        );
+        var problem = new SlittingProblem("1", "mm", 4500, 50, 50, 4200, 4400, 10, 0, "QUALITY", orders, 60);
+
+        var run1 = engine.solve(problem);
+        var run2 = engine.solve(problem);
+        assertEquals("FEASIBLE", run1.status());
+        assertEquals(run1, run2, "连续两次 QUALITY 求解输出必须 100% 确定性一致");
+
+        try (var singleThreadEngine = new LinearSlittingSolverEngine("384m", 1)) {
+            var singleRun = singleThreadEngine.solve(problem);
+            assertEquals("FEASIBLE", singleRun.status());
+            assertEquals(run1, singleRun, "低配单线程模式与多核并发模式 QUALITY 输出必须 100% 一致");
+        }
+    }
 }

@@ -146,10 +146,12 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
                 report.beginGroup(groupKey, groupItems, demands, allowOverSet, totalGroups);
                 log.debug("Allow-over widths: {}", allowOverSet);
 
+                long colGenStart = System.currentTimeMillis();
                 List<PatternCandidate> patterns = patternGenerator.generate(demands);
                 patterns = colGenSolver.solve(patterns, demands, allowOverSet);
                 List<PatternCandidate> qualityPatterns = buildQualityPatternPool(
                         patterns, demands, params);
+                long colGenElapsedMs = System.currentTimeMillis() - colGenStart;
 
                 // Multi-start over deterministic demand orders. Each order makes the
                 // selection MIP build variables in a different order -> a different
@@ -222,9 +224,11 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
                 }
 
                 List<MultiStageMIPSolver.SolveCandidate> rawCandidates = new ArrayList<>();
+                ALayerTask baselineTask = null;
                 MultiStageMIPSolver.SolveCandidate baseline = null;
+                long baselineStart = System.currentTimeMillis();
                 if (fastPreviewMode() || qualityMode()) {
-                    ALayerTask baselineTask = new ALayerTask(
+                    baselineTask = new ALayerTask(
                             "fast-baseline-", patterns, demandOrders.get(0), allowOverSet,
                             A_LAYER_SEEDS[0], 0.0, 0.0, alignmentContext, true);
                     baseline = solveALayerTask(baselineTask, params, aLayerDeadlineMs);
@@ -235,12 +239,17 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
                         log.warn("FAST baseline could not be established; quality candidates continue");
                     }
                 }
+                long baselineElapsedMs = System.currentTimeMillis() - baselineStart;
+
+                long aLayerTasksStart = System.currentTimeMillis();
                 if (!aLayerTasks.isEmpty()) {
                     try (SolverTaskExecutor executor = createTaskExecutor(
                             "a-layer", "cutting.parallel.aLayer.enabled",
                             "cutting.parallel.aLayer.threads", aLayerTasks.size())) {
                         logParallelStage("A-layer quality search", executor, aLayerTasks.size());
-                        final boolean hasBaseline = baseline != null;
+                        final ALayerTask establishedBaselineTask = baselineTask;
+                        final MultiStageMIPSolver.SolveCandidate establishedBaseline = baseline;
+                        final boolean hasBaseline = establishedBaseline != null;
                         rawCandidates.addAll(executor.mapOrdered(aLayerTasks,
                                         task -> {
                                             if (hasBaseline && aLayerDeadlineMs != Long.MAX_VALUE
@@ -249,12 +258,18 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
                                                         task.namePrefix());
                                                 return null;
                                             }
+                                            if (hasBaseline && canReuseBaselineStage3(
+                                                    task, establishedBaselineTask, establishedBaseline)) {
+                                                return solveALayerStage4FromBaseline(
+                                                        task, establishedBaseline, params, aLayerDeadlineMs);
+                                            }
                                             return solveALayerTask(task, params, aLayerDeadlineMs);
                                         }).stream()
                                 .filter(Objects::nonNull)
                                 .toList());
                     }
                 }
+                long aLayerTasksElapsedMs = System.currentTimeMillis() - aLayerTasksStart;
                 if (completePatternQualityEnabled() && baseline != null) {
                     MultiStageMIPSolver.SolveCandidate completeRefinement =
                             solveCompletePatternRefinement(
@@ -287,11 +302,20 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
 
                 // FAST uses one deterministic greedy conversion. QUALITY keeps that
                 // conversion as the baseline before evaluating Stage5/LNS/SPR.
+                long bLayerStart = System.currentTimeMillis();
+                long staticGroupBudgetMs = qualityMode() && qualityBudget > 0L
+                        ? Math.max(1_000L, qualityBudget / Math.max(1, totalGroups))
+                        : Long.MAX_VALUE;
                 GroupSolvePlan bestPlan = null;
                 List<SolveReportWriter.CandidateRow> reportRows = new ArrayList<>();
                 List<SolveReportWriter.SequenceCandidateRow> sequenceReportRows = new ArrayList<>();
                 List<CandidateEvaluation> candidateEvaluations = evaluateCandidates(
-                        solveCandidates, groupKey, groupItems, demands, params, groupDeadlineMs);
+                        solveCandidates, groupKey, groupItems, demands, params,
+                        groupDeadlineMs, staticGroupBudgetMs);
+                long bLayerElapsedMs = System.currentTimeMillis() - bLayerStart;
+                log.info("Group {} stage timings: colGen={}ms, aLayerBaseline={}ms, aLayerTasks={}ms, bLayer={}ms, distinctCandidates={}",
+                        groupKey, colGenElapsedMs, baselineElapsedMs, aLayerTasksElapsedMs,
+                        bLayerElapsedMs, solveCandidates.size());
                 for (CandidateEvaluation evaluation : candidateEvaluations) {
                     int candidateIndex = evaluation.order();
                     MultiStageMIPSolver.SolveCandidate solveCandidate = evaluation.candidate();
@@ -389,6 +413,57 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
         return allInstructions;
     }
 
+    static boolean canReuseBaselineStage3(
+            ALayerTask task,
+            ALayerTask baselineTask,
+            MultiStageMIPSolver.SolveCandidate baseline) {
+        if (task == null || baselineTask == null || baseline == null
+                || task.fastBaselineCandidate() || !baseline.stage3Optimal()) {
+            return false;
+        }
+        return task.seed() == baselineTask.seed()
+                && task.patterns().equals(baselineTask.patterns())
+                && task.demands().equals(baselineTask.demands())
+                && new ArrayList<>(task.demands().keySet())
+                        .equals(new ArrayList<>(baselineTask.demands().keySet()))
+                && task.allowOverWidths().equals(baselineTask.allowOverWidths());
+    }
+
+    private MultiStageMIPSolver.SolveCandidate solveALayerStage4FromBaseline(
+            ALayerTask task,
+            MultiStageMIPSolver.SolveCandidate baseline,
+            SolverParameters params,
+            long deadlineMs) {
+        try {
+            SolverParameters taskParams = params.copy();
+            if (deadlineMs != Long.MAX_VALUE) {
+                long remainingMs = Math.max(500L, deadlineMs - System.currentTimeMillis());
+                taskParams.setTimeoutMs(Math.min(taskParams.getTimeoutMs(), remainingMs));
+            }
+            Map<String, String> taskOverrides = new HashMap<>();
+            taskOverrides.put("cutting.aLayerParityPenalty",
+                    Double.toString(task.parityPenalty()));
+            MultiStageMIPSolver.SolveCandidate refined = SolverRuntimeProperties.withOverrides(
+                    taskOverrides,
+                    () -> new MultiStageMIPSolver(taskParams).refineStage4FromStage3Baseline(
+                            new ArrayList<>(task.patterns()),
+                            task.demands(),
+                            task.allowOverWidths(),
+                            baseline.result().getSolution(),
+                            task.seed(),
+                            task.alignmentLambda(),
+                            task.alignmentContext()));
+            return refined == null
+                    ? null
+                    : new MultiStageMIPSolver.SolveCandidate(
+                            task.namePrefix() + refined.name(), refined.result());
+        } catch (RuntimeException e) {
+            log.warn("A-layer Stage4-from-baseline task {} failed; remaining candidates continue",
+                    task.namePrefix(), e);
+            return null;
+        }
+    }
+
     private MultiStageMIPSolver.SolveCandidate solveALayerTask(
             ALayerTask task, SolverParameters params, long deadlineMs) {
         try {
@@ -418,7 +493,9 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
             return primary == null
                     ? null
                     : new MultiStageMIPSolver.SolveCandidate(
-                            task.namePrefix() + primary.name(), primary.result());
+                            task.namePrefix() + primary.name(),
+                            primary.result(),
+                            primary.stage3Optimal());
         } catch (RuntimeException e) {
             log.warn("A-layer task {} failed; remaining candidates continue",
                     task.namePrefix(), e);
@@ -453,34 +530,77 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
         }
     }
 
+    /**
+     * 按 {@link DeterministicPlanSelector} 字典序前两级 (totalOverProduction, totalRolls)
+     * 对进入 B 层前的 A 层候选做严格主导预剪枝：任何超产更高或同超产下车数更多的候选
+     * 0% 可能胜出，直接过滤不再送入昂贵的 Stage5 MIP 与 LNS。
+     */
+    static List<MultiStageMIPSolver.SolveCandidate> pruneDominatedCandidates(
+            List<MultiStageMIPSolver.SolveCandidate> candidates) {
+        if (candidates == null || candidates.size() <= 1) {
+            return candidates == null ? List.of() : List.copyOf(candidates);
+        }
+        int minOver = Integer.MAX_VALUE;
+        int minRolls = Integer.MAX_VALUE;
+        for (MultiStageMIPSolver.SolveCandidate candidate : candidates) {
+            SolverResult res = candidate.result();
+            int over = res.getTotalOverProduction();
+            int rolls = res.getTotalRolls();
+            if (over < minOver || (over == minOver && rolls < minRolls)) {
+                minOver = over;
+                minRolls = rolls;
+            }
+        }
+        final int targetOver = minOver;
+        final int targetRolls = minRolls;
+        List<MultiStageMIPSolver.SolveCandidate> kept = new ArrayList<>(candidates.size());
+        for (MultiStageMIPSolver.SolveCandidate candidate : candidates) {
+            SolverResult res = candidate.result();
+            if (res.getTotalOverProduction() == targetOver && res.getTotalRolls() == targetRolls) {
+                kept.add(candidate);
+            }
+        }
+        return kept;
+    }
+
     private List<CandidateEvaluation> evaluateCandidates(
             List<MultiStageMIPSolver.SolveCandidate> solveCandidates,
             String groupKey,
             List<SolverOrderItem> groupItems,
             Map<Integer, Integer> demands,
             SolverParameters params,
-            long groupDeadlineMs) {
-        List<CandidateTask> tasks = new ArrayList<>(solveCandidates.size());
-        for (int i = 0; i < solveCandidates.size(); i++) {
-            tasks.add(new CandidateTask(i, solveCandidates.get(i)));
+            long groupDeadlineMs,
+            long staticGroupBudgetMs) {
+        List<MultiStageMIPSolver.SolveCandidate> dominantCandidates =
+                pruneDominatedCandidates(solveCandidates);
+        Set<MultiStageMIPSolver.SolveCandidate> dominantSet =
+                Collections.newSetFromMap(new IdentityHashMap<>());
+        dominantSet.addAll(dominantCandidates);
+        if (dominantCandidates.size() < solveCandidates.size()) {
+            SolverResult bestRes = dominantCandidates.get(0).result();
+            log.info("B-layer dominance pruning: kept {}/{} candidates (minOver={}, minRolls={})",
+                    dominantCandidates.size(), solveCandidates.size(),
+                    bestRes.getTotalOverProduction(), bestRes.getTotalRolls());
         }
 
-        List<CandidateEvaluation> baseEvaluations;
-        try (SolverTaskExecutor executor = createTaskExecutor(
-                "candidate", "cutting.parallel.candidates.enabled",
-                "cutting.parallel.candidates.threads", tasks.size())) {
-            boolean outerParallel = executor.parallelism(tasks.size()) > 1;
-            logParallelStage(fastPreviewMode()
-                    ? "FAST preview candidates"
-                    : "Stage5+LNS candidates", executor, tasks.size());
-            int totalCandidates = Math.max(1, tasks.size());
-            baseEvaluations = executor.mapOrdered(tasks,
-                            task -> evaluateBaseCandidate(
-                                    task, groupKey, groupItems, demands, params, outerParallel,
-                                    groupDeadlineMs, totalCandidates))
-                    .stream()
-                    .filter(Objects::nonNull)
-                    .toList();
+        List<CandidateTask> primaryTasks = new ArrayList<>(dominantCandidates.size());
+        List<CandidateTask> fallbackTasks = new ArrayList<>();
+        for (int i = 0; i < solveCandidates.size(); i++) {
+            MultiStageMIPSolver.SolveCandidate candidate = solveCandidates.get(i);
+            if (dominantSet.contains(candidate)) {
+                primaryTasks.add(new CandidateTask(i, candidate));
+            } else {
+                fallbackTasks.add(new CandidateTask(i, candidate));
+            }
+        }
+
+        List<CandidateEvaluation> baseEvaluations = runBaseEvaluations(
+                primaryTasks, groupKey, groupItems, demands, params, groupDeadlineMs, staticGroupBudgetMs);
+        if (baseEvaluations.isEmpty() && !fallbackTasks.isEmpty()) {
+            log.warn("All dominant B-layer candidates produced empty conversions; falling back to {} pruned candidates",
+                    fallbackTasks.size());
+            baseEvaluations = runBaseEvaluations(
+                    fallbackTasks, groupKey, groupItems, demands, params, groupDeadlineMs, staticGroupBudgetMs);
         }
 
         if (!qualityMode() || !SetPartitionRefiner.isEnabled() || baseEvaluations.isEmpty()) {
@@ -514,14 +634,52 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
         }
     }
 
+    private List<CandidateEvaluation> runBaseEvaluations(
+            List<CandidateTask> tasks,
+            String groupKey,
+            List<SolverOrderItem> groupItems,
+            Map<Integer, Integer> demands,
+            SolverParameters params,
+            long groupDeadlineMs,
+            long staticGroupBudgetMs) {
+        if (tasks.isEmpty()) {
+            return List.of();
+        }
+        try (SolverTaskExecutor executor = createTaskExecutor(
+                "candidate", "cutting.parallel.candidates.enabled",
+                "cutting.parallel.candidates.threads", tasks.size())) {
+            int activeParallelism = executor.parallelism(tasks.size());
+            boolean outerParallel = activeParallelism > 1;
+            logParallelStage(fastPreviewMode()
+                    ? "FAST preview candidates"
+                    : "Stage5+LNS candidates", executor, tasks.size());
+            int totalCandidates = Math.max(1, tasks.size());
+            List<IndexedCandidateTask> indexedTasks = new ArrayList<>(tasks.size());
+            for (int idx = 0; idx < tasks.size(); idx++) {
+                indexedTasks.add(new IndexedCandidateTask(idx, tasks.get(idx)));
+            }
+            return executor.mapOrdered(indexedTasks,
+                            indexed -> evaluateBaseCandidate(
+                                    indexed.task(), indexed.position(), groupKey, groupItems, demands, params,
+                                    outerParallel, activeParallelism, groupDeadlineMs, staticGroupBudgetMs,
+                                    totalCandidates))
+                    .stream()
+                    .filter(Objects::nonNull)
+                    .toList();
+        }
+    }
+
     private CandidateEvaluation evaluateBaseCandidate(
             CandidateTask task,
+            int positionInBatch,
             String groupKey,
             List<SolverOrderItem> groupItems,
             Map<Integer, Integer> demands,
             SolverParameters params,
             boolean outerParallel,
+            int activeParallelism,
             long groupDeadlineMs,
+            long staticGroupBudgetMs,
             int totalCandidates) {
         try {
             InstructionConverter converter = new InstructionConverter(params);
@@ -547,10 +705,15 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
                     overrides.put("cutting.spr.parallel", "false");
                 }
                 if (qualityMode() && groupDeadlineMs != Long.MAX_VALUE) {
-                    int remainingCandidates = Math.max(1, totalCandidates - task.order());
                     long remainingMs = groupDeadlineMs - System.currentTimeMillis() - 1_000L;
-                    long perCandidateBudgetMs = remainingMs > 0L ? remainingMs / remainingCandidates : 0L;
-                    overrides.putAll(buildControlledLnsOverrides(perCandidateBudgetMs));
+                    int divisor;
+                    if (outerParallel) {
+                        divisor = Math.max(1, (totalCandidates + activeParallelism - 1) / activeParallelism);
+                    } else {
+                        divisor = Math.max(1, totalCandidates - positionInBatch);
+                    }
+                    long perCandidateBudgetMs = remainingMs > 0L ? remainingMs / divisor : 0L;
+                    overrides.putAll(buildControlledLnsOverrides(perCandidateBudgetMs, staticGroupBudgetMs));
                 }
                 if (!overrides.isEmpty()) {
                     conversion = SolverRuntimeProperties.withOverrides(
@@ -618,7 +781,7 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
         return groups - bestGroups <= Math.max(0, gap);
     }
 
-    private SolverTaskExecutor createTaskExecutor(
+    SolverTaskExecutor createTaskExecutor(
             String scope,
             String enabledProperty,
             String threadsProperty,
@@ -629,6 +792,9 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
         }
         int requestedThreads = SolverRuntimeProperties.getInt(
                 threadsProperty, BoundedSolverTaskExecutor.globalParallelism());
+        if (requestedThreads <= 1 || BoundedSolverTaskExecutor.globalParallelism() <= 1) {
+            return new DirectSolverTaskExecutor();
+        }
         return BoundedSolverTaskExecutor.create(scope, requestedThreads);
     }
 
@@ -785,6 +951,14 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
      * 若调用方显式禁用了 LNS，则不重新开启；若剩余预算不足 3s，则自动跳过 LNS 保底零超时。
      */
     static Map<String, String> buildControlledLnsOverrides(long remainingBudgetMs) {
+        return buildControlledLnsOverrides(remainingBudgetMs, remainingBudgetMs);
+    }
+
+    /**
+     * 档位参数（节点上限/最大迭代/无改进早停）由静态总预算 {@code tierBudgetMs} 决定，
+     * 避免前序阶段墙钟快慢或单/多核并发差异引起参数漂移；{@code remainingBudgetMs} 仅作为墙钟安全帽。
+     */
+    static Map<String, String> buildControlledLnsOverrides(long remainingBudgetMs, long tierBudgetMs) {
         Map<String, String> overrides = new HashMap<>();
         String explicitEnabled = SolverRuntimeProperties.get("cutting.lns.enabled");
         if (explicitEnabled != null && !explicitEnabled.isBlank() && !Boolean.parseBoolean(explicitEnabled.trim())) {
@@ -797,15 +971,16 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
         overrides.put("cutting.lns.enabled", "true");
         overrides.put("cutting.lns.budgetMs", Long.toString(remainingBudgetMs));
 
+        long effectiveTierBudgetMs = tierBudgetMs != Long.MAX_VALUE ? tierBudgetMs : remainingBudgetMs;
         long nodeLimit;
         int maxIterations;
         int maxNoImprove;
-        if (remainingBudgetMs >= 35_000L) {
-            nodeLimit = 8_000L;
+        if (effectiveTierBudgetMs >= 35_000L) {
+            nodeLimit = 5_000L;
             maxIterations = 24;
             maxNoImprove = 5;
-        } else if (remainingBudgetMs >= 15_000L) {
-            nodeLimit = 4_000L;
+        } else if (effectiveTierBudgetMs >= 15_000L) {
+            nodeLimit = 3_000L;
             maxIterations = 16;
             maxNoImprove = 4;
         } else {
@@ -1009,7 +1184,7 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
                 sourceOrder);
     }
 
-    private record ALayerTask(
+    record ALayerTask(
             String namePrefix,
             List<PatternCandidate> patterns,
             Map<Integer, Integer> demands,
@@ -1020,7 +1195,7 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
             PatternAlignmentContext alignmentContext,
             boolean fastBaselineCandidate) {
 
-        private ALayerTask {
+        ALayerTask {
             patterns = List.copyOf(patterns);
             demands = Collections.unmodifiableMap(new LinkedHashMap<>(demands));
             allowOverWidths = Set.copyOf(allowOverWidths);
@@ -1030,6 +1205,11 @@ public class CuttingSolver implements CuttingSolverAlgorithm {
     private record CandidateTask(
             int order,
             MultiStageMIPSolver.SolveCandidate candidate) {
+    }
+
+    private record IndexedCandidateTask(
+            int position,
+            CandidateTask task) {
     }
 
     private record CandidateEvaluation(

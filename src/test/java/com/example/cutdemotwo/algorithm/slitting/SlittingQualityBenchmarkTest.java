@@ -134,6 +134,138 @@ class SlittingQualityBenchmarkTest {
         }
     }
 
+    @Test
+    void compareFastVsQualitySuiteOverCapZero60s() {
+        List<Map.Entry<String, List<SlittingProblem.Order>>> suite = List.of(
+                Map.entry("T10-17", t1017Orders()),
+                Map.entry("T29-50", t2950Orders()),
+                Map.entry("T29-85", t2985Orders())
+        );
+        LinearSlittingSolverEngine engine = new LinearSlittingSolverEngine();
+        try {
+            // 预热常驻子进程，排除冷启动 JVM/OR-Tools 加载抖动（端到端首请求含冷启动另测或真实反映）
+            System.out.println("\n================ FAST vs QUALITY (overCap=0, 60s) ================");
+            System.out.printf(Locale.ROOT,
+                    "%-8s | %-7s | %8s | %5s | %7s | %4s | %5s | %6s%n",
+                    "Case", "Profile", "E2E(ms)", "Cars", "Util%", "Over", "Pats", "SeqGrp");
+            System.out.println("------------------------------------------------------------------");
+            for (var entry : suite) {
+                String name = entry.getKey();
+                var fastProblem = new SlittingProblem(
+                        "1", "mm", 4600, 100, 100, 4200, 4400, 10, 0, "FAST", entry.getValue(), 60);
+                var qualityProblem = new SlittingProblem(
+                        "1", "mm", 4600, 100, 100, 4200, 4400, 10, 0, "QUALITY", entry.getValue(), 60);
+
+                long t0 = System.nanoTime();
+                SlittingResult fast = engine.solve(fastProblem);
+                long fastMs = (System.nanoTime() - t0) / 1_000_000L;
+
+                long t1 = System.nanoTime();
+                SlittingResult quality = engine.solve(qualityProblem);
+                long qualityMs = (System.nanoTime() - t1) / 1_000_000L;
+
+                int fastCars = fast.patterns().stream().mapToInt(SlittingResult.Pattern::repetitions).sum();
+                int qualityCars = quality.patterns().stream().mapToInt(SlittingResult.Pattern::repetitions).sum();
+                double fastUtil = 100.0 * fast.pieceAreaMm2() / fast.motherAreaMm2();
+                double qualityUtil = 100.0 * quality.pieceAreaMm2() / quality.motherAreaMm2();
+                int fastGrp = countSequenceGroups(fast);
+                int qualityGrp = countSequenceGroups(quality);
+
+                System.out.printf(Locale.ROOT,
+                        "%-8s | %-7s | %8d | %5d | %6.2f%% | %4d | %5d | %6d%n",
+                        name, "FAST", fastMs, fastCars, fastUtil, fast.totalOverproduced(), fast.patterns().size(), fastGrp);
+                System.out.printf(Locale.ROOT,
+                        "%-8s | %-7s | %8d | %5d | %6.2f%% | %4d | %5d | %6d%n",
+                        name, "QUALITY", qualityMs, qualityCars, qualityUtil, quality.totalOverproduced(), quality.patterns().size(), qualityGrp);
+
+                assertTrue(quality.totalOverproduced() <= fast.totalOverproduced(),
+                        name + " QUALITY 超产不应高于 FAST");
+                if (quality.totalOverproduced() == fast.totalOverproduced()) {
+                    assertTrue(qualityCars <= fastCars,
+                            name + " QUALITY 车数不应劣于 FAST: quality=" + qualityCars + " fast=" + fastCars);
+                    assertTrue(qualityUtil + 1e-4 >= fastUtil,
+                            name + " QUALITY 利用率不应低于 FAST");
+                }
+            }
+            System.out.println("==================================================================\n");
+        } finally {
+            closeIfAutoCloseable(engine);
+        }
+    }
+
+    @Test
+    void profileQualityKernelStages() {
+        String only = System.getProperty("benchmarkCase", "T29-50,T29-85");
+        List<Map.Entry<String, List<SlittingProblem.Order>>> suite = List.of(
+                Map.entry("T10-17", t1017Orders()),
+                Map.entry("T29-50", t2950Orders()),
+                Map.entry("T29-85", t2985Orders())
+        );
+        for (var entry : suite) {
+            if (!only.contains(entry.getKey())) {
+                continue;
+            }
+            var qualityProblem = new SlittingProblem(
+                    "1", "mm", 4600, 100, 100, 4200, 4400, 10, 0, "QUALITY", entry.getValue(), 60);
+            System.out.println("\n>>> PROFILE KERNEL START: " + entry.getKey() + " <<<");
+            long t0 = System.nanoTime();
+            SlittingResult res = LinearSlittingSolverEngine.solveKernel(qualityProblem);
+            long ms = (System.nanoTime() - t0) / 1_000_000L;
+            SlittingValidation.validateResult(qualityProblem, res);
+            int cars = res.patterns().stream().mapToInt(SlittingResult.Pattern::repetitions).sum();
+            double util = 100.0 * res.pieceAreaMm2() / res.motherAreaMm2();
+            System.out.printf(Locale.ROOT,
+                    ">>> PROFILE KERNEL DONE: %s | %dms | cars=%d | util=%.2f%% | over=%d | seqGrp=%d <<<%n",
+                    entry.getKey(), ms, cars, util, res.totalOverproduced(), countSequenceGroups(res));
+        }
+    }
+
+    @Test
+    void verifyQualityDeterminismAndSingleThreadParity() {
+        List<Map.Entry<String, List<SlittingProblem.Order>>> suite = List.of(
+                Map.entry("T10-17", t1017Orders()),
+                Map.entry("T29-50", t2950Orders()),
+                Map.entry("T29-85", t2985Orders())
+        );
+        LinearSlittingSolverEngine multiEngine = new LinearSlittingSolverEngine();
+        LinearSlittingSolverEngine singleEngine = new LinearSlittingSolverEngine("384m", 1);
+        try {
+            System.out.println("\n============ DETERMINISM & SINGLE-THREAD PARITY (overCap=0, 60s) ============");
+            for (var entry : suite) {
+                String name = entry.getKey();
+                var qualityProblem = new SlittingProblem(
+                        "1", "mm", 4600, 100, 100, 4200, 4400, 10, 0, "QUALITY", entry.getValue(), 60);
+
+                long t0 = System.nanoTime();
+                SlittingResult multiRun1 = multiEngine.solve(qualityProblem);
+                long m1Ms = (System.nanoTime() - t0) / 1_000_000L;
+
+                long t1 = System.nanoTime();
+                SlittingResult multiRun2 = multiEngine.solve(qualityProblem);
+                long m2Ms = (System.nanoTime() - t1) / 1_000_000L;
+
+                long t2 = System.nanoTime();
+                SlittingResult singleRun = singleEngine.solve(qualityProblem);
+                long s1Ms = (System.nanoTime() - t2) / 1_000_000L;
+
+                System.out.printf(Locale.ROOT,
+                        "%-8s | multi#1=%5dms | multi#2=%5dms | single(1T)=%5dms | cars=%d | pats=%d/%d/%d | exactMatch(m1==m2)=%s | exactMatch(m1==1T)=%s%n",
+                        name, m1Ms, m2Ms, s1Ms,
+                        multiRun1.patterns().stream().mapToInt(SlittingResult.Pattern::repetitions).sum(),
+                        multiRun1.patterns().size(), multiRun2.patterns().size(), singleRun.patterns().size(),
+                        multiRun1.equals(multiRun2),
+                        multiRun1.equals(singleRun));
+
+                assertEquals(multiRun1, multiRun2, name + " 连续两次多核 QUALITY 求解必须 100% 确定性一致");
+                assertEquals(multiRun1, singleRun, name + " 1线程低配模式与多核模式 QUALITY 求解必须 100% 一致");
+            }
+            System.out.println("=============================================================================\n");
+        } finally {
+            closeIfAutoCloseable(multiEngine);
+            closeIfAutoCloseable(singleEngine);
+        }
+    }
+
     private static void closeIfAutoCloseable(Object engine) {
         if (engine instanceof AutoCloseable closeable) {
             try {

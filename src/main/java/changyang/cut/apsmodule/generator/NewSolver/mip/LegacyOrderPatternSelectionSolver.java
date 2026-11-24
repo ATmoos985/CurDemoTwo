@@ -25,6 +25,7 @@ class LegacyOrderPatternSelectionSolver {
     private static final int MAX_REPAIR_ATTEMPTS = 3;
     private static final long DEFAULT_QUALITY_PRIMARY_STAGE4_NODE_LIMIT = 3000L;
     private static final long DEFAULT_QUALITY_STAGE4_NODE_LIMIT = 10L;
+    private static final int DEFAULT_STAGE4_PARITY_POOL_CAP = 240;
     private static final long DEFAULT_STAGE4_WALL_CAP_MS = 20_000L;
     private static final long DEFAULT_STAGE4_SAFETY_TIME_LIMIT_MS = 120_000L;
 
@@ -134,14 +135,15 @@ class LegacyOrderPatternSelectionSolver {
             log.info("--- Legacy-order pattern selection attempt {}/{} ---",
                     attempt + 1, MAX_REPAIR_ATTEMPTS + 1);
 
-            Map<PatternCandidate, Integer> solution = solveFinalMIP(
+            StageSolution solved = solveFinalMIP(
                     patterns,
                     demands,
                     workingAllowOverSet,
                     deadlineMs);
 
-            if (isFeasible(solution, demands)) {
-                return List.of(new Result("legacy-order", new LinkedHashMap<>(solution)));
+            if (solved != null && isFeasible(solved.solution(), demands)) {
+                boolean reusableStage3 = attempt == 0 && solved.optimal();
+                return List.of(new Result("legacy-order", new LinkedHashMap<>(solved.solution()), reusableStage3));
             }
 
             if (attempt >= MAX_REPAIR_ATTEMPTS) {
@@ -207,7 +209,104 @@ class LegacyOrderPatternSelectionSolver {
         return refined;
     }
 
-    private Map<PatternCandidate, Integer> solveFinalMIP(List<PatternCandidate> patterns,
+    /**
+     * 复用同源 Stage3 基线直接进入 Stage4（跳过完全重复的 Stage1/2/3 主求解），
+     * 严格约束 over/rolls/waste 不劣于基线，baseline 本身由上层保底，保证零劣化。
+     */
+    Map<PatternCandidate, Integer> refineStage4FromStage3Baseline(
+            List<PatternCandidate> fullPatterns,
+            Map<Integer, Integer> demands,
+            Set<Integer> allowOverSet,
+            Map<PatternCandidate, Integer> stage3Baseline,
+            long deadlineMs) {
+        if (!isFeasible(stage3Baseline, demands)) {
+            log.warn("Stage3-baseline Stage4 skipped: baseline is not demand-feasible");
+            return null;
+        }
+
+        int maxTotalOver = calculateTotalOver(stage3Baseline, demands);
+        int maxTotalRolls = stage3Baseline.values().stream().mapToInt(Integer::intValue).sum();
+        int maxTotalWaste = calculateTotalWaste(stage3Baseline);
+        int wasteSlack = Math.max(200, (int) (maxTotalWaste * 0.05));
+        log.info("Legacy Stage4 (reused Stage3) constraints: maxRolls={}, maxWaste={}, wasteSlack={}, wasteCap={}",
+                maxTotalRolls, maxTotalWaste, wasteSlack, maxTotalWaste + wasteSlack);
+
+        long remainingMs = Math.max(2_000L, deadlineMs - System.currentTimeMillis());
+        boolean stage4NeedsFullPool = params.getALayerAlignmentLambda() > 0.0 || parityPenalty() > 0.0;
+        List<PatternCandidate> stage4PatternPool;
+        if (stage4NeedsFullPool) {
+            stage4PatternPool = selectStage4ExpandedPool(fullPatterns, stage3Baseline);
+            log.info("Legacy Stage4 (reused Stage3) uses expanded pattern pool: {}/{} patterns",
+                    stage4PatternPool.size(), fullPatterns.size());
+        } else {
+            stage4PatternPool = new ArrayList<>(stage3Baseline.keySet());
+        }
+
+        // 不向复用 Stage3 的常规 Stage4 注入 warmStart：
+        // 1) parityPenalty=0 的精简池仅数十模式，无 warmStart 即可快速求全局最优；
+        // 2) parityPenalty>0 的扩展池无 warmStart 时 SCIP 自由探索全新更少花型集（避免被旧解黏住并省去昂贵 RINS）。
+        // baseline 始终保留在 CuttingSolver 候选池首位保底，即使此处无解也零退化。
+        Map<PatternCandidate, Integer> stage4Solution = solveMIPStage4(
+                stage4PatternPool,
+                demands,
+                mergeForcedAllowOverWidths(allowOverSet),
+                maxTotalOver,
+                maxTotalRolls,
+                maxTotalWaste,
+                remainingMs,
+                Collections.emptyMap());
+        if (!isFeasible(stage4Solution, demands)) {
+            log.info("Legacy Stage4 (reused Stage3) returned no improvement, keeping baseline");
+            return null;
+        }
+        int stage4Rolls = stage4Solution.values().stream().mapToInt(Integer::intValue).sum();
+        int stage4Patterns = stage4Solution.size();
+        int stage4Waste = calculateTotalWaste(stage4Solution);
+        log.info("Legacy Stage4 (reused Stage3) completed: rolls={}, patterns={}, waste={}mm, sig#={}",
+                stage4Rolls, stage4Patterns, stage4Waste, solutionSignatureHash(stage4Solution));
+        return stage4Solution;
+    }
+
+    /**
+     * 为带奇偶/对齐项的 Stage4 构造确定性低废料精英池：
+     * 中小规模（<= cap）保留完整全池零截断；大规模（如 800 模式）必留全部 Stage3 基线花型，
+     * 其余按真实废料升序（平局按 signature）补齐至上限，显著降低 Big-M 变量规模并保持 100% 确定性。
+     */
+    private List<PatternCandidate> selectStage4ExpandedPool(
+            List<PatternCandidate> fullPatterns,
+            Map<PatternCandidate, Integer> stage3Baseline) {
+        int cap = Math.max(stage3Baseline.size(),
+                SolverRuntimeProperties.getInt("cutting.aLayerStage4ParityPoolCap", DEFAULT_STAGE4_PARITY_POOL_CAP));
+        Map<String, PatternCandidate> merged = new LinkedHashMap<>();
+        if (fullPatterns.size() <= cap) {
+            for (PatternCandidate pattern : fullPatterns) {
+                merged.putIfAbsent(pattern.signature(), pattern);
+            }
+            for (PatternCandidate pattern : stage3Baseline.keySet()) {
+                merged.putIfAbsent(pattern.signature(), pattern);
+            }
+            return new ArrayList<>(merged.values());
+        }
+        for (PatternCandidate pattern : stage3Baseline.keySet()) {
+            merged.putIfAbsent(pattern.signature(), pattern);
+        }
+        int totalWidth = params.getTotalWidth();
+        List<PatternCandidate> rankedExtras = fullPatterns.stream()
+                .filter(pattern -> !merged.containsKey(pattern.signature()))
+                .sorted(java.util.Comparator
+                        .comparingInt((PatternCandidate p) -> p.getRealWaste(totalWidth))
+                        .thenComparing(PatternCandidate::signature))
+                .toList();
+        for (PatternCandidate candidate : rankedExtras) {
+            if (merged.size() >= cap) {
+                break;
+            }
+            merged.putIfAbsent(candidate.signature(), candidate);
+        }
+        return new ArrayList<>(merged.values());
+    }
+
+    private StageSolution solveFinalMIP(List<PatternCandidate> patterns,
             Map<Integer, Integer> demands,
             Set<Integer> allowOverSet,
             long deadlineMs) {
@@ -221,7 +320,7 @@ class LegacyOrderPatternSelectionSolver {
                 : Math.max(5000, remaining / 6);
         Stage1Result stage1Result = solveMIPStage1(patterns, demands, allowOverSet, stage1Time);
         if (stage1Result == null) {
-            return Collections.emptyMap();
+            return new StageSolution(Collections.emptyMap(), false);
         }
 
         int optimalUnder = stage1Result.totalUnder();
@@ -236,15 +335,16 @@ class LegacyOrderPatternSelectionSolver {
         long stage2Time = fastPreview
                 ? Math.max(750, remaining * 45 / 100)
                 : Math.max(5000, remaining * 55 / 100);
-        Map<PatternCandidate, Integer> stage2Solution = solveMIPStage2(
+        StageSolution stage2Result = solveMIPStage2(
                 patterns, demands, allowOverSet, optimalUnder, optimalOver,
                 stage1Result.solution(), stage2Time);
+        Map<PatternCandidate, Integer> stage2Solution = stage2Result == null ? null : stage2Result.solution();
         if (!isFeasible(stage2Solution, demands)) {
             if (!completeBaseline.isEmpty()) {
                 log.warn("Legacy Stage2 did not preserve complete demand coverage; using Stage1 baseline");
-                return completeBaseline;
+                return new StageSolution(completeBaseline, false);
             }
-            return Collections.emptyMap();
+            return new StageSolution(Collections.emptyMap(), false);
         }
 
         int totalRolls = stage2Solution.values().stream().mapToInt(Integer::intValue).sum();
@@ -255,18 +355,24 @@ class LegacyOrderPatternSelectionSolver {
 
         if (fastPreview && System.currentTimeMillis() >= deadlineMs) {
             log.info("Fast preview A-layer budget reached after Stage2; using roll-optimal solution");
-            return stage2Solution;
+            return new StageSolution(stage2Solution, false);
         }
 
         remaining = Math.max(fastPreview ? 500 : 3000, deadlineMs - System.currentTimeMillis());
         long stage3Time = fastPreview
                 ? Math.max(500, remaining)
                 : Math.max(3000, remaining * 60 / 100);
-        Map<PatternCandidate, Integer> stage3Solution = solveMIPStage3(
+        StageSolution stage3Result = solveMIPStage3(
                 patterns, demands, allowOverSet, optimalOver, totalRolls, stage3Time);
+        Map<PatternCandidate, Integer> stage3Solution = stage3Result == null ? null : stage3Result.solution();
+        boolean stage3Optimal = stage1Result.optimal()
+                && stage2Result.optimal()
+                && stage3Result != null
+                && stage3Result.optimal();
         if (stage3Solution == null || stage3Solution.isEmpty()) {
             log.info("Legacy Stage3 failed, using Stage2 solution");
             stage3Solution = stage2Solution;
+            stage3Optimal = false;
         }
 
         int totalWaste = calculateTotalWaste(stage3Solution);
@@ -277,7 +383,7 @@ class LegacyOrderPatternSelectionSolver {
 
         if (fastPreview) {
             log.info("Fast preview skips A-layer Stage4 pattern-count refinement");
-            return stage3Solution;
+            return new StageSolution(stage3Solution, stage3Optimal);
         }
 
         int wasteSlack = Math.max(200, (int) (totalWaste * 0.05));
@@ -288,27 +394,28 @@ class LegacyOrderPatternSelectionSolver {
         // The inner Stage4 policy owns the wall cap. Passing the remaining request budget here
         // prevents an outer cap from firing before the deterministic node budget on slower hosts.
         long stage4Time = remaining;
-        // 对齐 λ 或奇偶 tie-break 生效时给 Stage4 全池：奇偶翻转需要备选花型做需求等式的
-        // 补偿交换，stage3 精选池往往没有腾挪空间。
+        // 对齐 λ 或奇偶 tie-break 生效时给 Stage4 扩展池（小规模全池，大规模低废料精英池）：
+        // 奇偶翻转需要备选花型做需求等式的补偿交换，stage3 精选池往往没有腾挪空间。
         boolean stage4NeedsFullPool = params.getALayerAlignmentLambda() > 0.0 || parityPenalty() > 0.0;
         List<PatternCandidate> stage4PatternPool = stage4NeedsFullPool
-                ? patterns
+                ? selectStage4ExpandedPool(patterns, stage3Solution)
                 : new ArrayList<>(stage3Solution.keySet());
         if (stage4NeedsFullPool) {
-            log.info("Legacy Stage4 uses full pattern pool: {} patterns", stage4PatternPool.size());
+            log.info("Legacy Stage4 uses expanded pattern pool: {}/{} patterns",
+                    stage4PatternPool.size(), patterns.size());
         }
         Map<PatternCandidate, Integer> stage4Solution = solveMIPStage4(
                 stage4PatternPool, demands, allowOverSet, optimalOver, stage3Rolls, totalWaste, stage4Time);
         if (stage4Solution == null || stage4Solution.isEmpty()) {
             log.info("Legacy Stage4 failed, using Stage3 solution");
-            return stage3Solution;
+            return new StageSolution(stage3Solution, stage3Optimal);
         }
         int stage4Rolls = stage4Solution.values().stream().mapToInt(Integer::intValue).sum();
         int stage4Patterns = stage4Solution.size();
         int stage4Waste = calculateTotalWaste(stage4Solution);
         log.info("Legacy Stage4 completed: rolls={}, patterns={}, waste={}mm, sig#={}",
                 stage4Rolls, stage4Patterns, stage4Waste, solutionSignatureHash(stage4Solution));
-        return stage4Solution;
+        return new StageSolution(stage4Solution, stage3Optimal);
     }
 
     private Set<Integer> expandAllowOverSet(Map<Integer, Integer> demands, int newTopK) {
@@ -327,8 +434,9 @@ class LegacyOrderPatternSelectionSolver {
             Map<Integer, Integer> demands,
             Set<Integer> allowOverSet,
             long timeLimitMs) {
+        MPSolver solver = null;
         try {
-            MPSolver solver = createMIPSolver();
+            solver = createMIPSolver();
             if (solver == null) {
                 return null;
             }
@@ -392,22 +500,31 @@ class LegacyOrderPatternSelectionSolver {
                 totalUnder += (int) Math.round(underVars.get(width).solutionValue());
                 totalOver += (int) Math.round(overVars.get(width).solutionValue());
             }
-            return new Stage1Result(extractSolution(patterns, xVars), totalUnder, totalOver);
+            return new Stage1Result(
+                    extractSolution(patterns, xVars),
+                    totalUnder,
+                    totalOver,
+                    status == MPSolver.ResultStatus.OPTIMAL);
         } catch (Exception e) {
             log.error("Legacy-order Stage1 failed", e);
             return null;
+        } finally {
+            if (solver != null) {
+                solver.delete();
+            }
         }
     }
 
-    private Map<PatternCandidate, Integer> solveMIPStage2(List<PatternCandidate> patterns,
+    private StageSolution solveMIPStage2(List<PatternCandidate> patterns,
             Map<Integer, Integer> demands,
             Set<Integer> allowOverSet,
             int maxTotalUnder,
             int maxTotalOver,
             Map<PatternCandidate, Integer> incumbent,
             long timeLimitMs) {
+        MPSolver solver = null;
         try {
-            MPSolver solver = createMIPSolver();
+            solver = createMIPSolver();
             if (solver == null) {
                 return null;
             }
@@ -480,21 +597,28 @@ class LegacyOrderPatternSelectionSolver {
                 return null;
             }
 
-            return extractSolution(patterns, xVars);
+            return new StageSolution(
+                    extractSolution(patterns, xVars),
+                    status == MPSolver.ResultStatus.OPTIMAL);
         } catch (Exception e) {
             log.error("Legacy-order Stage2 failed", e);
             return null;
+        } finally {
+            if (solver != null) {
+                solver.delete();
+            }
         }
     }
 
-    private Map<PatternCandidate, Integer> solveMIPStage3(List<PatternCandidate> patterns,
+    private StageSolution solveMIPStage3(List<PatternCandidate> patterns,
             Map<Integer, Integer> demands,
             Set<Integer> allowOverSet,
             int maxTotalOver,
             int maxTotalRolls,
             long timeLimitMs) {
+        MPSolver solver = null;
         try {
-            MPSolver solver = createMIPSolver();
+            solver = createMIPSolver();
             if (solver == null) {
                 return null;
             }
@@ -552,10 +676,16 @@ class LegacyOrderPatternSelectionSolver {
                 return null;
             }
 
-            return extractSolution(patterns, xVars);
+            return new StageSolution(
+                    extractSolution(patterns, xVars),
+                    status == MPSolver.ResultStatus.OPTIMAL);
         } catch (Exception e) {
             log.error("Legacy-order Stage3 failed", e);
             return null;
+        } finally {
+            if (solver != null) {
+                solver.delete();
+            }
         }
     }
 
@@ -578,8 +708,9 @@ class LegacyOrderPatternSelectionSolver {
             int maxTotalWaste,
             long timeLimitMs,
             Map<PatternCandidate, Integer> warmStart) {
+        MPSolver solver = null;
         try {
-            MPSolver solver = createMIPSolver();
+            solver = createMIPSolver();
             if (solver == null) {
                 return null;
             }
@@ -736,6 +867,10 @@ class LegacyOrderPatternSelectionSolver {
         } catch (Exception e) {
             log.error("Legacy-order Stage4 failed", e);
             return null;
+        } finally {
+            if (solver != null) {
+                solver.delete();
+            }
         }
     }
 
@@ -816,11 +951,17 @@ class LegacyOrderPatternSelectionSolver {
     private record Stage1Result(
             Map<PatternCandidate, Integer> solution,
             int totalUnder,
-            int totalOver) {
+            int totalOver,
+            boolean optimal) {
 
         private Stage1Result {
             solution = Collections.unmodifiableMap(new LinkedHashMap<>(solution));
         }
+    }
+
+    private record StageSolution(
+            Map<PatternCandidate, Integer> solution,
+            boolean optimal) {
     }
 
     private Set<Integer> mergeForcedAllowOverWidths(Set<Integer> allowOverSet) {
@@ -968,6 +1109,7 @@ class LegacyOrderPatternSelectionSolver {
 
     record Result(
             String name,
-            Map<PatternCandidate, Integer> solution) {
+            Map<PatternCandidate, Integer> solution,
+            boolean stage3Optimal) {
     }
 }

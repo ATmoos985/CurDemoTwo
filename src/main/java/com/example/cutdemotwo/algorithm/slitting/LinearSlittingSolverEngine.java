@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicLong;
 @Service
 public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCloseable {
     static final String DEFAULT_CHILD_XMX = "768m";
+    static final int MAX_CHILD_THREADS = 8;
     private static final String WORKER_FLAG = "--worker";
     private static final String WARM_WORKER_PROP = "cutdemo.slitting.warmWorker";
     private static final int MAX_IDLE_WORKERS = 2;
@@ -36,18 +37,77 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     private final String childXmx;
+    private final int childThreads;
     private final ConcurrentLinkedDeque<WarmWorker> idleWorkers = new ConcurrentLinkedDeque<>();
     private final Set<WarmWorker> activeWorkers = ConcurrentHashMap.newKeySet();
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     public LinearSlittingSolverEngine() {
-        this(DEFAULT_CHILD_XMX);
+        this(DEFAULT_CHILD_XMX, defaultChildThreads());
+    }
+
+    public LinearSlittingSolverEngine(String childXmx) {
+        this(childXmx, defaultChildThreads());
+    }
+
+    public LinearSlittingSolverEngine(String childXmx, int childThreads) {
+        this.childXmx = normalizeChildXmx(childXmx);
+        this.childThreads = normalizeChildThreads(childThreads);
+        registerShutdownCleanup(this);
     }
 
     @Autowired
-    public LinearSlittingSolverEngine(@Value("${cutdemo.slitting.child-xmx:" + DEFAULT_CHILD_XMX + "}") String childXmx) {
+    public LinearSlittingSolverEngine(
+            @Value("${cutdemo.slitting.child-xmx:" + DEFAULT_CHILD_XMX + "}") String childXmx,
+            @Value("${cutdemo.slitting.child-threads:auto}") String childThreads) {
         this.childXmx = normalizeChildXmx(childXmx);
+        this.childThreads = normalizeChildThreads(childThreads);
         registerShutdownCleanup(this);
+    }
+
+    static int defaultChildThreads() {
+        return defaultChildThreads(Runtime.getRuntime().availableProcessors());
+    }
+
+    static int defaultChildThreads(int availableProcessors) {
+        return Math.max(1, Math.min(3, Math.max(1, availableProcessors) / 2));
+    }
+
+    static int normalizeChildThreads(String raw) {
+        String value = raw == null ? "" : raw.trim();
+        if (value.isEmpty() || "auto".equalsIgnoreCase(value)) {
+            return defaultChildThreads();
+        }
+        int parsed;
+        try {
+            parsed = Integer.parseInt(value);
+        } catch (NumberFormatException error) {
+            throw new IllegalArgumentException("无效的一维子进程线程上限配置 cutdemo.slitting.child-threads: " + raw, error);
+        }
+        return normalizeChildThreads(parsed);
+    }
+
+    static int normalizeChildThreads(int raw) {
+        if (raw < 1 || raw > MAX_CHILD_THREADS) {
+            throw new IllegalArgumentException("无效的一维子进程线程上限配置 cutdemo.slitting.child-threads: " + raw);
+        }
+        return raw;
+    }
+
+    static int resolveKernelParallelThreads() {
+        String configured = System.getProperty("cutting.parallel.globalThreads");
+        if (configured != null && !configured.isBlank()) {
+            try {
+                return Math.max(1, Math.min(MAX_CHILD_THREADS, Integer.parseInt(configured.trim())));
+            } catch (NumberFormatException ignored) {
+                // ignore malformed override and fall back to adaptive default
+            }
+        }
+        return defaultChildThreads();
+    }
+
+    int childThreads() {
+        return childThreads;
     }
 
     private static void registerShutdownCleanup(LinearSlittingSolverEngine engine) {
@@ -192,7 +252,7 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
 
     private WarmWorker startWarmWorker(long requestDeadlineNanos) throws IOException {
         ComputationCancellation.check();
-        var cmd = workerCommand(ProcessHandle.current().pid(), childXmx);
+        var cmd = workerCommand(ProcessHandle.current().pid(), childXmx, childThreads);
         ProcessBuilder pb = new ProcessBuilder(cmd)
                 .redirectError(ProcessBuilder.Redirect.DISCARD);
         Process process = pb.start();
@@ -213,28 +273,38 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
     }
 
     static List<String> command(Path input, Path output, long parentPid) throws IOException {
-        return command(input, output, parentPid, DEFAULT_CHILD_XMX);
+        return command(input, output, parentPid, DEFAULT_CHILD_XMX, defaultChildThreads());
     }
 
     static List<String> command(Path input, Path output, long parentPid, String childXmx) throws IOException {
-        var args = baseJvmCommand(childXmx, false);
+        return command(input, output, parentPid, childXmx, defaultChildThreads());
+    }
+
+    static List<String> command(Path input, Path output, long parentPid, String childXmx, int childThreads) throws IOException {
+        var args = baseJvmCommand(childXmx, childThreads, false);
         args.addAll(List.of(input.toString(), output.toString(), Long.toString(parentPid)));
         return args;
     }
 
     static List<String> workerCommand(long parentPid, String childXmx) throws IOException {
-        var args = baseJvmCommand(childXmx, true);
+        return workerCommand(parentPid, childXmx, defaultChildThreads());
+    }
+
+    static List<String> workerCommand(long parentPid, String childXmx, int childThreads) throws IOException {
+        var args = baseJvmCommand(childXmx, childThreads, true);
         args.addAll(List.of(WORKER_FLAG, Long.toString(parentPid)));
         return args;
     }
 
-    private static List<String> baseJvmCommand(String childXmx, boolean warmWorker) throws IOException {
+    private static List<String> baseJvmCommand(String childXmx, int childThreads, boolean warmWorker) throws IOException {
+        int normalizedThreads = normalizeChildThreads(childThreads);
+        int activeProcessors = Math.max(2, normalizedThreads);
         String cp = System.getProperty("surefire.test.class.path", System.getProperty("java.class.path"));
         var args = new ArrayList<>(List.of(
                 javaExecutable().toString(),
                 "-Xmx" + normalizeChildXmx(childXmx),
-                "-XX:ActiveProcessorCount=2",
-                "-Dcutting.parallel.globalThreads=1"));
+                "-XX:ActiveProcessorCount=" + activeProcessors,
+                "-Dcutting.parallel.globalThreads=" + normalizedThreads));
         if (warmWorker) {
             args.add("-D" + WARM_WORKER_PROP + "=true");
         }
@@ -516,6 +586,8 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
 
         // 精修模式默认自动启用受控 LNS 压缩序号组（仅当请求显式设置 lnsEnabled=false 时关闭）。
         boolean enableLns = !fast && !Boolean.FALSE.equals(p.lnsEnabled());
+        int parallelThreads = resolveKernelParallelThreads();
+        boolean parallelEnabled = !fast && parallelThreads > 1;
         var options = new HashMap<String, String>();
         options.put("cutting.fast.preview", Boolean.toString(fast));
         options.put("cutting.quality", Boolean.toString(!fast));
@@ -529,15 +601,20 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
         options.put("cutting.spr.enabled", "false");
         options.put("cutting.lns.enabled", Boolean.toString(enableLns));
         options.put("cutting.lns.enrichPatterns", "false");
+        options.put("cutting.parallel.aLayer.enabled", Boolean.toString(parallelEnabled));
+        options.put("cutting.parallel.candidates.enabled", Boolean.toString(parallelEnabled));
+        options.put("cutting.parallel.aLayer.threads", Integer.toString(parallelThreads));
+        options.put("cutting.parallel.candidates.threads", Integer.toString(parallelThreads));
+        // 多候选并行时 CuttingSolver 会自动覆盖 cutting.lns.parallel=false 防止嵌套并发；
+        // 当 B 层经主导预剪枝/去重后仅剩 1 个候选时，由 LNS 内部按受控线程数确定性并行求解邻域。
+        options.put("cutting.lns.parallel", Boolean.toString(parallelEnabled && enableLns));
+        options.put("cutting.lns.parallelism", Integer.toString(parallelThreads));
         for (String key : List.of(
                 "cutting.phase2.enabled",
                 "cutting.demandPeak.enabled",
                 "cutting.demandPeak.smallPolish.enabled",
-                "cutting.parallel.aLayer.enabled",
-                "cutting.parallel.candidates.enabled",
                 "cutting.parallel.sprCandidates.enabled",
                 "cutting.spr.parallel",
-                "cutting.lns.parallel",
                 "cutting.portfolio.enabled")) {
             options.put(key, "false");
         }

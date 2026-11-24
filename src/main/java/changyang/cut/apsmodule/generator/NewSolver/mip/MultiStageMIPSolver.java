@@ -67,7 +67,10 @@ public class MultiStageMIPSolver {
         int rolls = sol.values().stream().mapToInt(Integer::intValue).sum();
         int waste = calculateTotalWaste(sol);
         int over = calculateTotalOver(sol, demands);
-        return new SolveCandidate(results.get(0).name(), new SolverResult(sol, rolls, waste, over, 0L));
+        return new SolveCandidate(
+                results.get(0).name(),
+                new SolverResult(sol, rolls, waste, over, 0L),
+                results.get(0).stage3Optimal());
     }
 
     public SolveCandidate refinePrimaryWithPatterns(
@@ -101,6 +104,40 @@ public class MultiStageMIPSolver {
                 new SolverResult(solution, rolls, waste, over, 0L));
     }
 
+    /**
+     * 复用同源 Stage3 基线，仅运行 Stage4（花型数/奇偶/对齐精炼），避免在 QUALITY 模式下重复求解 Stage1/2/3。
+     */
+    public SolveCandidate refineStage4FromStage3Baseline(
+            List<PatternCandidate> fullPatterns,
+            Map<Integer, Integer> demands,
+            Set<Integer> allowOverSet,
+            Map<PatternCandidate, Integer> stage3Baseline,
+            int seed,
+            double alignmentLambda,
+            PatternAlignmentContext alignmentContext) {
+        SolverParameters seededParams = params.copy();
+        seededParams.setALayerScipSeed(seed);
+        seededParams.setALayerAlignmentLambda(alignmentLambda);
+        seededParams.sanitize();
+        LegacyOrderPatternSelectionSolver legacySolver = new LegacyOrderPatternSelectionSolver(
+                seededParams, alignmentContext);
+        Map<PatternCandidate, Integer> solution = legacySolver.refineStage4FromStage3Baseline(
+                fullPatterns,
+                demands,
+                allowOverSet,
+                stage3Baseline,
+                System.currentTimeMillis() + seededParams.getTimeoutMs());
+        if (solution == null || solution.isEmpty()) {
+            return null;
+        }
+        int rolls = solution.values().stream().mapToInt(Integer::intValue).sum();
+        int waste = calculateTotalWaste(solution);
+        int over = calculateTotalOver(solution, demands);
+        return new SolveCandidate(
+                "legacy-order",
+                new SolverResult(solution, rolls, waste, over, 0L));
+    }
+
     private int calculateTotalWaste(Map<PatternCandidate, Integer> solution) {
         return solution.entrySet().stream()
                 .mapToInt(entry -> entry.getKey().getRealWaste(params.getTotalWidth()) * entry.getValue())
@@ -129,6 +166,11 @@ public class MultiStageMIPSolver {
 
     public record SolveCandidate(
             String name,
-            SolverResult result) {
+            SolverResult result,
+            boolean stage3Optimal) {
+
+        public SolveCandidate(String name, SolverResult result) {
+            this(name, result, false);
+        }
     }
 }

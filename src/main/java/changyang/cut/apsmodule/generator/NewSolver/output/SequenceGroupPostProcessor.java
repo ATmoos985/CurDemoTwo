@@ -6,6 +6,7 @@ import changyang.cut.apsmodule.service.CuttingInstruction;
 import changyang.cut.apsmodule.service.StationAssignment;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
@@ -185,7 +186,7 @@ public class SequenceGroupPostProcessor {
         int oddCarGroups = 0;
         int oneCarGroups = 0;
         int smallCarGroups = 0;
-        List<StationAssignment> previousRoll = null;
+        String[] previousRollKeys = null;
         int currentRun = 0;
 
         for (CuttingInstruction instruction : instructions) {
@@ -198,7 +199,8 @@ public class SequenceGroupPostProcessor {
             }
 
             for (List<StationAssignment> roll : simulateRolls(instruction)) {
-                if (previousRoll == null || !isRollContentSame(previousRoll, roll)) {
+                String[] currentRollKeys = sortedRollKeys(roll);
+                if (previousRollKeys == null || !Arrays.equals(previousRollKeys, currentRollKeys)) {
                     if (currentRun > 0) {
                         groups++;
                         if (currentRun % 2 != 0) oddCarGroups++;
@@ -209,7 +211,7 @@ public class SequenceGroupPostProcessor {
                 } else {
                     currentRun++;
                 }
-                previousRoll = roll;
+                previousRollKeys = currentRollKeys;
             }
         }
 
@@ -286,21 +288,24 @@ public class SequenceGroupPostProcessor {
         return groups;
     }
 
+    private static String[] sortedRollKeys(List<StationAssignment> roll) {
+        int size = roll.size();
+        String[] keys = new String[size];
+        for (int i = 0; i < size; i++) {
+            StationAssignment assignment = roll.get(i);
+            keys[i] = assignment.getWidth() + "_" + assignment.getMessageText();
+        }
+        if (size > 1) {
+            Arrays.sort(keys);
+        }
+        return keys;
+    }
+
     private static boolean isRollContentSame(List<StationAssignment> roll1, List<StationAssignment> roll2) {
         if (roll1.size() != roll2.size()) {
             return false;
         }
-
-        List<String> keys1 = roll1.stream()
-                .map(assignment -> assignment.getWidth() + "_" + assignment.getMessageText())
-                .sorted()
-                .collect(Collectors.toList());
-        List<String> keys2 = roll2.stream()
-                .map(assignment -> assignment.getWidth() + "_" + assignment.getMessageText())
-                .sorted()
-                .collect(Collectors.toList());
-
-        return keys1.equals(keys2);
+        return Arrays.equals(sortedRollKeys(roll1), sortedRollKeys(roll2));
     }
 
     private static boolean tryMergeAdjacentGroups(List<List<StationAssignment>> rolls, long deadlineNanos) {
