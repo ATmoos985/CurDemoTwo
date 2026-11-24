@@ -345,3 +345,16 @@
 :root[data-theme="dark"] .mp-insp-page {
   background: var(--cp-bg);
 }
+
+/* 工厂业务台账表格与拖拽区暗色适配 */
+:root[data-theme="dark"] .dl-table-scroll .t th,
+:root[data-theme="dark"] table.t th {
+  background: #111b2c;
+  color: var(--cp-ink-2);
+  border-color: var(--cp-divider);
+}
+
+:root[data-theme="dark"] .dc-dropzone {
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.08) 0%, rgba(17, 27, 44, 0.72) 100%);
+  border-color: rgba(56, 189, 248, 0.38);
+}

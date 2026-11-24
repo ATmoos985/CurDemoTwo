@@ -22,3 +22,15 @@ test('latest demand explanation follows quality event instead of earlier origina
     const latest=latestDemandChange([report],'t');assert.equal(latest.quality,true);assert.deepEqual(latest.deltas,{'1':-1});assert.equal(latest.pieces,1);
     assert.equal(latestDemandChange([report,{taskId:'t',planId:'new',confirmedAt:'2026-10-21',demandQuantities:{1:1}}],'t').planId,'new');
 });
+test('revoked quality disposition restores piece reviewability and qualified outcome',()=>{
+    const revokedReport={
+        ...report,
+        qualityDispositions:[{
+            id:'disp-1',
+            command:{pieceId:1,disposition:'REMNANT',reason:'误判'},
+            revocation:{idempotencyKey:'rev-1',operator:'质检主管',reason:'二次复核合格',revokedAt:'2026-11-25T03:00:00'}
+        }]
+    };
+    assert.deepEqual(reviewablePieces(revokedReport).map(p=>p.pieceId),[1,2]);
+    assert.equal(effectivePieceResults(revokedReport)[0].outcome,'QUALIFIED');
+});

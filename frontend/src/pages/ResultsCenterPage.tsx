@@ -10,6 +10,7 @@ import { rectangle } from '@static/js/canvas/nesting-scene.js';
 import { gcodeText, dxfText } from '@static/js/plugins/export/cam-format.js';
 import { requestJSON, idempotentPost, toast, fmtN, fmtM, loadSheetLib } from '@static/app/js/util.js';
 import { useStudioStore } from '../store/useStudioStore';
+import { extractCncPostOptions } from '../store/studioSettings';
 import { idempotentJsonPost } from '../utils/authClient';
 import { buildCompleteSchemeIdempotencyKey } from './workbench/schemeConfirmUtils';
 import {
@@ -558,7 +559,7 @@ export const ResultsCenterPage: React.FC<{
         endY: c.endY
       }))
     };
-    const content = kind === 'nc' ? gcodeText(data) : dxfText(data);
+    const content = kind === 'nc' ? gcodeText(data, extractCncPostOptions(settings)) : dxfText(data);
     const blob = new Blob([content], {
       type: kind === 'nc' ? 'text/plain;charset=utf-8' : 'application/dxf'
     });

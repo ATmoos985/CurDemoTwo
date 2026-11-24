@@ -4,6 +4,7 @@ import com.example.cutdemotwo.business.cutting.RemnantService;
 import com.example.cutdemotwo.business.model.InventoryReceiptDocument;
 import com.example.cutdemotwo.business.model.MaterialIssueDocument;
 import com.example.cutdemotwo.business.model.QualityReleaseDocument;
+import com.example.cutdemotwo.config.AuthContext;
 import com.example.cutdemotwo.persistence.InventoryConflictException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -42,7 +43,7 @@ public class FactoryDocumentController {
         RemnantService.QualityReleaseCommand cmd = body == null ? null : new RemnantService.QualityReleaseCommand(
                 resolveIdempotencyKey(body.idempotencyKey(), headerKey),
                 body.decision(),
-                body.inspector(),
+                resolveActor(body.inspector()),
                 body.reason()
         );
         return inventory.releaseQuarantinedRemnant(id, cmd);
@@ -66,7 +67,7 @@ public class FactoryDocumentController {
                 resolveIdempotencyKey(body.idempotencyKey(), headerKey),
                 body.supplierName(),
                 body.deliveryNoteNo(),
-                body.operator(),
+                resolveActor(body.operator()),
                 body.remarks(),
                 body.inspector(),
                 body.rolls()
@@ -94,7 +95,7 @@ public class FactoryDocumentController {
                 body.rollId(),
                 body.machineId(),
                 body.shiftTeam(),
-                body.operator(),
+                resolveActor(body.operator()),
                 body.targetLocation(),
                 body.reason()
         );
@@ -110,7 +111,7 @@ public class FactoryDocumentController {
     ) {
         RemnantService.ScrapRollCommand cmd = body == null ? null : new RemnantService.ScrapRollCommand(
                 resolveIdempotencyKey(body.idempotencyKey(), headerKey),
-                body.operator(),
+                resolveActor(body.operator()),
                 body.reason()
         );
         return inventory.scrapMotherRoll(rollId, cmd);
@@ -130,6 +131,16 @@ public class FactoryDocumentController {
     static String resolveIdempotencyKey(String bodyKey, String headerKey) {
         if (bodyKey != null && !bodyKey.isBlank()) return bodyKey.trim();
         return (headerKey == null || headerKey.isBlank()) ? null : headerKey.trim();
+    }
+
+    /** 认证开启且请求未显式指定操作人时，自动透传当前登录主体用户名，不干扰免登本地模式。 */
+    static String resolveActor(String declared) {
+        if (declared != null && !declared.isBlank()) return declared.trim();
+        AuthContext.Principal principal = AuthContext.current();
+        if (principal != null && principal.authenticated() && principal.username() != null && !principal.username().isBlank()) {
+            return principal.username();
+        }
+        return declared;
     }
 
     static <T> List<T> slicePage(List<T> items, Integer limit, Integer offset) {

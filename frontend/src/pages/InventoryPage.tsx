@@ -1542,7 +1542,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                                           <button
                                             type="button"
                                             className="btn sm"
-                                            style={{ color: '#b91c1c' }}
+                                            style={{ color: 'var(--err, #b91c1c)' }}
                                             title="执行母卷级受控报废（清零未切余量并留痕）"
                                             onClick={() =>
                                               openActionPanel('scrapRoll', { scrapRollId: r.rollId })
@@ -2509,12 +2509,12 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                   <div
                     role="alert"
                     style={{
-                      borderLeft: '3px solid #dc2626',
-                      background: 'rgba(220,38,38,0.08)',
+                      borderLeft: '3px solid var(--err, #dc2626)',
+                      background: 'var(--err-bg, rgba(220,38,38,0.08))',
                       padding: '8px 10px',
                       borderRadius: 4,
                       fontSize: 12,
-                      color: '#991b1b',
+                      color: 'var(--err, #991b1b)',
                       marginBottom: 10
                     }}
                   >

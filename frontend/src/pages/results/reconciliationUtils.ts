@@ -54,10 +54,40 @@ export function normalizeReconciliationReportItem(item: any): NormalizedReconcil
 export function isDispositionRevoked(disp: any): boolean {
   if (!disp || typeof disp !== 'object') return false;
   return Boolean(
-    disp.revoked ||
+    disp.revocation ||
+      disp.revoked ||
       disp.revokedAt ||
       String(disp.status || '').toUpperCase() === 'REVOKED'
   );
+}
+
+export interface NormalizedDispositionView {
+  id: string;
+  pieceId?: number | string;
+  disposition: string;
+  inspector: string;
+  reason: string;
+  remnantId: string;
+  revoked: boolean;
+  revokedBy: string;
+  revokedReason: string;
+}
+
+/** 统一兼容后端嵌套 `QualityDisposition{id, command, remnantId, revocation}` 与扁平形态。 */
+export function readDispositionFields(disp: any, fallbackIdx = 0): NormalizedDispositionView {
+  const cmd = disp?.command && typeof disp.command === 'object' ? disp.command : disp || {};
+  const rev = disp?.revocation && typeof disp.revocation === 'object' ? disp.revocation : null;
+  return {
+    id: String(disp?.id || disp?.dispositionId || fallbackIdx),
+    pieceId: cmd.pieceId ?? disp?.pieceId,
+    disposition: String(cmd.disposition || disp?.disposition || ''),
+    inspector: String(cmd.inspector || disp?.inspector || ''),
+    reason: String(cmd.reason || disp?.reason || ''),
+    remnantId: String(disp?.remnantId || disp?.recoveredRemnantId || ''),
+    revoked: isDispositionRevoked(disp),
+    revokedBy: String(rev?.operator || disp?.revokedBy || ''),
+    revokedReason: String(rev?.reason || disp?.revokedReason || '')
+  };
 }
 
 /**

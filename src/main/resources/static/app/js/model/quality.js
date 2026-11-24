@@ -25,7 +25,9 @@ export function qualityProblems(form, piece) {
 /** 生成不可变命令；operationId 由调用方在首次提交时生成，结果不确定时原样重发。 */
 export function buildQualityCommand(form, operationId) {
     const r = form.report;
-    return {operationId, expectedRevision: r.qualityRevision ?? (r.qualityDispositions || []).length, pieceId: Number(form.pieceId),
+    const events = r.qualityDispositions || [];
+    const fallbackRev = events.length + events.filter(e => Boolean(e && e.revocation)).length;
+    return {operationId, expectedRevision: r.qualityRevision ?? fallbackRev, pieceId: Number(form.pieceId),
         disposition: form.disposition, inspector: form.inspector.trim(), reason: form.reason.trim(),
         recovery: form.disposition === 'REMNANT' ? {x: Number(form.x), y: Number(form.y), width: Number(form.width), length: Number(form.length),
             location: form.location.trim(), quality: form.quality} : null};
@@ -34,6 +36,7 @@ export function buildQualityCommand(form, operationId) {
 /** 回执摘要：按复检后的有效结果统计。 */
 export function receiptSummary(report, effective) {
     const rows = effective(report);
+    const activeDispositions = (report.qualityDispositions || []).filter(e => e && !e.revocation && !e.revoked && !e.revokedAt).length;
     return {qualified: rows.filter(p => p.outcome === 'QUALIFIED').length, rejected: rows.filter(p => p.outcome === 'REJECTED').length,
-        uncut: rows.filter(p => p.outcome === 'UNCUT').length, dispositions: (report.qualityDispositions || []).length};
+        uncut: rows.filter(p => p.outcome === 'UNCUT').length, dispositions: activeDispositions};
 }

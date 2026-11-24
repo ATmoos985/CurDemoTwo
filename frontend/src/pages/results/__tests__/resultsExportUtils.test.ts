@@ -8,7 +8,8 @@ import {
 import {
   buildLedgerCsvText,
   isDispositionRevoked,
-  normalizeReconciliationReportItem
+  normalizeReconciliationReportItem,
+  readDispositionFields
 } from '../reconciliationUtils';
 
 describe('结果中心与对账导出、疵点透传、扫码定位及聚合报工适配', () => {
@@ -139,5 +140,38 @@ describe('结果中心与对账导出、疵点透传、扫码定位及聚合报�
     });
     expect(flat?.reportId).toBe('PLAN-02');
     expect(isDispositionRevoked(flat?.dispositions[0])).toBe(true);
+
+    // 真实后端 QualityDisposition 嵌套 command + revocation 形态校验
+    const backendDisp = {
+      id: 'DISP-REAL-1',
+      planId: 'PLAN-03',
+      remnantId: 'REM-202611-009',
+      command: {
+        operationId: 'op-1',
+        expectedRevision: 0,
+        pieceId: 7,
+        disposition: 'REMNANT',
+        inspector: '质检员王工',
+        reason: '边角暗伤'
+      },
+      revocation: {
+        idempotencyKey: 'rev-op-1',
+        operator: '质检主管刘工',
+        reason: '二次复核为浮尘',
+        revokedAt: '2026-11-25T04:00:00'
+      }
+    };
+    expect(isDispositionRevoked(backendDisp)).toBe(true);
+    expect(readDispositionFields(backendDisp)).toMatchObject({
+      id: 'DISP-REAL-1',
+      pieceId: 7,
+      disposition: 'REMNANT',
+      inspector: '质检员王工',
+      reason: '边角暗伤',
+      remnantId: 'REM-202611-009',
+      revoked: true,
+      revokedBy: '质检主管刘工',
+      revokedReason: '二次复核为浮尘'
+    });
   });
 });

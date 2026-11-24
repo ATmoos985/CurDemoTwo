@@ -108,7 +108,14 @@ public class StudioWorkflowController {
             @PathVariable String id,
             @RequestBody(required = false) SchedulingStudioService.CompleteSchemeCommand cmd
     ) {
-        return studioService.completeScheme(id, cmd);
+        SchedulingStudioService.CompleteSchemeCommand effective = cmd == null ? null : new SchedulingStudioService.CompleteSchemeCommand(
+                cmd.actualCutLenMm(),
+                cmd.rejectedPieceIds(),
+                cmd.recoverRemnants(),
+                cmd.remnantLocation(),
+                FactoryDocumentController.resolveActor(cmd.operator())
+        );
+        return studioService.completeScheme(id, effective);
     }
 
     @PostMapping("/v2/schemes/{id}/cancel")
@@ -128,7 +135,7 @@ public class StudioWorkflowController {
     ) {
         var cmd = body == null ? null : new SchedulingStudioService.ReplenishTaskCommand(
                 FactoryDocumentController.resolveIdempotencyKey(body.idempotencyKey(), headerKey),
-                body.operator(),
+                FactoryDocumentController.resolveActor(body.operator()),
                 body.reason()
         );
         return studioService.createReplenishTaskFromScheme(id, cmd);

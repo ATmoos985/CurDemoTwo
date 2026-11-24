@@ -27,7 +27,8 @@ import {
   NormalizedReconciliationReportRow,
   buildLedgerCsvText,
   isDispositionRevoked,
-  normalizeReconciliationReportItem
+  normalizeReconciliationReportItem,
+  readDispositionFields
 } from './results/reconciliationUtils';
 
 const REPORT_PAGE_SIZE = 50;
@@ -654,11 +655,12 @@ export const ReconciliationPage: React.FC = () => {
                                     </thead>
                                     <tbody>
                                       {dispositions.map((d: any, idx: number) => {
-                                        const dispId = String(d.id || d.dispositionId || idx);
-                                        const revoked = isDispositionRevoked(d);
+                                        const info = readDispositionFields(d, idx);
+                                        const dispId = info.id;
+                                        const revoked = info.revoked;
                                         const dispLabel =
-                                          (DISPOSITIONS as Record<string, string>)[d.disposition] ||
-                                          d.disposition ||
+                                          (DISPOSITIONS as Record<string, string>)[info.disposition] ||
+                                          info.disposition ||
                                           '复检处置';
                                         return (
                                           <tr
@@ -672,15 +674,13 @@ export const ReconciliationPage: React.FC = () => {
                                             <td>
                                               <CodeBadge title={dispId}>{shortId(dispId)}</CodeBadge>
                                             </td>
-                                            <td className="num">#{d.pieceId ?? '—'}</td>
+                                            <td className="num">#{info.pieceId ?? '—'}</td>
                                             <td>
                                               <span className="tag warn">{dispLabel}</span>
                                             </td>
-                                            <td>{d.inspector || '—'}</td>
-                                            <td>{d.reason || '—'}</td>
-                                            <td className="num">
-                                              {d.remnantId || d.recoveredRemnantId || '—'}
-                                            </td>
+                                            <td>{info.inspector || '—'}</td>
+                                            <td>{info.reason || '—'}</td>
+                                            <td className="num">{info.remnantId || '—'}</td>
                                             <td>
                                               <span className={`tag ${revoked ? '' : 'ok'}`}>
                                                 {revoked ? '已撤销' : '生效中'}
@@ -691,16 +691,16 @@ export const ReconciliationPage: React.FC = () => {
                                                 <button
                                                   type="button"
                                                   className="btn sm"
-                                                  style={{ color: '#b91c1c' }}
+                                                  style={{ color: 'var(--err, #b91c1c)' }}
                                                   onClick={() =>
                                                     setRevokeDraft({
                                                       reportId: row.reportId,
                                                       taskName: row.taskName,
                                                       dispositionId: String(d.id || d.dispositionId),
-                                                      pieceId: d.pieceId,
+                                                      pieceId: info.pieceId,
                                                       dispositionLabel: dispLabel,
-                                                      inspector: d.inspector,
-                                                      origReason: d.reason,
+                                                      inspector: info.inspector,
+                                                      origReason: info.reason,
                                                       operator: '',
                                                       reason: ''
                                                     })
@@ -710,7 +710,9 @@ export const ReconciliationPage: React.FC = () => {
                                                 </button>
                                               ) : (
                                                 <span className="muted" style={{ fontSize: 11.5 }}>
-                                                  {d.revokedReason ? `原因：${d.revokedReason}` : '—'}
+                                                  {info.revokedReason
+                                                    ? `${info.revokedBy ? `${info.revokedBy} · ` : ''}${info.revokedReason}`
+                                                    : '—'}
                                                 </span>
                                               )}
                                             </td>
@@ -1020,12 +1022,12 @@ export const ReconciliationPage: React.FC = () => {
             <div
               role="alert"
               style={{
-                borderLeft: '3px solid #d97706',
-                background: 'rgba(245, 158, 11, 0.1)',
+                borderLeft: '3px solid var(--warn, #d97706)',
+                background: 'var(--warn-bg, rgba(245, 158, 11, 0.1))',
                 padding: '8px 10px',
                 borderRadius: 4,
                 fontSize: 12,
-                color: '#92400e',
+                color: 'var(--warn, #92400e)',
                 marginBottom: 10
               }}
             >

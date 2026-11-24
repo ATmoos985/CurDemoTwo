@@ -149,7 +149,7 @@ public class FabricCutController {
             @RequestBody com.example.cutdemotwo.business.cutting.RemnantService.RevokeDispositionCommand body) {
         var cmd = body == null ? null : new com.example.cutdemotwo.business.cutting.RemnantService.RevokeDispositionCommand(
                 FactoryDocumentController.resolveIdempotencyKey(body.idempotencyKey(), headerKey),
-                body.operator(),
+                FactoryDocumentController.resolveActor(body.operator()),
                 body.reason()
         );
         return remnantService.revokeQualityDisposition(reportId, dispositionId, cmd);

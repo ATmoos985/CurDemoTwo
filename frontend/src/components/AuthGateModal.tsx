@@ -91,12 +91,12 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
             <div
               role="alert"
               style={{
-                borderLeft: `3px solid ${errorMsg ? '#dc2626' : '#d97706'}`,
-                background: errorMsg ? 'rgba(220,38,38,0.08)' : 'rgba(217,119,6,0.08)',
+                borderLeft: `3px solid ${errorMsg ? 'var(--err, #dc2626)' : 'var(--warn, #d97706)'}`,
+                background: errorMsg ? 'var(--err-bg, rgba(220,38,38,0.08))' : 'var(--warn-bg, rgba(217,119,6,0.08))',
                 padding: '8px 10px',
                 borderRadius: 4,
                 fontSize: 12,
-                color: errorMsg ? '#b91c1c' : '#92400e',
+                color: errorMsg ? 'var(--err, #b91c1c)' : 'var(--warn, #92400e)',
                 marginBottom: 12
               }}
             >

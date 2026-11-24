@@ -431,6 +431,7 @@ export const DocumentsPage: React.FC = () => {
   const [supplierName, setSupplierName] = useState('');
   const [deliveryNoteNo, setDeliveryNoteNo] = useState('');
   const [receiptOperator, setReceiptOperator] = useState('');
+  const [receiptInspector, setReceiptInspector] = useState('');
   const [receiptRemarks, setReceiptRemarks] = useState('');
   const [receiptRolls, setReceiptRolls] = useState<ReceiptRollDraft[]>(() => [
     createEmptyReceiptRoll()
@@ -537,12 +538,18 @@ export const DocumentsPage: React.FC = () => {
       toast('请至少录入 1 行包含有效品号、门幅与总长的母卷明细', true);
       return;
     }
+    const hasPassedRoll = validRolls.some((r) => r.inspectionStatus === 'PASSED');
+    if (hasPassedRoll && !receiptInspector.trim()) {
+      toast('入库直通合格(PASSED)必须填写来料质检员姓名', true);
+      return;
+    }
     setSubmitting(true);
     try {
       const res = await idempotentJsonPost('inventory-receipt', '/api/v2/inventory-receipts', {
         supplierName: supplierName.trim(),
         deliveryNoteNo: deliveryNoteNo.trim(),
         operator: receiptOperator.trim(),
+        inspector: hasPassedRoll ? receiptInspector.trim() : undefined,
         remarks: receiptRemarks.trim() || undefined,
         rolls: validRolls
       });
@@ -551,6 +558,7 @@ export const DocumentsPage: React.FC = () => {
       setReceiptModalOpen(false);
       setSupplierName('');
       setDeliveryNoteNo('');
+      setReceiptInspector('');
       setReceiptRemarks('');
       setReceiptRolls([createEmptyReceiptRoll()]);
       await loadData();
@@ -773,7 +781,7 @@ export const DocumentsPage: React.FC = () => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return receipts;
     return receipts.filter((r) => {
-      const rls = r.rolls || r.items || [];
+      const rls = r.lines || r.rolls || r.items || [];
       return [
         r.id,
         r.documentId,
@@ -781,7 +789,7 @@ export const DocumentsPage: React.FC = () => {
         r.deliveryNoteNo,
         r.operator,
         r.remarks,
-        ...rls.map((x: any) => `${x.id || x.rollId || ''} ${x.materialModel || x.rollModel || ''} ${x.batchNo || ''}`)
+        ...rls.map((x: any) => `${x.rollId || x.id || ''} ${x.materialModel || x.rollModel || ''} ${x.batchNo || ''}`)
       ].some((v) => String(v || '').toLowerCase().includes(q));
     });
   }, [receipts, searchQuery]);
@@ -796,8 +804,12 @@ export const DocumentsPage: React.FC = () => {
         r.documentId,
         r.direction,
         r.rollId,
+        r.materialModel,
+        r.batchNo,
         r.machineId,
         r.shiftTeam,
+        r.fromLocation,
+        r.toLocation,
         r.targetLocation,
         r.operator,
         r.reason
@@ -1388,12 +1400,12 @@ export const DocumentsPage: React.FC = () => {
                   <tbody>
                     {filteredReceipts
                       .slice()
-                      .reverse()
+                      .sort((a, b) => Number(b.inventoryRevision ?? b.postedAt ?? 0) - Number(a.inventoryRevision ?? a.postedAt ?? 0))
                       .map((r, idx) => {
-                        const rls = r.rolls || r.items || [];
+                        const rls = r.lines || r.rolls || r.items || [];
                         const detail = rls
                           .map((x: any) => {
-                            const rid = x.id || x.rollId || '—';
+                            const rid = x.rollId || x.id || '—';
                             const model = x.materialModel || x.rollModel || '';
                             const batch = x.batchNo ? `缸:${x.batchNo}` : '';
                             const dim =
@@ -1422,7 +1434,7 @@ export const DocumentsPage: React.FC = () => {
                             <td className="r num">
                               {r.beforeRevision != null && r.afterRevision != null
                                 ? `${r.beforeRevision} → ${r.afterRevision}`
-                                : r.revision ?? '—'}
+                                : r.inventoryRevision ?? r.revision ?? '—'}
                             </td>
                           </tr>
                         );
@@ -1500,7 +1512,7 @@ export const DocumentsPage: React.FC = () => {
                   <tbody>
                     {filteredIssues
                       .slice()
-                      .reverse()
+                      .sort((a, b) => Number(b.inventoryRevision ?? b.postedAt ?? 0) - Number(a.inventoryRevision ?? a.postedAt ?? 0))
                       .map((r, idx) => {
                         const isIssue = r.direction === 'ISSUE';
                         return (
@@ -1528,14 +1540,14 @@ export const DocumentsPage: React.FC = () => {
                               {[r.machineId, r.shiftTeam].filter(Boolean).join(' · ') || '—'}
                             </td>
                             <td>
-                              <span className="tag kind">{r.targetLocation || '—'}</span>
+                              <span className="tag kind">{r.toLocation || r.targetLocation || '—'}</span>
                             </td>
                             <td className="mp-doc-detail-cell">{r.reason || '—'}</td>
                             <td>{r.operator || '—'}</td>
                             <td className="r num">
                               {r.beforeRevision != null && r.afterRevision != null
                                 ? `${r.beforeRevision} → ${r.afterRevision}`
-                                : r.revision ?? '—'}
+                                : r.inventoryRevision ?? r.revision ?? '—'}
                             </td>
                           </tr>
                         );
@@ -1742,6 +1754,19 @@ export const DocumentsPage: React.FC = () => {
               value={receiptRemarks}
               onChange={(e) => setReceiptRemarks(e.target.value)}
             />
+            {receiptRolls.some((r) => r.inspectionStatus === 'PASSED') && (
+              <>
+                <label htmlFor="rec-inspector">来料质检员 *</label>
+                <input
+                  id="rec-inspector"
+                  className="field"
+                  required
+                  placeholder="直通合格(PASSED)必填检验员"
+                  value={receiptInspector}
+                  onChange={(e) => setReceiptInspector(e.target.value)}
+                />
+              </>
+            )}
           </div>
 
           <div
