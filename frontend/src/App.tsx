@@ -1,24 +1,97 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ClusterCenterPage } from './pages/ClusterCenterPage';
-import { DemandCreatePage } from './pages/DemandCreatePage';
-import { DemandLibraryPage } from './pages/DemandLibraryPage';
+import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { CuttingWorkbenchPage } from './pages/CuttingWorkbenchPage';
-import { ResultsCenterPage } from './pages/ResultsCenterPage';
-import { ReconciliationPage } from './pages/ReconciliationPage';
-import { ExecutionCenterPage } from './pages/ExecutionCenterPage';
-import { TasksPage } from './pages/TasksPage';
-import { TaskEditPage } from './pages/TaskEditPage';
-import { QualityPage } from './pages/QualityPage';
-import { InventoryPage } from './pages/InventoryPage';
-import { DocumentsPage } from './pages/DocumentsPage';
-import { AnalysisPage } from './pages/AnalysisPage';
-import { InspectionPage } from './pages/InspectionPage';
-import { GarmentWidthPage } from './pages/GarmentWidthPage';
-import { ShowcasePage } from './pages/ShowcasePage';
 import { SettingsModal } from './components/SettingsModal';
+import { AuthGateModal } from './components/AuthGateModal';
 import { SettingsTabId } from './store/studioSettings';
-import { requestJSON } from '@static/app/js/util.js';
+import { requestJSON, toast } from '@static/app/js/util.js';
 import { useStudioStore } from './store/useStudioStore';
+import {
+  AuthSession,
+  LOCAL_FALLBACK_SESSION,
+  fetchAuthMe,
+  installAuthFetchInterceptor,
+  logoutAuth,
+  roleDisplayName
+} from './utils/authClient';
+
+// 非首屏业务页面采用路由级 React.lazy 拆包，显著削减首屏入口包体积
+const ClusterCenterPage = lazy(() =>
+  import('./pages/ClusterCenterPage').then((m) => ({ default: m.ClusterCenterPage }))
+);
+const DemandCreatePage = lazy(() =>
+  import('./pages/DemandCreatePage').then((m) => ({ default: m.DemandCreatePage }))
+);
+const DemandLibraryPage = lazy(() =>
+  import('./pages/DemandLibraryPage').then((m) => ({ default: m.DemandLibraryPage }))
+);
+const ResultsCenterPage = lazy(() =>
+  import('./pages/ResultsCenterPage').then((m) => ({ default: m.ResultsCenterPage }))
+);
+const ReconciliationPage = lazy(() =>
+  import('./pages/ReconciliationPage').then((m) => ({ default: m.ReconciliationPage }))
+);
+const ExecutionCenterPage = lazy(() =>
+  import('./pages/ExecutionCenterPage').then((m) => ({ default: m.ExecutionCenterPage }))
+);
+const TasksPage = lazy(() =>
+  import('./pages/TasksPage').then((m) => ({ default: m.TasksPage }))
+);
+const TaskEditPage = lazy(() =>
+  import('./pages/TaskEditPage').then((m) => ({ default: m.TaskEditPage }))
+);
+const QualityPage = lazy(() =>
+  import('./pages/QualityPage').then((m) => ({ default: m.QualityPage }))
+);
+const InventoryPage = lazy(() =>
+  import('./pages/InventoryPage').then((m) => ({ default: m.InventoryPage }))
+);
+const DocumentsPage = lazy(() =>
+  import('./pages/DocumentsPage').then((m) => ({ default: m.DocumentsPage }))
+);
+const AnalysisPage = lazy(() =>
+  import('./pages/AnalysisPage').then((m) => ({ default: m.AnalysisPage }))
+);
+const InspectionPage = lazy(() =>
+  import('./pages/InspectionPage').then((m) => ({ default: m.InspectionPage }))
+);
+const GarmentWidthPage = lazy(() =>
+  import('./pages/GarmentWidthPage').then((m) => ({ default: m.GarmentWidthPage }))
+);
+const ShowcasePage = lazy(() =>
+  import('./pages/ShowcasePage').then((m) => ({ default: m.ShowcasePage }))
+);
+
+const RouteLoadingFallback: React.FC = () => (
+  <div
+    className="react-page"
+    role="status"
+    aria-live="polite"
+    style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 260,
+      padding: 24
+    }}
+  >
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '10px 16px',
+        borderRadius: 6,
+        border: '1px solid var(--line-2, #cbd5e1)',
+        background: 'var(--panel, #ffffff)',
+        fontSize: 12.5,
+        color: 'var(--cp-ink-2, #475569)'
+      }}
+    >
+      <span className="dot ok" aria-hidden="true" />
+      <span>正在按需加载业务模块…</span>
+    </div>
+  </div>
+);
 
 interface ParsedRoute {
   page: string;
@@ -133,6 +206,9 @@ export const App: React.FC = () => {
     ok: false
   });
   const [refreshingHealth, setRefreshingHealth] = useState(false);
+  const [auth, setAuth] = useState<AuthSession>(LOCAL_FALLBACK_SESSION);
+  const [authNotice, setAuthNotice] = useState<string>('');
+  const [authReloadKey, setAuthReloadKey] = useState<number>(0);
   const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({
     demand: true,
     solving: true,
@@ -223,8 +299,41 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
-    refreshHealth();
+    const uninstall = installAuthFetchInterceptor({
+      onUnauthorized: () => {
+        setAuth((prev) =>
+          prev.enabled ? { ...prev, authenticated: false } : { ...prev, enabled: true, authenticated: false }
+        );
+        setAuthNotice('会话令牌已失效或已过期，请重新登录');
+      }
+    });
+    fetchAuthMe().then((session) => {
+      setAuth(session);
+      if (!session.enabled || session.authenticated) {
+        refreshHealth();
+      }
+    });
+    return () => uninstall();
   }, []);
+
+  const handleAuthenticated = (session: AuthSession) => {
+    setAuth(session);
+    setAuthNotice('');
+    setAuthReloadKey((k) => k + 1);
+    refreshHealth();
+    toast(`欢迎回来，${session.displayName}（${roleDisplayName(session.role)}）`);
+  };
+
+  const handleLogout = () => {
+    logoutAuth();
+    setAuth((prev) => ({
+      ...prev,
+      authenticated: false,
+      username: '',
+      displayName: '未登录'
+    }));
+    setAuthNotice('您已退出当前企业账号，请重新登录');
+  };
 
   const candidateCount = schemes2D.length + slitSchemes.length;
 
@@ -639,6 +748,72 @@ export const App: React.FC = () => {
         </div>
 
         <div className="nav-foot">
+          {auth.enabled && (
+            <div
+              className="mp-auth-foot-card"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: navCollapsed ? 'center' : 'space-between',
+                gap: 6,
+                padding: navCollapsed ? '6px 4px' : '6px 8px',
+                marginBottom: 6,
+                borderRadius: 6,
+                border: '1px solid var(--line-2, rgba(148,163,184,0.28))',
+                background: 'var(--panel-2, rgba(15,23,42,0.04))',
+                fontSize: 11.5
+              }}
+              title={
+                auth.authenticated
+                  ? `当前操作员：${auth.displayName} (${auth.username}) · ${roleDisplayName(auth.role)}`
+                  : '企业认证已开启，等待登录'
+              }
+            >
+              {navCollapsed ? (
+                <button
+                  type="button"
+                  className="mp-foot-action"
+                  style={{ width: '100%', padding: 2 }}
+                  onClick={handleLogout}
+                  aria-label="退出登录"
+                  title={`${auth.displayName} (${roleDisplayName(auth.role)}) · 点击登出`}
+                >
+                  <span className="num" style={{ fontWeight: 700 }}>
+                    {(auth.displayName || auth.username || 'U').slice(0, 1).toUpperCase()}
+                  </span>
+                </button>
+              ) : (
+                <>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div
+                      style={{
+                        fontWeight: 600,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {auth.authenticated ? auth.displayName || auth.username : '未登录'}
+                    </div>
+                    <div style={{ fontSize: 10.5, opacity: 0.75 }}>
+                      {auth.authenticated ? roleDisplayName(auth.role) : '等待身份认证'}
+                    </div>
+                  </div>
+                  {auth.authenticated && (
+                    <button
+                      type="button"
+                      className="btn sm"
+                      style={{ padding: '2px 7px', fontSize: 11, flex: 'none' }}
+                      onClick={handleLogout}
+                    >
+                      登出
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
           <div className="mp-nav-foot-actions">
             <a
               href="#/settings"
@@ -748,8 +923,8 @@ export const App: React.FC = () => {
         </svg>
       </button>
 
-      <main className="main" id="main">
-        {renderMain()}
+      <main className="main" id="main" key={authReloadKey}>
+        <Suspense fallback={<RouteLoadingFallback />}>{renderMain()}</Suspense>
       </main>
 
       <SettingsModal
@@ -757,6 +932,12 @@ export const App: React.FC = () => {
         initialTab={settingsTab}
         onClose={handleSettingsClose}
         onCapabilitiesLoaded={(summary) => setHealth(summary)}
+      />
+
+      <AuthGateModal
+        open={auth.enabled && !auth.authenticated}
+        sessionNotice={authNotice}
+        onAuthenticated={handleAuthenticated}
       />
     </div>
   );

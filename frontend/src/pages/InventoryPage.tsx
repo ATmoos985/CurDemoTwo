@@ -20,12 +20,14 @@ import {
   SegmentedOption
 } from '../components/ui/MagpiePrimitives';
 import { useStudioStore } from '../store/useStudioStore';
+import { idempotentJsonPost } from '../utils/authClient';
 
 const ROLL_QUALITY_MAP: Record<string, [string, string]> = {
   PASSED: ['合格', 'ok'],
   PENDING: ['待检', 'warn'],
   FAILED: ['不合格', 'err'],
-  QUARANTINED: ['隔离', 'err']
+  QUARANTINED: ['隔离', 'err'],
+  SCRAPPED: ['已报废', 'err']
 };
 
 const REMNANT_STATUS_MAP: Record<string, [string, string]> = {
@@ -33,6 +35,8 @@ const REMNANT_STATUS_MAP: Record<string, [string, string]> = {
   RESERVED: ['已预约', 'run'],
   CONSUMED: ['已消耗', ''],
   SCRAPPED: ['已报废', ''],
+  REVOKED: ['已撤销', ''],
+  VOIDED: ['已作废', ''],
   LOST: ['盘亏', 'err'],
   QUARANTINED: ['隔离', 'err']
 };
@@ -41,7 +45,28 @@ const ACTION_TITLES: Record<string, string> = {
   receive: '母卷入库登记',
   transfer: '材料批量移库',
   count: '实物库存盘点',
-  scrap: '料头报废确认'
+  scrap: '料头报废确认',
+  release: '隔离料头质量复验放行',
+  scrapRoll: '母卷级报废确认',
+  editRoll: '编辑母卷缸号与工艺档案'
+};
+
+type InventoryActionKind =
+  | 'receive'
+  | 'transfer'
+  | 'count'
+  | 'scrap'
+  | 'release'
+  | 'scrapRoll'
+  | 'editRoll';
+
+type PendingSlotKey = 'transfer' | 'count' | 'quality-release' | 'roll-scrap';
+
+const PENDING_SLOT_LABELS: Record<PendingSlotKey, string> = {
+  transfer: '材料批量移库',
+  count: '实物库存盘点',
+  'quality-release': '隔离料头质量放行',
+  'roll-scrap': '母卷级报废'
 };
 
 interface CountRowState {
@@ -90,6 +115,9 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [focusedRollId, setFocusedRollId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [scanCode, setScanCode] = useState<string>('');
+  const [scanHitKey, setScanHitKey] = useState<string>('');
+  const [includeQuarantined, setIncludeQuarantined] = useState<boolean>(false);
   const [viewScope, setViewScope] = useState<InventoryViewScope>('ALL');
   const [statusScope, setStatusScope] = useState<InventoryStatusScope>('ALL');
 
@@ -111,10 +139,11 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
 
   const layoutContainerRef = useRef<HTMLDivElement | null>(null);
   const previewCanvasRef = useRef<any>(null);
+  const scanInputRef = useRef<HTMLInputElement | null>(null);
   const dragOriginRef = useRef<{ startX: number; startW: number }>({ startX: 0, startW: 0 });
 
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [action, setAction] = useState<'receive' | 'transfer' | 'count' | 'scrap' | null>(null);
+  const [action, setAction] = useState<InventoryActionKind | null>(null);
   const [opts, setOpts] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [pendingTick, setPendingTick] = useState(0);
@@ -127,16 +156,28 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
   const [rollModelInput, setRollModelInput] = useState('');
   const [widthInput, setWidthInput] = useState<string | number>('');
   const [lengthInput, setLengthInput] = useState<string | number>('');
+  const [batchNoInput, setBatchNoInput] = useState('');
+  const [colorInput, setColorInput] = useState('');
+  const [shrinkageInput, setShrinkageInput] = useState<string | number>('');
+  const [locationInput, setLocationInput] = useState('');
   const [scrapId, setScrapId] = useState('');
+  const [releaseRemnantId, setReleaseRemnantId] = useState('');
+  const [releaseDecision, setReleaseDecision] = useState<'RELEASE_AVAILABLE' | 'SCRAP'>(
+    'RELEASE_AVAILABLE'
+  );
+  const [releaseInspector, setReleaseInspector] = useState('');
+  const [scrapRollId, setScrapRollId] = useState('');
+  const [editRollTarget, setEditRollTarget] = useState<any | null>(null);
   const [countsMap, setCountsMap] = useState<Record<string, CountRowState>>({});
 
-  const loadData = async () => {
+  const loadData = async (forceIncludeQuarantined?: boolean) => {
     setLoading(true);
     setError(null);
+    const shouldIncludeQ = forceIncludeQuarantined ?? includeQuarantined;
     try {
       const [r, rem] = await Promise.all([
         requestJSON('/api/rolls'),
-        requestJSON('/api/remnants')
+        requestJSON(shouldIncludeQ ? '/api/remnants?includeQuarantined=true' : '/api/remnants')
       ]);
       setRolls(r || []);
       setRemnants(rem || []);
@@ -151,8 +192,10 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
           setPreviewOpen(true);
         }
       }
+      return { rolls: r || [], remnants: rem || [] };
     } catch (e: any) {
       setError(e.message || '读取库存档案失败');
+      return null;
     } finally {
       setLoading(false);
     }
@@ -160,6 +203,19 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
 
   useEffect(() => {
     loadData();
+  }, [includeQuarantined]);
+
+  // 扫码枪快捷键 Alt+S 快速聚焦定位框
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        scanInputRef.current?.focus();
+        scanInputRef.current?.select();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
   const announceResize = (msg: string) => {
@@ -180,7 +236,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
   };
 
   const openActionPanel = async (
-    kind: 'receive' | 'transfer' | 'count' | 'scrap',
+    kind: InventoryActionKind,
     extra: any = {}
   ) => {
     setAction(kind);
@@ -190,7 +246,27 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
     if (extra.rollModel !== undefined) setRollModelInput(extra.rollModel);
     if (extra.width !== undefined) setWidthInput(extra.width);
     if (extra.length !== undefined) setLengthInput(extra.length);
+    if (extra.batchNo !== undefined) setBatchNoInput(extra.batchNo);
+    else if (kind === 'receive') setBatchNoInput('');
+    if (extra.color !== undefined) setColorInput(extra.color);
+    else if (kind === 'receive') setColorInput('');
+    if (extra.shrinkageRate !== undefined) setShrinkageInput(extra.shrinkageRate);
+    else if (kind === 'receive') setShrinkageInput('');
+    if (extra.storageLocation !== undefined) setLocationInput(extra.storageLocation);
+    else if (kind === 'receive') setLocationInput('');
     if (extra.scrapId !== undefined) setScrapId(extra.scrapId);
+    if (extra.releaseRemnantId !== undefined) {
+      setReleaseRemnantId(extra.releaseRemnantId);
+      setReleaseDecision(extra.decision || 'RELEASE_AVAILABLE');
+    }
+    if (extra.scrapRollId !== undefined) setScrapRollId(extra.scrapRollId);
+    if (kind === 'editRoll' && extra.roll) {
+      setEditRollTarget(extra.roll);
+      setBatchNoInput(extra.roll.batchNo || '');
+      setColorInput(extra.roll.color || '');
+      setShrinkageInput(extra.roll.shrinkageRate ?? '');
+      setLocationInput(extra.roll.storageLocation || '');
+    }
 
     if (kind === 'transfer' || kind === 'count') {
       try {
@@ -411,6 +487,106 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
     });
   }, [activeProduct, statusScope, searchQuery, productMatchesQuery]);
 
+  const rollLookup = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const r of rolls) {
+      if (r?.rollId) map.set(r.rollId, r);
+    }
+    return map;
+  }, [rolls]);
+
+  // 扫码枪快速精准定位母卷或料头并高亮展开
+  const handleScanLocate = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const raw = scanCode.trim();
+    if (!raw) return;
+    const upper = raw.toUpperCase();
+
+    let rollList = rolls;
+    let remList = remnants;
+
+    let hitRoll =
+      rollList.find((r) => String(r.rollId || '').toUpperCase() === upper) ||
+      rollList.find((r) => String(r.rollId || '').toUpperCase().includes(upper));
+    let hitRem =
+      remList.find((rm) => String(rm.id || '').toUpperCase() === upper) ||
+      remList.find((rm) => String(rm.id || '').toUpperCase().includes(upper));
+
+    // 若未命中且尚未加载隔离/盘亏料头，尝试拉取完整料头集再定位
+    if (!hitRoll && !hitRem && !includeQuarantined) {
+      setIncludeQuarantined(true);
+      const refreshed = await loadData(true);
+      if (refreshed) {
+        rollList = refreshed.rolls;
+        remList = refreshed.remnants;
+        hitRoll =
+          rollList.find((r) => String(r.rollId || '').toUpperCase() === upper) ||
+          rollList.find((r) => String(r.rollId || '').toUpperCase().includes(upper));
+        hitRem =
+          remList.find((rm) => String(rm.id || '').toUpperCase() === upper) ||
+          remList.find((rm) => String(rm.id || '').toUpperCase().includes(upper));
+      }
+    }
+
+    if (hitRoll) {
+      const modelKey = hitRoll.rollModel || hitRoll.materialName || '未分类品号';
+      setSearchQuery('');
+      setViewScope('ALL');
+      setStatusScope(
+        hitRoll.inspectionStatus === 'SCRAPPED' || hitRoll.status === 'SCRAPPED' ? 'HISTORY' : 'ALL'
+      );
+      setSelectedModel(modelKey);
+      setFocusedRollId('');
+      setPreviewTarget({ kind: 'roll', id: hitRoll.rollId });
+      setRollLayout(hitRoll.totalLength > 15000 ? 'tile' : 'strip');
+      setPreviewOpen(true);
+      const hitKey = `roll:${hitRoll.rollId}`;
+      setScanHitKey(hitKey);
+      window.setTimeout(() => {
+        document
+          .querySelector(`[data-inv-row="${CSS.escape(hitKey)}"]`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 80);
+      toast(`扫码定位成功：母卷 ${hitRoll.rollId}（${modelKey}）`);
+      setScanCode('');
+      return;
+    }
+
+    if (hitRem) {
+      const parentRoll = hitRem.sourceRollId
+        ? rollList.find((r) => r.rollId === hitRem.sourceRollId)
+        : null;
+      const modelKey =
+        parentRoll?.rollModel || hitRem.materialBatch || hitRem.sourceRollId || '未分类品号';
+      setSearchQuery('');
+      setViewScope('ALL');
+      if (hitRem.status === 'QUARANTINED' || hitRem.status === 'LOST') {
+        setIncludeQuarantined(true);
+        setStatusScope('ALL');
+      } else if (hitRem.status === 'CONSUMED' || hitRem.status === 'SCRAPPED' || hitRem.status === 'REVOKED' || hitRem.status === 'VOIDED') {
+        setStatusScope('HISTORY');
+      } else {
+        setStatusScope('ALL');
+      }
+      setSelectedModel(modelKey);
+      setFocusedRollId('');
+      setPreviewTarget({ kind: 'remnant', id: hitRem.id });
+      setPreviewOpen(true);
+      const hitKey = `remnant:${hitRem.id}`;
+      setScanHitKey(hitKey);
+      window.setTimeout(() => {
+        document
+          .querySelector(`[data-inv-row="${CSS.escape(hitKey)}"]`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 80);
+      toast(`扫码定位成功：料头 ${hitRem.id}（状态：${REMNANT_STATUS_MAP[hitRem.status]?.[0] || hitRem.status}）`);
+      setScanCode('');
+      return;
+    }
+
+    toast(`未在台账中找到编号「${raw}」，请检查条码或开启「显示隔离/盘亏料头」后重试`, true);
+  };
+
   const displayedRemnants = useMemo(() => {
     if (!activeProduct) return [];
     const q = searchQuery.trim().toLowerCase();
@@ -421,7 +597,10 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
     if (statusScope === 'ALL') {
       list = list.filter(
         (rm) =>
-          rm.status === 'AVAILABLE' || rm.status === 'RESERVED' || rm.status === 'QUARANTINED'
+          rm.status === 'AVAILABLE' ||
+          rm.status === 'RESERVED' ||
+          rm.status === 'QUARANTINED' ||
+          (includeQuarantined && rm.status === 'LOST')
       );
     } else if (statusScope === 'READY') {
       list = list.filter((rm) => rm.status === 'AVAILABLE');
@@ -430,12 +609,15 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
     }
 
     if (q && !productMatchesQuery) {
-      list = list.filter((rm) =>
-        `${rm.id} ${rm.sourceRollId || ''} ${rm.location || ''}`.toLowerCase().includes(q)
-      );
+      list = list.filter((rm) => {
+        const parent = rm.sourceRollId ? rollLookup.get(rm.sourceRollId) : null;
+        return `${rm.id} ${rm.sourceRollId || ''} ${rm.location || ''} ${rm.batchNo || parent?.batchNo || ''} ${rm.color || parent?.color || ''}`
+          .toLowerCase()
+          .includes(q);
+      });
     }
     return list;
-  }, [activeProduct, focusedRollId, statusScope, searchQuery, productMatchesQuery]);
+  }, [activeProduct, focusedRollId, statusScope, searchQuery, productMatchesQuery, includeQuarantined, rollLookup]);
 
   const previewRoll = useMemo(
     () =>
@@ -628,7 +810,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
 
   const pendings = useMemo(() => {
     void pendingTick;
-    return (['transfer', 'count'] as const)
+    return (['transfer', 'count', 'quality-release', 'roll-scrap'] as const)
       .map((s) => [s, pendingWrite(s)] as const)
       .filter(([, v]) => Boolean(v));
   }, [pendingTick, busy]);
@@ -671,12 +853,18 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
     setBusy(true);
     try {
       if (action === 'receive') {
-        const body = {
+        const shrinkNum =
+          shrinkageInput === '' || shrinkageInput === null ? undefined : Number(shrinkageInput);
+        const body: Record<string, any> = {
           rollId: String(rollIdInput).trim(),
           rollModel: String(rollModelInput).trim(),
           width: Number(widthInput),
           totalLength: Math.round(Number(lengthInput) * 1000)
         };
+        if (batchNoInput.trim()) body.batchNo = batchNoInput.trim();
+        if (colorInput.trim()) body.color = colorInput.trim();
+        if (shrinkNum !== undefined && Number.isFinite(shrinkNum)) body.shrinkageRate = shrinkNum;
+        if (locationInput.trim()) body.storageLocation = locationInput.trim();
         if (!body.rollId || !body.rollModel || !(body.width > 0) || !(body.totalLength > 0)) {
           throw new Error('请填写卷号、品号、幅宽与整卷长');
         }
@@ -687,7 +875,61 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
         return;
       }
 
-      if (action === 'scrap') {
+      if (action === 'editRoll') {
+        if (!editRollTarget) throw new Error('未选定待编辑母卷');
+        const shrinkNum =
+          shrinkageInput === '' || shrinkageInput === null
+            ? editRollTarget.shrinkageRate ?? 0
+            : Number(shrinkageInput);
+        if (!Number.isFinite(shrinkNum) || shrinkNum < 0) {
+          throw new Error('缩水率须为非负数值');
+        }
+        await requestJSON('/api/rolls', {
+          ...editRollTarget,
+          batchNo: batchNoInput.trim() || editRollTarget.batchNo,
+          color: colorInput.trim() || editRollTarget.color,
+          shrinkageRate: shrinkNum,
+          storageLocation: locationInput.trim() || editRollTarget.storageLocation
+        });
+        toast(`母卷 ${editRollTarget.rollId} 档案已更新`);
+        setEditRollTarget(null);
+        setAction(null);
+      } else if (action === 'release') {
+        if (!releaseRemnantId) throw new Error('未选定待复验隔离料头');
+        if (!releaseInspector.trim() || !reason.trim()) {
+          throw new Error('请填写质检员姓名与复验原因');
+        }
+        await idempotentJsonPost(
+          'quality-release',
+          `/api/v2/quality/remnants/${encodeURIComponent(releaseRemnantId)}/release`,
+          {
+            decision: releaseDecision,
+            inspector: releaseInspector.trim(),
+            reason: reason.trim()
+          }
+        );
+        toast(
+          releaseDecision === 'RELEASE_AVAILABLE'
+            ? `隔离料头 ${releaseRemnantId} 已复验合格放行，转为可用状态`
+            : `隔离料头 ${releaseRemnantId} 已复验判废并记账`
+        );
+        setAction(null);
+      } else if (action === 'scrapRoll') {
+        if (!scrapRollId) throw new Error('未选定待报废母卷');
+        if (!operator.trim() || !reason.trim()) {
+          throw new Error('请填写经办人与母卷报废原因');
+        }
+        await idempotentJsonPost(
+          'roll-scrap',
+          `/api/v2/rolls/${encodeURIComponent(scrapRollId)}/scrap`,
+          {
+            operator: operator.trim(),
+            reason: reason.trim()
+          }
+        );
+        toast(`母卷 ${scrapRollId} 已受控报废，剩余余量已清零并写入不可变流水`);
+        setAction(null);
+      } else if (action === 'scrap') {
         if (!reason.trim()) throw new Error('请填写报废原因');
         await requestJSON('/api/remnants/' + encodeURIComponent(scrapId) + '/scrap', {
           reason: reason.trim()
@@ -754,7 +996,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
     }
   };
 
-  const handleRetryWrite = async (slot: 'transfer' | 'count') => {
+  const handleRetryWrite = async (slot: PendingSlotKey) => {
     try {
       await retryWrite(slot);
       toast('原操作已确认');
@@ -766,7 +1008,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
     }
   };
 
-  const handleDropWrite = (slot: 'transfer' | 'count') => {
+  const handleDropWrite = (slot: PendingSlotKey) => {
     dropWrite(slot);
     toast('已放弃待确认操作，请到库存单据核对是否已过账');
     setPendingTick((t) => t + 1);
@@ -866,8 +1108,27 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
           </div>
         </div>
 
-        <div className="mp-filter-toolbar mp-inv-filter-row">
-          <div className="mp-search-wrap">
+        <div className="mp-filter-toolbar mp-inv-filter-row" style={{ flexWrap: 'wrap', gap: 8 }}>
+          <form
+            onSubmit={handleScanLocate}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flex: '0 1 236px', minWidth: 180 }}
+          >
+            <input
+              ref={scanInputRef}
+              type="text"
+              className="field num"
+              style={{ height: 30, fontSize: 12, flex: 1, minWidth: 130 }}
+              aria-label="扫码枪快速定位母卷或料头"
+              placeholder="扫码定位卷号/料头 (Alt+S)"
+              value={scanCode}
+              onChange={(e) => setScanCode(e.target.value)}
+            />
+            <button type="submit" className="btn sm" style={{ flex: 'none' }}>
+              定位
+            </button>
+          </form>
+
+          <div className="mp-search-wrap" style={{ minWidth: 160 }}>
             <span className="mp-search-ico" aria-hidden="true">
               <svg viewBox="0 0 16 16" width="14" height="14">
                 <circle
@@ -891,11 +1152,31 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
               type="search"
               className="mp-search-input"
               aria-label="搜索物料品号、母卷或料头"
-              placeholder="搜品号、卷号、批号、库位或料头号"
+              placeholder="搜品号、卷号、缸号、库位或料头号"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
+
+          <label
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 12,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap'
+            }}
+            title="开启后从服务端加载并高亮展示 QUARANTINED（隔离）与 LOST（盘亏）料头"
+          >
+            <input
+              type="checkbox"
+              className="ux-switch"
+              checked={includeQuarantined}
+              onChange={(e) => setIncludeQuarantined(e.target.checked)}
+            />
+            <span>显示隔离/盘亏料头</span>
+          </label>
 
           <span className="mp-toolbar-count num">
             显示 {filteredProducts.length} / {productGroups.length} 品号
@@ -912,7 +1193,12 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
             <SegmentedControl
               options={statusOptions}
               value={statusScope}
-              onChange={(next) => setStatusScope(next)}
+              onChange={(next) => {
+                setStatusScope(next);
+                if ((next === 'PENDING' || next === 'HISTORY') && !includeQuarantined) {
+                  setIncludeQuarantined(true);
+                }
+              }}
               ariaLabel="按库存状态筛选"
               size="sm"
             />
@@ -924,7 +1210,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
         <div className="mp-inv-notice">
           {pendings.map(([s]) => (
             <span key={s} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <span>{ACTION_TITLES[s]}提交结果未确认</span>
+              <span>{PENDING_SLOT_LABELS[s] || ACTION_TITLES[s]}提交结果未确认</span>
               <button type="button" className="btn sm" onClick={() => handleRetryWrite(s)}>
                 重试原操作
               </button>
@@ -1121,10 +1407,22 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                                   (rm) => rm.status === 'AVAILABLE'
                                 );
 
+                                const isScrappedRoll =
+                                  r.inspectionStatus === 'SCRAPPED' || r.status === 'SCRAPPED';
+                                const isScanHit = scanHitKey === itemKey;
+
                                 return (
                                   <tr
                                     key={r.rollId}
+                                    data-inv-row={itemKey}
                                     className={`click ${isPreviewed ? 'sel' : ''}`}
+                                    style={
+                                      isScanHit
+                                        ? { outline: '2px solid #0284c7', background: 'rgba(2,132,199,0.08)' }
+                                        : isScrappedRoll
+                                        ? { opacity: 0.68 }
+                                        : undefined
+                                    }
                                     onClick={() => handleInspectRoll(r)}
                                   >
                                     <td onClick={(e) => e.stopPropagation()}>
@@ -1136,11 +1434,31 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                                       />
                                     </td>
                                     <td>
-                                      <div className="mp-inv-id-cell">
+                                      <div className="mp-inv-id-cell" style={{ flexWrap: 'wrap', gap: 4 }}>
                                         <strong className="num mp-inv-roll-id" title={r.rollId}>
                                           {r.rollId}
                                         </strong>
-                                        {r.batchNo && <CodeBadge>{r.batchNo}</CodeBadge>}
+                                        {r.batchNo && (
+                                          <CodeBadge title={`缸号/批次：${r.batchNo}`}>
+                                            缸:{r.batchNo}
+                                          </CodeBadge>
+                                        )}
+                                        {r.color && (
+                                          <span
+                                            className="tag"
+                                            style={{ fontSize: 10.5, padding: '1px 5px' }}
+                                            title={`色号：${r.color}`}
+                                          >
+                                            {r.color}
+                                          </span>
+                                        )}
+                                        {r.shrinkageRate !== undefined &&
+                                          r.shrinkageRate !== null &&
+                                          Number(r.shrinkageRate) > 0 && (
+                                            <span className="mp-inv-sub-meta num">
+                                              缩水 {fmtN(r.shrinkageRate, 1)}%
+                                            </span>
+                                          )}
                                       </div>
                                     </td>
                                     <td className="r num">{fmtN(r.width)}</td>
@@ -1192,6 +1510,11 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                                       >
                                         {r.storageLocation || '—'}
                                       </span>
+                                      {(r.issuedMachineId || r.issuedShiftTeam) && (
+                                        <div className="mp-inv-sub-meta" style={{ color: '#0284c7' }}>
+                                          去向：{[r.issuedMachineId, r.issuedShiftTeam].filter(Boolean).join(' · ')}
+                                        </div>
+                                      )}
                                     </td>
                                     <td>
                                       <span className={`tag ${qc}`}>{qt}</span>
@@ -1215,6 +1538,19 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                                         >
                                           跑疵点
                                         </a>
+                                        {!isScrappedRoll && (
+                                          <button
+                                            type="button"
+                                            className="btn sm"
+                                            style={{ color: '#b91c1c' }}
+                                            title="执行母卷级受控报废（清零未切余量并留痕）"
+                                            onClick={() =>
+                                              openActionPanel('scrapRoll', { scrapRollId: r.rollId })
+                                            }
+                                          >
+                                            报废
+                                          </button>
+                                        )}
                                       </div>
                                     </td>
                                   </tr>
@@ -1297,10 +1633,34 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                                   rm.status,
                                   ''
                                 ];
+                                const parentRoll = rm.sourceRollId
+                                  ? rollLookup.get(rm.sourceRollId)
+                                  : null;
+                                const remBatch = rm.batchNo || parentRoll?.batchNo || '';
+                                const remColor = rm.color || parentRoll?.color || '';
+                                const isQuarantined = rm.status === 'QUARANTINED';
+                                const isLost = rm.status === 'LOST';
+                                const isScanHit = scanHitKey === itemKey;
                                 return (
                                   <tr
                                     key={rm.id}
+                                    data-inv-row={itemKey}
                                     className={`click ${isPreviewed ? 'sel' : ''}`}
+                                    style={
+                                      isScanHit
+                                        ? { outline: '2px solid #0284c7', background: 'rgba(2,132,199,0.08)' }
+                                        : isQuarantined
+                                        ? {
+                                            background: 'rgba(245, 158, 11, 0.08)',
+                                            boxShadow: 'inset 3px 0 0 #d97706'
+                                          }
+                                        : isLost
+                                        ? {
+                                            background: 'rgba(220, 38, 38, 0.07)',
+                                            boxShadow: 'inset 3px 0 0 #dc2626'
+                                          }
+                                        : undefined
+                                    }
                                     onClick={() => handleInspectRemnant(rm)}
                                   >
                                     <td onClick={(e) => e.stopPropagation()}>
@@ -1317,7 +1677,7 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                                       </CodeBadge>
                                     </td>
                                     <td>
-                                      <div className="mp-inv-lineage-cell">
+                                      <div className="mp-inv-lineage-cell" style={{ flexWrap: 'wrap', gap: 4 }}>
                                         <span
                                           className="num muted mp-inv-source-id"
                                           title={rm.sourceRollId || '—'}
@@ -1327,6 +1687,20 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                                         {rm.generation ? (
                                           <CodeBadge>G{rm.generation}</CodeBadge>
                                         ) : null}
+                                        {remBatch && (
+                                          <CodeBadge title={`继承缸号：${remBatch}`}>
+                                            缸:{remBatch}
+                                          </CodeBadge>
+                                        )}
+                                        {remColor && (
+                                          <span
+                                            className="tag"
+                                            style={{ fontSize: 10.5, padding: '1px 5px' }}
+                                            title={`色号：${remColor}`}
+                                          >
+                                            {remColor}
+                                          </span>
+                                        )}
                                         {rm.qualityDispositionId && (
                                           <span className="tag warn">复检回收</span>
                                         )}
@@ -1372,13 +1746,32 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                                             排料
                                           </button>
                                         )}
-                                        {(rm.status === 'AVAILABLE' ||
-                                          rm.status === 'QUARANTINED') && (
+                                        {isQuarantined && (
+                                          <button
+                                            type="button"
+                                            className="btn sm soft-accent"
+                                            title="对隔离料头执行质量复验放行或判废"
+                                            onClick={() =>
+                                              openActionPanel('release', {
+                                                releaseRemnantId: rm.id,
+                                                decision: 'RELEASE_AVAILABLE'
+                                              })
+                                            }
+                                          >
+                                            复验放行
+                                          </button>
+                                        )}
+                                        {(rm.status === 'AVAILABLE' || isQuarantined) && (
                                           <button
                                             type="button"
                                             className="btn sm"
                                             onClick={() =>
-                                              openActionPanel('scrap', { scrapId: rm.id })
+                                              isQuarantined
+                                                ? openActionPanel('release', {
+                                                    releaseRemnantId: rm.id,
+                                                    decision: 'SCRAP'
+                                                  })
+                                                : openActionPanel('scrap', { scrapId: rm.id })
                                             }
                                           >
                                             报废
@@ -1476,6 +1869,16 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                     <span>实物几何预览</span>
                   )}
                   <span className="sp" />
+                  {previewRoll && (
+                    <button
+                      type="button"
+                      className="mp-dark-btn"
+                      title="维护母卷缸号、色号、缩水率与库位"
+                      onClick={() => openActionPanel('editRoll', { roll: previewRoll })}
+                    >
+                      档案
+                    </button>
+                  )}
                   {previewRoll && previewRoll.inspectionStatus === 'PASSED' && (
                     <button
                       type="button"
@@ -1491,6 +1894,20 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                       }}
                     >
                       去排料 →
+                    </button>
+                  )}
+                  {previewRemnant && previewRemnant.status === 'QUARANTINED' && (
+                    <button
+                      type="button"
+                      className="mp-dark-btn accent"
+                      onClick={() =>
+                        openActionPanel('release', {
+                          releaseRemnantId: previewRemnant.id,
+                          decision: 'RELEASE_AVAILABLE'
+                        })
+                      }
+                    >
+                      复验放行
                     </button>
                   )}
                   {previewRemnant && previewRemnant.status === 'AVAILABLE' && (
@@ -1797,8 +2214,18 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
 
                     <div className="studio-canvas-hint num">
                       {previewRoll
-                        ? `幅宽 ${fmtN(previewRoll.width)} mm × 总长 ${fmtM(previewRoll.totalLength)} m（剩余 ${fmtM(previewRoll.currentRemainingLength ?? previewRoll.totalLength - (previewRoll.usedLength || 0))} m · 疵点 ${(previewRoll.defects || []).length} 处）`
-                        : `料头尺寸 ${fmtN(previewRemnant?.width)} × ${fmtN(previewRemnant?.length)} mm（${fmtN(previewRemnant?.area, 2)} m²）`}
+                        ? `幅宽 ${fmtN(previewRoll.width)} mm × 总长 ${fmtM(previewRoll.totalLength)} m（剩余 ${fmtM(previewRoll.currentRemainingLength ?? previewRoll.totalLength - (previewRoll.usedLength || 0))} m · 疵点 ${(previewRoll.defects || []).length} 处）${
+                            previewRoll.batchNo ? ` · 缸号 ${previewRoll.batchNo}` : ''
+                          }${previewRoll.color ? ` · 色号 ${previewRoll.color}` : ''}${
+                            previewRoll.shrinkageRate != null ? ` · 缩水率 ${fmtN(previewRoll.shrinkageRate, 1)}%` : ''
+                          }${
+                            previewRoll.issuedMachineId || previewRoll.issuedShiftTeam
+                              ? ` · 领用去向 ${[previewRoll.issuedMachineId, previewRoll.issuedShiftTeam].filter(Boolean).join('/')}`
+                              : ''
+                          }`
+                        : `料头尺寸 ${fmtN(previewRemnant?.width)} × ${fmtN(previewRemnant?.length)} mm（${fmtN(previewRemnant?.area, 2)} m²）${
+                            previewRemnant?.batchNo ? ` · 缸号 ${previewRemnant.batchNo}` : ''
+                          }${previewRemnant?.color ? ` · 色号 ${previewRemnant.color}` : ''}`}
                       {cursor
                         ? ` · X=${fmtN(cursor.v, 0)} / Y=${fmtN(cursor.u, 0)} mm`
                         : ''}
@@ -1874,6 +2301,41 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                 value={lengthInput}
                 onChange={(e) => setLengthInput(e.target.value)}
               />
+              <label htmlFor="inv-rec-batch">缸号 / 批次</label>
+              <input
+                id="inv-rec-batch"
+                className="field num"
+                placeholder="如 BAT-202611-A1（防色差校验用）"
+                value={batchNoInput}
+                onChange={(e) => setBatchNoInput(e.target.value)}
+              />
+              <label htmlFor="inv-rec-color">色号</label>
+              <input
+                id="inv-rec-color"
+                className="field"
+                placeholder="如 藏青 / PANTONE 19-4024"
+                value={colorInput}
+                onChange={(e) => setColorInput(e.target.value)}
+              />
+              <label htmlFor="inv-rec-shrink">预缩水率 %</label>
+              <input
+                id="inv-rec-shrink"
+                type="number"
+                step="0.1"
+                min="0"
+                className="field num"
+                placeholder="如 1.5"
+                value={shrinkageInput}
+                onChange={(e) => setShrinkageInput(e.target.value)}
+              />
+              <label htmlFor="inv-rec-loc">初始库位</label>
+              <input
+                id="inv-rec-loc"
+                className="field"
+                placeholder="如 原料库位 R-01-A03"
+                value={locationInput}
+                onChange={(e) => setLocationInput(e.target.value)}
+              />
             </div>
             <p className="muted" style={{ fontSize: 12, margin: '4px 0 14px' }}>
               新母卷入库后默认处于“待检”状态，确认登记后直接进入跑布验疵定位画布，检验放行后方可投产锁料。
@@ -1886,6 +2348,232 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                 登记并去验布 →
               </button>
             </div>
+          </form>
+        ) : action === 'editRoll' ? (
+          <form onSubmit={handleSubmitAction}>
+            {editRollTarget && (
+              <>
+                <div className="kv" style={{ padding: '4px 0 10px' }}>
+                  <div>母卷编号</div>
+                  <div className="num">{editRollTarget.rollId}</div>
+                  <div>物料品号</div>
+                  <div className="num">{editRollTarget.rollModel}</div>
+                  <div>当前领用去向</div>
+                  <div className="num">
+                    {editRollTarget.issuedMachineId || editRollTarget.issuedShiftTeam
+                      ? [editRollTarget.issuedMachineId, editRollTarget.issuedShiftTeam]
+                          .filter(Boolean)
+                          .join(' · ')
+                      : '在库未发料'}
+                  </div>
+                </div>
+                <div className="form" style={{ gridTemplateColumns: '100px 1fr', padding: '4px 0 12px' }}>
+                  <label htmlFor="inv-edit-batch">缸号 / 批次</label>
+                  <input
+                    id="inv-edit-batch"
+                    className="field num"
+                    value={batchNoInput}
+                    onChange={(e) => setBatchNoInput(e.target.value)}
+                  />
+                  <label htmlFor="inv-edit-color">色号</label>
+                  <input
+                    id="inv-edit-color"
+                    className="field"
+                    value={colorInput}
+                    onChange={(e) => setColorInput(e.target.value)}
+                  />
+                  <label htmlFor="inv-edit-shrink">预缩水率 %</label>
+                  <input
+                    id="inv-edit-shrink"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    className="field num"
+                    value={shrinkageInput}
+                    onChange={(e) => setShrinkageInput(e.target.value)}
+                  />
+                  <label htmlFor="inv-edit-loc">存放库位</label>
+                  <input
+                    id="inv-edit-loc"
+                    className="field"
+                    value={locationInput}
+                    onChange={(e) => setLocationInput(e.target.value)}
+                  />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy}
+                    onClick={() => setAction(null)}
+                  >
+                    取消
+                  </button>
+                  <button type="submit" className="btn pri" disabled={busy}>
+                    保存母卷档案
+                  </button>
+                </div>
+              </>
+            )}
+          </form>
+        ) : action === 'release' ? (
+          <form onSubmit={handleSubmitAction}>
+            {(() => {
+              const targetRem = remnants.find((r) => r.id === releaseRemnantId);
+              const parentRoll = targetRem?.sourceRollId
+                ? rollLookup.get(targetRem.sourceRollId)
+                : null;
+              return (
+                <>
+                  <div className="kv" style={{ padding: '4px 0 10px' }}>
+                    <div>隔离料头编号</div>
+                    <div className="num">{targetRem?.id || releaseRemnantId}</div>
+                    <div>来源母卷 / 缸色</div>
+                    <div className="num">
+                      {targetRem?.sourceRollId || '—'}
+                      {(targetRem?.batchNo || parentRoll?.batchNo) &&
+                        ` · 缸:${targetRem?.batchNo || parentRoll?.batchNo}`}
+                      {(targetRem?.color || parentRoll?.color) &&
+                        ` · ${targetRem?.color || parentRoll?.color}`}
+                    </div>
+                    <div>实物尺寸</div>
+                    <div className="num">
+                      {fmtN(targetRem?.width)} × {fmtN(targetRem?.length)} mm（
+                      {fmtN(targetRem?.area, 2)} m²）
+                    </div>
+                  </div>
+                  <div
+                    className="form"
+                    style={{ gridTemplateColumns: '100px 1fr', padding: '4px 0 14px' }}
+                  >
+                    <label htmlFor="inv-rel-decision">复验结论</label>
+                    <select
+                      id="inv-rel-decision"
+                      className="field"
+                      value={releaseDecision}
+                      onChange={(e) =>
+                        setReleaseDecision(e.target.value as 'RELEASE_AVAILABLE' | 'SCRAP')
+                      }
+                    >
+                      <option value="RELEASE_AVAILABLE">合格放行（转为 AVAILABLE 可用）</option>
+                      <option value="SCRAP">复验判废（转为 SCRAPPED 报废）</option>
+                    </select>
+                    <label htmlFor="inv-rel-inspector">质检员</label>
+                    <input
+                      id="inv-rel-inspector"
+                      className="field"
+                      required
+                      placeholder="如：质检员张工"
+                      value={releaseInspector}
+                      onChange={(e) => setReleaseInspector(e.target.value)}
+                    />
+                    <label htmlFor="inv-rel-reason">复验说明</label>
+                    <input
+                      id="inv-rel-reason"
+                      className="field"
+                      required
+                      placeholder="如：二次人工验布确认无暗伤，准予放行排料"
+                      value={reason}
+                      onChange={(e) => setReason(e.target.value)}
+                    />
+                  </div>
+                  <p className="muted" style={{ fontSize: 12, margin: '0 0 14px' }}>
+                    本次放行/判废将生成不可变质量放行单并写入 `QUALITY_RELEASE` 账本流水（支持跨刷新幂等防重）。
+                  </p>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={busy}
+                      onClick={() => setAction(null)}
+                    >
+                      取消
+                    </button>
+                    <button type="submit" className="btn pri" disabled={busy}>
+                      {releaseDecision === 'RELEASE_AVAILABLE' ? '确认放行转可用' : '确认复验判废'}
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
+          </form>
+        ) : action === 'scrapRoll' ? (
+          <form onSubmit={handleSubmitAction}>
+            {(() => {
+              const targetRoll = rolls.find((r) => r.rollId === scrapRollId);
+              const remLen =
+                targetRoll?.currentRemainingLength ??
+                (targetRoll?.totalLength || 0) - (targetRoll?.usedLength || 0);
+              return (
+                <>
+                  <div
+                    role="alert"
+                    style={{
+                      borderLeft: '3px solid #dc2626',
+                      background: 'rgba(220,38,38,0.08)',
+                      padding: '8px 10px',
+                      borderRadius: 4,
+                      fontSize: 12,
+                      color: '#991b1b',
+                      marginBottom: 10
+                    }}
+                  >
+                    <strong>高风险受控操作：</strong>母卷报废将清零未切余量并标记为 SCRAPPED（保留历史已切消耗与报工记录不篡改）。若存在活跃预约或排程方案将被服务端拦截。
+                  </div>
+                  <div className="kv" style={{ padding: '4px 0 10px' }}>
+                    <div>母卷编号</div>
+                    <div className="num">{targetRoll?.rollId || scrapRollId}</div>
+                    <div>物料品号 / 缸号</div>
+                    <div className="num">
+                      {targetRoll?.rollModel || '—'}
+                      {targetRoll?.batchNo ? ` · 缸:${targetRoll.batchNo}` : ''}
+                    </div>
+                    <div>当前未切余量</div>
+                    <div className="num">
+                      {fmtM(remLen)} m / 整卷 {fmtM(targetRoll?.totalLength || 0)} m（已切{' '}
+                      {fmtM(targetRoll?.usedLength || 0)} m）
+                    </div>
+                  </div>
+                  <div
+                    className="form"
+                    style={{ gridTemplateColumns: '90px 1fr', padding: '4px 0 14px' }}
+                  >
+                    <label htmlFor="inv-scrap-roll-op">经办人</label>
+                    <input
+                      id="inv-scrap-roll-op"
+                      className="field"
+                      required
+                      placeholder="如：仓管李工"
+                      value={operator}
+                      onChange={(e) => setOperator(e.target.value)}
+                    />
+                    <label htmlFor="inv-scrap-roll-reason">报废原因</label>
+                    <input
+                      id="inv-scrap-roll-reason"
+                      className="field"
+                      required
+                      autoFocus
+                      placeholder="如：受潮霉变无法继续裁切"
+                      value={reason}
+                      onChange={(e) => setReason(e.target.value)}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={busy}
+                      onClick={() => setAction(null)}
+                    >
+                      取消
+                    </button>
+                    <button type="submit" className="btn pri" disabled={busy}>
+                      二次确认母卷报废
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
           </form>
         ) : action === 'scrap' ? (
           <form onSubmit={handleSubmitAction}>

@@ -1,10 +1,22 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { requestJSON, fmtTime, shortId, fmtN } from '@static/app/js/util.js';
+import {
+  requestJSON,
+  fmtTime,
+  shortId,
+  fmtN,
+  fmtM,
+  toast,
+  pendingWrite,
+  retryWrite,
+  dropWrite
+} from '@static/app/js/util.js';
+import { ModalDialog } from '../components/ModalDialog';
 import {
   SegmentedControl,
   CodeBadge,
   SegmentedOption
 } from '../components/ui/MagpiePrimitives';
+import { idempotentJsonPost } from '../utils/authClient';
 
 const EVENT_LABELS: Record<string, string> = {
   MIGRATION_OPENING: '期初迁移',
@@ -16,6 +28,12 @@ const EVENT_LABELS: Record<string, string> = {
   INVENTORY_COUNT: '盘点',
   INVENTORY_TRANSFER: '移库',
   QUALITY_DISPOSITION: '复检处置',
+  QUALITY_DISPOSITION_REVOKE: '复检撤销',
+  QUALITY_RELEASE: '隔离放行',
+  RECEIPT_IN: '采购入库',
+  MATERIAL_ISSUE: '车间领料',
+  MATERIAL_RETURN: '车间退料',
+  ROLL_SCRAP: '母卷报废',
   REMNANT_ISSUE: '料头领用',
   REMNANT_RECEIPT: '料头入库',
   REMNANT_SCRAP: '料头报废',
@@ -40,6 +58,9 @@ const AGG_LABELS: Record<string, string> = {
   CHECKPOINT: '检查点',
   TRANSFER: '移库单',
   COUNT: '盘点单',
+  RECEIPT: '采购入库单',
+  MATERIAL_ISSUE: '领退料单',
+  QUALITY_RELEASE: '放行单',
   QUALITY: '复检'
 };
 
@@ -52,12 +73,25 @@ const ACTOR_LABELS: Record<string, string> = {
 type Category = 'receipt' | 'report' | 'remnant' | 'demand' | 'quality' | 'reverse';
 
 const CATEGORY_EVENTS: Record<Category, string[]> = {
-  receipt: ['ROLL_RECEIPT', 'ROLL_RECEIPT_OR_UPDATE', 'DEMO_RECEIPT'],
+  receipt: ['ROLL_RECEIPT', 'ROLL_RECEIPT_OR_UPDATE', 'DEMO_RECEIPT', 'RECEIPT_IN'],
   report: ['CUT_REPORT', 'CUT_REPORT_BATCH'],
-  remnant: ['REMNANT_RECEIPT', 'REMNANT_ISSUE', 'REMNANT_SCRAP', 'REMNANT_STATUS_ADJUSTMENT'],
+  remnant: [
+    'REMNANT_RECEIPT',
+    'REMNANT_ISSUE',
+    'REMNANT_SCRAP',
+    'REMNANT_STATUS_ADJUSTMENT',
+    'MATERIAL_ISSUE',
+    'MATERIAL_RETURN'
+  ],
   demand: ['DEMAND_ADJUSTMENT'],
-  quality: ['INSPECTION', 'QUALITY_DISPOSITION', 'INVENTORY_COUNT', 'INVENTORY_TRANSFER'],
-  reverse: ['REPORT_REVERSE', 'DEFECT_VOID']
+  quality: [
+    'INSPECTION',
+    'QUALITY_DISPOSITION',
+    'QUALITY_RELEASE',
+    'INVENTORY_COUNT',
+    'INVENTORY_TRANSFER'
+  ],
+  reverse: ['REPORT_REVERSE', 'DEFECT_VOID', 'ROLL_SCRAP', 'QUALITY_DISPOSITION_REVOKE']
 };
 
 const CATEGORY_LABELS: Record<Category, string> = {
@@ -99,7 +133,11 @@ const FIELD_LABELS: Record<string, [string, string?]> = {
   sourceRollId: ['来源母卷'],
   rollId: ['母卷'],
   materialBatch: ['材料批次'],
-  batchNo: ['批次'],
+  batchNo: ['缸号/批次'],
+  color: ['色号'],
+  shrinkageRate: ['缩水率', '%'],
+  issuedMachineId: ['领用机台'],
+  issuedShiftTeam: ['领用班组'],
   rollModel: ['品号']
 };
 
@@ -298,7 +336,7 @@ function buildTxns(lines: any[]): Txn[] {
     .sort((a, b) => b.maxSeq - a.maxSeq);
 }
 
-type DocTab = 'ledger' | 'transfer' | 'count';
+type DocTab = 'ledger' | 'receipt' | 'issue' | 'transfer' | 'count';
 type RangeKey = 'today' | '7d' | '30d' | 'all';
 type ViewKey = 'txn' | 'line';
 type Focus =
@@ -306,6 +344,40 @@ type Focus =
   | { kind: 'obj'; type: string; id: string }
   | { kind: 'report'; id: string }
   | null;
+
+interface ReceiptRollDraft {
+  id: string;
+  materialModel: string;
+  materialType: string;
+  color: string;
+  batchNo: string;
+  widthMm: string;
+  totalLengthMm: string;
+  grammage: string;
+  shrinkageRate: string;
+  storageLocation: string;
+  inspectionStatus: 'PENDING' | 'PASSED';
+}
+
+const createEmptyReceiptRoll = (prev?: ReceiptRollDraft): ReceiptRollDraft => ({
+  id: '',
+  materialModel: prev?.materialModel || 'TC涤棉-B2026',
+  materialType: prev?.materialType || '面料',
+  color: prev?.color || '',
+  batchNo: prev?.batchNo || '',
+  widthMm: prev?.widthMm || '1650',
+  totalLengthMm: prev?.totalLengthMm || '60000',
+  grammage: prev?.grammage || '240',
+  shrinkageRate: prev?.shrinkageRate || '1.5',
+  storageLocation: prev?.storageLocation || '原料库位 R-01',
+  inspectionStatus: prev?.inspectionStatus || 'PENDING'
+});
+
+type DocPendingSlot = 'inventory-receipt' | 'material-issue';
+const DOC_PENDING_LABELS: Record<DocPendingSlot, string> = {
+  'inventory-receipt': '采购批量入库单',
+  'material-issue': '车间领/退料单'
+};
 
 const DAY_MS = 86400000;
 const dayKey = (t: number) => {
@@ -336,6 +408,9 @@ const fmtObjId = (id: any): string => {
 export const DocumentsPage: React.FC = () => {
   const [transfers, setTransfers] = useState<any[]>([]);
   const [counts, setCounts] = useState<any[]>([]);
+  const [receipts, setReceipts] = useState<any[]>([]);
+  const [issues, setIssues] = useState<any[]>([]);
+  const [rolls, setRolls] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -348,24 +423,187 @@ export const DocumentsPage: React.FC = () => {
   const [view, setView] = useState<ViewKey>('txn');
   const [showOpening, setShowOpening] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [issueDirFilter, setIssueDirFilter] = useState<'ALL' | 'ISSUE' | 'RETURN'>('ALL');
   const [focus, setFocus] = useState<Focus>(null);
+
+  // 新建单据弹窗与表单状态
+  const [receiptModalOpen, setReceiptModalOpen] = useState(false);
+  const [supplierName, setSupplierName] = useState('');
+  const [deliveryNoteNo, setDeliveryNoteNo] = useState('');
+  const [receiptOperator, setReceiptOperator] = useState('');
+  const [receiptRemarks, setReceiptRemarks] = useState('');
+  const [receiptRolls, setReceiptRolls] = useState<ReceiptRollDraft[]>(() => [
+    createEmptyReceiptRoll()
+  ]);
+
+  const [issueModalOpen, setIssueModalOpen] = useState(false);
+  const [issueDirection, setIssueDirection] = useState<'ISSUE' | 'RETURN'>('ISSUE');
+  const [issueRollId, setIssueRollId] = useState('');
+  const [issueMachineId, setIssueMachineId] = useState('');
+  const [issueShiftTeam, setIssueShiftTeam] = useState('');
+  const [issueOperator, setIssueOperator] = useState('');
+  const [issueTargetLoc, setIssueTargetLoc] = useState('');
+  const [issueReason, setIssueReason] = useState('');
+
+  const [submitting, setSubmitting] = useState(false);
+  const [pendingTick, setPendingTick] = useState(0);
 
   const loadData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [tr, ct, led] = await Promise.all([
+      const [tr, ct, rec, iss, rollList, led] = await Promise.all([
         requestJSON('/api/v2/inventory-transfers'),
         requestJSON('/api/v2/inventory-counts'),
+        requestJSON('/api/v2/inventory-receipts').catch(() => []),
+        requestJSON('/api/v2/material-issues').catch(() => []),
+        requestJSON('/api/rolls').catch(() => []),
         loadAllLedgerItems()
       ]);
       setTransfers(asList(tr));
       setCounts(asList(ct));
+      setReceipts(asList(rec));
+      setIssues(asList(iss));
+      const rArr = asList(rollList);
+      setRolls(rArr);
+      if (rArr.length && !issueRollId) {
+        const firstActive = rArr.find(
+          (r: any) =>
+            r.inspectionStatus !== 'SCRAPPED' &&
+            r.status !== 'SCRAPPED' &&
+            (r.currentRemainingLength ?? r.totalLength) > 0
+        );
+        if (firstActive) setIssueRollId(firstActive.rollId);
+      }
       setItems(led);
     } catch (e: any) {
       setError(e.message || '读取库存单据与流水失败');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const pendingSlots = useMemo(() => {
+    void pendingTick;
+    return (['inventory-receipt', 'material-issue'] as const)
+      .map((s) => [s, pendingWrite(s)] as const)
+      .filter(([, v]) => Boolean(v));
+  }, [pendingTick, submitting]);
+
+  const handleRetryDoc = async (slot: DocPendingSlot) => {
+    try {
+      await retryWrite(slot);
+      toast(`${DOC_PENDING_LABELS[slot]}已确认过账`);
+      await loadData();
+    } catch (err: any) {
+      toast(err.message || '重试失败', true);
+    } finally {
+      setPendingTick((t) => t + 1);
+    }
+  };
+
+  const handleDropDoc = (slot: DocPendingSlot) => {
+    dropWrite(slot);
+    toast('已放弃未确认草稿，请核对单据列表是否已入账');
+    setPendingTick((t) => t + 1);
+  };
+
+  const handleSubmitReceipt = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submitting) return;
+    if (!supplierName.trim() || !deliveryNoteNo.trim() || !receiptOperator.trim()) {
+      toast('请完整填写供应商名称、送货单号与经办人', true);
+      return;
+    }
+    const validRolls = receiptRolls
+      .filter((r) => r.materialModel.trim() && Number(r.widthMm) > 0 && Number(r.totalLengthMm) > 0)
+      .map((r) => ({
+        id: r.id.trim() || undefined,
+        materialModel: r.materialModel.trim(),
+        materialType: r.materialType.trim() || '面料',
+        color: r.color.trim() || undefined,
+        batchNo: r.batchNo.trim() || undefined,
+        widthMm: Number(r.widthMm),
+        totalLengthMm: Number(r.totalLengthMm),
+        grammage: r.grammage !== '' && Number.isFinite(Number(r.grammage)) ? Number(r.grammage) : undefined,
+        shrinkageRate:
+          r.shrinkageRate !== '' && Number.isFinite(Number(r.shrinkageRate))
+            ? Number(r.shrinkageRate)
+            : undefined,
+        storageLocation: r.storageLocation.trim() || '原料库位 R-01',
+        inspectionStatus: r.inspectionStatus
+      }));
+    if (!validRolls.length) {
+      toast('请至少录入 1 行包含有效品号、门幅与总长的母卷明细', true);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await idempotentJsonPost('inventory-receipt', '/api/v2/inventory-receipts', {
+        supplierName: supplierName.trim(),
+        deliveryNoteNo: deliveryNoteNo.trim(),
+        operator: receiptOperator.trim(),
+        remarks: receiptRemarks.trim() || undefined,
+        rolls: validRolls
+      });
+      const createdCount = Array.isArray(res?.createdRolls) ? res.createdRolls.length : validRolls.length;
+      toast(`采购入库单已过账！原子创建 ${createdCount} 卷母卷并写入不可变流水`);
+      setReceiptModalOpen(false);
+      setSupplierName('');
+      setDeliveryNoteNo('');
+      setReceiptRemarks('');
+      setReceiptRolls([createEmptyReceiptRoll()]);
+      await loadData();
+    } catch (err: any) {
+      toast('提交采购入库单失败：' + (err.message || '未知错误'), true);
+    } finally {
+      setSubmitting(false);
+      setPendingTick((t) => t + 1);
+    }
+  };
+
+  const handleSubmitIssue = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submitting) return;
+    if (!issueRollId.trim() || !issueOperator.trim()) {
+      toast('请选择母卷并填写经办人', true);
+      return;
+    }
+    if (issueDirection === 'ISSUE' && !issueMachineId.trim()) {
+      toast('车间领料请填写领用机台编号', true);
+      return;
+    }
+    if (issueDirection === 'RETURN' && !issueTargetLoc.trim()) {
+      toast('车间退料请填写退回仓库目标库位', true);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const targetLocation =
+        issueTargetLoc.trim() ||
+        (issueDirection === 'ISSUE' ? `车间:${issueMachineId.trim()}` : '原料库位 R-01');
+      await idempotentJsonPost('material-issue', '/api/v2/material-issues', {
+        direction: issueDirection,
+        rollId: issueRollId.trim(),
+        machineId: issueMachineId.trim() || undefined,
+        shiftTeam: issueShiftTeam.trim() || undefined,
+        operator: issueOperator.trim(),
+        targetLocation,
+        reason: issueReason.trim() || (issueDirection === 'ISSUE' ? '车间领料投产' : '完工余卷退库')
+      });
+      toast(
+        issueDirection === 'ISSUE'
+          ? `母卷 ${issueRollId.trim()} 发料单已过账（机台 ${issueMachineId.trim()}）`
+          : `母卷 ${issueRollId.trim()} 退料入库单已过账（目标库位 ${targetLocation}）`
+      );
+      setIssueModalOpen(false);
+      setIssueReason('');
+      await loadData();
+    } catch (err: any) {
+      toast('提交车间领/退料单失败：' + (err.message || '未知错误'), true);
+    } finally {
+      setSubmitting(false);
+      setPendingTick((t) => t + 1);
     }
   };
 
@@ -531,13 +769,51 @@ export const DocumentsPage: React.FC = () => {
     });
   }, [counts, searchQuery]);
 
+  const filteredReceipts = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return receipts;
+    return receipts.filter((r) => {
+      const rls = r.rolls || r.items || [];
+      return [
+        r.id,
+        r.documentId,
+        r.supplierName,
+        r.deliveryNoteNo,
+        r.operator,
+        r.remarks,
+        ...rls.map((x: any) => `${x.id || x.rollId || ''} ${x.materialModel || x.rollModel || ''} ${x.batchNo || ''}`)
+      ].some((v) => String(v || '').toLowerCase().includes(q));
+    });
+  }, [receipts, searchQuery]);
+
+  const filteredIssues = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return issues.filter((r) => {
+      if (issueDirFilter !== 'ALL' && r.direction !== issueDirFilter) return false;
+      if (!q) return true;
+      return [
+        r.id,
+        r.documentId,
+        r.direction,
+        r.rollId,
+        r.machineId,
+        r.shiftTeam,
+        r.targetLocation,
+        r.operator,
+        r.reason
+      ].some((v) => String(v || '').toLowerCase().includes(q));
+    });
+  }, [issues, issueDirFilter, searchQuery]);
+
   const tabOptions: SegmentedOption<DocTab>[] = useMemo(
     () => [
       { value: 'ledger', label: '库存流水', count: items.length - openingCount, accent: 'indigo' },
+      { value: 'receipt', label: '采购入库单', count: receipts.length, accent: 'emerald' },
+      { value: 'issue', label: '车间领/退料单', count: issues.length, accent: 'amber' },
       { value: 'transfer', label: '移库单', count: transfers.length },
       { value: 'count', label: '盘点单', count: counts.length }
     ],
-    [items.length, openingCount, transfers.length, counts.length]
+    [items.length, openingCount, receipts.length, issues.length, transfers.length, counts.length]
   );
 
   const rangeOptions: SegmentedOption<RangeKey>[] = [
@@ -870,21 +1146,54 @@ export const DocumentsPage: React.FC = () => {
           <div className="mp-page-title-block">
             <h1>库存单据</h1>
             <span className="mp-page-summary num">
-              不可变流水 {items.length - openingCount} 条（另有期初迁移 {openingCount} 条）· 移库单 {transfers.length} · 盘点单 {counts.length}
+              不可变流水 {items.length - openingCount} 条 · 采购入库 {receipts.length} · 领退料 {issues.length} · 移库 {transfers.length} · 盘点 {counts.length}
             </span>
           </div>
           <div className="mp-toolbar-actions">
             <button type="button" className="mp-ghost-btn" onClick={loadData}>
               刷新
             </button>
-            <a className="mp-ghost-btn" href="#/reconciliation">
-              产出对账
-            </a>
-            <a className="btn pri" href="#/inventory">
-              去库存移库 / 盘点
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setTab('issue');
+                setIssueModalOpen(true);
+              }}
+            >
+              ＋ 车间领/退料
+            </button>
+            <button
+              type="button"
+              className="btn pri"
+              onClick={() => {
+                setTab('receipt');
+                setReceiptModalOpen(true);
+              }}
+            >
+              ＋ 采购入库单
+            </button>
+            <a className="mp-ghost-btn" href="#/inventory">
+              库存台账
             </a>
           </div>
         </div>
+
+        {pendingSlots.length > 0 && (
+          <div className="mp-inv-notice" style={{ marginBottom: 10 }}>
+            {pendingSlots.map(([slot]) => (
+              <span key={slot} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <span>{DOC_PENDING_LABELS[slot]}提交结果未确认（幂等保护已落盘）</span>
+                <button type="button" className="btn sm" onClick={() => handleRetryDoc(slot)}>
+                  重试原提交
+                </button>
+                <button type="button" className="btn sm" onClick={() => handleDropDoc(slot)}>
+                  放弃
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
 
         <div className="mp-doc-subbar">
           <SegmentedControl options={tabOptions} value={tab} onChange={(next) => setTab(next)} ariaLabel="切换单据与流水类型" />
@@ -1035,6 +1344,212 @@ export const DocumentsPage: React.FC = () => {
               {renderFocus()}
             </div>
           </>
+        ) : tab === 'receipt' ? (
+          <div className="mp-doc-card">
+            <div className="mp-filter-toolbar" style={{ padding: '10px 14px', borderBottom: '1px solid var(--line-2, #e2e8f0)' }}>
+              <div className="mp-search-wrap">
+                <input
+                  type="search"
+                  className="mp-search-input"
+                  aria-label="搜索采购入库单"
+                  placeholder="搜入库单号、供应商、送货单号、母卷号或缸号"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+              <span className="mp-toolbar-count num">
+                显示 {filteredReceipts.length} / 共 {receipts.length} 张采购入库单
+              </span>
+              <div className="mp-toolbar-actions">
+                <button
+                  type="button"
+                  className="btn sm pri"
+                  onClick={() => setReceiptModalOpen(true)}
+                >
+                  ＋ 新建采购入库单
+                </button>
+              </div>
+            </div>
+            {filteredReceipts.length > 0 ? (
+              <div className="mp-table-scroll">
+                <table className="t">
+                  <thead>
+                    <tr>
+                      <th>入库单号</th>
+                      <th>入库时间</th>
+                      <th>供应商</th>
+                      <th>送货单号</th>
+                      <th className="r">母卷数</th>
+                      <th>入库母卷与缸号明细</th>
+                      <th>经办人</th>
+                      <th className="r">版本</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredReceipts
+                      .slice()
+                      .reverse()
+                      .map((r, idx) => {
+                        const rls = r.rolls || r.items || [];
+                        const detail = rls
+                          .map((x: any) => {
+                            const rid = x.id || x.rollId || '—';
+                            const model = x.materialModel || x.rollModel || '';
+                            const batch = x.batchNo ? `缸:${x.batchNo}` : '';
+                            const dim =
+                              x.widthMm && x.totalLengthMm
+                                ? `${x.widthMm}×${fmtM(x.totalLengthMm)}m`
+                                : '';
+                            return [rid, model, batch, dim].filter(Boolean).join(' ');
+                          })
+                          .join('；');
+                        return (
+                          <tr key={r.id || r.documentId || idx}>
+                            <td>
+                              <CodeBadge title={r.id || r.documentId}>
+                                {shortId(r.id || r.documentId)}
+                              </CodeBadge>
+                            </td>
+                            <td className="num">{fmtTime(r.postedAt || r.createdAt || r.at)}</td>
+                            <td style={{ fontWeight: 600 }}>{r.supplierName || '—'}</td>
+                            <td className="num">{r.deliveryNoteNo || '—'}</td>
+                            <td className="r num">{rls.length}</td>
+                            <td className="mp-doc-detail-cell num" title={detail}>
+                              {detail || '—'}
+                              {r.remarks ? ` · 备注：${r.remarks}` : ''}
+                            </td>
+                            <td>{r.operator || '—'}</td>
+                            <td className="r num">
+                              {r.beforeRevision != null && r.afterRevision != null
+                                ? `${r.beforeRevision} → ${r.afterRevision}`
+                                : r.revision ?? '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="mp-empty-inline" style={{ padding: 36 }}>
+                <strong>暂无采购批量入库单据</strong>
+                点击右上角「＋ 新建采购入库单」一次原子录入供应商送货单与多卷新母卷（含缸号、色号、缩水率与库位）。
+              </div>
+            )}
+          </div>
+        ) : tab === 'issue' ? (
+          <div className="mp-doc-card">
+            <div className="mp-filter-toolbar" style={{ padding: '10px 14px', borderBottom: '1px solid var(--line-2, #e2e8f0)' }}>
+              <SegmentedControl
+                options={[
+                  { value: 'ALL', label: '全部', count: issues.length },
+                  {
+                    value: 'ISSUE',
+                    label: '车间领料',
+                    count: issues.filter((x) => x.direction === 'ISSUE').length,
+                    accent: 'amber'
+                  },
+                  {
+                    value: 'RETURN',
+                    label: '车间退料',
+                    count: issues.filter((x) => x.direction === 'RETURN').length,
+                    accent: 'emerald'
+                  }
+                ]}
+                value={issueDirFilter}
+                onChange={(v) => setIssueDirFilter(v)}
+                ariaLabel="按领退料方向筛选"
+                size="sm"
+              />
+              <div className="mp-search-wrap">
+                <input
+                  type="search"
+                  className="mp-search-input"
+                  aria-label="搜索车间领退料单"
+                  placeholder="搜单号、母卷号、机台、班组、库位或经办人"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+              <div className="mp-toolbar-actions">
+                <button
+                  type="button"
+                  className="btn sm pri"
+                  onClick={() => setIssueModalOpen(true)}
+                >
+                  ＋ 新建领/退料单
+                </button>
+              </div>
+            </div>
+            {filteredIssues.length > 0 ? (
+              <div className="mp-table-scroll">
+                <table className="t">
+                  <thead>
+                    <tr>
+                      <th>单据号</th>
+                      <th>时间</th>
+                      <th>方向</th>
+                      <th>母卷编号</th>
+                      <th>机台 / 班组</th>
+                      <th>目标库位</th>
+                      <th>原因说明</th>
+                      <th>经办人</th>
+                      <th className="r">版本</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredIssues
+                      .slice()
+                      .reverse()
+                      .map((r, idx) => {
+                        const isIssue = r.direction === 'ISSUE';
+                        return (
+                          <tr key={r.id || r.documentId || idx}>
+                            <td>
+                              <CodeBadge title={r.id || r.documentId}>
+                                {shortId(r.id || r.documentId)}
+                              </CodeBadge>
+                            </td>
+                            <td className="num">{fmtTime(r.postedAt || r.createdAt || r.at)}</td>
+                            <td>
+                              <span className={`tag ${isIssue ? 'warn' : 'ok'}`}>
+                                {isIssue ? '领料出库' : '退料入库'}
+                              </span>
+                            </td>
+                            <td>
+                              <a
+                                href={`#/inventory?roll=${encodeURIComponent(r.rollId || '')}`}
+                                className="mp-link-btn num"
+                              >
+                                {r.rollId || '—'}
+                              </a>
+                            </td>
+                            <td className="num">
+                              {[r.machineId, r.shiftTeam].filter(Boolean).join(' · ') || '—'}
+                            </td>
+                            <td>
+                              <span className="tag kind">{r.targetLocation || '—'}</span>
+                            </td>
+                            <td className="mp-doc-detail-cell">{r.reason || '—'}</td>
+                            <td>{r.operator || '—'}</td>
+                            <td className="r num">
+                              {r.beforeRevision != null && r.afterRevision != null
+                                ? `${r.beforeRevision} → ${r.afterRevision}`
+                                : r.revision ?? '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="mp-empty-inline" style={{ padding: 36 }}>
+                <strong>暂无车间领/退料单据</strong>
+                点击「＋ 新建领/退料单」登记母卷发往裁床机台/班组，或将完工余卷退回原料仓库位。
+              </div>
+            )}
+          </div>
         ) : tab === 'transfer' ? (
           <div className="mp-doc-card">
             {filteredTransfers.length > 0 ? (
@@ -1173,6 +1688,429 @@ export const DocumentsPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* 新建采购批量入库单弹窗 */}
+      <ModalDialog
+        open={receiptModalOpen}
+        title="新建采购批量入库单（原子建档多卷母卷与不可变流水）"
+        onClose={() => {
+          if (!submitting) setReceiptModalOpen(false);
+        }}
+        maxWidth={920}
+      >
+        <form onSubmit={handleSubmitReceipt}>
+          <div
+            className="form"
+            style={{
+              gridTemplateColumns: '90px 1fr 90px 1fr',
+              gap: '8px 12px',
+              padding: '4px 0 12px'
+            }}
+          >
+            <label htmlFor="rec-supplier">供应商</label>
+            <input
+              id="rec-supplier"
+              className="field"
+              required
+              placeholder="如：华联高新纺织印染"
+              value={supplierName}
+              onChange={(e) => setSupplierName(e.target.value)}
+            />
+            <label htmlFor="rec-delivery">送货单号</label>
+            <input
+              id="rec-delivery"
+              className="field num"
+              required
+              placeholder="如：DN-20261125-01"
+              value={deliveryNoteNo}
+              onChange={(e) => setDeliveryNoteNo(e.target.value)}
+            />
+            <label htmlFor="rec-operator">经办仓管</label>
+            <input
+              id="rec-operator"
+              className="field"
+              required
+              placeholder="如：仓管王工"
+              value={receiptOperator}
+              onChange={(e) => setReceiptOperator(e.target.value)}
+            />
+            <label htmlFor="rec-remarks">备注</label>
+            <input
+              id="rec-remarks"
+              className="field"
+              placeholder="选填：来料批次或质检说明"
+              value={receiptRemarks}
+              onChange={(e) => setReceiptRemarks(e.target.value)}
+            />
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 6
+            }}
+          >
+            <strong style={{ fontSize: 12.5 }}>入库母卷明细（共 {receiptRolls.length} 卷）</strong>
+            <div style={{ display: 'inline-flex', gap: 6 }}>
+              <button
+                type="button"
+                className="btn sm"
+                onClick={() =>
+                  setReceiptRolls((prev) => [
+                    ...prev,
+                    createEmptyReceiptRoll(prev[prev.length - 1])
+                  ])
+                }
+              >
+                ＋ 复制末行添加母卷
+              </button>
+            </div>
+          </div>
+
+          <div className="mp-table-scroll" style={{ maxHeight: 300, marginBottom: 12 }}>
+            <table className="t">
+              <thead>
+                <tr>
+                  <th style={{ minWidth: 112 }}>卷号(选填)</th>
+                  <th style={{ minWidth: 112 }}>品号 *</th>
+                  <th style={{ minWidth: 74 }}>类型</th>
+                  <th style={{ minWidth: 96 }}>缸号</th>
+                  <th style={{ minWidth: 82 }}>色号</th>
+                  <th style={{ minWidth: 74 }} className="r">门幅 mm</th>
+                  <th style={{ minWidth: 84 }} className="r">卷长 mm</th>
+                  <th style={{ minWidth: 64 }} className="r">克重</th>
+                  <th style={{ minWidth: 64 }} className="r">缩水%</th>
+                  <th style={{ minWidth: 96 }}>库位</th>
+                  <th style={{ minWidth: 80 }}>检验态</th>
+                  <th style={{ width: 34 }} />
+                </tr>
+              </thead>
+              <tbody>
+                {receiptRolls.map((row, idx) => (
+                  <tr key={idx}>
+                    <td>
+                      <input
+                        className="field num"
+                        style={{ width: '100%', padding: '3px 6px', fontSize: 12 }}
+                        placeholder="留空自动"
+                        value={row.id}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setReceiptRolls((p) => p.map((x, i) => (i === idx ? { ...x, id: v } : x)));
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="field num"
+                        required
+                        style={{ width: '100%', padding: '3px 6px', fontSize: 12 }}
+                        value={row.materialModel}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setReceiptRolls((p) =>
+                            p.map((x, i) => (i === idx ? { ...x, materialModel: v } : x))
+                          );
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="field"
+                        style={{ width: '100%', padding: '3px 6px', fontSize: 12 }}
+                        value={row.materialType}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setReceiptRolls((p) =>
+                            p.map((x, i) => (i === idx ? { ...x, materialType: v } : x))
+                          );
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="field num"
+                        style={{ width: '100%', padding: '3px 6px', fontSize: 12 }}
+                        placeholder="BAT-xxx"
+                        value={row.batchNo}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setReceiptRolls((p) =>
+                            p.map((x, i) => (i === idx ? { ...x, batchNo: v } : x))
+                          );
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="field"
+                        style={{ width: '100%', padding: '3px 6px', fontSize: 12 }}
+                        placeholder="藏青"
+                        value={row.color}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setReceiptRolls((p) =>
+                            p.map((x, i) => (i === idx ? { ...x, color: v } : x))
+                          );
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={1}
+                        required
+                        className="field num"
+                        style={{ width: '100%', padding: '3px 6px', fontSize: 12, textAlign: 'right' }}
+                        value={row.widthMm}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setReceiptRolls((p) =>
+                            p.map((x, i) => (i === idx ? { ...x, widthMm: v } : x))
+                          );
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={100}
+                        required
+                        className="field num"
+                        style={{ width: '100%', padding: '3px 6px', fontSize: 12, textAlign: 'right' }}
+                        value={row.totalLengthMm}
+                        title={
+                          Number(row.totalLengthMm) > 0
+                            ? `折合 ${fmtM(Number(row.totalLengthMm))} m`
+                            : undefined
+                        }
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setReceiptRolls((p) =>
+                            p.map((x, i) => (i === idx ? { ...x, totalLengthMm: v } : x))
+                          );
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        step="any"
+                        className="field num"
+                        style={{ width: '100%', padding: '3px 6px', fontSize: 12, textAlign: 'right' }}
+                        value={row.grammage}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setReceiptRolls((p) =>
+                            p.map((x, i) => (i === idx ? { ...x, grammage: v } : x))
+                          );
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.1"
+                        className="field num"
+                        style={{ width: '100%', padding: '3px 6px', fontSize: 12, textAlign: 'right' }}
+                        value={row.shrinkageRate}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setReceiptRolls((p) =>
+                            p.map((x, i) => (i === idx ? { ...x, shrinkageRate: v } : x))
+                          );
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="field"
+                        style={{ width: '100%', padding: '3px 6px', fontSize: 12 }}
+                        value={row.storageLocation}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setReceiptRolls((p) =>
+                            p.map((x, i) => (i === idx ? { ...x, storageLocation: v } : x))
+                          );
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <select
+                        className="field"
+                        style={{ width: '100%', padding: '3px 4px', fontSize: 12 }}
+                        value={row.inspectionStatus}
+                        onChange={(e) => {
+                          const v = e.target.value as 'PENDING' | 'PASSED';
+                          setReceiptRolls((p) =>
+                            p.map((x, i) => (i === idx ? { ...x, inspectionStatus: v } : x))
+                          );
+                        }}
+                      >
+                        <option value="PENDING">待检</option>
+                        <option value="PASSED">已合格</option>
+                      </select>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      {receiptRolls.length > 1 && (
+                        <button
+                          type="button"
+                          className="btn sm"
+                          aria-label={`删除第 ${idx + 1} 行母卷`}
+                          onClick={() =>
+                            setReceiptRolls((p) => p.filter((_, i) => i !== idx))
+                          }
+                        >
+                          ×
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="muted" style={{ fontSize: 12, margin: '0 0 12px' }}>
+            默认来料检验状态为「待检 (PENDING)」，入库后须经跑布验疵放行方可锁卷排切；支持跨刷新幂等防重。
+          </p>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button
+              type="button"
+              className="btn"
+              disabled={submitting}
+              onClick={() => setReceiptModalOpen(false)}
+            >
+              取消
+            </button>
+            <button type="submit" className="btn pri" disabled={submitting}>
+              {submitting ? '过账中…' : `确认采购入库 (${receiptRolls.length} 卷)`}
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
+
+      {/* 新建车间领/退料单弹窗 */}
+      <ModalDialog
+        open={issueModalOpen}
+        title="新建车间领 / 退料单"
+        onClose={() => {
+          if (!submitting) setIssueModalOpen(false);
+        }}
+        maxWidth={560}
+      >
+        <form onSubmit={handleSubmitIssue}>
+          <div style={{ marginBottom: 12 }}>
+            <SegmentedControl
+              options={[
+                { value: 'ISSUE', label: '车间领料出库 (ISSUE)' },
+                { value: 'RETURN', label: '车间余卷退库 (RETURN)' }
+              ]}
+              value={issueDirection}
+              onChange={(next) => {
+                setIssueDirection(next);
+                if (next === 'RETURN' && issueTargetLoc.startsWith('车间:')) {
+                  setIssueTargetLoc('原料库位 R-01');
+                }
+              }}
+              ariaLabel="选择领料或退料方向"
+              fullWidth
+            />
+          </div>
+          <div className="form" style={{ gridTemplateColumns: '96px 1fr', padding: '4px 0 14px' }}>
+            <label htmlFor="iss-roll">选择母卷</label>
+            <select
+              id="iss-roll"
+              className="field num"
+              required
+              value={issueRollId}
+              onChange={(e) => setIssueRollId(e.target.value)}
+            >
+              <option value="">请选择在库母卷…</option>
+              {rolls
+                .filter((r) => r.inspectionStatus !== 'SCRAPPED' && r.status !== 'SCRAPPED')
+                .map((r) => (
+                  <option key={r.rollId} value={r.rollId}>
+                    {r.rollId} · {r.rollModel}
+                    {r.batchNo ? ` [缸:${r.batchNo}]` : ''} · 余
+                    {fmtM(r.currentRemainingLength ?? r.totalLength)}m · {r.storageLocation || '未分配库位'}
+                  </option>
+                ))}
+            </select>
+            <label htmlFor="iss-machine">机台编号</label>
+            <input
+              id="iss-machine"
+              className="field num"
+              required={issueDirection === 'ISSUE'}
+              placeholder="如：裁床-01 / SLIT-02"
+              value={issueMachineId}
+              onChange={(e) => {
+                const v = e.target.value;
+                setIssueMachineId(v);
+                if (issueDirection === 'ISSUE' && (!issueTargetLoc || issueTargetLoc.startsWith('车间:'))) {
+                  setIssueTargetLoc(v.trim() ? `车间:${v.trim()}` : '');
+                }
+              }}
+            />
+            <label htmlFor="iss-shift">班组</label>
+            <input
+              id="iss-shift"
+              className="field"
+              placeholder="如：甲班 / 白班一组"
+              value={issueShiftTeam}
+              onChange={(e) => setIssueShiftTeam(e.target.value)}
+            />
+            <label htmlFor="iss-loc">目标库位</label>
+            <input
+              id="iss-loc"
+              className="field"
+              required
+              placeholder={issueDirection === 'ISSUE' ? '如：车间:裁床-01' : '如：原料库位 R-01-A03'}
+              value={issueTargetLoc}
+              onChange={(e) => setIssueTargetLoc(e.target.value)}
+            />
+            <label htmlFor="iss-operator">经办人</label>
+            <input
+              id="iss-operator"
+              className="field"
+              required
+              placeholder="如：领料员陈工"
+              value={issueOperator}
+              onChange={(e) => setIssueOperator(e.target.value)}
+            />
+            <label htmlFor="iss-reason">原因说明</label>
+            <input
+              id="iss-reason"
+              className="field"
+              placeholder={issueDirection === 'ISSUE' ? '如：按排程工单领用投产' : '如：本班完工余卷退库'}
+              value={issueReason}
+              onChange={(e) => setIssueReason(e.target.value)}
+            />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button
+              type="button"
+              className="btn"
+              disabled={submitting}
+              onClick={() => setIssueModalOpen(false)}
+            >
+              取消
+            </button>
+            <button type="submit" className="btn pri" disabled={submitting}>
+              {submitting
+                ? '过账中…'
+                : issueDirection === 'ISSUE'
+                ? '确认发料出库'
+                : '确认退料入库'}
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
     </div>
   );
 };

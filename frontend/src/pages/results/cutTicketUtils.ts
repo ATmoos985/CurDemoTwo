@@ -1,3 +1,5 @@
+import { csvCell } from '@static/js/business/analysis/report-model.js';
+
 export interface TicketPlacementItem {
   id: number | string;
   name: string;
@@ -33,6 +35,100 @@ export interface TicketDefectItem {
   w: number;
   h: number;
   margin: number;
+  desc?: string;
+}
+
+/**
+ * 提取方案窗口内的有效疵点（优先采用方案自带局部疵点，否则从绑定实卷裁剪并平移到工位局部坐标）。
+ * 用于 A4 随工单绘图与 DXF 导出 `3_DEFECTS` 疵点避让图层保持 100% 一致。
+ */
+export function extractWindowDefects(scheme: any, boundRoll?: any): TicketDefectItem[] {
+  const occupiedLengthMm = Math.max(100, Number(scheme?.occupiedLengthMm) || 1000);
+  const windowStartY = Math.max(0, Number(scheme?.windowStartY) || 0);
+
+  const rawDefects: any[] =
+    Array.isArray(scheme?.layout2D?.defects) && scheme.layout2D.defects.length > 0
+      ? scheme.layout2D.defects
+      : Array.isArray(boundRoll?.defects)
+      ? boundRoll.defects
+          .filter((d: any) => {
+            const dy = Number(d.y) || 0;
+            const dh = Number(d.h) || 0;
+            return dy < windowStartY + occupiedLengthMm && dy + dh > windowStartY;
+          })
+          .map((d: any) => ({
+            ...d,
+            y: Math.max(0, (Number(d.y) || 0) - windowStartY)
+          }))
+      : [];
+
+  return rawDefects.map((d, idx) => ({
+    id: d.id ?? idx + 1,
+    x: Number(d.x) || 0,
+    y: Number(d.y) || 0,
+    w: Math.max(0, Number(d.w) || 0),
+    h: Math.max(0, Number(d.h) || 0),
+    margin: Number(d.margin) || 0,
+    desc: String(d.typeName || d.defectType || d.desc || 'Flaw')
+  }));
+}
+
+/**
+ * 安全生成一维分切机 PLC 排刀配方 CSV（全部单元格复用 `csvCell`，防御逗号、引号与表格公式注入）。
+ */
+export function buildSlittingCsvText(scheme: any): string {
+  const patterns: any[] = Array.isArray(scheme?.slitting1D?.patterns)
+    ? scheme.slitting1D.patterns
+    : [];
+  const rows: any[][] = [
+    [
+      '方案号',
+      '刀组序号',
+      '单车卷长(mm)',
+      '执行车数',
+      '左切边(mm)',
+      '右切边(mm)',
+      '排刀条宽组合',
+      '已用幅宽(mm)',
+      '余宽(mm)'
+    ],
+    ...patterns.map((p: any, idx: number) => [
+      scheme?.id ?? '',
+      idx + 1,
+      p.lengthMm,
+      p.repetitions,
+      scheme?.slitting1D?.leftTrimMm ?? 0,
+      scheme?.slitting1D?.rightTrimMm ?? 0,
+      (p.stations || []).map((s: any) => `${s.widthMm}*${s.countPerRepetition}`).join('+'),
+      p.usedWidthMm,
+      p.spareWidthMm
+    ])
+  ];
+  return '\uFEFF' + rows.map((row) => row.map((cell) => csvCell(cell)).join(',')).join('\n');
+}
+
+/**
+ * 扫码枪快速匹配排程方案：支持 `WO-<schemeId>`、`<schemeId>`、母卷号 `<rollId>` 与外部单号。
+ */
+export function matchScannedScheme(entries: any[], rawCode: string): any | null {
+  const trimmed = String(rawCode ?? '').trim();
+  if (!trimmed || !Array.isArray(entries) || entries.length === 0) return null;
+  const upper = trimmed.toUpperCase();
+  const withoutWo = upper.startsWith('WO-') ? upper.slice(3) : upper;
+
+  return (
+    entries.find((e) => String(e?.scheme?.id || '').toUpperCase() === withoutWo) ||
+    entries.find((e) => `WO-${String(e?.scheme?.id || '').toUpperCase()}` === upper) ||
+    entries.find((e) => String(e?.scheme?.rollId || '').toUpperCase() === upper) ||
+    entries.find((e) => String(e?.scheme?.externalOrderNo || '').toUpperCase() === upper) ||
+    entries.find((e) => {
+      const s = e?.scheme || {};
+      return `${s.id || ''} ${s.rollId || ''} ${s.externalOrderNo || ''}`
+        .toUpperCase()
+        .includes(withoutWo);
+    }) ||
+    null
+  );
 }
 
 export interface CutTicketModel {
@@ -148,29 +244,7 @@ export function buildCutTicketModel(
   });
 
   // 合并方案自带疵点或绑定实卷落在本次裁切窗口内的疵点
-  const rawDefects: any[] = Array.isArray(scheme?.layout2D?.defects)
-    ? scheme.layout2D.defects
-    : Array.isArray(options?.boundRoll?.defects)
-    ? options.boundRoll.defects
-        .filter((d: any) => {
-          const dy = Number(d.y) || 0;
-          const dh = Number(d.h) || 0;
-          return dy < windowStartY + occupiedLengthMm && dy + dh > windowStartY;
-        })
-        .map((d: any) => ({
-          ...d,
-          y: Math.max(0, (Number(d.y) || 0) - windowStartY)
-        }))
-    : [];
-
-  const defects: TicketDefectItem[] = rawDefects.map((d, idx) => ({
-    id: d.id ?? idx + 1,
-    x: Number(d.x) || 0,
-    y: Number(d.y) || 0,
-    w: Math.max(0, Number(d.w) || 0),
-    h: Math.max(0, Number(d.h) || 0),
-    margin: Number(d.margin) || 0
-  }));
+  const defects = extractWindowDefects(scheme, options?.boundRoll);
 
   const workOrderNo = `WO-${scheme?.id || 'DRAFT'}`;
   const originPoint = originCorner(cutOrigin, widthMm, occupiedLengthMm);

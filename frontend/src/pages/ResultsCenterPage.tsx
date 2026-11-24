@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CadCanvasView } from '../components/CadCanvasView';
 import { SlittingStripBar } from './CuttingWorkbenchPage';
 import { ModalDialog } from '../components/ModalDialog';
+import { BarcodeSvg } from '../components/BarcodeSvg';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
 import { NumberInput } from '../components/ui/NumberInput';
 import { showcaseScene } from '@static/app/js/model/showcase.js';
@@ -9,8 +10,14 @@ import { rectangle } from '@static/js/canvas/nesting-scene.js';
 import { gcodeText, dxfText } from '@static/js/plugins/export/cam-format.js';
 import { requestJSON, idempotentPost, toast, fmtN, fmtM, loadSheetLib } from '@static/app/js/util.js';
 import { useStudioStore } from '../store/useStudioStore';
+import { idempotentJsonPost } from '../utils/authClient';
 import { buildCompleteSchemeIdempotencyKey } from './workbench/schemeConfirmUtils';
-import { buildCutTicketModel } from './results/cutTicketUtils';
+import {
+  buildCutTicketModel,
+  buildSlittingCsvText,
+  extractWindowDefects,
+  matchScannedScheme
+} from './results/cutTicketUtils';
 
 const STATE_BADGE: Record<string, { label: string; cls: string }> = {
   AWAITING_ROLL: { label: '待绑实卷 (虚拟母卷)', cls: 'warn' },
@@ -158,9 +165,11 @@ export const ResultsCenterPage: React.FC<{
 
   const [entries, setEntries] = useState<any[]>([]);
   const [rolls, setRolls] = useState<any[]>([]);
+  const [taskOpenMap, setTaskOpenMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [stateFilter, setStateFilter] = useState<string>('ALL');
   const [search, setSearch] = useState('');
+  const [scanInput, setScanInput] = useState('');
   const [selectedId, setSelectedId] = useState<string>(schemeId || '');
   const [showPath, setShowPath] = useState(true);
   const [vertical, setVertical] = useState<boolean>(settings.vertical);
@@ -184,22 +193,37 @@ export const ResultsCenterPage: React.FC<{
   const [recoverRems, setRecoverRems] = useState<boolean>(true);
   const [remnantLoc, setRemnantLoc] = useState<string>('裁床余料架 A-01');
 
+  // 同缸加急补片单弹窗状态
+  const [showReplenishModal, setShowReplenishModal] = useState(false);
+  const [replenishOperator, setReplenishOperator] = useState('排产计划员');
+  const [replenishReason, setReplenishReason] = useState('判废/缺口同缸加急补片');
+  const [createdReplenishTask, setCreatedReplenishTask] = useState<{ id: string; name?: string } | null>(null);
+
   // Print Ticket Modal State
   const [showTicketModal, setShowTicketModal] = useState(false);
 
   const canvasRef = useRef<any>(null);
+  const scanRef = useRef<HTMLInputElement | null>(null);
 
   const loadAll = async () => {
     setLoading(true);
     try {
       const q = taskIdQuery ? `?taskId=${encodeURIComponent(taskIdQuery)}` : '';
-      const [list, allRolls] = await Promise.all([
+      const [list, allRolls, demandPool] = await Promise.all([
         requestJSON('/api/v2/schemes' + q),
-        requestJSON('/api/rolls').catch(() => [])
+        requestJSON('/api/rolls').catch(() => []),
+        requestJSON('/api/v2/demand-pool').catch(() => [])
       ]);
       const arr = Array.isArray(list) ? list : [];
       setEntries(arr);
       setRolls(Array.isArray(allRolls) ? allRolls : []);
+      const openMap: Record<string, number> = {};
+      if (Array.isArray(demandPool)) {
+        for (const fam of demandPool) {
+          if (fam?.id) openMap[fam.id] = Number(fam.openTotal) || 0;
+        }
+      }
+      setTaskOpenMap(openMap);
       if (schemeId && arr.some((x) => x.scheme?.id === schemeId)) {
         setSelectedId(schemeId);
       } else if (!selectedId && arr.length > 0) {
@@ -210,6 +234,36 @@ export const ResultsCenterPage: React.FC<{
     } finally {
       setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        scanRef.current?.focus();
+        scanRef.current?.select();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  const handleScanWorkOrder = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const raw = scanInput.trim();
+    if (!raw) return;
+    const hit = matchScannedScheme(entries, raw);
+    if (!hit) {
+      toast(`未找到与「${raw}」匹配的工单号、方案号或母卷号`, true);
+      return;
+    }
+    setStateFilter('ALL');
+    setSearch('');
+    setSelectedId(hit.scheme.id);
+    toast(
+      `扫码定位成功：工单 WO-${hit.scheme.id}${hit.scheme.rollId ? ` · 母卷 ${hit.scheme.rollId}` : ''}`
+    );
+    setScanInput('');
   };
 
   useEffect(() => {
@@ -437,6 +491,40 @@ export const ResultsCenterPage: React.FC<{
     }
   };
 
+  const handleGenerateReplenishTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeScheme || busy) return;
+    if (!replenishOperator.trim() || !replenishReason.trim()) {
+      toast('请填写经办人与补片原因', true);
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await idempotentJsonPost(
+        `replenish-${activeScheme.id}`,
+        `/api/v2/schemes/${encodeURIComponent(activeScheme.id)}/replenish-task`,
+        {
+          operator: replenishOperator.trim(),
+          reason: replenishReason.trim()
+        }
+      );
+      const taskId = res?.task?.id || '';
+      const taskName = res?.task?.name || '';
+      setCreatedReplenishTask(taskId ? { id: taskId, name: taskName } : null);
+      setShowReplenishModal(false);
+      toast(
+        taskId
+          ? `已生成同缸加急补片任务「${taskName || taskId}」（URGENT · 同缸强约束）`
+          : '同缸加急补片任务已生成'
+      );
+      await loadAll();
+    } catch (err: any) {
+      toast('生成同缸加急补片单失败：' + err.message, true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // ==================== Exports: DXF / G-Code / Slitting CSV / Excel / A4 Ticket ====================
 
   const handleExport2DCam = (kind: 'dxf' | 'nc') => {
@@ -450,6 +538,7 @@ export const ResultsCenterPage: React.FC<{
       l: p.shape?.height || p.l,
       shape: p.shape
     }));
+    const windowDefects = extractWindowDefects(activeScheme, boundRoll);
     const data = {
       rollId: activeScheme.rollId || 'VIRTUAL-ROLL',
       rollW: activeScheme.widthMm,
@@ -459,7 +548,7 @@ export const ResultsCenterPage: React.FC<{
       pieces: mappedPieces,
       placements: mappedPieces,
       remnants: activeScheme.layout2D.leftovers || [],
-      defects: [],
+      defects: windowDefects,
       cuts: (activeScheme.layout2D.cuts || []).map((c: any) => ({
         step: c.sequence,
         type: c.kind === 'HORIZONTAL' ? '横切' : '纵切',
@@ -482,21 +571,7 @@ export const ResultsCenterPage: React.FC<{
 
   const handleExportSlitCsv = () => {
     if (!activeScheme?.slitting1D?.patterns?.length) return;
-    const rows = [
-      ['方案号', '刀组序号', '单车卷长(mm)', '执行车数', '左切边(mm)', '右切边(mm)', '排刀条宽组合', '已用幅宽(mm)', '余宽(mm)'],
-      ...activeScheme.slitting1D.patterns.map((p: any, idx: number) => [
-        activeScheme.id,
-        idx + 1,
-        p.lengthMm,
-        p.repetitions,
-        activeScheme.slitting1D.leftTrimMm,
-        activeScheme.slitting1D.rightTrimMm,
-        p.stations.map((s: any) => `${s.widthMm}*${s.countPerRepetition}`).join('+'),
-        p.usedWidthMm,
-        p.spareWidthMm
-      ])
-    ];
-    const csv = '\uFEFF' + rows.map((r) => r.map((v) => `"${String(v)}"`).join(',')).join('\n');
+    const csv = buildSlittingCsvText(activeScheme);
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     a.download = `分切机PLC排刀配方-${activeScheme.id}.csv`;
@@ -609,6 +684,16 @@ export const ResultsCenterPage: React.FC<{
     activeScheme && (activeEntry?.canComplete || activeEntry?.canBindRoll)
   );
 
+  const canGenerateReplenish = Boolean(
+    activeScheme &&
+      activeScheme.state === 'COMPLETED' &&
+      (!activeScheme.complete ||
+        (activeScheme.placedCount ?? 0) < (activeScheme.requestedCount ?? 0) ||
+        Number(activeScheme.rejectedCount || activeEntry?.rejectedCount || 0) > 0 ||
+        Number(taskOpenMap[activeScheme.taskId] || 0) > 0 ||
+        Boolean(activeEntry?.canReplenish))
+  );
+
   return (
     <div className="react-page mp-res-page">
       <div className="mp-res-top no-print">
@@ -622,8 +707,27 @@ export const ResultsCenterPage: React.FC<{
           </div>
         </div>
 
-        <div className="mp-filter-toolbar">
-          <div className="mp-search-wrap">
+        <div className="mp-filter-toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+          <form
+            onSubmit={handleScanWorkOrder}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flex: '0 1 250px', minWidth: 190 }}
+          >
+            <input
+              ref={scanRef}
+              type="text"
+              className="field num"
+              style={{ height: 30, fontSize: 12, flex: 1, minWidth: 140 }}
+              aria-label="扫码定位工单或母卷"
+              placeholder="扫工单号 WO-xxx/母卷号 (Alt+S)"
+              value={scanInput}
+              onChange={(e) => setScanInput(e.target.value)}
+            />
+            <button type="submit" className="btn sm" style={{ flex: 'none' }}>
+              定位
+            </button>
+          </form>
+
+          <div className="mp-search-wrap" style={{ minWidth: 160 }}>
             <span className="mp-search-ico" aria-hidden="true">
               <svg viewBox="0 0 16 16" width="14" height="14">
                 <circle
@@ -833,6 +937,17 @@ export const ResultsCenterPage: React.FC<{
                             : '下发 MES 派工单'}
                         </button>
                       )}
+                      {canGenerateReplenish && (
+                        <button
+                          type="button"
+                          className="btn soft-accent"
+                          disabled={busy}
+                          onClick={() => setShowReplenishModal(true)}
+                          title="按源方案母卷缸号/色号一键创建高优同缸加急补片任务"
+                        >
+                          一键生成同缸加急补片单
+                        </button>
+                      )}
                       {activeEntry.canCancel && (
                         <button
                           type="button"
@@ -928,6 +1043,30 @@ export const ResultsCenterPage: React.FC<{
                       </a>
                     )}
                   </div>
+                  {createdReplenishTask && (
+                    <div
+                      style={{
+                        marginTop: 8,
+                        padding: '8px 10px',
+                        borderRadius: 6,
+                        background: 'rgba(16, 185, 129, 0.1)',
+                        border: '1px solid rgba(5, 150, 105, 0.35)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 10,
+                        fontSize: 12
+                      }}
+                    >
+                      <span>
+                        <span className="tag ok" style={{ marginRight: 6 }}>补片单已生成</span>
+                        同缸加急补片任务 <b className="num">{createdReplenishTask.name || createdReplenishTask.id}</b> 已加入需求池（URGENT · 同缸强约束）。
+                      </span>
+                      <a className="btn sm soft-accent" href="#/demand-library">
+                        前往需求库排补片 →
+                      </a>
+                    </div>
+                  )}
                 </div>
 
                 {/* Virtual Mother Roll -> Bind Real Stock Roll Card */}
@@ -1354,9 +1493,11 @@ export const ResultsCenterPage: React.FC<{
               style={{
                 display: 'flex',
                 justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: 12,
                 borderBottom: '2px solid #0f172a',
                 paddingBottom: 10,
-                marginBottom: 12
+                marginBottom: 10
               }}
             >
               <div>
@@ -1364,12 +1505,34 @@ export const ResultsCenterPage: React.FC<{
                 <div className="muted" style={{ fontSize: 12 }}>
                   需求族：{activeScheme.taskName} · 外部单号：{activeScheme.externalOrderNo || '内部排产'}
                 </div>
-              </div>
-              <div style={{ textAlign: 'right' }} className="num">
-                <div style={{ fontSize: 15, fontWeight: 700 }}>工单号：{ticketModel.workOrderNo}</div>
-                <div style={{ fontSize: 11.5 }}>
-                  方案号：{activeScheme.id} · 打印时间：{new Date().toLocaleString('zh-CN')}
+                <div style={{ fontSize: 11.5, marginTop: 4 }} className="num">
+                  工单号：<b>{ticketModel.workOrderNo}</b> · 方案号：{activeScheme.id} · 打印时间：
+                  {new Date().toLocaleString('zh-CN')}
                 </div>
+              </div>
+              <div
+                className="ticket-barcode-bar"
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 8,
+                  flexShrink: 0
+                }}
+              >
+                <BarcodeSvg
+                  value={ticketModel.workOrderNo}
+                  label="派工单号"
+                  height={36}
+                  moduleWidth={1.15}
+                />
+                {activeScheme.rollId && (
+                  <BarcodeSvg
+                    value={activeScheme.rollId}
+                    label="领用母卷"
+                    height={36}
+                    moduleWidth={1.15}
+                  />
+                )}
               </div>
             </header>
 
@@ -1677,6 +1840,70 @@ export const ResultsCenterPage: React.FC<{
               </button>
             </div>
           </div>
+        )}
+      </ModalDialog>
+      {/* 一键生成同缸加急补片单弹窗 */}
+      <ModalDialog
+        open={showReplenishModal}
+        title="一键生成同缸加急补片单（防色差）"
+        onClose={() => {
+          if (!busy) setShowReplenishModal(false);
+        }}
+        maxWidth={520}
+      >
+        {activeScheme && (
+          <form onSubmit={handleGenerateReplenishTask}>
+            <p style={{ margin: '0 0 10px', fontSize: 12.5 }}>
+              系统将按源方案的缺口/判废明细自动新建一张 <b>URGENT 加急</b> 且启用{' '}
+              <b>同单同缸强约束</b> 的补片需求任务，自动继承原母卷品号与缸色属性：
+            </p>
+            <div className="kv num" style={{ padding: '4px 0 10px' }}>
+              <div>源方案号</div>
+              <div>{activeScheme.id}</div>
+              <div>原实卷 / 缸号色号</div>
+              <div>
+                {activeScheme.rollId || '未绑定实卷'}
+                {boundRoll?.batchNo ? ` · 缸:${boundRoll.batchNo}` : ''}
+                {boundRoll?.color ? ` · ${boundRoll.color}` : ''}
+              </div>
+              <div>待补缺口提示</div>
+              <div>
+                方案产出 {activeScheme.placedCount}/{activeScheme.requestedCount} · 需求族剩余待排{' '}
+                {taskOpenMap[activeScheme.taskId] ?? 0}
+              </div>
+            </div>
+            <div className="form" style={{ gridTemplateColumns: '90px 1fr', padding: '4px 0 14px' }}>
+              <label htmlFor="rep-operator">经办人</label>
+              <input
+                id="rep-operator"
+                className="field"
+                required
+                value={replenishOperator}
+                onChange={(e) => setReplenishOperator(e.target.value)}
+              />
+              <label htmlFor="rep-reason">补片原因</label>
+              <input
+                id="rep-reason"
+                className="field"
+                required
+                value={replenishReason}
+                onChange={(e) => setReplenishReason(e.target.value)}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => setShowReplenishModal(false)}
+              >
+                取消
+              </button>
+              <button type="submit" className="btn pri" disabled={busy}>
+                {busy ? '正在生成…' : '确认生成同缸补片单'}
+              </button>
+            </div>
+          </form>
         )}
       </ModalDialog>
     </div>

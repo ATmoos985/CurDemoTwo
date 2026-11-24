@@ -195,6 +195,16 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
   const [familyName, setFamilyName] = useState('');
   const [materialModel, setMaterialModel] = useState('TC涤棉-B2026');
   const [externalRef, setExternalRef] = useState('');
+  // 生产排产主数据：交期、优先级、客户/齐套组、缸号色号防色差约束、指定机台/班组
+  const [priority, setPriority] = useState<'NORMAL' | 'HIGH' | 'URGENT'>('NORMAL');
+  const [dueDate, setDueDate] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [kittingGroup, setKittingGroup] = useState('');
+  const [requiredBatchNo, setRequiredBatchNo] = useState('');
+  const [requiredColor, setRequiredColor] = useState('');
+  const [strictBatchMatch, setStrictBatchMatch] = useState(false);
+  const [machineId, setMachineId] = useState('');
+  const [shiftTeam, setShiftTeam] = useState('');
   const [templateQuickId, setTemplateQuickId] = useState('');
   const [templateQuickSets, setTemplateQuickSets] = useState(2);
   const [draftLines, setDraftLines] = useState<DraftLine[]>(createDefaultDraftLines);
@@ -295,6 +305,18 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
     families.forEach((f) => f.materialModel && set.add(f.materialModel));
     return [...set].sort();
   }, [rolls, clusters, families]);
+
+  const batchNoOptions = useMemo(() => {
+    const set = new Set<string>();
+    rolls.forEach((r) => r?.batchNo && set.add(String(r.batchNo)));
+    return [...set].sort();
+  }, [rolls]);
+
+  const colorOptions = useMemo(() => {
+    const set = new Set<string>();
+    rolls.forEach((r) => r?.color && set.add(String(r.color)));
+    return [...set].sort();
+  }, [rolls]);
 
   const mergeTargetFamily = useMemo(
     () => families.find((f) => f.id === mergeTargetId) || null,
@@ -509,6 +531,15 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
   const handleReset = () => {
     setFamilyName('');
     setExternalRef('');
+    setPriority('NORMAL');
+    setDueDate('');
+    setCustomerName('');
+    setKittingGroup('');
+    setRequiredBatchNo('');
+    setRequiredColor('');
+    setStrictBatchMatch(false);
+    setMachineId('');
+    setShiftTeam('');
     setTemplateQuickId('');
     setTemplateQuickSets(2);
     setParsedFile(null);
@@ -568,6 +599,15 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
         name: familyName.trim() || `${materialModel} · 排程需求`,
         materialModel: materialModel.trim() || 'STANDARD-MAT',
         externalRef: externalRef.trim() || undefined,
+        dueDate: dueDate.trim() || undefined,
+        priority,
+        customerName: customerName.trim() || undefined,
+        kittingGroup: kittingGroup.trim() || undefined,
+        requiredBatchNo: requiredBatchNo.trim() || undefined,
+        requiredColor: requiredColor.trim() || undefined,
+        strictBatchMatch: Boolean(strictBatchMatch),
+        machineId: machineId.trim() || undefined,
+        shiftTeam: shiftTeam.trim() || undefined,
         dimension: createDim,
         bedLengthMm: is1D ? fixedLen1D : bedLength2D,
         minWidthMm: is1D
@@ -805,6 +845,162 @@ export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTa
                         />
                       </div>
                     </div>
+
+                    <div className="dc-grid-2">
+                      <div className="dc-field">
+                        <label htmlFor="dp-priority">生产优先级</label>
+                        <select
+                          id="dp-priority"
+                          className="field"
+                          value={priority}
+                          onChange={(e) =>
+                            setPriority(e.target.value as 'NORMAL' | 'HIGH' | 'URGENT')
+                          }
+                        >
+                          <option value="NORMAL">普通 (NORMAL)</option>
+                          <option value="HIGH">高优 (HIGH)</option>
+                          <option value="URGENT">加急 (URGENT)</option>
+                        </select>
+                      </div>
+                      <div className="dc-field">
+                        <label htmlFor="dp-duedate">
+                          承诺交期 <small>选填</small>
+                        </label>
+                        <input
+                          id="dp-duedate"
+                          type="date"
+                          className="field num"
+                          value={dueDate}
+                          onChange={(e) => setDueDate(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="dc-grid-2">
+                      <div className="dc-field">
+                        <label htmlFor="dp-customer">
+                          客户名称 <small>选填</small>
+                        </label>
+                        <input
+                          id="dp-customer"
+                          className="field"
+                          placeholder="如：优衣库华东仓"
+                          value={customerName}
+                          onChange={(e) => setCustomerName(e.target.value)}
+                        />
+                      </div>
+                      <div className="dc-field">
+                        <label htmlFor="dp-kit">
+                          齐套组 <small>选填</small>
+                        </label>
+                        <input
+                          id="dp-kit"
+                          className="field num"
+                          placeholder="如：KIT-2026-W48"
+                          value={kittingGroup}
+                          onChange={(e) => setKittingGroup(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="dc-grid-2">
+                      <div className="dc-field">
+                        <label htmlFor="dp-batch">
+                          指定缸号 <small>防色差</small>
+                        </label>
+                        <input
+                          id="dp-batch"
+                          list="dc-batch-list"
+                          className="field num"
+                          placeholder="如：BAT-202609-A1"
+                          value={requiredBatchNo}
+                          onChange={(e) => setRequiredBatchNo(e.target.value)}
+                        />
+                        <datalist id="dc-batch-list">
+                          {batchNoOptions.map((b) => (
+                            <option key={b} value={b} />
+                          ))}
+                        </datalist>
+                      </div>
+                      <div className="dc-field">
+                        <label htmlFor="dp-color">
+                          指定色号 <small>选填</small>
+                        </label>
+                        <input
+                          id="dp-color"
+                          list="dc-color-list"
+                          className="field"
+                          placeholder="如：藏青"
+                          value={requiredColor}
+                          onChange={(e) => setRequiredColor(e.target.value)}
+                        />
+                        <datalist id="dc-color-list">
+                          {colorOptions.map((c) => (
+                            <option key={c} value={c} />
+                          ))}
+                        </datalist>
+                      </div>
+                    </div>
+
+                    <div className="dc-grid-2">
+                      <div className="dc-field">
+                        <label htmlFor="dp-machine">
+                          指定机台 <small>选填</small>
+                        </label>
+                        <input
+                          id="dp-machine"
+                          className="field num"
+                          placeholder="如：裁床-01"
+                          value={machineId}
+                          onChange={(e) => setMachineId(e.target.value)}
+                        />
+                      </div>
+                      <div className="dc-field">
+                        <label htmlFor="dp-shift">
+                          指定班组 <small>选填</small>
+                        </label>
+                        <input
+                          id="dp-shift"
+                          className="field"
+                          placeholder="如：甲班"
+                          value={shiftTeam}
+                          onChange={(e) => setShiftTeam(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '6px 8px',
+                        borderRadius: 6,
+                        background: strictBatchMatch
+                          ? 'rgba(245, 158, 11, 0.12)'
+                          : 'var(--panel-2, rgba(15,23,42,0.03))',
+                        border: strictBatchMatch
+                          ? '1px solid rgba(217, 119, 6, 0.45)'
+                          : '1px solid var(--line-2, #e2e8f0)',
+                        fontSize: 12,
+                        cursor: 'pointer',
+                        marginTop: 2
+                      }}
+                    >
+                      <input
+                        id="dp-strict-batch"
+                        type="checkbox"
+                        className="ux-switch"
+                        checked={strictBatchMatch}
+                        onChange={(e) => setStrictBatchMatch(e.target.checked)}
+                      />
+                      <span>
+                        <strong>同单同缸强约束</strong>
+                        <span className="muted" style={{ marginLeft: 4, fontSize: 11 }}>
+                          绑卷/选料强校验缸号色号防色差
+                        </span>
+                      </span>
+                    </label>
                   </>
                 )}
 

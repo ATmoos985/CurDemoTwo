@@ -1,5 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { requestJSON, shortId, fmtN, toast, createUuid } from '@static/app/js/util.js';
+import {
+  requestJSON,
+  idempotentPost,
+  pendingWrite,
+  retryWrite,
+  dropWrite,
+  shortId,
+  fmtN,
+  toast,
+  createUuid
+} from '@static/app/js/util.js';
 import {
   reviewablePieces,
   effectivePieceResults,
@@ -9,50 +19,100 @@ import {
   receiptSummary,
   DISPOSITIONS
 } from '@static/app/js/model/quality.js';
-import { csvCell } from '@static/js/business/analysis/report-model.js';
 import { ModalDialog } from '../components/ModalDialog';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
 import { useStudioStore, DemandFamilySummary } from '../store/useStudioStore';
+import { idempotentJsonPost } from '../utils/authClient';
+import {
+  NormalizedReconciliationReportRow,
+  buildLedgerCsvText,
+  isDispositionRevoked,
+  normalizeReconciliationReportItem
+} from './results/reconciliationUtils';
+
+const REPORT_PAGE_SIZE = 50;
+const LEDGER_PAGE_SIZE = 100;
+
+type PendingReconSlot = 'quality-disposition' | 'quality-revoke';
+const PENDING_RECON_LABELS: Record<PendingReconSlot, string> = {
+  'quality-disposition': '裁后复检处置',
+  'quality-revoke': '复检处置撤销'
+};
+
+interface RevokeDraft {
+  reportId: string;
+  taskName: string;
+  dispositionId: string;
+  pieceId?: number | string;
+  dispositionLabel: string;
+  inspector?: string;
+  origReason?: string;
+  operator: string;
+  reason: string;
+}
 
 export const ReconciliationPage: React.FC = () => {
   const loadDemandFamilyIntoWorkbench = useStudioStore((s) => s.loadDemandFamilyIntoWorkbench);
 
   const [tab, setTab] = useState<'quality' | 'reconcile'>('quality');
   const [search, setSearch] = useState('');
-  const [reports, setReports] = useState<{ task: any; report: any }[]>([]);
+
+  // 聚合报工分页状态（彻底消灭 N+1 请求风暴）
+  const [reports, setReports] = useState<NormalizedReconciliationReportRow[]>([]);
+  const [reportTotal, setReportTotal] = useState(0);
+  const [reportOffset, setReportOffset] = useState(0);
+  const [reportHasMore, setReportHasMore] = useState(false);
+  const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
+
+  // 对账快照与游标分页不可变流水
   const [recon, setRecon] = useState<any>(null);
   const [ledgerItems, setLedgerItems] = useState<any[]>([]);
+  const [ledgerNextCursor, setLedgerNextCursor] = useState<number | string | null>(null);
+  const [ledgerHasMore, setLedgerHasMore] = useState(false);
+  const [loadingMoreLedger, setLoadingMoreLedger] = useState(false);
+
   const [loading, setLoading] = useState(true);
-
   const [qualityDraft, setQualityDraft] = useState<any>(null);
+  const [revokeDraft, setRevokeDraft] = useState<RevokeDraft | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingTick, setPendingTick] = useState(0);
 
-  const loadData = async () => {
+  const loadReportsPage = async (offset: number) => {
+    const page = await requestJSON(
+      `/api/v2/reconciliation/reports?limit=${REPORT_PAGE_SIZE}&offset=${offset}`
+    );
+    const rawItems: any[] = Array.isArray(page?.items)
+      ? page.items
+      : Array.isArray(page)
+      ? page
+      : [];
+    const normalized = rawItems
+      .map(normalizeReconciliationReportItem)
+      .filter((x): x is NormalizedReconciliationReportRow => Boolean(x))
+      .filter((x) => x.report.status !== 'REVERSED');
+    setReports(normalized);
+    setReportTotal(typeof page?.total === 'number' ? page.total : normalized.length);
+    setReportOffset(typeof page?.offset === 'number' ? page.offset : offset);
+    setReportHasMore(Boolean(page?.hasMore));
+  };
+
+  const loadData = async (targetOffset = reportOffset) => {
     setLoading(true);
     try {
-      const [summaries, reconData, ledPage] = await Promise.all([
-        requestJSON('/api/cutting/task-summaries').catch(() => []),
+      const [, reconData, ledPage] = await Promise.all([
+        loadReportsPage(targetOffset),
         requestJSON('/api/v2/inventory-ledger/reconciliation').catch(() => null),
-        requestJSON('/api/v2/inventory-ledger?limit=100&after=0').catch(() => ({ items: [] }))
+        requestJSON(`/api/v2/inventory-ledger?limit=${LEDGER_PAGE_SIZE}&after=0`).catch(() => ({
+          items: [],
+          hasMore: false
+        }))
       ]);
-
-      const withReports = (summaries || []).filter((r: any) => r.reportCount > 0);
-      const details = await Promise.all(
-        withReports.map((s: any) =>
-          requestJSON('/api/cutting/tasks/' + encodeURIComponent(s.task.id)).catch(() => null)
-        )
-      );
-      const rows = details
-        .filter(Boolean)
-        .flatMap((d: any) => (d.reports || []).map((r: any) => ({ task: d.task, report: r })))
-        .filter((x: any) => x.report.status !== 'REVERSED')
-        .sort((a: any, b: any) =>
-          String(b.report.confirmedAt || '').localeCompare(String(a.report.confirmedAt || ''))
-        );
-
-      setReports(rows);
+      const items: any[] = Array.isArray(ledPage?.items) ? ledPage.items : [];
       setRecon(reconData);
-      setLedgerItems(ledPage?.items || []);
+      setLedgerItems(items);
+      const lastSeq = items.length ? items[items.length - 1]?.sequence : null;
+      setLedgerNextCursor(ledPage?.nextCursor ?? lastSeq);
+      setLedgerHasMore(Boolean(ledPage?.hasMore));
     } catch (err: any) {
       toast('读取复检与对账数据失败：' + err.message, true);
     } finally {
@@ -61,8 +121,81 @@ export const ReconciliationPage: React.FC = () => {
   };
 
   useEffect(() => {
-    loadData();
+    loadData(0);
   }, []);
+
+  const handlePageChange = async (nextOffset: number) => {
+    if (nextOffset < 0 || loading) return;
+    setLoading(true);
+    try {
+      await loadReportsPage(nextOffset);
+    } catch (err: any) {
+      toast('切换报工分页失败：' + err.message, true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLoadMoreLedger = async () => {
+    if (loadingMoreLedger || !ledgerHasMore || ledgerNextCursor === null || ledgerNextCursor === undefined) {
+      return;
+    }
+    setLoadingMoreLedger(true);
+    try {
+      const ledPage = await requestJSON(
+        `/api/v2/inventory-ledger?limit=${LEDGER_PAGE_SIZE}&after=${encodeURIComponent(
+          String(ledgerNextCursor)
+        )}`
+      );
+      const nextItems: any[] = Array.isArray(ledPage?.items) ? ledPage.items : [];
+      setLedgerItems((prev) => {
+        const seen = new Set(prev.map((x) => x.id ?? x.sequence));
+        const merged = [...prev];
+        for (const it of nextItems) {
+          const key = it.id ?? it.sequence;
+          if (!seen.has(key)) {
+            seen.add(key);
+            merged.push(it);
+          }
+        }
+        return merged;
+      });
+      const tailSeq = nextItems.length ? nextItems[nextItems.length - 1]?.sequence : ledgerNextCursor;
+      setLedgerNextCursor(ledPage?.nextCursor ?? tailSeq);
+      setLedgerHasMore(Boolean(ledPage?.hasMore) && nextItems.length > 0);
+    } catch (err: any) {
+      toast('加载更多流水失败：' + err.message, true);
+    } finally {
+      setLoadingMoreLedger(false);
+    }
+  };
+
+  const pendingSlots = useMemo(() => {
+    void pendingTick;
+    return (['quality-disposition', 'quality-revoke'] as const)
+      .map((s) => [s, pendingWrite(s)] as const)
+      .filter(([, v]) => Boolean(v));
+  }, [pendingTick, busy]);
+
+  const handleRetryPending = async (slot: PendingReconSlot) => {
+    setBusy(true);
+    try {
+      await retryWrite(slot);
+      toast(`${PENDING_RECON_LABELS[slot]}已确认过账`);
+      await loadData(reportOffset);
+    } catch (err: any) {
+      toast('重试失败：' + (err.message || '未知错误'), true);
+    } finally {
+      setBusy(false);
+      setPendingTick((t) => t + 1);
+    }
+  };
+
+  const handleDropPending = (slot: PendingReconSlot) => {
+    dropWrite(slot);
+    toast('已放弃待确认操作，请刷新核对当前过账状态');
+    setPendingTick((t) => t + 1);
+  };
 
   const handleOpenQualityReview = (report: any) => {
     const revPieces = reviewablePieces(report);
@@ -70,7 +203,10 @@ export const ReconciliationPage: React.FC = () => {
       toast('该报工单已无剩余可复检合格件', true);
       return;
     }
-    setQualityDraft(emptyQualityForm(report, revPieces[0].pieceId));
+    setQualityDraft({
+      ...emptyQualityForm(report, revPieces[0].pieceId),
+      operationId: createUuid()
+    });
   };
 
   const handleSubmitQuality = async (e: React.FormEvent) => {
@@ -83,10 +219,12 @@ export const ReconciliationPage: React.FC = () => {
       toast(probs[0], true);
       return;
     }
-    const cmd = buildQualityCommand(qualityDraft, createUuid());
+    const opId = qualityDraft.operationId || createUuid();
+    const cmd = buildQualityCommand(qualityDraft, opId);
     setBusy(true);
     try {
-      await requestJSON(
+      await idempotentPost(
+        'quality-disposition',
         '/api/cutting/reports/' +
           encodeURIComponent(qualityDraft.report.planId) +
           '/quality-dispositions',
@@ -94,11 +232,42 @@ export const ReconciliationPage: React.FC = () => {
       );
       toast('复检处置已过账！原母卷耗用保持不变，不良件已扣回良品量并退回需求池待补排');
       setQualityDraft(null);
-      await loadData();
+      await loadData(reportOffset);
     } catch (err: any) {
       toast('复检处置失败：' + err.message, true);
     } finally {
       setBusy(false);
+      setPendingTick((t) => t + 1);
+    }
+  };
+
+  const handleSubmitRevoke = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!revokeDraft || busy) return;
+    if (!revokeDraft.operator.trim() || !revokeDraft.reason.trim()) {
+      toast('请填写撤销经办人与撤销原因', true);
+      return;
+    }
+    setBusy(true);
+    try {
+      await idempotentJsonPost(
+        'quality-revoke',
+        `/api/cutting/reports/${encodeURIComponent(
+          revokeDraft.reportId
+        )}/dispositions/${encodeURIComponent(revokeDraft.dispositionId)}/revoke`,
+        {
+          operator: revokeDraft.operator.trim(),
+          reason: revokeDraft.reason.trim()
+        }
+      );
+      toast('复检处置已受控撤销：原良品完成量已恢复，派生料头已作废，母卷消耗保持不变');
+      setRevokeDraft(null);
+      await loadData(reportOffset);
+    } catch (err: any) {
+      toast('撤销复检处置失败：' + err.message, true);
+    } finally {
+      setBusy(false);
+      setPendingTick((t) => t + 1);
     }
   };
 
@@ -117,19 +286,13 @@ export const ReconciliationPage: React.FC = () => {
 
   const handleExportLedgerCsv = () => {
     if (!ledgerItems.length) return;
-    const cols = ['sequence', 'eventType', 'aggregateType', 'aggregateId', 'actor', 'occurredAt'];
-    const csv =
-      '\uFEFF' +
-      [cols.join(',')]
-        .concat(
-          ledgerItems.map((it) => cols.map((k) => csvCell(it[k])).join(','))
-        )
-        .join('\n');
+    const { csv, rangeLabel } = buildLedgerCsvText(ledgerItems, { hasMore: ledgerHasMore });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-    a.download = '库存与需求过账流水.csv';
+    a.download = `库存与需求过账流水-${ledgerItems.length}条.csv`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast(`已导出流水 CSV（${rangeLabel}）`);
   };
 
   const areaStats = useMemo(() => {
@@ -152,9 +315,10 @@ export const ReconciliationPage: React.FC = () => {
 
   const gapReportCount = useMemo(
     () =>
-      reports.filter(({ report }) => {
+      reports.filter(({ report, dispositions }) => {
         const s = receiptSummary(report, effectivePieceResults);
-        return (report.qualityDispositions || []).length > 0 || s.rejected > 0;
+        const activeDisps = dispositions.filter((d) => !isDispositionRevoked(d)).length;
+        return activeDisps > 0 || s.rejected > 0;
       }).length,
     [reports]
   );
@@ -162,8 +326,8 @@ export const ReconciliationPage: React.FC = () => {
   const filteredReports = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return reports;
-    return reports.filter(({ task, report }) =>
-      `${report.planId || ''} ${task?.name || ''} ${report.rollId || ''} ${report.sourceRemnantId || ''}`
+    return reports.filter((row) =>
+      `${row.reportId} ${row.taskName} ${row.materialModel} ${row.batchNo} ${row.report.rollId || ''} ${row.report.sourceRemnantId || ''}`
         .toLowerCase()
         .includes(q)
     );
@@ -184,7 +348,7 @@ export const ReconciliationPage: React.FC = () => {
       {
         value: 'quality',
         label: '裁后复检与缺口补排',
-        count: reports.length,
+        count: reportTotal || reports.length,
         accent: gapReportCount > 0 ? 'amber' : 'default'
       },
       {
@@ -193,11 +357,14 @@ export const ReconciliationPage: React.FC = () => {
         count: ledgerItems.length
       }
     ],
-    [reports.length, gapReportCount, ledgerItems.length]
+    [reportTotal, reports.length, gapReportCount, ledgerItems.length]
   );
 
   const visibleCount = tab === 'quality' ? filteredReports.length : filteredLedger.length;
   const totalCount = tab === 'quality' ? reports.length : ledgerItems.length;
+
+  const pageStart = reportTotal > 0 ? reportOffset + 1 : 0;
+  const pageEnd = Math.min(reportTotal, reportOffset + reports.length);
 
   return (
     <div className="react-page">
@@ -206,7 +373,8 @@ export const ReconciliationPage: React.FC = () => {
           <div className="mp-page-title-block">
             <h1>复检补排与对账</h1>
             <span className="mp-page-summary num">
-              {reports.length} 笔报工回执 · {gapReportCount} 项含复检缺口 · 账实
+              {reportTotal || reports.length} 笔报工回执（当前页 {reports.length} 笔）· 本页{' '}
+              {gapReportCount} 项含复检缺口 · 账实
               {recon?.status === 'BALANCED'
                 ? '平衡'
                 : recon?.status === 'MISMATCH'
@@ -215,6 +383,32 @@ export const ReconciliationPage: React.FC = () => {
             </span>
           </div>
         </div>
+
+        {pendingSlots.length > 0 && (
+          <div className="mp-inv-notice" style={{ marginBottom: 10 }}>
+            {pendingSlots.map(([slot]) => (
+              <span key={slot} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <span>{PENDING_RECON_LABELS[slot]}提交结果未确认（已启用幂等保护）</span>
+                <button
+                  type="button"
+                  className="btn sm"
+                  disabled={busy}
+                  onClick={() => handleRetryPending(slot)}
+                >
+                  重试原提交
+                </button>
+                <button
+                  type="button"
+                  className="btn sm"
+                  disabled={busy}
+                  onClick={() => handleDropPending(slot)}
+                >
+                  放弃
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
 
         <div className="mp-filter-toolbar">
           <SegmentedControl
@@ -253,7 +447,7 @@ export const ReconciliationPage: React.FC = () => {
               aria-label={tab === 'quality' ? '搜索报工回执' : '搜索对账流水'}
               placeholder={
                 tab === 'quality'
-                  ? '筛选报工单号、需求族或母卷/料头号'
+                  ? '筛选报工单号、需求族、缸号或母卷/料头号'
                   : '筛选事件类型、对象编号或操作方'
               }
               value={search}
@@ -266,7 +460,7 @@ export const ReconciliationPage: React.FC = () => {
           </span>
 
           <div className="mp-toolbar-actions">
-            <button type="button" className="mp-ghost-btn" onClick={loadData}>
+            <button type="button" className="mp-ghost-btn" onClick={() => loadData(reportOffset)}>
               刷新
             </button>
             <a className="mp-ghost-btn" href="#/results">
@@ -277,9 +471,10 @@ export const ReconciliationPage: React.FC = () => {
                 type="button"
                 className="btn pri"
                 disabled={!ledgerItems.length}
+                title={`仅导出当前已加载的 ${ledgerItems.length} 条流水${ledgerHasMore ? '（可先点下方“加载更多”再导出）' : ''}`}
                 onClick={handleExportLedgerCsv}
               >
-                导出流水 CSV
+                导出已加载流水 CSV ({ledgerItems.length}条)
               </button>
             ) : (
               <a className="btn pri" href="#/workbench">
@@ -291,16 +486,16 @@ export const ReconciliationPage: React.FC = () => {
 
         {loading ? (
           <div className="mp-empty-card">
-            <div className="loading">正在读取报工回执与账实对账快照…</div>
+            <div className="loading">正在读取聚合报工回执与账实对账快照…</div>
           </div>
         ) : tab === 'quality' ? (
           <>
             <div className="mp-rec-note">
               <span>
-                裁后质量重分类仅扣回良品履约并将缺口退回需求池补排，不撤回或篡改已切母卷耗用。
+                裁后质量重分类与撤销均保留原母卷消耗不篡改，仅受控调整良品履约量与派生余料状态（支持跨刷新幂等恢复）。
               </span>
               <span className="mp-toolbar-count num">
-                待补排缺口单：{gapReportCount} 笔
+                {reportTotal > 0 ? `第 ${pageStart}-${pageEnd} / 共 ${reportTotal} 笔` : '共 0 笔'}
               </span>
             </div>
 
@@ -308,7 +503,7 @@ export const ReconciliationPage: React.FC = () => {
               <div className="mp-empty-card">
                 <strong>暂无已完工报工记录</strong>
                 <p>
-                  排程方案在「结果管理」完成完工过账（或由 MES 回传报工）后，即可在此执行裁后复检判废或剪裁转料头。
+                  排程方案在「结果管理」完成完工过账（或由 MES 回传报工）后，即可在此执行裁后复检判废、剪裁转料头或受控撤销。
                 </p>
                 <a className="btn" href="#/results">
                   前往结果管理查看方案 →
@@ -317,7 +512,7 @@ export const ReconciliationPage: React.FC = () => {
             ) : filteredReports.length === 0 ? (
               <div className="mp-empty-card">
                 <strong>未找到匹配的报工回执</strong>
-                <p>请调整搜索关键词后重试。</p>
+                <p>请调整搜索关键词或翻页查看其他报工记录。</p>
                 <button type="button" className="btn" onClick={() => setSearch('')}>
                   清空搜索
                 </button>
@@ -329,7 +524,7 @@ export const ReconciliationPage: React.FC = () => {
                     <thead>
                       <tr>
                         <th>报工单号</th>
-                        <th>所属需求族</th>
+                        <th>所属需求族 / 品号缸号</th>
                         <th>消耗母卷 / 料头</th>
                         <th className="r">实切长 mm</th>
                         <th className="r">净合格件</th>
@@ -339,70 +534,236 @@ export const ReconciliationPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredReports.map(({ task, report }) => {
+                      {filteredReports.map((row) => {
+                        const { report, dispositions } = row;
                         const s = receiptSummary(report, effectivePieceResults);
                         const revCount = reviewablePieces(report).length;
                         const defectCount = Number(s.rejected) || 0;
-                        const hasGap =
-                          (Number(s.dispositions) || 0) > 0 || defectCount > 0;
+                        const activeDispCount = dispositions.filter(
+                          (d) => !isDispositionRevoked(d)
+                        ).length;
+                        const hasGap = activeDispCount > 0 || defectCount > 0;
+                        const isExpanded = expandedReportId === row.reportId;
+
                         return (
-                          <tr key={report.planId}>
-                            <td>
-                              <CodeBadge>{shortId(report.planId)}</CodeBadge>
-                            </td>
-                            <td className="mp-rec-name-cell">
-                              <strong>{task.name}</strong>
-                              {report.confirmedAt && (
-                                <span className="mp-rec-name-sub num">
-                                  完工于{' '}
-                                  {String(report.confirmedAt).replace('T', ' ').slice(0, 19)}
-                                </span>
-                              )}
-                            </td>
-                            <td>
-                              <CodeBadge>{report.sourceRemnantId || report.rollId}</CodeBadge>
-                            </td>
-                            <td className="r num">{fmtN(report.actualCutLen, 1)}</td>
-                            <td className="r num" style={{ color: '#059669', fontWeight: 600 }}>
-                              {s.qualified}
-                            </td>
-                            <td
-                              className="r num"
-                              style={{
-                                color: defectCount > 0 ? '#e11d48' : 'var(--cp-ink-3)',
-                                fontWeight: defectCount > 0 ? 600 : 400
-                              }}
-                            >
-                              {defectCount}
-                            </td>
-                            <td className="r num">{fmtN(report.netUtilization, 2)}%</td>
-                            <td style={{ textAlign: 'right' }}>
-                              <div style={{ display: 'inline-flex', gap: 6 }}>
-                                {revCount > 0 && (
-                                  <button
-                                    type="button"
-                                    className="btn sm"
-                                    onClick={() => handleOpenQualityReview(report)}
-                                  >
-                                    复检处置 ({revCount})
-                                  </button>
+                          <React.Fragment key={row.reportId}>
+                            <tr>
+                              <td>
+                                <CodeBadge title={row.reportId}>{shortId(row.reportId)}</CodeBadge>
+                              </td>
+                              <td className="mp-rec-name-cell">
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                  <strong>{row.taskName}</strong>
+                                  {row.materialModel && (
+                                    <span className="muted num" style={{ fontSize: 11.5 }}>
+                                      {row.materialModel}
+                                    </span>
+                                  )}
+                                  {row.batchNo && <CodeBadge>缸:{row.batchNo}</CodeBadge>}
+                                </div>
+                                {report.confirmedAt && (
+                                  <span className="mp-rec-name-sub num">
+                                    完工于{' '}
+                                    {String(report.confirmedAt).replace('T', ' ').slice(0, 19)}
+                                  </span>
                                 )}
-                                {hasGap && (
-                                  <button
-                                    type="button"
-                                    className="btn sm soft-accent"
-                                    onClick={() => handleReplenishTask(task.id)}
+                              </td>
+                              <td>
+                                <CodeBadge>{report.sourceRemnantId || report.rollId || '—'}</CodeBadge>
+                              </td>
+                              <td className="r num">{fmtN(report.actualCutLen, 1)}</td>
+                              <td className="r num" style={{ color: '#059669', fontWeight: 600 }}>
+                                {s.qualified}
+                              </td>
+                              <td
+                                className="r num"
+                                style={{
+                                  color: defectCount > 0 ? '#e11d48' : 'var(--cp-ink-3)',
+                                  fontWeight: defectCount > 0 ? 600 : 400
+                                }}
+                              >
+                                {defectCount}
+                              </td>
+                              <td className="r num">{fmtN(report.netUtilization, 2)}%</td>
+                              <td style={{ textAlign: 'right' }}>
+                                <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                  {dispositions.length > 0 && (
+                                    <button
+                                      type="button"
+                                      className="btn sm"
+                                      onClick={() =>
+                                        setExpandedReportId(isExpanded ? null : row.reportId)
+                                      }
+                                    >
+                                      {isExpanded ? '收起处置' : `复检记录 (${dispositions.length})`}
+                                    </button>
+                                  )}
+                                  {revCount > 0 && (
+                                    <button
+                                      type="button"
+                                      className="btn sm"
+                                      onClick={() => handleOpenQualityReview(report)}
+                                    >
+                                      复检处置 ({revCount})
+                                    </button>
+                                  )}
+                                  {hasGap && row.taskId && (
+                                    <button
+                                      type="button"
+                                      className="btn sm soft-accent"
+                                      onClick={() => handleReplenishTask(row.taskId)}
+                                    >
+                                      带缺口去补排 →
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+
+                            {isExpanded && dispositions.length > 0 && (
+                              <tr>
+                                <td
+                                  colSpan={8}
+                                  style={{
+                                    background: 'var(--panel-2, #f8fafc)',
+                                    padding: '10px 14px'
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      fontSize: 12,
+                                      fontWeight: 600,
+                                      marginBottom: 6,
+                                      color: 'var(--cp-ink-2)'
+                                    }}
                                   >
-                                    带缺口去补排 →
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
+                                    历史复检处置记录（保留不可变审计痕迹，未撤销处置可执行受控撤销）
+                                  </div>
+                                  <table className="t">
+                                    <thead>
+                                      <tr>
+                                        <th>处置编号</th>
+                                        <th>裁片</th>
+                                        <th>方式</th>
+                                        <th>检验人</th>
+                                        <th>原因</th>
+                                        <th>派生料头</th>
+                                        <th>状态</th>
+                                        <th style={{ textAlign: 'right' }}>受控操作</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {dispositions.map((d: any, idx: number) => {
+                                        const dispId = String(d.id || d.dispositionId || idx);
+                                        const revoked = isDispositionRevoked(d);
+                                        const dispLabel =
+                                          (DISPOSITIONS as Record<string, string>)[d.disposition] ||
+                                          d.disposition ||
+                                          '复检处置';
+                                        return (
+                                          <tr
+                                            key={dispId}
+                                            style={
+                                              revoked
+                                                ? { opacity: 0.65, textDecoration: 'line-through' }
+                                                : undefined
+                                            }
+                                          >
+                                            <td>
+                                              <CodeBadge title={dispId}>{shortId(dispId)}</CodeBadge>
+                                            </td>
+                                            <td className="num">#{d.pieceId ?? '—'}</td>
+                                            <td>
+                                              <span className="tag warn">{dispLabel}</span>
+                                            </td>
+                                            <td>{d.inspector || '—'}</td>
+                                            <td>{d.reason || '—'}</td>
+                                            <td className="num">
+                                              {d.remnantId || d.recoveredRemnantId || '—'}
+                                            </td>
+                                            <td>
+                                              <span className={`tag ${revoked ? '' : 'ok'}`}>
+                                                {revoked ? '已撤销' : '生效中'}
+                                              </span>
+                                            </td>
+                                            <td style={{ textAlign: 'right' }}>
+                                              {!revoked && (d.id || d.dispositionId) ? (
+                                                <button
+                                                  type="button"
+                                                  className="btn sm"
+                                                  style={{ color: '#b91c1c' }}
+                                                  onClick={() =>
+                                                    setRevokeDraft({
+                                                      reportId: row.reportId,
+                                                      taskName: row.taskName,
+                                                      dispositionId: String(d.id || d.dispositionId),
+                                                      pieceId: d.pieceId,
+                                                      dispositionLabel: dispLabel,
+                                                      inspector: d.inspector,
+                                                      origReason: d.reason,
+                                                      operator: '',
+                                                      reason: ''
+                                                    })
+                                                  }
+                                                >
+                                                  撤销处置
+                                                </button>
+                                              ) : (
+                                                <span className="muted" style={{ fontSize: 11.5 }}>
+                                                  {d.revokedReason ? `原因：${d.revokedReason}` : '—'}
+                                                </span>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         );
                       })}
                     </tbody>
                   </table>
+                </div>
+
+                {/* 聚合报工分页控件 */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '10px 14px',
+                    borderTop: '1px solid var(--line-2, #e2e8f0)',
+                    fontSize: 12
+                  }}
+                >
+                  <span className="muted num">
+                    每页 {REPORT_PAGE_SIZE} 笔 · 当前第 {pageStart}~{pageEnd} / 共 {reportTotal}{' '}
+                    笔
+                  </span>
+                  <div style={{ display: 'inline-flex', gap: 6 }}>
+                    <button
+                      type="button"
+                      className="btn sm"
+                      disabled={reportOffset <= 0 || loading}
+                      onClick={() =>
+                        handlePageChange(Math.max(0, reportOffset - REPORT_PAGE_SIZE))
+                      }
+                    >
+                      ← 上一页
+                    </button>
+                    <button
+                      type="button"
+                      className="btn sm"
+                      disabled={!reportHasMore || loading}
+                      onClick={() => handlePageChange(reportOffset + REPORT_PAGE_SIZE)}
+                    >
+                      下一页 →
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -457,7 +818,8 @@ export const ReconciliationPage: React.FC = () => {
               <div className="mp-rec-card-head">
                 <strong>不可变库存与需求过账流水</strong>
                 <span className="mp-toolbar-count num">
-                  显示 {filteredLedger.length} / 最近 {ledgerItems.length} 笔
+                  当前显示 {filteredLedger.length} / 已加载 {ledgerItems.length} 笔
+                  {ledgerHasMore ? '（支持下方游标加载更多）' : '（已加载全部）'}
                 </span>
               </div>
               {filteredLedger.length === 0 ? (
@@ -479,7 +841,7 @@ export const ReconciliationPage: React.FC = () => {
                     </thead>
                     <tbody>
                       {filteredLedger.map((it) => (
-                        <tr key={it.id}>
+                        <tr key={it.id ?? it.sequence}>
                           <td className="num">#{it.sequence}</td>
                           <td>
                             <span className="tag kind">{it.eventType}</span>
@@ -500,6 +862,33 @@ export const ReconciliationPage: React.FC = () => {
                   </table>
                 </div>
               )}
+
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 14px',
+                  borderTop: '1px solid var(--line-2, #e2e8f0)',
+                  fontSize: 12
+                }}
+              >
+                <span className="muted num">
+                  已加载 {ledgerItems.length} 条流水 · CSV 导出仅包含当前已加载范围（含防公式注入转义）
+                </span>
+                {ledgerHasMore ? (
+                  <button
+                    type="button"
+                    className="btn sm"
+                    disabled={loadingMoreLedger}
+                    onClick={handleLoadMoreLedger}
+                  >
+                    {loadingMoreLedger ? '正在加载下一批…' : `加载更多流水 (+${LEDGER_PAGE_SIZE})`}
+                  </button>
+                ) : (
+                  <span className="muted">已全部加载完成</span>
+                )}
+              </div>
             </div>
           </>
         )}
@@ -509,7 +898,9 @@ export const ReconciliationPage: React.FC = () => {
       <ModalDialog
         open={qualityDraft !== null}
         title="裁后质量复检重分类（保持原母卷耗用不变，扣回良品完成量）"
-        onClose={() => setQualityDraft(null)}
+        onClose={() => {
+          if (!busy) setQualityDraft(null);
+        }}
         maxWidth={560}
       >
         {qualityDraft && (
@@ -599,11 +990,92 @@ export const ReconciliationPage: React.FC = () => {
               )}
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button type="button" className="btn" onClick={() => setQualityDraft(null)}>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => setQualityDraft(null)}
+              >
                 取消
               </button>
               <button type="submit" className="btn pri" disabled={busy}>
-                确认复检处置
+                {busy ? '过账中…' : '确认复检处置'}
+              </button>
+            </div>
+          </form>
+        )}
+      </ModalDialog>
+
+      {/* 受控复检处置撤销弹窗 */}
+      <ModalDialog
+        open={revokeDraft !== null}
+        title="受控撤销复检处置（保留审计留痕，恢复良品量）"
+        onClose={() => {
+          if (!busy) setRevokeDraft(null);
+        }}
+        maxWidth={540}
+      >
+        {revokeDraft && (
+          <form onSubmit={handleSubmitRevoke}>
+            <div
+              role="alert"
+              style={{
+                borderLeft: '3px solid #d97706',
+                background: 'rgba(245, 158, 11, 0.1)',
+                padding: '8px 10px',
+                borderRadius: 4,
+                fontSize: 12,
+                color: '#92400e',
+                marginBottom: 10
+              }}
+            >
+              <strong>撤销边界说明：</strong>撤销后将保留原复检记录并追加反向流水，恢复对应裁片的良品完成量、并将未使用的派生料头置为作废/撤销；原母卷消耗保持不变。若派生料头已被领用/移库将被服务端拦截。
+            </div>
+            <div className="kv num" style={{ padding: '4px 0 10px' }}>
+              <div>报工单号</div>
+              <div>{revokeDraft.reportId}</div>
+              <div>处置单号 / 裁片</div>
+              <div>
+                {revokeDraft.dispositionId} · 裁片 #{revokeDraft.pieceId ?? '—'}（
+                {revokeDraft.dispositionLabel}）
+              </div>
+              <div>原检验人 / 原因</div>
+              <div>
+                {revokeDraft.inspector || '—'} · {revokeDraft.origReason || '—'}
+              </div>
+            </div>
+            <div className="form" style={{ gridTemplateColumns: '90px 1fr', padding: '4px 0 14px' }}>
+              <label htmlFor="rev-operator">撤销经办人</label>
+              <input
+                id="rev-operator"
+                className="field"
+                required
+                placeholder="如：质检主管刘工"
+                value={revokeDraft.operator}
+                onChange={(e) => setRevokeDraft({ ...revokeDraft, operator: e.target.value })}
+              />
+              <label htmlFor="rev-reason">撤销原因</label>
+              <input
+                id="rev-reason"
+                className="field"
+                required
+                autoFocus
+                placeholder="如：二次复核确认为可擦除粉尘印，误判撤回"
+                value={revokeDraft.reason}
+                onChange={(e) => setRevokeDraft({ ...revokeDraft, reason: e.target.value })}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => setRevokeDraft(null)}
+              >
+                取消
+              </button>
+              <button type="submit" className="btn pri" disabled={busy}>
+                {busy ? '正在撤销…' : '确认受控撤销'}
               </button>
             </div>
           </form>
