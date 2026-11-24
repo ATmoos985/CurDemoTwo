@@ -195,9 +195,10 @@ test('shared renderer draws actual closed polygon boundaries without a bounding-
 
 test('engine hint follows auto-dispatch instead of the first engine that lists the same mode', () => {
     const engines = [{ id: 'crosscut', modes: ['CROSSCUT'], available: true }, { id: 'javaguillotine', modes: ['GUILLOTINE'], available: true },
-        { id: 'packingsolver', modes: ['GUILLOTINE'], available: false }, { id: 'packingsolver-irregular', modes: ['CONTOUR'], available: true }];
+        { id: 'packingsolver', modes: ['GUILLOTINE'], available: false },
+        { id: 'packingsolver-irregular', modes: ['CONTOUR'], available: false }, { id: 'deepnest', modes: ['CONTOUR'], available: true }];
     assert.equal(dispatchedEngine(engines, 'GUILLOTINE').id, 'packingsolver');
     assert.equal(dispatchedEngine(engines, 'CROSSCUT').id, 'crosscut');
-    assert.equal(dispatchedEngine(engines, 'CONTOUR').id, 'packingsolver-irregular');
+    assert.equal(dispatchedEngine(engines, 'CONTOUR').id, 'deepnest');
     assert.equal(dispatchedEngine([], 'GUILLOTINE'), null);
 });

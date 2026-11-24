@@ -28,6 +28,7 @@ class NativeSolverFallbackApiTests {
         r.add("cutdemo.state.path", () -> temp.resolve("state.json").toString());
         r.add("cutdemo.seed-demo-data", () -> false);
         r.add("packingsolver.executable.path", () -> temp.resolve("missing-packingsolver.exe").toString());
+        r.add("packingsolver.irregular.executable.path", () -> temp.resolve("missing-packingsolver-irregular.exe").toString());
     }
     @Value("${local.server.port}") int port;
     private final ObjectMapper json = new ObjectMapper();
@@ -45,6 +46,8 @@ class NativeSolverFallbackApiTests {
         var health = json.readTree(response.body());
         assertFalse(health.get("packingsolverAvailable").asBoolean(), response.body());
         assertEquals("javaguillotine", health.get("packingsolverFallback").asText(), response.body());
+        assertFalse(health.get("packingsolverIrregularAvailable").asBoolean(), response.body());
+        assertEquals("deepnest", health.get("packingsolverIrregularFallback").asText(), response.body());
 
         var engines = json.readTree(send("/api/v1/nesting/engines", null).body());
         for (var engine : engines) if ("packingsolver".equals(engine.get("id").asText()))
@@ -80,5 +83,24 @@ class NativeSolverFallbackApiTests {
         var plan = json.readTree(send("/api/cutting/plans/" + body.get("planId").asText(), null).body());
         assertEquals("javaguillotine", plan.get("result").get("engine").asText());
         assertEquals(reason, plan.get("result").get("fallbackReason").asText());
+    }
+
+    @Test void contourAutoUsesDeepnestDirectlyAndExplicitNativeFallsBackToDeepnest() throws Exception {
+        var autoResponse = send("/api/v1/nesting/solve", json.writeValueAsString(NativeSolverFallbackTests.contour("auto")));
+        assertEquals(200, autoResponse.statusCode(), autoResponse.body());
+        var autoResult = json.readValue(autoResponse.body(), NestingResult.class);
+        assertEquals("FEASIBLE", autoResult.status(), autoResult.message());
+        assertEquals("deepnest", autoResult.engine());
+        assertEquals("deepnest", autoResult.requestedEngine());
+        assertNull(autoResult.fallbackReason());
+
+        var nativeResponse = send("/api/v1/nesting/solve", json.writeValueAsString(NativeSolverFallbackTests.contour("packingsolver-irregular")));
+        assertEquals(200, nativeResponse.statusCode(), nativeResponse.body());
+        var nativeResult = json.readValue(nativeResponse.body(), NestingResult.class);
+        assertEquals("FEASIBLE", nativeResult.status(), nativeResult.message());
+        assertEquals("deepnest", nativeResult.engine());
+        assertEquals("packingsolver-irregular", nativeResult.requestedEngine());
+        assertNotNull(nativeResult.fallbackReason());
+        assertTrue(nativeResult.fallbackReason().contains("deepnest"), nativeResult.fallbackReason());
     }
 }

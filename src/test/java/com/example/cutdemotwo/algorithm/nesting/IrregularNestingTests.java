@@ -184,7 +184,7 @@ class IrregularNestingTests {
     @Test void exclusionOutsideActualMaterialAndForgedEngineGeometryAreRejected() {
         assertEquals("INVALID_INPUT",kernel.solve(problem(lShape(),sample().parts(),List.of(new Exclusion(1,150,150,Shape.rectangle(20,20),0)))).status());
         var forged = new ICutSolverEngine() {
-            public String getEngineType() { return "packingsolver-irregular"; }
+            public String getEngineType() { return "deepnest"; }
             public boolean isAvailable() { return true; }
             public EngineCapabilities capabilities() { return nativeEngine.capabilities(); }
             public EngineResult solve(NestingProblem p) { return candidate(placed(1,0,0,Shape.rectangle(200,200),0)); }

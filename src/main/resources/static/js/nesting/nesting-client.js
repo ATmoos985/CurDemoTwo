@@ -2,7 +2,7 @@ import { createNestingScene } from '../canvas/nesting-scene.js';
 
 /** Mirrors the server's auto-dispatch so capability hints describe the engine that will be asked first. */
 export function dispatchedEngine(engines, mode) {
-    const id = mode === 'CROSSCUT' ? 'crosscut' : mode === 'CONTOUR' ? 'packingsolver-irregular' : 'packingsolver';
+    const id = mode === 'CROSSCUT' ? 'crosscut' : mode === 'CONTOUR' ? 'deepnest' : 'packingsolver';
     return engines.find(e => e.id === id) || null;
 }
 

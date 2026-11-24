@@ -27,7 +27,7 @@ class ContourWorkflowTests {
     static final NestingProblem.Shape SHAPE = new NestingProblem.Shape("POLYGON",200,200,List.of(
             new NestingProblem.Point(0,0),new NestingProblem.Point(200,0),new NestingProblem.Point(0,200)));
     final ICutSolverEngine engine = new ICutSolverEngine() {
-        public String getEngineType(){return "packingsolver-irregular";}
+        public String getEngineType(){return "deepnest";}
         public boolean isAvailable(){return true;}
         public EngineCapabilities capabilities(){return new EngineCapabilities(getEngineType(),"1",List.of("RECTANGLE","POLYGON"),List.of("CONTOUR"),List.of("MAXIMIZE_PIECE_AREA"),.1,true);}
         public EngineResult solve(NestingProblem p){

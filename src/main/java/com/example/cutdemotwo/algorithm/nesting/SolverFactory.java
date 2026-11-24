@@ -36,7 +36,7 @@ public class SolverFactory implements NestingSolver {
     /** Native engine id → registered stand-in that may run, with a stated reason, while the native one is unavailable. */
     private static final Map<String, String> FALLBACKS = Map.of(
             "packingsolver", "javaguillotine",
-            "packingsolver-irregular", "javairregular"
+            "packingsolver-irregular", "deepnest"
     );
 
     private final Map<String, ICutSolverEngine> engineMap = new ConcurrentHashMap<>();
@@ -86,7 +86,7 @@ public class SolverFactory implements NestingSolver {
         if (requested == null || requested.isBlank() || "auto".equals(requested))
             requested = switch (problem.process().mode()) {
                 case "CROSSCUT" -> "crosscut";
-                case "CONTOUR" -> "packingsolver-irregular";
+                case "CONTOUR" -> "deepnest";
                 default -> "packingsolver";
             };
         ICutSolverEngine engine = engineMap.get(requested);

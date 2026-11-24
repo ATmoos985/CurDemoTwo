@@ -4,6 +4,8 @@ import com.example.cutdemotwo.business.model.PieceDemand;
 import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import com.example.cutdemotwo.business.cutting.FabricSolveAdapter;
+import com.example.cutdemotwo.algorithm.nesting.DeepnestSolverEngine;
+import com.example.cutdemotwo.algorithm.nesting.IrregularPackingSolverService;
 import com.example.cutdemotwo.algorithm.nesting.PackingSolverService;
 import com.example.cutdemotwo.algorithm.nesting.JavaGuillotineSolverEngine;
 import com.example.cutdemotwo.algorithm.nesting.SolverFactory;
@@ -125,6 +127,49 @@ class NativeSolverFallbackTests {
         var noFallback = factory.solve(guillotine("packingsolver"), false);
         assertEquals("FAILED", noFallback.status());
         assertEquals("packingsolver", noFallback.engine());
+        assertNull(noFallback.fallbackReason());
+    }
+
+    private IrregularPackingSolverService missingNativeIrregular() {
+        var engine = new IrregularPackingSolverService();
+        ReflectionTestUtils.setField(engine, "solverPath", temp.resolve("missing-packingsolver-irregular.exe").toString());
+        return engine;
+    }
+
+    static NestingProblem contour(String engine) {
+        return new NestingProblem("1", "mm",
+                new NestingProblem.Material("sheet", NestingProblem.Shape.rectangle(1000, 600), List.of(), false),
+                List.of(new NestingProblem.Part(7, "part", NestingProblem.Shape.rectangle(400, 300), 2, false)),
+                new NestingProblem.Process("CONTOUR", "SHEET", "left-top", "none", 0, 0, 0, 0,
+                        "MAXIMIZE_PIECE_AREA"), engine, 1);
+    }
+
+    @Test void contourAutoRoutesDirectlyToDeepnestWithoutFallback() {
+        var factory = new SolverFactory(List.of(missingNativeIrregular(), new DeepnestSolverEngine()));
+        for (String requested : List.of("auto", "")) {
+            var result = factory.solve(contour(requested));
+            assertEquals("FEASIBLE", result.status(), result.message());
+            assertEquals(2, result.placements().size());
+            assertEquals("deepnest", result.engine());
+            assertEquals("deepnest", result.requestedEngine());
+            assertNull(result.fallbackReason());
+        }
+    }
+
+    @Test void missingNativeIrregularFallsBackExplicitlyToDeepnestAndRespectsDisabledFallback() {
+        var factory = new SolverFactory(List.of(missingNativeIrregular(), new DeepnestSolverEngine()));
+        assertEquals("deepnest", factory.fallbackFor("packingsolver-irregular"));
+        var result = factory.solve(contour("packingsolver-irregular"));
+        assertEquals("FEASIBLE", result.status(), result.message());
+        assertEquals(2, result.placements().size());
+        assertEquals("deepnest", result.engine());
+        assertEquals("packingsolver-irregular", result.requestedEngine());
+        assertNotNull(result.fallbackReason());
+        assertTrue(result.fallbackReason().contains("deepnest"), result.fallbackReason());
+
+        var noFallback = factory.solve(contour("packingsolver-irregular"), false);
+        assertEquals("UNAVAILABLE", noFallback.status());
+        assertEquals("packingsolver-irregular", noFallback.engine());
         assertNull(noFallback.fallbackReason());
     }
 }
