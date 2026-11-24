@@ -786,16 +786,27 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
     }
     static SlittingResult solveKernel(SlittingProblem p) {
         SlittingValidation.validateProblem(p);
-        boolean fast = "FAST".equals(p.profile());
-        var config = new SolverConfig(p.minWidthMm(), p.maxWidthMm(), p.widthStepMm(), p.motherWidthMm());
-        config.setMode(p.minWidthMm() == p.maxWidthMm() ? "fixed" : "variable");
-
         long totalMs = p.timeLimitSeconds() * 1000L;
         boolean warmWorker = Boolean.getBoolean(WARM_WORKER_PROP);
         long startupMarginMs = warmWorker
                 ? Math.min(3_000L, Math.max(1_000L, totalMs / 15))
                 : Math.min(4_500L, Math.max(1_500L, totalMs / 4));
         long internalBudgetMs = Math.max(500L, totalMs - startupMarginMs);
+
+        // 当启用单车刀数上限、危险细边禁区、切缝损耗或多宽母卷池时，切换至严格物理约束与多宽联合求解器；
+        // 未启用时完整保留原有高性能列生成 + LNS 内核，并在输出端统一执行换刀 TSP 排序。
+        boolean requiresConstrainedSolver = p.maxKnives() != null
+                || p.hasForbiddenNarrowEdge()
+                || p.effectiveKerfMm() > 0
+                || p.hasCandidateRollWidths();
+        if (requiresConstrainedSolver) {
+            return ConstrainedSlittingSolver.solve(p, internalBudgetMs);
+        }
+
+        boolean fast = "FAST".equals(p.profile());
+        var config = new SolverConfig(p.minWidthMm(), p.maxWidthMm(), p.widthStepMm(), p.motherWidthMm());
+        config.setMode(p.minWidthMm() == p.maxWidthMm() ? "fixed" : "variable");
+
         long stageLimitMs = p.stageTimeLimitMs() != null ? p.stageTimeLimitMs() : 120_000L;
         // 隔离进程内多阶段串行共享总时限：精修模式须先保底与 FAST 同等强度的 A 层基线（避免截断倒挂），
         // 再将剩余预算用于多候选选型与 B 层受控 LNS 压缩序号组。
@@ -918,10 +929,13 @@ public class LinearSlittingSolverEngine implements ISlittingSolverEngine, AutoCl
             usable=Math.addExact(usable,Math.multiplyExact((long)p.motherWidthMm()-p.leftTrimMm()-p.rightTrimMm(),repeated));
             piece=Math.addExact(piece,Math.multiplyExact((long)width,repeated));
         }
+        var knifeOptimized = KnifeSetupSequenceOptimizer.optimize(patterns, p.leftTrimMm(), p.effectiveKerfMm());
+        var orderedPatterns = ConstrainedSlittingSolver.renumberPatterns(knifeOptimized.orderedPatterns());
         var fulfillment=p.orders().stream().map(o->{int n=counts.getOrDefault(o.id(),0);return new SlittingResult.Fulfillment(
                 o.id(),o.quantity(),n,Math.max(0,o.quantity()-n),Math.max(0,n-o.quantity()));}).toList();
-        var result=new SlittingResult("1","mm","ortools-1d","newsolver-ortools-9.10",patterns.isEmpty()?"NO_SOLUTION_FOUND":"FEASIBLE",false,
-                patterns,fulfillment,piece,mother,usable,fulfillment.stream().mapToInt(SlittingResult.Fulfillment::overproduced).sum());
+        var result=new SlittingResult("1","mm","ortools-1d","newsolver-ortools-9.10",orderedPatterns.isEmpty()?"NO_SOLUTION_FOUND":"FEASIBLE",false,
+                orderedPatterns,fulfillment,piece,mother,usable,fulfillment.stream().mapToInt(SlittingResult.Fulfillment::overproduced).sum(),
+                knifeOptimized.estimatedKnifeChanges(),knifeOptimized.knifeChangesSaved());
         SlittingValidation.validateResult(p,result);return result;
     }
 }

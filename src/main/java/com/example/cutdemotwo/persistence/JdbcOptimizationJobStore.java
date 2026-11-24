@@ -14,21 +14,27 @@ import java.util.*;
 import java.util.function.*;
 
 /**
- * The dispatch row serializes short state transactions, never solver execution.
+ * The dispatch row serializes short state transactions, never solver execution or capability checks.
  * Database time, lease ownership and increasing attempt tokens guard every worker write.
  */
 public final class JdbcOptimizationJobStore implements LeasedOptimizationJobStore {
     public static final long DEFAULT_TERMINAL_RETENTION_HOURS = 168L;
     private static final int MAX_PURGE_BATCH = 200;
+    private static final int MAX_CLAIM_CONTENTION_ROUNDS = 16;
     private static final String TERMINAL_STATES_SQL = "'SUCCEEDED','FAILED','CANCELLED','TIMED_OUT','LEASE_LOST'";
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
-    private final JsonMapper json=JsonMapper.builder().build();
+    private final JsonMapper json = JsonMapper.builder().build();
     private final boolean mysql;
     private final long terminalRetentionMillis;
     private int workers, queue, archive;
     private record Row(StoredOptimizationJob document, long token, String owner, Long lease, Long deadline) {}
     private record TerminalEntry(String id, long finishedAt) {}
+    private record ClaimOutcome(Lease lease, boolean stop) {
+        static ClaimOutcome claimed(Lease lease) { return new ClaimOutcome(lease, true); }
+        static ClaimOutcome capacityFull() { return new ClaimOutcome(null, true); }
+        static ClaimOutcome contended() { return new ClaimOutcome(null, false); }
+    }
 
     public JdbcOptimizationJobStore(DataSource source) {
         this(source, DEFAULT_TERMINAL_RETENTION_HOURS);
@@ -37,254 +43,368 @@ public final class JdbcOptimizationJobStore implements LeasedOptimizationJobStor
     public JdbcOptimizationJobStore(DataSource source, long terminalRetentionHours) {
         if (terminalRetentionHours < 0) throw new IllegalArgumentException("终态作业保留时长不能为负数");
         this.terminalRetentionMillis = java.util.concurrent.TimeUnit.HOURS.toMillis(terminalRetentionHours);
-        jdbc=new JdbcTemplate(source);
-        String product=jdbc.execute((org.springframework.jdbc.core.ConnectionCallback<String>)connection->connection.getMetaData().getDatabaseProductName());
-        mysql="MySQL".equals(product);
-        if(!mysql && !"H2".equals(product))throw new IllegalArgumentException("计算作业存储仅支持 MySQL，H2 仅用于兼容测试");
-        transaction=new TransactionTemplate(new DataSourceTransactionManager(source));
+        jdbc = new JdbcTemplate(source);
+        String product = jdbc.execute((org.springframework.jdbc.core.ConnectionCallback<String>) connection -> connection.getMetaData().getDatabaseProductName());
+        mysql = "MySQL".equals(product);
+        if (!mysql && !"H2".equals(product)) throw new IllegalArgumentException("计算作业存储仅支持 MySQL，H2 仅用于兼容测试");
+        transaction = new TransactionTemplate(new DataSourceTransactionManager(source));
         transaction.setTimeout(5);
     }
+
     private <T> T locked(Supplier<T> operation) {
         return transaction.execute(status -> {
-            jdbc.queryForObject("SELECT id FROM optimization_dispatch WHERE id=1 FOR UPDATE",Integer.class);
+            jdbc.queryForObject("SELECT id FROM optimization_dispatch WHERE id=1 FOR UPDATE", Integer.class);
             return operation.get();
         });
     }
+
     private long now() {
         // MySQL DATETIME has no offset: ask the server for epoch time instead of interpreting
         // its wall clock in each worker connection's possibly different time zone.
-        if(mysql)return Objects.requireNonNull(jdbc.queryForObject("SELECT UNIX_TIMESTAMP(CURRENT_TIMESTAMP(3))*1000",Long.class));
-        return Objects.requireNonNull(jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(3)",java.sql.Timestamp.class)).getTime();
+        if (mysql) return Objects.requireNonNull(jdbc.queryForObject("SELECT UNIX_TIMESTAMP(CURRENT_TIMESTAMP(3))*1000", Long.class));
+        return Objects.requireNonNull(jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(3)", java.sql.Timestamp.class)).getTime();
     }
-    @Override public void configure(int workers,int queue,int archive) {
-        locked(()->{
-            var config=jdbc.queryForMap("SELECT worker_limit,queue_limit,archive_limit FROM optimization_dispatch WHERE id=1");
-            if(config.get("worker_limit")==null)
-                jdbc.update("UPDATE optimization_dispatch SET worker_limit=?,queue_limit=?,archive_limit=? WHERE id=1",workers,queue,archive);
-            else if(((Number)config.get("worker_limit")).intValue()!=workers
-                    || ((Number)config.get("queue_limit")).intValue()!=queue
-                    || ((Number)config.get("archive_limit")).intValue()!=archive)
+
+    private long ownerActiveCount(String owner) {
+        return Objects.requireNonNull(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM optimization_job WHERE owner_id=? AND state IN ('RUNNING','CANCEL_REQUESTED')",
+                Long.class, owner));
+    }
+
+    @Override
+    public void configure(int workers, int queue, int archive) {
+        locked(() -> {
+            var config = jdbc.queryForMap("SELECT worker_limit,queue_limit,archive_limit FROM optimization_dispatch WHERE id=1");
+            if (config.get("worker_limit") == null)
+                jdbc.update("UPDATE optimization_dispatch SET worker_limit=?,queue_limit=?,archive_limit=? WHERE id=1", workers, queue, archive);
+            else if (((Number) config.get("worker_limit")).intValue() != workers
+                    || ((Number) config.get("queue_limit")).intValue() != queue
+                    || ((Number) config.get("archive_limit")).intValue() != archive)
                 throw new IllegalStateException("共享计算服务的全局并发、队列与归档限额必须一致");
-            this.workers=workers;this.queue=queue;this.archive=archive;
+            this.workers = workers;
+            this.queue = queue;
+            this.archive = archive;
             return null;
         });
     }
-    @Override public StoredOptimizationJob submitOrGet(StoredOptimizationJob document) {
-        if(workers<1)throw new IllegalStateException("作业存储尚未配置");
-        return locked(()->{
-            String digest=digest(document.idempotencyKey());
-            var old=jdbc.query("SELECT id FROM optimization_job WHERE key_digest=?",(rs,n)->rs.getString(1),digest);
-            if(!old.isEmpty()) {
-                var found=find(old.get(0));
-                if(!found.job().inputHash().equals(document.job().inputHash()))
-                    throw new OptimizationFailure("IDEMPOTENCY_CONFLICT","同一幂等键已绑定不同请求",409,false);
+
+    @Override
+    public StoredOptimizationJob submitOrGet(StoredOptimizationJob document) {
+        if (workers < 1) throw new IllegalStateException("作业存储尚未配置");
+        return locked(() -> {
+            String digest = digest(document.idempotencyKey());
+            var old = jdbc.query("SELECT id FROM optimization_job WHERE key_digest=?", (rs, n) -> rs.getString(1), digest);
+            if (!old.isEmpty()) {
+                var found = find(old.get(0));
+                if (!found.job().inputHash().equals(document.job().inputHash()))
+                    throw new OptimizationFailure("IDEMPOTENCY_CONFLICT", "同一幂等键已绑定不同请求", 409, false);
                 return found;
             }
-            long nowMs=now();
-            long active=jdbc.queryForObject("SELECT COUNT(*) FROM optimization_job WHERE state IN ('QUEUED','RUNNING','CANCEL_REQUESTED')",Long.class);
-            if(active>=workers+queue)throw new OptimizationFailure("QUOTA_EXCEEDED","共享作业并发/排队限额已满",429,true);
-            long stored=jdbc.queryForObject("SELECT COUNT(*) FROM optimization_job",Long.class);
-            if(stored>=archive) {
-                int minToFree=(int)Math.min(Integer.MAX_VALUE,stored-archive+1);
-                stored-=evictTerminalLocked(nowMs,terminalRetentionMillis,minToFree);
+            long nowMs = now();
+            // 全局排队与在途作业总量上限（防积压）；单节点并发执行槽在 claim() 按 owner_id 独立核算以支持集群水平扩容。
+            long active = jdbc.queryForObject("SELECT COUNT(*) FROM optimization_job WHERE state IN ('QUEUED','RUNNING','CANCEL_REQUESTED')", Long.class);
+            if (active >= workers + queue) throw new OptimizationFailure("QUOTA_EXCEEDED", "共享作业并发/排队限额已满", 429, true);
+            long stored = jdbc.queryForObject("SELECT COUNT(*) FROM optimization_job", Long.class);
+            if (stored >= archive) {
+                int minToFree = (int) Math.min(Integer.MAX_VALUE, stored - archive + 1);
+                stored -= evictTerminalLocked(nowMs, terminalRetentionMillis, minToFree);
             }
-            if(stored>=archive)throw new OptimizationFailure("QUOTA_EXCEEDED","共享作业归档限额已满且无可清理的终态作业",429,true);
+            if (stored >= archive) throw new OptimizationFailure("QUOTA_EXCEEDED", "共享作业归档限额已满且无可清理的终态作业", 429, true);
             jdbc.update("INSERT INTO optimization_job(id,key_digest,state,created_at,token,document_json) VALUES(?,?,?,?,0,?)",
-                    document.job().id(),digest,"QUEUED",nowMs,json.writeValueAsString(document));
+                    document.job().id(), digest, "QUEUED", nowMs, json.writeValueAsString(document));
             return document;
         });
     }
-    @Override public int purgeExpiredTerminal(long retentionMillis) {
-        if(retentionMillis<0)throw new IllegalArgumentException("终态作业保留时长不能为负数");
-        return locked(()->evictTerminalLocked(now(),retentionMillis,0));
+
+    @Override
+    public int purgeExpiredTerminal(long retentionMillis) {
+        if (retentionMillis < 0) throw new IllegalArgumentException("终态作业保留时长不能为负数");
+        return locked(() -> evictTerminalLocked(now(), retentionMillis, 0));
     }
-    private int evictTerminalLocked(long nowMs,long retentionMillis,int minRequiredToFree) {
-        long cutoff=nowMs-retentionMillis;
-        int limit=Math.max(MAX_PURGE_BATCH,minRequiredToFree);
-        var candidates=jdbc.query(
+
+    private int evictTerminalLocked(long nowMs, long retentionMillis, int minRequiredToFree) {
+        long cutoff = nowMs - retentionMillis;
+        int limit = Math.max(MAX_PURGE_BATCH, minRequiredToFree);
+        var candidates = jdbc.query(
                 "SELECT j.id, COALESCE(MAX(a.finished_at), j.created_at) AS finished_ts " +
                 "FROM optimization_job j " +
                 "LEFT JOIN optimization_attempt a ON a.job_id = j.id " +
                 "WHERE j.state IN (" + TERMINAL_STATES_SQL + ") " +
                 "GROUP BY j.id, j.created_at " +
                 "ORDER BY finished_ts ASC, j.created_at ASC, j.id ASC",
-                (rs,n)->new TerminalEntry(rs.getString(1),rs.getLong(2)));
-        int removed=0;
-        for(var entry:candidates) {
-            if(removed>=limit)break;
-            boolean expired=entry.finishedAt()<=cutoff;
-            if(!expired && removed>=minRequiredToFree)break;
+                (rs, n) -> new TerminalEntry(rs.getString(1), rs.getLong(2)));
+        int removed = 0;
+        for (var entry : candidates) {
+            if (removed >= limit) break;
+            boolean expired = entry.finishedAt() <= cutoff;
+            if (!expired && removed >= minRequiredToFree) break;
             deleteJobById(entry.id());
             removed++;
         }
         return removed;
     }
+
     private void deleteJobById(String id) {
         // 严格按外键依赖顺序清理子表后再删主表，避免外键冲突并连带移除幂等键映射。
-        jdbc.update("DELETE FROM optimization_result WHERE job_id=?",id);
-        jdbc.update("DELETE FROM optimization_attempt WHERE job_id=?",id);
-        jdbc.update("DELETE FROM optimization_archive_entry WHERE job_id=?",id);
-        jdbc.update("DELETE FROM optimization_job WHERE id=?",id);
+        jdbc.update("DELETE FROM optimization_result WHERE job_id=?", id);
+        jdbc.update("DELETE FROM optimization_attempt WHERE job_id=?", id);
+        jdbc.update("DELETE FROM optimization_archive_entry WHERE job_id=?", id);
+        jdbc.update("DELETE FROM optimization_job WHERE id=?", id);
     }
+
     private Row row(String id) {
-        var rows=jdbc.query("SELECT document_json,token,owner_id,lease_until,deadline_at FROM optimization_job WHERE id=?",
-                (rs,n)->new Row(json.readValue(rs.getString(1),StoredOptimizationJob.class),rs.getLong(2),
-                        rs.getString(3),rs.getObject(4,Long.class),rs.getObject(5,Long.class)),id);
-        return rows.isEmpty()?null:rows.get(0);
+        var rows = jdbc.query("SELECT document_json,token,owner_id,lease_until,deadline_at FROM optimization_job WHERE id=?",
+                (rs, n) -> new Row(json.readValue(rs.getString(1), StoredOptimizationJob.class), rs.getLong(2),
+                        rs.getString(3), rs.getObject(4, Long.class), rs.getObject(5, Long.class)), id);
+        return rows.isEmpty() ? null : rows.get(0);
     }
-    @Override public StoredOptimizationJob find(String id) {
-        var row=row(id);return row==null?null:row.document();
+
+    @Override
+    public StoredOptimizationJob find(String id) {
+        var row = row(id);
+        return row == null ? null : row.document();
     }
-    @Override public StoredOptimizationJob findByKey(String key) {
-        var found=jdbc.query("SELECT document_json FROM optimization_job WHERE key_digest=?",
-                (rs,n)->json.readValue(rs.getString(1),StoredOptimizationJob.class),digest(key));
-        return found.isEmpty()?null:found.get(0);
+
+    @Override
+    public StoredOptimizationJob findByKey(String key) {
+        var found = jdbc.query("SELECT document_json FROM optimization_job WHERE key_digest=?",
+                (rs, n) -> json.readValue(rs.getString(1), StoredOptimizationJob.class), digest(key));
+        return found.isEmpty() ? null : found.get(0);
     }
-    @Override public List<StoredOptimizationJob> load() {
+
+    @Override
+    public List<StoredOptimizationJob> load() {
         return jdbc.query("SELECT document_json FROM optimization_job ORDER BY created_at,id",
-                (rs,n)->json.readValue(rs.getString(1),StoredOptimizationJob.class));
+                (rs, n) -> json.readValue(rs.getString(1), StoredOptimizationJob.class));
     }
-    @Override public void save(StoredOptimizationJob document) {
+
+    @Override
+    public void save(StoredOptimizationJob document) {
         throw new UnsupportedOperationException("共享作业必须通过事务与租约操作，禁止无条件覆盖");
     }
+
     private void write(StoredOptimizationJob d) {
-        if(jdbc.update("UPDATE optimization_job SET state=?,document_json=? WHERE id=?",
-                d.job().state(),json.writeValueAsString(d),d.job().id())!=1)
+        if (jdbc.update("UPDATE optimization_job SET state=?,document_json=? WHERE id=?",
+                d.job().state(), json.writeValueAsString(d), d.job().id()) != 1)
             throw new IllegalStateException("计算作业写入丢失");
     }
+
     private void recover(long now) {
-        var ids=jdbc.query("SELECT id FROM optimization_job WHERE state IN ('RUNNING','CANCEL_REQUESTED') AND lease_until<=?",
-                (rs,n)->rs.getString(1),now);
-        for(String id:ids) {
-            var r=row(id);var d=r.document();
-            String state="QUEUED",code="LEASE_EXPIRED",message="执行租约过期，等待剩余预算内重试";
-            if("CANCEL_REQUESTED".equals(d.job().state())) {
-                state="TIMED_OUT".equals(d.job().code())?"TIMED_OUT":"CANCELLED";code=state;message="执行租约过期，取消意图保留";
-            } else if(r.deadline()<=now) {
-                state="TIMED_OUT";code=state;message="租约过期且总计算预算已耗尽";
-            } else if(r.token()>=3) {
-                state="FAILED";code="ATTEMPTS_EXHAUSTED";message="执行租约连续失效，已达到三次尝试上限";
+        var ids = jdbc.query("SELECT id FROM optimization_job WHERE state IN ('RUNNING','CANCEL_REQUESTED') AND lease_until<=?",
+                (rs, n) -> rs.getString(1), now);
+        for (String id : ids) {
+            var r = row(id);
+            var d = r.document();
+            String state = "QUEUED", code = "LEASE_EXPIRED", message = "执行租约过期，等待剩余预算内重试";
+            if ("CANCEL_REQUESTED".equals(d.job().state())) {
+                state = "TIMED_OUT".equals(d.job().code()) ? "TIMED_OUT" : "CANCELLED";
+                code = state;
+                message = "执行租约过期，取消意图保留";
+            } else if (r.deadline() <= now) {
+                state = "TIMED_OUT";
+                code = state;
+                message = "租约过期且总计算预算已耗尽";
+            } else if (r.token() >= 3) {
+                state = "FAILED";
+                code = "ATTEMPTS_EXHAUSTED";
+                message = "执行租约连续失效，已达到三次尝试上限";
             }
-            jdbc.update("UPDATE optimization_attempt SET finished_at=?,outcome='LEASE_EXPIRED' WHERE job_id=? AND token=? AND finished_at IS NULL",now,id,r.token());
-            write(d.transition(state,"QUEUED".equals(state)?"QUEUED":"LEASE_LOST",code,message,null,now));
-            jdbc.update("UPDATE optimization_job SET owner_id=NULL,lease_until=NULL WHERE id=?",id);
+            jdbc.update("UPDATE optimization_attempt SET finished_at=?,outcome='LEASE_EXPIRED' WHERE job_id=? AND token=? AND finished_at IS NULL", now, id, r.token());
+            write(d.transition(state, "QUEUED".equals(state) ? "QUEUED" : "LEASE_LOST", code, message, null, now));
+            jdbc.update("UPDATE optimization_job SET owner_id=NULL,lease_until=NULL WHERE id=?", id);
         }
         // A retriable job can exhaust its original budget while waiting for a worker.
-        var queued=jdbc.query("SELECT id FROM optimization_job WHERE state='QUEUED' AND deadline_at<=?",(rs,n)->rs.getString(1),now);
-        for(String id:queued)write(find(id).transition("TIMED_OUT","STOPPED","TIMED_OUT","重试等待期间总计算预算已耗尽",null,now));
+        var queued = jdbc.query("SELECT id FROM optimization_job WHERE state='QUEUED' AND deadline_at<=?", (rs, n) -> rs.getString(1), now);
+        for (String id : queued) write(find(id).transition("TIMED_OUT", "STOPPED", "TIMED_OUT", "重试等待期间总计算预算已耗尽", null, now));
     }
-    @Override public Lease claim(String owner,long leaseMillis,Predicate<StoredOptimizationJob> executable) {
-        if(owner==null || owner.isBlank() || owner.length()>64 || leaseMillis<1)throw new IllegalArgumentException("无效的 worker 或租约");
-        return locked(()->{
-            long time=now();recover(time);
-            long active=jdbc.queryForObject("SELECT COUNT(*) FROM optimization_job WHERE state IN ('RUNNING','CANCEL_REQUESTED')",Long.class);
-            if(active>=workers)return null;
-            var ids=jdbc.query("SELECT id FROM optimization_job WHERE state='QUEUED' ORDER BY created_at,id",(rs,n)->rs.getString(1));
-            if(ids.isEmpty())return null;
-            Row r=null;
-            for(String id:ids) {var candidate=row(id);if(executable.test(candidate.document())){r=candidate;break;}}
-            if(r==null)return null;
-            // Capability checks may take time. Lease and budget start after them, not before them.
-            time=now();
-            var d=r.document();long token=r.token()+1;
-            if(r.deadline()!=null && r.deadline()<=time)return null;
-            long deadline=r.deadline()==null?time+d.job().timeLimitSeconds()*1000L:r.deadline();
-            var running=d.transition("RUNNING","SOLVING",null,"正在计算并独立校验结果",null,time);
-            write(running);
-            jdbc.update("UPDATE optimization_job SET token=?,owner_id=?,lease_until=?,deadline_at=? WHERE id=?",
-                    token,owner,time+leaseMillis,deadline,d.job().id());
-            jdbc.update("INSERT INTO optimization_attempt(job_id,token,owner_id,started_at,outcome) VALUES(?,?,?,?,'RUNNING')",d.job().id(),token,owner,time);
-            return new Lease(running,owner,token,deadline-time);
-        });
+
+    @Override
+    public Lease claim(String owner, long leaseMillis, Predicate<StoredOptimizationJob> executable) {
+        if (owner == null || owner.isBlank() || owner.length() > 64 || leaseMillis < 1)
+            throw new IllegalArgumentException("无效的 worker 或租约");
+        Objects.requireNonNull(executable, "作业可执行校验谓词不能为空");
+        if (workers < 1) throw new IllegalStateException("作业存储尚未配置");
+
+        Set<String> incompatibleIds = new HashSet<>();
+        for (int round = 0; round < MAX_CLAIM_CONTENTION_ROUNDS; round++) {
+            // 阶段一（极短事务锁）：仅恢复过期租约、按当前节点 owner_id 核验本节点执行槽并拉取待排 ID 列表，绝不在锁内做多边形校验。
+            List<String> candidateIds = locked(() -> {
+                long time = now();
+                recover(time);
+                if (ownerActiveCount(owner) >= workers) {
+                    return List.of();
+                }
+                return jdbc.query("SELECT id FROM optimization_job WHERE state='QUEUED' ORDER BY created_at,id",
+                        (rs, n) -> rs.getString(1));
+            });
+            if (candidateIds.isEmpty()) {
+                return null;
+            }
+
+            // 阶段二（完全锁外）：读取候选文档并执行可能耗时的能力与多边形几何校验，彻底避免阻塞集群心跳与提交事务。
+            String chosenId = null;
+            for (String id : candidateIds) {
+                if (incompatibleIds.contains(id)) {
+                    continue;
+                }
+                Row candidate = row(id);
+                if (candidate == null || !"QUEUED".equals(candidate.document().job().state())) {
+                    continue;
+                }
+                if (executable.test(candidate.document())) {
+                    chosenId = id;
+                    break;
+                }
+                incompatibleIds.add(id);
+            }
+            if (chosenId == null) {
+                return null;
+            }
+
+            // 阶段三（极短原子事务锁）：复核本节点执行槽与目标作业状态，原子写入租约与 attempt，耗时微秒级。
+            final String targetId = chosenId;
+            ClaimOutcome outcome = locked(() -> {
+                long time = now();
+                recover(time);
+                if (ownerActiveCount(owner) >= workers) {
+                    return ClaimOutcome.capacityFull();
+                }
+                Row r = row(targetId);
+                if (r == null || !"QUEUED".equals(r.document().job().state())) {
+                    return ClaimOutcome.contended();
+                }
+                if (r.deadline() != null && r.deadline() <= time) {
+                    return ClaimOutcome.contended();
+                }
+                var d = r.document();
+                long token = r.token() + 1;
+                long deadline = r.deadline() == null ? time + d.job().timeLimitSeconds() * 1000L : r.deadline();
+                var running = d.transition("RUNNING", "SOLVING", null, "正在计算并独立校验结果", null, time);
+                write(running);
+                jdbc.update("UPDATE optimization_job SET token=?,owner_id=?,lease_until=?,deadline_at=? WHERE id=?",
+                        token, owner, time + leaseMillis, deadline, d.job().id());
+                jdbc.update("INSERT INTO optimization_attempt(job_id,token,owner_id,started_at,outcome) VALUES(?,?,?,?,'RUNNING')",
+                        d.job().id(), token, owner, time);
+                return ClaimOutcome.claimed(new Lease(running, owner, token, deadline - time));
+            });
+            if (outcome.lease() != null) {
+                return outcome.lease();
+            }
+            if (outcome.stop()) {
+                return null;
+            }
+        }
+        return null;
     }
-    private boolean owns(Row r,Lease lease,long now) {
-        return r!=null && !r.document().job().terminal() && r.token()==lease.token()
-                && lease.owner().equals(r.owner()) && r.lease()!=null && r.lease()>now;
+
+    private boolean owns(Row r, Lease lease, long now) {
+        return r != null && !r.document().job().terminal() && r.token() == lease.token()
+                && lease.owner().equals(r.owner()) && r.lease() != null && r.lease() > now;
     }
-    private StoredOptimizationJob timeout(Row r,long now) {
-        var d=r.document();
-        if(r.deadline()<=now && !"CANCEL_REQUESTED".equals(d.job().state())) {
-            d=d.transition("CANCEL_REQUESTED","STOPPING","TIMED_OUT","总计算预算耗尽，等待执行退出",null,now);write(d);
+
+    private StoredOptimizationJob timeout(Row r, long now) {
+        var d = r.document();
+        if (r.deadline() <= now && !"CANCEL_REQUESTED".equals(d.job().state())) {
+            d = d.transition("CANCEL_REQUESTED", "STOPPING", "TIMED_OUT", "总计算预算耗尽，等待执行退出", null, now);
+            write(d);
         }
         return d;
     }
-    @Override public StoredOptimizationJob heartbeat(Lease lease,long leaseMillis) {
-        return locked(()->{
-            long time=now();var r=row(lease.document().job().id());
-            if(!owns(r,lease,time))return null;
-            var d=timeout(r,time);
-            jdbc.update("UPDATE optimization_job SET lease_until=? WHERE id=?",time+leaseMillis,d.job().id());
+
+    @Override
+    public StoredOptimizationJob heartbeat(Lease lease, long leaseMillis) {
+        return locked(() -> {
+            long time = now();
+            var r = row(lease.document().job().id());
+            if (!owns(r, lease, time)) return null;
+            var d = timeout(r, time);
+            jdbc.update("UPDATE optimization_job SET lease_until=? WHERE id=?", time + leaseMillis, d.job().id());
             return d;
         });
     }
-    @Override public StoredOptimizationJob cancel(String id) {
-        return locked(()->{
-            var d=find(id);if(d==null || d.job().terminal() || "CANCEL_REQUESTED".equals(d.job().state()))return d;
-            boolean queued="QUEUED".equals(d.job().state());
-            var next=d.transition(queued?"CANCELLED":"CANCEL_REQUESTED",queued?"STOPPED":"STOPPING","CANCELLED","调用方请求取消",null,now());
-            write(next);return next;
+
+    @Override
+    public StoredOptimizationJob cancel(String id) {
+        return locked(() -> {
+            var d = find(id);
+            if (d == null || d.job().terminal() || "CANCEL_REQUESTED".equals(d.job().state())) return d;
+            boolean queued = "QUEUED".equals(d.job().state());
+            var next = d.transition(queued ? "CANCELLED" : "CANCEL_REQUESTED", queued ? "STOPPED" : "STOPPING", "CANCELLED", "调用方请求取消", null, now());
+            write(next);
+            return next;
         });
     }
-    @Override public boolean update(Lease lease,UnaryOperator<StoredOptimizationJob> change,boolean terminal) {
-        return locked(()->{
-            long time=now();var r=row(lease.document().job().id());
-            if(!owns(r,lease,time))return false;
-            var current=timeout(r,time);var next=change.apply(current);
+
+    @Override
+    public boolean update(Lease lease, UnaryOperator<StoredOptimizationJob> change, boolean terminal) {
+        return locked(() -> {
+            long time = now();
+            var r = row(lease.document().job().id());
+            if (!owns(r, lease, time)) return false;
+            var current = timeout(r, time);
+            var next = change.apply(current);
             // Application-side result wrapping must not extend a lease merely by holding the lock.
-            long completedAt=now();
-            if(r.lease()<=completedAt)return false;
-            if(r.deadline()<=completedAt && !"CANCEL_REQUESTED".equals(current.job().state())) {
-                current=timeout(r,completedAt);
-                next=change.apply(current);
-                completedAt=now();
-                if(r.lease()<=completedAt)return false;
+            long completedAt = now();
+            if (r.lease() <= completedAt) return false;
+            if (r.deadline() <= completedAt && !"CANCEL_REQUESTED".equals(current.job().state())) {
+                current = timeout(r, completedAt);
+                next = change.apply(current);
+                completedAt = now();
+                if (r.lease() <= completedAt) return false;
             }
-            if(next.job().terminal()!=terminal || !next.job().id().equals(current.job().id())
+            if (next.job().terminal() != terminal || !next.job().id().equals(current.job().id())
                     || !next.input().equals(current.input()) || !next.idempotencyKey().equals(current.idempotencyKey()))
                 throw new IllegalArgumentException("作业事务不能改写输入、身份或预期终态");
-            if(!terminal && !"RUNNING".equals(current.job().state()))return false;
-            if(terminal) {
-                String required="TIMED_OUT".equals(current.job().code())?"TIMED_OUT":"CANCELLED";
-                if("CANCEL_REQUESTED".equals(current.job().state()) && !required.equals(next.job().state()))
+            if (!terminal && !"RUNNING".equals(current.job().state())) return false;
+            if (terminal) {
+                String required = "TIMED_OUT".equals(current.job().code()) ? "TIMED_OUT" : "CANCELLED";
+                if ("CANCEL_REQUESTED".equals(current.job().state()) && !required.equals(next.job().state()))
                     throw new IllegalArgumentException("最终写入不能丢弃已持久化取消意图");
-                if(next.result()!=null)jdbc.update("INSERT INTO optimization_result(job_id,token,result_json) VALUES(?,?,?)",
-                        next.job().id(),lease.token(),json.writeValueAsString(next.result()));
+                if (next.result() != null) jdbc.update("INSERT INTO optimization_result(job_id,token,result_json) VALUES(?,?,?)",
+                        next.job().id(), lease.token(), json.writeValueAsString(next.result()));
                 jdbc.update("UPDATE optimization_attempt SET finished_at=?,outcome=? WHERE job_id=? AND token=?",
-                        completedAt,next.job().state(),next.job().id(),lease.token());
-                jdbc.update("UPDATE optimization_job SET owner_id=NULL,lease_until=NULL WHERE id=?",next.job().id());
+                        completedAt, next.job().state(), next.job().id(), lease.token());
+                jdbc.update("UPDATE optimization_job SET owner_id=NULL,lease_until=NULL WHERE id=?", next.job().id());
             }
-            write(next);return true;
+            write(next);
+            return true;
         });
     }
+
     private static String digest(String key) {
-        try {return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(("local\0submit-optimization\0"+key).getBytes(StandardCharsets.UTF_8)));}
-        catch(java.security.NoSuchAlgorithmException e){throw new IllegalStateException(e);}
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(("local\0submit-optimization\0" + key).getBytes(StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
-    @Override public void close() {} // Shared DataSource lifecycle belongs to Spring.
+
+    @Override
+    public void close() {} // Shared DataSource lifecycle belongs to Spring.
 
     int importArchive(OptimizationArchiveImport.Archive archive) {
-        return locked(()->{
-            var imported=jdbc.query("SELECT job_count FROM optimization_archive_import WHERE id=?",
-                    (rs,n)->rs.getInt(1),archive.fingerprint());
-            if(!imported.isEmpty())return imported.get(0); // Response loss/restart is safe to retry.
-            if(jdbc.queryForObject("SELECT COUNT(*) FROM optimization_job",Long.class)!=0)
+        return locked(() -> {
+            var imported = jdbc.query("SELECT job_count FROM optimization_archive_import WHERE id=?",
+                    (rs, n) -> rs.getInt(1), archive.fingerprint());
+            if (!imported.isEmpty()) return imported.get(0); // Response loss/restart is safe to retry.
+            if (jdbc.queryForObject("SELECT COUNT(*) FROM optimization_job", Long.class) != 0)
                 throw new IllegalStateException("目标作业库已有数据，拒绝覆盖或混合导入；相同归档可重复执行");
-            long time=now();
+            long time = now();
             jdbc.update("INSERT INTO optimization_archive_import(id,source_path,imported_at,job_count) VALUES(?,?,?,?)",
-                    archive.fingerprint(),archive.source(),time,archive.jobs().size());
-            for(var original:archive.jobs()) {
-                var document=original.job().terminal()?original:original.transition("FAILED","STOPPED","PROCESS_RESTARTED",
-                        "文件归档中的未完成作业在迁移时中止，未自动重算；原始快照保留于迁移记录",null,time);
-                var j=document.job();
+                    archive.fingerprint(), archive.source(), time, archive.jobs().size());
+            for (var original : archive.jobs()) {
+                var document = original.job().terminal() ? original : original.transition("FAILED", "STOPPED", "PROCESS_RESTARTED",
+                        "文件归档中的未完成作业在迁移时中止，未自动重算；原始快照保留于迁移记录", null, time);
+                var j = document.job();
                 jdbc.update("INSERT INTO optimization_job(id,key_digest,state,created_at,token,document_json) VALUES(?,?,?,?,0,?)",
-                        j.id(),digest(document.idempotencyKey()),j.state(),Instant.parse(j.createdAt()).toEpochMilli(),json.writeValueAsString(document));
+                        j.id(), digest(document.idempotencyKey()), j.state(), Instant.parse(j.createdAt()).toEpochMilli(), json.writeValueAsString(document));
                 // Token zero is an imported snapshot, explicitly not a fabricated worker execution.
                 jdbc.update("INSERT INTO optimization_attempt(job_id,token,owner_id,started_at,finished_at,outcome) VALUES(?,0,'archive-import',?,?,'IMPORTED')",
-                        j.id(),time,time);
-                if(document.result()!=null)jdbc.update("INSERT INTO optimization_result(job_id,token,result_json) VALUES(?,0,?)",
-                        j.id(),json.writeValueAsString(document.result()));
+                        j.id(), time, time);
+                if (document.result() != null) jdbc.update("INSERT INTO optimization_result(job_id,token,result_json) VALUES(?,0,?)",
+                        j.id(), json.writeValueAsString(document.result()));
                 jdbc.update("INSERT INTO optimization_archive_entry(import_id,job_id,original_json) VALUES(?,?,?)",
-                        archive.fingerprint(),j.id(),archive.originals().get(j.id()));
+                        archive.fingerprint(), j.id(), archive.originals().get(j.id()));
             }
             return archive.jobs().size();
         });
