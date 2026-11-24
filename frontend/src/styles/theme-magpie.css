@@ -836,16 +836,6 @@ dialog.native-modal-dialog::backdrop {
   flex-wrap: wrap;
 }
 
-.mp-section-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--cp-ink-3);
-  padding: 2px 4px 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
 .mp-demand-card {
   background: var(--cp-surface);
   border-radius: var(--cp-radius-card);
@@ -869,12 +859,6 @@ dialog.native-modal-dialog::backdrop {
 .mp-demand-card .t td {
   height: 52px;
   padding: 6px 9px;
-}
-
-.mp-demand-card .mp-col-name {
-  white-space: normal;
-  min-width: 170px;
-  max-width: 245px;
 }
 
 .mp-demand-card .demand-ledger-cell {
@@ -908,31 +892,6 @@ dialog.native-modal-dialog::backdrop {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 260px;
-}
-
-.mp-demand-expand-cell {
-  background: #f9fafb !important;
-  padding: 12px 18px 14px !important;
-}
-
-.mp-demand-expand-inner {
-  background: var(--cp-surface);
-  border-radius: 10px;
-  box-shadow: 0 0 0 1px var(--cp-border);
-  overflow: hidden;
-}
-
-.mp-demand-expand-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--cp-divider);
-  background: #fcfcfd;
-}
-
-.mp-demand-expand-inner table.t td {
-  height: 36px;
 }
 
 .demand-dual-bar {
@@ -980,31 +939,8 @@ dialog.settings-center-dialog {
   font-weight: 650;
 }
 
-.sc-status-chip {
-  border-radius: 999px;
-  border: 1px solid var(--cp-border);
-  background: var(--cp-surface-subtle);
-  color: var(--cp-ink-2);
-}
-
-.sc-status-chip.ok {
-  background: rgba(34, 197, 94, 0.1);
-  border-color: rgba(34, 197, 94, 0.22);
-  color: #15803d;
-}
-
 .sc-body {
   background: var(--cp-bg);
-}
-
-.sc-sidebar {
-  background: var(--cp-sidebar);
-  border-right: 1px solid var(--cp-border);
-  padding: 12px 10px;
-}
-
-.sc-tablist {
-  gap: 3px;
 }
 
 .sc-tab {
@@ -1042,8 +978,7 @@ dialog.settings-center-dialog {
   color: var(--cp-ink);
 }
 
-/* Hide old blue anchor bar and pseudo left strip so the crisp white pill shines */
-.sc-tablist::after,
+/* Hide old pseudo left strip so the crisp white pill shines */
 .sc-tab::before,
 .sc-tab[aria-selected="true"]::before {
   display: none !important;
@@ -1069,13 +1004,6 @@ dialog.settings-center-dialog {
   color: var(--cp-ink) !important;
 }
 
-.sc-card-pill {
-  background: var(--cp-accent-soft) !important;
-  color: var(--cp-accent-ink) !important;
-  border-color: rgba(91, 97, 246, 0.22) !important;
-  border-radius: 999px !important;
-}
-
 .sc-corner-node.on {
   background: var(--cp-accent) !important;
   border-color: #818cf8 !important;
@@ -1084,11 +1012,6 @@ dialog.settings-center-dialog {
 
 .sc-orient-card.on {
   color: var(--cp-accent) !important;
-}
-
-.sc-content {
-  background: var(--cp-bg);
-  padding: 18px 22px;
 }
 
 .sc-card {
@@ -1151,20 +1074,6 @@ dialog.settings-center-dialog {
   background: #eceef2;
 }
 
-.sc-time-btn {
-  border-radius: 7px;
-  border: 0;
-  background: #eceef2;
-  color: var(--cp-ink-2);
-}
-
-.sc-time-btn.on {
-  background: var(--cp-surface);
-  color: var(--cp-ink);
-  font-weight: 600;
-  box-shadow: var(--cp-shadow-pill);
-}
-
 .sc-foot {
   background: var(--cp-surface);
   border-top: 1px solid var(--cp-divider);
@@ -1187,42 +1096,6 @@ dialog.settings-center-dialog {
   font-weight: 650;
   color: var(--cp-ink);
   letter-spacing: -0.015em;
-}
-
-.studio-dim-seg,
-.studio-source-seg {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border: 0 !important;
-  border-radius: 9px;
-  background: #eceef2;
-}
-
-.studio-dim-seg button,
-.studio-source-seg button {
-  height: 26px;
-  padding: 0 10px;
-  border: 0 !important;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--cp-ink-2);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.studio-dim-seg button:hover,
-.studio-source-seg button:hover {
-  color: var(--cp-ink);
-}
-
-.studio-dim-seg button[aria-pressed="true"],
-.studio-source-seg button[aria-pressed="true"] {
-  background: var(--cp-surface);
-  color: var(--cp-ink);
-  font-weight: 600;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.09);
 }
 
 .craft-disclosure > summary {
@@ -1284,14 +1157,6 @@ dialog.settings-center-dialog {
   letter-spacing: 0.03em;
 }
 
-.wb-overview-card {
-  margin: 10px;
-  padding: 11px 12px;
-  border-radius: 10px;
-  background: #fafafb;
-  border: 1px solid var(--cp-border);
-}
-
 .wb-mini-prog {
   height: 5px;
   border-radius: 999px;
@@ -1308,13 +1173,6 @@ dialog.settings-center-dialog {
 
 .wb-mini-prog .seg-cand {
   background: #818cf8;
-}
-
-.wb-overview-head > div {
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-  white-space: nowrap;
 }
 
 .wb-demand-prog-row {
@@ -1342,32 +1200,6 @@ dialog.settings-center-dialog {
   background: rgba(16, 185, 129, 0.045);
   border-color: rgba(16, 185, 129, 0.22);
   border-left-color: #10b981;
-}
-
-.studio-accordion {
-  border: 0;
-  border-bottom: 1px solid var(--cp-divider);
-}
-
-.studio-accordion > summary {
-  background: var(--cp-surface);
-  color: var(--cp-ink);
-  font-weight: 600;
-}
-
-.studio-accordion > summary:hover {
-  background: #fafafb;
-}
-
-.choice-card {
-  border-radius: 9px;
-  border: 1px solid var(--cp-border);
-  background: var(--cp-surface);
-}
-
-.choice-card:has(input:checked) {
-  border-color: rgba(91, 97, 246, 0.45);
-  background: rgba(91, 97, 246, 0.045);
 }
 
 .scheme-slot {
