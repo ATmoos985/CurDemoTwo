@@ -297,7 +297,9 @@ final class StudioDemandPoolService {
         }
 
         long activeSchemes = tx.listSchemes().stream()
-                .filter(s -> task.id().equals(s.taskId()) && !SchedulingScheme.STATE_CANCELLED.equals(s.state()))
+                .filter(s -> s.involvesTask(task.id())
+                        && !SchedulingScheme.STATE_CANCELLED.equals(s.state())
+                        && !SchedulingScheme.STATE_REVERSED.equals(s.state()))
                 .count();
 
         String status = completedTotal >= orderedTotal && orderedTotal > 0
@@ -329,31 +331,39 @@ final class StudioDemandPoolService {
 
     /**
      * 计算任务内各需求行当前的「已排预占量 (plannedQty)」：
-     * 合并活跃的 SchedulingScheme 预占与独立未归属方案的 ExecutionOrder 预约，且扣除已报工确认的方案，绝不重复扣减。
+     * 合并活跃的 SchedulingScheme 预占（兼容单任务与跨任务多族合排 sourceAllocations）
+     * 与独立未归属方案的 ExecutionOrder 预约，且扣除已报工确认的方案，绝不重复扣减。
      */
     Map<String, Integer> plannedQuantitiesForTask(CuttingStatePort.ReadView tx, String taskId, String exceptSchemeId) {
         Map<String, Integer> counts = new LinkedHashMap<>();
         Set<String> coveredPlans = new HashSet<>();
 
         for (SchedulingScheme s : tx.listSchemes()) {
-            if (!taskId.equals(s.taskId()) || Objects.equals(exceptSchemeId, s.id()) || !s.occupiesDemand()) {
+            if (Objects.equals(exceptSchemeId, s.id()) || !s.occupiesDemand() || !s.involvesTask(taskId)) {
                 continue;
             }
             coveredPlans.addAll(s.linkedPlanIds());
             Map<String, Integer> alreadyReportedInScheme = new HashMap<>();
             for (String pid : s.linkedPlanIds()) {
                 Map<String, Object> rec = tx.findReceipt(pid).orElse(null);
-                if (rec != null && !"REVERSED".equals(rec.get("status"))
+                if (rec == null || "REVERSED".equals(rec.get("status"))) continue;
+                if (rec.get("taskDemandQuantities") instanceof Map<?, ?> multi) {
+                    if (multi.get(taskId) instanceof Map<?, ?> taskDq) {
+                        taskDq.forEach((k, v) -> alreadyReportedInScheme.merge(String.valueOf(k), ((Number) v).intValue(), Integer::sum));
+                    }
+                } else if (Objects.equals(taskId, rec.get("taskId"))
                         && rec.get("demandQuantities") instanceof Map<?, ?> dq) {
                     dq.forEach((k, v) -> alreadyReportedInScheme.merge(String.valueOf(k), ((Number) v).intValue(), Integer::sum));
                 }
             }
-            s.allocatedDemands().forEach((lineId, qty) -> {
-                int netPlanned = Math.max(0, qty - alreadyReportedInScheme.getOrDefault(lineId, 0));
+            for (SchedulingScheme.TaskDemandAllocation alloc : s.effectiveAllocations()) {
+                if (!Objects.equals(taskId, alloc.taskId())) continue;
+                String lineKey = String.valueOf(alloc.lineId());
+                int netPlanned = Math.max(0, alloc.quantity() - alreadyReportedInScheme.getOrDefault(lineKey, 0));
                 if (netPlanned > 0) {
-                    counts.merge(lineId, netPlanned, Integer::sum);
+                    counts.merge(lineKey, netPlanned, Integer::sum);
                 }
-            });
+            }
         }
 
         long now = tx.operationTime();

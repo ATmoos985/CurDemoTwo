@@ -52,7 +52,7 @@ public class RemnantService implements CuttingStatePort {
     private final Map<String,InventoryCount> counts=new LinkedHashMap<>();
     private final Map<String,DemandTemplate> templates=new LinkedHashMap<>();
     private final Map<String,SchedulingScheme> schemes=new LinkedHashMap<>();
-    private long revision;
+    private volatile long revision;
     private boolean accessing;
     private long operationTime;
     @Value("${cutdemo.measurement.tolerance-mm:5}")
@@ -75,7 +75,10 @@ public class RemnantService implements CuttingStatePort {
 
     public synchronized Map<String, Integer> initializeDemoInventory() {
         return mutate("DEMO_RECEIPT",null,"SYSTEM_DEMO",() -> {
-            if (!motherRolls.isEmpty() || !remnantPool.isEmpty() || !tasks.isEmpty() || !plans.isEmpty() || !receipts.isEmpty()) {
+            if (!motherRolls.isEmpty() || !remnantPool.isEmpty() || !tasks.isEmpty()
+                    || !plans.isEmpty() || !receipts.isEmpty() || !executions.isEmpty()
+                    || !transfers.isEmpty() || !counts.isEmpty()
+                    || !templates.isEmpty() || !schemes.isEmpty()) {
                 throw new IllegalArgumentException("当前库已有业务数据，不能创建整套示例材料；请使用已有库存或单独准备演示库");
             }
             initMotherRolls();
@@ -183,18 +186,19 @@ public class RemnantService implements CuttingStatePort {
         if (previous != null) return previous;
         operationTime = store.now();
         byte[] before = json.writeValueAsBytes(snapshot());
-        restore(json.readValue(before, InventorySnapshot.class));
+        InventorySnapshot beforeSnapshot = json.readValue(before, InventorySnapshot.class);
+        int beforeLedgerSize = beforeSnapshot.ledger().size();
         accessing = true;
         try {
             T result = command.get();
-            ledger = InventoryJournal.append(json.readValue(before,InventorySnapshot.class),snapshot(),
-                    eventType,businessId,actor,operationTime);
-            outbox = InventoryEvent.append(outbox,json.readValue(before,InventorySnapshot.class).ledger().size(),
-                    ledger,eventType,businessId,operationTime,revision+1);
+            ledger = InventoryJournal.append(beforeSnapshot, snapshot(),
+                    eventType, businessId, actor, operationTime);
+            outbox = InventoryEvent.append(outbox, beforeLedgerSize,
+                    ledger, eventType, businessId, operationTime, revision + 1);
             save();
             return result;
         } catch (RuntimeException error) {
-            restore(json.readValue(before, InventorySnapshot.class));
+            restore(beforeSnapshot);
             throw error;
         } finally { accessing = false; }
     }
@@ -202,8 +206,36 @@ public class RemnantService implements CuttingStatePort {
     /** Committed immutable facts; reads and external receipts never mutate inventory. */
     public synchronized List<InventoryEvent> integrationEvents() { return read(() -> outbox); }
 
+    /**
+     * 轻量无锁健康探针：不加全局 synchronized 锁、不触发 FOR UPDATE 全库扫描。
+     * 直接探测底层存储可用性，并基于 ConcurrentHashMap 与 volatile revision 返回当前快照指标。
+     */
+    public Map<String, Object> healthStatus() {
+        String storageError;
+        try {
+            storageError = store.healthCheckError();
+        } catch (Exception e) {
+            storageError = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+        }
+        long availableRemnants = remnantPool.values().stream()
+                .filter(r -> "AVAILABLE".equalsIgnoreCase(r.getStatus()))
+                .count();
+        Map<String, Object> status = new LinkedHashMap<>();
+        status.put("storageHealthy", storageError == null);
+        if (storageError != null) {
+            status.put("storageError", storageError);
+        }
+        status.put("revision", revision);
+        status.put("remnantsInStock", (int) availableRemnants);
+        return status;
+    }
+
     private void refresh() {
         if (!accessing && store.shared()) {
+            Long remoteRevision = store.currentRevision();
+            if (remoteRevision != null && remoteRevision == revision) {
+                return;
+            }
             InventorySnapshot latest = store.load();
             if (latest != null && latest.revision() != revision) restore(latest);
         }
@@ -253,6 +285,8 @@ public class RemnantService implements CuttingStatePort {
         } else return "材料类型必须为 roll 或 remnant";
         if(executions.values().stream().anyMatch(e->e.materialType().equals(type)&&e.materialId().equals(id)&&e.reserves(operationTime)))
             return "材料已被执行单预约或正在加工";
+        if(isMaterialReservedByScheme(type,id,null))
+            return "材料已被活跃排程方案预约或下发";
         return "";
     }
     public synchronized List<InventoryTransfer> inventoryTransfers() {
@@ -307,6 +341,8 @@ public class RemnantService implements CuttingStatePort {
         } else return "材料类型必须为 roll 或 remnant";
         if(executions.values().stream().anyMatch(e->e.materialType().equals(type)&&e.materialId().equals(id)&&e.reserves(operationTime)))
             return "材料已被执行单预约或正在加工";
+        if(isMaterialReservedByScheme(type,id,null))
+            return "材料已被活跃排程方案预约或下发";
         return "";
     }
     public synchronized Map<String,Object> countOptions() {
@@ -508,22 +544,91 @@ public class RemnantService implements CuttingStatePort {
     }
     private Map<String,Integer> reservedQuantities(String taskId,String exceptPlan) {
         var counts=new LinkedHashMap<String,Integer>();long now=operationTime;
-        executions.values().stream().filter(e->Objects.equals(e.taskId(),taskId) && !Objects.equals(e.planId(),exceptPlan) && e.reserves(now))
+        var coveredPlans=new HashSet<String>();
+        for(var s:schemes.values()) {
+            if(!s.occupiesDemand())continue;
+            if(exceptPlan!=null && s.linkedPlanIds().contains(exceptPlan)) {
+                coveredPlans.addAll(s.linkedPlanIds());
+                continue;
+            }
+            if(!s.involvesTask(taskId))continue;
+            coveredPlans.addAll(s.linkedPlanIds());
+            var reportedInScheme=new HashMap<String,Integer>();
+            for(var pid:s.linkedPlanIds()) {
+                var rec=receipts.get(pid);
+                if(rec!=null && !"REVERSED".equals(rec.get("status"))) {
+                    accumulateReceiptDemandForTask(rec,taskId,reportedInScheme);
+                }
+            }
+            for(var alloc:s.effectiveAllocations()) {
+                if(!Objects.equals(taskId,alloc.taskId()))continue;
+                String lineKey=String.valueOf(alloc.lineId());
+                int net=Math.max(0,alloc.quantity()-reportedInScheme.getOrDefault(lineKey,0));
+                if(net>0)counts.merge(lineKey,net,Integer::sum);
+            }
+        }
+        executions.values().stream()
+                .filter(e->Objects.equals(e.taskId(),taskId) && !Objects.equals(e.planId(),exceptPlan)
+                        && !coveredPlans.contains(e.planId()) && e.reserves(now))
                 .forEach(e->e.demandQuantities().forEach((id,n)->counts.merge(id,n,Integer::sum)));
         return counts;
     }
+
+    private boolean isMaterialReservedByExecution(String type,String id,String exceptPlan) {
+        return executions.values().stream().anyMatch(e->e.materialType().equalsIgnoreCase(type) && Objects.equals(e.materialId(),id)
+                && !Objects.equals(e.planId(),exceptPlan) && e.reserves(operationTime));
+    }
+
+    private boolean isMaterialReservedByScheme(String type,String id,String exceptPlan) {
+        return schemes.values().stream().anyMatch(s->s.occupiesMaterial(type,id)
+                && (exceptPlan==null || !s.linkedPlanIds().contains(exceptPlan)));
+    }
+
+    private boolean isPlanLinkedToActiveScheme(String planId) {
+        if(planId==null)return false;
+        return schemes.values().stream().anyMatch(s->s.isMaterialLockActive() && s.linkedPlanIds().contains(planId));
+    }
+
+    private boolean isRollIntervalReservedByOtherScheme(String rollId,double startY,double length,String exceptPlan) {
+        double endY=startY+length;
+        for(var s:schemes.values()) {
+            if(!s.occupiesRoll(rollId))continue;
+            if(exceptPlan!=null && s.linkedPlanIds().contains(exceptPlan))continue;
+            double otherStart=s.windowStartY();
+            double otherEnd=otherStart+s.occupiedLengthMm();
+            if(Math.min(endY,otherEnd)-Math.max(startY,otherStart)>0.001)return true;
+        }
+        return false;
+    }
+
     private void ensureMaterialNotReserved(String type,String id,String exceptPlan) {
-        if(executions.values().stream().anyMatch(e->e.materialType().equals(type) && Objects.equals(e.materialId(),id)
-                && !Objects.equals(e.planId(),exceptPlan) && e.reserves(operationTime)))
+        if(isMaterialReservedByExecution(type,id,exceptPlan))
             throw new InventoryConflictException("材料已被其他执行单预约或正在加工，请先处理原执行单");
+        if(isMaterialReservedByScheme(type,id,exceptPlan))
+            throw new InventoryConflictException("材料已被活跃排程方案预约或下发，请先完工或作废原排程方案");
     }
     private void ensurePlanNotExecuting(String planId) {
         if(executions.values().stream().anyMatch(e->e.planId().equals(planId) && e.reserves(operationTime)))
             throw new InventoryConflictException("方案已有有效执行单，请先取消未开工执行单；已开工须实际报工");
+        if(isPlanLinkedToActiveScheme(planId))
+            throw new InventoryConflictException("切割计划已被活跃排程方案锁定，请通过排程结果管理作废或完工");
     }
     private void validateExecutionReport(SolveRequest request,SolveResponse result,CutReport report) {
         boolean remnant="remnant".equalsIgnoreCase(request.getFeedPortType());
-        ensureMaterialNotReserved(remnant?"remnant":"roll",remnant?request.getSourceRemnantId():request.getRollId(),report.planId());
+        String matType=remnant?"remnant":"roll";
+        String matId=remnant?request.getSourceRemnantId():request.getRollId();
+        if(isMaterialReservedByExecution(matType,matId,report.planId()))
+            throw new InventoryConflictException("材料已被其他执行单预约或正在加工，请先处理原执行单");
+        if(remnant) {
+            if(isMaterialReservedByScheme("remnant",matId,report.planId()))
+                throw new InventoryConflictException("料头已被活跃排程方案预约或下发，请先完工或作废原排程方案");
+        } else if(isPlanLinkedToActiveScheme(report.planId())) {
+            // 同卷多个不重叠排程方案各自按自身区间完工互不死锁，仅拦截与其他活跃方案区间重叠
+            if(isRollIntervalReservedByOtherScheme(matId,request.getWindowStartY(),report.actualCutLen(),report.planId()))
+                throw new InventoryConflictException("本工位实切区间与其他活跃排程方案预占区间重叠");
+        } else if(isMaterialReservedByScheme("roll",matId,null)) {
+            throw new InventoryConflictException("母卷已被活跃排程方案预约或下发，禁止绕过排程方案直接报工");
+        }
         var execution=executions.values().stream().filter(e->e.planId().equals(report.planId()))
                 .max(Comparator.comparing((ExecutionOrder e)->"RUNNING".equals(e.state())).thenComparingLong(ExecutionOrder::createdAt));
         if(execution.isPresent()) {
@@ -687,10 +792,19 @@ public class RemnantService implements CuttingStatePort {
     }
 
     private Map<String, Object> confirmPlanInternal(CutReport report) {
-        return confirmPlanInternal(report, Set.of());
+        return confirmPlanInternal(report, Set.of(), null, null);
     }
 
     private Map<String, Object> confirmPlanInternal(CutReport report, Set<String> pendingBatchPlans) {
+        return confirmPlanInternal(report, pendingBatchPlans, null, null);
+    }
+
+    private Map<String, Object> confirmPlanInternal(
+            CutReport report,
+            Set<String> pendingBatchPlans,
+            Map<String, Map<String, Integer>> taskDemandQuantities,
+            Map<Integer, SchedulingScheme.TaskDemandAllocation> pieceSources
+    ) {
             Map<String, Object> receipt = receipts.get(report.planId());
             if (receipt != null) {
                 if ("REVERSED".equals(receipt.get("status"))) throw new IllegalArgumentException("该报工已冲销，请重新排料");
@@ -701,7 +815,7 @@ public class RemnantService implements CuttingStatePort {
             if (plan == null || !"PENDING".equals(plan.status())) throw new IllegalArgumentException("方案不存在或已取消，请重新排料");
             if (!Objects.equals(plan.baseline(), materialFingerprintInternal(plan.request())))
                 throw new IllegalArgumentException("材料或疵点已更新，请重新装载并排料");
-            Map<String, Object> result = confirmInternal(plan.request(), plan.result(), report, pendingBatchPlans);
+            Map<String, Object> result = confirmInternal(plan.request(), plan.result(), report, pendingBatchPlans, taskDemandQuantities, pieceSources);
             plans.put(plan.id(), plan.withStatus("CONFIRMED"));
             return qualityProjection(result);
     }
@@ -864,12 +978,19 @@ public class RemnantService implements CuttingStatePort {
                 roll.setCurrentRemainingLength(((Number) undo.get("remainingBefore")).doubleValue());
             }
             children.forEach(child -> child.setStatus("REVERSED"));
+            String reversedAt = LocalDateTime.now().toString();
             receipt.put("status", "REVERSED");
-            receipt.put("reversedAt", LocalDateTime.now().toString());
+            receipt.put("reversedAt", reversedAt);
             receipt.put("reversalReason", reason.trim());
             finishExecution(planId,"REVERSED");
             CuttingPlan plan = plans.get(planId);
             if (plan != null) plans.put(planId, plan.withStatus("REVERSED"));
+            // 同步将关联排程方案状态回滚为 REVERSED，彻底消除冲销后方案卡死在 COMPLETED 的死锁
+            schemes.replaceAll((sid, sc) -> sc.linkedPlanIds().contains(planId)
+                    && !SchedulingScheme.STATE_CANCELLED.equals(sc.state())
+                    && !SchedulingScheme.STATE_REVERSED.equals(sc.state())
+                    ? sc.withReversed(reversedAt, reason.trim())
+                    : sc);
             return receipt;
         });
     }
@@ -879,21 +1000,49 @@ public class RemnantService implements CuttingStatePort {
     }
 
     private List<Map<String, Object>> taskReportsInternal(String taskId) {
-        return receipts.values().stream().filter(r -> Objects.equals(taskId, r.get("taskId"))).map(this::qualityProjection).toList();
+        return receipts.values().stream()
+                .filter(r -> Objects.equals(taskId, r.get("taskId"))
+                        || (r.get("taskDemandQuantities") instanceof Map<?, ?> multi && multi.containsKey(taskId)))
+                .map(this::qualityProjection).toList();
     }
 
     public synchronized Map<String, Integer> completedQuantities(String taskId) {
         return read(() -> completedQuantitiesInternal(taskId));
     }
 
+    private void accumulateReceiptDemandForTask(Map<String, Object> receipt, String taskId, Map<String, Integer> counts) {
+        if (receipt.get("taskDemandQuantities") instanceof Map<?, ?> multi) {
+            if (multi.get(taskId) instanceof Map<?, ?> taskOutput) {
+                taskOutput.forEach((id, n) -> counts.merge(id.toString(), ((Number) n).intValue(), Integer::sum));
+            }
+            return;
+        }
+        if (Objects.equals(taskId, receipt.get("taskId")) && receipt.get("demandQuantities") instanceof Map<?, ?> output) {
+            output.forEach((id, n) -> counts.merge(id.toString(), ((Number) n).intValue(), Integer::sum));
+        }
+    }
+
     private Map<String, Integer> completedQuantitiesInternal(String taskId) {
         Map<String, Integer> counts = new LinkedHashMap<>();
-        for (Map<String, Object> receipt : taskReports(taskId)) {
+        for (Map<String, Object> receipt : taskReportsInternal(taskId)) {
             if ("REVERSED".equals(receipt.get("status"))) continue;
-            if (receipt.get("demandQuantities") instanceof Map<?, ?> output)
-                output.forEach((id, n) -> counts.merge(id.toString(), ((Number) n).intValue(), Integer::sum));
-            for (var event : qualityEvents(receipt))
-                if ("QUALIFIED".equals(event.originalOutcome())) counts.merge(String.valueOf(event.demandId()), -1, Integer::sum);
+            boolean multiTask = receipt.get("taskDemandQuantities") instanceof Map<?, ?>;
+            accumulateReceiptDemandForTask(receipt, taskId, counts);
+            Map<?, ?> pieceSources = receipt.get("pieceSources") instanceof Map<?, ?> ps ? ps : null;
+            for (var event : qualityEvents(receipt)) {
+                if (!"QUALIFIED".equals(event.originalOutcome())) continue;
+                if (multiTask && pieceSources != null) {
+                    Object srcObj = pieceSources.get(String.valueOf(event.command().pieceId()));
+                    if (srcObj == null) srcObj = pieceSources.get(event.command().pieceId());
+                    if (srcObj instanceof Map<?, ?> srcMap
+                            && Objects.equals(taskId, srcMap.get("taskId"))
+                            && srcMap.get("lineId") instanceof Number ln) {
+                        counts.merge(String.valueOf(ln.intValue()), -1, Integer::sum);
+                    }
+                } else if (!multiTask && Objects.equals(taskId, receipt.get("taskId"))) {
+                    counts.merge(String.valueOf(event.demandId()), -1, Integer::sum);
+                }
+            }
         }
         return counts;
     }
@@ -934,12 +1083,23 @@ public class RemnantService implements CuttingStatePort {
                     .filter(e->taskExecutions.stream().noneMatch(a->a.planId().equals(e.planId())
                             && !Set.of("EXPIRED","CANCELLED").contains(a.effectiveState(operationTime))))
                     .map(ExecutionOrder::planId).distinct().count();
+            var activeSchemes=schemes.values().stream().filter(s->s.occupiesDemand() && s.involvesTask(task.id())).toList();
             String status=running>0?"REPORT_PENDING":total==completed?"COMPLETED":expired>0?"ATTENTION":
-                    !active.isEmpty() || pending>0?"EXECUTION_PENDING":"PLAN_PENDING";
+                    !active.isEmpty() || pending>0 || !activeSchemes.isEmpty()?"EXECUTION_PENDING":"PLAN_PENDING";
             item.put("status",status);item.put("reserved",reservedCount);item.put("availableToPlan",available);
             item.put("runningCount",running);item.put("releasedCount",active.size()-running);item.put("expiredCount",expired);
-            item.put("materialReservations",active.stream().map(e->Map.of("executionId",e.id(),"materialId",e.materialId(),
-                    "materialType",e.materialType(),"station",e.station(),"state",e.effectiveState(operationTime))).toList());
+            var matReservations=new ArrayList<Map<String,Object>>();
+            active.forEach(e->matReservations.add(Map.of("executionId",e.id(),"materialId",e.materialId(),
+                    "materialType",e.materialType(),"station",e.station(),"state",e.effectiveState(operationTime))));
+            for(var s:activeSchemes) {
+                if(s.isMaterialLockActive() && ("STOCK_ROLL".equals(s.materialMode()) || "REMNANT".equals(s.materialMode()))) {
+                    boolean rem="REMNANT".equals(s.materialMode());
+                    matReservations.add(Map.of("schemeId",s.id(),
+                            "materialId",Objects.toString(rem?s.remnantId():s.rollId(),""),
+                            "materialType",rem?"remnant":"roll","state",s.state()));
+                }
+            }
+            item.put("materialReservations",matReservations);
             item.put("nextAction",switch(status) {
                 case "REPORT_PENDING","ATTENTION" -> "executions";
                 case "COMPLETED" -> "reports";
@@ -973,10 +1133,14 @@ public class RemnantService implements CuttingStatePort {
     }
 
     public synchronized CuttingTask saveTask(CuttingTask input) {
-        return mutate("DEMAND_ADJUSTMENT",input == null ? null : input.id(),"UNAUTHENTICATED_LOCAL",() -> saveTaskInternal(input));
+        return mutate("DEMAND_ADJUSTMENT",input == null ? null : input.id(),"UNAUTHENTICATED_LOCAL",() -> saveTaskInternal(input, null));
     }
 
     private CuttingTask saveTaskInternal(CuttingTask input) {
+        return saveTaskInternal(input, null);
+    }
+
+    private CuttingTask saveTaskInternal(CuttingTask input, String exceptSchemeId) {
         if (input == null || input.name() == null || input.name().isBlank() || input.materialModel() == null ||
                 input.materialModel().isBlank() || input.demands() == null || input.demands().isEmpty() || input.demands().size() > 200)
             throw new IllegalArgumentException("请填写任务名称、材料型号和 1 至 200 项需求");
@@ -1035,6 +1199,9 @@ public class RemnantService implements CuttingStatePort {
         }
         if (previous != null && executions.values().stream().anyMatch(e->e.taskId().equals(id) && e.reserves(operationTime)))
             throw new InventoryConflictException("任务已有下达或执行中的需求，请完成报工或取消预约后编辑");
+        if (previous != null && schemes.values().stream().anyMatch(s -> !Objects.equals(exceptSchemeId, s.id())
+                && s.occupiesDemand() && s.involvesTask(id)))
+            throw new InventoryConflictException("任务已有活跃排程方案占用，请先完工或作废对应方案后再编辑");
         CuttingTask task = new CuttingTask(id, input.name().trim(), input.materialModel().trim(), input.externalRef(),
                 previous == null ? 1 : previous.revision() + 1, List.copyOf(input.demands()), process, type, slitting);
         tasks.put(id, task);
@@ -1178,11 +1345,18 @@ public class RemnantService implements CuttingStatePort {
     }
 
     private Map<String, Object> confirmInternal(SolveRequest request, SolveResponse plan, CutReport report) {
-        return confirmInternal(request, plan, report, Set.of());
+        return confirmInternal(request, plan, report, Set.of(), null, null);
     }
 
     private Map<String, Object> confirmInternal(SolveRequest request, SolveResponse plan, CutReport report,
                                               Set<String> pendingBatchPlans) {
+        return confirmInternal(request, plan, report, pendingBatchPlans, null, null);
+    }
+
+    private Map<String, Object> confirmInternal(SolveRequest request, SolveResponse plan, CutReport report,
+                                              Set<String> pendingBatchPlans,
+                                              Map<String, Map<String, Integer>> taskDemandQuantities,
+                                              Map<Integer, SchedulingScheme.TaskDemandAllocation> pieceSources) {
         Map<String, Object> old = receipts.get(report.planId());
         if (old != null) {
             if ("REVERSED".equals(old.get("status"))) throw new IllegalArgumentException("该报工已撤回，请重新排料");
@@ -1331,6 +1505,15 @@ public class RemnantService implements CuttingStatePort {
         Map<String, Integer> quantities = new LinkedHashMap<>();
         output.qualified().forEach(p -> quantities.merge(String.valueOf(p.getDemandId()), 1, Integer::sum));
         receipt.put("demandQuantities", quantities);
+        if (taskDemandQuantities != null && !taskDemandQuantities.isEmpty()) {
+            receipt.put("taskDemandQuantities", taskDemandQuantities);
+        }
+        if (pieceSources != null && !pieceSources.isEmpty()) {
+            Map<String, Map<String, Object>> serializedSources = new LinkedHashMap<>();
+            pieceSources.forEach((pid, alloc) -> serializedSources.put(String.valueOf(pid),
+                    Map.of("taskId", alloc.taskId(), "lineId", alloc.lineId())));
+            receipt.put("pieceSources", serializedSources);
+        }
         receipt.put("pieceResults", output.details());
         receipt.put("rejectedPieceCount", output.rejected().size());
         receipt.put("uncutPieceCount", output.uncut().size());
@@ -1348,7 +1531,11 @@ public class RemnantService implements CuttingStatePort {
         receipt.put("remArea", recoveredArea);
         receipt.put("wasteArea", Math.max(0, sourceArea - output.qualifiedArea() - recoveredArea));
         receipt.put("utilization", sourceArea == 0 ? 0 : output.qualifiedArea() / sourceArea * 100);
-        receipt.put("derivedRemnants", children);
+        // 深拷贝派生料头快照存入回执，彻底切断与 remnantPool 活对象的共享引用，防止后续流转静默篡改历史回执
+        List<RemnantStock> frozenChildren = children.stream()
+                .map(c -> json.convertValue(c, RemnantStock.class))
+                .toList();
+        receipt.put("derivedRemnants", frozenChildren);
         receipt.put("recoveredGeometry", recoveredGeometry);
         receipt.put("inventoryCountRevision",countRevision(remnantFeed?"remnant":"roll",remnantFeed?request.getSourceRemnantId():request.getRollId()));
         receipt.put("confirmedAt", LocalDateTime.now().toString());
@@ -1359,15 +1546,20 @@ public class RemnantService implements CuttingStatePort {
     }
 
     public synchronized boolean resetRoll(String rollId) {
-        return resetRoll(rollId, false);
+        return mutate("DEMO_RESET",rollId,"UNAUTHENTICATED_LOCAL",() -> resetRollInternal(rollId));
     }
 
-    public synchronized boolean resetRoll(String rollId, boolean force) {
-        return mutate("DEMO_RESET",rollId,"UNAUTHENTICATED_LOCAL",() -> resetRollInternal(rollId, force));
+    /** 兼容旧调用签名；严禁通过 force 绕过报工、盘点、移库、执行单或排程方案追溯保护。 */
+    @Deprecated
+    public synchronized boolean resetRoll(String rollId, boolean ignoredForce) {
+        return resetRoll(rollId);
     }
 
-    private boolean resetRollInternal(String rollId, boolean force) {
+    private boolean resetRollInternal(String rollId) {
         ensureMaterialNotReserved("roll",rollId,null);
+        if(remnantPool.values().stream().anyMatch(rm->rollId.equals(rm.getSourceRollId())
+                && (isMaterialReservedByExecution("remnant",rm.getId(),null) || isMaterialReservedByScheme("remnant",rm.getId(),null))))
+            throw new InventoryConflictException("母卷派生料头已被执行单或排程方案占用，禁止演示重置");
         if(counts.values().stream().flatMap(c->c.lines().stream()).anyMatch(line->
                 "roll".equals(line.type()) && rollId.equals(line.id()) || "remnant".equals(line.type())
                 && remnantPool.containsKey(line.id()) && rollId.equals(remnantPool.get(line.id()).getSourceRollId())))
@@ -1378,6 +1570,8 @@ public class RemnantService implements CuttingStatePort {
             throw new InventoryConflictException("材料已有移库单追溯，禁止演示重置；请新建移库单更正库位");
         if(executions.values().stream().anyMatch(e->Objects.equals(e.materialId(),rollId) || plans.containsKey(e.planId()) && Objects.equals(plans.get(e.planId()).request().getRollId(),rollId)))
             throw new InventoryConflictException("材料已有执行单追溯，禁止演示重置");
+        if(schemes.values().stream().anyMatch(s->rollId.equals(s.rollId())))
+            throw new InventoryConflictException("材料已有排程方案追溯，禁止演示重置");
         MotherRollInfo roll = motherRolls.get(rollId);
         if (roll == null) return false;
         if (receipts.values().stream().anyMatch(r -> rollId.equals(r.get("rollId")) && !qualityEvents(r).isEmpty()))
@@ -1960,6 +2154,31 @@ public class RemnantService implements CuttingStatePort {
         });
     }
 
+    @Override
+    public synchronized <T> T inWrite(
+            String eventType,
+            String businessId,
+            String actor,
+            java.util.function.Function<CuttingStatePort.ReadView, T> replay,
+            java.util.function.Function<CuttingStatePort.WriteTx, T> command
+    ) {
+        return mutate(eventType, businessId, actor, () -> {
+            TxContext readTx = new TxContext(false);
+            try {
+                return replay.apply(readTx);
+            } finally {
+                readTx.close();
+            }
+        }, () -> {
+            TxContext tx = new TxContext(true);
+            try {
+                return command.apply(tx);
+            } finally {
+                tx.close();
+            }
+        });
+    }
+
     private final class TxContext implements CuttingStatePort.WriteTx {
         private final boolean writable;
         private boolean active = true;
@@ -2011,6 +2230,19 @@ public class RemnantService implements CuttingStatePort {
             if (idempotencyKey == null) return Optional.empty();
             for (SchedulingScheme existing : schemes.values()) {
                 if (idempotencyKey.equals(existing.idempotencyKey())) {
+                    return Optional.of(existing);
+                }
+            }
+            return Optional.empty();
+        }
+
+        @Override
+        public Optional<SchedulingScheme> findSchemeByMesReceiptNo(String mesReceiptNo) {
+            ensureActive();
+            if (mesReceiptNo == null || mesReceiptNo.isBlank()) return Optional.empty();
+            String target = mesReceiptNo.trim();
+            for (SchedulingScheme existing : schemes.values()) {
+                if (target.equals(existing.mesReceiptNo())) {
                     return Optional.of(existing);
                 }
             }
@@ -2102,6 +2334,12 @@ public class RemnantService implements CuttingStatePort {
         }
 
         @Override
+        public boolean isMaterialReservedByExecution(String materialType, String materialId, String exceptPlanId) {
+            ensureActive();
+            return RemnantService.this.isMaterialReservedByExecution(materialType, materialId, exceptPlanId);
+        }
+
+        @Override
         public void putTemplate(DemandTemplate template) {
             ensureWritable();
             if (template == null || template.id() == null || template.id().isBlank()) {
@@ -2129,7 +2367,13 @@ public class RemnantService implements CuttingStatePort {
         @Override
         public CuttingTask saveTask(CuttingTask input) {
             ensureWritable();
-            return saveTaskInternal(input);
+            return saveTaskInternal(input, null);
+        }
+
+        @Override
+        public CuttingTask saveTaskForScheme(CuttingTask input, String exceptSchemeId) {
+            ensureWritable();
+            return saveTaskInternal(input, exceptSchemeId);
         }
 
         @Override
@@ -2171,7 +2415,18 @@ public class RemnantService implements CuttingStatePort {
         @Override
         public Map<String, Object> confirmPlan(CutReport report, Set<String> pendingBatchPlans) {
             ensureWritable();
-            return confirmPlanInternal(report, pendingBatchPlans);
+            return confirmPlanInternal(report, pendingBatchPlans, null, null);
+        }
+
+        @Override
+        public Map<String, Object> confirmPlan(
+                CutReport report,
+                Set<String> pendingBatchPlans,
+                Map<String, Map<String, Integer>> taskDemandQuantities,
+                Map<Integer, SchedulingScheme.TaskDemandAllocation> pieceSources
+        ) {
+            ensureWritable();
+            return confirmPlanInternal(report, pendingBatchPlans, taskDemandQuantities, pieceSources);
         }
     }
 }

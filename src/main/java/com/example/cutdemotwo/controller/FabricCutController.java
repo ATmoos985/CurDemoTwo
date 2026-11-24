@@ -1,14 +1,19 @@
 package com.example.cutdemotwo.controller;
 
+import com.example.cutdemotwo.algorithm.api.ISlittingSolverEngine;
 import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.business.model.QualityDisposition;
 import com.example.cutdemotwo.business.model.SolveResponse;
 import com.example.cutdemotwo.business.cutting.ScenarioOneService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -32,18 +37,32 @@ public class FabricCutController {
     private final com.example.cutdemotwo.business.cutting.RemnantService remnantService;
     private final com.example.cutdemotwo.algorithm.api.ToolpathOptimizer toolpathOptimizerService;
     private final com.example.cutdemotwo.business.cutting.CuttingWorkflowService workflowService;
+    private final List<ISlittingSolverEngine> slittingEngines;
+
+    @Value("${cutdemo.demo.endpoints-enabled:true}")
+    private boolean demoEndpointsEnabled = true;
+
+    public FabricCutController(com.example.cutdemotwo.algorithm.api.NestingSolver solverFactory,
+                               ScenarioOneService scenarioOneService,
+                               com.example.cutdemotwo.business.cutting.RemnantService remnantService,
+                               com.example.cutdemotwo.algorithm.api.ToolpathOptimizer toolpathOptimizerService,
+                               com.example.cutdemotwo.business.cutting.CuttingWorkflowService workflowService) {
+        this(solverFactory, scenarioOneService, remnantService, toolpathOptimizerService, workflowService, List.of());
+    }
 
     @Autowired
     public FabricCutController(com.example.cutdemotwo.algorithm.api.NestingSolver solverFactory,
-                                ScenarioOneService scenarioOneService,
-                                com.example.cutdemotwo.business.cutting.RemnantService remnantService,
-                                com.example.cutdemotwo.algorithm.api.ToolpathOptimizer toolpathOptimizerService,
-                                com.example.cutdemotwo.business.cutting.CuttingWorkflowService workflowService) {
+                               ScenarioOneService scenarioOneService,
+                               com.example.cutdemotwo.business.cutting.RemnantService remnantService,
+                               com.example.cutdemotwo.algorithm.api.ToolpathOptimizer toolpathOptimizerService,
+                               com.example.cutdemotwo.business.cutting.CuttingWorkflowService workflowService,
+                               @Autowired(required = false) List<ISlittingSolverEngine> slittingEngines) {
         this.solverFactory = solverFactory;
         this.scenarioOneService = scenarioOneService;
         this.remnantService = remnantService;
         this.toolpathOptimizerService = toolpathOptimizerService;
         this.workflowService = workflowService;
+        this.slittingEngines = slittingEngines == null ? List.of() : List.copyOf(slittingEngines);
     }
 
     @GetMapping("/cutting/tasks")
@@ -149,9 +168,16 @@ public class FabricCutController {
         return scenarioOneService.getScenario(id);
     }
 
+    private void requireDemoEndpointsEnabled() {
+        if (!demoEndpointsEnabled) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前环境已关闭演示初始化与母卷重置接口");
+        }
+    }
+
     @PostMapping("/demo/inventory")
     public Map<String, Integer> initializeDemoInventory(@RequestBody Map<String, Boolean> body) {
-        if (!Boolean.TRUE.equals(body.get("confirmed"))) throw new IllegalArgumentException("请先确认创建示例材料");
+        requireDemoEndpointsEnabled();
+        if (body == null || !Boolean.TRUE.equals(body.get("confirmed"))) throw new IllegalArgumentException("请先确认创建示例材料");
         return remnantService.initializeDemoInventory();
     }
 
@@ -196,8 +222,8 @@ public class FabricCutController {
 
     @PostMapping("/rolls/{rollId}/reset")
     public Map<String, Object> resetRoll(@PathVariable String rollId, @RequestBody(required = false) Map<String, Object> body) {
-        boolean force = body != null && Boolean.TRUE.equals(body.get("force"));
-        boolean ok = remnantService.resetRoll(rollId, force);
+        requireDemoEndpointsEnabled();
+        boolean ok = remnantService.resetRoll(rollId);
         Map<String, Object> res = new HashMap<>();
         res.put("success", ok);
         res.put("rollId", rollId);
@@ -245,16 +271,36 @@ public class FabricCutController {
     }
 
     @GetMapping("/health")
-    public Map<String, Object> health() {
+    public ResponseEntity<Map<String, Object>> health() {
         Map<String, Object> map = new HashMap<>();
-        map.put("status", "UP");
-        var capabilities = solverFactory.capabilities();
+        Map<String, Object> storage = remnantService.healthStatus();
+        boolean storageHealthy = Boolean.TRUE.equals(storage.get("storageHealthy"));
+        var capabilities = solverFactory != null ? solverFactory.capabilities() : List.<com.example.cutdemotwo.contracts.nesting.EngineCapabilities>of();
+        boolean any2DAvailable = capabilities.stream().anyMatch(com.example.cutdemotwo.contracts.nesting.EngineCapabilities::available);
+        boolean slittingAvailable = slittingEngines.stream().anyMatch(ISlittingSolverEngine::isAvailable);
+
         map.put("packingsolverAvailable", capabilities.stream().anyMatch(e -> "packingsolver".equals(e.id()) && e.available()));
         // Null unless the native engine is missing and a registered stand-in will run (and be labelled) instead.
-        map.put("packingsolverFallback", solverFactory.fallbackFor("packingsolver"));
+        map.put("packingsolverFallback", solverFactory != null ? solverFactory.fallbackFor("packingsolver") : null);
         map.put("packingsolverIrregularAvailable", capabilities.stream().anyMatch(e -> "packingsolver-irregular".equals(e.id()) && e.available()));
-        map.put("packingsolverIrregularFallback", solverFactory.fallbackFor("packingsolver-irregular"));
-        map.put("remnantsInStock", remnantService.getAvailableRemnants().size());
-        return map;
+        map.put("packingsolverIrregularFallback", solverFactory != null ? solverFactory.fallbackFor("packingsolver-irregular") : null);
+        map.put("slittingAvailable", slittingAvailable);
+        map.put("storageStatus", storageHealthy ? "UP" : "DOWN");
+        if (!storageHealthy && storage.get("storageError") != null) {
+            map.put("storageError", storage.get("storageError"));
+        }
+        map.put("revision", storage.get("revision"));
+        map.put("remnantsInStock", storage.get("remnantsInStock"));
+
+        if (!storageHealthy) {
+            map.put("status", "DOWN");
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(map);
+        }
+        if (solverFactory != null && !any2DAvailable) {
+            map.put("status", "DEGRADED");
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(map);
+        }
+        map.put("status", "UP");
+        return ResponseEntity.ok(map);
     }
 }

@@ -28,6 +28,22 @@ interface CuttingStatePort {
 
     <T> T inWrite(String eventType, String businessId, String actor, Function<WriteTx, T> command);
 
+    /**
+     * 带原子幂等重放检查的写事务：在锁内 refresh 后先执行 replay，若返回非空则直接返回且不触发持久化或升版本。
+     */
+    default <T> T inWrite(
+            String eventType,
+            String businessId,
+            String actor,
+            Function<ReadView, T> replay,
+            Function<WriteTx, T> command
+    ) {
+        return inWrite(eventType, businessId, actor, tx -> {
+            T hit = replay.apply(tx);
+            return hit != null ? hit : command.apply(tx);
+        });
+    }
+
     interface ReadView {
         long operationTime();
 
@@ -38,6 +54,8 @@ interface CuttingStatePort {
         Optional<SchedulingScheme> findScheme(String id);
 
         Optional<SchedulingScheme> findSchemeByIdempotencyKey(String idempotencyKey);
+
+        Optional<SchedulingScheme> findSchemeByMesReceiptNo(String mesReceiptNo);
 
         List<CuttingTask> listTasks();
 
@@ -64,6 +82,9 @@ interface CuttingStatePort {
         Map<String, Integer> completedQuantities(String taskId);
 
         Map<String, Object> projectQuality(Map<String, Object> receipt);
+
+        /** 检查指定物理材料是否被有效执行单预约或正在加工。 */
+        boolean isMaterialReservedByExecution(String materialType, String materialId, String exceptPlanId);
     }
 
     interface WriteTx extends ReadView {
@@ -74,6 +95,9 @@ interface CuttingStatePort {
         void putScheme(SchedulingScheme scheme);
 
         CuttingTask saveTask(CuttingTask input);
+
+        /** 排程方案内部受控更新任务（如绑卷对齐型号或同款补片加量），忽略当前正在操作的方案自身预约。 */
+        CuttingTask saveTaskForScheme(CuttingTask input, String exceptSchemeId);
 
         MotherRollInfo saveRoll(MotherRollInfo roll);
 
@@ -90,5 +114,15 @@ interface CuttingStatePort {
         void cancelPendingPlan(String planId);
 
         Map<String, Object> confirmPlan(CutReport report, Set<String> pendingBatchPlans);
+
+        /**
+         * 跨任务合排报工过账：同时在回执写入各源任务合格量映射与逐件归属映射，保证完工结转、判废与冲销全链路可追溯。
+         */
+        Map<String, Object> confirmPlan(
+                CutReport report,
+                Set<String> pendingBatchPlans,
+                Map<String, Map<String, Integer>> taskDemandQuantities,
+                Map<Integer, SchedulingScheme.TaskDemandAllocation> pieceSources
+        );
     }
 }

@@ -21,13 +21,19 @@ public record InventorySnapshot(List<MotherRollInfo> rolls, List<RemnantStock> r
         @JsonInclude(JsonInclude.Include.NON_EMPTY) Map<String, DemandTemplate> templates,
         @JsonInclude(JsonInclude.Include.NON_EMPTY) Map<String, SchedulingScheme> schemes) {
     public InventorySnapshot {
-        executions = executions == null ? Map.of() : Map.copyOf(executions);
+        executions = orderedCopy(executions);
         ledger = ledger == null ? List.of() : List.copyOf(ledger);
-        transfers = transfers == null ? Map.of() : Map.copyOf(transfers);
+        transfers = orderedCopy(transfers);
         outbox = outbox == null ? List.of() : List.copyOf(outbox);
-        counts = counts == null ? Map.of() : Map.copyOf(counts);
-        templates = templates == null ? Map.of() : Map.copyOf(templates);
-        schemes = schemes == null ? Map.of() : Map.copyOf(schemes);
+        counts = orderedCopy(counts);
+        templates = orderedCopy(templates);
+        schemes = orderedCopy(schemes);
+    }
+
+    /** 保持 LinkedHashMap 确定性迭代顺序，防止跨重启哈希盐变化引发 JDBC sync 整表无效 UPDATE。 */
+    private static <K, V> Map<K, V> orderedCopy(Map<K, V> source) {
+        if (source == null || source.isEmpty()) return Map.of();
+        return Collections.unmodifiableMap(new LinkedHashMap<>(source));
     }
     public InventorySnapshot(List<MotherRollInfo> rolls, List<RemnantStock> remnants,
             Map<String, Map<String, Object>> receipts, int remnantSeq, int defectSeq,

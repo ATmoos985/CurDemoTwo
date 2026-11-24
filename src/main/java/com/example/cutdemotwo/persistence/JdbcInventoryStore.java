@@ -24,22 +24,43 @@ import java.util.function.Function;
 public class JdbcInventoryStore implements InventoryStore {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
+    private final TransactionTemplate readOnlyTransaction;
     private final boolean mysql;
     private final ObjectMapper json = new ObjectMapper();
     public JdbcInventoryStore(DataSource dataSource) {
         jdbc = new JdbcTemplate(dataSource);
         mysql = "MySQL".equals(jdbc.execute((org.springframework.jdbc.core.ConnectionCallback<String>)
                 connection -> connection.getMetaData().getDatabaseProductName()));
-        transaction = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
+        var txManager = new DataSourceTransactionManager(dataSource);
+        transaction = new TransactionTemplate(txManager);
+        readOnlyTransaction = new TransactionTemplate(txManager);
+        readOnlyTransaction.setReadOnly(true);
     }
     @Override public long now() {
         if (mysql) return Objects.requireNonNull(jdbc.queryForObject("SELECT UNIX_TIMESTAMP(CURRENT_TIMESTAMP(3))*1000", Long.class));
         return Objects.requireNonNull(jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(3)", java.sql.Timestamp.class)).getTime();
     }
     @Override public boolean shared() { return true; }
+
+    /** 轻量无锁查询当前版本号，避免只读请求与健康检查触发 FOR UPDATE 行锁。 */
+    @Override public Long currentRevision() {
+        List<Long> rows = jdbc.query("SELECT revision FROM cutdemo_revision WHERE id = 1", (rs, idx) -> rs.getLong(1));
+        return rows.isEmpty() ? 0L : rows.get(0);
+    }
+
+    /** 轻量无锁数据库连通性与版本行探针。 */
+    @Override public String healthCheckError() {
+        try {
+            jdbc.queryForObject("SELECT 1", Integer.class);
+            return null;
+        } catch (Exception e) {
+            return "数据库连接不可用: " + e.getMessage();
+        }
+    }
+
     @Override public InventorySnapshot load() {
-        return transaction.execute(status -> {
-            Map<String, Object> meta = jdbc.queryForMap("SELECT revision, remnant_seq, defect_seq FROM cutdemo_revision WHERE id = 1 FOR UPDATE");
+        return readOnlyTransaction.execute(status -> {
+            Map<String, Object> meta = jdbc.queryForMap("SELECT revision, remnant_seq, defect_seq FROM cutdemo_revision WHERE id = 1");
             long revision = ((Number)meta.get("revision")).longValue();
             if (revision == 0) return null;
             List<MotherRollInfo> rolls = rows("mother_roll", MotherRollInfo.class);
