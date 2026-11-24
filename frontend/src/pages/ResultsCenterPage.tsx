@@ -976,29 +976,41 @@ export const ResultsCenterPage: React.FC<{
                       </span>
                     </div>
                     <div className="slit-patterns-list">
-                      {activeScheme.slitting1D.patterns.map((p: any, idx: number) => (
-                        <div key={p.id || idx} className="slit-pattern-row">
-                          <div className="slit-pattern-meta">
-                            <span className="tag kind">组 {idx + 1}</span>
-                            <b className="num">{p.repetitions} 车</b>
-                            <span className="num">
-                              {p.stations
-                                .map((s: any) => `${s.widthMm}×${s.countPerRepetition}`)
-                                .join(' + ')}
-                            </span>
-                            <span className="sp" />
-                            <span className="num muted">
-                              已用 {p.usedWidthMm} mm · 余宽 {p.spareWidthMm} mm
-                            </span>
+                      {(() => {
+                        const allWidths: number[] = [];
+                        for (const pat of activeScheme.slitting1D.patterns || []) {
+                          for (const st of pat.stations || []) {
+                            if (st.widthMm > 0) allWidths.push(st.widthMm);
+                          }
+                        }
+                        const minW = allWidths.length ? Math.min(...allWidths) : 0;
+                        const maxW = allWidths.length ? Math.max(...allWidths) : 0;
+                        return activeScheme.slitting1D.patterns.map((p: any, idx: number) => (
+                          <div key={p.id || idx} className="slit-pattern-row">
+                            <div className="slit-pattern-meta">
+                              <span className="tag kind">组 {idx + 1}</span>
+                              <b className="num">{p.repetitions} 车</b>
+                              <span className="num">
+                                {p.stations
+                                  .map((s: any) => `${s.widthMm}×${s.countPerRepetition}`)
+                                  .join(' + ')}
+                              </span>
+                              <span className="sp" />
+                              <span className="num muted">
+                                已切 {p.usedWidthMm} mm · 余 {p.spareWidthMm} mm
+                              </span>
+                            </div>
+                            <SlittingStripBar
+                              motherWidthMm={activeScheme.widthMm}
+                              leftTrimMm={activeScheme.slitting1D.leftTrimMm}
+                              rightTrimMm={activeScheme.slitting1D.rightTrimMm}
+                              stations={p.stations}
+                              minWidthMm={minW}
+                              maxWidthMm={maxW}
+                            />
                           </div>
-                          <SlittingStripBar
-                            motherWidthMm={activeScheme.widthMm}
-                            leftTrimMm={activeScheme.slitting1D.leftTrimMm}
-                            rightTrimMm={activeScheme.slitting1D.rightTrimMm}
-                            stations={p.stations}
-                          />
-                        </div>
-                      ))}
+                        ));
+                      })()}
                     </div>
                   </div>
                 ) : null}

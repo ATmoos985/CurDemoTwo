@@ -99,16 +99,6 @@ export const SCENARIOS_2D: { id: Scenario2DType; label: string; desc: string }[]
   { id: 'MULTI_WIDTH', label: '多幅比选', desc: '批量对比多个门幅的单耗与版长' }
 ];
 
-export const STRIP_COLORS = [
-  '#2563eb',
-  '#059669',
-  '#d97706',
-  '#7c3aed',
-  '#0891b2',
-  '#db2777',
-  '#4f46e5'
-];
-
 export interface DemandRowView {
   key: string;
   rawId: number | string;

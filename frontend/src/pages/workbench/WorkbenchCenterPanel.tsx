@@ -1,4 +1,4 @@
-import React, { Dispatch, RefObject, SetStateAction } from 'react';
+import React, { Dispatch, RefObject, SetStateAction, useMemo, useState } from 'react';
 import { SavedScheme2D, SlittingOrderLine, SlittingSchemeRun } from '../../store/useStudioStore';
 import {
   WorkbenchBoardCanvas,
@@ -119,6 +119,28 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
   onRunSolve1D,
   onQuickExportExcel1D
 }) => {
+  const [hoveredStripWidth1D, setHoveredStripWidth1D] = useState<number | null>(null);
+
+  const widthBounds1D = useMemo(() => {
+    const widths: number[] = [];
+    for (const p of activeScheme1D?.patterns || []) {
+      for (const st of p.stations || []) {
+        if (st.widthMm > 0) widths.push(st.widthMm);
+      }
+    }
+    if (!widths.length) return { min: 0, max: 0 };
+    return { min: Math.min(...widths), max: Math.max(...widths) };
+  }, [activeScheme1D]);
+
+  const highlightedOrder1D = useMemo(() => {
+    if (is2D || !activeHighlightKey) return null;
+    return slitOrders.find((o) => String(o.id) === activeHighlightKey) || null;
+  }, [is2D, activeHighlightKey, slitOrders]);
+
+  const effectiveHighlightWidth1D = highlightedOrder1D
+    ? Math.round(highlightedOrder1D.widthMm)
+    : hoveredStripWidth1D;
+
   if (is2D) {
     return (
       <section className="pane studio-center">
@@ -398,34 +420,86 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
                     刀组排布 · {activeScheme1D.patterns.length} 组 · {activeScheme1D.totalCars} 车
                   </span>
                   <span className="sp" />
+                  <span className="slit-legend" aria-label="条带图例">
+                    <span className="slit-legend-item" title="色阶深浅对应条宽由窄到宽">
+                      <i className="slit-swatch-scale" aria-hidden="true" />
+                      窄→宽
+                    </span>
+                    <span className="slit-legend-item">
+                      <i className="slit-swatch-trim" aria-hidden="true" />
+                      切边
+                    </span>
+                    <span className="slit-legend-item">
+                      <i className="slit-swatch-spare" aria-hidden="true" />
+                      余宽
+                    </span>
+                  </span>
                   <button type="button" className="btn sm" onClick={onQuickExportExcel1D}>
                     导出 Excel
                   </button>
                 </div>
                 <div className="slit-patterns-list">
-                  {activeScheme1D.patterns.map((p, idx) => (
-                    <div key={p.id} className="slit-pattern-row">
-                      <div className="slit-pattern-meta">
-                        <span className="tag kind">组 {idx + 1}</span>
-                        <b className="num">{p.repetitions} 车</b>
-                        <span className="num">
-                          {p.stations
-                            .map((s) => `${s.widthMm}×${s.countPerRepetition}`)
-                            .join(' + ')}
-                        </span>
-                        <span className="sp" />
-                        <span className="num muted">
-                          已切 {p.usedWidthMm} mm · 余 {p.spareWidthMm} mm
-                        </span>
+                  {activeScheme1D.patterns.map((p, idx) => {
+                    const hasOrderHighlight = Boolean(highlightedOrder1D);
+                    const hasAlloc = Boolean(p.allocations && p.allocations.length > 0);
+                    const matchedAlloc =
+                      hasOrderHighlight && hasAlloc
+                        ? p.allocations!.find(
+                            (a) => String(a.orderId) === String(highlightedOrder1D!.id) && a.count > 0
+                          )
+                        : null;
+                    const hasWidthInPattern =
+                      effectiveHighlightWidth1D != null &&
+                      p.stations.some(
+                        (st) => Math.round(st.widthMm) === Math.round(effectiveHighlightWidth1D)
+                      );
+                    const isRowMatched = hasOrderHighlight
+                      ? hasAlloc
+                        ? Boolean(matchedAlloc)
+                        : hasWidthInPattern
+                      : hasWidthInPattern;
+                    const isRowDimmed =
+                      (hasOrderHighlight || hoveredStripWidth1D != null) && !isRowMatched;
+
+                    return (
+                      <div
+                        key={p.id}
+                        className={`slit-pattern-row${isRowMatched ? ' is-matched' : ''}${
+                          isRowDimmed ? ' is-dimmed' : ''
+                        }`}
+                      >
+                        <div className="slit-pattern-meta">
+                          <span className="tag kind">组 {idx + 1}</span>
+                          <b className="num">{p.repetitions} 车</b>
+                          <span className="num">
+                            {p.stations
+                              .map((s) => `${s.widthMm}×${s.countPerRepetition}`)
+                              .join(' + ')}
+                          </span>
+                          {matchedAlloc && (
+                            <span className="slit-alloc-pill num">
+                              本单 {matchedAlloc.count} 卷
+                            </span>
+                          )}
+                          <span className="sp" />
+                          <span className="num muted">
+                            已切 {p.usedWidthMm} mm · 余 {p.spareWidthMm} mm
+                          </span>
+                        </div>
+                        <SlittingStripBar
+                          motherWidthMm={activeScheme1D.motherWidthMm}
+                          leftTrimMm={activeScheme1D.leftTrimMm}
+                          rightTrimMm={activeScheme1D.rightTrimMm}
+                          stations={p.stations}
+                          minWidthMm={widthBounds1D.min}
+                          maxWidthMm={widthBounds1D.max}
+                          highlightedWidthMm={isRowDimmed ? null : effectiveHighlightWidth1D}
+                          dimAll={isRowDimmed}
+                          onHoverWidth={setHoveredStripWidth1D}
+                        />
                       </div>
-                      <SlittingStripBar
-                        motherWidthMm={activeScheme1D.motherWidthMm}
-                        leftTrimMm={activeScheme1D.leftTrimMm}
-                        rightTrimMm={activeScheme1D.rightTrimMm}
-                        stations={p.stations}
-                      />
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {defectSchedules1D.length > 0 && (
