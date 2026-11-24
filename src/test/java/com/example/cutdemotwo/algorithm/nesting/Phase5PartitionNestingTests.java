@@ -338,13 +338,40 @@ class Phase5PartitionNestingTests {
                 parts50, contourProcess(4.0, "left-top"), "deepnest", 5);
         assertFalse(ContourPartitionSolver.isEligible(polySheet, false, true, false, false, 50, 1e6, 4e6, budget));
 
-        // 4. 非 NOOP 窗帘约束不触发
-        NestingProblem curtainProb = new NestingProblem(
+        // 4a. 仅含纯布边禁区（无对花、无倒顺毛、无辅片布边差异）放宽触发分区，并严守布边与零容忍终检
+        NestingProblem pureSelvedgeProb = new NestingProblem(
                 "1", "mm",
-                new Material("curtain", Shape.rectangle(1500, 4000), List.of(), false,
+                new Material("curtain-selvedge", Shape.rectangle(1500, 4000), List.of(), false,
                         new FabricRule(30.0, 30.0, false, null, null)),
                 parts50, contourProcess(4.0, "left-top"), "deepnest", 5);
-        assertFalse(ContourPartitionSolver.isEligible(curtainProb, true, false, false, false, 50, 1e6, 6e6, budget));
+        assertTrue(ContourPartitionSolver.isEligible(pureSelvedgeProb, true, false, false, false, 50, 1e6, 6e6, budget));
+        EngineResult pureSelvedgeRes = engine.solve(pureSelvedgeProb);
+        assertZeroToleranceAndDemandConservation(pureSelvedgeProb, pureSelvedgeRes, true);
+        for (Placement p : pureSelvedgeRes.getPlacements()) {
+            assertTrue(p.x() >= 30.0 - 1e-4, "纯布边分区结果不得侵入左布边：" + p.x());
+            assertTrue(p.x() + p.shape().width() <= 1500.0 - 30.0 + 1e-4, "纯布边分区结果不得侵入右布边：" + (p.x() + p.shape().width()));
+        }
+
+        // 4b. 含对花或同组倒顺毛等复杂窗帘约束仍不触发分区
+        List<Part> patternParts50 = List.of(new Part(
+                1, "对花小L", lShape(200, 160, 80, 70), 50, false, true,
+                new NestingProblem.PartRule("PRIMARY", true, 0.0, 1.0, List.of(0, 180), null, null)));
+        NestingProblem patternProb = new NestingProblem(
+                "1", "mm",
+                new Material("curtain-pattern", Shape.rectangle(1500, 4000), List.of(), false,
+                        new FabricRule(30.0, 30.0, false, 200.0, 0.0)),
+                patternParts50, contourProcess(4.0, "left-top"), "deepnest", 5);
+        assertFalse(ContourPartitionSolver.isEligible(patternProb, true, false, false, false, 50, 1e6, 6e6, budget));
+
+        List<Part> grainGroupParts50 = List.of(new Part(
+                1, "同组倒顺毛小L", lShape(200, 160, 80, 70), 50, false, true,
+                new NestingProblem.PartRule("PRIMARY", false, null, null, List.of(0, 180), null, "G-NAP")));
+        NestingProblem grainGroupProb = new NestingProblem(
+                "1", "mm",
+                new Material("curtain-grain", Shape.rectangle(1500, 4000), List.of(), false,
+                        new FabricRule(30.0, 30.0, false, null, null)),
+                grainGroupParts50, contourProcess(4.0, "left-top"), "deepnest", 5);
+        assertFalse(ContourPartitionSolver.isEligible(grainGroupProb, true, false, false, false, 50, 1e6, 6e6, budget));
 
         // 5. 非 left-top 起角不触发
         for (String corner : List.of("right-top", "left-bottom", "right-bottom")) {

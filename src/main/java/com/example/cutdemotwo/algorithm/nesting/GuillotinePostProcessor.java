@@ -40,11 +40,23 @@ public final class GuillotinePostProcessor {
 
     /** 构建第 0 阶段卷头修齐横切刀（调用方保证 {@code frame.trimStart() > 0}）。 */
     public static CutStep createTrimCut(CoordinateFrame frame, int stepIndex) {
+        return createTrimCut(frame, stepIndex, 0.0);
+    }
+
+    /**
+     * 构建第 0 阶段卷头修齐横切刀，原生支持刀缝 {@code kerfMm}：
+     * 刀线中心自动向废料头一侧偏移 {@code kerf / 2}，确保锯路不侵蚀有效排样区前缘。
+     */
+    public static CutStep createTrimCut(CoordinateFrame frame, int stepIndex, double kerfMm) {
         double trim = frame.trimStart();
+        double halfKerf = Math.max(0.0, kerfMm) * 0.5;
+        double cutY = frame.isMirrorY()
+                ? Math.min(frame.height(), frame.trimCutY() + halfKerf)
+                : Math.max(0.0, frame.trimCutY() - halfKerf);
         return new CutStep(
                 stepIndex,
                 "横切",
-                frame.trimCutY(),
+                cutY,
                 0,
                 frame.width(),
                 String.format("第 0 阶段：卷头修齐横切断刀，切除 0~%.0f mm 不规则料头并确立绝对测量原点", trim)
@@ -123,8 +135,22 @@ public final class GuillotinePostProcessor {
                                                         List<CutStep> rawCuts,
                                                         CoordinateFrame frame,
                                                         boolean enforceStrictStages) {
+        return completeAndOptimizeCuts(completionService, optimizerService, pieces, remnants, rawCuts,
+                frame, enforceStrictStages, 0.0, null);
+    }
+
+    /** 串联 100% 无粘连边界补齐与空行程回零刀路优化（支持原生刀缝 kerf 与最大通切阶数约束）。 */
+    public static List<CutStep> completeAndOptimizeCuts(CutBoundaryCompletionService completionService,
+                                                        ToolpathOptimizerService optimizerService,
+                                                        List<PlacedPiece> pieces,
+                                                        List<RemnantPiece> remnants,
+                                                        List<CutStep> rawCuts,
+                                                        CoordinateFrame frame,
+                                                        boolean enforceStrictStages,
+                                                        double kerfMm,
+                                                        Integer maxStages) {
         List<CutStep> separated = completionService.ensureCompleteSeparation(
-                pieces, remnants, rawCuts, frame.width(), frame.height(), frame.isSheet()
+                pieces, remnants, rawCuts, frame.width(), frame.height(), frame.isSheet(), kerfMm, maxStages
         );
         return optimizeCuts(optimizerService, separated, frame, enforceStrictStages);
     }

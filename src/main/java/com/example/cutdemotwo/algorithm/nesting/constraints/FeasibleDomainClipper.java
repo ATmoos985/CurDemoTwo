@@ -18,8 +18,25 @@ public interface FeasibleDomainClipper {
         return problem.material().exclusions();
     }
 
-    /** 对候选 Y 坐标做可行域吸附（如经向花距循环对花向上对齐到最近合法格点）。 */
+    /** 对候选 Y 坐标做可行域单向向上吸附（如经向花距循环对花向上对齐到最近合法格点）。 */
     default double snapY(NestingProblem problem, NestingProblem.Part part, int angleDeg, double rawY) {
         return rawY;
+    }
+
+    /** 对候选 X 坐标做可行域单向向右吸附（如纬向花距对格）。 */
+    default double snapX(NestingProblem problem, NestingProblem.Part part, int angleDeg, double rawX) {
+        return rawX;
+    }
+
+    /** 对候选 Y 坐标在 [minY, maxY] 范围内执行双向最近合法格点吸附。 */
+    default double snapYNearest(NestingProblem problem, NestingProblem.Part part, int angleDeg,
+                                double rawY, double minY, double maxY) {
+        return snapY(problem, part, angleDeg, rawY);
+    }
+
+    /** 对候选 X 坐标在 [minX, maxX] 范围内执行双向最近合法格点吸附。 */
+    default double snapXNearest(NestingProblem problem, NestingProblem.Part part, int angleDeg,
+                                double rawX, double minX, double maxX) {
+        return snapX(problem, part, angleDeg, rawX);
     }
 }

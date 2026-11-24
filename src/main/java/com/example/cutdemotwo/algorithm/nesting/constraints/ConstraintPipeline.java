@@ -93,7 +93,7 @@ public final class ConstraintPipeline {
         return all.stream().filter(e -> finalIds.contains(e.id())).toList();
     }
 
-    /** 阶段 2c：候选 Y 坐标吸附（如花距循环对花）。 */
+    /** 阶段 2c：候选 Y 坐标单向向上吸附（如经向花距循环对花）。 */
     public double snapY(NestingProblem problem, NestingProblem.Part part, int angleDeg, double rawY) {
         if (noop || clippers.isEmpty()) return rawY;
         double y = rawY;
@@ -101,6 +101,38 @@ public final class ConstraintPipeline {
             y = clipper.snapY(problem, part, angleDeg, y);
         }
         return y;
+    }
+
+    /** 阶段 2c：候选 X 坐标单向向右吸附（如纬向花距对格）。 */
+    public double snapX(NestingProblem problem, NestingProblem.Part part, int angleDeg, double rawX) {
+        if (noop || clippers.isEmpty()) return rawX;
+        double x = rawX;
+        for (FeasibleDomainClipper clipper : clippers) {
+            x = clipper.snapX(problem, part, angleDeg, x);
+        }
+        return x;
+    }
+
+    /** 阶段 2c：候选 Y 坐标在 [minY, maxY] 范围内双向最近吸附。 */
+    public double snapYNearest(NestingProblem problem, NestingProblem.Part part, int angleDeg,
+                               double rawY, double minY, double maxY) {
+        if (noop || clippers.isEmpty()) return rawY;
+        double y = rawY;
+        for (FeasibleDomainClipper clipper : clippers) {
+            y = clipper.snapYNearest(problem, part, angleDeg, y, minY, maxY);
+        }
+        return y;
+    }
+
+    /** 阶段 2c：候选 X 坐标在 [minX, maxX] 范围内双向最近吸附。 */
+    public double snapXNearest(NestingProblem problem, NestingProblem.Part part, int angleDeg,
+                               double rawX, double minX, double maxX) {
+        if (noop || clippers.isEmpty()) return rawX;
+        double x = rawX;
+        for (FeasibleDomainClipper clipper : clippers) {
+            x = clipper.snapXNearest(problem, part, angleDeg, x, minX, maxX);
+        }
+        return x;
     }
 
     /** 阶段 3：候选位姿软约束惩罚（>= 0，越小越优）。 */

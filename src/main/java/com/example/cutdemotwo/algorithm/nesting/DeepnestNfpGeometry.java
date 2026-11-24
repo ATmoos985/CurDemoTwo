@@ -98,13 +98,41 @@ final class DeepnestNfpGeometry {
 
         static ShapeSignature of(Shape shape) {
             List<Point> pts = normalizePositiveWinding(PolygonGeometry.vertices(shape));
-            long[] coords = new long[pts.size() * 2];
-            for (int i = 0; i < pts.size(); i++) {
-                Point p = pts.get(i);
-                coords[i * 2] = Math.round(p.x() * 100_000.0);
-                coords[i * 2 + 1] = Math.round(p.y() * 100_000.0);
+            if (!shape.hasHoles()) {
+                long[] coords = new long[pts.size() * 2];
+                for (int i = 0; i < pts.size(); i++) {
+                    Point p = pts.get(i);
+                    coords[i * 2] = Math.round(p.x() * 100_000.0);
+                    coords[i * 2 + 1] = Math.round(p.y() * 100_000.0);
+                }
+                return new ShapeSignature(coords);
             }
-            return new ShapeSignature(coords);
+            List<long[]> holeSeqs = new ArrayList<>(shape.holes().size());
+            int totalLen = pts.size() * 2;
+            for (List<Point> hole : shape.holes()) {
+                List<Point> normHole = normalizePositiveWinding(hole);
+                long[] hc = new long[normHole.size() * 2];
+                for (int i = 0; i < normHole.size(); i++) {
+                    Point p = normHole.get(i);
+                    hc[i * 2] = Math.round(p.x() * 100_000.0);
+                    hc[i * 2 + 1] = Math.round(p.y() * 100_000.0);
+                }
+                holeSeqs.add(hc);
+                totalLen += 1 + hc.length;
+            }
+            holeSeqs.sort(Arrays::compare);
+            long[] all = new long[totalLen];
+            int pos = 0;
+            for (Point p : pts) {
+                all[pos++] = Math.round(p.x() * 100_000.0);
+                all[pos++] = Math.round(p.y() * 100_000.0);
+            }
+            for (long[] hc : holeSeqs) {
+                all[pos++] = Long.MIN_VALUE;
+                System.arraycopy(hc, 0, all, pos, hc.length);
+                pos += hc.length;
+            }
+            return new ShapeSignature(all);
         }
 
         @Override
@@ -465,10 +493,46 @@ final class DeepnestNfpGeometry {
 
     static Geometry toJtsPolygon(Shape shape, double dx, double dy) {
         if (shape == null) return EMPTY_GEOM;
-        if ("RECTANGLE".equals(shape.type())) {
-            return rectGeometry(dx, dy, shape.width(), shape.height());
+        if (!shape.hasHoles()) {
+            if ("RECTANGLE".equals(shape.type())) {
+                return rectGeometry(dx, dy, shape.width(), shape.height());
+            }
+            return toJtsPolygon(PolygonGeometry.vertices(shape), dx, dy);
         }
-        return toJtsPolygon(PolygonGeometry.vertices(shape), dx, dy);
+        LinearRing shell = toLinearRing(PolygonGeometry.vertices(shape), dx, dy);
+        if (shell == null) return EMPTY_GEOM;
+        List<LinearRing> holeRings = new ArrayList<>(shape.holes().size());
+        for (List<Point> hole : shape.holes()) {
+            LinearRing hr = toLinearRing(hole, dx, dy);
+            if (hr != null) {
+                holeRings.add(hr);
+            }
+        }
+        Polygon poly = GEOM_FACTORY.createPolygon(shell, holeRings.toArray(LinearRing[]::new));
+        return ensureValidPolygonal(poly);
+    }
+
+    private static LinearRing toLinearRing(List<Point> points, double dx, double dy) {
+        if (points == null || points.size() < 3) return null;
+        List<Coordinate> coords = new ArrayList<>(points.size() + 1);
+        for (Point p : points) {
+            double x = p.x() + dx;
+            double y = p.y() + dy;
+            if (coords.isEmpty()) {
+                coords.add(new Coordinate(x, y));
+            } else {
+                Coordinate prev = coords.get(coords.size() - 1);
+                if (Math.abs(prev.x - x) > 1e-12 || Math.abs(prev.y - y) > 1e-12) {
+                    coords.add(new Coordinate(x, y));
+                }
+            }
+        }
+        if (coords.size() > 1 && coords.get(0).equals2D(coords.get(coords.size() - 1), 1e-12)) {
+            coords.remove(coords.size() - 1);
+        }
+        if (coords.size() < 3) return null;
+        coords.add(new Coordinate(coords.get(0).x, coords.get(0).y));
+        return GEOM_FACTORY.createLinearRing(coords.toArray(Coordinate[]::new));
     }
 
     static Geometry rectGeometry(double x, double y, double w, double h) {
@@ -811,6 +875,8 @@ final class DeepnestNfpGeometry {
     /**
      * Computes the Outer No-Fit Polygon $\text{OuterNFP}(A, B) = A \oplus (-B)$ (plus JTS precise {@link BufferOp}
      * when {@code pieceGap > 0}) as a JTS {@link Geometry}.
+     * 当 {@code shapeA} 或 {@code shapeB} 含内孔洞 {@code holes} 时，自动扣除各内孔对应的合法孔内套料可行域（Hole IFP），
+     * 允许小件合法嵌套在母件内孔中且严格满足与孔壁的 {@code pieceGap} 安全间距，同时保持中心反演对称性。
      */
     static Geometry computeOuterNfpGeom(Shape shapeA, List<List<Point>> convexA,
                                         Shape shapeB, List<List<Point>> convexB,
@@ -840,10 +906,117 @@ final class DeepnestNfpGeometry {
             baseNfp = convolveGeomWithNegatedShape(toJtsPolygon(shapeA, 0.0, 0.0), shapeB);
         }
 
-        if (pieceGap > 0.0 && !baseNfp.isEmpty()) {
-            return bufferPrecise(baseNfp, pieceGap, GAP_SAFETY_MM);
+        Geometry resultNfp = (pieceGap > 0.0 && !baseNfp.isEmpty())
+                ? bufferPrecise(baseNfp, pieceGap, GAP_SAFETY_MM)
+                : baseNfp;
+
+        if (!resultNfp.isEmpty() && shapeA.hasHoles()) {
+            for (List<Point> holeA : shapeA.holes()) {
+                Geometry holeIfp = computeHoleInnerNfp(holeA, shapeB, pieceGap);
+                if (!holeIfp.isEmpty()) {
+                    resultNfp = differenceGeometry(resultNfp, holeIfp);
+                }
+            }
         }
-        return baseNfp;
+        if (!resultNfp.isEmpty() && shapeB.hasHoles()) {
+            for (List<Point> holeB : shapeB.holes()) {
+                Geometry holeIfpBA = computeHoleInnerNfp(holeB, shapeA, pieceGap);
+                if (!holeIfpBA.isEmpty()) {
+                    resultNfp = differenceGeometry(resultNfp, invertGeometry(holeIfpBA));
+                }
+            }
+        }
+        return resultNfp;
+    }
+
+    /**
+     * 计算移动件 {@code innerPart} 在固定件内孔 {@code holeRing}（处于固定件局部坐标系）中的精确合法落位域（Hole IFP），
+     * 若 {@code pieceGap > 0} 则先使用 JTS 负 Buffer 将内孔边界向内均匀收缩 {@code pieceGap + GAP_SAFETY_MM}。
+     */
+    static Geometry computeHoleInnerNfp(List<Point> holeRing, Shape innerPart, double pieceGap) {
+        ComputationCancellation.check();
+        if (holeRing == null || holeRing.size() < 3 || innerPart == null) {
+            return EMPTY_GEOM;
+        }
+        double hMinX = Double.POSITIVE_INFINITY, hMinY = Double.POSITIVE_INFINITY;
+        double hMaxX = Double.NEGATIVE_INFINITY, hMaxY = Double.NEGATIVE_INFINITY;
+        for (Point p : holeRing) {
+            if (p.x() < hMinX) hMinX = p.x();
+            if (p.y() < hMinY) hMinY = p.y();
+            if (p.x() > hMaxX) hMaxX = p.x();
+            if (p.y() > hMaxY) hMaxY = p.y();
+        }
+        double partW = innerPart.width();
+        double partH = innerPart.height();
+        double gapMargin = pieceGap > 0.0 ? (pieceGap + GAP_SAFETY_MM) : 0.0;
+        if (partW + 2.0 * gapMargin > (hMaxX - hMinX) + 1e-6
+                || partH + 2.0 * gapMargin > (hMaxY - hMinY) + 1e-6) {
+            return EMPTY_GEOM;
+        }
+
+        Geometry holeGeom = toJtsPolygon(holeRing, 0.0, 0.0);
+        if (holeGeom.isEmpty()) {
+            return EMPTY_GEOM;
+        }
+        Geometry effHole = holeGeom;
+        if (pieceGap > 0.0) {
+            BufferParameters params = new BufferParameters(
+                    BUFFER_QUADRANT_SEGMENTS,
+                    BufferParameters.CAP_ROUND,
+                    BufferParameters.JOIN_MITRE,
+                    BufferParameters.DEFAULT_MITRE_LIMIT
+            );
+            effHole = ensureValidPolygonal(BufferOp.bufferOp(holeGeom, -(pieceGap + GAP_SAFETY_MM), params));
+            if (effHole.isEmpty()) {
+                return EMPTY_GEOM;
+            }
+        }
+
+        Envelope env = effHole.getEnvelopeInternal();
+        double maxOriginX = env.getMaxX() - partW;
+        double maxOriginY = env.getMaxY() - partH;
+        if (maxOriginX < env.getMinX() - 1e-6 || maxOriginY < env.getMinY() - 1e-6) {
+            return EMPTY_GEOM;
+        }
+
+        // 若内孔为轴对齐矩形，直接使用 O(1) 精确解析 IFP
+        if (isAxisAlignedRectangle(effHole, env)) {
+            double eps = pieceGap > 0.0 ? 0.0 : OPEN_CHANNEL_EPS;
+            double w = Math.max(0.0, maxOriginX - env.getMinX()) + 2.0 * eps;
+            double h = Math.max(0.0, maxOriginY - env.getMinY()) + 2.0 * eps;
+            if (w <= 1e-9 || h <= 1e-9) {
+                return EMPTY_GEOM;
+            }
+            return rectGeometry(env.getMinX() - eps, env.getMinY() - eps, w, h);
+        }
+
+        double margin = partW + partH + 20.0;
+        Geometry frame = rectGeometry(
+                env.getMinX() - margin,
+                env.getMinY() - margin,
+                env.getWidth() + 2.0 * margin,
+                env.getHeight() + 2.0 * margin
+        );
+        Geometry frameMinusHole = differenceGeometry(frame, effHole);
+        Shape shrunkPart = pieceGap > 0.0 ? innerPart : shrinkShapeMicro(innerPart, OPEN_CHANNEL_EPS * 2.0);
+        Geometry forbiddenOutside = convolveGeomWithNegatedShape(frameMinusHole, shrunkPart);
+
+        double eps = pieceGap > 0.0 ? 0.0 : OPEN_CHANNEL_EPS;
+        Geometry boundingRect = rectGeometry(
+                env.getMinX() - eps,
+                env.getMinY() - eps,
+                Math.max(0.0, maxOriginX - env.getMinX()) + 2.0 * eps,
+                Math.max(0.0, maxOriginY - env.getMinY()) + 2.0 * eps
+        );
+        return differenceGeometry(boundingRect, forbiddenOutside);
+    }
+
+    private static boolean isAxisAlignedRectangle(Geometry geom, Envelope env) {
+        if (!(geom instanceof Polygon poly) || poly.getNumInteriorRing() > 0) {
+            return false;
+        }
+        double rectArea = env.getWidth() * env.getHeight();
+        return rectArea > 1e-9 && Math.abs(poly.getArea() - rectArea) <= 1e-4;
     }
 
     /**
@@ -917,8 +1090,8 @@ final class DeepnestNfpGeometry {
         double maxX = Math.max(0.0, matW - partW);
         double maxY = Math.max(0.0, matH - partH);
 
-        if ("RECTANGLE".equals(materialShape.type())) {
-            // Fast exact IFP for rectangular sheet
+        if ("RECTANGLE".equals(materialShape.type()) && !materialShape.hasHoles()) {
+            // Fast exact IFP for rectangular sheet without holes
             innerFeasible = rectGeometry(
                     -OPEN_CHANNEL_EPS,
                     -OPEN_CHANNEL_EPS,
@@ -1054,31 +1227,73 @@ final class DeepnestNfpGeometry {
         return toArea(computeOuterNfpGeom(shapeA, convexA, shapeB, convexB, pieceGap));
     }
 
-    private static Shape shrinkShapeMicro(Shape shape, double delta) {
-        List<Point> verts = PolygonGeometry.vertices(shape);
-        double cx = 0, cy = 0;
-        for (Point p : verts) {
-            cx += p.x();
-            cy += p.y();
+    /**
+     * 使用 JTS 负 Buffer 对任意多边形（含 U/C 形凹多边形）执行均匀微缩，
+     * 避免旧版“向外部质心缩放”在凹腔内壁引发翻转或自交多边形。
+     */
+    static Geometry shrinkGeometryMicro(Geometry geom, double delta) {
+        if (geom == null || geom.isEmpty() || delta <= 0.0) {
+            return geom == null ? EMPTY_GEOM : geom;
         }
-        cx /= verts.size();
-        cy /= verts.size();
-        List<Point> scaled = new ArrayList<>(verts.size());
+        BufferParameters miterParams = new BufferParameters(
+                BUFFER_QUADRANT_SEGMENTS,
+                BufferParameters.CAP_FLAT,
+                BufferParameters.JOIN_MITRE,
+                BufferParameters.DEFAULT_MITRE_LIMIT
+        );
+        double cur = delta;
+        for (int attempt = 0; attempt < 4; attempt++) {
+            Geometry shrunk = ensureValidPolygonal(BufferOp.bufferOp(geom, -cur, miterParams));
+            if (!shrunk.isEmpty() && shrunk.isValid() && shrunk.getArea() > 1e-9) {
+                return shrunk;
+            }
+            cur *= 0.25;
+        }
+        return geom;
+    }
+
+    /**
+     * 基于 JTS 负 Buffer 的形状微缩（保留局部左上归零外接框与拓扑合法性，专门修复 U/C 形凹轮廓自交问题）。
+     */
+    static Shape shrinkShapeMicro(Shape shape, double delta) {
+        if (shape == null || delta <= 0.0) {
+            return shape;
+        }
+        Geometry base = toJtsPolygon(PolygonGeometry.vertices(shape), 0.0, 0.0);
+        if (base.isEmpty()) {
+            return shape;
+        }
+        Geometry shrunk = shrinkGeometryMicro(base, delta);
+        if (shrunk.isEmpty() || shrunk == base) {
+            return shape;
+        }
+        @SuppressWarnings("unchecked")
+        List<Polygon> polys = PolygonExtracter.getPolygons(shrunk);
+        if (polys.isEmpty()) {
+            return shape;
+        }
+        Polygon largest = polys.get(0);
+        for (int i = 1; i < polys.size(); i++) {
+            if (polys.get(i).getArea() > largest.getArea()) {
+                largest = polys.get(i);
+            }
+        }
+        List<Ring> rings = new ArrayList<>(1);
+        appendRing(largest.getExteriorRing(), rings);
+        if (rings.isEmpty()) {
+            return shape;
+        }
+        List<Point> verts = rings.get(0).vertices();
         double minX = Double.POSITIVE_INFINITY, minY = Double.POSITIVE_INFINITY;
         double maxX = Double.NEGATIVE_INFINITY, maxY = Double.NEGATIVE_INFINITY;
         for (Point p : verts) {
-            double dx = p.x() - cx, dy = p.y() - cy;
-            double len = Math.hypot(dx, dy);
-            double nx = len > delta * 4 ? cx + dx * ((len - delta) / len) : p.x();
-            double ny = len > delta * 4 ? cy + dy * ((len - delta) / len) : p.y();
-            scaled.add(new Point(nx, ny));
-            if (nx < minX) minX = nx;
-            if (ny < minY) minY = ny;
-            if (nx > maxX) maxX = nx;
-            if (ny > maxY) maxY = ny;
+            if (p.x() < minX) minX = p.x();
+            if (p.y() < minY) minY = p.y();
+            if (p.x() > maxX) maxX = p.x();
+            if (p.y() > maxY) maxY = p.y();
         }
         final double ox = minX, oy = minY;
-        List<Point> shifted = scaled.stream().map(p -> new Point(p.x() - ox, p.y() - oy)).toList();
+        List<Point> shifted = verts.stream().map(p -> new Point(p.x() - ox, p.y() - oy)).toList();
         return new Shape("POLYGON", Math.max(1e-6, maxX - minX), Math.max(1e-6, maxY - minY), shifted);
     }
 

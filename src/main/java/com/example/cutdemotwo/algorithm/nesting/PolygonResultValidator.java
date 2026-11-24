@@ -50,7 +50,7 @@ public final class PolygonResultValidator {
         if (!output.getPieces().isEmpty() || !output.getRemnants().isEmpty() || !output.getCuts().isEmpty())
             return "轮廓排料不能混入矩形料头或直刀刀序";
         var materialShape = input.material().shape();
-        boolean isRectMaterial = "RECTANGLE".equals(materialShape.type());
+        boolean isRectMaterial = "RECTANGLE".equals(materialShape.type()) && !materialShape.hasHoles();
         double matW = materialShape.width();
         double matH = materialShape.height();
         Area material = null;
@@ -172,9 +172,9 @@ public final class PolygonResultValidator {
             }
         }
 
-        double pieceGap = input.process().pieceGap();
-        if (pieceGap > 0) {
-            double gapMargin = pieceGap + COORD_EPS;
+        double effectiveGap = Math.max(Math.max(0.0, input.process().pieceGap()), Math.max(0.0, input.process().kerf()));
+        if (effectiveGap > 0) {
+            double gapMargin = effectiveGap + COORD_EPS;
             for (int i = 0; i < n; i++) {
                 ComputationCancellation.check();
                 int currentIdx = i;
@@ -186,9 +186,9 @@ public final class PolygonResultValidator {
                     ComputationCancellation.check();
                     var b = occupied.get(j);
                     return ContourGeometrySupport.violatesMinEdgeGap(
-                            a.localVerts, a.placement.x(), a.placement.y(),
-                            b.localVerts, b.placement.x(), b.placement.y(),
-                            pieceGap, COORD_EPS);
+                            a.placement.shape(), a.placement.x(), a.placement.y(),
+                            b.placement.shape(), b.placement.x(), b.placement.y(),
+                            effectiveGap, COORD_EPS);
                 })) {
                     return "轮廓裁片间距不足";
                 }

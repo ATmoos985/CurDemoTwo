@@ -56,6 +56,7 @@ public class CrossCutSolverService implements ICutSolverEngine {
         List<PlacedPiece> pieces = new ArrayList<>();
         List<RemnantPiece> remnants = new ArrayList<>();
         List<CutStep> cuts = new ArrayList<>();
+        double pieceGap = Math.max(0.0, req.process().pieceGap());
         double cursor = req.process().trimStart();
         if (cursor > 0 && req.width() >= req.process().minReusableWidth() && cursor >= req.process().minReusableHeight()) addRemnant(remnants, req.width(), 0, cursor, overlaps(blocked, 0, cursor));
         int unmet = 0;
@@ -71,10 +72,11 @@ public class CrossCutSolverService implements ICutSolverEngine {
                     : toBlockedIntervals(pipeline.hardExclusionsFor(req, demand), req.width(), req.height());
             for (int i = 0; i < demand.quantity(); i++) {
                 ComputationCancellation.check();
+                double minStart = pieces.isEmpty() ? cursor : cursor + pieceGap;
                 // 优先避开全部疵点（含软疵点），放不下再退化为仅避让硬疵点（如辅片放行轻微疵点）
-                double start = nextCrossCutStart(req, pipeline, demand, cursor, length, blocked);
+                double start = nextCrossCutStart(req, pipeline, demand, minStart, length, blocked);
                 if (start + length > req.height() && hardBlocked.size() < blocked.size()) {
-                    start = nextCrossCutStart(req, pipeline, demand, cursor, length, hardBlocked);
+                    start = nextCrossCutStart(req, pipeline, demand, minStart, length, hardBlocked);
                 }
                 if (start + length > req.height()) {
                     unmet++;
@@ -82,7 +84,7 @@ public class CrossCutSolverService implements ICutSolverEngine {
                 }
                 if (start > cursor) {
                     if (req.width() >= req.process().minReusableWidth() && start - cursor >= req.process().minReusableHeight()) addRemnant(remnants, req.width(), cursor, start - cursor, overlaps(blocked, cursor, start));
-                    cuts.add(new CutStep(cuts.size() + 1, "横切", start, 0, req.width(), "隔离疵点区后起切"));
+                    cuts.add(new CutStep(cuts.size() + 1, "横切", start, 0, req.width(), "隔离疵点/间距区后起切"));
                 }
                 pieces.add(new PlacedPiece(pieces.size() + 1, demand.name(), 0, start,
                         req.width(), length, false, demand.id()));

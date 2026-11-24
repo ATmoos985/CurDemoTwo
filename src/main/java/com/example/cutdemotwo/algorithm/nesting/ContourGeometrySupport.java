@@ -91,6 +91,32 @@ public final class ContourGeometrySupport {
     }
 
     /**
+     * 检查两个形状（含全部外环与内孔壁）的任意两条边段之间是否存在小于 {@code minGap} 的间距（带容差 {@code gapTol}）。
+     * 双方无内孔时零分配直接退化为单环检测。
+     */
+    public static boolean violatesMinEdgeGap(Shape shapeA, double offsetAx, double offsetAy,
+                                             Shape shapeB, double offsetBx, double offsetBy,
+                                             double minGap, double gapTol) {
+        if (minGap <= 0.0) {
+            return false;
+        }
+        if (!shapeA.hasHoles() && !shapeB.hasHoles()) {
+            return violatesMinEdgeGap(PolygonGeometry.vertices(shapeA), offsetAx, offsetAy,
+                    PolygonGeometry.vertices(shapeB), offsetBx, offsetBy, minGap, gapTol);
+        }
+        List<List<Point>> ringsA = PolygonGeometry.allRings(shapeA);
+        List<List<Point>> ringsB = PolygonGeometry.allRings(shapeB);
+        for (List<Point> ra : ringsA) {
+            for (List<Point> rb : ringsB) {
+                if (violatesMinEdgeGap(ra, offsetAx, offsetAy, rb, offsetBx, offsetBy, minGap, gapTol)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
      * 检查两个多边形的任意两条边段之间是否存在小于 {@code minGap} 的间距（带容差 {@code gapTol}）。
      * 调用方可传入局部顶点加平移偏移，或世界顶点配合 {@code (0, 0)} 偏移。
      */

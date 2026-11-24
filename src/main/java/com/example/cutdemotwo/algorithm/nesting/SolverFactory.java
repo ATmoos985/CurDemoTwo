@@ -90,30 +90,50 @@ public class SolverFactory implements NestingSolver {
         var curtainConstraints = CurtainConstraintPack.forProblem(problem);
         curtainConstraints.checkProblem(problem);
         boolean hasCurtainConstraints = !curtainConstraints.isNoop();
+        String mode = problem.process().mode();
+        boolean hasKerf = problem.process().kerf() > 0;
+        boolean hasRectPieceGap = !"CONTOUR".equals(mode) && problem.process().pieceGap() > 0;
+        boolean hasMaxStages = problem.process().maxStages() != null;
+        boolean hasHoles = problem.material().shape().hasHoles()
+                || problem.parts().stream().anyMatch(part -> part.shape().hasHoles());
+
+        if ("CROSSCUT".equals(mode)) {
+            supported(!hasKerf, "仅横切模式暂不支持非零刀缝 kerf");
+        }
+        boolean requiresAutonomousRect = "GUILLOTINE".equals(mode)
+                && (hasCurtainConstraints || hasKerf || hasRectPieceGap || hasMaxStages);
+        boolean requiresAutonomousContour = "CONTOUR".equals(mode)
+                && (hasCurtainConstraints || hasKerf || hasHoles);
+
         String requested = problem.engine();
         boolean autoRequested = requested == null || requested.isBlank() || "auto".equals(requested);
         if (autoRequested)
-            requested = switch (problem.process().mode()) {
+            requested = switch (mode) {
                 case "CROSSCUT" -> "crosscut";
                 case "CONTOUR" -> "deepnest";
-                default -> hasCurtainConstraints ? "javaguillotine" : "packingsolver";
+                default -> requiresAutonomousRect ? "javaguillotine" : "packingsolver";
             };
         String requestedLower = requested.toLowerCase();
         ICutSolverEngine engine;
         String reason = null;
-        if (hasCurtainConstraints && NATIVE_ENGINES_WITHOUT_CURTAIN_SUPPORT.contains(requestedLower)) {
+        boolean nativeBlockedByConstraints = (requiresAutonomousRect && "packingsolver".equals(requestedLower))
+                || (requiresAutonomousContour && "packingsolver-irregular".equals(requestedLower));
+        if (nativeBlockedByConstraints) {
             String autonomousId = FALLBACKS.get(requestedLower);
             ICutSolverEngine autonomous = autonomousId == null ? null : engineMap.get(autonomousId);
+            String constraintLabel = hasCurtainConstraints ? "窗帘工艺约束（布边/对花/倒顺毛/疵点分级）"
+                    : (hasHoles ? "带内孔洞套料约束" : "原生刀缝/裁片间距/通切阶数约束");
             supported(allowFallback && autonomous != null && autonomous.isAvailable(),
-                    requested + " 不支持窗帘工艺约束（布边/对花/疵点分级），请使用 " + autonomousId + " 或开启自动回退");
-            reason = requested + " 不支持窗帘工艺约束，已自动跳过原生引擎并路由至 " + autonomous.getEngineType() + " 求解";
-            log.info("窗帘约束自动路由：{}", reason);
+                    requested + " 不支持" + constraintLabel + "，请使用 " + autonomousId + " 或开启自动回退");
+            reason = requested + " 不支持" + constraintLabel + "，已自动跳过原生引擎并路由至 " + autonomous.getEngineType() + " 求解";
+            log.info("高级工艺约束自动路由：{}", reason);
             engine = autonomous;
             checkSupport(problem, engine.capabilities());
         } else {
-            if (hasCurtainConstraints && autoRequested && "javaguillotine".equals(requestedLower)) {
-                reason = "检测到窗帘工艺约束，已自动跳过不支持该约束的原生引擎 packingsolver，路由至 javaguillotine 求解";
-                log.info("窗帘约束自动路由：{}", reason);
+            if (requiresAutonomousRect && autoRequested && "javaguillotine".equals(requestedLower)) {
+                String constraintLabel = hasCurtainConstraints ? "窗帘工艺约束" : "原生刀缝/裁片间距/通切阶数约束";
+                reason = "检测到" + constraintLabel + "，已自动跳过不支持该约束的原生引擎 packingsolver，路由至 javaguillotine 求解";
+                log.info("高级工艺约束自动路由：{}", reason);
             }
             engine = engineMap.get(requestedLower);
             supported(engine != null, "系统未找到排料引擎: " + requested);
@@ -125,7 +145,7 @@ public class SolverFactory implements NestingSolver {
                 checkSupport(problem, engine.capabilities());
             }
         }
-        if ("CROSSCUT".equals(problem.process().mode())) {
+        if ("CROSSCUT".equals(mode)) {
             supported("horizontal".equals(problem.process().firstStageOrientation()), "横切策略仅支持水平首刀");
             for (var part : problem.parts()) require(Math.abs(part.shape().width() - problem.width()) < .001,
                     "横切需求必须等于材料幅宽");
@@ -327,6 +347,8 @@ public class SolverFactory implements NestingSolver {
     private static void validatePrecision(NestingProblem p, double resolution) {
         shapePrecision(p.material().shape(), resolution);
         precision(p.process().trimStart(), resolution);
+        precision(p.process().kerf(), resolution);
+        precision(p.process().pieceGap(), resolution);
         for (var part : p.parts()) shapePrecision(part.shape(), resolution);
         for (var d : p.material().exclusions()) {
             precision(d.x(), resolution); precision(d.y(), resolution); precision(d.clearance(), resolution);
@@ -336,6 +358,9 @@ public class SolverFactory implements NestingSolver {
     private static void shapePrecision(NestingProblem.Shape shape, double resolution) {
         precision(shape.width(), resolution); precision(shape.height(), resolution);
         for (var point : shape.vertices()) { precision(point.x(), resolution); precision(point.y(), resolution); }
+        for (var hole : shape.holes()) {
+            for (var point : hole) { precision(point.x(), resolution); precision(point.y(), resolution); }
+        }
     }
 
     private static NestingResult toResult(NestingProblem problem, EngineResult result, String engine, String version, long elapsed,

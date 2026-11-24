@@ -27,7 +27,21 @@ public class CutBoundaryCompletionService {
             double rollW,
             double rollL,
             boolean isRemnantFeed) {
+        return ensureCompleteSeparation(pieces, remnants, initialCuts, rollW, rollL, isRemnantFeed, 0.0, null);
+    }
+
+    public List<CutStep> ensureCompleteSeparation(
+            List<PlacedPiece> pieces,
+            List<RemnantPiece> remnants,
+            List<CutStep> initialCuts,
+            double rollW,
+            double rollL,
+            boolean isRemnantFeed,
+            double kerfMm,
+            Integer maxStages) {
         ComputationCancellation.check();
+        double kerf = Math.max(0.0, kerfMm);
+        double halfKerf = kerf * 0.5;
 
         List<CutStep> result = new ArrayList<>();
         if (initialCuts != null) {
@@ -39,7 +53,9 @@ public class CutBoundaryCompletionService {
                 result.add(cs);
             }
         }
-        int patchStage = result.stream().map(CutStep::getStage).filter(Objects::nonNull).max(Integer::compareTo).orElse(0) + 1;
+        int maxExistingStage = result.stream().map(CutStep::getStage).filter(Objects::nonNull).max(Integer::compareTo).orElse(0);
+        int patchStageH = maxStages == null ? (maxExistingStage + 1) : Math.min(maxStages, Math.max(1, maxExistingStage));
+        int patchStageV = maxStages == null ? (maxExistingStage + 2) : Math.min(maxStages, Math.max(1, maxExistingStage));
 
         // 1. 收集所有矩形 (裁片与料头)
         List<double[]> rects = new ArrayList<>(); // [x, y, w, h]
@@ -57,9 +73,7 @@ public class CutBoundaryCompletionService {
         }
 
         // 2. 收集所有内部边界线段
-        // 水平线段: Map<Y坐标整数值, List<[startX, endX]>>
         Map<Long, List<double[]>> neededHoriz = new HashMap<>();
-        // 垂直线段: Map<X坐标整数值, List<[startY, endY]>>
         Map<Long, List<double[]>> neededVert = new HashMap<>();
 
         for (double[] r : rects) {
@@ -69,54 +83,52 @@ public class CutBoundaryCompletionService {
             double rw = r[2];
             double rh = r[3];
 
-            // 顶边 Y = ry (若在母卷内部)
             if (ry > EPS && ry < rollL - EPS) {
                 addNeededSegment(neededHoriz, ry, rx, rx + rw);
             }
-            // 底边 Y = ry + rh
-            // 在母卷长卷模式下，若底边到达 rollL，则是工位下料横切截断刀；在料头模式下，到达 rollL 是单板物理尽头无需下刀
             if (ry + rh > EPS && (ry + rh < rollL - EPS || (!isRemnantFeed && Math.abs(ry + rh - rollL) <= EPS))) {
                 addNeededSegment(neededHoriz, ry + rh, rx, rx + rw);
             }
-            // 左边 X = rx (若在母卷内部)
             if (rx > EPS && rx < rollW - EPS) {
                 addNeededSegment(neededVert, rx, ry, ry + rh);
             }
-            // 右边 X = rx + rw (若在母卷内部)
             if (rx + rw > EPS && rx + rw < rollW - EPS) {
                 addNeededSegment(neededVert, rx + rw, ry, ry + rh);
             }
         }
 
-        // 3. 对已有切刀建立覆盖索引
-        Map<Long, List<double[]>> existingHoriz = new HashMap<>();
-        Map<Long, List<double[]>> existingVert = new HashMap<>();
+        // 3. 对已有切刀建立精确位置与区间索引（兼容 kerf > 0 时锯路中心位于边界 ± kerf/2 处）
+        List<double[]> existingHorizCuts = new ArrayList<>(); // [pos, minX, maxX]
+        List<double[]> existingVertCuts = new ArrayList<>();  // [pos, minY, maxY]
 
         for (CutStep cs : result) {
             ComputationCancellation.check();
+            double s = Math.min(cs.getStart(), cs.getEnd());
+            double e = Math.max(cs.getStart(), cs.getEnd());
             if ("横切".equals(cs.getType())) {
-                addSegment(existingHoriz, cs.getPos(), Math.min(cs.getStart(), cs.getEnd()), Math.max(cs.getStart(), cs.getEnd()));
+                existingHorizCuts.add(new double[]{cs.getPos(), s, e});
             } else {
-                addSegment(existingVert, cs.getPos(), Math.min(cs.getStart(), cs.getEnd()), Math.max(cs.getStart(), cs.getEnd()));
+                existingVertCuts.add(new double[]{cs.getPos(), s, e});
             }
         }
 
         // 4. 检查水平横切漏刀并补齐
         for (Map.Entry<Long, List<double[]>> entry : neededHoriz.entrySet()) {
             ComputationCancellation.check();
-            double y = entry.getKey() / 10.0;
+            double y = entry.getKey() / 100.0;
             List<double[]> mergedNeeded = mergeIntervals(entry.getValue());
-            List<double[]> covered = existingHoriz.getOrDefault(entry.getKey(), Collections.emptyList());
+            List<double[]> covered = collectCoveredIntervals(existingHorizCuts, y, halfKerf);
 
             List<double[]> missing = subtractIntervals(mergedNeeded, covered);
             for (double[] interval : missing) {
                 ComputationCancellation.check();
                 if (interval[1] - interval[0] > EPS) {
-                    String desc = String.format("横切补刀，切断物理边界 [Y=%.1f mm, X=%.1f~%.1f mm]", y, interval[0], interval[1]);
-                    CutStep cutPatch = new CutStep(result.size() + 1, "横切", y, interval[0], interval[1], desc);
-                    cutPatch.setStage(patchStage);
+                    double cutY = resolveSafePatchPos(y, interval[0], interval[1], true, halfKerf, rollL, pieces);
+                    String desc = String.format("横切补刀，切断物理边界 [Y=%.1f mm, X=%.1f~%.1f mm]", cutY, interval[0], interval[1]);
+                    CutStep cutPatch = new CutStep(result.size() + 1, "横切", cutY, interval[0], interval[1], desc);
+                    cutPatch.setStage(patchStageH);
                     result.add(cutPatch);
-                    addSegment(existingHoriz, y, interval[0], interval[1]);
+                    existingHorizCuts.add(new double[]{cutY, interval[0], interval[1]});
                 }
             }
         }
@@ -124,25 +136,68 @@ public class CutBoundaryCompletionService {
         // 5. 检查垂直纵切漏刀并补齐
         for (Map.Entry<Long, List<double[]>> entry : neededVert.entrySet()) {
             ComputationCancellation.check();
-            double x = entry.getKey() / 10.0;
+            double x = entry.getKey() / 100.0;
             List<double[]> mergedNeeded = mergeIntervals(entry.getValue());
-            List<double[]> covered = existingVert.getOrDefault(entry.getKey(), Collections.emptyList());
+            List<double[]> covered = collectCoveredIntervals(existingVertCuts, x, halfKerf);
 
             List<double[]> missing = subtractIntervals(mergedNeeded, covered);
             for (double[] interval : missing) {
                 ComputationCancellation.check();
                 if (interval[1] - interval[0] > EPS) {
-                    String desc = String.format("纵切补刀，切断物理边界 [X=%.1f mm, Y=%.1f~%.1f mm]", x, interval[0], interval[1]);
-                    CutStep cutPatch = new CutStep(result.size() + 1, "纵切", x, interval[0], interval[1], desc);
-                    cutPatch.setStage(patchStage + 1);
+                    double cutX = resolveSafePatchPos(x, interval[0], interval[1], false, halfKerf, rollW, pieces);
+                    String desc = String.format("纵切补刀，切断物理边界 [X=%.1f mm, Y=%.1f~%.1f mm]", cutX, interval[0], interval[1]);
+                    CutStep cutPatch = new CutStep(result.size() + 1, "纵切", cutX, interval[0], interval[1], desc);
+                    cutPatch.setStage(patchStageV);
                     result.add(cutPatch);
-                    addSegment(existingVert, x, interval[0], interval[1]);
+                    existingVertCuts.add(new double[]{cutX, interval[0], interval[1]});
                 }
             }
         }
 
         // 6. 对同一直线上的切刀做最终合并与规范化
         return consolidateAndReorder(result);
+    }
+
+    private List<double[]> collectCoveredIntervals(List<double[]> cuts, double edgePos, double halfKerf) {
+        double tol = halfKerf + 0.05;
+        List<double[]> covered = new ArrayList<>();
+        for (double[] c : cuts) {
+            if (Math.abs(c[0] - edgePos) <= tol) {
+                covered.add(new double[]{c[1], c[2]});
+            }
+        }
+        return covered;
+    }
+
+    /** 在 kerf > 0 时为补刀选择不侵蚀任意裁片内部的安全刀线中心位置。 */
+    private double resolveSafePatchPos(double edgePos, double spanStart, double spanEnd, boolean horizontal,
+                                       double halfKerf, double limit, List<PlacedPiece> pieces) {
+        if (halfKerf <= EPS || pieces == null || pieces.isEmpty()) {
+            return edgePos;
+        }
+        double[] candidates = new double[]{
+                Math.min(limit, edgePos + halfKerf),
+                Math.max(0.0, edgePos - halfKerf),
+                edgePos
+        };
+        for (double cand : candidates) {
+            boolean hitsPiece = false;
+            for (PlacedPiece p : pieces) {
+                if (horizontal) {
+                    boolean yOverlap = cand + halfKerf > p.getY() + EPS && cand - halfKerf < p.getY() + p.getL() - EPS;
+                    boolean xOverlap = spanEnd > p.getX() + EPS && spanStart < p.getX() + p.getW() - EPS;
+                    if (yOverlap && xOverlap) { hitsPiece = true; break; }
+                } else {
+                    boolean xOverlap = cand + halfKerf > p.getX() + EPS && cand - halfKerf < p.getX() + p.getW() - EPS;
+                    boolean yOverlap = spanEnd > p.getY() + EPS && spanStart < p.getY() + p.getL() - EPS;
+                    if (xOverlap && yOverlap) { hitsPiece = true; break; }
+                }
+            }
+            if (!hitsPiece) {
+                return cand;
+            }
+        }
+        return edgePos;
     }
 
     private boolean isOuterBoundaryCut(CutStep cs, double rollW, double rollL, boolean isRemnantFeed) {
@@ -161,7 +216,7 @@ public class CutBoundaryCompletionService {
     }
 
     private void addSegment(Map<Long, List<double[]>> map, double pos, double start, double end) {
-        long key = Math.round(pos * 10.0);
+        long key = Math.round(pos * 100.0);
         map.computeIfAbsent(key, k -> new ArrayList<>()).add(new double[]{start, end});
     }
 
@@ -226,7 +281,7 @@ public class CutBoundaryCompletionService {
         for (CutStep cs : cuts) {
             ComputationCancellation.check();
             // Co-linear cuts at different stages can depend on different parent regions.
-            String key = cs.getType() + "_" + Math.round(cs.getPos() * 10.0) + "_"
+            String key = cs.getType() + "_" + Math.round(cs.getPos() * 100.0) + "_"
                     + (cs.getStage() == null ? "legacy" + legacyOrder++ : cs.getStage());
             grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(cs);
         }

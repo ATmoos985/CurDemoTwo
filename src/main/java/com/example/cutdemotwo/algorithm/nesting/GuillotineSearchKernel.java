@@ -14,15 +14,17 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.SplittableRandom;
+import java.util.TreeSet;
 import java.util.concurrent.Callable;
 
 /**
  * 自主二维直刀（Guillotine）核心搜索内核：
  * <ol>
  *   <li>确定性多起点启发式池（多维排序 × 多种空间匹配 × 多种正交切分），复用 {@link NestingParallelExecutor} 有界并行；</li>
- *   <li>有界 Beam Search（束搜索），在关键前序件上保留 Top-K 部分解，避免首步贪心锁死后续大件空间；</li>
- *   <li>预算内确定性 LNS 局部精修（未排件前置重装、尾段拔出换序重排、以及满排后的严格直刀版长二分压缩）；</li>
- *   <li>所有候选解均维护严格合法的通切树（父刀阶段严格小于子刀阶段、零重叠、零越界、完整保留空闲余料）。</li>
+ *   <li>有界 Beam Search（束搜索）+ 真实布局指纹去重与差异化候选筛选，避免首步贪心锁死后续大件空间；</li>
+ *   <li>预算内确定性 LNS 局部精修（未排件前置重装、尾段拔出换序重排，以及水平/垂直首刀全支持的严格直刀版长二分压缩）；</li>
+ *   <li>原生支持每刀 {@code kerf} 刀缝扣除、矩形原生 {@code pieceGap} 间距内缩、可选 {@code maxStages} 最大通切阶数限制，
+ *       以及双轴对格/旋转锚点/同组倒顺毛约束。</li>
  * </ol>
  */
 final class GuillotineSearchKernel {
@@ -36,13 +38,19 @@ final class GuillotineSearchKernel {
         final double w;
         final double h;
         final int level;
+        final boolean axisHorizontal;
 
-        FreeRect(double x, double y, double w, double h, int level) {
+        FreeRect(double x, double y, double w, double h, int level, boolean axisHorizontal) {
             this.x = x;
             this.y = y;
             this.w = w;
             this.h = h;
             this.level = level;
+            this.axisHorizontal = axisHorizontal;
+        }
+
+        FreeRect(double x, double y, double w, double h, int level) {
+            this(x, y, w, h, level, true);
         }
 
         double area() {
@@ -62,10 +70,19 @@ final class GuillotineSearchKernel {
         final double localMaxX;
         final List<Defect> hardLocalDefects;
         final boolean patternMatch;
+        final boolean patternMatchX;
+        final boolean patternMatchY;
 
         DemItem(int id, String name, double w, double l, boolean allowRotation, Integer demandId,
                 NestingProblem.Part part, double localMinX, double localMaxX,
                 List<Defect> hardLocalDefects, boolean patternMatch) {
+            this(id, name, w, l, allowRotation, demandId, part, localMinX, localMaxX,
+                    hardLocalDefects, patternMatch, false, patternMatch);
+        }
+
+        DemItem(int id, String name, double w, double l, boolean allowRotation, Integer demandId,
+                NestingProblem.Part part, double localMinX, double localMaxX,
+                List<Defect> hardLocalDefects, boolean patternMatch, boolean patternMatchX, boolean patternMatchY) {
             this.id = id;
             this.name = name;
             this.w = w;
@@ -77,6 +94,8 @@ final class GuillotineSearchKernel {
             this.localMaxX = localMaxX;
             this.hardLocalDefects = hardLocalDefects;
             this.patternMatch = patternMatch;
+            this.patternMatchX = patternMatchX;
+            this.patternMatchY = patternMatchY;
         }
 
         double area() {
@@ -207,6 +226,10 @@ final class GuillotineSearchKernel {
         final double rollW;
         final double activeL;
         final boolean horizontalFirst;
+        final double kerf;
+        final double pieceGap;
+        final double cutSpacing;
+        final Integer maxStages;
         final List<Defect> localDefects;
         final List<DemItem> items;
         final double totalDemandArea;
@@ -221,6 +244,10 @@ final class GuillotineSearchKernel {
             this.rollW = rollW;
             this.activeL = activeL;
             this.horizontalFirst = horizontalFirst;
+            this.kerf = Math.max(0.0, req.process().kerf());
+            this.pieceGap = Math.max(0.0, req.process().pieceGap());
+            this.cutSpacing = Math.max(this.kerf, this.pieceGap);
+            this.maxStages = req.process().maxStages();
             this.localDefects = localDefects;
             this.items = items;
             double sum = 0.0;
@@ -249,14 +276,13 @@ final class GuillotineSearchKernel {
         if (items.isEmpty()) {
             return new LayoutSolution(
                     List.of(), List.of(),
-                    List.of(new FreeRect(0, 0, rollW, activeL, 1)),
+                    List.of(new FreeRect(0, 0, rollW, activeL, 1, horizontalFirst)),
                     new boolean[0], 0.0, 0, 0.0, 0
             );
         }
 
         long now = System.nanoTime();
         long limitMs = Math.max(150L, (long) Math.max(1, req.timeLimitSeconds()) * 1000L);
-        // 预留后处理时间，保证总耗时严格受限于 timeLimitSeconds
         long reserveMs = Math.min(120L, Math.max(40L, limitMs / 8));
         long searchBudgetMs = Math.max(80L, limitMs - reserveMs);
         long deadlineNanos = now + searchBudgetMs * 1_000_000L;
@@ -288,7 +314,7 @@ final class GuillotineSearchKernel {
         }
         Strategy bestStrategy = strategies.get(bestStrategyIdx);
 
-        // 2. 有界 Beam Search（针对前序关键件展开 Top-K 状态，打破首刀/前步贪心锁死）
+        // 2. 有界 Beam Search（真实布局指纹去重，打破首刀/前步贪心锁死）
         long beamDeadline = now + (long) (searchBudgetMs * 0.55) * 1_000_000L;
         if (!ctx.timeUp() && System.nanoTime() < beamDeadline && items.size() >= 2) {
             int[] primaryOrder = buildOrder(ctx, bestStrategy.sortRule());
@@ -296,7 +322,6 @@ final class GuillotineSearchKernel {
             if (beamBest != null && isBetter(beamBest, best)) {
                 best = beamBest;
             }
-            // 若仍有未排件且时间充裕，再对面积降序做一轮补充束搜索
             if (best != null && best.placedCount < items.size()
                     && bestStrategy.sortRule() != SortRule.AREA_DESC
                     && System.nanoTime() < beamDeadline) {
@@ -308,14 +333,14 @@ final class GuillotineSearchKernel {
             }
         }
 
-        // 3. 预算内确定性 LNS 局部重排精修
+        // 3. 预算内确定性 LNS 局部重排精修与水平/垂直首刀版长二分压缩
         if (best != null && !ctx.timeUp()) {
             best = runLnsRefinement(ctx, best, bestStrategy);
         }
 
         return best != null ? best : new LayoutSolution(
                 List.of(), List.of(),
-                List.of(new FreeRect(0, 0, rollW, activeL, 1)),
+                List.of(new FreeRect(0, 0, rollW, activeL, 1, horizontalFirst)),
                 new boolean[items.size()], 0.0, 0, 0.0, 0
         );
     }
@@ -352,7 +377,6 @@ final class GuillotineSearchKernel {
         Arrays.sort(idx, (a, b) -> {
             DemItem ia = ctx.items.get(a);
             DemItem ib = ctx.items.get(b);
-            // 窗帘约束下，对花主片优先占位
             if (hasConstraints && ia.patternMatch != ib.patternMatch) {
                 return ia.patternMatch ? -1 : 1;
             }
@@ -376,14 +400,6 @@ final class GuillotineSearchKernel {
         return out;
     }
 
-    /**
-     * 字典序单调择优：
-     * 1. 总排入面积（大优先）
-     * 2. 满件数（多优先）
-     * 3. 辅片覆盖轻微疵点次数（少优先）
-     * 4. 更短消耗版长（短优先）
-     * 5. 更少切刀数（少优先）
-     */
     static boolean isBetter(LayoutSolution cand, LayoutSolution best) {
         if (best == null) return true;
         if (cand.placedArea > best.placedArea + 1e-3) return true;
@@ -411,7 +427,7 @@ final class GuillotineSearchKernel {
             double workingHeight,
             boolean checkDeadline) {
         List<FreeRect> freeRects = new ArrayList<>();
-        freeRects.add(new FreeRect(0.0, 0.0, ctx.rollW, workingHeight, 1));
+        freeRects.add(new FreeRect(0.0, 0.0, ctx.rollW, workingHeight, 1, ctx.horizontalFirst));
         List<PlacedRec> pieces = new ArrayList<>(order.length);
         List<RawCut> cuts = new ArrayList<>(order.length * 2);
         boolean[] placedMask = new boolean[ctx.items.size()];
@@ -437,16 +453,21 @@ final class GuillotineSearchKernel {
             if (bestCand.usedSoftDefect()) {
                 softHits++;
             }
-            boolean splitHoriz = resolveSplitHorizontal(r, bestCand.pw(), bestCand.pl(), splitRule, ctx.horizontalFirst);
-            splitRect(r, bestCand.px(), bestCand.py(), bestCand.pw(), bestCand.pl(), splitHoriz, cuts, freeRects);
+            boolean splitHoriz = resolveSplitHorizontal(ctx, r, bestCand.px(), bestCand.py(), bestCand.pw(), bestCand.pl(), splitRule);
+            splitRect(ctx, r, bestCand.px(), bestCand.py(), bestCand.pw(), bestCand.pl(), splitHoriz, cuts, freeRects);
         }
 
         return wrapWorkingHeightIfCompressed(ctx, pieces, cuts, freeRects, placedMask, placedArea, pieces.size(), usedLength, softHits, workingHeight);
     }
 
     /**
-     * 当使用压缩高度 {@code workingHeight < ctx.activeL} 求解时，在局部 Y = workingHeight 处补一条第 1 阶段全幅横切，
-     * 将内部所有切刀 stage 整体 +1，并把尾部连续大块 [workingHeight, activeL] 加入 freeRects，保证 100% 合法直刀树。
+     * 当使用压缩高度 {@code workingHeight < ctx.activeL} 求解时，将其严格合法地嵌入整板 {@code [0, ctx.activeL]}：
+     * <ul>
+     *   <li>水平首刀：在 {@code Y = workingHeight + kerf/2} 补一条第 1 阶段全幅横切（与同向第 1 阶横切平行，不额外升阶），
+     *       并加入尾部大块余料；</li>
+     *   <li>垂直首刀：将全部第 1 阶段垂直纵切延伸至 {@code ctx.activeL}，对含裁片的垂直列在
+     *       {@code Y = workingHeight + kerf/2} 处补第 2 阶段列内横切截断，纯空列直接纵向贯通延伸至 {@code ctx.activeL}。</li>
+     * </ul>
      */
     private static LayoutSolution wrapWorkingHeightIfCompressed(
             SearchContext ctx,
@@ -462,24 +483,110 @@ final class GuillotineSearchKernel {
         if (ctx.activeL - workingHeight <= MIN_SPLIT_MM) {
             return new LayoutSolution(pieces, cuts, freeRects, placedMask, placedArea, placedCount, usedLength, softHits);
         }
-        List<RawCut> shiftedCuts = new ArrayList<>(cuts.size() + 1);
-        shiftedCuts.add(new RawCut(
-                "横切",
-                workingHeight,
-                0.0,
-                ctx.rollW,
-                1,
-                String.format("第 1 阶段横切，压缩截断排样区 [%.0f × %.0f mm]", ctx.rollW, workingHeight)
-        ));
+        if (ctx.horizontalFirst) {
+            List<RawCut> outCuts = new ArrayList<>(cuts.size() + 1);
+            double cutY = Math.min(ctx.activeL - EPS, workingHeight + ctx.kerf * 0.5);
+            outCuts.add(new RawCut(
+                    "横切",
+                    cutY,
+                    0.0,
+                    ctx.rollW,
+                    1,
+                    String.format("第 1 阶段横切，压缩截断排样区 [%.0f × %.0f mm]", ctx.rollW, workingHeight)
+            ));
+            outCuts.addAll(cuts);
+            List<FreeRect> outFree = new ArrayList<>(freeRects.size() + 1);
+            outFree.addAll(freeRects);
+            double tailY = workingHeight + ctx.cutSpacing;
+            if (ctx.activeL - tailY > MIN_SPLIT_MM) {
+                outFree.add(new FreeRect(0.0, tailY, ctx.rollW, ctx.activeL - tailY, 1, true));
+            }
+            return new LayoutSolution(pieces, outCuts, outFree, placedMask, placedArea, placedCount, usedLength, softHits);
+        }
+
+        // 垂直首刀压缩：要求 maxStages 未限制为 1（需要第 2 阶段列内横切截断）且至少存在第 1 阶段纵切
+        if (ctx.maxStages != null && ctx.maxStages < 2) {
+            return null;
+        }
+        TreeSet<Double> stage1VertX = new TreeSet<>();
         for (RawCut c : cuts) {
-            shiftedCuts.add(new RawCut(c.type, c.pos, c.start, c.end, c.stage + 1, c.desc));
+            if (c.stage == 1 && "纵切".equals(c.type)) {
+                stage1VertX.add(c.pos);
+            }
         }
-        List<FreeRect> shiftedFree = new ArrayList<>(freeRects.size() + 1);
+        if (stage1VertX.isEmpty()) {
+            return null;
+        }
+
+        List<RawCut> outCuts = new ArrayList<>(cuts.size() + stage1VertX.size() + 1);
+        for (RawCut c : cuts) {
+            if (c.stage == 1 && "纵切".equals(c.type)) {
+                outCuts.add(new RawCut("纵切", c.pos, 0.0, ctx.activeL, 1, c.desc));
+            } else {
+                outCuts.add(c);
+            }
+        }
+
+        List<Double> boundaries = new ArrayList<>(stage1VertX.size() + 2);
+        boundaries.add(0.0);
+        boundaries.addAll(stage1VertX);
+        boundaries.add(ctx.rollW);
+
+        List<FreeRect> outFree = new ArrayList<>(freeRects.size() + boundaries.size());
+        Set<Integer> extendedFullEmptyCols = new HashSet<>();
         for (FreeRect fr : freeRects) {
-            shiftedFree.add(new FreeRect(fr.x, fr.y, fr.w, fr.h, fr.level + 1));
+            // 若某空闲矩形横跨某整列高度 [0, workingHeight]，直接拉通至 activeL 形成整条垂直大余料
+            int colIdx = findFullHeightColumnIndex(fr, boundaries, workingHeight, ctx.kerf);
+            if (colIdx >= 0) {
+                extendedFullEmptyCols.add(colIdx);
+                outFree.add(new FreeRect(fr.x, 0.0, fr.w, ctx.activeL, fr.level, fr.axisHorizontal));
+            } else {
+                outFree.add(fr);
+            }
         }
-        shiftedFree.add(new FreeRect(0.0, workingHeight, ctx.rollW, ctx.activeL - workingHeight, 2));
-        return new LayoutSolution(pieces, shiftedCuts, shiftedFree, placedMask, placedArea, placedCount, usedLength, softHits);
+
+        double cutY = Math.min(ctx.activeL - EPS, workingHeight + ctx.kerf * 0.5);
+        double tailY = workingHeight + ctx.cutSpacing;
+        for (int ci = 0; ci < boundaries.size() - 1; ci++) {
+            if (extendedFullEmptyCols.contains(ci)) {
+                continue;
+            }
+            double colCutStart = boundaries.get(ci);
+            double colCutEnd = boundaries.get(ci + 1);
+            if (colCutEnd - colCutStart <= MIN_SPLIT_MM) {
+                continue;
+            }
+            outCuts.add(new RawCut(
+                    "横切",
+                    cutY,
+                    colCutStart,
+                    colCutEnd,
+                    2,
+                    String.format("第 2 阶段列内横切，垂直首刀压缩截断 [X=%.0f~%.0f mm, Y=%.0f mm]", colCutStart, colCutEnd, workingHeight)
+            ));
+            double innerStart = ci == 0 ? 0.0 : (colCutStart + ctx.cutSpacing - ctx.kerf * 0.5);
+            double innerEnd = (ci == boundaries.size() - 2) ? ctx.rollW : (colCutEnd - ctx.kerf * 0.5);
+            if (innerEnd - innerStart > MIN_SPLIT_MM && ctx.activeL - tailY > MIN_SPLIT_MM) {
+                outFree.add(new FreeRect(innerStart, tailY, innerEnd - innerStart, ctx.activeL - tailY, 2, true));
+            }
+        }
+
+        return new LayoutSolution(pieces, outCuts, outFree, placedMask, placedArea, placedCount, usedLength, softHits);
+    }
+
+    private static int findFullHeightColumnIndex(FreeRect fr, List<Double> boundaries, double workingHeight, double kerf) {
+        if (Math.abs(fr.y) > MIN_SPLIT_MM || Math.abs(fr.h - workingHeight) > MIN_SPLIT_MM) {
+            return -1;
+        }
+        double tol = Math.max(MIN_SPLIT_MM, kerf + 0.5);
+        for (int i = 0; i < boundaries.size() - 1; i++) {
+            double cStart = boundaries.get(i);
+            double cEnd = boundaries.get(i + 1);
+            if (fr.x >= cStart - tol && fr.x + fr.w <= cEnd + tol && fr.w >= (cEnd - cStart) - tol * 2.0) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     // ==================== 有界 Beam Search（束搜索） ====================
@@ -521,7 +628,7 @@ final class GuillotineSearchKernel {
         int beamDepth = Math.min(n, 20);
 
         List<BeamState> beam = new ArrayList<>(beamWidth);
-        List<FreeRect> initFree = List.of(new FreeRect(0.0, 0.0, ctx.rollW, workingHeight, 1));
+        List<FreeRect> initFree = List.of(new FreeRect(0.0, 0.0, ctx.rollW, workingHeight, 1, ctx.horizontalFirst));
         beam.add(new BeamState(initFree, List.of(), List.of(), new boolean[n], 0.0, 0.0, 0, 0.0));
 
         for (int depth = 0; depth < beamDepth; depth++) {
@@ -539,7 +646,6 @@ final class GuillotineSearchKernel {
 
                 List<CandidatePlacement> topCands = selectTopPlacements(ctx, it, state.freeRects, baseFitRule, branchPerState);
                 if (topCands.isEmpty()) {
-                    // 无法放入当前件，保留原状态继续后续件
                     nextGen.add(state);
                     continue;
                 }
@@ -547,13 +653,14 @@ final class GuillotineSearchKernel {
                 for (int ci = 0; ci < topCands.size(); ci++) {
                     CandidatePlacement cand = topCands.get(ci);
                     FreeRect target = state.freeRects.get(cand.rectIdx());
-                    // 整板首刀（level == 1）严格遵循 firstStageOrientation；子矩形（level > 1）探索双切分方向
-                    boolean exploreBothSplits = (target.level > 1 && depth < 8 && ci == 0);
+                    boolean canHoriz = isSplitAllowedByMaxStages(ctx, target, cand.px(), cand.py(), cand.pw(), cand.pl(), true);
+                    boolean canVert = isSplitAllowedByMaxStages(ctx, target, cand.px(), cand.py(), cand.pw(), cand.pl(), false);
+                    boolean exploreBothSplits = (target.level > 1 && depth < 8 && ci == 0 && canHoriz && canVert);
                     if (exploreBothSplits) {
                         nextGen.add(expandState(ctx, state, itemIdx, cand, true));
                         nextGen.add(expandState(ctx, state, itemIdx, cand, false));
                     } else {
-                        boolean splitHoriz = resolveSplitHorizontal(target, cand.pw(), cand.pl(), baseSplitRule, ctx.horizontalFirst);
+                        boolean splitHoriz = resolveSplitHorizontal(ctx, target, cand.px(), cand.py(), cand.pw(), cand.pl(), baseSplitRule);
                         nextGen.add(expandState(ctx, state, itemIdx, cand, splitHoriz));
                     }
                 }
@@ -564,12 +671,12 @@ final class GuillotineSearchKernel {
             }
             nextGen.sort((a, b) -> Double.compare(b.heuristicScore, a.heuristicScore));
 
-            // 轻量去重，保持束内状态多样性
+            // 基于真实布局指纹（规范化裁片位姿 + 空闲区状态）去重，确保束内真正多样性
             List<BeamState> pruned = new ArrayList<>(beamWidth);
-            Set<Long> seenKeys = new HashSet<>();
+            Set<String> seenFingerprints = new HashSet<>(beamWidth * 2);
             for (BeamState st : nextGen) {
-                long sig = stateSignature(st);
-                if (seenKeys.add(sig)) {
+                String fp = layoutFingerprint(ctx, st);
+                if (seenFingerprints.add(fp)) {
                     pruned.add(st);
                     if (pruned.size() >= beamWidth) break;
                 }
@@ -577,7 +684,6 @@ final class GuillotineSearchKernel {
             beam = pruned;
         }
 
-        // 将束中 Top-K 部分解分别补全剩余件
         LayoutSolution best = null;
         int[] tailOrder = Arrays.copyOfRange(order, Math.min(beamDepth, n), n);
         for (BeamState st : beam) {
@@ -617,7 +723,7 @@ final class GuillotineSearchKernel {
         List<RawCut> nextCuts = new ArrayList<>(state.cuts.size() + 4);
         nextCuts.addAll(state.cuts);
 
-        splitRect(r, cand.px(), cand.py(), cand.pw(), cand.pl(), splitHoriz, nextCuts, nextFree);
+        splitRect(ctx, r, cand.px(), cand.py(), cand.pw(), cand.pl(), splitHoriz, nextCuts, nextFree);
 
         boolean[] nextMask = Arrays.copyOf(state.placedMask, state.placedMask.length);
         nextMask[itemIdx] = true;
@@ -631,7 +737,6 @@ final class GuillotineSearchKernel {
             double a = fr.area();
             if (a > maxFreeArea) maxFreeArea = a;
         }
-        // 前瞻评分：已排面积为主，兼顾保留大块完整余料、压缩已用长度与避免碎片化
         double score = nextArea * 1.0
                 + maxFreeArea * 0.12
                 - nextUsedLen * ctx.rollW * 0.08
@@ -641,17 +746,44 @@ final class GuillotineSearchKernel {
         return new BeamState(nextFree, nextPieces, nextCuts, nextMask, nextArea, nextUsedLen, nextSoftHits, score);
     }
 
-    private static long stateSignature(BeamState st) {
-        long h = 17L;
-        h = h * 31L + st.pieces.size();
-        h = h * 31L + Math.round(st.placedArea / 100.0);
-        h = h * 31L + Math.round(st.usedLength / 5.0);
-        double maxFree = 0.0;
-        for (FreeRect fr : st.freeRects) {
-            if (fr.area() > maxFree) maxFree = fr.area();
+    /**
+     * 基于真实几何布局构造规范指纹：
+     * 将已排裁片按规范坐标/规格排序并串接空闲矩形状态，消除顺序对称重复，同时避免不同几何布局误碰撞。
+     */
+    static String layoutFingerprint(SearchContext ctx, BeamState st) {
+        StringBuilder sb = new StringBuilder(st.pieces.size() * 24 + st.freeRects.size() * 20 + 16);
+        long[] pieceKeys = new long[st.pieces.size()];
+        for (int i = 0; i < st.pieces.size(); i++) {
+            PlacedRec p = st.pieces.get(i);
+            DemItem item = ctx.items.get(p.itemIdx);
+            long demandId = item.demandId == null ? item.id : item.demandId;
+            long rx = Math.round(p.x * 10.0) & 0xFFFFFL;
+            long ry = Math.round(p.y * 10.0) & 0xFFFFFL;
+            long rw = Math.round(p.w * 10.0) & 0x7FFFL;
+            long rot = p.rotated ? 1L : 0L;
+            pieceKeys[i] = ((demandId & 0xFFL) << 56) | (rx << 36) | (ry << 16) | (rw << 1) | rot;
         }
-        h = h * 31L + Math.round(maxFree / 500.0);
-        return h;
+        Arrays.sort(pieceKeys);
+        sb.append('P');
+        for (long k : pieceKeys) {
+            sb.append(Long.toHexString(k)).append(',');
+        }
+        long[] freeKeys = new long[st.freeRects.size()];
+        for (int i = 0; i < st.freeRects.size(); i++) {
+            FreeRect fr = st.freeRects.get(i);
+            long fx = Math.round(fr.x * 5.0) & 0xFFFFL;
+            long fy = Math.round(fr.y * 5.0) & 0xFFFFL;
+            long fw = Math.round(fr.w * 5.0) & 0xFFFFL;
+            long fh = Math.round(fr.h * 5.0) & 0x7FFFL;
+            long axis = fr.axisHorizontal ? 1L : 0L;
+            freeKeys[i] = (fx << 48) | (fy << 32) | (fw << 16) | (fh << 1) | axis;
+        }
+        Arrays.sort(freeKeys);
+        sb.append("|F");
+        for (long k : freeKeys) {
+            sb.append(Long.toHexString(k)).append(',');
+        }
+        return sb.toString();
     }
 
     private static LayoutSolution finishBeamState(
@@ -682,8 +814,8 @@ final class GuillotineSearchKernel {
             usedLength = Math.max(usedLength, bestCand.py() + bestCand.pl());
             if (bestCand.usedSoftDefect()) softHits++;
 
-            boolean splitHoriz = resolveSplitHorizontal(r, bestCand.pw(), bestCand.pl(), splitRule, ctx.horizontalFirst);
-            splitRect(r, bestCand.px(), bestCand.py(), bestCand.pw(), bestCand.pl(), splitHoriz, cuts, freeRects);
+            boolean splitHoriz = resolveSplitHorizontal(ctx, r, bestCand.px(), bestCand.py(), bestCand.pw(), bestCand.pl(), splitRule);
+            splitRect(ctx, r, bestCand.px(), bestCand.py(), bestCand.pw(), bestCand.pl(), splitHoriz, cuts, freeRects);
         }
 
         return wrapWorkingHeightIfCompressed(ctx, pieces, cuts, freeRects, placedMask, placedArea, pieces.size(), usedLength, softHits, workingHeight);
@@ -717,14 +849,15 @@ final class GuillotineSearchKernel {
                 if (isBetter(cand, best)) {
                     best = cand;
                     if (best.placedCount == n) {
-                        break; // 已满排，转入版长压缩阶段
+                        break;
                     }
                 }
             }
         }
 
-        // 阶段 3B：当水平首刀且已 100% 满排仍有明显可压缩版长空间时，执行严格直刀版长二分压缩
-        if (ctx.horizontalFirst && best.placedCount == n && !ctx.timeUp()) {
+        // 阶段 3B：水平首刀与垂直首刀均支持满排后的严格直刀版长二分压缩
+        boolean canCompressLength = ctx.horizontalFirst || (ctx.maxStages == null || ctx.maxStages >= 2);
+        if (canCompressLength && best.placedCount == n && !ctx.timeUp()) {
             double theoreticalMinLen = ctx.totalDemandArea / Math.max(1.0, ctx.rollW);
             double upper = best.usedLength;
             double lower = Math.max(theoreticalMinLen, maxSingleItemMinLen(ctx));
@@ -733,7 +866,6 @@ final class GuillotineSearchKernel {
                 int[] areaOrder = buildOrder(ctx, SortRule.AREA_DESC);
                 int[] heightOrder = buildOrder(ctx, SortRule.HEIGHT_DESC);
 
-                // 二分试探更短的截断高度 targetH
                 for (int step = 0; step < 8; step++) {
                     ComputationCancellation.check();
                     if (ctx.timeUp() || upper - lower <= 12.0) break;
@@ -823,13 +955,11 @@ final class GuillotineSearchKernel {
         List<Integer> result = new ArrayList<>(n);
         int mode = iter % 4;
         if (mode == 0 && !unplaced.isEmpty()) {
-            // 模式 0：将最大未排件提升至最前，再接其余已排件与剩余未排件
             int promoteCount = Math.min(unplaced.size(), 1 + (iter / 4) % 3);
             for (int i = 0; i < promoteCount; i++) result.add(unplaced.get(i));
             result.addAll(placed);
             for (int i = promoteCount; i < unplaced.size(); i++) result.add(unplaced.get(i));
         } else if (mode == 1 && placed.size() >= 3) {
-            // 模式 1：拔出尾段 25%~40% 低效已排件，与未排件混合后按长边降序重装
             int cutPoint = Math.max(1, (int) (placed.size() * (0.60 + 0.05 * (iter % 4))));
             cutPoint = Math.min(cutPoint, placed.size() - 1);
             List<Integer> tailAndUnplaced = new ArrayList<>();
@@ -839,13 +969,11 @@ final class GuillotineSearchKernel {
             for (int i = 0; i < cutPoint; i++) result.add(placed.get(i));
             result.addAll(tailAndUnplaced);
         } else if (mode == 2 && !unplaced.isEmpty()) {
-            // 模式 2：全部未排件插到前 1/3 位置（大件之后、中件之前）
             int insertAt = Math.min(placed.size(), Math.max(1, placed.size() / 3));
             for (int i = 0; i < insertAt; i++) result.add(placed.get(i));
             result.addAll(unplaced);
             for (int i = insertAt; i < placed.size(); i++) result.add(placed.get(i));
         } else {
-            // 模式 3：在当前序列上做 2~3 次确定性随机交换/前移
             result.addAll(placed);
             result.addAll(unplaced);
             int swaps = 2 + rng.nextInt(3);
@@ -863,7 +991,7 @@ final class GuillotineSearchKernel {
         return out;
     }
 
-    // ==================== 候选落位搜索与评分 ====================
+    // ==================== 候选落位搜索与差异化去重 ====================
 
     private static CandidatePlacement selectBestPlacement(
             SearchContext ctx, DemItem it, List<FreeRect> freeRects, FitRule fitRule) {
@@ -874,7 +1002,6 @@ final class GuillotineSearchKernel {
     private static List<CandidatePlacement> selectTopPlacements(
             SearchContext ctx, DemItem it, List<FreeRect> freeRects, FitRule fitRule, int limit) {
         if (!ctx.pipeline.isNoop()) {
-            // 窗帘约束路径：先尝试避开全部疵点（无软惩罚），避不开再放宽为仅避让硬疵点
             List<CandidatePlacement> clean = scanCandidates(ctx, it, freeRects, fitRule, ctx.localDefects, false, limit);
             if (!clean.isEmpty()) {
                 return clean;
@@ -906,9 +1033,7 @@ final class GuillotineSearchKernel {
                 continue;
             }
 
-            // 尝试 0°
             tryOrientation(ctx, it, r, rIdx, it.w, it.l, false, 0, activeDefects, constrained, usedSoftDefect, fitRule, cands);
-            // 尝试 90°（仅允许旋转且非正方形时）
             if (it.allowRotation && Math.abs(it.w - it.l) > EPS) {
                 tryOrientation(ctx, it, r, rIdx, it.l, it.w, true, 90, activeDefects, constrained, usedSoftDefect, fitRule, cands);
             }
@@ -929,11 +1054,41 @@ final class GuillotineSearchKernel {
             return Boolean.compare(a.rotated(), b.rotated());
         });
 
-        if (limit <= 1 || cands.size() <= limit) {
-            return cands.subList(0, Math.min(limit, cands.size()));
+        if (limit <= 1 || cands.size() <= 1) {
+            return List.of(cands.get(0));
         }
-        // 取前 limit 个差异化候选（尽量覆盖不同矩形或旋转方向）
-        return cands.subList(0, limit);
+
+        // 基于真实候选落位指纹（矩形桶位 + 旋转方向 + 几何位置）选取差异化 Top-K，而非简单 subList
+        List<CandidatePlacement> diverse = new ArrayList<>(limit);
+        Set<Long> seenPosKeys = new HashSet<>(limit * 2);
+        Set<Integer> seenRectRot = new HashSet<>(limit * 2);
+        List<CandidatePlacement> remainder = new ArrayList<>();
+
+        for (CandidatePlacement cp : cands) {
+            long posKey = candidatePositionFingerprint(cp);
+            if (!seenPosKeys.add(posKey)) {
+                continue;
+            }
+            int rectRotKey = (cp.rectIdx() << 1) | (cp.rotated() ? 1 : 0);
+            if (seenRectRot.add(rectRotKey)) {
+                diverse.add(cp);
+                if (diverse.size() >= limit) return diverse;
+            } else {
+                remainder.add(cp);
+            }
+        }
+        for (CandidatePlacement cp : remainder) {
+            diverse.add(cp);
+            if (diverse.size() >= limit) break;
+        }
+        return diverse;
+    }
+
+    private static long candidatePositionFingerprint(CandidatePlacement cp) {
+        long rx = Math.round(cp.px() * 10.0) & 0xFFFFFL;
+        long ry = Math.round(cp.py() * 10.0) & 0xFFFFFL;
+        long rw = Math.round(cp.pw() * 10.0) & 0xFFFFL;
+        return (rx << 40) | (ry << 20) | (rw << 1) | (cp.rotated() ? 1L : 0L);
     }
 
     private static void tryOrientation(
@@ -966,12 +1121,24 @@ final class GuillotineSearchKernel {
         }
         double px = pos[0];
         double py = pos[1];
+
+        // 严格 maxStages 门控：至少存在一种合法切分方向不超过最大通切阶数
+        if (ctx.maxStages != null) {
+            boolean okHoriz = isSplitAllowedByMaxStages(ctx, r, px, py, pw, pl, true);
+            boolean okVert = isSplitAllowedByMaxStages(ctx, r, px, py, pw, pl, false);
+            boolean allowed = (r.level == 1)
+                    ? (ctx.horizontalFirst ? okHoriz : okVert)
+                    : (okHoriz || okVert);
+            if (!allowed) {
+                return;
+            }
+        }
+
         double remW = Math.max(0.0, r.w - pw);
         double remH = Math.max(0.0, r.h - pl);
         double shortFit = Math.min(remW, remH);
         double longFit = Math.max(remW, remH);
         double areaFit = Math.max(0.0, r.area() - pw * pl);
-        // 避让疵点偏移越大，产生的额外切刀与碎料越多，加入温和偏移惩罚
         double offsetPenalty = ((px - r.x) + (py - r.y)) * 10.0;
 
         double primary;
@@ -1001,38 +1168,69 @@ final class GuillotineSearchKernel {
         out.add(new CandidatePlacement(rIdx, px, py, pw, pl, rotated, usedSoftDefect, primary, secondary));
     }
 
-    // ==================== 严格直刀切分树 ====================
+    // ==================== 严格直刀切分树（含 kerf、pieceGap 与 k-stage 阶数模型） ====================
+
+    private static int[] computeCutStages(FreeRect r, double px, double py, double pw, double pl, boolean splitHoriz) {
+        boolean needFirst;
+        boolean needSecond;
+        if (splitHoriz) {
+            needFirst = (py > r.y + MIN_SPLIT_MM) || (r.y + r.h > py + pl + MIN_SPLIT_MM);
+            needSecond = (px > r.x + MIN_SPLIT_MM) || (r.x + r.w > px + pw + MIN_SPLIT_MM);
+        } else {
+            needFirst = (px > r.x + MIN_SPLIT_MM) || (r.x + r.w > px + pw + MIN_SPLIT_MM);
+            needSecond = (py > r.y + MIN_SPLIT_MM) || (r.y + r.h > py + pl + MIN_SPLIT_MM);
+        }
+        int stage1 = (splitHoriz == r.axisHorizontal) ? r.level : (r.level + 1);
+        int stage2;
+        if (needFirst) {
+            stage2 = stage1 + 1;
+        } else if (r.level == 1 && splitHoriz == r.axisHorizontal) {
+            // 整板首阶未切第一刀时，正交方向仍归入第 2 阶以严守 firstStageOrientation
+            stage2 = 2;
+        } else {
+            stage2 = (!splitHoriz == r.axisHorizontal) ? r.level : (r.level + 1);
+        }
+        int maxStage = needSecond ? stage2 : (needFirst ? stage1 : 0);
+        return new int[]{stage1, stage2, maxStage};
+    }
+
+    private static boolean isSplitAllowedByMaxStages(
+            SearchContext ctx, FreeRect r, double px, double py, double pw, double pl, boolean splitHoriz) {
+        if (ctx.maxStages == null) return true;
+        if (r.level == 1 && splitHoriz != ctx.horizontalFirst) return false;
+        int maxStage = computeCutStages(r, px, py, pw, pl, splitHoriz)[2];
+        return maxStage <= ctx.maxStages;
+    }
 
     private static boolean resolveSplitHorizontal(
-            FreeRect r, double pw, double pl, SplitRule rule, boolean defaultHorizontalFirst) {
-        // 整板第 1 阶段首刀（level == 1）必须严格遵循工艺首刀方向 firstStageOrientation
+            SearchContext ctx, FreeRect r, double px, double py, double pw, double pl, SplitRule rule) {
         if (r.level == 1) {
-            return defaultHorizontalFirst;
+            return ctx.horizontalFirst;
         }
         double remW = Math.max(0.0, r.w - pw);
         double remH = Math.max(0.0, r.h - pl);
-        return switch (rule) {
+        boolean preferred = switch (rule) {
             case HORIZONTAL_FIRST -> true;
             case VERTICAL_FIRST -> false;
-            case SHORT_AXIS -> {
-                if (Math.abs(remW - remH) <= EPS) yield defaultHorizontalFirst;
-                yield remW <= remH;
-            }
-            case LONG_AXIS -> {
-                if (Math.abs(remW - remH) <= EPS) yield defaultHorizontalFirst;
-                yield remW >= remH;
-            }
+            case SHORT_AXIS -> Math.abs(remW - remH) <= EPS ? ctx.horizontalFirst : remW <= remH;
+            case LONG_AXIS -> Math.abs(remW - remH) <= EPS ? ctx.horizontalFirst : remW >= remH;
             case MIN_AREA -> {
-                // 比较横切优先 vs 纵切优先能保留的最大单块连续余料面积
                 double maxAreaHoriz = Math.max(r.w * remH, remW * pl);
                 double maxAreaVert = Math.max(remW * r.h, pw * remH);
-                if (Math.abs(maxAreaHoriz - maxAreaVert) <= EPS) yield defaultHorizontalFirst;
-                yield maxAreaHoriz >= maxAreaVert;
+                yield Math.abs(maxAreaHoriz - maxAreaVert) <= EPS ? ctx.horizontalFirst : maxAreaHoriz >= maxAreaVert;
             }
         };
+        if (ctx.maxStages != null) {
+            boolean prefOk = isSplitAllowedByMaxStages(ctx, r, px, py, pw, pl, preferred);
+            if (!prefOk && isSplitAllowedByMaxStages(ctx, r, px, py, pw, pl, !preferred)) {
+                return !preferred;
+            }
+        }
+        return preferred;
     }
 
     private static void splitRect(
+            SearchContext ctx,
             FreeRect r,
             double px,
             double py,
@@ -1041,85 +1239,143 @@ final class GuillotineSearchKernel {
             boolean horizontalFirst,
             List<RawCut> cuts,
             List<FreeRect> freeRects) {
+        int[] stages = computeCutStages(r, px, py, pw, pl, horizontalFirst);
+        int stage1 = stages[0];
+        int stage2 = stages[1];
+        double kerf = ctx.kerf;
+        double spacing = ctx.cutSpacing;
         boolean atOrigin = Math.abs(px - r.x) < EPS && Math.abs(py - r.y) < EPS;
+
         if (atOrigin) {
             if (horizontalFirst) {
-                double cutY = r.y + pl;
                 if (r.h - pl > MIN_SPLIT_MM) {
+                    double cutY = Math.min(r.y + r.h - EPS, r.y + pl + kerf * 0.5);
                     cuts.add(new RawCut(
-                            "横切", cutY, r.x, r.x + r.w, r.level,
-                            String.format("第 %d 阶段横切，分切行条 [%.0f × %.0f mm]", r.level, r.w, pl)
+                            "横切", cutY, r.x, r.x + r.w, stage1,
+                            String.format("第 %d 阶段横切，分切行条 [%.0f × %.0f mm]", stage1, r.w, pl)
                     ));
-                    freeRects.add(new FreeRect(r.x, cutY, r.w, r.h - pl, r.level + 1));
+                    double nextY = r.y + pl + spacing;
+                    double nextH = (r.y + r.h) - nextY;
+                    if (nextH > MIN_SPLIT_MM) {
+                        freeRects.add(new FreeRect(r.x, nextY, r.w, nextH, stage1, true));
+                    }
                 }
-                double cutX = r.x + pw;
                 if (r.w - pw > MIN_SPLIT_MM) {
+                    double cutX = Math.min(r.x + r.w - EPS, r.x + pw + kerf * 0.5);
                     cuts.add(new RawCut(
-                            "纵切", cutX, r.y, r.y + pl, r.level + 1,
-                            String.format("第 %d 阶段纵切，切断裁片与侧料 [%.0f × %.0f mm]", r.level + 1, pw, pl)
+                            "纵切", cutX, r.y, r.y + pl, stage2,
+                            String.format("第 %d 阶段纵切，切断裁片与侧料 [%.0f × %.0f mm]", stage2, pw, pl)
                     ));
-                    freeRects.add(new FreeRect(cutX, r.y, r.w - pw, pl, r.level + 2));
+                    double nextX = r.x + pw + spacing;
+                    double nextW = (r.x + r.w) - nextX;
+                    if (nextW > MIN_SPLIT_MM) {
+                        freeRects.add(new FreeRect(nextX, r.y, nextW, pl, stage2, false));
+                    }
                 }
             } else {
-                double cutX = r.x + pw;
                 if (r.w - pw > MIN_SPLIT_MM) {
+                    double cutX = Math.min(r.x + r.w - EPS, r.x + pw + kerf * 0.5);
                     cuts.add(new RawCut(
-                            "纵切", cutX, r.y, r.y + r.h, r.level,
-                            String.format("第 %d 阶段纵切，分切纵列 [%.0f × %.0f mm]", r.level, pw, r.h)
+                            "纵切", cutX, r.y, r.y + r.h, stage1,
+                            String.format("第 %d 阶段纵切，分切纵列 [%.0f × %.0f mm]", stage1, pw, r.h)
                     ));
-                    freeRects.add(new FreeRect(cutX, r.y, r.w - pw, r.h, r.level + 1));
+                    double nextX = r.x + pw + spacing;
+                    double nextW = (r.x + r.w) - nextX;
+                    if (nextW > MIN_SPLIT_MM) {
+                        freeRects.add(new FreeRect(nextX, r.y, nextW, r.h, stage1, false));
+                    }
                 }
-                double cutY = r.y + pl;
                 if (r.h - pl > MIN_SPLIT_MM) {
+                    double cutY = Math.min(r.y + r.h - EPS, r.y + pl + kerf * 0.5);
                     cuts.add(new RawCut(
-                            "横切", cutY, r.x, r.x + pw, r.level + 1,
-                            String.format("第 %d 阶段横切，切断裁片与顶料 [%.0f × %.0f mm]", r.level + 1, pw, pl)
+                            "横切", cutY, r.x, r.x + pw, stage2,
+                            String.format("第 %d 阶段横切，切断裁片与顶料 [%.0f × %.0f mm]", stage2, pw, pl)
                     ));
-                    freeRects.add(new FreeRect(r.x, cutY, pw, r.h - pl, r.level + 2));
+                    double nextY = r.y + pl + spacing;
+                    double nextH = (r.y + r.h) - nextY;
+                    if (nextH > MIN_SPLIT_MM) {
+                        freeRects.add(new FreeRect(r.x, nextY, pw, nextH, stage2, true));
+                    }
                 }
             }
             return;
         }
 
-        // 非原点放置（避让瑕疵 / 布边 / 对花）：先按第一方向做通切隔离，再按正交方向做二次分切
+        // 非原点放置（避让瑕疵 / 布边 / 双轴对格）：先按第一方向做通切隔离，再按正交方向做二次分切
         if (horizontalFirst) {
             if (py > r.y + MIN_SPLIT_MM) {
-                cuts.add(new RawCut("横切", py, r.x, r.x + r.w, r.level, "下部隔离横切"));
-                freeRects.add(new FreeRect(r.x, r.y, r.w, py - r.y, r.level + 1));
+                double cutY = Math.max(r.y + EPS, py - kerf * 0.5);
+                cuts.add(new RawCut("横切", cutY, r.x, r.x + r.w, stage1, "下部隔离横切"));
+                double botH = py - r.y - spacing;
+                if (botH > MIN_SPLIT_MM) {
+                    freeRects.add(new FreeRect(r.x, r.y, r.w, botH, stage1, true));
+                }
             }
             if (r.y + r.h > py + pl + MIN_SPLIT_MM) {
-                cuts.add(new RawCut("横切", py + pl, r.x, r.x + r.w, r.level, "上部展开横切"));
-                freeRects.add(new FreeRect(r.x, py + pl, r.w, (r.y + r.h) - (py + pl), r.level + 1));
+                double cutY = Math.min(r.y + r.h - EPS, py + pl + kerf * 0.5);
+                cuts.add(new RawCut("横切", cutY, r.x, r.x + r.w, stage1, "上部展开横切"));
+                double topY = py + pl + spacing;
+                double topH = (r.y + r.h) - topY;
+                if (topH > MIN_SPLIT_MM) {
+                    freeRects.add(new FreeRect(r.x, topY, r.w, topH, stage1, true));
+                }
             }
             if (px > r.x + MIN_SPLIT_MM) {
-                cuts.add(new RawCut("纵切", px, py, py + pl, r.level + 1, "左侧分切纵刀"));
-                freeRects.add(new FreeRect(r.x, py, px - r.x, pl, r.level + 2));
+                double cutX = Math.max(r.x + EPS, px - kerf * 0.5);
+                cuts.add(new RawCut("纵切", cutX, py, py + pl, stage2, "左侧分切纵刀"));
+                double leftW = px - r.x - spacing;
+                if (leftW > MIN_SPLIT_MM) {
+                    freeRects.add(new FreeRect(r.x, py, leftW, pl, stage2, false));
+                }
             }
             if (r.x + r.w > px + pw + MIN_SPLIT_MM) {
-                cuts.add(new RawCut("纵切", px + pw, py, py + pl, r.level + 1, "右侧分切纵刀"));
-                freeRects.add(new FreeRect(px + pw, py, (r.x + r.w) - (px + pw), pl, r.level + 2));
+                double cutX = Math.min(r.x + r.w - EPS, px + pw + kerf * 0.5);
+                cuts.add(new RawCut("纵切", cutX, py, py + pl, stage2, "右侧分切纵刀"));
+                double rightX = px + pw + spacing;
+                double rightW = (r.x + r.w) - rightX;
+                if (rightW > MIN_SPLIT_MM) {
+                    freeRects.add(new FreeRect(rightX, py, rightW, pl, stage2, false));
+                }
             }
         } else {
             if (px > r.x + MIN_SPLIT_MM) {
-                cuts.add(new RawCut("纵切", px, r.y, r.y + r.h, r.level, "左部隔离纵切"));
-                freeRects.add(new FreeRect(r.x, r.y, px - r.x, r.h, r.level + 1));
+                double cutX = Math.max(r.x + EPS, px - kerf * 0.5);
+                cuts.add(new RawCut("纵切", cutX, r.y, r.y + r.h, stage1, "左部隔离纵切"));
+                double leftW = px - r.x - spacing;
+                if (leftW > MIN_SPLIT_MM) {
+                    freeRects.add(new FreeRect(r.x, r.y, leftW, r.h, stage1, false));
+                }
             }
             if (r.x + r.w > px + pw + MIN_SPLIT_MM) {
-                cuts.add(new RawCut("纵切", px + pw, r.y, r.y + r.h, r.level, "右部展开纵切"));
-                freeRects.add(new FreeRect(px + pw, r.y, (r.x + r.w) - (px + pw), r.h, r.level + 1));
+                double cutX = Math.min(r.x + r.w - EPS, px + pw + kerf * 0.5);
+                cuts.add(new RawCut("纵切", cutX, r.y, r.y + r.h, stage1, "右部展开纵切"));
+                double rightX = px + pw + spacing;
+                double rightW = (r.x + r.w) - rightX;
+                if (rightW > MIN_SPLIT_MM) {
+                    freeRects.add(new FreeRect(rightX, r.y, rightW, r.h, stage1, false));
+                }
             }
             if (py > r.y + MIN_SPLIT_MM) {
-                cuts.add(new RawCut("横切", py, px, px + pw, r.level + 1, "下侧分切横刀"));
-                freeRects.add(new FreeRect(px, r.y, pw, py - r.y, r.level + 2));
+                double cutY = Math.max(r.y + EPS, py - kerf * 0.5);
+                cuts.add(new RawCut("横切", cutY, px, px + pw, stage2, "下侧分切横刀"));
+                double botH = py - r.y - spacing;
+                if (botH > MIN_SPLIT_MM) {
+                    freeRects.add(new FreeRect(px, r.y, pw, botH, stage2, true));
+                }
             }
             if (r.y + r.h > py + pl + MIN_SPLIT_MM) {
-                cuts.add(new RawCut("横切", py + pl, px, px + pw, r.level + 1, "上侧分切横刀"));
-                freeRects.add(new FreeRect(px, py + pl, pw, (r.y + r.h) - (py + pl), r.level + 2));
+                double cutY = Math.min(r.y + r.h - EPS, py + pl + kerf * 0.5);
+                cuts.add(new RawCut("横切", cutY, px, px + pw, stage2, "上侧分切横刀"));
+                double topY = py + pl + spacing;
+                double topH = (r.y + r.h) - topY;
+                if (topH > MIN_SPLIT_MM) {
+                    freeRects.add(new FreeRect(px, topY, pw, topH, stage2, true));
+                }
             }
         }
     }
 
-    // ==================== 疵点与窗帘约束安全定位 ====================
+    // ==================== 疵点与窗帘/双轴对格约束安全定位 ====================
 
     private static boolean isSafeFromDefects(double px, double py, double pw, double pl, List<Defect> defects) {
         for (Defect d : defects) {
@@ -1159,27 +1415,18 @@ final class GuillotineSearchKernel {
 
         for (Defect d : colliding) {
             double rx = d.getX() + d.getW();
-            if (rx >= r.x - EPS && rx + pw <= r.x + r.w + EPS) {
-                candX.add(Math.max(r.x, rx));
-            }
+            if (rx >= r.x - EPS && rx + pw <= r.x + r.w + EPS) candX.add(Math.max(r.x, rx));
             double lx = d.getX() - pw;
-            if (lx >= r.x - EPS && lx + pw <= r.x + r.w + EPS) {
-                candX.add(Math.max(r.x, lx));
-            }
+            if (lx >= r.x - EPS && lx + pw <= r.x + r.w + EPS) candX.add(Math.max(r.x, lx));
             double by = d.getY() + d.getH();
-            if (by >= r.y - EPS && by + pl <= r.y + r.h + EPS) {
-                candY.add(Math.max(r.y, by));
-            }
+            if (by >= r.y - EPS && by + pl <= r.y + r.h + EPS) candY.add(Math.max(r.y, by));
             double ty = d.getY() - pl;
-            if (ty >= r.y - EPS && ty + pl <= r.y + r.h + EPS) {
-                candY.add(Math.max(r.y, ty));
-            }
+            if (ty >= r.y - EPS && ty + pl <= r.y + r.h + EPS) candY.add(Math.max(r.y, ty));
         }
 
         candX.sort(Double::compare);
         candY.sort(Double::compare);
 
-        // 优先选择低位、紧靠起点的安全位置（减少版长拉伸和碎料）
         for (double cy : candY) {
             if (cy + pl > r.y + r.h + EPS) continue;
             for (double cx : candX) {
@@ -1229,15 +1476,19 @@ final class GuillotineSearchKernel {
         candY.sort(Double::compare);
 
         for (double rawY : candY) {
-            for (double cx : candX) {
+            for (double rawX : candX) {
                 ComputationCancellation.check();
-                if (cx + pw > effMaxX + EPS) continue;
+                double cx = rawX;
+                if (it.patternMatchX) {
+                    cx = snapLocalX(ctx.req, ctx.frame, ctx.pipeline, it.part, angleDeg, cx, pw);
+                }
+                if (cx < effMinX - EPS || cx + pw > effMaxX + EPS) continue;
                 double cy = rawY;
                 for (int iter = 0; iter < 5; iter++) {
-                    if (it.patternMatch) {
+                    if (it.patternMatchY) {
                         cy = snapLocalY(ctx.req, ctx.frame, ctx.pipeline, it.part, angleDeg, cy, pl);
                     }
-                    if (cy + pl > r.y + r.h + EPS) {
+                    if (cy < r.y - EPS || cy + pl > r.y + r.h + EPS) {
                         cy = Double.POSITIVE_INFINITY;
                         break;
                     }
@@ -1270,13 +1521,35 @@ final class GuillotineSearchKernel {
             double snappedPhys = pipeline.snapY(req, part, angleDeg, physY);
             return snappedPhys - frame.trimStart();
         }
-        if (PatternRepeatRule.isAligned(req, part, physY)) {
+        if (PatternRepeatRule.isAlignedY(req, part, angleDeg, physY)) {
             return localY;
         }
         double repeatY = req.material().fabricRule().repeatYMm();
         double phaseY = req.material().fabricRule().phaseYMm() == null ? 0.0 : req.material().fabricRule().phaseYMm();
-        double anchorY = part.rule().patternAnchorYMm() == null ? 0.0 : part.rule().patternAnchorYMm();
+        double anchorY = PatternRepeatRule.transformedAnchor(part, angleDeg)[1];
         double rem = (((physY + anchorY - phaseY) % repeatY) + repeatY) % repeatY;
         return localY + rem;
+    }
+
+    private static double snapLocalX(
+            NestingProblem req,
+            CoordinateFrame frame,
+            ConstraintPipeline pipeline,
+            NestingProblem.Part part,
+            int angleDeg,
+            double localX,
+            double pw) {
+        double physX = frame.toPhysicalX(localX, pw);
+        if (!frame.isRightOrigin()) {
+            return pipeline.snapX(req, part, angleDeg, physX);
+        }
+        if (PatternRepeatRule.isAlignedX(req, part, angleDeg, physX)) {
+            return localX;
+        }
+        double repeatX = req.material().fabricRule().repeatXMm();
+        double phaseX = req.material().fabricRule().phaseXMm() == null ? 0.0 : req.material().fabricRule().phaseXMm();
+        double anchorX = PatternRepeatRule.transformedAnchor(part, angleDeg)[0];
+        double rem = (((physX + anchorX - phaseX) % repeatX) + repeatX) % repeatX;
+        return localX + rem;
     }
 }

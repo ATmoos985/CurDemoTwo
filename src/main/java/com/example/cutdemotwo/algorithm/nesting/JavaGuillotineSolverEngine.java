@@ -10,6 +10,7 @@ import com.example.cutdemotwo.algorithm.nesting.GuillotineSearchKernel.PlacedRec
 import com.example.cutdemotwo.algorithm.nesting.GuillotineSearchKernel.RawCut;
 import com.example.cutdemotwo.algorithm.nesting.constraints.ConstraintPipeline;
 import com.example.cutdemotwo.algorithm.nesting.constraints.CurtainConstraintPack;
+import com.example.cutdemotwo.algorithm.nesting.constraints.GrainGroupRule;
 import com.example.cutdemotwo.algorithm.nesting.constraints.PatternRepeatRule;
 import com.example.cutdemotwo.algorithm.toolpath.CutBoundaryCompletionService;
 import com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService;
@@ -119,6 +120,9 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
                 double localMaxX = rollW;
                 List<Defect> hardLocal = localDefects;
                 boolean patternMatch = false;
+                boolean patternMatchX = false;
+                boolean patternMatchY = false;
+                boolean partAllowRotation = p.allowRotation();
                 if (!pipeline.isNoop()) {
                     double[] physBounds = pipeline.clipXBounds(req, p, 0.0, rollW);
                     if (frame.isRightOrigin()) {
@@ -134,14 +138,21 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
                         Defect ld = localDefectById.get(he.id());
                         if (ld != null) hardLocal.add(ld);
                     }
-                    patternMatch = PatternRepeatRule.requiresPatternMatch(req, p);
+                    patternMatchX = PatternRepeatRule.requiresPatternMatchX(req, p);
+                    patternMatchY = PatternRepeatRule.requiresPatternMatchY(req, p);
+                    patternMatch = patternMatchX || patternMatchY;
+                    if (GrainGroupRule.normalizedGroupId(p) != null) {
+                        // 同组倒顺毛在直刀矩形工艺下必须严格保经向 0°（禁止 90° 纬向旋转）
+                        partAllowRotation = false;
+                    }
                 }
                 int count = Math.max(0, p.quantity());
                 for (int c = 0; c < count; c++) {
                     ComputationCancellation.check();
                     items.add(new DemItem(
                             itemSeq++, p.name(), p.shape().width(), p.shape().height(),
-                            p.allowRotation(), p.id(), p, localMinX, localMaxX, hardLocal, patternMatch
+                            partAllowRotation, p.id(), p, localMinX, localMaxX, hardLocal,
+                            patternMatch, patternMatchX, patternMatchY
                     ));
                 }
             }
@@ -192,7 +203,7 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
         int stepIdx = 1;
         int stageOffset = trim > 0 ? 1 : 0;
         if (trim > 0) {
-            CutStep trimCut = GuillotinePostProcessor.createTrimCut(frame, stepIdx++);
+            CutStep trimCut = GuillotinePostProcessor.createTrimCut(frame, stepIdx++, req.process().kerf());
             trimCut.setStage(1);
             mappedCuts.add(trimCut);
         }
@@ -212,9 +223,13 @@ public class JavaGuillotineSolverEngine implements ICutSolverEngine {
             mappedCuts.add(step);
         }
 
-        // 100% 完整切断自愈检查 + 刀路平滑与空行程优化
+        // 100% 完整切断自愈检查 + 刀路平滑与空行程优化（透传原生刀缝 kerf 与最大通切阶数限制）
+        Integer allowedMaxStage = req.process().maxStages() == null
+                ? null
+                : req.process().maxStages() + stageOffset;
         List<CutStep> continuousCuts = GuillotinePostProcessor.completeAndOptimizeCuts(
-                cutBoundaryCompletionService, toolpathOptimizerService, finalPieces, remnants, mappedCuts, frame, true
+                cutBoundaryCompletionService, toolpathOptimizerService, finalPieces, remnants, mappedCuts,
+                frame, true, req.process().kerf(), allowedMaxStage
         );
 
         res.setPieces(finalPieces);

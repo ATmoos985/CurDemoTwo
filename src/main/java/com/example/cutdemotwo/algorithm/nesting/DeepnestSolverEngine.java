@@ -5,6 +5,7 @@ import com.example.cutdemotwo.algorithm.geometry.EngineGeometry;
 import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
 import com.example.cutdemotwo.algorithm.nesting.constraints.ConstraintPipeline;
 import com.example.cutdemotwo.algorithm.nesting.constraints.CurtainConstraintPack;
+import com.example.cutdemotwo.algorithm.nesting.constraints.GrainGroupRule;
 import com.example.cutdemotwo.algorithm.nesting.constraints.PatternRepeatRule;
 import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
@@ -359,9 +360,10 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         final List<Integer> allowedAngles;
         final Map<Integer, OrientedPart> byAngle;
         final OrientedPart primary;
+        final String grainGroupId;
 
         ExpandedPart(int instanceId, int demandId, String name, double area,
-                     List<Integer> allowedAngles, Map<Integer, OrientedPart> byAngle) {
+                     List<Integer> allowedAngles, Map<Integer, OrientedPart> byAngle, String grainGroupId) {
             this.instanceId = instanceId;
             this.demandId = demandId;
             this.name = name;
@@ -369,6 +371,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             this.allowedAngles = allowedAngles;
             this.byAngle = byAngle;
             this.primary = byAngle.get(allowedAngles.get(0));
+            this.grainGroupId = grainGroupId;
         }
 
         @Override public int instanceId() { return instanceId; }
@@ -377,6 +380,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         @Override public double primaryHeight() { return primary.height(); }
         @Override public double primaryWidth() { return primary.width(); }
         @Override public List<Integer> allowedAngles() { return allowedAngles; }
+        @Override public String grainGroupId() { return grainGroupId; }
     }
 
     private static final class ExclusionObstacle {
@@ -440,6 +444,8 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         final Shape matShape;
         final Area matArea;
         final boolean isRectMat;
+        final boolean hasAnyHoles;
+        final boolean pureSelvedgeForCompact;
         final double matW, matH;
         final double pieceGap;
         final boolean preferRight;
@@ -464,10 +470,12 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             this.matShape = problem.material().shape();
             this.matArea = PolygonGeometry.region(matShape, 0, 0);
             this.matArea.getBounds2D();
-            this.isRectMat = "RECTANGLE".equals(matShape.type());
+            this.hasAnyHoles = MarkerCompactor.hasAnyHoles(problem);
+            this.pureSelvedgeForCompact = CurtainConstraintPack.isPureSelvedgeOnly(problem, true);
+            this.isRectMat = "RECTANGLE".equals(matShape.type()) && !matShape.hasHoles();
             this.matW = matShape.width();
             this.matH = matShape.height();
-            this.pieceGap = problem.process().pieceGap();
+            this.pieceGap = Math.max(Math.max(0.0, problem.process().pieceGap()), Math.max(0.0, problem.process().kerf()));
             String corner = problem.process().startCorner() == null ? "left-top" : problem.process().startCorner();
             this.preferRight = corner.startsWith("right");
             this.preferBottom = !stripMode && corner.endsWith("bottom");
@@ -509,7 +517,13 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                     this.hardObstaclesByDemand.put(part.id(), hardObs);
                     this.hardObstacleBvhByDemand.put(part.id(), buildExclusionBvh(hardObs));
                 }
-                List<Integer> angles = part.contourAngles();
+                String grainGroupId = GrainGroupRule.normalizedGroupId(part);
+                List<Integer> angles = grainGroupId != null
+                        ? GrainGroupRule.allowedAnglesForPart(problem, part)
+                        : part.contourAngles();
+                if (angles.isEmpty()) {
+                    continue;
+                }
                 Map<Integer, OrientedPart> oriMap = new HashMap<>();
                 for (int angle : angles) {
                     ComputationCancellation.check();
@@ -535,7 +549,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 double partArea = PolygonGeometry.area(part.shape());
                 for (int q = 0; q < part.quantity(); q++) {
                     ComputationCancellation.check();
-                    ExpandedPart ep = new ExpandedPart(instanceSeq++, part.id(), part.name(), partArea, angles, oriMap);
+                    ExpandedPart ep = new ExpandedPart(instanceSeq++, part.id(), part.name(), partArea, angles, oriMap, grainGroupId);
                     items.add(ep);
                     reqArea += partArea;
                     sumPartH += ep.primaryHeight();
@@ -822,7 +836,8 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 List<PlacedInstance> polished = polishPlacements(ctx, bestEval.placed(), stage3Deadline);
                 finalPlacements = toPlacements(polished);
                 if (!ctx.preferBottom
-                        && ctx.pipeline.isNoop()
+                        && (ctx.pipeline.isNoop() || ctx.pureSelvedgeForCompact)
+                        && !ctx.hasAnyHoles
                         && finalPlacements.size() <= MarkerCompactor.MAX_COMPACT_PIECES
                         && AxisMarkerCompactor.supports(problem)
                         && System.nanoTime() < stage3Deadline) {
@@ -840,7 +855,8 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 finalPlacements = toPlacements(polished);
 
                 if (!ctx.preferBottom
-                        && ctx.pipeline.isNoop()
+                        && (ctx.pipeline.isNoop() || ctx.pureSelvedgeForCompact)
+                        && !ctx.hasAnyHoles
                         && finalPlacements.size() <= MarkerCompactor.MAX_COMPACT_PIECES
                         && System.nanoTime() < stage3CapDeadline) {
                     finalPlacements = runLinkedCompaction(problem, finalPlacements, stage3CapDeadline);
@@ -1162,11 +1178,16 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         double totalMergedLength = 0.0;
         double totalSoftPenalty = 0.0;
 
+        Map<String, Integer> lockedGroupAngles = new HashMap<>();
         for (PlacedInstance pi : kept) {
             placed.add(pi);
             placedWorldPolys.add(pi.worldVertices);
             placedBvh.add(pi);
             placedArea += pi.ori.area();
+            ExpandedPart ep = ctx.items.get(pi.instanceId);
+            if (ep.grainGroupId != null) {
+                lockedGroupAngles.putIfAbsent(ep.grainGroupId, pi.ori.angle());
+            }
             if (pi.minX < currentMinX) currentMinX = pi.minX;
             if (pi.maxX > currentMaxX) currentMaxX = pi.maxX;
             if (pi.minY < currentMinY) currentMinY = pi.minY;
@@ -1192,8 +1213,9 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                 return null;
             }
 
+            List<Integer> candidateAngles = resolveCandidateAngles(item, lockedGroupAngles);
             ChosenSpot bestSpot = null;
-            for (int angle : item.allowedAngles) {
+            for (int angle : candidateAngles) {
                 ComputationCancellation.check();
                 OrientedPart ori = item.byAngle.get(angle);
 
@@ -1263,6 +1285,9 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             }
 
             PlacedInstance pi = new PlacedInstance(item.instanceId, bestSpot.ori(), bestSpot.x(), bestSpot.y());
+            if (item.grainGroupId != null) {
+                lockedGroupAngles.putIfAbsent(item.grainGroupId, bestSpot.ori().angle());
+            }
             placed.add(pi);
             placedWorldPolys.add(pi.worldVertices);
             placedBvh.add(pi);
@@ -1348,6 +1373,17 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         }
     }
 
+    private static List<Integer> resolveCandidateAngles(ExpandedPart item, Map<String, Integer> lockedGroupAngles) {
+        if (item.grainGroupId == null) {
+            return item.allowedAngles;
+        }
+        Integer locked = lockedGroupAngles.get(item.grainGroupId);
+        if (locked == null) {
+            return item.allowedAngles;
+        }
+        return item.byAngle.containsKey(locked) ? List.of(locked) : List.of();
+    }
+
     /**
      * Evaluates one GA chromosome using Deepnest's NFP boolean difference placement rule
      * ({@code placeParts} in {@code background.js:804-1173}).
@@ -1360,6 +1396,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         List<List<Point>> placedWorldPolys = new ArrayList<>(ind.order.length);
         PlacedBvhTracker placedBvh = new PlacedBvhTracker(ind.order.length);
         Map<NfpInnerKey, ClipCacheEntry> clipCache = new HashMap<>();
+        Map<String, Integer> lockedGroupAngles = new HashMap<>();
 
         double currentMaxX = 0.0;
         double currentMinX = ctx.matW;
@@ -1376,14 +1413,21 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             }
 
             ExpandedPart item = ctx.items.get(ind.order[step]);
+            List<Integer> candidateAngles = resolveCandidateAngles(item, lockedGroupAngles);
+            if (candidateAngles.isEmpty()) {
+                continue;
+            }
             int preferredAngle = ind.rotations[step];
+            if (!candidateAngles.contains(preferredAngle)) {
+                preferredAngle = candidateAngles.get(0);
+            }
 
             ChosenSpot bestSpot = null;
             int candidateLimit = ctx.items.size() >= 12 ? LARGE_SET_CANDIDATES_TO_VALIDATE : TOP_CANDIDATES_TO_VALIDATE;
 
-            if (ind.greedyAngles || placed.isEmpty()) {
+            if (ind.greedyAngles || placed.isEmpty() || candidateAngles.size() == 1) {
                 // Evaluate all allowed rotations and record the best angle back into chromosome
-                for (int angle : item.allowedAngles) {
+                for (int angle : candidateAngles) {
                     ComputationCancellation.check();
                     OrientedPart ori = item.byAngle.get(angle);
                     double upperBoundScore = bestSpot != null ? bestSpot.score() : Double.POSITIVE_INFINITY;
@@ -1405,8 +1449,8 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                         Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY
                 );
                 // Fallback to other allowed rotations if preferred orientation cannot fit on remaining sheet
-                if (bestSpot == null && item.allowedAngles.size() > 1) {
-                    for (int angle : item.allowedAngles) {
+                if (bestSpot == null && candidateAngles.size() > 1) {
+                    for (int angle : candidateAngles) {
                         if (angle == prefOri.angle()) continue;
                         ComputationCancellation.check();
                         OrientedPart altOri = item.byAngle.get(angle);
@@ -1425,6 +1469,9 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
 
             if (bestSpot != null) {
                 ind.rotations[step] = bestSpot.ori().angle();
+                if (item.grainGroupId != null) {
+                    lockedGroupAngles.putIfAbsent(item.grainGroupId, bestSpot.ori().angle());
+                }
                 PlacedInstance pi = new PlacedInstance(item.instanceId, bestSpot.ori(), bestSpot.x(), bestSpot.y());
                 placed.add(pi);
                 placedWorldPolys.add(pi.worldVertices);
@@ -1551,25 +1598,40 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             double bestScoreBound = upperBoundScore;
             for (Point pt : rawPts) {
                 ComputationCancellation.check();
-                double cx = snapCoord(pt.x(), minValidX, maxValidX);
-                double cy = snapCoord(pt.y(), 0.0, maxValidY);
-                if (!ctx.pipeline.isNoop() && part != null) {
-                    cy = ctx.pipeline.snapY(ctx.problem, part, ori.angle(), cy);
-                    if (cy > maxValidY + 1e-6) continue;
+                double baseX = snapCoord(pt.x(), minValidX, maxValidX);
+                double baseY = snapCoord(pt.y(), 0.0, maxValidY);
+                double[][] snappedPairs;
+                if (!ctx.pipeline.isNoop() && part != null && PatternRepeatRule.requiresPatternMatch(ctx.problem, part)) {
+                    double nxNear = ctx.pipeline.snapXNearest(ctx.problem, part, ori.angle(), baseX, minValidX, maxValidX);
+                    double nyNear = ctx.pipeline.snapYNearest(ctx.problem, part, ori.angle(), baseY, 0.0, maxValidY);
+                    double nxFwd = ctx.pipeline.snapX(ctx.problem, part, ori.angle(), baseX);
+                    double nyFwd = ctx.pipeline.snapY(ctx.problem, part, ori.angle(), baseY);
+                    if (Math.abs(nxNear - nxFwd) > 1e-6 || Math.abs(nyNear - nyFwd) > 1e-6) {
+                        snappedPairs = new double[][]{{nxNear, nyNear}, {nxFwd, nyFwd}};
+                    } else {
+                        snappedPairs = new double[][]{{nxNear, nyNear}};
+                    }
+                } else {
+                    snappedPairs = new double[][]{{baseX, baseY}};
                 }
-                double primaryY = ctx.preferBottom ? (ctx.matH - cy) : (cy + ori.height());
-                if (primaryY > maxAllowedExtentY) continue;
-                double secondaryX = ctx.preferRight ? (ctx.matW - cx) : (cx + ori.width());
-                double score = mode == DeepnestGeneticAlgorithm.PlacementMode.GRAVITY_X
-                        ? (secondaryX * ctx.gravityWeight + primaryY)
-                        : (primaryY * ctx.gravityWeight + secondaryX);
-                if (!ctx.pipeline.isNoop() && part != null) {
-                    score += ctx.pipeline.penalty(ctx.problem, part, cx, cy, ori.angle(), ori.shape()) * ctx.gravityWeight;
-                }
-                if (score >= bestScoreBound - 1e-9) continue;
-                if (isPlacementValid(ctx, cx, cy, ori, placed, null, -1)) {
-                    bestFirst = new ChosenSpot(cx, cy, ori, score, 0.0);
-                    bestScoreBound = score;
+                for (double[] xy : snappedPairs) {
+                    double cx = xy[0];
+                    double cy = xy[1];
+                    if (cx < minValidX - 1e-6 || cx > maxValidX + 1e-6 || cy < -1e-6 || cy > maxValidY + 1e-6) continue;
+                    double primaryY = ctx.preferBottom ? (ctx.matH - cy) : (cy + ori.height());
+                    if (primaryY > maxAllowedExtentY) continue;
+                    double secondaryX = ctx.preferRight ? (ctx.matW - cx) : (cx + ori.width());
+                    double score = mode == DeepnestGeneticAlgorithm.PlacementMode.GRAVITY_X
+                            ? (secondaryX * ctx.gravityWeight + primaryY)
+                            : (primaryY * ctx.gravityWeight + secondaryX);
+                    if (!ctx.pipeline.isNoop() && part != null) {
+                        score += ctx.pipeline.penalty(ctx.problem, part, cx, cy, ori.angle(), ori.shape()) * ctx.gravityWeight;
+                    }
+                    if (score >= bestScoreBound - 1e-9) continue;
+                    if (isPlacementValid(ctx, cx, cy, ori, placed, null, -1)) {
+                        bestFirst = new ChosenSpot(cx, cy, ori, score, 0.0);
+                        bestScoreBound = score;
+                    }
                 }
             }
             return bestFirst;
@@ -1798,20 +1860,50 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         if (!Double.isFinite(rawX) || !Double.isFinite(rawY)) return;
         if (rawX < minValidX - 0.05 || rawX > maxValidX + 0.05 || rawY < -0.05 || rawY > maxValidY + 0.05) return;
 
-        double cx = snapCoord(rawX, minValidX, maxValidX);
-        double cy = snapCoord(rawY, 0.0, maxValidY);
-        double softPenalty = 0.0;
+        double baseX = snapCoord(rawX, minValidX, maxValidX);
+        double baseY = snapCoord(rawY, 0.0, maxValidY);
         if (!ctx.pipeline.isNoop()) {
             Part part = ctx.partById.get(ori.demandId());
-            cy = ctx.pipeline.snapY(ctx.problem, part, ori.angle(), cy);
-            if (cy > maxValidY + 1e-6) return;
+            if (PatternRepeatRule.requiresPatternMatch(ctx.problem, part)) {
+                double nxNear = ctx.pipeline.snapXNearest(ctx.problem, part, ori.angle(), baseX, minValidX, maxValidX);
+                double nyNear = ctx.pipeline.snapYNearest(ctx.problem, part, ori.angle(), baseY, 0.0, maxValidY);
+                appendScoredPoint(ctx, ori, mode, part, nxNear, nyNear, minValidX, maxValidX, maxValidY,
+                        currentMinX, currentMaxX, currentMinY, currentMaxY, maxAllowedExtentY, maxAllowedBaseScore, out);
+                double nxFwd = ctx.pipeline.snapX(ctx.problem, part, ori.angle(), baseX);
+                double nyFwd = ctx.pipeline.snapY(ctx.problem, part, ori.angle(), baseY);
+                if (Math.abs(nxFwd - nxNear) > 1e-6 || Math.abs(nyFwd - nyNear) > 1e-6) {
+                    appendScoredPoint(ctx, ori, mode, part, nxFwd, nyFwd, minValidX, maxValidX, maxValidY,
+                            currentMinX, currentMaxX, currentMinY, currentMaxY, maxAllowedExtentY, maxAllowedBaseScore, out);
+                }
+                return;
+            }
+            appendScoredPoint(ctx, ori, mode, part, baseX, baseY, minValidX, maxValidX, maxValidY,
+                    currentMinX, currentMaxX, currentMinY, currentMaxY, maxAllowedExtentY, maxAllowedBaseScore, out);
+            return;
+        }
+        appendScoredPoint(ctx, ori, mode, null, baseX, baseY, minValidX, maxValidX, maxValidY,
+                currentMinX, currentMaxX, currentMinY, currentMaxY, maxAllowedExtentY, maxAllowedBaseScore, out);
+    }
+
+    private static void appendScoredPoint(ProblemContext ctx, OrientedPart ori,
+                                          DeepnestGeneticAlgorithm.PlacementMode mode,
+                                          Part part,
+                                          double cx, double cy,
+                                          double minValidX, double maxValidX, double maxValidY,
+                                          double currentMinX, double currentMaxX,
+                                          double currentMinY, double currentMaxY,
+                                          double maxAllowedExtentY,
+                                          double maxAllowedBaseScore,
+                                          List<CandidatePoint> out) {
+        if (cx < minValidX - 1e-6 || cx > maxValidX + 1e-6 || cy < -1e-6 || cy > maxValidY + 1e-6) return;
+        double softPenalty = 0.0;
+        if (!ctx.pipeline.isNoop() && part != null) {
             softPenalty = ctx.pipeline.penalty(ctx.problem, part, cx, cy, ori.angle(), ori.shape());
         }
 
         double newExtentY = ctx.preferBottom
                 ? Math.max(ctx.matH - currentMinY, ctx.matH - cy)
                 : Math.max(currentMaxY, cy + ori.height());
-        // Bound-and-Prune：超出已知最优版长上界的候选点直接数学剪枝丢弃
         if (newExtentY > maxAllowedExtentY) {
             return;
         }
@@ -1826,15 +1918,12 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         double baseScore = switch (mode) {
             case GRAVITY_Y -> newExtentY * ctx.gravityWeight + newExtentX + ownY * 0.25 + ownX * 0.02;
             case GRAVITY_X -> newExtentX * ctx.gravityWeight + newExtentY + ownX * 0.25 + ownY * 0.02;
-            // Deepnest 'box' mode (background.js:1063): bounding rectangle area width * height
             case BOX_AREA -> newExtentX * newExtentY + (ownY + ownX) * 10.0;
-            // Tight corner packing: packs into the closest pocket toward startCorner first
             case TIGHT_CORNER -> ownY * 2.5 + ownX * 2.0 + newExtentY * 0.8 + newExtentX * 0.5;
         };
         if (softPenalty > 0.0) {
             baseScore += softPenalty * ctx.gravityWeight;
         }
-        // Bound-and-Prune：即便拿满最大可能共边奖励也无法优于同件已有角度解时直接丢弃
         if (baseScore >= maxAllowedBaseScore) {
             return;
         }
@@ -1882,7 +1971,8 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             double maxValidX = Math.max(minValidX, ctx.maxValidXEdge(current.ori.demandId()) - current.ori.width());
             double maxValidY = Math.max(0.0, ctx.matH - current.ori.height());
             Part part = ctx.pipeline.isNoop() ? null : ctx.partById.get(current.ori.demandId());
-            boolean lockYForPattern = !ctx.pipeline.isNoop() && PatternRepeatRule.requiresPatternMatch(ctx.problem, part);
+            boolean lockYForPattern = !ctx.pipeline.isNoop() && PatternRepeatRule.requiresPatternMatchY(ctx.problem, part);
+            boolean lockXForPattern = !ctx.pipeline.isNoop() && PatternRepeatRule.requiresPatternMatchX(ctx.problem, part);
             double curPenalty = ctx.pipeline.isNoop() ? 0.0
                     : ctx.pipeline.penalty(ctx.problem, part, current.x, current.y, current.ori.angle(), current.ori.shape());
 
@@ -1912,18 +2002,20 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                     }
                 }
                 // Slide along cross axis (-X or +X)
-                while (true) {
-                    ComputationCancellation.check();
-                    double nx = snapCoord(bestX + dirX * step, minValidX, maxValidX);
-                    if (Math.abs(nx - bestX) < 1e-6) break;
-                    if (isPlacementValid(ctx, nx, bestY, current.ori, work, currentBvh, idx)) {
-                        if (!ctx.pipeline.isNoop() && ctx.pipeline.penalty(ctx.problem, part, nx, bestY, current.ori.angle(), current.ori.shape()) > curPenalty + 1e-6) {
+                if (!lockXForPattern) {
+                    while (true) {
+                        ComputationCancellation.check();
+                        double nx = snapCoord(bestX + dirX * step, minValidX, maxValidX);
+                        if (Math.abs(nx - bestX) < 1e-6) break;
+                        if (isPlacementValid(ctx, nx, bestY, current.ori, work, currentBvh, idx)) {
+                            if (!ctx.pipeline.isNoop() && ctx.pipeline.penalty(ctx.problem, part, nx, bestY, current.ori.angle(), current.ori.shape()) > curPenalty + 1e-6) {
+                                break;
+                            }
+                            bestX = nx;
+                            moved = true;
+                        } else {
                             break;
                         }
-                        bestX = nx;
-                        moved = true;
-                    } else {
-                        break;
                     }
                 }
             }
@@ -1956,7 +2048,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
         }
         if (!ctx.pipeline.isNoop()) {
             Part part = ctx.partById.get(ori.demandId());
-            if (!PatternRepeatRule.isAligned(ctx.problem, part, y)) {
+            if (!PatternRepeatRule.isAligned(ctx.problem, part, ori.angle(), x, y)) {
                 return false;
             }
         }
@@ -2015,7 +2107,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                     return true;
                 }
                 return gap > 0 && ContourGeometrySupport.violatesMinEdgeGap(
-                        cVerts, x, y, p.worldVertices, 0.0, 0.0, gap, VALIDATOR_GAP_TOL);
+                        ori.shape(), x, y, p.ori.shape(), p.x, p.y, gap, VALIDATOR_GAP_TOL);
             });
         }
 
@@ -2037,7 +2129,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             }
 
             if (gap > 0 && ContourGeometrySupport.violatesMinEdgeGap(
-                    cVerts, x, y, p.worldVertices, 0.0, 0.0, gap, VALIDATOR_GAP_TOL)) {
+                    ori.shape(), x, y, p.ori.shape(), p.x, p.y, gap, VALIDATOR_GAP_TOL)) {
                 return false;
             }
         }

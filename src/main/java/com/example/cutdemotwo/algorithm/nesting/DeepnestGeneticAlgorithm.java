@@ -47,6 +47,7 @@ final class DeepnestGeneticAlgorithm {
         double primaryHeight();
         double primaryWidth();
         List<Integer> allowedAngles();
+        default String grainGroupId() { return null; }
     }
 
     static final class Individual {
@@ -162,6 +163,11 @@ final class DeepnestGeneticAlgorithm {
             PartDescriptor pd = items.get(order[i]);
             int occ = seenPerDemand.merge(pd.demandId(), 1, Integer::sum) - 1;
             List<Integer> allowed = pd.allowedAngles();
+            if (pd.grainGroupId() != null) {
+                // 同组倒顺毛禁止组内交替混向，统一选用 angleB（若允许）或首角
+                rot[i] = allowed.contains(angleB) ? angleB : allowed.get(0);
+                continue;
+            }
             int target = (occ % 2 == 0) ? angleA : angleB;
             if (allowed.contains(target)) {
                 rot[i] = target;

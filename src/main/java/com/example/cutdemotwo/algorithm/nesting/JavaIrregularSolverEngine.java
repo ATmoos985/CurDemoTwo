@@ -8,6 +8,7 @@ import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
 import com.example.cutdemotwo.algorithm.ComputationCancellation;
 import com.example.cutdemotwo.algorithm.nesting.constraints.ConstraintPipeline;
 import com.example.cutdemotwo.algorithm.nesting.constraints.CurtainConstraintPack;
+import com.example.cutdemotwo.algorithm.nesting.constraints.GrainGroupRule;
 import com.example.cutdemotwo.algorithm.nesting.constraints.PatternRepeatRule;
 
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
@@ -75,8 +76,12 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
         final List<ExclusionRecord> hardExclusions;
         final AabbBvh hardExclusionBvh;
         final boolean patternMatch;
+        final boolean patternMatchX;
+        final boolean patternMatchY;
+        final String grainGroupId;
 
-        PartItem(Part part, double minX, double maxX, List<ExclusionRecord> hardExclusions, boolean patternMatch) {
+        PartItem(NestingProblem problem, Part part, double minX, double maxX, List<ExclusionRecord> hardExclusions,
+                 boolean patternMatch, boolean patternMatchX, boolean patternMatchY) {
             this.part = part;
             this.demandId = part.id();
             this.name = part.name();
@@ -85,9 +90,15 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
             this.hardExclusions = hardExclusions;
             this.hardExclusionBvh = buildExclusionBvh(hardExclusions);
             this.patternMatch = patternMatch;
+            this.patternMatchX = patternMatchX;
+            this.patternMatchY = patternMatchY;
+            this.grainGroupId = GrainGroupRule.normalizedGroupId(part);
             List<OrientedShape> list = new ArrayList<>();
             double maxA = 0;
-            for (int angle : part.contourAngles()) {
+            List<Integer> allowedAngles = this.grainGroupId != null
+                    ? GrainGroupRule.allowedAnglesForPart(problem, part)
+                    : part.contourAngles();
+            for (int angle : allowedAngles) {
                 ComputationCancellation.check();
                 Shape rotShape = PolygonGeometry.rotate(part.shape(), angle);
                 double a = PolygonGeometry.area(rotShape);
@@ -150,10 +161,10 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
         Shape matShape = problem.material().shape();
         Area matArea = PolygonGeometry.region(matShape, 0, 0);
         matArea.getBounds2D();
-        boolean isRectMat = "RECTANGLE".equals(matShape.type());
+        boolean isRectMat = "RECTANGLE".equals(matShape.type()) && !matShape.hasHoles();
         double matW = matShape.width();
         double matH = matShape.height();
-        double gap = problem.process().pieceGap();
+        double gap = Math.max(Math.max(0.0, problem.process().pieceGap()), Math.max(0.0, problem.process().kerf()));
 
         ConstraintPipeline pipeline = CurtainConstraintPack.forProblem(problem);
         List<ExclusionRecord> exclusionRecords = new ArrayList<>();
@@ -181,8 +192,11 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                     if (r != null) hardRecs.add(r);
                 }
             }
-            boolean patternMatch = !pipeline.isNoop() && PatternRepeatRule.requiresPatternMatch(problem, p);
-            PartItem pi = new PartItem(p, xBounds[0], xBounds[1], hardRecs, patternMatch);
+            boolean patternMatchX = !pipeline.isNoop() && PatternRepeatRule.requiresPatternMatchX(problem, p);
+            boolean patternMatchY = !pipeline.isNoop() && PatternRepeatRule.requiresPatternMatchY(problem, p);
+            boolean patternMatch = patternMatchX || patternMatchY;
+            PartItem pi = new PartItem(problem, p, xBounds[0], xBounds[1], hardRecs, patternMatch, patternMatchX, patternMatchY);
+            if (pi.orientations.isEmpty()) continue;
             for (int i = 0; i < p.quantity(); i++) {
                 ComputationCancellation.check();
                 items.add(pi);
@@ -309,6 +323,7 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
             double gap, List<ExclusionRecord> exclusions, long startTime, long timeBudgetMs) {
 
         List<PlacedRecord> placedList = new ArrayList<>();
+        Map<String, Integer> lockedGroupAngles = new HashMap<>();
         double[] placedMinX = new double[items.size()];
         double[] placedMinY = new double[items.size()];
         double[] placedMaxX = new double[items.size()];
@@ -321,6 +336,7 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
             if (System.currentTimeMillis() - startTime > timeBudgetMs) break;
 
             CandidateBest bestCandidate = null;
+            Integer lockedAngle = item.grainGroupId == null ? null : lockedGroupAngles.get(item.grainGroupId);
 
             // Collect candidate anchor points
             SortedSet<Double> xAnchors = new TreeSet<>();
@@ -334,6 +350,19 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                 yAnchors.add(Math.min(matH, p.maxY + gap));
                 xAnchors.add(Math.max(item.minX, Math.min(item.maxX, p.minX)));
                 yAnchors.add(Math.min(matH, p.minY));
+                if (p.orientedShape.shape().hasHoles()) {
+                    for (List<Point> hole : p.orientedShape.shape().holes()) {
+                        double hMinX = Double.POSITIVE_INFINITY, hMinY = Double.POSITIVE_INFINITY;
+                        for (Point hp : hole) {
+                            if (hp.x() < hMinX) hMinX = hp.x();
+                            if (hp.y() < hMinY) hMinY = hp.y();
+                        }
+                        if (Double.isFinite(hMinX) && Double.isFinite(hMinY)) {
+                            xAnchors.add(Math.max(item.minX, Math.min(item.maxX, p.minX + hMinX + gap)));
+                            yAnchors.add(Math.min(matH, p.minY + hMinY + gap));
+                        }
+                    }
+                }
             }
             for (ExclusionRecord e : exclusions) {
                 ComputationCancellation.check();
@@ -347,6 +376,9 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
 
             for (OrientedShape orientation : item.orientations) {
                 ComputationCancellation.check();
+                if (lockedAngle != null && orientation.rotationDegrees() != lockedAngle) {
+                    continue;
+                }
                 double pw = orientation.width();
                 double ph = orientation.height();
                 if (pw > (item.maxX - item.minX) + EPS || ph > matH + EPS) continue;
@@ -354,16 +386,19 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                 // Try corner anchors
                 for (double rawY : yList) {
                     ComputationCancellation.check();
-                    double cy = item.patternMatch
+                    double cy = item.patternMatchY
                             ? pipeline.snapY(problem, item.part, orientation.rotationDegrees(), rawY)
                             : rawY;
                     if (cy + ph > matH + EPS) continue;
 
                     // Try key x positions
-                    for (double cx : xList) {
+                    for (double rawX : xList) {
                         ComputationCancellation.check();
+                        double cx = item.patternMatchX
+                                ? pipeline.snapX(problem, item.part, orientation.rotationDegrees(), rawX)
+                                : rawX;
                         if (cx < item.minX - EPS) continue;
-                        if (cx + pw > item.maxX + EPS) break;
+                        if (cx + pw > item.maxX + EPS) continue;
 
                         if (isPositionValid(cx, cy, orientation, matArea, isRectMat, item.minX, item.maxX, matH, gap, placedList, placedBvh, item.hardExclusions, item.hardExclusionBvh)) {
                             // Local squeeze to left and up
@@ -384,8 +419,12 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                     double availSpan = item.maxX - item.minX - pw;
                     if (bestCandidate == null && availSpan > 50) {
                         double step = Math.max(30.0, availSpan / 15.0);
-                        for (double cx = item.minX; cx + pw <= item.maxX + EPS; cx += step) {
+                        for (double rawX = item.minX; rawX + pw <= item.maxX + EPS; rawX += step) {
                             ComputationCancellation.check();
+                            double cx = item.patternMatchX
+                                    ? pipeline.snapX(problem, item.part, orientation.rotationDegrees(), rawX)
+                                    : rawX;
+                            if (cx < item.minX - EPS || cx + pw > item.maxX + EPS) continue;
                             if (isPositionValid(cx, cy, orientation, matArea, isRectMat, item.minX, item.maxX, matH, gap, placedList, placedBvh, item.hardExclusions, item.hardExclusionBvh)) {
                                 double[] squeezed = squeezeLeftUp(problem, pipeline, item, cx, cy, orientation, matArea, isRectMat, matH, gap, placedList, placedBvh);
                                 double sx = squeezed[0];
@@ -406,6 +445,9 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                 double placeX = bestCandidate.x;
                 double placeY = bestCandidate.y;
                 OrientedShape chosenOri = bestCandidate.orientation;
+                if (item.grainGroupId != null) {
+                    lockedGroupAngles.putIfAbsent(item.grainGroupId, chosenOri.rotationDegrees());
+                }
                 Area worldArea = PolygonGeometry.region(chosenOri.shape(), placeX, placeY);
 
                 Placement pl = new Placement(
@@ -455,23 +497,25 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
 
         for (double step : steps) {
             ComputationCancellation.check();
-            // Squeeze left
-            while (currX - step >= item.minX - 1e-9) {
-                ComputationCancellation.check();
-                double nx = Math.max(item.minX, currX - step);
-                if (isPositionValid(nx, currY, ori, matArea, isRectMat, item.minX, item.maxX, matH, gap, placed, placedBvh, item.hardExclusions, item.hardExclusionBvh)) {
-                    if (!pipeline.isNoop()) {
-                        double np = pipeline.penalty(problem, item.part, nx, currY, ori.rotationDegrees(), ori.shape());
-                        if (np > currPenalty + 1e-6) break;
-                        currPenalty = np;
+            // Squeeze left (skip if X is locked to pattern repeat grid)
+            if (!item.patternMatchX) {
+                while (currX - step >= item.minX - 1e-9) {
+                    ComputationCancellation.check();
+                    double nx = Math.max(item.minX, currX - step);
+                    if (isPositionValid(nx, currY, ori, matArea, isRectMat, item.minX, item.maxX, matH, gap, placed, placedBvh, item.hardExclusions, item.hardExclusionBvh)) {
+                        if (!pipeline.isNoop()) {
+                            double np = pipeline.penalty(problem, item.part, nx, currY, ori.rotationDegrees(), ori.shape());
+                            if (np > currPenalty + 1e-6) break;
+                            currPenalty = np;
+                        }
+                        currX = nx;
+                    } else {
+                        break;
                     }
-                    currX = nx;
-                } else {
-                    break;
                 }
             }
             // Squeeze up (skip if Y is locked to pattern repeat grid)
-            if (!item.patternMatch) {
+            if (!item.patternMatchY) {
                 while (currY - step >= 0) {
                     ComputationCancellation.check();
                     double ny = currY - step;
@@ -489,8 +533,8 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
             }
         }
 
-        double roundedX = Math.max(item.minX, Math.round(currX * 10.0) / 10.0);
-        double roundedY = item.patternMatch ? currY : Math.round(currY * 10.0) / 10.0;
+        double roundedX = item.patternMatchX ? currX : Math.max(item.minX, Math.round(currX * 10.0) / 10.0);
+        double roundedY = item.patternMatchY ? currY : Math.round(currY * 10.0) / 10.0;
         if ((Math.abs(roundedX - currX) > 1e-9 || Math.abs(roundedY - currY) > 1e-9)
                 && !isPositionValid(roundedX, roundedY, ori, matArea, isRectMat, item.minX, item.maxX, matH, gap,
                         placed, placedBvh, item.hardExclusions, item.hardExclusionBvh)) {
@@ -562,8 +606,8 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
                     return true;
                 }
                 return gap > 0 && ContourGeometrySupport.violatesMinEdgeGap(
-                        candVerts, x, y,
-                        placed.orientedShape.vertices(), placed.placement.x(), placed.placement.y(),
+                        ori.shape(), x, y,
+                        placed.orientedShape.shape(), placed.placement.x(), placed.placement.y(),
                         gap, EPS);
             });
         }
@@ -583,8 +627,8 @@ public class JavaIrregularSolverEngine implements ICutSolverEngine {
             }
 
             if (gap > 0 && ContourGeometrySupport.violatesMinEdgeGap(
-                    candVerts, x, y,
-                    placed.orientedShape.vertices(), placed.placement.x(), placed.placement.y(),
+                    ori.shape(), x, y,
+                    placed.orientedShape.shape(), placed.placement.x(), placed.placement.y(),
                     gap, EPS)) {
                 return false;
             }

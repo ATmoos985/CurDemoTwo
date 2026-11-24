@@ -144,13 +144,83 @@ final class MarkerCompactor {
         return new Positioned(Oriented.of(expanded.shape(), 0, 0.0), expanded.x(), expanded.y(), true);
     }
 
+    static boolean hasAnyHoles(NestingProblem problem) {
+        if (problem.material().shape().hasHoles()) return true;
+        for (var p : problem.parts()) {
+            if (p.shape().hasHoles()) return true;
+        }
+        return false;
+    }
+
+    static double pureSelvedgeLeft(NestingProblem problem) {
+        var fr = problem.material().fabricRule();
+        return fr == null || fr.leftSelvedgeMm() == null ? 0.0 : fr.leftSelvedgeMm();
+    }
+
+    static double pureSelvedgeRight(NestingProblem problem) {
+        var fr = problem.material().fabricRule();
+        return fr == null || fr.rightSelvedgeMm() == null ? 0.0 : fr.rightSelvedgeMm();
+    }
+
+    /** 将仅含纯布边禁区的问题转换为等效净幅宽无布边问题（所有普通硬疵点同步平移 -leftSelvedge 并裁剪到有效幅宽）。 */
+    static NestingProblem stripPureSelvedgeProblem(NestingProblem problem) {
+        double left = pureSelvedgeLeft(problem);
+        double right = pureSelvedgeRight(problem);
+        double effW = problem.width() - left - right;
+        var shiftedExcs = new ArrayList<NestingProblem.Exclusion>(problem.material().exclusions().size());
+        for (var exc : problem.material().exclusions()) {
+            double clr = exc.clearance();
+            double ex1 = exc.x() - clr - left;
+            double ex2 = exc.x() + exc.shape().width() + clr - left;
+            if (ex2 <= 1e-6 || ex1 >= effW - 1e-6) {
+                continue;
+            }
+            if ("RECTANGLE".equals(exc.shape().type())) {
+                double cx1 = Math.max(0.0, ex1);
+                double cx2 = Math.min(effW, ex2);
+                double cy1 = Math.max(0.0, exc.y() - clr);
+                double cy2 = Math.min(problem.height(), exc.y() + exc.shape().height() + clr);
+                if (cx2 - cx1 > 1e-6 && cy2 - cy1 > 1e-6) {
+                    shiftedExcs.add(new NestingProblem.Exclusion(
+                            exc.id(), cx1, cy1, Shape.rectangle(cx2 - cx1, cy2 - cy1), 0.0));
+                }
+            } else {
+                shiftedExcs.add(new NestingProblem.Exclusion(
+                        exc.id(), exc.x() - left, exc.y(), exc.shape(), exc.clearance()));
+            }
+        }
+        var netMat = new NestingProblem.Material(
+                problem.material().id(),
+                Shape.rectangle(effW, problem.height()),
+                shiftedExcs,
+                problem.material().continuesAfterRegion(),
+                null
+        );
+        return new NestingProblem(
+                problem.schemaVersion(), problem.unit(), netMat, problem.parts(),
+                problem.process(), problem.engine(), problem.timeLimitSeconds()
+        );
+    }
+
+    static List<Placement> shiftPlacementsX(List<Placement> placements, double dx) {
+        if (Math.abs(dx) < 1e-12) return placements;
+        var out = new ArrayList<Placement>(placements.size());
+        for (var p : placements) {
+            out.add(new Placement(p.id(), p.demandId(), p.name(), p.x() + dx, p.y(), p.shape(), p.rotationDegrees()));
+        }
+        return out;
+    }
+
     static boolean supports(NestingProblem problem, List<Placement> incumbent) {
         return incumbent.size() <= MAX_COMPACT_PIECES && (supportsGapSearch(problem) || AxisMarkerCompactor.supports(problem));
     }
 
     static boolean supportsGapSearch(NestingProblem problem) {
+        boolean constraintOk = CurtainConstraintPack.forProblem(problem).isNoop()
+                || CurtainConstraintPack.isPureSelvedgeOnly(problem, true);
         return "RECTANGLE".equals(problem.material().shape().type())
-                && CurtainConstraintPack.forProblem(problem).isNoop()
+                && !hasAnyHoles(problem)
+                && constraintOk
                 && problem.parts().stream().allMatch(p -> p.shape().vertices().size() <= 48)
                 && problem.material().exclusions().stream().allMatch(d -> d.shape().vertices().size() <= 48);
     }
@@ -166,7 +236,16 @@ final class MarkerCompactor {
     static List<Placement> compact(NestingProblem problem, List<Placement> incumbent, long deadline) {
         if (!supportsGapSearch(problem))
             return AxisMarkerCompactor.compact(problem, incumbent, deadline);
-        double pieceGap = problem.process().pieceGap();
+        if (!CurtainConstraintPack.forProblem(problem).isNoop()
+                && CurtainConstraintPack.isPureSelvedgeOnly(problem, true)) {
+            double left = pureSelvedgeLeft(problem);
+            NestingProblem netProb = stripPureSelvedgeProblem(problem);
+            List<Placement> shiftedIn = shiftPlacementsX(incumbent, -left);
+            List<Placement> compactedNet = compact(netProb, shiftedIn, deadline);
+            if (compactedNet == shiftedIn) return incumbent;
+            return validateOrFallback(problem, incumbent, shiftPlacementsX(compactedNet, left));
+        }
+        double pieceGap = Math.max(Math.max(0.0, problem.process().pieceGap()), Math.max(0.0, problem.process().kerf()));
         var choices = new HashMap<Integer, List<Oriented>>();
         for (var part : problem.parts()) {
             if (expired(deadline)) return incumbent;

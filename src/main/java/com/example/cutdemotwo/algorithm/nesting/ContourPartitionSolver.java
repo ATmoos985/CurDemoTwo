@@ -2,6 +2,7 @@ package com.example.cutdemotwo.algorithm.nesting;
 
 import com.example.cutdemotwo.algorithm.ComputationCancellation;
 import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
+import com.example.cutdemotwo.algorithm.nesting.constraints.CurtainConstraintPack;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Material;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem.Part;
@@ -80,7 +81,11 @@ final class ContourPartitionSolver {
                               double totalRequestedArea,
                               double sheetArea,
                               long availableBudgetNanos) {
-        if (!isRectMat || !pipelineIsNoop || preferRight || preferBottom) {
+        boolean pureSelvedge = !pipelineIsNoop && CurtainConstraintPack.isPureSelvedgeOnly(problem, false);
+        if (!isRectMat || (!pipelineIsNoop && !pureSelvedge) || preferRight || preferBottom) {
+            return false;
+        }
+        if (MarkerCompactor.hasAnyHoles(problem)) {
             return false;
         }
         String corner = problem.process().startCorner();
@@ -96,8 +101,18 @@ final class ContourPartitionSolver {
         if (availableBudgetNanos < MIN_BUDGET_NANOS) {
             return false;
         }
-        // 物理面积必然超母板上限时不可能完整满排，直接走原常规路径
-        return totalRequestedArea <= sheetArea + 1e-3;
+        double effectiveSheetArea = sheetArea;
+        if (pureSelvedge) {
+            double effW = problem.width()
+                    - MarkerCompactor.pureSelvedgeLeft(problem)
+                    - MarkerCompactor.pureSelvedgeRight(problem);
+            if (effW <= 1e-6) {
+                return false;
+            }
+            effectiveSheetArea = effW * problem.height();
+        }
+        // 物理面积必然超有效母板上限时不可能完整满排，直接走原常规路径
+        return totalRequestedArea <= effectiveSheetArea + 1e-3;
     }
 
     static int computeBucketCount(int totalCount) {
@@ -248,36 +263,42 @@ final class ContourPartitionSolver {
             return null;
         }
 
+        // 若仅含纯左右布边禁区，剥离布边进入等效净幅宽高速分区管线，出口再平移回物理坐标并按原问题零容忍终检
+        boolean pureSelvedge = !CurtainConstraintPack.forProblem(problem).isNoop()
+                && CurtainConstraintPack.isPureSelvedgeOnly(problem, false);
+        double leftShift = pureSelvedge ? MarkerCompactor.pureSelvedgeLeft(problem) : 0.0;
+        NestingProblem solveProblem = pureSelvedge ? MarkerCompactor.stripPureSelvedgeProblem(problem) : problem;
+
         int bucketCount = computeBucketCount(totalCount);
-        List<Bucket> buckets = buildBalancedBuckets(problem, bucketCount);
+        List<Bucket> buckets = buildBalancedBuckets(solveProblem, bucketCount);
         if (buckets.stream().anyMatch(b -> b.totalCount() <= 0)) {
             return null;
         }
 
         // 等价子区原型去重（按首次出现的桶号保持确定性顺序），高频同款大单可成倍省算力
         Map<String, Prototype> uniquePrototypes = new LinkedHashMap<>();
-        double matW = problem.width();
-        double matH = problem.height();
-        double pieceGap = problem.process().pieceGap();
+        double matW = solveProblem.width();
+        double matH = solveProblem.height();
+        double pieceGap = Math.max(Math.max(0.0, solveProblem.process().pieceGap()), Math.max(0.0, solveProblem.process().kerf()));
 
         for (Bucket bucket : buckets) {
             if (!uniquePrototypes.containsKey(bucket.signature())) {
                 double subMatH = computeCompactSubHeight(bucket, matW, matH, pieceGap);
                 Material subMat = new Material(
-                        problem.material().id() + "#part" + uniquePrototypes.size(),
+                        solveProblem.material().id() + "#part" + uniquePrototypes.size(),
                         Shape.rectangle(matW, subMatH),
                         List.of(),
                         false,
                         null
                 );
                 NestingProblem subProblem = new NestingProblem(
-                        problem.schemaVersion(),
-                        problem.unit(),
+                        solveProblem.schemaVersion(),
+                        solveProblem.unit(),
                         subMat,
                         bucket.parts(),
-                        problem.process(),
-                        problem.engine(),
-                        problem.timeLimitSeconds()
+                        solveProblem.process(),
+                        solveProblem.engine(),
+                        solveProblem.timeLimitSeconds()
                 );
                 uniquePrototypes.put(bucket.signature(), new Prototype(bucket.signature(), bucket, subProblem));
             }
@@ -322,8 +343,8 @@ final class ContourPartitionSolver {
             orderedSubs.add(sol);
         }
 
-        Map<Integer, Part> partById = new HashMap<>(problem.parts().size() * 2);
-        for (Part part : problem.parts()) {
+        Map<Integer, Part> partById = new HashMap<>(solveProblem.parts().size() * 2);
+        for (Part part : solveProblem.parts()) {
             partById.put(part.id(), part);
         }
 
@@ -363,7 +384,7 @@ final class ContourPartitionSolver {
         double[] phaseLens = new double[4];
         boolean[] choseAlt = new boolean[1];
         List<Placement> bestLayout = compactStitchedCandidates(
-                engine, problem, forwardStitched, alternatingStitched, seamYs, compactDeadline, phaseMs, phaseLens, choseAlt);
+                engine, solveProblem, forwardStitched, alternatingStitched, seamYs, compactDeadline, phaseMs, phaseLens, choseAlt);
         ComputationCancellation.check();
 
         if (bestLayout == null || bestLayout.size() != totalCount) {
@@ -373,11 +394,14 @@ final class ContourPartitionSolver {
         if (finalExtentY > matH + 1e-6) {
             return null;
         }
+        if (pureSelvedge && leftShift > 0.0) {
+            bestLayout = MarkerCompactor.shiftPlacementsX(bestLayout, leftShift);
+        }
 
         EngineResult result = new EngineResult();
         result.setSuccess(true);
         result.setPlacements(bestLayout);
-        // 出口零容忍几何与约束终检：不通过则安全回退原路径
+        // 出口零容忍几何与原始布边约束终检：不通过则安全回退原路径
         if (PolygonResultValidator.validate(problem, result) != null) {
             return null;
         }

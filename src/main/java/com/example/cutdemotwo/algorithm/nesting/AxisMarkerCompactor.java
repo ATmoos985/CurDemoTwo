@@ -40,14 +40,26 @@ final class AxisMarkerCompactor {
     }
 
     static boolean supports(NestingProblem p) {
+        boolean constraintOk = CurtainConstraintPack.forProblem(p).isNoop()
+                || CurtainConstraintPack.isPureSelvedgeOnly(p, true);
         return "RECTANGLE".equals(p.material().shape().type())
-                && CurtainConstraintPack.forProblem(p).isNoop();
+                && !MarkerCompactor.hasAnyHoles(p)
+                && constraintOk;
     }
 
     static List<Placement> compact(NestingProblem problem, List<Placement> original, long deadline) {
         if (!supports(problem) || original.isEmpty() || original.size() > MarkerCompactor.MAX_COMPACT_PIECES || expired(deadline)) return original;
+        if (!CurtainConstraintPack.forProblem(problem).isNoop()
+                && CurtainConstraintPack.isPureSelvedgeOnly(problem, true)) {
+            double left = MarkerCompactor.pureSelvedgeLeft(problem);
+            NestingProblem netProb = MarkerCompactor.stripPureSelvedgeProblem(problem);
+            List<Placement> shiftedIn = MarkerCompactor.shiftPlacementsX(original, -left);
+            List<Placement> compactedNet = compact(netProb, shiftedIn, deadline);
+            if (compactedNet == shiftedIn) return original;
+            return MarkerCompactor.validateOrFallback(problem, original, MarkerCompactor.shiftPlacementsX(compactedNet, left));
+        }
         int n = original.size();
-        double pieceGap = problem.process().pieceGap();
+        double pieceGap = Math.max(Math.max(0.0, problem.process().pieceGap()), Math.max(0.0, problem.process().kerf()));
 
         var cache = new HashMap<Shape, Profile>();
         var rawExclusions = problem.material().exclusions();
