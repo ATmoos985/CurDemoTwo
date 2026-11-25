@@ -81,8 +81,8 @@ class ModuleBoundaryTests {
         assertTrue(errors.isEmpty(), "持久化层严禁越层依赖业务服务或 business.optimization：\n" + String.join("\n", errors));
     }
 
-    @Test void changyangReferencesStayWhitelistedToSlittingKernelAndLegacyLinear() throws IOException {
-        Set<String> legacyLinearFiles = Set.of("LinearCutRequest.java", "LinearCutService.java");
+    @Test void changyangReferencesStayStrictlyInsideSlittingKernel() throws IOException {
+        assertFalse(Files.exists(ROOT.resolve("linear")), "旧一维兼容宿主目录 linear/ 已移除，不得重新引入");
         var errors = new ArrayList<String>();
         for (var file : javaFiles(ROOT)) {
             String rel = ROOT.relativize(file).toString().replace('\\', '/');
@@ -92,14 +92,12 @@ class ModuleBoundaryTests {
                     boolean allowedKernel = ref.startsWith("changyang.cut.apsmodule.")
                             && !ref.startsWith("changyang.cut.apsmodule.service.excel.");
                     if (!allowedKernel) errors.add(rel + " -> " + ref);
-                } else if (rel.startsWith("linear/") && legacyLinearFiles.contains(file.getFileName().toString())) {
-                    // 既有旧一维兼容宿主保持受控登记，不向新文件扩散
                 } else {
                     errors.add(rel + " -> " + ref);
                 }
             }
         }
-        assertTrue(errors.isEmpty(), "检测到未经白名单许可的 changyang.* 依赖：\n" + String.join("\n", errors));
+        assertTrue(errors.isEmpty(), "除 algorithm/slitting/ 纯内核适配层外严禁引用 changyang.*：\n" + String.join("\n", errors));
     }
 
     private static final Pattern PERSISTENCE_MEMBER_REF = Pattern.compile(

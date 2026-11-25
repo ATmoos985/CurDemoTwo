@@ -1,7 +1,8 @@
 package com.example.cutdemotwo;
 
-import com.example.cutdemotwo.business.model.PieceDemand;
-import com.example.cutdemotwo.business.model.SolveRequest;
+import com.example.cutdemotwo.contracts.jobs.OptimizationJob;
+import com.example.cutdemotwo.contracts.jobs.OptimizationRequest;
+import com.example.cutdemotwo.contracts.jobs.OptimizationResult;
 import com.example.cutdemotwo.contracts.nesting.NestingResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -16,7 +17,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
-import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -35,8 +36,13 @@ class NativeSolverFallbackApiTests {
     private final HttpClient http = HttpClient.newHttpClient();
 
     private HttpResponse<String> send(String path, String body) throws Exception {
+        return send(path, body, null);
+    }
+
+    private HttpResponse<String> send(String path, String body, String idempotencyKey) throws Exception {
         var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path));
         if (body != null) request.header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body));
+        if (idempotencyKey != null) request.header("Idempotency-Key", idempotencyKey);
         return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
     }
 
@@ -64,25 +70,38 @@ class NativeSolverFallbackApiTests {
         assertNotNull(result.fallbackReason());
     }
 
-    @Test void legacySolveAndItsSavedPlanKeepTheActualEngineAndFallbackReason() throws Exception {
-        assertEquals(200, send("/api/rolls", "{\"rollId\":\"ROLL-FALLBACK\",\"rollModel\":\"MODEL\",\"width\":1000,\"totalLength\":10000}").statusCode());
-        var request = new SolveRequest();
-        request.setRollId("ROLL-FALLBACK");
-        request.setRollW(1000); request.setRollL(2000); request.setTotalRollL(10000);
-        request.setCutOrigin("left-top"); request.setTimeLimitSeconds(1); request.setSolver("packingsolver");
-        request.setDemands(List.of(new PieceDemand(1, "裁片", 400, 600, 2, false)));
-        var response = send("/api/solve", json.writeValueAsString(request));
-        assertEquals(200, response.statusCode(), response.body());
-        var body = json.readTree(response.body());
-        assertTrue(body.get("success").asBoolean(), response.body());
-        assertEquals("javaguillotine", body.get("engine").asText());
-        assertEquals("packingsolver", body.get("requestedEngine").asText());
-        String reason = body.get("fallbackReason").asText();
-        assertFalse(reason.isBlank());
+    @Test void optimizationJobAndArchivedResultKeepTheActualEngineAndFallbackReason() throws Exception {
+        var request = new OptimizationRequest(
+                "2.0",
+                "NESTING_2D",
+                "FALLBACK-API-TEST",
+                NativeSolverFallbackTests.guillotine("packingsolver"),
+                true,
+                false
+        );
+        var accepted = send("/api/v2/optimization-jobs", json.writeValueAsString(request), UUID.randomUUID().toString());
+        assertEquals(202, accepted.statusCode(), accepted.body());
+        var job = json.readValue(accepted.body(), OptimizationJob.class);
 
-        var plan = json.readTree(send("/api/cutting/plans/" + body.get("planId").asText(), null).body());
-        assertEquals("javaguillotine", plan.get("result").get("engine").asText());
-        assertEquals(reason, plan.get("result").get("fallbackReason").asText());
+        OptimizationJob current = job;
+        for (int i = 0; i < 100 && !current.terminal(); i++) {
+            var poll = send("/api/v2/optimization-jobs/" + job.id(), null);
+            assertEquals(200, poll.statusCode(), poll.body());
+            current = json.readValue(poll.body(), OptimizationJob.class);
+            if (!current.terminal()) Thread.sleep(20);
+        }
+        assertEquals("SUCCEEDED", current.state(), current.message());
+
+        var resultResponse = send("/api/v2/optimization-results/" + job.id(), null);
+        assertEquals(200, resultResponse.statusCode(), resultResponse.body());
+        var archived = json.readValue(resultResponse.body(), OptimizationResult.class);
+        assertNotNull(archived.layout(), resultResponse.body());
+        assertEquals("FEASIBLE", archived.layout().status(), archived.layout().message());
+        assertEquals("javaguillotine", archived.layout().engine());
+        assertEquals("packingsolver", archived.layout().requestedEngine());
+        assertNotNull(archived.layout().fallbackReason());
+        assertFalse(archived.layout().fallbackReason().isBlank());
+        assertTrue(archived.layout().fallbackReason().contains("javaguillotine"), archived.layout().fallbackReason());
     }
 
     @Test void contourAutoUsesDeepnestDirectlyAndExplicitNativeFallsBackToDeepnest() throws Exception {

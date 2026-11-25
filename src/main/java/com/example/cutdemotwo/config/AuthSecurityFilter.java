@@ -241,12 +241,8 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
                 || path.startsWith("/api/cutting/plans/")
                 || path.matches("^/api/cutting/reports/[^/]+/reverse$")
                 || path.equals("/api/cutting/material-candidates")
-                || path.equals("/api/cutting/slitting-cars")
                 || path.equals("/api/cutting/remnant-recommendations")
-                || path.equals("/api/remnants/match")
-                || path.equals("/api/solve")
-                || path.startsWith("/api/toolpath/")
-                || path.startsWith("/api/linear/")) {
+                || path.equals("/api/remnants/match")) {
             return AuthContext.ROLE_PLANNER.equals(role);
         }
 

@@ -86,7 +86,7 @@ class P0BusinessSecurityAndLedgerTests {
         assertEquals(loadsAfterWrite, loadCount.get(), "版本未变化时 refresh 必须跳过全库 load()");
 
         // 健康探针不触发全库 load()，健康时返回 200 UP
-        var controller = new FabricCutController(solver(), null, inv, new ToolpathOptimizerService(), null, List.of());
+        var controller = new FabricCutController(solver(), inv, null, List.of());
         var okHealth = controller.health();
         assertEquals(HttpStatus.OK, okHealth.getStatusCode());
         assertEquals("UP", okHealth.getBody().get("status"));

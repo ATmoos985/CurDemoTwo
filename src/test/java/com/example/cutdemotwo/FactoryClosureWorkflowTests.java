@@ -516,7 +516,7 @@ class FactoryClosureWorkflowTests {
         ));
         inv.updateStatus("REM-202609-002", "QUARANTINED");
 
-        var controller = new com.example.cutdemotwo.controller.FabricCutController(solver(), null, inv, new ToolpathOptimizerService(), null, List.of());
+        var controller = new com.example.cutdemotwo.controller.FabricCutController(solver(), inv, null, List.of());
         var onlyAvail = controller.listRemnants(null, false, null, null);
         assertTrue(onlyAvail.stream().noneMatch(r -> "REM-202609-001".equals(r.getId()) || "REM-202609-002".equals(r.getId())));
         var withSpecial = controller.listRemnants(null, true, null, null);

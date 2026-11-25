@@ -9,7 +9,6 @@ import com.example.cutdemotwo.business.model.SolveResponse;
 import com.example.cutdemotwo.contracts.geometry.Defect;
 import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
 import com.example.cutdemotwo.algorithm.nesting.PackingSolverService;
-import com.example.cutdemotwo.business.cutting.ScenarioOneService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -31,63 +30,10 @@ class FabricCutBusinessTests {
 
 
     @Autowired
-    private ScenarioOneService scenarioOneService;
-
-    @Autowired
     private PackingSolverService packingSolverService;
 
     @Autowired
     private com.example.cutdemotwo.algorithm.nesting.SolverFactory solverFactory;
-
-    @Test
-    void testWordTableOneLShapeDecomposition() {
-        SolveResponse res = scenarioOneService.getTableOneLShape();
-        assertTrue(res.isSuccess());
-        assertEquals(1, res.getPieces().size());
-        assertEquals(2, res.getRemnants().size());
-        assertEquals(4.5, res.getPieceArea(), 0.001);
-        assertEquals(3.5, res.getRemArea(), 0.001);
-        assertEquals(8.0, res.getTotalArea(), 0.001);
-
-        // 100% Exact area balance
-        assertEquals(res.getTotalArea(), res.getPieceArea() + res.getRemArea() + res.getWasteArea(), 0.001);
-    }
-
-    @Test
-    void testWidthAdaptation() {
-        // Allowed longitudinal cut
-        SolveResponse okRes = scenarioOneService.getWidthAdaptation(true);
-        assertTrue(okRes.isSuccess());
-        assertEquals(6.0, okRes.getPieceArea(), 0.001);
-        assertEquals(2.0, okRes.getRemArea(), 0.001);
-        assertTrue(okRes.getRemnants().get(0).isHasDefect());
-
-        // Forbidden longitudinal cut (safety blockage)
-        SolveResponse blockRes = scenarioOneService.getWidthAdaptation(false);
-        assertFalse(blockRes.isSuccess());
-    }
-
-    @Test
-    void testShortRemnantReuse() {
-        SolveResponse res = scenarioOneService.getShortRemnantReuse();
-        assertTrue(res.isSuccess());
-        assertEquals(0.0, res.getDeductLen(), 0.001); // Mother roll 0 deduction
-        assertEquals(2.0, res.getPieceArea(), 0.001);
-        assertEquals(1.2, res.getRemArea(), 0.001);
-    }
-
-    @Test
-    void testRealFabricScenario7AreaBalance() {
-        SolveResponse res = scenarioOneService.getRealFabricScenario();
-        assertTrue(res.isSuccess());
-        assertEquals(1, res.getPieces().size());
-        assertEquals(4, res.getRemnants().size());
-        assertEquals(7.053, res.getPieceArea(), 0.001);
-        assertEquals(6.947, res.getRemArea(), 0.001);
-        assertEquals(14.0, res.getTotalArea(), 0.001);
-        // 100% Strict area conservation: Piece (7.053) + Remnant (6.947) = 14.000 m2
-        assertEquals(res.getTotalArea(), res.getPieceArea() + res.getRemArea() + res.getWasteArea(), 0.001);
-    }
 
     @Test
     void testPackingSolverRealExecutionWithDefects() {

@@ -28,19 +28,12 @@ class SiteEntryTests {
                 HttpResponse.BodyHandlers.ofString());
     }
 
-    @Test void rootEntersNewAppWhileHistoricalWorkbenchRemainsAvailable() throws Exception {
+    @Test void rootRedirectsToModernAppEntry() throws Exception {
         var root = get("/");
         assertEquals(302, root.statusCode());
         assertEquals("/app/", URI.create(root.headers().firstValue("location").orElseThrow()).getPath());
-        assertTrue(get("/app/").body().contains("js/main.js"));
-        var workbench = get("/index.html");
-        assertEquals(200, workbench.statusCode());
-        assertTrue(workbench.body().contains("data-product-nav=\"workbench\""), "通用操作台应保留在 /index.html");
-    }
-
-    @Test void everyEntryPageIsServed() throws Exception {
-        for (String page : new String[]{"/intro.html", "/nesting.html", "/linear.html", "/linear-demo.html", "/inspection.html", "/inventory.html"}) {
-            assertEquals(200, get(page).statusCode(), page);
-        }
+        var app = get("/app/");
+        assertEquals(200, app.statusCode());
+        assertTrue(app.body().contains("js/main.js"));
     }
 }

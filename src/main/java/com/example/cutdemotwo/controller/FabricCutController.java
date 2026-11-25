@@ -3,8 +3,6 @@ package com.example.cutdemotwo.controller;
 import com.example.cutdemotwo.algorithm.api.ISlittingSolverEngine;
 import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.business.model.QualityDisposition;
-import com.example.cutdemotwo.business.model.SolveResponse;
-import com.example.cutdemotwo.business.cutting.ScenarioOneService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -33,9 +31,7 @@ public class FabricCutController {
             .disable(tools.jackson.databind.MapperFeature.ALLOW_COERCION_OF_SCALARS).build();
 
     private final com.example.cutdemotwo.algorithm.api.NestingSolver solverFactory;
-    private final ScenarioOneService scenarioOneService;
     private final com.example.cutdemotwo.business.cutting.RemnantService remnantService;
-    private final com.example.cutdemotwo.algorithm.api.ToolpathOptimizer toolpathOptimizerService;
     private final com.example.cutdemotwo.business.cutting.CuttingWorkflowService workflowService;
     private final List<ISlittingSolverEngine> slittingEngines;
 
@@ -43,24 +39,18 @@ public class FabricCutController {
     private boolean demoEndpointsEnabled = true;
 
     public FabricCutController(com.example.cutdemotwo.algorithm.api.NestingSolver solverFactory,
-                               ScenarioOneService scenarioOneService,
                                com.example.cutdemotwo.business.cutting.RemnantService remnantService,
-                               com.example.cutdemotwo.algorithm.api.ToolpathOptimizer toolpathOptimizerService,
                                com.example.cutdemotwo.business.cutting.CuttingWorkflowService workflowService) {
-        this(solverFactory, scenarioOneService, remnantService, toolpathOptimizerService, workflowService, List.of());
+        this(solverFactory, remnantService, workflowService, List.of());
     }
 
     @Autowired
     public FabricCutController(com.example.cutdemotwo.algorithm.api.NestingSolver solverFactory,
-                               ScenarioOneService scenarioOneService,
                                com.example.cutdemotwo.business.cutting.RemnantService remnantService,
-                               com.example.cutdemotwo.algorithm.api.ToolpathOptimizer toolpathOptimizerService,
                                com.example.cutdemotwo.business.cutting.CuttingWorkflowService workflowService,
                                @Autowired(required = false) List<ISlittingSolverEngine> slittingEngines) {
         this.solverFactory = solverFactory;
-        this.scenarioOneService = scenarioOneService;
         this.remnantService = remnantService;
-        this.toolpathOptimizerService = toolpathOptimizerService;
         this.workflowService = workflowService;
         this.slittingEngines = slittingEngines == null ? List.of() : List.copyOf(slittingEngines);
     }
@@ -110,17 +100,6 @@ public class FabricCutController {
     @ExceptionHandler(com.example.cutdemotwo.persistence.InventoryConflictException.class)
     @ResponseStatus(HttpStatus.CONFLICT)
     public Map<String, String> conflict(RuntimeException error) { return Map.of("message", error.getMessage()); }
-
-    /** 一维分切出车：按分切组合把一车条位置保存为待报工候选。 */
-    @PostMapping("/cutting/slitting-cars")
-    public SolveResponse slittingCar(@RequestBody com.example.cutdemotwo.business.model.SlittingCar car) {
-        return workflowService.slittingCar(car);
-    }
-
-    @PostMapping("/solve")
-    public SolveResponse solve(@RequestBody SolveRequest request) {
-        return workflowService.solve(request);
-    }
 
     @PostMapping(value = "/cutting/report-confirm", consumes = "application/json")
     public Map<String, Object> confirmCut(@RequestBody String body) {
@@ -172,18 +151,6 @@ public class FabricCutController {
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Map<String, String> invalidInput(IllegalArgumentException error) {
         return Map.of("message", error.getMessage());
-    }
-
-    @PostMapping("/toolpath/optimize")
-    public com.example.cutdemotwo.contracts.geometry.ToolpathResult optimizeToolpath(@RequestBody com.example.cutdemotwo.business.model.ToolpathRequest req) {
-        double hx = req.getHomeX();
-        double hy = req.getHomeY();
-        return toolpathOptimizerService.optimizeToolpath(req.getCuts(), hx, hy, req.isRespectPrecedence());
-    }
-
-    @GetMapping("/scenario/{id}")
-    public SolveResponse getScenario(@PathVariable int id) {
-        return scenarioOneService.getScenario(id);
     }
 
     private void requireDemoEndpointsEnabled() {

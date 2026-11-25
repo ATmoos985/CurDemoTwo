@@ -89,7 +89,7 @@ class QualityDispositionTests {
         assertEquals("QUARANTINED",stock.getStatus());assertEquals(planId,stock.getSourceReportId());
     }
     @Test void controllerRejectsUnknownMissingFractionalAndCoercedFields() {
-        var controller=new FabricCutController(null,null,inventory,null,null);
+        var controller=new FabricCutController(null,inventory,null);
         String valid=json.writeValueAsString(command(1,0,false));
         for(String invalid:List.of(valid.replace("\"pieceId\":1","\"pieceId\":1.5"),valid.replace("\"expectedRevision\":0,",""),valid.replace("\"pieceId\":1","\"pieceId\":\"1\""),valid.replace("\"pieceId\":1","\"pieceId\":null"),valid.replace("\"recovery\":null","\"recovery\":null,\"unknown\":true"),valid+" {}"))
             assertThrows(IllegalArgumentException.class,()->controller.disposeQuality(planId,invalid),invalid);
