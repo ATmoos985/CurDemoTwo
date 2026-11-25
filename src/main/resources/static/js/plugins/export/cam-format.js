@@ -79,31 +79,79 @@ function extractPieceContour(piece) {
     return [];
 }
 
+/** 从裁片对象提取工位局部 mm 坐标下的闭合内孔轮廓列表（兼容 [{x,y}]、[[x,y]] 与 {vertices:[...]}）。 */
+function extractPieceHoles(piece) {
+    if (!piece || typeof piece !== 'object') return [];
+    const rawHoles = Array.isArray(piece.shape?.holes)
+        ? piece.shape.holes
+        : Array.isArray(piece.holes)
+            ? piece.holes
+            : [];
+    if (rawHoles.length === 0) return [];
+    const ox = Number(piece.x) || 0;
+    const oy = Number(piece.y) || 0;
+    const holes = [];
+    for (const hole of rawHoles) {
+        const rawPts = Array.isArray(hole) ? hole : hole?.vertices;
+        if (!Array.isArray(rawPts) || rawPts.length < 3) continue;
+        const shifted = rawPts.map(v => ({
+            x: ox + (Array.isArray(v) ? Number(v[0]) : Number(v?.x)),
+            y: oy + (Array.isArray(v) ? Number(v[1]) : Number(v?.y))
+        }));
+        const normalized = normalizeContourPoints(shifted);
+        if (normalized.length >= 3) holes.push(normalized);
+    }
+    return holes;
+}
+
+/** 计算闭合轮廓周长（mm）。 */
+function contourPerimeter(points) {
+    let perimeter = 0;
+    for (let k = 0; k < points.length; k++) {
+        const a = points[k];
+        const b = points[(k + 1) % points.length];
+        perimeter += Math.hypot(b.x - a.x, b.y - a.y);
+    }
+    return perimeter;
+}
+
+/** 构造轮廓加工刀路列表：严格遵循工业 CNC “先切全部内孔、后切外轮廓” 顺序，防止先切外轮廓导致裁片松动。 */
 function buildContourOperations(data) {
     const rawList = Array.isArray(data.placements) && data.placements.length > 0
         ? data.placements
         : Array.isArray(data.pieces)
             ? data.pieces
             : [];
-    const ops = [];
+    const holeOps = [];
+    const outerOps = [];
     for (let i = 0; i < rawList.length; i++) {
         const p = rawList[i];
         const points = extractPieceContour(p);
         if (points.length < 3) continue;
-        let perimeter = 0;
-        for (let k = 0; k < points.length; k++) {
-            const a = points[k];
-            const b = points[(k + 1) % points.length];
-            perimeter += Math.hypot(b.x - a.x, b.y - a.y);
+        const label = p.name || `Piece #${p.id ?? i + 1}`;
+        const holes = extractPieceHoles(p);
+        for (let hi = 0; hi < holes.length; hi++) {
+            const holePoints = holes[hi];
+            holeOps.push({
+                kind: 'INNER_HOLE',
+                holeIndex: hi + 1,
+                label,
+                points: holePoints,
+                perimeter: contourPerimeter(holePoints)
+            });
         }
-        ops.push({
-            index: ops.length + 1,
-            label: p.name || `Piece #${p.id ?? i + 1}`,
+        outerOps.push({
+            kind: 'OUTER_CONTOUR',
+            holeIndex: 0,
+            label,
             points,
-            perimeter
+            perimeter: contourPerimeter(points)
         });
     }
-    return ops;
+    return [...holeOps, ...outerOps].map((op, idx) => ({
+        ...op,
+        index: idx + 1
+    }));
 }
 
 export function gcodeText(data, {cutFeed = 4000, rapidFeed = 15000, plungeDelay = 200, retractDelay = 100, optimized = false, home, now = new Date()} = {}) {
@@ -161,7 +209,9 @@ export function gcodeText(data, {cutFeed = 4000, rapidFeed = 15000, plungeDelay 
             const startPt = op.points[0];
             const airDist = Math.hypot(startPt.x - lastX, startPt.y - lastY);
             totalAirDist += airDist;
-            g.push(`(--- CONTOUR ${op.index}: ${op.label} (${op.points.length} PTS, L=${Math.round(op.perimeter)}mm) ---)`);
+            const kindTag = op.kind === 'INNER_HOLE' ? `INNER HOLE #${op.holeIndex}` : 'OUTER CONTOUR';
+            const cutComment = op.kind === 'INNER_HOLE' ? 'Inner Hole Cut' : 'Contour Cut';
+            g.push(`(--- CONTOUR ${op.index}: ${op.label} [${kindTag}] (${op.points.length} PTS, L=${Math.round(op.perimeter)}mm) ---)`);
             g.push(`G00 X${startPt.x.toFixed(3)} Y${startPt.y.toFixed(3)} Z10.000 (Rapid Air Move)`);
             g.push('M03 S1        (Tool Down / Laser ON)');
             g.push(`G04 P${plungeDelay}     (Plunge Dwell)`);
@@ -169,7 +219,7 @@ export function gcodeText(data, {cutFeed = 4000, rapidFeed = 15000, plungeDelay 
             for (let k = 1; k <= op.points.length; k++) {
                 const nextPt = op.points[k % op.points.length];
                 totalCutDist += Math.hypot(nextPt.x - curX, nextPt.y - curY);
-                g.push(`G01 X${nextPt.x.toFixed(3)} Y${nextPt.y.toFixed(3)} Z0.000 F${cutFeed} (Contour Cut)`);
+                g.push(`G01 X${nextPt.x.toFixed(3)} Y${nextPt.y.toFixed(3)} Z0.000 F${cutFeed} (${cutComment})`);
                 curX = nextPt.x; curY = nextPt.y;
             }
             g.push('M05          (Tool Up / Laser OFF)');
@@ -186,34 +236,63 @@ export function gcodeText(data, {cutFeed = 4000, rapidFeed = 15000, plungeDelay 
     return g.join('\n');
 }
 
-/** AutoCAD R12 ASCII DXF：边界、裁片、料头、疵点（含避让外扩）、切割线、空走线六个图层。 */
+/** AutoCAD R12 ASCII DXF：边界、裁片外轮廓、裁片内孔、料头、疵点（含避让外扩）、切割线、空走线七个图层。 */
 export function dxfText(data, {home} = {}) {
     const rollW = data.rollW || 2000, bedL = data.bedL || 5000;
-    const pieces = data.pieces || [], remnants = data.remnants || [], defects = data.globalDefects || data.defects || [], cuts = data.cuts || [];
+    const pieces = Array.isArray(data.pieces) && data.pieces.length > 0
+        ? data.pieces
+        : Array.isArray(data.placements)
+            ? data.placements
+            : [];
+    const remnants = data.remnants || [], defects = data.globalDefects || data.defects || [], cuts = data.cuts || [];
     const h = home || homePoint({cutOrigin: data.cutOrigin, width: rollW, length: bedL, windowStartY: data.windowStartY});
+    const layers = [
+        {name: '0_FABRIC_BORDER', color: 7},
+        {name: '1_PIECES', color: 3},
+        {name: '1_PIECES_HOLES', color: 2},
+        {name: '2_REMNANTS', color: 4},
+        {name: '3_DEFECTS', color: 1},
+        {name: '4_CUT_LINES', color: 6},
+        {name: '5_RAPID_TRAVERSE', color: 5}
+    ];
     const dxf = [];
     dxf.push('0\nSECTION\n2\nHEADER');
     dxf.push('9\n$ACADVER\n1\nAC1009');
     dxf.push('9\n$INSUNITS\n70\n4');
     dxf.push('0\nENDSEC');
     dxf.push('0\nSECTION\n2\nTABLES');
-    dxf.push('0\nTABLE\n2\nLAYER\n70\n6');
-    for (const l of [{name: '0_FABRIC_BORDER', color: 7}, {name: '1_PIECES', color: 3}, {name: '2_REMNANTS', color: 4},
-        {name: '3_DEFECTS', color: 1}, {name: '4_CUT_LINES', color: 6}, {name: '5_RAPID_TRAVERSE', color: 5}])
+    dxf.push(`0\nTABLE\n2\nLAYER\n70\n${layers.length}`);
+    for (const l of layers)
         dxf.push(`0\nLAYER\n2\n${l.name}\n70\n0\n62\n${l.color}\n6\nCONTINUOUS`);
     dxf.push('0\nENDTAB');
     dxf.push('0\nENDSEC');
     dxf.push('0\nSECTION\n2\nENTITIES');
     const addLine = (layer, x1, y1, x2, y2) => dxf.push(`0\nLINE\n8\n${layer}\n10\n${x1.toFixed(3)}\n20\n${y1.toFixed(3)}\n30\n0.0\n11\n${x2.toFixed(3)}\n21\n${y2.toFixed(3)}\n31\n0.0`);
     const addRect = (layer, x1, y1, x2, y2) => { addLine(layer, x1, y1, x2, y1); addLine(layer, x2, y1, x2, y2); addLine(layer, x2, y2, x1, y2); addLine(layer, x1, y2, x1, y1); };
+    const addClosedLoop = (layer, points) => {
+        for (let i = 0; i < points.length; i++) {
+            const a = points[i];
+            const b = points[(i + 1) % points.length];
+            addLine(layer, a.x, a.y, b.x, b.y);
+        }
+    };
     const addText = (layer, x, y, height, text) => dxf.push(`0\nTEXT\n8\n${layer}\n10\n${x.toFixed(3)}\n20\n${y.toFixed(3)}\n30\n0.0\n40\n${height.toFixed(1)}\n1\n${text}`);
     addRect('0_FABRIC_BORDER', 0, 0, rollW, bedL);
     addText('0_FABRIC_BORDER', 20, 20, 40, `BED STATION: ${rollW}x${bedL}mm`);
     for (const p of pieces) {
-        if (p.shape?.type === 'POLYGON') p.shape.vertices.forEach((v, i) => { const n = p.shape.vertices[(i + 1) % p.shape.vertices.length]; addLine('1_PIECES', p.x + v.x, p.y + v.y, p.x + n.x, p.y + n.y); });
-        else addRect('1_PIECES', p.x, p.y, p.x + p.w, p.y + p.l);
-        addText('1_PIECES', p.x + 15, p.y + p.l / 2 - 10, 30, `${p.name || 'Piece'}`);
-        addText('1_PIECES', p.x + 15, p.y + p.l / 2 + 30, 24, `${p.w}x${p.l}mm`);
+        const px = Number(p.x) || 0;
+        const py = Number(p.y) || 0;
+        const pw = Number(p.w ?? p.shape?.width) || 0;
+        const pl = Number(p.l ?? p.shape?.height) || 0;
+        const outer = extractPieceContour(p);
+        if (outer.length >= 3) addClosedLoop('1_PIECES', outer);
+        else if (pw > 0 && pl > 0) addRect('1_PIECES', px, py, px + pw, py + pl);
+        const holes = extractPieceHoles(p);
+        for (const hole of holes) {
+            addClosedLoop('1_PIECES_HOLES', hole);
+        }
+        addText('1_PIECES', px + 15, py + pl / 2 - 10, 30, `${p.name || 'Piece'}`);
+        addText('1_PIECES', px + 15, py + pl / 2 + 30, 24, `${pw}x${pl}mm`);
     }
     for (const r of remnants) {
         addRect('2_REMNANTS', r.x, r.y, r.x + r.w, r.y + r.l);

@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { computeBackoffMs, createSyncWorker, loadWorkerConfig } from '../sync-worker.mjs';
 
 const TEST_TOKEN = 'test-integration-secret-token-0123456789abcdef';
@@ -23,8 +26,10 @@ function sendJson(res, status, data) {
 
 /**
  * 模拟严格遵循 IntegrationService.java 契约的后端 Outbox HTTP 服务。
+ * 可选 options.rejectedTokenField 控制 GET /api/v2/integration-deliveries 对 REJECTED 项返回令牌的字段形态（默认不返回，兼容旧后端）。
  */
-async function startMockOutboxServer(initialEvents) {
+async function startMockOutboxServer(initialEvents, options = {}) {
+  const { rejectedTokenField = null } = options;
   let acknowledgedThrough = 0;
   const attempts = [];
   const events = initialEvents.map((e, i) => ({
@@ -49,9 +54,12 @@ async function startMockOutboxServer(initialEvents) {
     const url = new URL(req.url, 'http://127.0.0.1');
 
     if (req.method === 'GET' && url.pathname === '/api/v2/integration-deliveries') {
-      const items = events.map((ev) => {
+      const after = Number(url.searchParams.get('after') || 0);
+      const limit = Number(url.searchParams.get('limit') || 20);
+      const sliced = events.filter((ev) => ev.sequence > after).slice(0, limit);
+      const items = sliced.map((ev) => {
         const a = lastAttemptFor(ev.id);
-        return {
+        const item = {
           eventId: ev.id,
           sequence: ev.sequence,
           state: a ? a.state : 'PENDING',
@@ -60,13 +68,22 @@ async function startMockOutboxServer(initialEvents) {
           externalReceipt: a ? a.externalReceipt : null,
           reason: a ? a.reason : null
         };
+        if (a && a.state === 'REJECTED' && rejectedTokenField) {
+          if (rejectedTokenField === 'attempt.token') {
+            item.attempt = { number: a.number, token: a.token };
+          } else {
+            item[rejectedTokenField] = a.token;
+          }
+        }
+        return item;
       });
+      const nextCursor = sliced.length > 0 ? sliced[sliced.length - 1].sequence : after;
       return sendJson(res, 200, {
         consumer: 'external-inventory',
         acknowledgedThrough,
         items,
-        nextCursor: events.length,
-        hasMore: false
+        nextCursor,
+        hasMore: events.some((ev) => ev.sequence > nextCursor)
       });
     }
 
@@ -84,6 +101,8 @@ async function startMockOutboxServer(initialEvents) {
         if (body.retryOf !== prev.token) {
           return sendJson(res, 409, { code: 'DELIVERY_REJECTED', message: '需要显式 retryOf 重试', retryable: false });
         }
+      } else if (body.retryOf != null) {
+        return sendJson(res, 409, { code: 'STALE_ATTEMPT', message: '重试令牌不属于当前被拒绝的尝试', retryable: false });
       }
       const attempt = {
         requestId: body.requestId,
@@ -341,6 +360,160 @@ test('积压事件达到阈值时输出结构化 OUTBOX_LAG_ALERT 滞后告警�
     assert.equal(alert.pendingCount, 3);
     assert.equal(alert.threshold, 2);
   } finally {
+    await outbox.close();
+    await wms.close();
+  }
+});
+
+test('WMS 拒收后进程崩溃重启：基于 WORKER_STATE_FILE 本地原子持久化自动恢复 retryOf 并重试成功，完成后清理状态文件', async () => {
+  // 故意不开启 rejectedTokenField，验证不依赖服务端任何额外改动即可自愈
+  const outbox = await startMockOutboxServer([{ id: 'evt-crash-file-1', action: 'CUT_REPORT' }]);
+  let wmsCalls = 0;
+  const wms = await startMockWmsServer((_req, res) => {
+    wmsCalls += 1;
+    if (wmsCalls === 1) {
+      return sendJson(res, 503, { message: 'WMS 临时不可用' });
+    }
+    sendJson(res, 200, { externalReceipt: 'WMS-FILE-RECOVERED-01' });
+  });
+
+  const tempDir = mkdtempSync(join(tmpdir(), 'outbox-worker-state-'));
+  const stateFile = join(tempDir, 'nested', 'worker-state.json');
+  const logs1 = [];
+  const logs2 = [];
+
+  try {
+    const baseEnv = {
+      CUTTING_API_URL: outbox.origin,
+      CUTTING_INTEGRATION_TOKEN: TEST_TOKEN,
+      WMS_WEBHOOK_URL: wms.url,
+      WORKER_STATE_FILE: stateFile
+    };
+
+    const cfg1 = loadWorkerConfig(baseEnv);
+    assert.equal(cfg1.stateFile, stateFile);
+    const worker1 = createSyncWorker(cfg1, { logger: (e) => logs1.push(e) });
+
+    // 1. 首次转发失败并回执 REJECTED，原子落盘 pendingRetryOf
+    const fail1 = await worker1.runOnce();
+    assert.equal(fail1.outcome, 'REJECTED');
+    assert.equal(fail1.rejectAcked, true);
+    assert.ok(existsSync(stateFile), '拒收后必须原子持久化状态文件');
+    const persisted = JSON.parse(readFileSync(stateFile, 'utf8'));
+    assert.equal(persisted.pendingRetryOf, fail1.retryOf);
+    assert.equal(persisted.pendingRetryEventId, 'evt-crash-file-1');
+    const dirEntries = readdirSync(join(tempDir, 'nested'));
+    assert.deepEqual(dirEntries, ['worker-state.json'], '原子 rename 后不得遗留 .tmp 临时文件');
+
+    // 2. 模拟进程崩溃：丢弃 worker1，基于同一 stateFile 启动全新 worker2 实例
+    const worker2 = createSyncWorker(loadWorkerConfig(baseEnv), { logger: (e) => logs2.push(e) });
+    assert.equal(worker2.state.pendingRetryOf, fail1.retryOf);
+    assert.equal(worker2.state.pendingRetryEventId, 'evt-crash-file-1');
+    assert.ok(logs2.some((l) => l.code === 'OUTBOX_STATE_RESTORED' && l.eventId === 'evt-crash-file-1'));
+
+    // 3. worker2 自动携带持久化 retryOf 完成重试并回执 ACCEPTED，随后自动清理状态文件
+    const recovered = await worker2.runOnce();
+    assert.equal(recovered.outcome, 'ACKNOWLEDGED');
+    assert.equal(recovered.eventId, 'evt-crash-file-1');
+    assert.equal(recovered.externalReceipt, 'WMS-FILE-RECOVERED-01');
+    assert.equal(outbox.getState().acknowledgedThrough, 1);
+    assert.equal(existsSync(stateFile), false, '恢复并 ACCEPTED 成功后必须删除/清空状态文件');
+
+    const allAttempts = outbox.getState().attempts;
+    assert.equal(allAttempts.length, 2);
+    assert.equal(allAttempts[1].retryOf, allAttempts[0].token);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+    await outbox.close();
+    await wms.close();
+  }
+});
+
+test('无本地状态文件时重启命中 DELIVERY_REJECTED：主动查询投递列表提取被拒 token 兜底续传并 ACCEPTED', async () => {
+  for (const fieldName of ['rejectedToken', 'attempt.token']) {
+    const outbox = await startMockOutboxServer(
+      [{ id: 'evt-api-1' }, { id: 'evt-api-2' }],
+      { rejectedTokenField: fieldName }
+    );
+    let failOnce = true;
+    const wms = await startMockWmsServer((req, res) => {
+      if (req.body.eventId === 'evt-api-2' && failOnce) {
+        failOnce = false;
+        return sendJson(res, 502, { message: '下游网关超时' });
+      }
+      sendJson(res, 200, { receiptId: `WMS-API-OK-${req.body.eventId}` });
+    });
+    const logs2 = [];
+
+    try {
+      const cfg = loadWorkerConfig({
+        CUTTING_API_URL: outbox.origin,
+        CUTTING_INTEGRATION_TOKEN: TEST_TOKEN,
+        WMS_WEBHOOK_URL: wms.url
+      });
+
+      // 旧实例消费第 1 条成功、第 2 条拒收后未保存状态文件即崩溃
+      const worker1 = createSyncWorker(cfg, { logger: () => {} });
+      assert.equal((await worker1.runOnce()).outcome, 'ACKNOWLEDGED');
+      const rejected = await worker1.runOnce();
+      assert.equal(rejected.outcome, 'REJECTED');
+      assert.equal(rejected.eventId, 'evt-api-2');
+
+      // 新实例无任何本地状态文件启动：首次 claim 命中 DELIVERY_REJECTED -> 查列表恢复 token -> 重试 ACCEPTED
+      const worker2 = createSyncWorker(cfg, { logger: (e) => logs2.push(e) });
+      assert.equal(worker2.state.pendingRetryOf, null);
+      const res = await worker2.runOnce();
+      assert.equal(res.outcome, 'ACKNOWLEDGED', `字段 ${fieldName} 兜底恢复应直接完成重试并 ACCEPTED`);
+      assert.equal(res.eventId, 'evt-api-2');
+      assert.equal(res.externalReceipt, 'WMS-API-OK-evt-api-2');
+      assert.equal(outbox.getState().acknowledgedThrough, 2);
+      assert.ok(
+        logs2.some((l) => l.code === 'OUTBOX_REJECTED_TOKEN_RECOVERED' && l.eventId === 'evt-api-2' && l.source === 'deliveries_api'),
+        `字段 ${fieldName} 应输出 OUTBOX_REJECTED_TOKEN_RECOVERED 结构化日志`
+      );
+
+      const evt2Attempts = outbox.getState().attempts.filter((a) => a.eventId === 'evt-api-2');
+      assert.equal(evt2Attempts.length, 2);
+      assert.equal(evt2Attempts[1].retryOf, evt2Attempts[0].token);
+    } finally {
+      await outbox.close();
+      await wms.close();
+    }
+  }
+});
+
+test('状态文件残留陈旧 retryOf 命中 STALE_ATTEMPT 时自动清理并恢复正常消费', async () => {
+  const outbox = await startMockOutboxServer([{ id: 'evt-stale-1' }]);
+  const wms = await startMockWmsServer((_req, res) => sendJson(res, 200, { receiptId: 'WMS-STALE-OK' }));
+  const tempDir = mkdtempSync(join(tmpdir(), 'outbox-worker-stale-'));
+  const stateFile = join(tempDir, 'stale-state.json');
+  const logs = [];
+
+  try {
+    writeFileSync(stateFile, JSON.stringify({
+      version: 1,
+      apiOrigin: outbox.origin,
+      pendingRetryOf: '00000000-0000-0000-0000-000000000000',
+      pendingRetryEventId: 'evt-already-done'
+    }));
+
+    const worker = createSyncWorker(
+      loadWorkerConfig({
+        CUTTING_API_URL: outbox.origin,
+        CUTTING_INTEGRATION_TOKEN: TEST_TOKEN,
+        WMS_WEBHOOK_URL: wms.url,
+        WORKER_STATE_FILE: stateFile
+      }),
+      { logger: (e) => logs.push(e) }
+    );
+
+    const res = await worker.runOnce();
+    assert.equal(res.outcome, 'ACKNOWLEDGED');
+    assert.equal(res.eventId, 'evt-stale-1');
+    assert.equal(existsSync(stateFile), false, '陈旧状态文件应被自动清理');
+    assert.ok(logs.some((l) => l.code === 'OUTBOX_STALE_RETRY_STATE_CLEARED'));
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
     await outbox.close();
     await wms.close();
   }

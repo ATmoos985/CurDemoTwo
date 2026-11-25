@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 /**
@@ -8,7 +10,8 @@ import { pathToFileURL } from 'node:url';
  * 1. 按周期调用 POST /api/v2/integration-deliveries/claims 顺序领取待投递事件（租约机制）。
  * 2. 携带 Idempotency-Key / X-Cutting-Event-Id 幂等头转发至外部 WMS Webhook。
  * 3. 转发成功调用 POST /api/v2/integration-deliveries/{eventId}/acknowledgements (ACCEPTED)；
- *    失败则回执 REJECTED，记录被拒 token 并按指数退避携带 retryOf 重试。
+ *    失败则回执 REJECTED，原子持久化被拒 token（WORKER_STATE_FILE）并按指数退避携带 retryOf 重试；
+ *    进程崩溃重启后优先从状态文件恢复，未命中时主动查询 GET /api/v2/integration-deliveries 兜底续传。
  * 4. 定期巡检 GET /api/v2/integration-deliveries 积压深度，超阈值输出结构化滞后告警日志。
  */
 
@@ -57,6 +60,7 @@ export function loadWorkerConfig(env = process.env) {
   const lagCheckEveryTicks = parsePositiveInt(env.LAG_CHECK_EVERY_TICKS, 5, 'LAG_CHECK_EVERY_TICKS', { min: 1, max: 1000 });
   const maxRetries = parsePositiveInt(env.MAX_RETRIES, 8, 'MAX_RETRIES', { min: 1, max: 1000 });
   const workerId = String(env.WORKER_ID || 'wms-sync').trim().replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 48) || 'wms-sync';
+  const stateFile = String(env.WORKER_STATE_FILE || '').trim() || null;
 
   return {
     apiOrigin: apiUrl.origin,
@@ -70,7 +74,8 @@ export function loadWorkerConfig(env = process.env) {
     lagAlertThreshold,
     lagCheckEveryTicks,
     maxRetries,
-    workerId
+    workerId,
+    stateFile
   };
 }
 
@@ -100,11 +105,33 @@ async function readJsonSafe(response) {
   }
 }
 
+function extractTokenFromRecord(record) {
+  if (!record || typeof record !== 'object') return null;
+  const candidates = [
+    record.rejectedToken,
+    record.retryToken,
+    record.attemptToken,
+    record.lastAttemptToken,
+    record.token,
+    typeof record.attempt === 'object' && record.attempt ? record.attempt.token : null,
+    typeof record.lastAttempt === 'object' && record.lastAttempt ? record.lastAttempt.token : null
+  ];
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
 export function createSyncWorker(config, deps = {}) {
   const fetchImpl = deps.fetchImpl || globalThis.fetch;
   const now = deps.now || (() => Date.now());
   const logger = deps.logger || ((entry) => process.stderr.write(JSON.stringify(entry) + '\n'));
   const sleep = deps.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const stateFilePath = typeof config.stateFile === 'string' && config.stateFile.trim()
+    ? config.stateFile.trim()
+    : null;
 
   const state = {
     running: false,
@@ -127,6 +154,94 @@ export function createSyncWorker(config, deps = {}) {
       ...fields
     });
   }
+
+  function clearPersistedRetryState() {
+    if (!stateFilePath) return;
+    try {
+      rmSync(stateFilePath, { force: true });
+    } catch (err) {
+      log('WARN', 'OUTBOX_STATE_CLEAR_FAILED', {
+        message: sanitizeReason(err?.message || String(err))
+      });
+    }
+  }
+
+  function persistRetryState() {
+    if (!stateFilePath) return;
+    if (!state.pendingRetryOf) {
+      clearPersistedRetryState();
+      return;
+    }
+    const serialized = JSON.stringify({
+      version: 1,
+      workerId: config.workerId,
+      apiOrigin: config.apiOrigin,
+      pendingRetryOf: state.pendingRetryOf,
+      pendingRetryEventId: state.pendingRetryEventId,
+      updatedAt: new Date(now()).toISOString()
+    }, null, 2);
+    const tmpPath = `${stateFilePath}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
+    try {
+      mkdirSync(dirname(stateFilePath), { recursive: true });
+      writeFileSync(tmpPath, serialized, { encoding: 'utf8', mode: 0o600 });
+      renameSync(tmpPath, stateFilePath);
+    } catch (err) {
+      try { rmSync(tmpPath, { force: true }); } catch {}
+      log('WARN', 'OUTBOX_STATE_PERSIST_FAILED', {
+        message: sanitizeReason(err?.message || String(err))
+      });
+    }
+  }
+
+  function setPendingRetry(token, eventId) {
+    state.pendingRetryOf = token || null;
+    state.pendingRetryEventId = token ? (eventId || null) : null;
+    persistRetryState();
+  }
+
+  function clearPendingRetry() {
+    state.pendingRetryOf = null;
+    state.pendingRetryEventId = null;
+    clearPersistedRetryState();
+  }
+
+  function loadPersistedRetryState() {
+    if (!stateFilePath) return;
+    let raw;
+    try {
+      raw = readFileSync(stateFilePath, 'utf8');
+    } catch (err) {
+      if (err?.code === 'ENOENT') return;
+      log('WARN', 'OUTBOX_STATE_LOAD_FAILED', {
+        message: sanitizeReason(err?.message || String(err))
+      });
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed?.apiOrigin && parsed.apiOrigin !== config.apiOrigin) {
+        return;
+      }
+      const token = typeof parsed?.pendingRetryOf === 'string' && parsed.pendingRetryOf.trim()
+        ? parsed.pendingRetryOf.trim()
+        : null;
+      if (!token) return;
+      state.pendingRetryOf = token;
+      state.pendingRetryEventId = typeof parsed?.pendingRetryEventId === 'string' && parsed.pendingRetryEventId.trim()
+        ? parsed.pendingRetryEventId.trim()
+        : null;
+      log('INFO', 'OUTBOX_STATE_RESTORED', {
+        eventId: state.pendingRetryEventId,
+        hasRetryToken: true
+      });
+    } catch (err) {
+      log('WARN', 'OUTBOX_STATE_LOAD_FAILED', {
+        message: sanitizeReason(err?.message || String(err))
+      });
+    }
+  }
+
+  loadPersistedRetryState();
 
   async function apiRequest(path, { method = 'GET', body } = {}) {
     const headers = {
@@ -151,6 +266,7 @@ export function createSyncWorker(config, deps = {}) {
       err.status = response.status;
       err.code = payload?.code || `HTTP_${response.status}`;
       err.retryable = payload?.retryable === true || response.status >= 500;
+      err.payload = payload;
       throw err;
     }
     return payload;
@@ -249,6 +365,54 @@ export function createSyncWorker(config, deps = {}) {
     return lagSnapshot;
   }
 
+  async function recoverRejectedTokenFromApi(errorPayload) {
+    const inlineToken = extractTokenFromRecord(errorPayload);
+    if (inlineToken) {
+      return {
+        token: inlineToken,
+        eventId: errorPayload?.eventId || null,
+        source: 'error_payload'
+      };
+    }
+
+    const firstPage = await apiRequest('/api/v2/integration-deliveries?after=0&limit=100');
+    const ackThrough = Number(firstPage?.acknowledgedThrough) || 0;
+    const findRejectedHead = (items) => {
+      if (!Array.isArray(items)) return null;
+      const exactHead = items.find(
+        (item) => Number(item?.sequence) === ackThrough + 1 && item?.state === 'REJECTED'
+      );
+      if (exactHead) return exactHead;
+      return items.find((item) => item?.state === 'REJECTED') || null;
+    };
+
+    let target = findRejectedHead(firstPage?.items);
+    if (!target && ackThrough > 0) {
+      const headPage = await apiRequest(`/api/v2/integration-deliveries?after=${ackThrough}&limit=20`);
+      target = findRejectedHead(headPage?.items);
+    }
+    if (!target) return null;
+
+    const token = extractTokenFromRecord(target);
+    if (!token) return null;
+    return {
+      token,
+      eventId: target.eventId || null,
+      source: 'deliveries_api'
+    };
+  }
+
+  async function claimNextLease() {
+    const requestId = `${config.workerId}-${randomUUID().replace(/-/g, '').slice(0, 20)}`;
+    const claimBody = state.pendingRetryOf
+      ? { requestId, retryOf: state.pendingRetryOf }
+      : { requestId };
+    return apiRequest('/api/v2/integration-deliveries/claims', {
+      method: 'POST',
+      body: claimBody
+    });
+  }
+
   async function runOnce() {
     state.tickCount += 1;
 
@@ -260,34 +424,66 @@ export function createSyncWorker(config, deps = {}) {
       };
     }
 
-    const requestId = `${config.workerId}-${randomUUID().replace(/-/g, '').slice(0, 20)}`;
-    const claimBody = state.pendingRetryOf
-      ? { requestId, retryOf: state.pendingRetryOf }
-      : { requestId };
-
     let lease;
     try {
-      lease = await apiRequest('/api/v2/integration-deliveries/claims', {
-        method: 'POST',
-        body: claimBody
-      });
+      lease = await claimNextLease();
     } catch (err) {
-      state.consecutiveFailures += 1;
-      const backoffMs = computeBackoffMs(state.consecutiveFailures, config.baseBackoffMs, config.maxBackoffMs);
-      state.nextAllowedAt = now() + backoffMs;
-      log('ERROR', err.code === 'DELIVERY_REJECTED' ? 'OUTBOX_DELIVERY_REJECTED' : 'OUTBOX_CLAIM_FAILED', {
-        errorCode: err.code || 'CLAIM_ERROR',
-        message: sanitizeReason(err.message),
-        consecutiveFailures: state.consecutiveFailures,
-        backoffMs
-      });
-      return { outcome: 'CLAIM_ERROR', errorCode: err.code || 'CLAIM_ERROR', backoffMs };
+      let finalErr = err;
+      if (err.code === 'STALE_ATTEMPT' && state.pendingRetryOf) {
+        log('WARN', 'OUTBOX_STALE_RETRY_STATE_CLEARED', {
+          eventId: state.pendingRetryEventId
+        });
+        clearPendingRetry();
+        try {
+          lease = await claimNextLease();
+          finalErr = null;
+        } catch (retryErr) {
+          finalErr = retryErr;
+        }
+      }
+
+      if (finalErr && finalErr.code === 'DELIVERY_REJECTED') {
+        const previousRetryOf = state.pendingRetryOf;
+        try {
+          const recovered = await recoverRejectedTokenFromApi(finalErr.payload);
+          if (recovered?.token && recovered.token !== previousRetryOf) {
+            setPendingRetry(recovered.token, recovered.eventId);
+            log('WARN', 'OUTBOX_REJECTED_TOKEN_RECOVERED', {
+              eventId: recovered.eventId,
+              source: recovered.source
+            });
+            try {
+              lease = await claimNextLease();
+              finalErr = null;
+            } catch (retryErr) {
+              finalErr = retryErr;
+            }
+          }
+        } catch (recoverErr) {
+          log('ERROR', 'OUTBOX_REJECTED_RECOVERY_FAILED', {
+            errorCode: recoverErr?.code || 'RECOVERY_ERROR',
+            message: sanitizeReason(recoverErr?.message)
+          });
+        }
+      }
+
+      if (finalErr) {
+        state.consecutiveFailures += 1;
+        const backoffMs = computeBackoffMs(state.consecutiveFailures, config.baseBackoffMs, config.maxBackoffMs);
+        state.nextAllowedAt = now() + backoffMs;
+        log('ERROR', finalErr.code === 'DELIVERY_REJECTED' ? 'OUTBOX_DELIVERY_REJECTED' : 'OUTBOX_CLAIM_FAILED', {
+          errorCode: finalErr.code || 'CLAIM_ERROR',
+          message: sanitizeReason(finalErr.message),
+          consecutiveFailures: state.consecutiveFailures,
+          backoffMs
+        });
+        return { outcome: 'CLAIM_ERROR', errorCode: finalErr.code || 'CLAIM_ERROR', backoffMs };
+      }
     }
 
     if (!lease || lease.state === 'EMPTY' || !lease.event || !lease.attempt) {
       state.consecutiveFailures = 0;
-      state.pendingRetryOf = null;
-      state.pendingRetryEventId = null;
+      clearPendingRetry();
       state.nextAllowedAt = 0;
       if (state.tickCount % config.lagCheckEveryTicks === 0) {
         await checkLag().catch(() => {});
@@ -304,8 +500,7 @@ export function createSyncWorker(config, deps = {}) {
       const delivery = await ackEvent(eventId, token, externalReceipt);
       state.totalAcked += 1;
       state.consecutiveFailures = 0;
-      state.pendingRetryOf = null;
-      state.pendingRetryEventId = null;
+      clearPendingRetry();
       state.nextAllowedAt = 0;
 
       log('INFO', 'OUTBOX_DELIVERY_ACKED', {
@@ -337,8 +532,11 @@ export function createSyncWorker(config, deps = {}) {
 
       state.totalRejected += 1;
       state.consecutiveFailures += 1;
-      state.pendingRetryOf = rejectAcked ? token : null;
-      state.pendingRetryEventId = rejectAcked ? eventId : null;
+      if (rejectAcked) {
+        setPendingRetry(token, eventId);
+      } else {
+        clearPendingRetry();
+      }
       const backoffMs = computeBackoffMs(state.consecutiveFailures, config.baseBackoffMs, config.maxBackoffMs);
       state.nextAllowedAt = now() + backoffMs;
 
