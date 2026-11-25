@@ -1,8 +1,10 @@
 // Runs pure optimization jobs; does not create orders or write inventory.
 const {before, after, test} = require('node:test');
 const assert = require('node:assert/strict');
+const base = process.env.BASE_URL;
+assert.ok(base && ['localhost', '127.0.0.1'].includes(new URL(base).hostname), 'isolated localhost BASE_URL required');
+assert.ok(new URL(base).port && new URL(base).port !== '8080', 'isolated non-8080 service required');
 const {chromium, expect} = require(process.env.PLAYWRIGHT_MODULE || 'playwright/test');
-const base = process.env.BASE_URL || 'http://localhost:8080';
 let browser, page;
 
 before(async () => {
