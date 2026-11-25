@@ -360,7 +360,8 @@ public class SchedulingStudioService {
 
             if (!isSlit) {
                 boolean isContour = "CONTOUR_2D".equals(dim)
-                        || cmd.layout2D().placements().stream().anyMatch(p -> p.shape() != null && "POLYGON".equals(p.shape().type()));
+                        || cmd.layout2D().placements().stream().anyMatch(p -> p.shape() != null
+                        && ("POLYGON".equals(p.shape().type()) || p.shape().hasHoles()));
                 effectiveLayout2D = bindPlacementsToSourceAllocations(cmd.layout2D(), cmd.demands(), normalizedSourceAllocs, sourceTasks, isContour);
                 for (SchedulingScheme.PlacementItem p : effectiveLayout2D.placements()) {
                     placedCount++;
@@ -406,21 +407,38 @@ public class SchedulingStudioService {
                 boolean isContour = "CONTOUR_2D".equals(dim)
                         || primaryTask.demands().stream().anyMatch(d -> d.shape() != null);
                 Map<Integer, Integer> rawPlacedByDemand = new LinkedHashMap<>();
+                List<SchedulingScheme.PlacementItem> enrichedPlacements = new ArrayList<>(cmd.layout2D().placements().size());
+                boolean shapeEnriched = false;
                 for (SchedulingScheme.PlacementItem p : cmd.layout2D().placements()) {
                     CuttingTask.Line line = primaryTask.demands().stream().filter(l -> l.id() == p.demandId()).findFirst()
                             .orElseThrow(() -> new IllegalArgumentException("排布裁片引用的需求行不存在: #" + p.demandId()));
-                    double pw = p.shape() != null ? p.shape().width() : p.w();
-                    double pl = p.shape() != null ? p.shape().height() : p.l();
+                    NestingProblem.Shape preservedShape = isContour
+                            ? StudioMaterializer.preserveLineHoles(p.shape(), line.shape(), p.rotationDegrees())
+                            : p.shape();
+                    if (preservedShape != p.shape()) {
+                        shapeEnriched = true;
+                    }
+                    double pw = preservedShape != null ? preservedShape.width() : p.w();
+                    double pl = preservedShape != null ? preservedShape.height() : p.l();
                     StudioMaterializer.validatePlacementRotation(
                             line.name(), line.width(), line.length(), line.allowRotation(), line.allowHalfTurn(),
                             p.rotationDegrees(), pw, pl, isContour
                     );
+                    enrichedPlacements.add(preservedShape == p.shape()
+                            ? p
+                            : new SchedulingScheme.PlacementItem(
+                                    p.id(), p.demandId(), p.name(), p.x(), p.y(), p.w(), p.l(),
+                                    p.rotationDegrees(), p.gapFill(), preservedShape, p.sourceTaskId(), p.sourceLineId()));
                     placedCount++;
                     if (Boolean.TRUE.equals(p.gapFill())) {
                         gapFillCount++;
                     } else {
                         rawPlacedByDemand.merge(p.demandId(), 1, Integer::sum);
                     }
+                }
+                if (shapeEnriched) {
+                    effectiveLayout2D = new SchedulingScheme.Layout2DPayload(
+                            enrichedPlacements, cmd.layout2D().leftovers(), cmd.layout2D().cuts());
                 }
                 for (Map.Entry<Integer, Integer> entry : rawPlacedByDemand.entrySet()) {
                     String lineKey = String.valueOf(entry.getKey());
@@ -1378,8 +1396,11 @@ public class SchedulingStudioService {
             }
 
             CuttingTask.Line line = lineByAllocKey.get(resolvedTaskId + ":" + resolvedLineId);
-            double pw = p.shape() != null ? p.shape().width() : p.w();
-            double pl = p.shape() != null ? p.shape().height() : p.l();
+            NestingProblem.Shape preservedShape = isContour
+                    ? StudioMaterializer.preserveLineHoles(p.shape(), line.shape(), p.rotationDegrees())
+                    : p.shape();
+            double pw = preservedShape != null ? preservedShape.width() : p.w();
+            double pl = preservedShape != null ? preservedShape.height() : p.l();
             StudioMaterializer.validatePlacementRotation(
                     line.name(), line.width(), line.length(), line.allowRotation(), line.allowHalfTurn(),
                     p.rotationDegrees(), pw, pl, isContour
@@ -1387,7 +1408,7 @@ public class SchedulingStudioService {
 
             boundPlacements.add(new SchedulingScheme.PlacementItem(
                     p.id(), p.demandId(), p.name(), p.x(), p.y(), p.w(), p.l(),
-                    p.rotationDegrees(), p.gapFill(), p.shape(), resolvedTaskId, resolvedLineId
+                    p.rotationDegrees(), p.gapFill(), preservedShape, resolvedTaskId, resolvedLineId
             ));
         }
 

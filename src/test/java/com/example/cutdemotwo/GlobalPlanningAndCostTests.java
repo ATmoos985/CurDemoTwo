@@ -20,6 +20,8 @@ import com.example.cutdemotwo.business.model.RemnantStock;
 import com.example.cutdemotwo.business.model.SchedulingScheme;
 import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.business.model.SolveResponse;
+import com.example.cutdemotwo.contracts.geometry.Defect;
+import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import com.example.cutdemotwo.persistence.FileInventoryStore;
 import org.junit.jupiter.api.Test;
@@ -554,5 +556,490 @@ class GlobalPlanningAndCostTests {
         assertEquals(0, res.unplacedPieces());
         assertTrue(res.placedByRemnants() >= 1, "应保守对齐 0.1mm 格网并成功消耗非整数尾数料头");
         assertFalse(res.rollOptions().isEmpty());
+    }
+
+    // ==================== 5. 后端业务准确度专项强校验回归 ====================
+
+    @Test
+    void costSummaryAttributesCrossTaskReinspectionPerPieceAndMatchesCompletedQuantities() {
+        Path stateFile = temp.resolve("cross-task-reinspection-cost.json");
+        FileInventoryStore store = new FileInventoryStore(stateFile.toString());
+        RemnantService inv = new RemnantService(store, false);
+        SolverFactory solver = createSolver();
+        SchedulingStudioService studio = new SchedulingStudioService(inv, solver, new ToolpathOptimizerService());
+        ProductionCostAndProcurementService analytics = new ProductionCostAndProcurementService(inv);
+
+        // 准备 2000mm 宽、40 元/m² 实价母卷
+        MotherRollInfo roll = new MotherRollInfo(
+                "ROLL-XTASK-1", "MODEL-XT", "BAT-XT", "织厂XT", "棉布", "藏青", 200.0, "全棉", 2000.0, 20000.0, "X-01");
+        roll.setUnitPricePerSqm(40.0);
+        inv.saveOrUpdateMotherRoll(roll);
+
+        // 创建任务 A（2 片 500x1000）与任务 B（2 片 500x1000）
+        CuttingTask taskA = inv.saveTask(new CuttingTask(
+                null, "合排任务A", "MODEL-XT", "SO-XT-A", 0,
+                List.of(new CuttingTask.Line(1, "A裁片", 500, 1000, 2, false))
+        ));
+        CuttingTask taskB = inv.saveTask(new CuttingTask(
+                null, "合排任务B", "MODEL-XT", "SO-XT-B", 0,
+                List.of(new CuttingTask.Line(1, "B裁片", 500, 1000, 2, false))
+        ));
+
+        // 通过排程工作台确认跨任务合排方案（4 片并排在 2000x1500 窗口中）并报工完工
+        SchedulingScheme.Layout2DPayload layout = new SchedulingScheme.Layout2DPayload(
+                List.of(
+                        new SchedulingScheme.PlacementItem(1, 1, "A裁片", 0, 0, 500, 1000, 0, false, null, taskA.id(), 1),
+                        new SchedulingScheme.PlacementItem(2, 1, "A裁片", 500, 0, 500, 1000, 0, false, null, taskA.id(), 1),
+                        new SchedulingScheme.PlacementItem(3, 2, "B裁片", 1000, 0, 500, 1000, 0, false, null, taskB.id(), 1),
+                        new SchedulingScheme.PlacementItem(4, 2, "B裁片", 1500, 0, 500, 1000, 0, false, null, taskB.id(), 1)
+                ),
+                List.of(),
+                List.of()
+        );
+        Map<String, Object> confirmed = studio.confirmScheme(new SchedulingStudioService.ConfirmSchemeCommand(
+                "IDEM-XTASK-SCHEME-1", "跨任务A+B合排方案", "RECT_2D", "DEFAULT", "JAVA_FAST", "Java直刀",
+                null, null, null, "STOCK_ROLL", "ROLL-XTASK-1", null, "MODEL-XT",
+                2000, 1500, 0.0, 1500, 0.0, 0.0, 66.67, 2.0, Boolean.TRUE,
+                null, layout, null,
+                List.of(
+                        new SchedulingScheme.TaskDemandAllocation(taskA.id(), 1, 2),
+                        new SchedulingScheme.TaskDemandAllocation(taskB.id(), 1, 2)
+                )
+        ));
+        SchedulingScheme scheme = (SchedulingScheme) confirmed.get("scheme");
+        String planId = scheme.linkedPlanIds().get(0);
+
+        // 完工报工：4 片全部初次合格，实切 1500mm -> 总耗用 3.0 m²（120 元）
+        studio.completeScheme(scheme.id(), new SchedulingStudioService.CompleteSchemeCommand(
+                1500.0, List.of(), false, "X区", "班长王五"
+        ));
+
+        // 复检前基线：任务 A、B 各 2 片 / 1.0 m² / 60 元
+        var beforeDisp = analytics.summarizeCosts(25.0, 0.7);
+        var beforeA = beforeDisp.byTask().stream().filter(t -> t.taskId().equals(taskA.id())).findFirst().orElseThrow();
+        var beforeB = beforeDisp.byTask().stream().filter(t -> t.taskId().equals(taskB.id())).findFirst().orElseThrow();
+        assertEquals(2, beforeA.netGoodPieceCount());
+        assertEquals(1.0, beforeA.netGoodAreaM2(), 0.001);
+        assertEquals(2, beforeB.netGoodPieceCount());
+        assertEquals(1.0, beforeB.netGoodAreaM2(), 0.001);
+
+        // 仅对任务 A 的第 1 片（pieceId = 1）执行复检判废，并回收 400x500 (0.20 m²) 可用料头
+        QualityDisposition disp = inv.disposeQuality(planId, new QualityDisposition.Command(
+                "DISP-XTASK-A1-0001", 0, 1, "REMNANT", "任务A裁片边角油污判废回收", "质检员张敏",
+                new QualityDisposition.Recovery(0, 0, 400, 500, "R-XT", "RECOVERABLE")
+        ));
+
+        // 校验内存态 + 从磁盘重载反序列化态（覆盖 ReportedPiece 与 Map 两条解析路径）完全一致
+        RemnantService reloadedInv = new RemnantService(new FileInventoryStore(stateFile.toString()), false);
+        ProductionCostAndProcurementService reloadedAnalytics = new ProductionCostAndProcurementService(reloadedInv);
+        for (ProductionCostAndProcurementService svc : List.of(analytics, reloadedAnalytics)) {
+            var afterDisp = svc.summarizeCosts(25.0, 0.7);
+            var itemA = afterDisp.byTask().stream().filter(t -> t.taskId().equals(taskA.id())).findFirst().orElseThrow();
+            var itemB = afterDisp.byTask().stream().filter(t -> t.taskId().equals(taskB.id())).findFirst().orElseThrow();
+
+            // 任务 A 精确扣减 1 片（0.5 m²），复检回收 0.20 m² 残值 5.60 元精确归属任务 A
+            int completedA = inv.completedQuantities(taskA.id()).values().stream().mapToInt(Integer::intValue).sum();
+            int completedB = inv.completedQuantities(taskB.id()).values().stream().mapToInt(Integer::intValue).sum();
+            assertEquals(1, completedA);
+            assertEquals(2, completedB);
+            assertEquals(completedA, itemA.netGoodPieceCount(), "任务 A 净良品件数必须与 completedQuantities 严格一致");
+            assertEquals(completedB, itemB.netGoodPieceCount(), "任务 B 净良品件数不受任务 A 判废影响且与 completedQuantities 一致");
+
+            assertEquals(0.5, itemA.netGoodAreaM2(), 0.001);
+            assertEquals(1.5, itemA.totalConsumedAreaM2(), 0.001);
+            assertEquals(0.2, itemA.recoveredRemnantAreaM2(), 0.001);
+            assertEquals(0.8, itemA.wasteAreaM2(), 0.001);
+            assertEquals(5.6, itemA.recoveredResidualValue(), 0.01);
+            assertEquals(54.4, itemA.netEffectiveCost(), 0.01);
+
+            // 任务 B 净良品、面积与成本纹丝不动
+            assertEquals(1.0, itemB.netGoodAreaM2(), 0.001);
+            assertEquals(1.5, itemB.totalConsumedAreaM2(), 0.001);
+            assertEquals(0.0, itemB.recoveredRemnantAreaM2(), 0.001);
+            assertEquals(0.5, itemB.wasteAreaM2(), 0.001);
+            assertEquals(0.0, itemB.recoveredResidualValue(), 0.01);
+            assertEquals(60.0, itemB.netEffectiveCost(), 0.01);
+
+            // 整单汇总严格守恒
+            assertEquals(afterDisp.summary().netGoodPieceCount(), itemA.netGoodPieceCount() + itemB.netGoodPieceCount());
+            assertEquals(afterDisp.summary().netGoodAreaM2(), itemA.netGoodAreaM2() + itemB.netGoodAreaM2(), 0.001);
+            assertEquals(afterDisp.summary().totalConsumedAreaM2(), itemA.totalConsumedAreaM2() + itemB.totalConsumedAreaM2(), 0.001);
+            assertEquals(afterDisp.summary().recoveredRemnantAreaM2(), itemA.recoveredRemnantAreaM2() + itemB.recoveredRemnantAreaM2(), 0.001);
+            assertEquals(afterDisp.summary().wasteAreaM2(), itemA.wasteAreaM2() + itemB.wasteAreaM2(), 0.001);
+            assertEquals(afterDisp.summary().netEffectiveCost(), itemA.netEffectiveCost() + itemB.netEffectiveCost(), 0.01);
+        }
+
+        // 撤销任务 A 的复检处置 -> 任务 A 精准恢复 2 片，任务 B 始终 2 片
+        inv.revokeQualityDisposition(planId, disp.id(),
+                new RemnantService.RevokeDispositionCommand("REVOKE-XTASK-A1-01", "质检主管", "复检误判撤销"));
+        var afterRevoke = analytics.summarizeCosts(25.0, 0.7);
+        var revA = afterRevoke.byTask().stream().filter(t -> t.taskId().equals(taskA.id())).findFirst().orElseThrow();
+        var revB = afterRevoke.byTask().stream().filter(t -> t.taskId().equals(taskB.id())).findFirst().orElseThrow();
+        assertEquals(2, revA.netGoodPieceCount());
+        assertEquals(1.0, revA.netGoodAreaM2(), 0.001);
+        assertEquals(60.0, revA.netEffectiveCost(), 0.01);
+        assertEquals(2, revB.netGoodPieceCount());
+        assertEquals(1.0, revB.netGoodAreaM2(), 0.001);
+        assertEquals("BALANCED", inv.reconcileInventory().get("status"));
+    }
+
+    @Test
+    void procurementSuggestionsFilterNarrowAndIncompatibleBatchOrColorStock() {
+        FileInventoryStore store = new FileInventoryStore(temp.resolve("procurement-filter.json").toString());
+        RemnantService inv = new RemnantService(store, false);
+        ProductionCostAndProcurementService analytics = new ProductionCostAndProcurementService(inv);
+
+        // 1. 门幅与料头尺寸剔除（WIDE-ONLY）：需求 10 片 1800x1000（不旋转，共 18m²）
+        //    在库：1200mm 窄卷 36m²（放不下 1800mm，必剔除）+ 1000x2000 小料头 2m²（放不下，必剔除）+ 2000mm 宽卷 10m²（可适配）
+        inv.saveOrUpdateMotherRoll(new MotherRollInfo(
+                "ROLL-WIDE-NARROW", "WIDE-ONLY", "BAT-W1", "织厂", "宽幅布", "灰", 200.0, "涤棉", 1200.0, 30000.0, "W-1"));
+        inv.saveOrUpdateMotherRoll(new MotherRollInfo(
+                "ROLL-WIDE-OK", "WIDE-ONLY", "BAT-W1", "织厂", "宽幅布", "灰", 200.0, "涤棉", 2000.0, 5000.0, "W-2"));
+        inv.registerRemnant(new RemnantStock("REM-WIDE-SMALL", 1000, 2000, "W-R1", "WIDE-ONLY", "AVAILABLE", "ROLL-WIDE-NARROW", false, ""));
+        inv.saveTask(new CuttingTask(
+                null, "超宽幕布任务", "WIDE-ONLY", "SO-WIDE-1", 0,
+                List.of(new CuttingTask.Line(1, "超宽帘", 1800, 1000, 10, false))
+        ));
+
+        // 2. 指定缸号与色号过滤（BATCH-FIXED）：要求 BAT-TARGET + 藏青，需求 20m²（10 片 1000x2000）
+        //    在库：异缸 50m²（剔除）、同缸异色 50m²（剔除）、同缸同色母卷 8m² + 同缸同色料头 2m² + 异缸料头 10m²（剔除）
+        inv.saveOrUpdateMotherRoll(new MotherRollInfo(
+                "ROLL-BF-WRONG-BATCH", "BATCH-FIXED", "BAT-OTHER", "织厂", "色丁", "藏青", 200.0, "涤", 2000.0, 25000.0, "B-1"));
+        inv.saveOrUpdateMotherRoll(new MotherRollInfo(
+                "ROLL-BF-WRONG-COLOR", "BATCH-FIXED", "BAT-TARGET", "织厂", "色丁", "白色", 200.0, "涤", 2000.0, 25000.0, "B-2"));
+        inv.saveOrUpdateMotherRoll(new MotherRollInfo(
+                "ROLL-BF-MATCH", "BATCH-FIXED", "BAT-TARGET", "织厂", "色丁", "藏青", 200.0, "涤", 2000.0, 4000.0, "B-3"));
+        RemnantStock remBfOk = new RemnantStock("REM-BF-OK", 1000, 2000, "B-R1", "BATCH-FIXED", "AVAILABLE", "ROLL-BF-MATCH", false, "");
+        remBfOk.setBatchNo("BAT-TARGET");
+        remBfOk.setColor("藏青");
+        RemnantStock remBfWrong = new RemnantStock("REM-BF-WRONG", 2000, 5000, "B-R2", "BATCH-FIXED", "AVAILABLE", "ROLL-BF-WRONG-BATCH", false, "");
+        remBfWrong.setBatchNo("BAT-OTHER");
+        remBfWrong.setColor("藏青");
+        inv.registerRemnant(remBfOk);
+        inv.registerRemnant(remBfWrong);
+        inv.saveTask(new CuttingTask(
+                null, "指定缸色任务", "BATCH-FIXED", "SO-BF-1", 0,
+                List.of(new CuttingTask.Line(1, "门帘", 1000, 2000, 10, false)),
+                null, null, null, null, null, null, null, "BAT-TARGET", "藏青", Boolean.TRUE, null, null, null, null
+        ));
+
+        // 3. 强同缸无固定缸号（STRICT-BATCH）：strictBatchMatch=true，需求 30m²（15 片 1000x2000）
+        //    在库：无缸号卷 40m²（必剔除）+ BAT-X 20m² + BAT-Y 18m²（严禁跨缸拼接成 38m²，单缸最大仅 20m² -> 必报 CRITICAL）
+        inv.saveOrUpdateMotherRoll(new MotherRollInfo(
+                "ROLL-SB-NOBATCH", "STRICT-BATCH", "", "织厂", "全棉", "米白", 200.0, "全棉", 2000.0, 20000.0, "S-1"));
+        inv.saveOrUpdateMotherRoll(new MotherRollInfo(
+                "ROLL-SB-X", "STRICT-BATCH", "BAT-X", "织厂", "全棉", "米白", 200.0, "全棉", 2000.0, 10000.0, "S-2"));
+        inv.saveOrUpdateMotherRoll(new MotherRollInfo(
+                "ROLL-SB-Y", "STRICT-BATCH", "BAT-Y", "织厂", "全棉", "米白", 200.0, "全棉", 2000.0, 9000.0, "S-3"));
+        inv.saveTask(new CuttingTask(
+                null, "强同缸单任务", "STRICT-BATCH", "SO-SB-1", 0,
+                List.of(new CuttingTask.Line(1, "窗帘", 1000, 2000, 15, false)),
+                null, null, null, null, null, null, null, null, null, Boolean.TRUE, null, null, null, null
+        ));
+
+        // 4. 混合无强约束兼容（MIXED-RELAXED）：任务 1 要求 BAT-1（需求 4m²），任务 2 无约束（需求 4m²），在库 BAT-1(6m²) + BAT-2(6m²) 均应可用
+        inv.saveOrUpdateMotherRoll(new MotherRollInfo(
+                "ROLL-MX-1", "MIXED-RELAXED", "BAT-1", "织厂", "涤棉", "蓝", 200.0, "涤棉", 1500.0, 4000.0, "M-1"));
+        inv.saveOrUpdateMotherRoll(new MotherRollInfo(
+                "ROLL-MX-2", "MIXED-RELAXED", "BAT-2", "织厂", "涤棉", "蓝", 200.0, "涤棉", 1500.0, 4000.0, "M-2"));
+        inv.saveTask(new CuttingTask(
+                null, "混合任务1", "MIXED-RELAXED", "SO-MX-1", 0,
+                List.of(new CuttingTask.Line(1, "片1", 1000, 1000, 4, false)),
+                null, null, null, null, null, null, null, "BAT-1", null, null, null, null, null, null
+        ));
+        inv.saveTask(new CuttingTask(
+                null, "混合任务2", "MIXED-RELAXED", "SO-MX-2", 0,
+                List.of(new CuttingTask.Line(1, "片2", 1000, 1000, 4, false))
+        ));
+
+        var result = analytics.suggestProcurement(10.0, 50.0);
+        Map<String, ProductionCostAndProcurementService.ProcurementSuggestionItem> byModel = new LinkedHashMap<>();
+        result.items().forEach(it -> byModel.put(it.materialModel(), it));
+
+        // 校验 WIDE-ONLY
+        var wideItem = byModel.get("WIDE-ONLY");
+        assertNotNull(wideItem);
+        assertEquals("CRITICAL", wideItem.alertLevel());
+        assertEquals(18.0, wideItem.demandAreaM2(), 0.01);
+        assertEquals(10.0, wideItem.availableRollAreaM2(), 0.01, "1200mm 窄卷应被彻底剔除");
+        assertEquals(0.0, wideItem.availableRemnantAreaM2(), 0.01, "1000x2000 不可适配料头应被彻底剔除");
+        assertEquals(10.0, wideItem.netAvailableAreaM2(), 0.01);
+        assertEquals(9.8, wideItem.shortageAreaM2(), 0.01);
+        assertTrue(wideItem.recommendedWidthMm() >= 1800.0);
+
+        // 校验 BATCH-FIXED
+        var batchItem = byModel.get("BATCH-FIXED");
+        assertNotNull(batchItem);
+        assertEquals("CRITICAL", batchItem.alertLevel());
+        assertEquals(8.0, batchItem.availableRollAreaM2(), 0.01, "仅匹配 BAT-TARGET 且藏青色母卷可计入");
+        assertEquals(2.0, batchItem.availableRemnantAreaM2(), 0.01, "仅匹配 BAT-TARGET 且藏青色料头可计入");
+        assertEquals(10.0, batchItem.netAvailableAreaM2(), 0.01);
+        assertEquals(12.0, batchItem.shortageAreaM2(), 0.01);
+
+        // 校验 STRICT-BATCH
+        var strictItem = byModel.get("STRICT-BATCH");
+        assertNotNull(strictItem);
+        assertEquals("CRITICAL", strictItem.alertLevel());
+        assertEquals(20.0, strictItem.availableRollAreaM2(), 0.01, "无缸号卷必剔除且严禁跨缸拼接 BAT-X 与 BAT-Y");
+        assertEquals(20.0, strictItem.netAvailableAreaM2(), 0.01);
+        assertEquals(13.0, strictItem.shortageAreaM2(), 0.01);
+
+        // 校验 MIXED-RELAXED（向后兼容）
+        var mixedItem = byModel.get("MIXED-RELAXED");
+        assertNotNull(mixedItem);
+        assertEquals("SUFFICIENT", mixedItem.alertLevel());
+        assertEquals(12.0, mixedItem.availableRollAreaM2(), 0.01);
+        assertEquals(0.0, mixedItem.shortageAreaM2(), 0.01);
+    }
+
+    @Test
+    void multiMaterialAllowsRotatedContourPiecesInRemnantsAndRollsWhileGuardingDisabledRotation() {
+        FileInventoryStore store = new FileInventoryStore(temp.resolve("contour-rotation-prefilter.json").toString());
+        RemnantService inv = new RemnantService(store, false);
+        GlobalPlanningService planning = new GlobalPlanningService(inv, createSolver());
+
+        // 场景 A：宽小于长的异形裁片（500x900），料头为宽 1000 x 长 600（不旋转放不下，90° 旋转后 900x500 可放入）
+        RemnantStock remWideShort = new RemnantStock(
+                "REM-CONTOUR-ROT", 1000, 600, "R-ROT", "POLY-ROT-REM", "AVAILABLE", null, false, "");
+        inv.registerRemnant(remWideShort);
+
+        NestingProblem.Shape tallLShape = new NestingProblem.Shape("POLYGON", 500, 900, List.of(
+                new NestingProblem.Point(0, 0),
+                new NestingProblem.Point(500, 0),
+                new NestingProblem.Point(500, 300),
+                new NestingProblem.Point(250, 300),
+                new NestingProblem.Point(250, 900),
+                new NestingProblem.Point(0, 900)
+        ));
+
+        var remRotatedRes = planning.planMultiMaterial(new GlobalPlanningService.MultiMaterialPlanRequest(
+                null, "POLY-ROT-REM", null, null, true, 5, null, 5000L, 0.0, 0.0,
+                List.of(new GlobalPlanningService.DemandItem(1, "长L异形片", 500, 900, 1, true, null, tallLShape))
+        ));
+        assertEquals(1, remRotatedRes.placedByRemnants(), "允许 90° 旋转的异形裁片应通过预筛并成功排入 1000x600 料头");
+        assertEquals(0, remRotatedRes.unplacedPieces());
+
+        // 对照：关闭旋转时同一异形片严禁排入 1000x600 料头
+        var remFixedRes = planning.planMultiMaterial(new GlobalPlanningService.MultiMaterialPlanRequest(
+                null, "POLY-ROT-REM", null, null, true, 5, null, 5000L, 0.0, 0.0,
+                List.of(new GlobalPlanningService.DemandItem(1, "禁转长L异形片", 500, 900, 1, false, null, tallLShape))
+        ));
+        assertEquals(0, remFixedRes.placedByRemnants(), "禁转异形裁片长 900 超过料头长 600，绝不能误排入");
+        assertEquals(1, remFixedRes.unplacedPieces());
+
+        // 场景 B：宽大于门幅的异形裁片（900x500），母卷门幅仅 600mm（不旋转放不下，90° 旋转后宽 500 <= 600 可放入）
+        inv.saveOrUpdateMotherRoll(new MotherRollInfo(
+                "ROLL-NARROW-POLY", "POLY-ROT-ROLL", "BAT-PR", "织厂", "针织", "黑", 180.0, "全棉", 600.0, 5000.0, "P-ROT"));
+        NestingProblem.Shape wideLShape = new NestingProblem.Shape("POLYGON", 900, 500, List.of(
+                new NestingProblem.Point(0, 0),
+                new NestingProblem.Point(900, 0),
+                new NestingProblem.Point(900, 250),
+                new NestingProblem.Point(300, 250),
+                new NestingProblem.Point(300, 500),
+                new NestingProblem.Point(0, 500)
+        ));
+
+        var rollRotatedRes = planning.planMultiMaterial(new GlobalPlanningService.MultiMaterialPlanRequest(
+                null, "POLY-ROT-ROLL", null, null, false, 0, null, 5000L, 0.0, 0.0,
+                List.of(new GlobalPlanningService.DemandItem(1, "宽L异形片", 900, 500, 2, true, null, wideLShape))
+        ));
+        assertEquals(2, rollRotatedRes.placedByRoll(), "允许 90° 旋转的 900x500 异形片应成功排入 600mm 门幅母卷");
+        assertEquals(0, rollRotatedRes.unplacedPieces());
+        assertEquals(1, rollRotatedRes.rollOptions().size());
+        assertTrue(rollRotatedRes.rollOptions().get(0).feasible());
+        assertTrue(rollRotatedRes.rollOptions().get(0).recommended());
+
+        // 对照：关闭旋转时 900mm 宽异形片不能排入 600mm 窄幅卷
+        var rollFixedRes = planning.planMultiMaterial(new GlobalPlanningService.MultiMaterialPlanRequest(
+                null, "POLY-ROT-ROLL", null, null, false, 0, null, 5000L, 0.0, 0.0,
+                List.of(new GlobalPlanningService.DemandItem(1, "禁转宽L异形片", 900, 500, 2, false, null, wideLShape))
+        ));
+        assertEquals(0, rollFixedRes.placedByRoll(), "禁转 900mm 宽异形片绝不能放入 600mm 门幅母卷");
+        assertEquals(2, rollFixedRes.unplacedPieces());
+    }
+
+    @Test
+    void windowDefectsPreservesBoundary20mmExclusionZonesAcrossStationEdges() {
+        FileInventoryStore store = new FileInventoryStore(temp.resolve("boundary-20mm-defect.json").toString());
+        RemnantService inv = new RemnantService(store, false);
+        SolverFactory solver = createSolver();
+        CuttingWorkflowService workflow = new CuttingWorkflowService(solver, inv, new ToolpathOptimizerService());
+        GlobalPlanningService planning = new GlobalPlanningService(inv, solver);
+
+        // 准备 1000mm 宽实卷，并登记两个实体完全在工位 [1000, 2000] 之外 5mm、但带 20mm 安全边距跨入工位各 15mm 的边界疵点
+        MotherRollInfo roll = new MotherRollInfo(
+                "ROLL-EDGE-20", "EDGE-M", "BAT-E1", "织厂", "遮光布", "米色", 260.0, "涤", 1000.0, 5000.0, "E-01");
+        roll.setDefects(List.of(
+                new Defect(101, 0, 985, 1000, 10, 20, "EDGE", "上边界疵点", 4, 4, "MANUAL", "MUST_AVOID", "距起点外5mm带20mm安全边距"),
+                new Defect(102, 0, 2005, 1000, 10, 20, "EDGE", "下边界疵点", 4, 4, "MANUAL", "MUST_AVOID", "距终点外5mm带20mm安全边距")
+        ));
+        inv.saveOrUpdateMotherRoll(roll);
+
+        CuttingTask fitTask = inv.saveTask(new CuttingTask(
+                null, "边界避疵可排任务", "EDGE-M", "SO-EDGE-FIT", 0,
+                List.of(new CuttingTask.Line(1, "避疵安全片", 1000, 960, 1, false))
+        ));
+
+        // 1. 通过 CuttingWorkflowService.solve 走通 windowDefects：校验 960mm 裁片成功避开两端 15mm 禁区，且两端禁区完整保留
+        SolveRequest fitReq = new SolveRequest();
+        fitReq.setSolver("javaguillotine");
+        fitReq.setTaskId(fitTask.id());
+        fitReq.setTaskRevision(fitTask.revision());
+        fitReq.setRollId("ROLL-EDGE-20");
+        fitReq.setRollModel("EDGE-M");
+        fitReq.setRollW(1000);
+        fitReq.setRollL(1000);
+        fitReq.setTotalRollL(5000);
+        fitReq.setWindowStartY(1000);
+        fitReq.setAllowLongitudinal(true);
+        fitReq.setDemands(List.of(new PieceDemand(1, "避疵安全片", 1000, 960, 1, false)));
+
+        SolveResponse fitRes = workflow.solve(fitReq);
+        assertTrue(fitRes.isSuccess(), "在净安全区 970mm 内排 960mm 裁片应成功: " + fitRes.getMessage());
+        assertEquals(2, fitReq.getDefects().size(), "两个窗外 5mm + 20mm 边距的边界疵点均不得被 windowDefects 丢弃");
+        Defect topProjected = fitReq.getDefects().stream().filter(d -> d.getId() == 101).findFirst().orElseThrow();
+        Defect botProjected = fitReq.getDefects().stream().filter(d -> d.getId() == 102).findFirst().orElseThrow();
+        assertEquals(0.0, topProjected.getY(), 0.001);
+        assertEquals(15.0, topProjected.getH(), 0.001);
+        assertEquals(0.0, topProjected.getMargin(), 0.001);
+        assertEquals(985.0, botProjected.getY(), 0.001);
+        assertEquals(15.0, botProjected.getH(), 0.001);
+        assertEquals(0.0, botProjected.getMargin(), 0.001);
+
+        PlacedPiece placed = fitRes.getPieces().get(0);
+        assertTrue(placed.getY() >= 15.0 - 0.001, "裁片起点必须避开前端 15mm 边界禁区，实际 y=" + placed.getY());
+        assertTrue(placed.getY() + placed.getL() <= 985.0 + 0.001,
+                "裁片末端必须避开尾部 15mm 边界禁区，实际 endY=" + (placed.getY() + placed.getL()));
+
+        // 2. 若裁片为 980mm（> 970mm 净安全区），因两端边界禁区被保留，严禁侵入禁区排入
+        CuttingTask tightTask = inv.saveTask(new CuttingTask(
+                null, "边界禁区超长拦截任务", "EDGE-M", "SO-EDGE-TIGHT", 0,
+                List.of(new CuttingTask.Line(1, "超长干涉片", 1000, 980, 1, false))
+        ));
+        SolveRequest tightReq = new SolveRequest();
+        tightReq.setSolver("javaguillotine");
+        tightReq.setTaskId(tightTask.id());
+        tightReq.setTaskRevision(tightTask.revision());
+        tightReq.setRollId("ROLL-EDGE-20");
+        tightReq.setRollModel("EDGE-M");
+        tightReq.setRollW(1000);
+        tightReq.setRollL(1000);
+        tightReq.setTotalRollL(5000);
+        tightReq.setWindowStartY(1000);
+        tightReq.setAllowLongitudinal(true);
+        tightReq.setDemands(List.of(new PieceDemand(1, "超长干涉片", 1000, 980, 1, false)));
+
+        SolveResponse tightRes = workflow.solve(tightReq);
+        assertTrue(!tightRes.isSuccess() || tightRes.getPieces().isEmpty(),
+                "保留两端 15mm 边界禁区后 1000mm 工位仅剩 970mm，980mm 裁片绝不能违规排入");
+
+        // 3. 同步验证 GlobalPlanningService.sliceDefectsForWindow 对仅剩 [1000, 2000] 区间母卷同样不丢弃 20mm 边界疵点
+        MotherRollInfo planRoll = new MotherRollInfo(
+                "ROLL-EDGE-PLAN", "EDGE-PLAN-M", "BAT-E2", "织厂", "遮光布", "米色", 260.0, "涤", 1000.0, 2000.0, "E-02");
+        planRoll.setUsedLength(1000.0);
+        planRoll.setCurrentRemainingLength(1000.0);
+        planRoll.setDefects(List.of(
+                new Defect(201, 0, 985, 1000, 10, 20),
+                new Defect(202, 0, 2005, 1000, 10, 20)
+        ));
+        inv.saveOrUpdateMotherRoll(planRoll);
+
+        var planRes = planning.planMultiMaterial(new GlobalPlanningService.MultiMaterialPlanRequest(
+                null, "EDGE-PLAN-M", null, null, false, 0, List.of("ROLL-EDGE-PLAN"), 4000L, 0.0, 0.0,
+                List.of(new GlobalPlanningService.DemandItem(1, "边界超长片", 1000, 980, 1, false, null, null))
+        ));
+        assertEquals(0, planRes.placedByRoll(), "联排 sliceDefectsForWindow 同样必须保留边界 20mm 禁区，拦截 980mm 裁片");
+        assertEquals(1, planRes.unplacedPieces());
+    }
+
+    @Test
+    void demandPoolAndSchemeMaterializationPreserveContourShapeHoles() {
+        Path stateFile = temp.resolve("contour-holes-roundtrip.json");
+        FileInventoryStore store = new FileInventoryStore(stateFile.toString());
+        RemnantService inv = new RemnantService(store, false);
+        SolverFactory solver = createSolver();
+        SchedulingStudioService studio = new SchedulingStudioService(inv, solver, new ToolpathOptimizerService());
+
+        // 准备在库合格母卷
+        inv.saveOrUpdateMotherRoll(new MotherRollInfo(
+                "ROLL-HOLE-1", "HOLE-MAT", "BAT-H1", "织厂", "工业帆布", "灰", 300.0, "帆布", 1200.0, 10000.0, "H-01"));
+
+        // 带偏移原点的带孔异形多边形（外轮廓 [10,20]..[610,520] -> 归零后 600x500；内孔 [110,120]..[310,320] -> 归零后 [100,100]..[300,300]）
+        NestingProblem.Shape rawShapeWithHole = new NestingProblem.Shape(
+                "POLYGON", 600, 500,
+                List.of(
+                        new NestingProblem.Point(10, 20),
+                        new NestingProblem.Point(610, 20),
+                        new NestingProblem.Point(610, 520),
+                        new NestingProblem.Point(10, 520)
+                ),
+                List.of(List.of(
+                        new NestingProblem.Point(110, 120),
+                        new NestingProblem.Point(310, 120),
+                        new NestingProblem.Point(310, 320),
+                        new NestingProblem.Point(110, 320)
+                ))
+        );
+
+        Map<String, Object> savedFamily = studio.saveOrMergeDemandFamily(new SchedulingStudioService.SaveDemandFamilyCommand(
+                null, null, "带孔法兰片需求族", "HOLE-MAT", "ORD-HOLE-01", "CONTOUR_2D",
+                2000.0, 0.0, 0.0, null, null, null, null, null, null,
+                List.of(new SchedulingStudioService.DemandLineInput(
+                        1, "带孔法兰片", 600, 500, 1, false, null, null, null, null, rawShapeWithHole))
+        ));
+        String taskId = (String) savedFamily.get("id");
+
+        // 1. 立即取回及磁盘重载后均须完整无损保留平移归零后的 shape.holes
+        RemnantService reloadedInv = new RemnantService(new FileInventoryStore(stateFile.toString()), false);
+        SchedulingStudioService reloadedStudio = new SchedulingStudioService(reloadedInv, solver, new ToolpathOptimizerService());
+        for (SchedulingStudioService svc : List.of(studio, reloadedStudio)) {
+            Map<String, Object> fetched = svc.getDemandFamily(taskId);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> lines = (List<Map<String, Object>>) fetched.get("lines");
+            assertEquals(1, lines.size());
+            NestingProblem.Shape storedShape = (NestingProblem.Shape) lines.get(0).get("shape");
+            assertNotNull(storedShape);
+            assertEquals("POLYGON", storedShape.type());
+            assertEquals(600.0, storedShape.width(), 0.001);
+            assertEquals(500.0, storedShape.height(), 0.001);
+            assertEquals(1, storedShape.holes().size(), "需求池保存与读取必须完整保留 shape.holes");
+            List<NestingProblem.Point> hole = storedShape.holes().get(0);
+            assertEquals(4, hole.size());
+            assertEquals(new NestingProblem.Point(100.0, 100.0), hole.get(0));
+            assertEquals(new NestingProblem.Point(300.0, 300.0), hole.get(2));
+            // 净面积 = 600*500 - 200*200 = 260000 mm²
+            assertEquals(260000.0, storedShape.areaMm2(), 0.01);
+        }
+
+        // 2. 方案确认与实卷物化：即使传入的 PlacementItem 省略了 holes，落库方案与底层 CuttingPlan 也须完整保留内孔
+        NestingProblem.Shape outerOnlyShape = new NestingProblem.Shape("POLYGON", 600, 500, List.of(
+                new NestingProblem.Point(0, 0),
+                new NestingProblem.Point(600, 0),
+                new NestingProblem.Point(600, 500),
+                new NestingProblem.Point(0, 500)
+        ));
+        Map<String, Object> confirmed = studio.confirmScheme(new SchedulingStudioService.ConfirmSchemeCommand(
+                "IDEM-HOLE-SCHEME-1", "带孔方案实卷落库", "CONTOUR_2D", "DEFAULT", "deepnest", "自主异形",
+                taskId, "带孔法兰片需求族", "ORD-HOLE-01", "STOCK_ROLL", "ROLL-HOLE-1", null, "HOLE-MAT",
+                1200, 1000, 0.0, 500, 0.0, 0.0, 43.33, 0.26, Boolean.TRUE,
+                null,
+                new SchedulingScheme.Layout2DPayload(
+                        List.of(new SchedulingScheme.PlacementItem(1, 1, "带孔法兰片", 0, 0, 600, 500, 0, false, outerOnlyShape)),
+                        List.of(), List.of()
+                ),
+                null
+        ));
+        SchedulingScheme scheme = (SchedulingScheme) confirmed.get("scheme");
+        NestingProblem.Shape schemePlacedShape = scheme.layout2D().placements().get(0).shape();
+        assertNotNull(schemePlacedShape);
+        assertEquals(1, schemePlacedShape.holes().size(), "确认落库的 SchedulingScheme.layout2D.placements 必须保留内孔");
+        assertEquals(new NestingProblem.Point(100.0, 100.0), schemePlacedShape.holes().get(0).get(0));
+
+        // 校验底层物化 CuttingPlan 也完整携带 shape.holes
+        var plan = inv.getPlan(scheme.linkedPlanIds().get(0));
+        NestingProblem.Shape materializedShape = plan.result().getPieces().get(0).getShape();
+        assertNotNull(materializedShape);
+        assertEquals(1, materializedShape.holes().size(), "物化落库的 CuttingPlan 裁片必须完整保留 shape.holes");
+        assertEquals(260000.0, materializedShape.areaMm2(), 0.01);
     }
 }

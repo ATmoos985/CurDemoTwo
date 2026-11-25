@@ -137,12 +137,14 @@ final class StudioDemandPoolService {
         String dim = normalizeDimension(cmd.dimension(), null);
         if (existing != null) {
             dim = inferTaskDimension(existing);
-        } else if (cmd.demands().stream().anyMatch(d -> d != null && d.shape() != null && "POLYGON".equals(d.shape().type()))) {
+        } else if (cmd.demands().stream().anyMatch(d -> d != null && d.shape() != null
+                && ("POLYGON".equals(d.shape().type()) || d.shape().hasHoles()))) {
             dim = "CONTOUR_2D";
         }
         boolean isSlit = "SLITTING_1D".equals(dim);
         boolean hasPoly = "CONTOUR_2D".equals(dim)
-                || cmd.demands().stream().anyMatch(d -> d != null && d.shape() != null && "POLYGON".equals(d.shape().type()));
+                || cmd.demands().stream().anyMatch(d -> d != null && d.shape() != null
+                && ("POLYGON".equals(d.shape().type()) || d.shape().hasHoles()));
 
         List<CuttingTask.Line> lines = new ArrayList<>();
         int nextLineId = 1;
@@ -421,7 +423,35 @@ final class StudioDemandPoolService {
             List<NestingProblem.Point> shifted = pts.stream()
                     .map(pt -> new NestingProblem.Point(round1(pt.x() - minX), round1(pt.y() - minY)))
                     .toList();
-            return new NestingProblem.Shape("POLYGON", round1(maxX - minX), round1(maxY - minY), shifted);
+            List<List<NestingProblem.Point>> shiftedHoles = List.of();
+            if (in.shape().holes() != null && !in.shape().holes().isEmpty()) {
+                List<List<NestingProblem.Point>> normalizedHoles = new ArrayList<>(in.shape().holes().size());
+                for (List<NestingProblem.Point> hole : in.shape().holes()) {
+                    if (hole == null || hole.size() < 3) continue;
+                    normalizedHoles.add(hole.stream()
+                            .map(pt -> new NestingProblem.Point(round1(pt.x() - minX), round1(pt.y() - minY)))
+                            .toList());
+                }
+                shiftedHoles = normalizedHoles;
+            }
+            return new NestingProblem.Shape("POLYGON", round1(maxX - minX), round1(maxY - minY), shifted, shiftedHoles);
+        }
+        if (in.shape() != null && in.shape().hasHoles()) {
+            double w = round1(in.shape().width() > 0 ? in.shape().width() : in.width());
+            double h = round1(in.shape().height() > 0 ? in.shape().height() : in.length());
+            List<List<NestingProblem.Point>> normalizedHoles = new ArrayList<>(in.shape().holes().size());
+            for (List<NestingProblem.Point> hole : in.shape().holes()) {
+                if (hole == null || hole.size() < 3) continue;
+                normalizedHoles.add(hole.stream()
+                        .map(pt -> new NestingProblem.Point(round1(pt.x()), round1(pt.y())))
+                        .toList());
+            }
+            return new NestingProblem.Shape("POLYGON", w, h, List.of(
+                    new NestingProblem.Point(0, 0),
+                    new NestingProblem.Point(w, 0),
+                    new NestingProblem.Point(w, h),
+                    new NestingProblem.Point(0, h)
+            ), normalizedHoles);
         }
         if (taskHasPolygon) {
             double w = round1(in.width());

@@ -4,8 +4,10 @@ import com.example.cutdemotwo.business.model.CuttingPlan;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.ExecutionOrder;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
+import com.example.cutdemotwo.business.model.QualityDisposition;
 import com.example.cutdemotwo.business.model.RemnantStock;
 import com.example.cutdemotwo.business.model.SchedulingScheme;
+import com.example.cutdemotwo.contracts.geometry.PlacedPiece;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -196,41 +198,93 @@ public class ProductionCostAndProcurementService {
                         .add(1, consumedArea, netGoodArea, netGoodPieces, recoveredRemArea, wasteArea,
                                 materialCost, residualValue, netEffectiveCost, wasteCost, weightKg, estimated);
 
-                // 分任务归集（兼容跨任务多族合排按件数权重分摊，保证分任务合计与总览严格守恒）
-                Map<String, Integer> taskWeights = extractTaskWeights(raw, primaryTaskId);
-                if (taskWeights.size() <= 1) {
-                    String tid = taskWeights.isEmpty() ? "UNASSIGNED" : taskWeights.keySet().iterator().next();
-                    CuttingTask taskObj = taskById.get(tid);
-                    String tName = taskObj != null ? taskObj.name() : "独立裁切";
-                    String tModel = taskObj != null && blankToNull(taskObj.materialModel()) != null
-                            ? taskObj.materialModel() : materialModel;
-                    taskAccs.computeIfAbsent(tid, k -> new TaskAccumulator(tid, tName, tModel))
-                            .acc.add(1, consumedArea, netGoodArea, netGoodPieces, recoveredRemArea, wasteArea,
-                                    materialCost, residualValue, netEffectiveCost, wasteCost, weightKg, estimated);
-                } else {
-                    int totalWeight = taskWeights.values().stream().mapToInt(Integer::intValue).sum();
-                    if (totalWeight <= 0) totalWeight = taskWeights.size();
-                    for (Map.Entry<String, Integer> entry : taskWeights.entrySet()) {
+                // 分任务精确归集：跨任务合排优先按 pieceSources + pieceResults + 未撤销复检处置逐件归属，
+                // 确保某任务复检判废仅扣减该任务的净良品件数、净良品面积与成本，与 completedQuantities 及整单汇总严格一致。
+                Map<String, TaskPieceSlice> pieceSlices = extractPieceAttributedTaskSlices(raw, projected, plan, primaryTaskId);
+                if (pieceSlices.size() > 1) {
+                    double totalCutArea = pieceSlices.values().stream().mapToDouble(s -> s.cutAreaM2).sum();
+                    int totalPieceCnt = pieceSlices.values().stream().mapToInt(s -> s.totalPieces).sum();
+                    double baseRemArea = Math.max(0.0, numberOf(raw.get("remArea")));
+                    for (Map.Entry<String, TaskPieceSlice> entry : pieceSlices.entrySet()) {
                         String tid = entry.getKey();
-                        double share = (double) Math.max(1, entry.getValue()) / totalWeight;
+                        TaskPieceSlice slice = entry.getValue();
+                        double share = totalCutArea > 1e-9
+                                ? slice.cutAreaM2 / totalCutArea
+                                : (totalPieceCnt > 0 ? (double) slice.totalPieces / totalPieceCnt : 1.0 / pieceSlices.size());
                         CuttingTask taskObj = taskById.get(tid);
                         String tName = taskObj != null ? taskObj.name() : tid;
                         String tModel = taskObj != null && blankToNull(taskObj.materialModel()) != null
                                 ? taskObj.materialModel() : materialModel;
-                        int pieceShare = (int) Math.round(netGoodPieces * share);
+                        double tConsumed = consumedArea * share;
+                        double tGoodArea = Math.max(0.0, slice.netGoodAreaM2);
+                        int tGoodPieces = Math.max(0, slice.netGoodPieces);
+                        double tRecoveredRem = baseRemArea * share + slice.dispRecoveredRemAreaM2;
+                        double tWasteArea = Math.max(0.0, tConsumed - tGoodArea - tRecoveredRem);
+                        double tMaterialCost = tConsumed * pricePerSqm;
+                        double tResidualValue = tRecoveredRem * pricePerSqm * remnantResidualFactor;
+                        double tNetEffectiveCost = Math.max(0.0, tMaterialCost - tResidualValue);
+                        double tWasteCost = tWasteArea * pricePerSqm;
+                        double tWeightKg = weightKg * share;
                         taskAccs.computeIfAbsent(tid, k -> new TaskAccumulator(tid, tName, tModel))
                                 .acc.add(1,
-                                        consumedArea * share,
-                                        netGoodArea * share,
-                                        pieceShare,
-                                        recoveredRemArea * share,
-                                        wasteArea * share,
-                                        materialCost * share,
-                                        residualValue * share,
-                                        netEffectiveCost * share,
-                                        wasteCost * share,
-                                        weightKg * share,
+                                        tConsumed,
+                                        tGoodArea,
+                                        tGoodPieces,
+                                        tRecoveredRem,
+                                        tWasteArea,
+                                        tMaterialCost,
+                                        tResidualValue,
+                                        tNetEffectiveCost,
+                                        tWasteCost,
+                                        tWeightKg,
                                         estimated);
+                    }
+                } else {
+                    Map<String, Integer> taskWeights = pieceSlices.size() == 1
+                            ? Map.of(pieceSlices.keySet().iterator().next(), 1)
+                            : extractTaskWeights(raw, primaryTaskId);
+                    if (taskWeights.size() <= 1) {
+                        String tid = taskWeights.isEmpty() ? "UNASSIGNED" : taskWeights.keySet().iterator().next();
+                        CuttingTask taskObj = taskById.get(tid);
+                        String tName = taskObj != null ? taskObj.name() : "独立裁切";
+                        String tModel = taskObj != null && blankToNull(taskObj.materialModel()) != null
+                                ? taskObj.materialModel() : materialModel;
+                        taskAccs.computeIfAbsent(tid, k -> new TaskAccumulator(tid, tName, tModel))
+                                .acc.add(1, consumedArea, netGoodArea, netGoodPieces, recoveredRemArea, wasteArea,
+                                        materialCost, residualValue, netEffectiveCost, wasteCost, weightKg, estimated);
+                    } else {
+                        // 兼容无 pieceSources 的历史多任务回执：按件数权重分摊并保证件数之和严格守恒
+                        int totalWeight = taskWeights.values().stream().mapToInt(Integer::intValue).sum();
+                        if (totalWeight <= 0) totalWeight = taskWeights.size();
+                        int remainingPieces = netGoodPieces;
+                        int idx = 0;
+                        int size = taskWeights.size();
+                        for (Map.Entry<String, Integer> entry : taskWeights.entrySet()) {
+                            idx++;
+                            String tid = entry.getKey();
+                            double share = (double) Math.max(1, entry.getValue()) / totalWeight;
+                            CuttingTask taskObj = taskById.get(tid);
+                            String tName = taskObj != null ? taskObj.name() : tid;
+                            String tModel = taskObj != null && blankToNull(taskObj.materialModel()) != null
+                                    ? taskObj.materialModel() : materialModel;
+                            int pieceShare = (idx == size)
+                                    ? Math.max(0, remainingPieces)
+                                    : Math.min(remainingPieces, (int) Math.round(netGoodPieces * share));
+                            remainingPieces = Math.max(0, remainingPieces - pieceShare);
+                            taskAccs.computeIfAbsent(tid, k -> new TaskAccumulator(tid, tName, tModel))
+                                    .acc.add(1,
+                                            consumedArea * share,
+                                            netGoodArea * share,
+                                            pieceShare,
+                                            recoveredRemArea * share,
+                                            wasteArea * share,
+                                            materialCost * share,
+                                            residualValue * share,
+                                            netEffectiveCost * share,
+                                            wasteCost * share,
+                                            weightKg * share,
+                                            estimated);
+                        }
                     }
                 }
             }
@@ -331,6 +385,8 @@ public class ProductionCostAndProcurementService {
 
             Map<String, MotherRollInfo> rollById = new HashMap<>();
             for (MotherRollInfo r : allRolls) rollById.put(r.getRollId(), r);
+            Map<String, CuttingTask> taskById = new HashMap<>();
+            for (CuttingTask t : allTasks) taskById.put(t.id(), t);
 
             // 预计算活跃方案与执行单锁定
             Set<String> lockedRemnants = new HashSet<>();
@@ -357,7 +413,7 @@ public class ProductionCostAndProcurementService {
 
             Map<String, ModelBucket> buckets = new LinkedHashMap<>();
 
-            // A. 需求侧：汇总所有活跃任务的未排余量 (openQty)
+            // A. 需求侧：汇总所有活跃任务的未排余量 (openQty)，同时收集每个待排任务的裁片几何与防色差约束
             for (CuttingTask task : allTasks) {
                 String model = blankToNull(task.materialModel());
                 if (model == null) continue;
@@ -366,22 +422,27 @@ public class ProductionCostAndProcurementService {
 
                 double taskOpenAreaM2 = 0.0;
                 double taskMaxWidthMm = 0.0;
+                List<PieceFitSpec> openPieces = new ArrayList<>();
                 for (CuttingTask.Line line : task.demands()) {
                     String key = String.valueOf(line.id());
                     int open = Math.max(0, line.quantity() - completed.getOrDefault(key, 0) - planned.getOrDefault(key, 0));
                     if (open <= 0) continue;
+                    double pieceW = line.shape() != null ? line.shape().width() : line.width();
+                    double pieceL = line.shape() != null ? line.shape().height() : line.length();
                     double pieceAreaM2 = line.shape() != null
                             ? line.shape().areaMm2() / 1_000_000.0
-                            : (line.width() * line.length()) / 1_000_000.0;
+                            : (pieceW * pieceL) / 1_000_000.0;
                     taskOpenAreaM2 += open * pieceAreaM2;
-                    double minNeededW = line.allowRotation() ? Math.min(line.width(), line.length()) : line.width();
+                    double minNeededW = line.allowRotation() ? Math.min(pieceW, pieceL) : pieceW;
                     taskMaxWidthMm = Math.max(taskMaxWidthMm, minNeededW);
+                    openPieces.add(new PieceFitSpec(pieceW, pieceL, line.allowRotation()));
                 }
                 if (taskOpenAreaM2 > 1e-9) {
                     ModelBucket b = buckets.computeIfAbsent(model, ModelBucket::new);
                     b.demandAreaM2 += taskOpenAreaM2;
                     b.pendingTaskIds.add(task.id());
                     b.maxRequiredWidthMm = Math.max(b.maxRequiredWidthMm, taskMaxWidthMm);
+                    b.upsertTaskDemandProfile(task, openPieces, 0.0);
                     if (blankToNull(task.requiredBatchNo()) != null) {
                         b.activeBatches.add(task.requiredBatchNo().trim());
                     }
@@ -417,12 +478,22 @@ public class ProductionCostAndProcurementService {
                 List<String> involved = s.involvedTaskIds();
                 if (!involved.isEmpty()) {
                     b.pendingTaskIds.addAll(involved);
+                    for (String tid : involved) {
+                        CuttingTask srcTask = taskById.get(tid);
+                        if (srcTask == null) continue;
+                        List<PieceFitSpec> schemePieces = extractSchemePiecesForTask(s, srcTask);
+                        b.upsertTaskDemandProfile(srcTask, schemePieces, suggestedW);
+                        if (blankToNull(srcTask.requiredBatchNo()) != null) {
+                            b.activeBatches.add(srcTask.requiredBatchNo().trim());
+                        }
+                    }
                 } else {
                     b.pendingTaskIds.add("SCHEME:" + s.id());
+                    b.addAnonymousDemandProfile("SCHEME:" + s.id(), extractAnonymousSchemePieces(s), suggestedW);
                 }
             }
 
-            // C. 供给侧：汇总在库净可用母卷面积与缸号/门幅分布（同时记录所有非报废卷门幅供缺料推荐参考）
+            // C. 供给侧：汇总在库净可用母卷面积与缸号/门幅分布（存在待排任务时剔除过窄或缸号/色号不可适配母卷）
             Map<String, List<Double>> knownRollWidthsByModel = new HashMap<>();
             for (MotherRollInfo roll : allRolls) {
                 String model = blankToNull(roll.getRollModel());
@@ -436,15 +507,20 @@ public class ProductionCostAndProcurementService {
                 if (netLenMm <= 0 || roll.getWidth() <= 0) continue;
 
                 ModelBucket b = buckets.computeIfAbsent(model, ModelBucket::new);
+                if (!isMaterialCompatibleWithBucket(tx, b, roll, null, roll.getWidth(), netLenMm)) {
+                    continue;
+                }
                 double areaM2 = roll.getWidth() * netLenMm / 1_000_000.0;
                 b.availableRollAreaM2 += areaM2;
                 b.stockWidthsMm.add(roll.getWidth());
-                if (blankToNull(roll.getBatchNo()) != null) {
-                    b.activeBatches.add(roll.getBatchNo().trim());
+                String batch = blankToNull(roll.getBatchNo());
+                if (batch != null) {
+                    b.activeBatches.add(batch);
+                    b.recordBatchRollArea(batch, areaM2);
                 }
             }
 
-            // D. 供给侧：汇总在库净可用料头面积
+            // D. 供给侧：汇总在库净可用料头面积（存在待排任务时剔除过小或缸号/色号不可适配料头）
             for (RemnantStock rem : allRemnants) {
                 if (!"AVAILABLE".equalsIgnoreCase(rem.getStatus())) continue;
                 if (lockedRemnants.contains(rem.getId())) continue;
@@ -455,10 +531,14 @@ public class ProductionCostAndProcurementService {
                 if (areaM2 <= 0) continue;
 
                 ModelBucket b = buckets.computeIfAbsent(model, ModelBucket::new);
+                if (!isMaterialCompatibleWithBucket(tx, b, sourceRoll, rem, rem.getWidth(), rem.getLength())) {
+                    continue;
+                }
                 b.availableRemnantAreaM2 += areaM2;
                 String batch = firstNonBlank(rem.getBatchNo(), sourceRoll != null ? sourceRoll.getBatchNo() : null);
                 if (batch != null) {
                     b.activeBatches.add(batch);
+                    b.recordBatchRemnantArea(batch, areaM2);
                 }
             }
 
@@ -470,7 +550,21 @@ public class ProductionCostAndProcurementService {
             for (ModelBucket b : buckets.values()) {
                 double demandArea = b.demandAreaM2;
                 double requiredWithBuffer = demandArea * factor;
-                double netAvailable = b.availableRollAreaM2 + b.availableRemnantAreaM2;
+                double effectiveRollArea = b.availableRollAreaM2;
+                double effectiveRemnantArea = b.availableRemnantAreaM2;
+
+                // 若该品号下仅有单个强同缸待排任务（未锁死单一缸号），严禁跨缸拼接库存凑数，仅取面积最大的单缸库存
+                if (b.isSingleStrictUnboundBatchTask() && b.batchSupplyAreas.size() > 1) {
+                    BatchSupply bestBatch = b.batchSupplyAreas.values().stream()
+                            .max(Comparator.comparingDouble(BatchSupply::totalAreaM2))
+                            .orElse(null);
+                    if (bestBatch != null) {
+                        effectiveRollArea = bestBatch.rollAreaM2;
+                        effectiveRemnantArea = bestBatch.remnantAreaM2;
+                    }
+                }
+
+                double netAvailable = effectiveRollArea + effectiveRemnantArea;
                 double shortage = Math.max(0.0, requiredWithBuffer - netAvailable);
 
                 String alertLevel;
@@ -493,8 +587,8 @@ public class ProductionCostAndProcurementService {
                         b.materialModel,
                         round3(demandArea),
                         round3(requiredWithBuffer),
-                        round3(b.availableRollAreaM2),
-                        round3(b.availableRemnantAreaM2),
+                        round3(effectiveRollArea),
+                        round3(effectiveRemnantArea),
                         round3(netAvailable),
                         round3(shortage),
                         round1(recWidthMm),
@@ -554,6 +648,238 @@ public class ProductionCostAndProcurementService {
             return sourceRemnant.getMaterialBatch().trim();
         }
         return "未分类材质";
+    }
+
+    private static final class TaskPieceSlice {
+        int totalPieces;
+        double cutAreaM2;
+        int netGoodPieces;
+        double netGoodAreaM2;
+        double dispRecoveredRemAreaM2;
+    }
+
+    /**
+     * 解析跨任务合排回执的逐件归属与复检后净产出：
+     * 严格读取 raw.pieceSources + raw.pieceResults + projected.qualityDispositions（忽略已撤销处置），
+     * 并优先使用 CuttingPlan 中对应的 PlacedPiece.areaMm2() 确保异形与带孔裁片面积精确一致。
+     */
+    private static Map<String, TaskPieceSlice> extractPieceAttributedTaskSlices(
+            Map<String, Object> raw,
+            Map<String, Object> projected,
+            CuttingPlan plan,
+            String primaryTaskId
+    ) {
+        if (!(raw.get("pieceSources") instanceof Map<?, ?> rawSources) || rawSources.isEmpty()) {
+            return Map.of();
+        }
+        if (!(raw.get("pieceResults") instanceof List<?> pieceResults) || pieceResults.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<Integer, String> pieceToTask = new HashMap<>();
+        for (Map.Entry<?, ?> entry : rawSources.entrySet()) {
+            Integer pieceId = parseIntegerKey(entry.getKey());
+            if (pieceId == null) continue;
+            if (entry.getValue() instanceof Map<?, ?> srcMap && srcMap.get("taskId") != null) {
+                String tid = blankToNull(srcMap.get("taskId").toString());
+                if (tid != null) {
+                    pieceToTask.put(pieceId, tid);
+                }
+            }
+        }
+        if (pieceToTask.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<Integer, PlacedPiece> planPiecesById = new HashMap<>();
+        if (plan != null && plan.result() != null && plan.result().getPieces() != null) {
+            for (PlacedPiece pp : plan.result().getPieces()) {
+                planPiecesById.put(pp.getId(), pp);
+            }
+        }
+
+        Map<Integer, QualityDisposition> activeDispByPieceId = new HashMap<>();
+        if (projected.get("qualityDispositions") instanceof List<?> qList) {
+            for (Object qObj : qList) {
+                if (qObj instanceof QualityDisposition qd && !qd.hasRevocation() && qd.command() != null) {
+                    activeDispByPieceId.put(qd.command().pieceId(), qd);
+                }
+            }
+        }
+
+        String fallbackTaskId = blankToNull(primaryTaskId) != null ? primaryTaskId.trim() : "UNASSIGNED";
+        Map<String, TaskPieceSlice> slices = new LinkedHashMap<>();
+
+        for (Object pObj : pieceResults) {
+            int pieceId;
+            String outcome;
+            double pieceAreaM2;
+            if (pObj instanceof ReportOutput.ReportedPiece rp) {
+                pieceId = rp.pieceId();
+                outcome = Objects.toString(rp.outcome(), "");
+                PlacedPiece pp = planPiecesById.get(pieceId);
+                if (pp != null) {
+                    pieceAreaM2 = pp.areaMm2() / 1_000_000.0;
+                } else if (rp.shape() != null) {
+                    pieceAreaM2 = rp.shape().areaMm2() / 1_000_000.0;
+                } else {
+                    pieceAreaM2 = (rp.w() * rp.l()) / 1_000_000.0;
+                }
+            } else if (pObj instanceof Map<?, ?> pm) {
+                Integer parsedId = parseIntegerKey(pm.get("pieceId"));
+                if (parsedId == null) continue;
+                pieceId = parsedId;
+                outcome = Objects.toString(pm.get("outcome"), "");
+                PlacedPiece pp = planPiecesById.get(pieceId);
+                QualityDisposition dispForArea = activeDispByPieceId.get(pieceId);
+                if (pp != null) {
+                    pieceAreaM2 = pp.areaMm2() / 1_000_000.0;
+                } else if (dispForArea != null && dispForArea.pieceAreaMm2() > 0) {
+                    pieceAreaM2 = dispForArea.pieceAreaMm2() / 1_000_000.0;
+                } else {
+                    pieceAreaM2 = (numberOf(pm.get("w")) * numberOf(pm.get("l"))) / 1_000_000.0;
+                }
+            } else {
+                continue;
+            }
+
+            String tid = pieceToTask.getOrDefault(pieceId, fallbackTaskId);
+            TaskPieceSlice slice = slices.computeIfAbsent(tid, k -> new TaskPieceSlice());
+            slice.totalPieces++;
+            QualityDisposition disp = activeDispByPieceId.get(pieceId);
+
+            if ("QUALIFIED".equals(outcome)) {
+                slice.cutAreaM2 += pieceAreaM2;
+                if (disp == null) {
+                    slice.netGoodPieces++;
+                    slice.netGoodAreaM2 += pieceAreaM2;
+                } else {
+                    slice.dispRecoveredRemAreaM2 += Math.max(0.0, disp.recoveredAreaMm2() / 1_000_000.0);
+                }
+            } else if ("REJECTED".equals(outcome)) {
+                slice.cutAreaM2 += pieceAreaM2;
+                if (disp != null) {
+                    slice.dispRecoveredRemAreaM2 += Math.max(0.0, disp.recoveredAreaMm2() / 1_000_000.0);
+                }
+            } else if (disp != null) {
+                slice.dispRecoveredRemAreaM2 += Math.max(0.0, disp.recoveredAreaMm2() / 1_000_000.0);
+            }
+        }
+        return slices;
+    }
+
+    private static Integer parseIntegerKey(Object key) {
+        if (key instanceof Number n) return n.intValue();
+        if (key instanceof String s) {
+            try {
+                return Integer.parseInt(s.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private record PieceFitSpec(double widthMm, double lengthMm, boolean allowRotation) {
+        boolean fits(double matW, double matL) {
+            if (matW <= 0 || matL <= 0) return false;
+            if (widthMm <= matW + 0.001 && lengthMm <= matL + 0.001) return true;
+            return allowRotation && lengthMm <= matW + 0.001 && widthMm <= matL + 0.001;
+        }
+    }
+
+    private static final class TaskDemandProfile {
+        final CuttingTask task;
+        final List<PieceFitSpec> pieces = new ArrayList<>();
+        double fallbackMinWidthMm;
+
+        TaskDemandProfile(CuttingTask task, double fallbackMinWidthMm) {
+            this.task = task;
+            this.fallbackMinWidthMm = fallbackMinWidthMm;
+        }
+
+        boolean fitsGeometry(double matW, double matL) {
+            if (!pieces.isEmpty()) {
+                for (PieceFitSpec p : pieces) {
+                    if (p.fits(matW, matL)) return true;
+                }
+                return false;
+            }
+            if (fallbackMinWidthMm > 0) {
+                return matW + 0.001 >= fallbackMinWidthMm;
+            }
+            return matW > 0 && matL > 0;
+        }
+    }
+
+    private static final class BatchSupply {
+        double rollAreaM2;
+        double remnantAreaM2;
+
+        double totalAreaM2() {
+            return rollAreaM2 + remnantAreaM2;
+        }
+    }
+
+    private static List<PieceFitSpec> extractSchemePiecesForTask(SchedulingScheme scheme, CuttingTask task) {
+        Map<Integer, CuttingTask.Line> lineById = new HashMap<>();
+        for (CuttingTask.Line l : task.demands()) {
+            lineById.put(l.id(), l);
+        }
+        List<PieceFitSpec> out = new ArrayList<>();
+        for (SchedulingScheme.TaskDemandAllocation alloc : scheme.effectiveAllocations()) {
+            if (!Objects.equals(task.id(), alloc.taskId()) || alloc.quantity() <= 0) continue;
+            CuttingTask.Line line = lineById.get(alloc.lineId());
+            if (line == null) continue;
+            double pieceW = line.shape() != null ? line.shape().width() : line.width();
+            double pieceL = line.shape() != null ? line.shape().height() : line.length();
+            out.add(new PieceFitSpec(pieceW, pieceL, line.allowRotation()));
+        }
+        return out;
+    }
+
+    private static List<PieceFitSpec> extractAnonymousSchemePieces(SchedulingScheme scheme) {
+        if (scheme.layout2D() == null || scheme.layout2D().placements() == null || scheme.layout2D().placements().isEmpty()) {
+            return List.of();
+        }
+        List<PieceFitSpec> out = new ArrayList<>();
+        for (SchedulingScheme.PlacementItem p : scheme.layout2D().placements()) {
+            if (p != null && p.w() > 0 && p.l() > 0) {
+                out.add(new PieceFitSpec(p.w(), p.l(), false));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 检查一块可用材料（母卷或料头）是否至少适配该品号下某一个待排任务（几何装得下至少一片且满足防色差缸号/色号约束）。
+     * 当该品号不存在待排需求时返回 true，保持无需求库存台账的向后兼容。
+     */
+    private static boolean isMaterialCompatibleWithBucket(
+            CuttingStatePort.ReadView tx,
+            ModelBucket bucket,
+            MotherRollInfo roll,
+            RemnantStock remnant,
+            double matW,
+            double matL
+    ) {
+        if (bucket.demandProfiles.isEmpty()) {
+            return true;
+        }
+        for (TaskDemandProfile profile : bucket.demandProfiles.values()) {
+            if (!profile.fitsGeometry(matW, matL)) {
+                continue;
+            }
+            if (profile.task != null) {
+                try {
+                    tx.validateBatchAndColorForTask(profile.task, roll, remnant);
+                } catch (IllegalArgumentException mismatch) {
+                    continue;
+                }
+            }
+            return true;
+        }
+        return false;
     }
 
     private static Map<String, Integer> extractTaskWeights(Map<String, Object> receipt, String primaryTaskId) {
@@ -674,9 +1000,49 @@ public class ProductionCostAndProcurementService {
         final List<Double> stockWidthsMm = new ArrayList<>();
         final Set<String> pendingTaskIds = new LinkedHashSet<>();
         final Set<String> activeBatches = new TreeSet<>();
+        final Map<String, TaskDemandProfile> demandProfiles = new LinkedHashMap<>();
+        final Map<String, BatchSupply> batchSupplyAreas = new LinkedHashMap<>();
 
         ModelBucket(String materialModel) {
             this.materialModel = materialModel;
+        }
+
+        void upsertTaskDemandProfile(CuttingTask task, List<PieceFitSpec> pieces, double fallbackMinWidthMm) {
+            TaskDemandProfile profile = demandProfiles.computeIfAbsent(
+                    task.id(), k -> new TaskDemandProfile(task, fallbackMinWidthMm));
+            if (pieces != null && !pieces.isEmpty()) {
+                profile.pieces.addAll(pieces);
+            }
+            if (fallbackMinWidthMm > 0) {
+                profile.fallbackMinWidthMm = Math.max(profile.fallbackMinWidthMm, fallbackMinWidthMm);
+            }
+        }
+
+        void addAnonymousDemandProfile(String key, List<PieceFitSpec> pieces, double fallbackMinWidthMm) {
+            TaskDemandProfile profile = demandProfiles.computeIfAbsent(
+                    key, k -> new TaskDemandProfile(null, fallbackMinWidthMm));
+            if (pieces != null && !pieces.isEmpty()) {
+                profile.pieces.addAll(pieces);
+            }
+            if (fallbackMinWidthMm > 0) {
+                profile.fallbackMinWidthMm = Math.max(profile.fallbackMinWidthMm, fallbackMinWidthMm);
+            }
+        }
+
+        void recordBatchRollArea(String batchNo, double areaM2) {
+            String key = batchNo.trim().toUpperCase(Locale.ROOT);
+            batchSupplyAreas.computeIfAbsent(key, k -> new BatchSupply()).rollAreaM2 += areaM2;
+        }
+
+        void recordBatchRemnantArea(String batchNo, double areaM2) {
+            String key = batchNo.trim().toUpperCase(Locale.ROOT);
+            batchSupplyAreas.computeIfAbsent(key, k -> new BatchSupply()).remnantAreaM2 += areaM2;
+        }
+
+        boolean isSingleStrictUnboundBatchTask() {
+            if (demandProfiles.size() != 1) return false;
+            TaskDemandProfile only = demandProfiles.values().iterator().next();
+            return only.task != null && Boolean.TRUE.equals(only.task.strictBatchMatch());
         }
     }
 

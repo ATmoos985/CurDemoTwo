@@ -181,18 +181,19 @@ final class StudioMaterializer {
             }
             seqId = Math.max(seqId, pid + 1);
             if (isContour) {
-                NestingProblem.Shape placedShape = p.shape() != null ? p.shape() : line.shape();
+                int normDeg = Math.floorMod(p.rotationDegrees(), 360);
+                NestingProblem.Shape placedShape = preserveLineHoles(p.shape(), line.shape(), normDeg);
                 if (placedShape == null) {
                     placedShape = NestingProblem.Shape.rectangle(line.width(), line.length());
                 }
                 PlacedPiece pp = new PlacedPiece(
                         pid, line.name(), p.x(), p.y(),
                         placedShape.width(), placedShape.height(),
-                        Math.floorMod(p.rotationDegrees(), 180) != 0,
+                        normDeg % 180 != 0,
                         localId
                 );
                 pp.setShape(placedShape);
-                pp.setRotationDegrees(Math.floorMod(p.rotationDegrees(), 360));
+                pp.setRotationDegrees(normDeg);
                 pieces.add(pp);
             } else {
                 boolean rotated = (Math.floorMod(p.rotationDegrees(), 180) != 0)
@@ -1185,6 +1186,38 @@ final class StudioMaterializer {
             }
         }
         return min;
+    }
+
+    /**
+     * 方案落库与物理物化时兜底透传内孔洞 {@code shape.holes}：
+     * 若放置图形已自带孔洞则原样保留；若放置图形缺失孔洞但源需求行包含孔洞，
+     * 按对应旋转角度同步旋转源需求图形并补回孔洞（外接尺寸匹配时），防止全链路任一环节丢失内孔。
+     */
+    static NestingProblem.Shape preserveLineHoles(
+            NestingProblem.Shape placedShape,
+            NestingProblem.Shape lineShape,
+            int rotationDegrees
+    ) {
+        int normDeg = Math.floorMod(rotationDegrees, 360);
+        if (placedShape == null) {
+            if (lineShape == null) return null;
+            return normDeg == 0 ? lineShape : PolygonGeometry.rotate(lineShape, normDeg);
+        }
+        if (placedShape.hasHoles() || lineShape == null || !lineShape.hasHoles()) {
+            return placedShape;
+        }
+        NestingProblem.Shape rotated = normDeg == 0 ? lineShape : PolygonGeometry.rotate(lineShape, normDeg);
+        if (Math.abs(rotated.width() - placedShape.width()) <= 0.25
+                && Math.abs(rotated.height() - placedShape.height()) <= 0.25) {
+            return new NestingProblem.Shape(
+                    placedShape.type(),
+                    placedShape.width(),
+                    placedShape.height(),
+                    placedShape.vertices(),
+                    rotated.holes()
+            );
+        }
+        return placedShape;
     }
 
     private static NestingProblem.Shape effectiveShape(SchedulingScheme.PlacementItem p) {

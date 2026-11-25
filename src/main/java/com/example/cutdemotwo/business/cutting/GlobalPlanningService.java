@@ -206,7 +206,7 @@ public class GlobalPlanningService {
         double totalSavedAreaM2 = 0.0;
 
         if (preferRemnants && maxRemnants > 0 && !ctx.candidateRemnants().isEmpty()) {
-            List<RemnantSnapshot> sortedRemnants = rankRemnants(ctx.candidateRemnants(), ctx.demands(), ctx.isContour());
+            List<RemnantSnapshot> sortedRemnants = rankRemnants(ctx.candidateRemnants(), ctx.demands());
             int evalLimit = Math.min(sortedRemnants.size(), Math.max(maxRemnants * 2, 12));
             int evaluated = 0;
 
@@ -219,7 +219,7 @@ public class GlobalPlanningService {
                     break;
                 }
                 List<NormalizedDemand> activeDemands = currentRemainingDemands(ctx.demands(), remainingQty);
-                if (!canFitAny(rem.width(), rem.length(), activeDemands, ctx.isContour(), ctx.pieceGapMm())) {
+                if (!canFitAny(rem.width(), rem.length(), activeDemands, ctx.pieceGapMm())) {
                     continue;
                 }
                 evaluated++;
@@ -677,13 +677,12 @@ public class GlobalPlanningService {
 
     private List<RemnantSnapshot> rankRemnants(
             List<RemnantSnapshot> remnants,
-            List<NormalizedDemand> demands,
-            boolean isContour
+            List<NormalizedDemand> demands
     ) {
         List<RemnantSnapshot> ranked = new ArrayList<>(remnants);
         ranked.sort((a, b) -> {
             // 1. 匹配度评分（能放下的需求行种数 + 无疵加分 + 幅宽贴合度）高者优先
-            int scoreCmp = Double.compare(remnantMatchScore(b, demands, isContour), remnantMatchScore(a, demands, isContour));
+            int scoreCmp = Double.compare(remnantMatchScore(b, demands), remnantMatchScore(a, demands));
             if (scoreCmp != 0) return scoreCmp;
             // 2. 同等匹配度下优先消纳较小可用面积的合适料头，避免切碎大块好料头
             int areaCmp = Double.compare(a.areaM2(), b.areaM2());
@@ -693,12 +692,12 @@ public class GlobalPlanningService {
         return ranked;
     }
 
-    private double remnantMatchScore(RemnantSnapshot rem, List<NormalizedDemand> demands, boolean isContour) {
+    private double remnantMatchScore(RemnantSnapshot rem, List<NormalizedDemand> demands) {
         int fitLines = 0;
         double bestWidthFit = 0.0;
         for (NormalizedDemand d : demands) {
             boolean fitsNormal = d.width() <= rem.width() + 0.001 && d.length() <= rem.length() + 0.001;
-            boolean fitsRot = !isContour && d.allowRotation()
+            boolean fitsRot = d.allowRotation()
                     && d.length() <= rem.width() + 0.001 && d.width() <= rem.length() + 0.001;
             if (fitsNormal || fitsRot) {
                 fitLines++;
@@ -734,18 +733,18 @@ public class GlobalPlanningService {
             long deadlineNanos
     ) {
         double availLen = roll.availableLengthMm();
-        if (availLen <= trimStartMm + 1.0 || !canFitAny(roll.width(), availLen - trimStartMm, demands, isContour, pieceGapMm)) {
+        if (availLen <= trimStartMm + 1.0 || !canFitAny(roll.width(), availLen - trimStartMm, demands, pieceGapMm)) {
             return new RollTrialOutcome(roll.rollId(), roll.width(), availLen, 0.0, Double.POSITIVE_INFINITY, 0.0, 0, false);
         }
 
         double totalDemandAreaMm2 = demands.stream().mapToDouble(d -> d.areaMm2() * d.quantity()).sum();
-        double maxPieceDimL = demands.stream().mapToDouble(d -> {
-            if (!isContour && d.allowRotation()) {
-                return Math.min(d.length(), d.width());
+        double maxPieceDimL = demands.stream().mapToDouble(d -> minLengthOnRollWidth(d, roll.width())).max().orElse(0.0);
+        double maxRawL = demands.stream().mapToDouble(d -> {
+            if (d.allowRotation() && d.width() > roll.width() + 0.001 && d.length() <= roll.width() + 0.001) {
+                return d.width();
             }
             return d.length();
         }).max().orElse(0.0);
-        double maxRawL = demands.stream().mapToDouble(NormalizedDemand::length).max().orElse(0.0);
         double sumPieceLen = demands.stream().mapToDouble(d -> (Math.max(d.length(), d.width()) + pieceGapMm) * d.quantity()).sum();
 
         double theoreticalMinLen = Math.max(trimStartMm + maxPieceDimL, trimStartMm + totalDemandAreaMm2 / roll.width());
@@ -757,7 +756,7 @@ public class GlobalPlanningService {
 
         NestingResult best = solveForMaterial(
                 roll.rollId(), roll.width(), initWindowLen,
-                sliceDefectsForWindow(roll.defects(), roll.startY(), initWindowLen),
+                sliceDefectsForWindow(roll.defects(), roll.startY(), initWindowLen, roll.width()),
                 demands, isContour, false, pieceGapMm, trimStartMm, perRollSec
         );
         int bestPlaced = countPlaced(best);
@@ -768,7 +767,7 @@ public class GlobalPlanningService {
             double expandedLen = Math.min(availLen, Math.max(initWindowLen * 2.0, trimStartMm + sumPieceLen + 500.0));
             NestingResult expanded = solveForMaterial(
                     roll.rollId(), roll.width(), expandedLen,
-                    sliceDefectsForWindow(roll.defects(), roll.startY(), expandedLen),
+                    sliceDefectsForWindow(roll.defects(), roll.startY(), expandedLen, roll.width()),
                     demands, isContour, false, pieceGapMm, trimStartMm, perRollSec
             );
             int expPlaced = countPlaced(expanded);
@@ -789,7 +788,7 @@ public class GlobalPlanningService {
                 if (mid <= trimStartMm + 1.0 || mid >= high - 1.0) break;
                 NestingResult trial = solveForMaterial(
                         roll.rollId(), roll.width(), mid,
-                        sliceDefectsForWindow(roll.defects(), roll.startY(), mid),
+                        sliceDefectsForWindow(roll.defects(), roll.startY(), mid, roll.width()),
                         demands, isContour, false, pieceGapMm, trimStartMm, 1
                 );
                 if (countPlaced(trial) >= remainingTotal) {
@@ -987,17 +986,31 @@ public class GlobalPlanningService {
         return active;
     }
 
+    private static double minLengthOnRollWidth(NormalizedDemand d, double rollWidth) {
+        if (!d.allowRotation()) {
+            return d.length();
+        }
+        boolean fitsNormalW = d.width() <= rollWidth + 0.001;
+        boolean fitsRotatedW = d.length() <= rollWidth + 0.001;
+        if (fitsNormalW && fitsRotatedW) {
+            return Math.min(d.length(), d.width());
+        }
+        if (fitsRotatedW) {
+            return d.width();
+        }
+        return d.length();
+    }
+
     private static boolean canFitAny(
             double matW,
             double matL,
             List<NormalizedDemand> demands,
-            boolean isContour,
             double pieceGapMm
     ) {
         if (matW <= 0 || matL <= 0) return false;
         for (NormalizedDemand d : demands) {
             if (d.width() <= matW + 0.001 && d.length() <= matL + 0.001) return true;
-            if (!isContour && d.allowRotation() && d.length() <= matW + 0.001 && d.width() <= matL + 0.001) return true;
+            if (d.allowRotation() && d.length() <= matW + 0.001 && d.width() <= matL + 0.001) return true;
         }
         return false;
     }
@@ -1054,21 +1067,25 @@ public class GlobalPlanningService {
         return area;
     }
 
-    private static List<Defect> sliceDefectsForWindow(List<Defect> defects, double startY, double windowLen) {
+    /**
+     * 与 {@link CuttingWorkflowService#windowDefects} 保持 1:1 语义一致：
+     * 先按避让边距外扩，再裁切到当前工位窗口 [0, rollWidth] × [startY, startY + windowLen] 并换算为局部坐标（margin=0），
+     * 确保窗外边界疵点的安全禁区绝不因实体在窗外而被丢弃。
+     */
+    private static List<Defect> sliceDefectsForWindow(List<Defect> defects, double startY, double windowLen, double rollWidth) {
         if (defects == null || defects.isEmpty()) return List.of();
         double endY = startY + windowLen;
         List<Defect> sliced = new ArrayList<>();
         for (Defect d : defects) {
             if (d == null) continue;
-            double defTop = d.getY() - d.getMargin();
-            double defBottom = d.getY() + d.getH() + d.getMargin();
-            if (defBottom <= startY || defTop >= endY) continue;
-            double localY = Math.max(0.0, d.getY() - startY);
-            double localBottom = Math.min(windowLen, d.getY() + d.getH() - startY);
-            double localH = localBottom - localY;
-            if (localH <= 0) continue;
+            double m = Math.max(0.0, d.getMargin());
+            double x = Math.max(0.0, d.getX() - m);
+            double y = Math.max(startY, d.getY() - m);
+            double w = Math.min(rollWidth, d.getX() + d.getW() + m) - x;
+            double h = Math.min(endY, d.getY() + d.getH() + m) - y;
+            if (w <= 0 || h <= 0) continue;
             sliced.add(new Defect(
-                    d.getId(), d.getX(), localY, d.getW(), localH, d.getMargin(),
+                    d.getId(), x, y - startY, w, h, 0.0,
                     d.getDefectType(), d.getTypeName(), d.getSeverity(), d.getPoints(),
                     d.getDetectionSource(), d.getAvoidanceStrategy(), d.getDescription()
             ));

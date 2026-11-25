@@ -4,6 +4,7 @@ import com.example.cutdemotwo.business.cutting.RemnantService;
 import com.example.cutdemotwo.business.model.*;
 import com.example.cutdemotwo.business.model.IntegrationProgress.Attempt;
 import com.example.cutdemotwo.persistence.IntegrationDeliveryStore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import java.nio.charset.StandardCharsets;
@@ -39,7 +40,12 @@ public class IntegrationService {
     }
     public record Claim(String requestId,String retryOf) {}
     public record Acknowledgement(String token,String status,String externalReceipt,String reason) {}
-    public record Delivery(String eventId,long sequence,String state,int attempt,long expiresAt,String externalReceipt,String reason) {}
+    public record Delivery(String eventId,long sequence,String state,int attempt,long expiresAt,String externalReceipt,String reason,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String rejectedToken) {
+        public Delivery(String eventId,long sequence,String state,int attempt,long expiresAt,String externalReceipt,String reason) {
+            this(eventId,sequence,state,attempt,expiresAt,externalReceipt,reason,null);
+        }
+    }
     public record Lease(String consumer,String state,Attempt attempt,InventoryEvent event) {}
     public record Page(String consumer,long acknowledgedThrough,List<Delivery> items,long nextCursor,boolean hasMore) {}
 
@@ -48,9 +54,12 @@ public class IntegrationService {
         // Read progress before inventory: a concurrently appended event cannot make this snapshot appear truncated.
         var progress=store.read(consumer);var events=inventory.integrationEvents();validateStream(progress,events);
         var page=events.stream().filter(e->e.sequence()>after).limit(limit).toList();
-        var items=page.stream().map(e->{var a=last(progress,e.id());return new Delivery(e.id(),e.sequence(),
-                a==null?"PENDING":"LEASED".equals(a.state())&&a.expiresAt()<=store.now()?"RETRYABLE":a.state(),
-                a==null?0:a.number(),a==null?0:a.expiresAt(),a==null?null:a.externalReceipt(),a==null?null:a.reason());}).toList();
+        var items=page.stream().map(e->{var a=last(progress,e.id());
+            String state=a==null?"PENDING":"LEASED".equals(a.state())&&a.expiresAt()<=store.now()?"RETRYABLE":a.state();
+            // 仅在 REJECTED 态暴露被拒尝试令牌供 Worker 重启后显式 retryOf 自愈，绝不暴露活跃 LEASED 租约令牌
+            String rejectedToken=a!=null && "REJECTED".equals(a.state())?a.token():null;
+            return new Delivery(e.id(),e.sequence(),state,
+                a==null?0:a.number(),a==null?0:a.expiresAt(),a==null?null:a.externalReceipt(),a==null?null:a.reason(),rejectedToken);}).toList();
         long next=page.isEmpty()?after:page.get(page.size()-1).sequence();
         return new Page(consumer,progress.acknowledgedThrough(),items,next,events.stream().anyMatch(e->e.sequence()>next));
     }
@@ -108,7 +117,10 @@ public class IntegrationService {
         String state="LEASED".equals(attempt.state())&&attempt.expiresAt()<=store.now()?"EXPIRED":attempt.state();
         return new Lease(consumer,state,attempt,events.get((int)attempt.eventSequence()-1));
     }
-    private static Delivery delivery(Attempt a){return new Delivery(a.eventId(),a.eventSequence(),a.state(),a.number(),a.expiresAt(),a.externalReceipt(),a.reason());}
+    private static Delivery delivery(Attempt a){
+        return new Delivery(a.eventId(),a.eventSequence(),a.state(),a.number(),a.expiresAt(),a.externalReceipt(),a.reason(),
+                "REJECTED".equals(a.state())?a.token():null);
+    }
     private static Attempt last(IntegrationProgress state,String eventId){
         for(int i=state.attempts().size()-1;i>=0;i--)if(state.attempts().get(i).eventId().equals(eventId))return state.attempts().get(i);
         return null;
