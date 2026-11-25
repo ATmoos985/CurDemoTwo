@@ -69,16 +69,73 @@ function cleanPolygonVertices(points) {
     return pts;
 }
 
-/** 归一化多边形顶点至 0.1 mm 分辨率、局部 (0,0) 原点，剔除重复点、共线折返并控制顶点数 <= 128。 */
+/** 计算闭合轮廓的有向面积（2倍），用于判定轮廓或内孔是否退化。 */
+function signedArea2(points) {
+    let area2 = 0;
+    for (let i = 0; i < points.length; i++) {
+        const a = points[i];
+        const b = points[(i + 1) % points.length];
+        area2 += a.x * b.y - b.x * a.y;
+    }
+    return area2;
+}
+
+/** 按与外轮廓一致的原点平移与 0.1 mm 分辨率归一化单个闭合内孔，剔除重复点、共线折返并控制顶点数 <= 128。 */
+function normalizeHoleRing01(rawHole, minX0, minY0, minX1 = 0, minY1 = 0) {
+    const rawPts = Array.isArray(rawHole) ? rawHole : rawHole?.vertices;
+    if (!Array.isArray(rawPts) || rawPts.length < 3) return null;
+    const shifted = [];
+    for (const v of rawPts) {
+        const rx = Array.isArray(v) ? Number(v[0]) : Number(v?.x);
+        const ry = Array.isArray(v) ? Number(v[1]) : Number(v?.y);
+        if (!Number.isFinite(rx) || !Number.isFinite(ry)) continue;
+        let x = Math.max(0, quantize01(rx - minX0));
+        let y = Math.max(0, quantize01(ry - minY0));
+        if (minX1 > 0 || minY1 > 0) {
+            x = Math.max(0, quantize01(x - minX1));
+            y = Math.max(0, quantize01(y - minY1));
+        }
+        const prev = shifted[shifted.length - 1];
+        if (!prev || Math.abs(prev.x - x) > 1e-6 || Math.abs(prev.y - y) > 1e-6) {
+            shifted.push({x, y});
+        }
+    }
+    if (shifted.length > 1) {
+        const first = shifted[0];
+        const last = shifted[shifted.length - 1];
+        if (Math.abs(first.x - last.x) <= 1e-6 && Math.abs(first.y - last.y) <= 1e-6) {
+            shifted.pop();
+        }
+    }
+    const cleaned = simplifyClosedPolygon(cleanPolygonVertices(shifted), 128);
+    if (cleaned.length < 3 || Math.abs(signedArea2(cleaned)) <= 1e-5) return null;
+    return cleaned;
+}
+
+/** 批量归一化多边形内孔列表（最多保留 64 个有效内孔，与后端 PolygonGeometry 契约一致）。 */
+function normalizePolygonHoles01(rawHoles, minX0, minY0, minX1 = 0, minY1 = 0) {
+    if (!Array.isArray(rawHoles) || rawHoles.length === 0) return [];
+    const normalized = [];
+    for (const rawHole of rawHoles) {
+        if (normalized.length >= 64) break;
+        const ring = normalizeHoleRing01(rawHole, minX0, minY0, minX1, minY1);
+        if (ring) normalized.push(ring);
+    }
+    return normalized;
+}
+
+/** 归一化多边形顶点（含可选内孔 holes）至 0.1 mm 分辨率、局部 (0,0) 原点，剔除重复点、共线折返并控制顶点数 <= 128。 */
 export function normalizePolygonShape01(shape, fallbackW = 100, fallbackH = 100) {
     const fallbackRect = () => {
         const w = Math.max(0.1, quantize01(shape?.width ?? fallbackW, 100));
         const h = Math.max(0.1, quantize01(shape?.height ?? fallbackH, 100));
+        const holes = normalizePolygonHoles01(shape?.holes, 0, 0, 0, 0);
         return {
             type: 'POLYGON',
             width: w,
             height: h,
-            vertices: [{x: 0, y: 0}, {x: w, y: 0}, {x: w, y: h}, {x: 0, y: h}]
+            vertices: [{x: 0, y: 0}, {x: w, y: 0}, {x: w, y: h}, {x: 0, y: h}],
+            ...(holes.length > 0 ? {holes} : {})
         };
     };
     const rawVerts = Array.isArray(shape?.vertices) ? shape.vertices : [];
@@ -113,14 +170,16 @@ export function normalizePolygonShape01(shape, fallbackW = 100, fallbackH = 100)
     }
     const maxX = Math.max(...cleaned.map(v => v.x));
     const maxY = Math.max(...cleaned.map(v => v.y));
-    let area2 = 0;
-    for (let i = 0; i < cleaned.length; i++) {
-        const a = cleaned[i];
-        const b = cleaned[(i + 1) % cleaned.length];
-        area2 += a.x * b.y - b.x * a.y;
-    }
+    const area2 = signedArea2(cleaned);
     if (maxX <= 0 || maxY <= 0 || Math.abs(area2) <= 1e-5) return fallbackRect();
-    return {type: 'POLYGON', width: quantize01(maxX), height: quantize01(maxY), vertices: cleaned};
+    const holes = normalizePolygonHoles01(shape?.holes, minX0, minY0, minX, minY);
+    return {
+        type: 'POLYGON',
+        width: quantize01(maxX),
+        height: quantize01(maxY),
+        vertices: cleaned,
+        ...(holes.length > 0 ? {holes} : {})
+    };
 }
 
 /**
@@ -146,7 +205,8 @@ export function buildSafeNestingRequest2D({
         return {error: '没有可排的有效裁片需求'};
     }
 
-    const hasPolygon = validRaw.some(d => d.shape?.type === 'POLYGON');
+    const hasHoles = d => Array.isArray(d?.shape?.holes) && d.shape.holes.length > 0;
+    const hasPolygon = validRaw.some(d => d.shape?.type === 'POLYGON' || hasHoles(d));
     const mode = hasPolygon ? 'CONTOUR' : 'GUILLOTINE';
     const engine = strategy.enginePref === 'deepnest'
         ? (mode === 'CONTOUR' ? 'deepnest' : 'javaguillotine')
@@ -186,7 +246,7 @@ export function buildSafeNestingRequest2D({
         const w01 = Math.max(0.1, quantize01(d.width));
         const l01 = Math.max(0.1, quantize01(d.length));
         const baseShape = mode === 'CONTOUR'
-            ? (d.shape?.type === 'POLYGON'
+            ? (d.shape?.type === 'POLYGON' || hasHoles(d)
                 ? normalizePolygonShape01(d.shape, w01, l01)
                 : normalizePolygonShape01(null, w01, l01))
             : rectangle(w01, l01);
@@ -207,7 +267,10 @@ export function buildSafeNestingRequest2D({
         return {error: `单次求解最多支持 10000 件（当前 ${totalQty} 件），请分批排程`};
     }
     if (mode === 'CONTOUR') {
-        const totalVertices = origParts.reduce((s, p) => s + (p.shape.vertices?.length || 4) * p.quantity, 0);
+        const totalVertices = origParts.reduce(
+            (s, p) => s + ((p.shape.vertices?.length || 4) + (p.shape.holes || []).reduce((hs, h) => hs + h.length, 0)) * p.quantity,
+            0
+        );
         if (totalQty > 200 || totalVertices > 10000) {
             return {error: `异形轮廓单次最多 200 件、10000 顶点（当前 ${totalQty} 件 / ${totalVertices} 顶点），请减少套数或分批排程`};
         }

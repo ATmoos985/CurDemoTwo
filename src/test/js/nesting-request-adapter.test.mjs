@@ -186,3 +186,105 @@ test('求解策略绝不越权放开禁用旋转或禁用半转的裁片，且�
     assert.equal(fixedBuilt.request.problem.parts[0].allowRotation, false);
     assert.equal(fixedBuilt.request.problem.parts[0].allowHalfTurn, undefined);
 });
+
+test('带孔多边形归一化按外轮廓相同 minX/minY 平移并 0.1mm 量化保留 shape.holes，无孔不附带空字段', () => {
+    // 1. 无孔多边形绝不附带 holes 字段，保持旧测试与旧请求零漂移
+    const noHole = normalizePolygonShape01({
+        type: 'POLYGON',
+        width: 200,
+        height: 150,
+        vertices: [{x: 10, y: 20}, {x: 210, y: 20}, {x: 210, y: 170}, {x: 10, y: 170}]
+    });
+    assert.equal('holes' in noHole, false, '无孔裁片不应附带空 holes 字段');
+
+    // 2. 带孔多边形：外轮廓带偏移 (10.04, 20.06)，内孔含闭合重复点、亚毫米坐标与退化孔洞
+    const withHoles = normalizePolygonShape01({
+        type: 'POLYGON',
+        width: 500,
+        height: 400,
+        vertices: [
+            {x: 10.04, y: 20.06},
+            {x: 510.08, y: 20.06},
+            {x: 510.08, y: 420.12},
+            {x: 10.04, y: 420.12},
+            {x: 10.04, y: 20.06}
+        ],
+        holes: [
+            [
+                {x: 110.09, y: 120.11},
+                {x: 210.09, y: 120.11},
+                {x: 210.09, y: 220.11},
+                {x: 110.09, y: 220.11},
+                {x: 110.09, y: 120.11}
+            ],
+            // {vertices} 包裹与数组顶点形态同样兼容
+            {
+                vertices: [
+                    [310.04, 120.06],
+                    [370.04, 120.06],
+                    [310.04, 200.06]
+                ]
+            },
+            // 退化孔洞应被静默过滤
+            [{x: 50, y: 50}, {x: 60, y: 50}]
+        ]
+    });
+    assert.equal(withHoles.width, 500);
+    assert.equal(withHoles.height, 400.1);
+    assert.equal(withHoles.holes.length, 2, '应保留 2 个有效内孔并过滤退化孔');
+    assert.deepEqual(withHoles.holes[0], [
+        {x: 100.1, y: 100.1},
+        {x: 200.1, y: 100.1},
+        {x: 200.1, y: 200.1},
+        {x: 100.1, y: 200.1}
+    ]);
+    assert.deepEqual(withHoles.holes[1], [
+        {x: 300, y: 100},
+        {x: 360, y: 100},
+        {x: 300, y: 180}
+    ]);
+
+    // 3. 构造完整 2D 排料请求时，shape.holes 完整透传至 problem.parts[*].shape.holes
+    const built = buildSafeNestingRequest2D({
+        strategy: {id: 'PS_FIXED', enginePref: 'auto', shorten: true, timeLimit: 10},
+        scenario: 'SHORTEN_KIT',
+        widthMm: 1600,
+        lengthMm: 2000,
+        demands: [{
+            id: 7,
+            name: '带孔窗口面板',
+            width: 500,
+            length: 400,
+            quantity: 2,
+            shape: {
+                type: 'POLYGON',
+                width: 500,
+                height: 400,
+                vertices: [
+                    {x: 5, y: 10},
+                    {x: 505, y: 10},
+                    {x: 505, y: 410},
+                    {x: 5, y: 410}
+                ],
+                holes: [
+                    [
+                        {x: 105.04, y: 110.06},
+                        {x: 205.04, y: 110.06},
+                        {x: 205.04, y: 210.06},
+                        {x: 105.04, y: 210.06}
+                    ]
+                ]
+            }
+        }]
+    });
+    assert.equal(built.error, null);
+    assert.equal(built.request.problem.process.mode, 'CONTOUR');
+    const partShape = built.request.problem.parts[0].shape;
+    assert.equal(partShape.holes.length, 1);
+    assert.deepEqual(partShape.holes[0], [
+        {x: 100, y: 100.1},
+        {x: 200, y: 100.1},
+        {x: 200, y: 200.1},
+        {x: 100, y: 200.1}
+    ]);
+});
