@@ -49,6 +49,20 @@ public class FactoryDocumentController {
         return inventory.releaseQuarantinedRemnant(id, cmd);
     }
 
+    // 1.1 母卷跑布验疵后质检放行 / 判定不合格（RBAC 归属 ADMIN / INSPECTOR）
+    @PostMapping("/v2/quality/rolls/{rollId}/inspect-complete")
+    public Map<String, Object> completeMotherRollInspection(
+            @PathVariable String rollId,
+            @RequestBody RemnantService.MotherRollInspectionCommand body
+    ) {
+        RemnantService.MotherRollInspectionCommand cmd = body == null ? null : new RemnantService.MotherRollInspectionCommand(
+                body.status(),
+                resolveActor(body.inspector()),
+                body.remarks()
+        );
+        return inventory.completeMotherRollInspection(rollId, cmd);
+    }
+
     // 2. 采购批量入库单
     @GetMapping("/v2/inventory-receipts")
     public List<InventoryReceiptDocument> listInventoryReceipts(

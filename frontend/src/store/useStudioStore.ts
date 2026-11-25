@@ -200,6 +200,15 @@ export interface DemandFamilySummary {
   openTotal: number;
   schemeCount: number;
   status: string;
+  dueDate?: string;
+  priority?: string;
+  customerName?: string;
+  kittingGroup?: string;
+  requiredBatchNo?: string;
+  requiredColor?: string;
+  strictBatchMatch?: boolean;
+  machineId?: string;
+  shiftTeam?: string;
   process?: any;
   slitting?: any;
   lines: {

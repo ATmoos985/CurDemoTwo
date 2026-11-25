@@ -1533,10 +1533,17 @@ export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) 
                                           看切割区
                                         </button>
                                         <a
-                                          className="btn sm"
+                                          className={`btn sm ${
+                                            !isScrappedRoll && r.inspectionStatus !== 'PASSED'
+                                              ? 'soft-accent'
+                                              : ''
+                                          }`}
                                           href={`#/inspection/${encodeURIComponent(r.rollId)}`}
+                                          title="进入跑布验疵并执行质检放行"
                                         >
-                                          跑疵点
+                                          {!isScrappedRoll && r.inspectionStatus !== 'PASSED'
+                                            ? '去验布放行'
+                                            : '跑疵点'}
                                         </a>
                                         {!isScrappedRoll && (
                                           <button

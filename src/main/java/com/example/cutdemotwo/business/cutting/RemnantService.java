@@ -2249,6 +2249,8 @@ public class RemnantService implements CuttingStatePort {
 
     public record ScrapRollCommand(String idempotencyKey, String operator, String reason) {}
 
+    public record MotherRollInspectionCommand(String status, String inspector, String remarks) {}
+
     /** 查询历史隔离料头质量复验放行单（按库存版本倒序）。 */
     public synchronized List<QualityReleaseDocument> listQualityReleases() {
         return read(() -> qualityReleases.values().stream()
@@ -2696,6 +2698,10 @@ public class RemnantService implements CuttingStatePort {
             String recordedMachine;
             String recordedShift;
             if (MaterialIssueDocument.DIRECTION_ISSUE.equals(direction)) {
+                if (!"PASSED".equalsIgnoreCase(roll.getInspectionStatus())) {
+                    throw new InventoryConflictException("母卷 " + rollId + " 尚未通过质检放行（当前状态："
+                            + Objects.toString(roll.getInspectionStatus(), "PENDING") + "），禁止领料出库至机台");
+                }
                 if (roll.getCurrentRemainingLength() <= 0.001) {
                     throw new InventoryConflictException("母卷 " + rollId + " 已用尽，禁止发料出库");
                 }
@@ -2777,6 +2783,40 @@ public class RemnantService implements CuttingStatePort {
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("roll", getMotherRollInternal(scrapped.getRollId()));
+        out.put("revision", revision);
+        return out;
+    }
+
+    /** 母卷跑布验疵后质量判定与放行（PENDING/FAILED <-> PASSED）：写入检验状态、检验员、验检日期与不可变流水。 */
+    public synchronized Map<String, Object> completeMotherRollInspection(String rollId, MotherRollInspectionCommand cmd) {
+        if (rollId == null || rollId.isBlank()) throw new IllegalArgumentException("请指定母卷编号 rollId");
+        if (cmd == null) throw new IllegalArgumentException("请提供母卷质检判定请求体");
+        String targetRollId = rollId.trim();
+        String status = cmd.status() == null ? "" : cmd.status().trim().toUpperCase(Locale.ROOT);
+        if (!Set.of("PASSED", "FAILED").contains(status)) {
+            throw new IllegalArgumentException("质检判定状态仅支持 PASSED（合格放行）或 FAILED（不合格留置）");
+        }
+        String inspector = requireText(cmd.inspector(), 100, "请填写 1–100 字质检员姓名");
+        String eventType = "PASSED".equals(status) ? "ROLL_INSPECTION_PASS" : "ROLL_INSPECTION_FAIL";
+
+        MotherRollInfo updated = mutate(eventType, targetRollId, "DECLARED:" + inspector, () -> {
+            MotherRollInfo roll = motherRolls.get(targetRollId);
+            if (roll == null) throw new IllegalArgumentException("母卷不存在: " + targetRollId);
+            if ("SCRAPPED".equalsIgnoreCase(roll.getInspectionStatus())) {
+                throw new InventoryConflictException("母卷 " + targetRollId + " 已报废，不能执行质检判定");
+            }
+            if ("FAILED".equals(status)) {
+                ensureMaterialNotReserved("roll", targetRollId, null);
+            }
+            roll.setInspectionStatus(status);
+            roll.setInspector(inspector);
+            roll.setInspectionDate(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+            return roll;
+        });
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("roll", getMotherRollInternal(updated.getRollId()));
+        out.put("status", status);
         out.put("revision", revision);
         return out;
     }

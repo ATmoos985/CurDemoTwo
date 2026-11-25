@@ -541,16 +541,17 @@
 /* ---------- 4. Center Column: Light Canvas Toolbar + Fixed-Grid Board ---------- */
 .studio-2d-page.wb-v2 .studio-center .ctool {
   flex: none;
-  height: 40px;
-  padding: 0 12px;
+  min-height: 38px;
+  height: auto;
+  padding: 5px 10px;
   background: #ffffff;
   border-bottom: 1px solid var(--cp-divider, rgba(15, 23, 42, 0.06));
   color: var(--cp-ink-2, #52525b);
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-wrap: nowrap;
-  overflow-x: auto;
+  gap: 5px 6px;
+  flex-wrap: wrap;
+  overflow-x: visible;
 }
 
 .studio-2d-page.wb-v2 .studio-center .ctool button {

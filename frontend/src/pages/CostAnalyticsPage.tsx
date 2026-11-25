@@ -379,30 +379,52 @@ export const CostAnalyticsPage: React.FC = () => {
           </div>
         )}
 
-        <div className="cards" aria-label="成本与备料关键指标" style={{ marginBottom: 12 }}>
-          <article className="card">
-            <span>累计净有效成本（扣残值）</span>
-            <strong className="num">
+        <div
+          className="cards"
+          aria-label="成本与备料关键指标"
+          style={{
+            marginBottom: 12,
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(195px, 1fr))',
+            gap: 10
+          }}
+        >
+          <article
+            className="card"
+            style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '12px 14px' }}
+          >
+            <span style={{ fontSize: 12, color: 'var(--cp-ink-3)' }}>累计净有效成本（扣残值）</span>
+            <strong className="num" style={{ fontSize: 19, lineHeight: 1.25 }}>
               {summary ? `${fmtN(summary.netEffectiveCost, 2)} ${currency}` : '—'}
             </strong>
             <span className="muted num" style={{ fontSize: 11 }}>
               单方良品 {summary ? `${fmtN(summary.avgCostPerGoodSqm, 2)} ${currency}/m²` : '—'}
             </span>
           </article>
-          <article className="card">
-            <span>原料总投入 / 有效报工</span>
-            <strong className="num">
+          <article
+            className="card"
+            style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '12px 14px' }}
+          >
+            <span style={{ fontSize: 12, color: 'var(--cp-ink-3)' }}>原料总投入 / 有效报工</span>
+            <strong className="num" style={{ fontSize: 19, lineHeight: 1.25 }}>
               {summary ? `${fmtN(summary.totalMaterialCost, 2)} ${currency}` : '—'}
             </strong>
             <span className="muted num" style={{ fontSize: 11 }}>
               {summary ? `${fmtN(summary.totalConsumedAreaM2, 2)} m² · ${summary.totalReports} 单` : '—'}
             </span>
           </article>
-          <article className="card">
-            <span>废料损失金额 / 占比</span>
+          <article
+            className="card"
+            style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '12px 14px' }}
+          >
+            <span style={{ fontSize: 12, color: 'var(--cp-ink-3)' }}>废料损失金额 / 占比</span>
             <strong
               className="num"
-              style={{ color: wasteSharePct >= 15 ? 'var(--err, #dc2626)' : undefined }}
+              style={{
+                fontSize: 19,
+                lineHeight: 1.25,
+                color: wasteSharePct >= 15 ? 'var(--err, #dc2626)' : undefined
+              }}
             >
               {summary ? `${fmtN(summary.wasteCost, 2)} ${currency}` : '—'}
             </strong>
@@ -410,20 +432,31 @@ export const CostAnalyticsPage: React.FC = () => {
               {summary ? `废料 ${fmtN(summary.wasteAreaM2, 2)} m²（占投入 ${wasteSharePct}%）` : '—'}
             </span>
           </article>
-          <article className="card">
-            <span>回收料头残值抵扣</span>
-            <strong className="num" style={{ color: 'var(--ok, #059669)' }}>
+          <article
+            className="card"
+            style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '12px 14px' }}
+          >
+            <span style={{ fontSize: 12, color: 'var(--cp-ink-3)' }}>回收料头残值抵扣</span>
+            <strong
+              className="num"
+              style={{ fontSize: 19, lineHeight: 1.25, color: 'var(--ok, #059669)' }}
+            >
               {summary ? `-${fmtN(summary.recoveredResidualValue, 2)} ${currency}` : '—'}
             </strong>
             <span className="muted num" style={{ fontSize: 11 }}>
               {summary ? `可复用回收 ${fmtN(summary.recoveredRemnantAreaM2, 2)} m²` : '—'}
             </span>
           </article>
-          <article className="card">
-            <span>跨订单缺料预警型号</span>
+          <article
+            className="card"
+            style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '12px 14px' }}
+          >
+            <span style={{ fontSize: 12, color: 'var(--cp-ink-3)' }}>跨订单缺料预警型号</span>
             <strong
               className="num"
               style={{
+                fontSize: 19,
+                lineHeight: 1.25,
                 color: (procData?.shortageModels || 0) > 0 ? 'var(--err, #dc2626)' : 'var(--ok, #059669)'
               }}
             >
@@ -481,8 +514,8 @@ export const CostAnalyticsPage: React.FC = () => {
                 {currency}/m² · 残值系数 {costData?.remnantResidualFactor ?? residualFactor}）
               </span>
             </div>
-            <div className="mp-table-scroll">
-              <table className="t">
+            <div className="mp-table-scroll" style={{ overflowX: 'auto' }}>
+              <table className="t" style={{ minWidth: 980 }}>
                 <thead>
                   <tr>
                     <th>{costDimension === 'task' ? '任务编号 / 名称' : '品号型号'}</th>
@@ -601,8 +634,8 @@ export const CostAnalyticsPage: React.FC = () => {
                   {procData?.defaultRollLengthM ?? defaultRollLengthM} m
                 </span>
               </div>
-              <div className="mp-table-scroll">
-                <table className="t">
+              <div className="mp-table-scroll" style={{ overflowX: 'auto' }}>
+                <table className="t" style={{ minWidth: 940 }}>
                   <thead>
                     <tr>
                       <th>品号型号</th>

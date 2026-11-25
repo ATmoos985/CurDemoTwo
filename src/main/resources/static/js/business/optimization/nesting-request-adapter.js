@@ -177,6 +177,10 @@ export function buildSafeNestingRequest2D({
         return nextAutoId++;
     };
 
+    // 策略仅可在需求自身允许的方向约束范围内收敛（如 lockZeroGrain 强制 0° 经向），绝不越权放开禁用旋转/半转的裁片
+    const lockZeroGrain = Boolean(
+        strategy.lockZeroGrain || strategy.id === 'PS_FIXED' || strategy.id === 'DN_FIXED'
+    );
     const origParts = validRaw.map((d, idx) => {
         const id = allocateId(d.id ?? idx + 1);
         const w01 = Math.max(0.1, quantize01(d.width));
@@ -186,14 +190,14 @@ export function buildSafeNestingRequest2D({
                 ? normalizePolygonShape01(d.shape, w01, l01)
                 : normalizePolygonShape01(null, w01, l01))
             : rectangle(w01, l01);
+        const allowRot90 = !lockZeroGrain && Boolean(d.allowRotation);
+        const allowHalfTurn180 = mode === 'CONTOUR' && !lockZeroGrain && Boolean(d.allowHalfTurn);
         return {
             id,
             name: String(d.name || `裁片 #${id}`),
             quantity: Math.max(1, Math.floor(Number(d.quantity))),
-            allowRotation: mode === 'GUILLOTINE'
-                ? Boolean(strategy.forceRotateRect || d.allowRotation)
-                : Boolean(d.allowRotation),
-            ...(mode === 'CONTOUR' && (strategy.halfTurn || d.allowHalfTurn) ? {allowHalfTurn: true} : {}),
+            allowRotation: allowRot90,
+            ...(allowHalfTurn180 ? {allowHalfTurn: true} : {}),
             shape: baseShape
         };
     });

@@ -3532,6 +3532,97 @@
         }
       }
     },
+    "/api/v2/quality/rolls/{rollId}/inspect-complete": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "rollId",
+          "required": true,
+          "description": "母卷编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "完成母卷来料检验并放行或判不合格（PASSED / FAILED，写入不可变流水）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": ["PASSED", "FAILED"],
+                    "description": "检验结论，默认 PASSED"
+                  },
+                  "inspector": {
+                    "type": "string",
+                    "description": "检验员姓名（已开启认证时自动取当前登录身份）"
+                  },
+                  "remarks": {
+                    "type": "string",
+                    "description": "检验备注"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "母卷检验状态更新成功"
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前角色无权访问（仅 ADMIN / INSPECTOR 允许）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "母卷状态冲突（已报废或在制锁定）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/quality/remnants/{id}/release": {
       "parameters": [
         {

@@ -825,6 +825,23 @@ input.ux-switch:focus-visible {
   box-shadow: var(--cp-shadow-card);
 }
 
+.cards > .card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 14px;
+}
+
+.cards > .card > span:first-child {
+  font-size: 12px;
+  color: var(--cp-ink-3);
+}
+
+.cards > .card > strong {
+  font-size: 18px;
+  line-height: 1.25;
+}
+
 table.t {
   border: 0;
   border-radius: var(--cp-radius-card);

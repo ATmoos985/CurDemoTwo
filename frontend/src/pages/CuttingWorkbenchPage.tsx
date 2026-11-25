@@ -163,9 +163,11 @@ export const CuttingWorkbenchPage: React.FC<{
   const [selectedPieceIndex, setSelectedPieceIndex] = useState<number | null>(null);
   const [selectedLeftoverId, setSelectedLeftoverId] = useState<string | null>(null);
 
-  // 左右侧栏折叠状态（1024px 工业平板可一键折叠腾出最大画布视野）
+  // 左右侧栏折叠状态（1024px 工业平板默认自动折叠右侧方案栏，腾出充足画布视野）
   const [leftCollapsed, setLeftCollapsed] = useState<boolean>(false);
-  const [rightCollapsed, setRightCollapsed] = useState<boolean>(false);
+  const [rightCollapsed, setRightCollapsed] = useState<boolean>(
+    () => typeof window !== 'undefined' && window.innerWidth <= 1120
+  );
 
   // 按 taskId 隔离的本机草稿恢复提示状态
   const [recoverableDraft, setRecoverableDraft] = useState<WorkbenchDraftPayload | null>(null);
@@ -561,6 +563,92 @@ export const CuttingWorkbenchPage: React.FC<{
     });
   }, [activeDemands2D, activeScheme2D]);
 
+  // 当前载入需求族的同缸/色号防色差实时校验（不等到选定落库才报 400）
+  const activePoolFamily = useMemo(() => {
+    const curId = is2D ? loadedTaskId : slitLoadedTaskId;
+    if (!curId) return null;
+    return poolFamilies.find((f) => f.id === curId) || null;
+  }, [is2D, loadedTaskId, slitLoadedTaskId, poolFamilies]);
+
+  const batchGuardWarning = useMemo(() => {
+    if (!activePoolFamily) return null;
+    const reqBatch = String(activePoolFamily.requiredBatchNo || '').trim();
+    const reqColor = String(activePoolFamily.requiredColor || '').trim();
+    const strict = Boolean(activePoolFamily.strictBatchMatch);
+    if (!reqBatch && !reqColor && !strict) return null;
+
+    let matLabel = '';
+    let matBatch = '';
+    let matColor = '';
+    if (is2D) {
+      if (canvasMode === 'STOCK_ROLL' && currentRoll2D) {
+        matLabel = `母卷 ${currentRoll2D.rollId}`;
+        matBatch = String(currentRoll2D.batchNo || '').trim();
+        matColor = String(currentRoll2D.color || '').trim();
+      } else if (canvasMode === 'REMNANT' && currentRemnant2D) {
+        matLabel = `料头 ${currentRemnant2D.id}`;
+        matBatch = String(currentRemnant2D.batchNo || currentRemnant2D.materialBatch || '').trim();
+        matColor = String(currentRemnant2D.color || '').trim();
+      } else {
+        return null;
+      }
+    } else if (slitMaterialMode === 'STOCK_ROLL' && currentRoll1D) {
+      matLabel = `母卷 ${currentRoll1D.rollId}`;
+      matBatch = String(currentRoll1D.batchNo || '').trim();
+      matColor = String(currentRoll1D.color || '').trim();
+    } else {
+      return null;
+    }
+
+    const matchingRoll = passedRolls.find((r) => {
+      if (reqBatch && String(r.batchNo || '').trim().toLowerCase() !== reqBatch.toLowerCase()) {
+        return false;
+      }
+      if (reqColor && r.color && String(r.color).trim().toLowerCase() !== reqColor.toLowerCase()) {
+        return false;
+      }
+      if (strict && !String(r.batchNo || '').trim()) return false;
+      return true;
+    });
+
+    if (reqBatch && (!matBatch || matBatch.toLowerCase() !== reqBatch.toLowerCase())) {
+      return {
+        blocking: strict,
+        title: strict ? '防色差同缸强约束拦截' : '跨缸号预警提示',
+        detail: `需求族「${activePoolFamily.name}」指定缸号 ${reqBatch}，当前所选 ${matLabel} 缸号为「${
+          matBatch || '未登记'
+        }」${strict ? '，已开启同单同缸强约束，禁止直接排版落库。' : '，请注意核对色差风险。'}`,
+        suggestedRoll: matchingRoll || null
+      };
+    }
+    if (strict && !matBatch) {
+      return {
+        blocking: true,
+        title: '防色差同缸强约束拦截',
+        detail: `需求族「${activePoolFamily.name}」已开启同单同缸强约束，但当前所选 ${matLabel} 未登记缸号，无法通过同缸校验。`,
+        suggestedRoll: matchingRoll || null
+      };
+    }
+    if (reqColor && matColor && matColor.toLowerCase() !== reqColor.toLowerCase()) {
+      return {
+        blocking: strict,
+        title: strict ? '色号不匹配拦截' : '色号差异预警',
+        detail: `需求族「${activePoolFamily.name}」指定色号「${reqColor}」，当前所选 ${matLabel} 色号为「${matColor}」。`,
+        suggestedRoll: matchingRoll || null
+      };
+    }
+    return null;
+  }, [
+    activePoolFamily,
+    is2D,
+    canvasMode,
+    currentRoll2D,
+    currentRemnant2D,
+    slitMaterialMode,
+    currentRoll1D,
+    passedRolls
+  ]);
+
   const {
     runningSolve,
     solveElapsedMs,
@@ -615,6 +703,7 @@ export const CuttingWorkbenchPage: React.FC<{
     setSlitSchemes,
     markSlitSchemeDispatched,
     settings,
+    batchGuardWarning,
     reloadReferenceData,
     syncDemandFamilyProgress,
     syncMergedDemandFamiliesProgress
@@ -883,6 +972,60 @@ export const CuttingWorkbenchPage: React.FC<{
         setSlitSpec={setSlitSpec}
         onRequestChangeMaterial1D={handleRequestChangeMaterial1D}
       />
+
+      {/* 同缸/色号防色差前置预警与拦截横幅 */}
+      {batchGuardWarning && (
+        <div
+          role="alert"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 8,
+            padding: '7px 14px',
+            fontSize: 12.5,
+            borderBottom: `1px solid ${
+              batchGuardWarning.blocking ? 'var(--err, #dc2626)' : 'var(--warn, #d97706)'
+            }`,
+            background: batchGuardWarning.blocking
+              ? 'var(--err-bg, rgba(220, 38, 38, 0.12))'
+              : 'var(--warn-bg, rgba(245, 158, 11, 0.14))',
+            color: batchGuardWarning.blocking ? 'var(--err, #b91c1c)' : 'var(--warn, #92400e)'
+          }}
+        >
+          <strong>{batchGuardWarning.title}：</strong>
+          <span>{batchGuardWarning.detail}</span>
+          {batchGuardWarning.suggestedRoll && (
+            <button
+              type="button"
+              className="btn sm pri"
+              style={{ marginLeft: 'auto' }}
+              onClick={() => {
+                const sr = batchGuardWarning.suggestedRoll;
+                if (is2D) {
+                  setCanvasSpec({
+                    canvasMode: 'STOCK_ROLL',
+                    selectedRollId: sr.rollId,
+                    canvasWidthMm: sr.width,
+                    materialModel2D: sr.rollModel,
+                    windowStartY2D: null
+                  });
+                } else {
+                  setSlitSpec({
+                    slitMaterialMode: 'STOCK_ROLL',
+                    selectedRollId: sr.rollId,
+                    slitMotherWidthMm: sr.width,
+                    slitMaterialModel: sr.rollModel
+                  });
+                }
+                toast(`已切换至同缸匹配母卷 ${sr.rollId}（缸号 ${sr.batchNo}）`);
+              }}
+            >
+              一键切换至同缸卷 {batchGuardWarning.suggestedRoll.rollId}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* 按 taskId 隔离的本机草稿自动恢复提示条 */}
       {recoverableDraft && (

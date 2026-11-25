@@ -422,10 +422,14 @@ public class ProductionCostAndProcurementService {
                 }
             }
 
-            // C. 供给侧：汇总在库净可用母卷面积与缸号/门幅分布
+            // C. 供给侧：汇总在库净可用母卷面积与缸号/门幅分布（同时记录所有非报废卷门幅供缺料推荐参考）
+            Map<String, List<Double>> knownRollWidthsByModel = new HashMap<>();
             for (MotherRollInfo roll : allRolls) {
                 String model = blankToNull(roll.getRollModel());
                 if (model == null) continue;
+                if (!"SCRAPPED".equalsIgnoreCase(roll.getInspectionStatus()) && roll.getWidth() > 0) {
+                    knownRollWidthsByModel.computeIfAbsent(model, k -> new ArrayList<>()).add(roll.getWidth());
+                }
                 if (!"PASSED".equalsIgnoreCase(roll.getInspectionStatus())) continue;
                 if (lockedRollsByExec.contains(roll.getRollId())) continue;
                 double netLenMm = Math.max(0.0, roll.getCurrentRemainingLength() - rollOccupiedByScheme.getOrDefault(roll.getRollId(), 0.0));
@@ -481,7 +485,7 @@ public class ProductionCostAndProcurementService {
                     shortageModels++;
                 }
 
-                double recWidthMm = resolveRecommendedWidthMm(b);
+                double recWidthMm = resolveRecommendedWidthMm(b, knownRollWidthsByModel.getOrDefault(b.materialModel, List.of()));
                 double recLengthM = shortage > 1e-6 ? shortage / (recWidthMm / 1000.0) : 0.0;
                 int recRolls = shortage > 1e-6 ? Math.max(1, (int) Math.ceil(recLengthM / defaultRollLengthM)) : 0;
 
@@ -573,14 +577,15 @@ public class ProductionCostAndProcurementService {
         return weights;
     }
 
-    private static double resolveRecommendedWidthMm(ModelBucket b) {
+    private static double resolveRecommendedWidthMm(ModelBucket b, List<Double> knownRollWidthsMm) {
         if (b.suggestedRollWidthMm > 0) {
             return Math.max(b.suggestedRollWidthMm, roundUp100(b.maxRequiredWidthMm));
         }
-        // 在库门幅中寻找能满足 maxRequiredWidthMm 的最主流门幅
-        if (!b.stockWidthsMm.isEmpty()) {
+        // 优先从在库可用门幅，其次从非报废历史/待检卷门幅中寻找满足 maxRequiredWidthMm 的主流门幅
+        List<Double> candidateWidths = !b.stockWidthsMm.isEmpty() ? b.stockWidthsMm : knownRollWidthsMm;
+        if (candidateWidths != null && !candidateWidths.isEmpty()) {
             Map<Long, Integer> freq = new LinkedHashMap<>();
-            for (double w : b.stockWidthsMm) {
+            for (double w : candidateWidths) {
                 if (w + 0.001 >= b.maxRequiredWidthMm) {
                     freq.merge(Math.round(w * 10.0), 1, Integer::sum);
                 }
@@ -593,7 +598,7 @@ public class ProductionCostAndProcurementService {
                         .orElse(0L);
                 if (bestKey > 0) return bestKey / 10.0;
             }
-            double maxStockW = b.stockWidthsMm.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
+            double maxStockW = candidateWidths.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
             if (maxStockW >= b.maxRequiredWidthMm) return maxStockW;
         }
         if (b.maxRequiredWidthMm > 0) {

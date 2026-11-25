@@ -2008,8 +2008,8 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
     syncHandleBar();
     baseScaleNodesRef.current.push(syncHandleBar);
 
-    // 1.3 母卷纸面（支持不规则多边形料头）
-    const sheetFill = darkTheme ? '#e2e8f0' : '#ffffff';
+    // 1.3 母卷纸面（支持不规则多边形料头；暗色模式采用高对比工业深岩灰避免刺眼亮白块）
+    const sheetFill = darkTheme ? '#1e293b' : '#ffffff';
     const sheetStroke = darkTheme ? '#475569' : '#cbd5e1';
     const rollSheet =
       rollShape?.type === 'POLYGON' && rollShape.vertices && rollShape.vertices.length >= 3

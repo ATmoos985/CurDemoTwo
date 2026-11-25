@@ -21,6 +21,7 @@ export class OptimizationSession {
     this.onCancellationError = onCancellationError;
     this.eventSourceFactory = options.eventSourceFactory ?? null;
     this.enableSse = options.enableSse !== false;
+    this.sseTransport = options.sseTransport ?? 'auto';
   }
 
   async read(path, options = {}) {
@@ -84,19 +85,143 @@ export class OptimizationSession {
     if (typeof this.eventSourceFactory === 'function') {
       return this.eventSourceFactory(url);
     }
-    if (typeof globalThis !== 'undefined' && typeof globalThis.EventSource === 'function') {
-      return new globalThis.EventSource(url);
-    }
     return null;
   }
 
+  shouldUseFetchSse() {
+    if (!this.enableSse) return false;
+    if (this.sseTransport === 'fetch') return true;
+    if (this.sseTransport === 'eventsource') return false;
+    return (
+      typeof globalThis !== 'undefined' &&
+      (typeof globalThis.EventSource === 'function' || typeof globalThis.window !== 'undefined')
+    );
+  }
+
   /**
-   * 尝试通过 SSE 订阅作业实时进度；返回：
-   * - `{ done: true, lastEvent }`：收到终态事件，外层可拉取权威作业对象读取 resultRef；
-   * - `{ done: false, fallback: true }`：SSE 不可用或出错，由外层无缝切换轮询。
+   * 尝试通过 SSE 订阅作业实时进度：
+   * - 若注入了自定义 eventSourceFactory（如单测 mock），沿用 EventSource 协议；
+   * - 生产浏览器环境优先通过 fetch 流式读取 text/event-stream，天然复用全局鉴权拦截器透传 Authorization: Bearer，
+   *   避免企业认证模式下原生 EventSource 吃 401，且取消时通过 AbortController 静默收口。
    */
   waitViaSse(job, token, onProgress) {
     const sseUrl = `/api/v2/optimization-jobs/${encodeURIComponent(job.id)}/events`;
+    if (typeof this.eventSourceFactory === 'function') {
+      return this.waitViaEventSource(sseUrl, job, token, onProgress);
+    }
+    if (this.shouldUseFetchSse()) {
+      return this.waitViaFetchSse(sseUrl, job, token, onProgress);
+    }
+    return Promise.resolve({ done: false, fallback: true });
+  }
+
+  async waitViaFetchSse(sseUrl, job, token, onProgress) {
+    const sseAbort = new AbortController();
+    let closed = false;
+    const closeStream = () => {
+      if (closed) return;
+      closed = true;
+      try {
+        sseAbort.abort();
+      } catch {
+        // 忽略重复中止异常
+      }
+    };
+    token.closeSse = closeStream;
+
+    const mergeAndNotify = (eventName, rawData) => {
+      let payload = null;
+      try {
+        payload = JSON.parse(rawData);
+      } catch {
+        return false;
+      }
+      if (!payload || typeof payload !== 'object') return false;
+      const nextState = payload.status || payload.state || job.state;
+      const nextJob = {
+        ...job,
+        state: nextState,
+        status: nextState,
+        phase: payload.phase ?? job.phase,
+        elapsedMs: payload.elapsedMs ?? job.elapsedMs,
+        transport: 'sse'
+      };
+      Object.assign(job, nextJob);
+      const isDoneEvent = eventName === 'done' || TERMINAL_STATES.includes(nextState);
+      if (isDoneEvent) {
+        return { done: true, lastEvent: payload };
+      }
+      if (eventName === 'progress' || payload.status || payload.state || payload.phase) {
+        onProgress({ ...job });
+      }
+      return false;
+    };
+
+    let reader = null;
+    try {
+      const response = await this.fetch(sseUrl, {
+        method: 'GET',
+        headers: { Accept: 'text/event-stream' },
+        cache: 'no-store',
+        signal: sseAbort.signal
+      });
+      if (token.cancelled || closed) return { done: false, aborted: true };
+      if (!response || !response.ok || !response.body || typeof response.body.getReader !== 'function') {
+        return { done: false, fallback: true };
+      }
+
+      reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (token.cancelled || closed) return { done: false, aborted: true };
+        if (value) {
+          buffer += decoder.decode(value, { stream: !done });
+          const frames = buffer.split(/\r?\n\r?\n/);
+          buffer = frames.pop() ?? '';
+          for (const frame of frames) {
+            if (!frame.trim()) continue;
+            let eventName = 'message';
+            const dataLines = [];
+            for (const line of frame.split(/\r?\n/)) {
+              if (!line || line.startsWith(':')) continue;
+              if (line.startsWith('event:')) {
+                eventName = line.slice(6).trim() || 'message';
+              } else if (line.startsWith('data:')) {
+                dataLines.push(line.slice(5).trimStart());
+              }
+            }
+            if (!dataLines.length) continue;
+            const terminalHit = mergeAndNotify(eventName, dataLines.join('\n'));
+            if (terminalHit) {
+              return terminalHit;
+            }
+          }
+        }
+        if (done) {
+          if (TERMINAL_STATES.includes(job.state)) {
+            return { done: true, lastEvent: null };
+          }
+          return { done: false, fallback: true };
+        }
+      }
+    } catch {
+      if (token.cancelled || closed) return { done: false, aborted: true };
+      return { done: false, fallback: true };
+    } finally {
+      if (token.closeSse === closeStream) token.closeSse = null;
+      try {
+        await reader?.cancel?.();
+      } catch {
+        // 忽略关闭异常
+      }
+      closeStream();
+    }
+  }
+
+  waitViaEventSource(sseUrl, job, token, onProgress) {
     let es = null;
     try {
       es = this.resolveEventSource(sseUrl);

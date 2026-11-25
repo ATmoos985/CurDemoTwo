@@ -253,3 +253,125 @@ test('SSE 监听期间取消作业会立即关闭 EventSource 并通知服务端
   assert.equal(es.closed, true);
   assert.ok(calls.includes('/api/v2/optimization-jobs/sse-cancel/cancellations'));
 });
+
+function createSseBody(chunks) {
+  const encoder = new TextEncoder();
+  let idx = 0;
+  return {
+    getReader() {
+      return {
+        async read() {
+          if (idx >= chunks.length) return { value: undefined, done: true };
+          const value = encoder.encode(chunks[idx++]);
+          return { value, done: false };
+        },
+        async cancel() {
+          idx = chunks.length;
+        }
+      };
+    }
+  };
+}
+
+test('fetch 流式 SSE 自动复用 fetch 鉴权上下文接收 progress/done 并避免原生 EventSource 401', async () => {
+  const progressEvents = [];
+  const headersLog = [];
+  const client = new OptimizationSession(
+    async (path, options = {}) => {
+      if (path.endsWith('/optimization-jobs')) {
+        return response({ id: 'fetch-sse-1', state: 'QUEUED' });
+      }
+      if (path === '/api/v2/optimization-jobs/fetch-sse-1/events') {
+        headersLog.push(options.headers);
+        return {
+          ok: true,
+          status: 200,
+          body: createSseBody([
+            ': keepalive\n\n',
+            'event: progress\ndata: {"jobId":"fetch-sse-1","status":"RUNNING","phase":"SOLVING","elapsedMs":180}\n\n',
+            'event: done\ndata: {"jobId":"fetch-sse-1","status":"SUCCEEDED","phase":"COMPLETED","elapsedMs":420}\n\n'
+          ])
+        };
+      }
+      if (path === '/api/v2/optimization-jobs/fetch-sse-1') {
+        return response({
+          id: 'fetch-sse-1',
+          state: 'SUCCEEDED',
+          phase: 'COMPLETED',
+          resultRef: '/api/v2/optimization-results/fetch-sse-1'
+        });
+      }
+      return response({ layout: { placements: [{ id: 42 }] } });
+    },
+    10,
+    () => {},
+    { sseTransport: 'fetch' }
+  );
+
+  const solved = await client.solve(
+    {},
+    { onProgress: (j) => progressEvents.push({ state: j.state, phase: j.phase, transport: j.transport }) }
+  );
+  assert.equal(headersLog.length, 1);
+  assert.equal(headersLog[0].Accept, 'text/event-stream');
+  assert.ok(progressEvents.some((e) => e.phase === 'SOLVING' && e.transport === 'sse'));
+  assert.equal(solved.job.state, 'SUCCEEDED');
+  assert.equal(solved.result.layout.placements[0].id, 42);
+});
+
+test('fetch 流式 SSE 遇到非 200（如 401）时静默降级至轮询不报错', async () => {
+  let polls = 0;
+  const client = new OptimizationSession(
+    async (path) => {
+      if (path.endsWith('/optimization-jobs')) return response({ id: 'fetch-sse-401', state: 'QUEUED' });
+      if (path.endsWith('/events')) return { ok: false, status: 401, body: null };
+      if (path === '/api/v2/optimization-jobs/fetch-sse-401') {
+        polls += 1;
+        return response({
+          id: 'fetch-sse-401',
+          state: 'SUCCEEDED',
+          resultRef: '/api/v2/optimization-results/fetch-sse-401'
+        });
+      }
+      return response({ layout: { placements: [{ id: 7 }] } });
+    },
+    0,
+    () => {},
+    { sseTransport: 'fetch' }
+  );
+
+  const solved = await client.solve({});
+  assert.equal(polls, 1);
+  assert.equal(solved.result.layout.placements[0].id, 7);
+});
+
+test('fetch 流式 SSE 取消时会触发 AbortSignal 优雅中止并向服务端发取消请求', async () => {
+  let aborted = false;
+  const calls = [];
+  const client = new OptimizationSession(
+    async (path, options = {}) => {
+      calls.push(path);
+      if (path.endsWith('/optimization-jobs')) return response({ id: 'fetch-sse-cancel', state: 'RUNNING' });
+      if (path.endsWith('/events')) {
+        return new Promise((_, reject) => {
+          options.signal?.addEventListener('abort', () => {
+            aborted = true;
+            reject(new DOMException('aborted', 'AbortError'));
+          });
+        });
+      }
+      return response({ id: 'fetch-sse-cancel', state: 'CANCEL_REQUESTED' });
+    },
+    50,
+    () => {},
+    { sseTransport: 'fetch' }
+  );
+
+  const runPromise = client.solve({});
+  const rejected = assert.rejects(runPromise, { name: 'AbortError' });
+  await new Promise((r) => setTimeout(r, 10));
+  await client.cancel();
+  await rejected;
+  assert.equal(aborted, true);
+  assert.ok(calls.includes('/api/v2/optimization-jobs/fetch-sse-cancel/cancellations'));
+});

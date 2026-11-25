@@ -436,6 +436,9 @@ export const DocumentsPage: React.FC = () => {
   const [receiptRolls, setReceiptRolls] = useState<ReceiptRollDraft[]>(() => [
     createEmptyReceiptRoll()
   ]);
+  const [lastReceiptRolls, setLastReceiptRolls] = useState<
+    { rollId: string; materialModel: string; inspectionStatus: string }[]
+  >([]);
 
   const [issueModalOpen, setIssueModalOpen] = useState(false);
   const [issueDirection, setIssueDirection] = useState<'ISSUE' | 'RETURN'>('ISSUE');
@@ -468,12 +471,20 @@ export const DocumentsPage: React.FC = () => {
       const rArr = asList(rollList);
       setRolls(rArr);
       if (rArr.length && !issueRollId) {
-        const firstActive = rArr.find(
+        const firstPassed = rArr.find(
           (r: any) =>
-            r.inspectionStatus !== 'SCRAPPED' &&
+            r.inspectionStatus === 'PASSED' &&
             r.status !== 'SCRAPPED' &&
             (r.currentRemainingLength ?? r.totalLength) > 0
         );
+        const firstActive =
+          firstPassed ||
+          rArr.find(
+            (r: any) =>
+              r.inspectionStatus !== 'SCRAPPED' &&
+              r.status !== 'SCRAPPED' &&
+              (r.currentRemainingLength ?? r.totalLength) > 0
+          );
         if (firstActive) setIssueRollId(firstActive.rollId);
       }
       setItems(led);
@@ -553,7 +564,15 @@ export const DocumentsPage: React.FC = () => {
         remarks: receiptRemarks.trim() || undefined,
         rolls: validRolls
       });
-      const createdCount = Array.isArray(res?.createdRolls) ? res.createdRolls.length : validRolls.length;
+      const createdList = Array.isArray(res?.createdRolls) ? res.createdRolls : [];
+      const createdCount = createdList.length || validRolls.length;
+      setLastReceiptRolls(
+        createdList.map((r: any) => ({
+          rollId: String(r.rollId || r.id || ''),
+          materialModel: String(r.rollModel || r.materialModel || ''),
+          inspectionStatus: String(r.inspectionStatus || 'PENDING')
+        }))
+      );
       toast(`采购入库单已过账！原子创建 ${createdCount} 卷母卷并写入不可变流水`);
       setReceiptModalOpen(false);
       setSupplierName('');
@@ -1382,6 +1401,44 @@ export const DocumentsPage: React.FC = () => {
                 </button>
               </div>
             </div>
+            {lastReceiptRolls.length > 0 && (
+              <div
+                role="status"
+                style={{
+                  margin: '10px 14px 0',
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  border: '1px solid var(--ok, #059669)',
+                  background: 'var(--ok-bg, rgba(16, 185, 129, 0.1))',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  gap: 8
+                }}
+              >
+                <strong style={{ fontSize: 12.5 }}>
+                  采购入库已过账（共 {lastReceiptRolls.length} 卷）
+                </strong>
+                {lastReceiptRolls.map((cr) => (
+                  <a
+                    key={cr.rollId}
+                    className={`btn sm ${cr.inspectionStatus !== 'PASSED' ? 'pri' : ''}`}
+                    href={`#/inspection/${encodeURIComponent(cr.rollId)}`}
+                  >
+                    {cr.rollId}
+                    {cr.inspectionStatus !== 'PASSED' ? ' · 去跑布验疵放行 →' : ' · 查看验布 →'}
+                  </a>
+                ))}
+                <button
+                  type="button"
+                  className="mp-ghost-btn"
+                  style={{ marginLeft: 'auto' }}
+                  onClick={() => setLastReceiptRolls([])}
+                >
+                  关闭提示
+                </button>
+              </div>
+            )}
             {filteredReceipts.length > 0 ? (
               <div className="mp-table-scroll">
                 <table className="t">
@@ -1427,8 +1484,31 @@ export const DocumentsPage: React.FC = () => {
                             <td className="num">{r.deliveryNoteNo || '—'}</td>
                             <td className="r num">{rls.length}</td>
                             <td className="mp-doc-detail-cell num" title={detail}>
-                              {detail || '—'}
-                              {r.remarks ? ` · 备注：${r.remarks}` : ''}
+                              <div>
+                                {detail || '—'}
+                                {r.remarks ? ` · 备注：${r.remarks}` : ''}
+                              </div>
+                              {rls.length > 0 && (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                                  {rls.slice(0, 6).map((x: any, li: number) => {
+                                    const rid = String(x.rollId || x.id || '');
+                                    if (!rid) return null;
+                                    const liveRoll = rolls.find((lr) => lr.rollId === rid);
+                                    const pendingQc =
+                                      liveRoll && liveRoll.inspectionStatus !== 'PASSED' && liveRoll.inspectionStatus !== 'SCRAPPED';
+                                    return (
+                                      <a
+                                        key={`${rid}-${li}`}
+                                        className={`btn sm ${pendingQc ? 'soft-accent' : ''}`}
+                                        style={{ height: 22, padding: '0 7px', fontSize: 11 }}
+                                        href={`#/inspection/${encodeURIComponent(rid)}`}
+                                      >
+                                        {rid} {pendingQc ? '待检·去验布 →' : '去验布 →'}
+                                      </a>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </td>
                             <td>{r.operator || '—'}</td>
                             <td className="r num">
@@ -1708,7 +1788,7 @@ export const DocumentsPage: React.FC = () => {
         onClose={() => {
           if (!submitting) setReceiptModalOpen(false);
         }}
-        maxWidth={920}
+        maxWidth={1120}
       >
         <form onSubmit={handleSubmitReceipt}>
           <div
@@ -1794,8 +1874,8 @@ export const DocumentsPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="mp-table-scroll" style={{ maxHeight: 300, marginBottom: 12 }}>
-            <table className="t">
+          <div className="mp-table-scroll" style={{ maxHeight: 320, overflowX: 'auto', marginBottom: 12 }}>
+            <table className="t" style={{ minWidth: 1020 }}>
               <thead>
                 <tr>
                   <th style={{ minWidth: 112 }}>卷号(选填)</th>
@@ -2039,6 +2119,18 @@ export const DocumentsPage: React.FC = () => {
               value={issueDirection}
               onChange={(next) => {
                 setIssueDirection(next);
+                if (next === 'ISSUE') {
+                  const cur = rolls.find((r) => r.rollId === issueRollId);
+                  if (cur && cur.inspectionStatus !== 'PASSED') {
+                    const fallback = rolls.find(
+                      (r) =>
+                        r.inspectionStatus === 'PASSED' &&
+                        r.status !== 'SCRAPPED' &&
+                        (r.currentRemainingLength ?? r.totalLength) > 0
+                    );
+                    setIssueRollId(fallback ? fallback.rollId : '');
+                  }
+                }
                 if (next === 'RETURN' && issueTargetLoc.startsWith('车间:')) {
                   setIssueTargetLoc('原料库位 R-01');
                 }
@@ -2049,24 +2141,38 @@ export const DocumentsPage: React.FC = () => {
           </div>
           <div className="form" style={{ gridTemplateColumns: '96px 1fr', padding: '4px 0 14px' }}>
             <label htmlFor="iss-roll">选择母卷</label>
-            <select
-              id="iss-roll"
-              className="field num"
-              required
-              value={issueRollId}
-              onChange={(e) => setIssueRollId(e.target.value)}
-            >
-              <option value="">请选择在库母卷…</option>
-              {rolls
-                .filter((r) => r.inspectionStatus !== 'SCRAPPED' && r.status !== 'SCRAPPED')
-                .map((r) => (
-                  <option key={r.rollId} value={r.rollId}>
-                    {r.rollId} · {r.rollModel}
-                    {r.batchNo ? ` [缸:${r.batchNo}]` : ''} · 余
-                    {fmtM(r.currentRemainingLength ?? r.totalLength)}m · {r.storageLocation || '未分配库位'}
-                  </option>
-                ))}
-            </select>
+            <div>
+              <select
+                id="iss-roll"
+                className="field num"
+                style={{ width: '100%' }}
+                required
+                value={issueRollId}
+                onChange={(e) => setIssueRollId(e.target.value)}
+              >
+                <option value="">请选择在库母卷…</option>
+                {rolls
+                  .filter((r) => r.inspectionStatus !== 'SCRAPPED' && r.status !== 'SCRAPPED')
+                  .map((r) => {
+                    const notPassed = r.inspectionStatus !== 'PASSED';
+                    const disabledOption = issueDirection === 'ISSUE' && notPassed;
+                    return (
+                      <option key={r.rollId} value={r.rollId} disabled={disabledOption}>
+                        {r.rollId} · {r.rollModel}
+                        {r.batchNo ? ` [缸:${r.batchNo}]` : ''} · 余
+                        {fmtM(r.currentRemainingLength ?? r.totalLength)}m ·{' '}
+                        {r.storageLocation || '未分配库位'}
+                        {disabledOption ? '（未验布放行，禁领）' : ''}
+                      </option>
+                    );
+                  })}
+              </select>
+              {issueDirection === 'ISSUE' && (
+                <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>
+                  仅已通过跑布验疵放行（PASSED）的母卷允许车间领料出库；待检卷请先前往「跑布验疵」放行。
+                </div>
+              )}
+            </div>
             <label htmlFor="iss-machine">机台编号</label>
             <input
               id="iss-machine"

@@ -354,7 +354,298 @@
   border-color: var(--cp-divider);
 }
 
+:root[data-theme="dark"] .t tr:hover td {
+  background: rgba(56, 189, 248, 0.08);
+}
+
+:root[data-theme="dark"] .t tr.sel td {
+  background: rgba(56, 189, 248, 0.16);
+}
+
 :root[data-theme="dark"] .dc-dropzone {
   background: linear-gradient(180deg, rgba(56, 189, 248, 0.08) 0%, rgba(17, 27, 44, 0.72) 100%);
   border-color: rgba(56, 189, 248, 0.38);
+}
+
+/* 通用分段控件、幽灵按钮、代码标签与卡片暗色覆盖（消除亮白底隐形字） */
+:root[data-theme="dark"] .mp-seg {
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+:root[data-theme="dark"] .mp-seg-btn {
+  background: transparent;
+  color: #94a3b8;
+}
+
+:root[data-theme="dark"] .mp-seg-btn:hover:not(.on) {
+  background: rgba(148, 163, 184, 0.12);
+  color: #f8fafc;
+}
+
+:root[data-theme="dark"] .mp-seg-btn.on {
+  background: #1e293b;
+  color: #f8fafc;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+:root[data-theme="dark"] .mp-seg-count {
+  color: #94a3b8;
+}
+
+:root[data-theme="dark"] .mp-seg-btn.on .mp-seg-count {
+  color: #cbd5e1;
+}
+
+:root[data-theme="dark"] .btn.ghost,
+:root[data-theme="dark"] .mp-ghost-btn {
+  background: transparent;
+  color: #cbd5e1;
+}
+
+:root[data-theme="dark"] .btn.ghost:hover,
+:root[data-theme="dark"] .mp-ghost-btn:hover {
+  background: rgba(148, 163, 184, 0.14);
+  color: #ffffff;
+}
+
+:root[data-theme="dark"] .btn.soft-accent {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.36);
+  color: #7dd3fc;
+}
+
+:root[data-theme="dark"] .btn.soft-accent:hover:not([disabled]) {
+  background: rgba(56, 189, 248, 0.24);
+  border-color: rgba(56, 189, 248, 0.55);
+  color: #e0f2fe;
+}
+
+:root[data-theme="dark"] .mp-code-badge,
+:root[data-theme="dark"] .tag.kind {
+  background: #1e293b;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+:root[data-theme="dark"] .mp-search-input {
+  background: #0f172a;
+  color: #f8fafc;
+  border-color: #334155;
+}
+
+:root[data-theme="dark"] .box,
+:root[data-theme="dark"] .card,
+:root[data-theme="dark"] .mp-kpi {
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+  border-color: var(--cp-border);
+}
+
+:root[data-theme="dark"] .pane-h {
+  background: #111b2c;
+  color: var(--cp-ink);
+  border-color: var(--cp-divider);
+}
+
+/* 结果中心（#/results）规格条、复盘工具栏与 1D 分切明细暗色覆盖 */
+:root[data-theme="dark"] .mp-res-spec-grid {
+  background: #111b2c;
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+:root[data-theme="dark"] .mp-res-spec-cell small {
+  color: #94a3b8;
+}
+
+:root[data-theme="dark"] .mp-res-spec-cell b {
+  color: #f8fafc;
+}
+
+:root[data-theme="dark"] .mp-res-spec-cell b.is-ok {
+  color: #34d399;
+}
+
+:root[data-theme="dark"] .mp-res-spec-cell b.is-accent {
+  color: #7dd3fc;
+}
+
+:root[data-theme="dark"] .mp-res-cad-card .ctool {
+  background: #162133;
+  color: #f8fafc;
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+:root[data-theme="dark"] .mp-res-cad-card .ctool button {
+  background: #1e293b;
+  color: #e2e8f0;
+  border-color: #334155;
+}
+
+:root[data-theme="dark"] .mp-res-cad-card .ctool button:hover {
+  background: #27364d;
+  color: #ffffff;
+  border-color: #475569;
+}
+
+:root[data-theme="dark"] .mp-res-cad-viewport {
+  background: #0d1524;
+}
+
+:root[data-theme="dark"] .mp-res-slit-card .slit-pattern-row,
+:root[data-theme="dark"] .slit-pattern-row {
+  background: #111b2c;
+  border-color: rgba(148, 163, 184, 0.22);
+  color: #f8fafc;
+}
+
+/* 母卷与料头台账（#/inventory）右侧预览工具栏与底部说明条暗色覆盖 */
+:root[data-theme="dark"] .mp-inv-preview-card .ctool.inv-preview-toolbar {
+  background: #111b2c;
+  color: #f8fafc;
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+:root[data-theme="dark"] .mp-inv-preview-card .ctool-group {
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+:root[data-theme="dark"] .mp-inv-preview-card .ctool button {
+  color: #cbd5e1;
+}
+
+:root[data-theme="dark"] .mp-inv-preview-card .ctool button:hover {
+  background: #1e293b;
+  color: #ffffff;
+}
+
+:root[data-theme="dark"] .mp-inv-preview-card .inv-toolbar-select {
+  background: #0f172a;
+  color: #f8fafc;
+  border-color: #334155;
+}
+
+:root[data-theme="dark"] .mp-inv-preview-card .roll-spatial-panel {
+  background: #162133;
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+:root[data-theme="dark"] .mp-inv-preview-card .inv-canvas-box {
+  background: #0d1524;
+}
+
+:root[data-theme="dark"] .mp-inv-preview-card .studio-canvas-hint {
+  background: #111b2c;
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+:root[data-theme="dark"] .mp-dark-btn {
+  background: #1e293b;
+  color: #e2e8f0;
+  border-color: #334155;
+}
+
+:root[data-theme="dark"] .mp-dark-btn:hover {
+  background: #27364d;
+  color: #ffffff;
+}
+
+:root[data-theme="dark"] .mp-dark-btn.accent {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.36);
+  color: #7dd3fc;
+}
+
+:root[data-theme="dark"] .mp-inv-remnant-link {
+  background: #1e293b;
+  border-color: #334155;
+  color: #7dd3fc;
+}
+
+:root[data-theme="dark"] .mp-dark-pill-tag.roll {
+  background: rgba(56, 189, 248, 0.18);
+  color: #7dd3fc;
+}
+
+:root[data-theme="dark"] .mp-dark-pill-tag.remnant {
+  background: rgba(16, 185, 129, 0.2);
+  color: #6ee7b7;
+}
+
+/* 台账列表分组头、品号切换条与验布工具栏暗色覆盖 */
+:root[data-theme="dark"] .mp-inv-model-bar,
+:root[data-theme="dark"] .mp-inv-section-head,
+:root[data-theme="dark"] .mp-inv-ledger-card table.t th,
+:root[data-theme="dark"] .mp-doc-card .mp-table-scroll > table.t th {
+  background: #111b2c;
+  color: #f8fafc;
+  border-color: var(--cp-divider);
+}
+
+:root[data-theme="dark"] .mp-inv-model-pill:hover {
+  background: #1e2d45;
+  color: #ffffff;
+}
+
+:root[data-theme="dark"] .mp-insp-canvas-card .ctool {
+  background: #111b2c;
+  color: #f8fafc;
+  border-color: var(--cp-divider);
+}
+
+:root[data-theme="dark"] .mp-insp-canvas-card .ctool .vseg {
+  background: #0f172a;
+  border-color: #334155;
+}
+
+:root[data-theme="dark"] .mp-insp-canvas-card .ctool button {
+  background: #1e293b;
+  color: #e2e8f0;
+  border-color: #334155;
+}
+
+:root[data-theme="dark"] .mp-insp-canvas-card .ctool button:hover:not([disabled]) {
+  background: #27364d;
+  color: #ffffff;
+}
+
+/* 需求创建（#/demands）与需求库（#/demand-library）暗色覆盖 */
+:root[data-theme="dark"] .dc-goal-btn:hover {
+  background: #1e2d45;
+}
+
+:root[data-theme="dark"] .dc-group-bar,
+:root[data-theme="dark"] .dc-result-foot,
+:root[data-theme="dark"] .dc-piece-svg-wrap,
+:root[data-theme="dark"] .dl-expand-head {
+  background: #111b2c;
+  color: #e2e8f0;
+  border-color: var(--cp-divider);
+}
+
+:root[data-theme="dark"] .dc-gallery-box {
+  background-color: #0d1524;
+  background-image:
+    linear-gradient(to right, rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+:root[data-theme="dark"] .dc-cell-in {
+  background: #0f172a;
+  color: #f8fafc;
+  border-color: #334155;
+}
+
+:root[data-theme="dark"] .dc-cell-in:focus {
+  background: #162133;
+  color: #ffffff;
+  border-color: #38bdf8;
+}
+
+:root[data-theme="dark"] .dl-expand-cell {
+  background: #0d1524 !important;
 }

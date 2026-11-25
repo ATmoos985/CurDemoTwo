@@ -17,6 +17,7 @@ import {
   CodeBadge,
   SegmentedOption
 } from '../components/ui/MagpiePrimitives';
+import { ModalDialog } from '../components/ModalDialog';
 
 const DEFECT_TYPES: [string, string][] = [
   ['STAIN', '污渍 / 斑点'],
@@ -83,6 +84,10 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
   const [saving, setSaving] = useState<boolean>(false);
   const [pointerText, setPointerText] = useState<string>('距右 / 距卷头 · mm');
   const [voidReason, setVoidReason] = useState<string>('');
+  const [inspectModalAction, setInspectModalAction] = useState<'PASSED' | 'FAILED' | null>(null);
+  const [inspectorName, setInspectorName] = useState<string>('');
+  const [inspectRemarks, setInspectRemarks] = useState<string>('');
+  const [inspectSubmitting, setInspectSubmitting] = useState<boolean>(false);
 
   // Form inputs for manual entry / editing
   const [fRight, setFRight] = useState<string | number>(0);
@@ -606,6 +611,68 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
     }
   };
 
+  const handleSubmitInspectionDecision = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!roll || !inspectModalAction || inspectSubmitting) return;
+    setRunning(false);
+    const rollId = roll.rollId;
+    setInspectSubmitting(true);
+    try {
+      // 若存在尚未入档的本机疵点草稿，放行/判定前自动原子保存避免遗漏
+      if (pending.length > 0) {
+        const submitted = structuredClone(pending);
+        const saved = await requestJSON(
+          '/api/rolls/' + encodeURIComponent(rollId) + '/inspection-defects',
+          {
+            width: roll.width,
+            totalLength: roll.totalLength,
+            defects: submitted
+          }
+        );
+        let latest: any = null;
+        try {
+          latest = JSON.parse(localStorage.getItem(draftKey(rollId)) || 'null');
+        } catch {}
+        if (latest) {
+          localStorage.setItem(
+            draftKey(rollId),
+            JSON.stringify({
+              ...latest,
+              pending: withoutSubmitted(latest.pending, submitted)
+            })
+          );
+        }
+        window.dispatchEvent(
+          new CustomEvent(SAVED_EVENT, { detail: { saved, submitted } })
+        );
+      }
+      const updated = await requestJSON(
+        `/api/v2/quality/rolls/${encodeURIComponent(rollId)}/inspect-complete`,
+        {
+          status: inspectModalAction,
+          inspector: inspectorName.trim() || '质检员',
+          remarks: inspectRemarks.trim() || undefined
+        }
+      );
+      const refreshed = await requestJSON('/api/rolls');
+      const list = Array.isArray(refreshed) ? refreshed : [];
+      setRolls(list);
+      const latestRoll = list.find((x: any) => x.rollId === rollId) || updated;
+      if (latestRoll) setRoll(latestRoll);
+      setInspectModalAction(null);
+      setInspectRemarks('');
+      toast(
+        inspectModalAction === 'PASSED'
+          ? `母卷 ${rollId} 已质检合格放行 (PASSED)，现可领料并进入搭切排料`
+          : `母卷 ${rollId} 已判定不合格 (FAILED)，将拦截领料与排料`
+      );
+    } catch (err: any) {
+      toast('提交质检判定失败：' + (err.message || '未知错误'), true);
+    } finally {
+      setInspectSubmitting(false);
+    }
+  };
+
   const handleApplyManualDefect = () => {
     if (saving || !roll) return;
     try {
@@ -765,13 +832,66 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
           </a>
           <button
             type="button"
-            className="btn pri"
+            className={`btn ${roll && roll.inspectionStatus === 'PASSED' ? 'pri' : ''}`}
             id="save"
-            disabled={!pending.length || saving}
+            disabled={!pending.length || saving || inspectSubmitting}
             onClick={handleSaveToRoll}
           >
             保存到母卷{pending.length ? ` (${pending.length})` : ''}
           </button>
+          {roll && roll.inspectionStatus !== 'SCRAPPED' && roll.inspectionStatus !== 'PASSED' && (
+            <>
+              <button
+                type="button"
+                className="btn pri"
+                id="inspect-pass-btn"
+                disabled={saving || inspectSubmitting}
+                onClick={() => {
+                  setInspectorName((prev) => prev || roll.inspector || '');
+                  setInspectModalAction('PASSED');
+                }}
+              >
+                ✓ 质检合格放行
+              </button>
+              <button
+                type="button"
+                className="btn"
+                id="inspect-fail-btn"
+                style={{ color: 'var(--err, #dc2626)' }}
+                disabled={saving || inspectSubmitting}
+                onClick={() => {
+                  setInspectorName((prev) => prev || roll.inspector || '');
+                  setInspectModalAction('FAILED');
+                }}
+              >
+                判不合格
+              </button>
+            </>
+          )}
+          {roll && roll.inspectionStatus === 'PASSED' && (
+            <>
+              <a
+                className="btn soft-accent"
+                href="#/workbench"
+                title="母卷已质检放行，可直接前往搭切工作台锁卷排料"
+              >
+                去搭切排料 →
+              </a>
+              <button
+                type="button"
+                className="btn"
+                id="inspect-fail-btn"
+                style={{ color: 'var(--err, #dc2626)' }}
+                disabled={saving || inspectSubmitting}
+                onClick={() => {
+                  setInspectorName((prev) => prev || roll.inspector || '');
+                  setInspectModalAction('FAILED');
+                }}
+              >
+                复判不合格
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -1506,6 +1626,89 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
           </div>
         </>
       )}
+
+      <ModalDialog
+        open={Boolean(inspectModalAction && roll)}
+        title={
+          inspectModalAction === 'PASSED'
+            ? `确认质检合格放行 · ${roll?.rollId || ''}`
+            : `确认判定母卷不合格 · ${roll?.rollId || ''}`
+        }
+        onClose={() => {
+          if (!inspectSubmitting) setInspectModalAction(null);
+        }}
+        maxWidth={480}
+      >
+        <form onSubmit={handleSubmitInspectionDecision}>
+          <div style={{ fontSize: 12.5, lineHeight: 1.6, marginBottom: 10 }}>
+            <div>
+              母卷：<b className="num">{roll?.rollId}</b> · 品号{' '}
+              <b className="num">{roll?.rollModel || '—'}</b> ·{' '}
+              <span className="num">
+                {roll ? `${fmtN(roll.width)}mm × ${fmtM(roll.totalLength)}m` : ''}
+              </span>
+            </div>
+            <div>
+              已入档疵点 <b className="num">{(roll?.defects || []).length}</b> 处
+              {pending.length > 0 && (
+                <>
+                  ，另有 <b className="num">{pending.length}</b> 处待存草稿将在提交时自动入档
+                </>
+              )}
+              。
+            </div>
+          </div>
+          <div className="form" style={{ gridTemplateColumns: '88px 1fr', padding: '4px 0 12px' }}>
+            <label htmlFor="qc-inspector">质检员</label>
+            <input
+              id="qc-inspector"
+              className="field"
+              placeholder="如：质检李工（认证模式下自动取当前登录人）"
+              value={inspectorName}
+              onChange={(e) => setInspectorName(e.target.value)}
+            />
+            <label htmlFor="qc-remarks">检验备注</label>
+            <input
+              id="qc-remarks"
+              className="field"
+              placeholder={
+                inspectModalAction === 'PASSED'
+                  ? '选填：门幅、克重与疵点复核合格'
+                  : '必填或说明：色差/破损超标原因'
+              }
+              required={inspectModalAction === 'FAILED'}
+              value={inspectRemarks}
+              onChange={(e) => setInspectRemarks(e.target.value)}
+            />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button
+              type="button"
+              className="btn"
+              disabled={inspectSubmitting}
+              onClick={() => setInspectModalAction(null)}
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              className="btn pri"
+              style={
+                inspectModalAction === 'FAILED'
+                  ? { background: 'var(--err, #dc2626)', borderColor: 'var(--err, #dc2626)' }
+                  : undefined
+              }
+              disabled={inspectSubmitting}
+            >
+              {inspectSubmitting
+                ? '提交中…'
+                : inspectModalAction === 'PASSED'
+                ? '确认放行 (PASSED)'
+                : '确认判不合格 (FAILED)'}
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
     </div>
   );
 };

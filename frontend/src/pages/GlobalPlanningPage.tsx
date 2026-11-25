@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { requestJSON, fmtN, toast } from '@static/app/js/util.js';
 import { csvCell } from '@static/js/business/analysis/report-model.js';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
+import { useStudioStore, DemandFamilySummary } from '../store/useStudioStore';
 
 export interface MultiMaterialDemandDraft {
   id: string;
@@ -285,6 +286,48 @@ export function buildCutPlanCsvText(plan: CutPlanResponse): string {
   return '\uFEFF' + [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
 }
 
+export function buildMultiMaterialCsvText(plan: MultiMaterialPlanResponse): string {
+  const header = [
+    '类别',
+    '材料编号',
+    '品号',
+    '门幅(mm)',
+    '长度/可用余长(mm)',
+    '预计切长(mm)',
+    '利用率(%)',
+    '排入件数',
+    '状态/明细'
+  ];
+  const rows: (string | number)[][] = [];
+  for (const rem of plan.remnantAllocations || []) {
+    rows.push([
+      '料头接力',
+      rem.remnantId,
+      plan.materialModel || '',
+      rem.widthMm,
+      rem.lengthMm,
+      rem.lengthMm,
+      Number(rem.utilizationPct || 0).toFixed(2),
+      rem.placedCount,
+      formatAllocatedItems(rem.allocatedItems)
+    ]);
+  }
+  for (const opt of plan.rollOptions || []) {
+    rows.push([
+      '母卷评估',
+      opt.rollId,
+      plan.materialModel || '',
+      opt.widthMm,
+      opt.availableLengthMm,
+      opt.estimatedCutLengthMm,
+      Number(opt.utilizationPct || 0).toFixed(2),
+      opt.placedCount,
+      opt.recommended ? '推荐首选' : opt.feasible ? '可行备选' : '长度或门幅不足'
+    ]);
+  }
+  return '\uFEFF' + [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
+}
+
 function formatAllocatedItems(items: any[]): string {
   if (!Array.isArray(items) || !items.length) return '—';
   return items
@@ -305,7 +348,9 @@ function formatAllocatedItems(items: any[]): string {
 }
 
 export const GlobalPlanningPage: React.FC = () => {
+  const { loadDemandFamilyIntoWorkbench, setCanvasSpec } = useStudioStore();
   const [activeTab, setActiveTab] = useState<'multi' | 'cutplan'>('multi');
+  const [dispatching, setDispatching] = useState(false);
 
   // 需求池选项（只读 GET 加载）
   const [demandTasks, setDemandTasks] = useState<any[]>([]);
@@ -465,6 +510,132 @@ export const GlobalPlanningPage: React.FC = () => {
     toast('已导出安全转义的分床方案 CSV');
   };
 
+  const handleExportMultiCsv = () => {
+    if (!multiResult) return;
+    const csv = buildMultiMaterialCsvText(multiResult);
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `联合排产方案-${multiResult.materialModel || 'ALL'}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('已导出安全转义的联合排产 CSV');
+  };
+
+  const handleSendMultiToWorkbench = async (preferredRollId?: string) => {
+    if (!multiResult || dispatching) return;
+    setDispatching(true);
+    try {
+      let fam: DemandFamilySummary | null = null;
+      if (multiForm.sourceMode === 'TASK' && multiForm.taskId) {
+        fam = await requestJSON(
+          '/api/v2/demand-pool/' + encodeURIComponent(multiForm.taskId)
+        );
+      } else {
+        const validLines = multiForm.demands.filter(
+          (d) => Number(d.width) > 0 && Number(d.length) > 0 && Number(d.quantity) > 0
+        );
+        if (!validLines.length) {
+          toast('没有有效裁片明细可生成需求族', true);
+          return;
+        }
+        fam = await requestJSON('/api/v2/demand-pool', {
+          name: `联排转入 · ${multiForm.materialModel.trim() || multiResult.materialModel || '标准面料'}`,
+          materialModel: multiForm.materialModel.trim() || multiResult.materialModel || 'STANDARD-MAT',
+          externalRef: 'GLOBAL-PLAN-MULTI',
+          dimension: 'RECT_2D',
+          pieceGapMm: Number(multiForm.pieceGapMm) || 0,
+          trimStartMm: Number(multiForm.trimStartMm) || 0,
+          requiredBatchNo: multiForm.requiredBatchNo.trim() || undefined,
+          requiredColor: multiForm.requiredColor.trim() || undefined,
+          demands: validLines.map((d, idx) => ({
+            id: idx + 1,
+            name: d.name.trim() || `裁片 #${idx + 1}`,
+            width: Number(d.width),
+            length: Number(d.length),
+            quantity: Math.max(1, Math.floor(Number(d.quantity))),
+            allowRotation: Boolean(d.allowRotation)
+          }))
+        });
+      }
+      if (!fam?.id) throw new Error('未能获取有效需求族');
+      loadDemandFamilyIntoWorkbench(fam);
+      const targetOpt =
+        (preferredRollId
+          ? multiResult.rollOptions.find((o) => o.rollId === preferredRollId)
+          : null) ||
+        multiResult.rollOptions.find((o) => o.recommended) ||
+        multiResult.rollOptions.find((o) => o.feasible);
+      if (targetOpt?.rollId) {
+        setCanvasSpec({
+          canvasMode: 'STOCK_ROLL',
+          selectedRollId: targetOpt.rollId,
+          canvasWidthMm: targetOpt.widthMm || undefined,
+          windowStartY2D: null
+        });
+      }
+      toast(
+        targetOpt?.rollId
+          ? `已生成需求族并绑定推荐母卷 ${targetOpt.rollId}，正在进入工作台…`
+          : '已生成待排需求族并转入搭切工作台…'
+      );
+      location.hash = '#/workbench';
+    } catch (err: any) {
+      toast('转入工作台失败：' + (err?.message || '未知错误'), true);
+    } finally {
+      setDispatching(false);
+    }
+  };
+
+  const handleSendCutPlanToWorkbench = async () => {
+    if (!cutResult || dispatching) return;
+    const validSizes = (cutResult.sizeAudit || []).filter((s) => s.planned > 0);
+    if (!validSizes.length) {
+      toast('分床结果没有有效计划件数', true);
+      return;
+    }
+    setDispatching(true);
+    try {
+      const fabW = Math.max(600, Number(cutForm.fabricWidthMm) || 1650);
+      const demands = validSizes.map((s, idx) => {
+        const sizeRow = cutForm.sizes.find((x) => x.size === s.size);
+        const areaM2 = Math.max(0.2, Number(sizeRow?.unitAreaM2) || Number(cutForm.defaultUnitAreaM2) || 1.25);
+        // 按单件耗布面积折算近似矩形排料块，保留尺码与分床计划件数供工作台进一步替换/精排
+        const w = Math.min(Math.round(fabW * 0.45), 720);
+        const l = Math.max(400, Math.round((areaM2 * 1_000_000) / w));
+        return {
+          id: idx + 1,
+          name: `${cutResult.styleName}-${s.size}码整套`,
+          sizeLabel: s.size,
+          width: w,
+          length: l,
+          quantity: s.planned,
+          allowRotation: false
+        };
+      });
+      const fam: DemandFamilySummary = await requestJSON('/api/v2/demand-pool', {
+        name: `分床转入 · ${cutResult.styleName} (${cutResult.colorName})`,
+        materialModel: `${cutResult.styleName}-FABRIC`,
+        externalRef: `CUTPLAN-${cutResult.layCount}LAY`,
+        dimension: 'RECT_2D',
+        requiredColor: cutResult.colorName || undefined,
+        demands
+      });
+      loadDemandFamilyIntoWorkbench(fam);
+      setCanvasSpec({
+        canvasMode: 'FREE_CANVAS',
+        canvasWidthMm: fabW,
+        canvasLengthMm: Math.max(2000, Math.round(cutResult.lays?.[0]?.estimatedMarkerLengthMm || 3200))
+      });
+      toast(`已按分床计划创建需求族（共 ${cutResult.totalPlannedGarments} 件），正在转入工作台…`);
+      location.hash = '#/workbench';
+    } catch (err: any) {
+      toast('分床转入工作台失败：' + (err?.message || '未知错误'), true);
+    } finally {
+      setDispatching(false);
+    }
+  };
+
   const cutRatioSizes = useMemo(() => {
     if (!cutResult) return [] as string[];
     return Array.from(
@@ -508,10 +679,35 @@ export const GlobalPlanningPage: React.FC = () => {
             ariaLabel="高级规划功能切换"
           />
           <div className="mp-toolbar-actions">
+            {activeTab === 'multi' && multiResult && (
+              <>
+                <button type="button" className="mp-ghost-btn" onClick={handleExportMultiCsv}>
+                  导出联排 CSV
+                </button>
+                <button
+                  type="button"
+                  className="btn sm pri"
+                  disabled={dispatching}
+                  onClick={() => handleSendMultiToWorkbench()}
+                >
+                  {dispatching ? '生成中…' : '一键转入搭切工作台 →'}
+                </button>
+              </>
+            )}
             {activeTab === 'cutplan' && cutResult && (
-              <button type="button" className="mp-ghost-btn" onClick={handleExportCutPlanCsv}>
-                导出分床 CSV
-              </button>
+              <>
+                <button type="button" className="mp-ghost-btn" onClick={handleExportCutPlanCsv}>
+                  导出分床 CSV
+                </button>
+                <button
+                  type="button"
+                  className="btn sm pri"
+                  disabled={dispatching}
+                  onClick={handleSendCutPlanToWorkbench}
+                >
+                  {dispatching ? '生成中…' : '按分床生成需求族并转工作台 →'}
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -953,12 +1149,13 @@ export const GlobalPlanningPage: React.FC = () => {
                           <th>预计利用率 (%)</th>
                           <th>可排件数 (件)</th>
                           <th>评估结论</th>
+                          <th style={{ textAlign: 'right' }}>操作</th>
                         </tr>
                       </thead>
                       <tbody>
                         {multiResult.rollOptions.length === 0 ? (
                           <tr>
-                            <td colSpan={7} className="muted" style={{ textAlign: 'center', padding: 16 }}>
+                            <td colSpan={8} className="muted" style={{ textAlign: 'center', padding: 16 }}>
                               当前品号/缸号条件下无可承接母卷，请前往「成本与备料分析」核对采购缺口。
                             </td>
                           </tr>
@@ -982,6 +1179,16 @@ export const GlobalPlanningPage: React.FC = () => {
                                 <td className="num">{opt.placedCount} 件</td>
                                 <td>
                                   <span className={`tag ${tagCls}`}>{statusLabel}</span>
+                                </td>
+                                <td style={{ textAlign: 'right' }}>
+                                  <button
+                                    type="button"
+                                    className={`btn sm ${opt.recommended ? 'soft-accent' : ''}`}
+                                    disabled={dispatching || !opt.feasible}
+                                    onClick={() => handleSendMultiToWorkbench(opt.rollId)}
+                                  >
+                                    选此卷去排料 →
+                                  </button>
                                 </td>
                               </tr>
                             );

@@ -241,15 +241,15 @@ final class StudioDemandPoolService {
             slit = new CuttingTask.Slitting(lt, rt, minW, maxW, step, overCap);
         }
 
-        String dueDate = blankToNull(cmd.dueDate()) != null ? blankToNull(cmd.dueDate()) : (existing != null ? existing.dueDate() : null);
-        String priority = blankToNull(cmd.priority()) != null ? blankToNull(cmd.priority()) : (existing != null ? existing.priority() : null);
-        String customerName = blankToNull(cmd.customerName()) != null ? blankToNull(cmd.customerName()) : (existing != null ? existing.customerName() : null);
-        String kittingGroup = blankToNull(cmd.kittingGroup()) != null ? blankToNull(cmd.kittingGroup()) : (existing != null ? existing.kittingGroup() : null);
-        String requiredBatchNo = blankToNull(cmd.requiredBatchNo()) != null ? blankToNull(cmd.requiredBatchNo()) : (existing != null ? existing.requiredBatchNo() : null);
-        String requiredColor = blankToNull(cmd.requiredColor()) != null ? blankToNull(cmd.requiredColor()) : (existing != null ? existing.requiredColor() : null);
+        String dueDate = cmd.dueDate() != null ? blankToNull(cmd.dueDate()) : (existing != null ? existing.dueDate() : null);
+        String priority = cmd.priority() != null ? blankToNull(cmd.priority()) : (existing != null ? existing.priority() : null);
+        String customerName = cmd.customerName() != null ? blankToNull(cmd.customerName()) : (existing != null ? existing.customerName() : null);
+        String kittingGroup = cmd.kittingGroup() != null ? blankToNull(cmd.kittingGroup()) : (existing != null ? existing.kittingGroup() : null);
+        String requiredBatchNo = cmd.requiredBatchNo() != null ? blankToNull(cmd.requiredBatchNo()) : (existing != null ? existing.requiredBatchNo() : null);
+        String requiredColor = cmd.requiredColor() != null ? blankToNull(cmd.requiredColor()) : (existing != null ? existing.requiredColor() : null);
         Boolean strictBatchMatch = cmd.strictBatchMatch() != null ? cmd.strictBatchMatch() : (existing != null ? existing.strictBatchMatch() : null);
-        String machineId = blankToNull(cmd.machineId()) != null ? blankToNull(cmd.machineId()) : (existing != null ? existing.machineId() : null);
-        String shiftTeam = blankToNull(cmd.shiftTeam()) != null ? blankToNull(cmd.shiftTeam()) : (existing != null ? existing.shiftTeam() : null);
+        String machineId = cmd.machineId() != null ? blankToNull(cmd.machineId()) : (existing != null ? existing.machineId() : null);
+        String shiftTeam = cmd.shiftTeam() != null ? blankToNull(cmd.shiftTeam()) : (existing != null ? existing.shiftTeam() : null);
 
         CuttingTask payload = new CuttingTask(
                 existing != null ? existing.id() : null,

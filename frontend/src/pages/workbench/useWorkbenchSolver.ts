@@ -89,6 +89,7 @@ export interface UseWorkbenchSolverOptions {
 
   // Shared
   settings: StudioSettings;
+  batchGuardWarning?: { blocking: boolean; title: string; detail: string } | null;
   reloadReferenceData: (explicitTaskId?: string | null) => Promise<DemandFamilySummary[]>;
   syncDemandFamilyProgress: (fam: DemandFamilySummary) => void;
   syncMergedDemandFamiliesProgress?: (fams: DemandFamilySummary[]) => void;
@@ -138,6 +139,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
     setSlitSchemes,
     markSlitSchemeDispatched,
     settings,
+    batchGuardWarning,
     reloadReferenceData,
     syncDemandFamilyProgress,
     syncMergedDemandFamiliesProgress
@@ -168,6 +170,10 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
 
   const handleRunSolve2D = async () => {
     if (runningSolve) return;
+    if (batchGuardWarning?.blocking) {
+      toast(`${batchGuardWarning.title}：${batchGuardWarning.detail}`, true);
+      return;
+    }
     let validDemands = activeDemands2D.filter(
       (d) => d.quantity > 0 && d.width > 0 && d.length > 0
     );
@@ -280,10 +286,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
     await Promise.all(
       jobsToRun.map(async ({ def, width, runKey, label }) => {
         const tooWide = validDemands.some((d) => {
-          const isPoly = d.shape?.type === 'POLYGON';
-          const canRot90 = isPoly
-            ? Boolean(d.allowRotation)
-            : Boolean(d.allowRotation || def.forceRotateRect);
+          const canRot90 = !def.lockZeroGrain && Boolean(d.allowRotation);
           return canRot90 ? Math.min(d.width, d.length) > width : d.width > width;
         });
         if (tooWide) {
@@ -491,6 +494,10 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
 
   const handleRunSolve1D = async () => {
     if (runningSolve) return;
+    if (batchGuardWarning?.blocking) {
+      toast(`${batchGuardWarning.title}：${batchGuardWarning.detail}`, true);
+      return;
+    }
     let validOrders = slitOrders.filter((o) => o.quantity > 0 && o.widthMm > 0);
     if (!validOrders.length) {
       const retrial = slitOrders

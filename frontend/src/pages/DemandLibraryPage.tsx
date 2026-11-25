@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useStudioStore, DemandFamilySummary } from '../store/useStudioStore';
 import { CodeBadge } from '../components/ui/MagpiePrimitives';
+import { ModalDialog } from '../components/ModalDialog';
 import { requestJSON, toast, fmtN, shortId } from '@static/app/js/util.js';
 import '../styles/theme-demand-library.css';
 
@@ -64,6 +65,86 @@ export const DemandLibraryPage: React.FC = () => {
   const [sortMode, setSortMode] = useState<SortMode>('DEFAULT');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [editingFamily, setEditingFamily] = useState<ExtendedDemandFamily | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    externalRef: '',
+    priority: 'NORMAL',
+    dueDate: '',
+    customerName: '',
+    kittingGroup: '',
+    requiredBatchNo: '',
+    requiredColor: '',
+    strictBatchMatch: false,
+    machineId: '',
+    shiftTeam: ''
+  });
+
+  const openEditFamily = (fam: ExtendedDemandFamily) => {
+    setEditingFamily(fam);
+    setEditForm({
+      name: fam.name || '',
+      externalRef: fam.externalRef || '',
+      priority: String(fam.priority || 'NORMAL').toUpperCase(),
+      dueDate: fam.dueDate || '',
+      customerName: fam.customerName || '',
+      kittingGroup: fam.kittingGroup || '',
+      requiredBatchNo: fam.requiredBatchNo || '',
+      requiredColor: fam.requiredColor || '',
+      strictBatchMatch: Boolean(fam.strictBatchMatch),
+      machineId: fam.machineId || '',
+      shiftTeam: fam.shiftTeam || ''
+    });
+  };
+
+  const handleSaveEditFamily = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingFamily || editSaving) return;
+    if (!editForm.name.trim()) {
+      toast('需求族名称不能为空', true);
+      return;
+    }
+    setEditSaving(true);
+    try {
+      await requestJSON('/api/v2/demand-pool', {
+        id: editingFamily.id,
+        name: editForm.name.trim(),
+        materialModel: editingFamily.materialModel,
+        externalRef: editForm.externalRef.trim(),
+        dimension: editingFamily.dimension,
+        priority: editForm.priority,
+        dueDate: editForm.dueDate.trim(),
+        customerName: editForm.customerName.trim(),
+        kittingGroup: editForm.kittingGroup.trim(),
+        requiredBatchNo: editForm.requiredBatchNo.trim(),
+        requiredColor: editForm.requiredColor.trim(),
+        strictBatchMatch: Boolean(editForm.strictBatchMatch),
+        machineId: editForm.machineId.trim(),
+        shiftTeam: editForm.shiftTeam.trim(),
+        demands: editingFamily.lines.map((ln) => ({
+          id: ln.id,
+          name: ln.name,
+          width: ln.width,
+          length: ln.length,
+          quantity: ln.orderedQty,
+          allowRotation: Boolean(ln.allowRotation),
+          allowHalfTurn: Boolean(ln.allowHalfTurn),
+          sizeLabel: ln.sizeLabel,
+          sourceTemplateId: ln.sourceTemplateId,
+          surfaceTreatment: ln.surfaceTreatment,
+          shape: ln.shape
+        }))
+      });
+      toast(`需求族「${editForm.name.trim()}」属性已保存`);
+      setEditingFamily(null);
+      await loadPool();
+    } catch (err: any) {
+      toast('保存需求族属性失败：' + (err.message || '未知错误'), true);
+    } finally {
+      setEditSaving(false);
+    }
+  };
 
   const loadPool = async () => {
     setLoading(true);
@@ -463,6 +544,14 @@ export const DemandLibraryPage: React.FC = () => {
                             <div style={{ display: 'inline-flex', gap: 6 }}>
                               <button
                                 type="button"
+                                className="btn sm"
+                                title="修改交期、优先级、客户、指定缸号/色号与同缸强约束"
+                                onClick={() => openEditFamily(fam)}
+                              >
+                                编辑属性
+                              </button>
+                              <button
+                                type="button"
                                 className={`btn sm ${fam.openTotal > 0 ? 'soft-accent' : ''}`}
                                 onClick={() => {
                                   loadDemandFamilyIntoWorkbench(fam);
@@ -602,6 +691,140 @@ export const DemandLibraryPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      <ModalDialog
+        open={Boolean(editingFamily)}
+        title={`编辑需求族生产属性 · ${editingFamily?.name || ''}`}
+        onClose={() => {
+          if (!editSaving) setEditingFamily(null);
+        }}
+        maxWidth={620}
+      >
+        <form onSubmit={handleSaveEditFamily}>
+          <div
+            className="form"
+            style={{ gridTemplateColumns: '100px 1fr 90px 1fr', gap: '8px 12px', padding: '4px 0 12px' }}
+          >
+            <label htmlFor="dl-edit-name">需求族名称</label>
+            <input
+              id="dl-edit-name"
+              className="field"
+              required
+              value={editForm.name}
+              onChange={(e) => setEditForm((p) => ({ ...p, name: e.target.value }))}
+            />
+            <label htmlFor="dl-edit-ref">来源单号</label>
+            <input
+              id="dl-edit-ref"
+              className="field num"
+              placeholder="如：SO-2026-088"
+              value={editForm.externalRef}
+              onChange={(e) => setEditForm((p) => ({ ...p, externalRef: e.target.value }))}
+            />
+            <label htmlFor="dl-edit-pri">优先级</label>
+            <select
+              id="dl-edit-pri"
+              className="field"
+              value={editForm.priority}
+              onChange={(e) => setEditForm((p) => ({ ...p, priority: e.target.value }))}
+            >
+              <option value="NORMAL">普通 (NORMAL)</option>
+              <option value="HIGH">高优 (HIGH)</option>
+              <option value="URGENT">加急 (URGENT)</option>
+            </select>
+            <label htmlFor="dl-edit-due">交付日期</label>
+            <input
+              id="dl-edit-due"
+              type="date"
+              className="field num"
+              value={editForm.dueDate}
+              onChange={(e) => setEditForm((p) => ({ ...p, dueDate: e.target.value }))}
+            />
+            <label htmlFor="dl-edit-cust">客户名称</label>
+            <input
+              id="dl-edit-cust"
+              className="field"
+              placeholder="选填"
+              value={editForm.customerName}
+              onChange={(e) => setEditForm((p) => ({ ...p, customerName: e.target.value }))}
+            />
+            <label htmlFor="dl-edit-kit">齐套组</label>
+            <input
+              id="dl-edit-kit"
+              className="field"
+              placeholder="选填：同款齐套批次"
+              value={editForm.kittingGroup}
+              onChange={(e) => setEditForm((p) => ({ ...p, kittingGroup: e.target.value }))}
+            />
+            <label htmlFor="dl-edit-batch">指定缸号</label>
+            <input
+              id="dl-edit-batch"
+              className="field num"
+              placeholder="如：BAT-2026-A1"
+              value={editForm.requiredBatchNo}
+              onChange={(e) => setEditForm((p) => ({ ...p, requiredBatchNo: e.target.value }))}
+            />
+            <label htmlFor="dl-edit-color">指定色号</label>
+            <input
+              id="dl-edit-color"
+              className="field"
+              placeholder="如：藏青"
+              value={editForm.requiredColor}
+              onChange={(e) => setEditForm((p) => ({ ...p, requiredColor: e.target.value }))}
+            />
+            <label htmlFor="dl-edit-mach">推荐机台</label>
+            <input
+              id="dl-edit-mach"
+              className="field num"
+              placeholder="如：裁床-01"
+              value={editForm.machineId}
+              onChange={(e) => setEditForm((p) => ({ ...p, machineId: e.target.value }))}
+            />
+            <label htmlFor="dl-edit-shift">责任班组</label>
+            <input
+              id="dl-edit-shift"
+              className="field"
+              placeholder="如：甲班"
+              value={editForm.shiftTeam}
+              onChange={(e) => setEditForm((p) => ({ ...p, shiftTeam: e.target.value }))}
+            />
+          </div>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '8px 10px',
+              borderRadius: 8,
+              marginBottom: 14,
+              border: '1px solid var(--cp-border, #e2e8f0)',
+              background: editForm.strictBatchMatch ? 'var(--warn-bg, rgba(245, 158, 11, 0.12))' : 'transparent',
+              fontSize: 12.5,
+              cursor: 'pointer'
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={editForm.strictBatchMatch}
+              onChange={(e) => setEditForm((p) => ({ ...p, strictBatchMatch: e.target.checked }))}
+            />
+            <span>启用「同单同缸强约束」防色差校验（工作台选错缸号母卷将前置拦截）</span>
+          </label>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button
+              type="button"
+              className="btn"
+              disabled={editSaving}
+              onClick={() => setEditingFamily(null)}
+            >
+              取消
+            </button>
+            <button type="submit" className="btn pri" disabled={editSaving}>
+              {editSaving ? '保存中…' : '保存属性更改'}
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
     </div>
   );
 };

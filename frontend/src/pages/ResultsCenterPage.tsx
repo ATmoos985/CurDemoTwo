@@ -148,10 +148,25 @@ function buildReplayScene2D(scheme: any) {
         gapFillPlacements
       }
     };
-    return (showcaseScene as any)(req, res, 0, {
+    const sc = (showcaseScene as any)(req, res, 0, {
       occupiedLengthMm: matLen,
       gapFillPlacements
     });
+    if (sc && sc.roll) {
+      sc.roll = {
+        ...sc.roll,
+        id: scheme.rollId || '虚拟新母卷',
+        width: matWidth,
+        total: matLen
+      };
+      if (Array.isArray(sc.segments) && sc.segments[0]) {
+        sc.segments[0] = {
+          ...sc.segments[0],
+          label: sanitizeSchemeTitle(scheme.title) || scheme.id || '排程方案复盘'
+        };
+      }
+    }
+    return sc;
   } catch (err) {
     console.warn('buildReplayScene2D fallback:', err);
     return null;
@@ -926,7 +941,8 @@ export const ResultsCenterPage: React.FC<{
                           </button>
                         </>
                       )}
-                      {activeScheme.state !== 'CANCELLED' && (
+                      {(activeScheme.state === 'READY_TO_CUT' ||
+                        activeScheme.state === 'DISPATCHED_MES') && (
                         <button
                           type="button"
                           className="btn"

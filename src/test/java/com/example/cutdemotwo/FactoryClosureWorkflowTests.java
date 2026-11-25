@@ -252,6 +252,16 @@ class FactoryClosureWorkflowTests {
                 "RCV-OK-001", "其他厂", "DN-2026-001", "收货员周涛", "改供应商", receiptCmd.rolls()
         )));
 
+        // 未放行 PENDING 待检卷禁止领料出库（防错拦截 409），放行后即可合法领用且对账保持 BALANCED
+        assertThrows(InventoryConflictException.class, () -> inv.postMaterialIssue(new RemnantService.MaterialIssueCommand(
+                "ISS-PENDING-BLOCK", "ISSUE", "ROLL-NEW-01", "CUTTER-01", "白班", "领料员赵敏", null, "试图领取待检卷"
+        )));
+        Map<String, Object> passRes = inv.completeMotherRollInspection("ROLL-NEW-01",
+                new RemnantService.MotherRollInspectionCommand("PASSED", "质检员陈峰", "跑布验疵合格放行"));
+        assertEquals("PASSED", ((MotherRollInfo) passRes.get("roll")).getInspectionStatus());
+        assertEquals("质检员陈峰", ((MotherRollInfo) passRes.get("roll")).getInspector());
+        assertEquals("BALANCED", inv.reconcileInventory().get("status"));
+
         // 3. 车间领料 ISSUE -> 更新机台、班组、库位
         var issueCmd = new RemnantService.MaterialIssueCommand(
                 "ISS-KEY-001", "ISSUE", "ROLL-NEW-02", "CUTTER-02", "白班A组", "领料员赵敏", null, "2号裁床开机备料"

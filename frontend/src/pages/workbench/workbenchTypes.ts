@@ -8,6 +8,7 @@ export interface SolverStrategyDef {
   description: string;
   halfTurn: boolean;
   forceRotateRect?: boolean;
+  lockZeroGrain?: boolean;
   shorten: boolean;
   gapFill: boolean;
   enginePref: 'auto' | 'java' | 'deepnest';
@@ -23,6 +24,7 @@ export const STRATEGIES_2D: SolverStrategyDef[] = [
     description: '保持全部裁片严格 0° 丝缕方向，多轮缩短并压紧版长',
     halfTurn: false,
     forceRotateRect: false,
+    lockZeroGrain: true,
     shorten: true,
     gapFill: false,
     enginePref: 'auto',
@@ -31,11 +33,12 @@ export const STRATEGIES_2D: SolverStrategyDef[] = [
   {
     id: 'PS_ROT',
     name: '旋转缩长',
-    shortTag: '180°/90° · 最短版长',
+    shortTag: '按工艺允许旋转 · 缩长',
     badge: '旋转',
-    description: '异形片允许 180° 倒顺对排、矩形允许 90° 旋转，追求最短版长',
+    description: '在需求工艺允许的 180°/90° 方向约束内缩短版长，绝不越权旋转禁用件',
     halfTurn: true,
-    forceRotateRect: true,
+    forceRotateRect: false,
+    lockZeroGrain: false,
     shorten: true,
     gapFill: false,
     enginePref: 'auto',
@@ -46,9 +49,10 @@ export const STRATEGIES_2D: SolverStrategyDef[] = [
     name: '异形进化',
     shortTag: '凹凸嵌合 · 进化寻优',
     badge: '异形',
-    description: '针对异形裁片多轮搜索凹凸互补与共边压紧',
+    description: '在需求允许方向内对异形裁片多轮搜索凹凸互补与共边压紧',
     halfTurn: true,
-    forceRotateRect: true,
+    forceRotateRect: false,
+    lockZeroGrain: false,
     shorten: true,
     gapFill: false,
     enginePref: 'deepnest',
@@ -62,6 +66,7 @@ export const STRATEGIES_2D: SolverStrategyDef[] = [
     description: '保持 0° 丝缕方向，针对异形轮廓精确凹凸嵌套直排',
     halfTurn: false,
     forceRotateRect: false,
+    lockZeroGrain: true,
     shorten: false,
     gapFill: false,
     enginePref: 'deepnest',
@@ -72,9 +77,10 @@ export const STRATEGIES_2D: SolverStrategyDef[] = [
     name: '快速基线',
     shortTag: '极速秒出对照',
     badge: '极速',
-    description: '快速启发式排料基线，用于多方案对照与兜底',
+    description: '按需求自身方向约束快速启发式排料，用于多方案对照与兜底',
     halfTurn: false,
     forceRotateRect: false,
+    lockZeroGrain: false,
     shorten: false,
     gapFill: false,
     enginePref: 'java',

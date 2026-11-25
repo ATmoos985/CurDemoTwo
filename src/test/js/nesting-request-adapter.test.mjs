@@ -139,3 +139,50 @@ test('CONTOUR preflight rejects >200 pieces cleanly, removes fold-back spikes, a
     });
     assert.match(tooMany.error, /最多 200 件/);
 });
+
+test('求解策略绝不越权放开禁用旋转或禁用半转的裁片，且经向策略可安全收紧为 0°', () => {
+    const polyShape = {
+        type: 'POLYGON',
+        width: 200,
+        height: 300,
+        vertices: [{x: 0, y: 0}, {x: 200, y: 0}, {x: 180, y: 300}, {x: 0, y: 300}]
+    };
+    const rectBuilt = buildSafeNestingRequest2D({
+        strategy: {id: 'PS_ROT', enginePref: 'auto', forceRotateRect: true, halfTurn: true, shorten: true, timeLimit: 10},
+        widthMm: 1600,
+        lengthMm: 2000,
+        demands: [
+            {id: 1, name: '直纹窗帘禁转', width: 600, length: 800, quantity: 2, allowRotation: false},
+            {id: 2, name: '素色配件可转', width: 300, length: 500, quantity: 2, allowRotation: true}
+        ]
+    });
+    assert.equal(rectBuilt.error, null);
+    assert.equal(rectBuilt.request.problem.parts[0].allowRotation, false);
+    assert.equal(rectBuilt.request.problem.parts[1].allowRotation, true);
+
+    const contourBuilt = buildSafeNestingRequest2D({
+        strategy: {id: 'DN_GA', enginePref: 'deepnest', halfTurn: true, forceRotateRect: true, shorten: true, timeLimit: 8},
+        widthMm: 1600,
+        lengthMm: 2000,
+        demands: [
+            {id: 1, name: '倒顺毛禁半转', width: 200, length: 300, quantity: 2, allowRotation: false, allowHalfTurn: false, shape: polyShape},
+            {id: 2, name: '允许半转裁片', width: 200, length: 300, quantity: 2, allowRotation: false, allowHalfTurn: true, shape: polyShape}
+        ]
+    });
+    assert.equal(contourBuilt.error, null);
+    assert.equal(contourBuilt.request.problem.parts[0].allowRotation, false);
+    assert.equal(contourBuilt.request.problem.parts[0].allowHalfTurn, undefined);
+    assert.equal(contourBuilt.request.problem.parts[1].allowHalfTurn, true);
+
+    const fixedBuilt = buildSafeNestingRequest2D({
+        strategy: {id: 'PS_FIXED', enginePref: 'auto', lockZeroGrain: true, shorten: true, timeLimit: 10},
+        widthMm: 1600,
+        lengthMm: 2000,
+        demands: [
+            {id: 2, name: '允许半转裁片', width: 200, length: 300, quantity: 2, allowRotation: true, allowHalfTurn: true, shape: polyShape}
+        ]
+    });
+    assert.equal(fixedBuilt.error, null);
+    assert.equal(fixedBuilt.request.problem.parts[0].allowRotation, false);
+    assert.equal(fixedBuilt.request.problem.parts[0].allowHalfTurn, undefined);
+});
