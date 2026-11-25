@@ -13,6 +13,7 @@ import {
   logoutAuth,
   roleDisplayName
 } from './utils/authClient';
+import { ParsedRoute, WORKBENCH_DEFAULT_ROUTE, parseHashRoute } from './utils/routeUtils';
 
 // 非首屏业务页面采用路由级 React.lazy 拆包，显著削减首屏入口包体积
 const ClusterCenterPage = lazy(() =>
@@ -30,26 +31,11 @@ const ResultsCenterPage = lazy(() =>
 const ReconciliationPage = lazy(() =>
   import('./pages/ReconciliationPage').then((m) => ({ default: m.ReconciliationPage }))
 );
-const ExecutionCenterPage = lazy(() =>
-  import('./pages/ExecutionCenterPage').then((m) => ({ default: m.ExecutionCenterPage }))
-);
-const TasksPage = lazy(() =>
-  import('./pages/TasksPage').then((m) => ({ default: m.TasksPage }))
-);
-const TaskEditPage = lazy(() =>
-  import('./pages/TaskEditPage').then((m) => ({ default: m.TaskEditPage }))
-);
-const QualityPage = lazy(() =>
-  import('./pages/QualityPage').then((m) => ({ default: m.QualityPage }))
-);
 const InventoryPage = lazy(() =>
   import('./pages/InventoryPage').then((m) => ({ default: m.InventoryPage }))
 );
 const DocumentsPage = lazy(() =>
   import('./pages/DocumentsPage').then((m) => ({ default: m.DocumentsPage }))
-);
-const AnalysisPage = lazy(() =>
-  import('./pages/AnalysisPage').then((m) => ({ default: m.AnalysisPage }))
 );
 const InspectionPage = lazy(() =>
   import('./pages/InspectionPage').then((m) => ({ default: m.InspectionPage }))
@@ -99,60 +85,6 @@ const RouteLoadingFallback: React.FC = () => (
   </div>
 );
 
-interface ParsedRoute {
-  page: string;
-  params: string[];
-  groupQuery: string;
-  taskIdQuery: string;
-  appendQuery: string;
-  rawKey: string;
-}
-
-function parseHashRoute(hash: string): ParsedRoute {
-  const clean = String(hash || '').replace(/^#\/?/, '');
-  const [rawPath = '', query = ''] = clean.split('?');
-  const [pageRaw = 'workbench', ...rest] = rawPath.split('/').filter(Boolean);
-  const params = rest.map(decodeURIComponent);
-  const sp = new URLSearchParams(query);
-  const intent = sp.get('intent');
-  const groupQuery = sp.get('group') || '';
-  const taskIdQuery = sp.get('taskId') || '';
-  const appendQuery = sp.get('append') || '';
-  const rollQuery = sp.get('roll') || '';
-  if (intent && params.length < 3) {
-    while (params.length < 2) params.push('');
-    params.push(intent);
-  }
-  if (pageRaw === 'inventory' && rollQuery && params.length === 0) {
-    params.push(rollQuery);
-  }
-  const known = [
-    'demands',
-    'demand-library',
-    'clusters',
-    'workbench',
-    'slitting',
-    'planning',
-    'results',
-    'reconciliation',
-    'cost-analytics',
-    'inventory',
-    'inspection',
-    'documents',
-    'garment',
-    'showcase',
-    'settings',
-    // Legacy compatibility routes
-    'execution',
-    'tasks',
-    'task',
-    'quality',
-    'analysis'
-  ];
-  const page = known.includes(pageRaw) ? pageRaw : 'workbench';
-  return { page, params, groupQuery, taskIdQuery, appendQuery, rawKey: clean || 'workbench' };
-}
-
 interface NavSubItem {
   id: string;
   label: string;
@@ -167,15 +99,6 @@ interface NavCategory {
   label: string;
   items: NavSubItem[];
 }
-
-const WORKBENCH_DEFAULT_ROUTE: ParsedRoute = {
-  page: 'workbench',
-  params: [],
-  groupQuery: '',
-  taskIdQuery: '',
-  appendQuery: '',
-  rawKey: 'workbench'
-};
 
 const VALID_SETTINGS_TABS: SettingsTabId[] = [
   'general',
@@ -258,8 +181,11 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
-    const onHash = () => {
+    const syncRoute = () => {
       const next = parseHashRoute(location.hash);
+      if (next.redirectTo && location.hash !== next.redirectTo) {
+        window.location.replace(next.redirectTo);
+      }
       setRoute(next);
       if (next.page === 'settings') {
         const candidate = next.params[0] as SettingsTabId | undefined;
@@ -274,13 +200,18 @@ export const App: React.FC = () => {
       const detailTab = (ev as CustomEvent)?.detail?.tab as SettingsTabId | undefined;
       openSettings(detailTab && VALID_SETTINGS_TABS.includes(detailTab) ? detailTab : 'general');
     };
-    window.addEventListener('hashchange', onHash);
+    window.addEventListener('hashchange', syncRoute);
     window.addEventListener('cutplan:open-settings', onOpenEvent);
     if (!location.hash) {
       location.hash = '#/workbench';
+    } else {
+      const initial = parseHashRoute(location.hash);
+      if (initial.redirectTo && location.hash !== initial.redirectTo) {
+        window.location.replace(initial.redirectTo);
+      }
     }
     return () => {
-      window.removeEventListener('hashchange', onHash);
+      window.removeEventListener('hashchange', syncRoute);
       window.removeEventListener('cutplan:open-settings', onOpenEvent);
     };
   }, []);
@@ -366,7 +297,7 @@ export const App: React.FC = () => {
                 />
               </svg>
             ),
-            isActive: (r) => r.page === 'demands' || r.page === 'task'
+            isActive: (r) => r.page === 'demands'
           },
           {
             id: 'demand-library',
@@ -384,7 +315,7 @@ export const App: React.FC = () => {
                 />
               </svg>
             ),
-            isActive: (r) => r.page === 'demand-library' || r.page === 'tasks'
+            isActive: (r) => r.page === 'demand-library'
           },
           {
             id: 'clusters',
@@ -497,7 +428,7 @@ export const App: React.FC = () => {
                 />
               </svg>
             ),
-            isActive: (r) => r.page === 'results' || r.page === 'execution'
+            isActive: (r) => r.page === 'results'
           },
           {
             id: 'reconciliation',
@@ -515,8 +446,7 @@ export const App: React.FC = () => {
                 />
               </svg>
             ),
-            isActive: (r) =>
-              r.page === 'reconciliation' || r.page === 'quality' || r.page === 'analysis'
+            isActive: (r) => r.page === 'reconciliation'
           },
           {
             id: 'cost-analytics',
@@ -709,23 +639,6 @@ export const App: React.FC = () => {
             groupQuery={effectiveRoute.groupQuery}
           />
         );
-      // Legacy compatibility routes
-      case 'execution':
-        return (
-          <ExecutionCenterPage
-            taskId={effectiveRoute.params[0] || undefined}
-            planId={effectiveRoute.params[1] || undefined}
-            intent={effectiveRoute.params[2] || undefined}
-          />
-        );
-      case 'tasks':
-        return <TasksPage />;
-      case 'task':
-        return <TaskEditPage params={effectiveRoute.params} />;
-      case 'quality':
-        return <QualityPage />;
-      case 'analysis':
-        return <AnalysisPage />;
       default:
         return <CuttingWorkbenchPage />;
     }

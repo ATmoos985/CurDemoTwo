@@ -319,40 +319,6 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
     return { styleName, materialModel, externalRef };
   };
 
-  const handleToTask = () => {
-    if (!displayedRow?.layoutRequest?.problem) return;
-    const prob = displayedRow.layoutRequest.problem;
-    const { styleName, materialModel, externalRef } = resolveMaterialMeta();
-    const draft = {
-      name: `${styleName} · ${fmtN(displayedRow.width, 0)}mm 幅宽试算转排产`,
-      problemType: 'NESTING_2D',
-      materialModel,
-      externalRef,
-      process: {
-        bedLength: Math.ceil(
-          displayedRow.use?.length || prob.material?.shape?.height || 5000
-        ),
-        trimStart: 0,
-        pieceGap: prob.process?.pieceGap ?? 0,
-        cutOrigin: 'left-top',
-        firstStageOrientation: 'horizontal',
-        allowRotation: false,
-        allowLongitudinal: true
-      },
-      demands: (prob.parts || []).map((p: any, i: number) => ({
-        id: i + 1,
-        name: p.name || p.id,
-        width: p.shape?.width || 0,
-        length: p.shape?.height || 0,
-        quantity: p.quantity || 1,
-        allowRotation: Boolean(p.allowRotation || p.allowHalfTurn),
-        shape: p.shape
-      }))
-    };
-    localStorage.setItem('cutplan.app.taskdraft.new', JSON.stringify(draft));
-    location.hash = '#/task/new';
-  };
-
   const handleToStudio2D = () => {
     if (!displayedRow?.layoutRequest?.problem) return;
     const prob = displayedRow.layoutRequest.problem;
@@ -1114,21 +1080,11 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
               </button>
               <button
                 type="button"
-                className="mp-cad-btn"
+                className="mp-cad-btn accent"
                 disabled={!displayedRow?.result?.layout}
                 onClick={handleToStudio2D}
               >
                 送入二维自由画布
-              </button>
-              <button
-                type="button"
-                className="mp-cad-btn accent"
-                id="garment-to-task"
-                disabled={!displayedRow?.result?.layout}
-                title="将当前选中的门幅与样板裁片带入新建二维生产任务"
-                onClick={handleToTask}
-              >
-                转入生产任务
               </button>
             </div>
             <div

@@ -1356,7 +1356,7 @@ export const CuttingWorkbenchPage: React.FC<{
               )}
               <span className="sp" />
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <a className="btn sm" href="#/quality">
+                <a className="btn sm" href="#/reconciliation">
                   复检处置 ↗
                 </a>
                 <a className="btn sm" href="#/reconciliation">

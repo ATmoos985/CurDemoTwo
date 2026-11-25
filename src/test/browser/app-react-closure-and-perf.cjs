@@ -2,7 +2,7 @@
 // 强制运行于独立隔离服务（BASE_URL 必须为 localhost/127.0.0.1 且端口严禁为 8080），严禁污染正式 8080 库存。
 // 覆盖三大核心现代验收闭环：
 //   1. 加工正确性闭环：带孔异形裁片 + 边界 20mm 安全边距疵点 -> React #/workbench 选卷求解 -> 确认落库 HTTP 200 -> G-Code 内孔先切且无干涉校验；
-//   2. 跨任务复检一致性闭环：双任务合排完工报工 -> 单片复检判废（原母卷消耗不变）-> #/workbench / #/quality / #/cost-analytics 三处净良品与余量一致；
+//   2. 跨任务复检一致性闭环：双任务合排完工报工 -> 单片复检判废（原母卷消耗不变）-> #/workbench / #/reconciliation / #/cost-analytics 三处净良品与余量一致；
 //   3. React 四层 Konva 画布（WorkbenchBoardCanvas）交互帧耗时基线采样：真实滚轮缩放与拖拽平移 P50/P95 帧耗时统计，替代旧 DOM canvas-performance.cjs。
 //
 // 用法示例：
@@ -554,10 +554,10 @@ async function measureCanvasInteraction(page, cdp, name, prepare, steps, stepFn)
     );
 
     // =========================================================================
-    // 场景 2：跨任务复检一致性闭环（#/workbench、#/quality、#/cost-analytics）
+    // 场景 2：跨任务复检一致性闭环（#/workbench、#/reconciliation、#/cost-analytics）
     // =========================================================================
     await runStep(
-      '跨任务复检一致性闭环：双任务合排报工后复检判废 -> 工作台/质检/成本三处净良品与余量完全一致',
+      '跨任务复检一致性闭环：双任务合排报工后复检判废 -> 工作台/复检对账/成本三处净良品与余量完全一致',
       async () => {
         const tag = 'E2E-QUAL-' + randomUUID().slice(0, 8).toUpperCase();
         const rollId = `ROLL-${tag}`;
@@ -765,7 +765,7 @@ async function measureCanvasInteraction(page, cdp, name, prepare, steps, stepFn)
           '复检判废严禁恢复已消耗母卷长度'
         );
 
-        // 2.5 校验后端需求池与三处 React 页面（#/workbench、#/quality、#/cost-analytics）完全一致
+        // 2.5 校验后端需求池与三处 React 页面（#/workbench、#/reconciliation、#/cost-analytics）完全一致
         const [famAAfter, famBAfter, costSummary] = await Promise.all([
           apiGet(`/api/v2/demand-pool/${encodeURIComponent(taskA.id)}`),
           apiGet(`/api/v2/demand-pool/${encodeURIComponent(taskB.id)}`),
@@ -821,18 +821,27 @@ async function measureCanvasInteraction(page, cdp, name, prepare, steps, stepFn)
           `#/workbench 任务 B 应保持 2/2 已排齐，不受任务 A 复检影响：${wbSummaryB}`
         );
 
-        // 页面 2：#/quality 复检处置页（核验合格=3、异常=1、已复检=1）
-        await page.goto(`${base}/app/#/quality`);
-        await page.getByRole('heading', { name: '复检处置', exact: true, level: 1 }).waitFor();
-        const qualityRow = page.locator('tbody tr', { hasText: rollId }).first();
-        await qualityRow.waitFor({ timeout: 10000 });
-        const qCells = await qualityRow.locator('td').evaluateAll((tds) =>
+        // 页面 2：#/reconciliation 复检补排与对账页（核验净合格=3、异常/判废=1、已复检=1、可复检=3 且已有复检处置时禁止冲销）
+        await page.goto(`${base}/app/#/reconciliation`);
+        await page.getByRole('heading', { name: '复检补排与对账', exact: true, level: 1 }).waitFor();
+        const reconRow = page.locator('tbody tr', { hasText: rollId }).first();
+        await reconRow.waitFor({ timeout: 10000 });
+        const qCells = await reconRow.locator('td').evaluateAll((tds) =>
           tds.map((td) => td.textContent.trim())
         );
-        // 列序：0报工单, 1任务, 2母卷/料头, 3实切mm, 4合格, 5异常, 6可复检, 7已复检
-        assert.equal(qCells[4], '3', `#/quality 净合格件数应为 3，实际行数据=${JSON.stringify(qCells)}`);
-        assert.equal(qCells[5], '1', `#/quality 异常/判废件数应为 1，实际行数据=${JSON.stringify(qCells)}`);
-        assert.equal(qCells[7], '1', `#/quality 已复检处置数应为 1，实际行数据=${JSON.stringify(qCells)}`);
+        // 列序：0报工单号, 1所属需求族/品号缸号, 2消耗母卷/料头, 3实切长mm, 4净合格件, 5异常/判废, 6净利用率, 7操作
+        assert.equal(qCells[4], '3', `#/reconciliation 净合格件数应为 3，实际行数据=${JSON.stringify(qCells)}`);
+        assert.equal(qCells[5], '1', `#/reconciliation 异常/判废件数应为 1，实际行数据=${JSON.stringify(qCells)}`);
+        assert.ok(
+          qCells[7].includes('复检记录 (1)'),
+          `#/reconciliation 应显示已复检处置数 1（复检记录 (1)），实际操作列=${qCells[7]}`
+        );
+        assert.ok(
+          qCells[7].includes('复检处置 (3)'),
+          `#/reconciliation 应显示剩余可复检数 3（复检处置 (3)），实际操作列=${qCells[7]}`
+        );
+        const reverseBtn = reconRow.getByRole('button', { name: '冲销报工', exact: true });
+        assert.ok(await reverseBtn.isDisabled(), '已有复检处置记录的报工行必须禁用「冲销报工」按钮');
 
         // 页面 3：#/cost-analytics 成本与备料分析页（核验按任务归集净良品面积与后端严格一致）
         await page.goto(`${base}/app/#/cost-analytics`);

@@ -19,6 +19,12 @@ import {
   extractWindowDefects,
   matchScannedScheme
 } from './results/cutTicketUtils';
+import {
+  MAX_REVERSAL_REASON_LENGTH,
+  buildReversalRequest,
+  evaluateSchemeReversalEligibility,
+  validateReversalReason
+} from './results/reportReversalUtils';
 
 const STATE_BADGE: Record<string, { label: string; cls: string }> = {
   AWAITING_ROLL: { label: '待绑实卷 (虚拟母卷)', cls: 'warn' },
@@ -215,6 +221,11 @@ export const ResultsCenterPage: React.FC<{
   const [replenishReason, setReplenishReason] = useState('判废/缺口同缸加急补片');
   const [createdReplenishTask, setCreatedReplenishTask] = useState<{ id: string; name?: string } | null>(null);
 
+  // 报工冲销弹窗状态
+  const [showReverseModal, setShowReverseModal] = useState(false);
+  const [reverseReason, setReverseReason] = useState('');
+  const [reverseError, setReverseError] = useState('');
+
   // Print Ticket Modal State
   const [showTicketModal, setShowTicketModal] = useState(false);
 
@@ -332,6 +343,9 @@ export const ResultsCenterPage: React.FC<{
 
   useEffect(() => {
     setPendingCreatedRollId('');
+    setShowReverseModal(false);
+    setReverseReason('');
+    setReverseError('');
   }, [activeScheme?.id]);
 
   useEffect(() => {
@@ -541,6 +555,65 @@ export const ResultsCenterPage: React.FC<{
     }
   };
 
+  const schemeReversal = useMemo(
+    () => evaluateSchemeReversalEligibility(activeEntry),
+    [activeEntry]
+  );
+
+  const handleOpenReverseModal = () => {
+    if (!schemeReversal.eligible) {
+      toast(schemeReversal.reason || '当前方案不支持报工冲销', true);
+      return;
+    }
+    setReverseReason('');
+    setReverseError('');
+    setShowReverseModal(true);
+  };
+
+  const handleReverseScheme = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeScheme || busy) return;
+    if (!schemeReversal.eligible || schemeReversal.targetPlanIds.length === 0) {
+      const msg = schemeReversal.reason || '当前方案不存在可冲销的报工回执';
+      setReverseError(msg);
+      toast(msg, true);
+      return;
+    }
+    const validation = validateReversalReason(reverseReason);
+    if (!validation.valid) {
+      setReverseError(validation.error || '请填写有效的冲销原因');
+      toast(validation.error || '请填写冲销原因', true);
+      return;
+    }
+    setBusy(true);
+    setReverseError('');
+    let reversedCount = 0;
+    try {
+      for (const planId of schemeReversal.targetPlanIds) {
+        const req = buildReversalRequest(planId, validation.trimmed);
+        await requestJSON(req.url, req.body);
+        reversedCount += 1;
+      }
+      setShowReverseModal(false);
+      setReverseReason('');
+      toast(
+        reversedCount > 1
+          ? `已按逆序冲销 ${reversedCount} 笔完工报工：母卷消耗与订单完成量已回滚，方案已置为已冲销释放`
+          : '报工已冲销：母卷/料头消耗与订单完成量已回滚，方案状态已置为已冲销释放'
+      );
+      await loadAll();
+    } catch (err: any) {
+      const msg = err?.message || '冲销报工请求失败';
+      setReverseError(msg);
+      toast('冲销报工失败：' + msg, true);
+      if (reversedCount > 0) {
+        await loadAll();
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // ==================== Exports: DXF / G-Code / Slitting CSV / Excel / A4 Ticket ====================
 
   const handleExport2DCam = (kind: 'dxf' | 'nc') => {
@@ -686,6 +759,12 @@ export const ResultsCenterPage: React.FC<{
         label: '已完工记账',
         count: countByState('COMPLETED'),
         accent: 'emerald'
+      },
+      {
+        value: 'REVERSED',
+        label: '已冲销释放',
+        count: countByState('REVERSED'),
+        accent: 'amber'
       },
       {
         value: 'CANCELLED',
@@ -963,6 +1042,21 @@ export const ResultsCenterPage: React.FC<{
                           title="按源方案母卷缸号/色号一键创建高优同缸加急补片任务"
                         >
                           一键生成同缸加急补片单
+                        </button>
+                      )}
+                      {schemeReversal.showAction && (
+                        <button
+                          type="button"
+                          className="mp-ghost-btn mp-btn-danger-ghost"
+                          disabled={busy || !schemeReversal.eligible}
+                          onClick={handleOpenReverseModal}
+                          title={
+                            schemeReversal.eligible
+                              ? '冲销已完工报工，恢复母卷/料头消耗并回滚订单完成量'
+                              : schemeReversal.reason
+                          }
+                        >
+                          冲销报工
                         </button>
                       )}
                       {activeEntry.canCancel && (
@@ -1918,6 +2012,122 @@ export const ResultsCenterPage: React.FC<{
               </button>
               <button type="submit" className="btn pri" disabled={busy}>
                 {busy ? '正在生成…' : '确认生成同缸补片单'}
+              </button>
+            </div>
+          </form>
+        )}
+      </ModalDialog>
+      {/* 冲销完工报工弹窗 */}
+      <ModalDialog
+        open={showReverseModal}
+        title="冲销完工报工（回滚母卷消耗与订单完成量）"
+        onClose={() => {
+          if (!busy) {
+            setShowReverseModal(false);
+            setReverseError('');
+          }
+        }}
+        maxWidth={540}
+      >
+        {activeScheme && (
+          <form onSubmit={handleReverseScheme}>
+            <div
+              role="alert"
+              style={{
+                borderLeft: '3px solid var(--err, #dc2626)',
+                background: 'rgba(220, 38, 38, 0.08)',
+                padding: '8px 10px',
+                borderRadius: 4,
+                fontSize: 12,
+                color: 'var(--err, #991b1b)',
+                marginBottom: 10
+              }}
+            >
+              <strong>冲销边界说明：</strong>
+              冲销后将恢复本次报工消耗的母卷/料头用量、作废本次派生余料、回滚对应订单完成量，并将方案状态置为{' '}
+              <b>已冲销释放（REVERSED）</b>
+              。若报工已存在复检处置、材料已有后续盘点/后续报工，或派生料头已流转，服务端将拒绝冲销。
+            </div>
+            <div className="kv num" style={{ padding: '4px 0 10px' }}>
+              <div>排程方案号</div>
+              <div>{activeScheme.id}</div>
+              <div>关联报工单号</div>
+              <div>{schemeReversal.targetPlanIds.join('、') || '—'}</div>
+              <div>领用母卷 / 料头</div>
+              <div>
+                {activeScheme.remnantId
+                  ? `料头 ${activeScheme.remnantId}`
+                  : activeScheme.rollId || '—'}
+              </div>
+              <div>已报产出</div>
+              <div>
+                {activeScheme.placedCount}{' '}
+                {activeScheme.dimension === 'SLITTING_1D' ? '卷' : '件'} · 占长{' '}
+                {fmtN(activeScheme.occupiedLengthMm, 1)} mm
+              </div>
+            </div>
+            <div className="form" style={{ gridTemplateColumns: '90px 1fr', padding: '4px 0 8px' }}>
+              <label htmlFor="scheme-reverse-reason">冲销原因</label>
+              <div>
+                <textarea
+                  id="scheme-reverse-reason"
+                  className="field"
+                  rows={3}
+                  required
+                  maxLength={MAX_REVERSAL_REASON_LENGTH}
+                  placeholder="必填（1–500字），如：录入实切长度有误或错绑母卷需回滚重报"
+                  value={reverseReason}
+                  onChange={(e) => {
+                    setReverseReason(e.target.value);
+                    if (reverseError) setReverseError('');
+                  }}
+                  style={{ width: '100%', resize: 'vertical', minHeight: 68 }}
+                />
+                <div
+                  className="muted num"
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    fontSize: 11,
+                    marginTop: 4
+                  }}
+                >
+                  <span>冲销操作将写入不可变过账流水（REPORT_REVERSE）</span>
+                  <span>
+                    {reverseReason.trim().length} / {MAX_REVERSAL_REASON_LENGTH}
+                  </span>
+                </div>
+              </div>
+            </div>
+            {reverseError && (
+              <div
+                role="alert"
+                style={{
+                  marginBottom: 10,
+                  padding: '6px 10px',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  background: 'rgba(220, 38, 38, 0.08)',
+                  color: 'var(--err, #b91c1c)'
+                }}
+              >
+                {reverseError}
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => {
+                  setShowReverseModal(false);
+                  setReverseError('');
+                }}
+              >
+                取消
+              </button>
+              <button type="submit" className="btn pri" disabled={busy}>
+                {busy ? '正在冲销…' : '确认冲销报工'}
               </button>
             </div>
           </form>

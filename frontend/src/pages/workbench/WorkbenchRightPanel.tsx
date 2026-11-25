@@ -275,7 +275,7 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
                       </>
                     )}
                   </span>
-                  <a href="#/quality" style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                  <a href="#/reconciliation" style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
                     质检 ↗
                   </a>
                 </div>

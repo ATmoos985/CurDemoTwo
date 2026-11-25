@@ -30,6 +30,12 @@ import {
   normalizeReconciliationReportItem,
   readDispositionFields
 } from './results/reconciliationUtils';
+import {
+  MAX_REVERSAL_REASON_LENGTH,
+  buildReversalRequest,
+  evaluateReportReversalEligibility,
+  validateReversalReason
+} from './results/reportReversalUtils';
 
 const REPORT_PAGE_SIZE = 50;
 const LEDGER_PAGE_SIZE = 100;
@@ -50,6 +56,16 @@ interface RevokeDraft {
   origReason?: string;
   operator: string;
   reason: string;
+}
+
+interface ReverseReportDraft {
+  reportId: string;
+  taskName: string;
+  materialLabel: string;
+  actualCutLen: number;
+  qualifiedCount: number;
+  reason: string;
+  error: string;
 }
 
 export const ReconciliationPage: React.FC = () => {
@@ -75,6 +91,7 @@ export const ReconciliationPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [qualityDraft, setQualityDraft] = useState<any>(null);
   const [revokeDraft, setRevokeDraft] = useState<RevokeDraft | null>(null);
+  const [reverseDraft, setReverseDraft] = useState<ReverseReportDraft | null>(null);
   const [busy, setBusy] = useState(false);
   const [pendingTick, setPendingTick] = useState(0);
 
@@ -269,6 +286,37 @@ export const ReconciliationPage: React.FC = () => {
     } finally {
       setBusy(false);
       setPendingTick((t) => t + 1);
+    }
+  };
+
+  const handleSubmitReverseReport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reverseDraft || busy) return;
+    const validation = validateReversalReason(reverseDraft.reason);
+    if (!validation.valid) {
+      const msg = validation.error || '请填写冲销原因';
+      setReverseDraft((prev) => (prev ? { ...prev, error: msg } : null));
+      toast(msg, true);
+      return;
+    }
+    setBusy(true);
+    setReverseDraft((prev) => (prev ? { ...prev, error: '' } : null));
+    try {
+      const req = buildReversalRequest(reverseDraft.reportId, validation.trimmed);
+      await requestJSON(req.url, req.body);
+      toast('报工已冲销：母卷/料头消耗与订单完成量已回滚，关联排程方案已置为已冲销释放');
+      setReverseDraft(null);
+      const nextOffset =
+        reports.length <= 1 && reportOffset > 0
+          ? Math.max(0, reportOffset - REPORT_PAGE_SIZE)
+          : reportOffset;
+      await loadData(nextOffset);
+    } catch (err: any) {
+      const msg = err?.message || '冲销报工请求失败';
+      setReverseDraft((prev) => (prev ? { ...prev, error: msg } : null));
+      toast('冲销报工失败：' + msg, true);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -545,6 +593,12 @@ export const ReconciliationPage: React.FC = () => {
                         ).length;
                         const hasGap = activeDispCount > 0 || defectCount > 0;
                         const isExpanded = expandedReportId === row.reportId;
+                        const reversalCheck = evaluateReportReversalEligibility({
+                          reportId: row.reportId,
+                          status: report.status,
+                          dispositions,
+                          report
+                        });
 
                         return (
                           <React.Fragment key={row.reportId}>
@@ -615,6 +669,37 @@ export const ReconciliationPage: React.FC = () => {
                                       onClick={() => handleReplenishTask(row.taskId)}
                                     >
                                       带缺口去补排 →
+                                    </button>
+                                  )}
+                                  {report.status !== 'REVERSED' && (
+                                    <button
+                                      type="button"
+                                      className="btn sm"
+                                      style={
+                                        reversalCheck.eligible
+                                          ? { color: 'var(--err, #b91c1c)' }
+                                          : undefined
+                                      }
+                                      disabled={busy || !reversalCheck.eligible}
+                                      title={
+                                        reversalCheck.eligible
+                                          ? '冲销该笔报工，恢复母卷/料头消耗并回滚完成量'
+                                          : reversalCheck.reason
+                                      }
+                                      onClick={() =>
+                                        setReverseDraft({
+                                          reportId: row.reportId,
+                                          taskName: row.taskName,
+                                          materialLabel:
+                                            report.sourceRemnantId || report.rollId || '—',
+                                          actualCutLen: Number(report.actualCutLen) || 0,
+                                          qualifiedCount: Number(s.qualified) || 0,
+                                          reason: '',
+                                          error: ''
+                                        })
+                                      }
+                                    >
+                                      冲销报工
                                     </button>
                                   )}
                                 </div>
@@ -1078,6 +1163,113 @@ export const ReconciliationPage: React.FC = () => {
               </button>
               <button type="submit" className="btn pri" disabled={busy}>
                 {busy ? '正在撤销…' : '确认受控撤销'}
+              </button>
+            </div>
+          </form>
+        )}
+      </ModalDialog>
+
+      {/* 报工冲销弹窗 */}
+      <ModalDialog
+        open={reverseDraft !== null}
+        title="冲销报工回执（恢复母卷/料头消耗与订单完成量）"
+        onClose={() => {
+          if (!busy) setReverseDraft(null);
+        }}
+        maxWidth={540}
+      >
+        {reverseDraft && (
+          <form onSubmit={handleSubmitReverseReport}>
+            <div
+              role="alert"
+              style={{
+                borderLeft: '3px solid var(--err, #dc2626)',
+                background: 'rgba(220, 38, 38, 0.08)',
+                padding: '8px 10px',
+                borderRadius: 4,
+                fontSize: 12,
+                color: 'var(--err, #991b1b)',
+                marginBottom: 10
+              }}
+            >
+              <strong>冲销边界说明：</strong>
+              冲销后将恢复本次报工消耗的母卷/料头用量、作废本次派生余料、回滚订单完成量，并将关联排程方案状态同步回滚为{' '}
+              <b>已冲销释放（REVERSED）</b>
+              。已有复检处置、后续盘点、后续报工或已流转派生料头的记录将被服务端拦截。
+            </div>
+            <div className="kv num" style={{ padding: '4px 0 10px' }}>
+              <div>报工单号</div>
+              <div>{reverseDraft.reportId}</div>
+              <div>所属需求族</div>
+              <div>{reverseDraft.taskName}</div>
+              <div>消耗母卷 / 料头</div>
+              <div>{reverseDraft.materialLabel}</div>
+              <div>实切长 / 净合格</div>
+              <div>
+                {fmtN(reverseDraft.actualCutLen, 1)} mm · 净合格 {reverseDraft.qualifiedCount} 件
+              </div>
+            </div>
+            <div className="form" style={{ gridTemplateColumns: '90px 1fr', padding: '4px 0 8px' }}>
+              <label htmlFor="recon-reverse-reason">冲销原因</label>
+              <div>
+                <textarea
+                  id="recon-reverse-reason"
+                  className="field"
+                  rows={3}
+                  required
+                  autoFocus
+                  maxLength={MAX_REVERSAL_REASON_LENGTH}
+                  placeholder="必填（1–500字），如：录入实切长度有误或错报母卷需撤回重报"
+                  value={reverseDraft.reason}
+                  onChange={(e) =>
+                    setReverseDraft((prev) =>
+                      prev ? { ...prev, reason: e.target.value, error: '' } : null
+                    )
+                  }
+                  style={{ width: '100%', resize: 'vertical', minHeight: 68 }}
+                />
+                <div
+                  className="muted num"
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    fontSize: 11,
+                    marginTop: 4
+                  }}
+                >
+                  <span>冲销将写入不可变流水（REPORT_REVERSE）</span>
+                  <span>
+                    {reverseDraft.reason.trim().length} / {MAX_REVERSAL_REASON_LENGTH}
+                  </span>
+                </div>
+              </div>
+            </div>
+            {reverseDraft.error && (
+              <div
+                role="alert"
+                style={{
+                  marginBottom: 10,
+                  padding: '6px 10px',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  background: 'rgba(220, 38, 38, 0.08)',
+                  color: 'var(--err, #b91c1c)'
+                }}
+              >
+                {reverseDraft.error}
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => setReverseDraft(null)}
+              >
+                取消
+              </button>
+              <button type="submit" className="btn pri" disabled={busy}>
+                {busy ? '正在冲销…' : '确认冲销报工'}
               </button>
             </div>
           </form>

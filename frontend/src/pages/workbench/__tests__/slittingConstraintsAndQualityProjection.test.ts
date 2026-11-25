@@ -191,7 +191,7 @@ describe('工作台报工与复检判废实绩投影（与质检页 / 履约账�
       openRemainingCount: 3
     });
 
-    // 与 QualityPage / ReconciliationPage 使用的 receiptSummary 校验 100% 一致
+    // 与 ReconciliationPage 使用的 receiptSummary 校验 100% 一致
     const expectedFromQuality = receiptSummary(activeReport, effectivePieceResults);
     expect(projection).not.toBeNull();
     expect(projection!.reportCount).toBe(1);
