@@ -3,10 +3,10 @@ import {
   DXF_GARMENT_STYLES,
   parseDxfGarmentText,
   mirrorVerticesX
-} from '@static/js/nesting/dxf-garment-samples.js';
-import { polygon, rectangle } from '@static/js/canvas/nesting-scene.js';
-import { LINEAR_SCENARIOS } from '@static/js/linear/linear-scenarios.js';
-import { requestJSON } from '@static/app/js/util.js';
+} from '../lib/nesting/dxf-garment-samples.js';
+import { polygon, rectangle } from '../lib/canvas/nesting-scene.js';
+import { LINEAR_SCENARIOS } from '../lib/domain/linear-scenarios.js';
+import { requestJSON } from '../lib/core/util.js';
 import {
   SlittingProfile,
   SlittingWidthMode,

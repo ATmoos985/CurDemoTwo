@@ -8,8 +8,7 @@ let browser, page;
 before(async () => {
     browser = await chromium.launch({headless:true, executablePath:process.env.CHROME_PATH});
     page = await browser.newPage({viewport:{width:1366,height:768}});
-    await page.goto(base + '/app/#/tasks');
-    await page.getByRole('link', {name:/唛架幅宽试算|多门幅工艺对比/}).click();
+    await page.goto(base + '/app/#/garment');
 });
 after(async () => { await browser?.close(); });
 
@@ -121,8 +120,8 @@ test('a failed width stays visible while the next real width can still qualify',
 });
 
 test('each named example fills the form without submitting and produces a complete marker', async t => {
-    const {GARMENT_EXAMPLES} = await import('../../main/resources/static/app/js/model/garment.js');
-    const {markerSizeLabels} = await import('../../main/resources/static/js/nesting/marker-demo.js');
+    const {GARMENT_EXAMPLES} = await import('../../../frontend/src/lib/model/garment.js');
+    const {markerSizeLabels} = await import('../../../frontend/src/lib/nesting/marker-demo.js');
     const submissions = [];
     page.on('request', req => {
         if (req.method() === 'POST' && new URL(req.url()).pathname === '/api/v2/optimization-jobs') submissions.push(req.postDataJSON());
@@ -329,7 +328,7 @@ test('四大件按 130、140 配码实算 16 片，展示固定与掉头方案�
         const compacted = turned.marker.trials.find(trial => trial.phase === 'COMPACTION');
         console.log('允许掉头后端初排与压紧', {seed, compacted, occupiedLengthMm:turned.marker.occupiedLengthMm,
             utilization:turned.metrics.find(metric => metric.name === 'markerAreaUtilization')?.value});
-        const {shapeArea} = await import('../../main/resources/static/js/canvas/nesting-scene.js');
+        const {shapeArea} = await import('../../../frontend/src/lib/canvas/nesting-scene.js');
         const area = problems[0].request.problem.parts.reduce((sum,p) => sum + p.quantity * shapeArea(p.shape), 0);
         const rows = page.locator('tbody tr');
         await expect(rows).toHaveCount(2);
@@ -376,7 +375,7 @@ test('四大件按 130、140 配码实算 16 片，展示固定与掉头方案�
 });
 
 test('manual DXF style selection shows its graded sizes and submits only the selected fabric and size', async () => {
-    const {GARMENT_EXAMPLES, markerRequest} = await import('../../main/resources/static/app/js/model/garment.js');
+    const {GARMENT_EXAMPLES, markerRequest} = await import('../../../frontend/src/lib/model/garment.js');
     const shell = GARMENT_EXAMPLES.find(e => e.source === '20148D' && e.fabric === '面布');
     const rib = GARMENT_EXAMPLES.find(e => e.source === '20148D' && e.fabric === '罗纹');
     await page.goto(base + '/app/#/garment/' + shell.id);

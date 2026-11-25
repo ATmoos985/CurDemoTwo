@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gcodeText, dxfText, homePoint } from '../../main/resources/static/js/plugins/export/cam-format.js';
+import { gcodeText, dxfText, homePoint } from '../../../frontend/src/lib/domain/cam-format.js';
 
 const FIXED_NOW = new Date('2026-11-25T00:00:00.000Z');
 

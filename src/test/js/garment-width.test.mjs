@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {GARMENT_EXAMPLES, candidateWidths, compactionSavingMm, fabricConsumption, markerRequest, selectMarkerTrial, solveMarkerDirection} from '../../main/resources/static/app/js/model/garment.js';
-import {DXF_TRIAL_STYLES, markerExample, markerSizeLabels} from '../../main/resources/static/js/nesting/marker-demo.js';
+import {GARMENT_EXAMPLES, candidateWidths, compactionSavingMm, fabricConsumption, markerRequest, selectMarkerTrial, solveMarkerDirection} from '../../../frontend/src/lib/model/garment.js';
+import {DXF_TRIAL_STYLES, markerExample, markerSizeLabels} from '../../../frontend/src/lib/nesting/marker-demo.js';
 
 test('width trials preserve the same single-size or mixed-size bill of pieces, including small parts', () => {
     const style = 'GARMENT_SHIRT', base = markerExample(1500, style);

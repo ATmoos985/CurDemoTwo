@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import Konva from '../vendor/konva';
 import { validateRollPlacement as validateRollPlacementPure } from '../pages/workbench/boardPlacementValidation';
 import type {
   BoardContextMenuEvent,
@@ -504,7 +505,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
   };
 
   const renderOverlay = () => {
-    const Konva = (globalThis as any).Konva;
+    // Konva 由 ../vendor/konva 显式导入并同步挂载至 globalThis.Konva
     const overlay = overlayGroupRef.current;
     const dynLayer = dynamicLayerRef.current;
     if (!Konva || !overlay || !dynLayer) return;
@@ -896,7 +897,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
   // 1. 仅挂载一次 Konva Stage 与四层 Layer（静态底图 / 裁片疵点 / 料头刀路 / 动态验布线交互）
   useEffect(() => {
     const host = hostRef.current;
-    const Konva = (globalThis as any).Konva;
+    // Konva 由 ../vendor/konva 显式导入并同步挂载至 globalThis.Konva
     if (!host || !Konva) return;
 
     const stage = new Konva.Stage({
@@ -1608,7 +1609,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
 
   // ==================== LAYER 1: 静态材料底图 + 左侧待排区（完全不受 10Hz 验布线与刀路仿真影响） ====================
   useEffect(() => {
-    const Konva = (globalThis as any).Konva;
+    // Konva 由 ../vendor/konva 显式导入并同步挂载至 globalThis.Konva
     const stagingGroup = stagingGroupRef.current;
     const rollGroup = baseRollGroupRef.current;
     const host = hostRef.current;
@@ -2269,7 +2270,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
 
   // ==================== LAYER 2: 裁片 + 疵点 Layer（独立重建，支持视口裁剪） ====================
   useEffect(() => {
-    const Konva = (globalThis as any).Konva;
+    // Konva 由 ../vendor/konva 显式导入并同步挂载至 globalThis.Konva
     const piecesRollGroup = piecesRollGroupRef.current;
     const host = hostRef.current;
     if (!Konva || !piecesRollGroup || !host) return;
@@ -2700,7 +2701,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
 
   // ==================== LAYER 3: 料头与刀路 Layer（含走刀动画仿真与余料交互） ====================
   useEffect(() => {
-    const Konva = (globalThis as any).Konva;
+    // Konva 由 ../vendor/konva 显式导入并同步挂载至 globalThis.Konva
     const tpRollGroup = toolpathRollGroupRef.current;
     const host = hostRef.current;
     if (!Konva || !tpRollGroup || !host) return;

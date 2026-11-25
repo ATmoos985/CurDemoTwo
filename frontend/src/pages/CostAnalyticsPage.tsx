@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { requestJSON, fmtN, toast } from '@static/app/js/util.js';
-import { csvCell } from '@static/js/business/analysis/report-model.js';
+import { requestJSON, fmtN, toast } from '../lib/core/util.js';
+import { csvCell } from '../lib/domain/report-model.js';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
 
 export interface CostSummaryTotals {

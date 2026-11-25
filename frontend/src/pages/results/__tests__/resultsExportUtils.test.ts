@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dxfText } from '@static/js/plugins/export/cam-format.js';
+import { dxfText } from '../../../lib/domain/cam-format.js';
 import {
   buildSlittingCsvText,
   extractWindowDefects,

@@ -16,13 +16,13 @@ import {
   BoardCutLine
 } from '../components/WorkbenchBoardCanvas';
 import { ModalDialog } from '../components/ModalDialog';
-import { requestJSON, toast } from '@static/app/js/util.js';
+import { requestJSON, toast } from '../lib/core/util.js';
 import {
   DISPOSITIONS,
   effectivePieceResults,
   receiptSummary,
   reviewablePieces
-} from '@static/app/js/model/quality.js';
+} from '../lib/model/quality.js';
 import {
   normalizeReconciliationReportItem,
   readDispositionFields,

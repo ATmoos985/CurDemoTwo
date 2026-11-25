@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {STATUS, PRESET_FIELDS, INDUSTRIES, CAPABILITIES, industryOfScenario, matchPreset, presets, describePreset, scenarioRules}
-    from '../../main/resources/static/js/industry/industry-profiles.js';
+    from '../../../frontend/src/lib/domain/industry-profiles.js';
 
 test('statuses stay inside the three agreed levels and every rule is explained', () => {
     for (const industry of INDUSTRIES) {

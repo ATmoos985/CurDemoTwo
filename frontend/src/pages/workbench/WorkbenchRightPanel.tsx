@@ -7,7 +7,7 @@ import {
   StrategyJobRun
 } from '../../store/useStudioStore';
 import { SlittingProfile, SlittingWidthMode, StudioSettings } from '../../store/studioSettings';
-import { fmtN } from '@static/app/js/util.js';
+import { fmtN } from '../../lib/core/util.js';
 import {
   LastConfirmSummary,
   OverviewStats,

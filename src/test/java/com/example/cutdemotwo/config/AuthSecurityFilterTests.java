@@ -97,7 +97,8 @@ class AuthSecurityFilterTests {
         List<String[]> whitelisted = List.of(
                 new String[]{"GET", "/"},
                 new String[]{"GET", "/app/"},
-                new String[]{"GET", "/app/dist/react-app.js"},
+                new String[]{"GET", "/app/index.html"},
+                new String[]{"GET", "/app/assets/index.js"},
                 new String[]{"GET", "/styles/main.css"},
                 new String[]{"GET", "/logo.svg"},
                 new String[]{"GET", "/icon.png"},

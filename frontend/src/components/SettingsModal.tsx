@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { requestJSON, toast, fmtN } from '@static/app/js/util.js';
-import { presets, matchPreset } from '@static/js/industry/industry-profiles.js';
+import { requestJSON, toast, fmtN } from '../lib/core/util.js';
+import { presets, matchPreset } from '../lib/domain/industry-profiles.js';
 import {
   DEFAULT_CNC_POST_OPTIONS,
   DEFAULT_SLITTING_SOLVER_SETTINGS,

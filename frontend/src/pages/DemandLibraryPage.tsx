@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useStudioStore, DemandFamilySummary } from '../store/useStudioStore';
 import { CodeBadge } from '../components/ui/MagpiePrimitives';
 import { ModalDialog } from '../components/ModalDialog';
-import { requestJSON, toast, fmtN, shortId } from '@static/app/js/util.js';
+import { requestJSON, toast, fmtN, shortId } from '../lib/core/util.js';
 import '../styles/theme-demand-library.css';
 
 const DIM_LABELS: Record<string, { text: string; cls: string; unit: string }> = {

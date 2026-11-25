@@ -2,7 +2,7 @@ import React from 'react';
 import { DemandItem, SlittingOrderLine } from '../../store/useStudioStore';
 import { ModalDialog } from '../../components/ModalDialog';
 import { NumberInput } from '../../components/ui/NumberInput';
-import { fmtN } from '@static/app/js/util.js';
+import { fmtN } from '../../lib/core/util.js';
 import { DemandRowView, OverviewStats } from './workbenchTypes';
 
 export interface DemandOverviewModalProps {

@@ -5,7 +5,7 @@ import {
     normalizePolygonShape01,
     buildSafeNestingRequest2D,
     unpadGuillotineResult
-} from '../../main/resources/static/js/business/optimization/nesting-request-adapter.js';
+} from '../../../frontend/src/lib/domain/nesting-request-adapter.js';
 
 test('CONTOUR mode forces left-top startCorner, none firstStage, and converts trimStart into top exclusion', () => {
     const built = buildSafeNestingRequest2D({

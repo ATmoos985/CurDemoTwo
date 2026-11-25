@@ -34,6 +34,9 @@ class SiteEntryTests {
         assertEquals("/app/", URI.create(root.headers().firstValue("location").orElseThrow()).getPath());
         var app = get("/app/");
         assertEquals(200, app.statusCode());
-        assertTrue(app.body().contains("js/main.js"));
+        assertTrue(app.body().contains("type=\"module\""), "现代入口应包含 Vite ESM 模块脚本");
+        assertTrue(app.body().contains("/app/assets/"), "现代入口应引用 /app/assets/ 下的 Vite 产物");
+        assertEquals(404, get("/index.html").statusCode(), "经典 /index.html 应已下线返回 404");
+        assertEquals(404, get("/linear.html").statusCode(), "经典 /linear.html 应已下线返回 404");
     }
 }

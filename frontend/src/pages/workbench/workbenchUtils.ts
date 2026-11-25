@@ -7,12 +7,12 @@ import {
 } from '../../store/useStudioStore';
 import { StudioSettings, extractCncPostOptions } from '../../store/studioSettings';
 import { BoardDefect } from '../../components/WorkbenchBoardCanvas';
-import { quantize01 } from '@static/js/business/optimization/nesting-request-adapter.js';
-import { shapeArea } from '@static/js/canvas/nesting-scene.js';
-import { gcodeText, dxfText } from '@static/js/plugins/export/cam-format.js';
-import { feedLengthLimits, suggestedFeedLength } from '@static/js/business/cutting/feed-length.js';
-import { carStart, assignCar } from '@static/app/js/model/slitting.js';
-import { toast, fmtN, loadSheetLib } from '@static/app/js/util.js';
+import { quantize01 } from '../../lib/domain/nesting-request-adapter.js';
+import { shapeArea } from '../../lib/canvas/nesting-scene.js';
+import { gcodeText, dxfText } from '../../lib/domain/cam-format.js';
+import { feedLengthLimits, suggestedFeedLength } from '../../lib/domain/feed-length.js';
+import { carStart, assignCar } from '../../lib/model/slitting.js';
+import { toast, fmtN, loadSheetLib } from '../../lib/core/util.js';
 import { DefectScheduleRow, DemandRowView, OverviewStats } from './workbenchTypes';
 
 export function rotateShapeGeometry(
@@ -236,7 +236,7 @@ export interface SuggestedFeedWindowResult {
 }
 
 /**
- * 复用 @static/js/business/cutting/feed-length.js 计算当前需求与母卷下的建议拉布长度及避疵工位窗口。
+ * 复用 frontend/src/lib/domain/feed-length.js 计算当前需求与母卷下的建议拉布长度及避疵工位窗口。
  * 纯函数：只生成预览建议，绝不写库或修改母卷库存。
  */
 export function computeSuggestedFeedWindow(params: {

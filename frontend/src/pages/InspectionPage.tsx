@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { requestJSON, fmtM, fmtN, toast, createUuid } from '@static/app/js/util.js';
+import { requestJSON, fmtM, fmtN, toast, createUuid } from '../lib/core/util.js';
 import {
   validateDefect,
   advance,
   round
-} from '@static/js/inspection/inspection-model.js';
+} from '../lib/domain/inspection-model.js';
 import {
   WorkbenchBoardCanvas,
   WorkbenchBoardHandle,

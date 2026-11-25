@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createNestingScene, rectangle, polygon, shapeArea } from '../../main/resources/static/js/canvas/nesting-scene.js';
+import { createNestingScene, rectangle, polygon, shapeArea } from '../../../frontend/src/lib/canvas/nesting-scene.js';
 
 const input = { schemaVersion: '1', unit: 'mm', engine: 'crosscut', timeLimitSeconds: 3,
     material: { id: 'sheet-A', shape: rectangle(2000, 3000), exclusions: [], continuesAfterRegion: false },

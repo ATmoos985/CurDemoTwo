@@ -8,7 +8,7 @@ import {
 import { ModalDialog } from '../components/ModalDialog';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
 import { NumberInput } from '../components/ui/NumberInput';
-import { requestJSON, toast } from '@static/app/js/util.js';
+import { requestJSON, toast } from '../lib/core/util.js';
 
 const CATEGORY_LABELS: Record<DemandCluster['category'], { label: string; tagClass: string }> = {
   DXF_GARMENT: { label: '服装/异形纸样', tagClass: 'run' },

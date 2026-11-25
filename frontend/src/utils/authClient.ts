@@ -1,4 +1,4 @@
-import { createUuid, idempotentPost, pendingWrite } from '@static/app/js/util.js';
+import { createUuid, idempotentPost, pendingWrite } from '../lib/core/util.js';
 
 export const AUTH_TOKEN_STORAGE_KEY = 'cutplan.auth.token';
 

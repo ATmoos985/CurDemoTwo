@@ -19,14 +19,14 @@ import {
   extractSlittingSolverOptions,
   validateSlittingPhysicalConstraints
 } from '../../store/studioSettings';
-import { OptimizationSession } from '@static/js/business/optimization/job-client.js';
+import { OptimizationSession } from '../../lib/domain/job-client.js';
 import {
   buildSafeNestingRequest2D,
   unpadGuillotineResult
-} from '@static/js/business/optimization/nesting-request-adapter.js';
-import { shapeArea } from '@static/js/canvas/nesting-scene.js';
-import { independentBaseline, planSummary } from '@static/js/linear/linear-model.js';
-import { idempotentPost, toast, fmtN } from '@static/app/js/util.js';
+} from '../../lib/domain/nesting-request-adapter.js';
+import { shapeArea } from '../../lib/canvas/nesting-scene.js';
+import { independentBaseline, planSummary } from '../../lib/domain/linear-model.js';
+import { idempotentPost, toast, fmtN } from '../../lib/core/util.js';
 import { LastConfirmSummary, SolverStrategyDef } from './workbenchTypes';
 import {
   buildConfirm1DIdempotencyKey,

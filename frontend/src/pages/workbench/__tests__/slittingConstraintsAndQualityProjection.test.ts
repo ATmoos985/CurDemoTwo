@@ -14,7 +14,7 @@ import {
   annotateBoardPiecesWithReinspection,
   computeTaskExecutionProjection
 } from '../../CuttingWorkbenchPage';
-import { receiptSummary, effectivePieceResults } from '@static/app/js/model/quality.js';
+import { receiptSummary, effectivePieceResults } from '../../../lib/model/quality.js';
 import type { BoardPlacedPiece } from '../../../components/WorkbenchBoardCanvas';
 
 describe('一维物理刀架硬约束请求体构建与换刀结果提取', () => {

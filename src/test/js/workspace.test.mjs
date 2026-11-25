@@ -1,8 +1,8 @@
 // Run with: node --test src/test/js/workspace.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fitBounds } from '../../main/resources/static/js/canvas/cad-view.js';
-import { getInitialScenarios } from '../../main/resources/static/js/plugins/presets/scenarios.js';
+import { fitBounds } from '../../../frontend/src/lib/canvas/cad-view.js';
+import { getInitialScenarios } from '../../../frontend/src/lib/nesting/scenarios.js';
 
 test('current-station framing stays centered in both narrow and wide viewports', () => {
     const data = getInitialScenarios()[1];

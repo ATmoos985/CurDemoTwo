@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {requestJSON,failurePresentation,fallbackPresentation,ApiError} from '../../main/resources/static/js/core/api-request.js';
+import {requestJSON,failurePresentation,fallbackPresentation,ApiError} from '../../../frontend/src/lib/core/api-request.js';
 const original=globalThis.fetch;
 test('HTTP rejection retains status and server message instead of treating it as infeasibility',async()=>{
     try {for(const [status,code]of [[400,'INVALID_INPUT'],[409,'CONFLICT'],[422,'UNSUPPORTED'],[503,'UNAVAILABLE'],[401,'AUTH'],[500,'SERVICE']]){

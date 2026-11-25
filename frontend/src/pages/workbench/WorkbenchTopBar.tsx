@@ -2,7 +2,7 @@ import React, { RefObject } from 'react';
 import { Scenario2DType } from '../../store/useStudioStore';
 import { SlittingWidthMode } from '../../store/studioSettings';
 import { NumberInput } from '../../components/ui/NumberInput';
-import { fmtM } from '@static/app/js/util.js';
+import { fmtM } from '../../lib/core/util.js';
 import { openCraftSettings } from './workbenchUtils';
 
 export interface WorkbenchTopBarProps {

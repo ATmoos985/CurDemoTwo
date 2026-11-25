@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import {parseDemandSheet} from '../../main/resources/static/js/business/cutting/demand-import-model.js';
-import {scenarioExample, garmentExample} from '../../main/resources/static/js/nesting/scenario-examples.js';
-import {createNestingScene, shapeArea} from '../../main/resources/static/js/canvas/nesting-scene.js';
+import {parseDemandSheet} from '../../../frontend/src/lib/domain/demand-import-model.js';
+import {scenarioExample, garmentExample} from '../../../frontend/src/lib/nesting/scenario-examples.js';
+import {createNestingScene, shapeArea} from '../../../frontend/src/lib/canvas/nesting-scene.js';
 
 test('demo inventory catalog agrees with the original order cells', () => {
     const original = JSON.parse(readFileSync(new URL('../fixtures/9.28-orders.json', import.meta.url)));

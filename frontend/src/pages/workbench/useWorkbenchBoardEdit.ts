@@ -7,9 +7,9 @@ import {
 } from '../../store/useStudioStore';
 import { StudioSettings } from '../../store/studioSettings';
 import { BoardDefect } from '../../components/WorkbenchBoardCanvas';
-import { buildSafeNestingRequest2D } from '@static/js/business/optimization/nesting-request-adapter.js';
-import { rectangle, shapeArea } from '@static/js/canvas/nesting-scene.js';
-import { requestJSON, toast } from '@static/app/js/util.js';
+import { buildSafeNestingRequest2D } from '../../lib/domain/nesting-request-adapter.js';
+import { rectangle, shapeArea } from '../../lib/canvas/nesting-scene.js';
+import { requestJSON, toast } from '../../lib/core/util.js';
 import { LastConfirmSummary, STRATEGIES_2D } from './workbenchTypes';
 import {
   tryRotatePlacedPiece,

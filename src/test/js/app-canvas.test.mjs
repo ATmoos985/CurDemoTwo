@@ -3,13 +3,10 @@ import assert from 'node:assert/strict';
 import {readFile, readdir, access} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {buildRollScene, buildInspectionScene, planSegment, plansOnRoll, rollsOfPlans, reportedPlans, segmentStatus, cutEnd, sceneMetrics, demandIndex, NEW_STATION, remnantAsRoll} from '../../main/resources/static/app/js/model/roll-scene.js';
-import {buildSolveRequest, remainingDemands, windowProblem, usablePlan} from '../../main/resources/static/app/js/model/solve-request.js';
-import {defaultReport, applyBulk, recoveryCandidates, reportSummary, reportProblems, buildCutReport} from '../../main/resources/static/app/js/model/report.js';
-import {reviewablePieces, effectivePieceResults, emptyQualityForm, qualityProblems, buildQualityCommand, receiptSummary} from '../../main/resources/static/app/js/model/quality.js';
-import {emptyTask, fromTask, addDemand, mergeImport, taskProblems, lineLock, toPayload, demandTemplateCsv} from '../../main/resources/static/app/js/model/task-form.js';
+import {buildRollScene, buildInspectionScene, planSegment, plansOnRoll, rollsOfPlans, reportedPlans, segmentStatus, cutEnd, sceneMetrics, demandIndex, NEW_STATION, remnantAsRoll, canvasScene} from '../../../frontend/src/lib/model/roll-scene.js';
+import {reviewablePieces, effectivePieceResults, emptyQualityForm, qualityProblems, buildQualityCommand, receiptSummary} from '../../../frontend/src/lib/model/quality.js';
 
-const appRoot = fileURLToPath(new URL('../../main/resources/static/app/', import.meta.url));
+const libRoot = fileURLToPath(new URL('../../../frontend/src/lib/', import.meta.url));
 const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
 
 test('inspection adapts saved and draft defects to global millimetres without changing the archive', () => {
@@ -60,6 +57,12 @@ test('new stations and remnant material use their own process datum extent', () 
     const remnant = buildRollScene({roll: remnantAsRoll({id: 'rem', width: 800, length: 600, status: 'AVAILABLE'}), plans: [], process});
     assert.deepEqual(remnant.origin, {u: 580, v: 800, du: -1, dv: -1, label: '右下'});
     assert.equal(buildInspectionScene({width: 2000, totalLength: 30000}, [], 1000).origin, undefined);
+});
+
+test('navigator length bounds follow material and trim instead of a hardcoded six-meter cap', () => {
+    const roll = {width: 2800, totalLength: 100000, usedLength: 49496.9, currentRemainingLength: 50503.1};
+    const scene = buildRollScene({roll, rollId: 'R', plans: [], process: {allowLongitudinal: true, allowRotation: false, trimStart: .3}, window: {start: 49496.9, len: 1698.3}});
+    assert.deepEqual(scene.bed, {min: .4, max: 50503.1});
 });
 
 const plan = (id, status, start, len, extra = {}) => ({
@@ -168,80 +171,11 @@ test('incomplete historical piece locations are disclosed instead of fabricated 
     assert.deepEqual(s.pieces.map(p => p.id), [2]); assert.match(s.outputNote, /1.*缺少.*未绘制/);
 });
 
-test('solve request uses remaining quantities, task process and window-clipped defects', () => {
-    const task = {id: 't', revision: 3, demands: [{id: 1, name: 'A', width: 900, length: 1400, quantity: 5}, {id: 2, name: 'B', width: 800, length: 1200, quantity: 2}],
-        process: {trimStart: 10, pieceGap: 2, cutOrigin: 'right-bottom', allowLongitudinal: true}};
-    assert.deepEqual(remainingDemands(task, {1: 2}, {'1': 1, 2: 2}).map(d => [d.id, d.demand]), [[1, 2]], '扣除已完成与已预约');
-    const roll = {rollId: 'R1', rollModel: 'M', width: 2800, totalLength: 60000, usedLength: 3000, currentRemainingLength: 57000,
-        defects: [{id: 9, x: 100, y: 7000, w: 200, h: 300, margin: 20}, {id: 10, x: 0, y: 30000, w: 10, h: 10, margin: 0}]};
-    const req = buildSolveRequest({task, roll, win: {start: 5000, len: 4000}, completed: {}, reserved: {}, settings: {timeLimitSeconds: 5}});
-    assert.equal(req.taskRevision, 3);
-    assert.deepEqual([req.rollW, req.rollL, req.windowStartY, req.totalRollL, req.feedPortType], [2800, 4000, 5000, 60000, 'roll']);
-    assert.deepEqual([req.trimStart, req.pieceGap, req.cutOrigin, req.timeLimitSeconds], [10, 2, 'right-bottom', 5]);
-    assert.equal(req.defects.length, 1, '只带入与工位重叠的疵点');
-    assert.deepEqual(req.defects[0], {id: 9, x: 80, y: 1980, w: 240, h: 340, margin: 0}, '疵点换算为工位坐标并外扩安全距离');
-    assert.equal(windowProblem(roll, {start: 2000, len: 1000}) !== null, true, '不能早于已用长度');
-    assert.equal(windowProblem(roll, {start: 58000, len: 3000}) !== null, true, '不能超出卷尾');
-    assert.equal(windowProblem(roll, {start: 5000, len: 4000}), null);
-    assert.equal(usablePlan({success: true, planId: 'p', pieces: [{}], cuts: [], remnants: []}), true);
-    assert.equal(usablePlan({success: true, planId: 'p', pieces: [], cuts: [], remnants: []}), false);
-});
-
 test('demand names merge task and plan demands with task taking precedence', () => {
     const idx = demandIndex([{id: 1, name: '任务需求'}], [{request: {demands: [{id: 1, name: '旧名'}, {id: 2, name: '方案需求'}]}}]);
     assert.equal(idx.get(1).name, '任务需求');
     assert.equal(idx.get(2).name, '方案需求');
     assert.notEqual(idx.get(1).color, idx.get(2).color);
-});
-
-test('report draft follows backend rules: per-piece outcome, cut length and recoverable remnants', () => {
-    // 工位起点 1000；件 1 在 0–1400，件 2 在 1500–3000（相对工位）
-    const seg = {id: 'p', start: 1000, len: 3200, remnants: [{id: 'R1', x: 0, y: 3000, w: 2800, l: 200, hasDefect: true}],
-        pieces: [{id: 1, demandId: 7, u: 1000, v: 0, du: 1400, dv: 900}, {id: 2, demandId: 8, u: 2500, v: 900, du: 1500, dv: 800}]};
-    let r = defaultReport(seg);
-    assert.equal(r.len, 3200);
-    assert.deepEqual(reportProblems(seg, r), []);
-    assert.deepEqual(reportSummary(seg, r), {qualified: 2, rejected: 0, uncut: 0, cutEnd: 3000});
-    r = {...r, len: 2000};
-    assert.match(reportProblems(seg, r).join(), /短于已切裁片末端/);
-    r = applyBulk(r, 'beyond-uncut', seg);
-    assert.equal(r.rows[2].outcome, 'UNCUT', '末端超出实切长度的件标为未切');
-    assert.equal(r.rows[1].outcome, 'QUALIFIED');
-    const cands = recoveryCandidates(seg, r);
-    assert.deepEqual(cands.find(c => c.id === 'UNCUT-2'), {id: 'UNCUT-2', x: 900, y: 1500, w: 800, l: 500, hasDefect: false, source: '未切区域'}, '未切区域只取实切长度以内');
-    r = {...r, rows: {...r.rows, 1: {outcome: 'REJECTED', reason: ''}}};
-    assert.match(reportProblems(seg, r).join(), /须填写原因/);
-    r = {...r, rows: {...r.rows, 1: {outcome: 'REJECTED', reason: '污渍'}}, rem: {...r.rem, R1: {use: true, w: 2900, l: 200}}};
-    assert.match(reportProblems(seg, r).join(), /不能大于/);
-    r = {...r, rem: {R1: {use: true, w: 2800, l: 150}, 'UNCUT-2': {use: true, w: 800, l: 500}}};
-    assert.deepEqual(reportProblems(seg, r), []);
-    const payload = buildCutReport(seg, r);
-    assert.deepEqual([payload.planId, payload.actualCutLen, payload.finishedPieceCount], ['p', 2000, 0]);
-    assert.deepEqual(payload.pieceResults, [{pieceId: 1, outcome: 'REJECTED', reason: '污渍'}, {pieceId: 2, outcome: 'UNCUT', reason: ''}]);
-    assert.deepEqual(payload.actualRemnants.map(x => [x.id, x.w, x.l, x.hasDefect]), [['R1', 2800, 150, true], ['UNCUT-2', 800, 500, false]], '带疵料头保留带疵标记');
-});
-
-test('task form mirrors backend save rules and protects reported demand lines', () => {
-    let f = emptyTask();
-    assert.deepEqual(taskProblems(f).slice(0, 3), ['请填写任务名称', '请填写材料型号', '需求需为 1 至 200 项']);
-    f = {...f, name: '窗帘', materialModel: 'M1'};
-    f = addDemand(addDemand(f, {name: 'A', width: 900, length: 1400, quantity: 2}), {name: 'B', width: 0, length: 1200, quantity: 20000});
-    assert.deepEqual(f.demands.map(d => d.id), [1, 2]);
-    assert.deepEqual(taskProblems(f), ['第 2 行：宽度、长度须大于 0', '第 2 行：件数须为 1–10000 的整数']);
-    const original = {id: 't', revision: 4, name: '窗帘', materialModel: 'M1', demands: [{id: 1, name: 'A', width: 900, length: 1400, quantity: 2}]};
-    const edit = fromTask(original);
-    assert.equal(edit.process.bedLength, 5000, '缺省工艺补默认值');
-    const completed = {1: 2};
-    assert.deepEqual(lineLock(edit.demands[0], completed), {locked: true, minQuantity: 2});
-    assert.match(taskProblems({...edit, demands: []}, {original, completed}).join(), /不能删除/);
-    assert.match(taskProblems({...edit, demands: [{...edit.demands[0], width: 901}]}, {original, completed}).join(), /不能改名或改尺寸/);
-    assert.match(taskProblems({...edit, demands: [{...edit.demands[0], quantity: 1}]}, {original, completed}).join(), /不得小于已报工/);
-    assert.match(taskProblems({...edit, materialModel: 'M2'}, {original, completed}).join(), /不能更改材料型号/);
-    const merged = mergeImport(edit, {name: 'x', materialModel: 'M1', externalRef: 'f.xlsx', demands: [{name: 'C', width: 800, length: 1200, quantity: 3}]}, {replace: true, completed});
-    assert.deepEqual(merged.demands.map(d => [d.id, d.name]), [[1, 'A'], [2, 'C']], '替换导入保留已报工项，新项续号');
-    const payload = toPayload(merged);
-    assert.deepEqual([payload.id, payload.revision, payload.demands.length], ['t', 4, 2]);
-    assert.match(demandTemplateCsv(), /材料型号,裁片名称,宽度\(mm\),长度\(mm\),数量/);
 });
 
 test('quality disposition form validates recovery rectangle and builds an immutable command', () => {
@@ -261,7 +195,7 @@ test('quality disposition form validates recovery rectangle and builds an immuta
     assert.equal(buildQualityCommand({...f, disposition: 'SCRAP'}, 'op-2').recovery, null);
 });
 
-test('remnant feed: whole-piece window, remnant plans only, solve and report follow remnant rules', () => {
+test('remnant feed: whole-piece window and remnant-only plan filtering', () => {
     const stock = {id: 'REM-1', status: 'AVAILABLE', materialBatch: 'M1', sourceRollId: 'R1', width: 2000, length: 1500, area: 3,
         defects: [{id: 1, x: 100, y: 200, w: 50, h: 60, margin: 10}]};
     const r = remnantAsRoll(stock);
@@ -271,20 +205,6 @@ test('remnant feed: whole-piece window, remnant plans only, solve and report fol
     assert.deepEqual([sc.window.start, sc.window.len, sc.fixed, sc.bed], [0, 1500, true, null]);
     const moved = buildRollScene({roll: r, plans, rollId: 'REM-1', demands: [], window: {start: 200, len: 800}});
     assert.deepEqual([moved.window.start, moved.window.len], [0, 1500], '料头工位不可移动');
-    assert.equal(windowProblem(r, {start: 0, len: 1500}), null);
-    assert.match(windowProblem({...r, remnant: {...stock, status: 'CONSUMED'}}, {start: 0, len: 1500}), /不可用/);
-    const task = {id: 't', revision: 1, demands: [{id: 1, name: 'A', width: 900, length: 1400, quantity: 1}], process: {}};
-    const req = buildSolveRequest({task, roll: r, win: {start: 0, len: 1500}, completed: {}, reserved: {}});
-    assert.deepEqual([req.feedPortType, req.sourceRemnantId, req.rollId, req.rollModel, req.rollW, req.rollL, req.totalRollL, req.windowStartY],
-        ['remnant', 'REM-1', 'R1', 'M1', 2000, 1500, 1500, 0]);
-    assert.deepEqual(req.defects[0], {id: 1, x: 90, y: 190, w: 70, h: 80, margin: 0});
-    const seg = {id: 'rp', start: 0, len: 1500, remnants: [{id: 'X', x: 0, y: 0, w: 10, l: 10}], pieces: [{id: 1, u: 0, v: 0, du: 1400, dv: 900}]};
-    const rep = defaultReport(seg, {remnant: true});
-    assert.deepEqual([rep.len, rep.rem], [0, {}]);
-    assert.deepEqual(reportProblems(seg, rep), [], '料头报工不校验实切长度');
-    assert.deepEqual(recoveryCandidates(seg, rep), []);
-    const payload = buildCutReport(seg, rep);
-    assert.deepEqual([payload.actualCutLen, payload.actualRemnants], [0, []]);
 });
 
 async function files(dir) {
@@ -305,19 +225,17 @@ test('scene adapter and its transitive dependencies stay pure: no transport, sto
             await visit(path.resolve(path.dirname(file), ref));
         }
     }
-    await visit(path.join(appRoot, 'js', 'model', 'roll-scene.js'));
+    await visit(path.join(libRoot, 'model', 'roll-scene.js'));
 });
 
-test('every new app module resolves its relative imports', async () => {
-    const all = await files(path.join(appRoot, 'js'));
+test('every model module resolves its relative imports', async () => {
+    const all = await files(path.join(libRoot, 'model'));
+    assert.ok(all.length > 0);
     for (const file of all) for (const ref of refs(await readFile(file, 'utf8')))
-        if (ref.startsWith('.')) await assert.doesNotReject(access(path.resolve(path.dirname(file), ref)), `${path.relative(appRoot, file)} -> ${ref}`);
-    const html = await readFile(path.join(appRoot, 'index.html'), 'utf8');
-    for (const m of html.matchAll(/(?:src|href)="([^"#:]+\.(?:js|css))"/g)) await assert.doesNotReject(access(path.join(appRoot, m[1])), m[1]);
+        if (ref.startsWith('.')) await assert.doesNotReject(access(path.resolve(path.dirname(file), ref)), `${path.relative(libRoot, file)} -> ${ref}`);
 });
 
-test('overlapping candidates display separately while every plan remains available to navigation', async () => {
-    const {canvasScene} = await import('../../main/resources/static/app/js/model/roll-scene.js');
+test('overlapping candidates display separately while every plan remains available to navigation', () => {
     const segments = [
         {id:'cut',status:'cut',start:0,len:1000},
         {id:'a',status:'pending',start:2000,len:1752},

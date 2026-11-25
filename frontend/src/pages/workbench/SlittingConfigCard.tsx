@@ -7,7 +7,7 @@ import {
   saveCustomSlittingPresets
 } from '../../store/studioSettings';
 import { NumberInput } from '../../components/ui/NumberInput';
-import { toast } from '@static/app/js/util.js';
+import { toast } from '../../lib/core/util.js';
 
 export interface SlittingConfigCardProps {
   slitWidthMode: SlittingWidthMode;

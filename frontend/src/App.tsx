@@ -3,7 +3,7 @@ import { CuttingWorkbenchPage } from './pages/CuttingWorkbenchPage';
 import { SettingsModal } from './components/SettingsModal';
 import { AuthGateModal } from './components/AuthGateModal';
 import { SettingsTabId } from './store/studioSettings';
-import { requestJSON, toast } from '@static/app/js/util.js';
+import { requestJSON, toast } from './lib/core/util.js';
 import { useStudioStore } from './store/useStudioStore';
 import {
   AuthSession,

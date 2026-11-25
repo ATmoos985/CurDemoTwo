@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OptimizationSession } from '../../main/resources/static/js/business/optimization/job-client.js';
+import { OptimizationSession } from '../../../frontend/src/lib/domain/job-client.js';
 
 const response = (value) => ({ ok: true, json: async () => value });
 

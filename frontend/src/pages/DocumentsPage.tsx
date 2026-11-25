@@ -9,7 +9,7 @@ import {
   pendingWrite,
   retryWrite,
   dropWrite
-} from '@static/app/js/util.js';
+} from '../lib/core/util.js';
 import { ModalDialog } from '../components/ModalDialog';
 import {
   SegmentedControl,

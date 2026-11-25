@@ -12,10 +12,8 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "strict": false,
-    "allowJs": true,
-    "paths": {
-      "@static/*": ["../src/main/resources/static/*"]
-    }
+    "allowJs": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/vendor/konva.min.js", "src/vendor/sheetjs/xlsx.mini.min.js"]
 }

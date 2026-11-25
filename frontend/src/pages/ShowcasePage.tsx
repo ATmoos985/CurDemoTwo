@@ -1,17 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fmtN } from '@static/app/js/util.js';
+import { fmtN } from '../lib/core/util.js';
 import { CadCanvasView } from '../components/CadCanvasView';
-import { OptimizationSession } from '@static/js/business/optimization/job-client.js';
+import { OptimizationSession } from '../lib/domain/job-client.js';
 import {
   SHOWCASE_CASES,
   showcaseRequest,
   showcaseScene
-} from '@static/app/js/model/showcase.js';
-import { fulfillmentReason } from '@static/js/business/cutting/demand-progress-model.js';
+} from '../lib/model/showcase.js';
+import { fulfillmentReason } from '../lib/domain/demand-progress-model.js';
 import {
   independentBaseline,
   planSummary
-} from '@static/js/linear/linear-model.js';
+} from '../lib/domain/linear-model.js';
 import {
   SegmentedControl,
   CodeBadge,

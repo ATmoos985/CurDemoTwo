@@ -9,14 +9,14 @@ import {
 } from '../store/useStudioStore';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
 import { NumberInput } from '../components/ui/NumberInput';
-import { requestJSON, toast, fmtN, fmtM, loadSheetLib } from '@static/app/js/util.js';
+import { requestJSON, toast, fmtN, fmtM, loadSheetLib } from '../lib/core/util.js';
 import {
   parseDemandSheet,
   parseDemandJSON,
-  importGroups
-} from '@static/js/business/cutting/demand-import-model.js';
-import { parseDxfGarmentText } from '@static/js/nesting/dxf-garment-samples.js';
-import { demandTemplateCsv } from '@static/app/js/model/task-form.js';
+  importGroups,
+  demandTemplateCsv
+} from '../lib/domain/demand-import-model.js';
+import { parseDxfGarmentText } from '../lib/nesting/dxf-garment-samples.js';
 import '../styles/theme-demand-create.css';
 
 type DimensionKey = 'RECT_2D' | 'CONTOUR_2D' | 'SLITTING_1D';

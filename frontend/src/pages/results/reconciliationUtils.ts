@@ -1,4 +1,4 @@
-import { csvCell } from '@static/js/business/analysis/report-model.js';
+import { csvCell } from '../../lib/domain/report-model.js';
 
 export interface NormalizedReconciliationReportRow {
   reportId: string;

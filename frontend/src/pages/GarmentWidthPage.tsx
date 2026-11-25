@@ -1,16 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { NumberInput } from '../components/ui/NumberInput';
-import { fmtN, toast, createUuid } from '@static/app/js/util.js';
+import { fmtN, toast, createUuid } from '../lib/core/util.js';
 import {
   DXF_TRIAL_STYLES,
   GARMENT_TRIAL_STYLES,
   MARKER_STYLES,
   markerSizeLabels
-} from '@static/js/nesting/marker-demo.js';
-import { fourPieceReference } from '@static/js/nesting/dxf-reference.js';
-import { fourPieceOptimized } from '@static/js/nesting/four-piece-seed.js';
-import { DXF_GARMENT_STYLES } from '@static/js/nesting/dxf-garment-samples.js';
-import { OptimizationSession } from '@static/js/business/optimization/job-client.js';
+} from '../lib/nesting/marker-demo.js';
+import { fourPieceReference } from '../lib/nesting/dxf-reference.js';
+import { fourPieceOptimized } from '../lib/nesting/four-piece-seed.js';
+import { DXF_GARMENT_STYLES } from '../lib/nesting/dxf-garment-samples.js';
+import { OptimizationSession } from '../lib/domain/job-client.js';
 import {
   GARMENT_EXAMPLES,
   candidateWidths,
@@ -20,9 +20,9 @@ import {
   markerRequest,
   selectMarkerTrial,
   solveMarkerDirection
-} from '@static/app/js/model/garment.js';
+} from '../lib/model/garment.js';
 import { CadCanvasView } from '../components/CadCanvasView';
-import { showcaseScene } from '@static/app/js/model/showcase.js';
+import { showcaseScene } from '../lib/model/showcase.js';
 import { useStudioStore } from '../store/useStudioStore';
 import { CodeBadge } from '../components/ui/MagpiePrimitives';
 

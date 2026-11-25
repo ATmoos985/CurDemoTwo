@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {SHOWCASE_CASES, showcaseRequest, showcaseScene} from '../../main/resources/static/app/js/model/showcase.js';
+import {SHOWCASE_CASES, showcaseRequest, showcaseScene} from '../../../frontend/src/lib/model/showcase.js';
 
 test('all examples have independent inputs and fit the shared canvas without business state', () => {
     assert.equal(new Set(SHOWCASE_CASES.map(c => c.id)).size, SHOWCASE_CASES.length);
@@ -90,11 +90,19 @@ test('verified fill pieces keep their contour and coordinates and add their net 
 });
 
 test('workflow templates supply matching material and valid tasks with enough demand for multiple stations', async () => {
-    const {WORKFLOW_TEMPLATES, workflowTemplate} = await import('../../main/resources/static/app/js/model/showcase.js');
-    const {fromTask, taskProblems} = await import('../../main/resources/static/app/js/model/task-form.js');
+    const {WORKFLOW_TEMPLATES, workflowTemplate} = await import('../../../frontend/src/lib/model/showcase.js');
+    const {SLITTING, slittingProblems} = await import('../../../frontend/src/lib/model/slitting.js');
     for (const t of WORKFLOW_TEMPLATES) {
         const fixture = workflowTemplate(t.id);
-        assert.deepEqual(taskProblems(fromTask(fixture.task)), [], t.id);
+        assert.ok(fixture.task.name.trim().length > 0, t.id);
+        assert.ok(fixture.task.materialModel.trim().length > 0, t.id);
+        assert.ok(fixture.task.demands.length > 0 && fixture.task.demands.length <= 200, t.id);
+        for (const d of fixture.task.demands) {
+            assert.ok(d.width > 0 && d.length > 0 && Number.isInteger(d.quantity) && d.quantity > 0, `${t.id}:${d.name}`);
+        }
+        if (fixture.task.problemType === SLITTING) {
+            assert.equal(slittingProblems(fixture.task.slitting, fixture.task.demands), null, t.id);
+        }
         assert.equal(fixture.material.rollModel,fixture.task.materialModel);
         assert.ok(fixture.material.length * 1000 > fixture.task.process.bedLength * 2);
         fixture.task.demands[0].quantity = 0;

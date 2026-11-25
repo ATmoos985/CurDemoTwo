@@ -9,9 +9,9 @@ import {
   retryWrite,
   dropWrite,
   createUuid
-} from '@static/app/js/util.js';
-import { buildRollScene, remnantAsRoll } from '@static/app/js/model/roll-scene.js';
-import { workflowTemplate } from '@static/app/js/model/showcase.js';
+} from '../lib/core/util.js';
+import { buildRollScene, remnantAsRoll } from '../lib/model/roll-scene.js';
+import { workflowTemplate } from '../lib/model/showcase.js';
 import { CadCanvasView } from '../components/CadCanvasView';
 import { ModalDialog } from '../components/ModalDialog';
 import {

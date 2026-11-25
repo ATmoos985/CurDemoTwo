@@ -1,9 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {slittingProblems, pendingCounts, openDemands, slittingJob, patternStrips, compositionText, assignCar, usefulCars, carStart, carRequest, patternRows, DEFAULT_SLITTING}
-    from '../../main/resources/static/app/js/model/slitting.js';
-import {emptyTask, fromTask, toPayload, taskProblems, withProblemType} from '../../main/resources/static/app/js/model/task-form.js';
-import {remainingDemands} from '../../main/resources/static/app/js/model/solve-request.js';
+import {slittingProblems, pendingCounts, openDemands, slittingJob, patternStrips, compositionText, assignCar, usefulCars, carStart, patternRows}
+    from '../../../frontend/src/lib/model/slitting.js';
 
 const params = {leftTrim: 10, rightTrim: 10, minWidth: 1800, maxWidth: 1980, widthStep: 10, totalOverCap: 2};
 const task = {id: 't1', revision: 3, name: '分切', materialModel: 'M1', problemType: 'SLITTING_1D', slitting: params,
@@ -21,22 +19,6 @@ test('slitting parameters mirror backend rules, including exact millimetre roll 
     assert.equal(slittingProblems(params, [{id: 1, name: 'A', width: 600, length: 2440}]), null);
     assert.match(slittingProblems(params, [{id: 1, name: 'A', width: 600, length: 2440.5}]), /整数/);
     assert.match(slittingProblems(params, [{id: 1, name: 'A', width: 2100, length: 2000}]), /组合上限/);
-});
-
-test('task form switches type, keeps 2D payload unchanged and validates 1D lines', () => {
-    const f = {...emptyTask(), name: 'x', materialModel: 'M1', demands: [{id: 1, name: 'A', width: 600, length: 2000, quantity: 1, allowRotation: true}]};
-    assert.equal('problemType' in toPayload(f), false, '二维任务的保存内容与之前一致');
-    const slit = withProblemType(f, 'SLITTING_1D', 2000);
-    assert.equal(slit.slitting.maxWidth, 1980);
-    assert.equal(slit.slitting.minWidth, 1780);
-    assert.equal(slit.demands[0].allowRotation, false);
-    assert.deepEqual(toPayload(slit).slitting, {...DEFAULT_SLITTING, maxWidth: 1980, minWidth: 1780});
-    assert.equal(toPayload(slit).problemType, 'SLITTING_1D');
-    assert.deepEqual(taskProblems(slit), []);
-    assert.deepEqual(taskProblems({...slit, demands: [{...slit.demands[0], length: 2440}]}), []);
-    assert.deepEqual(fromTask(task).slitting, params);
-    const original = {...task, problemType: undefined};
-    assert.match(taskProblems(fromTask(task), {original, completed: {1: 1}}).join(), /不能更改任务类型/);
 });
 
 test('open demands subtract strips already in pending cars; job uses the selected roll width', () => {
@@ -70,9 +52,10 @@ test('released car demand is deducted once, while unreserved candidates remain o
         {id: 'draft', status: 'PENDING', result: {pieces: [{demandId: 1}]} }
     ];
     const views = [{reservationActive: true, execution: {planId: 'released'}}];
-    const left = remainingDemands(task, {}, {1: 2});
-    assert.equal(openDemands(left, plans, views).find(d => d.id === 1).demand, 1);
-    assert.equal(openDemands(remainingDemands(task), plans, [{...views[0], reservationActive: false}]).find(d => d.id === 1).demand, 1);
+    const afterReserved = [{id: 1, width: 600, length: 2000, demand: 2}, {id: 2, width: 700, length: 2000, demand: 2}];
+    const fullRemaining = [{id: 1, width: 600, length: 2000, demand: 4}, {id: 2, width: 700, length: 2000, demand: 2}];
+    assert.equal(openDemands(afterReserved, plans, views).find(d => d.id === 1).demand, 1);
+    assert.equal(openDemands(fullRemaining, plans, [{...views[0], reservationActive: false}]).find(d => d.id === 1).demand, 1);
 });
 
 test('repeated cars advance beyond pending cars on this roll, then avoid defects and the roll end', () => {
@@ -96,16 +79,7 @@ test('car start steps past defects that touch the strips, and returns null at th
     assert.equal(carStart(roll, 18000, 2050, strips), null);
 });
 
-test('car request is a fixed-length station: trim + roll length, vertical first stage, strip counts as demand', () => {
-    const roll = {rollId: 'R1', rollModel: 'M1', width: 2000, totalLength: 60000, usedLength: 5000, defects: []};
-    const strips = [{x: 10, width: 600, demandId: 1}, {x: 610, width: 600, demandId: 1}, {x: 1210, width: 700, demandId: 2}];
-    const {request, pieces} = carRequest({task, roll, start: 5000, pattern, strips, settings: {}});
-    assert.equal(request.rollL, 2050);
-    assert.equal(request.windowStartY, 5000);
-    assert.equal(request.firstStageOrientation, 'vertical');
-    assert.equal(request.allowLongitudinal, true);
-    assert.deepEqual(request.demands.map(d => [d.id, d.demand]), [[1, 2], [2, 1]]);
-    assert.deepEqual(pieces.map(p => [p.id, p.x, p.y, p.w, p.l, p.demandId]), [[1, 10, 50, 600, 2000, 1], [2, 610, 50, 600, 2000, 1], [3, 1210, 50, 700, 2000, 2]]);
+test('patternRows summarizes slitting pattern widths, spare trim and order allocations', () => {
     const rows = patternRows({patterns: [pattern]}, new Map([[1, {name: 'A'}], [2, {name: 'B'}]]), 2000, params);
     assert.deepEqual(rows[0], {no: 1, id: 'p1', length: 2000, composition: '600×2 + 700×1', patternWidth: 1900, comboWidth: 2000, motherWidth: 2000, spare: 80, repetitions: 2, allocations: 'A: 4；B: 2'});
 });

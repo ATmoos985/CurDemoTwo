@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fourPieceReference} from '../../main/resources/static/js/nesting/dxf-reference.js';
-import {fourPieceOptimized} from '../../main/resources/static/js/nesting/four-piece-seed.js';
-import {pieceVertices, outlinesConflict} from '../../main/resources/static/js/canvas/outline-geometry.js';
-import {shapeArea} from '../../main/resources/static/js/canvas/nesting-scene.js';
-import {fabricConsumption} from '../../main/resources/static/app/js/model/garment.js';
-import {showcaseScene} from '../../main/resources/static/app/js/model/showcase.js';
-import {markerRequest, solveMarkerDirection} from '../../main/resources/static/app/js/model/garment.js';
+import {fourPieceReference} from '../../../frontend/src/lib/nesting/dxf-reference.js';
+import {fourPieceOptimized} from '../../../frontend/src/lib/nesting/four-piece-seed.js';
+import {pieceVertices, outlinesConflict} from '../../../frontend/src/lib/canvas/outline-geometry.js';
+import {shapeArea} from '../../../frontend/src/lib/canvas/nesting-scene.js';
+import {fabricConsumption} from '../../../frontend/src/lib/model/garment.js';
+import {showcaseScene} from '../../../frontend/src/lib/model/showcase.js';
+import {markerRequest, solveMarkerDirection} from '../../../frontend/src/lib/model/garment.js';
 
 test('the optimized kit is feasible, beats the reference, and seeds only matching solve requests', async () => {
     const {result, verified} = fourPieceOptimized();

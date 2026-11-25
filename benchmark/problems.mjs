@@ -1,9 +1,9 @@
 // Benchmark problems, built from code so that every run sends byte-identical request bodies (compare hash()).
 // Presets come from the front-end scenario data; the lab examples are copied because nesting-lab.js needs a DOM.
 import { createHash } from 'node:crypto';
-import { scenarioExample } from '../src/main/resources/static/js/nesting/scenario-examples.js';
-import { rectangle, polygon, shapeArea } from '../src/main/resources/static/js/canvas/nesting-scene.js';
-import { getInitialScenarios } from '../src/main/resources/static/js/plugins/presets/scenarios.js';
+import { scenarioExample } from '../frontend/src/lib/nesting/scenario-examples.js';
+import { rectangle, polygon, shapeArea } from '../frontend/src/lib/canvas/nesting-scene.js';
+import { getInitialScenarios } from '../frontend/src/lib/nesting/scenarios.js';
 
 const MAX_PIECES = 10000; // NestingValidation: 单次求解最多支持 10000 件
 const CONTINUOUS = { mode: 'GUILLOTINE', feedMode: 'CONTINUOUS', startCorner: 'right-top', firstStageOrientation: 'horizontal',

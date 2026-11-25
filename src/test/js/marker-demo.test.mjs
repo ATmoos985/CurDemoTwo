@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {DXF_TRIAL_STYLES, MARKER_STYLES, markerExample, markerSummary} from '../../main/resources/static/js/nesting/marker-demo.js';
-import {dxfParts} from '../../main/resources/static/js/nesting/dxf-patterns.js';
-import {DXF_GARMENT_STYLES, buildDxfStyleParts, parseDxfGarmentText} from '../../main/resources/static/js/nesting/dxf-garment-samples.js';
-import {shapeArea} from '../../main/resources/static/js/canvas/nesting-scene.js';
+import {DXF_TRIAL_STYLES, MARKER_STYLES, markerExample, markerSummary} from '../../../frontend/src/lib/nesting/marker-demo.js';
+import {dxfParts} from '../../../frontend/src/lib/nesting/dxf-patterns.js';
+import {DXF_GARMENT_STYLES, buildDxfStyleParts, parseDxfGarmentText} from '../../../frontend/src/lib/nesting/dxf-garment-samples.js';
+import {shapeArea} from '../../../frontend/src/lib/canvas/nesting-scene.js';
 import fs from 'node:fs';
 import {fileURLToPath} from 'node:url';
 

@@ -9,7 +9,7 @@ import {
   fmtN,
   toast,
   createUuid
-} from '@static/app/js/util.js';
+} from '../lib/core/util.js';
 import {
   reviewablePieces,
   effectivePieceResults,
@@ -18,7 +18,7 @@ import {
   buildQualityCommand,
   receiptSummary,
   DISPOSITIONS
-} from '@static/app/js/model/quality.js';
+} from '../lib/model/quality.js';
 import { ModalDialog } from '../components/ModalDialog';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
 import { useStudioStore, DemandFamilySummary } from '../store/useStudioStore';

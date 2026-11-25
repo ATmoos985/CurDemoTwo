@@ -11,7 +11,7 @@ import {
   BoardDefect,
   BoardCutLine
 } from '../../components/WorkbenchBoardCanvas';
-import { toast, fmtN } from '@static/app/js/util.js';
+import { toast, fmtN } from '../../lib/core/util.js';
 import { SlittingStripBar } from './SlittingStripBar';
 import { DefectScheduleRow } from './workbenchTypes';
 import { WorkbenchContextMenu } from './WorkbenchContextMenu';

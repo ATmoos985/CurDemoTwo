@@ -39,7 +39,7 @@ ENV PACKINGSOLVER_PATH=/opt/solver/packingsolver_rectangleguillotine
 ENV PACKINGSOLVER_IRREGULAR_PATH=/opt/solver/packingsolver_irregular
 COPY pom.xml .
 COPY src ./src
-COPY --from=frontend-tests /workspace/src/main/resources/static/app/dist ./src/main/resources/static/app/dist
+COPY --from=frontend-tests /workspace/src/main/resources/static/app ./src/main/resources/static/app
 RUN mvn -B -Dcutdemo.requireNativeSolvers=${REQUIRE_NATIVE_SOLVERS} verify
 
 FROM eclipse-temurin:17-jre-noble
