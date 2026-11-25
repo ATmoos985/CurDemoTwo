@@ -1,3 +1,12 @@
+// 【历史归档脚本说明 · 非 CI 强绑定】
+// 本脚本面向已清退的早期命令式 DOM 版 `/app/` 工作台（依赖 `#rc`、`#preview-clear`、`#preview-restore`、
+// `#remnant-reload` 及 `app/js/canvas/roll-canvas.js` 等旧实现），当前仓库已全面切换为 React 19 + TypeScript
+// 工作台与四层 Konva 画布（`WorkbenchBoardCanvas`）。
+// 请勿将本脚本作为当前主线回归入口；面向当前 React 主路由的现代端到端验收请使用：
+//   - `src/test/browser/app-react-closure-and-perf.cjs`（带孔裁片+20mm边界疵点闭环、跨任务复检一致性、新画布性能基准）
+//   - `src/test/browser/app-unified-workflow.cjs`（四大业务域与三阶段排程工作流回归）
+//   - `src/test/browser/app-ui-preview.cjs`（只读路由冒烟）
+//
 // Synthetic tasks with real native contours, on explicit isolated inventory only.
 const assert = require('node:assert/strict');
 const {randomUUID, createHash} = require('node:crypto');

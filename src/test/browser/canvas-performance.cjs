@@ -1,3 +1,10 @@
+// 【历史归档脚本说明 · 非 CI 强绑定】
+// 本脚本面向早期经典页面 `/index.html` 与旧单实例画布架构（依赖 `#konva-container`、`/js/core/state.js` 及
+// `/js/plugins/cad/*`），保留其模块导出仅用于兼容同目录历史辅助脚本（`canvas-interactions.cjs`、`canvas-profile.cjs`、
+// `canvas-rounds.cjs`）。当前 React 主路由（`/app/#/workbench`）已切换为四层独立 Konva 画布（`WorkbenchBoardCanvas`），
+// 现代画布交互帧耗时基线采样（滚轮缩放 / 拖拽平移 P50 & P95）请改用：
+//   - `BASE_URL=http://127.0.0.1:18095 node src/test/browser/app-react-closure-and-perf.cjs`
+//
 // Canvas frame cost with ~2000 synthetic pieces on a long roll. Client-side only: every API write is aborted.
 // BASE_URL=http://127.0.0.1:18091 [BASELINE_URL=http://127.0.0.1:18090] [SNAPSHOT_DIR=...] node src/test/browser/canvas-performance.cjs
 // With BASELINE_URL the same views are captured on both services and compared pixel by pixel. Both open /index.html, since / is the intro page.
