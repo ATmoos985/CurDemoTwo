@@ -143,14 +143,25 @@ function verifyHoledGCode(ncText, { rollWidthMm, minSafeYMm, placements }) {
   const sections = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
-    if (/INNER\s*HOLE|内孔/i.test(line) && line.startsWith('(')) {
-      innerHoleLines.push({ lineNo: i + 1, text: line });
-      currentSection = { kind: 'HOLE', lineNo: i + 1, text: line, points: [] };
-      sections.push(currentSection);
-    } else if (/OUTER\s*CONTOUR|外轮廓|\(---\s*CONTOUR\s+\d+:/i.test(line) && line.startsWith('(')) {
-      outerContourLines.push({ lineNo: i + 1, text: line });
-      currentSection = { kind: 'OUTER', lineNo: i + 1, text: line, points: [] };
-      sections.push(currentSection);
+    if (line.startsWith('(')) {
+      // 优先匹配显式英文加工段标记，避免裁片名称含“内孔”字样时误将 OUTER CONTOUR 归类为内孔段
+      if (/\[INNER\s*HOLE\b|INNER\s*HOLE/i.test(line)) {
+        innerHoleLines.push({ lineNo: i + 1, text: line });
+        currentSection = { kind: 'HOLE', lineNo: i + 1, text: line, points: [] };
+        sections.push(currentSection);
+      } else if (/\[OUTER\s*CONTOUR\]|OUTER\s*CONTOUR/i.test(line)) {
+        outerContourLines.push({ lineNo: i + 1, text: line });
+        currentSection = { kind: 'OUTER', lineNo: i + 1, text: line, points: [] };
+        sections.push(currentSection);
+      } else if (/内孔/.test(line) && !/外轮廓/.test(line)) {
+        innerHoleLines.push({ lineNo: i + 1, text: line });
+        currentSection = { kind: 'HOLE', lineNo: i + 1, text: line, points: [] };
+        sections.push(currentSection);
+      } else if (/外轮廓|\(---\s*CONTOUR\s+\d+:/i.test(line)) {
+        outerContourLines.push({ lineNo: i + 1, text: line });
+        currentSection = { kind: 'OUTER', lineNo: i + 1, text: line, points: [] };
+        sections.push(currentSection);
+      }
     }
     const g01 = line.match(/^G01\s+X(-?\d+(?:\.\d+)?)\s+Y(-?\d+(?:\.\d+)?)/i);
     if (g01) {

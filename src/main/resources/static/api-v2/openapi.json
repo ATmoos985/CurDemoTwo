@@ -7697,6 +7697,12 @@
               "string",
               "null"
             ]
+          },
+          "rejectedToken": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
