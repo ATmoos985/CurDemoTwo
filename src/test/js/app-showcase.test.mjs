@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {SHOWCASE_CASES, showcaseRequest, showcaseScene} from '../../main/resources/static/app/js/model/showcase.js';
-import {showcaseTarget} from '../../main/resources/static/js/showcase-redirect.js';
 
 test('all examples have independent inputs and fit the shared canvas without business state', () => {
     assert.equal(new Set(SHOWCASE_CASES.map(c => c.id)).size, SHOWCASE_CASES.length);
@@ -88,14 +87,6 @@ test('verified fill pieces keep their contour and coordinates and add their net 
     assert.equal(showcaseScene(request, {...result,meetsRequirement:false}, 0, options).segments[0].pieces.length, 1);
     const beyondTail = {...options, gapFillPlacements:[{...collar, y:1165}]};
     assert.equal(showcaseScene(request, result, 0, beyondTail).segments[0].len, 1257.5);
-});
-
-test('historical demo links retain scenario and style in new routes without iframes', () => {
-    const base = 'http://localhost:8080';
-    for (const [path,target] of [['/demos.html','#/showcase'],['/nesting.html?scenario=4','#/showcase/4'],['/demos.html#linear','#/showcase/film'],['/linear-demo.html?scenario=board','#/showcase/board'],['/marker-demo.html?style=GARMENT_PANTS','#/showcase/marker-GARMENT_PANTS'],['/cloth_cad_nesting.html','#/showcase/GUILLOTINE']])
-        assert.equal(showcaseTarget(base+path), '/app/'+target);
-    assert.equal(showcaseTarget(base+'/nesting.html?classic=1'),null);
-    assert.equal(showcaseTarget(base+'/app/'),null);
 });
 
 test('workflow templates supply matching material and valid tasks with enough demand for multiple stations', async () => {

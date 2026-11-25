@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {feedLengthLimits, suggestedFeedLength} from '../../main/resources/static/js/plugins/radar/feed-window.js';
-import {solveDiagnostics} from '../../main/resources/static/js/business/cutting/solve-diagnostics.js';
 
 test('length is bounded by the current roll tail, staged use and trim, preserving tenths of a millimeter',()=>{
     assert.deepEqual(feedLengthLimits({totalRollL:10000,windowStartY:6500,stockRemainingLength:8000,trimStart:30.2},500),{min:30.3,max:3500});
@@ -20,13 +19,4 @@ test('rotation can shorten a two-dimensional layout but never changes full-width
     const request={rollW:4000,allowLongitudinal:true,allowRotation:true,demands:[{width:2000,length:4000,demand:1}]};
     assert.equal(suggestedFeedLength(request),2000);
     assert.equal(suggestedFeedLength({...request,allowLongitudinal:false}),null);
-    assert.match(solveDiagnostics({...request,rollL:5000,allowLongitudinal:false}).summary,/仅横切/);
-});
-
-test('a length remedy is offered only inside actual stock and roll bounds, never for a fixed remnant',()=>{
-    const request={rollW:2000,rollL:2000,totalRollL:10000,windowStartY:5000,remainingLength:5000,allowLongitudinal:false,demands:[{width:2000,length:4000,demand:1}]};
-    assert.equal(solveDiagnostics(request).suggestedLength,4000);
-    assert.equal(solveDiagnostics({...request,windowStartY:6500}).suggestedLength,null);
-    assert.equal(solveDiagnostics({...request,remainingLength:3000}).suggestedLength,null);
-    assert.equal(solveDiagnostics({...request,feedPortType:'remnant'}).suggestedLength,null);
 });

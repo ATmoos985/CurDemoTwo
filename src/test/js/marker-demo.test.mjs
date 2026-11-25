@@ -4,7 +4,6 @@ import {DXF_TRIAL_STYLES, MARKER_STYLES, markerExample, markerSummary} from '../
 import {dxfParts} from '../../main/resources/static/js/nesting/dxf-patterns.js';
 import {DXF_GARMENT_STYLES, buildDxfStyleParts, parseDxfGarmentText} from '../../main/resources/static/js/nesting/dxf-garment-samples.js';
 import {shapeArea} from '../../main/resources/static/js/canvas/nesting-scene.js';
-import {cuttingFrame, CUT_PATHS} from '../../main/resources/static/js/intro/cutting-timeline.js';
 import fs from 'node:fs';
 import {fileURLToPath} from 'node:url';
 
@@ -80,24 +79,6 @@ test('tail accounting preserves decimal lengths and never labels an incomplete k
     assert.equal(markerSummary(p,sceneFor(p,1831.5,false)).unusedTail,null);
     assert.equal(markerSummary(p,null).unusedTail,null);
 });
-test('every separating animation frame comes after all 2D or 1D cuts', () => {
-    for(const mode of Object.keys(CUT_PATHS)) {
-        for(let t=0;t<13000;t+=10){const frame=cuttingFrame(t,mode);
-            if(frame.phase==='裁片分离')assert.equal(frame.complete,CUT_PATHS[mode].length);
-            if(frame.phase==='切割')assert.equal(frame.offset,0);
-        }
-        assert.equal(cuttingFrame(2800,mode).phase,'裁片分离');
-    }
-});
-
-test('2D crosscut finishes before all remaining edges advance together', () => {
-    assert.deepEqual(cuttingFrame(1200,'sheet').progress,[.5,0,0,0,0,0]);
-    assert.deepEqual(cuttingFrame(2100,'sheet').progress,[1,.5,.5,.5,.5,.5]);
-    assert.equal(cuttingFrame(2100,'sheet').complete,1);
-    assert.equal(cuttingFrame(2600,'sheet').complete,6);
-    assert.deepEqual(cuttingFrame(1700,'strip').progress,[.5,.5,.5,.5]);
-});
-
 test('DXF garment styles preserve 6 sizes (110-160), left-right mirrored pairs, and valid AAMA DXF parsing', () => {
     for (const id of ['DXF_1226', 'DXF_20148D', 'DXF_3129']) {
         const style = DXF_GARMENT_STYLES[id];
@@ -106,7 +87,7 @@ test('DXF garment styles preserve 6 sizes (110-160), left-right mirrored pairs, 
         const parts = buildDxfStyleParts(id, {sizeCounts: {M: 1, L: 1}, fabricFilter: '面布', splitMirrorPairs: true});
         assert.ok(parts.length >= 8, id);
         assert.ok(parts.some(p => p.name.includes('(左)')) && parts.some(p => p.name.includes('(右)')), id);
-        const dxfPath = fileURLToPath(new URL('../../main/resources/static/examples/dxf/' + style.file, import.meta.url));
+        const dxfPath = fileURLToPath(new URL('../resources/fixtures/dxf/' + style.file, import.meta.url));
         const buf = fs.readFileSync(dxfPath);
         const text = new TextDecoder('gb18030').decode(buf);
         const parsed = parseDxfGarmentText(text, style.file);

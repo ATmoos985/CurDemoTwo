@@ -1,36 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import {fileURLToPath} from 'node:url';
-import {ENTRIES, navGroups} from '../../main/resources/static/js/product-entries.js';
 import {STATUS, PRESET_FIELDS, INDUSTRIES, CAPABILITIES, industryOfScenario, matchPreset, presets, describePreset, scenarioRules}
     from '../../main/resources/static/js/industry/industry-profiles.js';
-
-const staticDir = fileURLToPath(new URL('../../main/resources/static/', import.meta.url));
-const read = name => fs.readFileSync(staticDir + name, 'utf8');
-const pages = fs.readdirSync(staticDir).filter(name => name.endsWith('.html'));
-
-test('every entry points at a real page and every nav host names a known entry', () => {
-    assert.equal(new Set(ENTRIES.map(e => e.id)).size, ENTRIES.length);
-    for (const item of ENTRIES) assert.ok(fs.existsSync(staticDir + item.href.slice(1)), `${item.href} 不存在`);
-    const hosts = new Map();
-    for (const page of pages) for (const [, id] of read(page).matchAll(/data-product-nav="([^"]+)"/g)) hosts.set(id, page);
-    for (const [id, page] of hosts) assert.ok(ENTRIES.some(e => e.id === id), `${page} 的导航标识 ${id} 未登记`);
-    for (const item of ENTRIES) {
-        if (item.id === 'demos') {
-            assert.match(read('demos.html'), /href="\/app\/#\/showcase"/);
-            assert.doesNotMatch(read('demos.html'), /iframe|demo-panel/);
-        } else assert.equal(hosts.get(item.id), item.href.slice(1), `${item.id} 页面缺少对应导航宿主`);
-    }
-});
-
-test('navigation exposes four production management destinations on every page', () => {
-    for (const active of ENTRIES.map(e => e.id)) {
-        const items=navGroups(active).flatMap(g=>g.items);
-        assert.deepEqual(items.map(item=>item.name), ['任务','材料','分析','设置']);
-        assert.deepEqual(items.map(item=>item.href), ['/tasks.html','/inventory.html','/analysis.html','/settings.html']);
-    }
-});
 
 test('statuses stay inside the three agreed levels and every rule is explained', () => {
     for (const industry of INDUSTRIES) {
@@ -43,41 +14,32 @@ test('statuses stay inside the three agreed levels and every rule is explained',
     }
 });
 
-test('lab scenarios listed for industries are exactly the options of the scenario selector', () => {
-    const html = read('nesting.html'), select = html.match(/<select id="scenario-select"[\s\S]*?<\/select>/)[0];
-    const options = [...select.matchAll(/<option value="([^"]+)"/g)].map(m => m[1]);
+test('industryOfScenario maps 2D scenarios to their industry profile and ignores 1D scenarios', () => {
     const listed = INDUSTRIES.filter(i => i.dimension === '二维').flatMap(i => i.scenarios.map(s => s.key));
-    assert.deepEqual([...listed].sort(), [...options].sort());
+    assert.ok(listed.length > 0);
+    assert.equal(new Set(listed).size, listed.length);
     assert.equal(industryOfScenario('GARMENT_SHIRT').id, 'garment');
     assert.equal(industryOfScenario(3).id, 'curtain');
     assert.equal(industryOfScenario('BOARD_GRAIN').id, 'board');
     assert.equal(industryOfScenario('film'), null);
 });
 
-test('every capability opens a real lab scenario (2D) or a registered page (1D)', () => {
-    const select = read('nesting.html').match(/<select id="scenario-select"[\s\S]*?<\/select>/)[0];
-    const options = [...select.matchAll(/<option value="([^"]+)"/g)].map(m => m[1]);
-    const hrefs = ENTRIES.map(e => e.href);
+test('every capability declares a valid status and target reference', () => {
+    const scenarioKeys = new Set(INDUSTRIES.filter(i => i.dimension === '二维').flatMap(i => i.scenarios.map(s => String(s.key))));
     for (const item of CAPABILITIES) {
         assert.ok(item.status in STATUS, item.id);
-        if (item.dimension === '二维') assert.ok(options.includes(String(item.demo)), `${item.id} 的演示键 ${item.demo} 不在场景演示中`);
-        else assert.ok(hrefs.includes(String(item.link).split(/[?#]/)[0]), `${item.id} 的链接 ${item.link} 未登记`);
+        if (item.dimension === '二维') assert.ok(scenarioKeys.has(String(item.demo)), `${item.id} 的演示键 ${item.demo} 未登记`);
+        else assert.ok(Boolean(item.link), `${item.id} 缺少链接`);
     }
 });
 
-test('workbench presets fit the form constraints so saving them never fails validation', () => {
-    const html = read('index.html');
-    for (const {key, id, options} of PRESET_FIELDS) {
-        const tag = html.match(new RegExp(`<(?:input|select)[^>]*id="${id}"[^>]*>`))?.[0];
-        assert.ok(tag, `${id} 不在设置面板中`);
+test('workbench presets carry valid integer field values', () => {
+    for (const {key, options} of PRESET_FIELDS) {
         for (const preset of presets()) {
-            const value = preset.values[key], attr = name => tag.match(new RegExp(`${name}="([^"]+)"`))?.[1];
+            const value = preset.values[key];
             assert.ok(Number.isInteger(value), `${preset.id}.${key}`);
             if (options) assert.ok(String(value) in options);
-            else {
-                const min = Number(attr('min') ?? 0), step = Number(attr('step') ?? 1);
-                assert.ok(value >= min && value <= Number(attr('max')) && (value - min) % step === 0, `${preset.id}.${key}=${value} 违反 ${id} 的范围或步长`);
-            }
+            else assert.ok(value >= 0, `${preset.id}.${key}=${value}`);
         }
     }
 });

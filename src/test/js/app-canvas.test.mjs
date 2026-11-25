@@ -3,16 +3,11 @@ import assert from 'node:assert/strict';
 import {readFile, readdir, access} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {toScreen, toWorld, fitCamera, zoomAt, panBy, ratioOf, scaleForRatio, parseRatio, formatRatio, rulerStep} from '../../main/resources/static/app/js/canvas/camera.js';
-import {snapPosition, tickStep} from '../../main/resources/static/app/js/canvas/roll-navigator.js';
 import {buildRollScene, buildInspectionScene, planSegment, plansOnRoll, rollsOfPlans, reportedPlans, segmentStatus, cutEnd, sceneMetrics, demandIndex, NEW_STATION, remnantAsRoll} from '../../main/resources/static/app/js/model/roll-scene.js';
 import {buildSolveRequest, remainingDemands, windowProblem, usablePlan} from '../../main/resources/static/app/js/model/solve-request.js';
 import {defaultReport, applyBulk, recoveryCandidates, reportSummary, reportProblems, buildCutReport} from '../../main/resources/static/app/js/model/report.js';
 import {reviewablePieces, effectivePieceResults, emptyQualityForm, qualityProblems, buildQualityCommand, receiptSummary} from '../../main/resources/static/app/js/model/quality.js';
-import {camData, localHome, worldHome, initialPositions, movePiece, rotatePiece, changedPieces, adjustPayload, applyPositions, sizeOf} from '../../main/resources/static/app/js/model/plan-tools.js';
-import {gcodeText} from '../../main/resources/static/js/plugins/export/cam-format.js';
 import {emptyTask, fromTask, addDemand, mergeImport, taskProblems, lineLock, toPayload, demandTemplateCsv} from '../../main/resources/static/app/js/model/task-form.js';
-import {containsRollPiece} from '../../main/resources/static/js/canvas/roll-canvas.js';
 
 const appRoot = fileURLToPath(new URL('../../main/resources/static/app/', import.meta.url));
 const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
@@ -41,21 +36,7 @@ test('roll scene preserves the already rotated polygon instead of its bounding b
     const seg = planSegment(plan);
     assert.deepEqual(seg.pieces[0].shape, shape);
     assert.deepEqual([seg.pieces[0].u, seg.pieces[0].v], [4040, 30]);
-    const moved = applyPositions(seg, plan, {7: {x: 80, y: 140, rotated: true}});
-    assert.deepEqual(moved.pieces[0].shape, shape, 'translation must not rotate an already transformed contour');
-    assert.deepEqual([moved.pieces[0].u, moved.pieces[0].v], [4140, 80]);
     assert.equal(JSON.stringify(plan), before);
-});
-
-test('camera maps world to screen and back in both orientations', () => {
-    const cam = {s: 0.5, a: 10, c: 20};
-    for (const vertical of [false, true]) {
-        const [x, y] = toScreen(cam, vertical, 1000, 400);
-        const [u, v] = toWorld(cam, vertical, x, y);
-        close(u, 1000); close(v, 400);
-    }
-    assert.deepEqual(toScreen(cam, false, 100, 40), [60, 40]);
-    assert.deepEqual(toScreen(cam, true, 100, 40), [40, 60], '竖向时卷长沿 y 方向');
 });
 
 test('all four process datums preserve request length, trim and world offset without transforming result geometry', () => {
@@ -79,73 +60,6 @@ test('new stations and remnant material use their own process datum extent', () 
     const remnant = buildRollScene({roll: remnantAsRoll({id: 'rem', width: 800, length: 600, status: 'AVAILABLE'}), plans: [], process});
     assert.deepEqual(remnant.origin, {u: 580, v: 800, du: -1, dv: -1, label: '右下'});
     assert.equal(buildInspectionScene({width: 2000, totalLength: 30000}, [], 1000).origin, undefined);
-});
-
-test('polygon hit detection excludes concave gaps and includes contour boundaries', () => {
-    const p = {u: 4000, v: 100, du: 900, dv: 600, shape: {type: 'POLYGON', vertices: [
-        {x: 0, y: 0}, {x: 600, y: 0}, {x: 600, y: 300}, {x: 200, y: 300}, {x: 200, y: 900}, {x: 0, y: 900}
-    ]}};
-    assert.equal(containsRollPiece(p, 4500, 550), false, 'inside bounding box but outside physical contour');
-    assert.equal(containsRollPiece(p, 4500, 150), true);
-    assert.equal(containsRollPiece(p, 4500, 300), true, 'edge belongs to the piece');
-    assert.equal(containsRollPiece(p, 3900, 150), false);
-});
-
-test('rectangular adjustment updates the rendered dimensions when rotation changes', () => {
-    const plan = {result: {pieces: [{id: 1, x: 0, y: 0, w: 200, l: 800, rotated: false,
-        shape: {type: 'RECTANGLE', width: 200, height: 800}}]}};
-    const seg = {start: 1200, pieces: [{id: 1, shape: {type: 'RECTANGLE', width: 200, height: 800}}]};
-    const result = applyPositions(seg, plan, {1: {x: 10, y: 20, rotated: true}}).pieces[0];
-    assert.deepEqual(result.shape, {type: 'RECTANGLE', width: 800, height: 200});
-    assert.deepEqual([result.u, result.v, result.du, result.dv], [1220, 10, 200, 800]);
-});
-
-test('fitCamera centres the requested range and respects padding', () => {
-    const cam = fitCamera({u0: 0, u1: 6000, v0: 0, v1: 2800}, {width: 1000, height: 600}, false, {start: 50, end: 50, near: 20, far: 20});
-    close(cam.s, Math.min(900 / 6000, 560 / 2800));
-    const [x0] = toScreen(cam, false, 0, 0), [x1] = toScreen(cam, false, 6000, 0);
-    close((x0 + x1) / 2, 50 + 900 / 2);
-});
-
-test('zoomAt keeps the point under the cursor fixed and clamps the scale', () => {
-    const cam = {s: 0.2, a: 30, c: 40};
-    for (const vertical of [false, true]) {
-        const before = toWorld(cam, vertical, 300, 200);
-        const z = zoomAt(cam, vertical, 300, 200, 2.5);
-        const after = toWorld(z, vertical, 300, 200);
-        close(before[0], after[0]); close(before[1], after[1]);
-    }
-    assert.equal(zoomAt(cam, false, 0, 0, 1000, 0, 8).s, 8);
-    const p = panBy(cam, true, 5, 7);
-    assert.deepEqual([p.a, p.c], [37, 45], '竖向平移：dy 沿卷长');
-});
-
-test('ratio conversion round-trips and parses user input', () => {
-    close(ratioOf(scaleForRatio(20)), 20);
-    close(ratioOf(scaleForRatio(50, 0.2), 0.2), 50);
-    assert.equal(parseRatio('1:20'), 20);
-    assert.equal(parseRatio('1：12.5'), 12.5);
-    assert.equal(parseRatio('100'), 100);
-    assert.equal(parseRatio('abc'), null);
-    assert.equal(parseRatio('1:0'), null);
-    assert.equal(formatRatio(19.6), '1:20');
-    assert.equal(formatRatio(2.345), '1:2.3');
-    assert.throws(() => scaleForRatio(0));
-});
-
-test('ruler and navigator ticks pick 1/2/5 steps with minimum spacing', () => {
-    for (const s of [0.001, 0.05, 0.3, 2, 7]) {
-        const step = rulerStep(s, 70);
-        assert.ok(step * s >= 70, `step ${step} at ${s}`);
-        assert.ok([1, 2, 5].includes(Number((step / 10 ** Math.floor(Math.log10(step))).toFixed(6))));
-    }
-    assert.equal(tickStep(100000, 1000), 10000);
-});
-
-test('navigator snaps to segment starts within the threshold, otherwise to 100 mm', () => {
-    assert.equal(snapPosition(4980, [0, 5000, 9000], 50), 5000);
-    assert.equal(snapPosition(4930, [0, 5000, 9000], 50), 4900);
-    assert.equal(snapPosition(7049, [], 50), 7000);
 });
 
 const plan = (id, status, start, len, extra = {}) => ({
@@ -373,48 +287,11 @@ test('remnant feed: whole-piece window, remnant plans only, solve and report fol
     assert.deepEqual([payload.actualCutLen, payload.actualRemnants], [0, []]);
 });
 
-test('plan tools: local CAM origin, clamped piece moves, rotation and adjustment payload', () => {
-    const p = {id: 'pl', version: 2, request: {rollId: 'R1', rollW: 2800, rollL: 4000, windowStartY: 9000, cutOrigin: 'right-bottom', feedPortType: 'roll', defects: [], allowRotation: true},
-        result: {cuts: [{step: 1, type: '横切', startX: 2800, startY: 1400, endX: 0, endY: 1400}], remnants: [],
-            pieces: [{id: 1, x: 0, y: 0, w: 900, l: 1400, rotated: false, name: 'A'}, {id: 2, x: 900, y: 0, w: 500, l: 700, rotated: true, name: 'B'}]}};
-    assert.deepEqual(localHome(p), {x: 2800, y: 4000}, '原点为工位局部坐标，不叠加工位起点');
-    const {data, home} = camData(p);
-    assert.equal(data.windowStartY, 9000);
-    assert.match(gcodeText(data, {home}), /G00 X2800\.000 Y4000\.000 Z50\.000/);
-    assert.deepEqual(worldHome(p, 9000), {u: 13000, v: 2800});
-    let pos = initialPositions(p);
-    pos = movePiece(pos, p, 1, 100.04, 50, pos);
-    assert.deepEqual(pos[1], {x: 50, y: 100, rotated: false});
-    pos = movePiece(pos, p, 1, 99999, -99999, pos);
-    assert.deepEqual([pos[1].x, pos[1].y], [0, 2600], '限制在工位内');
-    pos = rotatePiece(pos, p, 2);
-    assert.deepEqual(sizeOf(p.result.pieces[1], pos[2].rotated), {w: 700, l: 500}, '旋转后宽长互换');
-    assert.equal(changedPieces(pos, p), 2);
-    assert.deepEqual(adjustPayload(pos, 'op-1234567890abcdef').pieces[1], {id: 2, x: 900, y: 0, rotated: false});
-    const seg = applyPositions({id: 'pl', start: 9000, cuts: [1], pieces: [{id: 1, u: 9000, v: 0, du: 1400, dv: 900}, {id: 2, u: 9000, v: 900, du: 700, dv: 500}]}, p, pos);
-    assert.deepEqual([seg.pieces[0].u, seg.pieces[0].v, seg.pieces[1].du, seg.pieces[1].dv, seg.cuts.length], [11600, 0, 500, 700, 0], '调整中刀序失效、件按新位置显示');
-});
-
 async function files(dir) {
     const entries = await readdir(dir, {withFileTypes: true});
     return (await Promise.all(entries.map(e => e.isDirectory() ? files(path.join(dir, e.name)) : e.name.endsWith('.js') ? [path.join(dir, e.name)] : []))).flat();
 }
 const refs = code => [...code.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)(['"])([^'"]+)\1/g)].map(m => m[2]);
-
-test('new app canvas imports only application or shared canvas core and never loads business data', async () => {
-    const dir = path.join(appRoot, 'js', 'canvas'), all = await files(dir);
-    const shared = path.resolve(appRoot, '../js/canvas');
-    assert.ok(all.length >= 3);
-    for (const file of all) {
-        const code = await readFile(file, 'utf8');
-        for (const ref of refs(code)) {
-            const target = path.resolve(path.dirname(file), ref);
-            const inside = root => { const rel = path.relative(root, target); return !rel.startsWith('..') && !path.isAbsolute(rel); };
-            assert.ok(ref.startsWith('.') && (inside(dir) || inside(shared)), `${file} -> ${ref}`);
-        }
-        assert.doesNotMatch(code, /\b(fetch|XMLHttpRequest|localStorage|sessionStorage)\b|\/api\//, file);
-    }
-});
 
 test('scene adapter and its transitive dependencies stay pure: no transport, storage or DOM access', async () => {
     const seen = new Set();

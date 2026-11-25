@@ -38,17 +38,18 @@ test('canvas core imports only canvas core and cannot load or write business dat
             `${file}: transport and persistence belong to the host`);
     }
 });
-test('HTML entry scripts resolve after module migration', async () => {
+test('app HTML entry scripts resolve and legacy static root html/css remain removed', async () => {
     const staticRoot = path.dirname(root);
-    const pages = (await readdir(staticRoot)).filter(p => p.endsWith('.html'));
-    assert.ok(pages.length > 0);
-    for (const page of pages) {
-        const html = await readFile(path.join(staticRoot,page),'utf8');
-        for (const match of html.matchAll(/<script\b[^>]*\bsrc=['"]([^'"]+)['"]/g)) {
-            const ref = match[1];
-            if (/^(https?:)?\/\//.test(ref)) continue;
-            await assert.doesNotReject(access(path.join(staticRoot,ref.split('?')[0])), `${page} -> ${ref}`);
-        }
+    const rootEntries = await readdir(staticRoot);
+    assert.deepEqual(rootEntries.filter(p => p.endsWith('.html')), [], 'src/main/resources/static/ 根目录不得残留任何 .html 文件');
+    assert.ok(!rootEntries.includes('css'), 'src/main/resources/static/css 目录不得存在');
+    const appDir = path.join(staticRoot, 'app');
+    const html = await readFile(path.join(appDir, 'index.html'), 'utf8');
+    const scripts = [...html.matchAll(/<script\b[^>]*\bsrc=['"]([^'"]+)['"]/g)].map(m => m[1]);
+    assert.ok(scripts.length > 0, 'static/app/index.html 应包含脚本引用');
+    for (const ref of scripts) {
+        if (/^(https?:)?\/\//.test(ref)) continue;
+        await assert.doesNotReject(access(path.resolve(appDir, ref.split('?')[0])), `app/index.html -> ${ref}`);
     }
 });
 test('import guard recognizes static imports, exports and dynamic imports', () => {

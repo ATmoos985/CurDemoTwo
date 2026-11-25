@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {reviewablePieces,effectivePieceResults} from '../../main/resources/static/js/business/cutting/quality-review.js';
-import {restoreRecordedGeometry} from '../../main/resources/static/js/business/cutting/report-outcomes.js';
+import {reviewablePieces,effectivePieceResults} from '../../main/resources/static/js/business/cutting/quality-projection.js';
 const report={planId:'p',status:'CONFIRMED',rollId:'r',feedPortType:'roll',windowStartY:100,
     pieceResults:[{pieceId:1,name:'A',outcome:'QUALIFIED',x:0,y:0,w:100,l:100},{pieceId:2,outcome:'REJECTED'},{pieceId:3,outcome:'UNCUT'}],
     qualityDispositions:[{command:{pieceId:1,disposition:'REMNANT',reason:'破损'}}]};
@@ -12,9 +11,6 @@ test('only cut, untreated pieces can be reviewed; reversal disables all',()=>{
 test('effective quality overlays current results without rewriting original evidence',()=>{
     const before=structuredClone(report),results=effectivePieceResults(report);
     assert.equal(results[0].outcome,'REJECTED');assert.equal(results[0].reason,'复检转料头：破损');assert.deepEqual(report,before);
-    const data={rollId:'r',pieces:[],remnants:[]};restoreRecordedGeometry(data,[report],[]);
-    assert.equal(data.pieces[0].outcome,'REJECTED');assert.equal(data.pieces[0].sourcePieceId,1);assert.equal(data.pieces[0].y,100);
-    assert.deepEqual(report,before);
 });
 test('latest demand explanation follows quality event instead of earlier original completion',async()=>{
     const {latestDemandChange}=await import('../../main/resources/static/js/business/cutting/demand-progress-model.js');
