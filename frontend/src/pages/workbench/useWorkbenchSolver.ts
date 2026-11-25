@@ -10,10 +10,14 @@ import {
   StrategyJobRun
 } from '../../store/useStudioStore';
 import {
+  SlittingPhysicalConstraintInput,
   SlittingProfile,
+  SlittingSolverOptions,
   SlittingWidthMode,
   StudioSettings,
-  extractSlittingSolverOptions
+  buildSlittingPhysicalConstraintFields,
+  extractSlittingSolverOptions,
+  validateSlittingPhysicalConstraints
 } from '../../store/studioSettings';
 import { OptimizationSession } from '@static/js/business/optimization/job-client.js';
 import {
@@ -31,6 +35,122 @@ import {
   buildSourceAllocations2D
 } from './schemeConfirmUtils';
 import { formatSolverProgressText } from './solverProgressUtils';
+import { projectWindowDefectsForSolver } from './defectWindowUtils';
+
+export interface BuildSlittingOptimizationRequestParams {
+  profile: SlittingProfile;
+  motherWidthMm: number;
+  leftTrimMm: number;
+  rightTrimMm: number;
+  minWidthMm: number;
+  maxWidthMm: number;
+  widthStepMm: number;
+  totalOverCap: number;
+  timeLimitSeconds: number;
+  fixedLengthMm: number;
+  orders: SlittingOrderLine[];
+  advOpts: SlittingSolverOptions;
+  physicalConstraints?: SlittingPhysicalConstraintInput | null;
+  clientRequestId?: string;
+}
+
+/**
+ * 构造严格符合 POST /api/v2/optimization-jobs (SLITTING_1D) 契约的请求体：
+ * - 物理刀架硬约束默认全 0/留空时不写入 problem，保证历史默认请求体与幂等输入哈希零变更；
+ * - 用户显式配置正值或成对细边丝禁区时，严格按 SlittingProblem.java 精确字段名透传。
+ */
+export function buildSlittingOptimizationRequest(params: BuildSlittingOptimizationRequestParams) {
+  const {
+    profile,
+    motherWidthMm,
+    leftTrimMm,
+    rightTrimMm,
+    minWidthMm,
+    maxWidthMm,
+    widthStepMm,
+    totalOverCap,
+    timeLimitSeconds,
+    fixedLengthMm,
+    orders,
+    advOpts,
+    physicalConstraints,
+    clientRequestId
+  } = params;
+  const physicalFields = buildSlittingPhysicalConstraintFields(physicalConstraints);
+
+  return {
+    schemaVersion: '2.0',
+    clientRequestId: clientRequestId || `slit-${profile}-${Date.now()}`,
+    problemType: 'SLITTING_1D' as const,
+    allowFallback: false,
+    requireComplete: false,
+    problem: {
+      schemaVersion: '1',
+      unit: 'mm',
+      motherWidthMm,
+      leftTrimMm,
+      rightTrimMm,
+      minWidthMm,
+      maxWidthMm,
+      widthStepMm,
+      totalOverCap,
+      profile,
+      timeLimitSeconds,
+      topK: advOpts.topK,
+      maxIterations: advOpts.maxIterations,
+      maxPatterns: advOpts.maxPatterns,
+      maxDistinctWidths: advOpts.maxDistinctWidths,
+      stageTimeLimitMs: advOpts.stageTimeLimitMs,
+      useOptimizedAssignment: advOpts.useOptimizedAssignment,
+      underPenalty: advOpts.underPenalty,
+      seqGroupAlpha: advOpts.seqGroupAlpha,
+      seqGroupBeta: advOpts.seqGroupBeta,
+      lnsEnabled: advOpts.lnsEnabled,
+      ...physicalFields,
+      orders: orders.map((o) => ({
+        id: o.id,
+        widthMm: Math.floor(o.widthMm),
+        lengthMm: Math.floor(o.lengthMm > 0 ? o.lengthMm : fixedLengthMm),
+        quantity: Math.floor(o.quantity),
+        surfaceTreatment: o.surfaceTreatment?.trim() || '不电晕/不涂布'
+      }))
+    }
+  };
+}
+
+/** 判定二维方案确认落库时是否需要保留裁片轮廓与内孔几何（兼容 POLYGON 与带 holes 的矩形/多边形）。 */
+export function hasContourOrHolesShape(shape?: { type?: string; holes?: unknown[] } | null): boolean {
+  return Boolean(shape?.type === 'POLYGON' || (Array.isArray(shape?.holes) && shape.holes.length > 0));
+}
+
+export function shouldPersistConfirm2DShape(
+  demands: Array<{ shape?: { type?: string; holes?: unknown[] } | null }>,
+  placements: Array<{ shape?: { type?: string; holes?: unknown[] } | null }> = []
+): boolean {
+  return (
+    demands.some((d) => hasContourOrHolesShape(d?.shape)) ||
+    placements.some((p) => hasContourOrHolesShape(p?.shape))
+  );
+}
+
+/** 从后端 SlittingResult 提取换刀统计摘要（保留合法 0 值，缺失返回 null）。 */
+export function extractSlittingKnifeMetrics(slittingResult: any): {
+  estimatedKnifeChanges: number | null;
+  knifeChangesSaved: number | null;
+} {
+  const rawEst = slittingResult?.estimatedKnifeChanges;
+  const rawSaved = slittingResult?.knifeChangesSaved;
+  return {
+    estimatedKnifeChanges:
+      typeof rawEst === 'number' && Number.isFinite(rawEst) && rawEst >= 0
+        ? Math.round(rawEst)
+        : null,
+    knifeChangesSaved:
+      typeof rawSaved === 'number' && Number.isFinite(rawSaved) && rawSaved >= 0
+        ? Math.round(rawSaved)
+        : null
+  };
+}
 
 export interface UseWorkbenchSolverOptions {
   // 2D inputs
@@ -72,6 +192,11 @@ export interface UseWorkbenchSolverOptions {
   slitMaxWidthMm: number;
   slitWidthStepMm: number;
   slitOverCap: number;
+  slitMaxKnives?: number;
+  slitMinBladeSpacingMm?: number;
+  slitKerfMm?: number;
+  slitForbiddenNarrowEdgeMinMm?: number;
+  slitForbiddenNarrowEdgeMaxMm?: number;
   slitFixedLengthMm: number;
   slitAvoidDefects: boolean;
   slitMaterialModel: string;
@@ -128,6 +253,11 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
     slitMaxWidthMm,
     slitWidthStepMm,
     slitOverCap,
+    slitMaxKnives = 0,
+    slitMinBladeSpacingMm = 0,
+    slitKerfMm = 0,
+    slitForbiddenNarrowEdgeMinMm = 0,
+    slitForbiddenNarrowEdgeMaxMm = 0,
     slitFixedLengthMm,
     slitAvoidDefects,
     slitMaterialModel,
@@ -267,16 +397,39 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
             )
           )
         : 0;
+    const stockMaxCap =
+      canvasMode === 'STOCK_ROLL' && currentRoll2D
+        ? Math.max(
+            200,
+            Math.min(
+              Math.max(200, (currentRoll2D.totalLength || 0) - startOffset),
+              currentRoll2D.currentRemainingLength ?? currentRoll2D.totalLength
+            )
+          )
+        : undefined;
+    const solverWindowLength =
+      canvasMode === 'STOCK_ROLL' && currentRoll2D
+        ? effectiveScenario === 'FIXED_BED'
+          ? effLength
+          : Math.max(effLength, stockMaxCap ?? effLength)
+        : effLength;
     const windowDefects =
       canvasMode === 'STOCK_ROLL' && currentRoll2D
-        ? (currentRoll2D.defects || [])
-            .filter((d: any) => d.y < startOffset + effLength && d.y + d.h > startOffset)
-            .map((d: any) => ({
-              ...d,
-              y: Math.max(0, d.y - startOffset)
-            }))
+        ? projectWindowDefectsForSolver(
+            currentRoll2D.defects,
+            startOffset,
+            solverWindowLength,
+            Number(currentRoll2D.width) || candidateWidths[0],
+            settings.defectMarginMm
+          )
         : canvasMode === 'REMNANT' && currentRemnant2D
-        ? currentRemnant2D.defects || []
+        ? projectWindowDefectsForSolver(
+            currentRemnant2D.defects,
+            0,
+            effLength,
+            Number(currentRemnant2D.width) || candidateWidths[0],
+            settings.defectMarginMm
+          )
         : [];
 
     const batchSchemeIds = new Set<string>();
@@ -303,16 +456,6 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         }
         const session = new OptimizationSession();
         activeSessionsRef.current.push(session);
-        const stockMaxCap =
-          canvasMode === 'STOCK_ROLL' && currentRoll2D
-            ? Math.max(
-                200,
-                Math.min(
-                  Math.max(200, (currentRoll2D.totalLength || 0) - startOffset),
-                  currentRoll2D.currentRemainingLength ?? currentRoll2D.totalLength
-                )
-              )
-            : undefined;
         const built = buildSafeNestingRequest2D({
           strategy: def,
           scenario: effectiveScenario,
@@ -549,6 +692,19 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
       toast(`最大规格 ${maxOrderW} mm 超出上限 ${effMaxW} mm`, true);
       return;
     }
+    const minOrderW = Math.min(...validOrders.map((o) => Math.floor(o.widthMm)));
+    const physicalConstraints = {
+      maxKnives: slitMaxKnives,
+      minBladeSpacingMm: slitMinBladeSpacingMm,
+      kerfMm: slitKerfMm,
+      forbiddenNarrowEdgeMinMm: slitForbiddenNarrowEdgeMinMm,
+      forbiddenNarrowEdgeMaxMm: slitForbiddenNarrowEdgeMaxMm
+    };
+    const physicalErr = validateSlittingPhysicalConstraints(physicalConstraints, minOrderW);
+    if (physicalErr) {
+      toast(physicalErr, true);
+      return;
+    }
 
     setRunningSolve(true);
     setLastConfirmSummary(null);
@@ -649,43 +805,21 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
             )
           )
         );
-        const req = {
-          schemaVersion: '2.0',
-          clientRequestId: `slit-${profile}-${Date.now()}`,
-          problemType: 'SLITTING_1D',
-          allowFallback: false,
-          requireComplete: false,
-          problem: {
-            schemaVersion: '1',
-            unit: 'mm',
-            motherWidthMm: effMotherW,
-            leftTrimMm: effLeftTrim,
-            rightTrimMm: effRightTrim,
-            minWidthMm: effMinW,
-            maxWidthMm: effMaxW,
-            widthStepMm: effStep,
-            totalOverCap: effOverCap,
-            profile,
-            timeLimitSeconds: effTimeLimit,
-            topK: advOpts.topK,
-            maxIterations: advOpts.maxIterations,
-            maxPatterns: advOpts.maxPatterns,
-            maxDistinctWidths: advOpts.maxDistinctWidths,
-            stageTimeLimitMs: advOpts.stageTimeLimitMs,
-            useOptimizedAssignment: advOpts.useOptimizedAssignment,
-            underPenalty: advOpts.underPenalty,
-            seqGroupAlpha: advOpts.seqGroupAlpha,
-            seqGroupBeta: advOpts.seqGroupBeta,
-            lnsEnabled: advOpts.lnsEnabled,
-            orders: validOrders.map((o) => ({
-              id: o.id,
-              widthMm: Math.floor(o.widthMm),
-              lengthMm: Math.floor(o.lengthMm > 0 ? o.lengthMm : slitFixedLengthMm),
-              quantity: Math.floor(o.quantity),
-              surfaceTreatment: o.surfaceTreatment?.trim() || '不电晕/不涂布'
-            }))
-          }
-        };
+        const req = buildSlittingOptimizationRequest({
+          profile,
+          motherWidthMm: effMotherW,
+          leftTrimMm: effLeftTrim,
+          rightTrimMm: effRightTrim,
+          minWidthMm: effMinW,
+          maxWidthMm: effMaxW,
+          widthStepMm: effStep,
+          totalOverCap: effOverCap,
+          timeLimitSeconds: effTimeLimit,
+          fixedLengthMm: slitFixedLengthMm,
+          orders: validOrders,
+          advOpts,
+          physicalConstraints
+        });
         try {
           const { result } = await (session as any).solve(req, {
             onProgress: (j: any) => {
@@ -707,6 +841,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
             }
           });
           const s = result.slitting;
+          const knifeMetrics = extractSlittingKnifeMetrics(s);
           const utilMetric =
             result.metrics?.find((m: any) => m.name === 'motherAreaUtilization')?.value || 0;
           const totalCars = s.patterns.reduce((n: number, p: any) => n + p.repetitions, 0);
@@ -727,6 +862,8 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
             missingRolls,
             overproducedRolls,
             avgUtilizationPct: Number(utilMetric.toFixed(2)),
+            estimatedKnifeChanges: knifeMetrics.estimatedKnifeChanges,
+            knifeChangesSaved: knifeMetrics.knifeChangesSaved,
             elapsedMs: Math.round(performance.now() - t0),
             patterns: s.patterns.map((p: any) => ({
               id: p.id,
@@ -836,7 +973,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
       const effectiveDemands = activeScheme2D.demands?.length
         ? activeScheme2D.demands
         : activeDemands2D;
-      const hasPoly = effectiveDemands.some((d) => d.shape?.type === 'POLYGON');
+      const hasPoly = shouldPersistConfirm2DShape(effectiveDemands, [...rawMain, ...rawGap]);
 
       const demandById = new Map<number, DemandItem>();
       for (const d of effectiveDemands) {
@@ -855,7 +992,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
             l: p.shape?.height || p.l || 0,
             rotationDegrees: p.rotationDegrees || 0,
             gapFill: false,
-            shape: hasPoly ? p.shape : undefined,
+            shape: hasPoly || hasContourOrHolesShape(p.shape) ? p.shape : undefined,
             ...(srcDemand?.sourceTaskId && srcDemand.sourceLineId != null
               ? {
                   sourceTaskId: srcDemand.sourceTaskId,
@@ -876,7 +1013,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
             l: p.shape?.height || p.l || 0,
             rotationDegrees: p.rotationDegrees || 0,
             gapFill: true,
-            shape: hasPoly ? p.shape : undefined,
+            shape: hasPoly || hasContourOrHolesShape(p.shape) ? p.shape : undefined,
             ...(srcDemand?.sourceTaskId && srcDemand.sourceLineId != null
               ? {
                   sourceTaskId: srcDemand.sourceTaskId,

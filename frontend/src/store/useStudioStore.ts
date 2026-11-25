@@ -27,6 +27,7 @@ export interface ShapeGeometry {
   width: number;
   height: number;
   vertices?: { x: number; y: number }[];
+  holes?: { x: number; y: number }[][];
 }
 
 export interface DemandItem {
@@ -161,6 +162,10 @@ export interface SlittingSchemeRun {
   missingRolls: number;
   overproducedRolls: number;
   avgUtilizationPct: number;
+  /** 后端换刀顺序优化器返回的预计换刀次数（未返回时为 null/undefined）。 */
+  estimatedKnifeChanges?: number | null;
+  /** 后端换刀顺序优化器返回的较原序节省换刀次数（未返回时为 null/undefined）。 */
+  knifeChangesSaved?: number | null;
   elapsedMs?: number;
   errorMessage?: string;
   patterns: {
@@ -600,6 +605,11 @@ export interface WorkbenchLaunchPreset {
   slitFixedLengthMm?: number;
   slitRollId?: string;
   slitOverCap?: number;
+  slitMaxKnives?: number;
+  slitMinBladeSpacingMm?: number;
+  slitKerfMm?: number;
+  slitForbiddenNarrowEdgeMinMm?: number;
+  slitForbiddenNarrowEdgeMaxMm?: number;
   scenario1D?: Scenario1DType;
 }
 
@@ -645,6 +655,12 @@ interface StudioState {
   slitMaxWidthMm: number;
   slitWidthStepMm: number;
   slitOverCap: number;
+  /** 一维可选刀架物理硬约束（0 表示不限制，仅正值/有效禁区透传后端 SLITTING_1D） */
+  slitMaxKnives: number;
+  slitMinBladeSpacingMm: number;
+  slitKerfMm: number;
+  slitForbiddenNarrowEdgeMinMm: number;
+  slitForbiddenNarrowEdgeMaxMm: number;
   slitFixedLengthMm: number;
   slitAvoidDefects: boolean;
   slitRollId: string;
@@ -771,6 +787,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   slitMaxWidthMm: 4400,
   slitWidthStepMm: 10,
   slitOverCap: 30,
+  slitMaxKnives: 0,
+  slitMinBladeSpacingMm: 0,
+  slitKerfMm: 0,
+  slitForbiddenNarrowEdgeMinMm: 0,
+  slitForbiddenNarrowEdgeMaxMm: 0,
   slitFixedLengthMm: 2000,
   slitAvoidDefects: false,
   slitRollId: '',
@@ -1064,6 +1085,20 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         slitMaxWidthMm: maxW,
         slitWidthStepMm: stepW,
         slitOverCap: overCap,
+        slitMaxKnives: Math.max(0, preset?.slitMaxKnives ?? finiteOr(sp.maxKnives, 0)),
+        slitMinBladeSpacingMm: Math.max(
+          0,
+          preset?.slitMinBladeSpacingMm ?? finiteOr(sp.minBladeSpacingMm, 0)
+        ),
+        slitKerfMm: Math.max(0, preset?.slitKerfMm ?? finiteOr(sp.kerfMm, 0)),
+        slitForbiddenNarrowEdgeMinMm: Math.max(
+          0,
+          preset?.slitForbiddenNarrowEdgeMinMm ?? finiteOr(sp.forbiddenNarrowEdgeMinMm, 0)
+        ),
+        slitForbiddenNarrowEdgeMaxMm: Math.max(
+          0,
+          preset?.slitForbiddenNarrowEdgeMaxMm ?? finiteOr(sp.forbiddenNarrowEdgeMaxMm, 0)
+        ),
         slitFixedLengthMm: fixedLen,
         ...(preset?.scenario1D ? { scenario1D: preset.scenario1D } : {}),
         slitOrders: allLines.map((l) => ({

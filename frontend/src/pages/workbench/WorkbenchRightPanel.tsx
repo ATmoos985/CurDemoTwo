@@ -59,10 +59,22 @@ export interface WorkbenchRightPanelProps {
   slitMaxWidthMm: number;
   slitWidthStepMm: number;
   slitOverCap: number;
+  slitMaxKnives: number;
+  slitMinBladeSpacingMm: number;
+  slitKerfMm: number;
+  slitForbiddenNarrowEdgeMinMm: number;
+  slitForbiddenNarrowEdgeMaxMm: number;
   currentRoll1D: any;
   setSlitSpec: (spec: Record<string, any>) => void;
   settings: StudioSettings;
   updateStudioSettings: (next: StudioSettings) => void;
+  /** 当前激活 2D 已确认方案的报工与复检实绩摘要（仅存在报工时传入）。 */
+  activeSchemeExecutionSummary?: {
+    reportCount: number;
+    netQualifiedCount: number;
+    reinspectedCount: number;
+    rejectedTotalCount: number;
+  } | null;
 }
 
 export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
@@ -103,10 +115,16 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
   slitMaxWidthMm,
   slitWidthStepMm,
   slitOverCap,
+  slitMaxKnives,
+  slitMinBladeSpacingMm,
+  slitKerfMm,
+  slitForbiddenNarrowEdgeMinMm,
+  slitForbiddenNarrowEdgeMaxMm,
   currentRoll1D,
   setSlitSpec,
   settings,
-  updateStudioSettings
+  updateStudioSettings,
+  activeSchemeExecutionSummary
 }) => {
   return (
     <section ref={rightPaneRef} className="pane studio-right">
@@ -219,6 +237,50 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
               </div>
             </div>
 
+            {activeScheme2D.confirmedSchemeId &&
+              activeSchemeExecutionSummary &&
+              activeSchemeExecutionSummary.reportCount > 0 && (
+                <div
+                  className="num"
+                  role="status"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 6,
+                    padding: '6px 8px',
+                    borderRadius: 4,
+                    fontSize: 11.5,
+                    background:
+                      activeSchemeExecutionSummary.reinspectedCount > 0
+                        ? 'var(--warn-bg, rgba(245, 158, 11, 0.14))'
+                        : 'var(--ok-bg, rgba(16, 185, 129, 0.1))',
+                    borderLeft: `3px solid ${
+                      activeSchemeExecutionSummary.reinspectedCount > 0
+                        ? 'var(--warn, #d97706)'
+                        : 'var(--ok, #059669)'
+                    }`
+                  }}
+                >
+                  <span>
+                    已报工：净合格 <b>{activeSchemeExecutionSummary.netQualifiedCount}</b> 片
+                    {activeSchemeExecutionSummary.reinspectedCount > 0 && (
+                      <>
+                        {' '}
+                        · 复检判废{' '}
+                        <b style={{ color: 'var(--err, #dc2626)' }}>
+                          {activeSchemeExecutionSummary.reinspectedCount}
+                        </b>{' '}
+                        片
+                      </>
+                    )}
+                  </span>
+                  <a href="#/quality" style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    质检 ↗
+                  </a>
+                </div>
+              )}
+
             <div className="value-actions">
               <button
                 type="button"
@@ -301,6 +363,33 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
                     : currentRoll1D?.rollId || '实卷'}
                 </b>
               </div>
+              {(activeScheme1D.estimatedKnifeChanges != null ||
+                activeScheme1D.knifeChangesSaved != null) && (
+                <>
+                  <div className="value-kpi-cell">
+                    <small>预计换刀</small>
+                    <b>
+                      {activeScheme1D.estimatedKnifeChanges ?? '—'}
+                      <em>次</em>
+                    </b>
+                  </div>
+                  <div className="value-kpi-cell">
+                    <small>优化省换刀</small>
+                    <b
+                      style={
+                        (activeScheme1D.knifeChangesSaved ?? 0) > 0
+                          ? { color: 'var(--ok, #059669)' }
+                          : undefined
+                      }
+                    >
+                      {(activeScheme1D.knifeChangesSaved ?? 0) > 0
+                        ? `省 ${activeScheme1D.knifeChangesSaved}`
+                        : activeScheme1D.knifeChangesSaved ?? 0}
+                      <em>次</em>
+                    </b>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="value-actions">
@@ -398,6 +487,11 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
             slitMaxWidthMm={slitMaxWidthMm}
             slitWidthStepMm={slitWidthStepMm}
             slitOverCap={slitOverCap}
+            slitMaxKnives={slitMaxKnives}
+            slitMinBladeSpacingMm={slitMinBladeSpacingMm}
+            slitKerfMm={slitKerfMm}
+            slitForbiddenNarrowEdgeMinMm={slitForbiddenNarrowEdgeMinMm}
+            slitForbiddenNarrowEdgeMaxMm={slitForbiddenNarrowEdgeMaxMm}
             setSlitSpec={setSlitSpec}
             settings={settings}
             updateStudioSettings={updateStudioSettings}

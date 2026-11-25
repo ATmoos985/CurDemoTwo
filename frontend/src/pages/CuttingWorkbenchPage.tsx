@@ -17,6 +17,17 @@ import {
 } from '../components/WorkbenchBoardCanvas';
 import { ModalDialog } from '../components/ModalDialog';
 import { requestJSON, toast } from '@static/app/js/util.js';
+import {
+  DISPOSITIONS,
+  effectivePieceResults,
+  receiptSummary,
+  reviewablePieces
+} from '@static/app/js/model/quality.js';
+import {
+  normalizeReconciliationReportItem,
+  readDispositionFields,
+  type NormalizedReconciliationReportRow
+} from './results/reconciliationUtils';
 import '../styles/theme-workbench-v2.css';
 
 import {
@@ -32,6 +43,7 @@ import {
   exportCam2D,
   exportExcel1D
 } from './workbench/workbenchUtils';
+import { projectWindowDefectsForBoard } from './workbench/defectWindowUtils';
 import { useWorkbenchBoardEdit } from './workbench/useWorkbenchBoardEdit';
 import { useWorkbenchSolver } from './workbench/useWorkbenchSolver';
 import { WorkbenchTopBar } from './workbench/WorkbenchTopBar';
@@ -41,6 +53,172 @@ import { WorkbenchRightPanel } from './workbench/WorkbenchRightPanel';
 import { DemandOverviewModal } from './workbench/DemandOverviewModal';
 
 export { SlittingStripBar } from './workbench/SlittingStripBar';
+
+export interface ReinspectedPieceTag {
+  pieceId: number;
+  disposition: string;
+  dispositionLabel: string;
+  reason: string;
+}
+
+export interface SchemeExecutionSummary {
+  schemeId: string;
+  reportCount: number;
+  netQualifiedCount: number;
+  reinspectedCount: number;
+  rejectedTotalCount: number;
+  disposedPieces: Map<number, ReinspectedPieceTag>;
+}
+
+export interface TaskExecutionProjection {
+  taskId: string;
+  reportCount: number;
+  netQualifiedCount: number;
+  rejectedTotalCount: number;
+  reinspectionDisposedTotal: number;
+  reinspectionScrapCount: number;
+  reinspectionRemnantCount: number;
+  reviewableCount: number;
+  openRemainingCount: number;
+  bySchemeId: Map<string, SchemeExecutionSummary>;
+}
+
+/**
+ * 复用质检页与履约账本同一套 receiptSummary / effectivePieceResults 口径，
+ * 计算当前需求池任务的实切净合格数、复检判废扣回数、待补排余量与各已确认方案的逐片判废映射。
+ */
+export function computeTaskExecutionProjection(params: {
+  taskId: string | null;
+  rawReports: any[];
+  taskSchemes?: any[];
+  openRemainingCount: number;
+}): TaskExecutionProjection | null {
+  const { taskId, rawReports, taskSchemes = [], openRemainingCount } = params;
+  if (!taskId || !Array.isArray(rawReports) || rawReports.length === 0) return null;
+
+  const planIdToSchemeId = new Map<string, string>();
+  for (const sc of taskSchemes || []) {
+    const sid = sc?.id ? String(sc.id) : '';
+    if (!sid) continue;
+    const linked: any[] = Array.isArray(sc.linkedPlanIds) ? sc.linkedPlanIds : [];
+    for (const pid of linked) {
+      if (pid != null && String(pid).trim()) {
+        planIdToSchemeId.set(String(pid), sid);
+      }
+    }
+  }
+
+  let reportCount = 0;
+  let netQualifiedCount = 0;
+  let rejectedTotalCount = 0;
+  let reinspectionDisposedTotal = 0;
+  let reinspectionScrapCount = 0;
+  let reinspectionRemnantCount = 0;
+  let reviewableCount = 0;
+  const bySchemeId = new Map<string, SchemeExecutionSummary>();
+
+  for (const rawItem of rawReports) {
+    const row: NormalizedReconciliationReportRow | null =
+      normalizeReconciliationReportItem(rawItem);
+    if (!row) continue;
+    if (String(row.report.status || '').toUpperCase() === 'REVERSED') continue;
+
+    reportCount += 1;
+    const summary = receiptSummary(row.report, effectivePieceResults);
+    netQualifiedCount += Number(summary.qualified) || 0;
+    rejectedTotalCount += Number(summary.rejected) || 0;
+    reinspectionDisposedTotal += Number(summary.dispositions) || 0;
+    reviewableCount += reviewablePieces(row.report).length;
+
+    const resolvedSchemeId = String(
+      rawItem?.schemeId ||
+        row.report.schemeId ||
+        planIdToSchemeId.get(row.reportId) ||
+        ''
+    ).trim();
+
+    let schemeBucket: SchemeExecutionSummary | null = null;
+    if (resolvedSchemeId) {
+      schemeBucket = bySchemeId.get(resolvedSchemeId) || {
+        schemeId: resolvedSchemeId,
+        reportCount: 0,
+        netQualifiedCount: 0,
+        reinspectedCount: 0,
+        rejectedTotalCount: 0,
+        disposedPieces: new Map<number, ReinspectedPieceTag>()
+      };
+      schemeBucket.reportCount += 1;
+      schemeBucket.netQualifiedCount += Number(summary.qualified) || 0;
+      schemeBucket.reinspectedCount += Number(summary.dispositions) || 0;
+      schemeBucket.rejectedTotalCount += Number(summary.rejected) || 0;
+      bySchemeId.set(resolvedSchemeId, schemeBucket);
+    }
+
+    row.dispositions.forEach((disp: any, idx: number) => {
+      const info = readDispositionFields(disp, idx);
+      if (info.revoked) return;
+      if (info.disposition === 'REMNANT') {
+        reinspectionRemnantCount += 1;
+      } else {
+        reinspectionScrapCount += 1;
+      }
+      if (schemeBucket && info.pieceId != null && Number.isFinite(Number(info.pieceId))) {
+        const pid = Number(info.pieceId);
+        const dispLabel =
+          (DISPOSITIONS as Record<string, string>)[info.disposition] ||
+          info.disposition ||
+          '判废';
+        schemeBucket.disposedPieces.set(pid, {
+          pieceId: pid,
+          disposition: info.disposition,
+          dispositionLabel: dispLabel,
+          reason: info.reason
+        });
+      }
+    });
+  }
+
+  if (reportCount === 0) return null;
+
+  return {
+    taskId,
+    reportCount,
+    netQualifiedCount,
+    rejectedTotalCount,
+    reinspectionDisposedTotal,
+    reinspectionScrapCount,
+    reinspectionRemnantCount,
+    reviewableCount,
+    openRemainingCount: Math.max(0, Math.round(Number(openRemainingCount) || 0)),
+    bySchemeId
+  };
+}
+
+/**
+ * 为已确认且存在复检判废记录的画布裁片注入「复检判废」清晰标签（并刷新稳定签名 ID 以触发 Konva 即时重绘）。
+ */
+export function annotateBoardPiecesWithReinspection(
+  pieces: BoardPlacedPiece[],
+  schemeExecution: SchemeExecutionSummary | null | undefined
+): BoardPlacedPiece[] {
+  if (!schemeExecution || schemeExecution.disposedPieces.size === 0) {
+    return pieces;
+  }
+  return pieces.map((pc) => {
+    const rawNumericId = Number(pc.id);
+    const hit =
+      (Number.isInteger(rawNumericId) && rawNumericId > 0
+        ? schemeExecution.disposedPieces.get(rawNumericId)
+        : undefined) || schemeExecution.disposedPieces.get(pc.index + 1);
+    if (!hit) return pc;
+    const prefix = hit.disposition === 'REMNANT' ? '[复检判废·转料头]' : '[复检判废]';
+    return {
+      ...pc,
+      id: `${pc.id}-REINSPECTED`,
+      name: `${prefix} ${pc.name}`
+    };
+  });
+}
 
 interface PendingConfirmAction {
   title: string;
@@ -108,6 +286,11 @@ export const CuttingWorkbenchPage: React.FC<{
     slitMaxWidthMm,
     slitWidthStepMm,
     slitOverCap,
+    slitMaxKnives,
+    slitMinBladeSpacingMm,
+    slitKerfMm,
+    slitForbiddenNarrowEdgeMinMm,
+    slitForbiddenNarrowEdgeMaxMm,
     slitFixedLengthMm,
     slitAvoidDefects,
     slitRollId,
@@ -150,6 +333,7 @@ export const CuttingWorkbenchPage: React.FC<{
   const [remnants, setRemnants] = useState<any[]>([]);
   const [poolFamilies, setPoolFamilies] = useState<DemandFamilySummary[]>([]);
   const [taskSchemes, setTaskSchemes] = useState<any[]>([]);
+  const [taskReports, setTaskReports] = useState<any[]>([]);
   const [demandSourceTab, setDemandSourceTab] = useState<'POOL' | 'TEMPLATE'>('TEMPLATE');
   const [activeClusterQuickId, setActiveClusterQuickId] = useState('DXF_1226');
   const [overviewModalOpen, setOverviewModalOpen] = useState(false);
@@ -194,19 +378,32 @@ export const CuttingWorkbenchPage: React.FC<{
         : activeDimension === '2D'
         ? loadedTaskId
         : slitLoadedTaskId;
-    const [rList, remList, famList, schList] = await Promise.all([
+    const [rList, remList, famList, schList, repPage] = await Promise.all([
       requestJSON('/api/rolls').catch(() => []),
       requestJSON('/api/remnants').catch(() => []),
       requestJSON('/api/v2/demand-pool').catch(() => []),
       curTaskId
         ? requestJSON(`/api/v2/schemes?taskId=${encodeURIComponent(curTaskId)}`).catch(() => [])
-        : Promise.resolve([])
+        : Promise.resolve([]),
+      curTaskId
+        ? requestJSON(
+            `/api/v2/reconciliation/reports?limit=200&offset=0&taskId=${encodeURIComponent(
+              curTaskId
+            )}`
+          ).catch(() => ({ items: [] }))
+        : Promise.resolve({ items: [] })
     ]);
     setRolls(Array.isArray(rList) ? rList : []);
     setRemnants(Array.isArray(remList) ? remList : []);
     const fams: DemandFamilySummary[] = Array.isArray(famList) ? famList : [];
     setPoolFamilies(fams);
     setTaskSchemes(Array.isArray(schList) ? schList : []);
+    const repItems = Array.isArray(repPage?.items)
+      ? repPage.items
+      : Array.isArray(repPage)
+      ? repPage
+      : [];
+    setTaskReports(repItems);
     if (curTaskId) {
       const matched = fams.find((f) => f.id === curTaskId);
       if (matched) {
@@ -245,11 +442,28 @@ export const CuttingWorkbenchPage: React.FC<{
     const curTaskId = activeDimension === '2D' ? loadedTaskId : slitLoadedTaskId;
     if (!curTaskId) {
       setTaskSchemes([]);
+      setTaskReports([]);
       return;
     }
-    requestJSON(`/api/v2/schemes?taskId=${encodeURIComponent(curTaskId)}`)
-      .then((list) => setTaskSchemes(Array.isArray(list) ? list : []))
-      .catch(() => setTaskSchemes([]));
+    let cancelled = false;
+    Promise.all([
+      requestJSON(`/api/v2/schemes?taskId=${encodeURIComponent(curTaskId)}`).catch(() => []),
+      requestJSON(
+        `/api/v2/reconciliation/reports?limit=200&offset=0&taskId=${encodeURIComponent(curTaskId)}`
+      ).catch(() => ({ items: [] }))
+    ]).then(([schList, repPage]) => {
+      if (cancelled) return;
+      setTaskSchemes(Array.isArray(schList) ? schList : []);
+      const repItems = Array.isArray(repPage?.items)
+        ? repPage.items
+        : Array.isArray(repPage)
+        ? repPage
+        : [];
+      setTaskReports(repItems);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [activeDimension, loadedTaskId, slitLoadedTaskId]);
 
   const is2D = activeDimension === '2D';
@@ -432,28 +646,22 @@ export const CuttingWorkbenchPage: React.FC<{
         ? activeScheme2D.windowStartY
         : effectiveWindowStartY;
     if (canvasMode === 'STOCK_ROLL' && currentRoll2D) {
-      return (currentRoll2D.defects || [])
-        .filter((d: any) => d.y < startY + effectiveRollLengthMm && d.y + d.h > startY)
-        .map((d: any, idx: number) => ({
-          id: d.id ?? idx + 1,
-          x: Number(d.x) || 0,
-          y: Math.max(0, (Number(d.y) || 0) - startY),
-          w: Number(d.w) || 0,
-          h: Number(d.h) || 0,
-          margin: d.margin ?? settings.defectMarginMm,
-          label: d.typeName || d.defectType || '疵点'
-        }));
+      return projectWindowDefectsForBoard(
+        currentRoll2D.defects,
+        startY,
+        effectiveRollLengthMm,
+        Number(currentRoll2D.width) || effectiveRollWidthMm,
+        settings.defectMarginMm
+      );
     }
     if (canvasMode === 'REMNANT' && currentRemnant2D) {
-      return (currentRemnant2D.defects || []).map((d: any, idx: number) => ({
-        id: d.id ?? idx + 1,
-        x: Number(d.x) || 0,
-        y: Number(d.y) || 0,
-        w: Number(d.w) || 0,
-        h: Number(d.h) || 0,
-        margin: d.margin ?? settings.defectMarginMm,
-        label: d.typeName || d.defectType || '疵点'
-      }));
+      return projectWindowDefectsForBoard(
+        currentRemnant2D.defects,
+        0,
+        effectiveRollLengthMm,
+        Number(currentRemnant2D.width) || effectiveRollWidthMm,
+        settings.defectMarginMm
+      );
     }
     return [];
   }, [
@@ -463,9 +671,43 @@ export const CuttingWorkbenchPage: React.FC<{
     currentRoll2D,
     currentRemnant2D,
     effectiveWindowStartY,
+    effectiveRollWidthMm,
     effectiveRollLengthMm,
     settings.defectMarginMm
   ]);
+
+  // 当前载入需求族的同缸/色号防色差校验 & 报工复检实绩投影
+  const activeTaskId = is2D ? loadedTaskId : slitLoadedTaskId;
+  const activePoolFamily = useMemo(() => {
+    if (!activeTaskId) return null;
+    return poolFamilies.find((f) => f.id === activeTaskId) || null;
+  }, [activeTaskId, poolFamilies]);
+
+  const activeOpenRemainingFallback = useMemo(() => {
+    if (activePoolFamily && Number.isFinite(Number(activePoolFamily.openTotal))) {
+      return Math.max(0, Number(activePoolFamily.openTotal));
+    }
+    return is2D
+      ? activeDemands2D.reduce((s, d) => s + Math.max(0, Number(d.quantity) || 0), 0)
+      : slitOrders.reduce((s, o) => s + Math.max(0, Number(o.quantity) || 0), 0);
+  }, [activePoolFamily, is2D, activeDemands2D, slitOrders]);
+
+  const taskExecutionProjection = useMemo(
+    () =>
+      computeTaskExecutionProjection({
+        taskId: activeTaskId,
+        rawReports: taskReports,
+        taskSchemes,
+        openRemainingCount: activeOpenRemainingFallback
+      }),
+    [activeTaskId, taskReports, taskSchemes, activeOpenRemainingFallback]
+  );
+
+  const activeSchemeExecution = useMemo(() => {
+    const confirmedId = activeScheme2D?.confirmedSchemeId;
+    if (!confirmedId || !taskExecutionProjection) return null;
+    return taskExecutionProjection.bySchemeId.get(confirmedId) || null;
+  }, [activeScheme2D?.confirmedSchemeId, taskExecutionProjection]);
 
   const boardPlacedPieces: BoardPlacedPiece[] = useMemo(() => {
     if (!activeScheme2D?.result?.layout) return [];
@@ -505,8 +747,8 @@ export const CuttingWorkbenchPage: React.FC<{
         shape: p.shape
       });
     });
-    return combined;
-  }, [activeScheme2D]);
+    return annotateBoardPiecesWithReinspection(combined, activeSchemeExecution);
+  }, [activeScheme2D, activeSchemeExecution]);
 
   const boardLeftovers: BoardLeftover[] = useMemo(() => {
     const raw = activeScheme2D?.result?.layout?.leftovers || [];
@@ -562,13 +804,6 @@ export const CuttingWorkbenchPage: React.FC<{
       };
     });
   }, [activeDemands2D, activeScheme2D]);
-
-  // 当前载入需求族的同缸/色号防色差实时校验（不等到选定落库才报 400）
-  const activePoolFamily = useMemo(() => {
-    const curId = is2D ? loadedTaskId : slitLoadedTaskId;
-    if (!curId) return null;
-    return poolFamilies.find((f) => f.id === curId) || null;
-  }, [is2D, loadedTaskId, slitLoadedTaskId, poolFamilies]);
 
   const batchGuardWarning = useMemo(() => {
     if (!activePoolFamily) return null;
@@ -692,6 +927,11 @@ export const CuttingWorkbenchPage: React.FC<{
     slitMaxWidthMm,
     slitWidthStepMm,
     slitOverCap,
+    slitMaxKnives,
+    slitMinBladeSpacingMm,
+    slitKerfMm,
+    slitForbiddenNarrowEdgeMinMm,
+    slitForbiddenNarrowEdgeMaxMm,
     slitFixedLengthMm,
     slitAvoidDefects,
     slitMaterialModel,
@@ -1027,6 +1267,106 @@ export const CuttingWorkbenchPage: React.FC<{
         </div>
       )}
 
+      {/* 实绩与复检同步条：复用质检页/履约账本同一 receiptSummary 口径，确保净良品与补排缺口三处一致 */}
+      {taskExecutionProjection &&
+        (taskExecutionProjection.reportCount > 0 ||
+          taskExecutionProjection.reinspectionDisposedTotal > 0) && (() => {
+          const hasReinspection = taskExecutionProjection.reinspectionDisposedTotal > 0;
+          const hasRejected = taskExecutionProjection.rejectedTotalCount > 0;
+          const unitLabel = is2D ? '片' : '卷';
+          const activeDisposedCount = activeSchemeExecution?.disposedPieces.size ?? 0;
+          return (
+            <div
+              role="status"
+              aria-label="实绩与复检同步条"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 10,
+                padding: '7px 14px',
+                fontSize: 12.5,
+                borderBottom: `1px solid ${
+                  hasReinspection
+                    ? 'var(--warn, #d97706)'
+                    : 'var(--line-2, rgba(148, 163, 184, 0.35))'
+                }`,
+                borderLeft: `3px solid ${
+                  hasReinspection
+                    ? 'var(--err, #dc2626)'
+                    : hasRejected
+                    ? 'var(--warn, #d97706)'
+                    : 'var(--ok, #059669)'
+                }`,
+                background: hasReinspection
+                  ? 'var(--warn-bg, rgba(245, 158, 11, 0.12))'
+                  : 'var(--panel-2, rgba(16, 185, 129, 0.08))'
+              }}
+            >
+              <span className={`tag ${hasReinspection ? 'warn' : 'ok'}`}>
+                实绩与复检同步 · {taskExecutionProjection.reportCount} 笔报工
+              </span>
+              <span className="num">
+                已实切净合格{' '}
+                <b style={{ color: 'var(--ok, #059669)' }}>
+                  {taskExecutionProjection.netQualifiedCount} {unitLabel}
+                </b>
+              </span>
+              <span className="num">
+                复检判废扣回{' '}
+                <b
+                  style={{
+                    color: hasReinspection ? 'var(--err, #dc2626)' : 'var(--cp-ink-2, inherit)'
+                  }}
+                >
+                  {taskExecutionProjection.reinspectionDisposedTotal} {unitLabel}
+                </b>
+                {taskExecutionProjection.reinspectionRemnantCount > 0 && (
+                  <span className="muted">
+                    （含转料头 {taskExecutionProjection.reinspectionRemnantCount} {unitLabel}）
+                  </span>
+                )}
+              </span>
+              {taskExecutionProjection.rejectedTotalCount >
+                taskExecutionProjection.reinspectionDisposedTotal && (
+                <span className="num muted">
+                  报工初始异常{' '}
+                  {taskExecutionProjection.rejectedTotalCount -
+                    taskExecutionProjection.reinspectionDisposedTotal}{' '}
+                  {unitLabel}
+                </span>
+              )}
+              <span className="num">
+                待补排余量{' '}
+                <b
+                  style={{
+                    color:
+                      taskExecutionProjection.openRemainingCount > 0
+                        ? 'var(--warn, #b45309)'
+                        : 'var(--ok, #059669)'
+                  }}
+                >
+                  {taskExecutionProjection.openRemainingCount} {unitLabel}
+                </b>
+              </span>
+              {is2D && activeScheme2D?.confirmedSchemeId && activeDisposedCount > 0 && (
+                <span className="tag err num">
+                  当前方案 {activeDisposedCount} 片已复检判废（画布已标注）
+                </span>
+              )}
+              <span className="sp" />
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <a className="btn sm" href="#/quality">
+                  复检处置 ↗
+                </a>
+                <a className="btn sm" href="#/reconciliation">
+                  履约账本 ↗
+                </a>
+              </div>
+            </div>
+          );
+        })()}
+
       {/* 按 taskId 隔离的本机草稿自动恢复提示条 */}
       {recoverableDraft && (
         <div className="wb-draft-banner" role="status">
@@ -1214,10 +1554,16 @@ export const CuttingWorkbenchPage: React.FC<{
             slitMaxWidthMm={slitMaxWidthMm}
             slitWidthStepMm={slitWidthStepMm}
             slitOverCap={slitOverCap}
+            slitMaxKnives={slitMaxKnives}
+            slitMinBladeSpacingMm={slitMinBladeSpacingMm}
+            slitKerfMm={slitKerfMm}
+            slitForbiddenNarrowEdgeMinMm={slitForbiddenNarrowEdgeMinMm}
+            slitForbiddenNarrowEdgeMaxMm={slitForbiddenNarrowEdgeMaxMm}
             currentRoll1D={currentRoll1D}
             setSlitSpec={setSlitSpec}
             settings={settings}
             updateStudioSettings={updateStudioSettings}
+            activeSchemeExecutionSummary={activeSchemeExecution}
           />
         )}
       </div>

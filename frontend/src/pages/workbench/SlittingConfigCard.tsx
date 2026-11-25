@@ -18,6 +18,11 @@ export interface SlittingConfigCardProps {
   slitMaxWidthMm: number;
   slitWidthStepMm: number;
   slitOverCap: number;
+  slitMaxKnives: number;
+  slitMinBladeSpacingMm: number;
+  slitKerfMm: number;
+  slitForbiddenNarrowEdgeMinMm: number;
+  slitForbiddenNarrowEdgeMaxMm: number;
   setSlitSpec: (spec: Record<string, any>) => void;
   settings: StudioSettings;
   updateStudioSettings: (next: StudioSettings) => void;
@@ -32,6 +37,11 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
   slitMaxWidthMm,
   slitWidthStepMm,
   slitOverCap,
+  slitMaxKnives,
+  slitMinBladeSpacingMm,
+  slitKerfMm,
+  slitForbiddenNarrowEdgeMinMm,
+  slitForbiddenNarrowEdgeMaxMm,
   setSlitSpec,
   settings,
   updateStudioSettings
@@ -317,6 +327,116 @@ export const SlittingConfigCard: React.FC<SlittingConfigCardProps> = ({
           </div>
         </label>
       </div>
+
+      {/* Collapsible Physical Slitting Knife Constraints (默认 0 表示不限制) */}
+      {(() => {
+        const activeCount =
+          (slitMaxKnives > 0 ? 1 : 0) +
+          (slitMinBladeSpacingMm > 0 ? 1 : 0) +
+          (slitKerfMm > 0 ? 1 : 0) +
+          (slitForbiddenNarrowEdgeMaxMm > 0 ? 1 : 0);
+        return (
+          <details className="wb-param-fold">
+            <summary>
+              刀架物理约束
+              {activeCount > 0 ? ` · 已设 ${activeCount} 项` : '（可选）'}
+            </summary>
+            <div className="wb-param-grid-2" style={{ marginTop: 7 }}>
+              <label className="wb-field" title="单车同时分切最大刀数/条数，0 表示不限制（1–100）">
+                <span>最大刀数</span>
+                <div className="wb-input-unit">
+                  <NumberInput
+                    min={0}
+                    max={100}
+                    fallback={0}
+                    integer
+                    placeholder="不限"
+                    className="field num"
+                    value={slitMaxKnives}
+                    onValueChange={(v) => setSlitSpec({ slitMaxKnives: v })}
+                  />
+                  <em>刀</em>
+                </div>
+              </label>
+              <label className="wb-field" title="相邻刀片最小物理间距，0 表示不限制（1–100000 mm）">
+                <span>最小刀距</span>
+                <div className="wb-input-unit">
+                  <NumberInput
+                    min={0}
+                    max={100000}
+                    fallback={0}
+                    integer
+                    placeholder="不限"
+                    className="field num"
+                    value={slitMinBladeSpacingMm}
+                    onValueChange={(v) => setSlitSpec({ slitMinBladeSpacingMm: v })}
+                  />
+                  <em>mm</em>
+                </div>
+              </label>
+              <label className="wb-field" title="相邻分切条之间每刀切缝损耗，0 表示不计（0–500 mm）">
+                <span>切缝损耗</span>
+                <div className="wb-input-unit">
+                  <NumberInput
+                    min={0}
+                    max={500}
+                    fallback={0}
+                    integer
+                    placeholder="0"
+                    className="field num"
+                    value={slitKerfMm}
+                    onValueChange={(v) => setSlitSpec({ slitKerfMm: v })}
+                  />
+                  <em>mm</em>
+                </div>
+              </label>
+              <div className="wb-field" style={{ justifyContent: 'flex-end' }}>
+                <span className="muted" style={{ fontSize: 11, lineHeight: 1.35 }}>
+                  填 0 表示不限制
+                </span>
+              </div>
+              <label
+                className="wb-field"
+                title="危险细边丝禁区下限（须与上限成对生效，如 1~30mm 禁止出现细边丝）"
+              >
+                <span>禁区边丝下限</span>
+                <div className="wb-input-unit">
+                  <NumberInput
+                    min={0}
+                    max={100000}
+                    fallback={0}
+                    integer
+                    placeholder="0"
+                    className="field num"
+                    value={slitForbiddenNarrowEdgeMinMm}
+                    onValueChange={(v) => setSlitSpec({ slitForbiddenNarrowEdgeMinMm: v })}
+                  />
+                  <em>mm</em>
+                </div>
+              </label>
+              <label
+                className="wb-field"
+                title="危险细边丝禁区上限，0 表示不启用边丝禁区"
+              >
+                <span>禁区边丝上限</span>
+                <div className="wb-input-unit">
+                  <NumberInput
+                    min={0}
+                    max={100000}
+                    fallback={0}
+                    integer
+                    placeholder="不限"
+                    className="field num"
+                    value={slitForbiddenNarrowEdgeMaxMm}
+                    onValueChange={(v) => setSlitSpec({ slitForbiddenNarrowEdgeMaxMm: v })}
+                  />
+                  <em>mm</em>
+                </div>
+              </label>
+            </div>
+          </details>
+        );
+      })()}
 
       {/* Collapsible Advanced Tuning */}
       <details className="wb-param-fold">

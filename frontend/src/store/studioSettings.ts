@@ -131,6 +131,112 @@ export interface SlittingSolverOptions {
   lnsEnabled: boolean;
 }
 
+/** 一维分切可选刀架物理硬约束（全部对应 SlittingProblem.java 与 optimization-request.schema.json 精确字段）。 */
+export interface SlittingPhysicalConstraintInput {
+  maxKnives?: number | null;
+  minBladeSpacingMm?: number | null;
+  kerfMm?: number | null;
+  forbiddenNarrowEdgeMinMm?: number | null;
+  forbiddenNarrowEdgeMaxMm?: number | null;
+}
+
+/** 透传到 SLITTING_1D problem 的有效物理刀架约束子集（仅含正值或成对有效禁区）。 */
+export interface SlittingPhysicalConstraintPayload {
+  maxKnives?: number;
+  minBladeSpacingMm?: number;
+  kerfMm?: number;
+  forbiddenNarrowEdgeMinMm?: number;
+  forbiddenNarrowEdgeMaxMm?: number;
+}
+
+function toOptionalNonNegInt(raw: number | null | undefined): number | null {
+  if (raw === null || raw === undefined) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return Math.floor(n);
+}
+
+/**
+ * 校验工作台一维物理刀架约束（与 SlittingValidation.java 口径一致）：
+ * - 0 或留空视为不限制；
+ * - 危险细边丝禁区需上限 > 0 且 0 <= 下限 <= 上限 <= 100000；
+ * - 若传入最小订单宽度，则提前阻断宽幅小于最小物理刀距的无解请求。
+ */
+export function validateSlittingPhysicalConstraints(
+  input: SlittingPhysicalConstraintInput | null | undefined,
+  minOrderWidthMm?: number
+): string | null {
+  if (!input) return null;
+  const maxKnives = toOptionalNonNegInt(input.maxKnives);
+  if (maxKnives !== null && maxKnives !== 0 && (maxKnives < 1 || maxKnives > 100)) {
+    return '单车最大刀数须在 1–100 刀之间（填 0 表示不限制）';
+  }
+  const minBladeSpacingMm = toOptionalNonNegInt(input.minBladeSpacingMm);
+  if (
+    minBladeSpacingMm !== null &&
+    minBladeSpacingMm !== 0 &&
+    (minBladeSpacingMm < 1 || minBladeSpacingMm > 100_000)
+  ) {
+    return '最小物理刀距须在 1–100000 mm 之间（填 0 表示不限制）';
+  }
+  if (
+    minBladeSpacingMm !== null &&
+    minBladeSpacingMm > 0 &&
+    typeof minOrderWidthMm === 'number' &&
+    Number.isFinite(minOrderWidthMm) &&
+    minOrderWidthMm > 0 &&
+    minOrderWidthMm < minBladeSpacingMm
+  ) {
+    return `存在规格宽 ${Math.floor(minOrderWidthMm)} mm 小于机台最小物理刀距 ${minBladeSpacingMm} mm`;
+  }
+  const kerfMm = toOptionalNonNegInt(input.kerfMm);
+  if (kerfMm !== null && (kerfMm < 0 || kerfMm > 500)) {
+    return '每刀切缝损耗须在 0–500 mm 之间';
+  }
+  const fMin = toOptionalNonNegInt(input.forbiddenNarrowEdgeMinMm) ?? 0;
+  const fMax = toOptionalNonNegInt(input.forbiddenNarrowEdgeMaxMm) ?? 0;
+  if (fMin < 0 || fMax < 0 || fMin > 100_000 || fMax > 100_000) {
+    return '危险细边丝禁区范围须在 0–100000 mm 之间';
+  }
+  if (fMin > 0 && fMax === 0) {
+    return '启用危险细边丝禁区时须填写大于 0 的上限（且上限不小于下限）';
+  }
+  if (fMax > 0 && fMin > fMax) {
+    return `危险细边丝禁区下限（${fMin} mm）不能大于上限（${fMax} mm）`;
+  }
+  return null;
+}
+
+/**
+ * 构造透传给 POST /api/v2/optimization-jobs SLITTING_1D problem 的可选刀架硬约束字段。
+ * 默认全 0/留空时返回空对象 {}，不改变默认 1D 求解请求体和幂等哈希。
+ */
+export function buildSlittingPhysicalConstraintFields(
+  input: SlittingPhysicalConstraintInput | null | undefined
+): SlittingPhysicalConstraintPayload {
+  if (!input) return {};
+  const payload: SlittingPhysicalConstraintPayload = {};
+  const maxKnives = toOptionalNonNegInt(input.maxKnives);
+  if (maxKnives !== null && maxKnives >= 1 && maxKnives <= 100) {
+    payload.maxKnives = maxKnives;
+  }
+  const minBladeSpacingMm = toOptionalNonNegInt(input.minBladeSpacingMm);
+  if (minBladeSpacingMm !== null && minBladeSpacingMm >= 1 && minBladeSpacingMm <= 100_000) {
+    payload.minBladeSpacingMm = minBladeSpacingMm;
+  }
+  const kerfMm = toOptionalNonNegInt(input.kerfMm);
+  if (kerfMm !== null && kerfMm >= 1 && kerfMm <= 500) {
+    payload.kerfMm = kerfMm;
+  }
+  const fMin = toOptionalNonNegInt(input.forbiddenNarrowEdgeMinMm) ?? 0;
+  const fMax = toOptionalNonNegInt(input.forbiddenNarrowEdgeMaxMm) ?? 0;
+  if (fMax > 0 && fMin >= 0 && fMin <= fMax && fMax <= 100_000) {
+    payload.forbiddenNarrowEdgeMinMm = fMin;
+    payload.forbiddenNarrowEdgeMaxMm = fMax;
+  }
+  return payload;
+}
+
 export interface WorkbenchStrategyDef {
   id: string;
   name: string;
