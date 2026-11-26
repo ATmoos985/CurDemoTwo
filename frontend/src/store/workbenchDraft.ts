@@ -1,53 +1,8 @@
-import type {
-  DemandItem,
-  SavedScheme2D,
-  Scenario1DType,
-  Scenario2DType,
-  SlittingOrderLine
-} from './useStudioStore';
-import type { SlittingProfile, SlittingWidthMode } from './studioSettings';
+import type { SavedScheme2D, WorkbenchDraftPayload } from './studioTypes';
+
+export type { WorkbenchDraftPayload } from './studioTypes';
 
 export const WORKBENCH_DRAFT_PREFIX = 'cutplan.workbench.draft.v1.';
-
-export interface WorkbenchDraftPayload {
-  version: 1;
-  taskKey: string;
-  savedAt: string;
-  activeDimension: '2D' | '1D';
-  scenario2D: Scenario2DType;
-  multiWidthsText2D: string;
-  canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
-  canvasWidthMm: number;
-  canvasLengthMm: number;
-  windowStartY2D: number | null;
-  pieceGapMm: number;
-  trimStartMm: number;
-  selectedRollId: string;
-  selectedRemnantId: string;
-  materialModel2D: string;
-  activeDemands2D: DemandItem[];
-  /** 仅保存尚未确认入库的候选/手调方案，避免超出 localStorage 配额 */
-  unconfirmedSchemes2D: SavedScheme2D[];
-  activeSchemeId2D: string | null;
-
-  // 1D 草稿状态
-  scenario1D: Scenario1DType;
-  slitMaterialMode: 'VIRTUAL_ROLL' | 'STOCK_ROLL';
-  slitWidthMode: SlittingWidthMode;
-  slitProfile: SlittingProfile;
-  slitMotherWidthMm: number;
-  slitLeftTrimMm: number;
-  slitRightTrimMm: number;
-  slitMinWidthMm: number;
-  slitMaxWidthMm: number;
-  slitWidthStepMm: number;
-  slitOverCap: number;
-  slitFixedLengthMm: number;
-  slitAvoidDefects: boolean;
-  slitRollId: string;
-  slitMaterialModel: string;
-  slitOrders: SlittingOrderLine[];
-}
 
 export function workbenchDraftKey(taskId: string | null | undefined): string {
   const clean = (taskId || '').trim();

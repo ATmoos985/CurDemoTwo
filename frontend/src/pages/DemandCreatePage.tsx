@@ -1,12 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  useStudioStore,
+  expandClusterToDemands,
+  useDemandPoolStore,
+  useStudioSettings,
+  useTemplateCatalogStore
+} from '../store/selectors';
+import type {
   DemandFamilySummary,
   Scenario1DType,
   Scenario2DType,
-  WorkbenchLaunchPreset,
-  expandClusterToDemands
-} from '../store/useStudioStore';
+  WorkbenchLaunchPreset
+} from '../store/studioTypes';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
 import { NumberInput } from '../components/ui/NumberInput';
 import { requestJSON, toast, fmtN, fmtM, loadSheetLib } from '../lib/core/util.js';
@@ -178,12 +182,9 @@ const PieceSilhouetteSvg: React.FC<{ line: DraftLine; is1D: boolean; oversize: b
 };
 
 export const DemandCreatePage: React.FC<{ appendTaskId?: string }> = ({ appendTaskId }) => {
-  const {
-    clusters,
-    settings,
-    syncTemplatesFromServer,
-    loadDemandFamilyIntoWorkbench
-  } = useStudioStore();
+  const { clusters, syncTemplatesFromServer } = useTemplateCatalogStore();
+  const settings = useStudioSettings();
+  const { loadDemandFamilyIntoWorkbench } = useDemandPoolStore();
 
   const [families, setFamilies] = useState<DemandFamilySummary[]>([]);
   const [rolls, setRolls] = useState<any[]>([]);

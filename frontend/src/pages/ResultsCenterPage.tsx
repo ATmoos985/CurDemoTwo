@@ -9,7 +9,7 @@ import { showcaseScene } from '../lib/model/showcase.js';
 import { rectangle } from '../lib/canvas/nesting-scene.js';
 import { gcodeText, dxfText } from '../lib/domain/cam-format.js';
 import { requestJSON, idempotentPost, toast, fmtN, fmtM, loadSheetLib } from '../lib/core/util.js';
-import { useStudioStore } from '../store/useStudioStore';
+import { useStudioSettings } from '../store/selectors';
 import { extractCncPostOptions } from '../store/studioSettings';
 import { idempotentJsonPost } from '../utils/authClient';
 import { buildCompleteSchemeIdempotencyKey } from './workbench/schemeConfirmUtils';
@@ -183,7 +183,7 @@ export const ResultsCenterPage: React.FC<{
   schemeId?: string;
   taskIdQuery?: string;
 }> = ({ schemeId, taskIdQuery }) => {
-  const settings = useStudioStore((s) => s.settings);
+  const settings = useStudioSettings();
 
   const [entries, setEntries] = useState<any[]>([]);
   const [rolls, setRolls] = useState<any[]>([]);

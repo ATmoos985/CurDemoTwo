@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { useStudioStore, type DemandFamilySummary } from './useStudioStore';
+import {
+  useStudioStore,
+  expandClusterToDemands,
+  type DemandFamilySummary,
+  type SavedScheme2D
+} from './useStudioStore';
+import { getStudioSettingsSnapshot } from './selectors';
+import { mergeAndSelectBestSchemes2D } from './slices/workbench2DHelpers';
+import { DEFAULT_STUDIO_SETTINGS } from './studioSettings';
 
 const makeFamily2D = (id: string, name: string, open1: number, open2: number): DemandFamilySummary => ({
   id,
@@ -35,6 +43,31 @@ const makeFamily1D = (id: string, name: string, width: number, open: number): De
   lines: [
     { id: 7, name: `${width}mm宽条`, width, length: 2000, orderedQty: open, plannedQty: 0, completedQty: 0, openQty: open }
   ]
+});
+
+const makeScheme2D = (
+  id: string,
+  utilizationPct: number,
+  complete = true
+): SavedScheme2D => ({
+  id,
+  title: `方案 ${id}`,
+  strategyId: 'PS_FIXED',
+  strategyName: '经向缩长',
+  createdAt: '12:00:00',
+  canvasMode: 'FREE_CANVAS',
+  materialModel: 'MAT-2D',
+  widthMm: 1600,
+  canvasLengthMm: 2400,
+  occupiedLengthMm: 1200,
+  utilizationPct,
+  pieceAreaM2: 1.5,
+  placedCount: complete ? 4 : 2,
+  requestedCount: 4,
+  complete,
+  demands: [],
+  request: {},
+  result: { layout: { placements: [], cuts: [], leftovers: [] } }
 });
 
 describe('useStudioStore 多族合排溯源保持与进度同步', () => {
@@ -119,5 +152,135 @@ describe('useStudioStore 多族合排溯源保持与进度同步', () => {
       sourceLineId: 7,
       quantity: 12
     });
+  });
+});
+
+describe('正交域切片联动与纯辅助逻辑回归验证', () => {
+  it('WorkspaceSlice 更新设置时与 2D/1D 策略同步，且受 loadedTaskId 保护不误覆写任务工艺', () => {
+    // 无加载任务时：更新 pieceGapMm / trimStartMm 同步生效
+    useStudioStore.getState().setCanvasSpec({ loadedTaskId: null, pieceGapMm: 0, trimStartMm: 0 });
+    const updated = useStudioStore.getState().updateStudioSettings({
+      ...DEFAULT_STUDIO_SETTINGS,
+      pieceGapMm: 8,
+      trimStartMm: 25,
+      slitProfile: 'QUALITY',
+      enabledStrategies2D: ['PS_FIXED', 'JAVA_FAST']
+    });
+
+    expect(updated.pieceGapMm).toBe(8);
+    expect(getStudioSettingsSnapshot().pieceGapMm).toBe(8);
+    expect(useStudioStore.getState().pieceGapMm).toBe(8);
+    expect(useStudioStore.getState().trimStartMm).toBe(25);
+    expect(useStudioStore.getState().slitProfile).toBe('QUALITY');
+    expect(useStudioStore.getState().selectedStrategies2D).toEqual(['PS_FIXED', 'JAVA_FAST']);
+
+    // 已加载需求族任务时：全局默认 pieceGapMm 不得覆盖当前任务工艺参数
+    useStudioStore.getState().setCanvasSpec({ loadedTaskId: 'TASK-LOCKED', pieceGapMm: 12, trimStartMm: 40 });
+    useStudioStore.getState().updateStudioSettings({
+      ...DEFAULT_STUDIO_SETTINGS,
+      pieceGapMm: 2,
+      trimStartMm: 5
+    });
+    expect(useStudioStore.getState().pieceGapMm).toBe(12);
+    expect(useStudioStore.getState().trimStartMm).toBe(40);
+    expect(getStudioSettingsSnapshot().pieceGapMm).toBe(2);
+  });
+
+  it('TemplateSlice 尺码配比展开与单/多模板载入 2D/1D 正常工作', () => {
+    const curtain = useStudioStore.getState().clusters.find((c) => c.id === 'CLUSTER_CURTAIN_SUITE')!;
+    expect(curtain).toBeDefined();
+
+    const expanded = expandClusterToDemands(curtain, { '标准2.6m高': 2, '挑空3.2m高': 0 }, 10);
+    expect(expanded.length).toBe(curtain.pieces.length);
+    expect(expanded[0].id).toBe(10);
+    expect(expanded[0].quantity).toBe(4);
+
+    useStudioStore.getState().setClusterCount('CLUSTER_CURTAIN_SUITE', '标准2.6m高', 3);
+    useStudioStore.getState().loadClusterInto2D('CLUSTER_CURTAIN_SUITE', false);
+    expect(useStudioStore.getState().activeDimension).toBe('2D');
+    expect(useStudioStore.getState().materialModel2D).toBe(curtain.materialModel);
+    expect(useStudioStore.getState().activeDemands2D[0].quantity).toBe(6);
+
+    useStudioStore.getState().loadClusterInto1D('CLUSTER_SLIT_CURTAIN', false);
+    expect(useStudioStore.getState().activeDimension).toBe('1D');
+    expect(useStudioStore.getState().slitMotherWidthMm).toBe(2000);
+    expect(useStudioStore.getState().slitOrders).toHaveLength(3);
+  });
+
+  it('Workbench2D 候选择优逻辑优先齐套且尊重同批次 selectIfBetter', () => {
+    const s1 = makeScheme2D('S-1', 84.5, true);
+    const s2 = makeScheme2D('S-2', 79.0, true);
+    const s3 = makeScheme2D('S-3', 91.0, false);
+
+    // 即使 s3 利用率高，但未齐套，因此仍选齐套的 s1
+    const first = mergeAndSelectBestSchemes2D([], null, [s2, s3, s1]);
+    expect(first?.activeSchemeId2D).toBe('S-1');
+
+    // 同批次新方案 s4 更差时保持已选 s1；更优的 s5 则自动切换
+    const s4 = makeScheme2D('S-4', 80.0, true);
+    const keepBetter = mergeAndSelectBestSchemes2D([s1], 'S-1', [s4], {
+      selectIfBetter: true,
+      batchIds: new Set(['S-1', 'S-4'])
+    });
+    expect(keepBetter?.activeSchemeId2D).toBe('S-1');
+
+    const s5 = makeScheme2D('S-5', 88.2, true);
+    const switchBetter = mergeAndSelectBestSchemes2D([s1], 'S-1', [s5], {
+      selectIfBetter: true,
+      batchIds: new Set(['S-1', 'S-5'])
+    });
+    expect(switchBetter?.activeSchemeId2D).toBe('S-5');
+  });
+
+  it('Workbench1D 订单行增删改与优选非 BASELINE 方案切换行为一致', () => {
+    useStudioStore.getState().loadClusterInto1D('CLUSTER_SLIT_CURTAIN', false);
+    const initialCount = useStudioStore.getState().slitOrders.length;
+    useStudioStore.getState().addSlitOrder();
+    const afterAdd = useStudioStore.getState().slitOrders;
+    expect(afterAdd).toHaveLength(initialCount + 1);
+
+    const addedId = afterAdd[afterAdd.length - 1].id;
+    useStudioStore.getState().updateSlitOrder(addedId, { widthMm: 520, quantity: 9 });
+    expect(useStudioStore.getState().slitOrders.find((o) => o.id === addedId)).toMatchObject({
+      widthMm: 520,
+      quantity: 9
+    });
+
+    useStudioStore.getState().removeSlitOrder(addedId);
+    expect(useStudioStore.getState().slitOrders).toHaveLength(initialCount);
+
+    useStudioStore.getState().setSlitSchemes([
+      {
+        id: 'BASE-1',
+        strategyId: 'BASELINE',
+        strategyName: '基线',
+        state: 'SUCCEEDED',
+        motherWidthMm: 2000,
+        leftTrimMm: 10,
+        rightTrimMm: 10,
+        totalCars: 10,
+        missingRolls: 0,
+        overproducedRolls: 0,
+        avgUtilizationPct: 80,
+        patterns: [],
+        fulfillment: []
+      },
+      {
+        id: 'FAST-1',
+        strategyId: 'FAST',
+        strategyName: '快速优化',
+        state: 'SUCCEEDED',
+        motherWidthMm: 2000,
+        leftTrimMm: 10,
+        rightTrimMm: 10,
+        totalCars: 8,
+        missingRolls: 0,
+        overproducedRolls: 0,
+        avgUtilizationPct: 92,
+        patterns: [],
+        fulfillment: []
+      }
+    ]);
+    expect(useStudioStore.getState().activeSlitSchemeId).toBe('FAST-1');
   });
 });

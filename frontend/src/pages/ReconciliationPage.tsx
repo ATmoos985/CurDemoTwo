@@ -21,7 +21,8 @@ import {
 } from '../lib/model/quality.js';
 import { ModalDialog } from '../components/ModalDialog';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
-import { useStudioStore, DemandFamilySummary } from '../store/useStudioStore';
+import { useDemandPoolStore } from '../store/selectors';
+import type { DemandFamilySummary } from '../store/studioTypes';
 import { idempotentJsonPost } from '../utils/authClient';
 import {
   NormalizedReconciliationReportRow,
@@ -69,7 +70,7 @@ interface ReverseReportDraft {
 }
 
 export const ReconciliationPage: React.FC = () => {
-  const loadDemandFamilyIntoWorkbench = useStudioStore((s) => s.loadDemandFamilyIntoWorkbench);
+  const { loadDemandFamilyIntoWorkbench } = useDemandPoolStore();
 
   const [tab, setTab] = useState<'quality' | 'reconcile'>('quality');
   const [search, setSearch] = useState('');

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import {
+import type {
   CanvasMode2D,
   DemandFamilySummary,
   DemandItem,
@@ -10,7 +10,7 @@ import {
   SlittingOrderLine,
   SlittingSchemeRun,
   StrategyJobRun
-} from '../../store/useStudioStore';
+} from '../../store/studioTypes';
 import {
   SlittingPhysicalConstraintInput,
   SlittingProfile,

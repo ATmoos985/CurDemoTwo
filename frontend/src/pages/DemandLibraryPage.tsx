@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useStudioStore, DemandFamilySummary } from '../store/useStudioStore';
+import { useDemandPoolStore } from '../store/selectors';
+import type { DemandFamilySummary } from '../store/studioTypes';
 import { CodeBadge } from '../components/ui/MagpiePrimitives';
 import { ModalDialog } from '../components/ModalDialog';
 import { requestJSON, toast, fmtN, shortId } from '../lib/core/util.js';
@@ -53,7 +54,8 @@ function dueDateUrgency(dueDate?: string): { label: string; tone: 'err' | 'warn'
 }
 
 export const DemandLibraryPage: React.FC = () => {
-  const { loadDemandFamilyIntoWorkbench, loadDemandFamiliesMergedIntoWorkbench } = useStudioStore();
+  const { loadDemandFamilyIntoWorkbench, loadDemandFamiliesMergedIntoWorkbench } =
+    useDemandPoolStore();
 
   const [families, setFamilies] = useState<ExtendedDemandFamily[]>([]);
   const [loading, setLoading] = useState(true);

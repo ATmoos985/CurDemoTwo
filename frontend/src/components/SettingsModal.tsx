@@ -16,7 +16,7 @@ import {
   loadStudioSettings,
   validateStudioSettings
 } from '../store/studioSettings';
-import { useStudioStore } from '../store/useStudioStore';
+import { getStudioSettingsSnapshot, useStudioSettingsStore } from '../store/selectors';
 import { NumberInput } from './ui/NumberInput';
 
 export interface SettingsModalProps {
@@ -283,8 +283,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  const storeSettings = useStudioStore((s) => s.settings);
-  const updateStudioSettings = useStudioStore((s) => s.updateStudioSettings);
+  const { settings: storeSettings, updateStudioSettings } = useStudioSettingsStore();
 
   const [activeTab, setActiveTab] = useState<SettingsTabId>(initialTab);
   const [draft, setDraft] = useState<StudioSettings>(() => loadStudioSettings());
@@ -380,7 +379,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
     const handleClose = () => {
       dialog.returnValue = '';
-      applyThemeToDocument(useStudioStore.getState().settings.theme);
+      applyThemeToDocument(getStudioSettingsSnapshot().theme);
       onCloseRef.current();
     };
     dialog.addEventListener('close', handleClose);

@@ -1,4 +1,4 @@
-import { Scenario2DType, ShapeGeometry } from '../../store/useStudioStore';
+import type { Scenario2DType, ShapeGeometry } from '../../store/studioTypes';
 
 export interface SolverStrategyDef {
   id: string;

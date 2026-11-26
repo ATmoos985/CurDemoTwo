@@ -23,7 +23,7 @@ import {
 } from '../lib/model/garment.js';
 import { CadCanvasView } from '../components/CadCanvasView';
 import { showcaseScene } from '../lib/model/showcase.js';
-import { useStudioStore } from '../store/useStudioStore';
+import { useWorkbench2DActions } from '../store/selectors';
 import {
   CodeBadge,
   SegmentedControl,
@@ -160,8 +160,7 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
     initialIsDxf ? { halfTurn: false, gapFill: true } : null
   );
 
-  const setCanvasSpec = useStudioStore((s) => s.setCanvasSpec);
-  const setActiveDemands2D = useStudioStore((s) => s.setActiveDemands2D);
+  const { setCanvasSpec, setActiveDemands2D } = useWorkbench2DActions();
 
   const activeExample = useMemo(
     () => EXAMPLES.find((e) => e.id === currentExampleId) || null,

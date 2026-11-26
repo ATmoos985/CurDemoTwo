@@ -1,5 +1,5 @@
 import React, { Dispatch, RefObject, SetStateAction, useEffect, useMemo, useState } from 'react';
-import { SavedScheme2D, SlittingOrderLine, SlittingSchemeRun } from '../../store/useStudioStore';
+import type { SavedScheme2D, SlittingOrderLine, SlittingSchemeRun } from '../../store/studioTypes';
 import { StartCornerType } from '../../store/studioSettings';
 import {
   WorkbenchBoardCanvas,

@@ -4,7 +4,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { AuthGateModal } from './components/AuthGateModal';
 import { SettingsTabId } from './store/studioSettings';
 import { requestJSON, toast } from './lib/core/util.js';
-import { useStudioStore } from './store/useStudioStore';
+import { useWorkspaceNavBadges } from './store/selectors';
 import {
   AuthSession,
   LOCAL_FALLBACK_SESSION,
@@ -167,10 +167,7 @@ export const App: React.FC = () => {
     }, 200);
   };
 
-  const schemes2D = useStudioStore((s) => s.schemes2D);
-  const slitSchemes = useStudioStore((s) => s.slitSchemes);
-  const clusters = useStudioStore((s) => s.clusters);
-  const enabledAlgoCount = useStudioStore((s) => s.settings.enabledStrategies2D.length);
+  const { candidateCount, clusterCount, enabledAlgoCount } = useWorkspaceNavBadges();
 
   const openSettings = (tab: SettingsTabId = 'general') => {
     setSettingsTab(tab);
@@ -271,8 +268,6 @@ export const App: React.FC = () => {
     setAuthNotice('您已退出当前企业账号，请重新登录');
   };
 
-  const candidateCount = schemes2D.length + slitSchemes.length;
-
   const categories: NavCategory[] = useMemo(
     () => [
       {
@@ -346,7 +341,7 @@ export const App: React.FC = () => {
                 <path d="M5.4 5.2V3.3a.8.8 0 0 1 .8-.8h5.2l2.1 2.1v5.9a.8.8 0 0 1-.8.8h-1.9" />
               </svg>
             ),
-            badge: clusters.length || undefined,
+            badge: clusterCount || undefined,
             isActive: (r) => r.page === 'clusters'
           }
         ]
@@ -579,7 +574,7 @@ export const App: React.FC = () => {
         ]
       }
     ],
-    [candidateCount, clusters.length]
+    [candidateCount, clusterCount]
   );
 
   // Ensure the category owning the active route automatically unfolds

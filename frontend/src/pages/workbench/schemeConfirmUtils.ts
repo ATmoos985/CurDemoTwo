@@ -1,10 +1,10 @@
-import {
+import type {
   DemandItem,
   SavedScheme2D,
   SlittingOrderLine,
   SlittingSchemeRun
-} from '../../store/useStudioStore';
-import { BoardDefect } from '../../components/WorkbenchBoardCanvas';
+} from '../../store/studioTypes';
+import type { BoardDefect } from '../../components/canvas/canvasTypes';
 
 export interface SourceAllocationItem {
   taskId: string;

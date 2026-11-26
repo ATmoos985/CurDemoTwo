@@ -1,5 +1,5 @@
 import React from 'react';
-import { DemandItem, SlittingOrderLine } from '../../store/useStudioStore';
+import type { DemandItem, SlittingOrderLine } from '../../store/studioTypes';
 import { ModalDialog } from '../../components/ModalDialog';
 import { NumberInput } from '../../components/ui/NumberInput';
 import { fmtN } from '../../lib/core/util.js';

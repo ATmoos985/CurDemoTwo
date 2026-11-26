@@ -2,7 +2,8 @@ import React, { useMemo, useRef, useState } from 'react';
 import { NumberInput } from '../../components/ui/NumberInput';
 import { CodeBadge } from '../../components/ui/MagpiePrimitives';
 import { fmtN, requestJSON, toast } from '../../lib/core/util.js';
-import { DemandFamilySummary, useStudioStore } from '../../store/useStudioStore';
+import { useDemandPoolStore, useWorkbench2DActions } from '../../store/selectors';
+import type { DemandFamilySummary } from '../../store/studioTypes';
 import {
   CUT_PLAN_PRESETS,
   CutPlanFormState,
@@ -58,10 +59,8 @@ export const GarmentCutPlanPanel: React.FC<GarmentCutPlanPanelProps> = ({
   const helpRef = useRef<HTMLDetailsElement | null>(null);
   const styleInputRef = useRef<HTMLInputElement | null>(null);
 
-  const loadDemandFamilyIntoWorkbench = useStudioStore(
-    (s) => s.loadDemandFamilyIntoWorkbench
-  );
-  const setCanvasSpec = useStudioStore((s) => s.setCanvasSpec);
+  const { loadDemandFamilyIntoWorkbench } = useDemandPoolStore();
+  const { setCanvasSpec } = useWorkbench2DActions();
 
   const totalOrderedInput = useMemo(
     () => totalCutPlanOrderedQty(form.sizes),

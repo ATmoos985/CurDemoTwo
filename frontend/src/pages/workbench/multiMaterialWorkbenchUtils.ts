@@ -4,8 +4,8 @@ import type {
   SavedScheme2D,
   SchemeDefectSnapshot,
   ShapeGeometry
-} from '../../store/useStudioStore';
-import type { BoardDefect } from '../../components/WorkbenchBoardCanvas';
+} from '../../store/studioTypes';
+import type { BoardDefect } from '../../components/canvas/canvasTypes';
 import { rectangle, shapeArea } from '../../lib/canvas/nesting-scene.js';
 import { csvCell } from '../../lib/domain/report-model.js';
 import { toast } from '../../lib/core/util.js';

@@ -19,7 +19,7 @@ import {
   CodeBadge,
   SegmentedOption
 } from '../components/ui/MagpiePrimitives';
-import { useStudioStore } from '../store/useStudioStore';
+import { useWorkbench2DActions } from '../store/selectors';
 import { idempotentJsonPost } from '../utils/authClient';
 
 const ROLL_QUALITY_MAP: Record<string, [string, string]> = {
@@ -104,7 +104,7 @@ function clampNum(val: number, min: number, max: number) {
 
 export const InventoryPage: React.FC<{ params?: string[] }> = ({ params = [] }) => {
   const [intent, templateId] = params;
-  const setCanvasSpec = useStudioStore((s) => s.setCanvasSpec);
+  const { setCanvasSpec } = useWorkbench2DActions();
 
   const [rolls, setRolls] = useState<any[]>([]);
   const [remnants, setRemnants] = useState<any[]>([]);

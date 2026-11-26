@@ -1,13 +1,12 @@
-import {
+import type {
   DemandItem,
   SavedScheme2D,
   ShapeGeometry,
   SlittingOrderLine,
   SlittingSchemeRun
-} from '../../store/useStudioStore';
+} from '../../store/studioTypes';
 import { StudioSettings, extractCncPostOptions } from '../../store/studioSettings';
-import { BoardDefect } from '../../components/WorkbenchBoardCanvas';
-import { quantize01 } from '../../lib/domain/nesting-request-adapter.js';
+import type { BoardDefect } from '../../components/canvas/canvasTypes';
 import { shapeArea } from '../../lib/canvas/nesting-scene.js';
 import { gcodeText, dxfText } from '../../lib/domain/cam-format.js';
 import { feedLengthLimits, suggestedFeedLength } from '../../lib/domain/feed-length.js';
@@ -15,37 +14,7 @@ import { carStart, assignCar } from '../../lib/model/slitting.js';
 import { toast, fmtN, loadSheetLib } from '../../lib/core/util.js';
 import { DefectScheduleRow, DemandRowView, OverviewStats } from './workbenchTypes';
 
-export function rotateShapeGeometry(
-  shape: ShapeGeometry | undefined,
-  w: number,
-  h: number,
-  stepDeg: 90 | 180
-): ShapeGeometry {
-  if (shape?.type === 'POLYGON' && shape.vertices && shape.vertices.length >= 3) {
-    const sw = shape.width || w;
-    const sh = shape.height || h;
-    const raw = shape.vertices.map((pt) =>
-      stepDeg === 90 ? { x: sh - pt.y, y: pt.x } : { x: sw - pt.x, y: sh - pt.y }
-    );
-    const minX = Math.min(...raw.map((p) => p.x));
-    const minY = Math.min(...raw.map((p) => p.y));
-    const normalized = raw.map((p) => ({
-      x: Math.max(0, quantize01(p.x - minX)),
-      y: Math.max(0, quantize01(p.y - minY))
-    }));
-    const newW = quantize01(Math.max(...normalized.map((p) => p.x)));
-    const newH = quantize01(Math.max(...normalized.map((p) => p.y)));
-    return {
-      type: 'POLYGON',
-      width: newW,
-      height: newH,
-      vertices: normalized
-    };
-  }
-  return stepDeg === 90
-    ? { type: 'RECTANGLE', width: quantize01(h), height: quantize01(w) }
-    : { type: 'RECTANGLE', width: quantize01(w), height: quantize01(h) };
-}
+export { rotateShapeGeometry } from './boardPlacementValidation';
 
 export function computeDemandRowsView(params: {
   is2D: boolean;

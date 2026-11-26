@@ -1,9 +1,9 @@
 import React, { Dispatch, RefObject, SetStateAction } from 'react';
-import {
+import type {
   DemandCluster,
   DemandFamilySummary,
   ShapeGeometry
-} from '../../store/useStudioStore';
+} from '../../store/studioTypes';
 import { NumberInput } from '../../components/ui/NumberInput';
 import { DemandRowView, OverviewStats } from './workbenchTypes';
 

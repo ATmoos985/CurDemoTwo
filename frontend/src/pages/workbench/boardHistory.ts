@@ -3,7 +3,7 @@ import {
   type ValidationDefect,
   type ValidationPlacedPiece
 } from './boardPlacementValidation';
-import type { ShapeGeometry } from '../../store/useStudioStore';
+import type { ShapeGeometry } from '../../store/studioTypes';
 
 export interface BoardEditSnapshot {
   mainPlacements: any[];

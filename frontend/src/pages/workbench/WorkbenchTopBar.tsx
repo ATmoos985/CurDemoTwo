@@ -1,5 +1,5 @@
 import React, { RefObject } from 'react';
-import { CanvasMode2D, Scenario2DType } from '../../store/useStudioStore';
+import type { CanvasMode2D, Scenario2DType } from '../../store/studioTypes';
 import { SlittingWidthMode } from '../../store/studioSettings';
 import { NumberInput } from '../../components/ui/NumberInput';
 import { fmtM } from '../../lib/core/util.js';

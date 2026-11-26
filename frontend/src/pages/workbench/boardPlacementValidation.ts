@@ -1,5 +1,37 @@
-import { ShapeGeometry } from '../../store/useStudioStore';
-import { rotateShapeGeometry } from './workbenchUtils';
+import type { ShapeGeometry } from '../../store/studioTypes';
+import { quantize01 } from '../../lib/domain/nesting-request-adapter.js';
+
+export function rotateShapeGeometry(
+  shape: ShapeGeometry | undefined,
+  w: number,
+  h: number,
+  stepDeg: 90 | 180
+): ShapeGeometry {
+  if (shape?.type === 'POLYGON' && shape.vertices && shape.vertices.length >= 3) {
+    const sw = shape.width || w;
+    const sh = shape.height || h;
+    const raw = shape.vertices.map((pt) =>
+      stepDeg === 90 ? { x: sh - pt.y, y: pt.x } : { x: sw - pt.x, y: sh - pt.y }
+    );
+    const minX = Math.min(...raw.map((p) => p.x));
+    const minY = Math.min(...raw.map((p) => p.y));
+    const normalized = raw.map((p) => ({
+      x: Math.max(0, quantize01(p.x - minX)),
+      y: Math.max(0, quantize01(p.y - minY))
+    }));
+    const newW = quantize01(Math.max(...normalized.map((p) => p.x)));
+    const newH = quantize01(Math.max(...normalized.map((p) => p.y)));
+    return {
+      type: 'POLYGON',
+      width: newW,
+      height: newH,
+      vertices: normalized
+    };
+  }
+  return stepDeg === 90
+    ? { type: 'RECTANGLE', width: quantize01(h), height: quantize01(w) }
+    : { type: 'RECTANGLE', width: quantize01(w), height: quantize01(h) };
+}
 
 export interface ValidationPoint {
   x: number;

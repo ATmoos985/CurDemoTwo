@@ -1,10 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  useStudioStore,
-  DemandCluster,
-  ClusterTemplatePiece,
-  expandClusterToDemands
-} from '../store/useStudioStore';
+import { expandClusterToDemands, useTemplateLibraryStore } from '../store/selectors';
+import type { ClusterTemplatePiece, DemandCluster } from '../store/studioTypes';
 import { ModalDialog } from '../components/ModalDialog';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
 import { NumberInput } from '../components/ui/NumberInput';
@@ -61,7 +57,7 @@ export const ClusterCenterPage: React.FC = () => {
     loadClusterInto2D,
     loadSelectedClustersInto2D,
     loadClusterInto1D
-  } = useStudioStore();
+  } = useTemplateLibraryStore();
 
   const [filterCat, setFilterCat] = useState<string>('ALL');
   const [search, setSearch] = useState('');

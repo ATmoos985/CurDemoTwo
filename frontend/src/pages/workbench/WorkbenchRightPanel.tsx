@@ -1,5 +1,5 @@
 import React, { RefObject } from 'react';
-import {
+import type {
   CanvasMode2D,
   MultiMaterialRunSummary,
   SavedScheme2D,
@@ -7,7 +7,7 @@ import {
   Scenario2DType,
   SlittingSchemeRun,
   StrategyJobRun
-} from '../../store/useStudioStore';
+} from '../../store/studioTypes';
 import { SlittingProfile, SlittingWidthMode, StudioSettings } from '../../store/studioSettings';
 import { fmtN } from '../../lib/core/util.js';
 import {
