@@ -271,4 +271,45 @@ class ModuleBoundaryTests {
                 "import org.springframework.stereotype.Component;\n"
                         + "import com.google.ortools.linearsolver.MPSolver;\n").isEmpty());
     }
+
+    @Test void cuttingKernelAndVerticalDomainServicesStayAcyclicAndSynchronizedFree() throws IOException {
+        Path cuttingDir = ROOT.resolve("business/cutting");
+        List<String> verticalServices = List.of(
+                "RollAndRemnantDomainService",
+                "FactoryDocumentDomainService",
+                "CuttingTaskDomainService",
+                "CuttingExecutionAndReportService"
+        );
+        var errors = new ArrayList<String>();
+
+        // 1. InventoryStateKernel 严禁反向依赖 RemnantService 或任何上层垂直服务
+        String kernelCode = stripComments(Files.readString(cuttingDir.resolve("InventoryStateKernel.java")));
+        for (String forbidden : List.of("RemnantService", "RollAndRemnantDomainService",
+                "FactoryDocumentDomainService", "CuttingTaskDomainService", "CuttingExecutionAndReportService")) {
+            if (Pattern.compile("\\b" + forbidden + "\\b").matcher(kernelCode).find()) {
+                errors.add("InventoryStateKernel 禁止反向依赖 " + forbidden);
+            }
+        }
+
+        // 2. 四个垂直领域服务彼此零相互依赖，且均严禁反向依赖 RemnantService
+        for (String self : verticalServices) {
+            String code = stripComments(Files.readString(cuttingDir.resolve(self + ".java")));
+            if (Pattern.compile("\\bRemnantService\\b").matcher(code).find()) {
+                errors.add(self + " 禁止反向依赖 RemnantService");
+            }
+            for (String other : verticalServices) {
+                if (!self.equals(other) && Pattern.compile("\\b" + other + "\\b").matcher(code).find()) {
+                    errors.add(self + " 禁止同级耦合依赖 " + other);
+                }
+            }
+        }
+
+        // 3. RemnantService 门面须保持零 synchronized（统一由 InventoryStateKernel 读写锁管理）
+        String facadeCode = stripComments(Files.readString(cuttingDir.resolve("RemnantService.java")));
+        if (Pattern.compile("\\bsynchronized\\b").matcher(facadeCode).find()) {
+            errors.add("RemnantService 门面禁止出现 synchronized 关键字");
+        }
+
+        assertTrue(errors.isEmpty(), "阶段 B 垂直解耦门禁失败：\n" + String.join("\n", errors));
+    }
 }
