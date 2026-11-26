@@ -1,0 +1,392 @@
+/* ==========================================================================
+   Multi-Material Joint Planning inside Cutting Workbench (Magpie Light + Dark)
+   ========================================================================== */
+
+.studio-2d-page.wb-v2 .wb-multi-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--cp-ink, #18181b);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-check input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--cp-accent, #5b61f6);
+  cursor: pointer;
+}
+
+/* Compact candidate roll picker popover (mirrors .craft-disclosure) */
+.studio-2d-page.wb-v2 .wb-multi-roll-picker {
+  position: relative;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-roll-panel {
+  min-width: 316px;
+  max-width: 380px;
+  padding: 9px 10px;
+  gap: 7px;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-roll-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--cp-ink-2, #52525b);
+}
+
+.studio-2d-page.wb-v2 .wb-multi-roll-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-guard-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: var(--cp-surface-subtle, #f4f5f7);
+  border: 1px solid var(--cp-divider, rgba(15, 23, 42, 0.08));
+  font-size: 11px;
+  color: var(--cp-ink-2, #52525b);
+}
+
+.studio-2d-page.wb-v2 .wb-multi-roll-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 224px;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-roll-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: var(--cp-surface, #ffffff);
+  cursor: pointer;
+  transition: background-color 0.13s ease, border-color 0.13s ease;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-roll-opt:hover:not(.is-disabled) {
+  background: #f8f9fc;
+  border-color: rgba(91, 97, 246, 0.28);
+}
+
+.studio-2d-page.wb-v2 .wb-multi-roll-opt.is-checked {
+  background: rgba(91, 97, 246, 0.065);
+  border-color: rgba(91, 97, 246, 0.45);
+}
+
+.studio-2d-page.wb-v2 .wb-multi-roll-opt.is-disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-roll-opt input[type="checkbox"] {
+  margin: 2px 0 0;
+  accent-color: var(--cp-accent, #5b61f6);
+  flex: none;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-roll-opt-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-roll-opt-top {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--cp-ink, #18181b);
+}
+
+.studio-2d-page.wb-v2 .wb-multi-roll-opt-top b {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-roll-opt-sub {
+  font-size: 11px;
+  color: var(--cp-ink-3, #71717a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-roll-empty {
+  padding: 10px 8px;
+  font-size: 11.5px;
+  color: var(--cp-ink-3, #71717a);
+  text-align: center;
+}
+
+/* Right panel: Multi-Material Compact Summary Card */
+.studio-2d-page.wb-v2 .wb-multi-summary-card {
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: #f8f9fc;
+  border: 1px solid rgba(91, 97, 246, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--cp-ink, #18181b);
+}
+
+.studio-2d-page.wb-v2 .wb-multi-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-kpi {
+  padding: 6px 7px;
+  border-radius: 7px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-kpi.is-save {
+  background: #f0fdf4;
+  border-color: rgba(16, 185, 129, 0.28);
+}
+
+.studio-2d-page.wb-v2 .wb-multi-kpi small {
+  font-size: 10.5px;
+  color: var(--cp-ink-3, #71717a);
+  white-space: nowrap;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-kpi b {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--cp-ink, #18181b);
+  white-space: nowrap;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-kpi.is-save b {
+  color: #047857;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-kpi em {
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--cp-ink-3, #71717a);
+  margin-left: 2px;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-summary-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--cp-ink-2, #52525b);
+}
+
+.studio-2d-page.wb-v2 .wb-multi-warn-list {
+  margin: 0;
+  padding: 5px 8px 5px 18px;
+  border-radius: 6px;
+  background: #fffbeb;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #92400e;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* Right panel: Clickable Multi-Material Relay & Roll Scheme List */
+.studio-2d-page.wb-v2 .wb-multi-scheme-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-scheme-item {
+  width: 100%;
+  text-align: left;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.085);
+  background: #ffffff;
+  color: var(--cp-ink, #18181b);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: background-color 0.13s ease, border-color 0.13s ease, box-shadow 0.13s ease;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-scheme-item:hover {
+  background: #f8f9fc;
+  border-color: rgba(15, 23, 42, 0.18);
+}
+
+.studio-2d-page.wb-v2 .wb-multi-scheme-item.on {
+  background: rgba(91, 97, 246, 0.065);
+  border-color: var(--cp-accent, #5b61f6);
+  box-shadow: 0 0 0 1px rgba(91, 97, 246, 0.2);
+}
+
+.studio-2d-page.wb-v2 .wb-multi-scheme-top {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-scheme-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cp-ink, #18181b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-scheme-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--cp-ink-2, #52525b);
+}
+
+.studio-2d-page.wb-v2 .wb-multi-scheme-sub {
+  font-size: 10.5px;
+  color: var(--cp-ink-3, #71717a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-hint-card {
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: #f8f9fb;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--cp-ink-2, #52525b);
+}
+
+.studio-2d-page.wb-v2 .wb-multi-hint-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.studio-2d-page.wb-v2 .wb-multi-hint-row b {
+  color: var(--cp-ink, #18181b);
+  font-weight: 600;
+}
+
+/* ---------- Dark Theme Overrides ([data-theme="dark"]) ---------- */
+:root[data-theme="dark"] .studio-2d-page.wb-v2 .wb-multi-check {
+  color: var(--cp-ink);
+}
+
+:root[data-theme="dark"] .studio-2d-page.wb-v2 .wb-multi-guard-chips {
+  background: #0f172a;
+  border-color: rgba(148, 163, 184, 0.22);
+  color: #cbd5e1;
+}
+
+:root[data-theme="dark"] .studio-2d-page.wb-v2 .wb-multi-roll-opt {
+  background: #1e293b;
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+:root[data-theme="dark"] .studio-2d-page.wb-v2 .wb-multi-roll-opt:hover:not(.is-disabled) {
+  background: #27364d;
+  border-color: rgba(56, 189, 248, 0.42);
+}
+
+:root[data-theme="dark"] .studio-2d-page.wb-v2 .wb-multi-roll-opt.is-checked {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: #38bdf8;
+}
+
+:root[data-theme="dark"] .studio-2d-page.wb-v2 .wb-multi-summary-card,
+:root[data-theme="dark"] .studio-2d-page.wb-v2 .wb-multi-hint-card {
+  background: #111b2c;
+  border-color: rgba(56, 189, 248, 0.26);
+}
+
+:root[data-theme="dark"] .studio-2d-page.wb-v2 .wb-multi-kpi,
+:root[data-theme="dark"] .studio-2d-page.wb-v2 .wb-multi-scheme-item {
+  background: #1e293b;
+  border-color: rgba(148, 163, 184, 0.22);
+  color: #e2e8f0;
+}
+
+:root[data-theme="dark"] .studio-2d-page.wb-v2 .wb-multi-kpi.is-save {
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(52, 211, 153, 0.36);
+}
+
+:root[data-theme="dark"] .studio-2d-page.wb-v2 .wb-multi-kpi.is-save b {
+  color: #34d399;
+}
+
+:root[data-theme="dark"] .studio-2d-page.wb-v2 .wb-multi-scheme-item:hover {
+  background: #27364d;
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+:root[data-theme="dark"] .studio-2d-page.wb-v2 .wb-multi-scheme-item.on {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.24);
+}
+
+:root[data-theme="dark"] .studio-2d-page.wb-v2 .wb-multi-warn-list {
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(251, 191, 36, 0.45);
+  color: #fde68a;
+}

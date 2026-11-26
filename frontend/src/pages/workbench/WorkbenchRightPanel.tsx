@@ -1,5 +1,7 @@
 import React, { RefObject } from 'react';
 import {
+  CanvasMode2D,
+  MultiMaterialRunSummary,
   SavedScheme2D,
   Scenario1DType,
   Scenario2DType,
@@ -23,6 +25,7 @@ export interface WorkbenchRightPanelProps {
   schemes2D: SavedScheme2D[];
   activeScheme2D: SavedScheme2D | null;
   activeScheme1D: SlittingSchemeRun | null;
+  setActiveScheme2D: (id: string) => void;
   strategyRuns2D: StrategyJobRun[];
   runningSolve: boolean;
   solveElapsedMs: number;
@@ -34,12 +37,17 @@ export interface WorkbenchRightPanelProps {
   onConfirmSelectedScheme2D: () => void;
   onConfirmSelectedScheme1D: () => void;
   onQuickExportCam: (kind: 'dxf' | 'nc') => void;
+  onExportMultiMaterialCsv?: () => void;
   onStopSolve: () => void;
   onRunSolve2D: () => void;
   onRunSolve1D: () => void;
 
   // Scenario & display
-  canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
+  canvasMode: CanvasMode2D;
+  multiPreferRemnants?: boolean;
+  multiMaxRemnants?: number;
+  multiCandidateRollCount?: number;
+  multiMaterialSummary?: MultiMaterialRunSummary | null;
   scenario2D: Scenario2DType;
   setScenario2D: (sc: Scenario2DType) => void;
   scenario1D: Scenario1DType;
@@ -83,6 +91,7 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
   schemes2D,
   activeScheme2D,
   activeScheme1D,
+  setActiveScheme2D,
   strategyRuns2D,
   runningSolve,
   solveElapsedMs,
@@ -94,10 +103,15 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
   onConfirmSelectedScheme2D,
   onConfirmSelectedScheme1D,
   onQuickExportCam,
+  onExportMultiMaterialCsv,
   onStopSolve,
   onRunSolve2D,
   onRunSolve1D,
   canvasMode,
+  multiPreferRemnants = true,
+  multiMaxRemnants = 6,
+  multiCandidateRollCount = 0,
+  multiMaterialSummary = null,
   scenario2D,
   setScenario2D,
   scenario1D,
@@ -126,10 +140,16 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
   updateStudioSettings,
   activeSchemeExecutionSummary
 }) => {
+  const multiSchemes2D = is2D
+    ? schemes2D.filter((s) => Boolean(s.multiMaterialRole))
+    : [];
+  const showMultiMaterialPanel =
+    is2D && (Boolean(multiMaterialSummary) || multiSchemes2D.length > 0);
+
   return (
     <section ref={rightPaneRef} className="pane studio-right">
       <div className="pane-h">
-        <span>方案</span>
+        <span>{canvasMode === 'MULTI_MATERIAL' ? '联排方案' : '方案'}</span>
         <span className="sp" />
         {is2D && schemes2D.length > 0 && (
           <span className="tag kind num">{schemes2D.length} 套</span>
@@ -137,6 +157,71 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
       </div>
 
       <div className="pane-b">
+        {/* 多料联排顶部紧凑汇总卡 */}
+        {is2D && multiMaterialSummary && (
+          <div className="wb-multi-summary-card" role="region" aria-label="多料联排总览">
+            <div className="wb-multi-summary-head">
+              <span>多料联排总览</span>
+              <span className="tag kind num">{multiMaterialSummary.elapsedMs}ms</span>
+              <span className="sp" />
+              {onExportMultiMaterialCsv && (
+                <button
+                  type="button"
+                  className="btn sm"
+                  onClick={onExportMultiMaterialCsv}
+                  title="导出料头接力与多母卷比选明细 CSV"
+                >
+                  导出联排 CSV
+                </button>
+              )}
+            </div>
+
+            <div className="wb-multi-summary-grid num">
+              <div className="wb-multi-kpi">
+                <small>料头接力</small>
+                <b>
+                  {multiMaterialSummary.placedByRemnants}
+                  <em>件</em>
+                </b>
+              </div>
+              <div className="wb-multi-kpi">
+                <small>推荐母卷</small>
+                <b>
+                  {multiMaterialSummary.placedByRoll}
+                  <em>件</em>
+                </b>
+              </div>
+              <div className="wb-multi-kpi is-save">
+                <small>预计节料</small>
+                <b>
+                  {fmtN(multiMaterialSummary.totalSavedAreaM2, 2)}
+                  <em>m²</em>
+                </b>
+              </div>
+            </div>
+
+            <div className="wb-multi-summary-foot num">
+              <span>
+                共 {multiMaterialSummary.remnantCount} 块料头 ·{' '}
+                {multiMaterialSummary.feasibleRollCount} 卷可齐套母卷
+              </span>
+              {multiMaterialSummary.unplacedPieces > 0 ? (
+                <span className="tag warn">余 {multiMaterialSummary.unplacedPieces} 件未排</span>
+              ) : (
+                <span className="tag ok">全单可排齐</span>
+              )}
+            </div>
+
+            {multiMaterialSummary.warnings.length > 0 && (
+              <ul className="wb-multi-warn-list">
+                {multiMaterialSummary.warnings.slice(0, 3).map((w, idx) => (
+                  <li key={idx}>{w}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
         {/* Post-Confirm Continuation Banner */}
         {lastConfirmSummary && (
           <div className="wb-confirm-banner">
@@ -167,12 +252,76 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
           </div>
         )}
 
+        {/* 多料联排可点击料头/母卷方案列表（点选即刻切换四层 CAD 画布） */}
+        {showMultiMaterialPanel && multiSchemes2D.length > 0 && (
+          <div className="wb-right-section" role="region" aria-label="多料联排候选方案列表">
+            <div className="wb-right-section-head">
+              <span>点击切换料头 / 母卷画布预览</span>
+              <span className="num">{multiSchemes2D.length} 料</span>
+            </div>
+            <div className="wb-multi-scheme-list">
+              {multiSchemes2D.map((s) => {
+                const isSelected = activeScheme2D?.id === s.id;
+                const isRemnant = s.multiMaterialRole === 'REMNANT_RELAY';
+                const isRecRoll = s.multiMaterialRole === 'ROLL_RECOMMENDED';
+                const cardHeading = isRemnant
+                  ? s.title
+                  : s.strategyName;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    className={`wb-multi-scheme-item ${isSelected ? 'on' : ''}`}
+                    aria-pressed={isSelected}
+                    onClick={() => setActiveScheme2D(s.id)}
+                  >
+                    <div className="wb-multi-scheme-top">
+                      <span className="wb-multi-scheme-name" title={cardHeading}>
+                        {cardHeading}
+                      </span>
+                      {isRecRoll && <span className="tag ok">推荐</span>}
+                      {isRemnant && <span className="tag kind">料头</span>}
+                      {s.confirmedSchemeId && <span className="tag run">已选定</span>}
+                    </div>
+                    <div className="wb-multi-scheme-meta num">
+                      <span>
+                        {isRemnant
+                          ? `${fmtN(s.widthMm, 0)}×${fmtN(s.canvasLengthMm, 0)} mm`
+                          : `W${fmtN(s.widthMm, 0)} · 切 ${fmtN(s.occupiedLengthMm, 0)} mm`}
+                      </span>
+                      <span>
+                        排入 <b>{s.placedCount}</b> 件 · <b>{s.utilizationPct}%</b>
+                      </span>
+                    </div>
+                    {(s.allocatedSummary ||
+                      (!isRemnant && (s.windowStartY || 0) > 0) ||
+                      s.batchNo ||
+                      s.color) && (
+                      <div className="wb-multi-scheme-sub num">
+                        {isRemnant && s.allocatedSummary ? s.allocatedSummary : ''}
+                        {!isRemnant && (s.windowStartY || 0) > 0
+                          ? `起切 Y=${fmtN(s.windowStartY || 0, 1)}mm`
+                          : ''}
+                        {s.batchNo ? ` · 缸号 ${s.batchNo}` : ''}
+                        {s.color ? ` · ${s.color}` : ''}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Active Candidate Decision Card */}
         {is2D && activeScheme2D ? (
           <div className="value-hero-panel">
             <div className="value-hero-head">
               <div className="value-hero-title">{activeScheme2D.strategyName}</div>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                {activeScheme2D.multiMaterialRole === 'ROLL_RECOMMENDED' && (
+                  <span className="tag ok">推荐</span>
+                )}
                 {activeScheme2D.layoutDirty && !activeScheme2D.confirmedSchemeId && (
                   <span className="tag warn">待校验</span>
                 )}
@@ -500,31 +649,54 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
 
         {/* Compact Solving Strategy / Goal Card */}
         {is2D ? (
-          <div className="wb-param-card">
-            <div className="wb-param-head">
-              <span>求解目标</span>
+          canvasMode === 'MULTI_MATERIAL' ? (
+            <div className="wb-multi-hint-card" role="region" aria-label="多料联排配置摘要">
+              <div className="wb-multi-hint-row">
+                <span>料头接力消化</span>
+                <b className="num">
+                  {multiPreferRemnants ? `优先 · 最多 ${multiMaxRemnants} 块` : '已关闭'}
+                </b>
+              </div>
+              <div className="wb-multi-hint-row">
+                <span>母卷对比范围</span>
+                <b className="num">
+                  {multiCandidateRollCount > 0
+                    ? `指定 ${multiCandidateRollCount} 卷`
+                    : '全部合格同型卷'}
+                </b>
+              </div>
+              <div className="wb-multi-hint-row">
+                <span>落库方式</span>
+                <b>逐料预览 · 点选落库</b>
+              </div>
             </div>
-            <div className="wb-goal-grid" role="radiogroup" aria-label="二维求解目标">
-              {SCENARIOS_2D.map((sc) => {
-                const disabled = sc.id === 'MULTI_WIDTH' && canvasMode !== 'FREE_CANVAS';
-                const checked = scenario2D === sc.id;
-                return (
-                  <button
-                    key={sc.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={checked}
-                    disabled={disabled}
-                    title={sc.desc}
-                    className={`wb-goal-pill ${checked ? 'on' : ''}`}
-                    onClick={() => setScenario2D(sc.id)}
-                  >
-                    {sc.label}
-                  </button>
-                );
-              })}
+          ) : (
+            <div className="wb-param-card">
+              <div className="wb-param-head">
+                <span>求解目标</span>
+              </div>
+              <div className="wb-goal-grid" role="radiogroup" aria-label="二维求解目标">
+                {SCENARIOS_2D.map((sc) => {
+                  const disabled = sc.id === 'MULTI_WIDTH' && canvasMode !== 'FREE_CANVAS';
+                  const checked = scenario2D === sc.id;
+                  return (
+                    <button
+                      key={sc.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={checked}
+                      disabled={disabled}
+                      title={sc.desc}
+                      className={`wb-goal-pill ${checked ? 'on' : ''}`}
+                      onClick={() => setScenario2D(sc.id)}
+                    >
+                      {sc.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )
         ) : (
           <div className="wb-param-card">
             <div className="wb-param-head">
@@ -607,22 +779,30 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
               {overviewStats.uncut > 0 ? overviewStats.uncut : overviewStats.ordered}
               {overviewStats.unit}
             </b>{' '}
-            · W
+            ·{' '}
             {is2D
-              ? effectiveRollWidthMm
-              : slitMaterialMode === 'STOCK_ROLL' && currentRoll1D
-              ? currentRoll1D.width
-              : slitMotherWidthMm}
+              ? canvasMode === 'MULTI_MATERIAL' && !activeScheme2D
+                ? '多料联排'
+                : `W${effectiveRollWidthMm}`
+              : `W${
+                  slitMaterialMode === 'STOCK_ROLL' && currentRoll1D
+                    ? currentRoll1D.width
+                    : slitMotherWidthMm
+                }`}
           </span>
           {is2D ? (
-            <button
-              type="button"
-              className="wb-algo-config-link"
-              title="配置二维求解算法"
-              onClick={openEngineSettings}
-            >
-              {activeAlgos.length} 算法 ↗
-            </button>
+            canvasMode === 'MULTI_MATERIAL' ? (
+              <span className="wb-param-badge">只读评估</span>
+            ) : (
+              <button
+                type="button"
+                className="wb-algo-config-link"
+                title="配置二维求解算法"
+                onClick={openEngineSettings}
+              >
+                {activeAlgos.length} 算法 ↗
+              </button>
+            )
           ) : (
             <button
               type="button"
@@ -647,7 +827,13 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
             disabled={runningSolve}
             onClick={is2D ? onRunSolve2D : onRunSolve1D}
           >
-            {runningSolve ? '计算中…' : '开始排版'}
+            {runningSolve
+              ? is2D && canvasMode === 'MULTI_MATERIAL'
+                ? '联排计算中…'
+                : '计算中…'
+              : is2D && canvasMode === 'MULTI_MATERIAL'
+              ? '开始多料联排'
+              : '开始排版'}
           </button>
         </div>
       </div>

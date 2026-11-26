@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  CanvasMode2D,
   DemandFamilySummary,
   DemandItem,
+  MultiMaterialRunSummary,
   SavedScheme2D,
   Scenario1DType,
   Scenario2DType,
@@ -26,7 +28,7 @@ import {
 } from '../../lib/domain/nesting-request-adapter.js';
 import { shapeArea } from '../../lib/canvas/nesting-scene.js';
 import { independentBaseline, planSummary } from '../../lib/domain/linear-model.js';
-import { idempotentPost, toast, fmtN } from '../../lib/core/util.js';
+import { idempotentPost, requestJSON, toast, fmtN } from '../../lib/core/util.js';
 import { LastConfirmSummary, SolverStrategyDef } from './workbenchTypes';
 import {
   buildConfirm1DIdempotencyKey,
@@ -36,6 +38,11 @@ import {
 } from './schemeConfirmUtils';
 import { formatSolverProgressText } from './solverProgressUtils';
 import { projectWindowDefectsForSolver } from './defectWindowUtils';
+import {
+  buildMultiMaterialWorkbenchRequest,
+  mapMultiMaterialResponseToSchemes2D,
+  type MultiMaterialPlanResponse
+} from './multiMaterialWorkbenchUtils';
 
 export interface BuildSlittingOptimizationRequestParams {
   profile: SlittingProfile;
@@ -156,7 +163,7 @@ export interface UseWorkbenchSolverOptions {
   // 2D inputs
   activeDemands2D: DemandItem[];
   activeAlgos: SolverStrategyDef[];
-  canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
+  canvasMode: CanvasMode2D;
   scenario2D: Scenario2DType;
   multiWidthsText2D: string;
   canvasWidthMm: number;
@@ -165,6 +172,11 @@ export interface UseWorkbenchSolverOptions {
   pieceGapMm: number;
   trimStartMm: number;
   materialModel2D: string;
+  requiredBatchNo?: string | null;
+  requiredColor?: string | null;
+  multiPreferRemnants?: boolean;
+  multiMaxRemnants?: number;
+  multiCandidateRollIds?: string[];
   loadedTaskId: string | null;
   loadedTaskName: string;
   loadedExternalRef: string;
@@ -178,6 +190,8 @@ export interface UseWorkbenchSolverOptions {
     schemes: SavedScheme2D[],
     options?: { selectIfBetter?: boolean; batchIds?: ReadonlySet<string> }
   ) => void;
+  setSchemes2D?: (schemes: SavedScheme2D[], activeId?: string | null) => void;
+  setMultiMaterialSummary?: (summary: MultiMaterialRunSummary | null) => void;
   markSchemeDispatched: (schemeId: string, taskId: string, confirmedSchemeId: string) => void;
 
   // 1D inputs
@@ -233,6 +247,11 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
     pieceGapMm,
     trimStartMm,
     materialModel2D,
+    requiredBatchNo = null,
+    requiredColor = null,
+    multiPreferRemnants = true,
+    multiMaxRemnants = 6,
+    multiCandidateRollIds = [],
     loadedTaskId,
     loadedTaskName,
     loadedExternalRef,
@@ -241,6 +260,8 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
     activeScheme2D,
     setStrategyRuns2D,
     addSchemes2D,
+    setSchemes2D,
+    setMultiMaterialSummary,
     markSchemeDispatched,
     slitOrders,
     slitMaterialMode,
@@ -304,6 +325,124 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
       toast(`${batchGuardWarning.title}：${batchGuardWarning.detail}`, true);
       return;
     }
+
+    if (canvasMode === 'MULTI_MATERIAL') {
+      const builtReq = buildMultiMaterialWorkbenchRequest({
+        demands: activeDemands2D,
+        taskId: loadedTaskId,
+        materialModel: materialModel2D,
+        requiredBatchNo,
+        requiredColor,
+        preferRemnants: multiPreferRemnants,
+        maxRemnants: multiMaxRemnants,
+        candidateRollIds: multiCandidateRollIds,
+        pieceGapMm,
+        trimStartMm,
+        timeBudgetMs: 6000
+      });
+      if (builtReq.error || !builtReq.payload || !builtReq.effectiveDemands) {
+        toast(builtReq.error || '多料联排参数无效', true);
+        return;
+      }
+      if (builtReq.usedOrderedFallback) {
+        toast('已排齐，按原单试算多料联排');
+      }
+
+      setRunningSolve(true);
+      setLastConfirmSummary(null);
+      activeSessionsRef.current.forEach((s) => s.cancel());
+      activeSessionsRef.current = [];
+
+      const totalReqCount = builtReq.effectiveDemands.reduce((s, d) => s + d.quantity, 0);
+      setStrategyRuns2D([
+        {
+          strategyId: 'MULTI_MATERIAL_PLAN',
+          strategyName: '多料头接力 + 多母卷对比',
+          description: '只读联合排产评估，生成各块料头与可行母卷真实排布预览',
+          state: 'RUNNING',
+          phaseText: '联排试算中…',
+          requestedCount: totalReqCount
+        }
+      ]);
+
+      const t0 = performance.now();
+      try {
+        const res: MultiMaterialPlanResponse = await requestJSON(
+          '/api/v2/planning/multi-material',
+          builtReq.payload
+        );
+        const elapsedMs = Math.round(performance.now() - t0);
+        const { schemes, summary } = mapMultiMaterialResponseToSchemes2D(res, {
+          demands: builtReq.effectiveDemands,
+          fallbackMaterialModel: materialModel2D || 'STANDARD',
+          pieceGapMm,
+          trimStartMm
+        });
+
+        setMultiMaterialSummary?.(summary);
+        if (schemes.length > 0) {
+          if (setSchemes2D) {
+            setSchemes2D(schemes, schemes[0].id);
+          } else {
+            addSchemes2D(schemes);
+          }
+        } else if (setSchemes2D) {
+          setSchemes2D([], null);
+        }
+
+        const totalPlaced = summary.placedByRemnants + summary.placedByRoll;
+        setStrategyRuns2D([
+          {
+            strategyId: 'MULTI_MATERIAL_PLAN',
+            strategyName: '多料头接力 + 多母卷对比',
+            description: '只读联合排产评估，生成各块料头与可行母卷真实排布预览',
+            state: totalPlaced > 0 ? 'SUCCEEDED' : 'FAILED',
+            phaseText:
+              totalPlaced > 0
+                ? `料头 ${summary.placedByRemnants} 件 · 母卷 ${summary.placedByRoll} 件`
+                : '未命中可用料',
+            errorDetail:
+              totalPlaced === 0
+                ? summary.warnings[0] || '未找到可排入当前需求的在库料头或母卷'
+                : undefined,
+            elapsedMs,
+            placedCount: totalPlaced,
+            requestedCount: totalReqCount,
+            complete: summary.unplacedPieces === 0 && totalPlaced > 0
+          }
+        ]);
+
+        if (schemes.length === 0) {
+          toast(
+            summary.warnings[0] || '多料联排未命中可用在库料头或母卷，请核对品号/缸号或切换新母卷',
+            true
+          );
+        } else {
+          toast(
+            `多料联排完成：料头消化 ${summary.placedByRemnants} 件、推荐母卷承接 ${summary.placedByRoll} 件，共生成 ${schemes.length} 套可预览方案`
+          );
+        }
+      } catch (err: any) {
+        const rawMsg = err?.message || '多料联排计算失败';
+        const isNetErr = /failed to fetch|networkerror|connection|无法连接|fetch/i.test(rawMsg);
+        const friendlyDetail = isNetErr ? '无法连接后端求解服务（8080）' : rawMsg;
+        setStrategyRuns2D([
+          {
+            strategyId: 'MULTI_MATERIAL_PLAN',
+            strategyName: '多料头接力 + 多母卷对比',
+            description: '只读联合排产评估',
+            state: 'FAILED',
+            phaseText: isNetErr ? '未连接' : '失败',
+            errorDetail: friendlyDetail
+          }
+        ]);
+        toast('多料联排失败：' + friendlyDetail, true);
+      } finally {
+        setRunningSolve(false);
+      }
+      return;
+    }
+
     let validDemands = activeDemands2D.filter(
       (d) => d.quantity > 0 && d.width > 0 && d.length > 0
     );
@@ -982,6 +1121,8 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
       const placementsPayload = [
         ...rawMain.map((p, idx) => {
           const srcDemand = p.demandId != null ? demandById.get(Number(p.demandId)) : undefined;
+          const resolvedSourceTaskId = p.sourceTaskId ?? srcDemand?.sourceTaskId;
+          const resolvedSourceLineId = p.sourceLineId ?? srcDemand?.sourceLineId;
           return {
             id: idx + 1,
             demandId: p.demandId,
@@ -993,16 +1134,18 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
             rotationDegrees: p.rotationDegrees || 0,
             gapFill: false,
             shape: hasPoly || hasContourOrHolesShape(p.shape) ? p.shape : undefined,
-            ...(srcDemand?.sourceTaskId && srcDemand.sourceLineId != null
+            ...(resolvedSourceTaskId && resolvedSourceLineId != null
               ? {
-                  sourceTaskId: srcDemand.sourceTaskId,
-                  sourceLineId: Number(srcDemand.sourceLineId)
+                  sourceTaskId: resolvedSourceTaskId,
+                  sourceLineId: Number(resolvedSourceLineId)
                 }
               : {})
           };
         }),
         ...rawGap.map((p, idx) => {
           const srcDemand = p.demandId != null ? demandById.get(Number(p.demandId)) : undefined;
+          const resolvedSourceTaskId = p.sourceTaskId ?? srcDemand?.sourceTaskId;
+          const resolvedSourceLineId = p.sourceLineId ?? srcDemand?.sourceLineId;
           return {
             id: rawMain.length + idx + 1,
             demandId: p.demandId,
@@ -1014,15 +1157,18 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
             rotationDegrees: p.rotationDegrees || 0,
             gapFill: true,
             shape: hasPoly || hasContourOrHolesShape(p.shape) ? p.shape : undefined,
-            ...(srcDemand?.sourceTaskId && srcDemand.sourceLineId != null
+            ...(resolvedSourceTaskId && resolvedSourceLineId != null
               ? {
-                  sourceTaskId: srcDemand.sourceTaskId,
-                  sourceLineId: Number(srcDemand.sourceLineId)
+                  sourceTaskId: resolvedSourceTaskId,
+                  sourceLineId: Number(resolvedSourceLineId)
                 }
               : {})
           };
         })
       ];
+
+      const effectiveTrimStartMm =
+        activeScheme2D.canvasMode === 'REMNANT' ? 0 : trimStartMm;
 
       const allocSummary = buildSourceAllocations2D(
         placementsPayload,
@@ -1036,7 +1182,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         scheme: activeScheme2D,
         taskId: allocSummary.resolvedTaskId,
         sourceAllocations,
-        trimStartMm,
+        trimStartMm: effectiveTrimStartMm,
         pieceGapMm,
         placements: placementsPayload
       });
@@ -1063,7 +1209,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         canvasLengthMm: activeScheme2D.canvasLengthMm,
         windowStartY: activeScheme2D.windowStartY,
         occupiedLengthMm: activeScheme2D.occupiedLengthMm,
-        trimStartMm,
+        trimStartMm: effectiveTrimStartMm,
         pieceGapMm,
         utilizationPct: activeScheme2D.utilizationPct,
         pieceAreaM2: activeScheme2D.pieceAreaM2,

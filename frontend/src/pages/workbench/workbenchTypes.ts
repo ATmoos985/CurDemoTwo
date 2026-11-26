@@ -155,3 +155,27 @@ export interface DefectScheduleRow {
   comp: string;
   avoided: boolean;
 }
+
+export interface MultiMaterialCandidateRollOption {
+  rollId: string;
+  rollModel: string;
+  width: number;
+  availableLengthMm: number;
+  batchNo: string;
+  color: string;
+  matchesModel: boolean;
+  matchesBatch: boolean;
+  matchesColor: boolean;
+  /** 是否同时满足品号/缸号/色号条件（默认“全部合格同型卷”范围） */
+  eligible: boolean;
+  /** 开启强同缸约束时不合规卷禁止勾选 */
+  blockedByStrict: boolean;
+  mismatchReason?: string;
+}
+
+export interface MultiMaterialFilterContext {
+  materialModel?: string;
+  requiredBatchNo?: string;
+  requiredColor?: string;
+  strictBatchMatch?: boolean;
+}

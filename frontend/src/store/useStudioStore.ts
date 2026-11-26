@@ -105,6 +105,39 @@ export interface StrategyJobRun {
   result?: any;
 }
 
+export type SavedSchemeCanvasMode2D = 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
+export type CanvasMode2D = SavedSchemeCanvasMode2D | 'MULTI_MATERIAL';
+
+export interface SchemeDefectSnapshot {
+  id?: string | number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  margin?: number;
+  label?: string;
+  typeName?: string;
+  defectType?: string;
+  /** 标记该疵点是否已完成工位窗口局部坐标裁切（margin 已展开为 0），避免画布二次外扩 */
+  windowAligned?: boolean;
+}
+
+export interface MultiMaterialRunSummary {
+  batchId: string;
+  materialModel: string | null;
+  totalRequestedPieces: number;
+  placedByRemnants: number;
+  placedByRoll: number;
+  unplacedPieces: number;
+  remnantCount: number;
+  feasibleRollCount: number;
+  recommendedRollId: string | null;
+  totalSavedAreaM2: number;
+  elapsedMs: number;
+  warnings: string[];
+  rawResponse: any;
+}
+
 export interface SavedScheme2D {
   id: string;
   title: string;
@@ -112,7 +145,7 @@ export interface SavedScheme2D {
   strategyName: string;
   scenarioId?: string;
   createdAt: string;
-  canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
+  canvasMode: SavedSchemeCanvasMode2D;
   rollId?: string;
   remnantId?: string;
   windowStartY?: number;
@@ -129,6 +162,18 @@ export interface SavedScheme2D {
   demands: DemandItem[];
   request: any;
   result: any;
+  /** 方案专属窗口疵点快照（多料联排每块料头/每卷母卷自带，切卡片时画布原生渲染） */
+  defects?: SchemeDefectSnapshot[];
+  /** 多料联排卡片角色 */
+  multiMaterialRole?: 'REMNANT_RELAY' | 'ROLL_RECOMMENDED' | 'ROLL_ALTERNATIVE';
+  /** 料头接力序号（从 1 开始） */
+  multiMaterialRelayIndex?: number;
+  /** 同批次多料联排标识 */
+  multiMaterialBatchId?: string;
+  /** 辅助展示字段：缸号 / 色号 / 料头排入明细 */
+  batchNo?: string;
+  color?: string;
+  allocatedSummary?: string;
   layoutDirty?: boolean;
   layoutValidationErrors?: string[];
   dispatchedTaskId?: string;
@@ -584,11 +629,14 @@ export function expandClusterToDemands(
 }
 
 export interface WorkbenchLaunchPreset {
-  canvasMode?: 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
+  canvasMode?: CanvasMode2D;
   canvasWidthMm?: number;
   canvasLengthMm?: number;
   selectedRollId?: string;
   selectedRemnantId?: string;
+  multiPreferRemnants?: boolean;
+  multiMaxRemnants?: number;
+  multiCandidateRollIds?: string[];
   pieceGapMm?: number;
   trimStartMm?: number;
   scenario2D?: Scenario2DType;
@@ -624,7 +672,7 @@ interface StudioState {
   scenario1D: Scenario1DType;
 
   // 2D Studio State (defaults to FREE_CANVAS = Virtual New Mother Roll!)
-  canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
+  canvasMode: CanvasMode2D;
   canvasWidthMm: number;
   canvasLengthMm: number;
   /** 连续开卷可调起切点（mm），null 表示自动跟随实卷已切终点 usedLength */
@@ -633,6 +681,11 @@ interface StudioState {
   trimStartMm: number;
   selectedRollId: string;
   selectedRemnantId: string;
+  /** 多料联排参数：优先消化料头、料头接力上限（0..20）、指定候选母卷 ID（空表示全部合格同型卷） */
+  multiPreferRemnants: boolean;
+  multiMaxRemnants: number;
+  multiCandidateRollIds: string[];
+  multiMaterialSummary: MultiMaterialRunSummary | null;
   materialModel2D: string;
   loadedTaskId: string | null;
   loadedTaskName: string | null;
@@ -694,7 +747,7 @@ interface StudioState {
 
   setCanvasSpec: (spec: Partial<{
     activeDimension: '2D' | '1D';
-    canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
+    canvasMode: CanvasMode2D;
     canvasWidthMm: number;
     canvasLengthMm: number;
     windowStartY2D: number | null;
@@ -702,6 +755,10 @@ interface StudioState {
     trimStartMm: number;
     selectedRollId: string;
     selectedRemnantId: string;
+    multiPreferRemnants: boolean;
+    multiMaxRemnants: number;
+    multiCandidateRollIds: string[];
+    multiMaterialSummary: MultiMaterialRunSummary | null;
     materialModel2D: string;
     loadedTaskId: string | null;
     loadedTaskName: string | null;
@@ -718,6 +775,8 @@ interface StudioState {
     newSchemes: SavedScheme2D[],
     options?: { selectIfBetter?: boolean; batchIds?: ReadonlySet<string> }
   ) => void;
+  setSchemes2D: (schemes: SavedScheme2D[], activeId?: string | null) => void;
+  setMultiMaterialSummary: (summary: MultiMaterialRunSummary | null) => void;
   removeScheme2D: (id: string) => void;
   clearSchemes2D: () => void;
   setActiveScheme2D: (id: string | null) => void;
@@ -766,6 +825,10 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   trimStartMm: initialSettings.trimStartMm,
   selectedRollId: 'ROLL-2026-0920',
   selectedRemnantId: '',
+  multiPreferRemnants: true,
+  multiMaxRemnants: 6,
+  multiCandidateRollIds: [],
+  multiMaterialSummary: null,
   materialModel2D: defaultCluster2D.materialModel,
   loadedTaskId: null,
   loadedTaskName: null,
@@ -990,7 +1053,14 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       canvasWidthMm: append ? st.canvasWidthMm : cluster.defaultWidthMm,
       canvasLengthMm: append ? st.canvasLengthMm : cluster.defaultLengthMm,
       materialModel2D: append ? st.materialModel2D : cluster.materialModel,
-      ...(append ? {} : { activeSchemeId2D: null, schemes2D: [] })
+      ...(append
+        ? {}
+        : {
+            activeSchemeId2D: null,
+            schemes2D: [],
+            multiMaterialSummary: null,
+            multiCandidateRollIds: []
+          })
     });
   },
 
@@ -1158,6 +1228,14 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         ...(preset?.selectedRemnantId !== undefined
           ? { selectedRemnantId: preset.selectedRemnantId }
           : {}),
+        ...(preset?.multiPreferRemnants !== undefined
+          ? { multiPreferRemnants: preset.multiPreferRemnants }
+          : {}),
+        ...(preset?.multiMaxRemnants !== undefined
+          ? { multiMaxRemnants: preset.multiMaxRemnants }
+          : {}),
+        multiCandidateRollIds: preset?.multiCandidateRollIds ?? [],
+        multiMaterialSummary: null,
         pieceGapMm: preset?.pieceGapMm ?? (Number(family.process?.pieceGap) || 0),
         trimStartMm: preset?.trimStartMm ?? (Number(family.process?.trimStart) || 0),
         ...(preset?.scenario2D ? { scenario2D: preset.scenario2D } : {}),
@@ -1357,7 +1435,9 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         materialModel2D: first.materialModel,
         activeDemands2D: demands,
         schemes2D: [],
-        activeSchemeId2D: null
+        activeSchemeId2D: null,
+        multiMaterialSummary: null,
+        multiCandidateRollIds: []
       });
     }
   },
@@ -1494,16 +1574,27 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       };
     }),
 
+  setSchemes2D: (schemes, activeId) =>
+    set({
+      schemes2D: schemes,
+      activeSchemeId2D: activeId !== undefined ? activeId : schemes[0]?.id || null
+    }),
+
+  setMultiMaterialSummary: (summary) => set({ multiMaterialSummary: summary }),
+
   removeScheme2D: (id) =>
     set((st) => {
       const next = st.schemes2D.filter((s) => s.id !== id);
+      const hasMulti = next.some((s) => Boolean(s.multiMaterialRole));
       return {
         schemes2D: next,
-        activeSchemeId2D: st.activeSchemeId2D === id ? next[0]?.id || null : st.activeSchemeId2D
+        activeSchemeId2D: st.activeSchemeId2D === id ? next[0]?.id || null : st.activeSchemeId2D,
+        multiMaterialSummary: hasMulti ? st.multiMaterialSummary : null
       };
     }),
 
-  clearSchemes2D: () => set({ schemes2D: [], activeSchemeId2D: null }),
+  clearSchemes2D: () =>
+    set({ schemes2D: [], activeSchemeId2D: null, multiMaterialSummary: null }),
 
   setActiveScheme2D: (id) => set({ activeSchemeId2D: id }),
 

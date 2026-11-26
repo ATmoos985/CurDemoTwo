@@ -1,9 +1,13 @@
 import React, { RefObject } from 'react';
-import { Scenario2DType } from '../../store/useStudioStore';
+import { CanvasMode2D, Scenario2DType } from '../../store/useStudioStore';
 import { SlittingWidthMode } from '../../store/studioSettings';
 import { NumberInput } from '../../components/ui/NumberInput';
 import { fmtM } from '../../lib/core/util.js';
 import { openCraftSettings } from './workbenchUtils';
+import {
+  MultiMaterialCandidateRollOption,
+  MultiMaterialFilterContext
+} from './workbenchTypes';
 
 export interface WorkbenchTopBarProps {
   is2D: boolean;
@@ -21,7 +25,7 @@ export interface WorkbenchTopBarProps {
   onToggleRightPane: () => void;
 
   // 2D spec
-  canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
+  canvasMode: CanvasMode2D;
   scenario2D: Scenario2DType;
   multiWidthsText2D: string;
   setMultiWidthsText2D: (val: string) => void;
@@ -37,6 +41,13 @@ export interface WorkbenchTopBarProps {
   availableRemnants: any[];
   currentRoll2D: any;
   currentRemnant2D: any;
+
+  // 多料联排顶栏控制
+  multiPreferRemnants: boolean;
+  multiMaxRemnants: number;
+  multiCandidateRollIds: string[];
+  multiCandidateRollOptions: MultiMaterialCandidateRollOption[];
+  multiFilterContext: MultiMaterialFilterContext;
 
   // 1D spec
   slitMaterialMode: 'VIRTUAL_ROLL' | 'STOCK_ROLL';
@@ -80,6 +91,11 @@ export const WorkbenchTopBar: React.FC<WorkbenchTopBarProps> = ({
   availableRemnants,
   currentRoll2D,
   currentRemnant2D,
+  multiPreferRemnants,
+  multiMaxRemnants,
+  multiCandidateRollIds,
+  multiCandidateRollOptions,
+  multiFilterContext,
   slitMaterialMode,
   slitMotherWidthMm,
   slitFixedLengthMm,
@@ -96,6 +112,14 @@ export const WorkbenchTopBar: React.FC<WorkbenchTopBarProps> = ({
   const maxRollStartY = currentRoll2D
     ? Math.max(minRollStartY, Math.floor((Number(currentRoll2D.totalLength) || 0) - 500))
     : 0;
+  const eligibleMultiRollsCount = multiCandidateRollOptions.filter((r) => r.eligible).length;
+  const selectedRollSet = new Set(multiCandidateRollIds);
+  const toggleMultiCandidateRoll = (rollId: string) => {
+    const next = selectedRollSet.has(rollId)
+      ? multiCandidateRollIds.filter((id) => id !== rollId)
+      : [...multiCandidateRollIds, rollId];
+    setCanvasSpec({ multiCandidateRollIds: next });
+  };
 
   return (
     <div className="studio-top-bar">
@@ -207,6 +231,22 @@ export const WorkbenchTopBar: React.FC<WorkbenchTopBarProps> = ({
               }}
             >
               在库料头 ({availableRemnants.length})
+            </button>
+            <button
+              type="button"
+              className={canvasMode === 'MULTI_MATERIAL' ? 'on' : ''}
+              aria-pressed={canvasMode === 'MULTI_MATERIAL'}
+              title="跨多块在库料头接力消化 + 多卷在库母卷对比联合排产"
+              onClick={() => {
+                if (canvasMode !== 'MULTI_MATERIAL') {
+                  onRequestChangeMaterial2D(
+                    { canvasMode: 'MULTI_MATERIAL', windowStartY2D: null },
+                    '切换至「多料联排」'
+                  );
+                }
+              }}
+            >
+              多料联排
             </button>
           </div>
 
@@ -352,7 +392,7 @@ export const WorkbenchTopBar: React.FC<WorkbenchTopBarProps> = ({
                 </button>
               )}
             </div>
-          ) : (
+          ) : canvasMode === 'REMNANT' ? (
             <div className="studio-canvas-inputs">
               <label>
                 <span>料头</span>
@@ -373,6 +413,141 @@ export const WorkbenchTopBar: React.FC<WorkbenchTopBarProps> = ({
                   ))}
                 </select>
               </label>
+            </div>
+          ) : (
+            <div className="studio-canvas-inputs wb-multi-controls">
+              <label
+                className="wb-multi-check"
+                title="先跨多块在库合格料头接力消化裁片，再将剩余件送入多卷母卷比选"
+              >
+                <input
+                  type="checkbox"
+                  checked={multiPreferRemnants}
+                  onChange={(e) => setCanvasSpec({ multiPreferRemnants: e.target.checked })}
+                />
+                <span>优先消化料头</span>
+              </label>
+
+              <label title="最多连续接力消化的在库料头块数（0–20）">
+                <span>料头上限</span>
+                <NumberInput
+                  className="field num"
+                  style={{ width: 52 }}
+                  min={0}
+                  max={20}
+                  integer
+                  fallback={6}
+                  disabled={!multiPreferRemnants}
+                  value={multiMaxRemnants}
+                  onValueChange={(v) => setCanvasSpec({ multiMaxRemnants: v })}
+                />
+                <em>块</em>
+              </label>
+
+              <details className="craft-disclosure wb-multi-roll-picker">
+                <summary title="选择参与多料联排对比的在库母卷（默认按品号/缸号/色号自动匹配全部合格同型卷）">
+                  候选母卷{' '}
+                  <span className="num">
+                    {multiCandidateRollIds.length > 0
+                      ? `已选 ${multiCandidateRollIds.length} 卷`
+                      : `全部合格同型 (${eligibleMultiRollsCount})`}
+                  </span>
+                </summary>
+                <div className="craft-disclosure-panel wb-multi-roll-panel">
+                  <div className="wb-multi-roll-head">
+                    <span>勾选特定母卷（留空=全部合格同型卷）</span>
+                    <div className="wb-multi-roll-head-actions">
+                      {multiCandidateRollIds.length > 0 && (
+                        <button
+                          type="button"
+                          className="wb-tiny-ghost"
+                          onClick={() => setCanvasSpec({ multiCandidateRollIds: [] })}
+                        >
+                          恢复全部同型
+                        </button>
+                      )}
+                      {eligibleMultiRollsCount > 0 && (
+                        <button
+                          type="button"
+                          className="wb-tiny-ghost"
+                          onClick={() =>
+                            setCanvasSpec({
+                              multiCandidateRollIds: multiCandidateRollOptions
+                                .filter((r) => r.eligible)
+                                .map((r) => r.rollId)
+                            })
+                          }
+                        >
+                          全选同型
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {(multiFilterContext.materialModel ||
+                    multiFilterContext.requiredBatchNo ||
+                    multiFilterContext.requiredColor) && (
+                    <div className="wb-multi-guard-chips num">
+                      {multiFilterContext.materialModel && (
+                        <span>品号 {multiFilterContext.materialModel}</span>
+                      )}
+                      {multiFilterContext.requiredBatchNo && (
+                        <span>
+                          · 缸号 {multiFilterContext.requiredBatchNo}
+                          {multiFilterContext.strictBatchMatch ? ' (强同缸)' : ''}
+                        </span>
+                      )}
+                      {multiFilterContext.requiredColor && (
+                        <span>· 色号 {multiFilterContext.requiredColor}</span>
+                      )}
+                    </div>
+                  )}
+
+                  {multiCandidateRollOptions.length === 0 ? (
+                    <div className="wb-multi-roll-empty">暂无已质检放行的在库合格母卷</div>
+                  ) : (
+                    <div className="wb-multi-roll-list">
+                      {multiCandidateRollOptions.map((opt) => {
+                        const checked = selectedRollSet.has(opt.rollId);
+                        return (
+                          <label
+                            key={opt.rollId}
+                            className={`wb-multi-roll-opt${checked ? ' is-checked' : ''}${
+                              opt.blockedByStrict ? ' is-disabled' : ''
+                            }`}
+                            title={opt.mismatchReason || `${opt.rollId} · ${opt.rollModel}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={opt.blockedByStrict}
+                              onChange={() => toggleMultiCandidateRoll(opt.rollId)}
+                            />
+                            <div className="wb-multi-roll-opt-body">
+                              <div className="wb-multi-roll-opt-top num">
+                                <b>{opt.rollId}</b>
+                                <span>W{opt.width}</span>
+                                <span>余{fmtM(opt.availableLengthMm)}m</span>
+                                <span className="sp" />
+                                {opt.eligible ? (
+                                  <span className="tag ok">同型适配</span>
+                                ) : (
+                                  <span className="tag warn">{opt.mismatchReason || '非同型'}</span>
+                                )}
+                              </div>
+                              <div className="wb-multi-roll-opt-sub">
+                                {opt.rollModel || '未登记品号'}
+                                {opt.batchNo ? ` · 缸号 ${opt.batchNo}` : ''}
+                                {opt.color ? ` · ${opt.color}` : ''}
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </details>
             </div>
           )}
 

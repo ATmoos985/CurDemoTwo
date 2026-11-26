@@ -1,6 +1,7 @@
 import { Dispatch, SetStateAction, useRef, useState } from 'react';
 import {
   useStudioStore,
+  CanvasMode2D,
   DemandItem,
   SavedScheme2D,
   Scenario2DType
@@ -30,7 +31,7 @@ import { buildValidateLayoutPayload } from './schemeConfirmUtils';
 export interface UseWorkbenchBoardEditOptions {
   activeScheme2D: SavedScheme2D | null;
   activeDemands2D: DemandItem[];
-  canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
+  canvasMode: CanvasMode2D;
   scenario2D: Scenario2DType;
   currentRoll2D: any;
   currentRemnant2D: any;
@@ -289,7 +290,9 @@ export function useWorkbenchBoardEdit(opts: UseWorkbenchBoardEditOptions) {
       scenarioId: existingEditable?.scenarioId || scenario2D,
       createdAt:
         existingEditable?.createdAt || new Date().toLocaleTimeString('zh-CN', { hour12: false }),
-      canvasMode: existingEditable?.canvasMode || canvasMode,
+      canvasMode:
+        existingEditable?.canvasMode ||
+        (canvasMode === 'MULTI_MATERIAL' ? 'FREE_CANVAS' : canvasMode),
       rollId:
         existingEditable?.rollId ??
         (canvasMode === 'STOCK_ROLL' && currentRoll2D ? currentRoll2D.rollId : undefined),

@@ -482,7 +482,13 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
                     <span className="scheme-slot-stat num">
                       <b>{s.utilizationPct}%</b> · {fmtN(s.occupiedLengthMm, 0)}mm
                     </span>
-                    {isBest && <span className="tag ok">最优</span>}
+                    {s.multiMaterialRole === 'ROLL_RECOMMENDED' ? (
+                      <span className="tag ok">推荐</span>
+                    ) : s.multiMaterialRole === 'REMNANT_RELAY' ? (
+                      <span className="tag kind">料头</span>
+                    ) : (
+                      isBest && <span className="tag ok">最优</span>
+                    )}
                     {s.layoutDirty && !s.confirmedSchemeId && <span className="tag warn">待校验</span>}
                     {s.confirmedSchemeId && <span className="tag run">已选定</span>}
                     <button

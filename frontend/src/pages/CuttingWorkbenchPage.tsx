@@ -29,6 +29,7 @@ import {
   type NormalizedReconciliationReportRow
 } from './results/reconciliationUtils';
 import '../styles/theme-workbench-v2.css';
+import './workbench/multiMaterialWorkbench.css';
 
 import {
   DEFAULT_ENABLED_STRATEGIES,
@@ -44,6 +45,11 @@ import {
   exportExcel1D
 } from './workbench/workbenchUtils';
 import { projectWindowDefectsForBoard } from './workbench/defectWindowUtils';
+import {
+  buildMultiMaterialCandidateRollOptions,
+  exportMultiMaterialCsv,
+  toBoardDefectsFromSchemeSnapshot
+} from './workbench/multiMaterialWorkbenchUtils';
 import { useWorkbenchBoardEdit } from './workbench/useWorkbenchBoardEdit';
 import { useWorkbenchSolver } from './workbench/useWorkbenchSolver';
 import { WorkbenchTopBar } from './workbench/WorkbenchTopBar';
@@ -256,6 +262,10 @@ export const CuttingWorkbenchPage: React.FC<{
     trimStartMm,
     selectedRollId,
     selectedRemnantId,
+    multiPreferRemnants,
+    multiMaxRemnants,
+    multiCandidateRollIds,
+    multiMaterialSummary,
     materialModel2D,
     loadedTaskId,
     loadedTaskName,
@@ -272,6 +282,8 @@ export const CuttingWorkbenchPage: React.FC<{
     addBlankDemand2D,
     setStrategyRuns2D,
     addSchemes2D,
+    setSchemes2D,
+    setMultiMaterialSummary,
     removeScheme2D,
     clearSchemes2D,
     setActiveScheme2D,
@@ -496,7 +508,7 @@ export const CuttingWorkbenchPage: React.FC<{
         activeDimension,
         scenario2D,
         multiWidthsText2D,
-        canvasMode,
+        canvasMode: canvasMode === 'MULTI_MATERIAL' ? 'FREE_CANVAS' : canvasMode,
         canvasWidthMm,
         canvasLengthMm,
         windowStartY2D,
@@ -598,6 +610,28 @@ export const CuttingWorkbenchPage: React.FC<{
     setSelectedLeftoverId(null);
   }, [activeSchemeId2D]);
 
+  // 当前载入需求族的同缸/色号防色差校验 & 多料联排候选母卷联动
+  const activeTaskId = is2D ? loadedTaskId : slitLoadedTaskId;
+  const activePoolFamily = useMemo(() => {
+    if (!activeTaskId) return null;
+    return poolFamilies.find((f) => f.id === activeTaskId) || null;
+  }, [activeTaskId, poolFamilies]);
+
+  const multiFilterContext = useMemo(
+    () => ({
+      materialModel: activePoolFamily?.materialModel || materialModel2D || undefined,
+      requiredBatchNo: activePoolFamily?.requiredBatchNo || undefined,
+      requiredColor: activePoolFamily?.requiredColor || undefined,
+      strictBatchMatch: Boolean(activePoolFamily?.strictBatchMatch)
+    }),
+    [activePoolFamily, materialModel2D]
+  );
+
+  const multiCandidateRollOptions = useMemo(
+    () => buildMultiMaterialCandidateRollOptions(passedRolls, multiFilterContext),
+    [passedRolls, multiFilterContext]
+  );
+
   // 实卷连续开卷工位起切点（支持用户调节，受 >= usedLength 且 < totalLength - 100 约束）
   const effectiveWindowStartY = useMemo(() => {
     if (canvasMode !== 'STOCK_ROLL' || !currentRoll2D) return 0;
@@ -611,13 +645,32 @@ export const CuttingWorkbenchPage: React.FC<{
     if (activeScheme2D?.widthMm) return activeScheme2D.widthMm;
     if (canvasMode === 'STOCK_ROLL' && currentRoll2D) return currentRoll2D.width;
     if (canvasMode === 'REMNANT' && currentRemnant2D) return currentRemnant2D.width;
+    if (canvasMode === 'MULTI_MATERIAL') {
+      const firstEligible =
+        multiCandidateRollOptions.find((r) => r.eligible) || multiCandidateRollOptions[0];
+      if (firstEligible && firstEligible.width > 0) return firstEligible.width;
+    }
     return canvasWidthMm;
-  }, [activeScheme2D, canvasMode, currentRoll2D, currentRemnant2D, canvasWidthMm]);
+  }, [
+    activeScheme2D,
+    canvasMode,
+    currentRoll2D,
+    currentRemnant2D,
+    multiCandidateRollOptions,
+    canvasWidthMm
+  ]);
 
   const effectiveRollLengthMm = useMemo(() => {
     const baseLen =
       canvasMode === 'REMNANT' && currentRemnant2D ? currentRemnant2D.length : canvasLengthMm;
     if (!activeScheme2D) return baseLen;
+    if (activeScheme2D.canvasMode === 'REMNANT' || Boolean(activeScheme2D.multiMaterialRole)) {
+      return Math.max(
+        100,
+        Math.ceil(activeScheme2D.canvasLengthMm || 0),
+        Math.ceil(activeScheme2D.occupiedLengthMm || 0)
+      );
+    }
     return Math.max(
       baseLen,
       Math.ceil(activeScheme2D.occupiedLengthMm || 0),
@@ -625,10 +678,20 @@ export const CuttingWorkbenchPage: React.FC<{
     );
   }, [activeScheme2D, canvasMode, currentRemnant2D, canvasLengthMm]);
 
+  const effectiveTrimStartMm = useMemo(() => {
+    if (activeScheme2D) {
+      return activeScheme2D.canvasMode === 'REMNANT' ? 0 : trimStartMm;
+    }
+    return canvasMode === 'REMNANT' ? 0 : trimStartMm;
+  }, [activeScheme2D, canvasMode, trimStartMm]);
+
   const effectiveRollTitle = useMemo(() => {
     if (activeScheme2D) {
       if (activeScheme2D.canvasMode === 'STOCK_ROLL' && activeScheme2D.rollId) {
-        return `实卷 ${activeScheme2D.rollId}`;
+        const y0 = Math.round(Number(activeScheme2D.windowStartY) || 0);
+        return y0 > 0
+          ? `实卷 ${activeScheme2D.rollId} (Y=${y0}mm)`
+          : `实卷 ${activeScheme2D.rollId}`;
       }
       if (activeScheme2D.canvasMode === 'REMNANT' && activeScheme2D.remnantId) {
         return `料头 ${activeScheme2D.remnantId}`;
@@ -637,18 +700,64 @@ export const CuttingWorkbenchPage: React.FC<{
     }
     if (canvasMode === 'STOCK_ROLL' && currentRoll2D) return `实卷 ${currentRoll2D.rollId}`;
     if (canvasMode === 'REMNANT' && currentRemnant2D) return `料头 ${currentRemnant2D.id}`;
+    if (canvasMode === 'MULTI_MATERIAL') return '多料联排（待求解）';
     return '虚拟新母卷';
   }, [activeScheme2D, canvasMode, currentRoll2D, currentRemnant2D]);
 
   const windowDefects2D: BoardDefect[] = useMemo(() => {
-    const startY =
-      activeScheme2D?.canvasMode === 'STOCK_ROLL' && activeScheme2D.windowStartY != null
-        ? activeScheme2D.windowStartY
-        : effectiveWindowStartY;
+    if (activeScheme2D) {
+      if (Array.isArray(activeScheme2D.defects) && activeScheme2D.defects.length > 0) {
+        const alreadyAligned = activeScheme2D.defects.some((d) => d.windowAligned);
+        if (alreadyAligned) {
+          return toBoardDefectsFromSchemeSnapshot(activeScheme2D.defects);
+        }
+        return projectWindowDefectsForBoard(
+          activeScheme2D.defects,
+          0,
+          effectiveRollLengthMm,
+          effectiveRollWidthMm,
+          settings.defectMarginMm
+        );
+      }
+      if (activeScheme2D.canvasMode === 'STOCK_ROLL' && activeScheme2D.rollId) {
+        const matchedRoll =
+          rolls.find((r) => r.rollId === activeScheme2D.rollId) || currentRoll2D;
+        if (matchedRoll) {
+          const startY =
+            activeScheme2D.windowStartY != null
+              ? activeScheme2D.windowStartY
+              : effectiveWindowStartY;
+          return projectWindowDefectsForBoard(
+            matchedRoll.defects,
+            startY,
+            effectiveRollLengthMm,
+            Number(matchedRoll.width) || effectiveRollWidthMm,
+            settings.defectMarginMm
+          );
+        }
+      }
+      if (activeScheme2D.canvasMode === 'REMNANT' && activeScheme2D.remnantId) {
+        const matchedRem =
+          remnants.find((rm) => rm.id === activeScheme2D.remnantId) || currentRemnant2D;
+        if (matchedRem) {
+          return projectWindowDefectsForBoard(
+            matchedRem.defects,
+            0,
+            effectiveRollLengthMm,
+            Number(matchedRem.width) || effectiveRollWidthMm,
+            settings.defectMarginMm
+          );
+        }
+      }
+      if (activeScheme2D.canvasMode === 'FREE_CANVAS') {
+        return [];
+      }
+    }
+
     if (canvasMode === 'STOCK_ROLL' && currentRoll2D) {
       return projectWindowDefectsForBoard(
         currentRoll2D.defects,
-        startY,
+        effectiveWindowStartY,
         effectiveRollLengthMm,
         Number(currentRoll2D.width) || effectiveRollWidthMm,
         settings.defectMarginMm
@@ -665,9 +774,10 @@ export const CuttingWorkbenchPage: React.FC<{
     }
     return [];
   }, [
-    activeScheme2D?.canvasMode,
-    activeScheme2D?.windowStartY,
+    activeScheme2D,
     canvasMode,
+    rolls,
+    remnants,
     currentRoll2D,
     currentRemnant2D,
     effectiveWindowStartY,
@@ -675,13 +785,6 @@ export const CuttingWorkbenchPage: React.FC<{
     effectiveRollLengthMm,
     settings.defectMarginMm
   ]);
-
-  // 当前载入需求族的同缸/色号防色差校验 & 报工复检实绩投影
-  const activeTaskId = is2D ? loadedTaskId : slitLoadedTaskId;
-  const activePoolFamily = useMemo(() => {
-    if (!activeTaskId) return null;
-    return poolFamilies.find((f) => f.id === activeTaskId) || null;
-  }, [activeTaskId, poolFamilies]);
 
   const activeOpenRemainingFallback = useMemo(() => {
     if (activePoolFamily && Number.isFinite(Number(activePoolFamily.openTotal))) {
@@ -824,6 +927,22 @@ export const CuttingWorkbenchPage: React.FC<{
         matLabel = `料头 ${currentRemnant2D.id}`;
         matBatch = String(currentRemnant2D.batchNo || currentRemnant2D.materialBatch || '').trim();
         matColor = String(currentRemnant2D.color || '').trim();
+      } else if (canvasMode === 'MULTI_MATERIAL' && multiCandidateRollIds.length > 0) {
+        const offending = multiCandidateRollIds
+          .map((rid) => passedRolls.find((r) => r.rollId === rid))
+          .find((r) => {
+            if (!r) return false;
+            const rb = String(r.batchNo || '').trim();
+            const rc = String(r.color || '').trim();
+            if (reqBatch && (!rb || rb.toLowerCase() !== reqBatch.toLowerCase())) return true;
+            if (strict && !rb) return true;
+            if (reqColor && rc && rc.toLowerCase() !== reqColor.toLowerCase()) return true;
+            return false;
+          });
+        if (!offending) return null;
+        matLabel = `已选候选母卷 ${offending.rollId}`;
+        matBatch = String(offending.batchNo || '').trim();
+        matColor = String(offending.color || '').trim();
       } else {
         return null;
       }
@@ -879,6 +998,7 @@ export const CuttingWorkbenchPage: React.FC<{
     canvasMode,
     currentRoll2D,
     currentRemnant2D,
+    multiCandidateRollIds,
     slitMaterialMode,
     currentRoll1D,
     passedRolls
@@ -907,14 +1027,21 @@ export const CuttingWorkbenchPage: React.FC<{
     pieceGapMm,
     trimStartMm,
     materialModel2D,
+    requiredBatchNo: activePoolFamily?.requiredBatchNo || null,
+    requiredColor: activePoolFamily?.requiredColor || null,
+    multiPreferRemnants,
+    multiMaxRemnants,
+    multiCandidateRollIds,
     loadedTaskId,
-    loadedTaskName,
-    loadedExternalRef,
+    loadedTaskName: loadedTaskName || '',
+    loadedExternalRef: loadedExternalRef || '',
     currentRoll2D,
     currentRemnant2D,
     activeScheme2D,
     setStrategyRuns2D,
     addSchemes2D,
+    setSchemes2D,
+    setMultiMaterialSummary,
     markSchemeDispatched,
     slitOrders,
     slitMaterialMode,
@@ -984,7 +1111,7 @@ export const CuttingWorkbenchPage: React.FC<{
     effectiveRollLengthMm,
     effectiveWindowStartY,
     pieceGapMm,
-    trimStartMm,
+    trimStartMm: effectiveTrimStartMm,
     windowDefects2D,
     settings,
     removeScheme2D,
@@ -1200,6 +1327,11 @@ export const CuttingWorkbenchPage: React.FC<{
         availableRemnants={availableRemnants}
         currentRoll2D={currentRoll2D}
         currentRemnant2D={currentRemnant2D}
+        multiPreferRemnants={multiPreferRemnants}
+        multiMaxRemnants={multiMaxRemnants}
+        multiCandidateRollIds={multiCandidateRollIds}
+        multiCandidateRollOptions={multiCandidateRollOptions}
+        multiFilterContext={multiFilterContext}
         slitMaterialMode={slitMaterialMode}
         slitMotherWidthMm={slitMotherWidthMm}
         slitFixedLengthMm={slitFixedLengthMm}
@@ -1472,7 +1604,7 @@ export const CuttingWorkbenchPage: React.FC<{
           effectiveRollTitle={effectiveRollTitle}
           effectiveRollWidthMm={effectiveRollWidthMm}
           effectiveRollLengthMm={effectiveRollLengthMm}
-          trimStartMm={trimStartMm}
+          trimStartMm={effectiveTrimStartMm}
           pieceGapMm={pieceGapMm}
           windowDefects2D={windowDefects2D}
           boardStagingDemands={boardStagingDemands}
@@ -1518,6 +1650,7 @@ export const CuttingWorkbenchPage: React.FC<{
             schemes2D={schemes2D}
             activeScheme2D={activeScheme2D}
             activeScheme1D={activeScheme1D}
+            setActiveScheme2D={setActiveScheme2D}
             strategyRuns2D={strategyRuns2D}
             runningSolve={runningSolve}
             solveElapsedMs={solveElapsedMs}
@@ -1533,10 +1666,17 @@ export const CuttingWorkbenchPage: React.FC<{
             onConfirmSelectedScheme2D={handleConfirmSelectedScheme2D}
             onConfirmSelectedScheme1D={handleConfirmSelectedScheme1D}
             onQuickExportCam={(kind) => exportCam2D(activeScheme2D, settings, kind, windowDefects2D)}
+            onExportMultiMaterialCsv={() =>
+              exportMultiMaterialCsv(multiMaterialSummary?.rawResponse)
+            }
             onStopSolve={handleStopSolve}
             onRunSolve2D={handleRunSolve2D}
             onRunSolve1D={handleRunSolve1D}
             canvasMode={canvasMode}
+            multiPreferRemnants={multiPreferRemnants}
+            multiMaxRemnants={multiMaxRemnants}
+            multiCandidateRollCount={multiCandidateRollIds.length}
+            multiMaterialSummary={multiMaterialSummary}
             scenario2D={scenario2D}
             setScenario2D={setScenario2D}
             scenario1D={scenario1D}
