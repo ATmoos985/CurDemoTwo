@@ -163,7 +163,7 @@ final class StudioMaterializer {
         List<Defect> rawDefs = remnantMode
                 ? (remnant.getDefects() == null ? List.of() : remnant.getDefects())
                 : (roll.getDefects() == null ? List.of() : roll.getDefects());
-        solveReq.setDefects(CuttingWorkflowService.windowDefects(rawDefs, remnantMode ? 0 : startY, effectiveLen, widthMm));
+        solveReq.setDefects(DefectWindowSupport.sliceForWindow(rawDefs, remnantMode ? 0 : startY, effectiveLen, widthMm));
 
         List<PlacedPiece> pieces = new ArrayList<>();
         Set<Integer> usedPieceIds = new HashSet<>();
@@ -424,7 +424,7 @@ final class StudioMaterializer {
                 if (!multiTask) {
                     tx.prepareTaskSolve(req);
                 }
-                req.setDefects(CuttingWorkflowService.windowDefects(
+                req.setDefects(DefectWindowSupport.sliceForWindow(
                         roll.getDefects() == null ? List.of() : roll.getDefects(),
                         carStart, carLen, roll.getWidth()
                 ));
@@ -475,7 +475,7 @@ final class StudioMaterializer {
      */
     Map<String, Object> validateManualLayout(
             CuttingStatePort.ReadView tx,
-            SchedulingStudioService.ValidateLayoutRequest req
+            StudioCommandContracts.ValidateLayoutInput req
     ) {
         List<String> errors = new ArrayList<>();
         if (req == null) {
@@ -519,7 +519,7 @@ final class StudioMaterializer {
             }
             RemnantStock rem = remOpt.get();
             if (avoidDefects && rem.getDefects() != null) {
-                effectiveDefects.addAll(CuttingWorkflowService.windowDefects(rem.getDefects(), 0, heightMm, widthMm));
+                effectiveDefects.addAll(DefectWindowSupport.sliceForWindow(rem.getDefects(), 0, heightMm, widthMm));
             }
         } else if (rollMode) {
             Optional<MotherRollInfo> rollOpt = tx.findRoll(req.rollId().trim());
@@ -529,20 +529,20 @@ final class StudioMaterializer {
             }
             MotherRollInfo roll = rollOpt.get();
             if (avoidDefects && roll.getDefects() != null) {
-                effectiveDefects.addAll(CuttingWorkflowService.windowDefects(roll.getDefects(), windowStartY, heightMm, widthMm));
+                effectiveDefects.addAll(DefectWindowSupport.sliceForWindow(roll.getDefects(), windowStartY, heightMm, widthMm));
             }
         } else if (avoidDefects && req.defects() != null) {
-            effectiveDefects.addAll(CuttingWorkflowService.windowDefects(req.defects(), 0, heightMm, widthMm));
+            effectiveDefects.addAll(DefectWindowSupport.sliceForWindow(req.defects(), 0, heightMm, widthMm));
         }
 
         // 2. 几何边界、修边、重叠、间距检查
         errors.addAll(collect2DGeometryErrors(placements, widthMm, heightMm, trimStartMm, pieceGapMm));
 
         // 3. 旋转许可与需求一致性检查
-        Map<Integer, SchedulingStudioService.DemandLineInput> demandMap = new LinkedHashMap<>();
+        Map<Integer, StudioCommandContracts.DemandLineView> demandMap = new LinkedHashMap<>();
         if (req.demands() != null) {
             int fallbackId = 1;
-            for (SchedulingStudioService.DemandLineInput d : req.demands()) {
+            for (StudioCommandContracts.DemandLineView d : req.demands()) {
                 if (d == null) continue;
                 int id = (d.id() != null && d.id() > 0) ? d.id() : fallbackId++;
                 demandMap.put(id, d);
@@ -554,7 +554,7 @@ final class StudioMaterializer {
 
         for (SchedulingScheme.PlacementItem p : placements) {
             if (p == null) continue;
-            SchedulingStudioService.DemandLineInput dem = demandMap.get(p.demandId());
+            StudioCommandContracts.DemandLineView dem = demandMap.get(p.demandId());
             if (dem != null) {
                 double pw = p.shape() != null ? p.shape().width() : p.w();
                 double pl = p.shape() != null ? p.shape().height() : p.l();
@@ -619,7 +619,7 @@ final class StudioMaterializer {
             List<PieceDemand> reqDemands = new ArrayList<>();
             for (Map.Entry<Integer, Integer> e : countByDemand.entrySet()) {
                 int did = e.getKey();
-                SchedulingStudioService.DemandLineInput dem = demandMap.get(did);
+                StudioCommandContracts.DemandLineView dem = demandMap.get(did);
                 SchedulingScheme.PlacementItem sample = sampleByDemand.get(did);
                 String name = dem != null && dem.name() != null && !dem.name().isBlank()
                         ? dem.name() : Objects.toString(sample.name(), "裁片#" + did);
@@ -672,7 +672,7 @@ final class StudioMaterializer {
                     pp.setRotationDegrees(normDeg);
                     placedPieces.add(pp);
                 } else {
-                    SchedulingStudioService.DemandLineInput dem = demandMap.get(p.demandId());
+                    StudioCommandContracts.DemandLineView dem = demandMap.get(p.demandId());
                     boolean rotated = (normDeg % 180 != 0)
                             || (dem != null && Math.abs(p.w() - dem.length()) < 0.01 && Math.abs(p.l() - dem.width()) < 0.01 && Math.abs(dem.width() - dem.length()) > 0.01);
                     double pw = dem != null ? (rotated ? dem.length() : dem.width()) : p.w();

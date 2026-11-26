@@ -67,8 +67,8 @@ public class OptimizationController {
         }
     }
 
-    @ExceptionHandler(OptimizationService.Failure.class)
-    public ResponseEntity<?> failed(OptimizationService.Failure error) {
+    @ExceptionHandler(OptimizationFailure.class)
+    public ResponseEntity<?> failed(OptimizationFailure error) {
         var response = ResponseEntity.status(error.status)
                 .contentType(MediaType.APPLICATION_JSON)
                 .header("Cache-Control", "no-store");

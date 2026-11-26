@@ -153,11 +153,11 @@ class MarkerOptimizationTests {
     }
     @Test void unsupportedStrategyAndNonKitRequestsAreRejectedBeforeAcceptance() {
         var r=request("trials");
-        assertThrows(OptimizationService.Failure.class,()->MarkerOptimization.validate(new OptimizationRequest(
+        assertThrows(OptimizationFailure.class,()->MarkerOptimization.validate(new OptimizationRequest(
                 r.schemaVersion(),r.problemType(),r.clientRequestId(),r.problem(),false,false,r.strategy())));
-        assertThrows(OptimizationService.Failure.class,()->MarkerOptimization.validate(new OptimizationRequest(
+        assertThrows(OptimizationFailure.class,()->MarkerOptimization.validate(new OptimizationRequest(
                 r.schemaVersion(),r.problemType(),r.clientRequestId(),r.problem(),false,true,new OptimizationRequest.Strategy("marker-shortening","1",99))));
-        assertThrows(OptimizationService.Failure.class,()->MarkerOptimization.validate(new OptimizationRequest(
+        assertThrows(OptimizationFailure.class,()->MarkerOptimization.validate(new OptimizationRequest(
                 r.schemaVersion(),r.problemType(),r.clientRequestId(),r.problem(),false,true,new OptimizationRequest.Strategy("unknown","1",5))));
     }
     @Test void gapFillIsArchivedWithItsOwnAreaButDoesNotFulfillAnotherGarment() throws Exception {
@@ -193,7 +193,7 @@ class MarkerOptimizationTests {
         for (var limits : List.of(Map.of(999,1), Map.of(1,0), Map.of(1,81), Map.<Integer,Integer>of())) {
             var input = new OptimizationRequest(base.schemaVersion(),base.problemType(),base.clientRequestId(),
                     base.problem(),false,true,new OptimizationRequest.Strategy("marker-shortening","2",1,limits));
-            assertThrows(OptimizationService.Failure.class, () -> MarkerOptimization.validate(input));
+            assertThrows(OptimizationFailure.class, () -> MarkerOptimization.validate(input));
         }
         assertFalse(JsonMapper.builder().build().writeValueAsString(base).contains("gapFillLimits"));
         var withSpares = new OptimizationRequest(base.schemaVersion(),base.problemType(),base.clientRequestId(),

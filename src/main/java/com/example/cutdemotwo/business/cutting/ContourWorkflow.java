@@ -66,7 +66,7 @@ public final class ContourWorkflow {
         var input = problem(r, r.getRollL());
         var best = factory.solve(input);
         if (!complete(input, best)) {
-            var failed = FabricSolveAdapter.toLegacy(r, best);
+            var failed = SolveResponseMapper.toLegacy(r, best);
             failed.setSuccess(false);
             failed.setPieces(List.of());
             if (best.feasible()) {

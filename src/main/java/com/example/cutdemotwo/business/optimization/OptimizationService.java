@@ -332,9 +332,14 @@ public class OptimizationService implements AutoCloseable {
             case "UNAVAILABLE" -> new Failure("ENGINE_UNAVAILABLE", check.message(), 503, true);
             default -> new Failure("UNSUPPORTED_CONSTRAINT", check.message(), 422, false);
         };
-        MarkerOptimization.validate(request);
-        if (request.strategy() != null && request.strategy().initialPlacements() != null)
-            MarkerOptimization.validatedSeed(request, solvers);
+        try {
+            MarkerOptimization.validate(request);
+            if (request.strategy() != null && request.strategy().initialPlacements() != null)
+                MarkerOptimization.validatedSeed(request, solvers);
+        } catch (OptimizationFailure failure) {
+            if (failure instanceof Failure typed) throw typed;
+            throw new Failure(failure.code, failure.getMessage(), failure.status, failure.retryable);
+        }
         return check;
     }
 

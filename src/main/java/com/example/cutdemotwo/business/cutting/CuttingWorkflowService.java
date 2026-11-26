@@ -34,7 +34,7 @@ public class CuttingWorkflowService {
         // 任务排料以材料档案中的疵点为准（避让边距外扩并裁到工位内），不信任客户端传入；独立试算接口保持原样。
         if (request.getTaskId() != null) {
             boolean remnant = "remnant".equalsIgnoreCase(request.getFeedPortType());
-            request.setDefects(windowDefects(inventory.materialDefects(request), remnant ? 0 : request.getWindowStartY(), request.getRollL(), request.getRollW()));
+            request.setDefects(DefectWindowSupport.sliceForWindow(inventory.materialDefects(request), remnant ? 0 : request.getWindowStartY(), request.getRollL(), request.getRollW()));
         }
         String baseline = inventory.materialFingerprint(request);
         SolveResponse result = FabricSolveAdapter.solve(solverFactory, request);
@@ -61,7 +61,7 @@ public class CuttingWorkflowService {
             throw new IllegalArgumentException("一维分切按母卷定长出车，且须允许纵切");
         request.setFirstStageOrientation("vertical"); // 分切先纵向开条，再在车尾横断
         inventory.prepareTaskSolve(request);
-        request.setDefects(windowDefects(inventory.materialDefects(request), request.getWindowStartY(), request.getRollL(), request.getRollW()));
+        request.setDefects(DefectWindowSupport.sliceForWindow(inventory.materialDefects(request), request.getWindowStartY(), request.getRollL(), request.getRollW()));
         var demands = new java.util.HashMap<Integer, com.example.cutdemotwo.business.model.PieceDemand>();
         request.getDemands().forEach(d -> demands.put(d.getId(), d));
         var counts = new java.util.HashMap<Integer, Integer>();
@@ -88,20 +88,13 @@ public class CuttingWorkflowService {
         return result;
     }
 
-    /** 疵点以母卷档案为准（不信任客户端）：按避让边距外扩后裁到工位内，换算为工位局部坐标。 */
+    /** 疵点以母卷档案为准（不信任客户端）：统一委托 {@link DefectWindowSupport#sliceForWindow} 裁窗并保留完整质检元数据。 */
     static java.util.List<com.example.cutdemotwo.contracts.geometry.Defect> windowDefects(
             java.util.List<com.example.cutdemotwo.contracts.geometry.Defect> defects, double start, double length, double width) {
-        var result = new ArrayList<com.example.cutdemotwo.contracts.geometry.Defect>();
-        for (var d : defects == null ? java.util.List.<com.example.cutdemotwo.contracts.geometry.Defect>of() : defects) {
-            double m = d.getMargin(), x = Math.max(0, d.getX() - m), y = Math.max(start, d.getY() - m);
-            double w = Math.min(width, d.getX() + d.getW() + m) - x, h = Math.min(start + length, d.getY() + d.getH() + m) - y;
-            if (w <= 0 || h <= 0) continue;
-            result.add(new com.example.cutdemotwo.contracts.geometry.Defect(d.getId(), x, y - start, w, h, 0));
-        }
-        return result;
+        return DefectWindowSupport.sliceForWindow(defects, start, length, width);
     }
 
-    public synchronized Map<String, Object> confirm(CutReport report) {
+    public Map<String, Object> confirm(CutReport report) {
         return inventory.confirmPlan(report);
     }
 

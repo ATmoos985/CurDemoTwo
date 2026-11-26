@@ -865,7 +865,7 @@ public class GlobalPlanningService {
 
         NestingResult best = solveForMaterial(
                 roll.rollId(), roll.width(), initWindowLen,
-                sliceDefectsForWindow(roll.defects(), roll.startY(), initWindowLen, roll.width()),
+                DefectWindowSupport.sliceForWindow(roll.defects(), roll.startY(), initWindowLen, roll.width()),
                 demands, isContour, false, pieceGapMm, trimStartMm, perRollSec
         );
         int bestPlaced = countPlaced(best);
@@ -876,7 +876,7 @@ public class GlobalPlanningService {
             double expandedLen = Math.min(availLen, Math.max(initWindowLen * 2.0, trimStartMm + sumPieceLen + 500.0));
             NestingResult expanded = solveForMaterial(
                     roll.rollId(), roll.width(), expandedLen,
-                    sliceDefectsForWindow(roll.defects(), roll.startY(), expandedLen, roll.width()),
+                    DefectWindowSupport.sliceForWindow(roll.defects(), roll.startY(), expandedLen, roll.width()),
                     demands, isContour, false, pieceGapMm, trimStartMm, perRollSec
             );
             int expPlaced = countPlaced(expanded);
@@ -897,7 +897,7 @@ public class GlobalPlanningService {
                 if (mid <= trimStartMm + 1.0 || mid >= high - 1.0) break;
                 NestingResult trial = solveForMaterial(
                         roll.rollId(), roll.width(), mid,
-                        sliceDefectsForWindow(roll.defects(), roll.startY(), mid, roll.width()),
+                        DefectWindowSupport.sliceForWindow(roll.defects(), roll.startY(), mid, roll.width()),
                         demands, isContour, false, pieceGapMm, trimStartMm, 1
                 );
                 if (countPlaced(trial) >= remainingTotal) {
@@ -956,7 +956,7 @@ public class GlobalPlanningService {
         }
         double finalCutLen = Math.min(availLen, Math.max(bestCutLen, ceil1(maxSnapEndY)));
         boolean finalFeasible = finalPlaced >= remainingTotal;
-        List<Defect> windowDefects = sliceDefectsForWindow(roll.defects(), roll.startY(), finalCutLen, roll.width());
+        List<Defect> windowDefects = DefectWindowSupport.sliceForWindow(roll.defects(), roll.startY(), finalCutLen, roll.width());
 
         double placedAreaMm2 = computePlacedAreaMm2(acceptedRaw, demandById);
         double consumedAreaMm2 = roll.width() * finalCutLen;
@@ -1336,32 +1336,6 @@ public class GlobalPlanningService {
             clean.add(sanitizePointRing(ring));
         }
         return clean.isEmpty() ? null : List.copyOf(clean);
-    }
-
-    /**
-     * 与 {@link CuttingWorkflowService#windowDefects} 保持 1:1 语义一致：
-     * 先按避让边距外扩，再裁切到当前工位窗口 [0, rollWidth] × [startY, startY + windowLen] 并换算为局部坐标（margin=0），
-     * 确保窗外边界疵点的安全禁区绝不因实体在窗外而被丢弃。
-     */
-    private static List<Defect> sliceDefectsForWindow(List<Defect> defects, double startY, double windowLen, double rollWidth) {
-        if (defects == null || defects.isEmpty()) return List.of();
-        double endY = startY + windowLen;
-        List<Defect> sliced = new ArrayList<>();
-        for (Defect d : defects) {
-            if (d == null) continue;
-            double m = Math.max(0.0, d.getMargin());
-            double x = Math.max(0.0, d.getX() - m);
-            double y = Math.max(startY, d.getY() - m);
-            double w = cleanCoord(Math.min(rollWidth, d.getX() + d.getW() + m) - x);
-            double h = cleanCoord(Math.min(endY, d.getY() + d.getH() + m) - y);
-            if (w <= 0 || h <= 0) continue;
-            sliced.add(new Defect(
-                    d.getId(), cleanCoord(x), cleanCoord(y - startY), w, h, 0.0,
-                    d.getDefectType(), d.getTypeName(), d.getSeverity(), d.getPoints(),
-                    d.getDetectionSource(), d.getAvoidanceStrategy(), d.getDescription()
-            ));
-        }
-        return List.copyOf(sliced);
     }
 
     private static List<Defect> copyDefects(List<Defect> defects) {

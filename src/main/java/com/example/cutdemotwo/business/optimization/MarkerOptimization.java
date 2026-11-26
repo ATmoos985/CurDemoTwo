@@ -1,6 +1,7 @@
 package com.example.cutdemotwo.business.optimization;
 
 import com.example.cutdemotwo.algorithm.api.NestingSolver;
+import com.example.cutdemotwo.contracts.jobs.OptimizationFailure;
 import com.example.cutdemotwo.contracts.jobs.OptimizationRequest;
 import com.example.cutdemotwo.contracts.jobs.OptimizationResult.*;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
@@ -19,22 +20,22 @@ final class MarkerOptimization {
         var strategy = input.strategy();
         if (strategy == null) return;
         if (!"marker-shortening".equals(strategy.id()) || !("1".equals(strategy.version()) || "2".equals(strategy.version())))
-            throw new OptimizationService.Failure("UNSUPPORTED_CONSTRAINT", "不支持的编排策略或版本", 422, false);
+            throw new OptimizationFailure("UNSUPPORTED_CONSTRAINT", "不支持的编排策略或版本", 422, false);
         if (strategy.maxTrials() < 1 || strategy.maxTrials() > 12)
-            throw new OptimizationService.Failure("INVALID_INPUT", "唛架试排次数必须为 1–12", 400, false);
+            throw new OptimizationFailure("INVALID_INPUT", "唛架试排次数必须为 1–12", 400, false);
         if (!Boolean.TRUE.equals(input.requireComplete()) || !"CONTOUR".equals(input.nestingProblem().process().mode())
                 || !"RECTANGLE".equals(input.nestingProblem().material().shape().type()))
-            throw new OptimizationService.Failure("UNSUPPORTED_CONSTRAINT", "唛架缩长要求矩形门幅、轮廓工艺及完整齐套", 422, false);
+            throw new OptimizationFailure("UNSUPPORTED_CONSTRAINT", "唛架缩长要求矩形门幅、轮廓工艺及完整齐套", 422, false);
         var limits = strategy.gapFillLimits();
         if (strategy.initialPlacements() != null && (!"2".equals(strategy.version())
                 || strategy.initialPlacements().isEmpty() || strategy.initialPlacements().size() > 200))
-            throw new OptimizationService.Failure("INVALID_INPUT", "初始排法须使用策略 2，并提供 1–200 片", 400, false);
+            throw new OptimizationFailure("INVALID_INPUT", "初始排法须使用策略 2，并提供 1–200 片", 400, false);
         if (limits != null) {
             var ids = new HashSet<Integer>();
             input.nestingProblem().parts().forEach(part -> ids.add(part.id()));
             if (!"2".equals(strategy.version()) || limits.isEmpty() || limits.size() > 80 ||
                     !ids.containsAll(limits.keySet()) || limits.values().stream().anyMatch(n -> n == null || n < 1 || n > 80))
-                throw new OptimizationService.Failure("INVALID_INPUT", "补片限额须使用策略 2 的现有裁片，每种为 1–80 片，最多 80 种", 400, false);
+                throw new OptimizationFailure("INVALID_INPUT", "补片限额须使用策略 2 的现有裁片，每种为 1–80 片，最多 80 种", 400, false);
         }
     }
 
@@ -42,7 +43,7 @@ final class MarkerOptimization {
         try {
             return solver.validateMarkerSeed(input.nestingProblem(), input.strategy().initialPlacements());
         } catch (IllegalArgumentException invalid) {
-            throw new OptimizationService.Failure("INVALID_INPUT", invalid.getMessage(), 400, false);
+            throw new OptimizationFailure("INVALID_INPUT", invalid.getMessage(), 400, false);
         }
     }
 

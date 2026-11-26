@@ -1,6 +1,6 @@
 package com.example.cutdemotwo.contracts.slitting;
 
-import com.example.cutdemotwo.contracts.jobs.OptimizationProblem;
+import com.example.cutdemotwo.contracts.common.OptimizationProblem;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;

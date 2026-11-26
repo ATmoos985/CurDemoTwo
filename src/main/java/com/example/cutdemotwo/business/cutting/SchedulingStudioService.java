@@ -102,7 +102,7 @@ public class SchedulingStudioService {
             Boolean strictBatchMatch,
             String machineId,
             String shiftTeam
-    ) {
+    ) implements StudioCommandContracts.SaveDemandFamilyInput {
         public SaveDemandFamilyCommand(
                 String id, String mergeIntoTaskId, String name, String materialModel, String externalRef,
                 String dimension, Double bedLengthMm, Double trimStartMm, Double pieceGapMm,
@@ -129,7 +129,7 @@ public class SchedulingStudioService {
             NestingProblem.Shape shape,
             String sourceTaskId,
             Integer sourceLineId
-    ) {
+    ) implements StudioCommandContracts.DemandLineView {
         public DemandLineInput(
                 Integer id, String name, double width, double length, int quantity,
                 Boolean allowRotation, Boolean allowHalfTurn, String sizeLabel,
@@ -237,7 +237,7 @@ public class SchedulingStudioService {
             List<Defect> defects,
             List<SchedulingScheme.PlacementItem> placements,
             List<DemandLineInput> demands
-    ) {}
+    ) implements StudioCommandContracts.ValidateLayoutInput {}
 
     /**
      * 纯计算只读手调几何校验与刀路/余料重建（绝不修改库存或递增 revision）。

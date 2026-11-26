@@ -109,7 +109,7 @@ final class StudioDemandPoolService {
         });
     }
 
-    Map<String, Object> saveOrMergeDemandFamily(SchedulingStudioService.SaveDemandFamilyCommand cmd) {
+    Map<String, Object> saveOrMergeDemandFamily(StudioCommandContracts.SaveDemandFamilyInput cmd) {
         if (cmd == null || cmd.demands() == null || cmd.demands().isEmpty()) {
             throw new IllegalArgumentException("请至少提供 1 项有效需求明细");
         }
@@ -120,7 +120,7 @@ final class StudioDemandPoolService {
         });
     }
 
-    CuttingTask saveOrMergeTask(CuttingStatePort.WriteTx tx, SchedulingStudioService.SaveDemandFamilyCommand cmd) {
+    CuttingTask saveOrMergeTask(CuttingStatePort.WriteTx tx, StudioCommandContracts.SaveDemandFamilyInput cmd) {
         String targetId = (cmd.mergeIntoTaskId() != null && !cmd.mergeIntoTaskId().isBlank())
                 ? cmd.mergeIntoTaskId().trim()
                 : (cmd.id() != null && !cmd.id().isBlank() ? cmd.id().trim() : null);
@@ -146,7 +146,7 @@ final class StudioDemandPoolService {
             nextLineId = lines.stream().mapToInt(CuttingTask.Line::id).max().orElse(0) + 1;
         }
 
-        for (SchedulingStudioService.DemandLineInput in : cmd.demands()) {
+        for (StudioCommandContracts.DemandLineView in : cmd.demands()) {
             if (in == null || in.quantity() <= 0) continue;
             int lineId = (!merging && in.id() != null && in.id() > 0) ? in.id() : nextLineId++;
             while (containsLineId(lines, lineId)) lineId = nextLineId++;
@@ -405,7 +405,7 @@ final class StudioDemandPoolService {
 
     // ==================== 规范化辅助 ====================
 
-    static NestingProblem.Shape normalizeLineShape(SchedulingStudioService.DemandLineInput in, boolean isSlit, boolean taskHasPolygon) {
+    static NestingProblem.Shape normalizeLineShape(StudioCommandContracts.DemandLineView in, boolean isSlit, boolean taskHasPolygon) {
         if (isSlit) return null;
         if (in.shape() != null && "POLYGON".equals(in.shape().type()) && in.shape().vertices() != null && in.shape().vertices().size() >= 3) {
             List<NestingProblem.Point> pts = in.shape().vertices();
