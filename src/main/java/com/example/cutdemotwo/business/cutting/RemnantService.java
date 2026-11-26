@@ -85,6 +85,7 @@ public class RemnantService implements CuttingStatePort {
                     || !plans.isEmpty() || !receipts.isEmpty() || !executions.isEmpty()
                     || !transfers.isEmpty() || !counts.isEmpty()
                     || !templates.isEmpty() || !schemes.isEmpty()
+                    || (store.supportsIndependentTemplates() && !store.loadTemplates().isEmpty())
                     || !qualityReleases.isEmpty() || !inventoryReceipts.isEmpty() || !materialIssues.isEmpty()) {
                 throw new IllegalArgumentException("当前库已有业务数据，不能创建整套示例材料；请使用已有库存或单独准备演示库");
             }
@@ -3151,6 +3152,39 @@ public class RemnantService implements CuttingStatePort {
         });
     }
 
+    @Override
+    public List<DemandTemplate> listTemplatesIndependent() {
+        if (store.supportsIndependentTemplates()) {
+            return List.copyOf(store.loadTemplates());
+        }
+        return inRead(CuttingStatePort.ReadView::listTemplates);
+    }
+
+    @Override
+    public DemandTemplate saveTemplateIndependent(DemandTemplate template) {
+        if (template == null || template.id() == null || template.id().isBlank()) {
+            throw new IllegalArgumentException("需求模板及其编号不能为空");
+        }
+        if (store.supportsIndependentTemplates()) {
+            store.upsertTemplate(template);
+            return template;
+        }
+        return inWrite("SYSTEM_UPDATE", template.id(), "UNAUTHENTICATED_LOCAL", tx -> {
+            tx.putTemplate(template);
+            return template;
+        });
+    }
+
+    @Override
+    public boolean deleteTemplateIndependent(String id) {
+        if (id == null || id.isBlank()) return false;
+        String trimmed = id.trim();
+        if (store.supportsIndependentTemplates()) {
+            return store.deleteTemplate(trimmed);
+        }
+        return inWrite("SYSTEM_UPDATE", trimmed, "UNAUTHENTICATED_LOCAL", tx -> tx.removeTemplate(trimmed));
+    }
+
     private final class TxContext implements CuttingStatePort.WriteTx {
         private final boolean writable;
         private boolean active = true;
@@ -3187,6 +3221,9 @@ public class RemnantService implements CuttingStatePort {
         @Override
         public List<DemandTemplate> listTemplates() {
             ensureActive();
+            if (store.supportsIndependentTemplates()) {
+                return List.copyOf(store.loadTemplates());
+            }
             return List.copyOf(templates.values());
         }
 

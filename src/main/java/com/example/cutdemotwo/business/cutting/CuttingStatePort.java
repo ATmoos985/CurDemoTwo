@@ -44,6 +44,15 @@ interface CuttingStatePort {
         });
     }
 
+    /**
+     * 需求模板独立读写端口：与库存台账、账本及全局 revision 解耦，避免模板编辑与车间库存写入互斥。
+     */
+    List<DemandTemplate> listTemplatesIndependent();
+
+    DemandTemplate saveTemplateIndependent(DemandTemplate template);
+
+    boolean deleteTemplateIndependent(String id);
+
     interface ReadView {
         long operationTime();
 

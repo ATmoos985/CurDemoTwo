@@ -61,6 +61,43 @@ public class JdbcInventoryStore implements InventoryStore {
         }
     }
 
+    /** 需求模板与库存账本正交，独立直写 demand_template 表，不竞争 cutdemo_revision 行锁。 */
+    @Override public boolean supportsIndependentTemplates() { return true; }
+
+    @Override public List<DemandTemplate> loadTemplates() {
+        return readOnlyTransaction.execute(status -> rows("demand_template", DemandTemplate.class));
+    }
+
+    @Override public void upsertTemplate(DemandTemplate template) {
+        Objects.requireNonNull(template, "需求模板不能为空");
+        String serialized = json.writeValueAsString(template);
+        transaction.executeWithoutResult(status -> {
+            int updated = jdbc.update(
+                    "UPDATE demand_template SET dimension = ?, material_model = ?, data_json = ? WHERE id = ?",
+                    template.dimension(), template.materialModel(), serialized, template.id());
+            if (updated == 0) {
+                Long nextOrder = jdbc.queryForObject(
+                        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM demand_template", Long.class);
+                try {
+                    jdbc.update(
+                            "INSERT INTO demand_template (sort_order, dimension, material_model, data_json, id) VALUES (?, ?, ?, ?, ?)",
+                            nextOrder == null ? 0L : nextOrder, template.dimension(), template.materialModel(), serialized, template.id());
+                } catch (org.springframework.dao.DuplicateKeyException dup) {
+                    jdbc.update(
+                            "UPDATE demand_template SET dimension = ?, material_model = ?, data_json = ? WHERE id = ?",
+                            template.dimension(), template.materialModel(), serialized, template.id());
+                }
+            }
+        });
+    }
+
+    @Override public boolean deleteTemplate(String id) {
+        if (id == null || id.isBlank()) return false;
+        Integer deleted = transaction.execute(status ->
+                jdbc.update("DELETE FROM demand_template WHERE id = ?", id.trim()));
+        return deleted != null && deleted > 0;
+    }
+
     @Override public InventorySnapshot load() {
         return readOnlyTransaction.execute(status -> {
             Map<String, Object> meta = jdbc.queryForMap("SELECT revision, remnant_seq, defect_seq FROM cutdemo_revision WHERE id = 1");
@@ -151,9 +188,12 @@ public class JdbcInventoryStore implements InventoryStore {
             sync("execution_order", List.of("idempotency_key","plan_id","task_id","material_type","material_id","state","version","expires_at"),
                     values(snapshot.executions()),ExecutionOrder::id,
                     e->Arrays.asList(e.idempotencyKey(),e.planId(),e.taskId(),e.materialType(),e.materialId(),e.state(),e.version(),e.expiresAt()));
-            sync("demand_template", List.of("dimension","material_model"),
-                    values(snapshot.templates()),DemandTemplate::id,
-                    t->Arrays.asList(t.dimension(),t.materialModel()));
+            // 仅在冷库/全量导入（revision == 0）时携带模板落库；常规库存提交不覆盖独立管理的 demand_template 表
+            if (snapshot.revision() == 0 && snapshot.templates() != null && !snapshot.templates().isEmpty()) {
+                sync("demand_template", List.of("dimension","material_model"),
+                        values(snapshot.templates()),DemandTemplate::id,
+                        t->Arrays.asList(t.dimension(),t.materialModel()));
+            }
             sync("scheduling_scheme", List.of("task_id","roll_id","state","dimension"),
                     values(snapshot.schemes()),SchedulingScheme::id,
                     s->Arrays.asList(s.taskId(),s.rollId(),s.state(),s.dimension()));

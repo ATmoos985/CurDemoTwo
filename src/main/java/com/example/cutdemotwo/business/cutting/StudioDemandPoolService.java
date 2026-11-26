@@ -26,11 +26,9 @@ final class StudioDemandPoolService {
     // ==================== 1. 需求模板库 ====================
 
     List<DemandTemplate> listTemplates() {
-        return statePort.inRead(tx -> {
-            List<DemandTemplate> list = new ArrayList<>(tx.listTemplates());
-            list.sort(Comparator.comparing((DemandTemplate t) -> Objects.toString(t.updatedAt(), "")).reversed());
-            return list;
-        });
+        List<DemandTemplate> list = new ArrayList<>(statePort.listTemplatesIndependent());
+        list.sort(Comparator.comparing((DemandTemplate t) -> Objects.toString(t.updatedAt(), "")).reversed());
+        return list;
     }
 
     DemandTemplate saveTemplate(DemandTemplate input) {
@@ -79,19 +77,14 @@ final class StudioDemandPoolService {
                 input.pieces(),
                 now
         );
-        return statePort.inWrite("SYSTEM_UPDATE", id, "UNAUTHENTICATED_LOCAL", tx -> {
-            tx.putTemplate(normalized);
-            return normalized;
-        });
+        return statePort.saveTemplateIndependent(normalized);
     }
 
     Map<String, Object> deleteTemplate(String id) {
         if (id == null || id.isBlank()) throw new IllegalArgumentException("请指定模板编号");
         String trimmed = id.trim();
-        return statePort.inWrite("SYSTEM_UPDATE", id, "UNAUTHENTICATED_LOCAL", tx -> {
-            boolean deleted = tx.removeTemplate(trimmed);
-            return Map.of("deleted", deleted, "id", trimmed);
-        });
+        boolean deleted = statePort.deleteTemplateIndependent(trimmed);
+        return Map.of("deleted", deleted, "id", trimmed);
     }
 
     // ==================== 2. 多维待排需求池 ====================

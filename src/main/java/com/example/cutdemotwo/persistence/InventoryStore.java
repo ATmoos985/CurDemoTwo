@@ -1,5 +1,8 @@
 package com.example.cutdemotwo.persistence;
 
+import com.example.cutdemotwo.business.model.DemandTemplate;
+import java.util.List;
+
 public interface InventoryStore {
     InventorySnapshot load();
     long save(InventorySnapshot snapshot);
@@ -15,4 +18,19 @@ public interface InventoryStore {
      * 轻量无锁健康检查：返回 null 表示存储可用，非空返回具体故障原因。
      */
     default String healthCheckError() { return null; }
+
+    /**
+     * 是否支持需求模板独立持久化（不占用库存全局 revision 锁与账本事务）。
+     */
+    default boolean supportsIndependentTemplates() { return false; }
+
+    default List<DemandTemplate> loadTemplates() { return List.of(); }
+
+    default void upsertTemplate(DemandTemplate template) {
+        throw new UnsupportedOperationException("当前存储实现不支持独立写入需求模板");
+    }
+
+    default boolean deleteTemplate(String id) {
+        throw new UnsupportedOperationException("当前存储实现不支持独立删除需求模板");
+    }
 }
