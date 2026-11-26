@@ -169,7 +169,10 @@ class Phase4bHybridPipelineTests {
 
         assertZeroToleranceValid(problem, first);
         assertZeroToleranceValid(problem, second);
+        assertEquals(10, first.getPlacements().size());
         assertEquals(first.getPlacements().size(), second.getPlacements().size());
+        // The unchanged GA/LNS seed spans 780.80 mm. Replaying that seed alone would also be deterministic.
+        assertTrue(stripLength(first.getPlacements()) < 780.0, "精修应将这 10 件裁片的版长缩短到 780 mm 以内");
         assertEquals(stripLength(first.getPlacements()), stripLength(second.getPlacements()), 1e-6,
                 "同输入重复求解的版长必须完全确定");
         for (int i = 0; i < first.getPlacements().size(); i++) {

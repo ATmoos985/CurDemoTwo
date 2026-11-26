@@ -461,6 +461,8 @@ final class MarkerCompactor {
                 if (expired(deadline)) return best;
                 double x = xBuf[idx];
                 double limit = bottom(best) - orientation.shape.height();
+                // Y cannot go below zero. Later contacts are also worse in the X tie-break.
+                if (limit <= EPS && (preferLeft ? x >= best.x - EPS : x <= best.x + EPS)) break;
                 double y = firstFreeY(orientation, x, obstacles, obstacleBvh, limit, deadline);
                 if (y > limit + EPS) continue;
                 if (y < limit - EPS || (preferLeft ? x < best.x - EPS : x > best.x + EPS))

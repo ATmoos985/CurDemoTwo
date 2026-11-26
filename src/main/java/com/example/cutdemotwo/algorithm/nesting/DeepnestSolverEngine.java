@@ -848,18 +848,20 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                     }
                 }
             } else {
-                long stage3CapDeadline = Math.min(stage3Deadline, System.nanoTime() + stage3Reserve);
-                long remainingStage3 = stage3CapDeadline - System.nanoTime();
-                long polishDeadline = System.nanoTime() + Math.min(120_000_000L, Math.max(25_000_000L, remainingStage3 / 4));
+                // The reserve is a minimum. Reuse time left by GA/LNS to finish the contact search.
+                long now = System.nanoTime();
+                long polishDeadline = now + Math.min(stage3Reserve / 4, (stage3Deadline - now) / 4);
                 List<PlacedInstance> polished = polishPlacements(ctx, bestEval.placed(), polishDeadline);
-                finalPlacements = toPlacements(polished);
+                if (System.nanoTime() < polishDeadline) {
+                    finalPlacements = toPlacements(polished);
+                }
 
                 if (!ctx.preferBottom
                         && (ctx.pipeline.isNoop() || ctx.pureSelvedgeForCompact)
                         && !ctx.hasAnyHoles
                         && finalPlacements.size() <= MarkerCompactor.MAX_COMPACT_PIECES
-                        && System.nanoTime() < stage3CapDeadline) {
-                    finalPlacements = runLinkedCompaction(problem, finalPlacements, stage3CapDeadline);
+                        && System.nanoTime() < stage3Deadline) {
+                    finalPlacements = runLinkedCompaction(problem, finalPlacements, stage3Deadline, stage3Reserve);
                 }
             }
         }
@@ -920,7 +922,7 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
      */
     private static List<Placement> runLinkedCompaction(NestingProblem problem,
                                                        List<Placement> incumbent,
-                                                       long deadlineNanos) {
+                                                       long deadlineNanos, long stage3Reserve) {
         ComputationCancellation.check();
         List<Placement> current = incumbent;
         double currentExtentY = placementsExtentY(current);
@@ -929,9 +931,11 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
             long now = System.nanoTime();
             long remaining = deadlineNanos - now;
             if (remaining > 5_000_000L) {
-                long gapDeadline = now + (long) (remaining * 0.60);
+                long gapDeadline = deadlineNanos - Math.min(remaining, stage3Reserve) * 2 / 5;
                 List<Placement> gapCompacted = MarkerCompactor.compact(problem, current, gapDeadline);
-                if (gapCompacted != current && gapCompacted.size() == current.size()) {
+                // A deadline can interrupt a single piece's contact scan. Keep the preceding
+                // layout unless this refinement finished, even when its partial result is shorter.
+                if (System.nanoTime() < gapDeadline && gapCompacted != current && gapCompacted.size() == current.size()) {
                     double newExtentY = placementsExtentY(gapCompacted);
                     if (newExtentY < currentExtentY - 1e-6) {
                         current = gapCompacted;
@@ -939,19 +943,11 @@ public class DeepnestSolverEngine implements ICutSolverEngine, StripSearchCapabl
                     }
                 }
             }
-            ComputationCancellation.check();
-            if (System.nanoTime() < deadlineNanos) {
-                List<Placement> axisCompacted = AxisMarkerCompactor.compact(problem, current, deadlineNanos);
-                if (axisCompacted != current && axisCompacted.size() == current.size()) {
-                    double newExtentY = placementsExtentY(axisCompacted);
-                    if (newExtentY < currentExtentY - 1e-6) {
-                        current = axisCompacted;
-                    }
-                }
-            }
-        } else if (AxisMarkerCompactor.supports(problem) && System.nanoTime() < deadlineNanos) {
+        }
+        ComputationCancellation.check();
+        if (System.nanoTime() < deadlineNanos && AxisMarkerCompactor.supports(problem)) {
             List<Placement> axisCompacted = AxisMarkerCompactor.compact(problem, current, deadlineNanos);
-            if (axisCompacted != current && axisCompacted.size() == current.size()) {
+            if (System.nanoTime() < deadlineNanos && axisCompacted != current && axisCompacted.size() == current.size()) {
                 double newExtentY = placementsExtentY(axisCompacted);
                 if (newExtentY < currentExtentY - 1e-6) {
                     current = axisCompacted;
