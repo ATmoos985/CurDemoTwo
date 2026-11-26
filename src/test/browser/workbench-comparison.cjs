@@ -1,4 +1,4 @@
-// 在独立、启用免登录、禁用本机模型的 Spring 测试实例上运行。
+// 在独立免登录实例上运行，启用 local-ai 时设置 COMPARISON_TEST_SOURCE=LOCAL_MODEL。
 // BASE_URL=http://127.0.0.1:18095 node --test src/test/browser/workbench-comparison.cjs
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
@@ -11,6 +11,8 @@ assert.ok(base.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(base.
   && !base.search && !base.hash, '仅可连接独立的非 8080 本地回环服务');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const pieceName = '前幅大裁片';
+const expectedSource = process.env.COMPARISON_TEST_SOURCE || 'RULES';
+assert.ok(['LOCAL_MODEL', 'RULES'].includes(expectedSource), '请选择要实际验证的答复来源');
 let browser;
 
 before(async () => {
@@ -47,7 +49,8 @@ async function enableStrategies(page) {
 
 async function responseFor(page, method, path, action) {
   const [response] = await Promise.all([
-    page.waitForResponse(r => r.request().method() === method && new URL(r.url()).pathname === path),
+    page.waitForResponse(r => r.request().method() === method && new URL(r.url()).pathname === path,
+      { timeout: expectedSource === 'LOCAL_MODEL' && path.endsWith('/comparison-questions') ? 90000 : 15000 }),
     action()
   ]);
   assert.equal(response.status(), 200, method + ' ' + path + ' ' + (response.ok() ? '' : await response.text()));
@@ -144,21 +147,27 @@ for (const scenario of [
       await metric.click();
       assert.match(await metric.locator('..').innerText(), /分子.*mm².*分母.*mm²/);
       await dialog.getByText('追问这两个方案', { exact: true }).click();
-      await dialog.getByRole('textbox', { name: '关于齐套、缺件或省布的问题' }).fill('两套各缺哪种裁片，可以比较省布吗？');
-      const qa = await responseFor(page, 'POST', prefix + '/comparison-questions',
-        () => dialog.getByRole('button', { name: '提问', exact: true }).click());
-      assert.deepEqual([qa.request().postDataJSON().leftId, qa.request().postDataJSON().rightId], [report.left.resultId, report.right.resultId]);
-      const answer = await qa.json();
-      assert.equal(answer.source, 'RULES');
-      assert.ok(answer.lines.some(l => missing ? l.includes(pieceName) && l.includes('缺 ' + missing + ' 片') : l.includes('已齐套')));
-      assert.ok(answer.lines.some(l => missing ? l.includes('无法判定哪套更省布') : l.includes('预计占用长度相同')));
       const answerArea = dialog.locator('.wb-comparison-questions [role="status"]');
-      await answerArea.getByText('归档事实答复', { exact: true }).waitFor();
-      for (const line of answer.lines) assert.ok((await answerArea.innerText()).includes(line));
+      async function ask(question) {
+        await dialog.getByRole('textbox', { name: '关于齐套、缺件或省布的问题' }).fill(question);
+        const qa = await responseFor(page, 'POST', prefix + '/comparison-questions',
+          () => dialog.getByRole('button', { name: '提问', exact: true }).click());
+        assert.deepEqual([qa.request().postDataJSON().leftId, qa.request().postDataJSON().rightId], [report.left.resultId, report.right.resultId]);
+        const answer = await qa.json();
+        assert.equal(answer.source, expectedSource);
+        const label = expectedSource === 'RULES' ? '归档事实答复' : '本机模型识别问题 · 归档事实';
+        await answerArea.getByText(label, { exact: true }).waitFor();
+        for (const line of answer.lines) assert.ok((await answerArea.innerText()).includes(line));
+        return answer;
+      }
+      const stock = await ask('两套各缺哪种裁片？');
+      assert.ok(stock.lines.some(l => missing ? l.includes(pieceName) && l.includes('缺 ' + missing + ' 片') : l.includes('已齐套')));
+      const answer = await ask('哪套预计能省多少布？');
+      assert.ok(answer.lines.some(l => missing ? l.includes('无法判定哪套更省布') : l.includes('预计占用长度相同')));
       await checkDrawing(page, dialog, prefix, 'A', report.left);
       await checkDrawing(page, dialog, prefix, 'B', report.right);
       assert.ok(await answerArea.isVisible() && (await answerArea.innerText()).includes(answer.lines[0]), '从原图返回后保留答复');
-      assert.deepEqual(writes.slice(initialWrites), ['POST ' + prefix + '/comparison-questions']);
+      assert.deepEqual(writes.slice(initialWrites), Array(2).fill('POST ' + prefix + '/comparison-questions'));
       assert.deepEqual(errors, []);
       console.log(scenario.label + ' / 两案各 ' + scenario.placed + '/3 件 / ' + report.lengthComparison.status + ' / 原图 2 张 / ' + answer.source);
     } catch (error) {

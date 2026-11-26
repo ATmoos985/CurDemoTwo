@@ -23,18 +23,23 @@ import static com.example.cutdemotwo.business.optimization.ComparisonQuestions.T
 public class ComparisonQuestionModel {
     private final String model;
     private final URI endpoint;
+    private final Duration requestTimeout;
     private final JsonMapper json = JsonMapper.builder().build();
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
     private final Semaphore permits = new Semaphore(2);
 
     @Autowired
-    public ComparisonQuestionModel(@Value("${cutdemo.comparison.model:}") String model) {
-        this(model, URI.create("http://127.0.0.1:11434/api/chat"));
+    public ComparisonQuestionModel(@Value("${cutdemo.comparison.model:}") String model,
+                                  @Value("${cutdemo.comparison.timeout-seconds:8}") int timeoutSeconds) {
+        this(model, URI.create("http://127.0.0.1:11434/api/chat"), timeoutSeconds);
     }
 
-    ComparisonQuestionModel(String model, URI endpoint) {
+    ComparisonQuestionModel(String model, URI endpoint, int timeoutSeconds) {
         this.model = model;
         this.endpoint = endpoint;
+        if (timeoutSeconds < 1 || timeoutSeconds > 120)
+            throw new IllegalArgumentException("本机模型超时须介于 1 至 120 秒。");
+        this.requestTimeout = Duration.ofSeconds(timeoutSeconds);
     }
 
     Optional<Topic> classify(String question) {
@@ -49,7 +54,7 @@ public class ComparisonQuestionModel {
                     Map.of("role", "user", "content", question));
             var payload = Map.of("model", model, "messages", messages, "format", schema,
                     "stream", false, "think", false, "options", Map.of("temperature", 0, "num_predict", 48));
-            var request = HttpRequest.newBuilder(endpoint).timeout(Duration.ofSeconds(8))
+            var request = HttpRequest.newBuilder(endpoint).timeout(requestTimeout)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(payload))).build();
             var response = client.send(request, HttpResponse.BodyHandlers.ofString());

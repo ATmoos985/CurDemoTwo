@@ -24,7 +24,7 @@ class ComparisonQuestionsTests {
         var comparison = mock(WorkbenchComparison.class);
         when(comparison.left()).thenReturn(left);
         when(comparison.right()).thenReturn(right);
-        var answer = new ComparisonQuestions(new ComparisonQuestionModel("")).answer(comparison, "还缺哪些？");
+        var answer = new ComparisonQuestions(new ComparisonQuestionModel("", 8)).answer(comparison, "还缺哪些？");
         assertEquals("RULES", answer.source());
         assertEquals(List.of("方案 A 共缺 2 片，前片（#1）缺 2 片。", "方案 B 本次应排裁片已齐套。"), answer.lines());
     }
@@ -33,7 +33,7 @@ class ComparisonQuestionsTests {
         var comparison = mock(WorkbenchComparison.class);
         when(comparison.lengthComparison()).thenReturn(new WorkbenchComparison.LengthComparison(
                 "INCOMPLETE", null, null, null, "方案 A 尚有缺件。"));
-        var answer = new ComparisonQuestions(new ComparisonQuestionModel("")).answer(comparison, "能省多少布？");
+        var answer = new ComparisonQuestions(new ComparisonQuestionModel("", 8)).answer(comparison, "能省多少布？");
         assertEquals(List.of("当前无法判定哪套更省布。方案 A 尚有缺件。"), answer.lines());
     }
 
@@ -51,7 +51,7 @@ class ComparisonQuestionsTests {
         server.start();
         try {
             var endpoint = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/chat");
-            var model = new ComparisonQuestionModel("local-test", endpoint);
+            var model = new ComparisonQuestionModel("local-test", endpoint, 8);
             assertEquals(ComparisonQuestions.Topic.SHORTAGE, model.classify("齐了吗").orElseThrow());
             var request = json.readTree(received.get());
             assertEquals("齐了吗", request.path("messages").get(1).path("content").asString());
