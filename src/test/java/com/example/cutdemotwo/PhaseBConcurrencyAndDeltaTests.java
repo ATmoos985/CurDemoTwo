@@ -148,4 +148,81 @@ class PhaseBConcurrencyAndDeltaTests {
         importedInv.scrapRemnant("REM-202609-001", "导入后库存变更");
         assertEquals(1, importedStudio.listTemplates().size(), "导入后库存写操作不得抹除历史模板");
     }
+
+    @Test
+    void concurrentReadsRunInParallelAndCrossNodeRefreshDowngradesLockSafely() throws Exception {
+        JdbcDataSource ds = newH2Database();
+        JdbcInventoryStore delegateA = new JdbcInventoryStore(ds);
+        JdbcInventoryStore storeB = new JdbcInventoryStore(ds);
+
+        // 在 readLock 内部的 store.now() 处放置双线程并发屏障：若退化为排他 synchronized，必超时失败
+        java.util.concurrent.atomic.AtomicBoolean barrierArmed = new java.util.concurrent.atomic.AtomicBoolean(false);
+        CountDownLatch twoReadersInside = new CountDownLatch(2);
+        CountDownLatch releaseReaders = new CountDownLatch(1);
+        com.example.cutdemotwo.persistence.InventoryStore instrumentedStoreA = new com.example.cutdemotwo.persistence.InventoryStore() {
+            @Override public com.example.cutdemotwo.persistence.InventorySnapshot load() { return delegateA.load(); }
+            @Override public long save(com.example.cutdemotwo.persistence.InventorySnapshot snapshot) { return delegateA.save(snapshot); }
+            @Override public boolean shared() { return true; }
+            @Override public Long currentRevision() { return delegateA.currentRevision(); }
+            @Override public String healthCheckError() { return delegateA.healthCheckError(); }
+            @Override public boolean supportsIndependentTemplates() { return delegateA.supportsIndependentTemplates(); }
+            @Override public List<DemandTemplate> loadTemplates() { return delegateA.loadTemplates(); }
+            @Override public void upsertTemplate(DemandTemplate template) { delegateA.upsertTemplate(template); }
+            @Override public boolean deleteTemplate(String id) { return delegateA.deleteTemplate(id); }
+            @Override public long now() {
+                if (barrierArmed.get()) {
+                    twoReadersInside.countDown();
+                    try {
+                        twoReadersInside.await(3, java.util.concurrent.TimeUnit.SECONDS);
+                        releaseReaders.await(3, java.util.concurrent.TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                return delegateA.now();
+            }
+        };
+
+        RemnantService invA = new RemnantService(instrumentedStoreA, true);
+        invA.scrapRemnant("REM-202609-001", "初始化版本");
+        RemnantService invB = new RemnantService(storeB, false);
+
+        ExecutorService pool = Executors.newFixedThreadPool(6);
+        try {
+            // 1. 验证两个只读查询真正同时持有读锁并行执行
+            barrierArmed.set(true);
+            Future<List<MotherRollInfo>> r1 = pool.submit(invA::getMotherRolls);
+            Future<List<MotherRollInfo>> r2 = pool.submit(invA::getMotherRolls);
+            assertTrue(twoReadersInside.await(3, java.util.concurrent.TimeUnit.SECONDS),
+                    "双只读线程应通过 ReentrantReadWriteLock 并行进入读锁，不得互相串行阻塞");
+            releaseReaders.countDown();
+            List<MotherRollInfo> rolls1 = r1.get();
+            List<MotherRollInfo> rolls2 = r2.get();
+            barrierArmed.set(false);
+
+            assertFalse(rolls1.isEmpty());
+            assertEquals(rolls1.size(), rolls2.size());
+            // 验证读返回的母卷为脱壳副本，外部修改不会污染内存活对象
+            rolls1.get(0).setStorageLocation("外部恶意篡改");
+            assertNotEquals("外部恶意篡改", invA.getMotherRoll(rolls1.get(0).getRollId()).getStorageLocation());
+
+            // 2. 节点 A 推进版本后，节点 B 多线程并发触发只读刷新（写锁刷新 + 锁降级为读锁），不得死锁且均见到最新状态
+            invA.scrapRemnant("REM-202609-002", "跨节点刷新测试");
+            CountDownLatch refreshStart = new CountDownLatch(1);
+            List<Future<Object>> readers = new ArrayList<>();
+            for (int i = 0; i < 6; i++) {
+                readers.add(pool.submit(() -> {
+                    refreshStart.await();
+                    assertNull(invB.scanOrGetById("REM-202609-002"));
+                    return invB.getMotherRolls();
+                }));
+            }
+            refreshStart.countDown();
+            for (Future<Object> f : readers) {
+                assertNotNull(f.get());
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
 }

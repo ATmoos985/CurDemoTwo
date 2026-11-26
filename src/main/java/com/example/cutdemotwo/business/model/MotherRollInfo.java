@@ -195,4 +195,42 @@ public class MotherRollInfo {
     public int getDefectsCount() {
         return defects != null ? defects.size() : 0;
     }
+
+    /** 生成携带动态料头统计的独立只读视图副本，避免读锁并发路径原地修改共享母卷对象。 */
+    public MotherRollInfo copyWithRemnantStats(int count, double totalArea) {
+        MotherRollInfo copy = new MotherRollInfo();
+        copy.rollId = this.rollId;
+        copy.rollModel = this.rollModel;
+        copy.batchNo = this.batchNo;
+        copy.supplier = this.supplier;
+        copy.materialName = this.materialName;
+        copy.color = this.color;
+        copy.grammage = this.grammage;
+        copy.composition = this.composition;
+        copy.shrinkageRate = this.shrinkageRate;
+        copy.width = this.width;
+        copy.rawWidth = this.rawWidth;
+        copy.totalLength = this.totalLength;
+        copy.currentRemainingLength = this.currentRemainingLength;
+        copy.usedLength = this.usedLength;
+        copy.storageLocation = this.storageLocation;
+        copy.inspectionStatus = this.inspectionStatus;
+        copy.inspector = this.inspector;
+        copy.inspectionDate = this.inspectionDate;
+        copy.createdAt = this.createdAt;
+        copy.defects = this.defects == null ? new ArrayList<>() : new ArrayList<>(this.defects);
+        copy.voidedDefects = this.voidedDefects == null ? new ArrayList<>() : new ArrayList<>(this.voidedDefects);
+        copy.remnantCount = count;
+        copy.remnantTotalArea = totalArea;
+        copy.issuedMachineId = this.issuedMachineId;
+        copy.issuedShiftTeam = this.issuedShiftTeam;
+        copy.scrappedLengthMm = this.scrappedLengthMm;
+        copy.scrapReason = this.scrapReason;
+        copy.scrappedBy = this.scrappedBy;
+        copy.scrappedAt = this.scrappedAt;
+        copy.scrapIdempotencyKey = this.scrapIdempotencyKey;
+        copy.unitPricePerMeter = this.unitPricePerMeter;
+        copy.unitPricePerSqm = this.unitPricePerSqm;
+        return copy;
+    }
 }
