@@ -165,8 +165,9 @@ try {
     materialType: 'FREE_CANVAS',
     widthMm: 2000,
     windowLengthMm: 4000,
-    processMode: 'CROSSCUT',
-    timeLimitSeconds: 5,
+    processMode: 'GUILLOTINE',
+    objective: 'MAXIMIZE_PIECE_AREA',
+    timeLimitSeconds: 3,
     waitForResult: true,
     includePreview: true
   });
@@ -185,6 +186,7 @@ try {
     widthMm: 2000,
     windowLengthMm: 4000,
     processMode: 'GUILLOTINE',
+    objective: 'MAXIMIZE_PIECE_AREA',
     timeLimitSeconds: 5,
     waitForResult: true,
     includePreview: false
@@ -196,7 +198,8 @@ try {
     rightId: plan2.id
   });
   assert.equal(taskCmp.taskId, createdTask.id);
-  assert.ok(taskCmp.lengthComparison && typeof taskCmp.lengthComparison === 'object');
+  assert.equal(taskCmp.sameConstraints, true);
+  assert.ok(taskCmp.lengthComparison && taskCmp.lengthComparison.status === 'COMPARABLE');
   passed++;
 
   // 7. 独立 PNG 排料预览工具
@@ -220,6 +223,7 @@ try {
     ttlSeconds: 600
   });
   assert.ok(draft.draftId);
+  assert.equal(draft.status, 'PENDING_CONFIRMATION');
   assert.equal(draft.requiresHumanConfirmation, true);
   assert.equal(draft.inventoryMutated, false);
   assert.ok(draft.workbenchUrl.startsWith(config.origin + '/app/#/workbench'));

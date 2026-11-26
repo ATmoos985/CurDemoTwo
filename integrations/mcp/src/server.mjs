@@ -115,6 +115,13 @@ function isNotFoundError(error) {
   );
 }
 
+function extractResultId(job, fallbackId) {
+  const rawRef = typeof job?.resultRef === 'string' ? job.resultRef.trim() : '';
+  if (!rawRef) return String(fallbackId);
+  const seg = rawRef.includes('/') ? rawRef.split('/').filter(Boolean).at(-1) : rawRef;
+  return seg || String(fallbackId);
+}
+
 function buildWorkbenchUrl(origin, { taskId, resultId, draftId } = {}) {
   const params = new URLSearchParams();
   if (taskId) params.set('taskId', String(taskId));
@@ -1186,8 +1193,12 @@ export function createServer(config, options = {}) {
           widthMm: { type: 'number', exclusiveMinimum: 0, maximum: 100000 },
           windowStartMm: { type: 'number', minimum: 0, maximum: 10000000 },
           windowLengthMm: { type: 'number', exclusiveMinimum: 0, maximum: 10000000 },
-          processMode: { type: 'string', enum: ['CROSSCUT', 'GUILLOTINE', 'CONTOUR', 'SLITTING_1D', 'FAST', 'QUALITY'] },
-          objective: { type: 'string', maxLength: 64 },
+          processMode: { type: 'string', enum: ['CROSSCUT', 'GUILLOTINE', 'CONTOUR', 'SLITTING_1D'] },
+          objective: {
+            type: 'string',
+            maxLength: 64,
+            description: '2D: MAXIMIZE_PIECE_AREA / MINIMIZE_LENGTH / INPUT_ORDER; 1D: FAST / QUALITY'
+          },
           allowGapFill: { type: 'boolean' },
           pieceGapMm: { type: 'number', minimum: 0, maximum: 100 },
           trimStartMm: { type: 'number', minimum: 0, maximum: 10000 },
@@ -1323,7 +1334,7 @@ export function createServer(config, options = {}) {
         const extraContent = [];
 
         if (waitForResult && currentJob.state === 'SUCCEEDED') {
-          const resultId = String(currentJob.resultRef || jobId);
+          const resultId = extractResultId(currentJob, jobId);
           const loaded = await loadResultContextWithFallback(resultId);
           if (loaded.source) source = loaded.source;
           resultSummary = summarizeResultMetrics(loaded.result);
@@ -1522,7 +1533,7 @@ export function createServer(config, options = {}) {
         {
           id: { type: 'string' },
           draftId: { type: 'string' },
-          status: { type: 'string', enum: ['PENDING_HUMAN_APPROVAL', 'EXPIRED'] },
+          status: { type: 'string', enum: ['PENDING_CONFIRMATION', 'EXPIRED'] },
           approvalToken: { type: 'string' },
           contentHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
           issuedAt: { type: 'string' },

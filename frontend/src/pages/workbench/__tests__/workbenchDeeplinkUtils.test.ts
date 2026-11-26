@@ -625,4 +625,58 @@ describe('workbenchDeeplinkUtils 外部试排结果与持久化草案映射', ()
     expect(unplacedPlan.error).toBe('裁片宽超门幅');
     expect(unplacedPlan.banner.fulfillmentStatus).toBe('INFEASIBLE');
   });
+
+  it('兼容后端真实 WorkbenchJobSource 字段名（physicalWidthMm / dimension / materialRevision）', () => {
+    const backendLikeContext: WorkbenchResultContextDto = {
+      resultId: 'JOB-BACKEND-SRC',
+      job: { id: 'JOB-BACKEND-SRC', state: 'SUCCEEDED' },
+      source: {
+        taskId: 'TASK-REAL-01',
+        actor: 'LOCAL',
+        taskRevision: 2,
+        materialType: 'STOCK_ROLL',
+        materialId: 'ROLL-REAL-88',
+        materialRevision: 11,
+        physicalWidthMm: 1800,
+        windowStartMm: 120,
+        windowLengthMm: 2500,
+        rectGapPaddingMm: 5,
+        dimension: 'RECT_2D',
+        materialLabel: 'ROLL-REAL-88 (TC-2026 · 1800mm)',
+        avoidDefects: true,
+        trimStartMm: 15,
+        pieceGapMm: 5
+      },
+      input: {
+        schemaVersion: '2.0',
+        problemType: 'NESTING_2D',
+        problem: {
+          material: { id: 'ROLL-REAL-88', shape: { type: 'RECTANGLE', width: 1805, height: 2505 } },
+          parts: [
+            { id: 1, name: '门幅试件', quantity: 1, shape: { type: 'RECTANGLE', width: 805, height: 605 } }
+          ],
+          process: { mode: 'GUILLOTINE', trimStart: 15, pieceGap: 0 }
+        }
+      },
+      result: {
+        id: 'JOB-BACKEND-SRC',
+        fulfillmentStatus: 'COMPLETE',
+        layout: {
+          processingRegion: { type: 'RECTANGLE', width: 1805, height: 2505 },
+          placements: [
+            { id: 1, demandId: 1, name: '门幅试件', x: 0, y: 15, rotationDegrees: 0, shape: { type: 'RECTANGLE', width: 805, height: 605 } }
+          ]
+        }
+      }
+    };
+
+    const mapped = mapResultContextToWorkbenchPlan(backendLikeContext);
+    expect(mapped.error).toBeNull();
+    expect(mapped.rectGapPaddingMm).toBe(5);
+    expect(mapped.scheme2D?.widthMm).toBe(1800);
+    expect(mapped.scheme2D?.windowStartY).toBe(120);
+    expect(mapped.scheme2D?.occupiedLengthMm).toBe(615);
+    expect(mapped.canvasPatch2D?.canvasWidthMm).toBe(1800);
+    expect(mapped.banner.materialLabel).toContain('W1800mm');
+  });
 });

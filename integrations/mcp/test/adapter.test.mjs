@@ -309,13 +309,18 @@ test('configuration permits only literal loopback origins, explicit grants (incl
   assert.equal(httpCfg.allowDemandWrite, true);
 });
 
-test('OpenAPI 阶段四全部新增路径与 $ref 引用均完整有效', () => {
+test('OpenAPI 阶段四与阶段一工作台编排全部新增路径与 $ref 引用均完整有效', () => {
   const expectedPaths = [
     '/api/v2/optimization-jobs/{jobId}/events',
     '/api/v2/planning/multi-material',
     '/api/v2/planning/cut-plan',
     '/api/v2/analytics/cost-summary',
-    '/api/v2/analytics/procurement-suggestions'
+    '/api/v2/analytics/procurement-suggestions',
+    '/api/v2/workbench/tasks/{taskId}/plan-jobs',
+    '/api/v2/workbench/tasks/{taskId}/result-comparison',
+    '/api/v2/workbench/results/{resultId}/context',
+    '/api/v2/workbench/drafts',
+    '/api/v2/workbench/drafts/{draftId}'
   ];
   for (const p of expectedPaths) {
     assert.ok(openapi.paths[p], `OpenAPI 缺少路径 ${p}`);
@@ -824,7 +829,7 @@ test('plan_task_on_material 完成提单→轮询终态→附带 PNG 预览图�
           ...job,
           id: 'job-plan-1',
           state: pollCount >= 2 ? 'SUCCEEDED' : 'RUNNING',
-          resultRef: pollCount >= 2 ? 'job-plan-1' : null
+          resultRef: pollCount >= 2 ? '/api/v2/optimization-results/job-plan-1' : null
         };
       }
       if (path === '/api/v2/workbench/results/job-plan-1/context') {
@@ -921,7 +926,7 @@ test('create_demand_task 与升级后 save_draft_scheme 严格调用真实持久
         return {
           id: 'DRAFT-REAL-001',
           draftId: 'DRAFT-REAL-001',
-          status: 'PENDING_HUMAN_APPROVAL',
+          status: 'PENDING_CONFIRMATION',
           approvalToken: 'wbd_real_token_001',
           contentHash: hash64,
           issuedAt: '2026-11-26T15:00:00Z',

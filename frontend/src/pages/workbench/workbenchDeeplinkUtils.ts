@@ -16,9 +16,14 @@ import { rectangle } from '../../lib/canvas/nesting-scene.js';
 export interface WorkbenchJobSourceDto {
   taskId?: string | null;
   taskName?: string | null;
+  actor?: string | null;
+  dimension?: string | null;
   materialType?: string | null;
   materialId?: string | null;
   materialModel?: string | null;
+  materialLabel?: string | null;
+  materialRevision?: number | null;
+  physicalWidthMm?: number | null;
   widthMm?: number | null;
   windowStartMm?: number | null;
   windowStartY?: number | null;
@@ -299,7 +304,7 @@ export function resolveRectGapPaddingMm(context: WorkbenchResultContextDto | nul
   if (mode && mode !== 'GUILLOTINE') return 0;
 
   const solverW = positiveNum(problem?.material?.shape?.width, 0);
-  const origW = positiveNum(source?.widthMm, 0);
+  const origW = positiveNum(source?.physicalWidthMm ?? source?.widthMm, 0);
   if (solverW > 0 && origW > 0) {
     const diff = solverW - origW;
     if (Math.abs(diff - sourceGap) <= 0.25) {
@@ -583,7 +588,7 @@ export function mapResultContextToWorkbenchPlan(
   const is1D =
     problemType === 'SLITTING_1D' ||
     Boolean(rawResult?.slitting) ||
-    cleanText(source?.processMode).toUpperCase() === 'SLITTING_1D' ||
+    cleanText(source?.dimension || source?.processMode).toUpperCase() === 'SLITTING_1D' ||
     cleanText(taskSummary?.dimension || loadedFamily?.dimension).toUpperCase() === 'SLITTING_1D';
   const dimension: '2D' | '1D' = is1D ? '1D' : '2D';
 
@@ -595,7 +600,7 @@ export function mapResultContextToWorkbenchPlan(
       dimension,
       canvasMode,
       materialId,
-      widthMm: positiveNum(source?.widthMm, 0),
+      widthMm: positiveNum(source?.physicalWidthMm ?? source?.widthMm, 0),
       lengthMm: positiveNum(source?.windowLengthMm ?? source?.canvasLengthMm, 0),
       windowStartY: nonNegNum(source?.windowStartMm ?? source?.windowStartY, 0)
     });
@@ -640,7 +645,7 @@ export function mapResultContextToWorkbenchPlan(
         dimension: '1D',
         canvasMode,
         materialId,
-        widthMm: positiveNum(source?.widthMm ?? input?.problem?.motherWidthMm, 0),
+        widthMm: positiveNum(source?.physicalWidthMm ?? source?.widthMm ?? input?.problem?.motherWidthMm, 0),
         lengthMm: 0,
         windowStartY: 0
       });
@@ -677,6 +682,7 @@ export function mapResultContextToWorkbenchPlan(
       Math.round(
         positiveNum(
           problem.motherWidthMm ??
+            source?.physicalWidthMm ??
             source?.widthMm ??
             slitting.patterns[0]?.motherWidthMm ??
             slitting.patterns[0]?.rollWidthMm,
@@ -922,8 +928,11 @@ export function mapResultContextToWorkbenchPlan(
 
   const origWidthMm =
     rectGapPaddingMm > 0
-      ? positiveNum(source?.widthMm, Math.max(1, quantize01(solverMaterialW - rectGapPaddingMm)))
-      : positiveNum(source?.widthMm, quantize01(solverMaterialW));
+      ? positiveNum(
+          source?.physicalWidthMm ?? source?.widthMm,
+          Math.max(1, quantize01(solverMaterialW - rectGapPaddingMm))
+        )
+      : positiveNum(source?.physicalWidthMm ?? source?.widthMm, quantize01(solverMaterialW));
   const origHeightMm =
     rectGapPaddingMm > 0
       ? positiveNum(
