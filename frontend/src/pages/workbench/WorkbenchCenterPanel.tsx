@@ -1,5 +1,5 @@
 import React, { Dispatch, RefObject, SetStateAction, useEffect, useMemo, useState } from 'react';
-import { SavedScheme2D, SlittingOrderLine, SlittingSchemeRun } from '../../store/useStudioStore';
+import { SavedScheme2D, SlittingOrderLine, SlittingSchemeRun, StrategyJobRun } from '../../store/useStudioStore';
 import { StartCornerType } from '../../store/studioSettings';
 import {
   WorkbenchBoardCanvas,
@@ -16,9 +16,12 @@ import { SlittingStripBar } from './SlittingStripBar';
 import { DefectScheduleRow } from './workbenchTypes';
 import { WorkbenchContextMenu } from './WorkbenchContextMenu';
 import { ToolpathPlayerBar } from './ToolpathPlayerBar';
+import { CandidateComparison } from './CandidateComparison';
+import { emptyArchiveChoices } from './comparisonView';
 
 export interface WorkbenchCenterPanelProps {
   is2D: boolean;
+  taskId?: string;
   stripRef: RefObject<HTMLDivElement | null>;
   boardRef: RefObject<WorkbenchBoardHandle | null>;
 
@@ -38,6 +41,7 @@ export interface WorkbenchCenterPanelProps {
   setCursor: Dispatch<SetStateAction<{ x: number; y: number } | null>>;
   activeScheme2D: SavedScheme2D | null;
   schemes2D: SavedScheme2D[];
+  strategyRuns2D: StrategyJobRun[];
   bestUtil2D: number;
   setActiveScheme2D: (id: string) => void;
   removeScheme2D: (id: string) => void;
@@ -94,6 +98,7 @@ function fmtElapsed(ms?: number): string {
 
 export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
   is2D,
+  taskId,
   stripRef,
   boardRef,
   vertical,
@@ -111,6 +116,7 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
   setCursor,
   activeScheme2D,
   schemes2D,
+  strategyRuns2D,
   bestUtil2D,
   setActiveScheme2D,
   removeScheme2D,
@@ -211,6 +217,7 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
     : hoveredStripWidth1D;
 
   if (is2D) {
+    const emptyArchives = emptyArchiveChoices(strategyRuns2D);
     return (
       <section className="pane studio-center">
         <div className="ctool" role="toolbar" aria-label="画布视图工具">
@@ -456,9 +463,10 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
         />
 
         {/* Minimal Floating Candidate Switcher Pills (only when candidates exist) */}
-        {schemes2D.length > 0 && (
+        {(schemes2D.length > 0 || emptyArchives.length > 0) && (
           <div ref={stripRef} className="scheme-strip" role="region" aria-label="候选方案切换">
             <div className="scheme-slots">
+              {!schemes2D.length && <span>本轮未排入裁片，可查看归档结果</span>}
               {schemes2D.map((s) => {
                 const isBest = schemes2D.length > 1 && s.utilizationPct === bestUtil2D;
                 const isSelected = activeScheme2D?.id === s.id;
@@ -482,7 +490,7 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
                     <span className="scheme-slot-stat num">
                       <b>{s.utilizationPct}%</b> · {fmtN(s.occupiedLengthMm, 0)}mm
                     </span>
-                    {isBest && <span className="tag ok">最优</span>}
+                    {isBest && <span className="tag ok">预览利用率最高</span>}
                     {s.layoutDirty && !s.confirmedSchemeId && <span className="tag warn">待校验</span>}
                     {s.confirmedSchemeId && <span className="tag run">已选定</span>}
                     <button
@@ -500,9 +508,10 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
                 );
               })}
             </div>
-            <button type="button" className="wb-tiny-ghost" onClick={clearSchemes2D}>
+            <CandidateComparison schemes={[...schemes2D, ...emptyArchives]} activeId={activeScheme2D?.id} taskId={taskId} />
+            {schemes2D.length > 0 && <button type="button" className="wb-tiny-ghost" onClick={clearSchemes2D}>
               清空
-            </button>
+            </button>}
           </div>
         )}
       </section>

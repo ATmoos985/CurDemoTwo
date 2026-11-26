@@ -490,6 +490,10 @@ public class OptimizationService implements AutoCloseable {
     }
 
     public OptimizationJob submit(String key, OptimizationRequest input) {
+        return submit(key, input, null);
+    }
+
+    public OptimizationJob submit(String key, OptimizationRequest input, WorkbenchJobSource source) {
         if (key == null || !key.matches("[A-Za-z0-9._:-]{8,128}"))
             throw new Failure("INVALID_INPUT", "Idempotency-Key 必须为 8–128 个字母、数字或 . _ : -", 400, false);
         if (input == null)
@@ -501,7 +505,7 @@ public class OptimizationService implements AutoCloseable {
             // 共享模式全程零应用层大锁：DB 事务保证全局幂等与配额，几何校验在锁外完成。
             var existing = shared.findByKey(key);
             if (existing != null) {
-                if (!existing.job().inputHash().equals(inputHash))
+                if (!existing.job().inputHash().equals(inputHash) || !Objects.equals(existing.workbenchSource(), source))
                     throw new Failure("IDEMPOTENCY_CONFLICT", "同一幂等键已绑定不同请求", 409, false);
                 return existing.job();
             }
@@ -511,7 +515,7 @@ public class OptimizationService implements AutoCloseable {
             var job = new OptimizationJob(id, "2.0", input.clientRequestId(), inputHash, "QUEUED", "QUEUED",
                     Instant.now().toString(), null, null, input.problem().timeLimitSeconds(), null, null, "已持久化，等待计算");
             try {
-                var stored = shared.submitOrGet(new StoredOptimizationJob(key, input, job, null));
+                var stored = shared.submitOrGet(new StoredOptimizationJob(key, input, job, null, source));
                 publishJobEvent(stored, 1);
                 return stored.job();
             } catch (OptimizationFailure failure) {
@@ -525,7 +529,7 @@ public class OptimizationService implements AutoCloseable {
         if (existingId != null) {
             var old = documents.get(existingId);
             if (old != null) {
-                if (!old.job().inputHash().equals(inputHash))
+                if (!old.job().inputHash().equals(inputHash) || !Objects.equals(old.workbenchSource(), source))
                     throw new Failure("IDEMPOTENCY_CONFLICT", "同一幂等键已绑定不同请求", 409, false);
                 return old.job();
             }
@@ -544,7 +548,7 @@ public class OptimizationService implements AutoCloseable {
             if (doubleCheckId != null) {
                 var old = documents.get(doubleCheckId);
                 if (old != null) {
-                    if (!old.job().inputHash().equals(inputHash))
+                    if (!old.job().inputHash().equals(inputHash) || !Objects.equals(old.workbenchSource(), source))
                         throw new Failure("IDEMPOTENCY_CONFLICT", "同一幂等键已绑定不同请求", 409, false);
                     return old.job();
                 }
@@ -562,7 +566,7 @@ public class OptimizationService implements AutoCloseable {
             String id = UUID.randomUUID().toString();
             var job = new OptimizationJob(id, "2.0", input.clientRequestId(), inputHash, "QUEUED", "QUEUED",
                     Instant.now().toString(), null, null, input.problem().timeLimitSeconds(), null, null, "已持久化，等待计算");
-            accepted = new StoredOptimizationJob(key, input, job, null);
+            accepted = new StoredOptimizationJob(key, input, job, null, source);
             synchronized (lockFor(id)) {
                 persist(accepted);
             }
@@ -602,10 +606,30 @@ public class OptimizationService implements AutoCloseable {
         return document.result();
     }
 
+    /** One consistent archived input/result read, also during the interval between retention sweeps. */
+    StoredOptimizationJob workbenchArchive(String id) {
+        var document = required(id);
+        if (isEvictableTerminal(document)
+                && terminalTimestampMillis(document) <= System.currentTimeMillis() - terminalRetentionMillis) {
+            throw new Failure("NOT_FOUND", "归档结果已过期", 404, false);
+        }
+        if (document.result() == null) {
+            throw new Failure("RESULT_NOT_AVAILABLE", "作业尚无已归档的验证结果", 409, !document.job().terminal());
+        }
+        if (!"NESTING_2D".equals(document.input().problemType()) || document.result().layout() == null) {
+            throw new Failure("INVALID_INPUT", "仅支持已归档的二维排料结果", 400, false);
+        }
+        return document;
+    }
+
     public ResultComparison compare(String leftId, String rightId) {
         if (leftId == null || leftId.isBlank() || rightId == null || rightId.isBlank())
             throw new Failure("INVALID_INPUT", "请提供两份已归档结果的编号", 400, false);
         return ResultComparisons.compare(input(leftId), result(leftId), input(rightId), result(rightId));
+    }
+
+    public WorkbenchJobSource workbenchSource(String id) {
+        return required(id).workbenchSource();
     }
 
     private StoredOptimizationJob required(String id) {
@@ -970,7 +994,7 @@ public class OptimizationService implements AutoCloseable {
         var j = document.job();
         var job = new OptimizationJob(j.id(), j.schemaVersion(), j.clientRequestId(), j.inputHash(), j.state(), j.phase(), j.createdAt(),
                 j.startedAt(), j.finishedAt(), j.timeLimitSeconds(), j.resultRef(), j.code(), message);
-        return new StoredOptimizationJob(document.idempotencyKey(), document.input(), job, document.result());
+        return new StoredOptimizationJob(document.idempotencyKey(), document.input(), job, document.result(), document.workbenchSource());
     }
 
     private void progress(String id, String message) {
@@ -981,7 +1005,7 @@ public class OptimizationService implements AutoCloseable {
             var j = document.job();
             var job = new OptimizationJob(j.id(), j.schemaVersion(), j.clientRequestId(), j.inputHash(), j.state(), j.phase(),
                     j.createdAt(), j.startedAt(), j.finishedAt(), j.timeLimitSeconds(), j.resultRef(), j.code(), message);
-            updated = new StoredOptimizationJob(document.idempotencyKey(), document.input(), job, document.result());
+            updated = new StoredOptimizationJob(document.idempotencyKey(), document.input(), job, document.result(), document.workbenchSource());
             persist(updated);
         }
         if (updated != null) {

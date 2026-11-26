@@ -306,7 +306,7 @@ export class OptimizationSession {
     });
   }
 
-  async solve(request, { onProgress = () => {} } = {}) {
+  async solve(request, { onProgress = () => {}, workbench = null } = {}) {
     this.cancel();
     const token = { cancelled: false, poll: new AbortController(), id: null, closeSse: null };
     this.current = token;
@@ -316,11 +316,16 @@ export class OptimizationSession {
     };
     try {
       // 提交请求本身不中断：确保拿到已接受 job.id，从而在晚到取消时通知服务端停算
-      let job = await this.read('/api/v2/optimization-jobs', {
+      const submitUrl = workbench
+        ? `/api/v2/workbench/tasks/${encodeURIComponent(workbench.taskId)}/optimization-jobs`
+        : '/api/v2/optimization-jobs';
+      const accepted = await this.read(submitUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createUuid() },
-        body: JSON.stringify(request)
+        body: JSON.stringify(workbench ? { request, context: workbench.context } : request)
       });
+      let job = workbench ? accepted.job : accepted;
+      const comparisonTaskId = workbench ? accepted.comparisonTaskId : undefined;
       token.id = job.id;
       if (token.cancelled) await this.cancelJob(token);
       check();
@@ -364,7 +369,7 @@ export class OptimizationSession {
         signal: token.poll.signal
       });
       check();
-      return { job, result };
+      return workbench ? { job, result, comparisonTaskId } : { job, result };
     } catch (error) {
       // 轮询/连接失败时主动取消远端已接受作业，避免孤儿算力泄漏
       if (token.id && !terminal) await this.cancelJob(token);

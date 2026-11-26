@@ -96,7 +96,8 @@ public final class JdbcOptimizationJobStore implements LeasedOptimizationJobStor
             var old = jdbc.query("SELECT id FROM optimization_job WHERE key_digest=?", (rs, n) -> rs.getString(1), digest);
             if (!old.isEmpty()) {
                 var found = find(old.get(0));
-                if (!found.job().inputHash().equals(document.job().inputHash()))
+                if (!found.job().inputHash().equals(document.job().inputHash())
+                        || !java.util.Objects.equals(found.workbenchSource(), document.workbenchSource()))
                     throw new OptimizationFailure("IDEMPOTENCY_CONFLICT", "同一幂等键已绑定不同请求", 409, false);
                 return found;
             }

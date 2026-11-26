@@ -243,6 +243,37 @@
         }
       }
     },
+    "/api/v2/workbench/tasks/{taskId}/optimization-jobs": {
+      "post": {
+        "summary": "Submit a 2D calculation with immutable workbench task, material and caller provenance",
+        "parameters": [
+          {"in":"path","name":"taskId","required":true,"schema":{"type":"string"},"description":"Existing task ID or scratch:<UUID> for a private workbench draft"},
+          {"in":"header","name":"Idempotency-Key","required":true,"schema":{"type":"string","minLength":8,"maxLength":128}}
+        ],
+        "requestBody": {"required":true,"content":{"application/json":{"schema":{
+          "type":"object","required":["request","context"],"additionalProperties":false,
+          "properties":{
+            "request":{"$ref":"#/components/schemas/OptimizationRequest"},
+            "context":{"type":"object","additionalProperties":false,
+              "required":["materialType","materialId","windowStartMm","physicalWidthMm","windowLengthMm","rectGapPaddingMm","sourceLines"],
+              "properties":{
+                "materialType":{"enum":["FREE_CANVAS","STOCK_ROLL","REMNANT"]},"materialId":{"type":"string"},
+                "windowStartMm":{"type":"number","minimum":0},"physicalWidthMm":{"type":"number","exclusiveMinimum":0},
+                "windowLengthMm":{"type":"number","exclusiveMinimum":0},"rectGapPaddingMm":{"type":"number","minimum":0,"maximum":100},
+                "sourceLines":{"type":"object","description":"Solver demand ID to real task line ID; empty for private drafts","additionalProperties":{"type":"integer"}},
+                "fallbackDraftId":{"type":"string","description":"Optional private scratch:<UUID> scope for trials edited away from their original task lines"}
+              }
+            }
+          }
+        }}}},
+        "responses": {
+          "202":{"description":"Accepted calculation. Includes the actual workbench scope in comparisonTaskId. No inventory mutation.",
+            "content":{"application/json":{"schema":{"type":"object","required":["job","comparisonTaskId"],"properties":{"job":{"$ref":"#/components/schemas/OptimizationJob"},"comparisonTaskId":{"type":"string"}}}}}},
+          "403":{"description":"Role not authorized"},"404":{"description":"Task or material unavailable"},
+          "409":{"description":"Conflicting idempotency key"},"422":{"description":"Source inconsistent with submitted geometry"}
+        }
+      }
+    },
     "/api/v2/optimization-jobs": {
       "post": {
         "summary": "Persist and enqueue a pure computation; repeat key returns same job",
@@ -1255,6 +1286,325 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TransferOptions"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/workbench/tasks/{taskId}/comparison-questions": {
+      "post": {
+        "summary": "Explain a scoped pair of archived 2D results",
+        "description": "The server reads the authorized comparison again before answering. A local model may organize the explanation; rule-based answers remain available.",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "leftId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "rightId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "question": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 240
+                  }
+                },
+                "required": [
+                  "leftId",
+                  "rightId",
+                  "question"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Explanation from the authorized comparison",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "LOCAL_MODEL",
+                        "RULES"
+                      ]
+                    },
+                    "lines": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "lines"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid question or identical results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Planner role required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown, expired or inaccessible result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Result not archived",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/workbench/tasks/{taskId}/result-comparison": {
+      "get": {
+        "summary": "Compare two authorized archived 2D results",
+        "description": "Requires two different jobs bound to this operator and task. Demand fulfillment excludes spare placements. Savings compare the local physical footprint only for fulfilled demand and matching constraints, material and window. With rectangle gap padding, the workbench processingAreaUtilization numerator and denominator are restored to physical dimensions (version workbench-physical-1); the immutable archive remains in solver dimensions.",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "leftId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "rightId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Archived workbench data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchComparison"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid identifiers or unsupported result type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Planner role required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown, expired, or inaccessible result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No archived result is available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/workbench/tasks/{taskId}/results/{resultId}": {
+      "get": {
+        "summary": "Read an authorized original 2D drawing",
+        "description": "Returns the immutable archived result in solver coordinates. X-Rect-Gap-Padding-Mm gives the physical rectangle gap adjustment for rendering.",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "resultId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Archived workbench data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizationResult"
+                }
+              }
+            },
+            "headers": {
+              "X-Rect-Gap-Padding-Mm": {
+                "description": "Subtract this padding once from each archived rectangle dimension to restore its physical size.",
+                "schema": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid identifiers or unsupported result type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Planner role required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown, expired, or inaccessible result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No archived result is available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -7422,6 +7772,274 @@
                   "type": "boolean"
                 }
               }
+            }
+          }
+        }
+      },
+      "WorkbenchComparison": {
+        "type": "object",
+        "required": [
+          "taskId",
+          "left",
+          "right",
+          "sameConstraints",
+          "constraintDifferences",
+          "metricDeltas",
+          "lengthComparison"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "left": {
+            "$ref": "#/components/schemas/WorkbenchComparisonSide"
+          },
+          "right": {
+            "$ref": "#/components/schemas/WorkbenchComparisonSide"
+          },
+          "sameConstraints": {
+            "type": "boolean"
+          },
+          "constraintDifferences": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metricDeltas": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "left",
+                "right",
+                "delta",
+                "status"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "left": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Metric"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "right": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Metric"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "delta": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "COMPARABLE",
+                    "DIFFERENT_CONTEXT",
+                    "DIFFERENT_CONSTRAINTS",
+                    "INCOMPATIBLE_METRIC"
+                  ]
+                }
+              }
+            }
+          },
+          "lengthComparison": {
+            "type": "object",
+            "required": [
+              "status",
+              "shorterResultId",
+              "savedLengthMm",
+              "basis",
+              "reason"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "COMPARABLE",
+                  "DIFFERENT_CONTEXT",
+                  "DIFFERENT_CONSTRAINTS",
+                  "INCOMPLETE",
+                  "UNAVAILABLE"
+                ]
+              },
+              "shorterResultId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "savedLengthMm": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "basis": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "WorkbenchComparisonSide": {
+        "type": "object",
+        "required": [
+          "resultId",
+          "inputHash",
+          "fulfillmentStatus",
+          "requested",
+          "placed",
+          "unplaced",
+          "demands",
+          "occupiedLengthMm",
+          "lengthBasis",
+          "rectGapPaddingMm",
+          "materialWindow",
+          "metrics"
+        ],
+        "properties": {
+          "resultId": {
+            "type": "string"
+          },
+          "inputHash": {
+            "type": "string"
+          },
+          "fulfillmentStatus": {
+            "type": "string",
+            "enum": [
+              "COMPLETE",
+              "PARTIAL",
+              "NONE"
+            ]
+          },
+          "requested": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "placed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unplaced": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "demands": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "demandId",
+                "sourceLineId",
+                "name",
+                "requested",
+                "placed",
+                "unplaced"
+              ],
+              "properties": {
+                "demandId": {
+                  "type": "integer"
+                },
+                "sourceLineId": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "requested": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "placed": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "unplaced": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "occupiedLengthMm": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "lengthBasis": {
+            "type": "string"
+          },
+          "rectGapPaddingMm": {
+            "type": "number"
+          },
+          "materialWindow": {
+            "type": "object",
+            "required": [
+              "type",
+              "id",
+              "revision",
+              "widthMm",
+              "windowStartMm",
+              "windowLengthMm",
+              "taskRevision"
+            ],
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "widthMm": {
+                "type": "number"
+              },
+              "windowStartMm": {
+                "type": "number"
+              },
+              "windowLengthMm": {
+                "type": "number"
+              },
+              "taskRevision": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Metric"
             }
           }
         }

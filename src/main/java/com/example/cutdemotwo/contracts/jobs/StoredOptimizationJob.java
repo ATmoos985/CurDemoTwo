@@ -9,7 +9,12 @@ import java.util.Set;
 
 /** 内部持久化作业文档契约；幂等键绝不向公开作业响应暴露。 */
 public record StoredOptimizationJob(String idempotencyKey, OptimizationRequest input,
-                                    OptimizationJob job, OptimizationResult result) {
+                                    OptimizationJob job, OptimizationResult result,
+                                    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                                    WorkbenchJobSource workbenchSource) {
+    public StoredOptimizationJob(String key, OptimizationRequest input, OptimizationJob job, OptimizationResult result) {
+        this(key, input, job, result, null);
+    }
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     public static String inputHash(OptimizationRequest input) {
@@ -27,6 +32,6 @@ public record StoredOptimizationJob(String idempotencyKey, OptimizationRequest i
         var next = new OptimizationJob(job.id(), job.schemaVersion(), job.clientRequestId(), job.inputHash(), state, phase,
                 job.createdAt(), "RUNNING".equals(state) && job.startedAt() == null ? now : job.startedAt(),
                 terminal ? now : null, job.timeLimitSeconds(), result == null ? null : "/api/v2/optimization-results/" + job.id(), code, message);
-        return new StoredOptimizationJob(idempotencyKey, input, next, result);
+        return new StoredOptimizationJob(idempotencyKey, input, next, result, workbenchSource);
     }
 }

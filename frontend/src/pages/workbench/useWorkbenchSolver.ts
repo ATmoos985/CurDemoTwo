@@ -20,6 +20,7 @@ import {
   validateSlittingPhysicalConstraints
 } from '../../store/studioSettings';
 import { OptimizationSession } from '../../lib/domain/job-client.js';
+import { createUuid } from '../../lib/core/uuid.js';
 import {
   buildSafeNestingRequest2D,
   unpadGuillotineResult
@@ -280,6 +281,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
   const [confirmingScheme, setConfirmingScheme] = useState(false);
   const [lastConfirmSummary, setLastConfirmSummary] = useState<LastConfirmSummary | null>(null);
   const activeSessionsRef = useRef<OptimizationSession[]>([]);
+  const draftComparisonId = useRef<string | null>(null);
   const solveStartedAtRef = useRef<number>(0);
 
   useEffect(() => {
@@ -433,6 +435,13 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         : [];
 
     const batchSchemeIds = new Set<string>();
+    const singleTask = loadedTaskId && validDemands.every((d) =>
+      d.sourceTaskId === loadedTaskId && Number.isInteger(d.sourceLineId));
+    const draft = validDemands.every((d) => !d.sourceTaskId || d.sourceTaskId === loadedTaskId);
+    if (draft && !draftComparisonId.current) {
+      draftComparisonId.current = `scratch:${createUuid()}`;
+    }
+    const comparisonTaskId = singleTask ? loadedTaskId : draft ? draftComparisonId.current : null;
     const createdSchemes: SavedScheme2D[] = [];
     const failureMessages: string[] = [];
 
@@ -483,7 +492,23 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
         const req = built.request;
         const t0 = performance.now();
         try {
-          const { job, result: rawResult } = await (session as any).solve(req, {
+          const workbench = comparisonTaskId ? {
+            taskId: comparisonTaskId,
+            context: {
+              materialType: canvasMode,
+              materialId: canvasMode === 'STOCK_ROLL' ? currentRoll2D?.rollId
+                : canvasMode === 'REMNANT' ? currentRemnant2D?.id : materialModel2D || 'VIRTUAL',
+              windowStartMm: startOffset,
+              physicalWidthMm: built.origWidthMm,
+              windowLengthMm: built.origHeightMm,
+              rectGapPaddingMm: built.rectGapPadding,
+              ...(singleTask ? { fallbackDraftId: draftComparisonId.current } : {}),
+              sourceLines: singleTask ? Object.fromEntries(built.origParts.map((p: any, i: number) =>
+                [p.id, validDemands[i].sourceLineId])) : {}
+            }
+          } : null;
+          const { job, result: rawResult, comparisonTaskId: archivedTaskId } = await (session as any).solve(req, {
+            workbench,
             onProgress: (j: any) => {
               const liveState = j.state || j.status || 'RUNNING';
               const livePhase = formatSolverProgressText({
@@ -526,6 +551,8 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
           const denomAreaMm2 = width * Math.max(1, occupiedLengthMm);
           const utilizationPct = Number(((netAreaMm2 / denomAreaMm2) * 100).toFixed(2));
           const complete = result?.fulfillmentStatus === 'COMPLETE';
+          const comparisonSource = archivedTaskId && rawResult.id
+            ? { taskId: archivedTaskId, resultId: rawResult.id } : undefined;
           const fallbackHint = layout?.fallbackReason ? ' · 降级' : '';
 
           setStrategyRuns2D((prev) =>
@@ -534,6 +561,8 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
                 ? {
                     ...r,
                     jobId: job.id,
+                    comparisonSource,
+                    physicalWidthMm: built.origWidthMm,
                     state: job.state as any,
                     phaseText:
                       placements.length > 0
@@ -562,6 +591,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
             const schemeId = `CAND-${runKey}-${Date.now().toString(36).slice(-4)}`;
             const scheme: SavedScheme2D = {
               id: schemeId,
+              comparisonSource,
               title: `${label} (${width}×${Math.round(occupiedLengthMm)}mm)`,
               strategyId: def.id,
               strategyName: label,

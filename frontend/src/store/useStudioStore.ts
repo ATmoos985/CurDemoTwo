@@ -88,6 +88,8 @@ export interface DemandCluster {
 }
 
 export interface StrategyJobRun {
+  comparisonSource?: { taskId: string; resultId: string };
+  physicalWidthMm?: number;
   strategyId: string;
   strategyName: string;
   description: string;
@@ -107,6 +109,7 @@ export interface StrategyJobRun {
 
 export interface SavedScheme2D {
   id: string;
+  comparisonSource?: { taskId: string; resultId: string };
   title: string;
   strategyId?: string;
   strategyName: string;

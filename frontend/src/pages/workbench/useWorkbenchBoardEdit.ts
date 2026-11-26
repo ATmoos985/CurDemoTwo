@@ -82,6 +82,7 @@ export function applyLayoutValidationResult(
         : ['手调布局几何校验未通过，请检查裁片边界、旋转许可与碰撞情况'];
     return {
       ...scheme,
+      comparisonSource: undefined,
       layoutDirty: true,
       layoutValidationErrors: errors
     };
@@ -111,6 +112,7 @@ export function applyLayoutValidationResult(
 
   return {
     ...scheme,
+    comparisonSource: undefined,
     layoutDirty: false,
     layoutValidationErrors: [],
     result: {
@@ -283,6 +285,8 @@ export function useWorkbenchBoardEdit(opts: UseWorkbenchBoardEditOptions) {
 
     const nextScheme: SavedScheme2D = {
       id: schemeId,
+      // Edited or locally rebuilt layouts have no matching immutable solver result.
+      comparisonSource: undefined,
       title: `${snap.strategyName} (${effW}×${Math.round(occupiedLengthMm)}mm)`,
       strategyId: existingEditable ? existingEditable.strategyId : 'MANUAL_BOARD',
       strategyName: snap.strategyName,

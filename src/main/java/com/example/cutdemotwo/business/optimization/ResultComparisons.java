@@ -12,6 +12,13 @@ public final class ResultComparisons {
     private ResultComparisons() {}
     public static ResultComparison compare(OptimizationRequest leftInput,OptimizationResult left,
             OptimizationRequest rightInput,OptimizationResult right) {
+        var differences = hardConstraintDifferences(leftInput, rightInput);
+        boolean same = differences.isEmpty();
+        return new ResultComparison("1", left.id(), right.id(), same, differences, left.fulfillmentStatus(), right.fulfillmentStatus(),
+                left.meetsRequirement(), right.meetsRequirement(), compareMetrics(left.metrics(), right.metrics(), same));
+    }
+
+    static List<String> hardConstraintDifferences(OptimizationRequest leftInput, OptimizationRequest rightInput) {
         var differences=new ArrayList<String>();
         if(!Objects.equals(leftInput.problemType(),rightInput.problemType()))differences.add("problemType");
         if(!Objects.equals(leftInput.schemaVersion(),rightInput.schemaVersion()))differences.add("schemaVersion");
@@ -21,9 +28,13 @@ public final class ResultComparisons {
         var a=constraints(leftInput);var b=constraints(rightInput);
         var fields=new TreeSet<String>();a.properties().forEach(e->fields.add(e.getKey()));b.properties().forEach(e->fields.add(e.getKey()));
         for(String field:fields)if(!Objects.equals(a.get(field),b.get(field)))differences.add("problem."+field);
-        boolean same=differences.isEmpty();
-        var leftMetrics=new LinkedHashMap<String,OptimizationResult.Metric>();left.metrics().forEach(m->leftMetrics.put(m.name(),m));
-        var rightMetrics=new LinkedHashMap<String,OptimizationResult.Metric>();right.metrics().forEach(m->rightMetrics.put(m.name(),m));
+        return List.copyOf(differences);
+    }
+
+    static List<ResultComparison.MetricDelta> compareMetrics(List<OptimizationResult.Metric> left,
+            List<OptimizationResult.Metric> right, boolean same) {
+        var leftMetrics=new LinkedHashMap<String,OptimizationResult.Metric>();left.forEach(m->leftMetrics.put(m.name(),m));
+        var rightMetrics=new LinkedHashMap<String,OptimizationResult.Metric>();right.forEach(m->rightMetrics.put(m.name(),m));
         var names=new LinkedHashSet<>(leftMetrics.keySet());names.addAll(rightMetrics.keySet());
         var deltas=new ArrayList<ResultComparison.MetricDelta>();
         for(String name:names){
@@ -33,8 +44,7 @@ public final class ResultComparisons {
             deltas.add(new ResultComparison.MetricDelta(name,l,r,
                     "COMPARABLE".equals(status)?r.value()-l.value():null,status));
         }
-        return new ResultComparison("1",left.id(),right.id(),same,List.copyOf(differences),left.fulfillmentStatus(),right.fulfillmentStatus(),
-                left.meetsRequirement(),right.meetsRequirement(),List.copyOf(deltas));
+        return List.copyOf(deltas);
     }
     private static JsonNode constraints(OptimizationRequest input){
         ObjectNode problem=JSON.valueToTree(input.problem());

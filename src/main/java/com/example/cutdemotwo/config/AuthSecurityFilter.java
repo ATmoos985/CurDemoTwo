@@ -94,6 +94,8 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
         AuthContext.Principal principal;
         if (!authService.isEnabled()) {
             principal = AuthContext.LOCAL_PRINCIPAL;
+            // Establish one cookie before the workbench submits its strategies in parallel.
+            if ("GET".equals(method) && "/api/v2/auth/me".equals(path)) request.getSession();
         } else if (isWhitelisted(method, path)) {
             principal = authService.verifyAuthorizationHeader(request.getHeader("Authorization")).orElse(null);
         } else {
@@ -187,6 +189,9 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
         // 非健康类运维端点（如 /actuator/prometheus）仅允许 ADMIN
         if (path.startsWith("/actuator/")) {
             return false;
+        }
+        if (path.matches("^/api/v2/workbench/tasks/[^/]+/(optimization-jobs|comparison-questions|result-comparison|results/[^/]+)$")) {
+            return AuthContext.ROLE_PLANNER.equals(role);
         }
         // 业务只读接口：5 个已认证角色均可查阅台账、需求、方案、库存与报表
         if ("GET".equals(method) || "HEAD".equals(method)) {

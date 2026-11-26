@@ -1446,6 +1446,8 @@ export const CuttingWorkbenchPage: React.FC<{
 
         <WorkbenchCenterPanel
           is2D={is2D}
+          taskId={activeTaskId || undefined}
+          strategyRuns2D={strategyRuns2D}
           stripRef={stripRef}
           boardRef={boardRef}
           vertical={settings.vertical}
