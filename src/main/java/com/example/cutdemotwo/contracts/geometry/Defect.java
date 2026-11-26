@@ -96,4 +96,32 @@ public class Defect {
 
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
+
+    /** 轻量字段级副本，供写事务回滚与视图隔离复用，避免整库 JSON 深拷贝。 */
+    public Defect copy() {
+        Defect c = new Defect(getId(), x, y, w, h, margin,
+                defectType, typeName, severity, points, detectionSource, avoidanceStrategy, description);
+        c.captureId = this.captureId;
+        return c;
+    }
+
+    /** 零 JSON 字段内容比对，供增量变更集检测疵点变动。 */
+    public boolean equalsContent(Defect o) {
+        if (this == o) return true;
+        if (o == null) return false;
+        return getId() == o.getId()
+                && java.util.Objects.equals(captureId, o.captureId)
+                && Double.compare(x, o.x) == 0
+                && Double.compare(y, o.y) == 0
+                && Double.compare(w, o.w) == 0
+                && Double.compare(h, o.h) == 0
+                && Double.compare(margin, o.margin) == 0
+                && java.util.Objects.equals(defectType, o.defectType)
+                && java.util.Objects.equals(typeName, o.typeName)
+                && severity == o.severity
+                && points == o.points
+                && java.util.Objects.equals(detectionSource, o.detectionSource)
+                && java.util.Objects.equals(avoidanceStrategy, o.avoidanceStrategy)
+                && java.util.Objects.equals(description, o.description);
+    }
 }

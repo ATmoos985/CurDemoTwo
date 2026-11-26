@@ -239,6 +239,137 @@ public class JdbcInventoryStore implements InventoryStore {
     }
     private static <T> Collection<T> values(Map<String, T> map) { return map == null ? List.of() : map.values(); }
 
+    /**
+     * 定点增量落库：
+     * 在同一数据库事务内完成全局 revision CAS、脏聚合行定点 UPSERT/DELETE 以及只增表尾行 INSERT，
+     * 对未修改的主表和追加表零 SQL、零全表扫描、零历史反序列化。
+     */
+    @Override public long saveDelta(InventoryDelta delta, java.util.function.Supplier<InventorySnapshot> fullSnapshotSupplier) {
+        if (delta == null || delta.expectedRevision() == 0) {
+            return save(fullSnapshotSupplier.get());
+        }
+        return Objects.requireNonNull(transaction.execute(status -> {
+            int changed = jdbc.update(
+                    "UPDATE cutdemo_revision SET revision = revision + 1, remnant_seq = ?, defect_seq = ? WHERE id = 1 AND revision = ?",
+                    delta.remnantSeq(), delta.defectSeq(), delta.expectedRevision());
+            if (changed != 1) throw new InventoryConflictException();
+
+            applyTableDelta("mother_roll", List.of("material_model", "remaining_mm", "used_mm"),
+                    delta.upsertedRolls(), delta.deletedRollIds(),
+                    r -> Arrays.asList(r.getRollModel(), r.getCurrentRemainingLength(), r.getUsedLength()));
+            applyTableDelta("remnant_stock", List.of("source_roll_id", "parent_remnant_id", "status", "width_mm", "length_mm"),
+                    delta.upsertedRemnants(), delta.deletedRemnantIds(),
+                    r -> Arrays.asList(r.getSourceRollId(), r.getParentRemnantId(), r.getStatus(), r.getWidth(), r.getLength()));
+            applyTableDelta("cutting_task", List.of("revision", "material_model"),
+                    delta.upsertedTasks(), delta.deletedTaskIds(),
+                    t -> Arrays.asList(t.revision(), t.materialModel()));
+            applyTableDelta("cutting_plan", List.of("task_id", "status"),
+                    delta.upsertedPlans(), delta.deletedPlanIds(),
+                    p -> Arrays.asList(p.request().getTaskId(), p.status()));
+            applyTableDelta("cut_report", List.of("task_id", "roll_id", "source_remnant_id", "status"),
+                    delta.upsertedReceipts(), delta.deletedReceiptIds(),
+                    r -> Arrays.asList(r.get("taskId"), r.get("rollId"), r.get("sourceRemnantId"), r.getOrDefault("status", "CONFIRMED")));
+            applyTableDelta("execution_order", List.of("idempotency_key","plan_id","task_id","material_type","material_id","state","version","expires_at"),
+                    delta.upsertedExecutions(), delta.deletedExecutionIds(),
+                    e -> Arrays.asList(e.idempotencyKey(), e.planId(), e.taskId(), e.materialType(), e.materialId(), e.state(), e.version(), e.expiresAt()));
+            applyTableDelta("scheduling_scheme", List.of("task_id","roll_id","state","dimension"),
+                    delta.upsertedSchemes(), delta.deletedSchemeIds(),
+                    s -> Arrays.asList(s.taskId(), s.rollId(), s.state(), s.dimension()));
+
+            for (var document : delta.appendedTransfers()) {
+                jdbc.update("INSERT INTO inventory_transfer (id,idempotency_key,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?)",
+                        document.id(), document.idempotencyKey(), document.postedAt(), document.inventoryRevision(), json.writeValueAsString(document));
+            }
+            for (var document : delta.appendedCounts()) {
+                jdbc.update("INSERT INTO inventory_count (id,idempotency_key,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?)",
+                        document.id(), document.idempotencyKey(), document.postedAt(), document.inventoryRevision(), json.writeValueAsString(document));
+            }
+            for (var document : delta.appendedQualityReleases()) {
+                jdbc.update("INSERT INTO quality_release_document (id,idempotency_key,remnant_id,decision,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?)",
+                        document.id(), document.idempotencyKey(), document.remnantId(), document.decision(), document.postedAt(), document.inventoryRevision(), json.writeValueAsString(document));
+            }
+            for (var document : delta.appendedInventoryReceipts()) {
+                jdbc.update("INSERT INTO inventory_receipt_document (id,idempotency_key,supplier_name,delivery_note_no,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?)",
+                        document.id(), document.idempotencyKey(), document.supplierName(), document.deliveryNoteNo(), document.postedAt(), document.inventoryRevision(), json.writeValueAsString(document));
+            }
+            for (var document : delta.appendedMaterialIssues()) {
+                jdbc.update("INSERT INTO material_issue_document (id,idempotency_key,direction,roll_id,machine_id,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?,?)",
+                        document.id(), document.idempotencyKey(), document.direction(), document.rollId(), document.machineId(), document.postedAt(), document.inventoryRevision(), json.writeValueAsString(document));
+            }
+
+            if (!delta.appendedLedger().isEmpty()) {
+                Long maxSeq = jdbc.queryForObject("SELECT COALESCE(MAX(entry_sequence), 0) FROM inventory_ledger", Long.class);
+                long expectedSeq = maxSeq == null ? 0L : maxSeq;
+                if (expectedSeq != delta.priorLedgerSize()) {
+                    throw new IllegalStateException("库存账本尾序号不一致，拒绝增量记账");
+                }
+                for (var entry : delta.appendedLedger()) {
+                    if (entry.sequence() != ++expectedSeq) {
+                        throw new IllegalStateException("库存账本新增条目序号不连续");
+                    }
+                    jdbc.update("INSERT INTO inventory_ledger (id,entry_sequence,transaction_id,event_type,aggregate_type,aggregate_id,occurred_at,data_json) VALUES (?,?,?,?,?,?,?,?)",
+                            entry.id(), entry.sequence(), entry.transactionId(), entry.eventType(), entry.aggregateType(), entry.aggregateId(),
+                            entry.occurredAt(), json.writeValueAsString(entry));
+                }
+            }
+
+            if (!delta.appendedOutbox().isEmpty()) {
+                Long maxSeq = jdbc.queryForObject("SELECT COALESCE(MAX(event_sequence), 0) FROM inventory_outbox", Long.class);
+                long expectedSeq = maxSeq == null ? 0L : maxSeq;
+                if (expectedSeq != delta.priorOutboxSize()) {
+                    throw new IllegalStateException("集成事件尾序号不一致，拒绝增量写入");
+                }
+                for (var event : delta.appendedOutbox()) {
+                    if (event.sequence() != ++expectedSeq || event.changes().isEmpty()
+                            || event.changes().stream().anyMatch(e -> !event.id().equals(e.transactionId())
+                                || "MIGRATION_OPENING".equals(e.eventType()))) {
+                        throw new IllegalStateException("集成事件身份、序号或事务范围无效");
+                    }
+                    jdbc.update("INSERT INTO inventory_outbox (id,event_sequence,inventory_revision,data_json) VALUES (?,?,?,?)",
+                            event.id(), event.sequence(), event.inventoryRevision(), json.writeValueAsString(event));
+                }
+            }
+            return delta.expectedRevision() + 1;
+        }));
+    }
+
+    private <T> void applyTableDelta(
+            String table,
+            List<String> columns,
+            List<InventoryDelta.IndexedItem<T>> upserts,
+            List<String> deletedIds,
+            Function<T, List<Object>> fields
+    ) {
+        if ((upserts == null || upserts.isEmpty()) && (deletedIds == null || deletedIds.isEmpty())) {
+            return;
+        }
+        if (deletedIds != null) {
+            for (String removed : deletedIds) {
+                jdbc.update("DELETE FROM " + table + " WHERE id = ?", removed);
+            }
+        }
+        if (upserts == null || upserts.isEmpty()) {
+            return;
+        }
+        List<String> allColumns = new ArrayList<>(List.of("sort_order"));
+        allColumns.addAll(columns);
+        allColumns.add("data_json");
+        String update = "UPDATE " + table + " SET " + String.join(", ", allColumns.stream().map(c -> c + " = ?").toList()) + " WHERE id = ?";
+        String insert = "INSERT INTO " + table + " (" + String.join(", ", allColumns) + ", id) VALUES (" + String.join(", ", Collections.nCopies(allColumns.size() + 1, "?")) + ")";
+        for (InventoryDelta.IndexedItem<T> item : upserts) {
+            String serialized = json.writeValueAsString(item.value());
+            List<Object> args = new ArrayList<>();
+            args.add(item.sortOrder());
+            args.addAll(fields.apply(item.value()));
+            args.add(serialized);
+            args.add(item.id());
+            int updated = jdbc.update(update, args.toArray());
+            if (updated == 0) {
+                jdbc.update(insert, args.toArray());
+            }
+        }
+    }
+
     // Table/column names come only from the constants above; all business values are bound parameters.
     private <T> void sync(String table, List<String> columns, Collection<T> items, Function<T, String> key, Function<T, List<Object>> fields) {
         Map<String, String> existing = new HashMap<>();

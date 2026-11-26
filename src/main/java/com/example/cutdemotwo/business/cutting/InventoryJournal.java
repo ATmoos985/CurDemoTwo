@@ -84,6 +84,282 @@ public final class InventoryJournal {
         return result;
     }
 
+    /**
+     * 已校验通过的账本平衡索引：
+     * 绑定当前已提交的 revision 与 ledger 长度；冷启动或跨节点刷新后强制重算并重放验证以拦截外部篡改，
+     * 同一节点连续写入时仅对脏聚合计算增量差值，将单次记账复杂度由 O(N + L) 降至 O(k)。
+     */
+    static final class BalanceIndex {
+        private final Map<String, Balance> balances;
+        private long revision;
+        private int ledgerSize;
+
+        private BalanceIndex(Map<String, Balance> balances, long revision, int ledgerSize) {
+            this.balances = balances;
+            this.revision = revision;
+            this.ledgerSize = ledgerSize;
+        }
+
+        boolean matches(long currentRevision, int currentLedgerSize) {
+            return this.revision == currentRevision && this.ledgerSize == currentLedgerSize;
+        }
+    }
+
+    /** 增量记账结果：包含更新后的不可变账本列表与待提交成功后才生效的增量平衡补丁。 */
+    record AppendOutcome(
+            List<InventoryLedgerEntry> ledger,
+            BalanceIndex baseIndex,
+            Map<String, Balance> balancePatches,
+            long nextRevision
+    ) {
+        void commitIndex() {
+            if (baseIndex == null) return;
+            for (var entry : balancePatches.entrySet()) {
+                if (entry.getValue() == null) baseIndex.balances.remove(entry.getKey());
+                else baseIndex.balances.put(entry.getKey(), entry.getValue());
+            }
+            baseIndex.revision = nextRevision;
+            baseIndex.ledgerSize = ledger.size();
+        }
+    }
+
+    /** 本次写事务中可能影响账本的脏聚合键集合（不含 plans/executions/schemes/templates）。 */
+    record DirtyLedgerKeys(
+            Set<String> rollIds,
+            Set<String> remnantIds,
+            Set<String> receiptIds,
+            Set<String> taskIds,
+            Set<String> transferIds,
+            Set<String> countIds,
+            Set<String> qualityReleaseIds,
+            Set<String> inventoryReceiptIds,
+            Set<String> materialIssueIds,
+            Set<String> affectedReceiptTaskIds
+    ) {
+        boolean isEmpty() {
+            return rollIds.isEmpty() && remnantIds.isEmpty() && receiptIds.isEmpty() && taskIds.isEmpty()
+                    && transferIds.isEmpty() && countIds.isEmpty() && qualityReleaseIds.isEmpty()
+                    && inventoryReceiptIds.isEmpty() && materialIssueIds.isEmpty() && affectedReceiptTaskIds.isEmpty();
+        }
+    }
+
+    private static Balance balanceForRoll(MotherRollInfo roll) {
+        ObjectNode value = JSON.valueToTree(roll);
+        // Derived UI counters are not material facts and may be refreshed by read endpoints.
+        value.remove("remnantCount");
+        value.remove("remnantTotalArea");
+        return new Balance("ROLL", roll.getRollId(), canonical(value));
+    }
+
+    private static Map<String, Balance> balancesForTask(CuttingTask task, Map<String, Map<String, Object>> receipts) {
+        var result = new TreeMap<String, Balance>();
+        if (task == null) return result;
+        var completed = new HashMap<String, Integer>();
+        if (receipts != null) {
+            for (var receipt : receipts.values()) {
+                if ("REVERSED".equals(receipt.get("status"))) continue;
+                boolean multiTask = receipt.get("taskDemandQuantities") instanceof Map<?, ?>;
+                if (multiTask) {
+                    Map<?, ?> multi = (Map<?, ?>) receipt.get("taskDemandQuantities");
+                    if (!(multi.get(task.id()) instanceof Map<?, ?> quantities)) continue;
+                    quantities.forEach((id, n) -> completed.merge(id.toString(), ((Number) n).intValue(), Integer::sum));
+                    Map<?, ?> pieceSources = receipt.get("pieceSources") instanceof Map<?, ?> ps ? ps : null;
+                    if (pieceSources != null && receipt.get("qualityDispositions") instanceof List<?> events) {
+                        for (var raw : events) {
+                            var event = JSON.convertValue(raw, QualityDisposition.class);
+                            if (event.hasRevocation() || !"QUALIFIED".equals(event.originalOutcome())) continue;
+                            Object srcObj = pieceSources.get(String.valueOf(event.command().pieceId()));
+                            if (srcObj == null) srcObj = pieceSources.get(event.command().pieceId());
+                            if (srcObj instanceof Map<?, ?> srcMap && Objects.equals(task.id(), srcMap.get("taskId"))
+                                    && srcMap.get("lineId") instanceof Number ln) {
+                                completed.merge(String.valueOf(ln.intValue()), -1, Integer::sum);
+                            }
+                        }
+                    }
+                } else {
+                    if (!task.id().equals(receipt.get("taskId"))) continue;
+                    if (receipt.get("demandQuantities") instanceof Map<?, ?> quantities)
+                        quantities.forEach((id, n) -> completed.merge(id.toString(), ((Number) n).intValue(), Integer::sum));
+                    if (receipt.get("qualityDispositions") instanceof List<?> events) {
+                        for (var raw : events) {
+                            var event = JSON.convertValue(raw, QualityDisposition.class);
+                            if (event.hasRevocation()) continue;
+                            if ("QUALIFIED".equals(event.originalOutcome()))
+                                completed.merge(String.valueOf(event.demandId()), -1, Integer::sum);
+                        }
+                    }
+                }
+            }
+        }
+        for (var line : task.demands()) {
+            put(result, "DEMAND", task.id() + "/" + line.id(),
+                    Map.of("taskId", task.id(), "materialModel", task.materialModel(), "line", line,
+                            "completed", completed.getOrDefault(String.valueOf(line.id()), 0)));
+        }
+        return result;
+    }
+
+    static Set<String> receiptTaskIds(Map<String, Object> receipt) {
+        if (receipt == null) return Set.of();
+        var ids = new LinkedHashSet<String>();
+        if (receipt.get("taskId") instanceof String s && !s.isBlank()) ids.add(s);
+        if (receipt.get("taskDemandQuantities") instanceof Map<?, ?> multi) {
+            for (Object k : multi.keySet()) {
+                if (k != null && !k.toString().isBlank()) ids.add(k.toString());
+            }
+        }
+        return ids;
+    }
+
+    /**
+     * 增量账本追加：
+     * - 当已有已校验 BalanceIndex 且账本已初始化时，仅重算本次脏聚合键的 Balance，O(k) 生成账本条目；
+     * - 当首次冷启动、跨节点刷新后或尚未初始化 MIGRATION_OPENING 时，自动回退一次全量校验并建好 BalanceIndex。
+     */
+    static AppendOutcome appendIncremental(
+            BalanceIndex cachedIndex,
+            long beforeRevision,
+            List<InventoryLedgerEntry> beforeLedger,
+            java.util.function.Supplier<InventorySnapshot> beforeSnapshotSupplier,
+            Map<String, MotherRollInfo> afterRolls,
+            Map<String, RemnantStock> afterRemnants,
+            Map<String, Map<String, Object>> afterReceipts,
+            Map<String, CuttingTask> afterTasks,
+            Map<String, InventoryTransfer> afterTransfers,
+            Map<String, InventoryCount> afterCounts,
+            Map<String, QualityReleaseDocument> afterQualityReleases,
+            Map<String, InventoryReceiptDocument> afterInventoryReceipts,
+            Map<String, MaterialIssueDocument> afterMaterialIssues,
+            DirtyLedgerKeys dirty,
+            String action,
+            String businessId,
+            String actor,
+            long now
+    ) {
+        // 1. 尚无有效基线或未建迁移期初：执行一次完整基线建立与防篡改重放校验
+        BalanceIndex index = cachedIndex;
+        List<InventoryLedgerEntry> entries = new ArrayList<>(beforeLedger);
+        if (entries.isEmpty()) {
+            var old = balances(beforeSnapshotSupplier.get());
+            String opening = UUID.randomUUID().toString();
+            add(entries, opening, "MIGRATION_OPENING", "CHECKPOINT", "opening", null, List.of(), "SYSTEM_MIGRATION",
+                    now, beforeRevision, beforeRevision, List.of(), null, "{\"schemaVersion\":1}");
+            for (var balance : old.values()) {
+                add(entries, opening, "MIGRATION_OPENING", balance.type(), balance.id(),
+                        null, List.of(), "SYSTEM_MIGRATION", now, beforeRevision, beforeRevision, List.of(), null, balance.value());
+            }
+            index = new BalanceIndex(new TreeMap<>(old), beforeRevision, entries.size());
+        } else if (index == null || !index.matches(beforeRevision, beforeLedger.size())) {
+            var old = balances(beforeSnapshotSupplier.get());
+            var issues = replayIssues(entries, old);
+            if (!issues.isEmpty()) throw new IllegalStateException("库存与流水不一致，拒绝继续记账：" + issues.get(0));
+            index = new BalanceIndex(new TreeMap<>(old), beforeRevision, entries.size());
+        }
+
+        // 2. 纯排程/执行态变更（未触碰 9 类账本聚合）：跳过所有 canonical 计算与账本写入
+        if (dirty.isEmpty()) {
+            return new AppendOutcome(List.copyOf(entries), index, Map.of(), beforeRevision + 1);
+        }
+
+        // 3. 仅针对本次脏聚合计算变更后的候选 Balance
+        var candidateKeys = new TreeSet<String>();
+        var currentSubset = new HashMap<String, Balance>();
+
+        for (String id : dirty.rollIds()) {
+            String key = "ROLL/" + id;
+            candidateKeys.add(key);
+            MotherRollInfo roll = afterRolls.get(id);
+            if (roll != null) currentSubset.put(key, balanceForRoll(roll));
+        }
+        for (String id : dirty.remnantIds()) {
+            String key = "REMNANT/" + id;
+            candidateKeys.add(key);
+            RemnantStock rem = afterRemnants.get(id);
+            if (rem != null) currentSubset.put(key, new Balance("REMNANT", id, canonical(rem)));
+        }
+        for (String id : dirty.receiptIds()) {
+            String key = "REPORT/" + id;
+            candidateKeys.add(key);
+            Map<String, Object> rec = afterReceipts.get(id);
+            if (rec != null) currentSubset.put(key, new Balance("REPORT", id, canonical(rec)));
+        }
+        var dirtyTaskIds = new LinkedHashSet<>(dirty.taskIds());
+        dirtyTaskIds.addAll(dirty.affectedReceiptTaskIds());
+        for (String taskId : dirtyTaskIds) {
+            String prefix = "DEMAND/" + taskId + "/";
+            for (String existingKey : index.balances.keySet()) {
+                if (existingKey.startsWith(prefix)) candidateKeys.add(existingKey);
+            }
+            CuttingTask task = afterTasks.get(taskId);
+            if (task != null) {
+                var taskBalances = balancesForTask(task, afterReceipts);
+                candidateKeys.addAll(taskBalances.keySet());
+                currentSubset.putAll(taskBalances);
+            }
+        }
+        for (String id : dirty.transferIds()) {
+            String key = "TRANSFER/" + id;
+            candidateKeys.add(key);
+            var doc = afterTransfers.get(id);
+            if (doc != null) currentSubset.put(key, new Balance("TRANSFER", id, canonical(doc)));
+        }
+        for (String id : dirty.countIds()) {
+            String key = "COUNT/" + id;
+            candidateKeys.add(key);
+            var doc = afterCounts.get(id);
+            if (doc != null) currentSubset.put(key, new Balance("COUNT", id, canonical(doc)));
+        }
+        for (String id : dirty.qualityReleaseIds()) {
+            String key = "QUALITY_RELEASE/" + id;
+            candidateKeys.add(key);
+            var doc = afterQualityReleases.get(id);
+            if (doc != null) currentSubset.put(key, new Balance("QUALITY_RELEASE", id, canonical(doc)));
+        }
+        for (String id : dirty.inventoryReceiptIds()) {
+            String key = "INVENTORY_RECEIPT/" + id;
+            candidateKeys.add(key);
+            var doc = afterInventoryReceipts.get(id);
+            if (doc != null) currentSubset.put(key, new Balance("INVENTORY_RECEIPT", id, canonical(doc)));
+        }
+        for (String id : dirty.materialIssueIds()) {
+            String key = "MATERIAL_ISSUE/" + id;
+            candidateKeys.add(key);
+            var doc = afterMaterialIssues.get(id);
+            if (doc != null) currentSubset.put(key, new Balance("MATERIAL_ISSUE", id, canonical(doc)));
+        }
+
+        final BalanceIndex effectiveIndex = index;
+        var changedReports = candidateKeys.stream()
+                .filter(k -> k.startsWith("REPORT/") && !Objects.equals(effectiveIndex.balances.get(k), currentSubset.get(k)))
+                .map(k -> k.substring("REPORT/".length()))
+                .toList();
+        var patches = new LinkedHashMap<String, Balance>();
+        String transaction = UUID.randomUUID().toString();
+        for (String key : candidateKeys) {
+            var a = index.balances.get(key);
+            var b = currentSubset.get(key);
+            if (Objects.equals(a, b)) continue;
+            patches.put(key, b);
+            var identity = b == null ? a : b;
+            var sources = changedReports.stream().filter(id -> touches(identity, afterReceipts.get(id))).toList();
+            List<String> reverses = "REPORT_REVERSE".equals(action) ? entries.stream()
+                    .filter(e -> e.aggregateType().equals(identity.type()) && e.aggregateId().equals(identity.id())
+                            && (e.sourceReportIds().contains(businessId) || "MIGRATION_OPENING".equals(e.eventType())))
+                    .map(InventoryLedgerEntry::id).toList()
+                    : "QUALITY_DISPOSITION_REVOKE".equals(action) ? entries.stream()
+                    .filter(e -> e.aggregateType().equals(identity.type()) && e.aggregateId().equals(identity.id())
+                            && "QUALITY_DISPOSITION".equals(e.eventType())
+                            && (e.sourceReportIds().contains(businessId) || Objects.equals(e.businessId(), businessId)))
+                    .map(InventoryLedgerEntry::id).toList()
+                    : List.of();
+            String event = "ROLL_RECEIPT_OR_UPDATE".equals(action)
+                    ? (a == null ? "ROLL_RECEIPT" : "ROLL_ARCHIVE_UPDATE") : action;
+            add(entries, transaction, event, identity.type(), identity.id(), businessId, sources, actor, now,
+                    beforeRevision, beforeRevision + 1, reverses, a == null ? null : a.value(), b == null ? null : b.value());
+        }
+        return new AppendOutcome(List.copyOf(entries), index, patches, beforeRevision + 1);
+    }
+
     /** Only called inside the existing inventory mutation. Opening records never invent past transactions. */
     public static List<InventoryLedgerEntry> append(InventorySnapshot before, InventorySnapshot after,
             String action, String businessId, String actor, long now) {

@@ -117,4 +117,75 @@ public class RemnantStock {
 
     public String getConsumedByOrder() { return consumedByOrder; }
     public void setConsumedByOrder(String consumedByOrder) { this.consumedByOrder = consumedByOrder; }
+
+    /** 轻量无 JSON 深拷贝（含 defects 逐项复制），供写事务写前快照与精确回滚使用。 */
+    public RemnantStock deepCopy() {
+        RemnantStock copy = new RemnantStock();
+        copy.id = this.id;
+        copy.width = this.width;
+        copy.length = this.length;
+        copy.location = this.location;
+        copy.materialBatch = this.materialBatch;
+        copy.status = this.status;
+        copy.parentRemnantId = this.parentRemnantId;
+        copy.sourceRollId = this.sourceRollId;
+        copy.generation = this.generation;
+        copy.qualityGrade = this.qualityGrade;
+        copy.hasDefect = this.hasDefect;
+        copy.defectDesc = this.defectDesc;
+        if (this.defects != null) {
+            List<Defect> copied = new ArrayList<>(this.defects.size());
+            for (Defect d : this.defects) {
+                copied.add(d == null ? null : d.copy());
+            }
+            copy.defects = copied;
+        }
+        copy.createdAt = this.createdAt;
+        copy.consumedAt = this.consumedAt;
+        copy.consumedByOrder = this.consumedByOrder;
+        copy.sourceReportId = this.sourceReportId;
+        copy.sourcePieceId = this.sourcePieceId;
+        copy.qualityDispositionId = this.qualityDispositionId;
+        copy.batchNo = this.batchNo;
+        copy.color = this.color;
+        return copy;
+    }
+
+    /** 零 JSON 全字段比对（供 Delta 变更追踪检测料头是否被修改）。 */
+    public boolean equalsContent(RemnantStock o) {
+        if (this == o) return true;
+        if (o == null) return false;
+        if (!java.util.Objects.equals(id, o.id)
+                || Double.compare(width, o.width) != 0
+                || Double.compare(length, o.length) != 0
+                || !java.util.Objects.equals(location, o.location)
+                || !java.util.Objects.equals(materialBatch, o.materialBatch)
+                || !java.util.Objects.equals(status, o.status)
+                || !java.util.Objects.equals(parentRemnantId, o.parentRemnantId)
+                || !java.util.Objects.equals(sourceRollId, o.sourceRollId)
+                || generation != o.generation
+                || !java.util.Objects.equals(qualityGrade, o.qualityGrade)
+                || hasDefect != o.hasDefect
+                || !java.util.Objects.equals(defectDesc, o.defectDesc)
+                || !java.util.Objects.equals(createdAt, o.createdAt)
+                || !java.util.Objects.equals(consumedAt, o.consumedAt)
+                || !java.util.Objects.equals(consumedByOrder, o.consumedByOrder)
+                || !java.util.Objects.equals(sourceReportId, o.sourceReportId)
+                || !java.util.Objects.equals(sourcePieceId, o.sourcePieceId)
+                || !java.util.Objects.equals(qualityDispositionId, o.qualityDispositionId)
+                || !java.util.Objects.equals(batchNo, o.batchNo)
+                || !java.util.Objects.equals(color, o.color)) {
+            return false;
+        }
+        int sz = defects == null ? 0 : defects.size();
+        int osz = o.defects == null ? 0 : o.defects.size();
+        if (sz != osz) return false;
+        for (int i = 0; i < sz; i++) {
+            Defect a = defects.get(i);
+            Defect b = o.defects.get(i);
+            if (a == b) continue;
+            if (a == null || !a.equalsContent(b)) return false;
+        }
+        return true;
+    }
 }

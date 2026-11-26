@@ -33,4 +33,12 @@ public interface InventoryStore {
     default boolean deleteTemplate(String id) {
         throw new UnsupportedOperationException("当前存储实现不支持独立删除需求模板");
     }
+
+    /**
+     * 增量提交变更集：默认回退至全量快照 save()，保证文件存储及测试桩 100% 兼容；
+     * JDBC 存储实现为定点 SQL UPSERT/DELETE + 追加表尾行 INSERT，消除全表扫描。
+     */
+    default long saveDelta(InventoryDelta delta, java.util.function.Supplier<InventorySnapshot> fullSnapshotSupplier) {
+        return save(fullSnapshotSupplier.get());
+    }
 }

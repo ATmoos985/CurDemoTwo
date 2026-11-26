@@ -61,8 +61,78 @@ public class RemnantService implements CuttingStatePort {
     private volatile long revision;
     private final java.util.concurrent.locks.ReentrantReadWriteLock rwLock = new java.util.concurrent.locks.ReentrantReadWriteLock();
     private final ThreadLocal<AccessFrame> accessFrame = new ThreadLocal<>();
+    private InventoryJournal.BalanceIndex balanceIndex;
+    private final TableSortIndex rollSort = new TableSortIndex();
+    private final TableSortIndex remnantSort = new TableSortIndex();
+    private final TableSortIndex taskSort = new TableSortIndex();
+    private final TableSortIndex planSort = new TableSortIndex();
+    private final TableSortIndex receiptSort = new TableSortIndex();
+    private final TableSortIndex executionSort = new TableSortIndex();
+    private final TableSortIndex schemeSort = new TableSortIndex();
     @Value("${cutdemo.measurement.tolerance-mm:5}")
     private double measurementToleranceMm = 5;
+
+    /** 维护各可变主表的稳定 sort_order 映射，支持 JDBC 定点 UPSERT 时保持原有行序且不重排未变动行。 */
+    private static final class TableSortIndex {
+        final Map<String, Long> orders = new LinkedHashMap<>();
+        long nextOrder = 0L;
+
+        void reset(Collection<String> ids) {
+            orders.clear();
+            nextOrder = 0L;
+            for (String id : ids) {
+                orders.put(id, nextOrder++);
+            }
+        }
+
+        long peekOrder(String id, Map<String, Long> stagedNewOrders, long[] stagedNext) {
+            Long existing = orders.get(id);
+            if (existing != null) return existing;
+            Long staged = stagedNewOrders.get(id);
+            if (staged != null) return staged;
+            long assigned = stagedNext[0]++;
+            stagedNewOrders.put(id, assigned);
+            return assigned;
+        }
+
+        void commit(Map<String, Long> stagedNewOrders, Collection<String> deletedIds, long newNext) {
+            if (deletedIds != null) {
+                for (String id : deletedIds) orders.remove(id);
+            }
+            if (stagedNewOrders != null && !stagedNewOrders.isEmpty()) {
+                orders.putAll(stagedNewOrders);
+            }
+            this.nextOrder = newNext;
+        }
+    }
+
+    /** 写事务轻量写前备份：不可变 Record 集合仅浅拷贝 Map 引用，零 JSON 序列化、零全库历史深拷贝。 */
+    private record TxBackup(
+            Map<String, MotherRollInfo> rolls,
+            Map<String, RemnantStock> remnants,
+            Map<String, Map<String, Object>> receipts,
+            Map<String, CuttingTask> tasks,
+            Map<String, CuttingPlan> plans,
+            Map<String, ExecutionOrder> executions,
+            Map<String, InventoryTransfer> transfers,
+            Map<String, InventoryCount> counts,
+            Map<String, DemandTemplate> templates,
+            Map<String, SchedulingScheme> schemes,
+            Map<String, QualityReleaseDocument> qualityReleases,
+            Map<String, InventoryReceiptDocument> inventoryReceipts,
+            Map<String, MaterialIssueDocument> materialIssues,
+            List<InventoryLedgerEntry> ledger,
+            List<InventoryEvent> outbox,
+            long revision,
+            int remnantSeq,
+            int defectSeq
+    ) {
+        InventorySnapshot toSnapshot() {
+            return new InventorySnapshot(new ArrayList<>(rolls.values()), new ArrayList<>(remnants.values()),
+                    receipts, remnantSeq, defectSeq, tasks, plans, revision, executions, ledger, transfers,
+                    outbox, counts, templates, schemes, qualityReleases, inventoryReceipts, materialIssues);
+        }
+    }
 
     private static final class AccessFrame {
         int depth;
@@ -196,6 +266,111 @@ public class RemnantService implements CuttingStatePort {
         materialIssues.clear(); if (snapshot.materialIssues() != null) materialIssues.putAll(snapshot.materialIssues());
         revision = snapshot.revision();
         remnantSeq.set(snapshot.remnantSeq()); defectSeq.set(snapshot.defectSeq());
+        balanceIndex = null;
+        rollSort.reset(snapshot.rolls().stream().map(MotherRollInfo::getRollId).toList());
+        remnantSort.reset(snapshot.remnants().stream().map(RemnantStock::getId).toList());
+        taskSort.reset(tasks.keySet());
+        planSort.reset(plans.keySet());
+        receiptSort.reset(receipts.keySet());
+        executionSort.reset(executions.keySet());
+        schemeSort.reset(schemes.keySet());
+    }
+
+    private TxBackup captureBackup() {
+        Map<String, MotherRollInfo> rollsCopy = new LinkedHashMap<>(motherRolls.size() * 2);
+        for (var e : motherRolls.entrySet()) {
+            rollsCopy.put(e.getKey(), e.getValue().deepCopy());
+        }
+        Map<String, RemnantStock> remnantsCopy = new LinkedHashMap<>(remnantPool.size() * 2);
+        for (var e : remnantPool.entrySet()) {
+            remnantsCopy.put(e.getKey(), e.getValue().deepCopy());
+        }
+        return new TxBackup(
+                rollsCopy,
+                remnantsCopy,
+                new LinkedHashMap<>(receipts),
+                new LinkedHashMap<>(tasks),
+                new LinkedHashMap<>(plans),
+                new LinkedHashMap<>(executions),
+                new LinkedHashMap<>(transfers),
+                new LinkedHashMap<>(counts),
+                new LinkedHashMap<>(templates),
+                new LinkedHashMap<>(schemes),
+                new LinkedHashMap<>(qualityReleases),
+                new LinkedHashMap<>(inventoryReceipts),
+                new LinkedHashMap<>(materialIssues),
+                ledger,
+                outbox,
+                revision,
+                remnantSeq.get(),
+                defectSeq.get()
+        );
+    }
+
+    private void restoreBackup(TxBackup backup) {
+        motherRolls.clear(); motherRolls.putAll(backup.rolls());
+        remnantPool.clear(); remnantPool.putAll(backup.remnants());
+        receipts.clear(); receipts.putAll(backup.receipts());
+        tasks.clear(); tasks.putAll(backup.tasks());
+        plans.clear(); plans.putAll(backup.plans());
+        executions.clear(); executions.putAll(backup.executions());
+        transfers.clear(); transfers.putAll(backup.transfers());
+        counts.clear(); counts.putAll(backup.counts());
+        templates.clear(); templates.putAll(backup.templates());
+        schemes.clear(); schemes.putAll(backup.schemes());
+        qualityReleases.clear(); qualityReleases.putAll(backup.qualityReleases());
+        inventoryReceipts.clear(); inventoryReceipts.putAll(backup.inventoryReceipts());
+        materialIssues.clear(); materialIssues.putAll(backup.materialIssues());
+        ledger = backup.ledger();
+        outbox = backup.outbox();
+        revision = backup.revision();
+        remnantSeq.set(backup.remnantSeq());
+        defectSeq.set(backup.defectSeq());
+    }
+
+    private static <T> List<InventoryDelta.IndexedItem<T>> diffUpserts(
+            Map<String, T> before,
+            Map<String, T> after,
+            java.util.function.BiPredicate<T, T> unchanged,
+            TableSortIndex sortIndex,
+            Map<String, Long> stagedNewOrders,
+            long[] stagedNext,
+            Set<String> dirtyIdCollector
+    ) {
+        List<InventoryDelta.IndexedItem<T>> upserts = new ArrayList<>();
+        for (var e : after.entrySet()) {
+            String id = e.getKey();
+            T current = e.getValue();
+            T prev = before.get(id);
+            if (prev == null || !unchanged.test(prev, current)) {
+                long order = sortIndex.peekOrder(id, stagedNewOrders, stagedNext);
+                upserts.add(new InventoryDelta.IndexedItem<>(id, order, current));
+                if (dirtyIdCollector != null) dirtyIdCollector.add(id);
+            }
+        }
+        return upserts;
+    }
+
+    private static <T> List<String> diffDeletes(Map<String, T> before, Map<String, T> after, Set<String> dirtyIdCollector) {
+        List<String> deleted = new ArrayList<>();
+        for (String id : before.keySet()) {
+            if (!after.containsKey(id)) {
+                deleted.add(id);
+                if (dirtyIdCollector != null) dirtyIdCollector.add(id);
+            }
+        }
+        return deleted;
+    }
+
+    private static <T> List<T> diffAppends(Map<String, T> before, Map<String, T> after, Set<String> dirtyIdCollector) {
+        List<T> appended = new ArrayList<>();
+        for (var e : after.entrySet()) {
+            if (!before.containsKey(e.getKey())) {
+                appended.add(e.getValue());
+                if (dirtyIdCollector != null) dirtyIdCollector.add(e.getKey());
+            }
+        }
+        return appended;
     }
 
     /** One business command either persists every change or restores its entire before-image. */
@@ -232,19 +407,108 @@ public class RemnantService implements CuttingStatePort {
             T previous = replay.get();
             if (previous != null) return previous;
             long opTime = currentOperationTime();
-            byte[] before = json.writeValueAsBytes(snapshot());
-            InventorySnapshot beforeSnapshot = json.readValue(before, InventorySnapshot.class);
-            int beforeLedgerSize = beforeSnapshot.ledger().size();
+            TxBackup backup = captureBackup();
+            int beforeLedgerSize = backup.ledger().size();
+            int beforeOutboxSize = backup.outbox().size();
             try {
                 T result = command.get();
-                ledger = InventoryJournal.append(beforeSnapshot, snapshot(),
-                        eventType, businessId, actor, opTime);
-                outbox = InventoryEvent.append(outbox, beforeLedgerSize,
-                        ledger, eventType, businessId, opTime, revision + 1);
-                save();
+
+                // 1. 零全库深拷贝 Diff：精准识别本次事务变动的聚合 ID 与追加行
+                var dirtyRolls = new LinkedHashSet<String>();
+                var dirtyRemnants = new LinkedHashSet<String>();
+                var dirtyReceipts = new LinkedHashSet<String>();
+                var dirtyTasks = new LinkedHashSet<String>();
+                var dirtyTransfers = new LinkedHashSet<String>();
+                var dirtyCounts = new LinkedHashSet<String>();
+                var dirtyReleases = new LinkedHashSet<String>();
+                var dirtyInvReceipts = new LinkedHashSet<String>();
+                var dirtyIssues = new LinkedHashSet<String>();
+
+                Map<String, Long> newRollOrders = new LinkedHashMap<>(); long[] nextRollOrder = {rollSort.nextOrder};
+                Map<String, Long> newRemOrders = new LinkedHashMap<>(); long[] nextRemOrder = {remnantSort.nextOrder};
+                Map<String, Long> newTaskOrders = new LinkedHashMap<>(); long[] nextTaskOrder = {taskSort.nextOrder};
+                Map<String, Long> newPlanOrders = new LinkedHashMap<>(); long[] nextPlanOrder = {planSort.nextOrder};
+                Map<String, Long> newRecOrders = new LinkedHashMap<>(); long[] nextRecOrder = {receiptSort.nextOrder};
+                Map<String, Long> newExecOrders = new LinkedHashMap<>(); long[] nextExecOrder = {executionSort.nextOrder};
+                Map<String, Long> newSchemeOrders = new LinkedHashMap<>(); long[] nextSchemeOrder = {schemeSort.nextOrder};
+
+                var upsertedRolls = diffUpserts(backup.rolls(), motherRolls, MotherRollInfo::equalsContent, rollSort, newRollOrders, nextRollOrder, dirtyRolls);
+                var deletedRolls = diffDeletes(backup.rolls(), motherRolls, dirtyRolls);
+                var upsertedRemnants = diffUpserts(backup.remnants(), remnantPool, RemnantStock::equalsContent, remnantSort, newRemOrders, nextRemOrder, dirtyRemnants);
+                var deletedRemnants = diffDeletes(backup.remnants(), remnantPool, dirtyRemnants);
+                var upsertedTasks = diffUpserts(backup.tasks(), tasks, (a, b) -> a == b, taskSort, newTaskOrders, nextTaskOrder, dirtyTasks);
+                var deletedTasks = diffDeletes(backup.tasks(), tasks, dirtyTasks);
+                var upsertedPlans = diffUpserts(backup.plans(), plans, (a, b) -> a == b, planSort, newPlanOrders, nextPlanOrder, null);
+                var deletedPlans = diffDeletes(backup.plans(), plans, null);
+                var upsertedReceipts = diffUpserts(backup.receipts(), receipts, (a, b) -> a == b, receiptSort, newRecOrders, nextRecOrder, dirtyReceipts);
+                var deletedReceipts = diffDeletes(backup.receipts(), receipts, dirtyReceipts);
+                var upsertedExecutions = diffUpserts(backup.executions(), executions, (a, b) -> a == b, executionSort, newExecOrders, nextExecOrder, null);
+                var deletedExecutions = diffDeletes(backup.executions(), executions, null);
+                var upsertedSchemes = diffUpserts(backup.schemes(), schemes, (a, b) -> a == b, schemeSort, newSchemeOrders, nextSchemeOrder, null);
+                var deletedSchemes = diffDeletes(backup.schemes(), schemes, null);
+
+                var appendedTransfers = diffAppends(backup.transfers(), transfers, dirtyTransfers);
+                var appendedCounts = diffAppends(backup.counts(), counts, dirtyCounts);
+                var appendedReleases = diffAppends(backup.qualityReleases(), qualityReleases, dirtyReleases);
+                var appendedInvReceipts = diffAppends(backup.inventoryReceipts(), inventoryReceipts, dirtyInvReceipts);
+                var appendedIssues = diffAppends(backup.materialIssues(), materialIssues, dirtyIssues);
+
+                var affectedReceiptTaskIds = new LinkedHashSet<String>();
+                for (String rid : dirtyReceipts) {
+                    affectedReceiptTaskIds.addAll(InventoryJournal.receiptTaskIds(backup.receipts().get(rid)));
+                    affectedReceiptTaskIds.addAll(InventoryJournal.receiptTaskIds(receipts.get(rid)));
+                }
+
+                // 2. 增量账本核算与 Outbox 追加（仅重算脏聚合；冷启动/刷新后首次自动全量重放防篡改）
+                var dirtyLedgerKeys = new InventoryJournal.DirtyLedgerKeys(
+                        dirtyRolls, dirtyRemnants, dirtyReceipts, dirtyTasks,
+                        dirtyTransfers, dirtyCounts, dirtyReleases, dirtyInvReceipts, dirtyIssues,
+                        affectedReceiptTaskIds
+                );
+                InventoryJournal.AppendOutcome journalOutcome = InventoryJournal.appendIncremental(
+                        balanceIndex, backup.revision(), backup.ledger(), backup::toSnapshot,
+                        motherRolls, remnantPool, receipts, tasks,
+                        transfers, counts, qualityReleases, inventoryReceipts, materialIssues,
+                        dirtyLedgerKeys, eventType, businessId, actor, opTime
+                );
+                ledger = journalOutcome.ledger();
+                outbox = InventoryEvent.append(backup.outbox(), beforeLedgerSize,
+                        ledger, eventType, businessId, opTime, backup.revision() + 1);
+
+                List<InventoryLedgerEntry> appendedLedger = ledger.size() > beforeLedgerSize
+                        ? List.copyOf(ledger.subList(beforeLedgerSize, ledger.size())) : List.of();
+                List<InventoryEvent> appendedOutbox = outbox.size() > beforeOutboxSize
+                        ? List.copyOf(outbox.subList(beforeOutboxSize, outbox.size())) : List.of();
+
+                // 3. 定点增量提交（JDBC 零全表扫；File/测试桩自动回退全量快照）
+                InventoryDelta delta = new InventoryDelta(
+                        backup.revision(), remnantSeq.get(), defectSeq.get(),
+                        upsertedRolls, deletedRolls,
+                        upsertedRemnants, deletedRemnants,
+                        upsertedTasks, deletedTasks,
+                        upsertedPlans, deletedPlans,
+                        upsertedReceipts, deletedReceipts,
+                        upsertedExecutions, deletedExecutions,
+                        upsertedSchemes, deletedSchemes,
+                        appendedTransfers, appendedCounts, appendedReleases, appendedInvReceipts, appendedIssues,
+                        beforeLedgerSize, appendedLedger,
+                        beforeOutboxSize, appendedOutbox
+                );
+                revision = store.saveDelta(delta, this::snapshot);
+
+                // 4. 仅在持久化提交成功后才生效平衡缓存与稳定行序索引
+                journalOutcome.commitIndex();
+                balanceIndex = journalOutcome.baseIndex();
+                rollSort.commit(newRollOrders, deletedRolls, nextRollOrder[0]);
+                remnantSort.commit(newRemOrders, deletedRemnants, nextRemOrder[0]);
+                taskSort.commit(newTaskOrders, deletedTasks, nextTaskOrder[0]);
+                planSort.commit(newPlanOrders, deletedPlans, nextPlanOrder[0]);
+                receiptSort.commit(newRecOrders, deletedReceipts, nextRecOrder[0]);
+                executionSort.commit(newExecOrders, deletedExecutions, nextExecOrder[0]);
+                schemeSort.commit(newSchemeOrders, deletedSchemes, nextSchemeOrder[0]);
                 return result;
             } catch (RuntimeException error) {
-                restore(beforeSnapshot);
+                restoreBackup(backup);
                 throw error;
             }
         } finally {
@@ -1026,7 +1290,10 @@ public class RemnantService implements CuttingStatePort {
             }
             var event = new QualityDisposition(eventId, planId, command, piece.demandId(), piece.outcome(), area,
                     recovered, Math.max(0, area - recovered), remnantId, now);
-            events.add(event); receipt.put("qualityDispositions", events);
+            events.add(event);
+            Map<String, Object> updatedReceipt = new LinkedHashMap<>(receipt);
+            updatedReceipt.put("qualityDispositions", events);
+            receipts.put(planId, updatedReceipt);
             return event;
         });
     }
@@ -1056,13 +1323,13 @@ public class RemnantService implements CuttingStatePort {
         };
         if (!preview) return mutate("CUT_REPORT_BATCH",null,"UNAUTHENTICATED_LOCAL",command);
         return withWriteLock(() -> {
-            byte[] before = json.writeValueAsBytes(snapshot());
+            TxBackup backup = captureBackup();
             try { return command.get(); }
-            finally { restore(json.readValue(before, InventorySnapshot.class)); }
+            finally { restoreBackup(backup); }
         });
     }
 
-    public synchronized Map<String, Object> reverseReport(String planId, String reason) {
+    public Map<String, Object> reverseReport(String planId, String reason) {
         if (reason == null || reason.isBlank() || reason.length() > 500)
             throw new IllegalArgumentException("请填写 1 至 500 字的撤回原因");
         return mutate("REPORT_REVERSE",planId,"UNAUTHENTICATED_LOCAL",() -> {
@@ -1110,9 +1377,11 @@ public class RemnantService implements CuttingStatePort {
             }
             children.forEach(child -> child.setStatus("REVERSED"));
             String reversedAt = LocalDateTime.now().toString();
-            receipt.put("status", "REVERSED");
-            receipt.put("reversedAt", reversedAt);
-            receipt.put("reversalReason", reason.trim());
+            Map<String, Object> updatedReceipt = new LinkedHashMap<>(receipt);
+            updatedReceipt.put("status", "REVERSED");
+            updatedReceipt.put("reversedAt", reversedAt);
+            updatedReceipt.put("reversalReason", reason.trim());
+            receipts.put(planId, updatedReceipt);
             finishExecution(planId,"REVERSED");
             CuttingPlan plan = plans.get(planId);
             if (plan != null) plans.put(planId, plan.withStatus("REVERSED"));
@@ -1122,7 +1391,7 @@ public class RemnantService implements CuttingStatePort {
                     && !SchedulingScheme.STATE_REVERSED.equals(sc.state())
                     ? sc.withReversed(reversedAt, reason.trim())
                     : sc);
-            return receipt;
+            return updatedReceipt;
         });
     }
 
@@ -2511,13 +2780,15 @@ public class RemnantService implements CuttingStatePort {
                     key, operator, reason, LocalDateTime.now().toString()
             ));
             events.set(targetIdx, revoked);
-            receipt.put("qualityDispositions", events);
+            Map<String, Object> updatedReceipt = new LinkedHashMap<>(receipt);
+            updatedReceipt.put("qualityDispositions", events);
+            receipts.put(cleanReportId, updatedReceipt);
             if (derived != null) {
                 derived.setStatus("REVOKED");
                 derived.setDefectDesc((blankToNull(derived.getDefectDesc()) != null ? derived.getDefectDesc() + " | " : "")
                         + "复检撤销作废(" + operator + "): " + reason);
             }
-            return buildRevokeDispositionPayload(receipt);
+            return buildRevokeDispositionPayload(updatedReceipt);
         });
 
         result.put("revision", revision);

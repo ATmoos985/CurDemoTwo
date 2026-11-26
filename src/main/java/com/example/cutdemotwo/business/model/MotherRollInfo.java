@@ -233,4 +233,66 @@ public class MotherRollInfo {
         copy.unitPricePerSqm = this.unitPricePerSqm;
         return copy;
     }
+
+    /** 轻量无 JSON 深拷贝（含 defects 逐项复制），供写事务写前快照与精确回滚使用。 */
+    public MotherRollInfo deepCopy() {
+        MotherRollInfo copy = copyWithRemnantStats(this.remnantCount, this.remnantTotalArea);
+        if (this.defects != null) {
+            List<Defect> copiedDefects = new ArrayList<>(this.defects.size());
+            for (Defect d : this.defects) {
+                copiedDefects.add(d == null ? null : d.copy());
+            }
+            copy.defects = copiedDefects;
+        }
+        return copy;
+    }
+
+    /** 零 JSON 全字段比对（供 Delta 变更追踪检测母卷是否被修改）。 */
+    public boolean equalsContent(MotherRollInfo o) {
+        if (this == o) return true;
+        if (o == null) return false;
+        if (!java.util.Objects.equals(rollId, o.rollId)
+                || !java.util.Objects.equals(rollModel, o.rollModel)
+                || !java.util.Objects.equals(batchNo, o.batchNo)
+                || !java.util.Objects.equals(supplier, o.supplier)
+                || !java.util.Objects.equals(materialName, o.materialName)
+                || !java.util.Objects.equals(color, o.color)
+                || Double.compare(grammage, o.grammage) != 0
+                || !java.util.Objects.equals(composition, o.composition)
+                || Double.compare(shrinkageRate, o.shrinkageRate) != 0
+                || Double.compare(width, o.width) != 0
+                || Double.compare(rawWidth, o.rawWidth) != 0
+                || Double.compare(totalLength, o.totalLength) != 0
+                || Double.compare(currentRemainingLength, o.currentRemainingLength) != 0
+                || Double.compare(usedLength, o.usedLength) != 0
+                || !java.util.Objects.equals(storageLocation, o.storageLocation)
+                || !java.util.Objects.equals(inspectionStatus, o.inspectionStatus)
+                || !java.util.Objects.equals(inspector, o.inspector)
+                || !java.util.Objects.equals(inspectionDate, o.inspectionDate)
+                || !java.util.Objects.equals(createdAt, o.createdAt)
+                || remnantCount != o.remnantCount
+                || Double.compare(remnantTotalArea, o.remnantTotalArea) != 0
+                || !java.util.Objects.equals(issuedMachineId, o.issuedMachineId)
+                || !java.util.Objects.equals(issuedShiftTeam, o.issuedShiftTeam)
+                || !java.util.Objects.equals(scrappedLengthMm, o.scrappedLengthMm)
+                || !java.util.Objects.equals(scrapReason, o.scrapReason)
+                || !java.util.Objects.equals(scrappedBy, o.scrappedBy)
+                || !java.util.Objects.equals(scrappedAt, o.scrappedAt)
+                || !java.util.Objects.equals(scrapIdempotencyKey, o.scrapIdempotencyKey)
+                || !java.util.Objects.equals(unitPricePerMeter, o.unitPricePerMeter)
+                || !java.util.Objects.equals(unitPricePerSqm, o.unitPricePerSqm)
+                || !java.util.Objects.equals(voidedDefects, o.voidedDefects)) {
+            return false;
+        }
+        int sz = defects == null ? 0 : defects.size();
+        int osz = o.defects == null ? 0 : o.defects.size();
+        if (sz != osz) return false;
+        for (int i = 0; i < sz; i++) {
+            Defect a = defects.get(i);
+            Defect b = o.defects.get(i);
+            if (a == b) continue;
+            if (a == null || !a.equalsContent(b)) return false;
+        }
+        return true;
+    }
 }
