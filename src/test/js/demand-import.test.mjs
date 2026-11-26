@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
-import {parseDemandSheet, parseDemandJSON, importedTask, importGroups, matchingImportRolls} from '../../main/resources/static/js/business/cutting/demand-import-model.js';
+import {parseDemandSheet, parseDemandJSON, importedTask, importGroups, matchingImportRolls, demandTemplateCsv} from '../../../frontend/src/lib/domain/demand-import-model.js';
 const require = createRequire(import.meta.url);
-const XLSX = require('../../main/resources/static/vendor/sheetjs/xlsx.mini.min.js');
+const XLSX = require('../../../frontend/src/vendor/sheetjs/xlsx.mini.min.js');
 const header = ['序号','缝纫方式','订单\n编号','布料\n编号','供应\n商\n编号'];
 const row = (pair='单', model='布料 A') => [1,'AG','O-1','F-1',model,0,0,200,220,3,pair,'RH','横裁',500,2,260,1,231.3];
 const standard = ['订单编号','材料型号','裁片名称','宽度(mm)','长度(mm)','数量','允许旋转'];
@@ -96,4 +96,14 @@ test('inventory matches exact models, never similar colors or names, and exclude
 test('different fabric codes stay separate even if a supplier model name is reused', () => {
     const a=row(),b=row();b[3]='F-2';
     assert.equal(parseDemandSheet([header,a,b]).groups.length,2);
+});
+test('demandTemplateCsv generates a valid UTF-8 standard demand CSV parsed cleanly by parseDemandSheet', () => {
+    const csvText = demandTemplateCsv();
+    assert.match(csvText, /材料型号,裁片名称,宽度\(mm\),长度\(mm\),数量/);
+    const book = XLSX.read(Buffer.from(csvText, 'utf8'), {type:'buffer'});
+    const parsed = parseDemandSheet(XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]], {header:1}));
+    assert.equal(parsed.issues.length, 0);
+    assert.equal(parsed.groups[0].materialModel, '2#A3A-Cream');
+    assert.equal(parsed.groups[0].demands[0].width, 2170);
+    assert.equal(parsed.groups[0].demands[0].length, 3250);
 });

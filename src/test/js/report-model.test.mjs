@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {reportTotals,csvCell} from '../../main/resources/static/js/business/analysis/report-model.js';
+import {reportTotals,csvCell} from '../../../frontend/src/lib/domain/report-model.js';
 const row=(consumed,qualified,recovered=0)=>({unit:'m2',consumed,qualified,recovered,rejected:0,otherWasteAndLoss:consumed-qualified-recovered});
 test('actual yield is area-weighted and recoverable output stays separate',()=>{
  const result=reportTotals({status:'BALANCED',areas:[row(10,5,2),row(100,90,3)]});

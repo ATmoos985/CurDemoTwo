@@ -29,12 +29,19 @@ class PackingSolverCertificateWriteTests {
         assertTrue(command.contains("--only-write-at-the-end"), String.join(" ", command));
     }
 
+    private static void requireOrAssumeNativeSolver(boolean available, String reason) {
+        if (!available && Boolean.parseBoolean(System.getProperty("cutdemo.requireNativeSolvers", "false"))) {
+            fail("已启用 -Dcutdemo.requireNativeSolvers=true，但原生求解器不可用：" + reason);
+        }
+        org.junit.jupiter.api.Assumptions.assumeTrue(available, reason);
+    }
+
     /** The benchmark's synthetic2000: 10 sizes x 200 copies on a 2000 x 60000 mm continuous region with two defects. */
     @Test void largeInstanceSearchIsNotThrottledByCertificateRewrites() {
         var engine = new PackingSolverService();
         ReflectionTestUtils.setField(engine, "solverPath", System.getenv().getOrDefault(
                 "PACKINGSOLVER_PATH", "data/solver/packingsolver_rectangleguillotine.exe"));
-        org.junit.jupiter.api.Assumptions.assumeTrue(engine.isAvailable(), "Native solver is required for this regression");
+        requireOrAssumeNativeSolver(engine.isAvailable(), "Native solver is required for this regression");
         int[][] sizes = {{300, 400}, {250, 500}, {200, 300}, {350, 450}, {150, 600}, {400, 400}, {220, 330}, {180, 240}, {500, 260}, {320, 280}};
         var parts = IntStream.range(0, sizes.length).mapToObj(i -> new NestingProblem.Part(i + 1, "规格" + (i + 1),
                 NestingProblem.Shape.rectangle(sizes[i][0], sizes[i][1]), 200, i % 2 == 0)).toList();

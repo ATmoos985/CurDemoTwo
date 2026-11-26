@@ -13,6 +13,7 @@ public class OptimizationConfiguration {
             @Value("${cutdemo.jobs.storage:file}") String storage,
             @Value("${cutdemo.jobs.path:${cutdemo.state.path:data/cutdemo-state.json}.jobs}") String path,
             @Value("${cutdemo.jobs.import-path:}") String importPath,
+            @Value("${cutdemo.jobs.terminal-retention-hours:168}") long terminalRetentionHours,
             ObjectProvider<DataSource> source, InventoryStore inventory) {
         // Resolving InventoryStore first ensures the existing Flyway migration has completed.
         if(!importPath.isBlank() && !"mysql".equals(storage))
@@ -22,7 +23,7 @@ public class OptimizationConfiguration {
             case "mysql" -> {
                 var database=source.getIfAvailable();
                 if(database==null)throw new IllegalStateException("MySQL 作业模式需要已配置的 cutdemo.storage=mysql 数据源");
-                var store=new JdbcOptimizationJobStore(database);
+                var store=new JdbcOptimizationJobStore(database, terminalRetentionHours);
                 if(!importPath.isBlank())OptimizationArchiveImport.run(store,Path.of(importPath));
                 yield store;
             }

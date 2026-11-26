@@ -1,6 +1,6 @@
 package com.example.cutdemotwo.persistence;
 
-import com.example.cutdemotwo.business.optimization.StoredOptimizationJob;
+import com.example.cutdemotwo.contracts.jobs.StoredOptimizationJob;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.DeserializationFeature;
 import java.nio.channels.*;
@@ -68,6 +68,31 @@ public final class FileOptimizationJobStore implements OptimizationJobStore {
         for (int delayMillis = 10; ; delayMillis *= 2) {
             try {
                 replace.move(source, target);
+                return;
+            } catch (AccessDeniedException denied) {
+                if (delayMillis > 160) throw denied;
+                try {
+                    Thread.sleep(delayMillis);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    denied.addSuppressed(interrupted);
+                    throw denied;
+                }
+            }
+        }
+    }
+    @Override public void delete(String id) {
+        if (id == null || !id.matches("[0-9a-f-]{36}")) throw new IllegalArgumentException("无效的作业标识");
+        try {
+            deleteSnapshot(directory.resolve(id + ".json"));
+        } catch (IOException error) {
+            throw new IllegalStateException("计算作业删除失败", error);
+        }
+    }
+    private void deleteSnapshot(Path target) throws IOException {
+        for (int delayMillis = 10; ; delayMillis *= 2) {
+            try {
+                Files.deleteIfExists(target);
                 return;
             } catch (AccessDeniedException denied) {
                 if (delayMillis > 160) throw denied;

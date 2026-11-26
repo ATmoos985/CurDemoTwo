@@ -26,6 +26,7 @@ services:
     image: ${CUTDEMO_IMAGE:?Use a verified immutable image}
     restart: unless-stopped
     init: true
+    stop_grace_period: 35s
     mem_limit: 768m
     cpus: 1.5
     depends_on:
@@ -36,6 +37,11 @@ services:
       CUTDEMO_DB_URL: jdbc:mysql://mysql:3306/cutdemo?characterEncoding=UTF-8&connectionTimeZone=Asia/Taipei
       CUTDEMO_DB_USER: cutdemo
       CUTDEMO_DB_PASSWORD: ${CUTDEMO_DB_PASSWORD}
+      CUTDEMO_JOBS_STORAGE: mysql
+      CUTDEMO_DEMO_ENDPOINTS_ENABLED: "false"
+      CUTDEMO_SLITTING_MAX_IDLE_WORKERS: "1"
+      CUTDEMO_MES_AUTH_REQUIRED: "true"
+      CUTDEMO_MES_TOKEN: ${CUTDEMO_MES_TOKEN:-}
       JAVA_TOOL_OPTIONS: -Xms64m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:ActiveProcessorCount=2
       SERVER_TOMCAT_THREADS_MAX: 12
     ports:

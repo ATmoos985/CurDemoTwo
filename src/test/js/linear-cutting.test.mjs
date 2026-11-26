@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defaults,sample,validateInput,layout,totals,demandBalance,escapeHtml} from '../../main/resources/static/js/linear/linear-model.js';
+import {defaults,sample,validateInput,layout,totals,demandBalance,escapeHtml} from '../../../frontend/src/lib/domain/linear-model.js';
 
 test('uses physical width and fixed edges, never repeats transverse widths by roll count',()=>{
     const group={comboExpanded:[2200,1100,1100],rollWidth:4300,usageCount:5};

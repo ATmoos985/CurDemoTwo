@@ -17,7 +17,7 @@ const transport=new StdioClientTransport({command:process.execPath,args:[fileURL
 const client=new Client({name:'cutting-real-service-verifier',version:'1'});let passed=0;const results={};
 async function call(name,args={}){const result=await client.callTool({name,arguments:args});assert.ok(!result.isError,JSON.stringify(result));return result.structuredContent.data;}
 try{
-    await client.connect(transport);assert.equal((await client.listTools()).tools.length,10);passed++;
+    await client.connect(transport);assert.equal((await client.listTools()).tools.length,13);passed++;
     results.capabilities=await call('get_cutting_capabilities');assert.ok(results.capabilities.problemTypes.includes('NESTING_2D'));passed++;
     assert.equal((await call('validate_cutting_problem',{request})).status,'VALID');passed++;
     const idempotencyKey=randomUUID(),job=await call('submit_optimization_job',{request,idempotencyKey});assert.ok(job.id);passed++;

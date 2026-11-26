@@ -57,12 +57,28 @@ class IntegrationDeliveryTests {
         assertEquals("ACKNOWLEDGED",service.acknowledge(second.event().id(),accept(second.attempt().token())).state());
     }
     @Test void rejectedEventBlocksLaterEventsUntilExplicitRetry(){
-        var first=claim("one");var reject=new IntegrationService.Acknowledgement(first.attempt().token(),"REJECTED",null,"外部物料不匹配");
-        service.acknowledge(first.event().id(),reject);
+        // PENDING 态不得包含 rejectedToken
+        assertNull(service.list(0,10).items().get(0).rejectedToken());
+        var first=claim("one");
+        // 活跃 LEASED 态绝不暴露租约 token
+        assertNull(service.list(0,10).items().get(0).rejectedToken());
+        var reject=new IntegrationService.Acknowledgement(first.attempt().token(),"REJECTED",null,"外部物料不匹配");
+        var rejectedDelivery=service.acknowledge(first.event().id(),reject);
+        assertEquals(first.attempt().token(),rejectedDelivery.rejectedToken());
+        // REJECTED 态通过只读列表返回 rejectedToken，支持 Worker 重启后无本地状态也可自愈恢复 retryOf
+        var listedRejected=service.list(0,10).items().get(0);
+        assertEquals("REJECTED",listedRejected.state());
+        assertEquals(first.attempt().token(),listedRejected.rejectedToken());
         assertEquals("DELIVERY_REJECTED",assertThrows(IntegrationService.Failure.class,()->claim("two")).code);
-        var next=service.claim(new IntegrationService.Claim("two",first.attempt().token()));assertEquals(2,next.attempt().number());
-        service.acknowledge(first.event().id(),reject);assertEquals("LEASED",service.list(0,10).items().get(0).state());
-        service.acknowledge(next.event().id(),accept(next.attempt().token()));assertEquals(1,service.list(0,10).acknowledgedThrough());
+        var next=service.claim(new IntegrationService.Claim("two",listedRejected.rejectedToken()));assertEquals(2,next.attempt().number());
+        service.acknowledge(first.event().id(),reject);
+        var listedLeased=service.list(0,10).items().get(0);
+        assertEquals("LEASED",listedLeased.state());
+        assertNull(listedLeased.rejectedToken());
+        service.acknowledge(next.event().id(),accept(next.attempt().token()));
+        var finalPage=service.list(0,10);
+        assertEquals(1,finalPage.acknowledgedThrough());
+        assertNull(finalPage.items().get(0).rejectedToken());
     }
     @Test void restartPreservesUnknownResponseAndFileLockPreventsTwoOwners(){
         var first=claim("unknown-response");assertThrows(IllegalStateException.class,()->new FileIntegrationDeliveryStore(temp.resolve("deliveries")));

@@ -2,20 +2,51 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CadCanvasView } from '../components/CadCanvasView';
 import { SlittingStripBar } from './CuttingWorkbenchPage';
 import { ModalDialog } from '../components/ModalDialog';
+import { BarcodeSvg } from '../components/BarcodeSvg';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
-import { showcaseScene } from '@static/app/js/model/showcase.js';
-import { rectangle } from '@static/js/canvas/nesting-scene.js';
-import { gcodeText, dxfText } from '@static/js/plugins/export/cam-format.js';
-import { requestJSON, toast, fmtN, fmtM, loadSheetLib } from '@static/app/js/util.js';
+import { NumberInput } from '../components/ui/NumberInput';
+import { showcaseScene } from '../lib/model/showcase.js';
+import { rectangle } from '../lib/canvas/nesting-scene.js';
+import { gcodeText, dxfText } from '../lib/domain/cam-format.js';
+import { requestJSON, idempotentPost, toast, fmtN, fmtM, loadSheetLib } from '../lib/core/util.js';
 import { useStudioStore } from '../store/useStudioStore';
+import { extractCncPostOptions } from '../store/studioSettings';
+import { idempotentJsonPost } from '../utils/authClient';
+import { buildCompleteSchemeIdempotencyKey } from './workbench/schemeConfirmUtils';
+import {
+  buildCutTicketModel,
+  buildSlittingCsvText,
+  extractWindowDefects,
+  matchScannedScheme
+} from './results/cutTicketUtils';
+import {
+  MAX_REVERSAL_REASON_LENGTH,
+  buildReversalRequest,
+  evaluateSchemeReversalEligibility,
+  validateReversalReason
+} from './results/reportReversalUtils';
 
 const STATE_BADGE: Record<string, { label: string; cls: string }> = {
   AWAITING_ROLL: { label: '待绑实卷 (虚拟母卷)', cls: 'warn' },
   READY_TO_CUT: { label: '已锁实卷待切', cls: 'run' },
   DISPATCHED_MES: { label: '已下发 MES', cls: 'kind' },
   COMPLETED: { label: '已完工记账', cls: 'ok' },
-  CANCELLED: { label: '已作废释放', cls: '' }
+  CANCELLED: { label: '已作废释放', cls: '' },
+  REVERSED: { label: '已冲销释放', cls: 'warn' }
 };
+
+function sanitizeSchemeTitle(raw?: string): string {
+  if (!raw) return '';
+  return raw
+    .replace(/OR-?Tools\s*/gi, '')
+    .replace(/Deepnest\s*(NFP\+GA\s*)?/gi, '异形')
+    .replace(/PackingSolver\s*/gi, '')
+    .replace(/NewSolver\s*/gi, '')
+    .replace(/Java\s*天际线\/直刀/gi, '')
+    .replace(/\s*\((FAST|QUALITY)\)/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
 
 function buildReplayScene2D(scheme: any) {
   if (!scheme?.layout2D?.placements?.length) return null;
@@ -123,10 +154,25 @@ function buildReplayScene2D(scheme: any) {
         gapFillPlacements
       }
     };
-    return (showcaseScene as any)(req, res, 0, {
+    const sc = (showcaseScene as any)(req, res, 0, {
       occupiedLengthMm: matLen,
       gapFillPlacements
     });
+    if (sc && sc.roll) {
+      sc.roll = {
+        ...sc.roll,
+        id: scheme.rollId || '虚拟新母卷',
+        width: matWidth,
+        total: matLen
+      };
+      if (Array.isArray(sc.segments) && sc.segments[0]) {
+        sc.segments[0] = {
+          ...sc.segments[0],
+          label: sanitizeSchemeTitle(scheme.title) || scheme.id || '排程方案复盘'
+        };
+      }
+    }
+    return sc;
   } catch (err) {
     console.warn('buildReplayScene2D fallback:', err);
     return null;
@@ -141,9 +187,11 @@ export const ResultsCenterPage: React.FC<{
 
   const [entries, setEntries] = useState<any[]>([]);
   const [rolls, setRolls] = useState<any[]>([]);
+  const [taskOpenMap, setTaskOpenMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [stateFilter, setStateFilter] = useState<string>('ALL');
   const [search, setSearch] = useState('');
+  const [scanInput, setScanInput] = useState('');
   const [selectedId, setSelectedId] = useState<string>(schemeId || '');
   const [showPath, setShowPath] = useState(true);
   const [vertical, setVertical] = useState<boolean>(settings.vertical);
@@ -156,30 +204,53 @@ export const ResultsCenterPage: React.FC<{
   // Bind Roll Form State
   const [bindRollId, setBindRollId] = useState<string>('');
   const [newRollCode, setNewRollCode] = useState<string>('');
+  const [pendingCreatedRollId, setPendingCreatedRollId] = useState<string>('');
 
   // Custom Settlement Modal State
+  const [showQuickCompleteConfirm, setShowQuickCompleteConfirm] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [showCompleteModal, setShowCompleteModal] = useState(false);
   const [actualCutLenInput, setActualCutLenInput] = useState<number>(0);
   const [rejectedIds, setRejectedIds] = useState<Set<number>>(new Set());
   const [recoverRems, setRecoverRems] = useState<boolean>(true);
   const [remnantLoc, setRemnantLoc] = useState<string>('裁床余料架 A-01');
 
+  // 同缸加急补片单弹窗状态
+  const [showReplenishModal, setShowReplenishModal] = useState(false);
+  const [replenishOperator, setReplenishOperator] = useState('排产计划员');
+  const [replenishReason, setReplenishReason] = useState('判废/缺口同缸加急补片');
+  const [createdReplenishTask, setCreatedReplenishTask] = useState<{ id: string; name?: string } | null>(null);
+
+  // 报工冲销弹窗状态
+  const [showReverseModal, setShowReverseModal] = useState(false);
+  const [reverseReason, setReverseReason] = useState('');
+  const [reverseError, setReverseError] = useState('');
+
   // Print Ticket Modal State
   const [showTicketModal, setShowTicketModal] = useState(false);
 
   const canvasRef = useRef<any>(null);
+  const scanRef = useRef<HTMLInputElement | null>(null);
 
   const loadAll = async () => {
     setLoading(true);
     try {
       const q = taskIdQuery ? `?taskId=${encodeURIComponent(taskIdQuery)}` : '';
-      const [list, allRolls] = await Promise.all([
+      const [list, allRolls, demandPool] = await Promise.all([
         requestJSON('/api/v2/schemes' + q),
-        requestJSON('/api/rolls').catch(() => [])
+        requestJSON('/api/rolls').catch(() => []),
+        requestJSON('/api/v2/demand-pool').catch(() => [])
       ]);
       const arr = Array.isArray(list) ? list : [];
       setEntries(arr);
       setRolls(Array.isArray(allRolls) ? allRolls : []);
+      const openMap: Record<string, number> = {};
+      if (Array.isArray(demandPool)) {
+        for (const fam of demandPool) {
+          if (fam?.id) openMap[fam.id] = Number(fam.openTotal) || 0;
+        }
+      }
+      setTaskOpenMap(openMap);
       if (schemeId && arr.some((x) => x.scheme?.id === schemeId)) {
         setSelectedId(schemeId);
       } else if (!selectedId && arr.length > 0) {
@@ -190,6 +261,36 @@ export const ResultsCenterPage: React.FC<{
     } finally {
       setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        scanRef.current?.focus();
+        scanRef.current?.select();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  const handleScanWorkOrder = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const raw = scanInput.trim();
+    if (!raw) return;
+    const hit = matchScannedScheme(entries, raw);
+    if (!hit) {
+      toast(`未找到与「${raw}」匹配的工单号、方案号或母卷号`, true);
+      return;
+    }
+    setStateFilter('ALL');
+    setSearch('');
+    setSelectedId(hit.scheme.id);
+    toast(
+      `扫码定位成功：工单 WO-${hit.scheme.id}${hit.scheme.rollId ? ` · 母卷 ${hit.scheme.rollId}` : ''}`
+    );
+    setScanInput('');
   };
 
   useEffect(() => {
@@ -230,9 +331,28 @@ export const ResultsCenterPage: React.FC<{
     );
   }, [rolls, activeScheme]);
 
+  const matchingPendingRolls = useMemo(() => {
+    if (!activeScheme) return [];
+    return rolls.filter(
+      (r) =>
+        r.inspectionStatus === 'PENDING' &&
+        Math.abs(r.width - activeScheme.widthMm) <= 1.0 &&
+        (r.currentRemainingLength ?? r.totalLength) >= activeScheme.occupiedLengthMm
+    );
+  }, [rolls, activeScheme]);
+
+  useEffect(() => {
+    setPendingCreatedRollId('');
+    setShowReverseModal(false);
+    setReverseReason('');
+    setReverseError('');
+  }, [activeScheme?.id]);
+
   useEffect(() => {
     if (matchingPassedRolls.length > 0) {
-      setBindRollId(matchingPassedRolls[0].rollId);
+      setBindRollId((prev) =>
+        matchingPassedRolls.some((r) => r.rollId === prev) ? prev : matchingPassedRolls[0].rollId
+      );
     } else {
       setBindRollId('');
     }
@@ -248,6 +368,22 @@ export const ResultsCenterPage: React.FC<{
         ? buildReplayScene2D(activeScheme)
         : null,
     [activeScheme]
+  );
+
+  const boundRoll = useMemo(
+    () => (activeScheme?.rollId ? rolls.find((r) => r.rollId === activeScheme.rollId) || null : null),
+    [rolls, activeScheme?.rollId]
+  );
+
+  const ticketModel = useMemo(
+    () =>
+      activeScheme
+        ? buildCutTicketModel(activeScheme, {
+            cutOrigin: settings.startCorner,
+            boundRoll
+          })
+        : null,
+    [activeScheme, settings.startCorner, boundRoll]
   );
 
   // ==================== Actions: Bind Roll / Complete / Dispatch MES / Cancel ====================
@@ -269,7 +405,22 @@ export const ResultsCenterPage: React.FC<{
               autoCreateRoll: false
             }
       );
-      toast(`已成功锁卷绑定：${updated.scheme.rollId}（区间 Y=${fmtN(updated.scheme.windowStartY)}~${fmtN(updated.scheme.windowStartY + updated.scheme.occupiedLengthMm)}mm）`);
+      if (updated?.awaitingInspection || updated?.scheme?.state === 'AWAITING_ROLL') {
+        const createdId =
+          updated?.createdRoll?.rollId ||
+          updated?.rollInfo?.rollId ||
+          newRollCode.trim();
+        if (createdId) setPendingCreatedRollId(createdId);
+        toast(
+          updated?.message ||
+            `已按方案规格新建待检母卷 ${createdId || ''}（PENDING），请完成跑布验疵并质检放行后再执行锁卷绑定`
+        );
+      } else {
+        setPendingCreatedRollId('');
+        toast(
+          `已成功锁卷绑定：${updated.scheme.rollId}（区间 Y=${fmtN(updated.scheme.windowStartY)}~${fmtN(updated.scheme.windowStartY + updated.scheme.occupiedLengthMm)}mm）`
+        );
+      }
       setNewRollCode('');
       await loadAll();
     } catch (err: any) {
@@ -283,23 +434,37 @@ export const ResultsCenterPage: React.FC<{
     if (!activeScheme || busy) return;
     setBusy(true);
     try {
-      const res = await requestJSON(
+      const rejectedList = customMode ? [...rejectedIds] : [];
+      const effRecover = customMode ? recoverRems : true;
+      const effRemLoc = customMode ? remnantLoc : '裁床余料架 A-01';
+      const completeBody = customMode
+        ? {
+            actualCutLenMm: actualCutLenInput,
+            rejectedPieceIds: rejectedList,
+            recoverRemnants: effRecover,
+            remnantLocation: effRemLoc,
+            operator: '现场排料员'
+          }
+        : {
+            recoverRemnants: effRecover,
+            remnantLocation: effRemLoc,
+            operator: '一键完工核销'
+          };
+      const idemKey = buildCompleteSchemeIdempotencyKey({
+        schemeId: activeScheme.id,
+        customMode,
+        actualCutLenMm: customMode ? actualCutLenInput : undefined,
+        rejectedPieceIds: rejectedList,
+        recoverRemnants: effRecover,
+        remnantLocation: effRemLoc
+      });
+      const res = await idempotentPost(
+        `complete-${idemKey}`,
         `/api/v2/schemes/${encodeURIComponent(activeScheme.id)}/complete`,
-        customMode
-          ? {
-              actualCutLenMm: actualCutLenInput,
-              rejectedPieceIds: [...rejectedIds],
-              recoverRemnants: recoverRems,
-              remnantLocation: remnantLoc,
-              operator: '现场排料员'
-            }
-          : {
-              recoverRemnants: true,
-              remnantLocation: '裁床余料架 A-01',
-              operator: '一键完工核销'
-            }
+        completeBody
       );
       setShowCompleteModal(false);
+      setShowQuickCompleteConfirm(false);
       const openRem = res.demandFamily?.openTotal ?? 0;
       toast(
         openRem > 0
@@ -316,12 +481,12 @@ export const ResultsCenterPage: React.FC<{
 
   const handleCancelScheme = async () => {
     if (!activeScheme || busy) return;
-    if (!confirm(`确认作废方案「${activeScheme.id}」并将预占需求退回待排需求池？`)) return;
     setBusy(true);
     try {
       await requestJSON(`/api/v2/schemes/${encodeURIComponent(activeScheme.id)}/cancel`, {
         reason: '结果管理手动取消重排'
       });
+      setShowCancelConfirm(false);
       toast('方案已作废，母卷预占已释放，待排需求量已恢复');
       await loadAll();
     } catch (err: any) {
@@ -356,27 +521,123 @@ export const ResultsCenterPage: React.FC<{
     }
   };
 
+  const handleGenerateReplenishTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeScheme || busy) return;
+    if (!replenishOperator.trim() || !replenishReason.trim()) {
+      toast('请填写经办人与补片原因', true);
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await idempotentJsonPost(
+        `replenish-${activeScheme.id}`,
+        `/api/v2/schemes/${encodeURIComponent(activeScheme.id)}/replenish-task`,
+        {
+          operator: replenishOperator.trim(),
+          reason: replenishReason.trim()
+        }
+      );
+      const taskId = res?.task?.id || '';
+      const taskName = res?.task?.name || '';
+      setCreatedReplenishTask(taskId ? { id: taskId, name: taskName } : null);
+      setShowReplenishModal(false);
+      toast(
+        taskId
+          ? `已生成同缸加急补片任务「${taskName || taskId}」（URGENT · 同缸强约束）`
+          : '同缸加急补片任务已生成'
+      );
+      await loadAll();
+    } catch (err: any) {
+      toast('生成同缸加急补片单失败：' + err.message, true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const schemeReversal = useMemo(
+    () => evaluateSchemeReversalEligibility(activeEntry),
+    [activeEntry]
+  );
+
+  const handleOpenReverseModal = () => {
+    if (!schemeReversal.eligible) {
+      toast(schemeReversal.reason || '当前方案不支持报工冲销', true);
+      return;
+    }
+    setReverseReason('');
+    setReverseError('');
+    setShowReverseModal(true);
+  };
+
+  const handleReverseScheme = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeScheme || busy) return;
+    if (!schemeReversal.eligible || schemeReversal.targetPlanIds.length === 0) {
+      const msg = schemeReversal.reason || '当前方案不存在可冲销的报工回执';
+      setReverseError(msg);
+      toast(msg, true);
+      return;
+    }
+    const validation = validateReversalReason(reverseReason);
+    if (!validation.valid) {
+      setReverseError(validation.error || '请填写有效的冲销原因');
+      toast(validation.error || '请填写冲销原因', true);
+      return;
+    }
+    setBusy(true);
+    setReverseError('');
+    let reversedCount = 0;
+    try {
+      for (const planId of schemeReversal.targetPlanIds) {
+        const req = buildReversalRequest(planId, validation.trimmed);
+        await requestJSON(req.url, req.body);
+        reversedCount += 1;
+      }
+      setShowReverseModal(false);
+      setReverseReason('');
+      toast(
+        reversedCount > 1
+          ? `已按逆序冲销 ${reversedCount} 笔完工报工：母卷消耗与订单完成量已回滚，方案已置为已冲销释放`
+          : '报工已冲销：母卷/料头消耗与订单完成量已回滚，方案状态已置为已冲销释放'
+      );
+      await loadAll();
+    } catch (err: any) {
+      const msg = err?.message || '冲销报工请求失败';
+      setReverseError(msg);
+      toast('冲销报工失败：' + msg, true);
+      if (reversedCount > 0) {
+        await loadAll();
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // ==================== Exports: DXF / G-Code / Slitting CSV / Excel / A4 Ticket ====================
 
   const handleExport2DCam = (kind: 'dxf' | 'nc') => {
     if (!activeScheme?.layout2D?.placements?.length) return;
+    const mappedPieces = activeScheme.layout2D.placements.map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      x: p.x,
+      y: p.y,
+      w: p.shape?.width || p.w,
+      l: p.shape?.height || p.l,
+      shape: p.shape
+    }));
+    const windowDefects = extractWindowDefects(activeScheme, boundRoll);
     const data = {
       rollId: activeScheme.rollId || 'VIRTUAL-ROLL',
       rollW: activeScheme.widthMm,
       bedL: activeScheme.occupiedLengthMm,
       windowStartY: activeScheme.windowStartY || 0,
       cutOrigin: settings.startCorner,
-      pieces: activeScheme.layout2D.placements.map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        x: p.x,
-        y: p.y,
-        w: p.shape?.width || p.w,
-        l: p.shape?.height || p.l,
-        shape: p.shape
-      })),
+      pieces: mappedPieces,
+      placements: mappedPieces,
       remnants: activeScheme.layout2D.leftovers || [],
-      defects: [],
+      defects: windowDefects,
       cuts: (activeScheme.layout2D.cuts || []).map((c: any) => ({
         step: c.sequence,
         type: c.kind === 'HORIZONTAL' ? '横切' : '纵切',
@@ -386,7 +647,7 @@ export const ResultsCenterPage: React.FC<{
         endY: c.endY
       }))
     };
-    const content = kind === 'nc' ? gcodeText(data) : dxfText(data);
+    const content = kind === 'nc' ? gcodeText(data, extractCncPostOptions(settings)) : dxfText(data);
     const blob = new Blob([content], {
       type: kind === 'nc' ? 'text/plain;charset=utf-8' : 'application/dxf'
     });
@@ -399,21 +660,7 @@ export const ResultsCenterPage: React.FC<{
 
   const handleExportSlitCsv = () => {
     if (!activeScheme?.slitting1D?.patterns?.length) return;
-    const rows = [
-      ['方案号', '刀组序号', '单车卷长(mm)', '执行车数', '左切边(mm)', '右切边(mm)', '排刀条宽组合', '已用幅宽(mm)', '余宽(mm)'],
-      ...activeScheme.slitting1D.patterns.map((p: any, idx: number) => [
-        activeScheme.id,
-        idx + 1,
-        p.lengthMm,
-        p.repetitions,
-        activeScheme.slitting1D.leftTrimMm,
-        activeScheme.slitting1D.rightTrimMm,
-        p.stations.map((s: any) => `${s.widthMm}*${s.countPerRepetition}`).join('+'),
-        p.usedWidthMm,
-        p.spareWidthMm
-      ])
-    ];
-    const csv = '\uFEFF' + rows.map((r) => r.map((v) => `"${String(v)}"`).join(',')).join('\n');
+    const csv = buildSlittingCsvText(activeScheme);
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     a.download = `分切机PLC排刀配方-${activeScheme.id}.csv`;
@@ -430,7 +677,7 @@ export const ResultsCenterPage: React.FC<{
         book,
         XLSX.utils.aoa_to_sheet([
           ['排程方案号', activeScheme.id],
-          ['方案标题', activeScheme.title],
+          ['方案标题', sanitizeSchemeTitle(activeScheme.title)],
           ['所属需求族', activeScheme.taskName],
           ['关联外部/MES单号', activeScheme.externalOrderNo || '—'],
           ['物料品号', activeScheme.materialModel],
@@ -514,6 +761,12 @@ export const ResultsCenterPage: React.FC<{
         accent: 'emerald'
       },
       {
+        value: 'REVERSED',
+        label: '已冲销释放',
+        count: countByState('REVERSED'),
+        accent: 'amber'
+      },
+      {
         value: 'CANCELLED',
         label: '已作废释放',
         count: countByState('CANCELLED')
@@ -524,6 +777,16 @@ export const ResultsCenterPage: React.FC<{
 
   const hasDetailPrimaryCta = Boolean(
     activeScheme && (activeEntry?.canComplete || activeEntry?.canBindRoll)
+  );
+
+  const canGenerateReplenish = Boolean(
+    activeScheme &&
+      activeScheme.state === 'COMPLETED' &&
+      (!activeScheme.complete ||
+        (activeScheme.placedCount ?? 0) < (activeScheme.requestedCount ?? 0) ||
+        Number(activeScheme.rejectedCount || activeEntry?.rejectedCount || 0) > 0 ||
+        Number(taskOpenMap[activeScheme.taskId] || 0) > 0 ||
+        Boolean(activeEntry?.canReplenish))
   );
 
   return (
@@ -539,8 +802,27 @@ export const ResultsCenterPage: React.FC<{
           </div>
         </div>
 
-        <div className="mp-filter-toolbar">
-          <div className="mp-search-wrap">
+        <div className="mp-filter-toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+          <form
+            onSubmit={handleScanWorkOrder}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flex: '0 1 250px', minWidth: 190 }}
+          >
+            <input
+              ref={scanRef}
+              type="text"
+              className="field num"
+              style={{ height: 30, fontSize: 12, flex: 1, minWidth: 140 }}
+              aria-label="扫码定位工单或母卷"
+              placeholder="扫工单号 WO-xxx/母卷号 (Alt+S)"
+              value={scanInput}
+              onChange={(e) => setScanInput(e.target.value)}
+            />
+            <button type="submit" className="btn sm" style={{ flex: 'none' }}>
+              定位
+            </button>
+          </form>
+
+          <div className="mp-search-wrap" style={{ minWidth: 160 }}>
             <span className="mp-search-ico" aria-hidden="true">
               <svg viewBox="0 0 16 16" width="14" height="14">
                 <circle
@@ -658,7 +940,7 @@ export const ResultsCenterPage: React.FC<{
                       onClick={() => setSelectedId(s.id)}
                     >
                       <div className="mp-res-item-top">
-                        <span className="mp-res-item-title">{s.title}</span>
+                        <span className="mp-res-item-title">{sanitizeSchemeTitle(s.title)}</span>
                         <span className={`tag ${st.cls}`}>{st.label}</span>
                       </div>
                       <div className="mp-res-item-code-row">
@@ -696,7 +978,7 @@ export const ResultsCenterPage: React.FC<{
                   <div className="mp-res-detail-head">
                     <div className="mp-res-detail-identity">
                       <div className="mp-res-detail-title-row">
-                        <h2 className="mp-res-detail-title">{activeScheme.title}</h2>
+                        <h2 className="mp-res-detail-title">{sanitizeSchemeTitle(activeScheme.title)}</h2>
                         <CodeBadge>{activeScheme.id}</CodeBadge>
                         <span
                           className={`tag ${STATE_BADGE[activeScheme.state]?.cls || ''}`}
@@ -724,7 +1006,7 @@ export const ResultsCenterPage: React.FC<{
                             type="button"
                             className="btn pri"
                             disabled={busy}
-                            onClick={() => handleCompleteScheme(false)}
+                            onClick={() => setShowQuickCompleteConfirm(true)}
                           >
                             一键完工记账
                           </button>
@@ -738,7 +1020,8 @@ export const ResultsCenterPage: React.FC<{
                           </button>
                         </>
                       )}
-                      {activeScheme.state !== 'CANCELLED' && (
+                      {(activeScheme.state === 'READY_TO_CUT' ||
+                        activeScheme.state === 'DISPATCHED_MES') && (
                         <button
                           type="button"
                           className="btn"
@@ -750,12 +1033,38 @@ export const ResultsCenterPage: React.FC<{
                             : '下发 MES 派工单'}
                         </button>
                       )}
+                      {canGenerateReplenish && (
+                        <button
+                          type="button"
+                          className="btn soft-accent"
+                          disabled={busy}
+                          onClick={() => setShowReplenishModal(true)}
+                          title="按源方案母卷缸号/色号一键创建高优同缸加急补片任务"
+                        >
+                          一键生成同缸加急补片单
+                        </button>
+                      )}
+                      {schemeReversal.showAction && (
+                        <button
+                          type="button"
+                          className="mp-ghost-btn mp-btn-danger-ghost"
+                          disabled={busy || !schemeReversal.eligible}
+                          onClick={handleOpenReverseModal}
+                          title={
+                            schemeReversal.eligible
+                              ? '冲销已完工报工，恢复母卷/料头消耗并回滚订单完成量'
+                              : schemeReversal.reason
+                          }
+                        >
+                          冲销报工
+                        </button>
+                      )}
                       {activeEntry.canCancel && (
                         <button
                           type="button"
                           className="mp-ghost-btn mp-btn-danger-ghost"
                           disabled={busy}
-                          onClick={handleCancelScheme}
+                          onClick={() => setShowCancelConfirm(true)}
                         >
                           作废并退回需求
                         </button>
@@ -845,6 +1154,30 @@ export const ResultsCenterPage: React.FC<{
                       </a>
                     )}
                   </div>
+                  {createdReplenishTask && (
+                    <div
+                      style={{
+                        marginTop: 8,
+                        padding: '8px 10px',
+                        borderRadius: 6,
+                        background: 'rgba(16, 185, 129, 0.1)',
+                        border: '1px solid rgba(5, 150, 105, 0.35)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 10,
+                        fontSize: 12
+                      }}
+                    >
+                      <span>
+                        <span className="tag ok" style={{ marginRight: 6 }}>补片单已生成</span>
+                        同缸加急补片任务 <b className="num">{createdReplenishTask.name || createdReplenishTask.id}</b> 已加入需求池（URGENT · 同缸强约束）。
+                      </span>
+                      <a className="btn sm soft-accent" href="#/demand-library">
+                        前往需求库排补片 →
+                      </a>
+                    </div>
+                  )}
                 </div>
 
                 {/* Virtual Mother Roll -> Bind Real Stock Roll Card */}
@@ -909,9 +1242,49 @@ export const ResultsCenterPage: React.FC<{
                         disabled={busy}
                         onClick={() => handleBindStockRoll(true)}
                       >
-                        ＋ 按方案规格一键建卷并绑定
+                        ＋ 按方案规格新建待检母卷
                       </button>
                     </div>
+                    {(pendingCreatedRollId || matchingPendingRolls.length > 0) && (() => {
+                      const focusPendingId =
+                        pendingCreatedRollId &&
+                        rolls.some(
+                          (r) => r.rollId === pendingCreatedRollId && r.inspectionStatus === 'PENDING'
+                        )
+                          ? pendingCreatedRollId
+                          : matchingPendingRolls[0]?.rollId || pendingCreatedRollId;
+                      if (!focusPendingId) return null;
+                      return (
+                        <div
+                          className="mp-res-pending-roll-hint"
+                          data-pending-roll-id={focusPendingId}
+                          style={{
+                            marginTop: 8,
+                            padding: '8px 10px',
+                            borderRadius: 6,
+                            background: 'rgba(245, 158, 11, 0.1)',
+                            border: '1px solid rgba(245, 158, 11, 0.35)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 10,
+                            flexWrap: 'wrap',
+                            fontSize: 12
+                          }}
+                        >
+                          <span>
+                            <span className="tag warn" style={{ marginRight: 6 }}>待质检放行</span>
+                            母卷 <b className="num">{focusPendingId}</b> 已按方案规格入库（状态 PENDING），须完成跑布验疵并质检放行后，再刷新并选择该合格卷执行锁卷绑定。
+                          </span>
+                          <a
+                            className="mp-ghost-btn mp-ghost-sm"
+                            href={`#/inspection/${encodeURIComponent(focusPendingId)}`}
+                          >
+                            前往跑布验疵放行 →
+                          </a>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
@@ -962,29 +1335,41 @@ export const ResultsCenterPage: React.FC<{
                       </span>
                     </div>
                     <div className="slit-patterns-list">
-                      {activeScheme.slitting1D.patterns.map((p: any, idx: number) => (
-                        <div key={p.id || idx} className="slit-pattern-row">
-                          <div className="slit-pattern-meta">
-                            <span className="tag kind">组 {idx + 1}</span>
-                            <b className="num">{p.repetitions} 车</b>
-                            <span className="num">
-                              {p.stations
-                                .map((s: any) => `${s.widthMm}×${s.countPerRepetition}`)
-                                .join(' + ')}
-                            </span>
-                            <span className="sp" />
-                            <span className="num muted">
-                              已用 {p.usedWidthMm} mm · 余宽 {p.spareWidthMm} mm
-                            </span>
+                      {(() => {
+                        const allWidths: number[] = [];
+                        for (const pat of activeScheme.slitting1D.patterns || []) {
+                          for (const st of pat.stations || []) {
+                            if (st.widthMm > 0) allWidths.push(st.widthMm);
+                          }
+                        }
+                        const minW = allWidths.length ? Math.min(...allWidths) : 0;
+                        const maxW = allWidths.length ? Math.max(...allWidths) : 0;
+                        return activeScheme.slitting1D.patterns.map((p: any, idx: number) => (
+                          <div key={p.id || idx} className="slit-pattern-row">
+                            <div className="slit-pattern-meta">
+                              <span className="tag kind">组 {idx + 1}</span>
+                              <b className="num">{p.repetitions} 车</b>
+                              <span className="num">
+                                {p.stations
+                                  .map((s: any) => `${s.widthMm}×${s.countPerRepetition}`)
+                                  .join(' + ')}
+                              </span>
+                              <span className="sp" />
+                              <span className="num muted">
+                                已切 {p.usedWidthMm} mm · 余 {p.spareWidthMm} mm
+                              </span>
+                            </div>
+                            <SlittingStripBar
+                              motherWidthMm={activeScheme.widthMm}
+                              leftTrimMm={activeScheme.slitting1D.leftTrimMm}
+                              rightTrimMm={activeScheme.slitting1D.rightTrimMm}
+                              stations={p.stations}
+                              minWidthMm={minW}
+                              maxWidthMm={maxW}
+                            />
                           </div>
-                          <SlittingStripBar
-                            motherWidthMm={activeScheme.widthMm}
-                            leftTrimMm={activeScheme.slitting1D.leftTrimMm}
-                            rightTrimMm={activeScheme.slitting1D.rightTrimMm}
-                            stations={p.stations}
-                          />
-                        </div>
-                      ))}
+                        ));
+                      })()}
                     </div>
                   </div>
                 ) : null}
@@ -1011,11 +1396,11 @@ export const ResultsCenterPage: React.FC<{
               {activeScheme.dimension !== 'SLITTING_1D' && !activeScheme.remnantId && (
                 <>
                   <label>实切耗用长度 mm</label>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="field num"
+                    min={0}
                     value={actualCutLenInput}
-                    onChange={(e) => setActualCutLenInput(Number(e.target.value))}
+                    onValueChange={setActualCutLenInput}
                   />
                 </>
               )}
@@ -1107,6 +1492,105 @@ export const ResultsCenterPage: React.FC<{
         )}
       </ModalDialog>
 
+      {/* One-Click Completion Summary Confirmation Modal */}
+      <ModalDialog
+        open={showQuickCompleteConfirm}
+        title="确认一键完工记账"
+        onClose={() => setShowQuickCompleteConfirm(false)}
+        maxWidth={520}
+      >
+        {activeScheme && (
+          <div>
+            <p style={{ margin: '0 0 12px', fontSize: 13 }}>
+              请核对本次完工过账摘要。确认后将正式扣减材料库存并结转需求族良品完成量：
+            </p>
+            <div
+              className="form num"
+              style={{
+                gridTemplateColumns: '124px 1fr',
+                padding: '10px 12px',
+                background: 'var(--panel-2)',
+                borderRadius: 8,
+                border: '1px solid var(--line-2)',
+                marginBottom: 14
+              }}
+            >
+              <label>排程方案号</label>
+              <b>{activeScheme.id}</b>
+              <label>领用母卷 / 料头</label>
+              <b>{activeScheme.remnantId ? `料头 ${activeScheme.remnantId}` : activeScheme.rollId || '未绑定'}</b>
+              <label>实切消耗</label>
+              <b>
+                {activeScheme.remnantId
+                  ? `整块料头 (${activeScheme.widthMm} × ${fmtN(activeScheme.occupiedLengthMm, 1)} mm)`
+                  : activeScheme.dimension === 'SLITTING_1D' && activeScheme.slitting1D
+                  ? `${activeScheme.slitting1D.totalCars} 车 · 共 ${fmtN(activeScheme.occupiedLengthMm, 1)} mm`
+                  : `${fmtN(activeScheme.occupiedLengthMm, 1)} mm (Y=${fmtN(activeScheme.windowStartY || 0, 0)}~${fmtN((activeScheme.windowStartY || 0) + activeScheme.occupiedLengthMm, 0)})`}
+              </b>
+              <label>预计合格产出</label>
+              <b>
+                {activeScheme.placedCount}{' '}
+                {activeScheme.dimension === 'SLITTING_1D' ? '卷' : '件'}
+              </b>
+              <label>派生余料处理</label>
+              <span>自动回收达标余料至「裁床余料架 A-01」</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => setShowQuickCompleteConfirm(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn pri"
+                disabled={busy}
+                onClick={() => handleCompleteScheme(false)}
+              >
+                {busy ? '过账中…' : '确认一键完工记账'}
+              </button>
+            </div>
+          </div>
+        )}
+      </ModalDialog>
+
+      {/* Cancel Scheme Confirmation Modal */}
+      <ModalDialog
+        open={showCancelConfirm}
+        title="确认作废排程方案"
+        onClose={() => setShowCancelConfirm(false)}
+        maxWidth={460}
+      >
+        {activeScheme && (
+          <div>
+            <p style={{ margin: '0 0 14px', fontSize: 13 }}>
+              确认作废方案「<b>{activeScheme.id}</b>」并将预占需求退回待排需求池吗？作废后将释放关联母卷或料头的预占区段。
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => setShowCancelConfirm(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn pri"
+                disabled={busy}
+                onClick={handleCancelScheme}
+              >
+                {busy ? '处理中…' : '确认作废'}
+              </button>
+            </div>
+          </div>
+        )}
+      </ModalDialog>
+
       {/* Clean A4 Shop-Floor Cut Ticket Modal & Print Surface */}
       <ModalDialog
         open={showTicketModal}
@@ -1114,15 +1598,17 @@ export const ResultsCenterPage: React.FC<{
         onClose={() => setShowTicketModal(false)}
         maxWidth={820}
       >
-        {activeScheme && (
+        {activeScheme && ticketModel && (
           <div className="print-ticket-sheet">
             <header
               style={{
                 display: 'flex',
                 justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: 12,
                 borderBottom: '2px solid #0f172a',
                 paddingBottom: 10,
-                marginBottom: 12
+                marginBottom: 10
               }}
             >
               <div>
@@ -1130,10 +1616,34 @@ export const ResultsCenterPage: React.FC<{
                 <div className="muted" style={{ fontSize: 12 }}>
                   需求族：{activeScheme.taskName} · 外部单号：{activeScheme.externalOrderNo || '内部排产'}
                 </div>
+                <div style={{ fontSize: 11.5, marginTop: 4 }} className="num">
+                  工单号：<b>{ticketModel.workOrderNo}</b> · 方案号：{activeScheme.id} · 打印时间：
+                  {new Date().toLocaleString('zh-CN')}
+                </div>
               </div>
-              <div style={{ textAlign: 'right' }} className="num">
-                <div style={{ fontSize: 15, fontWeight: 700 }}>单号：{activeScheme.id}</div>
-                <div style={{ fontSize: 11.5 }}>打印时间：{new Date().toLocaleString('zh-CN')}</div>
+              <div
+                className="ticket-barcode-bar"
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 8,
+                  flexShrink: 0
+                }}
+              >
+                <BarcodeSvg
+                  value={ticketModel.workOrderNo}
+                  label="派工单号"
+                  height={36}
+                  moduleWidth={1.15}
+                />
+                {activeScheme.rollId && (
+                  <BarcodeSvg
+                    value={activeScheme.rollId}
+                    label="领用母卷"
+                    height={36}
+                    moduleWidth={1.15}
+                  />
+                )}
               </div>
             </header>
 
@@ -1163,56 +1673,178 @@ export const ResultsCenterPage: React.FC<{
               </div>
             </div>
 
-            {activeScheme.layout2D?.placements?.length > 0 && (
+            {ticketModel.placements.length > 0 && (
               <div className="ticket-diagram" style={{ marginBottom: 12 }}>
                 <svg
-                  viewBox={`-10 -10 ${activeScheme.widthMm + 20} ${activeScheme.occupiedLengthMm + 20}`}
+                  viewBox={ticketModel.viewBox}
+                  preserveAspectRatio="xMidYMid meet"
+                  role="img"
+                  aria-label={`排料示意图 ${ticketModel.workOrderNo}`}
                   style={{
                     width: '100%',
-                    maxHeight: 240,
+                    height: 'auto',
+                    maxHeight: 280,
                     border: '1px solid #94a3b8',
-                    background: '#f8fafc'
+                    background: '#f8fafc',
+                    display: 'block'
                   }}
                 >
+                  <text
+                    x={0}
+                    y={ticketModel.headerY}
+                    fontSize={ticketModel.headerFontSize}
+                    fontWeight="700"
+                    fill="#0f172a"
+                  >
+                    {ticketModel.workOrderNo} · {ticketModel.widthMm}×{fmtN(ticketModel.occupiedLengthMm, 1)}mm · 共 {ticketModel.placements.length} 件
+                  </text>
                   <rect
                     x={0}
                     y={0}
-                    width={activeScheme.widthMm}
-                    height={activeScheme.occupiedLengthMm}
+                    width={ticketModel.widthMm}
+                    height={ticketModel.occupiedLengthMm}
                     fill="#ffffff"
                     stroke="#0f172a"
-                    strokeWidth={4}
+                    strokeWidth={ticketModel.borderStroke}
                   />
-                  {activeScheme.layout2D.placements.map((p: any) => {
-                    const w = p.shape?.width || p.w;
-                    const h = p.shape?.height || p.l;
-                    if (p.shape?.vertices?.length >= 3) {
-                      const pts = p.shape.vertices
-                        .map((pt: any) => `${p.x + pt.x},${p.y + pt.y}`)
-                        .join(' ');
-                      return (
-                        <polygon
-                          key={p.id}
-                          points={pts}
-                          fill="rgba(2,132,199,0.15)"
-                          stroke="#0284c7"
-                          strokeWidth={3}
-                        />
-                      );
-                    }
-                    return (
+
+                  {/* 疵点禁入区标示 */}
+                  {ticketModel.defects.map((d) => (
+                    <g key={`def-${d.id}`}>
                       <rect
-                        key={p.id}
-                        x={p.x}
-                        y={p.y}
-                        width={w}
-                        height={h}
-                        fill="rgba(2,132,199,0.15)"
-                        stroke="#0284c7"
-                        strokeWidth={3}
+                        x={Math.max(0, d.x - d.margin)}
+                        y={Math.max(0, d.y - d.margin)}
+                        width={d.w + d.margin * 2}
+                        height={d.h + d.margin * 2}
+                        fill="rgba(239,68,68,0.14)"
+                        stroke="#dc2626"
+                        strokeWidth={ticketModel.pieceStroke}
+                        strokeDasharray={`${ticketModel.borderStroke * 3} ${ticketModel.borderStroke * 2}`}
                       />
-                    );
-                  })}
+                      <text
+                        x={d.x + d.w / 2}
+                        y={d.y + d.h / 2}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fontSize={Math.max(16, ticketModel.cutBadgeFontSize)}
+                        fontWeight="700"
+                        fill="#b91c1c"
+                      >
+                        疵#{d.id}
+                      </text>
+                    </g>
+                  ))}
+
+                  {/* 裁片轮廓 + 件号 + 尺寸标注 */}
+                  {ticketModel.placements.map((p) => (
+                    <g key={`p-${p.id}`}>
+                      {p.pointsAttr ? (
+                        <polygon
+                          points={p.pointsAttr}
+                          fill="rgba(2,132,199,0.14)"
+                          stroke="#0284c7"
+                          strokeWidth={ticketModel.pieceStroke}
+                        />
+                      ) : (
+                        <rect
+                          x={p.x}
+                          y={p.y}
+                          width={p.w}
+                          height={p.h}
+                          fill="rgba(2,132,199,0.14)"
+                          stroke="#0284c7"
+                          strokeWidth={ticketModel.pieceStroke}
+                        />
+                      )}
+                      <text
+                        x={p.cx}
+                        y={p.showDimLabel ? p.cy - p.fontSize * 0.52 : p.cy}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fontSize={p.fontSize}
+                        fontWeight="700"
+                        fill="#0f172a"
+                      >
+                        {p.pieceLabel}
+                      </text>
+                      {p.showDimLabel && (
+                        <text
+                          x={p.cx}
+                          y={p.cy + p.fontSize * 0.62}
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fontSize={Math.max(12, Math.round(p.fontSize * 0.78))}
+                          fill="#334155"
+                        >
+                          {p.dimLabel}
+                        </text>
+                      )}
+                    </g>
+                  ))}
+
+                  {/* 贯通直刀刀路与刀序圆标 */}
+                  {ticketModel.cuts.map((c, idx) => (
+                    <g key={`cut-${idx}`}>
+                      <line
+                        x1={c.startX}
+                        y1={c.startY}
+                        x2={c.endX}
+                        y2={c.endY}
+                        stroke="#d97706"
+                        strokeWidth={ticketModel.cutStroke}
+                        strokeDasharray={`${ticketModel.borderStroke * 4} ${ticketModel.borderStroke * 2}`}
+                      />
+                      <circle
+                        cx={c.labelX}
+                        cy={c.labelY}
+                        r={ticketModel.cutBadgeRadius}
+                        fill="#ffffff"
+                        stroke="#d97706"
+                        strokeWidth={ticketModel.pieceStroke}
+                      />
+                      <text
+                        x={c.labelX}
+                        y={c.labelY}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fontSize={ticketModel.cutBadgeFontSize}
+                        fontWeight="700"
+                        fill="#b45309"
+                      >
+                        {c.sequence}
+                      </text>
+                    </g>
+                  ))}
+
+                  {/* 切割起点基准标示 */}
+                  <g>
+                    <circle
+                      cx={ticketModel.originPoint.x}
+                      cy={ticketModel.originPoint.y}
+                      r={ticketModel.cutBadgeRadius * 0.85}
+                      fill="#dc2626"
+                      stroke="#ffffff"
+                      strokeWidth={ticketModel.pieceStroke}
+                    />
+                    <text
+                      x={
+                        ticketModel.originPoint.x === 0
+                          ? ticketModel.cutBadgeRadius * 1.3
+                          : ticketModel.widthMm - ticketModel.cutBadgeRadius * 1.3
+                      }
+                      y={
+                        ticketModel.originPoint.y === 0
+                          ? ticketModel.cutBadgeRadius * 1.4
+                          : ticketModel.occupiedLengthMm - ticketModel.cutBadgeRadius * 1.1
+                      }
+                      textAnchor={ticketModel.originPoint.x === 0 ? 'start' : 'end'}
+                      fontSize={ticketModel.cutBadgeFontSize}
+                      fontWeight="700"
+                      fill="#dc2626"
+                    >
+                      {ticketModel.originPoint.label}
+                    </text>
+                  </g>
                 </svg>
               </div>
             )}
@@ -1243,12 +1875,12 @@ export const ResultsCenterPage: React.FC<{
                           <td>________</td>
                         </tr>
                       ))
-                    : (activeScheme.layout2D?.placements || []).slice(0, 25).map((p: any, i: number) => (
-                        <tr key={p.id}>
-                          <td className="num">#{p.id || i + 1}</td>
+                    : ticketModel.placements.map((p, i) => (
+                        <tr key={`${p.id}-${i}`}>
+                          <td className="num">{p.pieceLabel}</td>
                           <td>{p.name}</td>
                           <td className="r num">
-                            {fmtN(p.shape?.width || p.w, 0)} × {fmtN(p.shape?.height || p.l, 0)}
+                            {fmtN(p.w, 0)} × {fmtN(p.h, 0)}
                           </td>
                           <td className="r num">1 件</td>
                           <td>□ 合格</td>
@@ -1259,40 +1891,40 @@ export const ResultsCenterPage: React.FC<{
               </table>
             </div>
 
-            {settings.ticketShowCuts &&
-              activeScheme.layout2D?.cuts?.length > 0 && (
-                <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>
-                    贯通直刀下刀顺序明细（共 {activeScheme.layout2D.cuts.length} 刀）
-                  </div>
-                  <table className="t">
-                    <thead>
-                      <tr>
-                        <th>刀序</th>
-                        <th>方向</th>
-                        <th className="r">起点坐标 (X, Y mm)</th>
-                        <th className="r">终点坐标 (X, Y mm)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {activeScheme.layout2D.cuts.slice(0, 16).map((c: any, idx: number) => (
-                        <tr key={idx}>
-                          <td className="num">第 {c.sequence || idx + 1} 刀</td>
-                          <td>{c.kind === 'HORIZONTAL' ? '横切' : '纵切'}</td>
-                          <td className="r num">
-                            ({fmtN(c.startX, 1)}, {fmtN(c.startY, 1)})
-                          </td>
-                          <td className="r num">
-                            ({fmtN(c.endX, 1)}, {fmtN(c.endY, 1)})
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            {settings.ticketShowCuts && ticketModel.cuts.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>
+                  贯通直刀下刀顺序明细（共 {ticketModel.cuts.length} 刀）
                 </div>
-              )}
+                <table className="t">
+                  <thead>
+                    <tr>
+                      <th>刀序</th>
+                      <th>方向</th>
+                      <th className="r">起点坐标 (X, Y mm)</th>
+                      <th className="r">终点坐标 (X, Y mm)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ticketModel.cuts.map((c, idx) => (
+                      <tr key={idx}>
+                        <td className="num">第 {c.sequence} 刀</td>
+                        <td>{c.directionLabel}</td>
+                        <td className="r num">
+                          ({fmtN(c.startX, 1)}, {fmtN(c.startY, 1)})
+                        </td>
+                        <td className="r num">
+                          ({fmtN(c.endX, 1)}, {fmtN(c.endY, 1)})
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             <div
+              className="ticket-sign-row"
               style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(3, 1fr)',
@@ -1319,6 +1951,186 @@ export const ResultsCenterPage: React.FC<{
               </button>
             </div>
           </div>
+        )}
+      </ModalDialog>
+      {/* 一键生成同缸加急补片单弹窗 */}
+      <ModalDialog
+        open={showReplenishModal}
+        title="一键生成同缸加急补片单（防色差）"
+        onClose={() => {
+          if (!busy) setShowReplenishModal(false);
+        }}
+        maxWidth={520}
+      >
+        {activeScheme && (
+          <form onSubmit={handleGenerateReplenishTask}>
+            <p style={{ margin: '0 0 10px', fontSize: 12.5 }}>
+              系统将按源方案的缺口/判废明细自动新建一张 <b>URGENT 加急</b> 且启用{' '}
+              <b>同单同缸强约束</b> 的补片需求任务，自动继承原母卷品号与缸色属性：
+            </p>
+            <div className="kv num" style={{ padding: '4px 0 10px' }}>
+              <div>源方案号</div>
+              <div>{activeScheme.id}</div>
+              <div>原实卷 / 缸号色号</div>
+              <div>
+                {activeScheme.rollId || '未绑定实卷'}
+                {boundRoll?.batchNo ? ` · 缸:${boundRoll.batchNo}` : ''}
+                {boundRoll?.color ? ` · ${boundRoll.color}` : ''}
+              </div>
+              <div>待补缺口提示</div>
+              <div>
+                方案产出 {activeScheme.placedCount}/{activeScheme.requestedCount} · 需求族剩余待排{' '}
+                {taskOpenMap[activeScheme.taskId] ?? 0}
+              </div>
+            </div>
+            <div className="form" style={{ gridTemplateColumns: '90px 1fr', padding: '4px 0 14px' }}>
+              <label htmlFor="rep-operator">经办人</label>
+              <input
+                id="rep-operator"
+                className="field"
+                required
+                value={replenishOperator}
+                onChange={(e) => setReplenishOperator(e.target.value)}
+              />
+              <label htmlFor="rep-reason">补片原因</label>
+              <input
+                id="rep-reason"
+                className="field"
+                required
+                value={replenishReason}
+                onChange={(e) => setReplenishReason(e.target.value)}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => setShowReplenishModal(false)}
+              >
+                取消
+              </button>
+              <button type="submit" className="btn pri" disabled={busy}>
+                {busy ? '正在生成…' : '确认生成同缸补片单'}
+              </button>
+            </div>
+          </form>
+        )}
+      </ModalDialog>
+      {/* 冲销完工报工弹窗 */}
+      <ModalDialog
+        open={showReverseModal}
+        title="冲销完工报工（回滚母卷消耗与订单完成量）"
+        onClose={() => {
+          if (!busy) {
+            setShowReverseModal(false);
+            setReverseError('');
+          }
+        }}
+        maxWidth={540}
+      >
+        {activeScheme && (
+          <form onSubmit={handleReverseScheme}>
+            <div
+              role="alert"
+              style={{
+                borderLeft: '3px solid var(--err, #dc2626)',
+                background: 'rgba(220, 38, 38, 0.08)',
+                padding: '8px 10px',
+                borderRadius: 4,
+                fontSize: 12,
+                color: 'var(--err, #991b1b)',
+                marginBottom: 10
+              }}
+            >
+              <strong>冲销边界说明：</strong>
+              冲销后将恢复本次报工消耗的母卷/料头用量、作废本次派生余料、回滚对应订单完成量，并将方案状态置为{' '}
+              <b>已冲销释放（REVERSED）</b>
+              。若报工已存在复检处置、材料已有后续盘点/后续报工，或派生料头已流转，服务端将拒绝冲销。
+            </div>
+            <div className="kv num" style={{ padding: '4px 0 10px' }}>
+              <div>排程方案号</div>
+              <div>{activeScheme.id}</div>
+              <div>关联报工单号</div>
+              <div>{schemeReversal.targetPlanIds.join('、') || '—'}</div>
+              <div>领用母卷 / 料头</div>
+              <div>
+                {activeScheme.remnantId
+                  ? `料头 ${activeScheme.remnantId}`
+                  : activeScheme.rollId || '—'}
+              </div>
+              <div>已报产出</div>
+              <div>
+                {activeScheme.placedCount}{' '}
+                {activeScheme.dimension === 'SLITTING_1D' ? '卷' : '件'} · 占长{' '}
+                {fmtN(activeScheme.occupiedLengthMm, 1)} mm
+              </div>
+            </div>
+            <div className="form" style={{ gridTemplateColumns: '90px 1fr', padding: '4px 0 8px' }}>
+              <label htmlFor="scheme-reverse-reason">冲销原因</label>
+              <div>
+                <textarea
+                  id="scheme-reverse-reason"
+                  className="field"
+                  rows={3}
+                  required
+                  maxLength={MAX_REVERSAL_REASON_LENGTH}
+                  placeholder="必填（1–500字），如：录入实切长度有误或错绑母卷需回滚重报"
+                  value={reverseReason}
+                  onChange={(e) => {
+                    setReverseReason(e.target.value);
+                    if (reverseError) setReverseError('');
+                  }}
+                  style={{ width: '100%', resize: 'vertical', minHeight: 68 }}
+                />
+                <div
+                  className="muted num"
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    fontSize: 11,
+                    marginTop: 4
+                  }}
+                >
+                  <span>冲销操作将写入不可变过账流水（REPORT_REVERSE）</span>
+                  <span>
+                    {reverseReason.trim().length} / {MAX_REVERSAL_REASON_LENGTH}
+                  </span>
+                </div>
+              </div>
+            </div>
+            {reverseError && (
+              <div
+                role="alert"
+                style={{
+                  marginBottom: 10,
+                  padding: '6px 10px',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  background: 'rgba(220, 38, 38, 0.08)',
+                  color: 'var(--err, #b91c1c)'
+                }}
+              >
+                {reverseError}
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => {
+                  setShowReverseModal(false);
+                  setReverseError('');
+                }}
+              >
+                取消
+              </button>
+              <button type="submit" className="btn pri" disabled={busy}>
+                {busy ? '正在冲销…' : '确认冲销报工'}
+              </button>
+            </div>
+          </form>
         )}
       </ModalDialog>
     </div>

@@ -58,11 +58,18 @@ class PackingSolverItemTypeTests {
         assertEquals(List.of(false, false, true, false), pieces.stream().map(PlacedPiece::isRotated).toList());
     }
 
+    private static void requireOrAssumeNativeSolver(boolean available, String reason) {
+        if (!available && Boolean.parseBoolean(System.getProperty("cutdemo.requireNativeSolvers", "false"))) {
+            fail("已启用 -Dcutdemo.requireNativeSolvers=true，但原生求解器不可用：" + reason);
+        }
+        org.junit.jupiter.api.Assumptions.assumeTrue(available, reason);
+    }
+
     @Test void nativeSolverPlacesEveryCopyWithUniqueIdsThatPassValidation() {
         PackingSolverService engine = new PackingSolverService();
         ReflectionTestUtils.setField(engine, "solverPath", System.getenv().getOrDefault(
                 "PACKINGSOLVER_PATH", "data/solver/packingsolver_rectangleguillotine.exe"));
-        org.junit.jupiter.api.Assumptions.assumeTrue(engine.isAvailable(), "Native solver is required for this regression");
+        requireOrAssumeNativeSolver(engine.isAvailable(), "Native solver is required for this regression");
         var result = new SolverFactory(List.of(engine)).solve(new NestingProblem("1", "mm",
                 new NestingProblem.Material("sheet", NestingProblem.Shape.rectangle(2000, 1500), List.of(), false),
                 List.of(new NestingProblem.Part(1, "方片", NestingProblem.Shape.rectangle(500, 500), 6, false),

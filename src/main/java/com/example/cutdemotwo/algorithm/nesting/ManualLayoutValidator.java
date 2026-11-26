@@ -1,5 +1,6 @@
 package com.example.cutdemotwo.algorithm.nesting;
 
+import com.example.cutdemotwo.algorithm.geometry.EngineGeometry;
 import com.example.cutdemotwo.algorithm.geometry.NestingValidation;
 
 import com.example.cutdemotwo.contracts.geometry.CutStep;
@@ -10,7 +11,7 @@ import java.util.*;
 
 /** Rebuilds an executable guillotine subdivision without moving the supplied pieces. No inventory state. */
 public final class ManualLayoutValidator {
-    private static final double EPS = .001;
+    private static final double EPS = EngineGeometry.COORDINATE_EPS_MM;
     private record Region(double x, double y, double w, double h, List<PlacedPiece> pieces, boolean first) {}
     private record Split(boolean horizontal, double position) {}
 

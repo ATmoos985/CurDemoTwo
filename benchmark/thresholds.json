@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "description": "排料基准质量与耗时红线门禁配置（minUtilization 为利用率百分比下限，maxElapsedMs 为最大耗时毫秒上限，minPlacedRatio 为可选排入比例下限）",
+  "problems": {
+    "guillotine": {
+      "minUtilization": 50.0,
+      "maxElapsedMs": 5000,
+      "minPlacedRatio": 1.0
+    },
+    "guillotine-java": {
+      "minUtilization": 50.0,
+      "maxElapsedMs": 5000,
+      "minPlacedRatio": 1.0
+    },
+    "contour14": {
+      "minUtilization": 40.0,
+      "maxElapsedMs": 6000
+    },
+    "contour14-native": {
+      "minUtilization": 40.0,
+      "maxElapsedMs": 6000
+    },
+    "contour200": {
+      "minUtilization": 45.0,
+      "maxElapsedMs": 25000
+    },
+    "scenario4": {
+      "minUtilization": 65.0,
+      "maxElapsedMs": 6000
+    },
+    "scenario4-java": {
+      "minUtilization": 60.0,
+      "maxElapsedMs": 6000
+    },
+    "synthetic2000": {
+      "minUtilization": 75.0,
+      "maxElapsedMs": 25000
+    },
+    "synthetic10000": {
+      "minUtilization": 70.0,
+      "maxElapsedMs": 25000
+    }
+  }
+}

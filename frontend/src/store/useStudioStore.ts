@@ -3,10 +3,10 @@ import {
   DXF_GARMENT_STYLES,
   parseDxfGarmentText,
   mirrorVerticesX
-} from '@static/js/nesting/dxf-garment-samples.js';
-import { polygon, rectangle } from '@static/js/canvas/nesting-scene.js';
-import { LINEAR_SCENARIOS } from '@static/js/linear/linear-scenarios.js';
-import { requestJSON } from '@static/app/js/util.js';
+} from '../lib/nesting/dxf-garment-samples.js';
+import { polygon, rectangle } from '../lib/canvas/nesting-scene.js';
+import { LINEAR_SCENARIOS } from '../lib/domain/linear-scenarios.js';
+import { requestJSON } from '../lib/core/util.js';
 import {
   SlittingProfile,
   SlittingWidthMode,
@@ -14,6 +14,7 @@ import {
   loadStudioSettings,
   persistStudioSettings
 } from './studioSettings';
+import type { WorkbenchDraftPayload } from './workbenchDraft';
 
 function finiteOr(val: unknown, fallback: number): number {
   if (val == null || val === '') return fallback;
@@ -26,6 +27,7 @@ export interface ShapeGeometry {
   width: number;
   height: number;
   vertices?: { x: number; y: number }[];
+  holes?: { x: number; y: number }[][];
 }
 
 export interface DemandItem {
@@ -42,6 +44,9 @@ export interface DemandItem {
   shape?: ShapeGeometry;
   clusterId?: string;
   clusterName?: string;
+  sourceTaskId?: string;
+  sourceTaskName?: string;
+  sourceLineId?: number;
   sizeLabel?: string;
   fabric?: string;
   surfaceTreatment?: string;
@@ -89,6 +94,7 @@ export interface StrategyJobRun {
   jobId?: string;
   state: 'IDLE' | 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'TIMED_OUT' | 'FAILED' | 'CANCELLED';
   phaseText: string;
+  errorDetail?: string;
   elapsedMs?: number;
   occupiedLengthMm?: number;
   utilizationPct?: number;
@@ -123,6 +129,8 @@ export interface SavedScheme2D {
   demands: DemandItem[];
   request: any;
   result: any;
+  layoutDirty?: boolean;
+  layoutValidationErrors?: string[];
   dispatchedTaskId?: string;
   confirmedSchemeId?: string;
 }
@@ -136,6 +144,9 @@ export interface SlittingOrderLine {
   orderedQty?: number;
   plannedQty?: number;
   completedQty?: number;
+  sourceTaskId?: string;
+  sourceTaskName?: string;
+  sourceLineId?: number;
   surfaceTreatment?: string;
 }
 
@@ -151,7 +162,12 @@ export interface SlittingSchemeRun {
   missingRolls: number;
   overproducedRolls: number;
   avgUtilizationPct: number;
+  /** 后端换刀顺序优化器返回的预计换刀次数（未返回时为 null/undefined）。 */
+  estimatedKnifeChanges?: number | null;
+  /** 后端换刀顺序优化器返回的较原序节省换刀次数（未返回时为 null/undefined）。 */
+  knifeChangesSaved?: number | null;
   elapsedMs?: number;
+  errorMessage?: string;
   patterns: {
     id: string;
     lengthMm: number;
@@ -159,7 +175,8 @@ export interface SlittingSchemeRun {
     stations: { widthMm: number; countPerRepetition: number }[];
     usedWidthMm: number;
     spareWidthMm: number;
-    allocations?: { orderId: string; count: number }[];
+    surfaceTreatment?: string;
+    allocations?: { orderId: string; quantity: number }[];
   }[];
   fulfillment: {
     orderId: string;
@@ -188,6 +205,15 @@ export interface DemandFamilySummary {
   openTotal: number;
   schemeCount: number;
   status: string;
+  dueDate?: string;
+  priority?: string;
+  customerName?: string;
+  kittingGroup?: string;
+  requiredBatchNo?: string;
+  requiredColor?: string;
+  strictBatchMatch?: boolean;
+  machineId?: string;
+  shiftTeam?: string;
   process?: any;
   slitting?: any;
   lines: {
@@ -579,6 +605,11 @@ export interface WorkbenchLaunchPreset {
   slitFixedLengthMm?: number;
   slitRollId?: string;
   slitOverCap?: number;
+  slitMaxKnives?: number;
+  slitMinBladeSpacingMm?: number;
+  slitKerfMm?: number;
+  slitForbiddenNarrowEdgeMinMm?: number;
+  slitForbiddenNarrowEdgeMaxMm?: number;
   scenario1D?: Scenario1DType;
 }
 
@@ -596,6 +627,8 @@ interface StudioState {
   canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
   canvasWidthMm: number;
   canvasLengthMm: number;
+  /** 连续开卷可调起切点（mm），null 表示自动跟随实卷已切终点 usedLength */
+  windowStartY2D: number | null;
   pieceGapMm: number;
   trimStartMm: number;
   selectedRollId: string;
@@ -604,6 +637,7 @@ interface StudioState {
   loadedTaskId: string | null;
   loadedTaskName: string | null;
   loadedExternalRef: string | null;
+  mergedSourceTaskIds: string[];
   activeDemands2D: DemandItem[];
   selectedStrategies2D: string[];
   strategyRuns2D: StrategyJobRun[];
@@ -621,12 +655,19 @@ interface StudioState {
   slitMaxWidthMm: number;
   slitWidthStepMm: number;
   slitOverCap: number;
+  /** 一维可选刀架物理硬约束（0 表示不限制，仅正值/有效禁区透传后端 SLITTING_1D） */
+  slitMaxKnives: number;
+  slitMinBladeSpacingMm: number;
+  slitKerfMm: number;
+  slitForbiddenNarrowEdgeMinMm: number;
+  slitForbiddenNarrowEdgeMaxMm: number;
   slitFixedLengthMm: number;
   slitAvoidDefects: boolean;
   slitRollId: string;
   slitMaterialModel: string;
   slitLoadedTaskId: string | null;
   slitLoadedTaskName: string | null;
+  slitMergedSourceTaskIds: string[];
   slitOrders: SlittingOrderLine[];
   slitSchemes: SlittingSchemeRun[];
   activeSlitSchemeId: string | null;
@@ -648,6 +689,7 @@ interface StudioState {
     preset?: WorkbenchLaunchPreset
   ) => void;
   syncDemandFamilyProgress: (family: DemandFamilySummary) => void;
+  syncMergedDemandFamiliesProgress: (families: DemandFamilySummary[]) => void;
   loadDemandFamiliesMergedIntoWorkbench: (families: DemandFamilySummary[]) => void;
 
   setCanvasSpec: (spec: Partial<{
@@ -655,6 +697,7 @@ interface StudioState {
     canvasMode: 'FREE_CANVAS' | 'STOCK_ROLL' | 'REMNANT';
     canvasWidthMm: number;
     canvasLengthMm: number;
+    windowStartY2D: number | null;
     pieceGapMm: number;
     trimStartMm: number;
     selectedRollId: string;
@@ -664,13 +707,17 @@ interface StudioState {
     loadedTaskName: string | null;
     loadedExternalRef: string | null;
   }>) => void;
+  restoreWorkbenchDraft: (draft: WorkbenchDraftPayload) => void;
   setActiveDemands2D: (demands: DemandItem[]) => void;
   updateDemand2D: (id: number, patch: Partial<DemandItem>) => void;
   removeDemand2D: (id: number) => void;
   addBlankDemand2D: () => void;
   toggleStrategy2D: (strategyId: string) => void;
   setStrategyRuns2D: (runs: StrategyJobRun[] | ((prev: StrategyJobRun[]) => StrategyJobRun[])) => void;
-  addSchemes2D: (newSchemes: SavedScheme2D[]) => void;
+  addSchemes2D: (
+    newSchemes: SavedScheme2D[],
+    options?: { selectIfBetter?: boolean; batchIds?: ReadonlySet<string> }
+  ) => void;
   removeScheme2D: (id: string) => void;
   clearSchemes2D: () => void;
   setActiveScheme2D: (id: string | null) => void;
@@ -714,6 +761,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   canvasMode: 'FREE_CANVAS',
   canvasWidthMm: defaultCluster2D.defaultWidthMm,
   canvasLengthMm: defaultCluster2D.defaultLengthMm,
+  windowStartY2D: null,
   pieceGapMm: initialSettings.pieceGapMm,
   trimStartMm: initialSettings.trimStartMm,
   selectedRollId: 'ROLL-2026-0920',
@@ -722,6 +770,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   loadedTaskId: null,
   loadedTaskName: null,
   loadedExternalRef: null,
+  mergedSourceTaskIds: [],
   activeDemands2D: defaultDemands2D,
   selectedStrategies2D: [...initialSettings.enabledStrategies2D],
   strategyRuns2D: [],
@@ -738,12 +787,18 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   slitMaxWidthMm: 4400,
   slitWidthStepMm: 10,
   slitOverCap: 30,
+  slitMaxKnives: 0,
+  slitMinBladeSpacingMm: 0,
+  slitKerfMm: 0,
+  slitForbiddenNarrowEdgeMinMm: 0,
+  slitForbiddenNarrowEdgeMaxMm: 0,
   slitFixedLengthMm: 2000,
   slitAvoidDefects: false,
   slitRollId: '',
   slitMaterialModel: defaultSlitCluster.materialModel,
   slitLoadedTaskId: null,
   slitLoadedTaskName: null,
+  slitMergedSourceTaskIds: [],
   slitOrders: defaultSlitCluster.pieces.map((p, idx) => ({
     id: String(idx + 1),
     name: p.name,
@@ -930,6 +985,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       loadedTaskId: append ? st.loadedTaskId : null,
       loadedTaskName: append ? st.loadedTaskName : null,
       loadedExternalRef: append ? st.loadedExternalRef : null,
+      mergedSourceTaskIds: append ? st.mergedSourceTaskIds : [],
       activeDemands2D: append ? [...st.activeDemands2D, ...expanded] : expanded,
       canvasWidthMm: append ? st.canvasWidthMm : cluster.defaultWidthMm,
       canvasLengthMm: append ? st.canvasLengthMm : cluster.defaultLengthMm,
@@ -974,6 +1030,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         loadedTaskId: null,
         loadedTaskName: null,
         loadedExternalRef: null,
+        mergedSourceTaskIds: [],
         activeDemands2D: list,
         ...(firstCluster && !append
           ? {
@@ -1014,6 +1071,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         activeDimension: '1D',
         slitLoadedTaskId: family.id,
         slitLoadedTaskName: family.name,
+        slitMergedSourceTaskIds: [],
         slitMaterialModel: family.materialModel,
         slitMaterialMode: preset?.slitMaterialMode ?? 'VIRTUAL_ROLL',
         slitWidthMode: widthMode,
@@ -1027,6 +1085,20 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         slitMaxWidthMm: maxW,
         slitWidthStepMm: stepW,
         slitOverCap: overCap,
+        slitMaxKnives: Math.max(0, preset?.slitMaxKnives ?? finiteOr(sp.maxKnives, 0)),
+        slitMinBladeSpacingMm: Math.max(
+          0,
+          preset?.slitMinBladeSpacingMm ?? finiteOr(sp.minBladeSpacingMm, 0)
+        ),
+        slitKerfMm: Math.max(0, preset?.slitKerfMm ?? finiteOr(sp.kerfMm, 0)),
+        slitForbiddenNarrowEdgeMinMm: Math.max(
+          0,
+          preset?.slitForbiddenNarrowEdgeMinMm ?? finiteOr(sp.forbiddenNarrowEdgeMinMm, 0)
+        ),
+        slitForbiddenNarrowEdgeMaxMm: Math.max(
+          0,
+          preset?.slitForbiddenNarrowEdgeMaxMm ?? finiteOr(sp.forbiddenNarrowEdgeMaxMm, 0)
+        ),
         slitFixedLengthMm: fixedLen,
         ...(preset?.scenario1D ? { scenario1D: preset.scenario1D } : {}),
         slitOrders: allLines.map((l) => ({
@@ -1038,6 +1110,9 @@ export const useStudioStore = create<StudioState>((set, get) => ({
           orderedQty: l.orderedQty,
           plannedQty: l.plannedQty,
           completedQty: l.completedQty,
+          sourceTaskId: family.id,
+          sourceTaskName: family.name,
+          sourceLineId: l.id,
           surfaceTreatment: l.surfaceTreatment
         })),
         slitSchemes: [],
@@ -1057,6 +1132,9 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         allowHalfTurn: Boolean(l.allowHalfTurn),
         shape: l.shape,
         clusterName: family.name,
+        sourceTaskId: family.id,
+        sourceTaskName: family.name,
+        sourceLineId: l.id,
         sizeLabel: l.sizeLabel
       }));
       const targetW = preset?.canvasWidthMm || get().canvasWidthMm || 1650;
@@ -1070,6 +1148,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         loadedTaskId: family.id,
         loadedTaskName: family.name,
         loadedExternalRef: family.externalRef || null,
+        mergedSourceTaskIds: [],
         materialModel2D: family.materialModel,
         canvasMode: preset?.canvasMode ?? 'FREE_CANVAS',
         canvasWidthMm: targetW,
@@ -1097,6 +1176,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       set({
         slitLoadedTaskId: family.id,
         slitLoadedTaskName: family.name,
+        slitMergedSourceTaskIds: [],
         slitOrders: family.lines.map((l) => ({
           id: String(l.id),
           name: l.name,
@@ -1106,6 +1186,9 @@ export const useStudioStore = create<StudioState>((set, get) => ({
           orderedQty: l.orderedQty,
           plannedQty: l.plannedQty,
           completedQty: l.completedQty,
+          sourceTaskId: family.id,
+          sourceTaskName: family.name,
+          sourceLineId: l.id,
           surfaceTreatment: l.surfaceTreatment
         }))
       });
@@ -1114,6 +1197,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         loadedTaskId: family.id,
         loadedTaskName: family.name,
         loadedExternalRef: family.externalRef || null,
+        mergedSourceTaskIds: [],
         activeDemands2D: family.lines.map((l) => ({
           id: l.id,
           name: l.name,
@@ -1127,10 +1211,52 @@ export const useStudioStore = create<StudioState>((set, get) => ({
           allowHalfTurn: Boolean(l.allowHalfTurn),
           shape: l.shape,
           clusterName: family.name,
+          sourceTaskId: family.id,
+          sourceTaskName: family.name,
+          sourceLineId: l.id,
           sizeLabel: l.sizeLabel
         }))
       });
     }
+  },
+
+  syncMergedDemandFamiliesProgress: (families) => {
+    const familyById = new Map<string, DemandFamilySummary>();
+    for (const f of families) {
+      familyById.set(f.id, f);
+    }
+    set((st) => {
+      const nextDemands2D = st.activeDemands2D.map((d) => {
+        if (!d.sourceTaskId || d.sourceLineId == null) return d;
+        const fam = familyById.get(d.sourceTaskId);
+        const ln = fam?.lines.find((l) => l.id === d.sourceLineId);
+        if (!ln) return d;
+        return {
+          ...d,
+          quantity: ln.openQty,
+          orderedQty: ln.orderedQty,
+          plannedQty: ln.plannedQty,
+          completedQty: ln.completedQty
+        };
+      });
+      const nextSlitOrders = st.slitOrders.map((o) => {
+        if (!o.sourceTaskId || o.sourceLineId == null) return o;
+        const fam = familyById.get(o.sourceTaskId);
+        const ln = fam?.lines.find((l) => l.id === o.sourceLineId);
+        if (!ln) return o;
+        return {
+          ...o,
+          quantity: ln.openQty,
+          orderedQty: ln.orderedQty,
+          plannedQty: ln.plannedQty,
+          completedQty: ln.completedQty
+        };
+      });
+      return {
+        activeDemands2D: nextDemands2D,
+        slitOrders: nextSlitOrders
+      };
+    });
   },
 
   loadDemandFamiliesMergedIntoWorkbench: (families) => {
@@ -1143,19 +1269,29 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     if (first.dimension === 'SLITTING_1D') {
       let nextId = 1;
       const orders: SlittingOrderLine[] = [];
+      const includedIds: string[] = [];
       for (const fam of families) {
         if (fam.dimension !== 'SLITTING_1D') continue;
+        let hasOpen = false;
         for (const l of fam.lines) {
           if (l.openQty <= 0) continue;
+          hasOpen = true;
           orders.push({
             id: String(nextId++),
             name: `${fam.name} · ${l.name}`,
             widthMm: l.width,
             lengthMm: l.length,
             quantity: l.openQty,
+            orderedQty: l.orderedQty,
+            plannedQty: l.plannedQty,
+            completedQty: l.completedQty,
+            sourceTaskId: fam.id,
+            sourceTaskName: fam.name,
+            sourceLineId: l.id,
             surfaceTreatment: l.surfaceTreatment
           });
         }
+        if (hasOpen) includedIds.push(fam.id);
       }
       const sp = first.slitting || {};
       const maxW = finiteOr(sp.maxWidth, 4400);
@@ -1166,6 +1302,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         activeDimension: '1D',
         slitLoadedTaskId: null,
         slitLoadedTaskName: `多族合排 (${families.length} 族 · ${first.materialModel})`,
+        slitMergedSourceTaskIds: includedIds,
         slitMaterialModel: first.materialModel,
         slitWidthMode: minW === maxW ? 'FIXED' : 'FLEXIBLE',
         slitMotherWidthMm: maxW + lt + rt,
@@ -1183,29 +1320,40 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     } else {
       let nextId = 1;
       const demands: DemandItem[] = [];
+      const includedIds: string[] = [];
       for (const fam of families) {
         if (fam.dimension === 'SLITTING_1D') continue;
+        let hasOpen = false;
         for (const l of fam.lines) {
           if (l.openQty <= 0) continue;
+          hasOpen = true;
           demands.push({
             id: nextId++,
             name: `${fam.name} · ${l.name}`,
             width: l.width,
             length: l.length,
             quantity: l.openQty,
+            orderedQty: l.orderedQty,
+            plannedQty: l.plannedQty,
+            completedQty: l.completedQty,
             allowRotation: Boolean(l.allowRotation),
             allowHalfTurn: Boolean(l.allowHalfTurn),
             shape: l.shape,
             clusterName: fam.name,
+            sourceTaskId: fam.id,
+            sourceTaskName: fam.name,
+            sourceLineId: l.id,
             sizeLabel: l.sizeLabel
           });
         }
+        if (hasOpen) includedIds.push(fam.id);
       }
       set({
         activeDimension: '2D',
         loadedTaskId: null,
         loadedTaskName: `多族合排 (${families.length} 族 · ${first.materialModel})`,
         loadedExternalRef: families.map((f) => f.externalRef || f.name).join(' + '),
+        mergedSourceTaskIds: includedIds,
         materialModel2D: first.materialModel,
         activeDemands2D: demands,
         schemes2D: [],
@@ -1215,6 +1363,55 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   },
 
   setCanvasSpec: (spec) => set((st) => ({ ...st, ...spec })),
+
+  restoreWorkbenchDraft: (draft) =>
+    set((st) => ({
+      activeDimension: draft.activeDimension || st.activeDimension,
+      scenario2D: draft.scenario2D || st.scenario2D,
+      multiWidthsText2D: draft.multiWidthsText2D ?? st.multiWidthsText2D,
+      canvasMode: draft.canvasMode || st.canvasMode,
+      canvasWidthMm: Number(draft.canvasWidthMm) > 0 ? draft.canvasWidthMm : st.canvasWidthMm,
+      canvasLengthMm: Number(draft.canvasLengthMm) > 0 ? draft.canvasLengthMm : st.canvasLengthMm,
+      windowStartY2D: draft.windowStartY2D ?? null,
+      pieceGapMm: Number.isFinite(draft.pieceGapMm) ? draft.pieceGapMm : st.pieceGapMm,
+      trimStartMm: Number.isFinite(draft.trimStartMm) ? draft.trimStartMm : st.trimStartMm,
+      selectedRollId: draft.selectedRollId ?? st.selectedRollId,
+      selectedRemnantId: draft.selectedRemnantId ?? st.selectedRemnantId,
+      materialModel2D: draft.materialModel2D || st.materialModel2D,
+      activeDemands2D:
+        Array.isArray(draft.activeDemands2D) && draft.activeDemands2D.length > 0
+          ? draft.activeDemands2D
+          : st.activeDemands2D,
+      schemes2D: Array.isArray(draft.unconfirmedSchemes2D)
+        ? draft.unconfirmedSchemes2D
+        : st.schemes2D,
+      activeSchemeId2D: draft.activeSchemeId2D ?? draft.unconfirmedSchemes2D?.[0]?.id ?? null,
+      scenario1D: draft.scenario1D || st.scenario1D,
+      slitMaterialMode: draft.slitMaterialMode || st.slitMaterialMode,
+      slitWidthMode: draft.slitWidthMode || st.slitWidthMode,
+      slitProfile: draft.slitProfile || st.slitProfile,
+      slitMotherWidthMm:
+        Number(draft.slitMotherWidthMm) > 0 ? draft.slitMotherWidthMm : st.slitMotherWidthMm,
+      slitLeftTrimMm: Number.isFinite(draft.slitLeftTrimMm) ? draft.slitLeftTrimMm : st.slitLeftTrimMm,
+      slitRightTrimMm: Number.isFinite(draft.slitRightTrimMm)
+        ? draft.slitRightTrimMm
+        : st.slitRightTrimMm,
+      slitMinWidthMm: Number(draft.slitMinWidthMm) > 0 ? draft.slitMinWidthMm : st.slitMinWidthMm,
+      slitMaxWidthMm: Number(draft.slitMaxWidthMm) > 0 ? draft.slitMaxWidthMm : st.slitMaxWidthMm,
+      slitWidthStepMm:
+        Number(draft.slitWidthStepMm) > 0 ? draft.slitWidthStepMm : st.slitWidthStepMm,
+      slitOverCap: Number.isFinite(draft.slitOverCap) ? draft.slitOverCap : st.slitOverCap,
+      slitFixedLengthMm:
+        Number(draft.slitFixedLengthMm) > 0 ? draft.slitFixedLengthMm : st.slitFixedLengthMm,
+      slitAvoidDefects:
+        typeof draft.slitAvoidDefects === 'boolean' ? draft.slitAvoidDefects : st.slitAvoidDefects,
+      slitRollId: draft.slitRollId ?? st.slitRollId,
+      slitMaterialModel: draft.slitMaterialModel || st.slitMaterialModel,
+      slitOrders:
+        Array.isArray(draft.slitOrders) && draft.slitOrders.length > 0
+          ? draft.slitOrders
+          : st.slitOrders
+    })),
 
   setActiveDemands2D: (demands) => set({ activeDemands2D: demands }),
 
@@ -1269,16 +1466,31 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       strategyRuns2D: typeof runs === 'function' ? runs(st.strategyRuns2D) : runs
     })),
 
-  addSchemes2D: (newSchemes) =>
+  addSchemes2D: (newSchemes, options) =>
     set((st) => {
       if (!newSchemes.length) return st;
       const merged = [...newSchemes, ...st.schemes2D];
       const completeOnes = newSchemes.filter((x) => x.complete);
       const pool = completeOnes.length ? completeOnes : newSchemes;
-      const best = [...pool].sort((a, b) => b.utilizationPct - a.utilizationPct)[0];
+      const bestNew = [...pool].sort((a, b) => b.utilizationPct - a.utilizationPct)[0];
+
+      let nextActiveId = bestNew.id;
+      if (options?.selectIfBetter && st.activeSchemeId2D) {
+        const cur = st.schemes2D.find((s) => s.id === st.activeSchemeId2D);
+        const curInBatch = cur && (!options.batchIds || options.batchIds.has(cur.id));
+        if (cur && curInBatch) {
+          const curBetter =
+            (cur.complete && !bestNew.complete) ||
+            (cur.complete === bestNew.complete && cur.utilizationPct >= bestNew.utilizationPct);
+          if (curBetter) {
+            nextActiveId = cur.id;
+          }
+        }
+      }
+
       return {
         schemes2D: merged,
-        activeSchemeId2D: best.id
+        activeSchemeId2D: nextActiveId
       };
     }),
 
@@ -1334,6 +1546,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       activeDimension: '1D',
       slitLoadedTaskId: append ? st.slitLoadedTaskId : null,
       slitLoadedTaskName: append ? st.slitLoadedTaskName : null,
+      slitMergedSourceTaskIds: append ? st.slitMergedSourceTaskIds : [],
       slitMaterialModel: append ? st.slitMaterialModel : cluster.materialModel,
       ...(append
         ? { slitOrders: [...st.slitOrders, ...orders] }
@@ -1384,13 +1597,24 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     })),
 
   setSlitSchemes: (schemes) =>
-    set({
-      slitSchemes: schemes,
-      activeSlitSchemeId:
-        schemes.find((s) => s.state === 'SUCCEEDED' && s.strategyId !== 'BASELINE')?.id ||
-        schemes.find((s) => s.state === 'SUCCEEDED')?.id ||
-        schemes[0]?.id ||
-        null
+    set((st) => {
+      const keepActive =
+        st.activeSlitSchemeId != null &&
+        schemes.some(
+          (s) =>
+            s.id === st.activeSlitSchemeId &&
+            s.state === 'SUCCEEDED' &&
+            s.strategyId !== 'BASELINE'
+        );
+      return {
+        slitSchemes: schemes,
+        activeSlitSchemeId: keepActive
+          ? st.activeSlitSchemeId
+          : schemes.find((s) => s.state === 'SUCCEEDED' && s.strategyId !== 'BASELINE')?.id ||
+            schemes.find((s) => s.state === 'SUCCEEDED')?.id ||
+            schemes[0]?.id ||
+            null
+      };
     }),
 
   setActiveSlitScheme: (id) => set({ activeSlitSchemeId: id }),

@@ -36,6 +36,12 @@ class OptimizationJdbcApiTests {
         var capabilities=json.readTree(get("/api/v2/capabilities").body());
         assertTrue(capabilities.path("features").path("distributedWorkers").asBoolean());
         assertEquals("jdbc-leases",capabilities.path("features").path("storage").asText());
+        assertEquals(768,capabilities.path("slittingEngine").path("maxHeapMiB").asInt());
+        assertEquals(180,capabilities.path("slittingEngine").path("maxTimeLimitSeconds").asInt());
+        assertEquals(60,capabilities.path("limits").path("maxTimeLimitSeconds").asInt());
+        assertEquals(60,capabilities.path("limits").path("maxNestingTimeLimitSeconds").asInt());
+        assertEquals(180,capabilities.path("limits").path("maxSlittingTimeLimitSeconds").asInt());
+        assertEquals(168,capabilities.path("limits").path("terminalRetentionHours").asInt());
         var example=get("/api-v2/example-request.json");
         var accepted=http.send(HttpRequest.newBuilder(URI.create("http://localhost:"+port+"/api/v2/optimization-jobs"))
                 .header("Content-Type","application/json").header("Idempotency-Key",UUID.randomUUID().toString())

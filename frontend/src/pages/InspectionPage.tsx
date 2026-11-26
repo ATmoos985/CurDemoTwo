@@ -1,17 +1,23 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { requestJSON, fmtM, fmtN, toast } from '@static/app/js/util.js';
+import { requestJSON, fmtM, fmtN, toast, createUuid } from '../lib/core/util.js';
 import {
   validateDefect,
   advance,
   round
-} from '@static/js/inspection/inspection-model.js';
-import { CadCanvasView } from '../components/CadCanvasView';
-import { buildInspectionScene } from '@static/app/js/model/roll-scene.js';
+} from '../lib/domain/inspection-model.js';
+import {
+  WorkbenchBoardCanvas,
+  WorkbenchBoardHandle,
+  BoardDefect,
+  BoardZone
+} from '../components/WorkbenchBoardCanvas';
+import { NumberInput } from '../components/ui/NumberInput';
 import {
   SegmentedControl,
   CodeBadge,
   SegmentedOption
 } from '../components/ui/MagpiePrimitives';
+import { ModalDialog } from '../components/ModalDialog';
 
 const DEFECT_TYPES: [string, string][] = [
   ['STAIN', '污渍 / 斑点'],
@@ -78,6 +84,10 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
   const [saving, setSaving] = useState<boolean>(false);
   const [pointerText, setPointerText] = useState<string>('距右 / 距卷头 · mm');
   const [voidReason, setVoidReason] = useState<string>('');
+  const [inspectModalAction, setInspectModalAction] = useState<'PASSED' | 'FAILED' | null>(null);
+  const [inspectorName, setInspectorName] = useState<string>('');
+  const [inspectRemarks, setInspectRemarks] = useState<string>('');
+  const [inspectSubmitting, setInspectSubmitting] = useState<boolean>(false);
 
   // Form inputs for manual entry / editing
   const [fRight, setFRight] = useState<string | number>(0);
@@ -87,7 +97,7 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
   const [fType, setFType] = useState<string>('STAIN');
   const [fMargin, setFMargin] = useState<string | number>(20);
 
-  const canvasRef = useRef<any>(null);
+  const canvasRef = useRef<WorkbenchBoardHandle | null>(null);
   const stateRef = useRef({
     roll,
     pending,
@@ -276,11 +286,57 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
     };
   }, [rollParam]);
 
-  const inspectionScene = useMemo(() => {
-    if (!roll) return null;
+  // 静态疵点与已用区段独立 memo（绝不依赖 10Hz 变化的 pos，确保跑布期间零节点销毁重建）
+  const inspectionDefects: BoardDefect[] = useMemo(() => {
+    if (!roll) return [];
+    return allDefects.map((d: any) => ({
+      id: defectKey(d),
+      x: Number(d.x) || 0,
+      y: Number(d.y) || 0,
+      w: Math.max(0.5, Number(d.w) || 10),
+      h: Math.max(0.5, Number(d.h) || 10),
+      margin: Number(d.margin ?? 0),
+      label: d.typeName || d.defectType || '疵点',
+      editable: !d.saved,
+      fresh: !d.saved
+    }));
+  }, [roll, allDefects]);
+
+  const inspectionZones: BoardZone[] = useMemo(() => {
+    if (!roll) return [];
+    const usedLen = Number(roll.usedLength || 0);
+    const totalLen = Math.max(10, Number(roll.totalLength || 3000));
+    if (usedLen <= 0) return [];
+    return [
+      {
+        id: 'roll-used-band',
+        startY: 0,
+        lengthMm: Math.min(usedLen, totalLen),
+        kind: 'used',
+        label: `已使用 ${(usedLen / 1000).toFixed(2)} m`
+      }
+    ];
+  }, [roll?.rollId, roll?.usedLength, roll?.totalLength]);
+
+  const emptyDemands = useMemo(() => [], []);
+  const emptyPlaced = useMemo(() => [], []);
+  const selectedDefectKey = useMemo(() => {
     const curD = sel != null ? allDefects[sel] : null;
-    return buildInspectionScene(roll, pending, pos, curD ? defectKey(curD) : null);
-  }, [roll, pending, pos, sel, allDefects]);
+    return curD ? String(defectKey(curD)) : null;
+  }, [sel, allDefects]);
+
+  // 跟随验布线模式：仅在非全卷视图下平滑移动视口，不触发静态底图/疵点层重建
+  const prevOverviewRef = useRef(overview);
+  useEffect(() => {
+    if (!roll) return;
+    const prevOverview = prevOverviewRef.current;
+    prevOverviewRef.current = overview;
+    if (!overview) {
+      canvasRef.current?.followPosition(pos);
+    } else if (!prevOverview && overview) {
+      canvasRef.current?.fit();
+    }
+  }, [roll?.rollId, overview, pos]);
 
   const handleCanvasInteract = () => {
     if (stateRef.current.running) {
@@ -293,12 +349,12 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
     }
   };
 
-  const handleCanvasCursor = (p: { u: number; v: number } | null) => {
+  const handleCanvasCursor = (pt: { x: number; y: number } | null) => {
     const curRoll = stateRef.current.roll;
     if (!curRoll) return;
     setPointerText(
-      p
-        ? `距右 ${round(curRoll.width - p.v)} · 距卷头 ${round(p.u)} mm`
+      pt
+        ? `距右 ${round(curRoll.width - pt.x)} · 距卷头 ${round(pt.y)} mm`
         : '距右 / 距卷头 · mm'
     );
   };
@@ -335,7 +391,7 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
       const newItem = {
         ...d,
         ...defectAttrs(st.defaultType),
-        captureId: crypto.randomUUID()
+        captureId: createUuid()
       };
       const nextPending = [...st.pending, newItem];
       const savedLen = (st.roll.defects || []).length;
@@ -555,6 +611,68 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
     }
   };
 
+  const handleSubmitInspectionDecision = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!roll || !inspectModalAction || inspectSubmitting) return;
+    setRunning(false);
+    const rollId = roll.rollId;
+    setInspectSubmitting(true);
+    try {
+      // 若存在尚未入档的本机疵点草稿，放行/判定前自动原子保存避免遗漏
+      if (pending.length > 0) {
+        const submitted = structuredClone(pending);
+        const saved = await requestJSON(
+          '/api/rolls/' + encodeURIComponent(rollId) + '/inspection-defects',
+          {
+            width: roll.width,
+            totalLength: roll.totalLength,
+            defects: submitted
+          }
+        );
+        let latest: any = null;
+        try {
+          latest = JSON.parse(localStorage.getItem(draftKey(rollId)) || 'null');
+        } catch {}
+        if (latest) {
+          localStorage.setItem(
+            draftKey(rollId),
+            JSON.stringify({
+              ...latest,
+              pending: withoutSubmitted(latest.pending, submitted)
+            })
+          );
+        }
+        window.dispatchEvent(
+          new CustomEvent(SAVED_EVENT, { detail: { saved, submitted } })
+        );
+      }
+      const updated = await requestJSON(
+        `/api/v2/quality/rolls/${encodeURIComponent(rollId)}/inspect-complete`,
+        {
+          status: inspectModalAction,
+          inspector: inspectorName.trim() || '质检员',
+          remarks: inspectRemarks.trim() || undefined
+        }
+      );
+      const refreshed = await requestJSON('/api/rolls');
+      const list = Array.isArray(refreshed) ? refreshed : [];
+      setRolls(list);
+      const latestRoll = list.find((x: any) => x.rollId === rollId) || updated;
+      if (latestRoll) setRoll(latestRoll);
+      setInspectModalAction(null);
+      setInspectRemarks('');
+      toast(
+        inspectModalAction === 'PASSED'
+          ? `母卷 ${rollId} 已质检合格放行 (PASSED)，现可领料并进入搭切排料`
+          : `母卷 ${rollId} 已判定不合格 (FAILED)，将拦截领料与排料`
+      );
+    } catch (err: any) {
+      toast('提交质检判定失败：' + (err.message || '未知错误'), true);
+    } finally {
+      setInspectSubmitting(false);
+    }
+  };
+
   const handleApplyManualDefect = () => {
     if (saving || !roll) return;
     try {
@@ -585,7 +703,7 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
       } else {
         nextPending = [
           ...pending,
-          { ...item, captureId: crypto.randomUUID() }
+          { ...item, captureId: createUuid() }
         ];
         nextSel = savedCount + nextPending.length - 1;
       }
@@ -714,13 +832,66 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
           </a>
           <button
             type="button"
-            className="btn pri"
+            className={`btn ${roll && roll.inspectionStatus === 'PASSED' ? 'pri' : ''}`}
             id="save"
-            disabled={!pending.length || saving}
+            disabled={!pending.length || saving || inspectSubmitting}
             onClick={handleSaveToRoll}
           >
             保存到母卷{pending.length ? ` (${pending.length})` : ''}
           </button>
+          {roll && roll.inspectionStatus !== 'SCRAPPED' && roll.inspectionStatus !== 'PASSED' && (
+            <>
+              <button
+                type="button"
+                className="btn pri"
+                id="inspect-pass-btn"
+                disabled={saving || inspectSubmitting}
+                onClick={() => {
+                  setInspectorName((prev) => prev || roll.inspector || '');
+                  setInspectModalAction('PASSED');
+                }}
+              >
+                ✓ 质检合格放行
+              </button>
+              <button
+                type="button"
+                className="btn"
+                id="inspect-fail-btn"
+                style={{ color: 'var(--err, #dc2626)' }}
+                disabled={saving || inspectSubmitting}
+                onClick={() => {
+                  setInspectorName((prev) => prev || roll.inspector || '');
+                  setInspectModalAction('FAILED');
+                }}
+              >
+                判不合格
+              </button>
+            </>
+          )}
+          {roll && roll.inspectionStatus === 'PASSED' && (
+            <>
+              <a
+                className="btn soft-accent"
+                href="#/workbench"
+                title="母卷已质检放行，可直接前往搭切工作台锁卷排料"
+              >
+                去搭切排料 →
+              </a>
+              <button
+                type="button"
+                className="btn"
+                id="inspect-fail-btn"
+                style={{ color: 'var(--err, #dc2626)' }}
+                disabled={saving || inspectSubmitting}
+                onClick={() => {
+                  setInspectorName((prev) => prev || roll.inspector || '');
+                  setInspectModalAction('FAILED');
+                }}
+              >
+                复判不合格
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -957,14 +1128,16 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
 
             <div className="mp-insp-feed-group">
               <span className="muted">步进</span>
-              <input
-                type="number"
+              <NumberInput
                 className="field num"
                 id="step"
                 aria-label="每次前进米数"
+                min={0.1}
+                step={0.1}
+                fallback={1}
                 style={{ width: 54, textAlign: 'right' }}
                 value={step}
-                onChange={(e) => setStep(Math.max(0.1, Number(e.target.value) || 1))}
+                onValueChange={setStep}
               />
               <span className="muted">m</span>
               <button
@@ -985,14 +1158,16 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
 
             <div className="mp-insp-feed-group">
               <span className="muted">速度</span>
-              <input
-                type="number"
+              <NumberInput
                 className="field num"
                 id="speed"
                 aria-label="自动跑布速度"
+                min={0.1}
+                step={0.1}
+                fallback={3}
                 style={{ width: 54, textAlign: 'right' }}
                 value={speed}
-                onChange={(e) => setSpeed(Math.max(0.1, Number(e.target.value) || 3))}
+                onValueChange={setSpeed}
               />
               <span className="muted">m/min</span>
               <button
@@ -1006,7 +1181,7 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                   } else {
                     setOverview(false);
                     setRunning(true);
-                    canvasRef.current?.fit();
+                    canvasRef.current?.followPosition(pos);
                   }
                 }}
               >
@@ -1075,7 +1250,7 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                     className={!overview ? 'on' : ''}
                     onClick={() => {
                       setOverview(false);
-                      setTimeout(() => canvasRef.current?.fit(), 0);
+                      setTimeout(() => canvasRef.current?.followPosition(stateRef.current.pos), 0);
                     }}
                   >
                     跟随验布线
@@ -1124,9 +1299,22 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                     inset: 0
                   }}
                 >
-                  <CadCanvasView
-                    scene={inspectionScene}
-                    viewMode={overview ? 'full' : 'inspection'}
+                  <WorkbenchBoardCanvas
+                    rollTitle={roll.rollId ? String(roll.rollId) : '验布母卷'}
+                    rollWidthMm={Math.max(10, Number(roll.width || 1500))}
+                    rollLengthMm={Math.max(10, Number(roll.totalLength || 3000))}
+                    occupiedLengthMm={0}
+                    trimStartMm={0}
+                    pieceGapMm={0}
+                    defects={inspectionDefects}
+                    demands={emptyDemands}
+                    placedPieces={emptyPlaced}
+                    zones={inspectionZones}
+                    feedPositionMm={pos}
+                    selectedDefectId={selectedDefectKey}
+                    showStaging={false}
+                    interactivePieces={false}
+                    vertical={true}
                     tool={
                       tool === 'mark'
                         ? 'defect'
@@ -1136,14 +1324,15 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                     }
                     showDimensions={true}
                     showPath={false}
-                    minHeight={360}
+                    highlightedDemandKey={null}
+                    selectedPieceIndex={null}
                     ariaLabel="验布实时画布"
                     onInteract={handleCanvasInteract}
                     onCursorMove={handleCanvasCursor}
                     onDefectSelect={handleCanvasDefectSelect}
                     onDefectDraw={handleCanvasDefectDraw}
                     onDefectEdit={handleCanvasDefectEdit}
-                    canvasRefOut={canvasRef}
+                    boardRef={canvasRef}
                   />
                 </div>
               </div>
@@ -1371,7 +1560,7 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
                               setPos(nextPos);
                               setOverview(false);
                               persistDraft(roll, pending, nextPos);
-                              setTimeout(() => canvasRef.current?.fit(), 0);
+                              setTimeout(() => canvasRef.current?.followPosition(nextPos), 0);
                             }}
                           >
                             <td className="num">{(d.y / 1000).toFixed(2)}</td>
@@ -1437,6 +1626,89 @@ export const InspectionPage: React.FC<{ params?: string[] }> = ({
           </div>
         </>
       )}
+
+      <ModalDialog
+        open={Boolean(inspectModalAction && roll)}
+        title={
+          inspectModalAction === 'PASSED'
+            ? `确认质检合格放行 · ${roll?.rollId || ''}`
+            : `确认判定母卷不合格 · ${roll?.rollId || ''}`
+        }
+        onClose={() => {
+          if (!inspectSubmitting) setInspectModalAction(null);
+        }}
+        maxWidth={480}
+      >
+        <form onSubmit={handleSubmitInspectionDecision}>
+          <div style={{ fontSize: 12.5, lineHeight: 1.6, marginBottom: 10 }}>
+            <div>
+              母卷：<b className="num">{roll?.rollId}</b> · 品号{' '}
+              <b className="num">{roll?.rollModel || '—'}</b> ·{' '}
+              <span className="num">
+                {roll ? `${fmtN(roll.width)}mm × ${fmtM(roll.totalLength)}m` : ''}
+              </span>
+            </div>
+            <div>
+              已入档疵点 <b className="num">{(roll?.defects || []).length}</b> 处
+              {pending.length > 0 && (
+                <>
+                  ，另有 <b className="num">{pending.length}</b> 处待存草稿将在提交时自动入档
+                </>
+              )}
+              。
+            </div>
+          </div>
+          <div className="form" style={{ gridTemplateColumns: '88px 1fr', padding: '4px 0 12px' }}>
+            <label htmlFor="qc-inspector">质检员</label>
+            <input
+              id="qc-inspector"
+              className="field"
+              placeholder="如：质检李工（认证模式下自动取当前登录人）"
+              value={inspectorName}
+              onChange={(e) => setInspectorName(e.target.value)}
+            />
+            <label htmlFor="qc-remarks">检验备注</label>
+            <input
+              id="qc-remarks"
+              className="field"
+              placeholder={
+                inspectModalAction === 'PASSED'
+                  ? '选填：门幅、克重与疵点复核合格'
+                  : '必填或说明：色差/破损超标原因'
+              }
+              required={inspectModalAction === 'FAILED'}
+              value={inspectRemarks}
+              onChange={(e) => setInspectRemarks(e.target.value)}
+            />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button
+              type="button"
+              className="btn"
+              disabled={inspectSubmitting}
+              onClick={() => setInspectModalAction(null)}
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              className="btn pri"
+              style={
+                inspectModalAction === 'FAILED'
+                  ? { background: 'var(--err, #dc2626)', borderColor: 'var(--err, #dc2626)' }
+                  : undefined
+              }
+              disabled={inspectSubmitting}
+            >
+              {inspectSubmitting
+                ? '提交中…'
+                : inspectModalAction === 'PASSED'
+                ? '确认放行 (PASSED)'
+                : '确认判不合格 (FAILED)'}
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
     </div>
   );
 };

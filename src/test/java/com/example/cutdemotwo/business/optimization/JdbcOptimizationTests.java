@@ -53,7 +53,7 @@ class JdbcOptimizationTests {
         var results=race(()->a.submitOrGet(document("same-key","same")),()->b.submitOrGet(document("same-key","same")));
         assertEquals(results.get(0).job().id(),results.get(1).job().id());
         assertEquals(1,sql.queryForObject("SELECT COUNT(*) FROM optimization_job",Integer.class));
-        assertEquals("IDEMPOTENCY_CONFLICT",assertThrows(OptimizationService.Failure.class,
+        assertEquals("IDEMPOTENCY_CONFLICT",assertThrows(OptimizationFailure.class,
                 ()->b.submitOrGet(document("same-key","different"))).code);
         assertNotEquals(results.get(0).job().id(),b.submitOrGet(document("SAME-key","same")).job().id());
     }
@@ -162,7 +162,7 @@ class JdbcOptimizationTests {
     }
     @Test void globalQuotaIsSharedAndQueuedCancellationReleasesCapacity()throws Exception {
         var accepted=race(()->a.submitOrGet(document("quota-key-a","hash")),()->b.submitOrGet(document("quota-key-b","hash")));
-        assertEquals("QUOTA_EXCEEDED",assertThrows(OptimizationService.Failure.class,()->a.submitOrGet(document("quota-key-c","hash"))).code);
+        assertEquals("QUOTA_EXCEEDED",assertThrows(OptimizationFailure.class,()->a.submitOrGet(document("quota-key-c","hash"))).code);
         assertEquals("CANCELLED",b.cancel(accepted.get(0).job().id()).job().state());
         assertNotNull(a.submitOrGet(document("quota-key-c","hash")));
         assertThrows(IllegalStateException.class,()->new JdbcOptimizationJobStore(source).configure(2,1,100));
@@ -209,5 +209,60 @@ class JdbcOptimizationTests {
             expire(running.id()); // Simulate the dead node's lease reaching database expiry.
             assertEquals("SUCCEEDED",finished(second,queued.id()).state());
         } finally {engine.release.countDown();}
+    }
+    @Test void archiveLimitEvictsOldestTerminalJobsInForeignKeyOrderAndRejectsWhenAllActive()throws Exception {
+        var limitedSource=OptimizationTestDatabase.create();
+        var limitedSql=new JdbcTemplate(limitedSource);
+        Flyway.configure().dataSource(limitedSource).load().migrate();
+        var store=new JdbcOptimizationJobStore(limitedSource,168L);
+        store.configure(1,2,2);
+
+        var first=store.submitOrGet(document("jdbc-evict-1","hash-1"));
+        var lease1=store.claim("w1",15000);
+        assertTrue(store.update(lease1,this::success,true));
+        Thread.sleep(15);
+
+        var second=store.submitOrGet(document("jdbc-evict-2","hash-2"));
+        var lease2=store.claim("w1",15000);
+        assertTrue(store.update(lease2,this::success,true));
+        assertEquals(2,limitedSql.queryForObject("SELECT COUNT(*) FROM optimization_job",Integer.class));
+        assertEquals(2,limitedSql.queryForObject("SELECT COUNT(*) FROM optimization_result",Integer.class));
+
+        // 达到 archive=2 上限时，提交第 3 个作业应按外键顺序淘汰最旧终态 first
+        var third=store.submitOrGet(document("jdbc-evict-3","hash-3"));
+        assertNull(store.find(first.job().id()));
+        assertNull(store.findByKey("jdbc-evict-1"));
+        assertNotNull(store.find(second.job().id()));
+        assertNotNull(store.find(third.job().id()));
+        assertEquals(2,limitedSql.queryForObject("SELECT COUNT(*) FROM optimization_job",Integer.class));
+        assertEquals(0,limitedSql.queryForObject("SELECT COUNT(*) FROM optimization_result WHERE job_id=?",Integer.class,first.job().id()));
+        assertEquals(0,limitedSql.queryForObject("SELECT COUNT(*) FROM optimization_attempt WHERE job_id=?",Integer.class,first.job().id()));
+
+        // 再提交第 4 个作业会淘汰 second，此时库中两个作业 third + fourth 均为活跃态
+        var fourth=store.submitOrGet(document("jdbc-evict-4","hash-4"));
+        assertNull(store.find(second.job().id()));
+        assertEquals("QUEUED",store.find(third.job().id()).job().state());
+        assertEquals("QUEUED",store.find(fourth.job().id()).job().state());
+
+        // 当全部已存作业均为活跃态达到 archive=2 上限时，必须严格返回 429 QUOTA_EXCEEDED 且不删除活跃作业
+        var rejected=assertThrows(OptimizationFailure.class,()->store.submitOrGet(document("jdbc-evict-5","hash-5")));
+        assertEquals("QUOTA_EXCEEDED",rejected.code);
+        assertEquals(429,rejected.status);
+        assertNotNull(store.find(third.job().id()));
+        assertNotNull(store.find(fourth.job().id()));
+    }
+    @Test void purgeExpiredTerminalDeletesCompletedAndArchivedEntriesWithoutTouchingActive() {
+        var done=a.submitOrGet(document("jdbc-purge-done","hash-done"));
+        var lease=a.claim("w1",15000);
+        assertTrue(a.update(lease,this::success,true));
+        // 模拟存在 archive_entry 外键引用，确保清理顺序能无错删除
+        sql.update("INSERT INTO optimization_archive_import(id,source_path,imported_at,job_count) VALUES('imp-1','/tmp',1,1)");
+        sql.update("INSERT INTO optimization_archive_entry(import_id,job_id,original_json) VALUES('imp-1',?,'{}')",done.job().id());
+        var active=a.submitOrGet(document("jdbc-purge-active","hash-active"));
+
+        assertEquals(1,a.purgeExpiredTerminal(0L));
+        assertNull(a.find(done.job().id()));
+        assertEquals(0,sql.queryForObject("SELECT COUNT(*) FROM optimization_archive_entry WHERE job_id=?",Integer.class,done.job().id()));
+        assertNotNull(a.find(active.job().id()));
     }
 }

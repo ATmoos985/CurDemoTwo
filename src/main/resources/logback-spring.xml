@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration scan="false">
+    <!--
+      默认控制台输出包含 traceId（由 TraceIdFilter 写入 MDC）的清晰键值日志，零额外依赖。
+      环境变量 / Spring 属性说明：
+        - CUTDEMO_LOG_FORMAT / cutdemo.logging.format：plain（默认键值格式）或 json（单行结构化 JSON）
+        - CUTDEMO_LOG_LEVEL / cutdemo.logging.level：根日志级别，默认 INFO
+        - 启用滚动文件归档：激活 Spring Profile "file-log"（如 SPRING_PROFILES_ACTIVE=mysql,file-log）
+          并可通过 CUTDEMO_LOG_FILE_PATH / CUTDEMO_LOG_FILE_MAX_SIZE / CUTDEMO_LOG_FILE_MAX_HISTORY /
+          CUTDEMO_LOG_FILE_TOTAL_CAP 调整路径与滚动配额。
+    -->
+    <springProperty scope="context" name="LOG_FORMAT" source="cutdemo.logging.format" defaultValue="${CUTDEMO_LOG_FORMAT:-plain}"/>
+    <springProperty scope="context" name="ROOT_LOG_LEVEL" source="cutdemo.logging.level" defaultValue="${CUTDEMO_LOG_LEVEL:-INFO}"/>
+    <springProperty scope="context" name="LOG_FILE_PATH" source="cutdemo.logging.file-path" defaultValue="${CUTDEMO_LOG_FILE_PATH:-logs/cutdemo.log}"/>
+    <springProperty scope="context" name="LOG_FILE_MAX_SIZE" source="cutdemo.logging.file-max-size" defaultValue="${CUTDEMO_LOG_FILE_MAX_SIZE:-20MB}"/>
+    <springProperty scope="context" name="LOG_FILE_MAX_HISTORY" source="cutdemo.logging.file-max-history" defaultValue="${CUTDEMO_LOG_FILE_MAX_HISTORY:-14}"/>
+    <springProperty scope="context" name="LOG_FILE_TOTAL_CAP" source="cutdemo.logging.file-total-cap" defaultValue="${CUTDEMO_LOG_FILE_TOTAL_CAP:-500MB}"/>
+
+    <property name="PATTERN_plain"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} level=%-5level thread=[%thread] traceId=%X{traceId:-none} logger=%logger{36} msg=%msg%n%ex"/>
+    <property name="PATTERN_json"
+              value="{&quot;ts&quot;:&quot;%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX}&quot;,&quot;level&quot;:&quot;%level&quot;,&quot;thread&quot;:&quot;%replace(%thread){'&quot;','\\&quot;'}&quot;,&quot;traceId&quot;:&quot;%X{traceId:-}&quot;,&quot;logger&quot;:&quot;%logger{36}&quot;,&quot;msg&quot;:&quot;%replace(%replace(%replace(%msg){'\\','\\\\'}){'&quot;','\\&quot;'}){'[\r\n]+',' '}&quot;}%n"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <charset>UTF-8</charset>
+            <pattern>${PATTERN_${LOG_FORMAT}}</pattern>
+        </encoder>
+    </appender>
+
+    <springProfile name="!file-log">
+        <root level="${ROOT_LOG_LEVEL}">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="file-log">
+        <appender name="ROLLING_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>${LOG_FILE_PATH}</file>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <fileNamePattern>${LOG_FILE_PATH}.%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+                <maxFileSize>${LOG_FILE_MAX_SIZE}</maxFileSize>
+                <maxHistory>${LOG_FILE_MAX_HISTORY}</maxHistory>
+                <totalSizeCap>${LOG_FILE_TOTAL_CAP}</totalSizeCap>
+            </rollingPolicy>
+            <encoder>
+                <charset>UTF-8</charset>
+                <pattern>${PATTERN_${LOG_FORMAT}}</pattern>
+            </encoder>
+        </appender>
+        <root level="${ROOT_LOG_LEVEL}">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="ROLLING_FILE"/>
+        </root>
+    </springProfile>
+</configuration>

@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
@@ -44,15 +45,23 @@ public class InstructionConverter {
     private static final int DEFAULT_MAX_WIDTH_OPTIONS_PER_REPACK = 6;
     private static final int DEFAULT_MAX_FULL_CONFIGS_PER_REPACK = 96;
     private static final long DEFAULT_INSTRUCTION_REPACK_TIME_LIMIT_MS = 150L;
+    private static final long DEFAULT_INSTRUCTION_REPACK_NODE_LIMIT = 400L;
+    private static final long DEFAULT_INSTRUCTION_REPACK_SAFETY_TIME_LIMIT_MS = 2_000L;
     private static final int LARGE_REPACK_MIN_BLOCKS = 6;
     private static final int LARGE_REPACK_MIN_USAGE_COUNT = 40;
     private static final int LARGE_MAX_WIDTH_MESSAGES_PER_REPACK = 6;
     private static final int LARGE_MAX_WIDTH_OPTIONS_PER_REPACK = 10;
     private static final int LARGE_MAX_FULL_CONFIGS_PER_REPACK = 192;
     private static final long LARGE_INSTRUCTION_REPACK_TIME_LIMIT_MS = 450L;
+    private static final long LARGE_INSTRUCTION_REPACK_NODE_LIMIT = 800L;
+    private static final long LARGE_INSTRUCTION_REPACK_SAFETY_TIME_LIMIT_MS = 4_000L;
     private static final long INSTRUCTION_REPACK_HINT_TIME_LIMIT_MS = 60L;
     private static final int INSTRUCTION_REPACK_HINT_MIN_BLOCKS = 4;
     private static final int INSTRUCTION_REPACK_HINT_MIN_USAGE_COUNT = 8;
+    private static final String SCIP_REPACK_DETERMINISTIC_PARAMS =
+            "randomization/randomseedshift = 0\n"
+          + "randomization/permutationseed = 0\n"
+          + "randomization/lpseed = 0\n";
     private static boolean orToolsLoaded = false;
 
     private final SolverParameters params;
@@ -244,8 +253,10 @@ public class InstructionConverter {
             }
         }
 
-        if (LocalNeighborhoodSequenceOptimizer.isEnabled()
-                || changyang.cut.apsmodule.generator.NewSolver.CuttingSolver.qualityMode()) {
+        boolean lnsActive = LocalNeighborhoodSequenceOptimizer.isEnabledExplicitlyConfigured()
+                ? LocalNeighborhoodSequenceOptimizer.isEnabled()
+                : changyang.cut.apsmodule.generator.NewSolver.CuttingSolver.qualityMode();
+        if (lnsActive) {
             LocalNeighborhoodSequenceOptimizer optimizer =
                     new LocalNeighborhoodSequenceOptimizer(params, this::arrangeForSequenceGroups);
             final List<CuttingInstruction> lnsInput = selectedInstructions;
@@ -381,11 +392,11 @@ public class InstructionConverter {
     }
 
     /**
-     * B 层 LNS 变体评优。快路径：按全局属性单跑（现状不变）。质量模式
-     * （cutting.quality=true）：默认邻域与扩大邻域（12/20/40/60）各跑一遍，
-     * 按 组→odd→1车→small 字典序拣优——两套邻域参数在不同数据集上互有胜负
-     * （sixian 扩大邻域胜，t9est188 默认邻域胜 69 vs 72，笔记13），
-     * 单一调参路径不可靠，评优后结构上永不劣于任一单路径。
+     * B 层受控渐进式 LNS 压缩序号组。
+     * 快路径：按全局属性单跑（现状不变）。
+     * 质量模式（cutting.quality=true）：先以标准受控邻域快速收敛，若剩余时间预算充足，
+     * 直接在第 1 段最优解的基础上接续扩大邻域（12/20/40/60）进一步压缩序号组。
+     * 两段均严格保持车数与废料守恒，按 组→odd→1车→small 字典序单调不劣化。
      */
     private LocalNeighborhoodSequenceOptimizer.LnsResult runLnsVariants(
             LocalNeighborhoodSequenceOptimizer optimizer,
@@ -394,36 +405,77 @@ public class InstructionConverter {
         if (!changyang.cut.apsmodule.generator.NewSolver.CuttingSolver.qualityMode()) {
             return optimizer.improve(instructions, groupItems);
         }
-        Map<String, String> defaultVariant = Map.of("cutting.lns.enabled", "true");
-        // 扩大邻域变体收敛后长尾空转是新时间瓶颈（t9est188 实测末次改善后仍跑满
-        // maxNoImprove=12 空迭代 ×~35s ≈ 6min）。该变体单迭代重（60 邻域/40 车），
-        // 早停阈值收紧到 6（默认变体与快路径不变）——砍长尾 ~3min，改善多在前段命中。
-        Map<String, String> qualityVariant = Map.of(
-                "cutting.lns.enabled", "true",
-                "cutting.lns.maxFreeOrders", "12",
-                "cutting.lns.maxFreePatterns", "20",
-                "cutting.lns.maxFreeCars", "40",
-                "cutting.lns.maxNeighborhoods", "60",
-                "cutting.lns.maxNoImprove", "6");
-        LocalNeighborhoodSequenceOptimizer.LnsResult resultDefault =
-                LocalNeighborhoodSequenceOptimizer.withPropertyOverrides(defaultVariant,
+        long totalBudgetMs = SolverRuntimeProperties.getLong("cutting.lns.budgetMs", 0L);
+        long startMs = System.currentTimeMillis();
+        SequenceGroupPostProcessor.GroupStats initialStats =
+                SequenceGroupPostProcessor.computeGroupStats(instructions);
+
+        Map<String, String> stage1Overrides = new HashMap<>();
+        stage1Overrides.put("cutting.lns.enabled", "true");
+        if (totalBudgetMs > 0L) {
+            long stage1Budget = Math.max(2_000L, totalBudgetMs * 45 / 100);
+            stage1Overrides.put("cutting.lns.budgetMs", Long.toString(stage1Budget));
+        }
+
+        long stage1StartMs = System.currentTimeMillis();
+        LocalNeighborhoodSequenceOptimizer.LnsResult resultStage1 =
+                LocalNeighborhoodSequenceOptimizer.withPropertyOverrides(stage1Overrides,
                         () -> optimizer.improve(instructions, groupItems));
-        LocalNeighborhoodSequenceOptimizer.LnsResult resultQuality =
-                LocalNeighborhoodSequenceOptimizer.withPropertyOverrides(qualityVariant,
-                        () -> optimizer.improve(instructions, groupItems));
-        SolverRunColumnArchive.recordInstructions(resultDefault.instructions());
-        SolverRunColumnArchive.recordInstructions(resultQuality.instructions());
-        SequenceGroupPostProcessor.GroupStats statsDefault =
-                SequenceGroupPostProcessor.computeGroupStats(resultDefault.instructions());
-        SequenceGroupPostProcessor.GroupStats statsQuality =
-                SequenceGroupPostProcessor.computeGroupStats(resultQuality.instructions());
-        boolean qualityWins = compareGroupStats(statsQuality, statsDefault) < 0;
-        log.info("LNS variants: default={}/{}/{}/{} quality={}/{}/{}/{} -> winner={}",
-                statsDefault.groups(), statsDefault.oddCarGroups(), statsDefault.oneCarGroups(),
-                statsDefault.smallCarGroups(), statsQuality.groups(), statsQuality.oddCarGroups(),
-                statsQuality.oneCarGroups(), statsQuality.smallCarGroups(),
-                qualityWins ? "quality" : "default");
-        return qualityWins ? resultQuality : resultDefault;
+        long stage1ElapsedMs = System.currentTimeMillis() - stage1StartMs;
+        List<CuttingInstruction> bestInstructions = resultStage1.instructions();
+        SolverRunColumnArchive.recordInstructions(bestInstructions);
+        SequenceGroupPostProcessor.GroupStats statsStage1 =
+                SequenceGroupPostProcessor.computeGroupStats(bestInstructions);
+
+        long remainingMs = totalBudgetMs > 0L
+                ? totalBudgetMs - (System.currentTimeMillis() - startMs)
+                : Long.MAX_VALUE;
+        if (totalBudgetMs > 0L && remainingMs < 3_000L) {
+            log.info("LNS stage2 skipped (remainingBudgetMs={}, stage1Ms={}): stage1={}/{}/{}/{}",
+                    remainingMs, stage1ElapsedMs,
+                    statsStage1.groups(), statsStage1.oddCarGroups(),
+                    statsStage1.oneCarGroups(), statsStage1.smallCarGroups());
+            return resultStage1;
+        }
+
+        int baseNoImprove = SolverRuntimeProperties.getInt("cutting.lns.maxNoImprove", 6);
+        Map<String, String> stage2Overrides = new HashMap<>();
+        stage2Overrides.put("cutting.lns.enabled", "true");
+        stage2Overrides.put("cutting.lns.maxFreeOrders", "12");
+        stage2Overrides.put("cutting.lns.maxFreePatterns", "20");
+        stage2Overrides.put("cutting.lns.maxFreeCars", "40");
+        stage2Overrides.put("cutting.lns.maxNeighborhoods", "60");
+        stage2Overrides.put("cutting.lns.maxNoImprove", Integer.toString(Math.min(baseNoImprove, 3)));
+        if (totalBudgetMs > 0L) {
+            stage2Overrides.put("cutting.lns.budgetMs", Long.toString(remainingMs));
+        }
+
+        final List<CuttingInstruction> stage2Input = bestInstructions;
+        long stage2StartMs = System.currentTimeMillis();
+        LocalNeighborhoodSequenceOptimizer.LnsResult resultStage2 =
+                LocalNeighborhoodSequenceOptimizer.withPropertyOverrides(stage2Overrides,
+                        () -> optimizer.improve(stage2Input, groupItems));
+        long stage2ElapsedMs = System.currentTimeMillis() - stage2StartMs;
+        SolverRunColumnArchive.recordInstructions(resultStage2.instructions());
+        SequenceGroupPostProcessor.GroupStats statsStage2 =
+                SequenceGroupPostProcessor.computeGroupStats(resultStage2.instructions());
+        boolean stage2Wins = compareGroupStats(statsStage2, statsStage1) < 0;
+        log.info("LNS progressive variants (stage1Ms={}, stage2Ms={}): stage1={}/{}/{}/{} stage2={}/{}/{}/{} -> winner={}",
+                stage1ElapsedMs, stage2ElapsedMs,
+                statsStage1.groups(), statsStage1.oddCarGroups(), statsStage1.oneCarGroups(),
+                statsStage1.smallCarGroups(), statsStage2.groups(), statsStage2.oddCarGroups(),
+                statsStage2.oneCarGroups(), statsStage2.smallCarGroups(),
+                stage2Wins ? "stage2" : "stage1");
+
+        List<CuttingInstruction> winnerInstructions = stage2Wins ? resultStage2.instructions() : bestInstructions;
+        SequenceGroupPostProcessor.GroupStats winnerStats = stage2Wins ? statsStage2 : statsStage1;
+        boolean overallImproved = compareGroupStats(winnerStats, initialStats) < 0;
+        if (overallImproved) {
+            return new LocalNeighborhoodSequenceOptimizer.LnsResult(
+                    true, winnerInstructions, initialStats.groups(), winnerStats.groups(), "improved");
+        }
+        return LocalNeighborhoodSequenceOptimizer.LnsResult.notImproved(
+                instructions, stage2Wins ? resultStage2.reason() : resultStage1.reason());
     }
 
     /**
@@ -1180,133 +1232,155 @@ public class InstructionConverter {
             int currentOddBlockCount,
             int currentSmallBlockCount,
             RepackProfile repackProfile) {
-        MPSolver solver = MPSolver.createSolver("SCIP");
-        if (solver == null) {
-            solver = MPSolver.createSolver("CBC");
-        }
-        if (solver == null) {
-            return null;
-        }
+        MPSolver solver = null;
+        try {
+            long nodeLimit = SolverRuntimeProperties.getLong(
+                    "cutting.repack.scipNodeLimit", repackProfile.nodeLimit());
+            solver = MPSolver.createSolver("SCIP");
+            if (solver != null) {
+                String scipParams = SCIP_REPACK_DETERMINISTIC_PARAMS;
+                if (nodeLimit > 0L) {
+                    scipParams = scipParams + "limits/nodes = " + nodeLimit + "\n";
+                }
+                solver.setSolverSpecificParametersAsString(scipParams);
+                try {
+                    solver.setNumThreads(1);
+                } catch (Exception ignored) {
+                }
+            } else {
+                solver = MPSolver.createSolver("CBC");
+            }
+            if (solver == null) {
+                return null;
+            }
 
-        List<RollConfig> activeConfigs = candidateConfigs.stream()
-                .filter(config -> config.support() > 0)
-                .toList();
-        if (activeConfigs.isEmpty()) {
-            return null;
-        }
+            List<RollConfig> activeConfigs = candidateConfigs.stream()
+                    .filter(config -> config.support() > 0)
+                    .toList();
+            if (activeConfigs.isEmpty()) {
+                return null;
+            }
 
-        List<MPVariable> countVars = new ArrayList<>(activeConfigs.size());
-        List<MPVariable> useVars = new ArrayList<>(activeConfigs.size());
-        List<MPVariable> oddVars = new ArrayList<>(activeConfigs.size());
-        List<MPVariable> halfVars = new ArrayList<>(activeConfigs.size());
-        List<MPVariable> smallVars = new ArrayList<>(activeConfigs.size());
+            List<MPVariable> countVars = new ArrayList<>(activeConfigs.size());
+            List<MPVariable> useVars = new ArrayList<>(activeConfigs.size());
+            List<MPVariable> oddVars = new ArrayList<>(activeConfigs.size());
+            List<MPVariable> halfVars = new ArrayList<>(activeConfigs.size());
+            List<MPVariable> smallVars = new ArrayList<>(activeConfigs.size());
 
-        // A block with 1..SMALL_CAR_MAX_CARS cars is "small"; threshold is one above.
-        int smallThreshold = SequenceGroupPostProcessor.SMALL_CAR_MAX_CARS + 1;
+            // A block with 1..SMALL_CAR_MAX_CARS cars is "small"; threshold is one above.
+            int smallThreshold = SequenceGroupPostProcessor.SMALL_CAR_MAX_CARS + 1;
 
-        for (int index = 0; index < activeConfigs.size(); index++) {
-            RollConfig config = activeConfigs.get(index);
-            int upperBound = Math.min(usageCount, config.support());
-            MPVariable countVar = solver.makeIntVar(0, upperBound, "repack_count_" + index);
-            MPVariable useVar = solver.makeBoolVar("repack_use_" + index);
-            MPVariable oddVar = solver.makeBoolVar("repack_odd_" + index);
-            MPVariable halfVar = solver.makeIntVar(0, upperBound, "repack_half_" + index);
-            MPVariable smallVar = solver.makeBoolVar("repack_small_" + index);
-
-            MPConstraint linkConstraint = solver.makeConstraint(-MPSolver.infinity(), 0, "repack_link_" + index);
-            linkConstraint.setCoefficient(countVar, 1);
-            linkConstraint.setCoefficient(useVar, -upperBound);
-
-            MPConstraint parityConstraint = solver.makeConstraint(0, 0, "repack_parity_" + index);
-            parityConstraint.setCoefficient(countVar, 1);
-            parityConstraint.setCoefficient(halfVar, -2);
-            parityConstraint.setCoefficient(oddVar, -1);
-
-            // Force small=1 when 0 < count <= SMALL_CAR_MAX_CARS:
-            //   smallThreshold*small + count >= smallThreshold*use
-            MPConstraint smallConstraint = solver.makeConstraint(0, MPSolver.infinity(), "repack_small_c_" + index);
-            smallConstraint.setCoefficient(smallVar, smallThreshold);
-            smallConstraint.setCoefficient(countVar, 1);
-            smallConstraint.setCoefficient(useVar, -smallThreshold);
-
-            countVars.add(countVar);
-            useVars.add(useVar);
-            oddVars.add(oddVar);
-            halfVars.add(halfVar);
-            smallVars.add(smallVar);
-        }
-
-        MPConstraint rollCountConstraint = solver.makeConstraint(usageCount, usageCount, "repack_total_rolls");
-        for (MPVariable countVar : countVars) {
-            rollCountConstraint.setCoefficient(countVar, 1);
-        }
-
-        for (Map.Entry<String, Integer> exactEntry : exactCounts.entrySet()) {
-            MPConstraint exactConstraint = solver.makeConstraint(
-                    exactEntry.getValue(), exactEntry.getValue(), "repack_exact_" + exactEntry.getKey());
             for (int index = 0; index < activeConfigs.size(); index++) {
-                int coefficient = activeConfigs.get(index).demandUsage().getOrDefault(exactEntry.getKey(), 0);
-                if (coefficient > 0) {
-                    exactConstraint.setCoefficient(countVars.get(index), coefficient);
+                RollConfig config = activeConfigs.get(index);
+                int upperBound = Math.min(usageCount, config.support());
+                MPVariable countVar = solver.makeIntVar(0, upperBound, "repack_count_" + index);
+                MPVariable useVar = solver.makeBoolVar("repack_use_" + index);
+                MPVariable oddVar = solver.makeBoolVar("repack_odd_" + index);
+                MPVariable halfVar = solver.makeIntVar(0, upperBound, "repack_half_" + index);
+                MPVariable smallVar = solver.makeBoolVar("repack_small_" + index);
+
+                MPConstraint linkConstraint = solver.makeConstraint(-MPSolver.infinity(), 0, "repack_link_" + index);
+                linkConstraint.setCoefficient(countVar, 1);
+                linkConstraint.setCoefficient(useVar, -upperBound);
+
+                MPConstraint parityConstraint = solver.makeConstraint(0, 0, "repack_parity_" + index);
+                parityConstraint.setCoefficient(countVar, 1);
+                parityConstraint.setCoefficient(halfVar, -2);
+                parityConstraint.setCoefficient(oddVar, -1);
+
+                // Force small=1 when 0 < count <= SMALL_CAR_MAX_CARS:
+                //   smallThreshold*small + count >= smallThreshold*use
+                MPConstraint smallConstraint = solver.makeConstraint(0, MPSolver.infinity(), "repack_small_c_" + index);
+                smallConstraint.setCoefficient(smallVar, smallThreshold);
+                smallConstraint.setCoefficient(countVar, 1);
+                smallConstraint.setCoefficient(useVar, -smallThreshold);
+
+                countVars.add(countVar);
+                useVars.add(useVar);
+                oddVars.add(oddVar);
+                halfVars.add(halfVar);
+                smallVars.add(smallVar);
+            }
+
+            MPConstraint rollCountConstraint = solver.makeConstraint(usageCount, usageCount, "repack_total_rolls");
+            for (MPVariable countVar : countVars) {
+                rollCountConstraint.setCoefficient(countVar, 1);
+            }
+
+            for (Map.Entry<String, Integer> exactEntry : exactCounts.entrySet()) {
+                MPConstraint exactConstraint = solver.makeConstraint(
+                        exactEntry.getValue(), exactEntry.getValue(), "repack_exact_" + exactEntry.getKey());
+                for (int index = 0; index < activeConfigs.size(); index++) {
+                    int coefficient = activeConfigs.get(index).demandUsage().getOrDefault(exactEntry.getKey(), 0);
+                    if (coefficient > 0) {
+                        exactConstraint.setCoefficient(countVars.get(index), coefficient);
+                    }
                 }
             }
-        }
 
-        // Weights enforce priority: fewer blocks (groups) >> fewer odd-car blocks > fewer small-car blocks.
-        MPObjective objective = solver.objective();
-        for (int index = 0; index < activeConfigs.size(); index++) {
-            objective.setCoefficient(useVars.get(index), 10_000);
-            objective.setCoefficient(oddVars.get(index), 100);
-            objective.setCoefficient(smallVars.get(index), 10);
-        }
-        objective.setMinimization();
-
-        solver.setTimeLimit(repackProfile.timeLimitMs());
-        MPSolver.ResultStatus status = solver.solve();
-        if (status != MPSolver.ResultStatus.OPTIMAL && status != MPSolver.ResultStatus.FEASIBLE) {
-            return null;
-        }
-
-        List<RepackBlock> blocks = new ArrayList<>();
-        for (int index = 0; index < activeConfigs.size(); index++) {
-            int count = (int) Math.round(countVars.get(index).solutionValue());
-            if (count > 0) {
-                blocks.add(new RepackBlock(activeConfigs.get(index), count));
+            // Weights enforce priority: fewer blocks (groups) >> fewer odd-car blocks > fewer small-car blocks.
+            MPObjective objective = solver.objective();
+            for (int index = 0; index < activeConfigs.size(); index++) {
+                objective.setCoefficient(useVars.get(index), 10_000);
+                objective.setCoefficient(oddVars.get(index), 100);
+                objective.setCoefficient(smallVars.get(index), 10);
             }
-        }
+            objective.setMinimization();
 
-        if (blocks.isEmpty()) {
-            return null;
-        }
-
-        blocks.sort(Comparator
-                .comparingInt(RepackBlock::count).reversed()
-                .thenComparing(block -> block.config().signature()));
-
-        int optimizedBlockCount = blocks.size();
-        int optimizedOddBlockCount = (int) blocks.stream().filter(block -> block.count() % 2 != 0).count();
-        int optimizedSmallBlockCount = (int) blocks.stream()
-                .filter(block -> block.count() > 0 && block.count() <= SequenceGroupPostProcessor.SMALL_CAR_MAX_CARS)
-                .count();
-        // Accept only a real improvement, ranked blocks > odd-blocks > small-blocks.
-        if (optimizedBlockCount > currentBlockCount) {
-            return null;
-        }
-        if (optimizedBlockCount == currentBlockCount) {
-            if (optimizedOddBlockCount > currentOddBlockCount) {
+            long effectiveTimeLimitMs = nodeLimit > 0L
+                    ? Math.max(repackProfile.timeLimitMs(), repackProfile.safetyTimeLimitMs())
+                    : repackProfile.timeLimitMs();
+            solver.setTimeLimit(effectiveTimeLimitMs);
+            MPSolver.ResultStatus status = solver.solve();
+            if (status != MPSolver.ResultStatus.OPTIMAL && status != MPSolver.ResultStatus.FEASIBLE) {
                 return null;
             }
-            if (optimizedOddBlockCount == currentOddBlockCount
-                    && optimizedSmallBlockCount >= currentSmallBlockCount) {
+
+            List<RepackBlock> blocks = new ArrayList<>();
+            for (int index = 0; index < activeConfigs.size(); index++) {
+                int count = (int) Math.round(countVars.get(index).solutionValue());
+                if (count > 0) {
+                    blocks.add(new RepackBlock(activeConfigs.get(index), count));
+                }
+            }
+
+            if (blocks.isEmpty()) {
                 return null;
             }
-        }
 
-        if (!exactCounts.equals(countAssignmentsByDemandKey(materializeRepackedInstructions(blocks)))) {
-            return null;
-        }
+            blocks.sort(Comparator
+                    .comparingInt(RepackBlock::count).reversed()
+                    .thenComparing(block -> block.config().signature()));
 
-        return new RepackPlan(blocks, optimizedBlockCount, optimizedOddBlockCount);
+            int optimizedBlockCount = blocks.size();
+            int optimizedOddBlockCount = (int) blocks.stream().filter(block -> block.count() % 2 != 0).count();
+            int optimizedSmallBlockCount = (int) blocks.stream()
+                    .filter(block -> block.count() > 0 && block.count() <= SequenceGroupPostProcessor.SMALL_CAR_MAX_CARS)
+                    .count();
+            // Accept only a real improvement, ranked blocks > odd-blocks > small-blocks.
+            if (optimizedBlockCount > currentBlockCount) {
+                return null;
+            }
+            if (optimizedBlockCount == currentBlockCount) {
+                if (optimizedOddBlockCount > currentOddBlockCount) {
+                    return null;
+                }
+                if (optimizedOddBlockCount == currentOddBlockCount
+                        && optimizedSmallBlockCount >= currentSmallBlockCount) {
+                    return null;
+                }
+            }
+
+            if (!exactCounts.equals(countAssignmentsByDemandKey(materializeRepackedInstructions(blocks)))) {
+                return null;
+            }
+
+            return new RepackPlan(blocks, optimizedBlockCount, optimizedOddBlockCount);
+        } finally {
+            if (solver != null) {
+                solver.delete();
+            }
+        }
     }
 
     private List<CuttingInstruction> materializeRepackedInstructions(List<RepackBlock> blocks) {
@@ -1361,6 +1435,7 @@ public class InstructionConverter {
 
         Map<Integer, Map<String, Integer>> countsByWidth = buildWidthMessageCounts(currentRolls);
         List<Integer> widths = new ArrayList<>(instruction.getSubRolls().keySet());
+        Collections.sort(widths);
         List<List<WidthOption>> optionsByWidth = new ArrayList<>(widths.size());
         for (int width : widths) {
             int slotsNeeded = instruction.getSubRolls().getOrDefault(width, 0);
@@ -1661,13 +1736,31 @@ public class InstructionConverter {
     }
 
     private void reorderInstructionsForSequenceGroups(List<CuttingInstruction> instructions) {
-        instructions.sort(Comparator
-                .comparing(this::instructionPrimaryRollSignature)
-                .thenComparing(this::instructionRollProfile)
-                .thenComparing(Comparator.comparingInt(this::instructionPrimaryRollCount).reversed())
-                .thenComparingInt(this::instructionRollBlockCount)
-                .thenComparingInt(CuttingInstruction::getRollWidth)
-                .thenComparing(this::instructionPatternSignature));
+        if (instructions == null || instructions.size() <= 1) {
+            return;
+        }
+        Map<CuttingInstruction, InstructionSortKey> sortKeys = new IdentityHashMap<>(instructions.size() * 2);
+        for (CuttingInstruction instruction : instructions) {
+            List<RollBlock> blocks = buildRollBlocks(simulateRolls(instruction));
+            String primarySig = blocks.isEmpty() ? "" : blocks.get(0).signature();
+            int primaryCount = blocks.isEmpty() ? 0 : blocks.get(0).rolls().size();
+            StringBuilder profile = new StringBuilder();
+            for (int i = 0; i < blocks.size(); i++) {
+                if (i > 0) {
+                    profile.append("||");
+                }
+                RollBlock block = blocks.get(i);
+                profile.append(block.signature()).append('#').append(block.rolls().size());
+            }
+            sortKeys.put(instruction, new InstructionSortKey(
+                    primarySig,
+                    profile.toString(),
+                    primaryCount,
+                    blocks.size(),
+                    instruction.getRollWidth(),
+                    instructionPatternSignature(instruction)));
+        }
+        instructions.sort((left, right) -> sortKeys.get(left).compareTo(sortKeys.get(right)));
     }
 
     private List<List<StationAssignment>> simulateRolls(CuttingInstruction instruction) {
@@ -1760,13 +1853,17 @@ public class InstructionConverter {
                     LARGE_MAX_WIDTH_MESSAGES_PER_REPACK,
                     LARGE_MAX_WIDTH_OPTIONS_PER_REPACK,
                     LARGE_MAX_FULL_CONFIGS_PER_REPACK,
-                    LARGE_INSTRUCTION_REPACK_TIME_LIMIT_MS);
+                    LARGE_INSTRUCTION_REPACK_TIME_LIMIT_MS,
+                    LARGE_INSTRUCTION_REPACK_NODE_LIMIT,
+                    LARGE_INSTRUCTION_REPACK_SAFETY_TIME_LIMIT_MS);
         }
         return new RepackProfile(
                 DEFAULT_MAX_WIDTH_MESSAGES_PER_REPACK,
                 DEFAULT_MAX_WIDTH_OPTIONS_PER_REPACK,
                 DEFAULT_MAX_FULL_CONFIGS_PER_REPACK,
-                DEFAULT_INSTRUCTION_REPACK_TIME_LIMIT_MS);
+                DEFAULT_INSTRUCTION_REPACK_TIME_LIMIT_MS,
+                DEFAULT_INSTRUCTION_REPACK_NODE_LIMIT,
+                DEFAULT_INSTRUCTION_REPACK_SAFETY_TIME_LIMIT_MS);
     }
 
     private String instructionFamilyKey(CuttingInstruction instruction) {
@@ -1914,9 +2011,45 @@ public class InstructionConverter {
             int maxWidthMessages,
             int maxWidthOptions,
             int maxFullConfigs,
-            long timeLimitMs) {
+            long timeLimitMs,
+            long nodeLimit,
+            long safetyTimeLimitMs) {
     }
 
     private record RollBlock(String signature, List<List<StationAssignment>> rolls) {
+    }
+
+    private record InstructionSortKey(
+            String primaryRollSignature,
+            String rollProfile,
+            int primaryRollCount,
+            int rollBlockCount,
+            int rollWidth,
+            String patternSignature) implements Comparable<InstructionSortKey> {
+
+        @Override
+        public int compareTo(InstructionSortKey other) {
+            int cmp = primaryRollSignature.compareTo(other.primaryRollSignature);
+            if (cmp != 0) {
+                return cmp;
+            }
+            cmp = rollProfile.compareTo(other.rollProfile);
+            if (cmp != 0) {
+                return cmp;
+            }
+            cmp = Integer.compare(other.primaryRollCount, primaryRollCount);
+            if (cmp != 0) {
+                return cmp;
+            }
+            cmp = Integer.compare(rollBlockCount, other.rollBlockCount);
+            if (cmp != 0) {
+                return cmp;
+            }
+            cmp = Integer.compare(rollWidth, other.rollWidth);
+            if (cmp != 0) {
+                return cmp;
+            }
+            return patternSignature.compareTo(other.patternSignature);
+        }
     }
 }

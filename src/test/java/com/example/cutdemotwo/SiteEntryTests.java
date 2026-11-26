@@ -28,19 +28,15 @@ class SiteEntryTests {
                 HttpResponse.BodyHandlers.ofString());
     }
 
-    @Test void rootEntersNewAppWhileHistoricalWorkbenchRemainsAvailable() throws Exception {
+    @Test void rootRedirectsToModernAppEntry() throws Exception {
         var root = get("/");
         assertEquals(302, root.statusCode());
         assertEquals("/app/", URI.create(root.headers().firstValue("location").orElseThrow()).getPath());
-        assertTrue(get("/app/").body().contains("js/main.js"));
-        var workbench = get("/index.html");
-        assertEquals(200, workbench.statusCode());
-        assertTrue(workbench.body().contains("data-product-nav=\"workbench\""), "通用操作台应保留在 /index.html");
-    }
-
-    @Test void everyEntryPageIsServed() throws Exception {
-        for (String page : new String[]{"/intro.html", "/nesting.html", "/linear.html", "/linear-demo.html", "/inspection.html", "/inventory.html"}) {
-            assertEquals(200, get(page).statusCode(), page);
-        }
+        var app = get("/app/");
+        assertEquals(200, app.statusCode());
+        assertTrue(app.body().contains("type=\"module\""), "现代入口应包含 Vite ESM 模块脚本");
+        assertTrue(app.body().contains("/app/assets/"), "现代入口应引用 /app/assets/ 下的 Vite 产物");
+        assertEquals(404, get("/index.html").statusCode(), "经典 /index.html 应已下线返回 404");
+        assertEquals(404, get("/linear.html").statusCode(), "经典 /linear.html 应已下线返回 404");
     }
 }

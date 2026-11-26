@@ -22,6 +22,7 @@ public final class NestingValidation {
         require(shape != null && shape.type() != null, "必须提供几何类型");
         supported("RECTANGLE".equals(shape.type()), "当前工艺仅支持 RECTANGLE，多边形请使用 CONTOUR 工艺");
         require(shape.vertices().isEmpty(), "矩形不能同时提供多边形顶点");
+        require(shape.holes().isEmpty(), "矩形直刀工艺不支持内孔洞");
         require(positive(shape.width()) && positive(shape.height()), "矩形宽高必须是有效正数");
     }
     public static void validate(NestingProblem p) {
@@ -45,13 +46,20 @@ public final class NestingValidation {
         } else supported(Set.of("horizontal", "vertical").contains(String.valueOf(c.firstStageOrientation())), "不支持的首刀方向");
         require(nonnegative(c.trimStart()) && c.trimStart() < p.height(), "修边长度必须小于加工区长度");
         require(nonnegative(c.minReusableWidth()) && nonnegative(c.minReusableHeight()), "余料回收尺寸无效");
-        supported(c.kerf() == 0, "当前引擎适配仅支持零刀缝");
+        try {
+            NestingProblem.Process.validateKerf(c.kerf());
+        } catch (IllegalArgumentException invalid) {
+            throw new Rejected("INVALID_INPUT", invalid.getMessage());
+        }
         try {
             NestingProblem.Process.validatePieceGap(c.pieceGap());
         } catch (IllegalArgumentException invalid) {
             throw new Rejected("INVALID_INPUT", invalid.getMessage());
         }
-        supported(contour || c.pieceGap() == 0, "矩形间距请使用工作台适配层");
+        if (c.maxStages() != null) {
+            supported("GUILLOTINE".equals(c.mode()), "最大通切阶数 maxStages 仅适用于直刀 GUILLOTINE 工艺");
+            require(c.maxStages() >= 1 && c.maxStages() <= 16, "最大通切阶数 maxStages 应为 1–16 的正整数");
+        }
         require(p.timeLimitSeconds() >= 1 && p.timeLimitSeconds() <= 60, "求解时限应为 1–60 秒");
         require(!p.parts().isEmpty(), "至少提供一项需求");
         Set<Integer> ids = new HashSet<>();
@@ -60,10 +68,23 @@ public final class NestingValidation {
         for (var part : p.parts()) {
             require(part != null && ids.add(part.id()), "需求标识重复或为空");
             supported(contour || !Boolean.TRUE.equals(part.allowHalfTurn()), "180° 掉头仅适用于轮廓排料");
+            if (part.rule() != null && part.rule().allowedAnglesDeg() != null) {
+                supported(contour, "自定义允许旋转角度集仅适用于轮廓排料");
+                var customAngles = part.rule().allowedAnglesDeg();
+                require(!customAngles.isEmpty(), "自定义允许旋转角度集不能为空");
+                require(customAngles.size() <= 72, "单个裁片最多声明 72 个离散旋转角度");
+                for (Integer deg : customAngles) {
+                    require(deg != null && deg >= 0 && deg <= 359, "允许旋转角度必须为 0–359 的整数度");
+                }
+            }
             shape(part.shape(), contour);
             require(part.quantity() > 0, "需求数量必须为正整数");
             quantity += part.quantity();
-            vertices += (long) PolygonGeometry.vertices(part.shape()).size() * part.quantity();
+            long partVerts = PolygonGeometry.vertices(part.shape()).size();
+            for (var hole : part.shape().holes()) {
+                partVerts += hole.size();
+            }
+            vertices += partVerts * part.quantity();
         }
         require(quantity <= 10_000, "单次求解最多支持 10000 件");
         require(!contour || (quantity <= 200 && vertices <= 10_000), "轮廓排料单次最多 200 件、展开后 10000 个顶点");

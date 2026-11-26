@@ -22,9 +22,10 @@ public final class FabricSolveAdapter {
         // Equal padding on parts and the outer boundary reserves inter-piece space without shrinking edge capacity.
         var material = new NestingProblem.Material(problem.material().id(),
                 NestingProblem.Shape.rectangle(problem.width() + gap, problem.height() + gap),
-                problem.material().exclusions(), problem.material().continuesAfterRegion());
+                problem.material().exclusions(), problem.material().continuesAfterRegion(), problem.material().fabricRule());
         var parts = problem.parts().stream().map(p -> new NestingProblem.Part(p.id(), p.name(),
-                NestingProblem.Shape.rectangle(p.shape().width() + gap, p.shape().height() + gap), p.quantity(), p.allowRotation())).toList();
+                NestingProblem.Shape.rectangle(p.shape().width() + gap, p.shape().height() + gap),
+                p.quantity(), p.allowRotation(), p.allowHalfTurn(), p.rule())).toList();
         var padded = new NestingProblem(problem.schemaVersion(), problem.unit(), material, parts, problem.process(), problem.engine(), problem.timeLimitSeconds());
         var candidate = factory.solve(padded);
         if (!candidate.feasible()) return toLegacy(request, candidate);
@@ -69,8 +70,17 @@ public final class FabricSolveAdapter {
             if (count > 10000) throw new IllegalArgumentException("单次排料最多 10000 件");
         }
         var defects = r.getDefects() == null ? List.<NestingProblem.Exclusion>of() : r.getDefects().stream()
-                .map(d -> new NestingProblem.Exclusion(d.getId(), d.getX(), d.getY(),
-                        NestingProblem.Shape.rectangle(d.getW(), d.getH()), d.getMargin())).toList();
+                .map(d -> {
+                    boolean defaultStrict = d.getSeverity() == 2
+                            && (d.getAvoidanceStrategy() == null || d.getAvoidanceStrategy().isBlank()
+                            || "MUST_AVOID".equalsIgnoreCase(d.getAvoidanceStrategy()));
+                    return defaultStrict
+                            ? new NestingProblem.Exclusion(d.getId(), d.getX(), d.getY(),
+                                    NestingProblem.Shape.rectangle(d.getW(), d.getH()), d.getMargin())
+                            : new NestingProblem.Exclusion(d.getId(), d.getX(), d.getY(),
+                                    NestingProblem.Shape.rectangle(d.getW(), d.getH()), d.getMargin(),
+                                    d.getSeverity(), d.getAvoidanceStrategy());
+                }).toList();
         var parts = r.getDemands() == null ? List.<NestingProblem.Part>of() : r.getDemands().stream()
                 .filter(d -> !sheet || r.isAllowLongitudinal() || Math.abs(d.getWidth() - r.getRollW()) < .001)
                 .map(d -> new NestingProblem.Part(d.getId(), d.getName(), NestingProblem.Shape.rectangle(d.getWidth(), d.getLength()),

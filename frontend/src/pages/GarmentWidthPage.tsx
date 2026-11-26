@@ -1,15 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fmtN, toast } from '@static/app/js/util.js';
+import { NumberInput } from '../components/ui/NumberInput';
+import { fmtN, toast, createUuid } from '../lib/core/util.js';
 import {
   DXF_TRIAL_STYLES,
   GARMENT_TRIAL_STYLES,
   MARKER_STYLES,
   markerSizeLabels
-} from '@static/js/nesting/marker-demo.js';
-import { fourPieceReference } from '@static/js/nesting/dxf-reference.js';
-import { fourPieceOptimized } from '@static/js/nesting/four-piece-seed.js';
-import { DXF_GARMENT_STYLES } from '@static/js/nesting/dxf-garment-samples.js';
-import { OptimizationSession } from '@static/js/business/optimization/job-client.js';
+} from '../lib/nesting/marker-demo.js';
+import { fourPieceReference } from '../lib/nesting/dxf-reference.js';
+import { fourPieceOptimized } from '../lib/nesting/four-piece-seed.js';
+import { DXF_GARMENT_STYLES } from '../lib/nesting/dxf-garment-samples.js';
+import { OptimizationSession } from '../lib/domain/job-client.js';
 import {
   GARMENT_EXAMPLES,
   candidateWidths,
@@ -19,9 +20,9 @@ import {
   markerRequest,
   selectMarkerTrial,
   solveMarkerDirection
-} from '@static/app/js/model/garment.js';
+} from '../lib/model/garment.js';
 import { CadCanvasView } from '../components/CadCanvasView';
-import { showcaseScene } from '@static/app/js/model/showcase.js';
+import { showcaseScene } from '../lib/model/showcase.js';
 import { useStudioStore } from '../store/useStudioStore';
 import { CodeBadge } from '../components/ui/MagpiePrimitives';
 
@@ -318,40 +319,6 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
     return { styleName, materialModel, externalRef };
   };
 
-  const handleToTask = () => {
-    if (!displayedRow?.layoutRequest?.problem) return;
-    const prob = displayedRow.layoutRequest.problem;
-    const { styleName, materialModel, externalRef } = resolveMaterialMeta();
-    const draft = {
-      name: `${styleName} · ${fmtN(displayedRow.width, 0)}mm 幅宽试算转排产`,
-      problemType: 'NESTING_2D',
-      materialModel,
-      externalRef,
-      process: {
-        bedLength: Math.ceil(
-          displayedRow.use?.length || prob.material?.shape?.height || 5000
-        ),
-        trimStart: 0,
-        pieceGap: prob.process?.pieceGap ?? 0,
-        cutOrigin: 'left-top',
-        firstStageOrientation: 'horizontal',
-        allowRotation: false,
-        allowLongitudinal: true
-      },
-      demands: (prob.parts || []).map((p: any, i: number) => ({
-        id: i + 1,
-        name: p.name || p.id,
-        width: p.shape?.width || 0,
-        length: p.shape?.height || 0,
-        quantity: p.quantity || 1,
-        allowRotation: Boolean(p.allowRotation || p.allowHalfTurn),
-        shape: p.shape
-      }))
-    };
-    localStorage.setItem('cutplan.app.taskdraft.new', JSON.stringify(draft));
-    location.hash = '#/task/new';
-  };
-
   const handleToStudio2D = () => {
     if (!displayedRow?.layoutRequest?.problem) return;
     const prob = displayedRow.layoutRequest.problem;
@@ -433,7 +400,7 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
           styleId,
           width,
           sizes,
-          crypto.randomUUID(),
+          createUuid(),
           ht,
           filling
         )
@@ -801,23 +768,24 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
                   return (
                     <React.Fragment key={size}>
                       <label htmlFor={inputId}>{size} 码（件/版）</label>
-                      <input
+                      <NumberInput
                         ref={(el) => {
                           sizeInputRefs.current[size] = el;
                         }}
                         className="field"
                         id={inputId}
                         name={size}
-                        type="number"
                         min={0}
                         max={12}
+                        fallback={0}
+                        integer
                         required
                         disabled={isBusy}
                         value={sizeCounts[size] ?? 0}
-                        onChange={(e) => {
+                        onValueChange={(v) => {
                           setSizeCounts((prev) => ({
                             ...prev,
-                            [size]: Number(e.target.value)
+                            [size]: v
                           }));
                           setCurrentExampleId('');
                           resetResults(false);
@@ -845,18 +813,18 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
                 }}
               />
               <label htmlFor="garment-edge">两侧布边合计（mm）</label>
-              <input
+              <NumberInput
                 className="field"
                 id="garment-edge"
                 name="edge"
-                type="number"
                 min={0}
                 step="0.1"
+                fallback={0}
                 required
                 disabled={isBusy}
                 value={edgeMm}
-                onChange={(e) => {
-                  setEdgeMm(Number(e.target.value));
+                onValueChange={(v) => {
+                  setEdgeMm(v);
                   setCurrentExampleId('');
                   resetResults(false);
                 }}
@@ -868,7 +836,7 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
                 name="gsm"
                 type="number"
                 min="0.1"
-                step="0.1"
+                step="any"
                 aria-describedby="weight-help"
                 required={!isDxfStyleActive}
                 placeholder={isDxfStyleActive ? '选填（留空不计克重）' : undefined}
@@ -1112,21 +1080,11 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
               </button>
               <button
                 type="button"
-                className="mp-cad-btn"
+                className="mp-cad-btn accent"
                 disabled={!displayedRow?.result?.layout}
                 onClick={handleToStudio2D}
               >
                 送入二维自由画布
-              </button>
-              <button
-                type="button"
-                className="mp-cad-btn accent"
-                id="garment-to-task"
-                disabled={!displayedRow?.result?.layout}
-                title="将当前选中的门幅与样板裁片带入新建二维生产任务"
-                onClick={handleToTask}
-              >
-                转入生产任务
               </button>
             </div>
             <div

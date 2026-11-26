@@ -1,7 +1,8 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { requestJSON, toast, fmtN } from '@static/app/js/util.js';
-import { presets, matchPreset } from '@static/js/industry/industry-profiles.js';
+import { requestJSON, toast, fmtN } from '../lib/core/util.js';
+import { presets, matchPreset } from '../lib/domain/industry-profiles.js';
 import {
+  DEFAULT_CNC_POST_OPTIONS,
   DEFAULT_SLITTING_SOLVER_SETTINGS,
   DEFAULT_STUDIO_SETTINGS,
   FirstStageOrientation,
@@ -9,11 +10,14 @@ import {
   SlittingProfile,
   StartCornerType,
   StudioSettings,
+  StudioThemeMode,
   WORKBENCH_STRATEGIES_2D,
+  applyThemeToDocument,
   loadStudioSettings,
   validateStudioSettings
 } from '../store/studioSettings';
 import { useStudioStore } from '../store/useStudioStore';
+import { NumberInput } from './ui/NumberInput';
 
 export interface SettingsModalProps {
   open: boolean;
@@ -164,6 +168,34 @@ const CORNERS: {
   }
 ];
 
+const ENGINE_DISPLAY_NAMES: Record<string, string> = {
+  crosscut: '通幅横切引擎',
+  deepnest: '异形轮廓排料引擎',
+  javaguillotine: '二维直刀排料引擎',
+  javairregular: '异形快速排料引擎',
+  packingsolver: '高精度直刀引擎',
+  'packingsolver-irregular': '高精度异形引擎',
+  'ortools-1d': '一维分切搭切引擎'
+};
+
+const ENGINE_MODE_LABELS: Record<string, string> = {
+  CROSSCUT: '横切',
+  GUILLOTINE: '直刀',
+  CONTOUR: '异形',
+  SLITTING: '分切',
+  RECTANGLE: '矩形',
+  POLYGON: '多边形',
+  '1D STRIP': '一维分条'
+};
+
+function formatEngineDisplayName(id: string): string {
+  return ENGINE_DISPLAY_NAMES[id] || '内置求解引擎';
+}
+
+function formatEngineModeLabel(mode: string): string {
+  return ENGINE_MODE_LABELS[mode] || mode;
+}
+
 function countChangedFields(a: StudioSettings, b: StudioSettings): number {
   let diff = 0;
   (Object.keys(DEFAULT_STUDIO_SETTINGS) as (keyof StudioSettings)[]).forEach((k) => {
@@ -203,15 +235,14 @@ const StepperNumberInput: React.FC<{
       >
         −
       </button>
-      <input
+      <NumberInput
         id={id}
-        type="number"
         min={min}
         max={max}
         step={step}
         className="sc-step-input num"
         value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
+        onValueChange={onChange}
       />
       <button
         type="button"
@@ -349,6 +380,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
     const handleClose = () => {
       dialog.returnValue = '';
+      applyThemeToDocument(useStudioStore.getState().settings.theme);
       onCloseRef.current();
     };
     dialog.addEventListener('close', handleClose);
@@ -797,6 +829,45 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                   {/* Right Visual Stack: Orientation Cards + Layer Switches */}
                   <div className="sc-col-stack">
+                    <section className="sc-card">
+                      <div className="sc-card-head">
+                        <span>界面外观主题</span>
+                        <code className="sc-code-pill num">
+                          {draft.theme === 'dark' ? '暗色车间大屏' : '浅色工业'}
+                        </code>
+                      </div>
+                      <div className="sc-orient-grid" role="radiogroup" aria-label="界面外观主题切换">
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={draft.theme === 'light'}
+                          className={`sc-orient-card ${draft.theme === 'light' ? 'on' : ''}`}
+                          onClick={() => {
+                            const nextTheme: StudioThemeMode = 'light';
+                            patchDraft({ theme: nextTheme });
+                            applyThemeToDocument(nextTheme);
+                          }}
+                        >
+                          <strong>浅色工业</strong>
+                          <span className="num">高亮办公室 / 明亮工位</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={draft.theme === 'dark'}
+                          className={`sc-orient-card ${draft.theme === 'dark' ? 'on' : ''}`}
+                          onClick={() => {
+                            const nextTheme: StudioThemeMode = 'dark';
+                            patchDraft({ theme: nextTheme });
+                            applyThemeToDocument(nextTheme);
+                          }}
+                        >
+                          <strong>暗色车间大屏</strong>
+                          <span className="num">低光护眼 / 工业高对比</span>
+                        </button>
+                      </div>
+                    </section>
+
                     <section className="sc-card">
                       <div className="sc-card-head">
                         <span>画布铺布视角</span>
@@ -1421,23 +1492,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         ))}
                       </div>
                       <div className="settings-unit-input">
-                        <input
+                        <NumberInput
                           id="s-time"
-                          type="number"
                           min={1}
                           max={60}
                           step={1}
+                          integer
                           className="field num"
                           style={{ width: 54 }}
                           value={draft.timeLimitSeconds}
-                          onChange={(e) => patchDraft({ timeLimitSeconds: Number(e.target.value) })}
+                          onValueChange={(v) => patchDraft({ timeLimitSeconds: v })}
                         />
                         <span>s</span>
                       </div>
                     </div>
 
                     <label className="sc-budget-fallback">
-                      <span>缺原生内核时回退 Java</span>
+                      <span>主引擎不可用时自动切换备用引擎</span>
                       <input
                         type="checkbox"
                         role="switch"
@@ -1453,7 +1524,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {/* 2D Parallel Strategy Management Card */}
                 <section className="sc-card">
                   <div className="sc-card-head">
-                    <span>二维并行排版算法管理</span>
+                    <span>二维并行排料策略</span>
                     <code className="sc-code-pill num">
                       已启用 {draft.enabledStrategies2D.length} / {WORKBENCH_STRATEGIES_2D.length}
                     </code>
@@ -1495,13 +1566,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   })}
                 </section>
 
-                {/* 1D Solartron-Cut NewSolver / OR-Tools Configuration Card */}
+                {/* 1D Slitting Configuration Card */}
                 <section className="sc-card" id="cfg-slitting-1d-card">
                   <div className="sc-card-head">
-                    <span>一维分切求解器参数（NewSolver / OR-Tools）</span>
+                    <span>一维分切求解参数</span>
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                       <code className="sc-code-pill num">
-                        {draft.slitProfile === 'QUALITY' ? '精确解 QUALITY' : '快捷解 FAST'}
+                        {draft.slitProfile === 'QUALITY' ? '精确解' : '快捷解'}
                       </code>
                       <button
                         type="button"
@@ -1525,7 +1596,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         aria-pressed={draft.slitProfile === 'FAST'}
                         onClick={() => patchDraft({ slitProfile: 'FAST' as SlittingProfile })}
                       >
-                        快捷解 (FAST)
+                        快捷解
                       </button>
                       <button
                         type="button"
@@ -1533,15 +1604,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         aria-pressed={draft.slitProfile === 'QUALITY'}
                         onClick={() => patchDraft({ slitProfile: 'QUALITY' as SlittingProfile })}
                       >
-                        精确解 (QUALITY)
+                        精确解
                       </button>
                     </div>
                   </div>
 
                   <div className="sc-slit-profile-note">
                     {draft.slitProfile === 'QUALITY'
-                      ? '精确解：启用多候选与 A 层奇偶惩罚扫描（单卷不同宽幅上限自动 ≥ 5），优先减少换刀组数与总卷数。'
-                      : '快捷解：启用单候选快速基线，优先在较短时间内稳定产出可行好解。'}
+                      ? '精确解：多候选深度寻优，优先压低排产车数与换刀组数。'
+                      : '快捷解：轻量快速求解，优先在较短时间内产出稳定方案。'}
                   </div>
 
                   <label className="sc-switch-row" htmlFor="cfg-slit-run-both">
@@ -1580,18 +1651,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         ))}
                       </div>
                       <div className="settings-unit-input">
-                        <input
+                        <NumberInput
                           id="cfg-slit-time"
-                          type="number"
                           min={1}
                           max={180}
                           step={1}
+                          integer
                           className="field num"
                           style={{ width: 60 }}
                           value={draft.slitTimeLimitSeconds}
-                          onChange={(e) =>
-                            patchDraft({ slitTimeLimitSeconds: Number(e.target.value) })
-                          }
+                          onValueChange={(v) => patchDraft({ slitTimeLimitSeconds: v })}
                         />
                         <span>s</span>
                       </div>
@@ -1601,89 +1670,81 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="sc-slit-grid">
                     <div className="sc-slit-field">
                       <label htmlFor="cfg-slit-topk">TOP K 超产宽度</label>
-                      <input
+                      <NumberInput
                         id="cfg-slit-topk"
-                        type="number"
                         min={0}
                         max={50}
+                        integer
                         className="field num"
                         value={draft.slitTopK}
-                        onChange={(e) => patchDraft({ slitTopK: Number(e.target.value) })}
+                        onValueChange={(v) => patchDraft({ slitTopK: v })}
                       />
                       <small>允许超产的前 K 个大需求宽幅（默认 3）</small>
                     </div>
                     <div className="sc-slit-field">
-                      <label htmlFor="cfg-slit-max-iter">列生成最大迭代</label>
-                      <input
+                      <label htmlFor="cfg-slit-max-iter">最大迭代轮次</label>
+                      <NumberInput
                         id="cfg-slit-max-iter"
-                        type="number"
                         min={1}
                         max={5000}
                         step={10}
+                        integer
                         className="field num"
                         value={draft.slitMaxIterations}
-                        onChange={(e) => patchDraft({ slitMaxIterations: Number(e.target.value) })}
+                        onValueChange={(v) => patchDraft({ slitMaxIterations: v })}
                       />
-                      <small>列生成定价循环上限（默认 300）</small>
+                      <small>方案生成循环上限（默认 300）</small>
                     </div>
                     <div className="sc-slit-field">
                       <label htmlFor="cfg-slit-max-pat">最大花型池</label>
-                      <input
+                      <NumberInput
                         id="cfg-slit-max-pat"
-                        type="number"
                         min={1}
                         max={20000}
                         step={50}
+                        integer
                         className="field num"
                         value={draft.slitMaxPatterns}
-                        onChange={(e) => patchDraft({ slitMaxPatterns: Number(e.target.value) })}
+                        onValueChange={(v) => patchDraft({ slitMaxPatterns: v })}
                       />
                       <small>候选分切花型池上限（默认 800）</small>
                     </div>
                     <div className="sc-slit-field">
                       <label htmlFor="cfg-slit-max-distinct">单卷不同宽幅上限</label>
-                      <input
+                      <NumberInput
                         id="cfg-slit-max-distinct"
-                        type="number"
                         min={1}
                         max={20}
+                        integer
                         className="field num"
                         value={draft.slitMaxDistinctWidths}
-                        onChange={(e) =>
-                          patchDraft({ slitMaxDistinctWidths: Number(e.target.value) })
-                        }
+                        onValueChange={(v) => patchDraft({ slitMaxDistinctWidths: v })}
                       />
-                      <small>
-                        {draft.slitProfile === 'QUALITY' && draft.slitMaxDistinctWidths < 5
-                          ? '精确解运行时自动提升到 5'
-                          : '单支母卷最多搭切不同规格数（默认 4）'}
-                      </small>
+                      <small>单支母卷最多搭切不同规格数（默认 4）</small>
                     </div>
                     <div className="sc-slit-field span-2">
-                      <label htmlFor="cfg-slit-stage-ms">MIP 单阶段安全时限（毫秒）</label>
-                      <input
+                      <label htmlFor="cfg-slit-stage-ms">单阶段求解时限（毫秒）</label>
+                      <NumberInput
                         id="cfg-slit-stage-ms"
-                        type="number"
                         min={1000}
                         max={600000}
                         step={1000}
+                        integer
                         className="field num"
                         value={draft.slitStageTimeLimitMs}
-                        onChange={(e) =>
-                          patchDraft({ slitStageTimeLimitMs: Number(e.target.value) })
-                        }
+                        onValueChange={(v) => patchDraft({ slitStageTimeLimitMs: v })}
                       />
-                      <small>单个 MIP 求解阶段的安全上限（默认 120000 ms，受总求解时限约束）</small>
+                      <small>单个求解阶段的安全上限（默认 120000 ms，受总求解时限约束）</small>
                     </div>
                   </div>
 
                   <details className="sc-fold" style={{ marginTop: 6 }}>
-                    <summary>NewSolver 惩罚权重与 B 层搜索微调</summary>
+                    <summary>高级权重与搜索微调</summary>
                     <div className="sc-slit-grid" style={{ marginTop: 8 }}>
                       <label className="sc-switch-row span-2" htmlFor="cfg-slit-opt-assign">
                         <span className="sc-switch-label">
-                          <strong>启用 B 层最优换刀分配</strong>
-                          <code className="num">useOptimizedAssignment（默认开启）</code>
+                          <strong>启用最优换刀分配</strong>
+                          <code className="num">优先压减换刀次数（默认开启）</code>
                         </span>
                         <input
                           id="cfg-slit-opt-assign"
@@ -1699,8 +1760,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </label>
                       <label className="sc-switch-row span-2" htmlFor="cfg-slit-lns">
                         <span className="sc-switch-label">
-                          <strong>精确解启用 LNS 大邻域搜索</strong>
-                          <code className="num">仅 QUALITY 档位生效，大单会增加耗时</code>
+                          <strong>启用深度邻域优化</strong>
+                          <code className="num">仅精确解生效，大单会增加耗时</code>
                         </span>
                         <input
                           id="cfg-slit-lns"
@@ -1714,42 +1775,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </label>
                       <div className="sc-slit-field">
                         <label htmlFor="cfg-slit-under-pen">欠产惩罚系数</label>
-                        <input
+                        <NumberInput
                           id="cfg-slit-under-pen"
-                          type="number"
                           min={0}
                           step={10000}
                           className="field num"
                           value={draft.slitUnderPenalty}
-                          onChange={(e) => patchDraft({ slitUnderPenalty: Number(e.target.value) })}
+                          onValueChange={(v) => patchDraft({ slitUnderPenalty: v })}
                         />
                       </div>
                       <div className="sc-slit-field">
                         <label htmlFor="cfg-slit-alpha">顺序组权重 α / β</label>
                         <div style={{ display: 'flex', gap: 6 }}>
-                          <input
+                          <NumberInput
                             id="cfg-slit-alpha"
-                            type="number"
                             min={0}
                             step={0.1}
                             className="field num"
                             aria-label="顺序组权重 alpha"
                             value={draft.slitSeqGroupAlpha}
-                            onChange={(e) =>
-                              patchDraft({ slitSeqGroupAlpha: Number(e.target.value) })
-                            }
+                            onValueChange={(v) => patchDraft({ slitSeqGroupAlpha: v })}
                           />
-                          <input
+                          <NumberInput
                             id="cfg-slit-beta"
-                            type="number"
                             min={0}
                             step={0.1}
                             className="field num"
                             aria-label="顺序组权重 beta"
                             value={draft.slitSeqGroupBeta}
-                            onChange={(e) =>
-                              patchDraft({ slitSeqGroupBeta: Number(e.target.value) })
-                            }
+                            onValueChange={(v) => patchDraft({ slitSeqGroupBeta: v })}
                           />
                         </div>
                       </div>
@@ -1766,34 +1820,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 )}
 
-                {/* Spacious Full 7-Engine Table (All Visible Without Clipping) */}
+                {/* Engine Availability Table (business-friendly labels, internal solver ids hidden) */}
                 <section className="sc-card sc-table-card">
                   {cap ? (
                     <table className="sc-engine-table">
                       <thead>
                         <tr>
-                          <th>内核标识</th>
+                          <th>求解引擎</th>
                           <th>运行状态</th>
-                          <th>工艺与几何模式</th>
+                          <th>支持工艺</th>
                           <th className="r">坐标精度</th>
                         </tr>
                       </thead>
                       <tbody id="engine-rows">
                         {allEngines.map((e: any) => (
                           <tr key={e.id}>
-                            <td className="num sc-eng-id">{e.id}</td>
+                            <td className="sc-eng-id">{formatEngineDisplayName(e.id)}</td>
                             <td>
                               <span className={`sc-status-pill ${e.available ? 'ok' : 'err'}`}>
                                 <i aria-hidden="true" />
-                                {e.available ? '隔离进程就绪' : '未就绪'}
+                                {e.available ? '就绪' : '未就绪'}
                               </span>
                             </td>
                             <td>
                               <div className="sc-mode-tags">
                                 {[...(e.modes || []), ...(e.shapes || [])].map((m: string) => (
-                                  <span key={m} className="num">
-                                    {m}
-                                  </span>
+                                  <span key={m}>{formatEngineModeLabel(m)}</span>
                                 ))}
                               </div>
                             </td>
@@ -1803,7 +1855,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </tbody>
                     </table>
                   ) : !capError ? (
-                    <div className="loading">正在检测多线程求解池…</div>
+                    <div className="loading">正在检测求解引擎…</div>
                   ) : null}
                 </section>
               </div>
@@ -1863,6 +1915,87 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         onChange={(e) => patchDraft({ ticketShowCuts: e.target.checked })}
                       />
                     </label>
+                  </div>
+                </section>
+
+                {/* CNC Post-Processor Parameters Card */}
+                <section className="sc-card" id="cfg-cnc-post-card">
+                  <div className="sc-card-head">
+                    <span>CNC 后处理参数（G-Code 导出）</span>
+                    <button
+                      type="button"
+                      className="btn sm"
+                      onClick={() => {
+                        patchDraft({
+                          cncCutFeed: DEFAULT_CNC_POST_OPTIONS.cutFeed,
+                          cncRapidFeed: DEFAULT_CNC_POST_OPTIONS.rapidFeed,
+                          cncPlungeDelay: DEFAULT_CNC_POST_OPTIONS.plungeDelay,
+                          cncRetractDelay: DEFAULT_CNC_POST_OPTIONS.retractDelay
+                        });
+                        toast('已恢复默认 CNC 后处理参数');
+                      }}
+                    >
+                      恢复默认
+                    </button>
+                  </div>
+
+                  <div className="sc-slit-grid">
+                    <div className="sc-slit-field">
+                      <label htmlFor="cfg-cnc-cut-feed">切割进给 cutFeed (mm/min)</label>
+                      <NumberInput
+                        id="cfg-cnc-cut-feed"
+                        min={100}
+                        max={60000}
+                        step={100}
+                        integer
+                        className="field num"
+                        value={draft.cncCutFeed}
+                        onValueChange={(v) => patchDraft({ cncCutFeed: v })}
+                      />
+                      <small>G01 切削进给率 F 值（默认 4000 mm/min）</small>
+                    </div>
+                    <div className="sc-slit-field">
+                      <label htmlFor="cfg-cnc-rapid-feed">空程进给 rapidFeed (mm/min)</label>
+                      <NumberInput
+                        id="cfg-cnc-rapid-feed"
+                        min={500}
+                        max={100000}
+                        step={500}
+                        integer
+                        className="field num"
+                        value={draft.cncRapidFeed}
+                        onValueChange={(v) => patchDraft({ cncRapidFeed: v })}
+                      />
+                      <small>G00 提刀空程速度 F 值（默认 15000 mm/min）</small>
+                    </div>
+                    <div className="sc-slit-field">
+                      <label htmlFor="cfg-cnc-plunge-delay">下刀延时 plungeDelay (ms)</label>
+                      <NumberInput
+                        id="cfg-cnc-plunge-delay"
+                        min={0}
+                        max={10000}
+                        step={50}
+                        integer
+                        className="field num"
+                        value={draft.cncPlungeDelay}
+                        onValueChange={(v) => patchDraft({ cncPlungeDelay: v })}
+                      />
+                      <small>M03 落刀/开光后的 G04 稳定延时（默认 200 ms）</small>
+                    </div>
+                    <div className="sc-slit-field">
+                      <label htmlFor="cfg-cnc-retract-delay">抬刀延时 retractDelay (ms)</label>
+                      <NumberInput
+                        id="cfg-cnc-retract-delay"
+                        min={0}
+                        max={10000}
+                        step={50}
+                        integer
+                        className="field num"
+                        value={draft.cncRetractDelay}
+                        onValueChange={(v) => patchDraft({ cncRetractDelay: v })}
+                      />
+                      <small>M05 抬刀/关光后的 G04 复位延时（默认 100 ms）</small>
+                    </div>
                   </div>
                 </section>
 

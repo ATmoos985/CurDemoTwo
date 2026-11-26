@@ -1,6 +1,6 @@
 package com.example.cutdemotwo.persistence;
 
-import com.example.cutdemotwo.business.optimization.StoredOptimizationJob;
+import com.example.cutdemotwo.contracts.jobs.StoredOptimizationJob;
 import tools.jackson.databind.json.JsonMapper;
 import java.nio.file.*;
 import java.io.IOException;

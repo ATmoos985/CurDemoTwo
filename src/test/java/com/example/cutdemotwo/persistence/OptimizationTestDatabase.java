@@ -17,7 +17,7 @@ public final class OptimizationTestDatabase {
         String password=System.getProperty("cutdemo.test.mysql.password","");
         String options="?allowPublicKeyRetrieval=true&useSSL=false&connectionTimeZone=UTC";
         var admin=new DriverManagerDataSource(base+options,user,password);
-        new JdbcTemplate(admin).execute("CREATE DATABASE "+name+" CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci");
+        new JdbcTemplate(admin).execute("CREATE DATABASE "+name+" CHARACTER SET utf8mb4 COLLATE utf8mb4_bin");
         return new DriverManagerDataSource(base+name+options,user,password);
     }
 }

@@ -12,9 +12,26 @@ import java.util.List;
 public record CuttingTask(String id, String name, String materialModel, String externalRef,
                           long revision, List<Line> demands, Process process,
                           @JsonInclude(JsonInclude.Include.NON_NULL) String problemType,
-                          @JsonInclude(JsonInclude.Include.NON_NULL) Slitting slitting) {
+                          @JsonInclude(JsonInclude.Include.NON_NULL) Slitting slitting,
+                          @JsonInclude(JsonInclude.Include.NON_NULL) String dueDate,
+                          @JsonInclude(JsonInclude.Include.NON_NULL) String priority,
+                          @JsonInclude(JsonInclude.Include.NON_NULL) String customerName,
+                          @JsonInclude(JsonInclude.Include.NON_NULL) String kittingGroup,
+                          @JsonInclude(JsonInclude.Include.NON_NULL) String requiredBatchNo,
+                          @JsonInclude(JsonInclude.Include.NON_NULL) String requiredColor,
+                          @JsonInclude(JsonInclude.Include.NON_NULL) Boolean strictBatchMatch,
+                          @JsonInclude(JsonInclude.Include.NON_NULL) String machineId,
+                          @JsonInclude(JsonInclude.Include.NON_NULL) String shiftTeam,
+                          @JsonInclude(JsonInclude.Include.NON_NULL) String sourceSchemeId,
+                          @JsonInclude(JsonInclude.Include.NON_NULL) String replenishIdempotencyKey) {
     public static final String NESTING_2D = "NESTING_2D", SLITTING_1D = "SLITTING_1D";
+    public static final String PRIORITY_NORMAL = "NORMAL", PRIORITY_HIGH = "HIGH", PRIORITY_URGENT = "URGENT";
 
+    public CuttingTask(String id, String name, String materialModel, String externalRef,
+                       long revision, List<Line> demands, Process process, String problemType, Slitting slitting) {
+        this(id, name, materialModel, externalRef, revision, demands, process, problemType, slitting,
+                null, null, null, null, null, null, null, null, null, null, null);
+    }
     public CuttingTask(String id, String name, String materialModel, String externalRef, long revision, List<Line> demands, Process process) {
         this(id, name, materialModel, externalRef, revision, demands, process, null, null);
     }
@@ -22,6 +39,18 @@ public record CuttingTask(String id, String name, String materialModel, String e
         this(id, name, materialModel, externalRef, revision, demands, null);
     }
     public boolean slittingTask() { return SLITTING_1D.equals(problemType); }
+
+    public CuttingTask withMaterialModel(String nextMaterialModel) {
+        return new CuttingTask(id, name, nextMaterialModel, externalRef, revision, demands, process, problemType, slitting,
+                dueDate, priority, customerName, kittingGroup, requiredBatchNo, requiredColor, strictBatchMatch,
+                machineId, shiftTeam, sourceSchemeId, replenishIdempotencyKey);
+    }
+
+    public CuttingTask withDemands(List<Line> nextDemands) {
+        return new CuttingTask(id, name, materialModel, externalRef, revision, nextDemands, process, problemType, slitting,
+                dueDate, priority, customerName, kittingGroup, requiredBatchNo, requiredColor, strictBatchMatch,
+                machineId, shiftTeam, sourceSchemeId, replenishIdempotencyKey);
+    }
 
     public record Line(int id, String name, double width, double length, int quantity, boolean allowRotation,
                        com.example.cutdemotwo.contracts.nesting.NestingProblem.Shape shape,

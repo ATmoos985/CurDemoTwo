@@ -29,12 +29,20 @@ public class RemnantStock {
     private String sourceReportId;
     private Integer sourcePieceId;
     private String qualityDispositionId;
+    private String batchNo;          // 继承自来源母卷/父料头的缸号，旧数据为空时不序列化
+    private String color;            // 继承自来源母卷/父料头的色号，旧数据为空时不序列化
     public String getSourceReportId() { return sourceReportId; }
     public void setSourceReportId(String value) { sourceReportId = value; }
     public Integer getSourcePieceId() { return sourcePieceId; }
     public void setSourcePieceId(Integer value) { sourcePieceId = value; }
     public String getQualityDispositionId() { return qualityDispositionId; }
     public void setQualityDispositionId(String value) { qualityDispositionId = value; }
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public String getBatchNo() { return batchNo; }
+    public void setBatchNo(String batchNo) { this.batchNo = batchNo; }
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public String getColor() { return color; }
+    public void setColor(String color) { this.color = color; }
 
     public RemnantStock() {}
 

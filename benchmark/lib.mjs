@@ -139,10 +139,80 @@ export function formatRun(row) {
     return `${head}：${row.placed}/${row.requested} · ${row.utilization == null ? '—' : percent(row.utilization)}% · ${row.elapsedMs} ms · ${row.engine}`;
 }
 
+/** 按题目红线配置核验各分组的利用率下限、耗时上限与排入比例；未在配置中登记的题目不计入违约。 */
+export function evaluateThresholds(summary, thresholds) {
+    const rules = thresholds?.problems ?? thresholds ?? {};
+    const violations = [];
+    let checked = 0;
+    for (const group of summary.groups) {
+        const rule = rules[group.problem];
+        if (!rule) continue;
+        checked += 1;
+        if (group.n === 0) {
+            violations.push({
+                problem: group.problem, side: group.side, label: group.label,
+                metric: 'validRuns', actual: 0, limit: 1,
+                message: `无有效运行（失败 ${group.failed} 次）`
+            });
+            continue;
+        }
+        if (rule.minUtilization != null) {
+            const actual = group.utilization?.mean ?? null;
+            if (actual == null || actual < rule.minUtilization) {
+                violations.push({
+                    problem: group.problem, side: group.side, label: group.label,
+                    metric: 'utilization', actual, limit: rule.minUtilization,
+                    message: `均值利用率 ${actual == null ? '—' : `${percent(actual)}%`} 低于红线 ${percent(rule.minUtilization)}%`
+                });
+            }
+        }
+        if (rule.maxElapsedMs != null) {
+            const actual = group.elapsedMs?.max ?? null;
+            if (actual == null || actual > rule.maxElapsedMs) {
+                violations.push({
+                    problem: group.problem, side: group.side, label: group.label,
+                    metric: 'elapsedMs', actual, limit: rule.maxElapsedMs,
+                    message: `最大耗时 ${actual == null ? '—' : `${ms(actual)} ms`} 超过红线 ${ms(rule.maxElapsedMs)} ms`
+                });
+            }
+        }
+        if (rule.minPlacedRatio != null && group.requested > 0) {
+            const actual = group.placed ? round(group.placed.mean / group.requested, 4) : null;
+            if (actual == null || actual < rule.minPlacedRatio) {
+                violations.push({
+                    problem: group.problem, side: group.side, label: group.label,
+                    metric: 'placedRatio', actual, limit: rule.minPlacedRatio,
+                    message: `平均排入率 ${actual == null ? '—' : `${percent(actual * 100)}%`} 低于红线 ${percent(rule.minPlacedRatio * 100)}%`
+                });
+            }
+        }
+    }
+    return { passed: violations.length === 0, checked, violations };
+}
+
+/** 格式化质量红线校验结论为中文 Markdown。 */
+export function formatThresholdReport(evaluation) {
+    if (!evaluation || evaluation.checked === 0) return '> 质量红线：本次结果无匹配红线规则的题目。';
+    if (evaluation.passed) return `> 质量红线：全部通过（共校验 ${evaluation.checked} 组）。`;
+    const lines = [
+        `> 质量红线：未通过（共校验 ${evaluation.checked} 组，发现 ${evaluation.violations.length} 项违约）。`,
+        '',
+        '| 题目 | 服务 | 指标 | 实测 | 红线 | 说明 |',
+        '|---|---|---|---|---|---|',
+    ];
+    for (const v of evaluation.violations) {
+        lines.push(`| ${v.problem} | ${service(v)} | ${v.metric} | ${v.actual ?? '—'} | ${v.limit} | ${v.message} |`);
+    }
+    return lines.join('\n');
+}
+
 /** Header and tables for a results file; an interrupted run is labelled as such. */
-export function formatReport(record) {
+export function formatReport(record, thresholds = null) {
     const parts = [formatHeader(record)];
     if (!record.complete) parts.push(`> 未完成：${record.abortReason ?? '运行中断'}；以下只统计已完成的 ${record.rows.length} 次。`);
-    parts.push(formatTable(summarize(record.rows)));
+    const summary = summarize(record.rows);
+    parts.push(formatTable(summary));
+    const evaluation = record.thresholdEvaluation ?? (thresholds ? evaluateThresholds(summary, thresholds) : null);
+    if (evaluation) parts.push(formatThresholdReport(evaluation));
     return parts.join('\n\n');
 }

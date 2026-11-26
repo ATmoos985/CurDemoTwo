@@ -133,10 +133,73 @@ class OptimizationServiceTests {
         var j=s.submit("result-disk-key",request("crosscut",1,3,false));assertEquals("FAILED",finished(s,j.id()).state());
         assertThrows(OptimizationService.Failure.class,()->s.result(j.id()));assertNull(backing.load().get(0).result());
     }
-    @Test void archiveLimitPreservesOldKeysAndReturnsQuotaInsteadOfEvictingResults()throws Exception{
-        var s=service(new SolverFactory(List.of(new CrossCutSolverService())),new FileOptimizationJobStore(temp.resolve("jobs")),1,1);
-        var input=request("crosscut",1,3,false);var j=s.submit("archive-key-1",input);finished(s,j.id());
-        assertEquals(j.id(),s.submit("archive-key-1",input).id());assertEquals(429,assertThrows(OptimizationService.Failure.class,()->s.submit("archive-key-2",input)).status);
+    @Test void archiveLimitEvictsOldestTerminalJobsAndClearsIdempotencyKeys()throws Exception{
+        Path dir=temp.resolve("jobs-evict");
+        var s=service(new SolverFactory(List.of(new CrossCutSolverService())),new FileOptimizationJobStore(dir),2,2);
+        var input=request("crosscut",1,3,false);
+        var j1=s.submit("archive-key-1",input);assertEquals("SUCCEEDED",finished(s,j1.id()).state());
+        Thread.sleep(15);
+        var j2=s.submit("archive-key-2",input);assertEquals("SUCCEEDED",finished(s,j2.id()).state());
+        // 幂等重放命中已有作业，不触发淘汰
+        assertEquals(j1.id(),s.submit("archive-key-1",input).id());
+        // 达到上限 maxStored=2 时，新提交自动滚动淘汰最旧终态作业 j1，不再返回 429
+        var j3=s.submit("archive-key-3",input);assertEquals("SUCCEEDED",finished(s,j3.id()).state());
+        assertEquals(404,assertThrows(OptimizationService.Failure.class,()->s.get(j1.id())).status);
+        assertFalse(Files.exists(dir.resolve(j1.id()+".json")),"被淘汰终态作业的磁盘文件应一并删除");
+        assertEquals("SUCCEEDED",s.get(j2.id()).state());
+        assertEquals("SUCCEEDED",s.get(j3.id()).state());
+        assertEquals(2,new FileCount(dir).count());
+        // 旧幂等键已随淘汰清理，不会留下悬空引用，复用该键可受理新作业
+        var j4=s.submit("archive-key-1",input);assertNotEquals(j1.id(),j4.id());
+        assertEquals("SUCCEEDED",finished(s,j4.id()).state());
+    }
+    @Test void archiveLimitRejectsWithQuotaExceededWhenAllStoredJobsAreActive()throws Exception{
+        var engine=new GateEngine();
+        var s=service(new SolverFactory(List.of(engine)),new FileOptimizationJobStore(temp.resolve("jobs-active-full")),2,2);
+        try {
+            var j1=s.submit("active-key-1",request("gate",1,5,false));assertTrue(engine.entered.await(2,TimeUnit.SECONDS));
+            var j2=s.submit("active-key-2",request("gate",1,5,false));
+            var rejected=assertThrows(OptimizationService.Failure.class,()->s.submit("active-key-3",request("gate",1,5,false)));
+            assertEquals("QUOTA_EXCEEDED",rejected.code);
+            assertEquals(429,rejected.status);
+            assertEquals("RUNNING",s.get(j1.id()).state());
+            assertEquals("QUEUED",s.get(j2.id()).state());
+        } finally {engine.release.countDown();}
+    }
+    @Test void expiredTerminalJobsArePurgedByCleanupWhileActiveJobsRemain()throws Exception{
+        Path dir=temp.resolve("jobs-ttl");
+        var engine=new GateEngine();
+        var s=new OptimizationService(new SolverFactory(List.of(new CrossCutSolverService(),engine)),
+                new com.example.cutdemotwo.algorithm.slitting.LinearSlittingSolverEngine(),
+                new FileOptimizationJobStore(dir),1,2,10,0L,"768m");
+        services.add(s);
+        try {
+            var done=s.submit("ttl-done-key",request("crosscut",1,3,false));
+            assertEquals("SUCCEEDED",finished(s,done.id()).state());
+            var active=s.submit("ttl-active-key",request("gate",1,5,false));
+            assertTrue(engine.entered.await(2,TimeUnit.SECONDS));
+            assertEquals(1,s.cleanupExpiredTerminalJobs());
+            assertEquals(404,assertThrows(OptimizationService.Failure.class,()->s.get(done.id())).status);
+            assertFalse(Files.exists(dir.resolve(done.id()+".json")));
+            assertEquals("RUNNING",s.get(active.id()).state());
+        } finally {engine.release.countDown();}
+    }
+    @Test void capabilitiesReportsDynamicSlittingHeapAndSeparateTimeLimits() {
+        var s=new OptimizationService(new SolverFactory(List.of(new CrossCutSolverService())),
+                new com.example.cutdemotwo.algorithm.slitting.LinearSlittingSolverEngine("384m"),
+                new FileOptimizationJobStore(temp.resolve("jobs-cap-384")),2,8,500,72L,"384m");
+        services.add(s);
+        var cap=s.capabilities();
+        @SuppressWarnings("unchecked") var slitting=(Map<String,Object>)cap.get("slittingEngine");
+        @SuppressWarnings("unchecked") var limits=(Map<String,Object>)cap.get("limits");
+        assertEquals(384,slitting.get("maxHeapMiB"));
+        assertEquals(180,slitting.get("maxTimeLimitSeconds"));
+        assertEquals(60,limits.get("maxTimeLimitSeconds"));
+        assertEquals(60,limits.get("maxNestingTimeLimitSeconds"));
+        assertEquals(180,limits.get("maxSlittingTimeLimitSeconds"));
+        assertEquals(72L,limits.get("terminalRetentionHours"));
+        assertEquals(1024,OptimizationService.parseHeapMiB("1g"));
+        assertEquals(768,OptimizationService.parseHeapMiB("768m"));
     }
     @Test void concurrentRepeatedSubmissionRunsOneJob()throws Exception{
         var engine=new GateEngine();var s=service(engine);var pool=Executors.newFixedThreadPool(6);

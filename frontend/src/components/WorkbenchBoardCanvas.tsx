@@ -1,450 +1,147 @@
 import React, { useEffect, useRef, useState } from 'react';
+import Konva from '../vendor/konva';
+import { validateRollPlacement as validateRollPlacementPure } from '../pages/workbench/boardPlacementValidation';
+import type {
+  BoardContextMenuEvent,
+  BoardCutLine,
+  BoardDefect,
+  BoardDemandSpec,
+  BoardLeftover,
+  BoardPlacedPiece,
+  BoardPoint,
+  BoardShapeGeometry,
+  BoardZone,
+  WorkbenchBoardCanvasProps,
+  WorkbenchBoardHandle
+} from './canvas/canvasTypes';
+import {
+  CameraState,
+  computeStagingLayout,
+  computeToolpathSegments,
+  computeTouchPinchTransform,
+  computeViewportWorldRect,
+  createHatchTile,
+  isWorldBoxVisible,
+  mapArrowKeyToRollDelta,
+  rollLocalBoxToWorldRect,
+  round1,
+  styleForDemand
+} from './canvas/canvasGeometry';
+import { drawScreenRulers, RULER_THICKNESS } from './canvas/canvasRuler';
 
-export interface BoardPoint {
-  x: number;
-  y: number;
+export type {
+  BoardPoint,
+  BoardShapeGeometry,
+  BoardDemandSpec,
+  BoardPlacedPiece,
+  BoardLeftover,
+  BoardDefect,
+  BoardZone,
+  BoardCutLine,
+  BoardContextMenuEvent,
+  WorkbenchBoardHandle,
+  WorkbenchBoardCanvasProps
+};
+
+interface DragFeedbackState {
+  tone: 'ok' | 'err' | 'return';
+  text: string;
 }
 
-export interface BoardShapeGeometry {
-  type: 'RECTANGLE' | 'POLYGON';
+interface CulledPieceEntry {
+  node: any;
+  localX: number;
+  localY: number;
   width: number;
   height: number;
-  vertices?: BoardPoint[];
+  dragging: boolean;
+  syncLabel: () => void;
 }
 
-export interface BoardDemandSpec {
-  key: string;
-  demandId: number;
-  name: string;
-  width: number;
-  length: number;
-  remainingQty: number;
-  totalQty: number;
-  allowRotation?: boolean;
-  allowHalfTurn?: boolean;
-  shape?: BoardShapeGeometry;
+function isDocumentDarkTheme(): boolean {
+  if (typeof document === 'undefined') return false;
+  return document.documentElement.dataset.theme === 'dark';
 }
 
-export interface BoardPlacedPiece {
-  id: string | number;
-  index: number;
-  demandId?: number;
-  demandKey: string;
-  name: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rotationDegrees?: number;
-  gapFill?: boolean;
-  shape?: BoardShapeGeometry;
+function makeShapeNode(
+  Konva: any,
+  shape: BoardShapeGeometry | undefined,
+  w: number,
+  h: number,
+  attrs: Record<string, any>
+) {
+  if (shape?.type === 'POLYGON' && shape.vertices && shape.vertices.length >= 3) {
+    return new Konva.Line({
+      points: shape.vertices.flatMap((pt) => [pt.x, pt.y]),
+      closed: true,
+      strokeScaleEnabled: false,
+      perfectDrawEnabled: false,
+      ...attrs
+    });
+  }
+  return new Konva.Rect({
+    width: w,
+    height: h,
+    cornerRadius: 0,
+    strokeScaleEnabled: false,
+    perfectDrawEnabled: false,
+    ...attrs
+  });
 }
 
-export interface BoardDefect {
-  id: string | number;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  margin?: number;
-  label?: string;
-  editable?: boolean;
-  fresh?: boolean;
-}
-
-export interface BoardZone {
-  id: string;
-  startY: number;
-  lengthMm: number;
-  kind: 'cut' | 'planned' | 'used' | 'window';
-  label?: string;
-}
-
-export interface BoardCutLine {
-  sequence?: number;
-  kind?: string;
-  startX: number;
-  startY: number;
-  endX: number;
-  endY: number;
-}
-
-export interface WorkbenchBoardHandle {
-  fit: () => void;
-  zoom: (factor: number) => void;
-  resetRollOffset: () => void;
-  focusRange: (startY: number, endY: number, startX?: number, endX?: number) => void;
-  followPosition: (yMm: number) => void;
-  clearMeasure: () => void;
-}
-
-export interface WorkbenchBoardCanvasProps {
+function buildBaseSignature(p: {
   rollTitle: string;
   rollWidthMm: number;
   rollLengthMm: number;
   occupiedLengthMm: number;
   trimStartMm: number;
-  pieceGapMm: number;
-  defects: BoardDefect[];
   demands: BoardDemandSpec[];
+  zones: BoardZone[];
+  rollShape: BoardShapeGeometry | null;
+  showStaging: boolean;
+  interactivePieces: boolean;
+  vertical: boolean;
+  tool: string;
+  dark: boolean;
+}): string {
+  const demSig = p.demands
+    .map((d) => `${d.key}:${d.width}x${d.length}:${d.remainingQty}:${d.shape?.type || 'R'}`)
+    .join('|');
+  const zoneSig = p.zones
+    .map((z) => `${z.id}:${z.kind}:${z.startY}:${z.lengthMm}:${z.label || ''}`)
+    .join('|');
+  const shapeSig = p.rollShape
+    ? `${p.rollShape.type}:${p.rollShape.width}x${p.rollShape.height}:${p.rollShape.vertices?.length || 0}`
+    : '';
+  return `${p.rollTitle}|${p.rollWidthMm}x${p.rollLengthMm}|occ=${p.occupiedLengthMm}|trim=${p.trimStartMm}|st=${p.showStaging ? 1 : 0}|ip=${p.interactivePieces ? 1 : 0}|v=${p.vertical ? 1 : 0}|t=${p.tool}|dk=${p.dark ? 1 : 0}|d=${demSig}|z=${zoneSig}|s=${shapeSig}`;
+}
+
+function buildPiecesSignature(p: {
   placedPieces: BoardPlacedPiece[];
-  cuts?: BoardCutLine[];
-  zones?: BoardZone[];
-  rollShape?: BoardShapeGeometry | null;
-  feedPositionMm?: number | null;
-  selectedDefectId?: string | null;
-  showStaging?: boolean;
-  interactivePieces?: boolean;
-  vertical?: boolean;
-  tool?: 'pan' | 'measure' | 'defect' | 'move';
-  showDimensions: boolean;
-  showPath: boolean;
-  highlightedDemandKey: string | null;
-  selectedPieceIndex: number | null;
-  ariaLabel?: string;
-  onDropStagingPiece?: (demandKey: string, localX: number, localY: number) => void;
-  onMovePlacedPiece?: (pieceIndex: number, localX: number, localY: number) => void;
-  onRotatePlacedPiece?: (pieceIndex: number) => void;
-  onRemovePlacedPiece?: (pieceIndex: number) => void;
-  onHoverDemandKey?: (demandKey: string | null) => void;
-  onSelectPiece?: (pieceIndex: number | null) => void;
-  onCursorMove?: (cursor: { x: number; y: number } | null) => void;
-  onCollisionNotice?: (message: string) => void;
-  onInteract?: () => void;
-  onContextInspect?: (hit: { entityId?: string | number; x: number; y: number } | null) => void;
-  onDefectSelect?: (id: string) => void;
-  onDefectDraw?: (box: { u: number; v: number; du: number; dv: number }) => void;
-  onDefectEdit?: (id: string, box: { u: number; v: number; du: number; dv: number }) => void;
-  boardRef?: React.MutableRefObject<WorkbenchBoardHandle | null>;
-}
-
-interface PieceVisualStyle {
-  fill: string;
-  stroke: string;
-  text: string;
-}
-
-const PIECE_PALETTE: PieceVisualStyle[] = [
-  { fill: '#eef2ff', stroke: '#5b61f6', text: '#312e81' },
-  { fill: '#ecfdf5', stroke: '#10b981', text: '#065f46' },
-  { fill: '#eff6ff', stroke: '#3b82f6', text: '#1e3a8a' },
-  { fill: '#f5f3ff', stroke: '#8b5cf6', text: '#4c1d95' },
-  { fill: '#f0fdfa', stroke: '#14b8a6', text: '#115e59' },
-  { fill: '#fff7ed', stroke: '#f97316', text: '#7c2d12' },
-  { fill: '#fdf2f8', stroke: '#ec4899', text: '#831843' },
-  { fill: '#f0f9ff', stroke: '#0ea5e9', text: '#0c4a6e' }
-];
-
-const GAP_FILL_STYLE: PieceVisualStyle = {
-  fill: '#d1fae5',
-  stroke: '#059669',
-  text: '#065f46'
-};
-
-function styleForDemand(demandId: number | undefined, fallbackIdx: number, gapFill?: boolean): PieceVisualStyle {
-  if (gapFill) return GAP_FILL_STYLE;
-  const seed = Math.abs(Number.isFinite(demandId) ? Number(demandId) : fallbackIdx);
-  return PIECE_PALETTE[seed % PIECE_PALETTE.length];
-}
-
-function round1(v: number): number {
-  return Math.round(v * 10) / 10;
-}
-
-function getWorldVertices(
-  shape: BoardShapeGeometry | undefined,
-  w: number,
-  h: number,
-  ox: number,
-  oy: number
-): BoardPoint[] {
-  if (shape?.type === 'POLYGON' && shape.vertices && shape.vertices.length >= 3) {
-    return shape.vertices.map((pt) => ({ x: pt.x + ox, y: pt.y + oy }));
-  }
-  return [
-    { x: ox, y: oy },
-    { x: ox + w, y: oy },
-    { x: ox + w, y: oy + h },
-    { x: ox, y: oy + h }
-  ];
-}
-
-function pointInPolygonStrict(px: number, py: number, poly: BoardPoint[]): boolean {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const a = poly[j];
-    const b = poly[i];
-    // Exclude points right on an edge (within epsilon) so touching pieces are permitted
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const lenSq = dx * dx + dy * dy;
-    if (lenSq > 1e-6) {
-      const t = Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / lenSq));
-      const distSq = (px - (a.x + t * dx)) ** 2 + (py - (a.y + t * dy)) ** 2;
-      if (distSq <= 0.36) return false;
-    }
-    if ((a.y > py) !== (b.y > py) && px < ((b.x - a.x) * (py - a.y)) / (b.y - a.y) + a.x) {
-      inside = !inside;
-    }
-  }
-  return inside;
-}
-
-function segmentsProperlyIntersect(a: BoardPoint, b: BoardPoint, c: BoardPoint, d: BoardPoint): boolean {
-  const cross = (p: BoardPoint, q: BoardPoint, r: BoardPoint) =>
-    (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
-  const d1 = cross(a, b, c);
-  const d2 = cross(a, b, d);
-  const d3 = cross(c, d, a);
-  const d4 = cross(c, d, b);
-  const eps = 1e-2;
-  return ((d1 > eps && d2 < -eps) || (d1 < -eps && d2 > eps)) &&
-    ((d3 > eps && d4 < -eps) || (d3 < -eps && d4 > eps));
-}
-
-function pointToSegmentDistSq(p: BoardPoint, a: BoardPoint, b: BoardPoint): number {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lenSq = dx * dx + dy * dy;
-  if (lenSq < 1e-6) return (p.x - a.x) ** 2 + (p.y - a.y) ** 2;
-  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
-  return (p.x - (a.x + t * dx)) ** 2 + (p.y - (a.y + t * dy)) ** 2;
-}
-
-function polygonsOverlapOrViolateGap(
-  polyA: BoardPoint[],
-  polyB: BoardPoint[],
-  minGap: number
-): boolean {
-  for (let i = 0; i < polyA.length; i++) {
-    const a1 = polyA[i];
-    const a2 = polyA[(i + 1) % polyA.length];
-    for (let j = 0; j < polyB.length; j++) {
-      const b1 = polyB[j];
-      const b2 = polyB[(j + 1) % polyB.length];
-      if (segmentsProperlyIntersect(a1, a2, b1, b2)) return true;
-    }
-  }
-  for (const p of polyA) {
-    if (pointInPolygonStrict(p.x, p.y, polyB)) return true;
-  }
-  for (const p of polyB) {
-    if (pointInPolygonStrict(p.x, p.y, polyA)) return true;
-  }
-  // Check centroid of A inside B and vice versa (handles identical overlapping polygons)
-  const cA = polyA.reduce((acc, p) => ({ x: acc.x + p.x / polyA.length, y: acc.y + p.y / polyA.length }), { x: 0, y: 0 });
-  const cB = polyB.reduce((acc, p) => ({ x: acc.x + p.x / polyB.length, y: acc.y + p.y / polyB.length }), { x: 0, y: 0 });
-  if (pointInPolygonStrict(cA.x, cA.y, polyB) || pointInPolygonStrict(cB.x, cB.y, polyA)) {
-    return true;
-  }
-
-  if (minGap > 0.6) {
-    const thresholdSq = (minGap - 0.5) ** 2;
-    for (const p of polyA) {
-      for (let j = 0; j < polyB.length; j++) {
-        if (pointToSegmentDistSq(p, polyB[j], polyB[(j + 1) % polyB.length]) < thresholdSq) {
-          return true;
-        }
-      }
-    }
-    for (const p of polyB) {
-      for (let i = 0; i < polyA.length; i++) {
-        if (pointToSegmentDistSq(p, polyA[i], polyA[(i + 1) % polyA.length]) < thresholdSq) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-function shapesCollide(
-  shapeA: BoardShapeGeometry | undefined,
-  wA: number,
-  hA: number,
-  xA: number,
-  yA: number,
-  shapeB: BoardShapeGeometry | undefined,
-  wB: number,
-  hB: number,
-  xB: number,
-  yB: number,
-  gapMm: number
-): boolean {
-  const pad = Math.max(0, gapMm) - 0.5;
-  if (xA + wA + pad <= xB || xB + wB + pad <= xA || yA + hA + pad <= yB || yB + hB + pad <= yA) {
-    return false;
-  }
-  if (shapeA?.type !== 'POLYGON' && shapeB?.type !== 'POLYGON') {
-    return true;
-  }
-  const polyA = getWorldVertices(shapeA, wA, hA, xA, yA);
-  const polyB = getWorldVertices(shapeB, wB, hB, xB, yB);
-  return polygonsOverlapOrViolateGap(polyA, polyB, Math.max(0, gapMm));
-}
-
-function createHatchTile(background: string | null, stroke: string, size = 10): HTMLCanvasElement {
-  const tile = document.createElement('canvas');
-  tile.width = size;
-  tile.height = size;
-  const ctx = tile.getContext('2d');
-  if (ctx) {
-    if (background) {
-      ctx.fillStyle = background;
-      ctx.fillRect(0, 0, size, size);
-    }
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(-1, 1);
-    ctx.lineTo(1, -1);
-    ctx.moveTo(0, size);
-    ctx.lineTo(size, 0);
-    ctx.moveTo(size - 1, size + 1);
-    ctx.lineTo(size + 1, size - 1);
-    ctx.stroke();
-  }
-  return tile;
-}
-
-function pickRulerStep(scalePxPerMm: number, minGapPx = 68): number {
-  const raw = minGapPx / Math.max(0.01, scalePxPerMm);
-  const steps = [50, 100, 200, 250, 500, 1000, 2000, 5000];
-  for (const s of steps) {
-    if (s >= raw) return s;
-  }
-  return Math.ceil(raw / 5000) * 5000;
-}
-
-interface StagingRenderItem {
-  instanceKey: string;
-  demandKey: string;
-  demandId: number;
-  name: string;
-  width: number;
-  height: number;
-  shape?: BoardShapeGeometry;
-  x: number;
-  y: number;
-  stackExtra: number;
-  style: PieceVisualStyle;
-}
-
-interface StagingLayoutResult {
-  items: StagingRenderItem[];
-  totalCount: number;
-  bounds: { x: number; y: number; width: number; height: number };
-}
-
-function computeStagingLayout(
-  demands: BoardDemandSpec[],
-  rollWidthMm: number,
-  rollLengthMm: number
-): StagingLayoutResult {
-  const gapFromRoll = Math.max(
-    260,
-    Math.round(rollWidthMm * 0.24),
-    Math.round(rollLengthMm * 0.038)
-  );
-  const itemGap = Math.max(44, Math.min(96, Math.round(rollWidthMm * 0.04)));
-  const pad = Math.max(64, Math.min(120, Math.round(rollWidthMm * 0.055)));
-  const colMaxH = Math.max(rollLengthMm, 1600);
-
-  const rawItems: Omit<StagingRenderItem, 'x' | 'y'>[] = [];
-  let totalCount = 0;
-
-  demands.forEach((d, idx) => {
-    const qty = Math.max(0, Math.floor(d.remainingQty || 0));
-    if (qty <= 0 || d.width <= 0 || d.length <= 0) return;
-    totalCount += qty;
-    const renderN = qty <= 12 ? qty : 6;
-    const extra = qty > 12 ? qty - 6 : 0;
-    const style = styleForDemand(d.demandId, idx, false);
-    for (let i = 0; i < renderN; i++) {
-      rawItems.push({
-        instanceKey: `${d.key}#${i}`,
-        demandKey: d.key,
-        demandId: d.demandId,
-        name: d.name,
-        width: d.width,
-        height: d.length,
-        shape: d.shape,
-        stackExtra: i === renderN - 1 ? extra : 0,
-        style
-      });
-    }
-  });
-
-  if (rawItems.length === 0) {
-    const boxW = Math.max(420, Math.min(680, Math.round(rollWidthMm * 0.42)));
-    const boxH = Math.max(520, Math.min(rollLengthMm, 1200));
-    return {
-      items: [],
-      totalCount: 0,
-      bounds: {
-        x: -gapFromRoll - boxW,
-        y: 0,
-        width: boxW,
-        height: boxH
-      }
-    };
-  }
-
-  // Group into neat vertical columns flowing right-to-left (closest to mother roll first)
-  interface ColBucket {
-    items: (Omit<StagingRenderItem, 'x' | 'y'> & { relY: number })[];
-    colWidth: number;
-    colHeight: number;
-  }
-  const columns: ColBucket[] = [];
-  let curCol: ColBucket = { items: [], colWidth: 0, colHeight: 0 };
-
-  for (const item of rawItems) {
-    const nextY = curCol.items.length === 0 ? 0 : curCol.colHeight + itemGap;
-    if (curCol.items.length > 0 && nextY + item.height > colMaxH) {
-      columns.push(curCol);
-      curCol = { items: [], colWidth: 0, colHeight: 0 };
-    }
-    const relY = curCol.items.length === 0 ? 0 : curCol.colHeight + itemGap;
-    curCol.items.push({ ...item, relY });
-    curCol.colWidth = Math.max(curCol.colWidth, item.width);
-    curCol.colHeight = relY + item.height;
-  }
-  if (curCol.items.length > 0) columns.push(curCol);
-
-  const positioned: StagingRenderItem[] = [];
-  let cursorRightX = -gapFromRoll - pad;
-  let maxColH = 0;
-
-  for (const col of columns) {
-    const colLeftX = cursorRightX - col.colWidth;
-    for (const it of col.items) {
-      positioned.push({
-        ...it,
-        x: colLeftX + (col.colWidth - it.width) / 2,
-        y: pad + it.relY
-      });
-    }
-    maxColH = Math.max(maxColH, col.colHeight);
-    cursorRightX = colLeftX - itemGap;
-  }
-
-  const contentLeftX = cursorRightX + itemGap;
-  const boxX = contentLeftX - pad;
-  const boxRightX = -gapFromRoll;
-  const boxW = Math.max(320, boxRightX - boxX);
-  const boxH = Math.max(460, maxColH + pad * 2);
-
-  return {
-    items: positioned,
-    totalCount,
-    bounds: { x: boxX, y: 0, width: boxW, height: boxH }
-  };
-}
-
-interface DragFeedbackState {
-  tone: 'ok' | 'err' | 'return';
-  text: string;
+  defects: BoardDefect[];
+  selectedDefectId: string | null;
+  interactivePieces: boolean;
+  vertical: boolean;
+  tool: string;
+  rollWidthMm: number;
+  rollLengthMm: number;
+  trimStartMm: number;
+  pieceGapMm: number;
+  hasDefectHandlers: boolean;
+}): string {
+  const pcSig = p.placedPieces
+    .map(
+      (pc) =>
+        `${pc.id}:${pc.index}:${pc.demandKey}:${pc.x},${pc.y},${pc.width}x${pc.height}:${pc.rotationDegrees || 0}:${pc.gapFill ? 1 : 0}:${pc.shape?.type || 'R'}:${pc.shape?.vertices?.length || 0}`
+    )
+    .join('|');
+  const defSig = p.defects
+    .map(
+      (d) =>
+        `${d.id}:${d.x},${d.y},${d.w}x${d.h}:${d.margin ?? 0}:${d.editable ? 1 : 0}:${d.fresh ? 1 : 0}:${d.label || ''}`
+    )
+    .join('|');
+  return `${p.rollWidthMm}x${p.rollLengthMm}|trim=${p.trimStartMm}|gap=${p.pieceGapMm}|ip=${p.interactivePieces ? 1 : 0}|v=${p.vertical ? 1 : 0}|t=${p.tool}|selDef=${p.selectedDefectId || ''}|hd=${p.hasDefectHandlers ? 1 : 0}|pc=${pcSig}|df=${defSig}`;
 }
 
 export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
@@ -457,11 +154,15 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
   defects,
   demands,
   placedPieces,
+  leftovers = [],
   cuts = [],
   zones = [],
   rollShape = null,
   feedPositionMm = null,
   selectedDefectId = null,
+  selectedLeftoverId = null,
+  simCutStep = null,
+  startCorner = 'left-top',
   showStaging = true,
   interactivePieces = true,
   vertical = true,
@@ -473,39 +174,82 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
   ariaLabel = '二维交互排料工作台画布',
   onDropStagingPiece,
   onMovePlacedPiece,
+  onNudgePlacedPiece,
   onRotatePlacedPiece,
   onRemovePlacedPiece,
+  onUndo,
+  onRedo,
+  onSelectLeftover,
   onHoverDemandKey,
   onSelectPiece,
   onCursorMove,
   onCollisionNotice,
   onInteract,
   onContextInspect,
+  onContextMenu,
   onDefectSelect,
   onDefectDraw,
   onDefectEdit,
   boardRef
 }) => {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const rulerCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [dragFeedback, setDragFeedback] = useState<DragFeedbackState | null>(null);
   const [zoomPct, setZoomPct] = useState<number>(100);
+  const [darkTheme, setDarkTheme] = useState<boolean>(() => isDocumentDarkTheme());
 
-  // Persistent refs for Konva objects & camera so highlight/zoom never resets drag offsets
+  // 监听全局 data-theme 变化，保证浅色工业 / 暗色车间大屏无缝同步画布与标尺
+  useEffect(() => {
+    if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
+    const root = document.documentElement;
+    const observer = new MutationObserver(() => {
+      setDarkTheme(root.dataset.theme === 'dark');
+    });
+    observer.observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []);
+
+  // 四层独立 Konva Layer + 共享坐标变换的 world/roll Group refs
   const stageRef = useRef<any>(null);
-  const layerRef = useRef<any>(null);
-  const worldGroupRef = useRef<any>(null);
-  const stagingGroupRef = useRef<any>(null);
-  const rollGroupRef = useRef<any>(null);
-  const overlayGroupRef = useRef<any>(null);
-  const scaleNodesRef = useRef<(() => void)[]>([]);
+  const baseLayerRef = useRef<any>(null);
+  const piecesLayerRef = useRef<any>(null);
+  const toolpathLayerRef = useRef<any>(null);
+  const dynamicLayerRef = useRef<any>(null);
 
-  const camRef = useRef<{ x: number; y: number; scale: number; fitScale: number }>({
+  const worldGroupsRef = useRef<any[]>([]);
+  const rollGroupsRef = useRef<any[]>([]);
+  const stagingGroupRef = useRef<any>(null);
+  const baseRollGroupRef = useRef<any>(null);
+  const piecesRollGroupRef = useRef<any>(null);
+  const toolpathRollGroupRef = useRef<any>(null);
+  const dynamicRollGroupRef = useRef<any>(null);
+
+  // 持久化的验布跑布线节点（零销毁重建，10Hz 仅原地改坐标与文本）
+  const feedNodesRef = useRef<{
+    group: any;
+    line: any;
+    tagBg: any;
+    tagText: any;
+  } | null>(null);
+  const overlayGroupRef = useRef<any>(null);
+
+  // 各层缩放自适应回调，分开存储以支持按层独立重建
+  const baseScaleNodesRef = useRef<(() => void)[]>([]);
+  const piecesScaleNodesRef = useRef<(() => void)[]>([]);
+  const toolpathScaleNodesRef = useRef<(() => void)[]>([]);
+  const culledPiecesRef = useRef<CulledPieceEntry[]>([]);
+
+  const lastBaseSigRef = useRef<string>('');
+  const lastPiecesSigRef = useRef<string>('');
+
+  const camRef = useRef<CameraState>({
     x: 40,
     y: 40,
     scale: 0.25,
     fitScale: 0.25
   });
-  const rollOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const rollOffsetRef = useRef<BoardPoint>({ x: 0, y: 0 });
+  const cursorLocalRef = useRef<BoardPoint | null>(null);
   const stagingOffsetsRef = useRef<Map<string, BoardPoint>>(new Map());
   const stagingBoundsRef = useRef<{ x: number; y: number; width: number; height: number }>({
     x: 0,
@@ -515,16 +259,32 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
   });
   const didInitialFitRef = useRef<boolean>(false);
   const lastFitSigRef = useRef<string>('');
+  const rafCamIdRef = useRef<number | null>(null);
+  const rafRulerIdRef = useRef<number | null>(null);
+
   const hatchCacheRef = useRef<{
     trim?: HTMLCanvasElement;
     defect?: HTMLCanvasElement;
     cut?: HTMLCanvasElement;
     used?: HTMLCanvasElement;
+    leftover?: HTMLCanvasElement;
   }>({});
   const measureLineRef = useRef<{ p1: BoardPoint; p2: BoardPoint } | null>(null);
   const defectDraftRef = useRef<{ p1: BoardPoint; p2: BoardPoint } | null>(null);
 
-  // Keep latest props & callbacks in a ref for Konva event handlers
+  // 高亮/选中快速更新表（零几何重建）
+  const pieceNodeMapRef = useRef<
+    {
+      node: any;
+      outline: any;
+      demandKey: string;
+      baseStroke: string;
+      placedIndex: number | null;
+      gapFill?: boolean;
+      layerKind: 'base' | 'pieces';
+    }[]
+  >([]);
+
   const propsRef = useRef({
     rollTitle,
     rollWidthMm,
@@ -535,11 +295,15 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
     defects,
     demands,
     placedPieces,
+    leftovers,
     cuts,
     zones,
     rollShape,
     feedPositionMm,
     selectedDefectId,
+    selectedLeftoverId,
+    simCutStep,
+    startCorner,
     showStaging,
     interactivePieces,
     vertical,
@@ -548,16 +312,22 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
     showPath,
     highlightedDemandKey,
     selectedPieceIndex,
+    darkTheme,
     onDropStagingPiece,
     onMovePlacedPiece,
+    onNudgePlacedPiece,
     onRotatePlacedPiece,
     onRemovePlacedPiece,
+    onUndo,
+    onRedo,
+    onSelectLeftover,
     onHoverDemandKey,
     onSelectPiece,
     onCursorMove,
     onCollisionNotice,
     onInteract,
     onContextInspect,
+    onContextMenu,
     onDefectSelect,
     onDefectDraw,
     onDefectEdit
@@ -572,11 +342,15 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
     defects,
     demands,
     placedPieces,
+    leftovers,
     cuts,
     zones,
     rollShape,
     feedPositionMm,
     selectedDefectId,
+    selectedLeftoverId,
+    simCutStep,
+    startCorner,
     showStaging,
     interactivePieces,
     vertical,
@@ -585,32 +359,26 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
     showPath,
     highlightedDemandKey,
     selectedPieceIndex,
+    darkTheme,
     onDropStagingPiece,
     onMovePlacedPiece,
+    onNudgePlacedPiece,
     onRotatePlacedPiece,
     onRemovePlacedPiece,
+    onUndo,
+    onRedo,
+    onSelectLeftover,
     onHoverDemandKey,
     onSelectPiece,
     onCursorMove,
     onCollisionNotice,
     onInteract,
     onContextInspect,
+    onContextMenu,
     onDefectSelect,
     onDefectDraw,
     onDefectEdit
   };
-
-  // Keep node references for fast highlight/selection visual updates without rebuilding geometry
-  const pieceNodeMapRef = useRef<
-    {
-      node: any;
-      outline: any;
-      demandKey: string;
-      baseStroke: string;
-      placedIndex: number | null;
-      gapFill?: boolean;
-    }[]
-  >([]);
 
   const getRollWorldRect = () => {
     const p = propsRef.current;
@@ -623,8 +391,18 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
     return { x: ro.x, y: ro.y - w, width: l, height: w };
   };
 
+  const syncAllRollGroupsTransform = () => {
+    const ro = rollOffsetRef.current;
+    const rot = propsRef.current.vertical ? 0 : -90;
+    for (const rg of rollGroupsRef.current) {
+      if (!rg) continue;
+      rg.position(ro);
+      rg.rotation(rot);
+    }
+  };
+
   const stageToRollLocal = (stagePt: { x: number; y: number }): BoardPoint | null => {
-    const rollGroup = rollGroupRef.current;
+    const rollGroup = baseRollGroupRef.current;
     if (!rollGroup) return null;
     try {
       const inv = rollGroup.getAbsoluteTransform().copy().invert();
@@ -635,11 +413,102 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
     }
   };
 
+  const drawRulersNow = () => {
+    const canvas = rulerCanvasRef.current;
+    const host = hostRef.current;
+    if (!canvas || !host) return;
+    const p = propsRef.current;
+    const vw = host.clientWidth;
+    const vh = host.clientHeight;
+    if (!p.showDimensions || vw <= 24 || vh <= 24) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const targetW = Math.round(vw * dpr);
+    const targetH = Math.round(vh * dpr);
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+      canvas.width = targetW;
+      canvas.height = targetH;
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawScreenRulers(ctx, {
+      width: vw,
+      height: vh,
+      cam: camRef.current,
+      rollOffset: rollOffsetRef.current,
+      rollWidthMm: p.rollWidthMm,
+      rollLengthMm: p.rollLengthMm,
+      vertical: p.vertical,
+      cursorLocal: cursorLocalRef.current,
+      dark: p.darkTheme,
+      dpr
+    });
+  };
+
+  const scheduleRulerDraw = () => {
+    if (rafRulerIdRef.current != null) return;
+    rafRulerIdRef.current = window.requestAnimationFrame(() => {
+      rafRulerIdRef.current = null;
+      drawRulersNow();
+    });
+  };
+
+  /** 原地更新独立动态 Layer 上的验布线（零节点创建/销毁，专为 10Hz 跑布设计）。 */
+  const updateFeedLineVisual = (drawLayer = true) => {
+    const fn = feedNodesRef.current;
+    const dynLayer = dynamicLayerRef.current;
+    if (!fn || !dynLayer) return;
+    const p = propsRef.current;
+    if (p.feedPositionMm == null || !Number.isFinite(p.feedPositionMm)) {
+      if (fn.group.visible()) {
+        fn.group.visible(false);
+        if (drawLayer) dynLayer.batchDraw();
+      }
+      return;
+    }
+    const fy = Math.max(0, Math.min(p.rollLengthMm, p.feedPositionMm));
+    const s = Math.max(0.002, camRef.current.scale);
+    const isVert = p.vertical;
+
+    fn.group.visible(true);
+    fn.line.points([0, fy, p.rollWidthMm, fy]);
+    fn.tagText.text(`验布线 ${(fy / 1000).toFixed(2)} m`);
+    const fontMm = 10.5 / s;
+    fn.tagText.fontSize(fontMm);
+    fn.tagText.rotation(isVert ? 0 : 90);
+
+    const padX = 5 / s;
+    const padY = 2.5 / s;
+    const tw = fn.tagText.width();
+    const th = fontMm * 1.2;
+    fn.tagBg.size({ width: tw + padX * 2, height: th + padY * 2 });
+    fn.tagBg.cornerRadius(4 / s);
+    fn.tagBg.rotation(isVert ? 0 : 90);
+
+    if (isVert) {
+      const tx = p.rollWidthMm + 8 / s;
+      const ty = fy - (th + padY * 2) / 2;
+      fn.tagBg.position({ x: tx, y: ty });
+      fn.tagText.position({ x: tx + padX, y: ty + padY });
+    } else {
+      const tx = -8 / s;
+      const ty = fy - (tw + padX * 2) / 2;
+      fn.tagBg.position({ x: tx, y: ty });
+      fn.tagText.position({ x: tx - padY, y: ty + padX });
+    }
+
+    if (drawLayer) dynLayer.batchDraw();
+  };
+
   const renderOverlay = () => {
-    const Konva = (globalThis as any).Konva;
+    // Konva 由 ../vendor/konva 显式导入并同步挂载至 globalThis.Konva
     const overlay = overlayGroupRef.current;
-    const layer = layerRef.current;
-    if (!Konva || !overlay || !layer) return;
+    const dynLayer = dynamicLayerRef.current;
+    if (!Konva || !overlay || !dynLayer) return;
     overlay.destroyChildren();
     const s = Math.max(0.03, camRef.current.scale);
     const isVert = propsRef.current.vertical;
@@ -729,7 +598,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
       );
       const tagGrp = new Konva.Group({
         x: x + w / 2,
-        y: y,
+        y,
         rotation: isVert ? 0 : 90,
         listening: false
       });
@@ -761,21 +630,78 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
       overlay.add(tagGrp);
     }
 
-    layer.batchDraw();
+    dynLayer.batchDraw();
   };
 
-  const applyCamera = () => {
-    const world = worldGroupRef.current;
-    const layer = layerRef.current;
-    if (!world || !layer) return;
+  /** 视口裁剪（Viewport Culling）：跳过完全在视口外的裁片标签同步并按需裁剪隐藏。 */
+  const syncCulledPieces = () => {
+    const host = hostRef.current;
+    const entries = culledPiecesRef.current;
+    if (!host || entries.length === 0) return;
+    const vw = host.clientWidth;
+    const vh = host.clientHeight;
+    const viewportWorld = computeViewportWorldRect(camRef.current, vw, vh, 64);
+    const ro = rollOffsetRef.current;
+    const isVert = propsRef.current.vertical;
+
+    for (const entry of entries) {
+      if (entry.dragging) {
+        if (!entry.node.visible()) entry.node.visible(true);
+        entry.syncLabel();
+        continue;
+      }
+      const box = rollLocalBoxToWorldRect(
+        entry.localX,
+        entry.localY,
+        entry.width,
+        entry.height,
+        ro,
+        isVert
+      );
+      const visible = isWorldBoxVisible(box, viewportWorld);
+      if (visible) {
+        if (!entry.node.visible()) entry.node.visible(true);
+        entry.syncLabel();
+      } else if (entry.node.visible()) {
+        entry.node.visible(false);
+      }
+    }
+  };
+
+  const applyCameraImmediate = () => {
+    const worldGroups = worldGroupsRef.current;
+    if (!worldGroups.length) return;
     const c = camRef.current;
-    world.position({ x: c.x, y: c.y });
-    world.scale({ x: c.scale, y: c.scale });
-    for (const fn of scaleNodesRef.current) fn();
+    for (const wg of worldGroups) {
+      if (!wg) continue;
+      wg.position({ x: c.x, y: c.y });
+      wg.scale({ x: c.scale, y: c.scale });
+    }
+    for (const fn of baseScaleNodesRef.current) fn();
+    for (const fn of piecesScaleNodesRef.current) fn();
+    for (const fn of toolpathScaleNodesRef.current) fn();
+    syncCulledPieces();
+    updateFeedLineVisual(false);
     renderOverlay();
-    layer.batchDraw();
-    const relPct = c.fitScale > 0 ? Math.round((c.scale / c.fitScale) * 100) : Math.round(c.scale * 400);
+
+    baseLayerRef.current?.batchDraw();
+    piecesLayerRef.current?.batchDraw();
+    toolpathLayerRef.current?.batchDraw();
+    dynamicLayerRef.current?.batchDraw();
+    drawRulersNow();
+
+    const relPct =
+      c.fitScale > 0 ? Math.round((c.scale / c.fitScale) * 100) : Math.round(c.scale * 400);
     setZoomPct(Math.max(10, Math.min(999, relPct)));
+  };
+
+  /** 平移/缩放 rAF 节流，合并同一帧内多次滚轮/拖拽相机变更。 */
+  const scheduleCameraApply = () => {
+    if (rafCamIdRef.current != null) return;
+    rafCamIdRef.current = window.requestAnimationFrame(() => {
+      rafCamIdRef.current = null;
+      applyCameraImmediate();
+    });
   };
 
   const fitView = () => {
@@ -803,19 +729,24 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
 
     const worldW = Math.max(200, maxX - minX);
     const worldH = Math.max(200, maxY - minY);
-    const padX = 52;
-    const padTop = 54;
-    const padBottom = 36;
+    const rulerPad = p.showDimensions ? RULER_THICKNESS : 0;
+    const padLeft = rulerPad + 36;
+    const padRight = 40;
+    const padTop = rulerPad + 42;
+    const padBottom = 34;
     const scale = Math.max(
       0.002,
-      Math.min(1.6, Math.min((vw - padX * 2) / worldW, (vh - padTop - padBottom) / worldH))
+      Math.min(
+        1.6,
+        Math.min((vw - padLeft - padRight) / worldW, (vh - padTop - padBottom) / worldH)
+      )
     );
 
-    const x = (vw - worldW * scale) / 2 - minX * scale;
+    const x = padLeft + (vw - padLeft - padRight - worldW * scale) / 2 - minX * scale;
     const y = padTop + (vh - padTop - padBottom - worldH * scale) / 2 - minY * scale;
 
     camRef.current = { x, y, scale, fitScale: scale };
-    applyCamera();
+    applyCameraImmediate();
   };
 
   const focusRange = (startY: number, endY: number, startX?: number, endX?: number) => {
@@ -851,30 +782,72 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
 
     const worldW = Math.max(120, maxX - minX);
     const worldH = Math.max(120, maxY - minY);
-    const padX = 48;
-    const padY = 48;
+    const rulerPad = p.showDimensions ? RULER_THICKNESS : 0;
+    const padLeft = rulerPad + 36;
+    const padRight = 36;
+    const padTop = rulerPad + 36;
+    const padBottom = 36;
     const scale = Math.max(
       0.002,
-      Math.min(2.2, Math.min((vw - padX * 2) / worldW, (vh - padY * 2) / worldH))
+      Math.min(
+        2.4,
+        Math.min((vw - padLeft - padRight) / worldW, (vh - padTop - padBottom) / worldH)
+      )
     );
-    const x = (vw - worldW * scale) / 2 - minX * scale;
-    const y = (vh - worldH * scale) / 2 - minY * scale;
+    const x = padLeft + (vw - padLeft - padRight - worldW * scale) / 2 - minX * scale;
+    const y = padTop + (vh - padTop - padBottom - worldH * scale) / 2 - minY * scale;
 
     camRef.current = { x, y, scale, fitScale: scale };
-    applyCamera();
+    applyCameraImmediate();
   };
 
+  /** 跟随验布线位置：若当前已在局部视野则平移跟踪，首次或全卷视角下自动聚焦合理跨度。 */
   const followPosition = (yMm: number) => {
+    const host = hostRef.current;
     const p = propsRef.current;
+    if (!host) return;
+    const vw = host.clientWidth;
+    const vh = host.clientHeight;
+    if (vw < 40 || vh < 40) return;
+
     const span = Math.min(p.rollLengthMm, Math.max(2400, p.rollWidthMm * 2.2));
-    const half = span / 2;
-    let y0 = Math.max(0, yMm - half);
-    let y1 = y0 + span;
-    if (y1 > p.rollLengthMm) {
-      y1 = p.rollLengthMm;
-      y0 = Math.max(0, y1 - span);
+    const desiredScale = Math.min(
+      2.2,
+      Math.max(
+        0.02,
+        p.vertical
+          ? Math.min((vw - 96) / Math.max(200, p.rollWidthMm), (vh - 96) / span)
+          : Math.min((vw - 96) / span, (vh - 96) / Math.max(200, p.rollWidthMm))
+      )
+    );
+    const cur = camRef.current;
+    // 如果当前缩放比远离跟拍视野（例如刚从全卷切回），调用 focusRange；否则仅平滑平移，避免抖动
+    if (cur.scale < desiredScale * 0.55 || cur.scale > desiredScale * 3.5) {
+      const half = span / 2;
+      let y0 = Math.max(0, yMm - half);
+      let y1 = y0 + span;
+      if (y1 > p.rollLengthMm) {
+        y1 = p.rollLengthMm;
+        y0 = Math.max(0, y1 - span);
+      }
+      focusRange(y0, y1, 0, p.rollWidthMm);
+      return;
     }
-    focusRange(y0, y1, 0, p.rollWidthMm);
+
+    const ro = rollOffsetRef.current;
+    const rulerPad = p.showDimensions ? RULER_THICKNESS : 0;
+    if (p.vertical) {
+      const targetScreenY = rulerPad + (vh - rulerPad) * 0.5;
+      const nextCamY = targetScreenY - (ro.y + yMm) * cur.scale;
+      if (Math.abs(nextCamY - cur.y) < 0.5) return;
+      camRef.current = { ...cur, y: nextCamY };
+    } else {
+      const targetScreenX = rulerPad + (vw - rulerPad) * 0.5;
+      const nextCamX = targetScreenX - (ro.x + yMm) * cur.scale;
+      if (Math.abs(nextCamX - cur.x) < 0.5) return;
+      camRef.current = { ...cur, x: nextCamX };
+    }
+    scheduleCameraApply();
   };
 
   const clearMeasure = () => {
@@ -888,7 +861,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
     const cx = centerPx ? centerPx.x : host.clientWidth / 2;
     const cy = centerPx ? centerPx.y : host.clientHeight / 2;
     const c = camRef.current;
-    const nextScale = Math.max(0.002, Math.min(3.0, c.scale * factor));
+    const nextScale = Math.max(0.002, Math.min(5.0, c.scale * factor));
     const worldX = (cx - c.x) / c.scale;
     const worldY = (cy - c.y) / c.scale;
     camRef.current = {
@@ -897,14 +870,12 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
       x: cx - worldX * nextScale,
       y: cy - worldY * nextScale
     };
-    applyCamera();
+    scheduleCameraApply();
   };
 
   const resetRollOffset = () => {
     rollOffsetRef.current = { x: 0, y: 0 };
-    if (rollGroupRef.current) {
-      rollGroupRef.current.position({ x: 0, y: 0 });
-    }
+    syncAllRollGroupsTransform();
     fitView();
   };
 
@@ -923,10 +894,10 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
     };
   }, [boardRef]);
 
-  // Mount Konva Stage once
+  // 1. 仅挂载一次 Konva Stage 与四层 Layer（静态底图 / 裁片疵点 / 料头刀路 / 动态验布线交互）
   useEffect(() => {
     const host = hostRef.current;
-    const Konva = (globalThis as any).Konva;
+    // Konva 由 ../vendor/konva 显式导入并同步挂载至 globalThis.Konva
     if (!host || !Konva) return;
 
     const stage = new Konva.Stage({
@@ -934,45 +905,115 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
       width: Math.max(1, host.clientWidth),
       height: Math.max(1, host.clientHeight)
     });
-    const layer = new Konva.Layer();
-    const worldGroup = new Konva.Group();
-    const stagingGroup = new Konva.Group();
-    const rollGroup = new Konva.Group({ draggable: propsRef.current.tool === 'pan' });
 
-    worldGroup.add(stagingGroup);
-    worldGroup.add(rollGroup);
-    layer.add(worldGroup);
-    stage.add(layer);
+    const baseLayer = new Konva.Layer();
+    const piecesLayer = new Konva.Layer();
+    const toolpathLayer = new Konva.Layer();
+    const dynamicLayer = new Konva.Layer({ listening: false });
+
+    const baseWorld = new Konva.Group();
+    const piecesWorld = new Konva.Group();
+    const toolpathWorld = new Konva.Group();
+    const dynamicWorld = new Konva.Group({ listening: false });
+
+    const stagingGroup = new Konva.Group();
+    const baseRollGroup = new Konva.Group({ draggable: propsRef.current.tool === 'pan' });
+    const piecesRollGroup = new Konva.Group();
+    const toolpathRollGroup = new Konva.Group();
+    const dynamicRollGroup = new Konva.Group({ listening: false });
+
+    // 持久化验布跑布线与标签节点（位于独立 dynamicLayer，永不销毁重建）
+    const feedGroup = new Konva.Group({ visible: false, listening: false });
+    const feedLine = new Konva.Line({
+      points: [0, 0, 1000, 0],
+      stroke: '#10b981',
+      strokeWidth: 2,
+      strokeScaleEnabled: false,
+      listening: false
+    });
+    const feedTagBg = new Konva.Rect({
+      fill: 'rgba(16, 185, 129, 0.14)',
+      stroke: '#10b981',
+      strokeWidth: 1,
+      strokeScaleEnabled: false,
+      listening: false
+    });
+    const feedTagText = new Konva.Text({
+      text: '',
+      fill: '#047857',
+      fontStyle: '700',
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      listening: false
+    });
+    feedGroup.add(feedLine, feedTagBg, feedTagText);
+
+    const overlayGroup = new Konva.Group({ listening: false });
+    dynamicRollGroup.add(feedGroup, overlayGroup);
+
+    baseWorld.add(stagingGroup, baseRollGroup);
+    piecesWorld.add(piecesRollGroup);
+    toolpathWorld.add(toolpathRollGroup);
+    dynamicWorld.add(dynamicRollGroup);
+
+    baseLayer.add(baseWorld);
+    piecesLayer.add(piecesWorld);
+    toolpathLayer.add(toolpathWorld);
+    dynamicLayer.add(dynamicWorld);
+
+    stage.add(baseLayer, piecesLayer, toolpathLayer, dynamicLayer);
 
     stageRef.current = stage;
-    layerRef.current = layer;
-    worldGroupRef.current = worldGroup;
+    baseLayerRef.current = baseLayer;
+    piecesLayerRef.current = piecesLayer;
+    toolpathLayerRef.current = toolpathLayer;
+    dynamicLayerRef.current = dynamicLayer;
+    worldGroupsRef.current = [baseWorld, piecesWorld, toolpathWorld, dynamicWorld];
+    rollGroupsRef.current = [baseRollGroup, piecesRollGroup, toolpathRollGroup, dynamicRollGroup];
     stagingGroupRef.current = stagingGroup;
-    rollGroupRef.current = rollGroup;
+    baseRollGroupRef.current = baseRollGroup;
+    piecesRollGroupRef.current = piecesRollGroup;
+    toolpathRollGroupRef.current = toolpathRollGroup;
+    dynamicRollGroupRef.current = dynamicRollGroup;
+    feedNodesRef.current = { group: feedGroup, line: feedLine, tagBg: feedTagBg, tagText: feedTagText };
+    overlayGroupRef.current = overlayGroup;
 
-    // Whole-roll dragging (moves roll + all placed pieces as a rigid unit without mutating piece coords)
-    rollGroup.on('dragstart', (e: any) => {
-      if (e.target !== rollGroup) return;
+    // 整卷刚体拖动：同步其余 3 层的 rollGroup 偏移，不修改裁片自身局部坐标
+    baseRollGroup.on('dragstart', (e: any) => {
+      if (e.target !== baseRollGroup) return;
       host.style.cursor = 'grabbing';
       propsRef.current.onInteract?.();
     });
-    rollGroup.on('dragmove', (e: any) => {
-      if (e.target !== rollGroup) return;
-      rollOffsetRef.current = { x: rollGroup.x(), y: rollGroup.y() };
+    baseRollGroup.on('dragmove', (e: any) => {
+      if (e.target !== baseRollGroup) return;
+      rollOffsetRef.current = { x: baseRollGroup.x(), y: baseRollGroup.y() };
+      piecesRollGroup.position(rollOffsetRef.current);
+      toolpathRollGroup.position(rollOffsetRef.current);
+      dynamicRollGroup.position(rollOffsetRef.current);
+      piecesLayer.batchDraw();
+      toolpathLayer.batchDraw();
+      dynamicLayer.batchDraw();
+      scheduleRulerDraw();
     });
-    rollGroup.on('dragend', (e: any) => {
-      if (e.target !== rollGroup) return;
-      rollOffsetRef.current = { x: rollGroup.x(), y: rollGroup.y() };
+    baseRollGroup.on('dragend', (e: any) => {
+      if (e.target !== baseRollGroup) return;
+      rollOffsetRef.current = { x: baseRollGroup.x(), y: baseRollGroup.y() };
+      piecesRollGroup.position(rollOffsetRef.current);
+      toolpathRollGroup.position(rollOffsetRef.current);
+      dynamicRollGroup.position(rollOffsetRef.current);
       host.style.cursor = '';
+      scheduleCameraApply();
     });
 
-    // Pan empty grid background + measure / defect drawing gestures
-    let panState: { startX: number; startY: number; camX: number; camY: number } | null = null;
-    let activeToolDrag: 'measure' | 'defect' | null = null;
+    // Pointer Events 统一处理：单指平移、测距/画疵点、以及双指捏合缩放
+    let panState: { pointerId: number; startX: number; startY: number; camX: number; camY: number } | null =
+      null;
+    let activeToolDrag: { kind: 'measure' | 'defect'; pointerId: number } | null = null;
+    const activeTouchPointers = new Map<number, BoardPoint>();
+    let pinchState: { dist: number; center: BoardPoint } | null = null;
 
-    const getPointerFromClient = (evt: MouseEvent): { x: number; y: number } => {
+    const getPointerFromClient = (clientX: number, clientY: number): BoardPoint => {
       const rect = host.getBoundingClientRect();
-      return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+      return { x: clientX - rect.left, y: clientY - rect.top };
     };
 
     const clampToRoll = (pt: BoardPoint): BoardPoint => ({
@@ -980,77 +1021,33 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
       y: Math.max(0, Math.min(propsRef.current.rollLengthMm, pt.y))
     });
 
-    const onWindowMove = (evt: MouseEvent) => {
-      if (panState) {
-        camRef.current = {
-          ...camRef.current,
-          x: panState.camX + (evt.clientX - panState.startX),
-          y: panState.camY + (evt.clientY - panState.startY)
-        };
-        applyCamera();
-        return;
-      }
-      if (activeToolDrag === 'measure' && measureLineRef.current) {
-        const local = stageToRollLocal(getPointerFromClient(evt));
-        if (local) {
-          measureLineRef.current = { ...measureLineRef.current, p2: local };
-          renderOverlay();
-        }
-        return;
-      }
-      if (activeToolDrag === 'defect' && defectDraftRef.current) {
-        const local = stageToRollLocal(getPointerFromClient(evt));
-        if (local) {
-          defectDraftRef.current = { ...defectDraftRef.current, p2: clampToRoll(local) };
-          renderOverlay();
+    const onHostPointerDown = (evt: PointerEvent) => {
+      if (evt.pointerType === 'touch') {
+        activeTouchPointers.set(evt.pointerId, getPointerFromClient(evt.clientX, evt.clientY));
+        if (activeTouchPointers.size === 2) {
+          // 进入双指捏合缩放，取消任何进行中的单指平移/画框
+          panState = null;
+          activeToolDrag = null;
+          const pts = Array.from(activeTouchPointers.values());
+          pinchState = {
+            dist: Math.max(1, Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y)),
+            center: { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 }
+          };
+          propsRef.current.onInteract?.();
+          return;
         }
       }
-    };
 
-    const onWindowUp = () => {
-      if (panState) {
-        panState = null;
-        host.style.cursor = '';
-      }
-      if (activeToolDrag === 'measure') {
-        activeToolDrag = null;
-      }
-      if (activeToolDrag === 'defect') {
-        activeToolDrag = null;
-        const draft = defectDraftRef.current;
-        defectDraftRef.current = null;
-        renderOverlay();
-        if (draft) {
-          const minX = Math.min(draft.p1.x, draft.p2.x);
-          const minY = Math.min(draft.p1.y, draft.p2.y);
-          const w = Math.abs(draft.p2.x - draft.p1.x);
-          const h = Math.abs(draft.p2.y - draft.p1.y);
-          if (w >= 0.1 && h >= 0.1) {
-            propsRef.current.onDefectDraw?.({
-              u: round1(minY),
-              v: round1(minX),
-              du: round1(h),
-              dv: round1(w)
-            });
-          }
-        }
-      }
-    };
-    window.addEventListener('mousemove', onWindowMove);
-    window.addEventListener('mouseup', onWindowUp);
-
-    stage.on('mousedown', (e: any) => {
-      const evt = e.evt as MouseEvent;
       const isMiddle = evt.button === 1;
       const isLeft = evt.button === 0;
       const curTool = propsRef.current.tool;
+      const stagePt = getPointerFromClient(evt.clientX, evt.clientY);
 
       if (isLeft && curTool === 'measure') {
-        const pt = stage.getPointerPosition();
-        const local = pt ? stageToRollLocal(pt) : null;
+        const local = stageToRollLocal(stagePt);
         if (local) {
           measureLineRef.current = { p1: local, p2: local };
-          activeToolDrag = 'measure';
+          activeToolDrag = { kind: 'measure', pointerId: evt.pointerId };
           renderOverlay();
           propsRef.current.onInteract?.();
         }
@@ -1058,8 +1055,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
       }
 
       if (isLeft && curTool === 'defect') {
-        const pt = stage.getPointerPosition();
-        const local = pt ? stageToRollLocal(pt) : null;
+        const local = stageToRollLocal(stagePt);
         if (
           local &&
           local.x >= -20 &&
@@ -1069,58 +1065,170 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
         ) {
           const clamped = clampToRoll(local);
           defectDraftRef.current = { p1: clamped, p2: clamped };
-          activeToolDrag = 'defect';
+          activeToolDrag = { kind: 'defect', pointerId: evt.pointerId };
           renderOverlay();
           propsRef.current.onInteract?.();
         }
         return;
       }
 
-      if (e.target === stage || isMiddle || (isLeft && curTool === 'move' && e.target === stage)) {
-        if (e.target === stage) {
+      const hitShape = stage.getIntersection(stagePt);
+      const isEmptyStage = !hitShape;
+      if (isEmptyStage || isMiddle || (isLeft && curTool === 'move' && isEmptyStage)) {
+        if (isEmptyStage && evt.button === 0) {
           propsRef.current.onSelectPiece?.(null);
+          propsRef.current.onSelectLeftover?.(null);
         }
-        panState = {
-          startX: evt.clientX,
-          startY: evt.clientY,
-          camX: camRef.current.x,
-          camY: camRef.current.y
-        };
-        host.style.cursor = 'grabbing';
-        propsRef.current.onInteract?.();
+        if (isLeft || isMiddle) {
+          panState = {
+            pointerId: evt.pointerId,
+            startX: evt.clientX,
+            startY: evt.clientY,
+            camX: camRef.current.x,
+            camY: camRef.current.y
+          };
+          host.style.cursor = 'grabbing';
+          propsRef.current.onInteract?.();
+        }
       }
-    });
+    };
+
+    const onWindowPointerMove = (evt: PointerEvent) => {
+      if (evt.pointerType === 'touch' && activeTouchPointers.has(evt.pointerId)) {
+        activeTouchPointers.set(evt.pointerId, getPointerFromClient(evt.clientX, evt.clientY));
+        if (activeTouchPointers.size === 2 && pinchState) {
+          const pts = Array.from(activeTouchPointers.values());
+          const { nextCam, dist, center } = computeTouchPinchTransform(
+            pts[0],
+            pts[1],
+            pinchState.dist,
+            pinchState.center,
+            camRef.current
+          );
+          camRef.current = nextCam;
+          pinchState = { dist, center };
+          scheduleCameraApply();
+          return;
+        }
+      }
+
+      if (panState && evt.pointerId === panState.pointerId) {
+        camRef.current = {
+          ...camRef.current,
+          x: panState.camX + (evt.clientX - panState.startX),
+          y: panState.camY + (evt.clientY - panState.startY)
+        };
+        scheduleCameraApply();
+        return;
+      }
+
+      if (activeToolDrag && evt.pointerId === activeToolDrag.pointerId) {
+        const local = stageToRollLocal(getPointerFromClient(evt.clientX, evt.clientY));
+        if (!local) return;
+        if (activeToolDrag.kind === 'measure' && measureLineRef.current) {
+          measureLineRef.current = { ...measureLineRef.current, p2: local };
+          renderOverlay();
+        } else if (activeToolDrag.kind === 'defect' && defectDraftRef.current) {
+          defectDraftRef.current = { ...defectDraftRef.current, p2: clampToRoll(local) };
+          renderOverlay();
+        }
+      }
+    };
+
+    const onWindowPointerUp = (evt: PointerEvent) => {
+      if (evt.pointerType === 'touch') {
+        activeTouchPointers.delete(evt.pointerId);
+        if (activeTouchPointers.size < 2) {
+          pinchState = null;
+        }
+      }
+
+      if (panState && evt.pointerId === panState.pointerId) {
+        panState = null;
+        host.style.cursor = '';
+      }
+
+      if (activeToolDrag && evt.pointerId === activeToolDrag.pointerId) {
+        const kind = activeToolDrag.kind;
+        activeToolDrag = null;
+        if (kind === 'defect') {
+          const draft = defectDraftRef.current;
+          defectDraftRef.current = null;
+          renderOverlay();
+          if (draft) {
+            const minX = Math.min(draft.p1.x, draft.p2.x);
+            const minY = Math.min(draft.p1.y, draft.p2.y);
+            const w = Math.abs(draft.p2.x - draft.p1.x);
+            const h = Math.abs(draft.p2.y - draft.p1.y);
+            if (w >= 0.1 && h >= 0.1) {
+              propsRef.current.onDefectDraw?.({
+                u: round1(minY),
+                v: round1(minX),
+                du: round1(h),
+                dv: round1(w)
+              });
+            }
+          }
+        }
+      }
+    };
+
+    host.addEventListener('pointerdown', onHostPointerDown);
+    window.addEventListener('pointermove', onWindowPointerMove);
+    window.addEventListener('pointerup', onWindowPointerUp);
+    window.addEventListener('pointercancel', onWindowPointerUp);
 
     stage.on('contextmenu', (e: any) => {
-      if (!propsRef.current.onContextInspect) return;
+      const p = propsRef.current;
+      if (!p.onContextMenu && !p.onContextInspect) return;
       e.evt.preventDefault();
       const pt = stage.getPointerPosition();
       const local = pt ? stageToRollLocal(pt) : null;
+      const lx = local ? round1(local.x) : 0;
+      const ly = local ? round1(local.y) : 0;
+      p.onContextMenu?.({
+        kind: 'empty',
+        clientX: e.evt.clientX,
+        clientY: e.evt.clientY,
+        localX: lx,
+        localY: ly
+      });
       if (local) {
-        propsRef.current.onContextInspect({
-          x: round1(local.x),
-          y: round1(local.y)
-        });
+        p.onContextInspect?.({ x: lx, y: ly });
       }
     });
 
-    stage.on('mousemove', () => {
+    stage.on('mousemove pointermove', () => {
       const pt = stage.getPointerPosition();
       if (!pt) {
+        cursorLocalRef.current = null;
         propsRef.current.onCursorMove?.(null);
+        scheduleRulerDraw();
         return;
       }
       const local = stageToRollLocal(pt);
       const p = propsRef.current;
-      if (local && local.x >= 0 && local.x <= p.rollWidthMm && local.y >= 0 && local.y <= p.rollLengthMm) {
-        propsRef.current.onCursorMove?.({ x: round1(local.x), y: round1(local.y) });
+      if (
+        local &&
+        local.x >= 0 &&
+        local.x <= p.rollWidthMm &&
+        local.y >= 0 &&
+        local.y <= p.rollLengthMm
+      ) {
+        const rounded = { x: round1(local.x), y: round1(local.y) };
+        cursorLocalRef.current = rounded;
+        propsRef.current.onCursorMove?.(rounded);
       } else {
+        cursorLocalRef.current = null;
         propsRef.current.onCursorMove?.(null);
       }
+      scheduleRulerDraw();
     });
 
     stage.on('mouseleave', () => {
+      cursorLocalRef.current = null;
       propsRef.current.onCursorMove?.(null);
+      scheduleRulerDraw();
     });
 
     stage.on('wheel', (e: any) => {
@@ -1140,7 +1248,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
           didInitialFitRef.current = true;
           fitView();
         } else {
-          applyCamera();
+          scheduleCameraApply();
         }
       }
     });
@@ -1148,21 +1256,33 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
 
     return () => {
       ro.disconnect();
-      window.removeEventListener('mousemove', onWindowMove);
-      window.removeEventListener('mouseup', onWindowUp);
+      if (rafCamIdRef.current != null) window.cancelAnimationFrame(rafCamIdRef.current);
+      if (rafRulerIdRef.current != null) window.cancelAnimationFrame(rafRulerIdRef.current);
+      host.removeEventListener('pointerdown', onHostPointerDown);
+      window.removeEventListener('pointermove', onWindowPointerMove);
+      window.removeEventListener('pointerup', onWindowPointerUp);
+      window.removeEventListener('pointercancel', onWindowPointerUp);
       stage.destroy();
       stageRef.current = null;
-      layerRef.current = null;
-      worldGroupRef.current = null;
+      baseLayerRef.current = null;
+      piecesLayerRef.current = null;
+      toolpathLayerRef.current = null;
+      dynamicLayerRef.current = null;
+      worldGroupsRef.current = [];
+      rollGroupsRef.current = [];
       stagingGroupRef.current = null;
-      rollGroupRef.current = null;
+      baseRollGroupRef.current = null;
+      piecesRollGroupRef.current = null;
+      toolpathRollGroupRef.current = null;
+      dynamicRollGroupRef.current = null;
+      feedNodesRef.current = null;
       overlayGroupRef.current = null;
     };
   }, []);
 
-  // Sync tool cursor & rollGroup draggability when tool switches
+  // 同步工具光标与整卷拖动手柄开关
   useEffect(() => {
-    const rollGroup = rollGroupRef.current;
+    const rollGroup = baseRollGroupRef.current;
     const host = hostRef.current;
     if (rollGroup) {
       rollGroup.draggable(tool === 'pan');
@@ -1176,10 +1296,11 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
     }
   }, [tool]);
 
-  // Keyboard shortcuts: R to rotate selected piece, Delete/Backspace to return, Esc to deselect
+  // 键盘快捷键：撤销/重做、方向键微调（1mm / Shift 0.1mm）、R 旋转、Delete 退回、Esc 取消选中
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!propsRef.current.interactivePieces) return;
+      const p = propsRef.current;
+      if (!p.interactivePieces) return;
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -1190,23 +1311,61 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
       ) {
         return;
       }
-      const selIdx = propsRef.current.selectedPieceIndex;
-      if (selIdx == null) return;
-      if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+
+      const mod = e.ctrlKey || e.metaKey;
+      const lowerKey = e.key.toLowerCase();
+
+      if (mod && !e.altKey) {
+        if (lowerKey === 'z' && !e.shiftKey) {
+          e.preventDefault();
+          p.onUndo?.();
+          return;
+        }
+        if (lowerKey === 'y' || (lowerKey === 'z' && e.shiftKey)) {
+          e.preventDefault();
+          p.onRedo?.();
+          return;
+        }
+      }
+
+      const selIdx = p.selectedPieceIndex;
+      if (selIdx == null) {
+        if (e.key === 'Escape') {
+          p.onSelectLeftover?.(null);
+        }
+        return;
+      }
+
+      if (
+        !mod &&
+        !e.altKey &&
+        (e.key === 'ArrowLeft' ||
+          e.key === 'ArrowRight' ||
+          e.key === 'ArrowUp' ||
+          e.key === 'ArrowDown')
+      ) {
         e.preventDefault();
-        propsRef.current.onRotatePlacedPiece?.(selIdx);
+        const stepMm = e.shiftKey ? 0.1 : 1;
+        const { dx, dy } = mapArrowKeyToRollDelta(e.key, stepMm, p.vertical);
+        p.onNudgePlacedPiece?.(selIdx, dx, dy);
+        return;
+      }
+
+      if ((e.key === 'r' || e.key === 'R') && !mod && !e.altKey) {
+        e.preventDefault();
+        p.onRotatePlacedPiece?.(selIdx);
       } else if (e.key === 'Escape') {
-        propsRef.current.onSelectPiece?.(null);
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && !e.ctrlKey && !e.metaKey) {
+        p.onSelectPiece?.(null);
+        p.onSelectLeftover?.(null);
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && !mod) {
         e.preventDefault();
-        propsRef.current.onRemovePlacedPiece?.(selIdx);
+        p.onRemovePlacedPiece?.(selIdx);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  // Helper: validate a placement in mother-roll local coordinates
   const validateRollPlacement = (
     shape: BoardShapeGeometry | undefined,
     w: number,
@@ -1216,52 +1375,22 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
     ignorePieceIndex: number
   ): { ok: boolean; reason: string } => {
     const p = propsRef.current;
-    if (w > p.rollWidthMm + 0.5) {
-      return { ok: false, reason: `裁片宽 ${Math.round(w)}mm 超过母卷门幅 ${p.rollWidthMm}mm` };
-    }
-    if (localX < -0.5 || localX + w > p.rollWidthMm + 0.5) {
-      return { ok: false, reason: '超出母卷左右边界' };
-    }
-    if (localY < p.trimStartMm - 0.5) {
-      return { ok: false, reason: `进入切头修边区 (Y < ${p.trimStartMm}mm)` };
-    }
-    if (localY + h > p.rollLengthMm + 0.5) {
-      return { ok: false, reason: '超出当前母卷版长上限' };
-    }
-    for (const d of p.defects) {
-      const m = d.margin ?? 0;
-      const dx = Math.max(0, d.x - m);
-      const dy = Math.max(0, d.y - m);
-      const dw = d.w + m * 2;
-      const dh = d.h + m * 2;
-      if (shapesCollide(shape, w, h, localX, localY, undefined, dw, dh, dx, dy, 0)) {
-        return { ok: false, reason: '与母卷疵点禁入区重叠' };
-      }
-    }
-    for (const other of p.placedPieces) {
-      if (other.index === ignorePieceIndex) continue;
-      if (
-        shapesCollide(
-          shape,
-          w,
-          h,
-          localX,
-          localY,
-          other.shape,
-          other.width,
-          other.height,
-          other.x,
-          other.y,
-          p.pieceGapMm
-        )
-      ) {
-        return { ok: false, reason: `与裁片「${other.name}」重叠或间距不足` };
-      }
-    }
-    return { ok: true, reason: '' };
+    return validateRollPlacementPure({
+      shape,
+      w,
+      h,
+      localX,
+      localY,
+      ignorePieceIndex,
+      rollWidthMm: p.rollWidthMm,
+      rollLengthMm: p.rollLengthMm,
+      trimStartMm: p.trimStartMm,
+      pieceGapMm: p.pieceGapMm,
+      defects: p.defects,
+      placedPieces: p.placedPieces
+    });
   };
 
-  // Magnetic snapping inside mother roll
   const snapRollPosition = (
     w: number,
     h: number,
@@ -1305,200 +1434,217 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
     return { x: bestX, y: bestY };
   };
 
-  // Rebuild geometry whenever scene data changes (NOT on hover/select)
-  useEffect(() => {
-    const Konva = (globalThis as any).Konva;
-    const stagingGroup = stagingGroupRef.current;
-    const rollGroup = rollGroupRef.current;
-    const host = hostRef.current;
-    if (!Konva || !stagingGroup || !rollGroup || !host) return;
-
-    stagingGroup.destroyChildren();
-    rollGroup.destroyChildren();
-    scaleNodesRef.current = [];
-    pieceNodeMapRef.current = [];
-
+  const ensureHatchTiles = () => {
     if (!hatchCacheRef.current.trim) {
       hatchCacheRef.current.trim = createHatchTile('#f1f5f9', '#cbd5e1', 10);
     }
     if (!hatchCacheRef.current.defect) {
-      hatchCacheRef.current.defect = createHatchTile('rgba(239, 68, 68, 0.14)', 'rgba(220, 38, 38, 0.45)', 9);
+      hatchCacheRef.current.defect = createHatchTile(
+        'rgba(239, 68, 68, 0.14)',
+        'rgba(220, 38, 38, 0.45)',
+        9
+      );
     }
     if (!hatchCacheRef.current.cut) {
-      hatchCacheRef.current.cut = createHatchTile('rgba(148, 163, 184, 0.16)', 'rgba(100, 116, 139, 0.36)', 10);
+      hatchCacheRef.current.cut = createHatchTile(
+        'rgba(148, 163, 184, 0.16)',
+        'rgba(100, 116, 139, 0.36)',
+        10
+      );
     }
     if (!hatchCacheRef.current.used) {
-      hatchCacheRef.current.used = createHatchTile('rgba(226, 232, 240, 0.42)', 'rgba(148, 163, 184, 0.45)', 10);
+      hatchCacheRef.current.used = createHatchTile(
+        'rgba(226, 232, 240, 0.42)',
+        'rgba(148, 163, 184, 0.45)',
+        10
+      );
     }
+    if (!hatchCacheRef.current.leftover) {
+      hatchCacheRef.current.leftover = createHatchTile(
+        'rgba(16, 185, 129, 0.08)',
+        'rgba(16, 185, 129, 0.28)',
+        12
+      );
+    }
+  };
 
-    const makeShapeNode = (
-      shape: BoardShapeGeometry | undefined,
-      w: number,
-      h: number,
-      attrs: Record<string, any>
-    ) => {
-      if (shape?.type === 'POLYGON' && shape.vertices && shape.vertices.length >= 3) {
-        return new Konva.Line({
-          points: shape.vertices.flatMap((pt) => [pt.x, pt.y]),
-          closed: true,
-          strokeScaleEnabled: false,
-          perfectDrawEnabled: false,
-          ...attrs
-        });
-      }
-      return new Konva.Rect({
-        width: w,
-        height: h,
-        cornerRadius: 0,
-        strokeScaleEnabled: false,
-        perfectDrawEnabled: false,
-        ...attrs
-      });
-    };
+  const createLabelUpdater = (
+    Konva: any,
+    parent: any,
+    textStr: string,
+    subStr: string,
+    w: number,
+    h: number,
+    color: string,
+    inRollGroup: boolean
+  ): (() => void) => {
+    const titleNode = new Konva.Text({
+      text: textStr,
+      fill: color,
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Inter", "PingFang SC", "Microsoft YaHei", sans-serif',
+      fontStyle: '600',
+      align: 'center',
+      verticalAlign: 'middle',
+      wrap: 'none',
+      ellipsis: true,
+      listening: false
+    });
+    const subNode = new Konva.Text({
+      text: subStr,
+      fill: color,
+      opacity: 0.72,
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      align: 'center',
+      verticalAlign: 'middle',
+      wrap: 'none',
+      ellipsis: true,
+      listening: false
+    });
+    parent.add(titleNode, subNode);
 
-    const addPieceLabel = (
-      parent: any,
-      textStr: string,
-      subStr: string,
-      w: number,
-      h: number,
-      color: string,
-      inRollGroup: boolean
-    ) => {
-      const titleNode = new Konva.Text({
-        text: textStr,
-        fill: color,
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Inter", "PingFang SC", "Microsoft YaHei", sans-serif',
-        fontStyle: '600',
-        align: 'center',
-        verticalAlign: 'middle',
-        wrap: 'none',
-        ellipsis: true,
-        listening: false
-      });
-      const subNode = new Konva.Text({
-        text: subStr,
-        fill: color,
-        opacity: 0.72,
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-        align: 'center',
-        verticalAlign: 'middle',
-        wrap: 'none',
-        ellipsis: true,
-        listening: false
-      });
-      parent.add(titleNode, subNode);
+    return () => {
+      const s = Math.max(0.002, camRef.current.scale);
+      const horizRoll = inRollGroup && !propsRef.current.vertical;
+      const screenW = (horizRoll ? h : w) * s;
+      const screenH = (horizRoll ? w : h) * s;
 
-      const syncLabel = () => {
-        const s = Math.max(0.002, camRef.current.scale);
-        const horizRoll = inRollGroup && !propsRef.current.vertical;
-        const screenW = (horizRoll ? h : w) * s;
-        const screenH = (horizRoll ? w : h) * s;
-
-        // Horizontal roll mode: rotate labels +90 deg so text is upright on screen
-        if (horizRoll) {
-          if (screenW < 36 || screenH < 16) {
-            titleNode.visible(false);
-            subNode.visible(false);
-            return;
-          }
-          const fontPx = Math.min(11.5, Math.max(8.5, Math.min(screenW / 5.5, screenH * 0.34)));
-          const fontMm = fontPx / s;
-          const boxW = Math.max(10, h - 8 / s);
-          const lineH = fontMm * 1.28;
-          const showSub = screenW >= 58 && screenH >= 34;
-
-          titleNode.visible(true);
-          titleNode.rotation(90);
-          titleNode.fontSize(fontMm);
-          titleNode.width(boxW);
-          titleNode.height(lineH);
-          titleNode.offsetX(boxW / 2);
-          titleNode.offsetY(lineH / 2);
-
-          if (showSub) {
-            const subFontMm = Math.max(7.5 / s, fontMm * 0.84);
-            const subLineH = subFontMm * 1.25;
-            const shift = subLineH * 0.52;
-            titleNode.position({ x: w / 2 + shift, y: h / 2 });
-            subNode.visible(true);
-            subNode.rotation(90);
-            subNode.fontSize(subFontMm);
-            subNode.width(boxW);
-            subNode.height(subLineH);
-            subNode.offsetX(boxW / 2);
-            subNode.offsetY(subLineH / 2);
-            subNode.position({ x: w / 2 - shift, y: h / 2 });
-          } else {
-            titleNode.position({ x: w / 2, y: h / 2 });
-            subNode.visible(false);
-          }
-          return;
-        }
-
-        // Tall & narrow piece on screen: rotate label -90 deg along vertical spine
-        const useVertical = screenW >= 20 && screenW < 58 && screenH >= 48 && screenH > screenW * 1.25;
-        if (useVertical) {
-          const fontPx = Math.min(11, Math.max(8.5, screenW * 0.28));
-          const fontMm = fontPx / s;
-          const boxW = Math.max(8, h - 10 / s);
-          const boxH = fontMm * 1.3;
-          titleNode.visible(true);
-          titleNode.fontSize(fontMm);
-          titleNode.width(boxW);
-          titleNode.height(boxH);
-          titleNode.offsetX(boxW / 2);
-          titleNode.offsetY(boxH / 2);
-          titleNode.rotation(-90);
-          titleNode.position({ x: w / 2, y: h / 2 });
-          subNode.visible(false);
-          return;
-        }
-
-        if (screenW < 40 || screenH < 18) {
+      if (horizRoll) {
+        if (screenW < 36 || screenH < 16) {
           titleNode.visible(false);
           subNode.visible(false);
           return;
         }
         const fontPx = Math.min(11.5, Math.max(8.5, Math.min(screenW / 5.5, screenH * 0.34)));
         const fontMm = fontPx / s;
-        const boxW = Math.max(10, w - 8 / s);
+        const boxW = Math.max(10, h - 8 / s);
         const lineH = fontMm * 1.28;
+        const showSub = screenW >= 58 && screenH >= 34;
 
         titleNode.visible(true);
-        titleNode.rotation(0);
-        titleNode.offsetX(0);
-        titleNode.offsetY(0);
+        titleNode.rotation(90);
         titleNode.fontSize(fontMm);
         titleNode.width(boxW);
         titleNode.height(lineH);
-        titleNode.x(4 / s);
+        titleNode.offsetX(boxW / 2);
+        titleNode.offsetY(lineH / 2);
 
-        const showSub = screenW >= 62 && screenH >= 36;
         if (showSub) {
           const subFontMm = Math.max(7.5 / s, fontMm * 0.84);
           const subLineH = subFontMm * 1.25;
+          const shift = subLineH * 0.52;
+          titleNode.position({ x: w / 2 + shift, y: h / 2 });
           subNode.visible(true);
-          subNode.rotation(0);
-          subNode.offsetX(0);
-          subNode.offsetY(0);
+          subNode.rotation(90);
           subNode.fontSize(subFontMm);
           subNode.width(boxW);
           subNode.height(subLineH);
-          subNode.x(4 / s);
-          const totalH = lineH + subLineH;
-          titleNode.y((h - totalH) / 2);
-          subNode.y((h - totalH) / 2 + lineH);
+          subNode.offsetX(boxW / 2);
+          subNode.offsetY(subLineH / 2);
+          subNode.position({ x: w / 2 - shift, y: h / 2 });
         } else {
+          titleNode.position({ x: w / 2, y: h / 2 });
           subNode.visible(false);
-          titleNode.y((h - lineH) / 2);
         }
-      };
-      syncLabel();
-      scaleNodesRef.current.push(syncLabel);
-    };
+        return;
+      }
 
-    // ==================== 1. LEFT STAGING ZONE (1:1 mm, optional) ====================
+      const useVertical = screenW >= 20 && screenW < 58 && screenH >= 48 && screenH > screenW * 1.25;
+      if (useVertical) {
+        const fontPx = Math.min(11, Math.max(8.5, screenW * 0.28));
+        const fontMm = fontPx / s;
+        const boxW = Math.max(8, h - 10 / s);
+        const boxH = fontMm * 1.3;
+        titleNode.visible(true);
+        titleNode.fontSize(fontMm);
+        titleNode.width(boxW);
+        titleNode.height(boxH);
+        titleNode.offsetX(boxW / 2);
+        titleNode.offsetY(boxH / 2);
+        titleNode.rotation(-90);
+        titleNode.position({ x: w / 2, y: h / 2 });
+        subNode.visible(false);
+        return;
+      }
+
+      if (screenW < 40 || screenH < 18) {
+        titleNode.visible(false);
+        subNode.visible(false);
+        return;
+      }
+      const fontPx = Math.min(11.5, Math.max(8.5, Math.min(screenW / 5.5, screenH * 0.34)));
+      const fontMm = fontPx / s;
+      const boxW = Math.max(10, w - 8 / s);
+      const lineH = fontMm * 1.28;
+
+      titleNode.visible(true);
+      titleNode.rotation(0);
+      titleNode.offsetX(0);
+      titleNode.offsetY(0);
+      titleNode.fontSize(fontMm);
+      titleNode.width(boxW);
+      titleNode.height(lineH);
+      titleNode.x(4 / s);
+
+      const showSub = screenW >= 62 && screenH >= 36;
+      if (showSub) {
+        const subFontMm = Math.max(7.5 / s, fontMm * 0.84);
+        const subLineH = subFontMm * 1.25;
+        subNode.visible(true);
+        subNode.rotation(0);
+        subNode.offsetX(0);
+        subNode.offsetY(0);
+        subNode.fontSize(subFontMm);
+        subNode.width(boxW);
+        subNode.height(subLineH);
+        subNode.x(4 / s);
+        const totalH = lineH + subLineH;
+        titleNode.y((h - totalH) / 2);
+        subNode.y((h - totalH) / 2 + lineH);
+      } else {
+        subNode.visible(false);
+        titleNode.y((h - lineH) / 2);
+      }
+    };
+  };
+
+  // ==================== LAYER 1: 静态材料底图 + 左侧待排区（完全不受 10Hz 验布线与刀路仿真影响） ====================
+  useEffect(() => {
+    // Konva 由 ../vendor/konva 显式导入并同步挂载至 globalThis.Konva
+    const stagingGroup = stagingGroupRef.current;
+    const rollGroup = baseRollGroupRef.current;
+    const host = hostRef.current;
+    if (!Konva || !stagingGroup || !rollGroup || !host) return;
+
+    const sig = buildBaseSignature({
+      rollTitle,
+      rollWidthMm,
+      rollLengthMm,
+      occupiedLengthMm,
+      trimStartMm,
+      demands,
+      zones,
+      rollShape,
+      showStaging,
+      interactivePieces,
+      vertical,
+      tool,
+      dark: darkTheme
+    });
+    if (sig === lastBaseSigRef.current) {
+      return;
+    }
+    lastBaseSigRef.current = sig;
+
+    stagingGroup.destroyChildren();
+    rollGroup.destroyChildren();
+    baseScaleNodesRef.current = [];
+    pieceNodeMapRef.current = pieceNodeMapRef.current.filter((it) => it.layerKind !== 'base');
+
+    ensureHatchTiles();
+    syncAllRollGroupsTransform();
+    rollGroup.draggable(tool === 'pan');
+
+    // 1.1 左侧待排区
     if (showStaging) {
       const staging = computeStagingLayout(demands, rollWidthMm, rollLengthMm);
       stagingBoundsRef.current = staging.bounds;
@@ -1508,24 +1654,25 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
         if (!validInstanceKeys.has(k)) stagingOffsetsRef.current.delete(k);
       }
 
-      const stagingFrame = new Konva.Rect({
-        x: staging.bounds.x,
-        y: staging.bounds.y,
-        width: staging.bounds.width,
-        height: staging.bounds.height,
-        fill: 'rgba(255, 255, 255, 0.42)',
-        stroke: 'rgba(15, 23, 42, 0.16)',
-        strokeWidth: 1.2,
-        dash: [6, 5],
-        strokeScaleEnabled: false,
-        cornerRadius: 8,
-        listening: false
-      });
-      stagingGroup.add(stagingFrame);
+      stagingGroup.add(
+        new Konva.Rect({
+          x: staging.bounds.x,
+          y: staging.bounds.y,
+          width: staging.bounds.width,
+          height: staging.bounds.height,
+          fill: darkTheme ? 'rgba(30, 41, 59, 0.55)' : 'rgba(255, 255, 255, 0.42)',
+          stroke: darkTheme ? 'rgba(148, 163, 184, 0.25)' : 'rgba(15, 23, 42, 0.16)',
+          strokeWidth: 1.2,
+          dash: [6, 5],
+          strokeScaleEnabled: false,
+          cornerRadius: 8,
+          listening: false
+        })
+      );
 
       const stagingHeader = new Konva.Text({
         text: `待排裁片 · ${staging.totalCount} 件`,
-        fill: '#52525b',
+        fill: darkTheme ? '#cbd5e1' : '#52525b',
         fontFamily: '-apple-system, BlinkMacSystemFont, "Inter", "PingFang SC", "Microsoft YaHei", sans-serif',
         fontStyle: '600',
         wrap: 'none',
@@ -1538,18 +1685,15 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
         const headerW = stagingHeader.width();
         const rightEdge = staging.bounds.x + staging.bounds.width;
         const hx = Math.min(staging.bounds.x + 2 / s, rightEdge - headerW);
-        stagingHeader.position({
-          x: hx,
-          y: staging.bounds.y - 24 / s
-        });
+        stagingHeader.position({ x: hx, y: staging.bounds.y - 24 / s });
       };
       syncStagingHeader();
-      scaleNodesRef.current.push(syncStagingHeader);
+      baseScaleNodesRef.current.push(syncStagingHeader);
 
       if (staging.items.length === 0) {
         const emptyText = new Konva.Text({
           text: '待排区已清空\n拖出母卷裁片可退回',
-          fill: '#8e929b',
+          fill: darkTheme ? '#94a3b8' : '#8e929b',
           align: 'center',
           lineHeight: 1.5,
           fontFamily: '-apple-system, BlinkMacSystemFont, "Inter", "PingFang SC", "Microsoft YaHei", sans-serif',
@@ -1572,7 +1716,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
           });
         };
         syncEmpty();
-        scaleNodesRef.current.push(syncEmpty);
+        baseScaleNodesRef.current.push(syncEmpty);
       }
 
       for (const item of staging.items) {
@@ -1586,7 +1730,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
           draggable: interactivePieces
         });
 
-        const bodyNode = makeShapeNode(item.shape, item.width, item.height, {
+        const bodyNode = makeShapeNode(Konva, item.shape, item.width, item.height, {
           fill: item.style.fill,
           stroke: item.style.stroke,
           strokeWidth: 1.4,
@@ -1597,7 +1741,8 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
         });
         pieceGroup.add(bodyNode);
 
-        addPieceLabel(
+        const syncLbl = createLabelUpdater(
+          Konva,
           pieceGroup,
           item.name,
           `${Math.round(item.width)}×${Math.round(item.height)}`,
@@ -1606,13 +1751,11 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
           item.style.text,
           false
         );
+        syncLbl();
+        baseScaleNodesRef.current.push(syncLbl);
 
         if (item.stackExtra > 0) {
-          const badgeBg = new Konva.Rect({
-            fill: '#18181b',
-            cornerRadius: 4,
-            listening: false
-          });
+          const badgeBg = new Konva.Rect({ fill: '#18181b', cornerRadius: 4, listening: false });
           const badgeTxt = new Konva.Text({
             text: `+余 ${item.stackExtra}`,
             fill: '#ffffff',
@@ -1634,7 +1777,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
             badgeTxt.position({ x: item.width - bw + 4 / s + padX, y: -bh * 0.45 + padY });
           };
           syncBadge();
-          scaleNodesRef.current.push(syncBadge);
+          baseScaleNodesRef.current.push(syncBadge);
         }
 
         pieceNodeMapRef.current.push({
@@ -1642,12 +1785,12 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
           outline: bodyNode,
           demandKey: item.demandKey,
           baseStroke: item.style.stroke,
-          placedIndex: null
+          placedIndex: null,
+          layerKind: 'base'
         });
 
         if (interactivePieces) {
           let dragOrigin = { x: startX, y: startY };
-
           pieceGroup.on('mousedown touchstart', (e: any) => {
             e.cancelBubble = true;
           });
@@ -1667,22 +1810,32 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
             bodyNode.shadowBlur(12);
             bodyNode.shadowColor('rgba(15, 23, 42, 0.22)');
           });
-
           pieceGroup.on('dragmove', (e: any) => {
             e.cancelBubble = true;
+            const p = propsRef.current;
             const ro = rollOffsetRef.current;
-            const rawLocalX = pieceGroup.x() - ro.x;
-            const rawLocalY = pieceGroup.y() - ro.y;
+            // 将待排片世界坐标映射到母卷局部坐标（支持纵向与横向台板）
+            let rawLocalX: number;
+            let rawLocalY: number;
+            if (p.vertical) {
+              rawLocalX = pieceGroup.x() - ro.x;
+              rawLocalY = pieceGroup.y() - ro.y;
+            } else {
+              const worldCx = pieceGroup.x() + item.width / 2;
+              const worldCy = pieceGroup.y() + item.height / 2;
+              rawLocalX = ro.y - worldCy - item.width / 2;
+              rawLocalY = worldCx - ro.x - item.height / 2;
+            }
             const cx = rawLocalX + item.width / 2;
             const cy = rawLocalY + item.height / 2;
-            const p = propsRef.current;
-
             const overRoll =
               cx >= -20 && cx <= p.rollWidthMm + 20 && cy >= -20 && cy <= p.rollLengthMm + 20;
 
             if (overRoll) {
               const snapped = snapRollPosition(item.width, item.height, rawLocalX, rawLocalY, -1);
-              pieceGroup.position({ x: snapped.x + ro.x, y: snapped.y + ro.y });
+              if (p.vertical) {
+                pieceGroup.position({ x: snapped.x + ro.x, y: snapped.y + ro.y });
+              }
               const check = validateRollPlacement(
                 item.shape,
                 item.width,
@@ -1709,7 +1862,6 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
               setDragFeedback(null);
             }
           });
-
           pieceGroup.on('dragend', (e: any) => {
             e.cancelBubble = true;
             host.style.cursor = '';
@@ -1719,12 +1871,21 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
             bodyNode.strokeWidth(1.4);
             setDragFeedback(null);
 
+            const p = propsRef.current;
             const ro = rollOffsetRef.current;
-            const localX = pieceGroup.x() - ro.x;
-            const localY = pieceGroup.y() - ro.y;
+            let localX: number;
+            let localY: number;
+            if (p.vertical) {
+              localX = pieceGroup.x() - ro.x;
+              localY = pieceGroup.y() - ro.y;
+            } else {
+              const worldCx = pieceGroup.x() + item.width / 2;
+              const worldCy = pieceGroup.y() + item.height / 2;
+              localX = ro.y - worldCy - item.width / 2;
+              localY = worldCx - ro.x - item.height / 2;
+            }
             const cx = localX + item.width / 2;
             const cy = localY + item.height / 2;
-            const p = propsRef.current;
 
             const overRoll = cx >= 0 && cx <= p.rollWidthMm && cy >= 0 && cy <= p.rollLengthMm;
             if (overRoll) {
@@ -1746,10 +1907,14 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
               );
               if (check.ok) {
                 stagingOffsetsRef.current.delete(item.instanceKey);
-                propsRef.current.onDropStagingPiece?.(item.demandKey, round1(targetX), round1(targetY));
+                propsRef.current.onDropStagingPiece?.(
+                  item.demandKey,
+                  round1(targetX),
+                  round1(targetY)
+                );
               } else {
                 pieceGroup.position(dragOrigin);
-                layerRef.current?.batchDraw();
+                baseLayerRef.current?.batchDraw();
                 propsRef.current.onCollisionNotice?.(check.reason);
               }
             } else {
@@ -1767,26 +1932,21 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
       stagingBoundsRef.current = getRollWorldRect();
     }
 
-    // ==================== 2. MOTHER ROLL BOARD (rollGroup) ====================
-    rollGroup.position(rollOffsetRef.current);
-    rollGroup.rotation(vertical ? 0 : -90);
-    rollGroup.draggable(tool === 'pan');
-
-    // Top Drag Handle Bar (attached to rollGroup so dragging it moves the entire roll)
+    // 1.2 母卷顶部拖动手柄条
     const handleGroup = new Konva.Group();
     const handleBg = new Konva.Rect({
-      fill: '#ffffff',
-      stroke: 'rgba(15, 23, 42, 0.14)',
+      fill: darkTheme ? '#1e293b' : '#ffffff',
+      stroke: darkTheme ? 'rgba(148, 163, 184, 0.28)' : 'rgba(15, 23, 42, 0.14)',
       strokeWidth: 1,
       strokeScaleEnabled: false,
       cornerRadius: 6,
-      shadowColor: 'rgba(15, 23, 42, 0.08)',
+      shadowColor: 'rgba(15, 23, 42, 0.12)',
       shadowBlur: 6,
       shadowOffsetY: 2
     });
     const handleTitle = new Konva.Text({
       text: `${rollTitle} · ${Math.round(rollWidthMm)}×${Math.round(rollLengthMm)} mm`,
-      fill: '#18181b',
+      fill: darkTheme ? '#f8fafc' : '#18181b',
       fontStyle: '600',
       wrap: 'none',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Inter", "PingFang SC", "Microsoft YaHei", sans-serif',
@@ -1794,7 +1954,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
     });
     const handleHint = new Konva.Text({
       text: '拖动整卷',
-      fill: '#8e929b',
+      fill: darkTheme ? '#94a3b8' : '#8e929b',
       wrap: 'none',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Inter", "PingFang SC", "Microsoft YaHei", sans-serif',
       listening: false
@@ -1804,7 +1964,10 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
       if (propsRef.current.tool === 'pan') host.style.cursor = 'grab';
     });
     handleGroup.on('mouseleave', () => {
-      host.style.cursor = propsRef.current.tool === 'defect' || propsRef.current.tool === 'measure' ? 'crosshair' : '';
+      host.style.cursor =
+        propsRef.current.tool === 'defect' || propsRef.current.tool === 'measure'
+          ? 'crosshair'
+          : '';
     });
     rollGroup.add(handleGroup);
 
@@ -1830,7 +1993,6 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
         const hx = propsRef.current.showStaging ? 0 : (rollWidthMm - barW) / 2;
         handleGroup.position({ x: hx, y: -(barH + gap) });
       } else {
-        // Horizontal roll: top screen edge is local x = rollWidthMm, y from 0..rollLengthMm
         handleGroup.rotation(90);
         const hy = propsRef.current.showStaging ? 0 : (rollLengthMm - barW) / 2;
         handleGroup.position({ x: rollWidthMm + barH + gap, y: hy });
@@ -1841,26 +2003,25 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
       handleTitle.position({ x: padX, y: 7 / s });
       handleHint.visible(showHint);
       if (showHint) {
-        handleHint.position({
-          x: barW - hintW - padX,
-          y: 7.5 / s
-        });
+        handleHint.position({ x: barW - hintW - padX, y: 7.5 / s });
       }
     };
     syncHandleBar();
-    scaleNodesRef.current.push(syncHandleBar);
+    baseScaleNodesRef.current.push(syncHandleBar);
 
-    // Mother roll crisp white sheet (supports irregular remnant polygons via rollShape)
+    // 1.3 母卷纸面（支持不规则多边形料头；暗色模式采用高对比工业深岩灰避免刺眼亮白块）
+    const sheetFill = darkTheme ? '#1e293b' : '#ffffff';
+    const sheetStroke = darkTheme ? '#475569' : '#cbd5e1';
     const rollSheet =
       rollShape?.type === 'POLYGON' && rollShape.vertices && rollShape.vertices.length >= 3
         ? new Konva.Line({
             points: rollShape.vertices.flatMap((pt) => [pt.x, pt.y]),
             closed: true,
-            fill: '#ffffff',
-            stroke: '#cbd5e1',
+            fill: sheetFill,
+            stroke: sheetStroke,
             strokeWidth: 1.5,
             strokeScaleEnabled: false,
-            shadowColor: 'rgba(15, 23, 42, 0.13)',
+            shadowColor: darkTheme ? 'rgba(0, 0, 0, 0.42)' : 'rgba(15, 23, 42, 0.13)',
             shadowBlur: 20,
             shadowOffsetY: 6
           })
@@ -1869,11 +2030,11 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
             y: 0,
             width: rollWidthMm,
             height: rollLengthMm,
-            fill: '#ffffff',
-            stroke: '#cbd5e1',
+            fill: sheetFill,
+            stroke: sheetStroke,
             strokeWidth: 1.5,
             strokeScaleEnabled: false,
-            shadowColor: 'rgba(15, 23, 42, 0.13)',
+            shadowColor: darkTheme ? 'rgba(0, 0, 0, 0.42)' : 'rgba(15, 23, 42, 0.13)',
             shadowBlur: 20,
             shadowOffsetY: 6
           });
@@ -1881,22 +2042,50 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
       if (propsRef.current.tool === 'pan') host.style.cursor = 'grab';
     });
     rollSheet.on('mouseleave', () => {
-      host.style.cursor = propsRef.current.tool === 'defect' || propsRef.current.tool === 'measure' ? 'crosshair' : '';
+      host.style.cursor =
+        propsRef.current.tool === 'defect' || propsRef.current.tool === 'measure'
+          ? 'crosshair'
+          : '';
     });
     rollSheet.on('click tap', (e: any) => {
       e.cancelBubble = true;
       propsRef.current.onSelectPiece?.(null);
+      propsRef.current.onSelectLeftover?.(null);
+    });
+    rollSheet.on('contextmenu', (e: any) => {
+      const p = propsRef.current;
+      if (!p.onContextMenu && !p.onContextInspect) return;
+      e.evt.preventDefault();
+      e.cancelBubble = true;
+      const pt = stageRef.current?.getPointerPosition();
+      const local = pt ? stageToRollLocal(pt) : null;
+      const lx = local ? round1(local.x) : 0;
+      const ly = local ? round1(local.y) : 0;
+      p.onContextMenu?.({
+        kind: 'empty',
+        clientX: e.evt.clientX,
+        clientY: e.evt.clientY,
+        localX: lx,
+        localY: ly
+      });
+      if (local) p.onContextInspect?.({ x: lx, y: ly });
     });
     rollGroup.add(rollSheet);
 
-    // Subtle meter lines inside sheet (auto-scaled step for very long rolls)
+    // 1.4 内部米线参考
     const meterStep =
-      rollLengthMm > 60000 ? 10000 : rollLengthMm > 20000 ? 5000 : rollLengthMm > 10000 ? 2000 : 1000;
+      rollLengthMm > 60000
+        ? 10000
+        : rollLengthMm > 20000
+        ? 5000
+        : rollLengthMm > 10000
+        ? 2000
+        : 1000;
     for (let y = meterStep; y < rollLengthMm; y += meterStep) {
       rollGroup.add(
         new Konva.Line({
           points: [0, y, rollWidthMm, y],
-          stroke: 'rgba(15, 23, 42, 0.05)',
+          stroke: 'rgba(15, 23, 42, 0.06)',
           strokeWidth: 1,
           strokeScaleEnabled: false,
           listening: false
@@ -1904,7 +2093,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
       );
     }
 
-    // Spatial zones (cut / planned / used / inspection window)
+    // 1.5 分区（已切 / 预占 / 已使用 / 工位窗口）
     for (const z of zones) {
       const zy = Math.max(0, z.startY);
       const zh = Math.max(0, Math.min(rollLengthMm - zy, z.lengthMm));
@@ -1974,12 +2163,12 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
             }
           };
           syncZoneTxt();
-          scaleNodesRef.current.push(syncZoneTxt);
+          baseScaleNodesRef.current.push(syncZoneTxt);
         }
       }
     }
 
-    // Trim Start Zone (gray hatched band)
+    // 1.6 首端切头修边区
     if (trimStartMm > 0) {
       const trimH = Math.min(trimStartMm, rollLengthMm);
       rollGroup.add(
@@ -2016,10 +2205,10 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
         }
       };
       syncTrimLabel();
-      scaleNodesRef.current.push(syncTrimLabel);
+      baseScaleNodesRef.current.push(syncTrimLabel);
     }
 
-    // Occupied length marker line
+    // 1.7 实占长度标记线
     if (occupiedLengthMm > 0 && occupiedLengthMm <= rollLengthMm) {
       rollGroup.add(
         new Konva.Line({
@@ -2033,7 +2222,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
       );
       const occTag = new Konva.Text({
         text: `实占 ${round1(occupiedLengthMm)} mm`,
-        fill: '#047857',
+        fill: darkTheme ? '#34d399' : '#047857',
         fontStyle: '600',
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
         listening: false
@@ -2051,153 +2240,70 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
         }
       };
       syncOcc();
-      scaleNodesRef.current.push(syncOcc);
+      baseScaleNodesRef.current.push(syncOcc);
     }
 
-    // Inspection feed line (InspectionPage)
-    if (feedPositionMm != null && Number.isFinite(feedPositionMm)) {
-      const fy = Math.max(0, Math.min(rollLengthMm, feedPositionMm));
-      rollGroup.add(
-        new Konva.Line({
-          points: [0, fy, rollWidthMm, fy],
-          stroke: '#10b981',
-          strokeWidth: 2,
-          strokeScaleEnabled: false,
-          listening: false
-        })
-      );
-      const feedTag = new Konva.Text({
-        text: `验布线 ${(fy / 1000).toFixed(2)} m`,
-        fill: '#047857',
-        fontStyle: '700',
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-        listening: false
-      });
-      rollGroup.add(feedTag);
-      const syncFeed = () => {
-        const s = Math.max(0.002, camRef.current.scale);
-        const isVert = propsRef.current.vertical;
-        feedTag.fontSize(10.5 / s);
-        feedTag.rotation(isVert ? 0 : 90);
-        if (isVert) {
-          feedTag.position({ x: rollWidthMm + 8 / s, y: fy - 6 / s });
-        } else {
-          feedTag.position({ x: -8 / s, y: fy - 4 / s });
-        }
-      };
-      syncFeed();
-      scaleNodesRef.current.push(syncFeed);
+    // 仅在卷尺寸、朝向、待排区开关或需求族变更时自动 fitView
+    const fitSig = `${rollWidthMm}x${rollLengthMm}-${vertical ? 'V' : 'H'}-${showStaging ? 'S' : 'N'}-${demands.map((d) => d.key).join(',')}`;
+    if (!didInitialFitRef.current || fitSig !== lastFitSigRef.current) {
+      lastFitSigRef.current = fitSig;
+      didInitialFitRef.current = true;
+      fitView();
+    } else {
+      applyCameraImmediate();
     }
+  }, [
+    rollTitle,
+    rollWidthMm,
+    rollLengthMm,
+    occupiedLengthMm,
+    trimStartMm,
+    demands,
+    zones,
+    rollShape,
+    showStaging,
+    interactivePieces,
+    vertical,
+    tool,
+    darkTheme
+  ]);
 
-    // Rulers & Dimensions
-    if (showDimensions) {
-      const rulerGroup = new Konva.Group({ listening: false });
-      rollGroup.add(rulerGroup);
+  // ==================== LAYER 2: 裁片 + 疵点 Layer（独立重建，支持视口裁剪） ====================
+  useEffect(() => {
+    // Konva 由 ../vendor/konva 显式导入并同步挂载至 globalThis.Konva
+    const piecesRollGroup = piecesRollGroupRef.current;
+    const host = hostRef.current;
+    if (!Konva || !piecesRollGroup || !host) return;
 
-      const syncRulers = () => {
-        rulerGroup.destroyChildren();
-        const s = Math.max(0.002, camRef.current.scale);
-        const isVert = propsRef.current.vertical;
-        const stepX = pickRulerStep(s, 72);
-        const stepY = pickRulerStep(s, 68);
-        const tickLen = 6 / s;
-        const fontSize = 9.5 / s;
-
-        if (isVert) {
-          for (let x = 0; x <= rollWidthMm; x += stepX) {
-            rulerGroup.add(
-              new Konva.Line({
-                points: [x, rollLengthMm, x, rollLengthMm + tickLen],
-                stroke: '#94a3b8',
-                strokeWidth: 1,
-                strokeScaleEnabled: false
-              })
-            );
-            const tickTxt = new Konva.Text({
-              x,
-              y: rollLengthMm + tickLen + 2 / s,
-              text: String(Math.round(x)),
-              fontSize,
-              fill: '#64748b',
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
-            });
-            tickTxt.offsetX(x === 0 ? 0 : tickTxt.width() / 2);
-            rulerGroup.add(tickTxt);
-          }
-          for (let y = 0; y <= rollLengthMm; y += stepY) {
-            rulerGroup.add(
-              new Konva.Line({
-                points: [rollWidthMm, y, rollWidthMm + tickLen, y],
-                stroke: '#94a3b8',
-                strokeWidth: 1,
-                strokeScaleEnabled: false
-              })
-            );
-            if (occupiedLengthMm > 0 && Math.abs(y - occupiedLengthMm) * s < 16) continue;
-            if (feedPositionMm != null && Math.abs(y - feedPositionMm) * s < 16) continue;
-            rulerGroup.add(
-              new Konva.Text({
-                x: rollWidthMm + tickLen + 4 / s,
-                y: y - 5 / s,
-                text: String(Math.round(y)),
-                fontSize,
-                fill: '#64748b',
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
-              })
-            );
-          }
-        } else {
-          // Horizontal roll: length runs along bottom (x = 0, y = 0..rollLengthMm), width along right (y = rollLengthMm, x = 0..rollWidthMm)
-          for (let y = 0; y <= rollLengthMm; y += stepY) {
-            rulerGroup.add(
-              new Konva.Line({
-                points: [0, y, -tickLen, y],
-                stroke: '#94a3b8',
-                strokeWidth: 1,
-                strokeScaleEnabled: false
-              })
-            );
-            const tickTxt = new Konva.Text({
-              x: -tickLen - 4 / s,
-              y,
-              text: String(Math.round(y)),
-              fontSize,
-              rotation: 90,
-              fill: '#64748b',
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
-            });
-            tickTxt.offsetX(y === 0 ? 0 : tickTxt.width() / 2);
-            rulerGroup.add(tickTxt);
-          }
-          for (let x = 0; x <= rollWidthMm; x += stepX) {
-            rulerGroup.add(
-              new Konva.Line({
-                points: [x, rollLengthMm, x, rollLengthMm + tickLen],
-                stroke: '#94a3b8',
-                strokeWidth: 1,
-                strokeScaleEnabled: false
-              })
-            );
-            const tickTxt = new Konva.Text({
-              x: x + 4 / s,
-              y: rollLengthMm + tickLen + 4 / s,
-              text: String(Math.round(x)),
-              fontSize,
-              rotation: 90,
-              fill: '#64748b',
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
-            });
-            rulerGroup.add(tickTxt);
-          }
-        }
-      };
-      syncRulers();
-      scaleNodesRef.current.push(syncRulers);
+    const sig = buildPiecesSignature({
+      placedPieces,
+      defects,
+      selectedDefectId,
+      interactivePieces,
+      vertical,
+      tool,
+      rollWidthMm,
+      rollLengthMm,
+      trimStartMm,
+      pieceGapMm,
+      hasDefectHandlers: Boolean(onDefectSelect || onDefectEdit)
+    });
+    if (sig === lastPiecesSigRef.current) {
+      return;
     }
+    lastPiecesSigRef.current = sig;
 
-    // Placed Pieces inside rollGroup
+    piecesRollGroup.destroyChildren();
+    piecesScaleNodesRef.current = [];
+    culledPiecesRef.current = [];
+    pieceNodeMapRef.current = pieceNodeMapRef.current.filter((it) => it.layerKind !== 'pieces');
+
+    ensureHatchTiles();
+    syncAllRollGroupsTransform();
+
+    // 2.1 已排裁片
     const placedLayerGroup = new Konva.Group();
-    rollGroup.add(placedLayerGroup);
+    piecesRollGroup.add(placedLayerGroup);
 
     for (const pc of placedPieces) {
       const style = styleForDemand(pc.demandId, pc.index, pc.gapFill);
@@ -2207,7 +2313,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
         draggable: interactivePieces
       });
 
-      const bodyNode = makeShapeNode(pc.shape, pc.width, pc.height, {
+      const bodyNode = makeShapeNode(Konva, pc.shape, pc.width, pc.height, {
         fill: style.fill,
         stroke: style.stroke,
         strokeWidth: 1.4,
@@ -2217,7 +2323,8 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
 
       const labelText = pc.gapFill ? `补 · ${pc.name}` : pc.name;
       const rotTag = pc.rotationDegrees ? ` · ${pc.rotationDegrees}°` : '';
-      addPieceLabel(
+      const syncLabel = createLabelUpdater(
+        Konva,
         pcGroup,
         labelText,
         `${Math.round(pc.width)}×${Math.round(pc.height)}${rotTag}`,
@@ -2227,24 +2334,49 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
         true
       );
 
+      const cullEntry: CulledPieceEntry = {
+        node: pcGroup,
+        localX: pc.x,
+        localY: pc.y,
+        width: pc.width,
+        height: pc.height,
+        dragging: false,
+        syncLabel
+      };
+      culledPiecesRef.current.push(cullEntry);
+
       pieceNodeMapRef.current.push({
         node: pcGroup,
         outline: bodyNode,
         demandKey: pc.demandKey,
         baseStroke: style.stroke,
         placedIndex: pc.index,
-        gapFill: pc.gapFill
+        gapFill: pc.gapFill,
+        layerKind: 'pieces'
       });
 
       pcGroup.on('click tap', (e: any) => {
         e.cancelBubble = true;
+        propsRef.current.onSelectLeftover?.(null);
         propsRef.current.onSelectPiece?.(pc.index);
       });
       pcGroup.on('contextmenu', (e: any) => {
-        if (!propsRef.current.onContextInspect) return;
+        const p = propsRef.current;
+        if (!p.onContextMenu && !p.onContextInspect) return;
         e.evt.preventDefault();
         e.cancelBubble = true;
-        propsRef.current.onContextInspect({
+        p.onSelectLeftover?.(null);
+        p.onSelectPiece?.(pc.index);
+        p.onContextMenu?.({
+          kind: 'piece',
+          pieceIndex: pc.index,
+          entityId: pc.id,
+          clientX: e.evt.clientX,
+          clientY: e.evt.clientY,
+          localX: round1(pc.x),
+          localY: round1(pc.y)
+        });
+        p.onContextInspect?.({
           entityId: pc.id,
           x: round1(pc.x),
           y: round1(pc.y)
@@ -2268,14 +2400,15 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
         });
         pcGroup.on('dragstart', (e: any) => {
           e.cancelBubble = true;
+          cullEntry.dragging = true;
           pcGroup.moveToTop();
           host.style.cursor = 'grabbing';
+          propsRef.current.onSelectLeftover?.(null);
           propsRef.current.onSelectPiece?.(pc.index);
           bodyNode.shadowEnabled(true);
           bodyNode.shadowColor('rgba(15, 23, 42, 0.22)');
           bodyNode.shadowBlur(10);
         });
-
         pcGroup.on('dragmove', (e: any) => {
           e.cancelBubble = true;
           const p = propsRef.current;
@@ -2316,9 +2449,9 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
             }
           }
         });
-
         pcGroup.on('dragend', (e: any) => {
           e.cancelBubble = true;
+          cullEntry.dragging = false;
           host.style.cursor = '';
           bodyNode.shadowEnabled(false);
           bodyNode.dash(pc.gapFill ? [5, 3] : []);
@@ -2353,15 +2486,15 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
             pc.index
           );
           if (check.ok) {
-            if (Math.abs(clampedX - origX) > 0.2 || Math.abs(clampedY - origY) > 0.2) {
+            if (Math.abs(clampedX - origX) > 0.05 || Math.abs(clampedY - origY) > 0.05) {
               propsRef.current.onMovePlacedPiece?.(pc.index, round1(clampedX), round1(clampedY));
             } else {
               pcGroup.position({ x: origX, y: origY });
-              layerRef.current?.batchDraw();
+              piecesLayerRef.current?.batchDraw();
             }
           } else {
             pcGroup.position({ x: origX, y: origY });
-            layerRef.current?.batchDraw();
+            piecesLayerRef.current?.batchDraw();
             propsRef.current.onCollisionNotice?.(check.reason);
           }
         });
@@ -2370,9 +2503,9 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
       placedLayerGroup.add(pcGroup);
     }
 
-    // Defect Exclusion Zones (drawn above pieces when inspecting, supports selection + drag/resize)
+    // 2.2 疵点禁入区与交互手柄
     const defectLayerGroup = new Konva.Group();
-    rollGroup.add(defectLayerGroup);
+    piecesRollGroup.add(defectLayerGroup);
 
     for (const d of defects) {
       const defId = String(d.id);
@@ -2440,7 +2573,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
         }
       };
       syncDef();
-      scaleNodesRef.current.push(syncDef);
+      piecesScaleNodesRef.current.push(syncDef);
 
       if (canInteract) {
         defRect.on('mousedown touchstart', (e: any) => {
@@ -2455,7 +2588,9 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
         });
         defRect.on('mouseleave', () => {
           host.style.cursor =
-            propsRef.current.tool === 'defect' || propsRef.current.tool === 'measure' ? 'crosshair' : '';
+            propsRef.current.tool === 'defect' || propsRef.current.tool === 'measure'
+              ? 'crosshair'
+              : '';
         });
       }
 
@@ -2481,7 +2616,6 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
           });
         });
 
-        // 4 corner resize handles when selected
         if (isSelected) {
           const corners: { id: 'nw' | 'ne' | 'sw' | 'se'; x: number; y: number }[] = [
             { id: 'nw', x: 0, y: 0 },
@@ -2507,7 +2641,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
               handle.offsetY(sz / 2);
             };
             syncHandle();
-            scaleNodesRef.current.push(syncHandle);
+            piecesScaleNodesRef.current.push(syncHandle);
 
             handle.on('mousedown touchstart', (e: any) => {
               e.cancelBubble = true;
@@ -2548,66 +2682,233 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
       defectLayerGroup.add(defGroup);
     }
 
-    // Optional Cutting Toolpaths inside rollGroup
-    if (showPath && cuts.length > 0) {
-      const pathGroup = new Konva.Group({ listening: false });
-      rollGroup.add(pathGroup);
-      for (let i = 0; i < cuts.length; i++) {
-        const c = cuts[i];
-        pathGroup.add(
-          new Konva.Line({
-            points: [c.startX, c.startY, c.endX, c.endY],
-            stroke: '#e11d48',
-            strokeWidth: 1.5,
-            dash: [6, 4],
-            strokeScaleEnabled: false
-          })
-        );
-      }
-    }
-
-    // Top overlay group for active measure / defect drawing previews
-    const overlayGroup = new Konva.Group({ listening: false });
-    rollGroup.add(overlayGroup);
-    overlayGroupRef.current = overlayGroup;
-
-    // Auto-fit when dimensions, orientation, or demand roster changes significantly
-    const fitSig = `${rollWidthMm}x${rollLengthMm}-${vertical ? 'V' : 'H'}-${showStaging ? 'S' : 'N'}-${demands.map((d) => d.key).join(',')}`;
-    if (!didInitialFitRef.current || fitSig !== lastFitSigRef.current) {
-      lastFitSigRef.current = fitSig;
-      didInitialFitRef.current = true;
-      fitView();
-    } else {
-      applyCamera();
-    }
+    syncCulledPieces();
+    piecesLayerRef.current?.batchDraw();
   }, [
-    rollTitle,
-    rollWidthMm,
-    rollLengthMm,
-    occupiedLengthMm,
-    trimStartMm,
-    pieceGapMm,
-    defects,
-    demands,
     placedPieces,
-    cuts,
-    zones,
-    rollShape,
-    feedPositionMm,
+    defects,
     selectedDefectId,
-    showStaging,
     interactivePieces,
     vertical,
     tool,
-    showDimensions,
-    showPath
+    rollWidthMm,
+    rollLengthMm,
+    trimStartMm,
+    pieceGapMm,
+    onDefectSelect,
+    onDefectEdit
   ]);
 
-  // Lightweight highlight & selection visual pass (zero geometry rebuild)
+  // ==================== LAYER 3: 料头与刀路 Layer（含走刀动画仿真与余料交互） ====================
+  useEffect(() => {
+    // Konva 由 ../vendor/konva 显式导入并同步挂载至 globalThis.Konva
+    const tpRollGroup = toolpathRollGroupRef.current;
+    const host = hostRef.current;
+    if (!Konva || !tpRollGroup || !host) return;
+
+    tpRollGroup.destroyChildren();
+    toolpathScaleNodesRef.current = [];
+    ensureHatchTiles();
+    syncAllRollGroupsTransform();
+
+    // 3.1 计划余料（料头）虚线绿框渲染 + 点击高亮 + 右键抛弃菜单
+    const activeLeftovers = (leftovers || []).filter((rm) => !rm.discarded && rm.width > 0 && rm.height > 0);
+    if (activeLeftovers.length > 0) {
+      const remGroup = new Konva.Group();
+      tpRollGroup.add(remGroup);
+
+      for (const rm of activeLeftovers) {
+        const isSel = selectedLeftoverId != null && String(selectedLeftoverId) === String(rm.id);
+        const areaM2 = ((rm.width * rm.height) / 1_000_000).toFixed(2);
+        const strokeColor = isSel ? '#059669' : rm.hasDefect ? '#d97706' : '#10b981';
+
+        const boxGroup = new Konva.Group({ x: rm.x, y: rm.y });
+        const boxShape = makeShapeNode(Konva, rm.shape, rm.width, rm.height, {
+          fill: isSel
+            ? 'rgba(16, 185, 129, 0.22)'
+            : rm.hasDefect
+            ? 'rgba(245, 158, 11, 0.1)'
+            : undefined,
+          fillPatternImage: !isSel && !rm.hasDefect ? hatchCacheRef.current.leftover : undefined,
+          stroke: strokeColor,
+          strokeWidth: isSel ? 2.4 : 1.5,
+          dash: [6, 4],
+          shadowEnabled: isSel,
+          shadowColor: 'rgba(16, 185, 129, 0.35)',
+          shadowBlur: 10
+        });
+        boxGroup.add(boxShape);
+
+        const syncRemLbl = createLabelUpdater(
+          Konva,
+          boxGroup,
+          `余料 #${rm.id}${rm.hasDefect ? ' · 含疵' : ''}`,
+          `${Math.round(rm.width)}×${Math.round(rm.height)} · ${areaM2}m²`,
+          rm.width,
+          rm.height,
+          rm.hasDefect ? '#92400e' : '#065f46',
+          true
+        );
+        syncRemLbl();
+        toolpathScaleNodesRef.current.push(syncRemLbl);
+
+        boxGroup.on('mouseenter', () => {
+          host.style.cursor = 'pointer';
+        });
+        boxGroup.on('mouseleave', () => {
+          host.style.cursor = '';
+        });
+        boxGroup.on('click tap', (e: any) => {
+          e.cancelBubble = true;
+          propsRef.current.onSelectPiece?.(null);
+          propsRef.current.onSelectLeftover?.(String(rm.id));
+        });
+        boxGroup.on('contextmenu', (e: any) => {
+          const p = propsRef.current;
+          if (!p.onContextMenu) return;
+          e.evt.preventDefault();
+          e.cancelBubble = true;
+          p.onSelectPiece?.(null);
+          p.onSelectLeftover?.(String(rm.id));
+          p.onContextMenu({
+            kind: 'leftover',
+            leftoverId: String(rm.id),
+            entityId: rm.id,
+            clientX: e.evt.clientX,
+            clientY: e.evt.clientY,
+            localX: round1(rm.x),
+            localY: round1(rm.y)
+          });
+        });
+
+        remGroup.add(boxGroup);
+      }
+    }
+
+    // 3.2 切割刀路与走刀仿真动画（含提刀空程 G00 路径）
+    const shouldRenderPath = (showPath || simCutStep != null) && cuts.length > 0;
+    if (shouldRenderPath) {
+      const pathGroup = new Konva.Group({ listening: false });
+      tpRollGroup.add(pathGroup);
+
+      const { segments } = computeToolpathSegments(
+        cuts,
+        startCorner,
+        rollWidthMm,
+        occupiedLengthMm > 0 ? occupiedLengthMm : rollLengthMm
+      );
+      const isSimMode = simCutStep != null;
+      const activeStep = isSimMode ? Math.max(0, Math.min(segments.length, simCutStep)) : segments.length;
+
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        const stepIdx = i + 1;
+        const isCurrent = isSimMode && stepIdx === activeStep;
+        const isDone = !isSimMode || stepIdx < activeStep;
+
+        // 提刀空程 G00（在仿真模式或当前刀路展示）
+        if (isSimMode && stepIdx <= activeStep && seg.rapidDistMm > 0.5) {
+          pathGroup.add(
+            new Konva.Line({
+              points: [seg.rapidStart.x, seg.rapidStart.y, seg.rapidEnd.x, seg.rapidEnd.y],
+              stroke: isCurrent ? '#0284c7' : 'rgba(2, 132, 199, 0.35)',
+              strokeWidth: isCurrent ? 1.8 : 1.1,
+              dash: [4, 4],
+              strokeScaleEnabled: false,
+              listening: false
+            })
+          );
+        }
+
+        // 切割线段 G01
+        pathGroup.add(
+          new Konva.Line({
+            points: [seg.cutStart.x, seg.cutStart.y, seg.cutEnd.x, seg.cutEnd.y],
+            stroke: isCurrent ? '#f97316' : isDone ? '#e11d48' : 'rgba(225, 29, 72, 0.22)',
+            strokeWidth: isCurrent ? 3.2 : isDone ? 1.6 : 1,
+            dash: isCurrent ? undefined : isDone ? (isSimMode ? undefined : [6, 4]) : [3, 4],
+            strokeScaleEnabled: false,
+            listening: false
+          })
+        );
+
+        // 当前步进刀头高亮光标 + 刀序号标牌
+        if (isCurrent) {
+          const headHalo = new Konva.Circle({
+            x: seg.cutEnd.x,
+            y: seg.cutEnd.y,
+            fill: 'rgba(249, 115, 22, 0.25)',
+            stroke: '#f97316',
+            strokeWidth: 1.8,
+            strokeScaleEnabled: false,
+            listening: false
+          });
+          const headDot = new Konva.Circle({
+            x: seg.cutEnd.x,
+            y: seg.cutEnd.y,
+            fill: '#ea580c',
+            listening: false
+          });
+          const startDot = new Konva.Circle({
+            x: seg.cutStart.x,
+            y: seg.cutStart.y,
+            fill: '#0284c7',
+            listening: false
+          });
+          const stepBadge = new Konva.Text({
+            x: (seg.cutStart.x + seg.cutEnd.x) / 2,
+            y: (seg.cutStart.y + seg.cutEnd.y) / 2,
+            text: `#${seg.step}`,
+            fill: '#ea580c',
+            fontStyle: '700',
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+            listening: false
+          });
+          pathGroup.add(headHalo, headDot, startDot, stepBadge);
+          const syncSimHead = () => {
+            const s = Math.max(0.002, camRef.current.scale);
+            headHalo.radius(10 / s);
+            headDot.radius(4.5 / s);
+            startDot.radius(3.5 / s);
+            stepBadge.fontSize(11 / s);
+            stepBadge.rotation(propsRef.current.vertical ? 0 : 90);
+          };
+          syncSimHead();
+          toolpathScaleNodesRef.current.push(syncSimHead);
+        }
+      }
+    }
+
+    toolpathLayerRef.current?.batchDraw();
+  }, [
+    leftovers,
+    selectedLeftoverId,
+    cuts,
+    showPath,
+    simCutStep,
+    startCorner,
+    rollWidthMm,
+    rollLengthMm,
+    occupiedLengthMm,
+    vertical
+  ]);
+
+  // ==================== LAYER 4: 10Hz 验布线原地更新（零 destroyChildren） ====================
+  useEffect(() => {
+    updateFeedLineVisual(true);
+  }, [feedPositionMm, rollWidthMm, rollLengthMm, vertical]);
+
+  // 尺寸标尺开关或暗色主题切换时重绘屏幕固定标尺
+  useEffect(() => {
+    drawRulersNow();
+  }, [showDimensions, darkTheme, vertical, rollWidthMm, rollLengthMm]);
+
+  // 轻量级高亮与选中视觉切换（零几何重建）
   useEffect(() => {
     const entries = pieceNodeMapRef.current;
-    const layer = layerRef.current;
-    if (!layer || !entries.length) return;
+    if (!entries.length) return;
+    let touchedBase = false;
+    let touchedPieces = false;
     for (const item of entries) {
       const isSelected = selectedPieceIndex != null && item.placedIndex === selectedPieceIndex;
       const isHighlighted = highlightedDemandKey != null && item.demandKey === highlightedDemandKey;
@@ -2615,7 +2916,7 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
         item.outline.stroke('#18181b');
         item.outline.strokeWidth(2.6);
         item.outline.shadowEnabled(true);
-        item.outline.shadowColor('rgba(91, 97, 246, 0.32)');
+        item.outline.shadowColor('rgba(91, 97, 246, 0.34)');
         item.outline.shadowBlur(10);
       } else if (isHighlighted) {
         item.outline.stroke('#5b61f6');
@@ -2634,13 +2935,21 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
           item.outline.shadowBlur(5);
         }
       }
+      if (item.layerKind === 'base') touchedBase = true;
+      else touchedPieces = true;
     }
-    layer.batchDraw();
+    if (touchedBase) baseLayerRef.current?.batchDraw();
+    if (touchedPieces) piecesLayerRef.current?.batchDraw();
   }, [highlightedDemandKey, selectedPieceIndex, placedPieces, demands]);
 
   return (
     <div className="wb-board-stage" aria-label={ariaLabel}>
       <div ref={hostRef} className="wb-board-konva-host" tabIndex={0} />
+      <canvas
+        ref={rulerCanvasRef}
+        className="wb-board-ruler-canvas"
+        aria-hidden="true"
+      />
       {dragFeedback && (
         <div className={`wb-board-feedback is-${dragFeedback.tone}`} role="status">
           {dragFeedback.text}

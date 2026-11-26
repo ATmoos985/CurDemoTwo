@@ -3,6 +3,21 @@ export type FirstStageOrientation = 'horizontal' | 'vertical';
 export type SettingsTabId = 'general' | 'craft' | 'remnant' | 'engines' | 'integration';
 export type SlittingProfile = 'FAST' | 'QUALITY';
 export type SlittingWidthMode = 'FLEXIBLE' | 'FIXED';
+export type StudioThemeMode = 'light' | 'dark';
+
+export interface CncPostOptions {
+  cutFeed: number;
+  rapidFeed: number;
+  plungeDelay: number;
+  retractDelay: number;
+}
+
+export const DEFAULT_CNC_POST_OPTIONS: CncPostOptions = {
+  cutFeed: 4000,
+  rapidFeed: 15000,
+  plungeDelay: 200,
+  retractDelay: 100
+};
 
 export interface SlittingWidthPreset {
   id: string;
@@ -116,6 +131,112 @@ export interface SlittingSolverOptions {
   lnsEnabled: boolean;
 }
 
+/** 一维分切可选刀架物理硬约束（全部对应 SlittingProblem.java 与 optimization-request.schema.json 精确字段）。 */
+export interface SlittingPhysicalConstraintInput {
+  maxKnives?: number | null;
+  minBladeSpacingMm?: number | null;
+  kerfMm?: number | null;
+  forbiddenNarrowEdgeMinMm?: number | null;
+  forbiddenNarrowEdgeMaxMm?: number | null;
+}
+
+/** 透传到 SLITTING_1D problem 的有效物理刀架约束子集（仅含正值或成对有效禁区）。 */
+export interface SlittingPhysicalConstraintPayload {
+  maxKnives?: number;
+  minBladeSpacingMm?: number;
+  kerfMm?: number;
+  forbiddenNarrowEdgeMinMm?: number;
+  forbiddenNarrowEdgeMaxMm?: number;
+}
+
+function toOptionalNonNegInt(raw: number | null | undefined): number | null {
+  if (raw === null || raw === undefined) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return Math.floor(n);
+}
+
+/**
+ * 校验工作台一维物理刀架约束（与 SlittingValidation.java 口径一致）：
+ * - 0 或留空视为不限制；
+ * - 危险细边丝禁区需上限 > 0 且 0 <= 下限 <= 上限 <= 100000；
+ * - 若传入最小订单宽度，则提前阻断宽幅小于最小物理刀距的无解请求。
+ */
+export function validateSlittingPhysicalConstraints(
+  input: SlittingPhysicalConstraintInput | null | undefined,
+  minOrderWidthMm?: number
+): string | null {
+  if (!input) return null;
+  const maxKnives = toOptionalNonNegInt(input.maxKnives);
+  if (maxKnives !== null && maxKnives !== 0 && (maxKnives < 1 || maxKnives > 100)) {
+    return '单车最大刀数须在 1–100 刀之间（填 0 表示不限制）';
+  }
+  const minBladeSpacingMm = toOptionalNonNegInt(input.minBladeSpacingMm);
+  if (
+    minBladeSpacingMm !== null &&
+    minBladeSpacingMm !== 0 &&
+    (minBladeSpacingMm < 1 || minBladeSpacingMm > 100_000)
+  ) {
+    return '最小物理刀距须在 1–100000 mm 之间（填 0 表示不限制）';
+  }
+  if (
+    minBladeSpacingMm !== null &&
+    minBladeSpacingMm > 0 &&
+    typeof minOrderWidthMm === 'number' &&
+    Number.isFinite(minOrderWidthMm) &&
+    minOrderWidthMm > 0 &&
+    minOrderWidthMm < minBladeSpacingMm
+  ) {
+    return `存在规格宽 ${Math.floor(minOrderWidthMm)} mm 小于机台最小物理刀距 ${minBladeSpacingMm} mm`;
+  }
+  const kerfMm = toOptionalNonNegInt(input.kerfMm);
+  if (kerfMm !== null && (kerfMm < 0 || kerfMm > 500)) {
+    return '每刀切缝损耗须在 0–500 mm 之间';
+  }
+  const fMin = toOptionalNonNegInt(input.forbiddenNarrowEdgeMinMm) ?? 0;
+  const fMax = toOptionalNonNegInt(input.forbiddenNarrowEdgeMaxMm) ?? 0;
+  if (fMin < 0 || fMax < 0 || fMin > 100_000 || fMax > 100_000) {
+    return '危险细边丝禁区范围须在 0–100000 mm 之间';
+  }
+  if (fMin > 0 && fMax === 0) {
+    return '启用危险细边丝禁区时须填写大于 0 的上限（且上限不小于下限）';
+  }
+  if (fMax > 0 && fMin > fMax) {
+    return `危险细边丝禁区下限（${fMin} mm）不能大于上限（${fMax} mm）`;
+  }
+  return null;
+}
+
+/**
+ * 构造透传给 POST /api/v2/optimization-jobs SLITTING_1D problem 的可选刀架硬约束字段。
+ * 默认全 0/留空时返回空对象 {}，不改变默认 1D 求解请求体和幂等哈希。
+ */
+export function buildSlittingPhysicalConstraintFields(
+  input: SlittingPhysicalConstraintInput | null | undefined
+): SlittingPhysicalConstraintPayload {
+  if (!input) return {};
+  const payload: SlittingPhysicalConstraintPayload = {};
+  const maxKnives = toOptionalNonNegInt(input.maxKnives);
+  if (maxKnives !== null && maxKnives >= 1 && maxKnives <= 100) {
+    payload.maxKnives = maxKnives;
+  }
+  const minBladeSpacingMm = toOptionalNonNegInt(input.minBladeSpacingMm);
+  if (minBladeSpacingMm !== null && minBladeSpacingMm >= 1 && minBladeSpacingMm <= 100_000) {
+    payload.minBladeSpacingMm = minBladeSpacingMm;
+  }
+  const kerfMm = toOptionalNonNegInt(input.kerfMm);
+  if (kerfMm !== null && kerfMm >= 1 && kerfMm <= 500) {
+    payload.kerfMm = kerfMm;
+  }
+  const fMin = toOptionalNonNegInt(input.forbiddenNarrowEdgeMinMm) ?? 0;
+  const fMax = toOptionalNonNegInt(input.forbiddenNarrowEdgeMaxMm) ?? 0;
+  if (fMax > 0 && fMin >= 0 && fMin <= fMax && fMax <= 100_000) {
+    payload.forbiddenNarrowEdgeMinMm = fMin;
+    payload.forbiddenNarrowEdgeMaxMm = fMax;
+  }
+  return payload;
+}
+
 export interface WorkbenchStrategyDef {
   id: string;
   name: string;
@@ -124,15 +245,16 @@ export interface WorkbenchStrategyDef {
 }
 
 export const WORKBENCH_STRATEGIES_2D: WorkbenchStrategyDef[] = [
-  { id: 'PS_FIXED', name: 'PackingSolver 严格经向缩长', badge: 'C++ 原生', shortTag: '0° 保丝缕 · 二分缩长压紧' },
-  { id: 'PS_ROT', name: 'PackingSolver 180°/90° 倒顺缩长', badge: 'C++ 原生', shortTag: '异形 180° / 矩形 90° · 最短版长' },
-  { id: 'DN_GA', name: 'Deepnest NFP+GA 进化嵌套', badge: 'NFP+GA', shortTag: 'Minkowski 临界多边形 + 遗传共边寻优' },
-  { id: 'DN_FIXED', name: 'Deepnest 严格经向直排', badge: 'NFP 经向', shortTag: '0° 严保纱向 · 临界多边形紧贴' },
-  { id: 'JAVA_FAST', name: 'Java 天际线/直刀快速基线', badge: 'Java 内置', shortTag: '极速秒出基线对照与降级兜底' }
+  { id: 'PS_FIXED', name: '经向缩长', badge: '经向', shortTag: '0° 保丝缕 · 缩长压紧' },
+  { id: 'PS_ROT', name: '旋转缩长', badge: '旋转', shortTag: '异形 180° / 矩形 90°' },
+  { id: 'DN_GA', name: '异形进化', badge: '异形', shortTag: '凹凸嵌合 · 进化寻优' },
+  { id: 'DN_FIXED', name: '异形经向', badge: '异形', shortTag: '0° 保丝缕 · 凹凸嵌合' },
+  { id: 'JAVA_FAST', name: '快速基线', badge: '极速', shortTag: '极速秒出对照' }
 ];
 
 export interface StudioSettings {
   // Tab 1: 画布与常规
+  theme: StudioThemeMode;
   vertical: boolean;
   showDimensions: boolean;
   showPath: boolean;
@@ -168,9 +290,13 @@ export interface StudioSettings {
   slitSeqGroupBeta: number;
   slitLnsEnabled: boolean;
 
-  // Tab 5: 导出与系统接入
+  // Tab 5: 导出与系统接入（含 CNC 后处理参数）
   exportPrefix: string;
   ticketShowCuts: boolean;
+  cncCutFeed: number;
+  cncRapidFeed: number;
+  cncPlungeDelay: number;
+  cncRetractDelay: number;
 }
 
 export const DEFAULT_SLITTING_SOLVER_SETTINGS = {
@@ -190,6 +316,7 @@ export const DEFAULT_SLITTING_SOLVER_SETTINGS = {
 };
 
 export const DEFAULT_STUDIO_SETTINGS: StudioSettings = {
+  theme: 'light',
   vertical: true,
   showDimensions: true,
   showPath: false,
@@ -211,8 +338,26 @@ export const DEFAULT_STUDIO_SETTINGS: StudioSettings = {
   ...DEFAULT_SLITTING_SOLVER_SETTINGS,
 
   exportPrefix: 'CutPlan',
-  ticketShowCuts: true
+  ticketShowCuts: true,
+  cncCutFeed: DEFAULT_CNC_POST_OPTIONS.cutFeed,
+  cncRapidFeed: DEFAULT_CNC_POST_OPTIONS.rapidFeed,
+  cncPlungeDelay: DEFAULT_CNC_POST_OPTIONS.plungeDelay,
+  cncRetractDelay: DEFAULT_CNC_POST_OPTIONS.retractDelay
 };
+
+export function extractCncPostOptions(settings: StudioSettings): CncPostOptions {
+  return {
+    cutFeed: Math.min(60000, Math.max(100, Math.round(Number(settings.cncCutFeed) || DEFAULT_CNC_POST_OPTIONS.cutFeed))),
+    rapidFeed: Math.min(100000, Math.max(500, Math.round(Number(settings.cncRapidFeed) || DEFAULT_CNC_POST_OPTIONS.rapidFeed))),
+    plungeDelay: Math.min(10000, Math.max(0, Math.round(Number(settings.cncPlungeDelay ?? DEFAULT_CNC_POST_OPTIONS.plungeDelay)))),
+    retractDelay: Math.min(10000, Math.max(0, Math.round(Number(settings.cncRetractDelay ?? DEFAULT_CNC_POST_OPTIONS.retractDelay))))
+  };
+}
+
+export function applyThemeToDocument(theme: StudioThemeMode): void {
+  if (typeof document === 'undefined') return;
+  document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : 'light';
+}
 
 export function extractSlittingSolverOptions(settings: StudioSettings): SlittingSolverOptions {
   return {
@@ -274,8 +419,10 @@ export function loadStudioSettings(): StudioSettings {
     const rawEnabledStrategies2D = localStorage.getItem('cutplan.studio.enabledStrategies2D');
     const rawTicketCuts = localStorage.getItem('cutplan.studio.ticketShowCuts');
     const rawPrefix = (localStorage.getItem('cutplan.studio.exportPrefix') || '').trim();
+    const rawTheme = localStorage.getItem('cutplan.studio.theme');
 
     return {
+      theme: rawTheme === 'dark' ? 'dark' : 'light',
       vertical:
         typeof rawPrefs.vertical === 'boolean'
           ? rawPrefs.vertical
@@ -434,7 +581,31 @@ export function loadStudioSettings(): StudioSettings {
           ? false
           : rawTicketCuts === '1'
           ? true
-          : DEFAULT_STUDIO_SETTINGS.ticketShowCuts
+          : DEFAULT_STUDIO_SETTINGS.ticketShowCuts,
+      cncCutFeed: readNumber(
+        localStorage.getItem('cutplan.studio.cncCutFeed'),
+        DEFAULT_STUDIO_SETTINGS.cncCutFeed,
+        100,
+        60000
+      ),
+      cncRapidFeed: readNumber(
+        localStorage.getItem('cutplan.studio.cncRapidFeed'),
+        DEFAULT_STUDIO_SETTINGS.cncRapidFeed,
+        500,
+        100000
+      ),
+      cncPlungeDelay: readNumber(
+        localStorage.getItem('cutplan.studio.cncPlungeDelay'),
+        DEFAULT_STUDIO_SETTINGS.cncPlungeDelay,
+        0,
+        10000
+      ),
+      cncRetractDelay: readNumber(
+        localStorage.getItem('cutplan.studio.cncRetractDelay'),
+        DEFAULT_STUDIO_SETTINGS.cncRetractDelay,
+        0,
+        10000
+      )
     };
   } catch {
     return {
@@ -507,7 +678,7 @@ export function validateStudioSettings(draft: StudioSettings): string | null {
     draft.slitStageTimeLimitMs < 1000 ||
     draft.slitStageTimeLimitMs > 600000
   ) {
-    return '一维 MIP 单阶段安全时限须在 1000–600000 毫秒之间';
+    return '单阶段求解时限须在 1000–600000 毫秒之间';
   }
   if (!Number.isFinite(draft.slitUnderPenalty) || draft.slitUnderPenalty < 0) {
     return '一维欠产惩罚系数必须为非负数';
@@ -528,12 +699,25 @@ export function validateStudioSettings(draft: StudioSettings): string | null {
   if (!cleanPrefix || cleanPrefix.length > 32 || /[\\/:*?"<>|]/.test(cleanPrefix)) {
     return '导出文件名前缀须为 1–32 个合法文件名字符（不含 \\ / : * ? " < > |）';
   }
+  if (!Number.isFinite(draft.cncCutFeed) || draft.cncCutFeed < 100 || draft.cncCutFeed > 60000) {
+    return 'CNC 切割进给速度须在 100–60000 mm/min 之间';
+  }
+  if (!Number.isFinite(draft.cncRapidFeed) || draft.cncRapidFeed < 500 || draft.cncRapidFeed > 100000) {
+    return 'CNC 空程进给速度须在 500–100000 mm/min 之间';
+  }
+  if (!Number.isFinite(draft.cncPlungeDelay) || draft.cncPlungeDelay < 0 || draft.cncPlungeDelay > 10000) {
+    return 'CNC 下刀延时须在 0–10000 ms 之间';
+  }
+  if (!Number.isFinite(draft.cncRetractDelay) || draft.cncRetractDelay < 0 || draft.cncRetractDelay > 10000) {
+    return 'CNC 抬刀延时须在 0–10000 ms 之间';
+  }
   return null;
 }
 
 export function persistStudioSettings(next: StudioSettings): StudioSettings {
   const sanitized: StudioSettings = {
     ...next,
+    theme: next.theme === 'dark' ? 'dark' : 'light',
     showWorkflowGuide: Boolean(next.showWorkflowGuide),
     defectMarginMm: Math.round(next.defectMarginMm * 10) / 10,
     trimStartMm: Math.round(next.trimStartMm * 10) / 10,
@@ -555,8 +739,14 @@ export function persistStudioSettings(next: StudioSettings): StudioSettings {
     slitSeqGroupAlpha: Math.max(0, Number(next.slitSeqGroupAlpha) || 0),
     slitSeqGroupBeta: Math.max(0, Number(next.slitSeqGroupBeta) || 0),
     slitLnsEnabled: Boolean(next.slitLnsEnabled),
-    exportPrefix: next.exportPrefix.trim() || 'CutPlan'
+    exportPrefix: next.exportPrefix.trim() || 'CutPlan',
+    cncCutFeed: Math.min(60000, Math.max(100, Math.round(Number(next.cncCutFeed) || DEFAULT_CNC_POST_OPTIONS.cutFeed))),
+    cncRapidFeed: Math.min(100000, Math.max(500, Math.round(Number(next.cncRapidFeed) || DEFAULT_CNC_POST_OPTIONS.rapidFeed))),
+    cncPlungeDelay: Math.min(10000, Math.max(0, Math.round(Number(next.cncPlungeDelay ?? DEFAULT_CNC_POST_OPTIONS.plungeDelay)))),
+    cncRetractDelay: Math.min(10000, Math.max(0, Math.round(Number(next.cncRetractDelay ?? DEFAULT_CNC_POST_OPTIONS.retractDelay))))
   };
+
+  applyThemeToDocument(sanitized.theme);
 
   try {
     const existingPrefs = JSON.parse(localStorage.getItem(PREF_KEY) || '{}');
@@ -569,6 +759,7 @@ export function persistStudioSettings(next: StudioSettings): StudioSettings {
         showPath: sanitized.showPath
       })
     );
+    localStorage.setItem('cutplan.studio.theme', sanitized.theme);
     localStorage.setItem('cutplan.studio.showWorkflowGuide', sanitized.showWorkflowGuide ? '1' : '0');
     localStorage.setItem('cam_origin', sanitized.startCorner);
     localStorage.setItem('cam_margin', String(sanitized.defectMarginMm));
@@ -611,6 +802,10 @@ export function persistStudioSettings(next: StudioSettings): StudioSettings {
     localStorage.setItem('cutplan.slit.lnsEnabled', sanitized.slitLnsEnabled ? '1' : '0');
     localStorage.setItem('cutplan.studio.exportPrefix', sanitized.exportPrefix);
     localStorage.setItem('cutplan.studio.ticketShowCuts', sanitized.ticketShowCuts ? '1' : '0');
+    localStorage.setItem('cutplan.studio.cncCutFeed', String(sanitized.cncCutFeed));
+    localStorage.setItem('cutplan.studio.cncRapidFeed', String(sanitized.cncRapidFeed));
+    localStorage.setItem('cutplan.studio.cncPlungeDelay', String(sanitized.cncPlungeDelay));
+    localStorage.setItem('cutplan.studio.cncRetractDelay', String(sanitized.cncRetractDelay));
   } catch {}
 
   return sanitized;

@@ -18,6 +18,8 @@ services:
   app:
     build: .
     restart: unless-stopped
+    init: true
+    stop_grace_period: 35s
     depends_on:
       mysql:
         condition: service_healthy

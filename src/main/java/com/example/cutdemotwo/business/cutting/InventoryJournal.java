@@ -43,13 +43,33 @@ public final class InventoryJournal {
         if (snapshot.tasks() != null) for (var task : snapshot.tasks().values()) {
             var completed = new HashMap<String,Integer>();
             if (snapshot.receipts() != null) for (var receipt : snapshot.receipts().values()) {
-                if (!task.id().equals(receipt.get("taskId")) || "REVERSED".equals(receipt.get("status"))) continue;
-                if (receipt.get("demandQuantities") instanceof Map<?,?> quantities)
+                if ("REVERSED".equals(receipt.get("status"))) continue;
+                boolean multiTask = receipt.get("taskDemandQuantities") instanceof Map<?,?>;
+                if (multiTask) {
+                    Map<?,?> multi = (Map<?,?>) receipt.get("taskDemandQuantities");
+                    if (!(multi.get(task.id()) instanceof Map<?,?> quantities)) continue;
                     quantities.forEach((id,n) -> completed.merge(id.toString(), ((Number)n).intValue(), Integer::sum));
-                if (receipt.get("qualityDispositions") instanceof List<?> events) for (var raw : events) {
-                    var event = JSON.convertValue(raw,QualityDisposition.class);
-                    if ("QUALIFIED".equals(event.originalOutcome()))
-                        completed.merge(String.valueOf(event.demandId()),-1,Integer::sum);
+                    Map<?,?> pieceSources = receipt.get("pieceSources") instanceof Map<?,?> ps ? ps : null;
+                    if (pieceSources != null && receipt.get("qualityDispositions") instanceof List<?> events) for (var raw : events) {
+                        var event = JSON.convertValue(raw,QualityDisposition.class);
+                        if (event.hasRevocation() || !"QUALIFIED".equals(event.originalOutcome())) continue;
+                        Object srcObj = pieceSources.get(String.valueOf(event.command().pieceId()));
+                        if (srcObj == null) srcObj = pieceSources.get(event.command().pieceId());
+                        if (srcObj instanceof Map<?,?> srcMap && Objects.equals(task.id(), srcMap.get("taskId"))
+                                && srcMap.get("lineId") instanceof Number ln) {
+                            completed.merge(String.valueOf(ln.intValue()), -1, Integer::sum);
+                        }
+                    }
+                } else {
+                    if (!task.id().equals(receipt.get("taskId"))) continue;
+                    if (receipt.get("demandQuantities") instanceof Map<?,?> quantities)
+                        quantities.forEach((id,n) -> completed.merge(id.toString(), ((Number)n).intValue(), Integer::sum));
+                    if (receipt.get("qualityDispositions") instanceof List<?> events) for (var raw : events) {
+                        var event = JSON.convertValue(raw,QualityDisposition.class);
+                        if (event.hasRevocation()) continue;
+                        if ("QUALIFIED".equals(event.originalOutcome()))
+                            completed.merge(String.valueOf(event.demandId()),-1,Integer::sum);
+                    }
                 }
             }
             for (var line : task.demands()) put(result,"DEMAND",task.id()+"/"+line.id(),
@@ -58,6 +78,9 @@ public final class InventoryJournal {
         }
         snapshot.transfers().forEach((id,document)->put(result,"TRANSFER",id,document));
         snapshot.counts().forEach((id,document)->put(result,"COUNT",id,document));
+        snapshot.qualityReleases().forEach((id,document)->put(result,"QUALITY_RELEASE",id,document));
+        snapshot.inventoryReceipts().forEach((id,document)->put(result,"INVENTORY_RECEIPT",id,document));
+        snapshot.materialIssues().forEach((id,document)->put(result,"MATERIAL_ISSUE",id,document));
         return result;
     }
 
@@ -88,7 +111,13 @@ public final class InventoryJournal {
             List<String> reverses = "REPORT_REVERSE".equals(action) ? entries.stream()
                     .filter(e -> e.aggregateType().equals(identity.type()) && e.aggregateId().equals(identity.id())
                             && (e.sourceReportIds().contains(businessId) || "MIGRATION_OPENING".equals(e.eventType())))
-                    .map(InventoryLedgerEntry::id).toList() : List.of();
+                    .map(InventoryLedgerEntry::id).toList()
+                    : "QUALITY_DISPOSITION_REVOKE".equals(action) ? entries.stream()
+                    .filter(e -> e.aggregateType().equals(identity.type()) && e.aggregateId().equals(identity.id())
+                            && "QUALITY_DISPOSITION".equals(e.eventType())
+                            && (e.sourceReportIds().contains(businessId) || Objects.equals(e.businessId(), businessId)))
+                    .map(InventoryLedgerEntry::id).toList()
+                    : List.of();
             String event = "ROLL_RECEIPT_OR_UPDATE".equals(action)
                     ? (a==null?"ROLL_RECEIPT":"ROLL_ARCHIVE_UPDATE") : action;
             add(entries,transaction,event,identity.type(),identity.id(),businessId,sources,actor,now,
@@ -103,8 +132,12 @@ public final class InventoryJournal {
             case "ROLL" -> balance.id().equals(receipt.get("rollId"));
             case "DEMAND" -> {
                 var demand=JSON.readTree(balance.value());
-                String line=String.valueOf(demand.get("line").get("id").asInt());
-                yield demand.get("taskId").asString().equals(receipt.get("taskId"))
+                String taskId = demand.get("taskId").asString();
+                String line = String.valueOf(demand.get("line").get("id").asInt());
+                if (receipt.get("taskDemandQuantities") instanceof Map<?,?> multi) {
+                    yield multi.get(taskId) instanceof Map<?,?> counts && counts.containsKey(line);
+                }
+                yield taskId.equals(receipt.get("taskId"))
                         && (receipt.get("demandQuantities") instanceof Map<?,?> counts && counts.containsKey(line));
             }
             case "REMNANT" -> {
@@ -155,7 +188,12 @@ public final class InventoryJournal {
             if("ROLL".equals(balance.type())) {
                 double total=value.get("totalLength").asDouble(),used=value.get("usedLength").asDouble(),
                         remaining=value.get("currentRemainingLength").asDouble();
-                if(!Double.isFinite(total+used+remaining) || used<0 || remaining<0 || Math.abs(total-used-remaining)>.001)
+                double scrapped=value.has("scrappedLengthMm") && value.get("scrappedLengthMm").isNumber()
+                        ? value.get("scrappedLengthMm").asDouble() : 0.0;
+                boolean isScrapped=value.has("inspectionStatus") && "SCRAPPED".equals(value.get("inspectionStatus").asString());
+                if(!Double.isFinite(total+used+remaining+scrapped) || used<0 || remaining<0 || scrapped<0
+                        || (isScrapped && remaining>.001) || (!isScrapped && scrapped>.001)
+                        || Math.abs(total-used-remaining-scrapped)>.001)
                     issues.add(Map.of("code","ROLL_LENGTH_MISMATCH","aggregate",balance.id()));
             }
         }
@@ -172,6 +210,7 @@ public final class InventoryJournal {
                     rejected=receipt.get("rejectedArea") instanceof Number n?n.doubleValue():0;
             if(receipt.get("qualityDispositions") instanceof List<?> events)for(var raw:events) {
                 var event=JSON.convertValue(raw,QualityDisposition.class);
+                if(event.hasRevocation())continue;
                 double area=event.pieceAreaMm2()/1_000_000, recovered=event.recoveredAreaMm2()/1_000_000;
                 if("QUALIFIED".equals(event.originalOutcome())) {good-=area;waste+=area;}
                 else if("REJECTED".equals(event.originalOutcome()))rejected-=area;

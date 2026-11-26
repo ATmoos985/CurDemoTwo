@@ -18,7 +18,7 @@ class JavaIrregularSolverEngineTests {
     @BeforeEach
     void setup() {
         engine = new JavaIrregularSolverEngine();
-        solverFactory = new SolverFactory(List.of(new IrregularPackingSolverService(), engine));
+        solverFactory = new SolverFactory(List.of(new IrregularPackingSolverService(), new DeepnestSolverEngine(), engine));
     }
 
     private static Shape polygon(double... xy) {
@@ -121,21 +121,34 @@ class JavaIrregularSolverEngineTests {
 
         // Standard marker width: 1500 mm, length: 2500 mm
         Shape markerMaterial = Shape.rectangle(1500, 2500);
-        NestingProblem problem = new NestingProblem(
+        NestingProblem fallbackProblem = new NestingProblem(
                 "1", "mm", new Material("marker-mat", markerMaterial, List.of(), false),
                 parts,
                 new NestingProblem.Process("CONTOUR", "SHEET", "left-top", "none", 0, 0, 0, 0, "MAXIMIZE_PIECE_AREA", 5.0),
-                "auto", 3
+                "packingsolver-irregular", 3
         );
 
-        // Solve via solverFactory (verifies automatic fallback from packingsolver-irregular -> javairregular)
-        NestingResult result = solverFactory.solve(problem);
-        assertEquals("FEASIBLE", result.status());
-        assertEquals("javairregular", result.engine());
-        assertEquals("packingsolver-irregular", result.requestedEngine());
-        assertNotNull(result.fallbackReason());
-        assertTrue(result.fallbackReason().contains("javairregular"));
+        // Solve via solverFactory (verifies explicit native request falls back transparently to deepnest)
+        NestingResult fallbackResult = solverFactory.solve(fallbackProblem);
+        assertEquals("FEASIBLE", fallbackResult.status());
+        assertEquals("deepnest", fallbackResult.engine());
+        assertEquals("packingsolver-irregular", fallbackResult.requestedEngine());
+        assertNotNull(fallbackResult.fallbackReason());
+        assertTrue(fallbackResult.fallbackReason().contains("deepnest"));
+        assertEquals(totalExpectedPieces, fallbackResult.placements().size(), "All 18 pieces must be placed (complete kit)");
 
-        assertEquals(totalExpectedPieces, result.placements().size(), "All 18 pieces must be placed (complete kit)");
+        // Also verify javairregular directly still packs the complete 18-piece garment kit
+        NestingProblem javaProblem = new NestingProblem(
+                "1", "mm", new Material("marker-mat", markerMaterial, List.of(), false),
+                parts,
+                new NestingProblem.Process("CONTOUR", "SHEET", "left-top", "none", 0, 0, 0, 0, "MAXIMIZE_PIECE_AREA", 5.0),
+                "javairregular", 3
+        );
+        NestingResult javaResult = solverFactory.solve(javaProblem);
+        assertEquals("FEASIBLE", javaResult.status());
+        assertEquals("javairregular", javaResult.engine());
+        assertEquals("javairregular", javaResult.requestedEngine());
+        assertNull(javaResult.fallbackReason());
+        assertEquals(totalExpectedPieces, javaResult.placements().size(), "All 18 pieces must be placed by javairregular");
     }
 }

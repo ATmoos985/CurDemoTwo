@@ -1,6 +1,8 @@
 package com.example.cutdemotwo.algorithm.nesting;
 
 import com.example.cutdemotwo.algorithm.ComputationCancellation;
+import com.example.cutdemotwo.algorithm.nesting.constraints.ConstraintPipeline;
+import com.example.cutdemotwo.algorithm.nesting.constraints.CurtainConstraintPack;
 
 import com.example.cutdemotwo.contracts.geometry.CutStep;
 import com.example.cutdemotwo.contracts.geometry.Defect;
@@ -9,6 +11,7 @@ import com.example.cutdemotwo.contracts.geometry.RemnantPiece;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
 import com.example.cutdemotwo.algorithm.nesting.EngineResult;
 import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
+import com.example.cutdemotwo.algorithm.geometry.CoordinateFrame;
 import com.example.cutdemotwo.algorithm.geometry.EngineGeometry;
 import com.example.cutdemotwo.algorithm.nesting.ICutSolverEngine;
 import com.example.cutdemotwo.algorithm.toolpath.ToolpathOptimizerService;
@@ -48,17 +51,12 @@ public class CrossCutSolverService implements ICutSolverEngine {
             res.setMessage("母料尺寸或卷头修齐量无效");
             return res;
         }
-        List<double[]> blocked = new ArrayList<>();
-        for (Defect d : EngineGeometry.defects(req)) {
-            ComputationCancellation.check();
-            if (d.getSafeX() < req.width() && d.getSafeX() + d.getSafeW() > 0) {
-                blocked.add(new double[]{Math.max(0, d.getSafeY()), Math.min(req.height(), d.getSafeY() + d.getSafeH())});
-            }
-        }
-        blocked.sort(Comparator.comparingDouble(a -> a[0]));
+        ConstraintPipeline pipeline = CurtainConstraintPack.forProblem(req);
+        List<double[]> blocked = toBlockedIntervals(req.material().exclusions(), req.width(), req.height());
         List<PlacedPiece> pieces = new ArrayList<>();
         List<RemnantPiece> remnants = new ArrayList<>();
         List<CutStep> cuts = new ArrayList<>();
+        double pieceGap = Math.max(0.0, req.process().pieceGap());
         double cursor = req.process().trimStart();
         if (cursor > 0 && req.width() >= req.process().minReusableWidth() && cursor >= req.process().minReusableHeight()) addRemnant(remnants, req.width(), 0, cursor, overlaps(blocked, 0, cursor));
         int unmet = 0;
@@ -69,12 +67,16 @@ public class CrossCutSolverService implements ICutSolverEngine {
                 res.setMessage("仅横切要求裁片宽度等于母料幅宽，且长度与件数有效：" + demand.name());
                 return res;
             }
+            List<double[]> hardBlocked = pipeline.isNoop()
+                    ? blocked
+                    : toBlockedIntervals(pipeline.hardExclusionsFor(req, demand), req.width(), req.height());
             for (int i = 0; i < demand.quantity(); i++) {
                 ComputationCancellation.check();
-                double start = cursor;
-                for (double[] interval : blocked) {
-                    ComputationCancellation.check();
-                    if (start < interval[1] && start + length > interval[0]) start = interval[1];
+                double minStart = pieces.isEmpty() ? cursor : cursor + pieceGap;
+                // 优先避开全部疵点（含软疵点），放不下再退化为仅避让硬疵点（如辅片放行轻微疵点）
+                double start = nextCrossCutStart(req, pipeline, demand, minStart, length, blocked);
+                if (start + length > req.height() && hardBlocked.size() < blocked.size()) {
+                    start = nextCrossCutStart(req, pipeline, demand, minStart, length, hardBlocked);
                 }
                 if (start + length > req.height()) {
                     unmet++;
@@ -82,7 +84,7 @@ public class CrossCutSolverService implements ICutSolverEngine {
                 }
                 if (start > cursor) {
                     if (req.width() >= req.process().minReusableWidth() && start - cursor >= req.process().minReusableHeight()) addRemnant(remnants, req.width(), cursor, start - cursor, overlaps(blocked, cursor, start));
-                    cuts.add(new CutStep(cuts.size() + 1, "横切", start, 0, req.width(), "隔离疵点区后起切"));
+                    cuts.add(new CutStep(cuts.size() + 1, "横切", start, 0, req.width(), "隔离疵点/间距区后起切"));
                 }
                 pieces.add(new PlacedPiece(pieces.size() + 1, demand.name(), 0, start,
                         req.width(), length, false, demand.id()));
@@ -98,9 +100,8 @@ public class CrossCutSolverService implements ICutSolverEngine {
         }
         if (req.height() > cursor && req.width() >= req.process().minReusableWidth() && req.height() - cursor >= req.process().minReusableHeight()) addRemnant(remnants, req.width(), cursor, req.height() - cursor,
                 overlaps(blocked, cursor, req.height()));
-        double homeX = req.process().startCorner().startsWith("right") ? req.width() : 0.0;
-        double homeY = req.process().startCorner().endsWith("bottom") ? req.height() : 0.0;
-        List<CutStep> continuousCuts = toolpathOptimizerService.optimizeAndChain(cuts, homeX, homeY, false);
+        CoordinateFrame frame = CoordinateFrame.of(req);
+        List<CutStep> continuousCuts = GuillotinePostProcessor.optimizeCuts(toolpathOptimizerService, cuts, frame, false);
         res.setPieces(pieces);
         res.setRemnants(remnants);
         res.setCuts(continuousCuts);
@@ -109,6 +110,44 @@ public class CrossCutSolverService implements ICutSolverEngine {
         res.setSuccess(true);
         if (unmet > 0) res.setMessage("当前窗口未排入 " + unmet + " 件，可在后续工位接续");
         return res;
+    }
+
+    private List<double[]> toBlockedIntervals(List<NestingProblem.Exclusion> exclusions, double width, double height) {
+        List<double[]> intervals = new ArrayList<>();
+        for (NestingProblem.Exclusion e : exclusions) {
+            ComputationCancellation.check();
+            double safeX = Math.max(0, e.x() - e.clearance());
+            double safeW = e.shape().width() + 2.0 * e.clearance();
+            double safeY = Math.max(0, e.y() - e.clearance());
+            double safeH = e.shape().height() + 2.0 * e.clearance();
+            if (safeX < width && safeX + safeW > 0) {
+                intervals.add(new double[]{Math.max(0, safeY), Math.min(height, safeY + safeH)});
+            }
+        }
+        intervals.sort(Comparator.comparingDouble(a -> a[0]));
+        return intervals;
+    }
+
+    private double nextCrossCutStart(NestingProblem req, ConstraintPipeline pipeline, NestingProblem.Part demand,
+                                     double cursor, double length, List<double[]> intervals) {
+        double start = cursor;
+        for (int iter = 0; iter <= intervals.size() + 2; iter++) {
+            double before = start;
+            for (double[] interval : intervals) {
+                ComputationCancellation.check();
+                if (start < interval[1] && start + length > interval[0]) start = interval[1];
+            }
+            if (!pipeline.isNoop()) {
+                double snapped = pipeline.snapY(req, demand, 0, start);
+                if (snapped > start + 1e-6) {
+                    start = snapped;
+                }
+            }
+            if (Math.abs(start - before) < 1e-6 || start + length > req.height()) {
+                break;
+            }
+        }
+        return start;
     }
 
     private void addRemnant(List<RemnantPiece> remnants, double width, double y, double length, boolean hasDefect) {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {dragDefect,validateDefect,pointAt,screenRect,advance} from '../../main/resources/static/js/inspection/inspection-model.js';
+import {dragDefect,validateDefect,pointAt,screenRect,advance} from '../../../frontend/src/lib/domain/inspection-model.js';
 const roll={width:2000,totalLength:100000};
 test('drag in either direction records whole-roll geometry at tenth-millimetre resolution',()=>{
     const a={x:200.1,y:15550.2},b={x:400.3,y:15000.1};

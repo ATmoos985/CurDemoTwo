@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defaults,validateInput,totals,independentBaseline,planSummary} from '../../main/resources/static/js/linear/linear-model.js';
-import {LINEAR_SCENARIOS} from '../../main/resources/static/js/linear/linear-scenarios.js';
-import {industry} from '../../main/resources/static/js/industry/industry-profiles.js';
+import {defaults,validateInput,totals,independentBaseline,planSummary} from '../../../frontend/src/lib/domain/linear-model.js';
+import {LINEAR_SCENARIOS} from '../../../frontend/src/lib/domain/linear-scenarios.js';
+import {industry} from '../../../frontend/src/lib/domain/industry-profiles.js';
 
 const near=(actual,expected)=>assert.ok(Math.abs(actual-expected)<1e-9,`${actual} ≠ ${expected}`);
 const order=(messageText,width,quantity,length=100,surfaceTreatment='X')=>({messageText,width,quantity,length,surfaceTreatment});

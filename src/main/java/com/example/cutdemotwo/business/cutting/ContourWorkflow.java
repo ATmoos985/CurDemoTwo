@@ -32,8 +32,17 @@ public final class ContourWorkflow {
             double x = Math.max(0, d.getX()-d.getMargin()), y = Math.max(0, d.getY()-d.getMargin());
             double right = Math.min(r.getRollW(), d.getX()+d.getW()+d.getMargin());
             double bottom = Math.min(length, d.getY()+d.getH()+d.getMargin());
-            if (right > x && bottom > y) exclusions.add(new NestingProblem.Exclusion(exclusions.size()+1, x, y,
-                    NestingProblem.Shape.rectangle(right-x, bottom-y), 0));
+            if (right > x && bottom > y) {
+                boolean defaultStrict = d.getSeverity() == 2
+                        && (d.getAvoidanceStrategy() == null || d.getAvoidanceStrategy().isBlank()
+                        || "MUST_AVOID".equalsIgnoreCase(d.getAvoidanceStrategy()));
+                exclusions.add(defaultStrict
+                        ? new NestingProblem.Exclusion(exclusions.size()+1, x, y,
+                                NestingProblem.Shape.rectangle(right-x, bottom-y), 0)
+                        : new NestingProblem.Exclusion(exclusions.size()+1, x, y,
+                                NestingProblem.Shape.rectangle(right-x, bottom-y), 0,
+                                d.getSeverity(), d.getAvoidanceStrategy()));
+            }
         }
         if (r.getTrimStart() > 0) exclusions.add(new NestingProblem.Exclusion(exclusions.size()+1, 0, 0,
                 NestingProblem.Shape.rectangle(r.getRollW(), r.getTrimStart()), 0));

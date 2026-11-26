@@ -88,6 +88,11 @@ public class LocalNeighborhoodSequenceOptimizer {
         return booleanProperty("cutting.lns.enabled", false);
     }
 
+    public static boolean isEnabledExplicitlyConfigured() {
+        String value = configuredProperty("cutting.lns.enabled");
+        return value != null && !value.isBlank();
+    }
+
     public static <T> T withPropertyOverrides(Map<String, String> overrides, Supplier<T> supplier) {
         return SolverRuntimeProperties.withOverrides(overrides, supplier);
     }
@@ -156,6 +161,8 @@ public class LocalNeighborhoodSequenceOptimizer {
         // wall-clock budget makes the result depend on machine load (different #iterations
         // completed → different floor) — that was the run-to-run swing (49 vs 51). Stop after
         // maxIterations, or early after maxNoImprove consecutive iterations with no new best.
+        long budgetMs = longProperty("cutting.lns.budgetMs", 0L);
+        long deadlineMs = budgetMs > 0L ? System.currentTimeMillis() + budgetMs : Long.MAX_VALUE;
         int maxNoImprove = intProperty("cutting.lns.maxNoImprove", 12);
         int noImproveStreak = 0;
         boolean improved = false;
@@ -168,6 +175,9 @@ public class LocalNeighborhoodSequenceOptimizer {
         // Without it the escape step oscillates in a 2-cycle (escape up, best move undoes it).
         Set<String> visited = new HashSet<>();
         visited.add(solutionSignature(current));
+        // 单次 improve() 局部的确定性邻域求解缓存：每轮只修改极少数车，未受波及的邻域输入完全一致，
+        // 直接复用确定性 SCIP 求解结果，避免每轮重复枚举列与重解相同子 MIP。
+        Map<String, SolveAttempt> solveCache = new HashMap<>();
 
         // Parallelize the independent neighborhood solves (the LNS hot path, ~94% of LNS time). Each
         // solveNeighborhood builds its own MPSolver and reads only the (immutable) neighborhood, so
@@ -177,7 +187,9 @@ public class LocalNeighborhoodSequenceOptimizer {
         boolean parallel = booleanProperty("cutting.lns.parallel", true);
         int requestedParallelism = intProperty(
                 "cutting.lns.parallelism", BoundedSolverTaskExecutor.globalParallelism());
-        BoundedSolverTaskExecutor executor = parallel
+        BoundedSolverTaskExecutor executor = (parallel
+                && requestedParallelism > 1
+                && BoundedSolverTaskExecutor.globalParallelism() > 1)
                 ? BoundedSolverTaskExecutor.create("lns", requestedParallelism)
                 : null;
         if (executor != null) {
@@ -186,27 +198,78 @@ public class LocalNeighborhoodSequenceOptimizer {
         }
         try {
             for (int iteration = 0; iteration < maxIterations; iteration++) {
+            if (System.currentTimeMillis() >= deadlineMs) {
+                lastReason = "budget-reached";
+                break;
+            }
+            long iterStartMs = System.currentTimeMillis();
             SequenceGroupPostProcessor.GroupStats beforeStats =
                     SequenceGroupPostProcessor.computeGroupStats(current);
             int beforeGroups = beforeStats.groups();
             int beforeFragmentation = fragmentationScore(current);
             List<RollRecord> rolls = decompose(current);
             List<Neighborhood> neighborhoods = buildNeighborhoods(rolls, maxNeighborhoods);
+            long buildNbDoneMs = System.currentTimeMillis();
             MoveCandidate bestImprovement = null;
             MoveCandidate bestPlateau = null;
             MoveCandidate bestWorsening = null;
 
-            // Solve all neighborhoods up front in parallel (each solve is independent + thread-safe);
+            List<String> cacheKeys = new ArrayList<>(neighborhoods.size());
+            SolveAttempt[] resolvedAttempts = new SolveAttempt[neighborhoods.size()];
+            List<Integer> uncachedIndexes = new ArrayList<>();
+            List<Neighborhood> uncachedNeighborhoods = new ArrayList<>();
+            for (int ni = 0; ni < neighborhoods.size(); ni++) {
+                Neighborhood neighborhood = neighborhoods.get(ni);
+                String cacheKey = neighborhoodCacheKey(neighborhood);
+                cacheKeys.add(cacheKey);
+                SolveAttempt cached = solveCache.get(cacheKey);
+                if (cached != null) {
+                    resolvedAttempts[ni] = cached;
+                } else {
+                    uncachedIndexes.add(ni);
+                    uncachedNeighborhoods.add(neighborhood);
+                }
+            }
+
+            // Solve only cache-miss neighborhoods up front in parallel (each solve is independent + thread-safe);
             // the reduction below consumes them by index, so the chosen move is identical to serial.
-            List<SolveAttempt> presolved = null;
-            if (executor != null && !neighborhoods.isEmpty()) {
-                presolved = executor.mapOrdered(neighborhoods, this::solveNeighborhood);
+            if (executor != null && !uncachedNeighborhoods.isEmpty()) {
+                final long iterDeadlineMs = deadlineMs;
+                List<SolveAttempt> solvedMisses =
+                        executor.mapOrdered(uncachedNeighborhoods, n -> solveNeighborhood(n, iterDeadlineMs));
+                for (int i = 0; i < uncachedIndexes.size(); i++) {
+                    int ni = uncachedIndexes.get(i);
+                    SolveAttempt attempt = solvedMisses.get(i);
+                    resolvedAttempts[ni] = attempt;
+                    if (!"budget-reached".equals(attempt.reason())) {
+                        solveCache.put(cacheKeys.get(ni), attempt);
+                    }
+                }
+            }
+            long solveDoneMs = System.currentTimeMillis();
+            long maxSingleNbMs = 0L;
+            int maxSingleNbCols = 0;
+            int noOpSkipped = 0;
+            for (SolveAttempt a : resolvedAttempts) {
+                if (a != null && a.elapsedMs() > maxSingleNbMs) {
+                    maxSingleNbMs = a.elapsedMs();
+                    maxSingleNbCols = a.columns().size();
+                }
             }
 
             for (int ni = 0; ni < neighborhoods.size(); ni++) {
                 Neighborhood neighborhood = neighborhoods.get(ni);
-                SolveAttempt attempt = presolved != null
-                        ? presolved.get(ni) : solveNeighborhood(neighborhood);
+                SolveAttempt attempt = resolvedAttempts[ni];
+                if (attempt == null) {
+                    if (System.currentTimeMillis() >= deadlineMs) {
+                        lastReason = "budget-reached";
+                        break;
+                    }
+                    attempt = solveNeighborhood(neighborhood, deadlineMs);
+                    if (!"budget-reached".equals(attempt.reason())) {
+                        solveCache.put(cacheKeys.get(ni), attempt);
+                    }
+                }
                 lastReason = attempt.reason();
                 int beforeProxy = currentActiveColumns(neighborhood);
                 if (!attempt.feasible()) {
@@ -234,6 +297,13 @@ public class LocalNeighborhoodSequenceOptimizer {
                             false,
                             false,
                             attempt.status()));
+                    continue;
+                }
+
+                // 若子 MIP 返回的列配置多重集与当前邻域完全一致，重排后必然与当前解相同（必命中 visited），
+                // 直接跳过全车队重建、排序与统计，零质量损失。
+                if (!diagnostics.enabled && isNoOpAttempt(neighborhood, attempt)) {
+                    noOpSkipped++;
                     continue;
                 }
 
@@ -346,6 +416,18 @@ public class LocalNeighborhoodSequenceOptimizer {
                         attempt.columns().size(),
                         attempt.status());
             }
+
+            log.debug("LNS iter {}: nbs={}, cacheHits={}, uncached={}, buildMs={}, solveMs={}, evalMs={}, maxNbMs={} (cols={}), noOpSkipped={}",
+                    iteration,
+                    neighborhoods.size(),
+                    neighborhoods.size() - uncachedNeighborhoods.size(),
+                    uncachedNeighborhoods.size(),
+                    buildNbDoneMs - iterStartMs,
+                    solveDoneMs - buildNbDoneMs,
+                    System.currentTimeMillis() - solveDoneMs,
+                    maxSingleNbMs,
+                    maxSingleNbCols,
+                    noOpSkipped);
 
             MoveCandidate accepted = bestImprovement != null ? bestImprovement : bestPlateau;
             boolean escapeStep = false;
@@ -615,10 +697,19 @@ public class LocalNeighborhoodSequenceOptimizer {
     private Set<Integer> expandBySharedWidths(List<RollRecord> rolls, Set<Integer> selectedIndexes) {
         Set<Integer> expanded = new LinkedHashSet<>(selectedIndexes);
         int maxDepth = intProperty("cutting.lns.sharedWidthDepth", DEFAULT_SHARED_WIDTH_DEPTH);
+        int freeCarsCap = maxFreeCars();
+        // 识别“已纯单订单满整车的超大固定块”（车数 >= maxFreeCars，单次邻域不可能整体重排），
+        // 避免扩展时将其撕碎挤占 maxFreeCars 配额并膨胀子 MIP 列规模。
+        Map<String, Integer> rollCountByConfig = new HashMap<>();
+        for (RollRecord roll : rolls) {
+            rollCountByConfig.merge(roll.configSignature(), 1, Integer::sum);
+        }
         for (int depth = 0; depth < maxDepth; depth++) {
             Set<Integer> activeWidths = widthsInSelectedRolls(rolls, expanded);
             List<RollRecord> candidates = rolls.stream()
                     .filter(roll -> !expanded.contains(roll.index()))
+                    .filter(roll -> !(roll.demandCounts().size() == 1
+                            && rollCountByConfig.getOrDefault(roll.configSignature(), 0) >= freeCarsCap))
                     .filter(roll -> overlapScore(roll, activeWidths) > 0)
                     .sorted(Comparator
                             .comparingInt((RollRecord roll) -> overlapScore(roll, activeWidths)).reversed()
@@ -626,15 +717,35 @@ public class LocalNeighborhoodSequenceOptimizer {
                             .thenComparingInt(RollRecord::index))
                     .toList();
 
+            int freeOrdersCap = maxFreeOrders();
+            int freePatternsCap = maxFreePatterns();
+            Set<String> currentOrders = new HashSet<>();
+            Set<String> currentPatterns = new HashSet<>();
+            for (int index : expanded) {
+                RollRecord existing = rolls.get(index);
+                currentOrders.addAll(existing.demandCounts().keySet());
+                currentPatterns.add(existing.pattern().signature());
+            }
+
             boolean added = false;
             for (RollRecord roll : candidates) {
-                Set<Integer> trial = new LinkedHashSet<>(expanded);
-                trial.add(roll.index());
-                NeighborhoodSize size = neighborhoodSize(rolls, trial);
-                if (size.freeOrders() <= maxFreeOrders()
-                        && size.patterns() <= maxFreePatterns()
-                        && size.cars() <= maxFreeCars()) {
+                if (expanded.size() >= freeCarsCap) {
+                    break;
+                }
+                int newPatterns = currentPatterns.contains(roll.pattern().signature()) ? 0 : 1;
+                if (currentPatterns.size() + newPatterns > freePatternsCap) {
+                    continue;
+                }
+                int newOrders = 0;
+                for (String key : roll.demandCounts().keySet()) {
+                    if (!currentOrders.contains(key)) {
+                        newOrders++;
+                    }
+                }
+                if (currentOrders.size() + newOrders <= freeOrdersCap) {
                     expanded.add(roll.index());
+                    currentOrders.addAll(roll.demandCounts().keySet());
+                    currentPatterns.add(roll.pattern().signature());
                     added = true;
                 }
             }
@@ -782,14 +893,59 @@ public class LocalNeighborhoodSequenceOptimizer {
         current.remove(w);
     }
 
-    private SolveAttempt solveNeighborhood(Neighborhood neighborhood) {
+    private String neighborhoodCacheKey(Neighborhood neighborhood) {
+        StringBuilder sb = new StringBuilder(256);
+        sb.append(neighborhood.cars()).append('|').append(neighborhood.waste()).append("#D:");
+        for (Map.Entry<String, Integer> entry : neighborhood.freeDemand().entrySet()) {
+            sb.append(entry.getKey()).append('=').append(entry.getValue()).append(',');
+        }
+        sb.append("#P:");
+        for (PatternKey pattern : neighborhood.patterns()) {
+            sb.append(pattern.signature()).append(';');
+        }
+        sb.append("#R:");
+        Map<String, Integer> requiredCounts = new LinkedHashMap<>();
+        for (RollRecord roll : neighborhood.selectedRolls()) {
+            String colSig = new Column(roll.pattern(), roll.config(), roll.demandCounts(), true).signature();
+            requiredCounts.merge(colSig, 1, Integer::sum);
+        }
+        for (Map.Entry<String, Integer> entry : requiredCounts.entrySet()) {
+            sb.append(entry.getKey()).append('x').append(entry.getValue()).append(';');
+        }
+        return sb.toString();
+    }
+
+    private boolean isNoOpAttempt(Neighborhood neighborhood, SolveAttempt attempt) {
+        Map<String, Integer> beforeCounts = new HashMap<>();
+        for (RollRecord roll : neighborhood.selectedRolls()) {
+            String sig = new Column(roll.pattern(), roll.config(), roll.demandCounts(), true).signature();
+            beforeCounts.merge(sig, 1, Integer::sum);
+        }
+        Map<String, Integer> afterCounts = new HashMap<>();
+        for (Map.Entry<Integer, Integer> entry : attempt.counts().entrySet()) {
+            int count = entry.getValue();
+            if (count > 0) {
+                afterCounts.merge(attempt.columns().get(entry.getKey()).signature(), count, Integer::sum);
+            }
+        }
+        return beforeCounts.equals(afterCounts);
+    }
+
+    private SolveAttempt solveNeighborhood(Neighborhood neighborhood, long deadlineMs) {
         long start = System.currentTimeMillis();
+        if (start >= deadlineMs) {
+            return SolveAttempt.infeasible("budget-reached", List.of(), 0L);
+        }
+        // 纯数学下界短路：当前邻域内所有车已完全同配置（活跃列数 <= 1），min Σy 理论下界为 1，无压缩空间。
+        if (currentActiveColumns(neighborhood) <= 1) {
+            return SolveAttempt.infeasible("already-single-column", List.of(), 0L);
+        }
         List<Column> columns = buildColumns(neighborhood);
         if (columns.isEmpty()) {
             return SolveAttempt.infeasible("no-columns", columns, 0L);
         }
 
-        SolveSolution stage1 = solveColumns(neighborhood, columns, null, false);
+        SolveSolution stage1 = solveColumns(neighborhood, columns, null, false, deadlineMs);
         if (stage1 == null || stage1.counts().isEmpty()) {
             return SolveAttempt.infeasible("stage1-infeasible", columns, System.currentTimeMillis() - start);
         }
@@ -799,8 +955,8 @@ public class LocalNeighborhoodSequenceOptimizer {
         // FEASIBLE-not-OPTIMAL (non-deterministic) solve, so it can be disabled to keep every
         // solve OPTIMAL/deterministic without changing the group floor.
         SolveSolution best = stage1;
-        if (booleanProperty("cutting.lns.secondary", false)) {
-            SolveSolution stage2 = solveColumns(neighborhood, columns, stage1.activeColumns(), true);
+        if (booleanProperty("cutting.lns.secondary", false) && System.currentTimeMillis() < deadlineMs) {
+            SolveSolution stage2 = solveColumns(neighborhood, columns, stage1.activeColumns(), true, deadlineMs);
             if (stage2 != null && !stage2.counts().isEmpty()) {
                 best = stage2;
             }
@@ -934,9 +1090,16 @@ public class LocalNeighborhoodSequenceOptimizer {
     }
 
     private SolveSolution solveColumns(Neighborhood neighborhood, List<Column> columns,
-            Integer activeCap, boolean secondaryObjective) {
+            Integer activeCap, boolean secondaryObjective, long deadlineMs) {
+        MPSolver solver = null;
         try {
-            MPSolver solver = MPSolver.createSolver("SCIP");
+            long remainingMs = deadlineMs == Long.MAX_VALUE
+                    ? Long.MAX_VALUE
+                    : deadlineMs - System.currentTimeMillis();
+            if (remainingMs <= 0L) {
+                return null;
+            }
+            solver = MPSolver.createSolver("SCIP");
             if (solver != null) {
                 // Deterministic node limit: bound the B&B by a fixed NODE count, not wall-clock.
                 // A wall-clock limit returns whatever incumbent the machine reached in N seconds
@@ -1045,7 +1208,11 @@ public class LocalNeighborhoodSequenceOptimizer {
             }
             objective.setMinimization();
 
-            solver.setTimeLimit(longProperty("cutting.lns.timeLimitMs", DEFAULT_TIME_LIMIT_MS));
+            long configuredLimitMs = longProperty("cutting.lns.timeLimitMs", DEFAULT_TIME_LIMIT_MS);
+            long effectiveTimeLimitMs = deadlineMs == Long.MAX_VALUE
+                    ? configuredLimitMs
+                    : Math.min(configuredLimitMs, Math.max(200L, deadlineMs - System.currentTimeMillis()));
+            solver.setTimeLimit(effectiveTimeLimitMs);
             MPSolver.ResultStatus status = solver.solve();
             if (status != MPSolver.ResultStatus.OPTIMAL && status != MPSolver.ResultStatus.FEASIBLE) {
                 return null;
@@ -1070,6 +1237,10 @@ public class LocalNeighborhoodSequenceOptimizer {
         } catch (Exception e) {
             log.warn("LNS neighbourhood solve failed", e);
             return null;
+        } finally {
+            if (solver != null) {
+                solver.delete();
+            }
         }
     }
 

@@ -40,13 +40,6 @@
   color: #9f1239;
 }
 
-/* Reusable 12px white floating surface card */
-.mp-card-surface {
-  background: var(--cp-surface);
-  border-radius: var(--cp-radius-card);
-  box-shadow: var(--cp-shadow-card);
-}
-
 .mp-empty-card {
   background: var(--cp-surface);
   border-radius: var(--cp-radius-card);

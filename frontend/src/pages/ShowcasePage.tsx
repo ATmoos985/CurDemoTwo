@@ -1,22 +1,23 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fmtN } from '@static/app/js/util.js';
+import { fmtN } from '../lib/core/util.js';
 import { CadCanvasView } from '../components/CadCanvasView';
-import { OptimizationSession } from '@static/js/business/optimization/job-client.js';
+import { OptimizationSession } from '../lib/domain/job-client.js';
 import {
   SHOWCASE_CASES,
   showcaseRequest,
   showcaseScene
-} from '@static/app/js/model/showcase.js';
-import { fulfillmentReason } from '@static/js/business/cutting/demand-progress-model.js';
+} from '../lib/model/showcase.js';
+import { fulfillmentReason } from '../lib/domain/demand-progress-model.js';
 import {
   independentBaseline,
   planSummary
-} from '@static/js/linear/linear-model.js';
+} from '../lib/domain/linear-model.js';
 import {
   SegmentedControl,
   CodeBadge,
   SegmentedOption
 } from '../components/ui/MagpiePrimitives';
+import { NumberInput } from '../components/ui/NumberInput';
 import { GarmentWidthPage } from './GarmentWidthPage';
 import {
   SlittingWidthMode,
@@ -112,7 +113,7 @@ function applySlitDraftToRequest(baseReq: any, draft: ShowcaseSlitDraft, profile
       topK: Math.min(50, Math.max(0, Math.floor(Number(draft.topK) || 0))),
       maxIterations: Math.min(5000, Math.max(1, Math.floor(Number(draft.maxIterations) || 300))),
       maxPatterns: Math.min(20000, Math.max(1, Math.floor(Number(draft.maxPatterns) || 800))),
-      maxDistinctWidths: profile === 'QUALITY' ? Math.max(rawDistinct, 5) : rawDistinct,
+      maxDistinctWidths: rawDistinct,
       stageTimeLimitMs: Math.min(
         600000,
         Math.max(1000, Math.floor(Number(draft.stageTimeLimitMs) || 120000))
@@ -241,7 +242,7 @@ const CASE_META: Record<string, CaseMeta> = {
     capLabel: '异形与密排',
     featureTag: '凹角嵌合',
     thumb: 'contour',
-    algorithm: '2D 真实多边形包络与凹角互补嵌套（Polygon NFP）',
+    algorithm: '2D 真实多边形包络与凹角互补嵌套',
     scenario: '服装/箱包 L 形、斜边与非矩形异形样板排料',
     why: '对比外接矩形排料，验证非矩形折线轮廓的凹角嵌合借位能力。',
     verifyRule: 'L 形与斜边异形片在同一个加工区内无重叠紧凑嵌合。',
@@ -316,7 +317,7 @@ const CASE_META: Record<string, CaseMeta> = {
     capLabel: '一维分切搭切',
     featureTag: '列生成合卷',
     thumb: 'slitting',
-    algorithm: '1D 列生成（Column Generation）+ 整数规划合卷搭切',
+    algorithm: '1D 多规格合卷分切优化',
     scenario: '6000m 光学膜母卷多规格条宽同卷长订单合卷分切',
     why: '对比传统「逐规格独立分切」，通过不同条宽组合搭切大幅减少开卷车数与边丝损耗。',
     verifyRule: '订单 100% 齐套（COMPLETE），搭切车数显著低于逐规格独立分切基线。',
@@ -988,13 +989,13 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
     setCancelledHint(false);
     setPatternIndex(0);
     setBusy(true);
-    setStateText('正在提交计算…');
+    setStateText('排队中');
     const t0 = performance.now();
     try {
       const response = await sessionRef.current.solve(nextReq, {
         onProgress: (j: any) => {
           if (mine === tokenRef.current) {
-            setStateText(j.message || j.phase || j.state);
+            setStateText(j.state === 'QUEUED' ? '排队中' : '计算中');
           }
         }
       });
@@ -1008,18 +1009,16 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
       const record = evaluateCaseResult(selected, nextReq, res, elapsedMs);
       setVerifications((prev) => ({ ...prev, [selected.id]: record }));
       setStateText(
-        `${
-          res.fulfillmentStatus === 'COMPLETE'
-            ? '计算完成 · 齐套'
-            : '计算结束 · 未齐套'
-        }${response.job.state !== 'SUCCEEDED' ? ' · 搜索提前结束' : ''}`
+        `${res.fulfillmentStatus === 'COMPLETE' ? '齐套' : '未齐套'}${
+          response.job.state !== 'SUCCEEDED' ? ' · 提前结束' : ''
+        }`
       );
     } catch (e: any) {
       if (mine !== tokenRef.current) return;
       if (e.name === 'AbortError') {
-        setStateText('已停止计算');
+        setStateText('已停止');
       } else {
-        setStateText('计算未完成，可重试');
+        setStateText('未完成');
         setErrorText(e.message);
       }
     } finally {
@@ -1035,10 +1034,10 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
     if (batchRunning) {
       batchAbortRef.current++;
       setBatchRunning(false);
-      setBatchProgressText('已停止快检');
+      setBatchProgressText('已停止');
     }
     setBusy(false);
-    setStateText('已请求停止计算');
+    setStateText('已停止');
     setResult(null);
     setErrorText(null);
     setCancelledHint(true);
@@ -1968,13 +1967,12 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                 <div className="slit-cfg-grid">
                   <label className="slit-cfg-field">
                     <span>母卷总宽 (mm)</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={200}
+                      fallback={200}
                       className="field num"
                       value={slitDraft.motherWidthMm}
-                      onChange={(e) => {
-                        const w = Math.max(200, Number(e.target.value) || 200);
+                      onValueChange={(w) => {
                         const usable = Math.max(100, w - slitDraft.leftTrimMm - slitDraft.rightTrimMm);
                         const nextMax = Math.min(slitDraft.maxWidthMm, usable);
                         patchSlitDraft({
@@ -1990,26 +1988,24 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                   </label>
                   <label className="slit-cfg-field">
                     <span>超产上限 (卷)</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={0}
                       max={10000}
+                      fallback={0}
+                      integer
                       className="field num"
                       value={slitDraft.totalOverCap}
-                      onChange={(e) =>
-                        patchSlitDraft({ totalOverCap: Math.max(0, Number(e.target.value) || 0) })
-                      }
+                      onValueChange={(v) => patchSlitDraft({ totalOverCap: v })}
                     />
                   </label>
                   <label className="slit-cfg-field">
                     <span>左切边 (mm)</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={0}
+                      fallback={0}
                       className="field num"
                       value={slitDraft.leftTrimMm}
-                      onChange={(e) => {
-                        const lt = Math.max(0, Number(e.target.value) || 0);
+                      onValueChange={(lt) => {
                         const usable = Math.max(100, slitDraft.motherWidthMm - lt - slitDraft.rightTrimMm);
                         patchSlitDraft({
                           leftTrimMm: lt,
@@ -2021,13 +2017,12 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                   </label>
                   <label className="slit-cfg-field">
                     <span>右切边 (mm)</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={0}
+                      fallback={0}
                       className="field num"
                       value={slitDraft.rightTrimMm}
-                      onChange={(e) => {
-                        const rt = Math.max(0, Number(e.target.value) || 0);
+                      onValueChange={(rt) => {
                         const usable = Math.max(100, slitDraft.motherWidthMm - slitDraft.leftTrimMm - rt);
                         patchSlitDraft({
                           rightTrimMm: rt,
@@ -2041,173 +2036,127 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                     <>
                       <label className="slit-cfg-field">
                         <span>最小组合宽 (mm)</span>
-                        <input
-                          type="number"
+                        <NumberInput
                           min={100}
+                          fallback={100}
                           className="field num"
                           value={slitDraft.minWidthMm}
-                          onChange={(e) =>
-                            patchSlitDraft({
-                              minWidthMm: Math.max(100, Number(e.target.value) || 100)
-                            })
-                          }
+                          onValueChange={(v) => patchSlitDraft({ minWidthMm: v })}
                         />
                       </label>
                       <label className="slit-cfg-field">
                         <span>最大组合宽 (mm)</span>
-                        <input
-                          type="number"
+                        <NumberInput
                           min={100}
+                          fallback={100}
                           className="field num"
                           value={slitDraft.maxWidthMm}
-                          onChange={(e) =>
-                            patchSlitDraft({
-                              maxWidthMm: Math.max(100, Number(e.target.value) || 100)
-                            })
-                          }
+                          onValueChange={(v) => patchSlitDraft({ maxWidthMm: v })}
                         />
                       </label>
                       <label className="slit-cfg-field">
                         <span>幅宽步长 (mm)</span>
-                        <input
-                          type="number"
+                        <NumberInput
                           min={1}
+                          fallback={10}
                           className="field num"
                           value={slitDraft.widthStepMm}
-                          onChange={(e) =>
-                            patchSlitDraft({
-                              widthStepMm: Math.max(1, Number(e.target.value) || 10)
-                            })
-                          }
+                          onValueChange={(v) => patchSlitDraft({ widthStepMm: v })}
                         />
                       </label>
                     </>
                   ) : (
                     <label className="slit-cfg-field span-2">
                       <span>固定组合宽 (mm)</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={100}
+                        fallback={100}
                         className="field num"
                         value={slitDraft.maxWidthMm}
-                        onChange={(e) => {
-                          const v = Math.max(100, Number(e.target.value) || 100);
-                          patchSlitDraft({ maxWidthMm: v, minWidthMm: v });
-                        }}
+                        onValueChange={(v) => patchSlitDraft({ maxWidthMm: v, minWidthMm: v })}
                       />
                     </label>
                   )}
                   <label className="slit-cfg-field">
                     <span>求解时限 (秒)</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={1}
                       max={180}
+                      fallback={30}
+                      integer
                       className="field num"
                       value={slitDraft.timeLimitSeconds}
-                      onChange={(e) =>
-                        patchSlitDraft({
-                          timeLimitSeconds: Math.min(180, Math.max(1, Number(e.target.value) || 30))
-                        })
-                      }
+                      onValueChange={(v) => patchSlitDraft({ timeLimitSeconds: v })}
                     />
                   </label>
                 </div>
 
                 <details className="slit-adv-fold">
                   <summary className="num">
-                    NewSolver 参数：TopK {slitDraft.topK} · 迭代 {slitDraft.maxIterations} · 花型{' '}
-                    {slitDraft.maxPatterns} · 宽幅≤{slitDraft.maxDistinctWidths}
+                    高级参数 · 宽幅≤{slitDraft.maxDistinctWidths}
                   </summary>
                   <div className="slit-cfg-grid" style={{ marginTop: 6 }}>
                     <label className="slit-cfg-field">
                       <span>TOP K 超产</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={0}
                         max={50}
+                        fallback={0}
+                        integer
                         className="field num"
                         value={slitDraft.topK}
-                        onChange={(e) =>
-                          patchSlitDraft({
-                            topK: Math.min(50, Math.max(0, Number(e.target.value) || 0))
-                          })
-                        }
+                        onValueChange={(v) => patchSlitDraft({ topK: v })}
                       />
                     </label>
                     <label className="slit-cfg-field">
                       <span>列生成迭代</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={1}
                         max={5000}
                         step={10}
+                        fallback={300}
+                        integer
                         className="field num"
                         value={slitDraft.maxIterations}
-                        onChange={(e) =>
-                          patchSlitDraft({
-                            maxIterations: Math.min(
-                              5000,
-                              Math.max(1, Number(e.target.value) || 300)
-                            )
-                          })
-                        }
+                        onValueChange={(v) => patchSlitDraft({ maxIterations: v })}
                       />
                     </label>
                     <label className="slit-cfg-field">
                       <span>最大花型池</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={1}
                         max={20000}
                         step={50}
+                        fallback={800}
+                        integer
                         className="field num"
                         value={slitDraft.maxPatterns}
-                        onChange={(e) =>
-                          patchSlitDraft({
-                            maxPatterns: Math.min(
-                              20000,
-                              Math.max(1, Number(e.target.value) || 800)
-                            )
-                          })
-                        }
+                        onValueChange={(v) => patchSlitDraft({ maxPatterns: v })}
                       />
                     </label>
                     <label className="slit-cfg-field">
                       <span>不同宽幅上限</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={1}
                         max={20}
+                        fallback={4}
+                        integer
                         className="field num"
                         value={slitDraft.maxDistinctWidths}
-                        onChange={(e) =>
-                          patchSlitDraft({
-                            maxDistinctWidths: Math.min(
-                              20,
-                              Math.max(1, Number(e.target.value) || 4)
-                            )
-                          })
-                        }
+                        onValueChange={(v) => patchSlitDraft({ maxDistinctWidths: v })}
                       />
                     </label>
                     <label className="slit-cfg-field span-2">
-                      <span>MIP 单阶段安全时限 (ms)</span>
-                      <input
-                        type="number"
+                      <span>单阶段时限 (ms)</span>
+                      <NumberInput
                         min={1000}
                         max={600000}
                         step={1000}
+                        fallback={120000}
+                        integer
                         className="field num"
                         value={slitDraft.stageTimeLimitMs}
-                        onChange={(e) =>
-                          patchSlitDraft({
-                            stageTimeLimitMs: Math.min(
-                              600000,
-                              Math.max(1000, Number(e.target.value) || 120000)
-                            )
-                          })
-                        }
+                        onValueChange={(v) => patchSlitDraft({ stageTimeLimitMs: v })}
                       />
                     </label>
                     <label className="slit-both-toggle span-2">
@@ -2216,7 +2165,7 @@ export const ShowcasePage: React.FC<{ params?: string[]; groupQuery?: string }> 
                         checked={slitDraft.lnsEnabled}
                         onChange={(e) => patchSlitDraft({ lnsEnabled: e.target.checked })}
                       />
-                      <span>精细优化启用 LNS 大邻域搜索</span>
+                      <span>精细优化启用深度邻域搜索</span>
                     </label>
                   </div>
                 </details>

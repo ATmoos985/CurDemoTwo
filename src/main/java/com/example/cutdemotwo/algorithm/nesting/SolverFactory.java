@@ -1,6 +1,7 @@
 package com.example.cutdemotwo.algorithm.nesting;
 
 import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
+import com.example.cutdemotwo.algorithm.nesting.constraints.CurtainConstraintPack;
 
 import com.example.cutdemotwo.contracts.nesting.EngineCapabilities;
 import com.example.cutdemotwo.algorithm.api.NestingSolver;
@@ -22,6 +23,7 @@ import java.util.function.Function;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Set;
 import static com.example.cutdemotwo.algorithm.geometry.NestingValidation.*;
 
 /**
@@ -35,7 +37,12 @@ public class SolverFactory implements NestingSolver {
     /** Native engine id → registered stand-in that may run, with a stated reason, while the native one is unavailable. */
     private static final Map<String, String> FALLBACKS = Map.of(
             "packingsolver", "javaguillotine",
-            "packingsolver-irregular", "javairregular"
+            "packingsolver-irregular", "deepnest"
+    );
+    /** 原生 C++ 引擎尚未支持窗帘声明式约束，检测到窗帘规则时需跳过并路由至自主引擎。 */
+    private static final Set<String> NATIVE_ENGINES_WITHOUT_CURTAIN_SUPPORT = Set.of(
+            "packingsolver",
+            "packingsolver-irregular"
     );
 
     private final Map<String, ICutSolverEngine> engineMap = new ConcurrentHashMap<>();
@@ -80,23 +87,65 @@ public class SolverFactory implements NestingSolver {
 
     private Selection select(NestingProblem problem, boolean allowFallback) {
         validate(problem);
-        String requested = problem.engine();
-        if (requested == null || requested.isBlank() || "auto".equals(requested))
-            requested = switch (problem.process().mode()) {
-                case "CROSSCUT" -> "crosscut";
-                case "CONTOUR" -> "packingsolver-irregular";
-                default -> "packingsolver";
-            };
-        ICutSolverEngine engine = engineMap.get(requested);
-        supported(engine != null, "系统未找到排料引擎: " + requested);
-        checkSupport(problem, engine.capabilities());
-        String fallback = allowFallback ? fallbackFor(requested) : null, reason = null;
-        if (fallback != null) {
-            reason = requested + " 未就绪（原生可执行文件缺失或不可执行），本次由 " + fallback + " 求解";
-            engine = engineMap.get(fallback);
-            checkSupport(problem, engine.capabilities());
+        var curtainConstraints = CurtainConstraintPack.forProblem(problem);
+        curtainConstraints.checkProblem(problem);
+        boolean hasCurtainConstraints = !curtainConstraints.isNoop();
+        String mode = problem.process().mode();
+        boolean hasKerf = problem.process().kerf() > 0;
+        boolean hasRectPieceGap = !"CONTOUR".equals(mode) && problem.process().pieceGap() > 0;
+        boolean hasMaxStages = problem.process().maxStages() != null;
+        boolean hasHoles = problem.material().shape().hasHoles()
+                || problem.parts().stream().anyMatch(part -> part.shape().hasHoles());
+
+        if ("CROSSCUT".equals(mode)) {
+            supported(!hasKerf, "仅横切模式暂不支持非零刀缝 kerf");
         }
-        if ("CROSSCUT".equals(problem.process().mode())) {
+        boolean requiresAutonomousRect = "GUILLOTINE".equals(mode)
+                && (hasCurtainConstraints || hasKerf || hasRectPieceGap || hasMaxStages);
+        boolean requiresAutonomousContour = "CONTOUR".equals(mode)
+                && (hasCurtainConstraints || hasKerf || hasHoles);
+
+        String requested = problem.engine();
+        boolean autoRequested = requested == null || requested.isBlank() || "auto".equals(requested);
+        if (autoRequested)
+            requested = switch (mode) {
+                case "CROSSCUT" -> "crosscut";
+                case "CONTOUR" -> "deepnest";
+                default -> requiresAutonomousRect ? "javaguillotine" : "packingsolver";
+            };
+        String requestedLower = requested.toLowerCase();
+        ICutSolverEngine engine;
+        String reason = null;
+        boolean nativeBlockedByConstraints = (requiresAutonomousRect && "packingsolver".equals(requestedLower))
+                || (requiresAutonomousContour && "packingsolver-irregular".equals(requestedLower));
+        if (nativeBlockedByConstraints) {
+            String autonomousId = FALLBACKS.get(requestedLower);
+            ICutSolverEngine autonomous = autonomousId == null ? null : engineMap.get(autonomousId);
+            String constraintLabel = hasCurtainConstraints ? "窗帘工艺约束（布边/对花/倒顺毛/疵点分级）"
+                    : (hasHoles ? "带内孔洞套料约束" : "原生刀缝/裁片间距/通切阶数约束");
+            supported(allowFallback && autonomous != null && autonomous.isAvailable(),
+                    requested + " 不支持" + constraintLabel + "，请使用 " + autonomousId + " 或开启自动回退");
+            reason = requested + " 不支持" + constraintLabel + "，已自动跳过原生引擎并路由至 " + autonomous.getEngineType() + " 求解";
+            log.info("高级工艺约束自动路由：{}", reason);
+            engine = autonomous;
+            checkSupport(problem, engine.capabilities());
+        } else {
+            if (requiresAutonomousRect && autoRequested && "javaguillotine".equals(requestedLower)) {
+                String constraintLabel = hasCurtainConstraints ? "窗帘工艺约束" : "原生刀缝/裁片间距/通切阶数约束";
+                reason = "检测到" + constraintLabel + "，已自动跳过不支持该约束的原生引擎 packingsolver，路由至 javaguillotine 求解";
+                log.info("高级工艺约束自动路由：{}", reason);
+            }
+            engine = engineMap.get(requestedLower);
+            supported(engine != null, "系统未找到排料引擎: " + requested);
+            checkSupport(problem, engine.capabilities());
+            String fallback = allowFallback ? fallbackFor(requested) : null;
+            if (fallback != null) {
+                reason = requested + " 未就绪（原生可执行文件缺失或不可执行），本次由 " + fallback + " 求解";
+                engine = engineMap.get(fallback);
+                checkSupport(problem, engine.capabilities());
+            }
+        }
+        if ("CROSSCUT".equals(mode)) {
             supported("horizontal".equals(problem.process().firstStageOrientation()), "横切策略仅支持水平首刀");
             for (var part : problem.parts()) require(Math.abs(part.shape().width() - problem.width()) < .001,
                     "横切需求必须等于材料幅宽");
@@ -118,7 +167,7 @@ public class SolverFactory implements NestingSolver {
     @Override
     public Optional<Function<NestingProblem, NestingResult>> stripSearch(NestingProblem problem, boolean allowFallback) {
         var engine = select(problem, allowFallback).engine();
-        if (!(engine instanceof IrregularPackingSolverService || engine instanceof DeepnestSolverEngine) || !engine.isAvailable())
+        if (!(engine instanceof StripSearchCapable) || !engine.isAvailable())
             return Optional.empty();
         return Optional.of(candidate -> solve(candidate, false, true));
     }
@@ -185,9 +234,9 @@ public class SolverFactory implements NestingSolver {
         var counts = new HashMap<>(baseCounts);
         for (var extra : extras) counts.merge(extra.demandId(), 1, Integer::sum);
         var parts = problem.parts().stream().map(p -> new NestingProblem.Part(p.id(), p.name(), p.shape(),
-                counts.get(p.id()), p.allowRotation(), p.allowHalfTurn())).toList();
+                counts.get(p.id()), p.allowRotation(), p.allowHalfTurn(), p.rule())).toList();
         var material = new NestingProblem.Material(problem.material().id(), NestingProblem.Shape.rectangle(problem.width(), length),
-                problem.material().exclusions(), problem.material().continuesAfterRegion());
+                problem.material().exclusions(), problem.material().continuesAfterRegion(), problem.material().fabricRule());
         var filled = new NestingProblem(problem.schemaVersion(), problem.unit(), material, parts,
                 problem.process(), problem.engine(), problem.timeLimitSeconds());
         var combined = new ArrayList<>(fixed);
@@ -214,12 +263,32 @@ public class SolverFactory implements NestingSolver {
             var capabilities = engine.capabilities();
             if (!engine.isAvailable())
                 return NestingResult.failure("UNAVAILABLE", "求解引擎尚未就绪", selected, requested, fallbackReason, elapsed(start));
-            EngineResult result = stripSearch && engine instanceof IrregularPackingSolverService irregular
-                    ? irregular.solveStripCandidate(problem)
-                    : stripSearch && engine instanceof DeepnestSolverEngine deepnest
-                    ? deepnest.solveStripCandidate(problem)
+            EngineResult result = stripSearch && engine instanceof StripSearchCapable stripCapable
+                    ? stripCapable.solveStripCandidate(problem)
                     : engine.solve(problem);
             com.example.cutdemotwo.algorithm.ComputationCancellation.check();
+            if (!result.isSuccess() && !"NO_SOLUTION_FOUND".equals(result.getFailureStatus())
+                    && allowFallback && fallbackEnabled && fallbackReason == null) {
+                String standInId = FALLBACKS.get(engine.getEngineType().toLowerCase());
+                ICutSolverEngine standIn = standInId == null ? null : engineMap.get(standInId);
+                if (standIn != null && standIn.isAvailable()) {
+                    try {
+                        checkSupport(problem, standIn.capabilities());
+                        String cause = result.getMessage() != null && !result.getMessage().isBlank()
+                                ? result.getMessage() : result.getFailureStatus();
+                        log.warn("Runtime fallback from {} to {} after native failure: {}", selected, standInId, cause);
+                        fallbackReason = requested + " 运行失败（" + cause + "），已自动降级由 " + standInId + " 求解";
+                        engine = standIn;
+                        selected = standIn.getEngineType();
+                        capabilities = standIn.capabilities();
+                        result = engine.solve(problem);
+                        com.example.cutdemotwo.algorithm.ComputationCancellation.check();
+                    } catch (Rejected unsupportedByStandIn) {
+                        log.warn("Stand-in engine {} cannot handle problem after {} failed: {}",
+                                standInId, selected, unsupportedByStandIn.getMessage());
+                    }
+                }
+            }
             if (!result.isSuccess() && !"NO_SOLUTION_FOUND".equals(result.getFailureStatus()))
                 return NestingResult.failure(result.getFailureStatus(), result.getMessage(), selected, requested, fallbackReason, elapsed(start));
             String error = "CONTOUR".equals(problem.process().mode()) ? PolygonResultValidator.validate(problem, result)
@@ -278,6 +347,8 @@ public class SolverFactory implements NestingSolver {
     private static void validatePrecision(NestingProblem p, double resolution) {
         shapePrecision(p.material().shape(), resolution);
         precision(p.process().trimStart(), resolution);
+        precision(p.process().kerf(), resolution);
+        precision(p.process().pieceGap(), resolution);
         for (var part : p.parts()) shapePrecision(part.shape(), resolution);
         for (var d : p.material().exclusions()) {
             precision(d.x(), resolution); precision(d.y(), resolution); precision(d.clearance(), resolution);
@@ -287,6 +358,9 @@ public class SolverFactory implements NestingSolver {
     private static void shapePrecision(NestingProblem.Shape shape, double resolution) {
         precision(shape.width(), resolution); precision(shape.height(), resolution);
         for (var point : shape.vertices()) { precision(point.x(), resolution); precision(point.y(), resolution); }
+        for (var hole : shape.holes()) {
+            for (var point : hole) { precision(point.x(), resolution); precision(point.y(), resolution); }
+        }
     }
 
     private static NestingResult toResult(NestingProblem problem, EngineResult result, String engine, String version, long elapsed,

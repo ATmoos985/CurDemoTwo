@@ -2,6 +2,7 @@ package changyang.cut.apsmodule.generator.NewSolver.report;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import changyang.cut.apsmodule.generator.NewSolver.config.SolverRuntimeProperties;
 import changyang.cut.apsmodule.generator.NewSolver.model.PatternCandidate;
 import changyang.cut.apsmodule.generator.NewSolver.model.SolverResult;
 
@@ -25,6 +26,9 @@ import java.util.stream.Collectors;
  */
 public class SolveReportWriter implements Closeable {
 
+    public static final String ENABLED_PROPERTY = "cutting.report.enabled";
+    public static final String LOG_DIR_PROPERTY = "cutting.report.dir";
+
     private static final Logger log = LoggerFactory.getLogger(SolveReportWriter.class);
     private static final String LOG_DIR = "logs";
     private static final DateTimeFormatter FILE_TS = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS");
@@ -47,18 +51,27 @@ public class SolveReportWriter implements Closeable {
         this.requestStartMs = System.currentTimeMillis();
     }
 
+    public static SolveReportWriter disabled() {
+        return new SolveReportWriter(new PrintWriter(OutputStream.nullOutputStream()), "disabled");
+    }
+
     public static SolveReportWriter create() {
+        if (!SolverRuntimeProperties.getBoolean(ENABLED_PROPERTY, false)) {
+            return disabled();
+        }
         try {
-            Files.createDirectories(Paths.get(LOG_DIR));
+            String configuredDir = SolverRuntimeProperties.get(LOG_DIR_PROPERTY, LOG_DIR);
+            Path dir = Paths.get(configuredDir == null || configuredDir.isBlank() ? LOG_DIR : configuredDir.trim());
+            Files.createDirectories(dir);
             String timestamp = LocalDateTime.now().format(FILE_TS);
-            Path path = Paths.get(LOG_DIR, "solve-report-" + timestamp + ".txt");
+            Path path = dir.resolve("solve-report-" + timestamp + ".txt");
             PrintWriter writer = new PrintWriter(Files.newBufferedWriter(path, StandardCharsets.UTF_8));
             SolveReportWriter report = new SolveReportWriter(writer, path.toString());
             report.writeHeader();
             return report;
         } catch (Exception e) {
             log.warn("Cannot create solve report file, reporting is disabled: {}", e.getMessage());
-            return new SolveReportWriter(new PrintWriter(OutputStream.nullOutputStream()), "disabled");
+            return disabled();
         }
     }
 
