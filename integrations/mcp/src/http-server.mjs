@@ -5,7 +5,7 @@ import { apiClient, createAuditLogger } from './api.mjs';
 import { createServer as createMcpServer } from './server.mjs';
 
 const MAX_BODY_BYTES = 524_288; // 512 KiB
-const REQUEST_TIMEOUT_MS = 25_000;
+const REQUEST_TIMEOUT_MS = 65_000;
 
 function constantTimeTokenMatch(expected, supplied) {
   if (!expected || !supplied) return false;

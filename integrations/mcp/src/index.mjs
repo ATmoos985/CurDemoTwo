@@ -14,7 +14,8 @@ try {
         endpointUrl: running.endpointUrl,
         compute: config.compute,
         businessRead: config.businessRead,
-        allowDraftScheme: config.allowDraftScheme
+        allowDraftScheme: config.allowDraftScheme,
+        allowDemandWrite: config.allowDemandWrite
       }) + '\n'
     );
     process.once('SIGTERM', () => running.close());

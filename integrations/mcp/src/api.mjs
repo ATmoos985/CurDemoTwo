@@ -2,12 +2,33 @@ import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+const EXTRA_CONTENT_SYMBOL = Symbol('mcpExtraContent');
+
 export class ToolFailure extends Error {
-  constructor(code, message, retryable = false) {
+  constructor(code, message, retryable = false, status = null) {
     super(message);
     this.code = code;
     this.retryable = retryable;
+    this.status = status;
   }
+}
+
+/**
+ * 为工具结果附加额外 MCP content 块（例如 image/png），同时保留 structuredContent.data 的纯结构化语义。
+ */
+export function withExtraContent(data, extraContent = []) {
+  return {
+    [EXTRA_CONTENT_SYMBOL]: true,
+    data,
+    extraContent: Array.isArray(extraContent) ? extraContent : []
+  };
+}
+
+export function unwrapToolOutput(raw) {
+  if (raw && typeof raw === 'object' && raw[EXTRA_CONTENT_SYMBOL] === true) {
+    return { data: raw.data, extraContent: raw.extraContent };
+  }
+  return { data: raw, extraContent: [] };
 }
 
 export function configuration(env = process.env) {
@@ -29,7 +50,8 @@ export function configuration(env = process.env) {
   for (const flag of [
     'CUTTING_MCP_COMPUTE',
     'CUTTING_MCP_BUSINESS_READ',
-    'CUTTING_MCP_ALLOW_DRAFT_SCHEME'
+    'CUTTING_MCP_ALLOW_DRAFT_SCHEME',
+    'CUTTING_MCP_ALLOW_DEMAND_WRITE'
   ]) {
     if (env[flag] && !['true', 'false'].includes(env[flag])) {
       throw new Error(`${flag} must be true or false`);
@@ -60,6 +82,7 @@ export function configuration(env = process.env) {
     compute: env.CUTTING_MCP_COMPUTE === 'true',
     businessRead: env.CUTTING_MCP_BUSINESS_READ === 'true',
     allowDraftScheme: env.CUTTING_MCP_ALLOW_DRAFT_SCHEME === 'true',
+    allowDemandWrite: env.CUTTING_MCP_ALLOW_DEMAND_WRITE === 'true',
     apiToken,
     transport,
     httpHost,
@@ -74,22 +97,32 @@ export function apiClient(
   { fetchImpl = fetch, timeoutMs = 20000, maxResponseBytes = 4194304, authToken } = {}
 ) {
   const bearerToken = (authToken ?? config.apiToken ?? '').trim();
-  return async (path, body, key) => {
+  return async (path, body, key, requestOptions = {}) => {
     const encoded = body === undefined ? undefined : JSON.stringify(body);
     if (encoded && Buffer.byteLength(encoded) > 262144) {
       throw new ToolFailure('PAYLOAD_TOO_LARGE', 'Input exceeds the API limit of 262144 bytes.');
     }
+    const method = requestOptions?.method
+      ? String(requestOptions.method).trim().toUpperCase()
+      : encoded === undefined
+      ? 'GET'
+      : 'POST';
+    const effectiveTimeoutMs =
+      Number.isFinite(requestOptions?.timeoutMs) && requestOptions.timeoutMs > 0
+        ? requestOptions.timeoutMs
+        : timeoutMs;
     try {
       const headers = {
         Accept: 'application/json',
         ...(encoded === undefined ? {} : { 'Content-Type': 'application/json' }),
         ...(key ? { 'Idempotency-Key': key } : {}),
-        ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {})
+        ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
+        ...(requestOptions?.headers && typeof requestOptions.headers === 'object' ? requestOptions.headers : {})
       };
       const response = await fetchImpl(config.origin + path, {
-        method: encoded === undefined ? 'GET' : 'POST',
+        method,
         redirect: 'error',
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: AbortSignal.timeout(effectiveTimeoutMs),
         headers,
         body: encoded
       });
@@ -116,7 +149,7 @@ export function apiClient(
       try {
         data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       } catch {
-        throw new ToolFailure('INVALID_RESPONSE', 'The service did not return JSON.');
+        throw new ToolFailure('INVALID_RESPONSE', 'The service did not return JSON.', false, response.status);
       }
       if (!response.ok) {
         throw new ToolFailure(
@@ -124,7 +157,8 @@ export function apiClient(
           typeof data.message === 'string'
             ? data.message.slice(0, 1000)
             : 'Service rejected the request.',
-          data.retryable === true
+          data.retryable === true,
+          response.status
         );
       }
       return data;
@@ -196,16 +230,20 @@ export function audited(
       .update(JSON.stringify(args ?? {}))
       .digest('hex');
     try {
-      const data = await handler(args);
+      const raw = await handler(args);
+      const { data, extraContent } = unwrapToolOutput(raw);
       audit({
         traceId,
         tool,
         inputHash,
         status: 'SUCCEEDED',
         elapsedMs: Date.now() - started,
-        resultId: data?.id || data?.draftId || null
+        resultId: data?.id || data?.draftId || data?.resultId || data?.job?.id || null
       });
-      return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: { data } };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(data) }, ...extraContent],
+        structuredContent: { data }
+      };
     } catch (error) {
       const failure =
         error instanceof ToolFailure
