@@ -3,6 +3,8 @@ export interface ParsedRoute {
   params: string[];
   groupQuery: string;
   taskIdQuery: string;
+  resultIdQuery: string;
+  draftIdQuery: string;
   appendQuery: string;
   rawKey: string;
   redirectTo?: string;
@@ -43,6 +45,8 @@ export const WORKBENCH_DEFAULT_ROUTE: ParsedRoute = {
   params: [],
   groupQuery: '',
   taskIdQuery: '',
+  resultIdQuery: '',
+  draftIdQuery: '',
   appendQuery: '',
   rawKey: 'workbench'
 };
@@ -111,6 +115,8 @@ export function parseHashRoute(hash: string): ParsedRoute {
   const intent = sp.get('intent');
   const groupQuery = sp.get('group') || '';
   const taskIdQuery = sp.get('taskId') || '';
+  const resultIdQuery = sp.get('resultId') || '';
+  const draftIdQuery = sp.get('draftId') || '';
   const appendQuery = sp.get('append') || '';
   const rollQuery = sp.get('roll') || '';
   if (intent && params.length < 3) {
@@ -126,6 +132,8 @@ export function parseHashRoute(hash: string): ParsedRoute {
     params,
     groupQuery,
     taskIdQuery,
+    resultIdQuery,
+    draftIdQuery,
     appendQuery,
     rawKey: clean || 'workbench',
     ...(redirectTo ? { redirectTo } : {})

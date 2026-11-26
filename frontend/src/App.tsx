@@ -607,7 +607,13 @@ export const App: React.FC = () => {
       case 'clusters':
         return <ClusterCenterPage />;
       case 'workbench':
-        return <CuttingWorkbenchPage taskId={effectiveRoute.params[0] || undefined} />;
+        return (
+          <CuttingWorkbenchPage
+            taskId={effectiveRoute.params[0] || effectiveRoute.taskIdQuery || undefined}
+            resultId={effectiveRoute.resultIdQuery || undefined}
+            draftId={effectiveRoute.draftIdQuery || undefined}
+          />
+        );
       case 'slitting':
         return <CuttingWorkbenchPage forceDimension="1D" />;
       case 'results':

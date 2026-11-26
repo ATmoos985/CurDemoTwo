@@ -57,6 +57,13 @@ import { WorkbenchDemandSidebar } from './workbench/WorkbenchDemandSidebar';
 import { WorkbenchCenterPanel } from './workbench/WorkbenchCenterPanel';
 import { WorkbenchRightPanel } from './workbench/WorkbenchRightPanel';
 import { DemandOverviewModal } from './workbench/DemandOverviewModal';
+import { ExternalPlanBanner } from './workbench/ExternalPlanBanner';
+import {
+  mapResultContextToWorkbenchPlan,
+  type ExternalPlanBannerMeta,
+  type WorkbenchResultContextDto,
+  type WorkbenchSchemeDraftDto
+} from './workbench/workbenchDeeplinkUtils';
 
 export { SlittingStripBar } from './workbench/SlittingStripBar';
 
@@ -234,8 +241,10 @@ interface PendingConfirmAction {
 
 export const CuttingWorkbenchPage: React.FC<{
   taskId?: string;
+  resultId?: string;
+  draftId?: string;
   forceDimension?: '2D' | '1D';
-}> = ({ taskId, forceDimension }) => {
+}> = ({ taskId, resultId, draftId, forceDimension }) => {
   const {
     clusters,
     clusterSelections,
@@ -276,6 +285,7 @@ export const CuttingWorkbenchPage: React.FC<{
     schemes2D,
     activeSchemeId2D,
     setCanvasSpec,
+    setActiveDemands2D,
     restoreWorkbenchDraft,
     updateDemand2D,
     removeDemand2D,
@@ -373,6 +383,13 @@ export const CuttingWorkbenchPage: React.FC<{
   // 破坏性切换二次确认弹窗（切料 / 重载需求族 / 重载模板）
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirmAction | null>(null);
 
+  // URL 深链一键接管外部试排方案 / 草案预检状态（按三元组防重复拉取）
+  const [externalPlanLoading, setExternalPlanLoading] = useState<boolean>(false);
+  const [externalPlanError, setExternalPlanError] = useState<string | null>(null);
+  const [externalPlanBanner, setExternalPlanBanner] = useState<ExternalPlanBannerMeta | null>(null);
+  const [externalPlanDismissed, setExternalPlanDismissed] = useState<boolean>(false);
+  const deeplinkLoadedKeyRef = useRef<string>('');
+
   useEffect(() => {
     setShowPath(settings.showPath);
     setShowDimensions(settings.showDimensions);
@@ -437,18 +454,194 @@ export const CuttingWorkbenchPage: React.FC<{
     reloadReferenceData();
   }, []);
 
-  // Load Demand Family if navigated via #/workbench/:taskId
+  // URL 深链统一载入：支持 #/workbench/:taskId、#/workbench?taskId=...&resultId=... 与 #/workbench?taskId=...&draftId=...
   useEffect(() => {
-    if (!taskId) return;
-    requestJSON('/api/v2/demand-pool/' + encodeURIComponent(taskId))
-      .then((fam: DemandFamilySummary) => {
-        if (fam?.id) {
-          loadDemandFamilyIntoWorkbench(fam);
-          setDemandSourceTab('POOL');
+    const cleanTaskId = (taskId || '').trim();
+    const cleanResultId = (resultId || '').trim();
+    const cleanDraftId = (draftId || '').trim();
+    const deeplinkKey = `${cleanTaskId}|${cleanResultId}|${cleanDraftId}`;
+
+    if (!cleanTaskId && !cleanResultId && !cleanDraftId) {
+      deeplinkLoadedKeyRef.current = '';
+      return;
+    }
+    if (deeplinkLoadedKeyRef.current === deeplinkKey) {
+      return;
+    }
+    deeplinkLoadedKeyRef.current = deeplinkKey;
+
+    const hasExternalPlan = Boolean(cleanResultId || cleanDraftId);
+    let cancelled = false;
+    let finished = false;
+
+    const hydrateFromDeeplink = async () => {
+      let draft: WorkbenchSchemeDraftDto | null = null;
+      let loadedFamily: DemandFamilySummary | null = null;
+
+      if (hasExternalPlan) {
+        setExternalPlanLoading(true);
+        setExternalPlanError(null);
+        setExternalPlanBanner(null);
+        setExternalPlanDismissed(false);
+      }
+
+      try {
+        // a) 若携带 draftId，先读取持久化草案拿到 target.taskId / target.resultId 与预检告警
+        if (cleanDraftId) {
+          draft = await requestJSON(
+            '/api/v2/workbench/drafts/' + encodeURIComponent(cleanDraftId)
+          );
+          if (cancelled) return;
         }
-      })
-      .catch((e) => toast('加载需求族失败：' + e.message, true));
-  }, [taskId]);
+
+        const effectiveTaskId = cleanTaskId || String(draft?.target?.taskId || '').trim();
+        const effectiveResultId = cleanResultId || String(draft?.target?.resultId || '').trim();
+
+        // b) 若有 taskId，先通过既有需求池逻辑加载该任务并切换至对应维度（2D/1D）
+        if (effectiveTaskId) {
+          try {
+            const fam: DemandFamilySummary = await requestJSON(
+              '/api/v2/demand-pool/' + encodeURIComponent(effectiveTaskId)
+            );
+            if (cancelled) return;
+            if (fam?.id) {
+              loadedFamily = fam;
+              loadDemandFamilyIntoWorkbench(fam);
+              setDemandSourceTab('POOL');
+            }
+          } catch (famErr: any) {
+            if (cancelled) return;
+            if (!effectiveResultId && !cleanDraftId) {
+              toast('加载需求族失败：' + (famErr?.message || '请求异常'), true);
+              return;
+            }
+          }
+        }
+
+        // 纯 taskId 深链不触发外部试排横幅与结果拉取
+        if (!hasExternalPlan) {
+          return;
+        }
+
+        if (!effectiveResultId) {
+          const fallbackPlan = mapResultContextToWorkbenchPlan(null, draft, loadedFamily);
+          const msg = '草案缺少关联的试排结果编号（resultId），无法渲染排料画布。';
+          setExternalPlanBanner(fallbackPlan.banner);
+          setExternalPlanError(msg);
+          toast(msg, true);
+          return;
+        }
+
+        // c) 拉取外部试排结果完整上下文并映射为工作台可交互候选方案
+        const context: WorkbenchResultContextDto = await requestJSON(
+          '/api/v2/workbench/results/' + encodeURIComponent(effectiveResultId) + '/context'
+        );
+        if (cancelled) return;
+
+        // 若 URL 与草案未给 taskId 但结果来源关联了任务，补充载入左侧需求池任务
+        const inferredTaskId =
+          effectiveTaskId ||
+          String(
+            context?.source?.taskId ||
+              context?.taskSummary?.id ||
+              context?.taskSummary?.taskId ||
+              ''
+          ).trim();
+        if (!loadedFamily && inferredTaskId) {
+          try {
+            const fam: DemandFamilySummary = await requestJSON(
+              '/api/v2/demand-pool/' + encodeURIComponent(inferredTaskId)
+            );
+            if (cancelled) return;
+            if (fam?.id) {
+              loadedFamily = fam;
+              loadDemandFamilyIntoWorkbench(fam);
+              setDemandSourceTab('POOL');
+            }
+          } catch {
+            // 需求族拉取失败时仍继续渲染试排画布，避免阻断人工核对
+          }
+        }
+
+        const mapped = mapResultContextToWorkbenchPlan(context, draft, loadedFamily);
+        if (cancelled) return;
+
+        if (mapped.error) {
+          setExternalPlanBanner(mapped.banner);
+          setExternalPlanError(mapped.error);
+          toast(mapped.error, true);
+          return;
+        }
+
+        if (mapped.dimension === '2D' && mapped.scheme2D) {
+          setActiveDimension('2D');
+          if (mapped.canvasPatch2D) {
+            setCanvasSpec(mapped.canvasPatch2D);
+          }
+          if (!loadedFamily && mapped.demands2D.length > 0) {
+            setActiveDemands2D(mapped.demands2D);
+          }
+          const prevSchemes = useStudioStore.getState().schemes2D;
+          const nextSchemes = [
+            mapped.scheme2D,
+            ...prevSchemes.filter((s) => s.id !== mapped.scheme2D!.id)
+          ];
+          setSchemes2D(nextSchemes, mapped.scheme2D.id);
+          draftHydratedKeyRef.current = mapped.taskId || inferredTaskId || 'scratch';
+          setRecoverableDraft(null);
+          allowAutoSaveRef.current = true;
+          setExternalPlanBanner(mapped.banner);
+          setExternalPlanError(null);
+        } else if (mapped.dimension === '1D' && mapped.scheme1D) {
+          setActiveDimension('1D');
+          if (mapped.slitPatch1D) {
+            setSlitSpec({
+              ...mapped.slitPatch1D,
+              ...(!loadedFamily && mapped.slitOrders1D.length > 0
+                ? { slitOrders: mapped.slitOrders1D }
+                : {})
+            });
+          }
+          const prevSlit = useStudioStore.getState().slitSchemes;
+          const nextSlit = [
+            mapped.scheme1D,
+            ...prevSlit.filter((s) => s.id !== mapped.scheme1D!.id)
+          ];
+          setSlitSchemes(nextSlit);
+          setActiveSlitScheme(mapped.scheme1D.id);
+          draftHydratedKeyRef.current = mapped.taskId || inferredTaskId || 'scratch';
+          setRecoverableDraft(null);
+          allowAutoSaveRef.current = true;
+          setExternalPlanBanner(mapped.banner);
+          setExternalPlanError(null);
+        }
+
+        reloadReferenceData(mapped.taskId || inferredTaskId || null).catch(() => {});
+      } catch (err: any) {
+        if (cancelled) return;
+        const msg = '加载外部试排方案失败：' + (err?.message || '请确认链接有效或服务已就绪');
+        if (draft) {
+          setExternalPlanBanner(mapResultContextToWorkbenchPlan(null, draft, loadedFamily).banner);
+        }
+        setExternalPlanError(msg);
+        toast(msg, true);
+      } finally {
+        finished = true;
+        if (!cancelled && hasExternalPlan) {
+          setExternalPlanLoading(false);
+        }
+      }
+    };
+
+    hydrateFromDeeplink();
+
+    return () => {
+      cancelled = true;
+      if (!finished && deeplinkLoadedKeyRef.current === deeplinkKey) {
+        deeplinkLoadedKeyRef.current = '';
+      }
+    };
+  }, [taskId, resultId, draftId]);
 
   useEffect(() => {
     const curTaskId = activeDimension === '2D' ? loadedTaskId : slitLoadedTaskId;
@@ -1344,6 +1537,30 @@ export const CuttingWorkbenchPage: React.FC<{
         setSlitSpec={setSlitSpec}
         onRequestChangeMaterial1D={handleRequestChangeMaterial1D}
       />
+
+      {/* 外部深链试排方案与草案预检顶部提示条 */}
+      {!externalPlanDismissed && (externalPlanLoading || externalPlanError || externalPlanBanner) && (
+        <ExternalPlanBanner
+          loading={externalPlanLoading}
+          error={externalPlanError}
+          banner={externalPlanBanner}
+          confirmedSchemeId={
+            externalPlanBanner
+              ? is2D
+                ? activeScheme2D?.id === `EXT-2D-${externalPlanBanner.resultId}`
+                  ? activeScheme2D.confirmedSchemeId || null
+                  : null
+                : activeScheme1D?.id === `EXT-1D-${externalPlanBanner.resultId}`
+                ? activeScheme1D.confirmedSchemeId || null
+                : null
+              : null
+          }
+          onDismiss={() => {
+            setExternalPlanDismissed(true);
+            setExternalPlanError(null);
+          }}
+        />
+      )}
 
       {/* 同缸/色号防色差前置预警与拦截横幅 */}
       {batchGuardWarning && (

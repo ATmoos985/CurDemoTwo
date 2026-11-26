@@ -99,4 +99,36 @@ describe('现代路由解析与已下线旧兼容路由自动重定向', () => {
     expect(parseHashRoute('#/inventory?roll=ROLL-1').redirectTo).toBeUndefined();
     expect(parseHashRoute('#/unknown-route')).toMatchObject({ page: 'workbench' });
   });
+
+  it('正确解析工作台深链中的 taskId / resultId / draftId 查询参数并保持路径参数兼容', () => {
+    expect(
+      parseHashRoute('#/workbench?taskId=TASK-100&resultId=JOB-200&draftId=DRAFT-300')
+    ).toMatchObject({
+      page: 'workbench',
+      params: [],
+      taskIdQuery: 'TASK-100',
+      resultIdQuery: 'JOB-200',
+      draftIdQuery: 'DRAFT-300'
+    });
+    expect(parseHashRoute('#/workbench?taskId=TASK%201&resultId=RES-01')).toMatchObject({
+      page: 'workbench',
+      taskIdQuery: 'TASK 1',
+      resultIdQuery: 'RES-01',
+      draftIdQuery: ''
+    });
+    expect(parseHashRoute('#/workbench?draftId=DRAFT-ONLY')).toMatchObject({
+      page: 'workbench',
+      taskIdQuery: '',
+      resultIdQuery: '',
+      draftIdQuery: 'DRAFT-ONLY'
+    });
+    expect(parseHashRoute('#/workbench/TASK-PATH?resultId=RES-PATH')).toMatchObject({
+      page: 'workbench',
+      params: ['TASK-PATH'],
+      taskIdQuery: '',
+      resultIdQuery: 'RES-PATH',
+      draftIdQuery: ''
+    });
+    expect(resolveLegacyHashRedirect('#/workbench?taskId=T-1&resultId=R-1')).toBeNull();
+  });
 });
