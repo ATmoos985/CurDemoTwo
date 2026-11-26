@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { requestJSON, fmtN, toast } from '../lib/core/util.js';
 import { csvCell } from '../lib/domain/report-model.js';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
+import { NumberInput } from '../components/ui/NumberInput';
 
 export interface CostSummaryTotals {
   totalReports: number;
@@ -162,6 +163,7 @@ export function buildProcurementCsvText(proc: ProcurementSuggestionsResponse): s
 export const CostAnalyticsPage: React.FC = () => {
   const [viewTab, setViewTab] = useState<'cost' | 'procurement'>('cost');
   const [costDimension, setCostDimension] = useState<'task' | 'model'>('task');
+  const [paramsOpen, setParamsOpen] = useState<boolean>(false);
 
   // 可调核算口径参数（支持实时重算）
   const [unitPrice, setUnitPrice] = useState<number>(25);
@@ -281,192 +283,171 @@ export const CostAnalyticsPage: React.FC = () => {
       <div className="mp-page-shell">
         <div className="mp-page-head">
           <div className="mp-page-title-block">
-            <h1>成本与备料分析</h1>
+            <h1>成本与备料</h1>
             <span className="mp-page-summary num">
               基于已过账实绩报工与在库可用量核算（不含未报工预览方案）· 货币口径 {currency}
             </span>
           </div>
           <div className="mp-toolbar-actions">
+            <button
+              type="button"
+              className={`mp-ghost-btn mp-cost-cfg-toggle ${paramsOpen ? 'on' : ''}`}
+              aria-expanded={paramsOpen}
+              aria-controls="cost-params-panel"
+              onClick={() => setParamsOpen((prev) => !prev)}
+            >
+              <svg
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M2.5 4.5h7.5M12.5 4.5h1M2.5 8h3M8 8h5.5M2.5 11.5h6.5M11.5 11.5h2" />
+                <circle cx="11.2" cy="4.5" r="1.3" />
+                <circle cx="6.8" cy="8" r="1.3" />
+                <circle cx="10.2" cy="11.5" r="1.3" />
+              </svg>
+              <span>核算口径</span>
+            </button>
             <a className="mp-ghost-btn" href="#/reconciliation">
-              复检补排与对账
-            </a>
-            <a className="mp-ghost-btn" href="#/planning">
-              联合排产与分床 →
+              复检与对账
             </a>
           </div>
         </div>
 
-        <form className="box" onSubmit={handleRecalculate} style={{ marginBottom: 12 }}>
-          <div className="pane-h">
-            <span>核算参数与备料安全系数（修改后点击重算即时更新）</span>
-            <span className="sub">只读实时分析</span>
-          </div>
-          <div
-            className="pane-b"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-              gap: 10,
-              alignItems: 'end'
-            }}
-          >
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-              <span>默认面料单价 ({currency}/m²)</span>
-              <input
-                type="number"
-                className="num"
-                min={0}
-                step="any"
-                value={unitPrice}
-                onChange={(e) => setUnitPrice(Number(e.target.value))}
-              />
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-              <span>料头残值折算系数 (0~1)</span>
-              <input
-                type="number"
-                className="num"
-                min={0}
-                max={1}
-                step="any"
-                value={residualFactor}
-                onChange={(e) => setResidualFactor(Number(e.target.value))}
-              />
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-              <span>采购安全缓冲率 (%)</span>
-              <input
-                type="number"
-                className="num"
-                min={0}
-                max={200}
-                step="any"
-                value={safetyBufferPct}
-                onChange={(e) => setSafetyBufferPct(Number(e.target.value))}
-              />
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-              <span>标准采购卷长 (m/卷)</span>
-              <input
-                type="number"
-                className="num"
-                min={1}
-                step="any"
-                value={defaultRollLengthM}
-                onChange={(e) => setDefaultRollLengthM(Number(e.target.value))}
-              />
-            </label>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button type="submit" className="btn pri" disabled={loading}>
-                {loading ? '核算中…' : '按口径重算'}
-              </button>
-            </div>
-          </div>
-        </form>
-
         {error && (
-          <div
-            className="box"
-            role="alert"
-            style={{
-              borderLeft: '3px solid var(--err, #dc2626)',
-              padding: '10px 14px',
-              marginBottom: 12,
-              fontSize: 12.5
-            }}
-          >
+          <div className="mp-demand-card mp-cost-error-card" role="alert">
             <strong>分析接口异常：</strong> {error}
           </div>
         )}
 
-        <div
-          className="cards"
-          aria-label="成本与备料关键指标"
-          style={{
-            marginBottom: 12,
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(195px, 1fr))',
-            gap: 10
-          }}
-        >
-          <article
-            className="card"
-            style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '12px 14px' }}
-          >
-            <span style={{ fontSize: 12, color: 'var(--cp-ink-3)' }}>累计净有效成本（扣残值）</span>
-            <strong className="num" style={{ fontSize: 19, lineHeight: 1.25 }}>
+        <section className="mp-cost-kpi-grid" aria-label="成本与备料关键指标">
+          <article className="mp-demand-card mp-cost-kpi-card">
+            <span className="mp-cost-kpi-label">累计净有效成本（扣残值）</span>
+            <strong className="mp-cost-kpi-value num">
               {summary ? `${fmtN(summary.netEffectiveCost, 2)} ${currency}` : '—'}
             </strong>
-            <span className="muted num" style={{ fontSize: 11 }}>
+            <span className="mp-cost-kpi-sub num">
               单方良品 {summary ? `${fmtN(summary.avgCostPerGoodSqm, 2)} ${currency}/m²` : '—'}
             </span>
           </article>
-          <article
-            className="card"
-            style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '12px 14px' }}
-          >
-            <span style={{ fontSize: 12, color: 'var(--cp-ink-3)' }}>原料总投入 / 有效报工</span>
-            <strong className="num" style={{ fontSize: 19, lineHeight: 1.25 }}>
+          <article className="mp-demand-card mp-cost-kpi-card">
+            <span className="mp-cost-kpi-label">原料总投入 / 有效报工</span>
+            <strong className="mp-cost-kpi-value num">
               {summary ? `${fmtN(summary.totalMaterialCost, 2)} ${currency}` : '—'}
             </strong>
-            <span className="muted num" style={{ fontSize: 11 }}>
+            <span className="mp-cost-kpi-sub num">
               {summary ? `${fmtN(summary.totalConsumedAreaM2, 2)} m² · ${summary.totalReports} 单` : '—'}
             </span>
           </article>
-          <article
-            className="card"
-            style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '12px 14px' }}
-          >
-            <span style={{ fontSize: 12, color: 'var(--cp-ink-3)' }}>废料损失金额 / 占比</span>
-            <strong
-              className="num"
-              style={{
-                fontSize: 19,
-                lineHeight: 1.25,
-                color: wasteSharePct >= 15 ? 'var(--err, #dc2626)' : undefined
-              }}
-            >
+          <article className="mp-demand-card mp-cost-kpi-card">
+            <span className="mp-cost-kpi-label">废料损失金额 / 占比</span>
+            <strong className={`mp-cost-kpi-value num ${wasteSharePct >= 15 ? 'is-err' : ''}`}>
               {summary ? `${fmtN(summary.wasteCost, 2)} ${currency}` : '—'}
             </strong>
-            <span className="muted num" style={{ fontSize: 11 }}>
+            <span className="mp-cost-kpi-sub num">
               {summary ? `废料 ${fmtN(summary.wasteAreaM2, 2)} m²（占投入 ${wasteSharePct}%）` : '—'}
             </span>
           </article>
-          <article
-            className="card"
-            style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '12px 14px' }}
-          >
-            <span style={{ fontSize: 12, color: 'var(--cp-ink-3)' }}>回收料头残值抵扣</span>
-            <strong
-              className="num"
-              style={{ fontSize: 19, lineHeight: 1.25, color: 'var(--ok, #059669)' }}
-            >
+          <article className="mp-demand-card mp-cost-kpi-card">
+            <span className="mp-cost-kpi-label">回收料头残值抵扣</span>
+            <strong className="mp-cost-kpi-value num is-ok">
               {summary ? `-${fmtN(summary.recoveredResidualValue, 2)} ${currency}` : '—'}
             </strong>
-            <span className="muted num" style={{ fontSize: 11 }}>
+            <span className="mp-cost-kpi-sub num">
               {summary ? `可复用回收 ${fmtN(summary.recoveredRemnantAreaM2, 2)} m²` : '—'}
             </span>
           </article>
-          <article
-            className="card"
-            style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '12px 14px' }}
-          >
-            <span style={{ fontSize: 12, color: 'var(--cp-ink-3)' }}>跨订单缺料预警型号</span>
+          <article className="mp-demand-card mp-cost-kpi-card">
+            <span className="mp-cost-kpi-label">跨订单缺料预警型号</span>
             <strong
-              className="num"
-              style={{
-                fontSize: 19,
-                lineHeight: 1.25,
-                color: (procData?.shortageModels || 0) > 0 ? 'var(--err, #dc2626)' : 'var(--ok, #059669)'
-              }}
+              className={`mp-cost-kpi-value num ${(procData?.shortageModels || 0) > 0 ? 'is-err' : 'is-ok'}`}
             >
               {procData ? `${procData.shortageModels} / ${procData.totalModels} 个` : '—'}
             </strong>
-            <span className="muted num" style={{ fontSize: 11 }}>
+            <span className="mp-cost-kpi-sub num">
               安全缓冲 +{procData?.safetyBufferPct ?? safetyBufferPct}%
             </span>
           </article>
-        </div>
+        </section>
+
+        {paramsOpen && (
+          <form
+            id="cost-params-panel"
+            className="mp-demand-card mp-cost-params-card"
+            onSubmit={handleRecalculate}
+          >
+            <div className="mp-cost-params-head">
+              <div className="mp-cost-params-title">
+                <strong>核算口径与备料安全系数</strong>
+                <span className="mp-page-summary">
+                  修改参数后点击「按口径重算」即时刷新只读核算，不改动库存或报工实绩
+                </span>
+              </div>
+              <button
+                type="button"
+                className="mp-ghost-btn mp-ghost-sm"
+                onClick={() => setParamsOpen(false)}
+              >
+                收起
+              </button>
+            </div>
+            <div className="mp-cost-params-grid">
+              <label className="mp-cost-param-field">
+                <span>默认面料单价 ({currency}/m²)</span>
+                <NumberInput
+                  className="field num"
+                  min={0}
+                  fallback={25}
+                  value={unitPrice}
+                  onValueChange={setUnitPrice}
+                />
+              </label>
+              <label className="mp-cost-param-field">
+                <span>料头残值折算系数 (0~1)</span>
+                <NumberInput
+                  className="field num"
+                  min={0}
+                  max={1}
+                  fallback={0.7}
+                  value={residualFactor}
+                  onValueChange={setResidualFactor}
+                />
+              </label>
+              <label className="mp-cost-param-field">
+                <span>采购安全缓冲率 (%)</span>
+                <NumberInput
+                  className="field num"
+                  min={0}
+                  max={200}
+                  fallback={15}
+                  value={safetyBufferPct}
+                  onValueChange={setSafetyBufferPct}
+                />
+              </label>
+              <label className="mp-cost-param-field">
+                <span>标准采购卷长 (m/卷)</span>
+                <NumberInput
+                  className="field num"
+                  min={1}
+                  fallback={50}
+                  value={defaultRollLengthM}
+                  onValueChange={setDefaultRollLengthM}
+                />
+              </label>
+              <div className="mp-cost-params-actions">
+                <button type="submit" className="btn pri" disabled={loading}>
+                  {loading ? '核算中…' : '按口径重算'}
+                </button>
+              </div>
+            </div>
+          </form>
+        )}
 
         <div className="mp-filter-toolbar">
           <SegmentedControl<'cost' | 'procurement'>
@@ -504,17 +485,17 @@ export const CostAnalyticsPage: React.FC = () => {
             <div className="loading">正在拉取实绩成本台账与跨订单备料缺口…</div>
           </div>
         ) : viewTab === 'cost' ? (
-          <div className="box">
-            <div className="pane-h">
-              <span>
+          <div className="mp-demand-card">
+            <div className="mp-cost-card-head">
+              <strong>
                 {costDimension === 'task' ? '按任务 / 订单实绩成本分解' : '按品号型号实绩成本分解'}
-              </span>
-              <span className="sub">
+              </strong>
+              <span className="mp-page-summary num">
                 净有效成本 = 原料总投入 − 回收料头残值抵扣（单价 {costData?.defaultUnitPricePerSqm ?? unitPrice}{' '}
                 {currency}/m² · 残值系数 {costData?.remnantResidualFactor ?? residualFactor}）
               </span>
             </div>
-            <div className="mp-table-scroll" style={{ overflowX: 'auto' }}>
+            <div className="mp-table-scroll">
               <table className="t" style={{ minWidth: 980 }}>
                 <thead>
                   <tr>
@@ -581,42 +562,28 @@ export const CostAnalyticsPage: React.FC = () => {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {shortageCards.length > 0 && (
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-                  gap: 10
-                }}
-                aria-label="高危缺料预警卡片"
-              >
+              <div className="mp-cost-alert-grid" aria-label="高危缺料预警卡片">
                 {shortageCards.map((item) => {
                   const badge = normalizeAlertLevel(item.alertLevel);
                   return (
                     <article
                       key={item.materialModel}
-                      className="box"
-                      style={{
-                        borderLeft: `3px solid ${
-                          badge.tagClass === 'err' ? 'var(--err, #dc2626)' : 'var(--warn, #d97706)'
-                        }`,
-                        padding: '10px 14px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 6
-                      }}
+                      className={`mp-demand-card mp-cost-alert-card ${
+                        badge.tagClass === 'err' ? 'is-err' : 'is-warn'
+                      }`}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div className="mp-cost-alert-top">
                         <CodeBadge>{item.materialModel}</CodeBadge>
                         <span className={`tag ${badge.tagClass}`}>{badge.label}</span>
                       </div>
-                      <div className="num" style={{ fontSize: 15, fontWeight: 700, color: 'var(--err, #dc2626)' }}>
+                      <div className="mp-cost-alert-shortage num">
                         净缺口 {fmtN(item.shortageAreaM2, 2)} m²
                       </div>
-                      <div style={{ fontSize: 12 }} className="num">
+                      <div className="mp-cost-alert-plan num">
                         建议补采：门幅 {fmtN(item.recommendedWidthMm, 0)} mm × {fmtN(item.recommendedLengthM, 1)} m ×{' '}
                         <strong>{item.recommendedRolls} 卷</strong>
                       </div>
-                      <div className="muted" style={{ fontSize: 11.5 }}>
+                      <div className="mp-cost-alert-meta">
                         涉及待排任务 {item.pendingTaskCount} 单 · 现有缸号：
                         {item.activeBatches?.length ? item.activeBatches.join('、') : '无在库批次'}
                       </div>
@@ -626,15 +593,15 @@ export const CostAnalyticsPage: React.FC = () => {
               </div>
             )}
 
-            <div className="box">
-              <div className="pane-h">
-                <span>跨订单全品号备料核算与采购建议表</span>
-                <span className="sub num">
+            <div className="mp-demand-card">
+              <div className="mp-cost-card-head">
+                <strong>跨订单全品号备料核算与采购建议表</strong>
+                <span className="mp-page-summary num">
                   共 {procData?.totalModels ?? 0} 个品号 · 缺料 {procData?.shortageModels ?? 0} 个 · 默认卷长{' '}
                   {procData?.defaultRollLengthM ?? defaultRollLengthM} m
                 </span>
               </div>
-              <div className="mp-table-scroll" style={{ overflowX: 'auto' }}>
+              <div className="mp-table-scroll">
                 <table className="t" style={{ minWidth: 940 }}>
                   <thead>
                     <tr>

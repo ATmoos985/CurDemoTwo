@@ -15,6 +15,7 @@ export interface ParsedRoute {
 export const LEGACY_ROUTE_REDIRECTS: Record<string, string> = {
   tasks: 'demand-library',
   task: 'demands',
+  planning: 'workbench',
   execution: 'results',
   quality: 'reconciliation',
   analysis: 'cost-analytics'
@@ -26,7 +27,6 @@ export const KNOWN_MODERN_ROUTES: readonly string[] = [
   'clusters',
   'workbench',
   'slitting',
-  'planning',
   'results',
   'reconciliation',
   'cost-analytics',

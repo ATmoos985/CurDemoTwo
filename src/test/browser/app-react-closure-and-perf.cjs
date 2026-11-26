@@ -843,9 +843,9 @@ async function measureCanvasInteraction(page, cdp, name, prepare, steps, stepFn)
         const reverseBtn = reconRow.getByRole('button', { name: '冲销报工', exact: true });
         assert.ok(await reverseBtn.isDisabled(), '已有复检处置记录的报工行必须禁用「冲销报工」按钮');
 
-        // 页面 3：#/cost-analytics 成本与备料分析页（核验按任务归集净良品面积与后端严格一致）
+        // 页面 3：#/cost-analytics 成本与备料页（核验按任务归集净良品面积与后端严格一致）
         await page.goto(`${base}/app/#/cost-analytics`);
-        await page.getByRole('heading', { name: '成本与备料分析', exact: true, level: 1 }).waitFor();
+        await page.getByRole('heading', { name: '成本与备料', exact: true, level: 1 }).waitFor();
         const costRowATr = page.locator('tbody tr', { hasText: taskA.id }).first();
         const costRowBTr = page.locator('tbody tr', { hasText: taskB.id }).first();
         await costRowATr.waitFor({ timeout: 10000 });

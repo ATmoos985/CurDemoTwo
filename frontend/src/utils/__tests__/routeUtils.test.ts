@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { parseHashRoute, resolveLegacyHashRedirect } from '../routeUtils';
 
 describe('现代路由解析与已下线旧兼容路由自动重定向', () => {
-  it('将 5 个已下线旧路由收敛重定向至对应现代主路由并保留可用上下文', () => {
+  it('将 6 个已下线旧路由收敛重定向至对应现代主路由并保留可用上下文', () => {
     expect(resolveLegacyHashRedirect('#/tasks')).toBe('#/demand-library');
     expect(resolveLegacyHashRedirect('#/task')).toBe('#/demands');
     expect(resolveLegacyHashRedirect('#/task/new')).toBe('#/demands');
     expect(resolveLegacyHashRedirect('#/task/TASK-01')).toBe('#/demands?append=TASK-01');
     expect(resolveLegacyHashRedirect('#/task/TASK%2001')).toBe('#/demands?append=TASK%2001');
+    expect(resolveLegacyHashRedirect('#/planning')).toBe('#/workbench');
+    expect(resolveLegacyHashRedirect('#/planning?tab=cutplan')).toBe('#/workbench');
     expect(resolveLegacyHashRedirect('#/execution')).toBe('#/results');
     // 旧 planId 与新版 SchedulingScheme.id 聚合模型不同，非 quality 意图按 taskId 过滤方案列表
     expect(resolveLegacyHashRedirect('#/execution/TASK-01/PLAN-02')).toBe(
@@ -50,6 +52,10 @@ describe('现代路由解析与已下线旧兼容路由自动重定向', () => {
       page: 'demands',
       appendQuery: 'TASK-01',
       redirectTo: '#/demands?append=TASK-01'
+    });
+    expect(parseHashRoute('#/planning')).toMatchObject({
+      page: 'workbench',
+      redirectTo: '#/workbench'
     });
     expect(parseHashRoute('#/execution/T-99')).toMatchObject({
       page: 'results',

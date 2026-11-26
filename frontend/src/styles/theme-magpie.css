@@ -1679,6 +1679,188 @@ dialog.settings-center-dialog {
   width: 100%;
 }
 
+/* ==========================================================================
+   Cost & Procurement Analytics Page (Magpie Unified Cards & Collapsible Bar)
+   ========================================================================== */
+.mp-cost-cfg-toggle.on {
+  background: var(--cp-accent-soft);
+  color: var(--cp-accent-ink);
+}
+
+.mp-cost-error-card {
+  border-left: 3px solid var(--err, #e11d48);
+  padding: 10px 14px;
+  font-size: 12.5px;
+  color: var(--cp-ink);
+}
+
+.mp-cost-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mp-cost-kpi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 13px 15px;
+  overflow: hidden;
+}
+
+.mp-cost-kpi-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--cp-ink-3);
+  line-height: 1.35;
+}
+
+.mp-cost-kpi-value {
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.25;
+  color: var(--cp-ink);
+  letter-spacing: -0.015em;
+}
+
+.mp-cost-kpi-value.is-ok {
+  color: var(--ok, #10b981);
+}
+
+.mp-cost-kpi-value.is-err {
+  color: var(--err, #e11d48);
+}
+
+.mp-cost-kpi-sub {
+  font-size: 11.5px;
+  color: var(--cp-ink-3);
+}
+
+.mp-cost-params-card {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mp-cost-params-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mp-cost-params-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mp-cost-params-title strong {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--cp-ink);
+}
+
+.mp-cost-params-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.mp-cost-param-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.mp-cost-param-field > span {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--cp-ink-2);
+}
+
+.mp-cost-param-field .field {
+  width: 100%;
+}
+
+.mp-cost-params-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.mp-cost-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--cp-divider);
+  background: var(--cp-surface);
+}
+
+.mp-cost-card-head strong {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--cp-ink);
+}
+
+.mp-cost-alert-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.mp-cost-alert-card {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-left: 3px solid var(--warn, #d97706);
+}
+
+.mp-cost-alert-card.is-err {
+  border-left-color: var(--err, #e11d48);
+}
+
+.mp-cost-alert-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.mp-cost-alert-shortage {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--err, #e11d48);
+}
+
+.mp-cost-alert-plan {
+  font-size: 12px;
+  color: var(--cp-ink);
+}
+
+.mp-cost-alert-meta {
+  font-size: 11.5px;
+  color: var(--cp-ink-3);
+}
+
+@media (max-width: 1180px) {
+  .mp-cost-kpi-grid {
+    grid-template-columns: repeat(auto-fit, minmax(195px, 1fr));
+  }
+  .mp-cost-params-grid {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+}
+
 /* Compact 1366x768 Guard */
 @media (max-width: 1400px) {
   .app.app-magpie {

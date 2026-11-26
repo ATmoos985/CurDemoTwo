@@ -73,14 +73,14 @@ const apiPost = async (path, body) => {
       const catLabels = await page
         .locator('#nav .nav-group-label')
         .evaluateAll((els) => els.map((e) => e.textContent.trim()));
-      assert.deepEqual(catLabels, ['需求管理', '搭切工作台', '结果管理', '库存管理', '示例场景']);
+      assert.deepEqual(catLabels, ['订单需求', '排料工作台', '产出与核算', '材料库存', '工艺试验']);
 
-      // Ensure "多门幅工艺对比" is inside "示例场景" (moved out of workbench domain)
-      await page.locator('#nav .nav-group-trigger', { hasText: '示例场景' }).click();
+      // Ensure "服装唛架" is inside "工艺试验" (moved out of workbench domain)
+      await page.locator('#nav .nav-group-trigger', { hasText: '工艺试验' }).click();
       const showcaseLinks = await page
         .locator('#nav-sub-showcase a')
         .evaluateAll((els) => els.map((e) => e.textContent.trim()));
-      assert.ok(showcaseLinks.includes('多门幅工艺对比'), '多门幅工艺对比 should live under 示例场景');
+      assert.ok(showcaseLinks.includes('服装唛架'), '服装唛架 should live under 工艺试验');
 
       // Browse all primary routes without mutating backend state
       const routes = [
@@ -91,6 +91,7 @@ const apiPost = async (path, body) => {
         ['slitting', '搭切工作台'],
         ['results', '结果管理'],
         ['reconciliation', '复检补排与对账'],
+        ['cost-analytics', '成本与备料'],
         ['inventory', '库存'],
         ['inspection', '跑布验疵'],
         ['documents', '库存单据'],

@@ -649,3 +649,20 @@
 :root[data-theme="dark"] .dl-expand-cell {
   background: #0d1524 !important;
 }
+
+/* 成本与备料页面卡片与表头暗色覆盖 */
+:root[data-theme="dark"] .mp-demand-card .t th {
+  background: #111b2c;
+  color: var(--cp-ink-2);
+  border-color: var(--cp-divider);
+}
+
+:root[data-theme="dark"] .mp-cost-card-head {
+  background: var(--cp-surface);
+  border-color: var(--cp-divider);
+}
+
+:root[data-theme="dark"] .mp-cost-cfg-toggle.on {
+  background: rgba(56, 189, 248, 0.16);
+  color: #7dd3fc;
+}

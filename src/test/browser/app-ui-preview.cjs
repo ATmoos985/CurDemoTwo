@@ -10,10 +10,9 @@ const MODERN_ROUTES = [
   ['demand-library', '需求库'],
   ['clusters', '需求模板库'],
   ['workbench', '搭切工作台'],
-  ['planning', '联合排产与自动分床'],
   ['results', '结果管理'],
   ['reconciliation', '复检补排与对账'],
-  ['cost-analytics', '成本与备料分析'],
+  ['cost-analytics', '成本与备料'],
   ['inventory', '库存'],
   ['inspection', '跑布验疵'],
   ['documents', '库存单据'],
@@ -25,9 +24,10 @@ const MODERN_ROUTES = [
 const LEGACY_REDIRECTS = [
   ['tasks', '#/demand-library', '需求库'],
   ['task/new', '#/demands', '需求管理'],
+  ['planning', '#/workbench', '搭切工作台'],
   ['execution', '#/results', '结果管理'],
   ['quality', '#/reconciliation', '复检补排与对账'],
-  ['analysis', '#/cost-analytics', '成本与备料分析']
+  ['analysis', '#/cost-analytics', '成本与备料']
 ];
 
 (async () => {
