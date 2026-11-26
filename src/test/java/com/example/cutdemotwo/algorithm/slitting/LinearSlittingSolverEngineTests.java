@@ -437,7 +437,8 @@ class LinearSlittingSolverEngineTests {
             assertEquals("FEASIBLE", shortTtl.solve(problem).status());
             assertEquals(1, shortTtl.idleWorkerCount());
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-            while (shortTtl.idleWorkerCount() > 0 && System.nanoTime() < deadline) {
+            while ((shortTtl.idleWorkerCount() > 0 || newJavaChildren(existing).findAny().isPresent())
+                    && System.nanoTime() < deadline) {
                 Thread.sleep(100);
             }
             assertEquals(0, shortTtl.idleWorkerCount(), "超过 idleTtlSeconds 后应自动回收过期空闲子进程");
