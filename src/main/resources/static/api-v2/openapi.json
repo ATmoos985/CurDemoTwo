@@ -9177,6 +9177,20 @@
           },
           "shape": {
             "$ref": "#/components/schemas/Shape"
+          },
+          "sourceTaskId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          },
+          "sourceLineId": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
           }
         }
       },
@@ -9242,8 +9256,207 @@
           }
         }
       },
+      "MultiMaterialPlacement": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "demandId",
+          "name",
+          "x",
+          "y",
+          "w",
+          "l",
+          "rotationDegrees",
+          "rotated"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "demandId": {
+            "type": "integer"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "x": {
+            "type": "number",
+            "minimum": 0
+          },
+          "y": {
+            "type": "number",
+            "minimum": 0
+          },
+          "w": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "l": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "rotationDegrees": {
+            "type": "integer"
+          },
+          "rotated": {
+            "type": "boolean"
+          },
+          "polygon": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            }
+          },
+          "holes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "array",
+              "minItems": 3,
+              "items": {
+                "$ref": "#/components/schemas/Point"
+              }
+            }
+          },
+          "sourceTaskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourceLineId": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      },
+      "MultiMaterialDefect": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "x",
+          "y",
+          "w",
+          "h"
+        ],
+        "properties": {
+          "id": {
+            "type": [
+              "integer",
+              "string",
+              "null"
+            ]
+          },
+          "captureId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "w": {
+            "type": "number",
+            "minimum": 0
+          },
+          "h": {
+            "type": "number",
+            "minimum": 0
+          },
+          "margin": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "safeX": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "safeY": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "safeW": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "safeH": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "defectType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "typeName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "severity": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "points": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "detectionSource": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "avoidanceStrategy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "MultiMaterialRemnantAllocation": {
         "type": "object",
+        "additionalProperties": false,
         "required": [
           "remnantId",
           "widthMm",
@@ -9277,11 +9490,42 @@
             "items": {
               "type": "object"
             }
+          },
+          "placements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MultiMaterialPlacement"
+            }
+          },
+          "defects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MultiMaterialDefect"
+            }
+          },
+          "materialModel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "batchNo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
       "MultiMaterialRollOption": {
         "type": "object",
+        "additionalProperties": false,
         "required": [
           "rollId",
           "widthMm",
@@ -9316,6 +9560,50 @@
           },
           "recommended": {
             "type": "boolean"
+          },
+          "windowStartY": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "totalLengthMm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "exclusiveMinimum": 0
+          },
+          "placements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MultiMaterialPlacement"
+            }
+          },
+          "defects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MultiMaterialDefect"
+            }
+          },
+          "rollModel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "batchNo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },

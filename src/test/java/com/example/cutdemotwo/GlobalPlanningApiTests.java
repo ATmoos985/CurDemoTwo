@@ -101,6 +101,29 @@ class GlobalPlanningApiTests {
         assertTrue(multi.has("totalSavedAreaM2"));
         assertTrue(multi.has("elapsedMs"));
         assertTrue(multi.get("warnings").isArray());
+        for (JsonNode remAlloc : multi.get("remnantAllocations")) {
+            assertTrue(remAlloc.get("placements").isArray(), "料头分配必须返回 placements 数组");
+            assertEquals(remAlloc.get("placedCount").asInt(), remAlloc.get("placements").size(), "料头 placements 件数必须与 placedCount 严格一致");
+            assertTrue(remAlloc.get("defects").isArray(), "料头分配必须返回 defects 数组");
+            for (JsonNode p : remAlloc.get("placements")) {
+                assertTrue(p.get("x").asDouble() >= 0.0 && p.get("y").asDouble() >= 0.0);
+                assertTrue(p.get("w").asDouble() > 0.0 && p.get("l").asDouble() > 0.0);
+                assertTrue(p.has("rotationDegrees") && p.has("rotated"));
+            }
+        }
+        for (JsonNode rollOpt : multi.get("rollOptions")) {
+            assertTrue(rollOpt.has("windowStartY") && rollOpt.get("windowStartY").asDouble() >= 0.0);
+            assertTrue(rollOpt.has("totalLengthMm") && rollOpt.get("totalLengthMm").asDouble() > 0.0);
+            assertTrue(rollOpt.get("placements").isArray(), "母卷方案必须返回 placements 数组");
+            assertEquals(rollOpt.get("placedCount").asInt(), rollOpt.get("placements").size(), "母卷 placements 件数必须与 placedCount 严格一致");
+            assertTrue(rollOpt.get("defects").isArray(), "母卷方案必须返回 defects 数组");
+            for (JsonNode p : rollOpt.get("placements")) {
+                assertTrue(p.get("x").asDouble() >= 0.0 && p.get("y").asDouble() >= 0.0);
+                assertTrue(p.get("w").asDouble() > 0.0 && p.get("l").asDouble() > 0.0);
+                assertTrue(p.get("x").asDouble() + p.get("w").asDouble() <= rollOpt.get("widthMm").asDouble() + 0.11);
+                assertTrue(p.get("y").asDouble() + p.get("l").asDouble() <= rollOpt.get("estimatedCutLengthMm").asDouble() + 0.11);
+            }
+        }
 
         // 2. POST /api/v2/planning/cut-plan
         String cutPlanReq = """

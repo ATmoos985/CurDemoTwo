@@ -139,6 +139,24 @@ class GlobalPlanningAndCostTests {
         assertTrue(res.remnantAllocations().stream().noneMatch(a -> "REM-LOCKED".equals(a.remnantId())));
         assertEquals(3, res.remnantAllocations().stream().mapToInt(GlobalPlanningService.RemnantAllocation::placedCount).sum());
         assertEquals(2.4, res.totalSavedAreaM2(), 0.01);
+        for (GlobalPlanningService.RemnantAllocation remAlloc : res.remnantAllocations()) {
+            assertEquals("MODEL-TC", remAlloc.materialModel());
+            assertEquals("BAT-A", remAlloc.batchNo());
+            assertEquals("藏青", remAlloc.color());
+            assertNotNull(remAlloc.defects());
+            assertTrue(remAlloc.defects().isEmpty());
+            assertNotNull(remAlloc.placements());
+            assertEquals(remAlloc.placedCount(), remAlloc.placements().size(), "料头 placements 数量必须与 placedCount 严格守恒");
+            for (GlobalPlanningService.PlacementSnapshot p : remAlloc.placements()) {
+                assertEquals(1, p.demandId());
+                assertEquals("主片", p.name());
+                assertEquals(800.0, p.w(), 0.1);
+                assertEquals(1000.0, p.l(), 0.1);
+                assertFalse(p.rotated());
+                assertTrue(p.x() >= 0.0 && p.x() + p.w() <= remAlloc.widthMm() + 0.11);
+                assertTrue(p.y() >= 0.0 && p.y() + p.l() <= remAlloc.lengthMm() + 0.11);
+            }
+        }
 
         // 母卷对比应只包含 BAT-A 的两卷，且推荐更省料的 1600mm 卷
         assertEquals(2, res.rollOptions().size());
@@ -151,6 +169,23 @@ class GlobalPlanningAndCostTests {
         assertTrue(bestRoll.feasible());
         assertEquals(4, bestRoll.placedCount());
         assertTrue(bestRoll.utilizationPct() > 90.0);
+        for (GlobalPlanningService.RollOption opt : res.rollOptions()) {
+            assertEquals(0.0, opt.windowStartY(), 0.001);
+            assertEquals(40000.0, opt.totalLengthMm(), 0.1);
+            assertEquals("MODEL-TC", opt.rollModel());
+            assertEquals("BAT-A", opt.batchNo());
+            assertEquals("藏青", opt.color());
+            assertNotNull(opt.defects());
+            assertNotNull(opt.placements());
+            assertEquals(opt.placedCount(), opt.placements().size(), "母卷 placements 数量必须与 placedCount 严格守恒");
+            for (GlobalPlanningService.PlacementSnapshot p : opt.placements()) {
+                assertEquals(1, p.demandId());
+                assertEquals(800.0, p.w(), 0.1);
+                assertEquals(1000.0, p.l(), 0.1);
+                assertTrue(p.x() >= 0.0 && p.x() + p.w() <= opt.widthMm() + 0.11);
+                assertTrue(p.y() >= 0.0 && p.y() + p.l() <= opt.estimatedCutLengthMm() + 0.11);
+            }
+        }
 
         // 严守零库存写入不变量
         assertArrayEquals(snapshotBefore, Files.readAllBytes(stateFile));
@@ -193,8 +228,24 @@ class GlobalPlanningAndCostTests {
         assertEquals(4, res.placedByRoll());
         assertEquals(0, res.unplacedPieces());
         assertEquals(1, res.rollOptions().size());
-        assertTrue(res.rollOptions().get(0).feasible());
-        assertTrue(res.rollOptions().get(0).recommended());
+        GlobalPlanningService.RollOption polyRoll = res.rollOptions().get(0);
+        assertTrue(polyRoll.feasible());
+        assertTrue(polyRoll.recommended());
+        assertEquals(0.0, polyRoll.windowStartY(), 0.001);
+        assertEquals(20000.0, polyRoll.totalLengthMm(), 0.1);
+        assertEquals("GARMENT-01", polyRoll.rollModel());
+        assertEquals("BAT-G1", polyRoll.batchNo());
+        assertEquals("白色", polyRoll.color());
+        assertEquals(4, polyRoll.placements().size(), "异形母卷方案必须返回全部 4 片真实排布坐标");
+        for (GlobalPlanningService.PlacementSnapshot p : polyRoll.placements()) {
+            assertEquals(task.id(), p.sourceTaskId(), "从任务解析的需求必须回填 sourceTaskId");
+            assertEquals(1, p.sourceLineId(), "从任务解析的需求必须回填 sourceLineId");
+            assertNotNull(p.polygon(), "异形裁片必须返回局部外轮廓 polygon");
+            assertEquals(6, p.polygon().size());
+            assertTrue(p.polygon().stream().allMatch(pt -> pt.x() >= 0.0 && pt.y() >= 0.0));
+            assertTrue(p.x() >= 0.0 && p.x() + p.w() <= polyRoll.widthMm() + 0.11);
+            assertTrue(p.y() >= 0.0 && p.y() + p.l() <= polyRoll.estimatedCutLengthMm() + 0.11);
+        }
     }
 
     // ==================== 2. 服装订单多床自动分床 ====================
@@ -1041,5 +1092,186 @@ class GlobalPlanningAndCostTests {
         assertNotNull(materializedShape);
         assertEquals(1, materializedShape.holes().size(), "物化落库的 CuttingPlan 裁片必须完整保留 shape.holes");
         assertEquals(260000.0, materializedShape.areaMm2(), 0.01);
+    }
+
+    @Test
+    void multiMaterialReturnsExactPlacementsWindowDefectsUnpaddedGeometryAndHolesMatchingOpenApi() throws Exception {
+        FileInventoryStore store = new FileInventoryStore(temp.resolve("multi-geom-defects.json").toString());
+        RemnantService inv = new RemnantService(store, false);
+        GlobalPlanningService planning = new GlobalPlanningService(inv, createSolver());
+
+        // 1. 准备带疵料头（1000x1200，在顶部 y=[0,150] 有一处带 20mm 边距的污渍疵点）
+        RemnantStock defRem = new RemnantStock(
+                "REM-DEF-01", 1000, 1200, "D-01", "GEOM-M", "AVAILABLE", "ROLL-WIN-01", true, "局部污渍");
+        defRem.setBatchNo("BAT-G");
+        defRem.setColor("深灰");
+        defRem.setDefects(List.of(
+                new Defect(11, 0, 0, 1000, 150, 20.0, "STAIN", "顶部污渍", 3, 3, "MANUAL", "MUST_AVOID", "顶部禁区")
+        ));
+        inv.registerRemnant(defRem);
+
+        // 2. 准备非零起切点母卷（已切 1500mm，总长 20000mm）：
+        //    - 疵点 21：位于 y=[1480,1490], margin=20 -> 安全禁区下沿到 1510，跨入工位窗口 [0, 10]！
+        //    - 疵点 22：位于 y=[1900,1960], x=[100,260], margin=20 -> 落在工位窗口局部 y=[380,480]！
+        //    - 疵点 23：位于 y=[15000,15100], margin=20 -> 远在窗口之外，绝不能出现在 RollOption.defects 中！
+        MotherRollInfo winRoll = new MotherRollInfo(
+                "ROLL-WIN-01", "GEOM-M", "BAT-G", "织厂G", "工业布", "深灰", 240.0, "涤棉", 1600.0, 20000.0, "G-01");
+        winRoll.setUsedLength(1500.0);
+        winRoll.setCurrentRemainingLength(18500.0);
+        winRoll.setDefects(List.of(
+                new Defect(21, 0, 1480, 1600, 10, 20.0, "EDGE", "起点边界疵点", 4, 4, "MANUAL", "MUST_AVOID", "距起点前10mm含20mm边距"),
+                new Defect(22, 100, 1900, 160, 60, 20.0, "HOLE", "窗内破洞", 4, 4, "AI_VISION_SCANNER", "MUST_AVOID", "窗内破洞"),
+                new Defect(23, 200, 15000, 100, 100, 20.0, "STAIN", "远端疵点", 2, 2, "MANUAL", "MUST_AVOID", "远端窗外")
+        ));
+        inv.saveOrUpdateMotherRoll(winRoll);
+
+        // 发起带 pieceGapMm=10.0 与显式 sourceTaskId/sourceLineId 的 5 片 750x900 矩形联合排产
+        GlobalPlanningService.MultiMaterialPlanResult rectRes = planning.planMultiMaterial(
+                new GlobalPlanningService.MultiMaterialPlanRequest(
+                        null, "GEOM-M", "BAT-G", "深灰",
+                        true, 4, List.of("ROLL-WIN-01"), 6000L, 10.0, 0.0,
+                        List.of(new GlobalPlanningService.DemandItem(
+                                1, "避疵片", 750, 900, 5, true, null, null, "TASK-SRC-1", 7))
+                )
+        );
+
+        assertEquals(5, rectRes.totalRequestedPieces());
+        assertEquals(1, rectRes.placedByRemnants(), "带疵 1000x1200 料头净安全区长 1030mm，应排入 1 片 750x900");
+        assertEquals(4, rectRes.placedByRoll(), "剩余 4 片应由母卷完整排入");
+        assertEquals(0, rectRes.unplacedPieces());
+
+        // 校验料头几何、疵点、unpad 净尺寸与来源归属
+        GlobalPlanningService.RemnantAllocation remAlloc = rectRes.remnantAllocations().get(0);
+        assertEquals("REM-DEF-01", remAlloc.remnantId());
+        assertEquals(1, remAlloc.placements().size());
+        assertEquals(1, remAlloc.defects().size());
+        assertEquals(20.0, remAlloc.defects().get(0).getMargin(), 0.001);
+        GlobalPlanningService.PlacementSnapshot remPiece = remAlloc.placements().get(0);
+        assertEquals("TASK-SRC-1", remPiece.sourceTaskId());
+        assertEquals(7, remPiece.sourceLineId());
+        assertNull(remPiece.polygon(), "纯矩形裁片应省略 polygon");
+        assertNull(remPiece.holes(), "无孔裁片应省略 holes");
+        double expectedRemW = remPiece.rotated() ? 900.0 : 750.0;
+        double expectedRemL = remPiece.rotated() ? 750.0 : 900.0;
+        assertEquals(expectedRemW, remPiece.w(), 0.1, "含 pieceGapMm=10 时料头裁片宽度必须已 unpad 还原为净尺寸");
+        assertEquals(expectedRemL, remPiece.l(), 0.1, "含 pieceGapMm=10 时料头裁片长度必须已 unpad 还原为净尺寸");
+        assertTrue(remPiece.y() >= 170.0 - 0.11, "料头裁片必须严格避开顶部 y=[0,170] 疵点禁区，实际 y=" + remPiece.y());
+
+        // 校验母卷窗口起点、窗口裁切对齐疵点、unpad 净尺寸与无干涉
+        GlobalPlanningService.RollOption rollOpt = rectRes.rollOptions().get(0);
+        assertEquals("ROLL-WIN-01", rollOpt.rollId());
+        assertTrue(rollOpt.recommended());
+        assertEquals(1500.0, rollOpt.windowStartY(), 0.001);
+        assertEquals(20000.0, rollOpt.totalLengthMm(), 0.1);
+        assertEquals("GEOM-M", rollOpt.rollModel());
+        assertEquals("BAT-G", rollOpt.batchNo());
+        assertEquals("深灰", rollOpt.color());
+        assertEquals(4, rollOpt.placements().size());
+        assertTrue(rollOpt.defects().stream().anyMatch(d -> d.getId() == 21), "必须保留窗外起点前10mm含20mm边距伸入窗口的边界疵点");
+        assertTrue(rollOpt.defects().stream().anyMatch(d -> d.getId() == 22), "必须保留窗口内破洞疵点");
+        assertTrue(rollOpt.defects().stream().noneMatch(d -> d.getId() == 23), "远在切割窗口之外的疵点不得混入 RollOption.defects");
+        for (Defect d : rollOpt.defects()) {
+            assertEquals(0.0, d.getMargin(), 0.001, "母卷窗口裁切对齐疵点必须已外扩归零 margin=0");
+            assertTrue(d.getX() >= 0.0 && d.getX() + d.getW() <= rollOpt.widthMm() + 0.001);
+            assertTrue(d.getY() >= 0.0 && d.getY() + d.getH() <= rollOpt.estimatedCutLengthMm() + 0.11);
+        }
+        for (GlobalPlanningService.PlacementSnapshot p : rollOpt.placements()) {
+            assertEquals("TASK-SRC-1", p.sourceTaskId());
+            assertEquals(7, p.sourceLineId());
+            assertEquals((p.rotationDegrees() % 180) != 0, p.rotated());
+            double expW = p.rotated() ? 900.0 : 750.0;
+            double expL = p.rotated() ? 750.0 : 900.0;
+            assertEquals(expW, p.w(), 0.1, "母卷裁片宽必须已 unpad 还原为净尺寸");
+            assertEquals(expL, p.l(), 0.1, "母卷裁片长必须已 unpad 还原为净尺寸");
+            assertTrue(p.x() >= 0.0 && p.x() + p.w() <= rollOpt.widthMm() + 0.11);
+            assertTrue(p.y() >= 0.0 && p.y() + p.l() <= rollOpt.estimatedCutLengthMm() + 0.11);
+            for (Defect d : rollOpt.defects()) {
+                boolean separated = (p.x() + p.w() <= d.getX() + 0.11)
+                        || (d.getX() + d.getW() <= p.x() + 0.11)
+                        || (p.y() + p.l() <= d.getY() + 0.11)
+                        || (d.getY() + d.getH() <= p.y() + 0.11);
+                assertTrue(separated, "母卷裁片不得侵入窗口疵点禁区: piece=" + p + ", defect=" + d.getId());
+            }
+        }
+
+        // 3. 验证带内孔（holes）异形裁片在联排结果中完整输出 polygon 与 holes
+        MotherRollInfo holeRoll = new MotherRollInfo(
+                "ROLL-HOLES-01", "HOLE-PLAN-M", "BAT-HP", "织厂", "帆布", "白", 260.0, "帆布", 1400.0, 10000.0, "HP-01");
+        inv.saveOrUpdateMotherRoll(holeRoll);
+        NestingProblem.Shape shapeWithHole = new NestingProblem.Shape(
+                "POLYGON", 500, 400,
+                List.of(
+                        new NestingProblem.Point(0, 0),
+                        new NestingProblem.Point(500, 0),
+                        new NestingProblem.Point(500, 400),
+                        new NestingProblem.Point(0, 400)
+                ),
+                List.of(List.of(
+                        new NestingProblem.Point(100, 100),
+                        new NestingProblem.Point(250, 100),
+                        new NestingProblem.Point(250, 250),
+                        new NestingProblem.Point(100, 250)
+                ))
+        );
+        GlobalPlanningService.MultiMaterialPlanResult holeRes = planning.planMultiMaterial(
+                new GlobalPlanningService.MultiMaterialPlanRequest(
+                        null, "HOLE-PLAN-M", null, null, false, 0, List.of("ROLL-HOLES-01"), 5000L, 0.0, 0.0,
+                        List.of(new GlobalPlanningService.DemandItem(
+                                2, "带孔垫片", 500, 400, 2, true, null, shapeWithHole, "TASK-HOLE", 3))
+                )
+        );
+        assertEquals(2, holeRes.placedByRoll());
+        List<GlobalPlanningService.PlacementSnapshot> holePlacements = holeRes.rollOptions().get(0).placements();
+        assertEquals(2, holePlacements.size());
+        for (GlobalPlanningService.PlacementSnapshot p : holePlacements) {
+            assertEquals("TASK-HOLE", p.sourceTaskId());
+            assertEquals(3, p.sourceLineId());
+            assertNotNull(p.polygon());
+            assertEquals(4, p.polygon().size());
+            assertNotNull(p.holes(), "带孔裁片必须完整输出 holes");
+            assertEquals(1, p.holes().size());
+            assertEquals(4, p.holes().get(0).size());
+            assertTrue(p.holes().get(0).stream().allMatch(pt -> pt.x() >= 0.0 && pt.y() >= 0.0));
+        }
+
+        // 4. 严格对照 openapi.json 校验真实序列化 JSON 无任何未声明额外字段（防止 MCP additionalProperties: false 拦截）
+        tools.jackson.databind.json.JsonMapper mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        var openApiRoot = mapper.readTree(Files.readString(Path.of("src/main/resources/static/api-v2/openapi.json")));
+        var schemas = openApiRoot.get("components").get("schemas");
+        assertAllJsonKeysDeclared(mapper.readTree(mapper.writeValueAsString(rectRes)), schemas, "MultiMaterialPlanResponse");
+        assertAllJsonKeysDeclared(mapper.readTree(mapper.writeValueAsString(holeRes)), schemas, "MultiMaterialPlanResponse");
+    }
+
+    private static void assertAllJsonKeysDeclared(
+            tools.jackson.databind.JsonNode root,
+            tools.jackson.databind.JsonNode schemas,
+            String rootSchemaName
+    ) {
+        var rootProps = schemas.get(rootSchemaName).get("properties");
+        root.propertyNames().forEach(k -> assertTrue(rootProps.has(k), rootSchemaName + " 未在 OpenAPI 中声明字段: " + k));
+
+        var remProps = schemas.get("MultiMaterialRemnantAllocation").get("properties");
+        var rollProps = schemas.get("MultiMaterialRollOption").get("properties");
+        var placementProps = schemas.get("MultiMaterialPlacement").get("properties");
+        var defectProps = schemas.get("MultiMaterialDefect").get("properties");
+
+        for (var rem : root.get("remnantAllocations")) {
+            rem.propertyNames().forEach(k -> assertTrue(remProps.has(k), "MultiMaterialRemnantAllocation 未声明字段: " + k));
+            for (var p : rem.get("placements")) {
+                p.propertyNames().forEach(k -> assertTrue(placementProps.has(k), "MultiMaterialPlacement 未声明字段: " + k));
+            }
+            for (var d : rem.get("defects")) {
+                d.propertyNames().forEach(k -> assertTrue(defectProps.has(k), "MultiMaterialDefect 未声明字段: " + k));
+            }
+        }
+        for (var roll : root.get("rollOptions")) {
+            roll.propertyNames().forEach(k -> assertTrue(rollProps.has(k), "MultiMaterialRollOption 未声明字段: " + k));
+            for (var p : roll.get("placements")) {
+                p.propertyNames().forEach(k -> assertTrue(placementProps.has(k), "MultiMaterialPlacement 未声明字段: " + k));
+            }
+            for (var d : roll.get("defects")) {
+                d.propertyNames().forEach(k -> assertTrue(defectProps.has(k), "MultiMaterialDefect 未声明字段: " + k));
+            }
+        }
     }
 }

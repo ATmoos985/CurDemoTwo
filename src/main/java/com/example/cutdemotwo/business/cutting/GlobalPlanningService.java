@@ -46,6 +46,7 @@ public class GlobalPlanningService {
 
     // ==================== 请求与响应契约 ====================
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record DemandItem(
             Integer id,
             String name,
@@ -54,8 +55,23 @@ public class GlobalPlanningService {
             int quantity,
             Boolean allowRotation,
             Boolean allowHalfTurn,
-            NestingProblem.Shape shape
-    ) {}
+            NestingProblem.Shape shape,
+            String sourceTaskId,
+            Integer sourceLineId
+    ) {
+        public DemandItem(
+                Integer id,
+                String name,
+                double width,
+                double length,
+                int quantity,
+                Boolean allowRotation,
+                Boolean allowHalfTurn,
+                NestingProblem.Shape shape
+        ) {
+            this(id, name, width, length, quantity, allowRotation, allowHalfTurn, shape, null, null);
+        }
+    }
 
     public record MultiMaterialPlanRequest(
             String taskId,
@@ -73,6 +89,24 @@ public class GlobalPlanningService {
 
     public record AllocatedItem(int demandId, String name, int quantity) {}
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record PlacementSnapshot(
+            int id,
+            int demandId,
+            String name,
+            double x,
+            double y,
+            double w,
+            double l,
+            int rotationDegrees,
+            boolean rotated,
+            List<NestingProblem.Point> polygon,
+            List<List<NestingProblem.Point>> holes,
+            String sourceTaskId,
+            Integer sourceLineId
+    ) {}
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record RemnantAllocation(
             String remnantId,
             double widthMm,
@@ -80,9 +114,28 @@ public class GlobalPlanningService {
             double utilizationPct,
             int placedCount,
             double piecesAreaM2,
-            List<AllocatedItem> allocatedItems
-    ) {}
+            List<AllocatedItem> allocatedItems,
+            List<PlacementSnapshot> placements,
+            List<Defect> defects,
+            String materialModel,
+            String batchNo,
+            String color
+    ) {
+        public RemnantAllocation(
+                String remnantId,
+                double widthMm,
+                double lengthMm,
+                double utilizationPct,
+                int placedCount,
+                double piecesAreaM2,
+                List<AllocatedItem> allocatedItems
+        ) {
+            this(remnantId, widthMm, lengthMm, utilizationPct, placedCount, piecesAreaM2, allocatedItems,
+                    List.of(), List.of(), null, null, null);
+        }
+    }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record RollOption(
             String rollId,
             double widthMm,
@@ -91,8 +144,29 @@ public class GlobalPlanningService {
             double utilizationPct,
             int placedCount,
             boolean feasible,
-            boolean recommended
-    ) {}
+            boolean recommended,
+            Double windowStartY,
+            Double totalLengthMm,
+            List<PlacementSnapshot> placements,
+            List<Defect> defects,
+            String rollModel,
+            String batchNo,
+            String color
+    ) {
+        public RollOption(
+                String rollId,
+                double widthMm,
+                double availableLengthMm,
+                double estimatedCutLengthMm,
+                double utilizationPct,
+                int placedCount,
+                boolean feasible,
+                boolean recommended
+        ) {
+            this(rollId, widthMm, availableLengthMm, estimatedCutLengthMm, utilizationPct, placedCount,
+                    feasible, recommended, null, null, List.of(), List.of(), null, null, null);
+        }
+    }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record MultiMaterialPlanResult(
@@ -119,7 +193,9 @@ public class GlobalPlanningService {
             boolean allowRotation,
             Boolean allowHalfTurn,
             NestingProblem.Shape shape,
-            double areaMm2
+            double areaMm2,
+            String sourceTaskId,
+            Integer sourceLineId
     ) {}
 
     private record RemnantSnapshot(
@@ -234,13 +310,15 @@ public class GlobalPlanningService {
                     continue;
                 }
 
-                // 统计并按剩余需求池做防御性上限收敛
+                // 统计并按剩余需求池做防御性上限收敛（同步保留真实排布坐标，保证 placements 与 placedCount 严格守恒）
                 Map<Integer, Integer> placedMap = new LinkedHashMap<>();
+                List<NestingResult.Placement> acceptedRaw = new ArrayList<>();
                 for (NestingResult.Placement p : res.placements()) {
                     int remLeft = remainingQty.getOrDefault(p.demandId(), 0);
                     int curPlaced = placedMap.getOrDefault(p.demandId(), 0);
                     if (curPlaced < remLeft) {
                         placedMap.put(p.demandId(), curPlaced + 1);
+                        acceptedRaw.add(p);
                     }
                 }
                 int batchPlaced = sumValues(placedMap);
@@ -258,6 +336,9 @@ public class GlobalPlanningService {
                     allocatedItems.add(new AllocatedItem(did, d.name(), qty));
                 }
 
+                List<PlacementSnapshot> remPlacements = toPlacementSnapshots(
+                        acceptedRaw, demandById, ctx.isContour(), ctx.pieceGapMm(), rem.width(), rem.length()
+                );
                 double utilPct = rem.areaM2() > 0 ? Math.min(100.0, batchPiecesAreaM2 / rem.areaM2() * 100.0) : 0.0;
                 remnantAllocations.add(new RemnantAllocation(
                         rem.id(),
@@ -266,7 +347,12 @@ public class GlobalPlanningService {
                         round2(utilPct),
                         batchPlaced,
                         round4(batchPiecesAreaM2),
-                        List.copyOf(allocatedItems)
+                        List.copyOf(allocatedItems),
+                        remPlacements,
+                        copyDefects(rem.defects()),
+                        blankToNull(rem.materialModel()),
+                        blankToNull(rem.batchNo()),
+                        blankToNull(rem.color())
                 ));
                 placedByRemnants += batchPlaced;
                 totalSavedAreaM2 += batchPiecesAreaM2;
@@ -318,7 +404,14 @@ public class GlobalPlanningService {
                             round2(t.utilizationPct()),
                             t.placedCount(),
                             t.feasible(),
-                            recommended
+                            recommended,
+                            cleanCoord(t.windowStartY()),
+                            round1(t.totalLengthMm()),
+                            t.placements(),
+                            t.defects(),
+                            blankToNull(t.rollModel()),
+                            blankToNull(t.batchNo()),
+                            blankToNull(t.color())
                     ));
                 }
             }
@@ -369,7 +462,8 @@ public class GlobalPlanningService {
                     : (task != null && task.process() != null ? task.process().trimStart() : 0.0);
 
             List<NormalizedDemand> demands = resolveDemands(tx, request, task, warnings);
-            boolean isContour = demands.stream().anyMatch(d -> d.shape() != null && "POLYGON".equals(d.shape().type()));
+            boolean isContour = demands.stream().anyMatch(d -> d.shape() != null
+                    && ("POLYGON".equals(d.shape().type()) || d.shape().hasHoles()));
             if (isContour && trimStartMm > 0) {
                 // 异形模式下 trimStart 以排斥区表达，保持合法
             }
@@ -506,7 +600,9 @@ public class GlobalPlanningService {
                         Boolean.TRUE.equals(item.allowRotation()),
                         Boolean.TRUE.equals(item.allowHalfTurn()) ? Boolean.TRUE : null,
                         shape,
-                        areaMm2
+                        areaMm2,
+                        blankToNull(item.sourceTaskId()),
+                        item.sourceLineId()
                 ));
             }
             if (out.isEmpty()) {
@@ -541,7 +637,9 @@ public class GlobalPlanningService {
                     line.allowRotation(),
                     line.allowHalfTurn(),
                     line.shape(),
-                    areaMm2
+                    areaMm2,
+                    task.id(),
+                    line.id()
             ));
         }
         if (out.isEmpty()) {
@@ -719,7 +817,14 @@ public class GlobalPlanningService {
             double estimatedConsumedAreaMm2,
             double utilizationPct,
             int placedCount,
-            boolean feasible
+            boolean feasible,
+            double windowStartY,
+            double totalLengthMm,
+            List<PlacementSnapshot> placements,
+            List<Defect> defects,
+            String rollModel,
+            String batchNo,
+            String color
     ) {}
 
     private RollTrialOutcome evaluateRoll(
@@ -734,7 +839,11 @@ public class GlobalPlanningService {
     ) {
         double availLen = roll.availableLengthMm();
         if (availLen <= trimStartMm + 1.0 || !canFitAny(roll.width(), availLen - trimStartMm, demands, pieceGapMm)) {
-            return new RollTrialOutcome(roll.rollId(), roll.width(), availLen, 0.0, Double.POSITIVE_INFINITY, 0.0, 0, false);
+            return new RollTrialOutcome(
+                    roll.rollId(), roll.width(), availLen, 0.0, Double.POSITIVE_INFINITY, 0.0, 0, false,
+                    roll.startY(), roll.totalLength(), List.of(), List.of(),
+                    roll.materialModel(), roll.batchNo(), roll.color()
+            );
         }
 
         double totalDemandAreaMm2 = demands.stream().mapToDouble(d -> d.areaMm2() * d.quantity()).sum();
@@ -804,22 +913,70 @@ public class GlobalPlanningService {
             }
         }
 
-        if (bestPlaced <= 0 || bestCutLen <= 0) {
-            return new RollTrialOutcome(roll.rollId(), roll.width(), availLen, 0.0, Double.POSITIVE_INFINITY, 0.0, 0, false);
+        if (bestPlaced <= 0 || bestCutLen <= 0 || best == null || best.placements() == null || best.placements().isEmpty()) {
+            return new RollTrialOutcome(
+                    roll.rollId(), roll.width(), availLen, 0.0, Double.POSITIVE_INFINITY, 0.0, 0, false,
+                    roll.startY(), roll.totalLength(), List.of(), List.of(),
+                    roll.materialModel(), roll.batchNo(), roll.color()
+            );
         }
 
-        double placedAreaMm2 = computePlacedAreaMm2(best, demands);
-        double consumedAreaMm2 = roll.width() * bestCutLen;
+        // 保留最优切长那次求解的真实排布坐标（按剩余需求限量做防御性守恒校验，绝不重复调用求解器）
+        Map<Integer, NormalizedDemand> demandById = new LinkedHashMap<>();
+        Map<Integer, Integer> demandLimits = new LinkedHashMap<>();
+        for (NormalizedDemand d : demands) {
+            demandById.put(d.id(), d);
+            demandLimits.put(d.id(), d.quantity());
+        }
+        Map<Integer, Integer> seenCounts = new LinkedHashMap<>();
+        List<NestingResult.Placement> acceptedRaw = new ArrayList<>(best.placements().size());
+        for (NestingResult.Placement p : best.placements()) {
+            int limit = demandLimits.getOrDefault(p.demandId(), 0);
+            int cur = seenCounts.getOrDefault(p.demandId(), 0);
+            if (cur < limit) {
+                seenCounts.put(p.demandId(), cur + 1);
+                acceptedRaw.add(p);
+            }
+        }
+        List<PlacementSnapshot> placements = toPlacementSnapshots(
+                acceptedRaw, demandById, isContour, pieceGapMm, roll.width(), availLen
+        );
+        int finalPlaced = placements.size();
+        if (finalPlaced <= 0) {
+            return new RollTrialOutcome(
+                    roll.rollId(), roll.width(), availLen, 0.0, Double.POSITIVE_INFINITY, 0.0, 0, false,
+                    roll.startY(), roll.totalLength(), List.of(), List.of(),
+                    roll.materialModel(), roll.batchNo(), roll.color()
+            );
+        }
+
+        double maxSnapEndY = trimStartMm;
+        for (PlacementSnapshot ps : placements) {
+            maxSnapEndY = Math.max(maxSnapEndY, ps.y() + ps.l());
+        }
+        double finalCutLen = Math.min(availLen, Math.max(bestCutLen, ceil1(maxSnapEndY)));
+        boolean finalFeasible = finalPlaced >= remainingTotal;
+        List<Defect> windowDefects = sliceDefectsForWindow(roll.defects(), roll.startY(), finalCutLen, roll.width());
+
+        double placedAreaMm2 = computePlacedAreaMm2(acceptedRaw, demandById);
+        double consumedAreaMm2 = roll.width() * finalCutLen;
         double utilPct = consumedAreaMm2 > 0 ? Math.min(100.0, placedAreaMm2 / consumedAreaMm2 * 100.0) : 0.0;
         return new RollTrialOutcome(
                 roll.rollId(),
                 roll.width(),
                 availLen,
-                bestCutLen,
+                finalCutLen,
                 consumedAreaMm2,
                 utilPct,
-                bestPlaced,
-                feasible
+                finalPlaced,
+                finalFeasible,
+                roll.startY(),
+                roll.totalLength(),
+                placements,
+                windowDefects,
+                roll.materialModel(),
+                roll.batchNo(),
+                roll.color()
         );
     }
 
@@ -979,7 +1136,8 @@ public class GlobalPlanningService {
             if (rem > 0) {
                 active.add(new NormalizedDemand(
                         d.id(), d.name(), d.width(), d.length(), rem,
-                        d.allowRotation(), d.allowHalfTurn(), d.shape(), d.areaMm2()
+                        d.allowRotation(), d.allowHalfTurn(), d.shape(), d.areaMm2(),
+                        d.sourceTaskId(), d.sourceLineId()
                 ));
             }
         }
@@ -1051,13 +1209,14 @@ public class GlobalPlanningService {
         return maxEndY;
     }
 
-    private static double computePlacedAreaMm2(NestingResult result, List<NormalizedDemand> demands) {
-        if (result == null || !result.feasible() || result.placements() == null) return 0.0;
-        Map<Integer, NormalizedDemand> map = new HashMap<>();
-        for (NormalizedDemand d : demands) map.put(d.id(), d);
+    private static double computePlacedAreaMm2(
+            List<NestingResult.Placement> placements,
+            Map<Integer, NormalizedDemand> demandById
+    ) {
+        if (placements == null || placements.isEmpty()) return 0.0;
         double area = 0.0;
-        for (NestingResult.Placement p : result.placements()) {
-            NormalizedDemand d = map.get(p.demandId());
+        for (NestingResult.Placement p : placements) {
+            NormalizedDemand d = demandById.get(p.demandId());
             if (d != null) {
                 area += d.areaMm2();
             } else if (p.shape() != null) {
@@ -1065,6 +1224,118 @@ public class GlobalPlanningService {
             }
         }
         return area;
+    }
+
+    /**
+     * 将求解器输出的 {@link NestingResult.Placement} 转为前端四层画布与确认落库可直接消费的 {@link PlacementSnapshot}：
+     * - 矩形直刀含片间距外扩求解时自动 unpad 还原为真实净尺寸；
+     * - 异形与带孔裁片完整保留局部归一化外轮廓 {@code polygon} 及随旋转角度同步变换的内孔 {@code holes}；
+     * - 自动回填来源任务/需求行归属 {@code sourceTaskId} / {@code sourceLineId}。
+     */
+    private static List<PlacementSnapshot> toPlacementSnapshots(
+            List<NestingResult.Placement> rawPlacements,
+            Map<Integer, NormalizedDemand> demandById,
+            boolean isContour,
+            double pieceGapMm,
+            double matW,
+            double matL
+    ) {
+        if (rawPlacements == null || rawPlacements.isEmpty()) {
+            return List.of();
+        }
+        double pad = (!isContour && pieceGapMm > 0) ? ceil1(pieceGapMm) : 0.0;
+        double safeMatW = floor1(matW);
+        double safeMatL = floor1(matL);
+        List<PlacementSnapshot> out = new ArrayList<>(rawPlacements.size());
+
+        for (int idx = 0; idx < rawPlacements.size(); idx++) {
+            NestingResult.Placement p = rawPlacements.get(idx);
+            if (p == null) continue;
+            NormalizedDemand d = demandById.get(p.demandId());
+            int normDeg = Math.floorMod(p.rotationDegrees(), 360);
+            boolean rotated = (normDeg % 180) != 0;
+            String name = blankToNull(p.name()) != null
+                    ? p.name().trim()
+                    : (d != null ? d.name() : ("裁片 #" + p.demandId()));
+
+            double w;
+            double l;
+            double x;
+            double y;
+            if (pad > 0) {
+                if (d != null) {
+                    w = round1(rotated ? d.length() : d.width());
+                    l = round1(rotated ? d.width() : d.length());
+                } else {
+                    w = Math.max(0.1, round1((p.shape() != null ? p.shape().width() : 0.0) - pad));
+                    l = Math.max(0.1, round1((p.shape() != null ? p.shape().height() : 0.0) - pad));
+                }
+                x = round1(Math.max(0.0, Math.min(Math.max(0.0, safeMatW - w), p.x())));
+                y = round1(Math.max(0.0, Math.min(Math.max(0.0, safeMatL - l), p.y())));
+            } else {
+                w = round1(p.shape() != null
+                        ? p.shape().width()
+                        : (d != null ? (rotated ? d.length() : d.width()) : 0.0));
+                l = round1(p.shape() != null
+                        ? p.shape().height()
+                        : (d != null ? (rotated ? d.width() : d.length()) : 0.0));
+                x = round1(Math.max(0.0, p.x()));
+                y = round1(Math.max(0.0, p.y()));
+            }
+
+            List<NestingProblem.Point> polygon = null;
+            if (p.shape() != null && "POLYGON".equals(p.shape().type()) && !p.shape().vertices().isEmpty()) {
+                polygon = sanitizePointRing(p.shape().vertices());
+            }
+
+            List<List<NestingProblem.Point>> holes = null;
+            if (p.shape() != null && p.shape().hasHoles()) {
+                holes = sanitizeHoleRings(p.shape().holes());
+            } else if (d != null && d.shape() != null && d.shape().hasHoles()) {
+                NestingProblem.Shape rotatedSource = PolygonGeometry.rotate(d.shape(), normDeg);
+                if (rotatedSource.hasHoles()) {
+                    holes = sanitizeHoleRings(rotatedSource.holes());
+                }
+            }
+
+            out.add(new PlacementSnapshot(
+                    out.size() + 1,
+                    p.demandId(),
+                    name,
+                    x,
+                    y,
+                    w,
+                    l,
+                    normDeg,
+                    rotated,
+                    polygon,
+                    holes,
+                    d != null ? d.sourceTaskId() : null,
+                    d != null ? d.sourceLineId() : null
+            ));
+        }
+        return List.copyOf(out);
+    }
+
+    private static List<NestingProblem.Point> sanitizePointRing(List<NestingProblem.Point> ring) {
+        List<NestingProblem.Point> clean = new ArrayList<>(ring.size());
+        for (NestingProblem.Point pt : ring) {
+            if (pt == null) continue;
+            clean.add(new NestingProblem.Point(
+                    Math.max(0.0, cleanCoord(pt.x())),
+                    Math.max(0.0, cleanCoord(pt.y()))
+            ));
+        }
+        return List.copyOf(clean);
+    }
+
+    private static List<List<NestingProblem.Point>> sanitizeHoleRings(List<List<NestingProblem.Point>> holes) {
+        List<List<NestingProblem.Point>> clean = new ArrayList<>(holes.size());
+        for (List<NestingProblem.Point> ring : holes) {
+            if (ring == null || ring.size() < 3) continue;
+            clean.add(sanitizePointRing(ring));
+        }
+        return clean.isEmpty() ? null : List.copyOf(clean);
     }
 
     /**
@@ -1081,16 +1352,16 @@ public class GlobalPlanningService {
             double m = Math.max(0.0, d.getMargin());
             double x = Math.max(0.0, d.getX() - m);
             double y = Math.max(startY, d.getY() - m);
-            double w = Math.min(rollWidth, d.getX() + d.getW() + m) - x;
-            double h = Math.min(endY, d.getY() + d.getH() + m) - y;
+            double w = cleanCoord(Math.min(rollWidth, d.getX() + d.getW() + m) - x);
+            double h = cleanCoord(Math.min(endY, d.getY() + d.getH() + m) - y);
             if (w <= 0 || h <= 0) continue;
             sliced.add(new Defect(
-                    d.getId(), x, y - startY, w, h, 0.0,
+                    d.getId(), cleanCoord(x), cleanCoord(y - startY), w, h, 0.0,
                     d.getDefectType(), d.getTypeName(), d.getSeverity(), d.getPoints(),
                     d.getDetectionSource(), d.getAvoidanceStrategy(), d.getDescription()
             ));
         }
-        return sliced;
+        return List.copyOf(sliced);
     }
 
     private static List<Defect> copyDefects(List<Defect> defects) {
@@ -1181,5 +1452,11 @@ public class GlobalPlanningService {
 
     private static double round4(double v) {
         return Math.rint(v * 10000.0) / 10000.0;
+    }
+
+    private static double cleanCoord(double v) {
+        if (!Double.isFinite(v)) return 0.0;
+        double cleaned = Math.rint(v * 1_000_000.0) / 1_000_000.0;
+        return cleaned == 0.0 ? 0.0 : cleaned;
     }
 }
