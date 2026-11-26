@@ -24,7 +24,17 @@ import {
 import { CadCanvasView } from '../components/CadCanvasView';
 import { showcaseScene } from '../lib/model/showcase.js';
 import { useStudioStore } from '../store/useStudioStore';
-import { CodeBadge } from '../components/ui/MagpiePrimitives';
+import {
+  CodeBadge,
+  SegmentedControl,
+  SegmentedOption
+} from '../components/ui/MagpiePrimitives';
+import { GarmentCutPlanPanel } from './garment/GarmentCutPlanPanel';
+import {
+  CutPlanFormState,
+  CutPlanResponse,
+  createDefaultCutPlanForm
+} from './garment/cutPlanUtils';
 
 interface GarmentExample {
   id: string;
@@ -54,6 +64,8 @@ type SelectedSource =
   | { kind: 'optimized' }
   | { kind: 'reference' }
   | null;
+
+type GarmentPageTab = 'width' | 'cutplan';
 
 function buildPreviewRow(layout: any, direction: string) {
   const { request, result, verified } = layout;
@@ -129,6 +141,13 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
   );
   const [isBusy, setIsBusy] = useState<boolean>(false);
   const [statusText, setStatusText] = useState<string>('待试算');
+
+  const [activeTab, setActiveTab] = useState<GarmentPageTab>('width');
+  const [cutPlanForm, setCutPlanForm] = useState<CutPlanFormState>(() =>
+    createDefaultCutPlanForm()
+  );
+  const [cutPlanResult, setCutPlanResult] = useState<CutPlanResponse | null>(null);
+  const [cutPlanError, setCutPlanError] = useState<string | null>(null);
 
   const helpRef = useRef<HTMLDetailsElement | null>(null);
   const sizeInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -214,6 +233,7 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
 
   useEffect(() => {
     if (routeExampleId) {
+      setActiveTab('width');
       const target = EXAMPLES.find((e) => e.id === routeExampleId);
       if (target && target.id !== currentExampleId) {
         applyExample(target);
@@ -611,16 +631,53 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
     ) : null;
   };
 
+  const garmentTabOptions: SegmentedOption<GarmentPageTab>[] = useMemo(
+    () => [
+      {
+        value: 'width',
+        label: '多门幅唛架对比',
+        count: rows.length > 0 ? rows.length : undefined,
+        accent: 'indigo'
+      },
+      {
+        value: 'cutplan',
+        label: '订单自动分床',
+        count: cutPlanResult ? cutPlanResult.layCount : undefined,
+        accent: 'emerald'
+      }
+    ],
+    [rows.length, cutPlanResult]
+  );
+
+  const showWidthTab = embedded || activeTab === 'width';
+
   return (
     <div className={`react-page mp-garment-page ${embedded ? 'mp-garment-embedded' : ''}`.trim()}>
       {!embedded && (
         <div className="mp-sc-topbar">
           <h1>唛架幅宽试算</h1>
-          <span className="mp-sc-sub">服装工艺测算 · 多门幅单耗与齐套排料对比</span>
-          {activeExample && <CodeBadge>{activeExample.id}</CodeBadge>}
+          <span className="mp-sc-sub">
+            {showWidthTab
+              ? '服装工艺测算 · 多门幅单耗与齐套排料对比'
+              : '服装大货工艺 · 多床自动分床与尺码守恒核对'}
+          </span>
+          {showWidthTab && activeExample && <CodeBadge>{activeExample.id}</CodeBadge>}
+          {!showWidthTab && cutPlanResult && (
+            <CodeBadge>{`${cutPlanResult.layCount} 床 · ${cutPlanResult.totalPlies} 层`}</CodeBadge>
+          )}
+          <span className="sp" />
+          <SegmentedControl<GarmentPageTab>
+            size="sm"
+            ariaLabel="服装唛架功能切换"
+            value={activeTab}
+            onChange={setActiveTab}
+            options={garmentTabOptions}
+          />
         </div>
       )}
 
+      {showWidthTab ? (
+        <>
       <div className="split garment-split mp-garment-split">
         <section className="pane mp-float-card mp-garment-left">
           <div className="pane-b">
@@ -1129,6 +1186,17 @@ export const GarmentWidthPage: React.FC<{ exampleId?: string; embedded?: boolean
           试算幅宽
         </button>
       </div>
+        </>
+      ) : (
+        <GarmentCutPlanPanel
+          form={cutPlanForm}
+          onFormChange={setCutPlanForm}
+          result={cutPlanResult}
+          onResultChange={setCutPlanResult}
+          error={cutPlanError}
+          onErrorChange={setCutPlanError}
+        />
+      )}
     </div>
   );
 };

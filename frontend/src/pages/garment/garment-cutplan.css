@@ -1,0 +1,521 @@
+/* ==========================================================================
+   Garment Cut Plan Panel (Magpie Light Desktop + Workshop Dark Theme)
+   Scoped strictly to .mp-cutplan-root so existing GarmentWidthPage DOM/styles
+   stay 100% untouched.
+   ========================================================================== */
+
+.mp-cutplan-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--cp-bg);
+}
+
+.mp-cutplan-split {
+  flex: 1;
+  min-height: 0;
+}
+
+.mp-cutplan-left .pane-b {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+/* Collapsible Craft Help — mirrors #garment-help */
+.mp-cutplan-help summary.pane-h {
+  list-style: none;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+}
+
+.mp-cutplan-help summary.pane-h::-webkit-details-marker {
+  display: none;
+}
+
+.mp-cutplan-help .help-mark {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--cp-border-strong);
+  border-radius: 999px;
+  color: var(--cp-ink-3);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  flex: none;
+}
+
+.mp-cutplan-help-text {
+  padding: 8px 14px 10px;
+  background: var(--cp-surface-subtle);
+  border-bottom: 1px solid var(--cp-divider);
+  color: var(--cp-ink-2);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.mp-cutplan-help-text p {
+  margin: 0 0 6px;
+}
+
+.mp-cutplan-help-text p:last-child {
+  margin-bottom: 0;
+}
+
+.mp-cutplan-pills {
+  background: var(--cp-surface-subtle);
+}
+
+/* Left Parameter Form */
+.mp-cutplan-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px 16px;
+}
+
+.mp-cutplan-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--cp-ink-2);
+  letter-spacing: 0.01em;
+}
+
+.mp-cutplan-section-sub {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--cp-ink-3);
+}
+
+.mp-cutplan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+
+.mp-cutplan-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.mp-cutplan-field > span {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--cp-ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mp-cutplan-field .field {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  font-size: 12px;
+}
+
+.mp-cutplan-advanced {
+  border: 1px solid var(--cp-divider);
+  border-radius: var(--cp-radius-ctrl);
+  background: var(--cp-surface-subtle);
+  overflow: hidden;
+}
+
+.mp-cutplan-advanced > summary {
+  padding: 7px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--cp-ink-2);
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  list-style: none;
+}
+
+.mp-cutplan-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.mp-cutplan-advanced > summary::after {
+  content: '展开';
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--cp-ink-3);
+}
+
+.mp-cutplan-advanced[open] > summary::after {
+  content: '收起';
+}
+
+.mp-cutplan-advanced-body {
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--cp-divider);
+  background: var(--cp-surface);
+}
+
+/* Size Matrix Editor inside Left Card */
+.mp-cutplan-sizes-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--cp-divider);
+}
+
+.mp-cutplan-size-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mp-cutplan-size-table-wrap {
+  border: 1px solid var(--cp-border);
+  border-radius: var(--cp-radius-ctrl);
+  overflow: hidden;
+  background: var(--cp-surface);
+}
+
+.mp-cutplan-size-head,
+.mp-cutplan-size-row {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr) minmax(0, 1fr) 30px;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 8px;
+}
+
+.mp-cutplan-size-head {
+  background: var(--cp-surface-subtle);
+  border-bottom: 1px solid var(--cp-divider);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cp-ink-3);
+}
+
+.mp-cutplan-size-row {
+  border-bottom: 1px solid var(--cp-divider);
+}
+
+.mp-cutplan-size-row:last-child {
+  border-bottom: 0;
+}
+
+.mp-cutplan-size-row .field {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 7px;
+  font-size: 12px;
+}
+
+.mp-cutplan-row-del {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--cp-ink-3);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.mp-cutplan-row-del:hover:not([disabled]) {
+  background: var(--err-bg);
+  color: var(--err);
+  border-color: transparent;
+}
+
+.mp-cutplan-row-del[disabled] {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Right Workspace Column */
+.mp-cutplan-right {
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+
+.mp-cutplan-alert {
+  background: var(--cp-surface);
+  border-radius: var(--cp-radius-card);
+  box-shadow: var(--cp-shadow-card);
+  border-left: 3px solid var(--err);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.mp-cutplan-alert-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mp-cutplan-alert-body strong {
+  font-size: 12.5px;
+  color: var(--err);
+}
+
+.mp-cutplan-alert-body p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--cp-ink-2);
+}
+
+.mp-cutplan-alert-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+/* KPI Strip inside Right Overview Card */
+.mp-cutplan-overview-card {
+  flex: none;
+}
+
+.mp-cutplan-kpis .garment-metric {
+  background: var(--cp-surface);
+}
+
+/* Size Conservation Verification Bar */
+.mp-cutplan-audit-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  padding: 9px 14px;
+  background: var(--cp-surface-subtle);
+  border-top: 1px solid var(--cp-divider);
+}
+
+.mp-cutplan-audit-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--cp-ink-2);
+  flex-wrap: wrap;
+}
+
+.mp-cutplan-audit-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mp-cutplan-audit-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--cp-surface);
+  border: 1px solid var(--cp-border);
+  font-size: 11.5px;
+  color: var(--cp-ink-2);
+}
+
+.mp-cutplan-audit-chip strong {
+  color: var(--cp-ink);
+  font-weight: 650;
+}
+
+.mp-cutplan-audit-chip.is-ok {
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.mp-cutplan-audit-chip.is-warn {
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+.mp-cutplan-audit-chip.is-err {
+  border-color: rgba(225, 29, 72, 0.45);
+}
+
+.mp-cutplan-audit-delta {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.mp-cutplan-audit-delta.ok {
+  color: var(--ok);
+}
+
+.mp-cutplan-audit-delta.warn {
+  color: var(--warn);
+}
+
+.mp-cutplan-audit-delta.err {
+  color: var(--err);
+}
+
+/* Result Cards & Tables */
+.mp-cutplan-table-card {
+  flex: none;
+}
+
+.mp-cutplan-card-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mp-cutplan-table-card .t th {
+  height: 34px;
+  padding: 0 10px;
+  background: var(--cp-surface-subtle);
+  color: var(--cp-ink-3);
+}
+
+.mp-cutplan-table-card .t td {
+  height: 38px;
+  padding: 4px 10px;
+}
+
+.mp-cutplan-table-card .t tfoot td {
+  height: 36px;
+  padding: 4px 10px;
+  background: var(--cp-surface-subtle);
+  border-top: 1px solid var(--cp-border);
+  border-bottom: 0;
+  font-weight: 600;
+  color: var(--cp-ink);
+}
+
+.mp-cutplan-ratio-hit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--cp-accent-soft);
+  color: var(--cp-accent-ink);
+  font-weight: 650;
+}
+
+/* Empty State before First Calculation */
+.mp-cutplan-empty {
+  flex: 1;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 28px 20px;
+  gap: 8px;
+}
+
+.mp-cutplan-empty-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--cp-accent-soft);
+  color: var(--cp-accent-ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.mp-cutplan-empty strong {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--cp-ink);
+}
+
+.mp-cutplan-empty p {
+  margin: 0;
+  max-width: 460px;
+  font-size: 12px;
+  color: var(--cp-ink-3);
+  line-height: 1.6;
+}
+
+.mp-cutplan-empty-meta {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* Dark Theme Overrides — Zero White Patches */
+:root[data-theme="dark"] .mp-cutplan-root .mp-float-card,
+:root[data-theme="dark"] .mp-cutplan-root .mp-cutplan-kpis .garment-metric,
+:root[data-theme="dark"] .mp-cutplan-root .mp-cutplan-size-table-wrap,
+:root[data-theme="dark"] .mp-cutplan-root .mp-cutplan-advanced-body,
+:root[data-theme="dark"] .mp-cutplan-root .mp-cutplan-audit-chip {
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+}
+
+:root[data-theme="dark"] .mp-cutplan-root .mp-style-pills,
+:root[data-theme="dark"] .mp-cutplan-root .mp-cutplan-help-text,
+:root[data-theme="dark"] .mp-cutplan-root .mp-cutplan-audit-strip,
+:root[data-theme="dark"] .mp-cutplan-root .mp-cutplan-size-head,
+:root[data-theme="dark"] .mp-cutplan-root .mp-cutplan-advanced,
+:root[data-theme="dark"] .mp-cutplan-root .mp-cutplan-table-card .t th,
+:root[data-theme="dark"] .mp-cutplan-root .mp-cutplan-table-card .t tfoot td {
+  background: var(--cp-surface-subtle);
+  color: var(--cp-ink-2);
+  border-color: var(--cp-divider);
+}
+
+:root[data-theme="dark"] .mp-cutplan-root .mp-style-pills .style-pill {
+  background: var(--cp-surface);
+  color: var(--cp-ink-2);
+  border-color: var(--cp-border-strong);
+}
+
+:root[data-theme="dark"] .mp-cutplan-root .mp-style-pills .style-pill:hover:not([disabled]) {
+  background: var(--cp-surface-hover);
+  color: var(--cp-ink);
+}
+
+:root[data-theme="dark"] .mp-cutplan-root .mp-style-pills .style-pill.on {
+  background: var(--cp-accent);
+  border-color: var(--cp-accent);
+  color: #0b1220;
+}
+
+:root[data-theme="dark"] .mp-cutplan-root .mp-cutplan-table-card .t tfoot td {
+  color: var(--cp-ink);
+}
+
+@media (max-width: 1120px) {
+  .mp-cutplan-grid {
+    grid-template-columns: 1fr;
+  }
+}
