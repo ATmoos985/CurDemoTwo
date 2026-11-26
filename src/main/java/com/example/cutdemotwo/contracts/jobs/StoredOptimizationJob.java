@@ -1,5 +1,6 @@
 package com.example.cutdemotwo.contracts.jobs;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.security.MessageDigest;
@@ -8,9 +9,20 @@ import java.util.HexFormat;
 import java.util.Set;
 
 /** 内部持久化作业文档契约；幂等键绝不向公开作业响应暴露。 */
-public record StoredOptimizationJob(String idempotencyKey, OptimizationRequest input,
-                                    OptimizationJob job, OptimizationResult result) {
+public record StoredOptimizationJob(
+        String idempotencyKey,
+        OptimizationRequest input,
+        OptimizationJob job,
+        OptimizationResult result,
+        @JsonInclude(JsonInclude.Include.NON_NULL) WorkbenchJobSource workbenchSource
+) {
     private static final JsonMapper JSON = JsonMapper.builder().build();
+
+    /** 兼容旧 4 参构造器及不含 workbenchSource 的历史持久化快照。 */
+    public StoredOptimizationJob(String idempotencyKey, OptimizationRequest input,
+                                 OptimizationJob job, OptimizationResult result) {
+        this(idempotencyKey, input, job, result, null);
+    }
 
     public static String inputHash(OptimizationRequest input) {
         try {
@@ -27,6 +39,6 @@ public record StoredOptimizationJob(String idempotencyKey, OptimizationRequest i
         var next = new OptimizationJob(job.id(), job.schemaVersion(), job.clientRequestId(), job.inputHash(), state, phase,
                 job.createdAt(), "RUNNING".equals(state) && job.startedAt() == null ? now : job.startedAt(),
                 terminal ? now : null, job.timeLimitSeconds(), result == null ? null : "/api/v2/optimization-results/" + job.id(), code, message);
-        return new StoredOptimizationJob(idempotencyKey, input, next, result);
+        return new StoredOptimizationJob(idempotencyKey, input, next, result, workbenchSource);
     }
 }

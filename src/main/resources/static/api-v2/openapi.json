@@ -4791,6 +4791,353 @@
           }
         }
       }
+    },
+    "/api/v2/workbench/tasks/{taskId}/plan-jobs": {
+      "post": {
+        "summary": "按任务剩余待排量与指定材料一键装配并提交 2D/1D 试排作业（不写库存）",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkbenchPlanJobRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted workbench optimization job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchPlanJobResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task or material not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Material not ready, no open demand, or unsupported constraint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Queue or archive limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable engine or persistence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/workbench/tasks/{taskId}/result-comparison": {
+      "get": {
+        "summary": "同口径比较同一任务下的两份已归档排料结果",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "leftId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "rightId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workbench same-basis result comparison",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchComparison"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid comparison arguments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Result not found under task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Result not yet available or archive inconsistent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/workbench/results/{resultId}/context": {
+      "get": {
+        "summary": "查询归档结果的完整工作台上下文与深链地址（不暴露幂等键）",
+        "parameters": [
+          {
+            "name": "resultId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Archived result with workbench source and task summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchResultContext"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid resultId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job or result not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/workbench/drafts": {
+      "post": {
+        "summary": "创建持久化待人工确认排料草案（绝不修改实物库存）",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkbenchCreateDraftRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Persisted draft awaiting human confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchSchemeDraft"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid draft request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Result not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Result not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Task or material mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/workbench/drafts/{draftId}": {
+      "get": {
+        "summary": "查询持久化草案并动态重算过期与库存/任务版本漂移状态",
+        "parameters": [
+          {
+            "name": "draftId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Persisted draft with live expiry and staleness evaluation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchSchemeDraft"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid draftId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Draft not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -10059,6 +10406,723 @@
             "items": {
               "$ref": "#/components/schemas/ProcurementSuggestionItem"
             }
+          }
+        }
+      },
+      "WorkbenchPlanJobRequest": {
+        "type": "object",
+        "required": [
+          "materialType"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "materialType": {
+            "type": "string",
+            "enum": [
+              "STOCK_ROLL",
+              "REMNANT",
+              "FREE_CANVAS"
+            ]
+          },
+          "materialId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "widthMm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "exclusiveMinimum": 0
+          },
+          "windowStartMm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "windowLengthMm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "exclusiveMinimum": 0
+          },
+          "processMode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "GUILLOTINE",
+              "CONTOUR",
+              "CROSSCUT",
+              "SLITTING_1D",
+              null
+            ]
+          },
+          "objective": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "allowGapFill": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "pieceGapMm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100
+          },
+          "trimStartMm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "avoidDefects": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "timeLimitSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 180
+          }
+        }
+      },
+      "WorkbenchJobSource": {
+        "type": "object",
+        "required": [
+          "taskId",
+          "actor",
+          "taskRevision",
+          "materialType",
+          "materialId",
+          "materialRevision",
+          "physicalWidthMm",
+          "windowStartMm",
+          "windowLengthMm",
+          "rectGapPaddingMm",
+          "sourceLines"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "taskRevision": {
+            "type": "integer"
+          },
+          "materialType": {
+            "type": "string",
+            "enum": [
+              "STOCK_ROLL",
+              "REMNANT",
+              "FREE_CANVAS"
+            ]
+          },
+          "materialId": {
+            "type": "string"
+          },
+          "materialRevision": {
+            "type": "integer"
+          },
+          "physicalWidthMm": {
+            "type": "number"
+          },
+          "windowStartMm": {
+            "type": "number"
+          },
+          "windowLengthMm": {
+            "type": "number"
+          },
+          "rectGapPaddingMm": {
+            "type": "number"
+          },
+          "sourceLines": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "dimension": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "materialLabel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "avoidDefects": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "trimStartMm": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "pieceGapMm": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        }
+      },
+      "WorkbenchPlanJobResponse": {
+        "type": "object",
+        "required": [
+          "job",
+          "source",
+          "workbenchUrl"
+        ],
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/OptimizationJob"
+          },
+          "source": {
+            "$ref": "#/components/schemas/WorkbenchJobSource"
+          },
+          "workbenchUrl": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkbenchComparisonDemand": {
+        "type": "object",
+        "required": [
+          "demandId",
+          "name",
+          "requested",
+          "placed",
+          "unplaced"
+        ],
+        "properties": {
+          "demandId": {
+            "type": "integer"
+          },
+          "sourceLineId": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "requested": {
+            "type": "integer"
+          },
+          "placed": {
+            "type": "integer"
+          },
+          "unplaced": {
+            "type": "integer"
+          }
+        }
+      },
+      "WorkbenchMaterialWindow": {
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "revision",
+          "widthMm",
+          "windowStartMm",
+          "windowLengthMm",
+          "taskRevision"
+        ],
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "widthMm": {
+            "type": "number"
+          },
+          "windowStartMm": {
+            "type": "number"
+          },
+          "windowLengthMm": {
+            "type": "number"
+          },
+          "taskRevision": {
+            "type": "integer"
+          }
+        }
+      },
+      "WorkbenchComparisonSide": {
+        "type": "object",
+        "required": [
+          "resultId",
+          "inputHash",
+          "problemType",
+          "fulfillmentStatus",
+          "requested",
+          "placed",
+          "unplaced",
+          "demands",
+          "lengthBasis",
+          "rectGapPaddingMm",
+          "materialWindow",
+          "metrics"
+        ],
+        "properties": {
+          "resultId": {
+            "type": "string"
+          },
+          "inputHash": {
+            "type": "string"
+          },
+          "problemType": {
+            "type": "string"
+          },
+          "fulfillmentStatus": {
+            "type": "string"
+          },
+          "requested": {
+            "type": "integer"
+          },
+          "placed": {
+            "type": "integer"
+          },
+          "unplaced": {
+            "type": "integer"
+          },
+          "demands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchComparisonDemand"
+            }
+          },
+          "occupiedLengthMm": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "lengthBasis": {
+            "type": "string"
+          },
+          "rectGapPaddingMm": {
+            "type": "number"
+          },
+          "materialWindow": {
+            "$ref": "#/components/schemas/WorkbenchMaterialWindow"
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Metric"
+            }
+          }
+        }
+      },
+      "WorkbenchMetricDelta": {
+        "type": "object",
+        "required": [
+          "name",
+          "status"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "left": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Metric"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "right": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Metric"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delta": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "COMPARABLE",
+              "DIFFERENT_CONSTRAINTS",
+              "DIFFERENT_CONTEXT",
+              "INCOMPATIBLE_METRIC"
+            ]
+          }
+        }
+      },
+      "WorkbenchLengthComparison": {
+        "type": "object",
+        "required": [
+          "status",
+          "basis",
+          "reason"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "COMPARABLE",
+              "DIFFERENT_CONTEXT",
+              "DIFFERENT_CONSTRAINTS",
+              "INCOMPLETE",
+              "UNAVAILABLE"
+            ]
+          },
+          "shorterResultId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "savedLengthMm": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "basis": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkbenchComparison": {
+        "type": "object",
+        "required": [
+          "taskId",
+          "left",
+          "right",
+          "sameConstraints",
+          "constraintDifferences",
+          "metricDeltas",
+          "lengthComparison"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "left": {
+            "$ref": "#/components/schemas/WorkbenchComparisonSide"
+          },
+          "right": {
+            "$ref": "#/components/schemas/WorkbenchComparisonSide"
+          },
+          "sameConstraints": {
+            "type": "boolean"
+          },
+          "constraintDifferences": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metricDeltas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchMetricDelta"
+            }
+          },
+          "lengthComparison": {
+            "$ref": "#/components/schemas/WorkbenchLengthComparison"
+          }
+        }
+      },
+      "WorkbenchResultContext": {
+        "type": "object",
+        "required": [
+          "resultId",
+          "job",
+          "input",
+          "workbenchUrl"
+        ],
+        "properties": {
+          "resultId": {
+            "type": "string"
+          },
+          "job": {
+            "$ref": "#/components/schemas/OptimizationJob"
+          },
+          "input": {
+            "$ref": "#/components/schemas/OptimizationRequest"
+          },
+          "result": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OptimizationResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WorkbenchJobSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "taskSummary": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "workbenchUrl": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkbenchCreateDraftRequest": {
+        "type": "object",
+        "required": [
+          "resultId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "resultId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "taskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "materialId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "materialType": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "STOCK_ROLL",
+              "REMNANT",
+              "FREE_CANVAS",
+              null
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500
+          },
+          "ttlSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 86400
+          }
+        }
+      },
+      "WorkbenchDraftTarget": {
+        "type": "object",
+        "required": [
+          "resultId"
+        ],
+        "properties": {
+          "resultId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "materialId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "materialType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "WorkbenchDraftRiskCheck": {
+        "type": "object",
+        "required": [
+          "code",
+          "passed",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkbenchSchemeDraft": {
+        "type": "object",
+        "required": [
+          "id",
+          "draftId",
+          "status",
+          "approvalToken",
+          "contentHash",
+          "issuedAt",
+          "expiresAt",
+          "ttlSeconds",
+          "requiresHumanConfirmation",
+          "inventoryMutated",
+          "stale",
+          "staleReasons",
+          "target",
+          "riskChecks",
+          "workbenchUrl",
+          "nextStep"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "draftId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING_CONFIRMATION",
+              "EXPIRED"
+            ]
+          },
+          "approvalToken": {
+            "type": "string"
+          },
+          "contentHash": {
+            "type": "string"
+          },
+          "issuedAt": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "ttlSeconds": {
+            "type": "integer"
+          },
+          "requiresHumanConfirmation": {
+            "type": "boolean",
+            "const": true
+          },
+          "inventoryMutated": {
+            "type": "boolean",
+            "const": false
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "staleReasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "target": {
+            "$ref": "#/components/schemas/WorkbenchDraftTarget"
+          },
+          "riskChecks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchDraftRiskCheck"
+            }
+          },
+          "workbenchUrl": {
+            "type": "string"
+          },
+          "nextStep": {
+            "type": "string"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "snapshotTaskRevision": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "snapshotMaterialRevision": {
+            "type": [
+              "integer",
+              "null"
+            ]
           }
         }
       }

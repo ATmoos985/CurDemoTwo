@@ -353,8 +353,9 @@ public final class JdbcOptimizationJobStore implements LeasedOptimizationJobStor
                 if (r.lease() <= completedAt) return false;
             }
             if (next.job().terminal() != terminal || !next.job().id().equals(current.job().id())
-                    || !next.input().equals(current.input()) || !next.idempotencyKey().equals(current.idempotencyKey()))
-                throw new IllegalArgumentException("作业事务不能改写输入、身份或预期终态");
+                    || !next.input().equals(current.input()) || !next.idempotencyKey().equals(current.idempotencyKey())
+                    || !Objects.equals(next.workbenchSource(), current.workbenchSource()))
+                throw new IllegalArgumentException("作业事务不能改写输入、来源上下文、身份或预期终态");
             if (!terminal && !"RUNNING".equals(current.job().state())) return false;
             if (terminal) {
                 String required = "TIMED_OUT".equals(current.job().code()) ? "TIMED_OUT" : "CANCELLED";

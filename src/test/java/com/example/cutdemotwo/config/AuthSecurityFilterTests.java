@@ -236,13 +236,22 @@ class AuthSecurityFilterTests {
         assertEquals(403, invoke(filter, "POST", "/api/v2/quality/remnants/REM-1/release", plannerToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/demo/inventory", plannerToken).getStatus());
 
-        // 阶段四只读分析与 SSE 对已认证其他角色开放，而联合排产/分床 POST 仅限 ADMIN / PLANNER
+        // 阶段四只读分析与 SSE 对已认证其他角色开放，而联合排产/分床与工作台编排/草案 POST 仅限 ADMIN / PLANNER
         assertEquals(200, invoke(filter, "POST", "/api/v2/planning/multi-material", adminToken).getStatus());
         assertEquals(200, invoke(filter, "POST", "/api/v2/planning/cut-plan", adminToken).getStatus());
+        assertEquals(200, invoke(filter, "POST", "/api/v2/workbench/tasks/T-1/plan-jobs", adminToken).getStatus());
+        assertEquals(200, invoke(filter, "POST", "/api/v2/workbench/drafts", adminToken).getStatus());
+        assertEquals(200, invoke(filter, "POST", "/api/v2/workbench/tasks/T-1/plan-jobs", plannerToken).getStatus());
+        assertEquals(200, invoke(filter, "POST", "/api/v2/workbench/drafts", plannerToken).getStatus());
+        assertEquals(200, invoke(filter, "GET", "/api/v2/workbench/drafts/DFT-1", operatorToken).getStatus());
+        assertEquals(200, invoke(filter, "GET", "/api/v2/workbench/results/RES-1/context", operatorToken).getStatus());
         assertEquals(200, invoke(filter, "GET", "/api/v2/analytics/cost-summary", operatorToken).getStatus());
         assertEquals(200, invoke(filter, "GET", "/api/v2/optimization-jobs/JOB-1/events", operatorToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/v2/planning/multi-material", operatorToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/v2/planning/cut-plan", warehouseToken).getStatus());
+        assertEquals(403, invoke(filter, "POST", "/api/v2/workbench/tasks/T-1/plan-jobs", operatorToken).getStatus());
+        assertEquals(403, invoke(filter, "POST", "/api/v2/workbench/drafts", warehouseToken).getStatus());
+        assertEquals(403, invoke(filter, "POST", "/api/v2/workbench/drafts", inspectorToken).getStatus());
 
         // 下游抛异常时也必须写入并在 finally 清理 AuthContext
         var req = new MockHttpServletRequest("POST", "/api/v2/schemes/confirm");

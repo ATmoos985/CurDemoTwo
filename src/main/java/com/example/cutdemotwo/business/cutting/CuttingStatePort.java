@@ -22,7 +22,7 @@ import java.util.function.Function;
  * 为排程工作室与查询协作者提供有界事务内的只读视图与受控写操作，
  * 隔离底层内存聚合存储结构，禁止暴露内部可变 Map 或序列化器引用。
  */
-interface CuttingStatePort {
+public interface CuttingStatePort {
 
     <T> T inRead(Function<ReadView, T> query);
 

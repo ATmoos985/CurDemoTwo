@@ -11,10 +11,10 @@ import java.util.List;
  * 并换算为工位局部坐标（{@code margin = 0}），同时完整保留疵点类型、严重度、扣分与避让策略等元数据，
  * 确保窗外边界疵点的安全禁区绝不因实体在窗外而被丢弃。
  */
-final class DefectWindowSupport {
+public final class DefectWindowSupport {
     private DefectWindowSupport() {}
 
-    static List<Defect> sliceForWindow(List<Defect> defects, double startY, double windowLen, double rollWidth) {
+    public static List<Defect> sliceForWindow(List<Defect> defects, double startY, double windowLen, double rollWidth) {
         if (defects == null || defects.isEmpty()) {
             return List.of();
         }
