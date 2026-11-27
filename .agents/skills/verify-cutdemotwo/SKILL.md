@@ -10,12 +10,14 @@ description: >-
 
 本技能面向接手任务、首次操作本仓库的 Agent，提供**零猜测、零污染正式 `8080` 与正式 `data/cutdemo-state.json`** 的真机验收标准流。
 
-- **主交互面**：React SPA 工作台（`http://127.0.0.1:<PORT>/app/`，5 组 12 项导航，Hash 路由 `#/workbench` 等）
-- **次交互面**：Spring Boot REST / SSE API（`/api/*`、`/api/v2/*`）、OpenAPI 3.1（`/api-v2/openapi.json`）、MCP 服务（`integrations/mcp`）
+- **主交互面**：React SPA 工作台（`http://127.0.0.1:<PORT>/app/`，5 组 12 项导航，14 个现代 Hash 路由如 `#/workbench`、`#/slitting` 及 `?taskId=&resultId=&draftId=` 深链）
+- **次交互面**：Spring Boot REST / SSE API（`/api/*`、`/api/v2/*`、`/api/v2/workbench/*`）、OpenAPI 3.1（`/api-v2/openapi.json`）、MCP 服务（`integrations/mcp`，22 工具 + PNG 预览）
 - **统一辅助控制器**：[`scripts/verify-ctl.mjs`](./scripts/verify-ctl.mjs)（零外部依赖，跨平台）
 - **功能验收地图索引**：[`features/README.md`](./features/README.md)（驱动前必读）
 
-> **铁律**：严禁将任何自动化验收指向正式 `8080` 端口；严禁向正式 `data/cutdemo-state.json` 注入测试单据；清理过程严禁按 `java.exe` 进程名强杀（防止误杀用户常驻 `8080` 服务）。
+> **铁律**：严禁将任何自动化验收指向正式 `8080` 端口；严禁向正式 `data/cutdemo-state.json` 及 `data/cutdemo-state.json.drafts` 注入测试单据；清理过程严禁按 `java.exe` 进程名强杀（防止误杀用户常驻 `8080` 服务）。
+>
+> **Windows / Agent 进程生命周期提示**：在带 Job Object 进程组回收的命令执行器中，跨不同 shell 会话的独立后台子进程可能被系统自动终止；务必在**同一条 shell 会话**内以 `try / finally` 串联 `launch → doctor → drive → cleanup`。
 
 ---
 
@@ -31,7 +33,7 @@ node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs launch --port 18091
 node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs launch --port 18092 --auth
 ```
 
-- **数据物理隔离**：自动在系统临时目录 `os.tmpdir()/cutdemo-verify/run-<runId>/` 下设置 `--cutdemo.state.path=<tmpDir>/cutdemo-state.json`（后端自动将作业存储 `.jobs` 与集成 Outbox `.integrations` 隔离至同前缀目录）并开启 `--cutdemo.seed-demo-data=true`。
+- **数据物理隔离**：自动在系统临时目录 `os.tmpdir()/cutdemo-verify/run-<runId>/` 下显式隔离 `--cutdemo.state.path`、`--cutdemo.jobs.path`、`--cutdemo.integration.path` 与 `--cutdemo.workbench.drafts.path`（防止外部环境变量污染正式 `data/` 目录），并开启 `--cutdemo.seed-demo-data=true`。
 - **可用就绪判据**：并非只看端口监听，必须同时满足进程存活 + `GET /app/` 返回 `200` + `GET /api/health` 返回 `status="UP"` 且 `storageStatus="UP"`（认证模式改为校验 `GET /api/v2/auth/me` 返回 `enabled=true`）。
 - **启动输出**：返回 JSON 中的 `sessionFile`、`baseUrl`、`evidenceDir` 与正式库存启动前 `prodStateSha256Before`。
 
@@ -50,14 +52,14 @@ node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs doctor --session "<
 2. 磁盘 `target/CutDemoTwo-0.0.1-SNAPSHOT.jar` 与运行中实例一致（未因重新打包而陈旧）；
 3. `GET /app/` 返回 HTTP 200；
 4. 免登模式：`GET /api/health` 为 `UP` 且 `storageStatus=UP`，且 `GET /api/v2/inventory-ledger/reconciliation` 为 `BALANCED`；认证模式：`GET /api/v2/auth/me` 返回 `enabled=true`；
-5. 正式 `data/cutdemo-state.json` 的 SHA-256 与启动前一致；
+5. 正式 `data/cutdemo-state.json` 的 SHA-256 与正式 `data/cutdemo-state.json.drafts` 目录指纹与启动前一致；
 6. 自动报告探测到的本机 `playwright` / `playwright/test` 模块与 Chrome/Edge 可执行路径。
 
 ---
 
 ## Drive（驱动验收脚本与地图）
 
-先查阅 [`features/README.md`](./features/README.md) 选择对应功能地图，优先通过控制器驱动仓库现役 4 套 Playwright 脚本：
+先查阅 [`features/README.md`](./features/README.md) 选择对应功能地图，优先通过控制器驱动仓库现役 4 套 Playwright 脚本及技能配套 2 套闭环脚本：
 
 ```powershell
 # A. 全路由渲染、旧书签重定向、筛选与零写零错冒烟（22 项，只读）
@@ -71,6 +73,12 @@ node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs drive --session "<s
 
 # D. 服装多门幅唛架对比、180° 旋转、补空与四大件 DXF 压紧验收（28 项，需 playwright/test）
 node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs drive --session "<sessionFile>" --script garment-width
+
+# E. 22 工具工业级 MCP stdio 真机闭环（含 PNG 预览图、持久化草案与库存零污染，零浏览器依赖）
+node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs drive --session "<sessionFile>" --script mcp-live-smoke
+
+# F. 服装第二 Tab 订单自动分床（GARM-06）+ 工作台深链预览/草案预检/版本漂移告警（DEEP-01..03）
+node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs drive --session "<sessionFile>" --script deeplink-and-cutplan
 ```
 
 ### 配套无头自动化套件（按改动范围按需组合）
@@ -108,12 +116,13 @@ node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs cleanup --session "
 
 清理逻辑保证：
 1. 仅按 `sessionFile` 中记录的精确 `pid` 终止进程树（Windows `taskkill /pid <pid> /t /f`，POSIX `SIGTERM`/`SIGKILL`），绝不波及正式 `8080`；
-2. 删除隔离临时目录 `run-<runId>/`（临时状态文件、`.jobs`、`.integrations`、临时日志）；
+2. 删除隔离临时目录 `run-<runId>/`（临时状态文件、`.jobs`、`.integrations`、`.drafts`、临时日志）；
 3. **保留全部证据文件**并输出存活证据文件名清单；
-4. 自动复核端口已释放，且正式 `data/cutdemo-state.json` 的 SHA-256 严格零变动（`prodInventoryUntouched: true`）。
+4. 自动复核端口已释放，且正式 `data/cutdemo-state.json` 的 SHA-256 及正式 `data/cutdemo-state.json.drafts` 目录指纹严格零变动（`prodInventoryUntouched: true`、`prodDraftsUntouched: true`）。
 
 ---
 
 ## Helpers（附带脚本说明）
 
-- [`scripts/verify-ctl.mjs`](./scripts/verify-ctl.mjs)：唯一辅助脚本，提供 `launch`、`doctor`、`drive`、`cleanup` 四个子命令，已覆盖自动探测本机 `playwright` / `playwright-core` / `playwright/test` 与系统 Chrome/Edge，亦可通过环境变量 `PLAYWRIGHT_MODULE` 与 `CHROME_PATH` 显式覆写。
+- [`scripts/verify-ctl.mjs`](./scripts/verify-ctl.mjs)：统一验收控制器，提供 `launch`、`doctor`、`drive`、`cleanup` 四个子命令，已覆盖自动探测本机 `playwright` / `playwright-core` / `playwright/test` 与系统 Chrome/Edge，并支持零浏览器依赖的 `mcp-live-smoke`。
+- [`scripts/verify-deeplink-and-cutplan.mjs`](./scripts/verify-deeplink-and-cutplan.mjs)：技能自有真机补充驱动，覆盖服装第二 Tab 订单自动分床（`GARM-06`）与工作台深链/草案/版本漂移告警（`DEEP-01..03`）。

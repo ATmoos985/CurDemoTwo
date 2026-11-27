@@ -18,8 +18,9 @@
 
 ## 功能地图索引
 
-1. [导航壳层、主路由渲染与旧书签重定向](./navigation-and-ui-smoke.md) — 覆盖 5 组 12 项导航、13 现代路由与 6 类旧路由自动跳转、只读筛选、零写零错（对应 `ui-preview`）。
-2. [下单到完工记账全流程闭环](./order-to-cutting-closure.md) — 覆盖新建订单、需求库、搭切工作台 2D/多料联排选定锁料、A4 车间派工单、新建待检母卷与质检放行绑卷、二次确认完工记账、母卷空间条与设置弹窗（对应 `unified-workflow`）。
-3. [带孔 CNC 加工、20mm 避疵窗、跨任务复检对账与画布性能](./cam-holes-defects-and-reconciliation.md) — 覆盖异形内孔先切后外 G-Code、边界 20mm 疵点零侵入、双任务复检三端净良品与残值守恒、80 件四层 Konva 缩放/平移帧耗时基线（对应 `closure-perf`）。
-4. [服装多门幅唛架对比与订单自动分床](./garment-marker-and-cutplan.md) — 覆盖 180° 掉头与固定方向对比、同款补空、18 个内置与 DXF 服装示例、四大件 16 片压紧及第二 Tab 自动分床（对应 `garment-width`）。
-5. [库存台账、验布质检放行、单据过账与企业认证接口](./inventory-inspection-and-auth-api.md) — 覆盖卷料来料质检放行、待检卷禁领料、采购/领退料单据、库存账本对账 `BALANCED` 及 `--auth` 模式 HS256/RBAC/SSE 鉴权验证。
+1. [导航壳层、主路由渲染与旧书签重定向](./navigation-and-ui-smoke.md) — 覆盖 5 组 12 项导航、14 现代路由（含 `#/slitting`）与 6 类旧路由自动跳转、只读筛选、零写零错（对应 `ui-preview`）。
+2. [下单到完工记账全流程闭环](./order-to-cutting-closure.md) — 覆盖新建订单、需求库、搭切工作台 2D 求解选定锁料、A4 车间派工单、新建待检母卷与质检放行绑卷、二次确认完工记账、母卷空间条与设置弹窗（对应 `unified-workflow`）。
+3. [带孔 CNC 加工、20mm 避疵窗、跨任务复检对账与画布性能](./cam-holes-defects-and-reconciliation.md) — 覆盖异形内孔先切后外 G-Code、边界 20mm 疵点零侵入、双任务复检三端净良品与残值守恒、80 件四层 Konva 缩放/中键平移帧耗时基线（对应 `closure-perf`）。
+4. [服装多门幅唛架对比与订单自动分床](./garment-marker-and-cutplan.md) — 覆盖 180° 掉头与固定方向对比、同款补空、18 个内置与 DXF 服装示例、四大件 16 片压紧（对应 `garment-width`）及第二 Tab 单色多尺码自动分床（对应 `deeplink-and-cutplan`）。
+5. [库存台账、验布质检放行、单据过账与企业认证接口](./inventory-inspection-and-auth-api.md) — 覆盖卷料来料质检放行（`PENDING → PASSED/FAILED`）、待检卷禁领料、采购/领退料单据、库存账本对账 `BALANCED`（`issues: []`）及 `--auth` 模式 HS256/5 角色 RBAC（含 `/api/v2/workbench/**`）/Bearer SSE 鉴权验证。
+6. [工作台编排求解、22 工具工业 MCP 与深链预览闭环](./workbench-orchestration-mcp-and-deeplink.md) — 覆盖 `/api/v2/workbench/**` 5 端点、22 工具工业级 MCP 与零依赖 PNG 预览（对应 `mcp-live-smoke`），以及 `#/workbench?taskId=&resultId=&draftId=` 深链画布预览与版本漂移告警（对应 `deeplink-and-cutplan`）。

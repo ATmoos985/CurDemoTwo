@@ -6,13 +6,13 @@
  *   launch  [--port 18091] [--run-id <id>] [--jar <path>] [--evidence-dir <dir>]
  *           [--auth] [--auth-secret <secret>] [--auth-users <users>] [--timeout-sec 45]
  *   doctor  --session <session.json>
- *   drive   --session <session.json> --script <ui-preview|unified-workflow|closure-perf|garment-width>
+ *   drive   --session <session.json> --script <ui-preview|unified-workflow|closure-perf|garment-width|mcp-live-smoke|deeplink-and-cutplan>
  *           [--perf-budget-ms 120]
  *   cleanup --session <session.json>
  *
  * 安全红线：
  *   1. 严禁连接或启停 8080 端口；
- *   2. 数据、作业与 Outbox 全量隔离于临时目录，绝不写入正式 data/cutdemo-state.json；
+ *   2. 状态、作业、Outbox 与工作台草案目录全量显式隔离于临时目录，绝不写入正式 data/；
  *   3. 清理仅按会话 PID 精准停服并删除临时目录，绝不按进程名误杀，且绝不删除证据目录。
  */
 
@@ -29,6 +29,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const PROD_STATE_FILE = path.join(REPO_ROOT, 'data', 'cutdemo-state.json');
+const PROD_DRAFTS_DIR = path.join(REPO_ROOT, 'data', 'cutdemo-state.json.drafts');
 const DEFAULT_JAR = path.join(REPO_ROOT, 'target', 'CutDemoTwo-0.0.1-SNAPSHOT.jar');
 const VERIFY_BASE_TMP = path.join(os.tmpdir(), 'cutdemo-verify');
 const require = createRequire(import.meta.url);
@@ -37,23 +38,40 @@ const SCRIPTS = {
   'ui-preview': {
     file: path.join(REPO_ROOT, 'src', 'test', 'browser', 'app-ui-preview.cjs'),
     runner: 'node',
+    needsBrowser: true,
     needsTestRunner: false
   },
   'unified-workflow': {
     file: path.join(REPO_ROOT, 'src', 'test', 'browser', 'app-unified-workflow.cjs'),
     runner: 'node',
+    needsBrowser: true,
     needsTestRunner: false
   },
   'closure-perf': {
     file: path.join(REPO_ROOT, 'src', 'test', 'browser', 'app-react-closure-and-perf.cjs'),
     runner: 'node',
+    needsBrowser: true,
     needsTestRunner: false,
     supportsResultFile: true
   },
   'garment-width': {
     file: path.join(REPO_ROOT, 'src', 'test', 'browser', 'garment-width.cjs'),
     runner: 'node-test',
+    needsBrowser: true,
     needsTestRunner: true
+  },
+  'mcp-live-smoke': {
+    file: path.join(REPO_ROOT, 'integrations', 'mcp', 'test', 'live-smoke.mjs'),
+    runner: 'node',
+    needsBrowser: false,
+    needsTestRunner: false,
+    mcpSmokeEnv: true
+  },
+  'deeplink-and-cutplan': {
+    file: path.join(__dirname, 'verify-deeplink-and-cutplan.mjs'),
+    runner: 'node',
+    needsBrowser: true,
+    needsTestRunner: false
   }
 };
 
@@ -84,6 +102,18 @@ function sha256File(filePath) {
   if (!fs.existsSync(filePath)) return null;
   const hash = createHash('sha256');
   hash.update(fs.readFileSync(filePath));
+  return hash.digest('hex');
+}
+
+function fingerprintDir(dirPath) {
+  if (!dirPath || !fs.existsSync(dirPath)) return 'ABSENT';
+  const hash = createHash('sha256');
+  const entries = fs.readdirSync(dirPath).sort();
+  for (const name of entries) {
+    const full = path.join(dirPath, name);
+    const stat = fs.statSync(full);
+    hash.update(`${name}|${stat.isDirectory() ? 'D' : 'F'}|${stat.size}|${Math.round(stat.mtimeMs)}\n`);
+  }
   return hash.digest('hex');
 }
 
@@ -265,6 +295,7 @@ async function cmdLaunch(flags) {
   const sessionFile = path.join(VERIFY_BASE_TMP, `${runId}.session.json`);
   const jarStat = fs.statSync(jarPath);
   const prodHashBefore = sha256File(PROD_STATE_FILE);
+  const prodDraftsBefore = fingerprintDir(PROD_DRAFTS_DIR);
 
   const javaArgs = [
     '-jar',
@@ -272,6 +303,9 @@ async function cmdLaunch(flags) {
     `--server.port=${port}`,
     '--server.address=127.0.0.1',
     `--cutdemo.state.path=${statePath}`,
+    `--cutdemo.jobs.path=${statePath}.jobs`,
+    `--cutdemo.integration.path=${statePath}.integrations`,
+    `--cutdemo.workbench.drafts.path=${statePath}.drafts`,
     '--cutdemo.seed-demo-data=true'
   ];
   if (flags.auth) {
@@ -354,6 +388,8 @@ async function cmdLaunch(flags) {
     evidenceDir,
     prodStateFile: PROD_STATE_FILE,
     prodStateSha256Before: prodHashBefore,
+    prodDraftsDir: PROD_DRAFTS_DIR,
+    prodDraftsFingerprintBefore: prodDraftsBefore,
     startedAt: new Date().toISOString()
   };
   fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2), 'utf8');
@@ -419,10 +455,19 @@ async function cmdDoctor(flags) {
 
     const reconRes = await fetchJsonOrText(`${s.baseUrl}/api/v2/inventory-ledger/reconciliation`, 3000);
     const rOk = reconRes.ok && (reconRes.json?.status === 'BALANCED' || reconRes.json?.balanced === true);
+    const reconSummary = reconRes.ok
+      ? JSON.stringify({
+          status: reconRes.json?.status,
+          revision: reconRes.json?.revision,
+          entryCount: reconRes.json?.entryCount,
+          issueCount: Array.isArray(reconRes.json?.issues) ? reconRes.json.issues.length : null,
+          issues: Array.isArray(reconRes.json?.issues) ? reconRes.json.issues.slice(0, 5) : reconRes.json?.issues
+        })
+      : `HTTP ${reconRes.status}`;
     checks.push({
       name: 'ledger_reconciliation_balanced',
       pass: rOk,
-      detail: reconRes.ok ? JSON.stringify(reconRes.json).slice(0, 160) : `HTTP ${reconRes.status}`
+      detail: reconSummary
     });
     if (!rOk) healthy = false;
   }
@@ -435,6 +480,16 @@ async function cmdDoctor(flags) {
     detail: prodUntouched ? 'SHA-256 零变动' : `变更: ${s.prodStateSha256Before} -> ${prodHashNow}`
   });
   if (!prodUntouched) healthy = false;
+
+  const prodDraftsNow = fingerprintDir(s.prodDraftsDir || PROD_DRAFTS_DIR);
+  const prodDraftsUntouched =
+    s.prodDraftsFingerprintBefore === undefined || prodDraftsNow === s.prodDraftsFingerprintBefore;
+  checks.push({
+    name: 'prod_drafts_untouched',
+    pass: prodDraftsUntouched,
+    detail: prodDraftsUntouched ? '正式草案目录零变动' : `变更: ${s.prodDraftsFingerprintBefore} -> ${prodDraftsNow}`
+  });
+  if (!prodDraftsUntouched) healthy = false;
 
   const browserPath = resolveBrowserExecutable();
   const pwModule = resolvePlaywrightModule(false);
@@ -469,17 +524,22 @@ async function cmdDrive(flags) {
     throw new Error(`隔离实例进程（pid=${s.pid}）已退出，请先重新 launch 或执行 doctor`);
   }
 
-  const pwModule = resolvePlaywrightModule(spec.needsTestRunner);
-  if (!pwModule) {
-    throw new Error(
-      `未探测到 ${spec.needsTestRunner ? 'playwright/test' : 'playwright / playwright-core'} 模块，请设置环境变量 PLAYWRIGHT_MODULE`
-    );
+  let pwModule = null;
+  let browserExe = null;
+  if (spec.needsBrowser) {
+    pwModule = resolvePlaywrightModule(spec.needsTestRunner);
+    if (!pwModule) {
+      throw new Error(
+        `未探测到 ${spec.needsTestRunner ? 'playwright/test' : 'playwright / playwright-core'} 模块，请设置环境变量 PLAYWRIGHT_MODULE`
+      );
+    }
+    browserExe = resolveBrowserExecutable();
   }
-  const browserExe = resolveBrowserExecutable();
   const env = {
     ...process.env,
     BASE_URL: s.baseUrl,
-    PLAYWRIGHT_MODULE: pwModule,
+    ...(spec.mcpSmokeEnv ? { CUTTING_TEST_API_URL: s.baseUrl } : {}),
+    ...(pwModule ? { PLAYWRIGHT_MODULE: pwModule } : {}),
     ...(browserExe ? { CHROME_PATH: browserExe } : {})
   };
 
@@ -510,8 +570,8 @@ async function cmdDrive(flags) {
     `# Timestamp: ${new Date().toISOString()}`,
     `# BaseURL: ${s.baseUrl}`,
     `# Script: ${path.relative(REPO_ROOT, spec.file)}`,
-    `# Playwright: ${pwModule}`,
-    `# Browser: ${browserExe || '(playwright bundled)'}`,
+    `# Playwright: ${pwModule || '(not required)'}`,
+    `# Browser: ${spec.needsBrowser ? browserExe || '(playwright bundled)' : '(not required)'}`,
     `# ExitCode: ${res.status}`,
     `# DurationMs: ${durationMs}`,
     '',
@@ -572,13 +632,16 @@ async function cmdCleanup(flags) {
   const evidenceFiles = evidenceExists ? fs.readdirSync(s.evidenceDir).sort() : [];
   const prodHashAfter = sha256File(s.prodStateFile);
   const prodUntouched = prodHashAfter === s.prodStateSha256Before;
+  const prodDraftsAfter = fingerprintDir(s.prodDraftsDir || PROD_DRAFTS_DIR);
+  const prodDraftsUntouched =
+    s.prodDraftsFingerprintBefore === undefined || prodDraftsAfter === s.prodDraftsFingerprintBefore;
   const portFree = await checkPortFree(s.port);
 
   if (fs.existsSync(resolved) && !stillAlive) {
     fs.rmSync(resolved, { force: true });
   }
 
-  const ok = !stillAlive && tmpRemoved && evidenceExists && prodUntouched && portFree;
+  const ok = !stillAlive && tmpRemoved && evidenceExists && prodUntouched && prodDraftsUntouched && portFree;
   console.log(
     JSON.stringify(
       {
@@ -591,6 +654,7 @@ async function cmdCleanup(flags) {
         evidenceDir: s.evidenceDir,
         evidenceFiles,
         prodInventoryUntouched: prodUntouched,
+        prodDraftsUntouched,
         prodStateSha256Before: s.prodStateSha256Before,
         prodStateSha256After: prodHashAfter
       },

@@ -14,10 +14,10 @@
 ## How to get to it (user POV)
 
 - 订单创建与池化：`新建订单`（`#/demands`）→ `待排订单`（`#/demand-library`）
-- 排料与选定：`搭切工作台`（`#/workbench`），支持 2D 虚拟新卷、在库母卷、料头与第 4 种投料源「多料联排」
+- 排料与选定：`搭切工作台`（`#/workbench`），支持 2D 虚拟新卷、在库母卷、料头与第 4 种投料源「多料联排」（注：`unified-workflow` 自动化脚本覆盖虚拟新卷链路；外部试排深链 `#/workbench?taskId=&resultId=&draftId=` 见 [`workbench-orchestration-mcp-and-deeplink.md`](./workbench-orchestration-mcp-and-deeplink.md)）
 - 绑卷、派工单与完工：`方案与工单`（`#/results`）→ 选定方案 → 打印 A4 派工单 / 新建待检卷 / 绑定合格卷 / 一键完工记账
 - 空间消耗复核：`卷料台账`（`#/inventory?roll=<rollId>`）查看已切割空间条
-- 系统设置：侧栏底部设置按钮或顶栏 `#engine-status` 胶囊
+- 系统设置：**左侧导航栏底部** `nav-foot` 的引擎状态胶囊 `#engine-status` 或设置入口
 
 ## Driving it with Playwright (`verify-ctl.mjs`)
 
@@ -33,5 +33,6 @@ Preconditions: 已通过 `verify-ctl.mjs launch` 启动全新隔离实例且 `do
 ## Gotchas
 
 - 本脚本会向隔离实例写入新订单、排程方案、母卷与报工记录，因此建议在全新隔离实例上运行，不要在已充满脏状态的同一实例上重复跑导致同名混淆。
-- 为保证跨平台无 C++ 原生引擎也能稳定快速完成，脚本会通过设置弹窗仅勾选内置 `JAVA_FAST` 策略再求解；本脚本通过**不等于**原生 C++ `packingsolver` 二进制已验证。
+- 为保证跨平台无 C++ 原生引擎也能稳定快速完成，脚本会通过设置弹窗仅勾选内置「快速基线 (`JAVA_FAST`)」策略（DOM `id="cfg-strategy-JAVA_FAST"`）再求解；本脚本通过**不等于**原生 C++ `packingsolver` 二进制已验证。
+- `unified-workflow` 在 `FLOW-04` 阶段通过后端 API 快速将新建待检卷置为 `PASSED`；如需验证 `#/inspection` 页面质检放行或「多料联排」UI 交互，请另行专项验真。
 - 若页面任何地方误调用了 `window.confirm` / `window.alert`，脚本的 `nativeDialogs` 断言会直接失败。
