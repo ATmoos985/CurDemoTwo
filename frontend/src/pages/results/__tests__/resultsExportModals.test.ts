@@ -1,8 +1,13 @@
+// @ts-ignore — frontend/tsconfig.json 未包含 @types/node
+import { readFileSync } from 'node:fs';
+// @ts-ignore — frontend/tsconfig.json 未包含 @types/node
+import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { sanitizeSchemeTitle, validateBatchZipSelection } from '../resultsSceneUtils';
 import { ResultsCenterPage } from '../../ResultsCenterPage';
+import { ResultsListPane } from '../ResultsListPane';
 import { ResultsDetailPanel } from '../ResultsDetailPanel';
 import { ResultsExportModals } from '../ResultsExportModals';
 import { AuthSession } from '../../../utils/authClient';
@@ -114,5 +119,63 @@ describe('ResultsCenterPage 拆解与多格式导出弹窗 SSR 契约', () => {
     expect(modalsHtml).toContain('data-testid="res-summary-export-modal"');
     expect(modalsHtml).toContain('data-testid="res-summary-format-select"');
     expect(modalsHtml).toContain('data-testid="res-summary-export-submit-btn"');
+  });
+
+  it('ResultsListPane 与 theme-magpie-results.css 在多位数方案换行时自适应撑开头部而不遮挡批量导出按钮', () => {
+    const entries = Array.from({ length: 120 }, (_, idx) => ({
+      scheme: {
+        id: `SCH-${String(idx + 1).padStart(3, '0')}`,
+        title: `排料方案 ${idx + 1}`,
+        state: 'AWAITING_ROLL',
+        dimension: 'RECT_2D',
+        materialModel: 'M1',
+        widthMm: 1600,
+        occupiedLengthMm: 2000,
+        utilizationPct: 86.2,
+        taskName: '多批订单'
+      }
+    }));
+
+    const listHtml = renderToStaticMarkup(
+      React.createElement(ResultsListPane, {
+        filteredEntries: entries,
+        selectedId: 'SCH-001',
+        onSelect: () => {},
+        checkedIds: new Set(['SCH-001', 'SCH-002']),
+        onToggleCheck: () => {},
+        onToggleSelectAllVisible: () => {},
+        onOpenBatchZipModal: () => {},
+        onResetFilters: () => {}
+      })
+    );
+    expect(listHtml).toContain('120 项');
+    expect(listHtml).toContain('data-testid="res-open-batch-zip-modal-btn"');
+    expect(listHtml).toContain('批量导出 ZIP (2)');
+
+    const headIdx = listHtml.indexOf('class="mp-res-pane-head"');
+    const scrollIdx = listHtml.indexOf('class="mp-res-list-scroll"');
+    const zipBtnIdx = listHtml.indexOf('data-testid="res-open-batch-zip-modal-btn"');
+    expect(headIdx).toBeGreaterThan(-1);
+    expect(scrollIdx).toBeGreaterThan(headIdx);
+    expect(zipBtnIdx).toBeGreaterThan(headIdx);
+    expect(zipBtnIdx).toBeLessThan(scrollIdx);
+
+    const cssPath = fileURLToPath(new URL('../../../styles/theme-magpie-results.css', import.meta.url));
+    const css = readFileSync(cssPath, 'utf8');
+
+    const paneMatch = css.match(/\.mp-res-list-pane\s*\{([^}]*)\}/);
+    expect(paneMatch?.[1]).toMatch(/display:\s*flex;/);
+    expect(paneMatch?.[1]).toMatch(/flex-direction:\s*column;/);
+
+    const headMatch = css.match(/\.mp-res-pane-head\s*\{([^}]*)\}/);
+    expect(headMatch?.[1]).toMatch(/min-height:\s*40px;/);
+    expect(headMatch?.[1]).toMatch(/height:\s*auto;/);
+    expect(headMatch?.[1]).toMatch(/flex-wrap:\s*wrap;/);
+    expect(headMatch?.[1]).not.toMatch(/(?:^|[;\s])height:\s*40px;/);
+
+    const ctoolMatch = css.match(/\.mp-res-cad-card\s+\.ctool\s*\{([^}]*)\}/);
+    expect(ctoolMatch?.[1]).toMatch(/min-height:\s*38px;/);
+    expect(ctoolMatch?.[1]).toMatch(/height:\s*auto;/);
+    expect(ctoolMatch?.[1]).not.toMatch(/(?:^|[;\s])height:\s*38px;/);
   });
 });

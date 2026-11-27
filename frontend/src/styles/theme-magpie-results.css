@@ -119,12 +119,14 @@
 
 .mp-res-pane-head {
   flex: none;
-  height: 40px;
-  padding: 0 14px;
+  min-height: 40px;
+  height: auto;
+  padding: 6px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
   border-bottom: 1px solid var(--cp-divider);
   background: var(--cp-surface);
   font-size: 12.5px;
@@ -452,8 +454,9 @@
 }
 
 .mp-res-cad-card .ctool {
-  height: 38px;
-  padding: 0 12px;
+  min-height: 38px;
+  height: auto;
+  padding: 6px 12px;
   background: var(--cp-surface);
   border-bottom: 1px solid var(--cp-divider);
   color: var(--cp-ink);
