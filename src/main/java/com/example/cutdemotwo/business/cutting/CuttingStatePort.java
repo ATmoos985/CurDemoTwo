@@ -5,11 +5,13 @@ import com.example.cutdemotwo.business.model.CuttingPlan;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.DemandTemplate;
 import com.example.cutdemotwo.business.model.ExecutionOrder;
+import com.example.cutdemotwo.business.model.InventoryBatchImportDocument;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
 import com.example.cutdemotwo.business.model.RemnantStock;
 import com.example.cutdemotwo.business.model.SchedulingScheme;
 import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.business.model.SolveResponse;
+import com.example.cutdemotwo.contracts.geometry.Defect;
 
 import java.util.List;
 import java.util.Map;
@@ -111,6 +113,10 @@ public interface CuttingStatePort {
 
         /** 检查指定物理材料是否被有效执行单预约或正在加工。 */
         boolean isMaterialReservedByExecution(String materialType, String materialId, String exceptPlanId);
+
+        default Optional<InventoryBatchImportDocument> findBatchImportByIdempotencyKey(String key) {
+            return Optional.empty();
+        }
     }
 
     interface WriteTx extends ReadView {
@@ -150,5 +156,17 @@ public interface CuttingStatePort {
                 Map<String, Map<String, Integer>> taskDemandQuantities,
                 Map<Integer, SchedulingScheme.TaskDemandAllocation> pieceSources
         );
+
+        default RemnantStock registerRemnant(RemnantStock item) {
+            throw new UnsupportedOperationException("当前事务端口不支持料头登记");
+        }
+
+        default Defect appendDefectToRoll(String rollId, Defect defect) {
+            throw new UnsupportedOperationException("当前事务端口不支持母卷瑕疵追加");
+        }
+
+        default void putBatchImport(InventoryBatchImportDocument doc) {
+            throw new UnsupportedOperationException("当前事务端口不支持批量导入凭证落库");
+        }
     }
 }

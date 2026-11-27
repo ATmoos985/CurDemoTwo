@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * 验证 P0-5 生产安全硬开关：
- * 1. cutdemo.demo.endpoints-enabled=false 时 /api/demo/inventory 与 /api/rolls/{id}/reset 返回 403；
+ * 1. cutdemo.demo.endpoints-enabled=false 时 /api/v2/demo/inventory 与 /api/v2/rolls/{id}/reset 返回 403；
  * 2. cutdemo.mes.auth-required=true 与 cutdemo.mes.token 非空时，/api/v2/mes/* 强制校验 Bearer Token（缺/错返回 401，正确返回 200）。
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -62,10 +62,10 @@ class P0SecurityConfigApiTests {
 
     @Test
     void demoEndpointsReturn403WhenDisabled() throws Exception {
-        var initRes = post("/api/demo/inventory", Map.of("confirmed", true), null);
+        var initRes = post("/api/v2/demo/inventory", Map.of("confirmed", true), null);
         assertEquals(403, initRes.statusCode(), initRes.body());
 
-        var resetRes = post("/api/rolls/ROLL-2026-0920/reset", Map.of("force", true), null);
+        var resetRes = post("/api/v2/rolls/ROLL-2026-0920/reset", Map.of("force", true), null);
         assertEquals(403, resetRes.statusCode(), resetRes.body());
     }
 

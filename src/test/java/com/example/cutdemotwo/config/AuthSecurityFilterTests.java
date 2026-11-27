@@ -73,7 +73,7 @@ class AuthSecurityFilterTests {
         assertEquals("ADMIN", me.role());
         assertEquals(List.of("ADMIN"), me.roles());
 
-        var req = new MockHttpServletRequest("POST", "/api/demo/inventory");
+        var req = new MockHttpServletRequest("POST", "/api/v2/demo/inventory");
         var res = new MockHttpServletResponse();
         var seenUser = new AtomicReference<String>();
         var seenRole = new AtomicReference<String>();
@@ -104,6 +104,7 @@ class AuthSecurityFilterTests {
                 new String[]{"GET", "/icon.png"},
                 new String[]{"GET", "/api-v2/openapi.json"},
                 new String[]{"GET", "/api/health"},
+                new String[]{"GET", "/api/v2/health"},
                 new String[]{"GET", "/actuator/health"},
                 new String[]{"GET", "/actuator/health/readiness"},
                 new String[]{"GET", "/api/v2/auth/me"},
@@ -155,7 +156,7 @@ class AuthSecurityFilterTests {
 
         // 3. 无令牌访问业务接口返回 401
         MDC.put(TraceIdFilter.MDC_KEY, "trace-auth-401");
-        var noTokenRes = invoke(filter, "GET", "/api/rolls", null);
+        var noTokenRes = invoke(filter, "GET", "/api/v2/rolls", null);
         assertEquals(401, noTokenRes.getStatus());
         JsonNode body401 = JSON.readTree(noTokenRes.getContentAsByteArray());
         assertEquals("UNAUTHORIZED", body401.get("code").asString());
@@ -165,21 +166,21 @@ class AuthSecurityFilterTests {
         // 4. 篡改签名段返回 401
         String token = loginResult.token();
         String tampered = token.substring(0, token.length() - 2) + (token.endsWith("AA") ? "BB" : "AA");
-        assertEquals(401, invoke(filter, "GET", "/api/rolls", "Bearer " + tampered).getStatus());
+        assertEquals(401, invoke(filter, "GET", "/api/v2/rolls", "Bearer " + tampered).getStatus());
 
         // 5. 篡改载荷（尝试把 PLANNER 提权为 ADMIN）返回 401
         String[] parts = token.split("\\.");
         String forgedPayload = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
                 "{\"sub\":\"planner\",\"name\":\"排程计划员\",\"role\":\"ADMIN\",\"iat\":1795478400,\"exp\":1795482000}"
                         .getBytes(StandardCharsets.UTF_8));
-        assertEquals(401, invoke(filter, "GET", "/api/rolls", "Bearer " + parts[0] + "." + forgedPayload + "." + parts[2]).getStatus());
+        assertEquals(401, invoke(filter, "GET", "/api/v2/rolls", "Bearer " + parts[0] + "." + forgedPayload + "." + parts[2]).getStatus());
 
         // 6. 有效期内正常放行
-        assertEquals(200, invoke(filter, "GET", "/api/rolls", "Bearer " + token).getStatus());
+        assertEquals(200, invoke(filter, "GET", "/api/v2/rolls", "Bearer " + token).getStatus());
 
         // 7. 超过 TTL 1 小时后过期，返回 401
         clock.advanceSeconds(3601);
-        assertEquals(401, invoke(filter, "GET", "/api/rolls", "Bearer " + token).getStatus());
+        assertEquals(401, invoke(filter, "GET", "/api/v2/rolls", "Bearer " + token).getStatus());
     }
 
     @Test
@@ -194,32 +195,35 @@ class AuthSecurityFilterTests {
         String warehouseToken = "Bearer " + service.authenticate("warehouse", "warehouse123").orElseThrow().token();
 
         // ADMIN 全部放行
-        assertEquals(200, invoke(filter, "POST", "/api/demo/inventory", adminToken).getStatus());
+        assertEquals(200, invoke(filter, "POST", "/api/v2/demo/inventory", adminToken).getStatus());
         assertEquals(200, invoke(filter, "POST", "/api/v2/inventory-receipts", adminToken).getStatus());
         assertEquals(200, invoke(filter, "POST", "/api/v2/quality/remnants/REM-1/release", adminToken).getStatus());
         assertEquals(200, invoke(filter, "GET", "/actuator/prometheus", adminToken).getStatus());
 
         // OPERATOR：允许报工/方案完工/只读查询，严禁采购入库、演示重置、质检放行、排程确认
-        assertEquals(200, invoke(filter, "GET", "/api/rolls", operatorToken).getStatus());
+        assertEquals(200, invoke(filter, "GET", "/api/v2/rolls", operatorToken).getStatus());
         assertEquals(200, invoke(filter, "POST", "/api/v2/schemes/SCH-1/complete", operatorToken).getStatus());
-        assertEquals(200, invoke(filter, "POST", "/api/cutting/report-confirm", operatorToken).getStatus());
+        assertEquals(200, invoke(filter, "POST", "/api/v2/cutting/report-confirm", operatorToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/v2/inventory-receipts", operatorToken).getStatus());
-        assertEquals(403, invoke(filter, "POST", "/api/demo/inventory", operatorToken).getStatus());
+        assertEquals(403, invoke(filter, "POST", "/api/v2/demo/inventory", operatorToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/v2/quality/remnants/REM-1/release", operatorToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/v2/schemes/confirm", operatorToken).getStatus());
 
-        // WAREHOUSE：允许入库/领退料/移库/盘点/报废，严禁质检放行、排程确认、演示重置
+        // WAREHOUSE：允许入库/领退料/移库/盘点/母卷建档/报废，严禁质检放行、排程确认、演示重置、越权验布
         assertEquals(200, invoke(filter, "POST", "/api/v2/inventory-receipts", warehouseToken).getStatus());
         assertEquals(200, invoke(filter, "POST", "/api/v2/material-issues", warehouseToken).getStatus());
+        assertEquals(200, invoke(filter, "POST", "/api/v2/rolls", warehouseToken).getStatus());
         assertEquals(200, invoke(filter, "POST", "/api/v2/rolls/R-1/scrap", warehouseToken).getStatus());
+        assertEquals(403, invoke(filter, "POST", "/api/v2/rolls/R-1/reset", warehouseToken).getStatus());
+        assertEquals(403, invoke(filter, "POST", "/api/v2/rolls/R-1/inspection-defects", warehouseToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/v2/quality/remnants/REM-1/release", warehouseToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/v2/schemes/confirm", warehouseToken).getStatus());
-        assertEquals(403, invoke(filter, "POST", "/api/demo/inventory", warehouseToken).getStatus());
+        assertEquals(403, invoke(filter, "POST", "/api/v2/demo/inventory", warehouseToken).getStatus());
 
         // INSPECTOR：允许质检放行、跑布验疵、复检撤销，严禁采购入库、排程确认
         assertEquals(200, invoke(filter, "POST", "/api/v2/quality/remnants/REM-1/release", inspectorToken).getStatus());
-        assertEquals(200, invoke(filter, "POST", "/api/inspection/rolls", inspectorToken).getStatus());
-        assertEquals(200, invoke(filter, "POST", "/api/cutting/reports/RP-1/dispositions/D-1/revoke", inspectorToken).getStatus());
+        assertEquals(200, invoke(filter, "POST", "/api/v2/inspection/rolls", inspectorToken).getStatus());
+        assertEquals(200, invoke(filter, "POST", "/api/v2/cutting/reports/RP-1/dispositions/D-1/revoke", inspectorToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/v2/inventory-receipts", inspectorToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/v2/schemes/confirm", inspectorToken).getStatus());
 
@@ -234,7 +238,7 @@ class AuthSecurityFilterTests {
         assertEquals(200, invoke(filter, "POST", "/api/v2/schemes/SCH-1/replenish-task", plannerToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/v2/inventory-receipts", plannerToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/v2/quality/remnants/REM-1/release", plannerToken).getStatus());
-        assertEquals(403, invoke(filter, "POST", "/api/demo/inventory", plannerToken).getStatus());
+        assertEquals(403, invoke(filter, "POST", "/api/v2/demo/inventory", plannerToken).getStatus());
 
         // 阶段四只读分析与 SSE 对已认证其他角色开放，而联合排产/分床与工作台编排/草案 POST 仅限 ADMIN / PLANNER
         assertEquals(200, invoke(filter, "POST", "/api/v2/planning/multi-material", adminToken).getStatus());
@@ -335,7 +339,7 @@ class AuthSecurityFilterTests {
         assertTrue(JSON.readTree(limited.getContentAsByteArray()).get("retryable").asBoolean());
 
         // GET 请求不受写限流影响
-        assertEquals(200, invoke(filter, "GET", "/api/rolls", null).getStatus());
+        assertEquals(200, invoke(filter, "GET", "/api/v2/rolls", null).getStatus());
 
         // 下一分钟窗口恢复放行
         clock.advanceSeconds(61);
@@ -360,10 +364,10 @@ class AuthSecurityFilterTests {
         assertEquals("/api/v2/users", AuthSecurityFilter.normalizePathString("/app/../api/v2/users", ""));
         assertEquals("/api/v2/users", AuthSecurityFilter.normalizePathString("/api/v2/foo/..;/users", ""));
         assertEquals("/api/v2/users", AuthSecurityFilter.normalizePathString("/api/v2/./users", ""));
-        assertEquals("/api/rolls/ROLL 01/scrap", AuthSecurityFilter.normalizePathString("/api/rolls/ROLL%2001/scrap", ""));
-        assertEquals("/api/rolls/ROLL+01/scrap", AuthSecurityFilter.normalizePathString("/api/rolls/ROLL+01/scrap", ""));
-        assertEquals("/api/rolls/ROLL+01/scrap", AuthSecurityFilter.normalizePathString("/api/rolls/ROLL%2B01/scrap", ""));
-        assertEquals("/api/rolls/ROLL-布料", AuthSecurityFilter.normalizePathString("/api/rolls/ROLL-%E5%B8%83%E6%96%99", ""));
+        assertEquals("/api/v2/rolls/ROLL 01/scrap", AuthSecurityFilter.normalizePathString("/api/v2/rolls/ROLL%2001/scrap", ""));
+        assertEquals("/api/v2/rolls/ROLL+01/scrap", AuthSecurityFilter.normalizePathString("/api/v2/rolls/ROLL+01/scrap", ""));
+        assertEquals("/api/v2/rolls/ROLL+01/scrap", AuthSecurityFilter.normalizePathString("/api/v2/rolls/ROLL%2B01/scrap", ""));
+        assertEquals("/api/v2/rolls/ROLL-布料", AuthSecurityFilter.normalizePathString("/api/v2/rolls/ROLL-%E5%B8%83%E6%96%99", ""));
         assertTrue(AuthSecurityFilter.tryNormalizePathString("/api/v2/%2fusers", "").isEmpty());
         assertTrue(AuthSecurityFilter.tryNormalizePathString("/api/v2/%5cusers", "").isEmpty());
         assertTrue(AuthSecurityFilter.tryNormalizePathString("/api/v2/users%00", "").isEmpty());
@@ -441,6 +445,153 @@ class AuthSecurityFilterTests {
             assertEquals(1L, page.total(), "路径变形写请求绝不可逃逸 OperationAuditFilter 审计: " + confirmUri);
             assertEquals("/api/v2/schemes/confirm", page.items().get(0).requestPath());
         }
+    }
+
+    @Test
+    void agentRootPathsScopeIsolationAndForbiddenWriteEndpoints() throws Exception {
+        InMemorySecurityCredentialStore store = new InMemorySecurityCredentialStore();
+        AuthService service = new AuthService(true, TEST_SECRET, "", 12, Clock.systemUTC(), store);
+        AuthSecurityFilter filter = new AuthSecurityFilter(service, 2_097_152L, 600, Clock.systemUTC());
+
+        long now = System.currentTimeMillis();
+        var fullAgent = store.createAgent(new SecurityCredentialStore.AgentRecord(
+                "ag-full", "全业务可读与算排代理", "admin",
+                List.of(
+                        AuthContext.SCOPE_DEMAND_READ,
+                        AuthContext.SCOPE_DEMAND_WRITE,
+                        AuthContext.SCOPE_INVENTORY_READ,
+                        AuthContext.SCOPE_PLAN_COMPUTE,
+                        AuthContext.SCOPE_DRAFT_WRITE
+                ),
+                true, 1L, "回归测试代理", now, now, now + 3_600_000L, null, null
+        ));
+        var demandOnlyAgent = store.createAgent(new SecurityCredentialStore.AgentRecord(
+                "ag-demand-only", "仅需求只读代理", "admin",
+                List.of(AuthContext.SCOPE_DEMAND_READ),
+                true, 1L, "缺库存读取权限测试", now, now, now + 3_600_000L, null, null
+        ));
+
+        String fullToken = "Bearer " + service.issueAgentToken(fullAgent, 3600L);
+        String demandOnlyToken = "Bearer " + service.issueAgentToken(demandOnlyAgent, 3600L);
+
+        // 1. SCOPE_INVENTORY_READ 根路径与子路径全覆盖（含 E2E-M3 inventory-ledger 根路径及查询参数、/options）
+        var ledgerQueryReq = new MockHttpServletRequest("GET", "/api/v2/inventory-ledger");
+        ledgerQueryReq.setQueryString("after=0&limit=1");
+        ledgerQueryReq.addHeader("Authorization", fullToken);
+        var ledgerQueryRes = new MockHttpServletResponse();
+        filter.doFilter(ledgerQueryReq, ledgerQueryRes, (r, s) -> {});
+        assertEquals(200, ledgerQueryRes.getStatus(), "Agent 携带 query 访问 GET /api/v2/inventory-ledger 必须 200");
+
+        for (String path : List.of(
+                "/api/v2/inventory-ledger",
+                "/api/v2/inventory-ledger/reconciliation",
+                "/api/v2/rolls",
+                "/api/v2/rolls/R-1",
+                "/api/v2/rolls/R-1/spatial-map",
+                "/api/v2/remnants",
+                "/api/v2/schemes",
+                "/api/v2/schemes/SCH-1",
+                "/api/v2/execution-orders",
+                "/api/v2/execution-orders/EXO-1",
+                "/api/v2/reconciliation/reports",
+                "/api/v2/quality/releases",
+                "/api/v2/inventory-receipts",
+                "/api/v2/material-issues",
+                "/api/v2/inventory-transfers",
+                "/api/v2/inventory-transfers/options",
+                "/api/v2/inventory-counts",
+                "/api/v2/inventory-counts/options",
+                "/api/v2/cutting/reports/RP-1/quality-dispositions"
+        )) {
+            assertEquals(200, invoke(filter, "GET", path, fullToken).getStatus(), "INVENTORY_READ 应放行: " + path);
+        }
+
+        // 2. SCOPE_DEMAND_READ / SCOPE_PLAN_COMPUTE / SCOPE_DRAFT_WRITE
+        for (String path : List.of(
+                "/api/v2/demand-pool",
+                "/api/v2/demand-pool/TASK-1",
+                "/api/v2/demand-templates",
+                "/api/v2/cutting/tasks/TASK-1",
+                "/api/v2/cutting/tasks/TASK-1/plans",
+                "/api/v2/workbench/drafts",
+                "/api/v2/workbench/drafts/DFT-1",
+                "/api/v2/capabilities",
+                "/api/v2/nesting/engines"
+        )) {
+            assertEquals(200, invoke(filter, "GET", path, fullToken).getStatus(), "Agent GET 应放行: " + path);
+        }
+        for (String path : List.of(
+                "/api/v2/demand-pool",
+                "/api/v2/nesting/solve",
+                "/api/v2/cutting/remnant-recommendations",
+                "/api/v2/workbench/drafts",
+                "/api/v2/workbench/drafts/DFT-1/discard",
+                "/api/v2/workbench/multi-material-drafts"
+        )) {
+            assertEquals(200, invoke(filter, "POST", path, fullToken).getStatus(), "Agent POST 应放行: " + path);
+        }
+
+        // 3. 缺 scope 负例：仅 DEMAND_READ 不得访问 inventory-ledger / transfers/options / counts/options / rolls
+        for (String path : List.of(
+                "/api/v2/inventory-ledger",
+                "/api/v2/inventory-ledger/reconciliation",
+                "/api/v2/inventory-transfers/options",
+                "/api/v2/inventory-counts/options",
+                "/api/v2/rolls"
+        )) {
+            assertEquals(403, invoke(filter, "GET", path, demandOnlyToken).getStatus(), "缺 INVENTORY_READ 必须返回 403: " + path);
+        }
+
+        // 4. 越权写与管理端点隔离（持全部业务 scope 仍返回 403）
+        for (String getForbidden : List.of("/api/v2/users", "/api/v2/agents", "/api/v2/audit-logs")) {
+            assertEquals(403, invoke(filter, "GET", getForbidden, fullToken).getStatus(), "Agent 禁止访问管理接口: " + getForbidden);
+        }
+        for (String postForbidden : List.of(
+                "/api/v2/cutting/tasks",
+                "/api/v2/cutting/report-confirm",
+                "/api/v2/rolls",
+                "/api/v2/rolls/R-1/scrap",
+                "/api/v2/rolls/R-1/reset",
+                "/api/v2/demo/inventory",
+                "/api/v2/schemes/confirm",
+                "/api/v2/workbench/drafts/DFT-1/confirm",
+                "/api/v2/inventory-receipts",
+                "/api/v2/quality/remnants/REM-1/release"
+        )) {
+            assertEquals(403, invoke(filter, "POST", postForbidden, fullToken).getStatus(), "Agent 禁止访问业务落库/管理写接口: " + postForbidden);
+        }
+
+        // 5. Principal 静态授权校验与下线死路由拦截
+        var principal = new AuthContext.Principal(
+                "agent:ag-full", "助理", AuthContext.ROLE_AGENT, List.of(AuthContext.ROLE_AGENT), true,
+                AuthContext.ACTOR_AGENT, "ag-full", List.of(AuthContext.SCOPE_INVENTORY_READ), null, 1L
+        );
+        assertTrue(AuthSecurityFilter.isAuthorized(principal, "GET", "/api/v2/inventory-ledger"));
+        assertTrue(AuthSecurityFilter.isAuthorized(principal, "GET", "/api/v2/inventory-transfers/options"));
+        assertTrue(AuthSecurityFilter.isAuthorized(principal, "GET", "/api/v2/inventory-counts/options"));
+        assertTrue(AuthSecurityFilter.isAuthorized(principal, "GET", "/api/v2/exports/schemes/SCH-1/cam"));
+        assertTrue(AuthSecurityFilter.isAuthorized(principal, "GET", "/api/v2/exports/production-summary"));
+        assertFalse(AuthSecurityFilter.isAuthorized(principal, "POST", "/api/v2/exports/batch-zip"));
+        assertFalse(AuthSecurityFilter.isAuthorized(principal, "POST", "/api/v2/inventory/import/rolls"));
+        assertFalse(AuthSecurityFilter.isAuthorized(principal, "POST", "/api/v2/inventory/import/defects"));
+        assertFalse(AuthSecurityFilter.isAuthorized(principal, "GET", "/api/cutting/tasks"));
+        assertFalse(AuthSecurityFilter.isAuthorized(principal, "POST", "/api/remnants/scan"));
+
+        // 6. M4-2 导入导出 RBAC 矩阵验证
+        for (String r : List.of("ADMIN", "PLANNER", "OPERATOR", "INSPECTOR", "WAREHOUSE")) {
+            assertTrue(AuthSecurityFilter.isAuthorized(r, "GET", "/api/v2/exports/schemes/SCH-1/ticket.pdf"), "全角色应放行 GET 导出: " + r);
+            assertTrue(AuthSecurityFilter.isAuthorized(r, "POST", "/api/v2/exports/batch-zip"), "全角色应放行 batch-zip: " + r);
+        }
+        assertTrue(AuthSecurityFilter.isAuthorized("WAREHOUSE", "POST", "/api/v2/inventory/import/rolls"));
+        assertTrue(AuthSecurityFilter.isAuthorized("WAREHOUSE", "POST", "/api/v2/inventory/import/remnants/preview"));
+        assertFalse(AuthSecurityFilter.isAuthorized("WAREHOUSE", "POST", "/api/v2/inventory/import/defects"));
+        assertTrue(AuthSecurityFilter.isAuthorized("INSPECTOR", "POST", "/api/v2/inventory/import/defects/preview"));
+        assertFalse(AuthSecurityFilter.isAuthorized("INSPECTOR", "POST", "/api/v2/inventory/import/rolls"));
+        assertFalse(AuthSecurityFilter.isAuthorized("OPERATOR", "POST", "/api/v2/inventory/import/rolls"));
+        assertFalse(AuthSecurityFilter.isAuthorized("PLANNER", "POST", "/api/v2/inventory/import/defects"));
+        assertEquals(403, invoke(filter, "GET", "/api/v2/exports/schemes/SCH-1/cam", demandOnlyToken).getStatus());
+        assertEquals(200, invoke(filter, "GET", "/api/v2/exports/schemes/SCH-1/cam", fullToken).getStatus());
+        assertEquals(403, invoke(filter, "POST", "/api/v2/exports/batch-zip", fullToken).getStatus());
     }
 
     private MockHttpServletResponse invoke(AuthSecurityFilter filter, String method, String uri, String authHeader) throws Exception {

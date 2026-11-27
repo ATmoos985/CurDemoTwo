@@ -159,7 +159,7 @@ class SecurityAndAuditIntegrationTests {
         ), adminToken);
         assertEquals(201, createUserRes.statusCode(), createUserRes.body());
         String qaToken1 = loginToken("qa_user", "initPass123");
-        assertEquals(200, send("GET", "/api/rolls", null, qaToken1).statusCode());
+        assertEquals(200, send("GET", "/api/v2/rolls", null, qaToken1).statusCode());
 
         // 自主改密：旧密码不变拦截，改密成功旧 token 立即 401
         assertEquals(400, send("PUT", "/api/v2/auth/password",
@@ -167,7 +167,7 @@ class SecurityAndAuditIntegrationTests {
         var changePwdRes = send("PUT", "/api/v2/auth/password",
                 Map.of("currentPassword", "initPass123", "newPassword", "newPass456"), qaToken1);
         assertEquals(200, changePwdRes.statusCode(), changePwdRes.body());
-        assertEquals(401, send("GET", "/api/rolls", null, qaToken1).statusCode(), "改密后原 Token 必须立即失效");
+        assertEquals(401, send("GET", "/api/v2/rolls", null, qaToken1).statusCode(), "改密后原 Token 必须立即失效");
 
         // 重建 AuthService 模拟重启：DB 密码应保持新密码，绝不被 DEFAULT_USERS 覆盖
         AuthService restartedAuth = new AuthService(true, TEST_SECRET, "", 4, Clock.systemUTC(), credentialStore);
@@ -177,13 +177,13 @@ class SecurityAndAuditIntegrationTests {
         // 登出吊销 jti
         String qaToken2 = loginToken("qa_user", "newPass456");
         assertEquals(200, send("POST", "/api/v2/auth/logout", null, qaToken2).statusCode());
-        assertEquals(401, send("GET", "/api/rolls", null, qaToken2).statusCode(), "登出后原 jti 必须立即失效");
+        assertEquals(401, send("GET", "/api/v2/rolls", null, qaToken2).statusCode(), "登出后原 jti 必须立即失效");
 
         // 管理员禁用账号 + 重置密码 + 最后一个 ADMIN 保护
         String qaToken3 = loginToken("qa_user", "newPass456");
         var disableRes = send("POST", "/api/v2/users/qa_user/status", Map.of("enabled", false), adminToken);
         assertEquals(200, disableRes.statusCode());
-        assertEquals(401, send("GET", "/api/rolls", null, qaToken3).statusCode(), "禁用账号后存量 Token 必须 401");
+        assertEquals(401, send("GET", "/api/v2/rolls", null, qaToken3).statusCode(), "禁用账号后存量 Token 必须 401");
         assertEquals(401, send("POST", "/api/v2/auth/login",
                 Map.of("username", "qa_user", "password", "newPass456"), null).statusCode());
         assertEquals(409, send("POST", "/api/v2/users/admin/status",
@@ -232,7 +232,7 @@ class SecurityAndAuditIntegrationTests {
         assertEquals(401, send("GET", "/api/v2/optimization-jobs/JOB-1/events", null, agentToken).statusCode());
 
         // 6. 业务写操作经 OperationAuditFilter 落库审计 + ROLL_LENGTH_MISMATCH 修复验证
-        var rollSaveRes = send("POST", "/api/rolls", Map.of(
+        var rollSaveRes = send("POST", "/api/v2/rolls", Map.of(
                 "rollId", "ROLL-M3-PARTIAL-01",
                 "rollModel", "M3-TC",
                 "width", 1500.0,
@@ -280,7 +280,7 @@ class SecurityAndAuditIntegrationTests {
         assertEquals(200, send("GET", "/api/v2/users;foo=bar", null, adminToken).statusCode());
 
         // 携带矩阵参数的已认证写请求放行且完整记录审计，随后验证更新已有母卷为 SCRAPPED 必被拒绝且账本保持 BALANCED
-        var matrixRollSaveRes = send("POST", "/api/rolls;foo=bar", Map.of(
+        var matrixRollSaveRes = send("POST", "/api/v2/rolls;foo=bar", Map.of(
                 "rollId", "ROLL-M3-MATRIX-01",
                 "rollModel", "M3-TC",
                 "width", 1500.0,
@@ -296,7 +296,7 @@ class SecurityAndAuditIntegrationTests {
         assertTrue(matrixAuditPage.get("total").asLong() >= 1, "携带矩阵参数的写操作必须落盘审计");
 
         for (String illegalScrapStatus : List.of("SCRAPPED", " scrapped ")) {
-            var scrapViaSaveRes = send("POST", "/api/rolls", Map.of(
+            var scrapViaSaveRes = send("POST", "/api/v2/rolls", Map.of(
                     "rollId", "ROLL-M3-MATRIX-01",
                     "rollModel", "M3-TC",
                     "width", 1500.0,
@@ -307,7 +307,7 @@ class SecurityAndAuditIntegrationTests {
             ), adminToken);
             assertEquals(400, scrapViaSaveRes.statusCode(), "禁止通过档案保存将已有母卷改写为 SCRAPPED: " + scrapViaSaveRes.body());
         }
-        var rollAfterRejectedScrap = send("GET", "/api/rolls/ROLL-M3-MATRIX-01", null, adminToken);
+        var rollAfterRejectedScrap = send("GET", "/api/v2/rolls/ROLL-M3-MATRIX-01", null, adminToken);
         assertEquals(200, rollAfterRejectedScrap.statusCode());
         assertEquals("PASSED", json.readTree(rollAfterRejectedScrap.body()).get("inspectionStatus").asString());
 
@@ -394,7 +394,7 @@ class SecurityAndAuditIntegrationTests {
         assertTrue(afterConfirmAudit > beforeConfirmAudit, "POST /api/v2/schemes/%63onfirm 必须写入 SCHEME_CONFIRM 审计");
 
         // 含 %20 与 UTF-8 中文编码的合法业务路径正常 200
-        assertEquals(200, send("POST", "/api/rolls", Map.of(
+        assertEquals(200, send("POST", "/api/v2/rolls", Map.of(
                 "rollId", "ROLL 01",
                 "rollModel", "M3-TC",
                 "width", 1500.0,
@@ -403,12 +403,12 @@ class SecurityAndAuditIntegrationTests {
                 "currentRemainingLength", 50000.0,
                 "inspectionStatus", "PASSED"
         ), warehouseToken).statusCode());
-        assertEquals(200, send("GET", "/api/rolls/ROLL%2001", null, plannerToken).statusCode());
+        assertEquals(200, send("GET", "/api/v2/rolls/ROLL%2001", null, plannerToken).statusCode());
         var scrapRoll01Res = send("POST", "/api/v2/rolls/ROLL%2001/scrap",
                 Map.of("idempotencyKey", "scrap-roll-01-pct20", "reason", "编码路径报废"), warehouseToken);
         assertEquals(200, scrapRoll01Res.statusCode(), scrapRoll01Res.body());
 
-        assertEquals(200, send("POST", "/api/rolls", Map.of(
+        assertEquals(200, send("POST", "/api/v2/rolls", Map.of(
                 "rollId", "ROLL-布料",
                 "rollModel", "M3-TC",
                 "width", 1500.0,
@@ -417,10 +417,10 @@ class SecurityAndAuditIntegrationTests {
                 "currentRemainingLength", 50000.0,
                 "inspectionStatus", "PASSED"
         ), warehouseToken).statusCode());
-        assertEquals(200, send("GET", "/api/rolls/ROLL-%E5%B8%83%E6%96%99", null, plannerToken).statusCode());
+        assertEquals(200, send("GET", "/api/v2/rolls/ROLL-%E5%B8%83%E6%96%99", null, plannerToken).statusCode());
 
         // 2. 新建母卷不守恒必须被 400 拒绝且全库对账保持 BALANCED
-        var newScrapBad = send("POST", "/api/rolls", Map.of(
+        var newScrapBad = send("POST", "/api/v2/rolls", Map.of(
                 "rollId", "ROLL-NEW-SCRAP-BAD-HTTP",
                 "rollModel", "M3-TC",
                 "width", 1500.0,
@@ -431,7 +431,7 @@ class SecurityAndAuditIntegrationTests {
         ), warehouseToken);
         assertEquals(400, newScrapBad.statusCode(), "新建 SCRAPPED 母卷但余长 > 0 必须返回 400: " + newScrapBad.body());
 
-        var newPassedWithScrapBad = send("POST", "/api/rolls", Map.of(
+        var newPassedWithScrapBad = send("POST", "/api/v2/rolls", Map.of(
                 "rollId", "ROLL-NEW-PASSED-SCRAP-BAD-HTTP",
                 "rollModel", "M3-TC",
                 "width", 1500.0,

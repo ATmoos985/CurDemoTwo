@@ -2,8 +2,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { expandClusterToDemands, useTemplateLibraryStore } from '../store/selectors';
 import type { ClusterTemplatePiece, DemandCluster } from '../store/studioTypes';
 import { ModalDialog } from '../components/ModalDialog';
+import {
+  DxfImportWizardModal,
+  DxfParseOptionsState,
+  ParsedDxfResult
+} from '../components/DxfImportWizardModal';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
 import { NumberInput } from '../components/ui/NumberInput';
+import { AuthSession } from '../utils/authClient';
 import { requestJSON, toast } from '../lib/core/util.js';
 
 const CATEGORY_LABELS: Record<DemandCluster['category'], { label: string; tagClass: string }> = {
@@ -45,13 +51,12 @@ function PieceMiniSvg({ piece, sizeKey }: { piece: ClusterTemplatePiece; sizeKey
   );
 }
 
-export const ClusterCenterPage: React.FC = () => {
+export const ClusterCenterPage: React.FC<{ auth?: AuthSession }> = ({ auth: _auth }) => {
   const {
     clusters,
     clusterSelections,
     syncTemplatesFromServer,
     setClusterCount,
-    importDxfAsCluster,
     addCustomCluster,
     deleteCustomCluster,
     loadClusterInto2D,
@@ -63,6 +68,7 @@ export const ClusterCenterPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [checkedIds, setCheckedIds] = useState<string[]>(['DXF_1226']);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showDxfModal, setShowDxfModal] = useState(false);
   const [pushingToPool, setPushingToPool] = useState(false);
 
   const [newName, setNewName] = useState('');
@@ -98,25 +104,75 @@ export const ClusterCenterPage: React.FC = () => {
     setCheckedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
-  const handleDxfFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const buf = await file.arrayBuffer();
-      let text = new TextDecoder('utf-8', { fatal: false }).decode(buf);
-      if (!text.includes('Piece Name:') || text.includes('\uFFFD')) {
-        try {
-          text = new TextDecoder('gb18030').decode(buf);
-        } catch {}
+  const handleConfirmDxfCluster = (
+    parsed: ParsedDxfResult,
+    fileName: string,
+    options: DxfParseOptionsState
+  ) => {
+    const baseCode = fileName.replace(/\.dxf$/i, '').toUpperCase();
+    const id = 'DXF_CUSTOM_' + baseCode + '_' + Date.now().toString(36).slice(-4);
+    const pieceMap = new Map<string, ClusterTemplatePiece>();
+    const sizesSet = new Set<string>();
+    const grainRule =
+      options.rotationMode === 'ROTATE_90'
+        ? 'FREE_90'
+        : options.rotationMode === 'HALF_TURN_180'
+        ? 'HALF_TURN_180'
+        : 'STRICT_0';
+
+    for (const g of parsed.groups) {
+      const sizeMatch = String(g.fabricCode || '').match(/-(\S+)码$/);
+      const sz = sizeMatch ? sizeMatch[1] : '均码';
+      sizesSet.add(sz);
+      for (const d of g.demands) {
+        if (d.name.endsWith('(右)')) continue;
+        const isLeft = d.name.endsWith('(左)');
+        const cleanName = d.name.replace(/^\S+码\s*·\s*/, '').replace(/\((左|右)\)$/, '');
+        if (!pieceMap.has(cleanName)) {
+          pieceMap.set(cleanName, {
+            name: cleanName,
+            fabric: '面布',
+            quantityPerUnit: isLeft ? 2 : d.quantity,
+            pairMirror: isLeft,
+            grainRule,
+            sizes: {}
+          });
+        }
+        pieceMap.get(cleanName)!.sizes[sz] = {
+          w: d.width,
+          h: d.length,
+          v: d.shape?.vertices?.map((pt) => [pt.x, pt.y])
+        };
       }
-      const created = importDxfAsCluster(text, file.name);
-      setCheckedIds((prev) => [created.id, ...prev]);
-      toast(`已解析并持久化需求模板：${created.name}（${created.pieces.length} 种部件）`);
-    } catch (err: any) {
-      toast('DXF 纸样导入失败：' + err.message, true);
-    } finally {
-      e.target.value = '';
     }
+
+    const availableSizes = [...sizesSet];
+    const defaultSizeCounts: Record<string, number> = {};
+    availableSizes.forEach((s, i) => {
+      defaultSizeCounts[s] = i < 2 ? 1 : 0;
+    });
+
+    const created: DemandCluster = {
+      id,
+      name: `${baseCode} 导入纸样模板 (DXF)`,
+      code: baseCode,
+      category: 'DXF_GARMENT',
+      dimension: '2D',
+      subDimension: 'CONTOUR_2D',
+      description: `从 ${fileName} 解析的 CAD 纸样需求模板（单位 ${parsed.unit}，共 ${pieceMap.size} 种裁片）`,
+      defaultWidthMm: 1650,
+      defaultLengthMm: 2000,
+      materialModel: parsed.groups[0]?.materialModel || `DXF-${baseCode}`,
+      availableSizes: availableSizes.length ? availableSizes : ['均码'],
+      defaultSizeCounts: Object.keys(defaultSizeCounts).length ? defaultSizeCounts : { 均码: 1 },
+      custom: true,
+      pieces: [...pieceMap.values()]
+    };
+
+    addCustomCluster(created);
+    setCheckedIds((prev) => [created.id, ...prev]);
+    setShowDxfModal(false);
+    toast(`已解析并持久化需求模板：${created.name}（${created.pieces.length} 种部件）`);
   };
 
   const handleCreateCustomCluster = (e: React.FormEvent) => {
@@ -328,10 +384,14 @@ export const ClusterCenterPage: React.FC = () => {
           </span>
 
           <div className="mp-toolbar-actions">
-            <label className="mp-ghost-btn" style={{ cursor: 'pointer' }}>
+            <button
+              type="button"
+              className="mp-ghost-btn"
+              data-testid="cluster-open-dxf-import-btn"
+              onClick={() => setShowDxfModal(true)}
+            >
               导入 CAD DXF 模板
-              <input type="file" accept=".dxf" hidden onChange={handleDxfFileUpload} />
-            </label>
+            </button>
             <button
               type="button"
               className="mp-ghost-btn"
@@ -749,6 +809,14 @@ export const ClusterCenterPage: React.FC = () => {
           </div>
         </form>
       </ModalDialog>
+
+      <DxfImportWizardModal
+        open={showDxfModal}
+        title="模板库 CAD / AAMA DXF 几何导入"
+        confirmLabel="保存为需求模板"
+        onClose={() => setShowDxfModal(false)}
+        onConfirm={handleConfirmDxfCluster}
+      />
     </div>
   );
 };

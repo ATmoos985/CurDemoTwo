@@ -3,6 +3,9 @@ import { requestJSON, fmtN, toast } from '../lib/core/util.js';
 import { csvCell } from '../lib/domain/report-model.js';
 import { SegmentedControl, CodeBadge, SegmentedOption } from '../components/ui/MagpiePrimitives';
 import { NumberInput } from '../components/ui/NumberInput';
+import { OperationFeedbackCard } from '../components/OperationFeedbackCard';
+import { AuthSession, LOCAL_FALLBACK_SESSION } from '../utils/authClient';
+import { downloadProductionSummary, formatExportError } from '../utils/exportApiClient';
 
 export interface CostSummaryTotals {
   totalReports: number;
@@ -160,10 +163,22 @@ export function buildProcurementCsvText(proc: ProcurementSuggestionsResponse): s
   return '\uFEFF' + [header, ...body].map((r) => r.map(csvCell).join(',')).join('\r\n');
 }
 
-export const CostAnalyticsPage: React.FC = () => {
+export const CostAnalyticsPage: React.FC<{
+  auth?: AuthSession;
+  initialCostData?: CostSummaryResponse | null;
+}> = ({
+  auth: _auth = LOCAL_FALLBACK_SESSION,
+  initialCostData = null
+}) => {
   const [viewTab, setViewTab] = useState<'cost' | 'procurement'>('cost');
   const [costDimension, setCostDimension] = useState<'task' | 'model'>('task');
   const [paramsOpen, setParamsOpen] = useState<boolean>(false);
+  const [exportBusy, setExportBusy] = useState<boolean>(false);
+  const [exportError, setExportError] = useState<{
+    title: string;
+    message: string;
+    traceId?: string;
+  } | null>(null);
 
   // 可调核算口径参数（支持实时重算）
   const [unitPrice, setUnitPrice] = useState<number>(25);
@@ -171,9 +186,9 @@ export const CostAnalyticsPage: React.FC = () => {
   const [safetyBufferPct, setSafetyBufferPct] = useState<number>(15);
   const [defaultRollLengthM, setDefaultRollLengthM] = useState<number>(50);
 
-  const [costData, setCostData] = useState<CostSummaryResponse | null>(null);
+  const [costData, setCostData] = useState<CostSummaryResponse | null>(initialCostData);
   const [procData, setProcData] = useState<ProcurementSuggestionsResponse | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(!initialCostData);
   const [error, setError] = useState<string | null>(null);
 
   const fetchAnalytics = useCallback(
@@ -245,6 +260,20 @@ export const CostAnalyticsPage: React.FC = () => {
     }
   };
 
+  const handleDownloadSummary = async (format: 'pdf' | 'xlsx') => {
+    if (exportBusy) return;
+    setExportBusy(true);
+    setExportError(null);
+    try {
+      const res = await downloadProductionSummary(format);
+      toast(`已下载汇总报表：${res.fileName}`);
+    } catch (err) {
+      setExportError(formatExportError(err));
+    } finally {
+      setExportBusy(false);
+    }
+  };
+
   const tabOptions: SegmentedOption<'cost' | 'procurement'>[] = useMemo(
     () => [
       {
@@ -291,6 +320,24 @@ export const CostAnalyticsPage: React.FC = () => {
           <div className="mp-toolbar-actions">
             <button
               type="button"
+              className="mp-ghost-btn"
+              data-testid="cost-export-summary-pdf-btn"
+              disabled={exportBusy}
+              onClick={() => handleDownloadSummary('pdf')}
+            >
+              生产汇总 PDF
+            </button>
+            <button
+              type="button"
+              className="mp-ghost-btn"
+              data-testid="cost-export-summary-xlsx-btn"
+              disabled={exportBusy}
+              onClick={() => handleDownloadSummary('xlsx')}
+            >
+              多维汇总 Excel
+            </button>
+            <button
+              type="button"
               className={`mp-ghost-btn mp-cost-cfg-toggle ${paramsOpen ? 'on' : ''}`}
               aria-expanded={paramsOpen}
               aria-controls="cost-params-panel"
@@ -323,6 +370,19 @@ export const CostAnalyticsPage: React.FC = () => {
         {error && (
           <div className="mp-demand-card mp-cost-error-card" role="alert">
             <strong>分析接口异常：</strong> {error}
+          </div>
+        )}
+
+        {exportError && (
+          <div style={{ marginBottom: 12 }}>
+            <OperationFeedbackCard
+              tone="err"
+              testId="export-error-banner"
+              title={exportError.title}
+              message={exportError.message}
+              traceId={exportError.traceId}
+              actions={[{ label: '关闭提示', onClick: () => setExportError(null) }]}
+            />
           </div>
         )}
 
@@ -472,6 +532,7 @@ export const CostAnalyticsPage: React.FC = () => {
             <button
               type="button"
               className="btn pri"
+              data-testid="cost-detail-csv-btn"
               disabled={loading || (viewTab === 'cost' ? !costData : !procData)}
               onClick={handleExportCsv}
             >

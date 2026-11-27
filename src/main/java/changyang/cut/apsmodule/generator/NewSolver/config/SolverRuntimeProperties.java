@@ -46,6 +46,10 @@ public final class SolverRuntimeProperties {
         return value == null ? defaultValue : value;
     }
 
+    public static boolean isQualityMode() {
+        return getBoolean("cutting.quality", false);
+    }
+
     public static boolean getBoolean(String key, boolean defaultValue) {
         String value = get(key);
         return value == null ? defaultValue : Boolean.parseBoolean(value.trim());

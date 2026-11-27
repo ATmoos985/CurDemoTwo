@@ -5,6 +5,7 @@ import com.example.cutdemotwo.business.model.CuttingPlan;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.DemandTemplate;
 import com.example.cutdemotwo.business.model.ExecutionOrder;
+import com.example.cutdemotwo.business.model.InventoryBatchImportDocument;
 import com.example.cutdemotwo.business.model.InventoryCount;
 import com.example.cutdemotwo.business.model.InventoryEvent;
 import com.example.cutdemotwo.business.model.InventoryReceiptDocument;
@@ -639,6 +640,19 @@ public class RemnantService implements CuttingStatePort {
         }
 
         @Override
+        public Optional<InventoryBatchImportDocument> findBatchImportByIdempotencyKey(String key) {
+            ensureActive();
+            if (key == null || key.isBlank()) return Optional.empty();
+            String clean = key.trim();
+            for (InventoryBatchImportDocument doc : kernel.batchImports.values()) {
+                if (clean.equals(doc.idempotencyKey())) return Optional.of(doc);
+            }
+            return kernel.store.supportsHotColdLoading()
+                    ? kernel.store.findBatchImportByIdempotencyKey(clean)
+                    : Optional.empty();
+        }
+
+        @Override
         public void putTemplate(DemandTemplate template) {
             ensureWritable();
             if (template == null || template.id() == null || template.id().isBlank()) {
@@ -726,6 +740,27 @@ public class RemnantService implements CuttingStatePort {
         ) {
             ensureWritable();
             return executionAndReportService.confirmPlanInternal(report, pendingBatchPlans, taskDemandQuantities, pieceSources);
+        }
+
+        @Override
+        public RemnantStock registerRemnant(RemnantStock item) {
+            ensureWritable();
+            return rollAndRemnantService.registerRemnantInternal(item);
+        }
+
+        @Override
+        public Defect appendDefectToRoll(String rollId, Defect defect) {
+            ensureWritable();
+            return rollAndRemnantService.addDefectToRollInternal(rollId, defect);
+        }
+
+        @Override
+        public void putBatchImport(InventoryBatchImportDocument doc) {
+            ensureWritable();
+            if (doc == null || doc.id() == null || doc.id().isBlank()) {
+                throw new IllegalArgumentException("批量导入凭证编号不能为空");
+            }
+            kernel.batchImports.put(doc.id(), doc);
         }
     }
 }

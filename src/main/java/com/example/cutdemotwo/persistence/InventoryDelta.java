@@ -3,6 +3,7 @@ package com.example.cutdemotwo.persistence;
 import com.example.cutdemotwo.business.model.CuttingPlan;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.ExecutionOrder;
+import com.example.cutdemotwo.business.model.InventoryBatchImportDocument;
 import com.example.cutdemotwo.business.model.InventoryCount;
 import com.example.cutdemotwo.business.model.InventoryEvent;
 import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
@@ -45,10 +46,37 @@ public record InventoryDelta(
         List<QualityReleaseDocument> appendedQualityReleases,
         List<InventoryReceiptDocument> appendedInventoryReceipts,
         List<MaterialIssueDocument> appendedMaterialIssues,
+        List<InventoryBatchImportDocument> appendedBatchImports,
         long priorLedgerSize,
         List<InventoryLedgerEntry> appendedLedger,
         long priorOutboxSize,
         List<InventoryEvent> appendedOutbox
 ) {
+    public InventoryDelta {
+        appendedBatchImports = appendedBatchImports == null ? List.of() : List.copyOf(appendedBatchImports);
+    }
+
+    public InventoryDelta(
+            long expectedRevision, int remnantSeq, int defectSeq,
+            List<IndexedItem<MotherRollInfo>> upsertedRolls, List<String> deletedRollIds,
+            List<IndexedItem<RemnantStock>> upsertedRemnants, List<String> deletedRemnantIds,
+            List<IndexedItem<CuttingTask>> upsertedTasks, List<String> deletedTaskIds,
+            List<IndexedItem<CuttingPlan>> upsertedPlans, List<String> deletedPlanIds,
+            List<IndexedItem<Map<String, Object>>> upsertedReceipts, List<String> deletedReceiptIds,
+            List<IndexedItem<ExecutionOrder>> upsertedExecutions, List<String> deletedExecutionIds,
+            List<IndexedItem<SchedulingScheme>> upsertedSchemes, List<String> deletedSchemeIds,
+            List<InventoryTransfer> appendedTransfers, List<InventoryCount> appendedCounts,
+            List<QualityReleaseDocument> appendedQualityReleases, List<InventoryReceiptDocument> appendedInventoryReceipts,
+            List<MaterialIssueDocument> appendedMaterialIssues,
+            long priorLedgerSize, List<InventoryLedgerEntry> appendedLedger,
+            long priorOutboxSize, List<InventoryEvent> appendedOutbox
+    ) {
+        this(expectedRevision, remnantSeq, defectSeq, upsertedRolls, deletedRollIds, upsertedRemnants, deletedRemnantIds,
+                upsertedTasks, deletedTaskIds, upsertedPlans, deletedPlanIds, upsertedReceipts, deletedReceiptIds,
+                upsertedExecutions, deletedExecutionIds, upsertedSchemes, deletedSchemeIds,
+                appendedTransfers, appendedCounts, appendedQualityReleases, appendedInventoryReceipts,
+                appendedMaterialIssues, List.of(), priorLedgerSize, appendedLedger, priorOutboxSize, appendedOutbox);
+    }
+
     public record IndexedItem<T>(String id, long sortOrder, T value) {}
 }

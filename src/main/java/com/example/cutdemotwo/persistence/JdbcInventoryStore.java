@@ -7,6 +7,7 @@ import com.example.cutdemotwo.business.model.ExecutionOrder;
 import com.example.cutdemotwo.business.model.InventoryCount;
 import com.example.cutdemotwo.business.model.InventoryEvent;
 import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
+import com.example.cutdemotwo.business.model.InventoryBatchImportDocument;
 import com.example.cutdemotwo.business.model.InventoryReceiptDocument;
 import com.example.cutdemotwo.business.model.InventoryTransfer;
 import com.example.cutdemotwo.business.model.MaterialIssueDocument;
@@ -131,8 +132,16 @@ public class JdbcInventoryStore implements InventoryStore {
             rows("scheduling_scheme", SchedulingScheme.class).forEach(s -> schemes.put(s.id(), s));
             return new InventorySnapshot(rolls, remnants, receipts, ((Number) meta.get("remnant_seq")).intValue(),
                     ((Number) meta.get("defect_seq")).intValue(), tasks, plans, revision, executions, ledger(), transfers(),
-                    outbox(), counts(), templates, schemes, qualityReleases(), inventoryReceipts(), materialIssues());
+                    outbox(), counts(), templates, schemes, qualityReleases(), inventoryReceipts(), materialIssues(), batchImports());
         });
+    }
+
+    private Map<String, InventoryBatchImportDocument> batchImports() {
+        var result = new LinkedHashMap<String, InventoryBatchImportDocument>();
+        jdbc.query("SELECT id,data_json FROM inventory_batch_import ORDER BY inventory_revision,id", rs -> {
+            result.put(rs.getString(1), json.readValue(rs.getString(2), InventoryBatchImportDocument.class));
+        });
+        return result;
     }
 
     private Map<String, QualityReleaseDocument> qualityReleases() {
@@ -259,6 +268,14 @@ public class JdbcInventoryStore implements InventoryStore {
                     jdbc.update("INSERT INTO material_issue_document (id,idempotency_key,direction,roll_id,machine_id,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?,?)",
                             document.id(), document.idempotencyKey(), document.direction(), document.rollId(), document.machineId(), document.postedAt(), document.inventoryRevision(), json.writeValueAsString(document));
             }
+            var existingBatchImports = batchImports();
+            InventoryBatchImportDocument.requireAppendOnly(existingBatchImports, snapshot.batchImports());
+            for (var document : snapshot.batchImports().values()) {
+                if (!existingBatchImports.containsKey(document.id())) {
+                    jdbc.update("INSERT INTO inventory_batch_import (id,import_type,idempotency_key,request_hash,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?)",
+                            document.id(), document.importType(), document.idempotencyKey(), document.requestHash(), document.postedAt(), document.inventoryRevision(), json.writeValueAsString(document));
+                }
+            }
             var previous = ledger();
             InventoryLedgerEntry.requireAppendOnly(previous, snapshot.ledger());
             for (var entry : snapshot.ledger().subList(previous.size(), snapshot.ledger().size())) {
@@ -341,6 +358,10 @@ public class JdbcInventoryStore implements InventoryStore {
             for (var document : delta.appendedMaterialIssues()) {
                 jdbc.update("INSERT INTO material_issue_document (id,idempotency_key,direction,roll_id,machine_id,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?,?)",
                         document.id(), document.idempotencyKey(), document.direction(), document.rollId(), document.machineId(), document.postedAt(), document.inventoryRevision(), json.writeValueAsString(document));
+            }
+            for (var document : delta.appendedBatchImports()) {
+                jdbc.update("INSERT INTO inventory_batch_import (id,import_type,idempotency_key,request_hash,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?)",
+                        document.id(), document.importType(), document.idempotencyKey(), document.requestHash(), document.postedAt(), document.inventoryRevision(), json.writeValueAsString(document));
             }
 
             if (!delta.appendedLedger().isEmpty()) {
@@ -464,6 +485,7 @@ public class JdbcInventoryStore implements InventoryStore {
     @Override public Optional<MaterialIssueDocument> findMaterialIssueByIdempotencyKey(String key) { return coldQueries.findByIdempotencyKey("material_issue_document", MaterialIssueDocument.class, key); }
     @Override public boolean hasMaterialIssueForRoll(String rollId) { return coldQueries.hasMaterialIssueForRoll(rollId); }
     @Override public void streamMaterialIssues(int batchSize, Consumer<List<MaterialIssueDocument>> consumer) { coldQueries.streamOrderedTable("material_issue_document", "inventory_revision", MaterialIssueDocument.class, batchSize, consumer); }
+    @Override public Optional<InventoryBatchImportDocument> findBatchImportByIdempotencyKey(String key) { return coldQueries.findByIdempotencyKey("inventory_batch_import", InventoryBatchImportDocument.class, key); }
     @Override public Optional<HotColdModels.OrderedEntry<Map<String, Object>>> findCutReport(String planId) { return coldQueries.findCutReport(planId); }
     @Override public List<Map<String, Object>> findCutReportsByRollId(String rollId) { return coldQueries.findCutReportsByRollId(rollId); }
     @Override public List<Map<String, Object>> findCutReportsByTaskId(String taskId) { return coldQueries.findCutReportsByTaskId(taskId); }

@@ -209,7 +209,7 @@ class SchedulingStudioWorkflowTests {
         // 3b. 通过正常质检流程放行母卷后再绑卷 -> 进入 READY_TO_CUT
         createdRoll.setInspectionStatus("PASSED");
         createdRoll.setInspector("验布员-李四");
-        post("/api/rolls", createdRoll, Object.class);
+        post("/api/v2/rolls", createdRoll, Object.class);
 
         Map<String, Object> bound = post("/api/v2/schemes/" + schemeId + "/bind-roll",
                 new SchedulingStudioService.BindRollCommand(newRollId, false, null, null, null),
@@ -219,7 +219,7 @@ class SchedulingStudioWorkflowTests {
         assertEquals(newRollId, boundScheme.get("rollId"));
 
         // 校验空间图显示 PLANNED_ZONE 且精确坐标保留
-        Map<String, Object> spatialBefore = get("/api/rolls/" + newRollId + "/spatial-map", Map.class);
+        Map<String, Object> spatialBefore = get("/api/v2/rolls/" + newRollId + "/spatial-map", Map.class);
         assertEquals(1, ((List<?>) spatialBefore.get("plannedZones")).size());
         assertEquals(0, ((List<?>) spatialBefore.get("cutZones")).size());
         List<?> plannedPieces = (List<?>) ((Map<?, ?>) ((List<?>) spatialBefore.get("plannedZones")).get(0)).get("pieces");
@@ -247,7 +247,7 @@ class SchedulingStudioWorkflowTests {
         assertTrue(ledgerItems.stream().anyMatch(e -> "DECLARED:张工".equals(((com.example.cutdemotwo.business.model.InventoryLedgerEntry) e).actor())));
 
         // 校验母卷空间图与账本对账 BALANCED
-        Map<String, Object> spatialAfter = get("/api/rolls/" + newRollId + "/spatial-map", Map.class);
+        Map<String, Object> spatialAfter = get("/api/v2/rolls/" + newRollId + "/spatial-map", Map.class);
         assertEquals(0, ((List<?>) spatialAfter.get("plannedZones")).size());
         assertEquals(1, ((List<?>) spatialAfter.get("cutZones")).size());
         assertFalse(((List<?>) spatialAfter.get("cleanSpans")).isEmpty());
@@ -256,7 +256,7 @@ class SchedulingStudioWorkflowTests {
         // 5. P0-6 冲销报工联动：冲销后方案自动回滚为 REVERSED，需求完整释回 openTotal=4
         List<String> linkedPlanIds = (List<String>) ((Map<?, ?>) completed.get("scheme")).get("linkedPlanIds");
         assertEquals(1, linkedPlanIds.size());
-        post("/api/cutting/reports/" + linkedPlanIds.get(0) + "/reverse", Map.of("reason", "误报冲销验证"), Map.class);
+        post("/api/v2/cutting/reports/" + linkedPlanIds.get(0) + "/reverse", Map.of("reason", "误报冲销验证"), Map.class);
 
         Map<String, Object> afterReverseScheme = get("/api/v2/schemes/" + schemeId, Map.class);
         assertEquals("REVERSED", ((Map<?, ?>) afterReverseScheme.get("scheme")).get("state"));
@@ -319,7 +319,7 @@ class SchedulingStudioWorkflowTests {
 
         // 3. 重新确认、下发 MES、查询 GET /api/v2/mes/dispatch-packages/{id}、MES 单事务绑卷+完工回传
         String slitRollId = "ROLL-FILM-4600";
-        post("/api/rolls", new MotherRollInfo(
+        post("/api/v2/rolls", new MotherRollInfo(
                 slitRollId, "光学膜-4600", "BAT-FILM", "光学膜厂", "PET光学膜", "透明", 120, "PET", 4600, 20000, "分切库位 S-01"
         ), Object.class);
 

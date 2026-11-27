@@ -4,6 +4,7 @@ import com.example.cutdemotwo.business.model.CuttingPlan;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.DemandTemplate;
 import com.example.cutdemotwo.business.model.ExecutionOrder;
+import com.example.cutdemotwo.business.model.InventoryBatchImportDocument;
 import com.example.cutdemotwo.business.model.InventoryCount;
 import com.example.cutdemotwo.business.model.InventoryEvent;
 import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
@@ -132,6 +133,8 @@ public interface InventoryStore {
     default boolean hasMaterialIssueForRoll(String rollId) { return false; }
 
     default void streamMaterialIssues(int batchSize, Consumer<List<MaterialIssueDocument>> consumer) {}
+
+    default Optional<InventoryBatchImportDocument> findBatchImportByIdempotencyKey(String key) { return Optional.empty(); }
 
     default Optional<HotColdModels.OrderedEntry<Map<String, Object>>> findCutReport(String planId) {
         return Optional.empty();

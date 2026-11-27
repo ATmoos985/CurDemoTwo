@@ -12,7 +12,7 @@ import java.util.List;
 
 /** Pure computation endpoint: never creates a task, saves a plan, or updates stock. */
 @RestController
-@RequestMapping("/api/v1/nesting")
+@RequestMapping("/api/v2/nesting")
 public class NestingController {
     private final NestingSolver solvers;
     private final JsonMapper json = JsonMapper.builder()

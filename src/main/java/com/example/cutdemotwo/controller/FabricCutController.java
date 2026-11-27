@@ -1,7 +1,6 @@
 package com.example.cutdemotwo.controller;
 
 import com.example.cutdemotwo.algorithm.api.ISlittingSolverEngine;
-import com.example.cutdemotwo.business.model.SolveRequest;
 import com.example.cutdemotwo.business.model.QualityDisposition;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -55,53 +54,26 @@ public class FabricCutController {
         this.slittingEngines = slittingEngines == null ? List.of() : List.copyOf(slittingEngines);
     }
 
-    @GetMapping("/cutting/tasks")
-    public java.util.List<com.example.cutdemotwo.business.model.CuttingTask> tasks() { return remnantService.listTasks(); }
-
-    @GetMapping("/cutting/task-summaries")
-    public java.util.List<Map<String, Object>> taskSummaries() { return remnantService.taskSummaries(); }
-
-    @GetMapping("/cutting/tasks/{id}")
+    @GetMapping("/v2/cutting/tasks/{id}")
     public Map<String, Object> task(@PathVariable String id) { return remnantService.taskDetail(id); }
 
-    @PostMapping("/cutting/tasks")
+    @PostMapping("/v2/cutting/tasks")
     public com.example.cutdemotwo.business.model.CuttingTask saveTask(@RequestBody com.example.cutdemotwo.business.model.CuttingTask task) {
         return remnantService.saveTask(task);
     }
 
-    @PostMapping("/cutting/material-candidates")
-    public java.util.List<Map<String, Object>> candidates(@RequestBody SolveRequest request) { return remnantService.materialCandidates(request); }
-
-    @GetMapping("/cutting/plans/{id}")
-    public Map<String, Object> plan(@PathVariable String id) { return workflowService.getPlan(id); }
-
-    @GetMapping("/cutting/tasks/{id}/plans")
+    @GetMapping("/v2/cutting/tasks/{id}/plans")
     public java.util.List<com.example.cutdemotwo.business.model.CuttingPlan> taskPlans(
             @PathVariable String id,
             @RequestParam(defaultValue = "false") boolean summary) {
         return remnantService.taskPlans(id, summary);
     }
 
-    /** 待报工候选的有效性：失效的方案编号 → 原因。 */
-    @GetMapping("/cutting/tasks/{id}/plan-checks")
-    public Map<String, String> planChecks(@PathVariable String id) { return remnantService.planChecks(id); }
-
-    @PostMapping("/cutting/plans/{id}/cancel")
-    public Object cancelPlan(@PathVariable String id) { return remnantService.changePlanStatus(id, false); }
-
-    @PostMapping("/cutting/plans/{id}/restore")
-    public Object restorePlan(@PathVariable String id) { return remnantService.changePlanStatus(id, true); }
-
-    @PostMapping("/cutting/plans/{id}/adjust")
-    public Object adjustPlan(@PathVariable String id, @RequestBody com.example.cutdemotwo.business.model.PlanAdjustment adjustment) {
-        return workflowService.adjust(id, adjustment);
-    }
-
     @ExceptionHandler(com.example.cutdemotwo.persistence.InventoryConflictException.class)
     @ResponseStatus(HttpStatus.CONFLICT)
     public Map<String, String> conflict(RuntimeException error) { return Map.of("message", error.getMessage()); }
 
-    @PostMapping(value = "/cutting/report-confirm", consumes = "application/json")
+    @PostMapping(value = "/v2/cutting/report-confirm", consumes = "application/json")
     public Map<String, Object> confirmCut(@RequestBody String body) {
         com.example.cutdemotwo.business.model.CutReport report;
         try { report = reportJson.readValue(body, com.example.cutdemotwo.business.model.CutReport.class); }
@@ -109,10 +81,10 @@ public class FabricCutController {
         return workflowService.confirm(report);
     }
 
-    @GetMapping("/cutting/reports/{id}/quality-dispositions")
+    @GetMapping("/v2/cutting/reports/{id}/quality-dispositions")
     public Map<String, Object> qualityReview(@PathVariable String id) { return remnantService.qualityReview(id); }
 
-    @PostMapping(value = "/cutting/reports/{id}/quality-dispositions", consumes = "application/json")
+    @PostMapping(value = "/v2/cutting/reports/{id}/quality-dispositions", consumes = "application/json")
     public QualityDisposition disposeQuality(@PathVariable String id, @RequestBody String body) {
         QualityDisposition.Command command;
         try { command = qualityJson.readValue(body, QualityDisposition.Command.class); }
@@ -120,7 +92,7 @@ public class FabricCutController {
         return remnantService.disposeQuality(id, command);
     }
 
-    @PostMapping("/cutting/reports/{reportId}/dispositions/{dispositionId}/revoke")
+    @PostMapping("/v2/cutting/reports/{reportId}/dispositions/{dispositionId}/revoke")
     public Map<String, Object> revokeQualityDisposition(
             @PathVariable String reportId,
             @PathVariable String dispositionId,
@@ -134,17 +106,9 @@ public class FabricCutController {
         return remnantService.revokeQualityDisposition(reportId, dispositionId, cmd);
     }
 
-    @PostMapping("/cutting/reports/{id}/reverse")
+    @PostMapping("/v2/cutting/reports/{id}/reverse")
     public Map<String, Object> reverseReport(@PathVariable String id, @RequestBody Map<String, String> body) {
         return remnantService.reverseReport(id, body.get("reason"));
-    }
-
-    @PostMapping(value = "/cutting/report-batch", consumes = "application/json")
-    public Object reportBatch(@RequestBody String body, @RequestParam(defaultValue = "false") boolean preview) {
-        com.example.cutdemotwo.business.model.CutReport[] reports;
-        try { reports = reportJson.readValue(body, com.example.cutdemotwo.business.model.CutReport[].class); }
-        catch (RuntimeException invalid) { throw new IllegalArgumentException("报工格式无效，请核对各工位的裁片结果和件数"); }
-        return remnantService.reportBatch(reports == null ? null : java.util.Arrays.asList(reports), preview);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
@@ -159,55 +123,50 @@ public class FabricCutController {
         }
     }
 
-    @PostMapping("/demo/inventory")
+    @PostMapping("/v2/demo/inventory")
     public Map<String, Integer> initializeDemoInventory(@RequestBody Map<String, Boolean> body) {
         requireDemoEndpointsEnabled();
         if (body == null || !Boolean.TRUE.equals(body.get("confirmed"))) throw new IllegalArgumentException("请先确认创建示例材料");
         return remnantService.initializeDemoInventory();
     }
 
-    @GetMapping("/rolls")
+    @GetMapping("/v2/rolls")
     public java.util.List<com.example.cutdemotwo.business.model.MotherRollInfo> listRolls(
             @RequestParam(required = false) Integer limit,
             @RequestParam(required = false) Integer offset) {
         return FactoryDocumentController.slicePage(remnantService.getMotherRolls(), limit, offset);
     }
 
-    @GetMapping("/rolls/{rollId}")
+    @GetMapping("/v2/rolls/{rollId}")
     public com.example.cutdemotwo.business.model.MotherRollInfo getRollDetail(@PathVariable String rollId) {
         var roll = remnantService.getMotherRoll(rollId);
         if (roll == null) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.NOT_FOUND, "母卷不存在");
         return roll;
     }
 
-    @PostMapping("/rolls")
+    @PostMapping("/v2/rolls")
     public com.example.cutdemotwo.business.model.MotherRollInfo saveRoll(@RequestBody com.example.cutdemotwo.business.model.MotherRollInfo roll) {
         return remnantService.saveOrUpdateMotherRoll(roll);
     }
 
-    @PostMapping("/rolls/{rollId}/defects")
-    public com.example.cutdemotwo.contracts.geometry.Defect addDefect(@PathVariable String rollId, @RequestBody com.example.cutdemotwo.contracts.geometry.Defect defect) {
-        return remnantService.addDefectToRoll(rollId, defect);
-    }
-
-    @PostMapping("/rolls/{rollId}/inspection-defects")
+    @PostMapping("/v2/rolls/{rollId}/inspection-defects")
     public com.example.cutdemotwo.business.model.MotherRollInfo saveInspection(@PathVariable String rollId,
             @RequestBody com.example.cutdemotwo.business.cutting.RemnantService.InspectionInput input) {
         return remnantService.saveInspection(rollId, input);
     }
 
-    @PostMapping("/rolls/{rollId}/defects/{defectId}/void")
+    @PostMapping("/v2/rolls/{rollId}/defects/{defectId}/void")
     public com.example.cutdemotwo.business.model.MotherRollInfo voidDefect(@PathVariable String rollId, @PathVariable int defectId,
             @RequestBody Map<String, String> body) {
         return remnantService.voidDefect(rollId, defectId, body == null ? null : body.get("reason"));
     }
 
-    @PostMapping("/inspection/rolls")
+    @PostMapping("/v2/inspection/rolls")
     public com.example.cutdemotwo.business.model.MotherRollInfo createInspectionRoll(@RequestBody com.example.cutdemotwo.business.model.MotherRollInfo roll) {
         return remnantService.createInspectionRoll(roll);
     }
 
-    @PostMapping("/rolls/{rollId}/reset")
+    @PostMapping("/v2/rolls/{rollId}/reset")
     public Map<String, Object> resetRoll(@PathVariable String rollId, @RequestBody(required = false) Map<String, Object> body) {
         requireDemoEndpointsEnabled();
         boolean ok = remnantService.resetRoll(rollId);
@@ -217,7 +176,7 @@ public class FabricCutController {
         return res;
     }
 
-    @PostMapping("/remnants/{id}/scrap")
+    @PostMapping("/v2/remnants/{id}/scrap")
     public Map<String, Object> scrapRemnant(@PathVariable String id, @RequestBody(required = false) Map<String, String> body) {
         String reason = (body != null && body.containsKey("reason")) ? body.get("reason") : "现场破损报废";
         boolean ok = remnantService.scrapRemnant(id, reason);
@@ -227,7 +186,7 @@ public class FabricCutController {
         return res;
     }
 
-    @GetMapping("/remnants")
+    @GetMapping("/v2/remnants")
     public java.util.List<com.example.cutdemotwo.business.model.RemnantStock> listRemnants(
             @RequestParam(required = false) String rollId,
             @RequestParam(defaultValue = "false") boolean includeQuarantined,
@@ -245,27 +204,12 @@ public class FabricCutController {
         return FactoryDocumentController.slicePage(all, limit, offset);
     }
 
-    @PostMapping("/remnants/scan")
-    public com.example.cutdemotwo.business.model.RemnantStock scanRemnant(@RequestBody Map<String, String> body) {
-        String id = body.get("id");
-        return remnantService.scanOrGetById(id);
-    }
-
-    @PostMapping("/remnants/match")
-    public java.util.List<com.example.cutdemotwo.business.model.RemnantStock> matchRemnants(@RequestBody Map<String, Object> body) {
-        String rollId = body.containsKey("rollId") && body.get("rollId") != null ? body.get("rollId").toString() : null;
-        double w = body.containsKey("w") ? Double.parseDouble(body.get("w").toString()) : 0;
-        double l = body.containsKey("l") ? Double.parseDouble(body.get("l").toString()) : 0;
-        boolean rot = body.containsKey("allowRotation") && Boolean.parseBoolean(body.get("allowRotation").toString());
-        return remnantService.matchRemnants(rollId, w, l, rot);
-    }
-
-    @PostMapping("/remnants/register")
+    @PostMapping("/v2/remnants/register")
     public com.example.cutdemotwo.business.model.RemnantStock registerRemnant(@RequestBody com.example.cutdemotwo.business.model.RemnantStock item) {
         return remnantService.registerRemnant(item);
     }
 
-    @GetMapping("/health")
+    @GetMapping({"/health", "/v2/health"})
     public ResponseEntity<Map<String, Object>> health() {
         Map<String, Object> map = new HashMap<>();
         Map<String, Object> storage = remnantService.healthStatus();

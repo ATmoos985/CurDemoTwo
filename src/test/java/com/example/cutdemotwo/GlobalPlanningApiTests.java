@@ -67,7 +67,7 @@ class GlobalPlanningApiTests {
         MotherRollInfo rollCopy = json.readValue(json.writeValueAsString(liveRoll), MotherRollInfo.class);
         rollCopy.setUnitPricePerSqm(32.5);
         rollCopy.setUnitPricePerMeter(65.0);
-        var saveRollResp = post("/api/rolls", json.writeValueAsString(rollCopy));
+        var saveRollResp = post("/api/v2/rolls", json.writeValueAsString(rollCopy));
         assertEquals(200, saveRollResp.statusCode(), saveRollResp.body());
         JsonNode savedRollJson = json.readTree(saveRollResp.body());
         assertEquals(32.5, savedRollJson.get("unitPricePerSqm").asDouble(), 0.001);

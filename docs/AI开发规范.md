@@ -54,6 +54,10 @@
 - 本地缺少原生引擎时，记录跳过数量及原因；Java 降级通过不等于原生引擎已验证。
 - 运行过程中保持简短进度说明。报告中区分“发现测试数、实际执行数、成功、失败、跳过”。
 - **防遗漏工作流闭环门禁**：合入任何功能变更前必须执行 `node scripts/workflow-closure-audit.mjs --fail`，确保新增或修改的 JDBC/Flyway 测试类已标注 `@Tag("mysql-integration")` 且无硬编码 `jdbc:h2:mem:`、Controller 暴露接口与 `src/main/resources/static/api-v2/openapi.json` 保持同步（禁止新增未登记非 `/api/v2/*` 端点）、新增代码零循环且不突破超千行生产源码基线、新增前端路由均在 `.agents/skills/verify-cutdemotwo/features/*.md` 登记验收地图。
+- **求解质量基准门禁（严禁作弊）**：
+  - 区分 `node --test benchmark/*.test.mjs`（构建期静态/逻辑单测，不启动求解服务）与 `node benchmark/gate.mjs --set v2-gate --auth`（独立非 `8080` 端口隔离真机门禁，强制独立临时状态目录并校验正式 `data/cutdemo-state.json` SHA-256 零变动）；
+  - 涉及 `algorithm/`、`SolverFactory`、`GlobalPlanningService`、`OptimizationService` 求解或编排变更时，交付前必须执行 `node benchmark/gate.mjs --set v2-gate --auth` 并如实报告实测利用率、排入率与耗时；
+  - 严禁为凑过关而无依据压低 `benchmark/thresholds.json` 中的 `minUtilization`、`minPlacedRatio`、`minRemnantPlaced` 或 `minRelayRolls`。
 
 ## 6. 交付
 

@@ -47,21 +47,23 @@ class NativeSolverFallbackApiTests {
     }
 
     @Test void healthReportsTheMissingNativeEngineAndTheFallbackThatWillRun() throws Exception {
-        var response = send("/api/health", null);
-        assertEquals(200, response.statusCode(), response.body());
-        var health = json.readTree(response.body());
-        assertFalse(health.get("packingsolverAvailable").asBoolean(), response.body());
-        assertEquals("javaguillotine", health.get("packingsolverFallback").asText(), response.body());
-        assertFalse(health.get("packingsolverIrregularAvailable").asBoolean(), response.body());
-        assertEquals("deepnest", health.get("packingsolverIrregularFallback").asText(), response.body());
+        for (String healthPath : java.util.List.of("/api/health", "/api/v2/health")) {
+            var response = send(healthPath, null);
+            assertEquals(200, response.statusCode(), response.body());
+            var health = json.readTree(response.body());
+            assertFalse(health.get("packingsolverAvailable").asBoolean(), response.body());
+            assertEquals("javaguillotine", health.get("packingsolverFallback").asText(), response.body());
+            assertFalse(health.get("packingsolverIrregularAvailable").asBoolean(), response.body());
+            assertEquals("deepnest", health.get("packingsolverIrregularFallback").asText(), response.body());
+        }
 
-        var engines = json.readTree(send("/api/v1/nesting/engines", null).body());
+        var engines = json.readTree(send("/api/v2/nesting/engines", null).body());
         for (var engine : engines) if ("packingsolver".equals(engine.get("id").asText()))
             assertFalse(engine.get("available").asBoolean(), "engine discovery must not claim the native engine");
     }
 
     @Test void standardSolveNamesTheJavaEngineAndExplainsTheFallback() throws Exception {
-        var response = send("/api/v1/nesting/solve", json.writeValueAsString(NativeSolverFallbackTests.guillotine("packingsolver")));
+        var response = send("/api/v2/nesting/solve", json.writeValueAsString(NativeSolverFallbackTests.guillotine("packingsolver")));
         assertEquals(200, response.statusCode(), response.body());
         var result = json.readValue(response.body(), NestingResult.class);
         assertEquals("FEASIBLE", result.status(), result.message());
@@ -105,7 +107,7 @@ class NativeSolverFallbackApiTests {
     }
 
     @Test void contourAutoUsesDeepnestDirectlyAndExplicitNativeFallsBackToDeepnest() throws Exception {
-        var autoResponse = send("/api/v1/nesting/solve", json.writeValueAsString(NativeSolverFallbackTests.contour("auto")));
+        var autoResponse = send("/api/v2/nesting/solve", json.writeValueAsString(NativeSolverFallbackTests.contour("auto")));
         assertEquals(200, autoResponse.statusCode(), autoResponse.body());
         var autoResult = json.readValue(autoResponse.body(), NestingResult.class);
         assertEquals("FEASIBLE", autoResult.status(), autoResult.message());
@@ -113,7 +115,7 @@ class NativeSolverFallbackApiTests {
         assertEquals("deepnest", autoResult.requestedEngine());
         assertNull(autoResult.fallbackReason());
 
-        var nativeResponse = send("/api/v1/nesting/solve", json.writeValueAsString(NativeSolverFallbackTests.contour("packingsolver-irregular")));
+        var nativeResponse = send("/api/v2/nesting/solve", json.writeValueAsString(NativeSolverFallbackTests.contour("packingsolver-irregular")));
         assertEquals(200, nativeResponse.statusCode(), nativeResponse.body());
         var nativeResult = json.readValue(nativeResponse.body(), NestingResult.class);
         assertEquals("FEASIBLE", nativeResult.status(), nativeResult.message());

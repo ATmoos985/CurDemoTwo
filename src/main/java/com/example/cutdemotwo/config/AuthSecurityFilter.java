@@ -148,7 +148,8 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
             }
         }
 
-        if (writeRequest && writeRateLimitPerMinute > 0 && path.startsWith("/api/") && !"/api/health".equals(path)) {
+        if (writeRequest && writeRateLimitPerMinute > 0 && path.startsWith("/api/")
+                && !"/api/health".equals(path) && !"/api/v2/health".equals(path)) {
             String rateKey = (principal != null && principal.authenticated())
                     ? "user:" + principal.username()
                     : "ip:" + (request.getRemoteAddr() == null ? "unknown" : request.getRemoteAddr());
@@ -189,6 +190,7 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
             return true;
         }
         if ("/api/health".equals(path)
+                || "/api/v2/health".equals(path)
                 || "/actuator/health".equals(path)
                 || path.startsWith("/actuator/health/")) {
             return true;
@@ -245,16 +247,22 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
             return true;
         }
 
-        if (path.startsWith("/api/demo/") || path.matches("^/api/rolls/[^/]+/reset$")) {
+        if (path.startsWith("/api/v2/demo/") || path.matches("^/api/v2/rolls/[^/]+/reset$")) {
             return false;
         }
 
+        if ("POST".equals(method) && "/api/v2/exports/batch-zip".equals(path)) {
+            return AuthContext.ALL_ROLES.contains(role);
+        }
+
         if (path.startsWith("/api/v2/quality/")
-                || path.startsWith("/api/inspection/")
-                || path.matches("^/api/rolls/[^/]+/defects(?:/.*)?$")
-                || path.matches("^/api/rolls/[^/]+/inspection-defects$")
-                || path.matches("^/api/cutting/reports/[^/]+/quality-dispositions$")
-                || path.matches("^/api/cutting/reports/[^/]+/dispositions/[^/]+/revoke$")) {
+                || path.startsWith("/api/v2/inspection/")
+                || "/api/v2/inventory/import/defects".equals(path)
+                || "/api/v2/inventory/import/defects/preview".equals(path)
+                || path.matches("^/api/v2/rolls/[^/]+/defects/[^/]+/void$")
+                || path.matches("^/api/v2/rolls/[^/]+/inspection-defects$")
+                || path.matches("^/api/v2/cutting/reports/[^/]+/quality-dispositions$")
+                || path.matches("^/api/v2/cutting/reports/[^/]+/dispositions/[^/]+/revoke$")) {
             return AuthContext.ROLE_INSPECTOR.equals(role);
         }
 
@@ -262,18 +270,18 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
                 || path.equals("/api/v2/material-issues") || path.startsWith("/api/v2/material-issues/")
                 || path.equals("/api/v2/inventory-transfers") || path.startsWith("/api/v2/inventory-transfers/")
                 || path.equals("/api/v2/inventory-counts") || path.startsWith("/api/v2/inventory-counts/")
+                || path.equals("/api/v2/inventory/import/rolls") || path.equals("/api/v2/inventory/import/rolls/preview")
+                || path.equals("/api/v2/inventory/import/remnants") || path.equals("/api/v2/inventory/import/remnants/preview")
                 || path.matches("^/api/v2/rolls/[^/]+/scrap$")
-                || path.equals("/api/rolls")
-                || path.equals("/api/remnants/register")
-                || path.equals("/api/remnants/scan")
-                || path.matches("^/api/remnants/[^/]+/scrap$")) {
+                || path.equals("/api/v2/rolls")
+                || path.equals("/api/v2/remnants/register")
+                || path.matches("^/api/v2/remnants/[^/]+/scrap$")) {
             return AuthContext.ROLE_WAREHOUSE.equals(role);
         }
 
         if (path.equals("/api/v2/execution-orders") || path.startsWith("/api/v2/execution-orders/")
                 || path.matches("^/api/v2/schemes/[^/]+/complete$")
-                || path.equals("/api/cutting/report-confirm")
-                || path.equals("/api/cutting/report-batch")) {
+                || path.equals("/api/v2/cutting/report-confirm")) {
             return AuthContext.ROLE_OPERATOR.equals(role) || AuthContext.ROLE_PLANNER.equals(role);
         }
 
@@ -284,13 +292,10 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
                 || path.startsWith("/api/v2/schemes/")
                 || path.equals("/api/v2/problem-validations")
                 || path.equals("/api/v2/optimization-jobs") || path.startsWith("/api/v2/optimization-jobs/")
-                || path.startsWith("/api/v1/nesting/")
-                || path.startsWith("/api/cutting/tasks")
-                || path.startsWith("/api/cutting/plans/")
-                || path.matches("^/api/cutting/reports/[^/]+/reverse$")
-                || path.equals("/api/cutting/material-candidates")
-                || path.equals("/api/cutting/remnant-recommendations")
-                || path.equals("/api/remnants/match")) {
+                || path.equals("/api/v2/nesting/solve")
+                || path.equals("/api/v2/cutting/tasks")
+                || path.matches("^/api/v2/cutting/reports/[^/]+/reverse$")
+                || path.equals("/api/v2/cutting/remnant-recommendations")) {
             return AuthContext.ROLE_PLANNER.equals(role);
         }
 
@@ -319,13 +324,12 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
         if (read) {
             if (path.equals("/api/v2/demand-pool") || path.startsWith("/api/v2/demand-pool/")
                     || path.equals("/api/v2/demand-templates") || path.startsWith("/api/v2/demand-templates/")
-                    || path.equals("/api/cutting/tasks") || path.startsWith("/api/cutting/tasks/")
-                    || path.equals("/api/cutting/task-summaries")) {
+                    || path.matches("^/api/v2/cutting/tasks/[^/]+(?:/plans)?$")) {
                 return AuthContext.SCOPE_DEMAND_READ;
             }
-            if (path.equals("/api/rolls") || path.startsWith("/api/rolls/")
-                    || path.equals("/api/remnants") || path.startsWith("/api/remnants/")
-                    || path.startsWith("/api/v2/inventory-ledger/")
+            if (path.equals("/api/v2/rolls") || path.startsWith("/api/v2/rolls/")
+                    || path.equals("/api/v2/remnants") || path.startsWith("/api/v2/remnants/")
+                    || path.equals("/api/v2/inventory-ledger") || path.startsWith("/api/v2/inventory-ledger/")
                     || path.startsWith("/api/v2/analytics/")
                     || path.startsWith("/api/v2/reconciliation/")
                     || path.equals("/api/v2/schemes") || path.startsWith("/api/v2/schemes/")
@@ -333,14 +337,14 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
                     || path.equals("/api/v2/quality/releases")
                     || path.equals("/api/v2/inventory-receipts")
                     || path.equals("/api/v2/material-issues")
-                    || path.equals("/api/v2/inventory-transfers")
-                    || path.equals("/api/v2/inventory-counts")
-                    || path.startsWith("/api/cutting/plans/")
-                    || path.startsWith("/api/cutting/reports/")) {
+                    || path.equals("/api/v2/inventory-transfers") || path.equals("/api/v2/inventory-transfers/options")
+                    || path.equals("/api/v2/inventory-counts") || path.equals("/api/v2/inventory-counts/options")
+                    || path.startsWith("/api/v2/exports/")
+                    || path.matches("^/api/v2/cutting/reports/[^/]+/quality-dispositions$")) {
                 return AuthContext.SCOPE_INVENTORY_READ;
             }
             if (path.equals("/api/v2/capabilities")
-                    || path.equals("/api/v1/nesting/engines")
+                    || path.equals("/api/v2/nesting/engines")
                     || path.startsWith("/api/v2/optimization-jobs/")
                     || path.startsWith("/api/v2/optimization-results/")
                     || path.equals("/api/v2/result-comparisons")
@@ -361,11 +365,9 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
             if (path.equals("/api/v2/problem-validations")
                     || path.equals("/api/v2/optimization-jobs")
                     || path.matches("^/api/v2/optimization-jobs/[^/]+/cancellations$")
-                    || path.startsWith("/api/v1/nesting/")
+                    || path.equals("/api/v2/nesting/solve")
                     || path.startsWith("/api/v2/planning/")
-                    || path.equals("/api/cutting/material-candidates")
-                    || path.equals("/api/cutting/remnant-recommendations")
-                    || path.equals("/api/remnants/match")
+                    || path.equals("/api/v2/cutting/remnant-recommendations")
                     || path.equals("/api/v2/schemes/validate-layout")
                     || path.matches("^/api/v2/workbench/tasks/[^/]+/plan-jobs$")) {
                 return AuthContext.SCOPE_PLAN_COMPUTE;

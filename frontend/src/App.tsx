@@ -217,7 +217,7 @@ export const App: React.FC = () => {
   const refreshHealth = () => {
     setRefreshingHealth(true);
     Promise.all([
-      requestJSON('/api/health').catch(() => null),
+      requestJSON('/api/v2/health').catch(() => null),
       requestJSON('/api/v2/capabilities').catch(() => null)
     ])
       .then(([h, c]) => {
@@ -327,11 +327,11 @@ export const App: React.FC = () => {
   const renderMain = () => {
     switch (effectiveRoute.page) {
       case 'demands':
-        return <DemandCreatePage appendTaskId={effectiveRoute.appendQuery || undefined} />;
+        return <DemandCreatePage appendTaskId={effectiveRoute.appendQuery || undefined} auth={auth} />;
       case 'demand-library':
         return <DemandLibraryPage />;
       case 'clusters':
-        return <ClusterCenterPage />;
+        return <ClusterCenterPage auth={auth} />;
       case 'workbench':
         return (
           <CuttingWorkbenchPage
@@ -347,16 +347,17 @@ export const App: React.FC = () => {
           <ResultsCenterPage
             schemeId={effectiveRoute.params[0] || undefined}
             taskIdQuery={effectiveRoute.taskIdQuery || undefined}
+            auth={auth}
           />
         );
       case 'reconciliation':
-        return <ReconciliationPage />;
+        return <ReconciliationPage auth={auth} />;
       case 'cost-analytics':
-        return <CostAnalyticsPage />;
+        return <CostAnalyticsPage auth={auth} />;
       case 'inventory':
-        return <InventoryPage params={effectiveRoute.params} />;
+        return <InventoryPage params={effectiveRoute.params} auth={auth} />;
       case 'inspection':
-        return <InspectionPage params={effectiveRoute.params} />;
+        return <InspectionPage params={effectiveRoute.params} auth={auth} />;
       case 'documents':
         return <DocumentsPage />;
       case 'garment':

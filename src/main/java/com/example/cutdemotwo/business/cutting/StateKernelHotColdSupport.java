@@ -4,6 +4,7 @@ import com.example.cutdemotwo.business.model.CuttingPlan;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.DemandTemplate;
 import com.example.cutdemotwo.business.model.ExecutionOrder;
+import com.example.cutdemotwo.business.model.InventoryBatchImportDocument;
 import com.example.cutdemotwo.business.model.InventoryCount;
 import com.example.cutdemotwo.business.model.InventoryEvent;
 import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
@@ -92,6 +93,7 @@ final class StateKernelHotColdSupport {
             Map<String, QualityReleaseDocument> qualityReleases,
             Map<String, InventoryReceiptDocument> inventoryReceipts,
             Map<String, MaterialIssueDocument> materialIssues,
+            Map<String, InventoryBatchImportDocument> batchImports,
             Map<String, Long> activeCountRevisions,
             List<InventoryLedgerEntry> ledger,
             List<InventoryEvent> outbox,
@@ -105,7 +107,7 @@ final class StateKernelHotColdSupport {
         InventorySnapshot toSnapshot() {
             return new InventorySnapshot(new ArrayList<>(rolls.values()), new ArrayList<>(remnants.values()),
                     receipts, remnantSeq, defectSeq, tasks, plans, revision, executions, ledger, transfers,
-                    outbox, counts, templates, schemes, qualityReleases, inventoryReceipts, materialIssues);
+                    outbox, counts, templates, schemes, qualityReleases, inventoryReceipts, materialIssues, batchImports);
         }
     }
 
@@ -268,6 +270,7 @@ final class StateKernelHotColdSupport {
             Map<String, QualityReleaseDocument> qualityReleases,
             Map<String, InventoryReceiptDocument> inventoryReceipts,
             Map<String, MaterialIssueDocument> materialIssues,
+            Map<String, InventoryBatchImportDocument> batchImports,
             Map<String, Long> activeCountRevisions,
             TableSortIndex rollSort,
             TableSortIndex remnantSort,
@@ -286,6 +289,7 @@ final class StateKernelHotColdSupport {
         qualityReleases.clear();
         inventoryReceipts.clear();
         materialIssues.clear();
+        batchImports.clear();
 
         List<String> coldExecs = executions.values().stream()
                 .filter(e -> !ColdStateQueryBridge.isHotExecution(e)).map(ExecutionOrder::id).toList();

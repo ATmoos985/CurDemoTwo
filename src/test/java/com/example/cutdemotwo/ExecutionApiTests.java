@@ -54,7 +54,7 @@ class ExecutionApiTests {
         assertFalse(released.get("report").get("allowed").asBoolean());
         assertArrayEquals(reservedSnapshot,java.nio.file.Files.readAllBytes(temp.resolve("inventory.json")));
         String report=json.writeValueAsString(fixture.report(p,1));
-        assertEquals(409,call("/api/cutting/report-confirm",report,null).statusCode());
+        assertEquals(409,call("/api/v2/cutting/report-confirm",report,null).statusCode());
         assertEquals(200,call(base+"/"+id+"/start","{\"operationId\":\"http-start\",\"expectedVersion\":2,\"reservationSeconds\":0,\"reason\":\"开工\"}",null).statusCode());
         var running=json.readTree(call(base+"/"+id,null,null).body()).get("allowedActions");
         assertFalse(running.get("cancel").get("allowed").asBoolean());

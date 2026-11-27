@@ -40,19 +40,21 @@ public class OperationAuditFilter extends OncePerRequestFilter {
     private static final Pattern P_DRAFT_CONFIRM = Pattern.compile("^/api/v2/workbench/drafts/([^/]+)/confirm$");
     private static final Pattern P_DRAFT_DISCARD = Pattern.compile("^/api/v2/workbench/drafts/([^/]+)/discard$");
     private static final Pattern P_SCHEME_ACTION = Pattern.compile("^/api/v2/schemes/([^/]+)/(bind-roll|complete|cancel|replenish-task)$");
-    private static final Pattern P_PLAN_ACTION = Pattern.compile("^/api/cutting/plans/([^/]+)/(cancel|restore|adjust)$");
     private static final Pattern P_EXEC_ACTION = Pattern.compile("^/api/v2/execution-orders/([^/]+)/(release|start|cancel|reports)$");
-    private static final Pattern P_REPORT_REVERSE = Pattern.compile("^/api/cutting/reports/([^/]+)/reverse$");
+    private static final Pattern P_REPORT_REVERSE = Pattern.compile("^/api/v2/cutting/reports/([^/]+)/reverse$");
     private static final Pattern P_QUALITY_RELEASE = Pattern.compile("^/api/v2/quality/remnants/([^/]+)/release$");
     private static final Pattern P_QUALITY_ROLL = Pattern.compile("^/api/v2/quality/rolls/([^/]+)/inspect-complete$");
-    private static final Pattern P_ROLL_DEFECT = Pattern.compile("^/api/rolls/([^/]+)/(?:defects|inspection-defects)$");
-    private static final Pattern P_ROLL_DEFECT_VOID = Pattern.compile("^/api/rolls/([^/]+)/defects/([^/]+)/void$");
-    private static final Pattern P_QUALITY_DISP = Pattern.compile("^/api/cutting/reports/([^/]+)/quality-dispositions$");
-    private static final Pattern P_QUALITY_DISP_REVOKE = Pattern.compile("^/api/cutting/reports/([^/]+)/dispositions/([^/]+)/revoke$");
+    private static final Pattern P_ROLL_DEFECT = Pattern.compile("^/api/v2/rolls/([^/]+)/inspection-defects$");
+    private static final Pattern P_ROLL_DEFECT_VOID = Pattern.compile("^/api/v2/rolls/([^/]+)/defects/([^/]+)/void$");
+    private static final Pattern P_QUALITY_DISP = Pattern.compile("^/api/v2/cutting/reports/([^/]+)/quality-dispositions$");
+    private static final Pattern P_QUALITY_DISP_REVOKE = Pattern.compile("^/api/v2/cutting/reports/([^/]+)/dispositions/([^/]+)/revoke$");
     private static final Pattern P_ROLL_SCRAP = Pattern.compile("^/api/v2/rolls/([^/]+)/scrap$");
-    private static final Pattern P_REMNANT_SCRAP = Pattern.compile("^/api/remnants/([^/]+)/scrap$");
-    private static final Pattern P_ROLL_RESET = Pattern.compile("^/api/rolls/([^/]+)/reset$");
+    private static final Pattern P_REMNANT_SCRAP = Pattern.compile("^/api/v2/remnants/([^/]+)/scrap$");
+    private static final Pattern P_ROLL_RESET = Pattern.compile("^/api/v2/rolls/([^/]+)/reset$");
     private static final Pattern P_MES_DISPATCH = Pattern.compile("^/api/v2/mes/schemes/([^/]+)/dispatch$");
+    private static final Pattern P_EXPORT_CAM = Pattern.compile("^/api/v2/exports/schemes/([^/]+)/cam$");
+    private static final Pattern P_EXPORT_SLITTING = Pattern.compile("^/api/v2/exports/schemes/([^/]+)/slitting$");
+    private static final Pattern P_EXPORT_TICKET = Pattern.compile("^/api/v2/exports/schemes/([^/]+)/ticket\\.pdf$");
 
     private record AuditTargetSpec(String action, String targetType, String pathTargetId) {}
 
@@ -65,15 +67,12 @@ public class OperationAuditFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String method = request.getMethod() == null ? "GET" : request.getMethod().toUpperCase(Locale.ROOT);
-        if (!WRITE_METHODS.contains(method)) {
-            return true;
-        }
         var normalized = AuthSecurityFilter.tryNormalizePath(request);
         if (normalized.isEmpty()) {
             return true;
         }
         String path = normalized.get();
-        if ("/api/cutting/report-batch".equals(path) && "true".equalsIgnoreCase(request.getParameter("preview"))) {
+        if (!WRITE_METHODS.contains(method) && !("GET".equals(method) && path.startsWith("/api/v2/exports/"))) {
             return true;
         }
         return resolveSpec(method, path) == null;
@@ -96,6 +95,32 @@ public class OperationAuditFilter extends OncePerRequestFilter {
             return;
         }
 
+        // 所有 /api/v2/exports/**（含 GET 与 POST /batch-zip）禁用响应体缓存，直接透传确保流式输出零堆缓冲
+        if (path.startsWith("/api/v2/exports/")) {
+            int status = 500;
+            try {
+                filterChain.doFilter(request, response);
+                status = response.getStatus();
+            } finally {
+                String targetId = resolveExportTargetId(spec, request);
+                String outcome = (status >= 200 && status < 400) ? "SUCCESS" : "FAILED";
+                Map<String, Object> detail = buildExportAuditDetail(spec, request, status, targetId);
+                auditService.record(
+                        AuthContext.current(),
+                        spec.action(),
+                        spec.targetType(),
+                        targetId,
+                        method,
+                        path,
+                        outcome,
+                        status,
+                        request.getRemoteAddr(),
+                        detail
+                );
+            }
+            return;
+        }
+
         ContentCachingResponseWrapper wrapped = new ContentCachingResponseWrapper(response);
         int status = 500;
         try {
@@ -109,6 +134,9 @@ public class OperationAuditFilter extends OncePerRequestFilter {
             detail.put("status", status);
             if (targetId != null) {
                 detail.put("targetId", targetId);
+            }
+            if (path.startsWith("/api/v2/inventory/import/")) {
+                enrichImportAuditDetail(detail, path, bodyBytes);
             }
             auditService.record(
                     AuthContext.current(),
@@ -127,6 +155,22 @@ public class OperationAuditFilter extends OncePerRequestFilter {
     }
 
     private static AuditTargetSpec resolveSpec(String method, String path) {
+        if ("GET".equals(method)) {
+            if ("/api/v2/exports/production-summary".equals(path)) {
+                return new AuditTargetSpec("EXPORT_PRODUCTION_SUMMARY", "PRODUCTION_REPORT", "ALL");
+            }
+            Matcher m;
+            if ((m = P_EXPORT_CAM.matcher(path)).matches()) {
+                return new AuditTargetSpec("EXPORT_CAM", "SCHEDULING_SCHEME", m.group(1));
+            }
+            if ((m = P_EXPORT_SLITTING.matcher(path)).matches()) {
+                return new AuditTargetSpec("EXPORT_SLITTING", "SCHEDULING_SCHEME", m.group(1));
+            }
+            if ((m = P_EXPORT_TICKET.matcher(path)).matches()) {
+                return new AuditTargetSpec("EXPORT_TICKET_PDF", "SCHEDULING_SCHEME", m.group(1));
+            }
+            return null;
+        }
         if ("DELETE".equals(method)) {
             Matcher m = P_TEMPLATE_DEL.matcher(path);
             if (m.matches()) {
@@ -140,23 +184,29 @@ public class OperationAuditFilter extends OncePerRequestFilter {
         return switch (path) {
             case "/api/v2/demand-templates" -> new AuditTargetSpec("DEMAND_TEMPLATE_SAVE", "DEMAND_TEMPLATE", null);
             case "/api/v2/demand-pool" -> new AuditTargetSpec("DEMAND_POOL_SAVE", "DEMAND_TASK", null);
-            case "/api/cutting/tasks" -> new AuditTargetSpec("TASK_SAVE", "DEMAND_TASK", null);
+            case "/api/v2/cutting/tasks" -> new AuditTargetSpec("TASK_SAVE", "DEMAND_TASK", null);
             case "/api/v2/workbench/drafts" -> new AuditTargetSpec("DRAFT_CREATE", "WORKBENCH_DRAFT", null);
             case "/api/v2/workbench/multi-material-drafts" -> new AuditTargetSpec("DRAFT_BATCH_CREATE", "WORKBENCH_DRAFT_BATCH", null);
             case "/api/v2/schemes/confirm" -> new AuditTargetSpec("SCHEME_CONFIRM", "SCHEDULING_SCHEME", null);
             case "/api/v2/execution-orders" -> new AuditTargetSpec("EXECUTION_ORDER_CREATE", "EXECUTION_ORDER", null);
-            case "/api/cutting/report-confirm" -> new AuditTargetSpec("CUT_REPORT_CONFIRM", "CUT_REPORT", null);
-            case "/api/cutting/report-batch" -> new AuditTargetSpec("CUT_REPORT_BATCH", "CUT_REPORT", null);
+            case "/api/v2/cutting/report-confirm" -> new AuditTargetSpec("CUT_REPORT_CONFIRM", "CUT_REPORT", null);
             case "/api/v2/mes/orders" -> new AuditTargetSpec("MES_ORDER_SYNC", "MES_ORDER", null);
             case "/api/v2/mes/execution-feedback" -> new AuditTargetSpec("MES_FEEDBACK", "EXECUTION_ORDER", null);
-            case "/api/inspection/rolls" -> new AuditTargetSpec("INSPECTION_ROLL_CREATE", "MOTHER_ROLL", null);
+            case "/api/v2/inspection/rolls" -> new AuditTargetSpec("INSPECTION_ROLL_CREATE", "MOTHER_ROLL", null);
             case "/api/v2/inventory-receipts" -> new AuditTargetSpec("INVENTORY_RECEIPT", "INVENTORY_RECEIPT", null);
             case "/api/v2/material-issues" -> new AuditTargetSpec("MATERIAL_ISSUE", "MATERIAL_ISSUE", null);
             case "/api/v2/inventory-transfers" -> new AuditTargetSpec("INVENTORY_TRANSFER", "INVENTORY_TRANSFER", null);
             case "/api/v2/inventory-counts" -> new AuditTargetSpec("INVENTORY_COUNT", "INVENTORY_COUNT", null);
-            case "/api/rolls" -> new AuditTargetSpec("ROLL_SAVE", "MOTHER_ROLL", null);
-            case "/api/remnants/register" -> new AuditTargetSpec("REMNANT_REGISTER", "REMNANT", null);
-            case "/api/demo/inventory" -> new AuditTargetSpec("SYSTEM_DEMO_INIT", "SYSTEM", "DEMO_INVENTORY");
+            case "/api/v2/rolls" -> new AuditTargetSpec("ROLL_SAVE", "MOTHER_ROLL", null);
+            case "/api/v2/remnants/register" -> new AuditTargetSpec("REMNANT_REGISTER", "REMNANT", null);
+            case "/api/v2/demo/inventory" -> new AuditTargetSpec("SYSTEM_DEMO_INIT", "SYSTEM", "DEMO_INVENTORY");
+            case "/api/v2/exports/batch-zip" -> new AuditTargetSpec("EXPORT_BATCH_ZIP", "SCHEDULING_SCHEME_BATCH", "BATCH_ZIP");
+            case "/api/v2/inventory/import/rolls" -> new AuditTargetSpec("INVENTORY_IMPORT_ROLLS", "MOTHER_ROLL_BATCH", "COMMIT");
+            case "/api/v2/inventory/import/rolls/preview" -> new AuditTargetSpec("INVENTORY_IMPORT_ROLLS", "MOTHER_ROLL_BATCH", "PREVIEW");
+            case "/api/v2/inventory/import/remnants" -> new AuditTargetSpec("INVENTORY_IMPORT_REMNANTS", "REMNANT_BATCH", "COMMIT");
+            case "/api/v2/inventory/import/remnants/preview" -> new AuditTargetSpec("INVENTORY_IMPORT_REMNANTS", "REMNANT_BATCH", "PREVIEW");
+            case "/api/v2/inventory/import/defects" -> new AuditTargetSpec("INVENTORY_IMPORT_DEFECTS", "DEFECT_BATCH", "COMMIT");
+            case "/api/v2/inventory/import/defects/preview" -> new AuditTargetSpec("INVENTORY_IMPORT_DEFECTS", "DEFECT_BATCH", "PREVIEW");
             default -> matchPatternSpec(path);
         };
     }
@@ -178,10 +228,6 @@ public class OperationAuditFilter extends OncePerRequestFilter {
                 case "replenish-task" -> new AuditTargetSpec("SCHEME_REPLENISH_TASK", "DEMAND_TASK", m.group(1));
                 default -> null;
             };
-        }
-        if ((m = P_PLAN_ACTION.matcher(path)).matches()) {
-            String op = m.group(2).toUpperCase(Locale.ROOT);
-            return new AuditTargetSpec("PLAN_" + op, "CUTTING_PLAN", m.group(1));
         }
         if ((m = P_EXEC_ACTION.matcher(path)).matches()) {
             String op = m.group(2).toUpperCase(Locale.ROOT);
@@ -237,6 +283,8 @@ public class OperationAuditFilter extends OncePerRequestFilter {
                         case "DRAFT_CREATE" -> firstNonBlank(root.path("draftId").asString(""), root.path("id").asString(""));
                         case "DRAFT_BATCH_CREATE" -> firstNonBlank(root.path("batchGroupId").asString(""), root.path("id").asString(""));
                         case "ROLL_SAVE", "INSPECTION_ROLL_CREATE" -> firstNonBlank(root.path("rollId").asString(""), root.path("id").asString(""));
+                        case "INVENTORY_IMPORT_ROLLS", "INVENTORY_IMPORT_REMNANTS", "INVENTORY_IMPORT_DEFECTS" ->
+                                firstNonBlank(root.path("documentId").asString(""), spec.pathTargetId());
                         default -> firstNonBlank(root.path("id").asString(""), root.path("rollId").asString(""));
                     };
                     if (extracted != null) {
@@ -248,6 +296,61 @@ public class OperationAuditFilter extends OncePerRequestFilter {
             }
         }
         return spec.pathTargetId();
+    }
+
+    private static String resolveExportTargetId(AuditTargetSpec spec, HttpServletRequest request) {
+        if ("EXPORT_PRODUCTION_SUMMARY".equals(spec.action())) {
+            String taskId = request.getParameter("taskId");
+            if (taskId != null && !taskId.isBlank()) {
+                return taskId.trim();
+            }
+        }
+        return spec.pathTargetId();
+    }
+
+    private static Map<String, Object> buildExportAuditDetail(
+            AuditTargetSpec spec, HttpServletRequest request, int status, String targetId
+    ) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("status", status);
+        if (targetId != null) {
+            detail.put("targetId", targetId);
+        }
+        String format = request.getParameter("format");
+        if (format != null && !format.isBlank()) {
+            detail.put("format", format.trim());
+        } else if ("EXPORT_TICKET_PDF".equals(spec.action())) {
+            detail.put("format", "pdf");
+        }
+        String taskId = request.getParameter("taskId");
+        if (taskId != null && !taskId.isBlank()) {
+            detail.put("taskId", taskId.trim());
+        }
+        String state = request.getParameter("state");
+        if (state != null && !state.isBlank()) {
+            detail.put("state", state.trim());
+        }
+        return detail;
+    }
+
+    private static void enrichImportAuditDetail(Map<String, Object> detail, String path, byte[] bodyBytes) {
+        detail.put("mode", path.endsWith("/preview") ? "PREVIEW" : "COMMIT");
+        if (bodyBytes != null && bodyBytes.length > 0 && bodyBytes.length <= MAX_RESPONSE_SNIPPET_BYTES) {
+            try {
+                String text = new String(bodyBytes, StandardCharsets.UTF_8).trim();
+                if (text.startsWith("{")) {
+                    JsonNode root = JSON.readTree(text);
+                    if (root.has("dryRun")) detail.put("dryRun", root.path("dryRun").asBoolean());
+                    if (root.has("totalRows")) detail.put("totalRows", root.path("totalRows").asInt());
+                    if (root.has("validRows")) detail.put("validRows", root.path("validRows").asInt());
+                    if (root.has("importedCount")) detail.put("importedCount", root.path("importedCount").asInt());
+                    if (root.has("errorRows")) detail.put("errorRows", root.path("errorRows").asInt());
+                    if (root.has("idempotentReplay")) detail.put("idempotentReplay", root.path("idempotentReplay").asBoolean());
+                }
+            } catch (RuntimeException ignored) {
+                // 非 JSON 或校验异常响应跳过明细提取
+            }
+        }
     }
 
     private static String firstNonBlank(String a, String b) {

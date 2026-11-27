@@ -210,7 +210,7 @@ export function evaluateSchemeReversalEligibility(entry: any): SchemeReversalEli
 }
 
 /**
- * 构造后端 `POST /api/cutting/reports/{id}/reverse` 请求地址与载荷。
+ * 构造后端 `POST /api/v2/cutting/reports/{id}/reverse` 请求地址与载荷。
  */
 export function buildReversalRequest(reportId: string, reason: string): ReversalRequestPayload {
   const id = String(reportId ?? '').trim();
@@ -222,7 +222,7 @@ export function buildReversalRequest(reportId: string, reason: string): Reversal
     throw new Error(validation.error || '请填写有效的冲销原因');
   }
   return {
-    url: `/api/cutting/reports/${encodeURIComponent(id)}/reverse`,
+    url: `/api/v2/cutting/reports/${encodeURIComponent(id)}/reverse`,
     body: { reason: validation.trimmed }
   };
 }

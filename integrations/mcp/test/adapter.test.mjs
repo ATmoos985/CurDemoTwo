@@ -500,10 +500,10 @@ test('MCP Resources（含 cutting://guides/operations）与 3 个标准 Prompts 
 
 test('彻底修复静默吞错：get_material_trace / analyze_production_insights 记录 partialErrors，list_available_materials 报错绝不伪装空库', async () => {
   const session = await connected({ businessRead: true }, async (path) => {
-    if (path === '/api/rolls/ROLL-101/spatial-map') {
+    if (path === '/api/v2/rolls/ROLL-101/spatial-map') {
       return { rollId: 'ROLL-101', cutZones: [], plannedZones: [], cleanSpans: [], defects: [] };
     }
-    if (path === '/api/remnants') {
+    if (path === '/api/v2/remnants') {
       throw new ToolFailure('HTTP_503', '料头存储暂不可用', true, 503);
     }
     if (path.startsWith('/api/v2/inventory-ledger?')) {
@@ -517,14 +517,14 @@ test('彻底修复静默吞错：get_material_trace / analyze_production_insight
     if (path === '/api/v2/demand-pool') {
       throw new ToolFailure('HTTP_500', '需求池查询超时', true, 500);
     }
-    if (path === '/api/rolls') {
+    if (path === '/api/v2/rolls') {
       return [{ rollId: 'ROLL-101', width: 1800, currentRemainingLength: 10000, inspectionStatus: 'PASSED' }];
     }
     return {};
   });
 
   try {
-    // 1. get_material_trace 不再吞掉 /api/remnants 与 /api/v2/inventory-ledger 的失败
+    // 1. get_material_trace 不再吞掉 /api/v2/remnants 与 /api/v2/inventory-ledger 的失败
     const trace = await session.client.callTool({
       name: 'get_material_trace',
       arguments: { rollId: 'ROLL-101' }
@@ -553,7 +553,7 @@ test('彻底修复静默吞错：get_material_trace / analyze_production_insight
     assert.equal(insData.partialErrors[0].code, 'HTTP_500');
     assert.ok(insData.insights.some((i) => i.category === 'DATA_QUALITY'));
 
-    // 3. list_available_materials 绝不吞掉 /api/remnants 报错
+    // 3. list_available_materials 绝不吞掉 /api/v2/remnants 报错
     const mats = await session.client.callTool({
       name: 'list_available_materials',
       arguments: { type: 'ALL' }
@@ -660,7 +660,7 @@ test('新增业务只读 5 工具（demand-pool / materials / templates / cut-pl
         }
       ];
     }
-    if (path === '/api/rolls') {
+    if (path === '/api/v2/rolls') {
       return [
         {
           rollId: 'ROLL-PASS',
@@ -688,7 +688,7 @@ test('新增业务只读 5 工具（demand-pool / materials / templates / cut-pl
         }
       ];
     }
-    if (path === '/api/remnants') {
+    if (path === '/api/v2/remnants') {
       return [
         {
           id: 'REM-01',

@@ -555,7 +555,7 @@ final class RollAndRemnantDomainService {
         });
     }
 
-    private Defect addDefectToRollInternal(String rollId, Defect defect) {
+    Defect addDefectToRollInternal(String rollId, Defect defect) {
         kernel.ensureMaterialNotReserved("roll", rollId, null);
         MotherRollInfo roll = kernel.findOrLoadRoll(rollId);
         if (roll == null) {
@@ -564,8 +564,8 @@ final class RollAndRemnantDomainService {
         if (defect == null || !Double.isFinite(defect.getX()) || !Double.isFinite(defect.getY()) ||
                 !Double.isFinite(defect.getW()) || !Double.isFinite(defect.getH()) ||
                 defect.getX() < 0 || defect.getY() < 0 || defect.getW() <= 0 || defect.getH() <= 0 ||
-                defect.getX() + defect.getW() > roll.getWidth() ||
-                defect.getY() + defect.getH() > roll.getTotalLength()) {
+                defect.getX() + defect.getW() > roll.getWidth() + 1e-6 ||
+                defect.getY() + defect.getH() > roll.getTotalLength() + 1e-6) {
             throw new IllegalArgumentException("疵点坐标或尺寸超出母卷范围");
         }
         if (!Double.isFinite(defect.getMargin()) || defect.getMargin() < 0)
@@ -729,7 +729,7 @@ final class RollAndRemnantDomainService {
                 () -> registerRemnantInternal(item));
     }
 
-    private RemnantStock registerRemnantInternal(RemnantStock item) {
+    RemnantStock registerRemnantInternal(RemnantStock item) {
         if (item == null || !Double.isFinite(item.getWidth()) || !Double.isFinite(item.getLength()) ||
                 item.getWidth() <= 0 || item.getLength() <= 0) throw new IllegalArgumentException("料头宽长必须大于零");
         if (item.getId() == null || item.getId().trim().isEmpty()) {

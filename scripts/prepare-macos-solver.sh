@@ -73,4 +73,4 @@ while IFS= read -r -d '' license; do
     cp "$license" "$destination/licenses/$relative"
 done < <(find "$build_dir/_deps" -maxdepth 2 -type f \( -iname 'license*' -o -iname 'copying*' -o -iname 'copyright*' \) -print0)
 printf 'Installed macOS solvers (%s) in %s\n' "$revision" "$destination"
-echo 'Start the application from the repository root, then verify /api/health and a real solve for each engine.'
+echo 'Start the application from the repository root, then verify /api/v2/health (or /api/health) and a real solve for each engine.'

@@ -557,7 +557,7 @@ export function createServer(config, options = {}) {
       '只读查询内部裁剪任务详情与当前净履约进度，不修改任务或库存。',
       object({ taskId: id }),
       { type: 'object' },
-      ({ taskId }) => api('/api/cutting/tasks/' + encodeURIComponent(taskId))
+      ({ taskId }) => api('/api/v2/cutting/tasks/' + encodeURIComponent(taskId))
     );
 
     tool(
@@ -594,7 +594,7 @@ export function createServer(config, options = {}) {
 
     tool(
       'get_material_trace',
-      '只读查询母卷空间图（/api/rolls/{rollId}/spatial-map）、派生料头谱系与关联库存流水。主源失败立即报错，辅助源失败显式记录 partialErrors 绝不静默伪装为空库存。',
+      '只读查询母卷空间图（/api/v2/rolls/{rollId}/spatial-map）、派生料头谱系与关联库存流水。主源失败立即报错，辅助源失败显式记录 partialErrors 绝不静默伪装为空库存。',
       object(
         {
           rollId: id,
@@ -620,9 +620,9 @@ export function createServer(config, options = {}) {
         })
       }),
       async ({ rollId, includeLedger = true, ledgerLimit = 20 }) => {
-        const spatialMap = await api('/api/rolls/' + encodeURIComponent(rollId) + '/spatial-map');
+        const spatialMap = await api('/api/v2/rolls/' + encodeURIComponent(rollId) + '/spatial-map');
         const [remnantsSettled, ledgerSettled] = await Promise.allSettled([
-          api('/api/remnants'),
+          api('/api/v2/remnants'),
           includeLedger
             ? api(
                 '/api/v2/inventory-ledger?' +
@@ -866,7 +866,7 @@ export function createServer(config, options = {}) {
     // 新增业务只读工具 #16：可用母卷与料头全景筛选（严禁吞错，明确区分 PASSED 可用卷与 PENDING 待检禁领卷）
     tool(
       'list_available_materials',
-      '并发只读查询在库母卷（GET /api/rolls）与料头（GET /api/remnants），严禁静默吞错；按类型、品号、缸号、最小门幅筛选，明确区分 inspectionStatus=PASSED 可用卷与 PENDING 待检禁领卷。',
+      '并发只读查询在库母卷（GET /api/v2/rolls）与料头（GET /api/v2/remnants），严禁静默吞错；按类型、品号、缸号、最小门幅筛选，明确区分 inspectionStatus=PASSED 可用卷与 PENDING 待检禁领卷。',
       object(
         {
           type: { type: 'string', enum: ['ALL', 'ROLL', 'REMNANT'], default: 'ALL' },
@@ -940,8 +940,8 @@ export function createServer(config, options = {}) {
         const needRemnants = type === 'ALL' || type === 'REMNANT';
         // 绝不吞错：任意所需库存端点失败立即抛出 ToolFailure
         const [rollsRaw, remnantsRaw] = await Promise.all([
-          needRolls ? api('/api/rolls') : Promise.resolve([]),
-          needRemnants ? api('/api/remnants') : Promise.resolve([])
+          needRolls ? api('/api/v2/rolls') : Promise.resolve([]),
+          needRemnants ? api('/api/v2/remnants') : Promise.resolve([])
         ]);
 
         const modelNeedle = String(materialModel || '').trim().toLowerCase();

@@ -160,7 +160,7 @@ describe('报工冲销纯函数资格判定与请求构造', () => {
 
   it('buildReversalRequest 正确编码路径参数并校验非法输入', () => {
     expect(buildReversalRequest('PLAN/2026#01', '  错绑母卷  ')).toEqual({
-      url: '/api/cutting/reports/PLAN%2F2026%2301/reverse',
+      url: '/api/v2/cutting/reports/PLAN%2F2026%2301/reverse',
       body: { reason: '错绑母卷' }
     });
     expect(() => buildReversalRequest('', '原因')).toThrow();

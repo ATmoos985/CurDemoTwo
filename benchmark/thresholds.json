@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "排料基准质量与耗时红线门禁配置（minUtilization 为利用率百分比下限，maxElapsedMs 为最大耗时毫秒上限，minPlacedRatio 为可选排入比例下限）",
+  "description": "排料基准质量与耗时红线门禁配置（基于真机实测定标：minUtilization 为利用率百分比下限，maxElapsedMs 为最大耗时毫秒上限，minPlacedRatio 为排入比例下限，minRemnantPlaced/minRelayRolls/maxOverproduced 为专项约束）",
   "problems": {
     "guillotine": {
       "minUtilization": 50.0,
@@ -13,24 +13,86 @@
       "minPlacedRatio": 1.0
     },
     "contour14": {
-      "minUtilization": 40.0,
-      "maxElapsedMs": 6000
+      "minUtilization": 75.0,
+      "maxElapsedMs": 6000,
+      "minPlacedRatio": 1.0
     },
     "contour14-native": {
       "minUtilization": 40.0,
-      "maxElapsedMs": 6000
+      "maxElapsedMs": 6000,
+      "minPlacedRatio": 1.0
+    },
+    "contour-holes-16": {
+      "minUtilization": 40.0,
+      "maxElapsedMs": 12000,
+      "minPlacedRatio": 1.0
+    },
+    "nesting-2d-job": {
+      "minUtilization": 50.0,
+      "maxElapsedMs": 6000,
+      "minPlacedRatio": 1.0
+    },
+    "slitting-basic": {
+      "minUtilization": 88.0,
+      "maxElapsedMs": 9000,
+      "minPlacedRatio": 1.0,
+      "maxOverproduced": 6
+    },
+    "multi-material-relay": {
+      "minUtilization": 74.0,
+      "maxElapsedMs": 16000,
+      "minPlacedRatio": 1.0,
+      "minRemnantPlaced": 5,
+      "minRelayRolls": 2
     },
     "contour200": {
       "minUtilization": 45.0,
       "maxElapsedMs": 25000
     },
+    "scenario1": {
+      "minUtilization": 68.0,
+      "maxElapsedMs": 6000,
+      "minPlacedRatio": 0.1
+    },
+    "scenario2": {
+      "minUtilization": 85.0,
+      "maxElapsedMs": 6000,
+      "minPlacedRatio": 0.3
+    },
+    "scenario3": {
+      "minUtilization": 52.0,
+      "maxElapsedMs": 6000,
+      "minPlacedRatio": 1.0
+    },
     "scenario4": {
       "minUtilization": 65.0,
-      "maxElapsedMs": 6000
+      "maxElapsedMs": 6000,
+      "minPlacedRatio": 0.25
     },
     "scenario4-java": {
-      "minUtilization": 60.0,
-      "maxElapsedMs": 6000
+      "minUtilization": 75.0,
+      "maxElapsedMs": 6000,
+      "minPlacedRatio": 0.25
+    },
+    "scenario5": {
+      "minUtilization": 84.0,
+      "maxElapsedMs": 6000,
+      "minPlacedRatio": 0.5
+    },
+    "scenario6": {
+      "minUtilization": 85.0,
+      "maxElapsedMs": 6000,
+      "minPlacedRatio": 0.2
+    },
+    "scenario7": {
+      "minUtilization": 80.0,
+      "maxElapsedMs": 6000,
+      "minPlacedRatio": 0.35
+    },
+    "scenario8": {
+      "minUtilization": 15.0,
+      "maxElapsedMs": 6000,
+      "minPlacedRatio": 0.7
     },
     "synthetic2000": {
       "minUtilization": 75.0,

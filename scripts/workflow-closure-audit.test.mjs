@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
+  INFRA_HEALTH_PROBE_ENDPOINTS,
   LARGE_SOURCE_FILES_BASELINE,
   LEGACY_NON_V2_ENDPOINTS_BASELINE,
   auditWorkflowClosure,
@@ -105,6 +106,7 @@ RUN node --test integrations/inventory/test/sync-worker.test.mjs \\
     'src/main/resources/static/api-v2/openapi.json': JSON.stringify({
       openapi: '3.1.0',
       paths: {
+        '/api/health': { get: { summary: 'health' } },
         '/api/v2/capabilities': { get: { summary: 'caps' } },
         '/api/v2/orders/{orderId}/items': { post: { summary: 'create' } },
         '/api/v2/optimization-jobs/{jobId}/events': { get: { summary: 'events' } }
@@ -146,8 +148,9 @@ routes:
 }
 
 test('基线常量数量与真实仓库基线一致', () => {
-  assert.equal(LEGACY_NON_V2_ENDPOINTS_BASELINE.length, 36);
-  assert.equal(LARGE_SOURCE_FILES_BASELINE.length, 30);
+  assert.equal(LEGACY_NON_V2_ENDPOINTS_BASELINE.length, 0);
+  assert.deepEqual(INFRA_HEALTH_PROBE_ENDPOINTS, ['GET /api/health']);
+  assert.equal(LARGE_SOURCE_FILES_BASELINE.length, 0);
 });
 
 test('Controller 词法解析器：免疫 {id} 与 consumes 参数、支持数组路径与多方法、屏蔽注释', () => {
@@ -207,10 +210,24 @@ test('全绿合成 Fixture 与基线单向递减兼容性（--fail 返回退出�
     const report = auditWorkflowClosure(tmpDir);
     assert.equal(report.summary.passed, true, JSON.stringify(report.violations));
     assert.equal(report.summary.verdict, 'PASS');
-    assert.equal(report.dimensions.apiContract.legacyEndpointCount, 1);
-    assert.equal(report.dimensions.apiContract.resolvedLegacyCount, 35);
+    assert.equal(report.dimensions.apiContract.infraEndpointCount, 1);
+    assert.equal(report.dimensions.apiContract.legacyEndpointCount, 0);
+    assert.equal(report.dimensions.apiContract.legacyBaselineCount, 0);
+    assert.equal(report.dimensions.apiContract.resolvedLegacyCount, 0);
     assert.equal(report.dimensions.archAndLargeFiles.currentLargeFileCount, 0);
-    assert.equal(report.dimensions.archAndLargeFiles.resolvedBaselineLargeFiles.length, 30);
+    assert.equal(report.dimensions.archAndLargeFiles.largeFileBaselineCount, 0);
+    assert.equal(report.dimensions.archAndLargeFiles.resolvedBaselineLargeFiles.length, 0);
+
+    const customReport = auditWorkflowClosure(tmpDir, {
+      legacyBaseline: ['GET /api/legacy/sample'],
+      largeFilesBaseline: ['frontend/src/components/WorkbenchBoardCanvas.tsx']
+    });
+    assert.equal(customReport.summary.passed, true);
+    assert.equal(customReport.dimensions.apiContract.resolvedLegacyCount, 1);
+    assert.deepEqual(
+      customReport.dimensions.archAndLargeFiles.resolvedBaselineLargeFiles,
+      ['frontend/src/components/WorkbenchBoardCanvas.tsx']
+    );
 
     const res = spawnSync(process.execPath, [CLI_PATH, '--root', tmpDir, '--fail'], { encoding: 'utf8' });
     assert.equal(res.status, 0, res.stdout + res.stderr);
@@ -379,6 +396,25 @@ test('维度 B 反例：漏写 OpenAPI v2 接口、路径参数名漂移、未�
       assert.ok(report.violations.some((v) => v.rule === 'unregistered-legacy-endpoint'));
     }
   );
+
+  // 3. 基础设施健康探针缺失 openapi.json -> 拦截 infra-endpoint-missing-in-openapi
+  withTempFixture(
+    createHealthyFixtureFiles({
+      'src/main/resources/static/api-v2/openapi.json': JSON.stringify({
+        openapi: '3.1.0',
+        paths: {
+          '/api/v2/capabilities': { get: { summary: 'caps' } },
+          '/api/v2/orders/{orderId}/items': { post: { summary: 'create' } },
+          '/api/v2/optimization-jobs/{jobId}/events': { get: { summary: 'events' } }
+        }
+      }, null, 2)
+    }),
+    (tmpDir) => {
+      const report = auditWorkflowClosure(tmpDir);
+      assert.equal(report.summary.passed, false);
+      assert.ok(report.violations.some((v) => v.rule === 'infra-endpoint-missing-in-openapi'));
+    }
+  );
 });
 
 test('维度 C 反例与零误报：新增超千行生产文件、测试文件超千行豁免、循环依赖拦截', () => {
@@ -481,12 +517,15 @@ test('CLI 参数校验、JSON/MD 输出写文件与真实仓库全量闭环门�
     assert.equal(res.status, 0, res.stdout + res.stderr);
     const parsed = JSON.parse(fs.readFileSync(jsonOut, 'utf8'));
     assert.equal(parsed.summary.passed, true, JSON.stringify(parsed.violations));
-    assert.equal(parsed.dimensions.testCoverage.taggedTestClassCount, 21);
-    assert.equal(parsed.dimensions.apiContract.v2EndpointCount, 80);
-    assert.equal(parsed.dimensions.apiContract.legacyEndpointCount, 36);
-    assert.equal(parsed.dimensions.apiContract.openapiOperationCount, 82);
+    assert.equal(parsed.dimensions.testCoverage.taggedTestClassCount, 22);
+    assert.equal(parsed.dimensions.apiContract.v2EndpointCount, 115);
+    assert.equal(parsed.dimensions.apiContract.infraEndpointCount, 1);
+    assert.equal(parsed.dimensions.apiContract.legacyEndpointCount, 0);
+    assert.equal(parsed.dimensions.apiContract.openapiOperationCount, 116);
     assert.equal(parsed.dimensions.archAndLargeFiles.totalCycles, 0);
-    assert.equal(parsed.dimensions.archAndLargeFiles.currentLargeFileCount, 28);
+    assert.equal(parsed.dimensions.archAndLargeFiles.currentLargeFileCount, 0);
+    assert.equal(parsed.dimensions.archAndLargeFiles.largeFileBaselineCount, 0);
+    assert.equal(parsed.dimensions.archAndLargeFiles.resolvedBaselineLargeFiles.length, 0);
     assert.equal(parsed.dimensions.verifyMap.knownModernRouteCount, 18);
     assert.match(formatMarkdownReport(parsed), /四大防遗漏工作流闭环维度全部通过/);
   } finally {

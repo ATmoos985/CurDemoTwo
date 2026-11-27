@@ -1,5 +1,5 @@
 // Pure helpers for run.mjs and report.mjs: run order, per-run measurement, summaries and tables. No I/O.
-import { expectedEngine } from './problems.mjs';
+import { expectedEngine, netShapeArea, problemKind } from './problems.mjs';
 
 const round = (value, digits) => Math.round(value * 10 ** digits) / 10 ** digits;
 
@@ -22,20 +22,38 @@ export function schedule(problems, sides, rounds) {
     return runs;
 }
 
-/** One solve's fixed outputs. A run counts only if it is FEASIBLE on the expected engine, without fallback. */
-export function measure(body, http, response, wallMs) {
+function measure2D(body, http, response, wallMs, expected, extraIssues = [], allowFallback = false) {
     const placements = response?.placements ?? [], cuts = response?.cuts ?? [], metrics = response?.metrics ?? {};
     const ids = placements.map(p => p.id);
     const requested = body.parts.reduce((sum, p) => sum + p.quantity, 0);
-    const expected = expectedEngine(body);
-    const issues = [];
+    const issues = [...extraIssues];
     if (http !== 200 || response?.status !== 'FEASIBLE')
         issues.push(`HTTP ${http} ${response?.status ?? '无结果'}${response?.message ? `：${response.message}` : ''}`);
-    if (response?.engine && response.engine !== expected) issues.push(`引擎 ${response.engine}，预期 ${expected}`);
-    if (response?.fallbackReason) issues.push(`降级：${response.fallbackReason}`);
+    if (!allowFallback) {
+        if (response?.engine && response.engine !== expected) issues.push(`引擎 ${response.engine}，预期 ${expected}`);
+        if (response?.fallbackReason) issues.push(`降级：${response.fallbackReason}`);
+    }
     if (new Set(ids).size !== ids.length) issues.push('裁片编号重复');
+
+    // 带内孔题目核验：若后端返回 pieceAreaMm2 且全部裁片包含内孔或已排满，校验扣孔后净面积口径一致
+    const hasHoles = body.parts.some(p => Array.isArray(p.shape?.holes) && p.shape.holes.length > 0);
+    if (hasHoles && metrics.pieceAreaMm2 != null && placements.length > 0) {
+        const partById = new Map(body.parts.map(p => [p.id, p]));
+        let expectedNetSum = null;
+        if (placements.every(pl => pl.partId != null && partById.has(pl.partId))) {
+            expectedNetSum = placements.reduce((sum, pl) => sum + netShapeArea(partById.get(pl.partId).shape), 0);
+        } else if (placements.length === requested) {
+            expectedNetSum = body.parts.reduce((sum, p) => sum + p.quantity * netShapeArea(p.shape), 0);
+        }
+        if (expectedNetSum != null && Math.abs(metrics.pieceAreaMm2 - expectedNetSum) > 5.0) {
+            issues.push(`内孔净面积校验异常：返回 ${metrics.pieceAreaMm2}，预期 ${round(expectedNetSum, 2)}`);
+        }
+    }
+
     const elapsedMs = response?.elapsedMs ?? null;
-    return { http, status: response?.status ?? null, engine: response?.engine ?? null,
+    return {
+        kind: 'nesting',
+        http, status: response?.status ?? null, engine: response?.engine ?? null,
         requestedEngine: response?.requestedEngine ?? null, fallbackReason: response?.fallbackReason ?? null,
         ok: issues.length === 0, issues, requested, placed: ids.length, unplaced: requested - ids.length,
         utilization: metrics.processingAreaMm2 ? round(100 * metrics.pieceAreaMm2 / metrics.processingAreaMm2, 2) : null,
@@ -44,7 +62,174 @@ export function measure(body, http, response, wallMs) {
         usedLengthMm: body.process.feedMode === 'CONTINUOUS' && placements.length
             ? round(placements.reduce((max, p) => Math.max(max, p.y + p.shape.height), 0), 1) : null,
         cuts: cuts.length, airDistanceM: round(cuts.reduce((sum, c) => sum + (c.airDistanceMm ?? 0), 0) / 1000, 2),
-        elapsedMs, wallMs, overrunMs: elapsedMs == null ? null : elapsedMs - body.timeLimitSeconds * 1000 };
+        elapsedMs, wallMs, overrunMs: elapsedMs == null ? null : elapsedMs - body.timeLimitSeconds * 1000
+    };
+}
+
+function measureSlitting(body, http, outcome, wallMs, expected, allowFallback = false) {
+    const job = outcome?.job ?? null;
+    const result = outcome?.result ?? outcome;
+    const slitting = result?.slitting ?? null;
+    const p = body.problem;
+    const fulfillment = slitting?.fulfillment ?? [];
+    const requested = fulfillment.length
+        ? fulfillment.reduce((sum, f) => sum + (f.requested ?? 0), 0)
+        : p.orders.reduce((sum, o) => sum + o.quantity, 0);
+    const placed = fulfillment.reduce((sum, f) => sum + (f.produced ?? 0), 0);
+    const overproduced = slitting?.totalOverproduced ?? null;
+    const issues = [];
+
+    if (http !== 200 && http !== 202) issues.push(`HTTP ${http}`);
+    if (job && job.state !== 'SUCCEEDED') issues.push(`作业状态 ${job.state}${job.message ? `：${job.message}` : ''}`);
+    if (!result) issues.push('缺少 OptimizationResult');
+    else if (result.validationStatus !== 'PASSED') issues.push(`结果校验未通过：${result.validationStatus}`);
+    if (!slitting || slitting.status !== 'FEASIBLE') issues.push(`分切状态 ${slitting?.status ?? '无结果'}`);
+    if (!allowFallback && slitting?.engine && expected && slitting.engine !== expected) {
+        issues.push(`引擎 ${slitting.engine}，预期 ${expected}`);
+    }
+
+    const metricsList = Array.isArray(result?.metrics) ? result.metrics : [];
+    const metricVal = name => {
+        const m = metricsList.find(item => item.name === name);
+        return m && Number.isFinite(m.value) ? round(m.value, 2) : null;
+    };
+    const utilization = metricVal('motherAreaUtilization')
+        ?? (slitting?.motherAreaMm2 > 0 ? round(100 * slitting.pieceAreaMm2 / slitting.motherAreaMm2, 2) : null);
+    const usableUtilization = metricVal('usableAreaUtilization')
+        ?? (slitting?.usableAreaMm2 > 0 ? round(100 * slitting.pieceAreaMm2 / slitting.usableAreaMm2, 2) : null);
+
+    let elapsedMs = null;
+    if (job?.startedAt && job?.finishedAt) {
+        const diff = Date.parse(job.finishedAt) - Date.parse(job.startedAt);
+        if (Number.isFinite(diff) && diff >= 0) elapsedMs = Math.round(diff);
+    }
+    if (elapsedMs == null) elapsedMs = wallMs ?? null;
+
+    return {
+        kind: 'SLITTING_1D',
+        http,
+        status: slitting?.status ?? job?.state ?? null,
+        engine: slitting?.engine ?? expected ?? 'or-tools',
+        requestedEngine: expected ?? 'or-tools',
+        fallbackReason: null,
+        ok: issues.length === 0,
+        issues,
+        requested,
+        placed,
+        unplaced: Math.max(0, requested - placed),
+        overproduced,
+        patternsCount: slitting?.patterns?.length ?? null,
+        estimatedKnifeChanges: slitting?.estimatedKnifeChanges ?? null,
+        utilization,
+        usableUtilization,
+        pieceAreaM2: slitting?.pieceAreaMm2 == null ? null : round(slitting.pieceAreaMm2 / 1e6, 2),
+        usedLengthMm: null,
+        cuts: 0,
+        airDistanceM: 0,
+        elapsedMs,
+        wallMs,
+        overrunMs: elapsedMs == null ? null : elapsedMs - p.timeLimitSeconds * 1000
+    };
+}
+
+function measureMultiMaterial(body, http, response, wallMs, expected) {
+    const requested = response?.totalRequestedPieces ?? body.demands.reduce((sum, d) => sum + d.quantity, 0);
+    const placedByRemnants = response?.placedByRemnants ?? 0;
+    const placedByRoll = response?.placedByRoll ?? 0;
+    const unplacedPieces = response?.unplacedPieces ?? Math.max(0, requested - placedByRemnants - placedByRoll);
+    const placed = placedByRemnants + placedByRoll;
+    const remnants = response?.remnantAllocations ?? [];
+    const rollOptions = response?.rollOptions ?? [];
+    const adoptedRolls = rollOptions.filter(r => r.recommended || r.relayOrder != null);
+
+    const issues = [];
+    if (http !== 200 || !response) {
+        issues.push(`HTTP ${http} ${response?.message ?? '无结果'}`);
+    } else {
+        if (response.totalRequestedPieces !== placedByRemnants + placedByRoll + response.unplacedPieces) {
+            issues.push(`多料排产件数不守恒：${response.totalRequestedPieces} !== ${placedByRemnants}+${placedByRoll}+${response.unplacedPieces}`);
+        }
+        if (placed <= 0) {
+            issues.push('多料联排未排入任何裁片');
+        }
+    }
+
+    let totalPlacedAreaMm2 = 0;
+    let totalConsumedAreaMm2 = 0;
+    for (const rem of remnants) {
+        totalPlacedAreaMm2 += (rem.piecesAreaM2 ?? 0) * 1e6;
+        totalConsumedAreaMm2 += (rem.widthMm ?? 0) * (rem.lengthMm ?? 0);
+    }
+    for (const roll of adoptedRolls) {
+        const rollConsumed = (roll.widthMm ?? 0) * (roll.estimatedCutLengthMm ?? 0);
+        totalConsumedAreaMm2 += rollConsumed;
+        totalPlacedAreaMm2 += rollConsumed * ((roll.utilizationPct ?? 0) / 100);
+    }
+
+    const utilization = totalConsumedAreaMm2 > 0 ? round(100 * totalPlacedAreaMm2 / totalConsumedAreaMm2, 2) : null;
+    const elapsedMs = response?.elapsedMs ?? wallMs ?? null;
+    const budgetMs = body.timeBudgetMs ?? 6000;
+
+    return {
+        kind: 'multi-material',
+        http,
+        status: http === 200 && placed > 0 ? 'FEASIBLE' : 'FAILED',
+        engine: expected ?? 'javaguillotine',
+        requestedEngine: expected ?? 'javaguillotine',
+        fallbackReason: null,
+        ok: issues.length === 0,
+        issues,
+        requested,
+        placed,
+        unplaced: unplacedPieces,
+        placedByRemnants,
+        placedByRoll,
+        remnantCount: remnants.length,
+        relayRollCount: adoptedRolls.length,
+        totalSavedAreaM2: response?.totalSavedAreaM2 == null ? null : round(response.totalSavedAreaM2, 2),
+        utilization,
+        pieceAreaM2: totalConsumedAreaMm2 > 0 ? round(totalPlacedAreaMm2 / 1e6, 2) : null,
+        usedLengthMm: null,
+        cuts: 0,
+        airDistanceM: 0,
+        elapsedMs,
+        wallMs,
+        overrunMs: elapsedMs == null ? null : elapsedMs - budgetMs
+    };
+}
+
+/** One solve's fixed outputs. Supports 2D nesting, optimization-job (2D/1D), and multi-material planning. */
+export function measure(target, http, outcome, wallMs, options = {}) {
+    const body = target?.body ?? target;
+    const kind = target?.kind ?? problemKind(body);
+    const expected = target?.expectedEngine ?? expectedEngine(body);
+    const allowFallback = Boolean(options.allowFallback);
+
+    if (kind === 'optimization-job') {
+        if (body.problemType === 'SLITTING_1D') {
+            return measureSlitting(body, http, outcome, wallMs, expected, allowFallback);
+        }
+        const job = outcome?.job ?? null;
+        const result = outcome?.result ?? outcome;
+        const extraIssues = [];
+        if (http !== 200 && http !== 202) extraIssues.push(`HTTP ${http}`);
+        if (job && job.state !== 'SUCCEEDED') extraIssues.push(`作业状态 ${job.state}${job.message ? `：${job.message}` : ''}`);
+        if (result && result.validationStatus !== 'PASSED') extraIssues.push(`结果校验未通过：${result.validationStatus}`);
+        const layout = result?.layout ?? null;
+        const measured = measure2D(body.problem, layout ? 200 : http, layout, wallMs, expected, extraIssues, allowFallback);
+        if (measured.elapsedMs == null && job?.startedAt && job?.finishedAt) {
+            const diff = Date.parse(job.finishedAt) - Date.parse(job.startedAt);
+            if (Number.isFinite(diff) && diff >= 0) {
+                measured.elapsedMs = Math.round(diff);
+                measured.overrunMs = measured.elapsedMs - body.problem.timeLimitSeconds * 1000;
+            }
+        }
+        return { ...measured, kind: 'NESTING_2D_JOB' };
+    }
+    if (kind === 'multi-material') {
+        return measureMultiMaterial(body, http, outcome, wallMs, expected);
+    }
+    return measure2D(body, http, outcome, wallMs, expected, [], allowFallback);
 }
 
 export function stats(values) {
@@ -53,7 +238,10 @@ export function stats(values) {
     return { mean: round(list.reduce((sum, v) => sum + v, 0) / list.length, 2), min: Math.min(...list), max: Math.max(...list) };
 }
 
-const METRICS = ['placed', 'utilization', 'pieceAreaM2', 'usedLengthMm', 'cuts', 'airDistanceM', 'elapsedMs', 'overrunMs'];
+const METRICS = [
+    'placed', 'utilization', 'pieceAreaM2', 'usedLengthMm', 'cuts', 'airDistanceM', 'elapsedMs', 'overrunMs',
+    'placedByRemnants', 'remnantCount', 'relayRollCount', 'totalSavedAreaM2', 'usableUtilization', 'overproduced', 'patternsCount'
+];
 
 // n is the smaller side's valid run count: a single run per side has no range to separate.
 function compare(a, b, n) {
@@ -71,9 +259,18 @@ export function summarize(rows) {
         const all = rows.filter(r => r.problem === problem && r.side === side);
         if (!all.length) continue;
         const valid = all.filter(r => r.ok);
-        const group = { problem, side, label: all[0].label, n: valid.length, failed: all.length - valid.length,
-            engines: [...new Set(all.map(r => r.engine).filter(Boolean))], requested: all[0].requested,
-            issues: [...new Set(all.flatMap(r => r.issues))] };
+        const group = {
+            problem,
+            kind: all[0].kind ?? 'nesting',
+            side,
+            label: all[0].label,
+            n: valid.length,
+            failed: all.length - valid.length,
+            fallbackCount: valid.filter(r => r.fallbackReason).length,
+            engines: [...new Set(all.map(r => r.engine).filter(Boolean))],
+            requested: all[0].requested,
+            issues: [...new Set(all.flatMap(r => r.issues))]
+        };
         for (const metric of METRICS) group[metric] = stats(valid.map(r => r[metric]));
         groups.push(group);
     }
@@ -96,11 +293,34 @@ const signed = (change, format) => !change ? '—' : change.delta > 0 ? `+${form
 const service = ({ side, label }) => label === side ? side : `${side} ${label}`;
 const VERDICT = { same: '一致', single: '单次', separated: '区间分离', overlap: '区间重叠' };
 
-/** Markdown tables: one row per problem and service, then the second-minus-first differences. */
+/** Markdown tables: one row per problem and service, then optional specialized 1D/multi-material & diff tables. */
 export function formatTable({ groups, comparisons }) {
     const lines = ['| 题目 | 服务 | 引擎 | n | 排入/需求 | 利用率 % | 耗时 ms | 越限 ms | 异常 |', '|---|---|---|---|---|---|---|---|---|'];
-    for (const g of groups)
-        lines.push(`| ${g.problem} | ${service(g)} | ${g.engines.join('/') || '—'} | ${g.n} | ${cell(g.placed, count)}/${g.requested} | ${cell(g.utilization, percent)} | ${cell(g.elapsedMs, ms)} | ${cell(g.overrunMs, ms)} | ${g.failed ? `${g.failed} 次：${g.issues.join('；')}` : ''} |`);
+    for (const g of groups) {
+        const noteParts = [];
+        if (g.failed) noteParts.push(`${g.failed} 次：${g.issues.join('；')}`);
+        if (g.fallbackCount) noteParts.push(`含降级 ${g.fallbackCount} 次`);
+        lines.push(`| ${g.problem} | ${service(g)} | ${g.engines.join('/') || '—'} | ${g.n} | ${cell(g.placed, count)}/${g.requested} | ${cell(g.utilization, percent)} | ${cell(g.elapsedMs, ms)} | ${cell(g.overrunMs, ms)} | ${noteParts.join('；')} |`);
+    }
+
+    const slittingGroups = groups.filter(g => g.kind === 'SLITTING_1D' || g.overproduced != null || g.usableUtilization != null);
+    if (slittingGroups.length) {
+        lines.push('', '### 1D 分切扩展明细', '',
+            '| 题目 | 服务 | 可用幅宽利用率 % | 排刀方案数 | 超产卷数 |', '|---|---|---|---|---|');
+        for (const g of slittingGroups) {
+            lines.push(`| ${g.problem} | ${service(g)} | ${cell(g.usableUtilization, percent)} | ${cell(g.patternsCount, count)} | ${cell(g.overproduced, count)} |`);
+        }
+    }
+
+    const relayGroups = groups.filter(g => g.kind === 'multi-material' || g.placedByRemnants != null);
+    if (relayGroups.length) {
+        lines.push('', '### 多料联排扩展明细', '',
+            '| 题目 | 服务 | 料头排入件数 | 命中料头数 | 接力母卷数 | 节省面积 m² |', '|---|---|---|---|---|---|');
+        for (const g of relayGroups) {
+            lines.push(`| ${g.problem} | ${service(g)} | ${cell(g.placedByRemnants, count)} | ${cell(g.remnantCount, count)} | ${cell(g.relayRollCount, count)} | ${cell(g.totalSavedAreaM2, percent)} |`);
+        }
+    }
+
     if (comparisons.length) {
         const { a, b } = comparisons[0];
         lines.push('', `${service(b)} − ${service(a)}（均值之差；区间按利用率判断）：`, '',
@@ -127,7 +347,11 @@ export function formatHeader({ suiteCheckout, startedAt, options, host, services
         `- 主机：${host.os} · ${host.cpu} · ${host.logicalCpus} 逻辑核 · Node ${host.node}`];
     for (const s of services) {
         const health = Object.entries(s.health ?? {}).filter(([key]) => key.startsWith('packingsolver')).map(([key, value]) => `${key}=${value}`);
-        lines.push(`- ${service(s)}：${[s.base, ...health].join(' · ')}`);
+        const extras = [];
+        if (s.health?.slittingAvailable != null) extras.push(`slittingAvailable=${s.health.slittingAvailable}`);
+        else if (s.capabilities?.slittingEngine?.available != null) extras.push(`slittingAvailable=${s.capabilities.slittingEngine.available}`);
+        if (s.authStatus) extras.push(s.authStatus);
+        lines.push(`- ${service(s)}：${[s.base, ...health, ...extras].join(' · ')}`);
     }
     return lines.join('\n');
 }
@@ -136,14 +360,30 @@ export function formatHeader({ suiteCheckout, startedAt, options, host, services
 export function formatRun(row) {
     const head = `第 ${row.round} 轮 ${row.problem} ${service(row)}`;
     if (!row.ok) return `${head}：✗ ${row.issues.join('；')}`;
-    return `${head}：${row.placed}/${row.requested} · ${row.utilization == null ? '—' : percent(row.utilization)}% · ${row.elapsedMs} ms · ${row.engine}`;
+    const suffix = row.fallbackReason ? `（降级）` : '';
+    return `${head}：${row.placed}/${row.requested} · ${row.utilization == null ? '—' : percent(row.utilization)}% · ${row.elapsedMs} ms · ${row.engine}${suffix}`;
 }
 
-/** 按题目红线配置核验各分组的利用率下限、耗时上限与排入比例；未在配置中登记的题目不计入违约。 */
-export function evaluateThresholds(summary, thresholds) {
+/** 按题目红线配置核验各分组的利用率、耗时、排入比例与专项（料头/接力/超产）红线。 */
+export function evaluateThresholds(summary, thresholds, options = {}) {
     const rules = thresholds?.problems ?? thresholds ?? {};
     const violations = [];
     let checked = 0;
+
+    if (options.requiredProblems?.length) {
+        const tested = new Set(summary.groups.map(g => g.problem));
+        for (const name of options.requiredProblems) {
+            if (rules[name] && !tested.has(name)) {
+                checked += 1;
+                violations.push({
+                    problem: name, side: '—', label: 'missing',
+                    metric: 'missingProblem', actual: 0, limit: 1,
+                    message: '红线要求题目未在本次结果中执行'
+                });
+            }
+        }
+    }
+
     for (const group of summary.groups) {
         const rule = rules[group.problem];
         if (!rule) continue;
@@ -183,6 +423,36 @@ export function evaluateThresholds(summary, thresholds) {
                     problem: group.problem, side: group.side, label: group.label,
                     metric: 'placedRatio', actual, limit: rule.minPlacedRatio,
                     message: `平均排入率 ${actual == null ? '—' : `${percent(actual * 100)}%`} 低于红线 ${percent(rule.minPlacedRatio * 100)}%`
+                });
+            }
+        }
+        if (rule.minRemnantPlaced != null) {
+            const actual = group.placedByRemnants?.mean ?? null;
+            if (actual == null || actual < rule.minRemnantPlaced) {
+                violations.push({
+                    problem: group.problem, side: group.side, label: group.label,
+                    metric: 'minRemnantPlaced', actual, limit: rule.minRemnantPlaced,
+                    message: `料头排入件数 ${actual == null ? '—' : count(actual)} 低于红线 ${count(rule.minRemnantPlaced)}`
+                });
+            }
+        }
+        if (rule.minRelayRolls != null) {
+            const actual = group.relayRollCount?.mean ?? null;
+            if (actual == null || actual < rule.minRelayRolls) {
+                violations.push({
+                    problem: group.problem, side: group.side, label: group.label,
+                    metric: 'minRelayRolls', actual, limit: rule.minRelayRolls,
+                    message: `接力母卷数 ${actual == null ? '—' : count(actual)} 低于红线 ${count(rule.minRelayRolls)}`
+                });
+            }
+        }
+        if (rule.maxOverproduced != null) {
+            const actual = group.overproduced?.max ?? null;
+            if (actual == null || actual > rule.maxOverproduced) {
+                violations.push({
+                    problem: group.problem, side: group.side, label: group.label,
+                    metric: 'maxOverproduced', actual, limit: rule.maxOverproduced,
+                    message: `最大超产卷数 ${actual == null ? '—' : count(actual)} 超过红线 ${count(rule.maxOverproduced)}`
                 });
             }
         }

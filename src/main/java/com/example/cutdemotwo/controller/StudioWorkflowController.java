@@ -158,7 +158,7 @@ public class StudioWorkflowController {
     }
 
     // 4. 母卷全长切割/预占/疵点空间图 (Mother Roll Spatial Map)
-    @GetMapping("/rolls/{rollId}/spatial-map")
+    @GetMapping("/v2/rolls/{rollId}/spatial-map")
     public Map<String, Object> getMotherRollSpatialMap(@PathVariable String rollId) {
         return studioService.getMotherRollSpatialMap(rollId);
     }

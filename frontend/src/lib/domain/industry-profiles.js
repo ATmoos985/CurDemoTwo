@@ -123,7 +123,7 @@ export const INDUSTRIES = Object.freeze([
     }
 ]);
 
-/** 切割能力总览：engines 为 /api/v1/nesting/engines 中的引擎标识；demo 为场景演示键，link 为一维页面。 */
+/** 切割能力总览：engines 为 /api/v2/nesting/engines 中的引擎标识；demo 为场景演示键，link 为一维页面。 */
 export const CAPABILITIES = Object.freeze([
     {id: 'crosscut', dimension: '二维', name: '整幅横切', status: 'ready', engines: ['crosscut'], demo: 'CROSSCUT',
         text: '按需求顺序沿整幅一刀切到边，需求宽度等于材料宽度。'},

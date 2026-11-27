@@ -5,6 +5,7 @@ import com.example.cutdemotwo.business.model.CuttingPlan;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.DemandTemplate;
 import com.example.cutdemotwo.business.model.ExecutionOrder;
+import com.example.cutdemotwo.business.model.InventoryBatchImportDocument;
 import com.example.cutdemotwo.business.model.InventoryCount;
 import com.example.cutdemotwo.business.model.InventoryEvent;
 import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
@@ -58,6 +59,7 @@ final class InventoryStateKernel {
     final Map<String, QualityReleaseDocument> qualityReleases = new LinkedHashMap<>();
     final Map<String, InventoryReceiptDocument> inventoryReceipts = new LinkedHashMap<>();
     final Map<String, MaterialIssueDocument> materialIssues = new LinkedHashMap<>();
+    final Map<String, InventoryBatchImportDocument> batchImports = new LinkedHashMap<>();
     final Map<String, Long> activeCountRevisions = new HashMap<>();
     volatile long revision;
     volatile long ledgerSize;
@@ -89,7 +91,7 @@ final class InventoryStateKernel {
     InventorySnapshot snapshot() {
         return new InventorySnapshot(new ArrayList<>(motherRolls.values()), new ArrayList<>(remnantPool.values()),
                 receipts, remnantSeq.get(), defectSeq.get(), tasks, plans, revision, executions, ledger, transfers,
-                outbox, counts, templates, schemes, qualityReleases, inventoryReceipts, materialIssues);
+                outbox, counts, templates, schemes, qualityReleases, inventoryReceipts, materialIssues, batchImports);
     }
 
     void restore(InventorySnapshot snapshot) {
@@ -111,6 +113,7 @@ final class InventoryStateKernel {
         qualityReleases.clear(); if (snapshot.qualityReleases() != null) qualityReleases.putAll(snapshot.qualityReleases());
         inventoryReceipts.clear(); if (snapshot.inventoryReceipts() != null) inventoryReceipts.putAll(snapshot.inventoryReceipts());
         materialIssues.clear(); if (snapshot.materialIssues() != null) materialIssues.putAll(snapshot.materialIssues());
+        batchImports.clear(); if (snapshot.batchImports() != null) batchImports.putAll(snapshot.batchImports());
         activeCountRevisions.clear();
         revision = snapshot.revision();
         remnantSeq.set(snapshot.remnantSeq());
@@ -139,6 +142,7 @@ final class InventoryStateKernel {
         qualityReleases.clear();
         inventoryReceipts.clear();
         materialIssues.clear();
+        batchImports.clear();
         ledger = List.of();
         outbox = List.of();
         activeCountRevisions.clear();
@@ -170,6 +174,7 @@ final class InventoryStateKernel {
                 new LinkedHashMap<>(executions), new LinkedHashMap<>(transfers), new LinkedHashMap<>(counts),
                 new LinkedHashMap<>(templates), new LinkedHashMap<>(schemes),
                 new LinkedHashMap<>(qualityReleases), new LinkedHashMap<>(inventoryReceipts), new LinkedHashMap<>(materialIssues),
+                new LinkedHashMap<>(batchImports),
                 new HashMap<>(activeCountRevisions),
                 ledger, outbox, revision, ledgerSize, outboxSize, outboxStreamHeadId, remnantSeq.get(), defectSeq.get()
         );
@@ -189,6 +194,7 @@ final class InventoryStateKernel {
         qualityReleases.clear(); qualityReleases.putAll(backup.qualityReleases());
         inventoryReceipts.clear(); inventoryReceipts.putAll(backup.inventoryReceipts());
         materialIssues.clear(); materialIssues.putAll(backup.materialIssues());
+        batchImports.clear(); batchImports.putAll(backup.batchImports());
         activeCountRevisions.clear(); activeCountRevisions.putAll(backup.activeCountRevisions());
         ledger = backup.ledger();
         outbox = backup.outbox();
@@ -428,6 +434,7 @@ final class InventoryStateKernel {
         var appendedReleases = diffAppends(backup.qualityReleases(), qualityReleases, dirtyReleases);
         var appendedInvReceipts = diffAppends(backup.inventoryReceipts(), inventoryReceipts, dirtyInvReceipts);
         var appendedIssues = diffAppends(backup.materialIssues(), materialIssues, dirtyIssues);
+        var appendedBatchImports = diffAppends(backup.batchImports(), batchImports, null);
 
         var affectedReceiptTaskIds = new LinkedHashSet<String>();
         for (String rid : dirtyReceipts) {
@@ -456,6 +463,7 @@ final class InventoryStateKernel {
                     upsertedReceipts, deletedReceipts, upsertedExecutions, deletedExecutions,
                     upsertedSchemes, deletedSchemes,
                     appendedTransfers, appendedCounts, appendedReleases, appendedInvReceipts, appendedIssues,
+                    appendedBatchImports,
                     backup.ledgerSize(), appendedLedger, backup.outboxSize(), appendedOutbox
             );
             java.util.function.Supplier<InventorySnapshot> saveSupplier = backup.revision() == 0L
@@ -463,7 +471,7 @@ final class InventoryStateKernel {
                             new ArrayList<>(motherRolls.values()), new ArrayList<>(remnantPool.values()),
                             receipts, remnantSeq.get(), defectSeq.get(), tasks, plans, backup.revision(),
                             executions, appendedLedger, transfers, appendedOutbox, counts, templates,
-                            schemes, qualityReleases, inventoryReceipts, materialIssues)
+                            schemes, qualityReleases, inventoryReceipts, materialIssues, batchImports)
                     : this::snapshot;
             revision = store.saveDelta(delta, saveSupplier);
             ledgerSize = backup.ledgerSize() + appendedLedger.size();
@@ -518,6 +526,7 @@ final class InventoryStateKernel {
                     upsertedReceipts, deletedReceipts, upsertedExecutions, deletedExecutions,
                     upsertedSchemes, deletedSchemes,
                     appendedTransfers, appendedCounts, appendedReleases, appendedInvReceipts, appendedIssues,
+                    appendedBatchImports,
                     beforeLedgerSize, appendedLedger, beforeOutboxSize, appendedOutbox
             );
             revision = store.saveDelta(delta, this::snapshot);
@@ -541,7 +550,7 @@ final class InventoryStateKernel {
         outbox = List.of();
         StateKernelHotColdSupport.evictColdAfterCommit(
                 store, motherRolls, remnantPool, receipts, tasks, plans, executions, schemes,
-                transfers, counts, qualityReleases, inventoryReceipts, materialIssues, activeCountRevisions,
+                transfers, counts, qualityReleases, inventoryReceipts, materialIssues, batchImports, activeCountRevisions,
                 rollSort, remnantSort, taskSort, planSort, receiptSort, executionSort, schemeSort,
                 dirtyTasks, affectedReceiptTaskIds
         );

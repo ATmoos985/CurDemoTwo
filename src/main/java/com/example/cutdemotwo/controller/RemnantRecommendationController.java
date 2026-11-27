@@ -7,7 +7,7 @@ import org.springframework.http.HttpStatus;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/cutting")
+@RequestMapping("/api/v2/cutting")
 public class RemnantRecommendationController {
     private final RemnantRecommendationService service;
     private final tools.jackson.databind.json.JsonMapper json = tools.jackson.databind.json.JsonMapper.builder()

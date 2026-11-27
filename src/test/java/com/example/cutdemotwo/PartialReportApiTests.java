@@ -34,16 +34,16 @@ class PartialReportApiTests {
             new CutReport.PieceResult(2,"REJECTED","边缘破损"),new CutReport.PieceResult(3,"UNCUT","")));}
     @Test void actualHttpReportPersistsOutcomesAndCanBeReversed()throws Exception{
         var p=plan();double before=inventory.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength();
-        var response=post("/api/cutting/report-confirm",json.writeValueAsString(report(p)));assertEquals(200,response.statusCode(),response.body());
+        var response=post("/api/v2/cutting/report-confirm",json.writeValueAsString(report(p)));assertEquals(200,response.statusCode(),response.body());
         var body=json.readTree(response.body());assertEquals(1,body.get("finishedPieceCount").asInt());assertEquals("REJECTED",body.get("pieceResults").get(1).get("outcome").asText());
         assertEquals("边缘破损",body.get("pieceResults").get(1).get("reason").asText());assertEquals(2.0,body.get("pieceArea").asDouble());
-        assertEquals(response.body(),post("/api/cutting/report-confirm",json.writeValueAsString(report(p))).body());
-        assertEquals(200,post("/api/cutting/reports/"+p.getPlanId()+"/reverse","{\"reason\":\"API误报回滚\"}").statusCode());
+        assertEquals(response.body(),post("/api/v2/cutting/report-confirm",json.writeValueAsString(report(p))).body());
+        assertEquals(200,post("/api/v2/cutting/reports/"+p.getPlanId()+"/reverse","{\"reason\":\"API误报回滚\"}").statusCode());
         assertEquals(before,inventory.getMotherRoll("ROLL-2026-0920").getCurrentRemainingLength());
     }
     @Test void fractionalPieceIdentifierCannotBeSilentlyMappedToAnExistingPiece()throws Exception{
         var p=plan();String body=json.writeValueAsString(report(p));
-        var response=post("/api/cutting/report-confirm",body.replace("\"pieceId\":1,","\"pieceId\":1.5,"));
+        var response=post("/api/v2/cutting/report-confirm",body.replace("\"pieceId\":1,","\"pieceId\":1.5,"));
         assertEquals(400,response.statusCode(),response.body());assertNull(inventory.getReceipt(p.getPlanId()));
     }
 }

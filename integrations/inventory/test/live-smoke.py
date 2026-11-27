@@ -62,7 +62,7 @@ def start():
     while time.monotonic() < deadline:
         assert process.poll() is None, "QA server stopped; inspect server.log"
         try:
-            if call("/api/health")["status"] == "UP":
+            if call("/api/v2/health")["status"] == "UP":
                 return
         except (OSError, urllib.error.URLError):
             time.sleep(.15)
@@ -106,7 +106,7 @@ try:
     check("authentication and demo startup produce no historical events")
 
     for material in ["REM-202609-001", "REM-202609-002"]:
-        assert call(f"/api/remnants/{material}/scrap", {"reason": "isolated integration smoke"})["success"]
+        assert call(f"/api/v2/remnants/{material}/scrap", {"reason": "isolated integration smoke"})["success"]
     before = STATE.read_bytes()
     page = call(PREFIX, schema="IntegrationDeliveryPage")
     assert [item["sequence"] for item in page["items"]] == [1, 2]
@@ -169,7 +169,7 @@ try:
     assert external.execute("SELECT count(*) FROM applied").fetchone()[0] == 2
     external.close()
     check("process restart preserves checkpoint, attempts and external deduplication")
-    call("/api/cutting/tasks", {"name": "isolated task", "materialModel": "QA", "revision": 0,
+    call("/api/v2/cutting/tasks", {"name": "isolated task", "materialModel": "QA", "revision": 0,
         "demands": [{"id": 1, "name": "piece", "width": 100, "length": 100,
                      "quantity": 1, "allowRotation": False}]})
     task_event = claim("new-task")

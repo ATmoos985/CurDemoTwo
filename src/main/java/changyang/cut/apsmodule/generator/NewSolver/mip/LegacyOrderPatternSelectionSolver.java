@@ -1,13 +1,11 @@
 package changyang.cut.apsmodule.generator.NewSolver.mip;
 
-import com.google.ortools.linearsolver.MPConstraint;
-import com.google.ortools.linearsolver.MPObjective;
-import com.google.ortools.linearsolver.MPSolver;
-import com.google.ortools.linearsolver.MPVariable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import changyang.cut.apsmodule.generator.NewSolver.config.SolverParameters;
 import changyang.cut.apsmodule.generator.NewSolver.config.SolverRuntimeProperties;
+import changyang.cut.apsmodule.generator.NewSolver.mip.LegacyPatternMipSupport.Stage1Result;
+import changyang.cut.apsmodule.generator.NewSolver.mip.LegacyPatternMipSupport.StageSolution;
 import changyang.cut.apsmodule.generator.NewSolver.model.PatternCandidate;
 
 import java.util.ArrayList;
@@ -23,41 +21,7 @@ class LegacyOrderPatternSelectionSolver {
 
     private static final Logger log = LoggerFactory.getLogger(LegacyOrderPatternSelectionSolver.class);
     private static final int MAX_REPAIR_ATTEMPTS = 3;
-    private static final long DEFAULT_QUALITY_PRIMARY_STAGE4_NODE_LIMIT = 3000L;
-    private static final long DEFAULT_QUALITY_STAGE4_NODE_LIMIT = 10L;
     private static final int DEFAULT_STAGE4_PARITY_POOL_CAP = 240;
-    private static final long DEFAULT_STAGE4_WALL_CAP_MS = 20_000L;
-    private static final long DEFAULT_STAGE4_SAFETY_TIME_LIMIT_MS = 120_000L;
-
-    /**
-     * 固定 SCIP 随机化种子，保证相同输入 → 相同解。Legacy 既产出 primary 花型集，
-     * 又承担 diverse 候选的 Stage4 refine（最终胜出的 {@code -s4} 候选），两者都需复现。
-     */
-    private static final String SCIP_DETERMINISTIC_PARAMS =
-            "randomization/randomseedshift = 0\n"
-          + "randomization/permutationseed = 0\n"
-          + "randomization/lpseed = 0\n";
-
-    /**
-     * SCIP randomization params for the configured A-layer seed. The seed steers
-     * which 花型集 the selection MIP lands on among tie-degenerate optima; the
-     * multi-start in CuttingSolver sweeps it to find a lower sequence-group set.
-     * Seed 0 reproduces the legacy {@link #SCIP_DETERMINISTIC_PARAMS}.
-     */
-    private String scipParams() {
-        int s = params.getALayerScipSeed();
-        if (s == 0) {
-            return SCIP_DETERMINISTIC_PARAMS;
-        }
-        return "randomization/randomseedshift = " + s + "\n"
-             + "randomization/permutationseed = " + s + "\n"
-             + "randomization/lpseed = " + s + "\n";
-    }
-
-    private static final double LEGACY_SEQ_GROUP_ALPHA = 1.0;
-    private static final double LEGACY_SEQ_GROUP_BETA = 0.0;
-    private static final int    MIN_USAGE_THRESHOLD = 4;
-    private static final double SMALL_USAGE_PENALTY = 0.02;
 
     private final SolverParameters params;
     private final PatternAlignmentScorer alignmentScorer;
@@ -71,45 +35,16 @@ class LegacyOrderPatternSelectionSolver {
         this.alignmentScorer = new PatternAlignmentScorer(alignmentContext);
     }
 
-    /**
-     * Stage4 奇偶 tie-break 权重。默认 0（关闭）。实验开关：-Dcutting.aLayerParityPenalty=0.02。
-     * 权重须远小于 1（花型数单位代价），保证只在花型数平局的最优解之间挑奇偶更好的。
-     */
-    private static double parityPenalty() {
-        return SolverRuntimeProperties.getDouble("cutting.aLayerParityPenalty", 0.0);
-    }
-
-    private static long longProperty(String key, long defaultValue) {
-        return SolverRuntimeProperties.getLong(key, defaultValue);
-    }
-
     static long stage4NodeLimit() {
-        long defaultValue = SolverRuntimeProperties.getBoolean("cutting.quality", false)
-                ? DEFAULT_QUALITY_STAGE4_NODE_LIMIT
-                : 0L;
-        return longProperty("cutting.aLayerStage4NodeLimit", defaultValue);
+        return LegacyPatternStage4Mip.stage4NodeLimit();
     }
 
     static long stage4WallLimitMs(long remainingTimeMs) {
-        return stage4WallLimitMs(remainingTimeMs, stage4NodeLimit());
-    }
-
-    private static long stage4WallLimitMs(long remainingTimeMs, long effectiveNodeLimit) {
-        long configuredCap = effectiveNodeLimit > 0
-                ? longProperty("cutting.aLayerStage4SafetyTimeLimitMs",
-                        DEFAULT_STAGE4_SAFETY_TIME_LIMIT_MS)
-                : longProperty("cutting.aLayerStage4CapMs", DEFAULT_STAGE4_WALL_CAP_MS);
-        return Math.min(remainingTimeMs, configuredCap);
+        return LegacyPatternStage4Mip.stage4WallLimitMs(remainingTimeMs);
     }
 
     static long effectiveStage4NodeLimit(double parityPenalty, double alignmentLambda) {
-        if (parityPenalty > 0.0 || alignmentLambda > 0.0) {
-            return stage4NodeLimit();
-        }
-        long defaultValue = SolverRuntimeProperties.getBoolean("cutting.quality", false)
-                ? DEFAULT_QUALITY_PRIMARY_STAGE4_NODE_LIMIT
-                : 0L;
-        return longProperty("cutting.aLayerPrimaryStage4NodeLimit", defaultValue);
+        return LegacyPatternStage4Mip.effectiveStage4NodeLimit(parityPenalty, alignmentLambda);
     }
 
     List<Result> solveCandidates(List<PatternCandidate> patterns,
@@ -126,10 +61,12 @@ class LegacyOrderPatternSelectionSolver {
         Set<String> seen = patterns.stream()
                 .map(PatternCandidate::signature)
                 .collect(Collectors.toCollection(HashSet::new));
-        Set<Integer> baseAllowOverSet = mergeForcedAllowOverWidths(allowOverSet);
-        Set<Integer> expandedAllowOverSet = mergeForcedAllowOverWidths(expandAllowOverSet(demands, params.getTopK() + 2));
-        Set<Integer> relaxedAllowOverSet = mergeForcedAllowOverWidths(new HashSet<>(demands.keySet()));
-        Set<Integer> workingAllowOverSet = mergeForcedAllowOverWidths(allowOverSet);
+        Set<Integer> baseAllowOverSet = LegacyPatternMipSupport.mergeForcedAllowOverWidths(allowOverSet, params);
+        Set<Integer> expandedAllowOverSet = LegacyPatternMipSupport.mergeForcedAllowOverWidths(
+                expandAllowOverSet(demands, params.getTopK() + 2), params);
+        Set<Integer> relaxedAllowOverSet = LegacyPatternMipSupport.mergeForcedAllowOverWidths(
+                new HashSet<>(demands.keySet()), params);
+        Set<Integer> workingAllowOverSet = LegacyPatternMipSupport.mergeForcedAllowOverWidths(allowOverSet, params);
 
         for (int attempt = 0; attempt <= MAX_REPAIR_ATTEMPTS; attempt++) {
             log.info("--- Legacy-order pattern selection attempt {}/{} ---",
@@ -141,7 +78,7 @@ class LegacyOrderPatternSelectionSolver {
                     workingAllowOverSet,
                     deadlineMs);
 
-            if (solved != null && isFeasible(solved.solution(), demands)) {
+            if (solved != null && LegacyPatternMipSupport.isFeasible(solved.solution(), demands)) {
                 boolean reusableStage3 = attempt == 0 && solved.optimal();
                 return List.of(new Result("legacy-order", new LinkedHashMap<>(solved.solution()), reusableStage3));
             }
@@ -180,29 +117,31 @@ class LegacyOrderPatternSelectionSolver {
             Set<Integer> allowOverSet,
             Map<PatternCandidate, Integer> baseline,
             long deadlineMs) {
-        if (!isFeasible(baseline, demands)) {
+        if (!LegacyPatternMipSupport.isFeasible(baseline, demands)) {
             log.warn("Complete-pool Stage4 skipped: baseline is not demand-feasible");
             return null;
         }
 
-        int maxTotalOver = calculateTotalOver(baseline, demands);
+        int maxTotalOver = LegacyPatternMipSupport.calculateTotalOver(baseline, demands);
         int maxTotalRolls = baseline.values().stream().mapToInt(Integer::intValue).sum();
-        int maxTotalWaste = calculateTotalWaste(baseline);
+        int maxTotalWaste = LegacyPatternMipSupport.calculateTotalWaste(baseline, params.getTotalWidth());
         long remainingMs = Math.max(2_000L, deadlineMs - System.currentTimeMillis());
         log.info("Complete-pool Stage4 baseline constraints: patterns={}, maxOver={}, "
                         + "maxRolls={}, maxWaste={}mm, remainingMs={}",
                 patterns.size(), maxTotalOver, maxTotalRolls, maxTotalWaste, remainingMs);
 
-        Map<PatternCandidate, Integer> refined = solveMIPStage4(
+        Map<PatternCandidate, Integer> refined = LegacyPatternStage4Mip.solveMIPStage4(
+                params,
+                alignmentScorer,
                 patterns,
                 demands,
-                mergeForcedAllowOverWidths(allowOverSet),
+                LegacyPatternMipSupport.mergeForcedAllowOverWidths(allowOverSet, params),
                 maxTotalOver,
                 maxTotalRolls,
                 maxTotalWaste,
                 remainingMs,
                 baseline);
-        if (!isFeasible(refined, demands)) {
+        if (!LegacyPatternMipSupport.isFeasible(refined, demands)) {
             log.warn("Complete-pool Stage4 returned no demand-feasible refinement");
             return null;
         }
@@ -219,20 +158,21 @@ class LegacyOrderPatternSelectionSolver {
             Set<Integer> allowOverSet,
             Map<PatternCandidate, Integer> stage3Baseline,
             long deadlineMs) {
-        if (!isFeasible(stage3Baseline, demands)) {
+        if (!LegacyPatternMipSupport.isFeasible(stage3Baseline, demands)) {
             log.warn("Stage3-baseline Stage4 skipped: baseline is not demand-feasible");
             return null;
         }
 
-        int maxTotalOver = calculateTotalOver(stage3Baseline, demands);
+        int maxTotalOver = LegacyPatternMipSupport.calculateTotalOver(stage3Baseline, demands);
         int maxTotalRolls = stage3Baseline.values().stream().mapToInt(Integer::intValue).sum();
-        int maxTotalWaste = calculateTotalWaste(stage3Baseline);
+        int maxTotalWaste = LegacyPatternMipSupport.calculateTotalWaste(stage3Baseline, params.getTotalWidth());
         int wasteSlack = Math.max(200, (int) (maxTotalWaste * 0.05));
         log.info("Legacy Stage4 (reused Stage3) constraints: maxRolls={}, maxWaste={}, wasteSlack={}, wasteCap={}",
                 maxTotalRolls, maxTotalWaste, wasteSlack, maxTotalWaste + wasteSlack);
 
         long remainingMs = Math.max(2_000L, deadlineMs - System.currentTimeMillis());
-        boolean stage4NeedsFullPool = params.getALayerAlignmentLambda() > 0.0 || parityPenalty() > 0.0;
+        boolean stage4NeedsFullPool = params.getALayerAlignmentLambda() > 0.0
+                || LegacyPatternStage4Mip.parityPenalty() > 0.0;
         List<PatternCandidate> stage4PatternPool;
         if (stage4NeedsFullPool) {
             stage4PatternPool = selectStage4ExpandedPool(fullPatterns, stage3Baseline);
@@ -242,36 +182,30 @@ class LegacyOrderPatternSelectionSolver {
             stage4PatternPool = new ArrayList<>(stage3Baseline.keySet());
         }
 
-        // 不向复用 Stage3 的常规 Stage4 注入 warmStart：
-        // 1) parityPenalty=0 的精简池仅数十模式，无 warmStart 即可快速求全局最优；
-        // 2) parityPenalty>0 的扩展池无 warmStart 时 SCIP 自由探索全新更少花型集（避免被旧解黏住并省去昂贵 RINS）。
-        // baseline 始终保留在 CuttingSolver 候选池首位保底，即使此处无解也零退化。
-        Map<PatternCandidate, Integer> stage4Solution = solveMIPStage4(
+        Map<PatternCandidate, Integer> stage4Solution = LegacyPatternStage4Mip.solveMIPStage4(
+                params,
+                alignmentScorer,
                 stage4PatternPool,
                 demands,
-                mergeForcedAllowOverWidths(allowOverSet),
+                LegacyPatternMipSupport.mergeForcedAllowOverWidths(allowOverSet, params),
                 maxTotalOver,
                 maxTotalRolls,
                 maxTotalWaste,
                 remainingMs,
                 Collections.emptyMap());
-        if (!isFeasible(stage4Solution, demands)) {
+        if (!LegacyPatternMipSupport.isFeasible(stage4Solution, demands)) {
             log.info("Legacy Stage4 (reused Stage3) returned no improvement, keeping baseline");
             return null;
         }
         int stage4Rolls = stage4Solution.values().stream().mapToInt(Integer::intValue).sum();
         int stage4Patterns = stage4Solution.size();
-        int stage4Waste = calculateTotalWaste(stage4Solution);
+        int stage4Waste = LegacyPatternMipSupport.calculateTotalWaste(stage4Solution, params.getTotalWidth());
         log.info("Legacy Stage4 (reused Stage3) completed: rolls={}, patterns={}, waste={}mm, sig#={}",
-                stage4Rolls, stage4Patterns, stage4Waste, solutionSignatureHash(stage4Solution));
+                stage4Rolls, stage4Patterns, stage4Waste,
+                LegacyPatternMipSupport.solutionSignatureHash(stage4Solution));
         return stage4Solution;
     }
 
-    /**
-     * 为带奇偶/对齐项的 Stage4 构造确定性低废料精英池：
-     * 中小规模（<= cap）保留完整全池零截断；大规模（如 800 模式）必留全部 Stage3 基线花型，
-     * 其余按真实废料升序（平局按 signature）补齐至上限，显著降低 Big-M 变量规模并保持 100% 确定性。
-     */
     private List<PatternCandidate> selectStage4ExpandedPool(
             List<PatternCandidate> fullPatterns,
             Map<PatternCandidate, Integer> stage3Baseline) {
@@ -310,22 +244,22 @@ class LegacyOrderPatternSelectionSolver {
             Map<Integer, Integer> demands,
             Set<Integer> allowOverSet,
             long deadlineMs) {
-        // Distribute remaining budget across stages. Stage1/2 are critical;
-        // Stage3/4 are refinements and get whatever is left.
         boolean fastPreview = SolverRuntimeProperties.getBoolean("cutting.fast.preview", false);
         long now = System.currentTimeMillis();
         long remaining = Math.max(fastPreview ? 500 : 5000, deadlineMs - now);
         long stage1Time = fastPreview
                 ? Math.max(500, remaining * 40 / 100)
                 : Math.max(5000, remaining / 6);
-        Stage1Result stage1Result = solveMIPStage1(patterns, demands, allowOverSet, stage1Time);
+        Stage1Result stage1Result = LegacyPatternStage1To3Mip.solveMIPStage1(
+                params, patterns, demands, allowOverSet, stage1Time);
         if (stage1Result == null) {
             return new StageSolution(Collections.emptyMap(), false);
         }
 
         int optimalUnder = stage1Result.totalUnder();
         int optimalOver = stage1Result.totalOver();
-        Map<PatternCandidate, Integer> completeBaseline = isFeasible(stage1Result.solution(), demands)
+        Map<PatternCandidate, Integer> completeBaseline = LegacyPatternMipSupport.isFeasible(
+                stage1Result.solution(), demands)
                 ? stage1Result.solution()
                 : Collections.emptyMap();
         log.info("Legacy Stage1 completed: under={}, over={}, completeBaseline={}, rolls={}",
@@ -335,11 +269,11 @@ class LegacyOrderPatternSelectionSolver {
         long stage2Time = fastPreview
                 ? Math.max(750, remaining * 45 / 100)
                 : Math.max(5000, remaining * 55 / 100);
-        StageSolution stage2Result = solveMIPStage2(
-                patterns, demands, allowOverSet, optimalUnder, optimalOver,
+        StageSolution stage2Result = LegacyPatternStage1To3Mip.solveMIPStage2(
+                params, patterns, demands, allowOverSet, optimalUnder, optimalOver,
                 stage1Result.solution(), stage2Time);
         Map<PatternCandidate, Integer> stage2Solution = stage2Result == null ? null : stage2Result.solution();
-        if (!isFeasible(stage2Solution, demands)) {
+        if (!LegacyPatternMipSupport.isFeasible(stage2Solution, demands)) {
             if (!completeBaseline.isEmpty()) {
                 log.warn("Legacy Stage2 did not preserve complete demand coverage; using Stage1 baseline");
                 return new StageSolution(completeBaseline, false);
@@ -349,9 +283,10 @@ class LegacyOrderPatternSelectionSolver {
 
         int totalRolls = stage2Solution.values().stream().mapToInt(Integer::intValue).sum();
         int stage2Patterns = stage2Solution.size();
-        int stage2Waste = calculateTotalWaste(stage2Solution);
+        int stage2Waste = LegacyPatternMipSupport.calculateTotalWaste(stage2Solution, params.getTotalWidth());
         log.info("Legacy Stage2 completed: rolls={}, patterns={}, waste={}mm, sig#={}",
-                totalRolls, stage2Patterns, stage2Waste, solutionSignatureHash(stage2Solution));
+                totalRolls, stage2Patterns, stage2Waste,
+                LegacyPatternMipSupport.solutionSignatureHash(stage2Solution));
 
         if (fastPreview && System.currentTimeMillis() >= deadlineMs) {
             log.info("Fast preview A-layer budget reached after Stage2; using roll-optimal solution");
@@ -362,8 +297,8 @@ class LegacyOrderPatternSelectionSolver {
         long stage3Time = fastPreview
                 ? Math.max(500, remaining)
                 : Math.max(3000, remaining * 60 / 100);
-        StageSolution stage3Result = solveMIPStage3(
-                patterns, demands, allowOverSet, optimalOver, totalRolls, stage3Time);
+        StageSolution stage3Result = LegacyPatternStage1To3Mip.solveMIPStage3(
+                params, patterns, demands, allowOverSet, optimalOver, totalRolls, stage3Time);
         Map<PatternCandidate, Integer> stage3Solution = stage3Result == null ? null : stage3Result.solution();
         boolean stage3Optimal = stage1Result.optimal()
                 && stage2Result.optimal()
@@ -375,11 +310,12 @@ class LegacyOrderPatternSelectionSolver {
             stage3Optimal = false;
         }
 
-        int totalWaste = calculateTotalWaste(stage3Solution);
+        int totalWaste = LegacyPatternMipSupport.calculateTotalWaste(stage3Solution, params.getTotalWidth());
         int stage3Rolls = stage3Solution.values().stream().mapToInt(Integer::intValue).sum();
         int stage3Patterns = stage3Solution.size();
         log.info("Legacy Stage3 completed: rolls={}, patterns={}, waste={}mm, sig#={}",
-                stage3Rolls, stage3Patterns, totalWaste, solutionSignatureHash(stage3Solution));
+                stage3Rolls, stage3Patterns, totalWaste,
+                LegacyPatternMipSupport.solutionSignatureHash(stage3Solution));
 
         if (fastPreview) {
             log.info("Fast preview skips A-layer Stage4 pattern-count refinement");
@@ -391,12 +327,9 @@ class LegacyOrderPatternSelectionSolver {
                 stage3Rolls, totalWaste, wasteSlack, totalWaste + wasteSlack);
 
         remaining = Math.max(2000, deadlineMs - System.currentTimeMillis());
-        // The inner Stage4 policy owns the wall cap. Passing the remaining request budget here
-        // prevents an outer cap from firing before the deterministic node budget on slower hosts.
         long stage4Time = remaining;
-        // 对齐 λ 或奇偶 tie-break 生效时给 Stage4 扩展池（小规模全池，大规模低废料精英池）：
-        // 奇偶翻转需要备选花型做需求等式的补偿交换，stage3 精选池往往没有腾挪空间。
-        boolean stage4NeedsFullPool = params.getALayerAlignmentLambda() > 0.0 || parityPenalty() > 0.0;
+        boolean stage4NeedsFullPool = params.getALayerAlignmentLambda() > 0.0
+                || LegacyPatternStage4Mip.parityPenalty() > 0.0;
         List<PatternCandidate> stage4PatternPool = stage4NeedsFullPool
                 ? selectStage4ExpandedPool(patterns, stage3Solution)
                 : new ArrayList<>(stage3Solution.keySet());
@@ -404,17 +337,19 @@ class LegacyOrderPatternSelectionSolver {
             log.info("Legacy Stage4 uses expanded pattern pool: {}/{} patterns",
                     stage4PatternPool.size(), patterns.size());
         }
-        Map<PatternCandidate, Integer> stage4Solution = solveMIPStage4(
-                stage4PatternPool, demands, allowOverSet, optimalOver, stage3Rolls, totalWaste, stage4Time);
+        Map<PatternCandidate, Integer> stage4Solution = LegacyPatternStage4Mip.solveMIPStage4(
+                params, alignmentScorer, stage4PatternPool, demands, allowOverSet,
+                optimalOver, stage3Rolls, totalWaste, stage4Time);
         if (stage4Solution == null || stage4Solution.isEmpty()) {
             log.info("Legacy Stage4 failed, using Stage3 solution");
             return new StageSolution(stage3Solution, stage3Optimal);
         }
         int stage4Rolls = stage4Solution.values().stream().mapToInt(Integer::intValue).sum();
         int stage4Patterns = stage4Solution.size();
-        int stage4Waste = calculateTotalWaste(stage4Solution);
+        int stage4Waste = LegacyPatternMipSupport.calculateTotalWaste(stage4Solution, params.getTotalWidth());
         log.info("Legacy Stage4 completed: rolls={}, patterns={}, waste={}mm, sig#={}",
-                stage4Rolls, stage4Patterns, stage4Waste, solutionSignatureHash(stage4Solution));
+                stage4Rolls, stage4Patterns, stage4Waste,
+                LegacyPatternMipSupport.solutionSignatureHash(stage4Solution));
         return new StageSolution(stage4Solution, stage3Optimal);
     }
 
@@ -430,265 +365,6 @@ class LegacyOrderPatternSelectionSolver {
         return expandedSet;
     }
 
-    private Stage1Result solveMIPStage1(List<PatternCandidate> patterns,
-            Map<Integer, Integer> demands,
-            Set<Integer> allowOverSet,
-            long timeLimitMs) {
-        MPSolver solver = null;
-        try {
-            solver = createMIPSolver();
-            if (solver == null) {
-                return null;
-            }
-
-            int totalDemand = demands.values().stream().mapToInt(Integer::intValue).sum();
-            List<Integer> widthList = new ArrayList<>(demands.keySet());
-
-            List<MPVariable> xVars = new ArrayList<>();
-            for (int i = 0; i < patterns.size(); i++) {
-                xVars.add(solver.makeIntVar(0, totalDemand + params.getTotalOverCap(), "x_" + i));
-            }
-
-            Map<Integer, MPVariable> overVars = new LinkedHashMap<>();
-            Map<Integer, MPVariable> underVars = new LinkedHashMap<>();
-            for (int width : widthList) {
-                double overUpperBound = allowOverSet.contains(width) ? params.getTotalOverCap() : 0;
-                overVars.put(width, solver.makeIntVar(0, overUpperBound, "over_" + width));
-                underVars.put(width, solver.makeIntVar(0, totalDemand, "under_" + width));
-            }
-
-            for (Map.Entry<Integer, Integer> demandEntry : demands.entrySet()) {
-                int width = demandEntry.getKey();
-                int demand = demandEntry.getValue();
-                MPConstraint constraint = solver.makeConstraint(demand, demand, "demand_" + width);
-
-                for (int i = 0; i < patterns.size(); i++) {
-                    int count = patterns.get(i).getPattern().getOrDefault(width, 0);
-                    if (count > 0) {
-                        constraint.setCoefficient(xVars.get(i), count);
-                    }
-                }
-                constraint.setCoefficient(underVars.get(width), 1);
-                constraint.setCoefficient(overVars.get(width), -1);
-            }
-
-            MPConstraint overCap = solver.makeConstraint(0, params.getTotalOverCap(), "overCap");
-            for (MPVariable overVar : overVars.values()) {
-                overCap.setCoefficient(overVar, 1);
-            }
-
-            MPObjective objective = solver.objective();
-            for (MPVariable underVar : underVars.values()) {
-                objective.setCoefficient(underVar, params.getUnderPenalty());
-            }
-            for (MPVariable overVar : overVars.values()) {
-                objective.setCoefficient(overVar, 1);
-            }
-            objective.setMinimization();
-
-            solver.setTimeLimit(Math.max(1000, timeLimitMs));
-            MPSolver.ResultStatus status = solver.solve();
-            if (status != MPSolver.ResultStatus.OPTIMAL && status != MPSolver.ResultStatus.FEASIBLE) {
-                log.warn("Legacy-order Stage1 returned {}", status);
-                return null;
-            }
-
-            int totalUnder = 0;
-            int totalOver = 0;
-            for (int i = 0; i < widthList.size(); i++) {
-                int width = widthList.get(i);
-                totalUnder += (int) Math.round(underVars.get(width).solutionValue());
-                totalOver += (int) Math.round(overVars.get(width).solutionValue());
-            }
-            return new Stage1Result(
-                    extractSolution(patterns, xVars),
-                    totalUnder,
-                    totalOver,
-                    status == MPSolver.ResultStatus.OPTIMAL);
-        } catch (Exception e) {
-            log.error("Legacy-order Stage1 failed", e);
-            return null;
-        } finally {
-            if (solver != null) {
-                solver.delete();
-            }
-        }
-    }
-
-    private StageSolution solveMIPStage2(List<PatternCandidate> patterns,
-            Map<Integer, Integer> demands,
-            Set<Integer> allowOverSet,
-            int maxTotalUnder,
-            int maxTotalOver,
-            Map<PatternCandidate, Integer> incumbent,
-            long timeLimitMs) {
-        MPSolver solver = null;
-        try {
-            solver = createMIPSolver();
-            if (solver == null) {
-                return null;
-            }
-
-            int totalDemand = demands.values().stream().mapToInt(Integer::intValue).sum();
-
-            List<MPVariable> xVars = new ArrayList<>();
-            for (int i = 0; i < patterns.size(); i++) {
-                xVars.add(solver.makeIntVar(0, totalDemand + params.getTotalOverCap(), "x_" + i));
-            }
-
-            Map<Integer, MPVariable> overVars = new LinkedHashMap<>();
-            Map<Integer, MPVariable> underVars = new LinkedHashMap<>();
-            for (int width : demands.keySet()) {
-                double overUpperBound = allowOverSet.contains(width) ? params.getTotalOverCap() : 0;
-                overVars.put(width, solver.makeIntVar(0, overUpperBound, "over_" + width));
-                underVars.put(width, solver.makeIntVar(0, totalDemand, "under_" + width));
-            }
-
-            for (Map.Entry<Integer, Integer> demandEntry : demands.entrySet()) {
-                int width = demandEntry.getKey();
-                int demand = demandEntry.getValue();
-                MPConstraint constraint = solver.makeConstraint(demand, demand, "demand_" + width);
-
-                for (int i = 0; i < patterns.size(); i++) {
-                    int count = patterns.get(i).getPattern().getOrDefault(width, 0);
-                    if (count > 0) {
-                        constraint.setCoefficient(xVars.get(i), count);
-                    }
-                }
-                constraint.setCoefficient(underVars.get(width), 1);
-                constraint.setCoefficient(overVars.get(width), -1);
-            }
-
-            MPConstraint overCap = solver.makeConstraint(0, maxTotalOver, "overCap");
-            for (MPVariable overVar : overVars.values()) {
-                overCap.setCoefficient(overVar, 1);
-            }
-
-            MPConstraint underCap = solver.makeConstraint(0, maxTotalUnder, "underCap");
-            for (MPVariable underVar : underVars.values()) {
-                underCap.setCoefficient(underVar, 1);
-            }
-
-            MPObjective objective = solver.objective();
-            for (MPVariable underVar : underVars.values()) {
-                objective.setCoefficient(underVar, params.getUnderPenalty());
-            }
-            for (MPVariable xVar : xVars) {
-                objective.setCoefficient(xVar, 1);
-            }
-            objective.setMinimization();
-
-            if (incumbent != null && !incumbent.isEmpty()) {
-                MPVariable[] hintVars = xVars.toArray(new MPVariable[0]);
-                double[] hintValues = new double[hintVars.length];
-                for (int i = 0; i < patterns.size(); i++) {
-                    hintValues[i] = incumbent.getOrDefault(patterns.get(i), 0);
-                }
-                solver.setHint(hintVars, hintValues);
-            }
-
-            solver.setTimeLimit(Math.max(1000, timeLimitMs));
-            long startedAt = System.currentTimeMillis();
-            MPSolver.ResultStatus status = solver.solve();
-            log.info("Legacy Stage2 solve: status={}, elapsedMs={}, nodes={}, wallLimitMs={}",
-                    status, System.currentTimeMillis() - startedAt, safeNodes(solver), timeLimitMs);
-            if (status != MPSolver.ResultStatus.OPTIMAL && status != MPSolver.ResultStatus.FEASIBLE) {
-                log.warn("Legacy-order Stage2 returned {}", status);
-                return null;
-            }
-
-            return new StageSolution(
-                    extractSolution(patterns, xVars),
-                    status == MPSolver.ResultStatus.OPTIMAL);
-        } catch (Exception e) {
-            log.error("Legacy-order Stage2 failed", e);
-            return null;
-        } finally {
-            if (solver != null) {
-                solver.delete();
-            }
-        }
-    }
-
-    private StageSolution solveMIPStage3(List<PatternCandidate> patterns,
-            Map<Integer, Integer> demands,
-            Set<Integer> allowOverSet,
-            int maxTotalOver,
-            int maxTotalRolls,
-            long timeLimitMs) {
-        MPSolver solver = null;
-        try {
-            solver = createMIPSolver();
-            if (solver == null) {
-                return null;
-            }
-
-            int totalDemand = demands.values().stream().mapToInt(Integer::intValue).sum();
-
-            List<MPVariable> xVars = new ArrayList<>();
-            for (int i = 0; i < patterns.size(); i++) {
-                xVars.add(solver.makeIntVar(0, totalDemand + params.getTotalOverCap(), "x_" + i));
-            }
-
-            Map<Integer, MPVariable> overVars = new LinkedHashMap<>();
-            for (int width : demands.keySet()) {
-                double overUpperBound = allowOverSet.contains(width) ? params.getTotalOverCap() : 0;
-                overVars.put(width, solver.makeIntVar(0, overUpperBound, "over_" + width));
-            }
-
-            for (Map.Entry<Integer, Integer> demandEntry : demands.entrySet()) {
-                int width = demandEntry.getKey();
-                int demand = demandEntry.getValue();
-                MPConstraint constraint = solver.makeConstraint(demand, demand, "demand_" + width);
-
-                for (int i = 0; i < patterns.size(); i++) {
-                    int count = patterns.get(i).getPattern().getOrDefault(width, 0);
-                    if (count > 0) {
-                        constraint.setCoefficient(xVars.get(i), count);
-                    }
-                }
-                constraint.setCoefficient(overVars.get(width), -1);
-            }
-
-            MPConstraint overCap = solver.makeConstraint(0, maxTotalOver, "overCap");
-            for (MPVariable overVar : overVars.values()) {
-                overCap.setCoefficient(overVar, 1);
-            }
-
-            MPConstraint rollsCap = solver.makeConstraint(0, maxTotalRolls, "rollsCap");
-            for (MPVariable xVar : xVars) {
-                rollsCap.setCoefficient(xVar, 1);
-            }
-
-            MPObjective objective = solver.objective();
-            for (int i = 0; i < patterns.size(); i++) {
-                objective.setCoefficient(xVars.get(i), patterns.get(i).getRealWaste(params.getTotalWidth()));
-            }
-            objective.setMinimization();
-
-            solver.setTimeLimit(Math.max(1000, timeLimitMs));
-            long startedAt = System.currentTimeMillis();
-            MPSolver.ResultStatus status = solver.solve();
-            log.info("Legacy Stage3 solve: status={}, elapsedMs={}, nodes={}, wallLimitMs={}",
-                    status, System.currentTimeMillis() - startedAt, safeNodes(solver), timeLimitMs);
-            if (status != MPSolver.ResultStatus.OPTIMAL && status != MPSolver.ResultStatus.FEASIBLE) {
-                log.warn("Legacy-order Stage3 returned {}", status);
-                return null;
-            }
-
-            return new StageSolution(
-                    extractSolution(patterns, xVars),
-                    status == MPSolver.ResultStatus.OPTIMAL);
-        } catch (Exception e) {
-            log.error("Legacy-order Stage3 failed", e);
-            return null;
-        } finally {
-            if (solver != null) {
-                solver.delete();
-            }
-        }
-    }
-
     Map<PatternCandidate, Integer> solveMIPStage4(List<PatternCandidate> patterns,
             Map<Integer, Integer> demands,
             Set<Integer> allowOverSet,
@@ -696,278 +372,9 @@ class LegacyOrderPatternSelectionSolver {
             int maxTotalRolls,
             int maxTotalWaste,
             long timeLimitMs) {
-        return solveMIPStage4(patterns, demands, allowOverSet, maxTotalOver,
-                maxTotalRolls, maxTotalWaste, timeLimitMs, Collections.emptyMap());
-    }
-
-    private Map<PatternCandidate, Integer> solveMIPStage4(List<PatternCandidate> patterns,
-            Map<Integer, Integer> demands,
-            Set<Integer> allowOverSet,
-            int maxTotalOver,
-            int maxTotalRolls,
-            int maxTotalWaste,
-            long timeLimitMs,
-            Map<PatternCandidate, Integer> warmStart) {
-        MPSolver solver = null;
-        try {
-            solver = createMIPSolver();
-            if (solver == null) {
-                return null;
-            }
-
-            int totalDemand = demands.values().stream().mapToInt(Integer::intValue).sum();
-            int bigM = totalDemand + params.getTotalOverCap();
-
-            List<MPVariable> xVars = new ArrayList<>();
-            List<MPVariable> yVars = new ArrayList<>();
-            List<MPVariable> sVars = new ArrayList<>();
-            for (int i = 0; i < patterns.size(); i++) {
-                xVars.add(solver.makeIntVar(0, totalDemand + params.getTotalOverCap(), "x_" + i));
-                yVars.add(solver.makeBoolVar("y_" + i));
-                sVars.add(solver.makeNumVar(0, MIN_USAGE_THRESHOLD, "s_" + i));
-            }
-
-            Map<Integer, MPVariable> overVars = new LinkedHashMap<>();
-            for (int width : demands.keySet()) {
-                double overUpperBound = allowOverSet.contains(width) ? params.getTotalOverCap() : 0;
-                overVars.put(width, solver.makeIntVar(0, overUpperBound, "over_" + width));
-            }
-
-            for (Map.Entry<Integer, Integer> demandEntry : demands.entrySet()) {
-                int width = demandEntry.getKey();
-                int demand = demandEntry.getValue();
-                MPConstraint constraint = solver.makeConstraint(demand, demand, "demand_" + width);
-
-                for (int i = 0; i < patterns.size(); i++) {
-                    int count = patterns.get(i).getPattern().getOrDefault(width, 0);
-                    if (count > 0) {
-                        constraint.setCoefficient(xVars.get(i), count);
-                    }
-                }
-                constraint.setCoefficient(overVars.get(width), -1);
-            }
-
-            MPConstraint overCap = solver.makeConstraint(0, maxTotalOver, "overCap");
-            for (MPVariable overVar : overVars.values()) {
-                overCap.setCoefficient(overVar, 1);
-            }
-
-            MPConstraint rollsCap = solver.makeConstraint(0, maxTotalRolls, "rollsCap");
-            for (MPVariable xVar : xVars) {
-                rollsCap.setCoefficient(xVar, 1);
-            }
-
-            int wasteSlack = Math.max(200, (int) (maxTotalWaste * 0.05));
-            MPConstraint wasteCap = solver.makeConstraint(0, maxTotalWaste + wasteSlack, "wasteCap");
-            for (int i = 0; i < patterns.size(); i++) {
-                wasteCap.setCoefficient(xVars.get(i), patterns.get(i).getRealWaste(params.getTotalWidth()));
-            }
-
-            for (int i = 0; i < patterns.size(); i++) {
-                MPConstraint link = solver.makeConstraint(-MPSolver.infinity(), 0, "link_" + i);
-                link.setCoefficient(xVars.get(i), 1);
-                link.setCoefficient(yVars.get(i), -bigM);
-            }
-
-            for (int i = 0; i < patterns.size(); i++) {
-                MPConstraint minUse = solver.makeConstraint(0, MPSolver.infinity(), "minuse_" + i);
-                minUse.setCoefficient(sVars.get(i), 1.0);
-                minUse.setCoefficient(xVars.get(i), 1.0);
-                minUse.setCoefficient(yVars.get(i), -MIN_USAGE_THRESHOLD);
-            }
-
-            // 奇偶 tie-break：odd 序号组的理论下界 = usage 为奇数的花型族个数（每族块大小
-            // 之和 = 族车数，奇数至少留一个奇块，B 层不可突破——人工方案 odd=2 恰好打到
-            // 自己花型集的下界）。x_i = 2·h_i + o_i 提取 usage 奇偶性，o_i 进目标做小权重
-            // 惩罚，在车数/废边/花型数平局的最优解中偏好偶 usage 的花型集，把下界往
-            // 理论极限（总车数奇偶性决定，本数据集=每分组1）压。
-            double parityPenalty = parityPenalty();
-            List<MPVariable> hVars = new ArrayList<>();
-            List<MPVariable> oVars = new ArrayList<>();
-            if (parityPenalty > 0.0) {
-                for (int i = 0; i < patterns.size(); i++) {
-                    MPVariable hVar = solver.makeIntVar(0, totalDemand + params.getTotalOverCap(), "h_" + i);
-                    MPVariable oVar = solver.makeBoolVar("o_" + i);
-                    MPConstraint parity = solver.makeConstraint(0, 0, "parity_" + i);
-                    parity.setCoefficient(xVars.get(i), 1);
-                    parity.setCoefficient(hVar, -2);
-                    parity.setCoefficient(oVar, -1);
-                    hVars.add(hVar);
-                    oVars.add(oVar);
-                }
-            }
-
-            int maxWidthCount = patterns.stream()
-                    .mapToInt(PatternCandidate::getWidthCount)
-                    .max()
-                    .orElse(1);
-
-            MPObjective objective = solver.objective();
-            double alignmentLambda = params.getALayerAlignmentLambda();
-            double alignmentCostSum = 0.0;
-            double alignmentCostMax = 0.0;
-            for (int i = 0; i < patterns.size(); i++) {
-                double alignmentCost = alignmentLambda > 0.0
-                        ? alignmentScorer.cost(patterns.get(i))
-                        : 0.0;
-                alignmentCostSum += alignmentCost;
-                alignmentCostMax = Math.max(alignmentCostMax, alignmentCost);
-                objective.setCoefficient(yVars.get(i),
-                        LEGACY_SEQ_GROUP_ALPHA + alignmentLambda * alignmentCost);
-                double groupCost = (double) patterns.get(i).getWidthCount() / maxWidthCount;
-                objective.setCoefficient(xVars.get(i), LEGACY_SEQ_GROUP_BETA * groupCost);
-                objective.setCoefficient(sVars.get(i), SMALL_USAGE_PENALTY);
-            }
-            for (MPVariable oVar : oVars) {
-                objective.setCoefficient(oVar, parityPenalty);
-            }
-            objective.setMinimization();
-            if (alignmentLambda > 0.0 && !patterns.isEmpty()) {
-                log.info("Legacy Stage4 alignment: lambda={}, avgCost={}, maxCost={}",
-                        alignmentLambda,
-                        alignmentCostSum / patterns.size(),
-                        alignmentCostMax);
-            }
-
-            // 20s 是快路径顶帽；全池+奇偶变量的模型 20s 常 NOT_SOLVED/FEASIBLE 截断
-            // （截断时奇偶项来不及优化）。实验可用 -Dcutting.aLayerStage4CapMs 放宽。
-            long nodeLimit = effectiveStage4NodeLimit(parityPenalty, alignmentLambda);
-            if (nodeLimit > 0 && solver.solverVersion().toUpperCase().contains("SCIP")) {
-                solver.setSolverSpecificParametersAsString(
-                        scipParams() + "limits/nodes = " + nodeLimit + "\n");
-            }
-            long stage4TimeLimit = stage4WallLimitMs(timeLimitMs, nodeLimit);
-            applyStage4WarmStart(
-                    solver, patterns, demands, warmStart,
-                    xVars, yVars, sVars, hVars, oVars, overVars);
-            solver.setTimeLimit(stage4TimeLimit);
-
-            long stage4StartedAt = System.currentTimeMillis();
-            MPSolver.ResultStatus status = solver.solve();
-            long stage4ElapsedMs = System.currentTimeMillis() - stage4StartedAt;
-            long stage4Nodes = -1L;
-            try {
-                stage4Nodes = solver.nodes();
-            } catch (Throwable ignored) {
-            }
-            log.info("Legacy Stage4 solve: status={}, elapsedMs={}, nodes={}/{}, wallLimitMs={}",
-                    status, stage4ElapsedMs, stage4Nodes, nodeLimit, stage4TimeLimit);
-            if (status != MPSolver.ResultStatus.OPTIMAL && status != MPSolver.ResultStatus.FEASIBLE) {
-                log.warn("Legacy-order Stage4 returned {}", status);
-                return null;
-            }
-
-            Map<PatternCandidate, Integer> solution = extractSolution(patterns, xVars);
-            if (parityPenalty > 0.0) {
-                long oddUsageFamilies = solution.values().stream().filter(u -> u % 2 != 0).count();
-                log.info("Legacy Stage4 parity: penalty={}, oddUsageFamilies={} (odd 序号组下界), status={}",
-                        parityPenalty, oddUsageFamilies, status);
-            }
-            return solution;
-        } catch (Exception e) {
-            log.error("Legacy-order Stage4 failed", e);
-            return null;
-        } finally {
-            if (solver != null) {
-                solver.delete();
-            }
-        }
-    }
-
-    private void applyStage4WarmStart(
-            MPSolver solver,
-            List<PatternCandidate> patterns,
-            Map<Integer, Integer> demands,
-            Map<PatternCandidate, Integer> warmStart,
-            List<MPVariable> xVars,
-            List<MPVariable> yVars,
-            List<MPVariable> sVars,
-            List<MPVariable> hVars,
-            List<MPVariable> oVars,
-            Map<Integer, MPVariable> overVars) {
-        if (warmStart == null || warmStart.isEmpty()) {
-            return;
-        }
-        List<MPVariable> hintVars = new ArrayList<>();
-        List<Double> hintValues = new ArrayList<>();
-        for (int i = 0; i < patterns.size(); i++) {
-            int usage = warmStart.getOrDefault(patterns.get(i), 0);
-            hintVars.add(xVars.get(i));
-            hintValues.add((double) usage);
-            hintVars.add(yVars.get(i));
-            hintValues.add(usage > 0 ? 1.0 : 0.0);
-            hintVars.add(sVars.get(i));
-            hintValues.add(usage > 0 ? (double) Math.max(0, MIN_USAGE_THRESHOLD - usage) : 0.0);
-            if (!oVars.isEmpty()) {
-                hintVars.add(hVars.get(i));
-                hintValues.add((double) (usage / 2));
-                hintVars.add(oVars.get(i));
-                hintValues.add((double) (usage & 1));
-            }
-        }
-        Map<Integer, Integer> production = calculateProduction(warmStart);
-        for (Map.Entry<Integer, MPVariable> entry : overVars.entrySet()) {
-            int over = Math.max(0,
-                    production.getOrDefault(entry.getKey(), 0)
-                            - demands.getOrDefault(entry.getKey(), 0));
-            hintVars.add(entry.getValue());
-            hintValues.add((double) over);
-        }
-        double[] values = hintValues.stream().mapToDouble(Double::doubleValue).toArray();
-        solver.setHint(hintVars.toArray(MPVariable[]::new), values);
-        log.info("Legacy Stage4 warm start applied: baselinePatterns={}, hintedVars={}",
-                warmStart.size(), hintVars.size());
-    }
-
-    private static int solutionSignatureHash(Map<PatternCandidate, Integer> solution) {
-        return solution.entrySet().stream()
-                .map(entry -> entry.getKey().signature() + "x" + entry.getValue())
-                .sorted()
-                .collect(Collectors.joining("|"))
-                .hashCode();
-    }
-
-    private static long safeNodes(MPSolver solver) {
-        try {
-            return solver.nodes();
-        } catch (Throwable ignored) {
-            return -1L;
-        }
-    }
-
-    private boolean isFeasible(Map<PatternCandidate, Integer> solution, Map<Integer, Integer> demands) {
-        if (solution == null || solution.isEmpty()) {
-            return false;
-        }
-        Map<Integer, Integer> production = calculateProduction(solution);
-        for (Map.Entry<Integer, Integer> demandEntry : demands.entrySet()) {
-            if (production.getOrDefault(demandEntry.getKey(), 0) < demandEntry.getValue()) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private record Stage1Result(
-            Map<PatternCandidate, Integer> solution,
-            int totalUnder,
-            int totalOver,
-            boolean optimal) {
-
-        private Stage1Result {
-            solution = Collections.unmodifiableMap(new LinkedHashMap<>(solution));
-        }
-    }
-
-    private record StageSolution(
-            Map<PatternCandidate, Integer> solution,
-            boolean optimal) {
-    }
-
-    private Set<Integer> mergeForcedAllowOverWidths(Set<Integer> allowOverSet) {
-        Set<Integer> merged = new HashSet<>(allowOverSet);
-        merged.addAll(params.getForceAllowOverWidths());
-        return merged;
+        return LegacyPatternStage4Mip.solveMIPStage4(
+                params, alignmentScorer, patterns, demands, allowOverSet,
+                maxTotalOver, maxTotalRolls, maxTotalWaste, timeLimitMs);
     }
 
     private int repairPatterns(List<PatternCandidate> patterns,
@@ -991,7 +398,7 @@ class LegacyOrderPatternSelectionSolver {
             if (!needsRepair) {
                 int divisor = coefficients.get(0);
                 for (int coefficient : coefficients) {
-                    divisor = gcd(divisor, coefficient);
+                    divisor = LegacyPatternMipSupport.gcd(divisor, coefficient);
                 }
                 int capForWidth = allowOverSet.contains(width) ? params.getTotalOverCap() : 0;
                 boolean reachable = false;
@@ -1022,7 +429,7 @@ class LegacyOrderPatternSelectionSolver {
                         break;
                     }
 
-                    int rollWidth = ceilToStep(totalWidth, params.getStepSize());
+                    int rollWidth = LegacyPatternMipSupport.ceilToStep(totalWidth, params.getStepSize());
                     rollWidth = Math.max(rollWidth, params.getMinRollWidth());
                     rollWidth = Math.min(rollWidth, params.getMaxRollWidth());
                     if (totalWidth > rollWidth) {
@@ -1044,67 +451,6 @@ class LegacyOrderPatternSelectionSolver {
         }
 
         return repaired;
-    }
-
-    private int calculateTotalWaste(Map<PatternCandidate, Integer> solution) {
-        return solution.entrySet().stream()
-                .mapToInt(entry -> entry.getKey().getRealWaste(params.getTotalWidth()) * entry.getValue())
-                .sum();
-    }
-
-    private int calculateTotalOver(Map<PatternCandidate, Integer> solution,
-            Map<Integer, Integer> demands) {
-        Map<Integer, Integer> production = calculateProduction(solution);
-        return demands.entrySet().stream()
-                .mapToInt(entry -> Math.max(
-                        0, production.getOrDefault(entry.getKey(), 0) - entry.getValue()))
-                .sum();
-    }
-
-    private Map<Integer, Integer> calculateProduction(Map<PatternCandidate, Integer> solution) {
-        Map<Integer, Integer> produced = new LinkedHashMap<>();
-        for (Map.Entry<PatternCandidate, Integer> entry : solution.entrySet()) {
-            for (Map.Entry<Integer, Integer> cut : entry.getKey().getPattern().entrySet()) {
-                produced.merge(cut.getKey(), cut.getValue() * entry.getValue(), Integer::sum);
-            }
-        }
-        return produced;
-    }
-
-    private Map<PatternCandidate, Integer> extractSolution(List<PatternCandidate> patterns, List<MPVariable> xVars) {
-        Map<PatternCandidate, Integer> solution = new LinkedHashMap<>();
-        for (int i = 0; i < patterns.size(); i++) {
-            int usage = (int) Math.round(xVars.get(i).solutionValue());
-            if (usage > 0) {
-                solution.put(patterns.get(i), usage);
-            }
-        }
-        return solution;
-    }
-
-    private MPSolver createMIPSolver() {
-        MPSolver solver = MPSolver.createSolver("SCIP");
-        if (solver != null) {
-            // 仅 SCIP 接受该参数串；CBC 回退路径不应用。
-            solver.setSolverSpecificParametersAsString(scipParams());
-            // 单线程：多线程 MIP 是非确定性的经典来源（线程竞争与种子无关）。
-            try { solver.setNumThreads(1); } catch (Exception ignored) {}
-            return solver;
-        }
-        return MPSolver.createSolver("CBC");
-    }
-
-    private int gcd(int a, int b) {
-        while (b != 0) {
-            int temp = b;
-            b = a % b;
-            a = temp;
-        }
-        return a;
-    }
-
-    private int ceilToStep(int value, int step) {
-        return ((value + step - 1) / step) * step;
     }
 
     record Result(

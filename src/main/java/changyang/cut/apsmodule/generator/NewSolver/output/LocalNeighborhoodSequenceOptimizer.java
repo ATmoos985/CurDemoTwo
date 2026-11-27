@@ -1,34 +1,30 @@
 package changyang.cut.apsmodule.generator.NewSolver.output;
 
-import com.google.ortools.Loader;
-import com.google.ortools.linearsolver.MPConstraint;
-import com.google.ortools.linearsolver.MPObjective;
-import com.google.ortools.linearsolver.MPSolver;
-import com.google.ortools.linearsolver.MPVariable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import changyang.cut.apsmodule.generator.NewSolver.config.OrToolsNativeLoader;
 import changyang.cut.apsmodule.generator.NewSolver.config.SolverParameters;
 import changyang.cut.apsmodule.generator.NewSolver.config.SolverRuntimeProperties;
+import changyang.cut.apsmodule.generator.NewSolver.output.LnsDiagnostics.DiagnosticRow;
+import changyang.cut.apsmodule.generator.NewSolver.output.LnsDiagnostics.Diagnostics;
+import changyang.cut.apsmodule.generator.NewSolver.output.LnsModelAndInstructionSupport.Column;
+import changyang.cut.apsmodule.generator.NewSolver.output.LnsModelAndInstructionSupport.Neighborhood;
+import changyang.cut.apsmodule.generator.NewSolver.output.LnsModelAndInstructionSupport.PatternKey;
+import changyang.cut.apsmodule.generator.NewSolver.output.LnsModelAndInstructionSupport.RollRecord;
+import changyang.cut.apsmodule.generator.NewSolver.output.LnsModelAndInstructionSupport.SolveAttempt;
 import changyang.cut.apsmodule.service.CuttingInstruction;
 import changyang.cut.apsmodule.service.SolverOrderItem;
-import changyang.cut.apsmodule.service.StationAssignment;
 import changyang.cut.apsmodule.solver.kernel.execution.BoundedSolverTaskExecutor;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.Queue;
 import java.util.Set;
-import java.util.TreeMap;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 /**
  * Experimental local neighbourhood search for sequence-group reduction.
@@ -41,93 +37,36 @@ public class LocalNeighborhoodSequenceOptimizer {
 
     private static final Logger log = LoggerFactory.getLogger(LocalNeighborhoodSequenceOptimizer.class);
 
-    private static final int DEFAULT_MAX_FREE_ORDERS = 10;
-    private static final int DEFAULT_MAX_FREE_PATTERNS = 12;
-    private static final int DEFAULT_MAX_FREE_CARS = 32;
-    private static final int DEFAULT_MAX_COLUMNS = 3000;
     private static final int DEFAULT_MAX_ITERATIONS = 40;
     private static final int DEFAULT_MAX_NEIGHBORHOODS = 50;
-    // High wall-clock cap acts only as a runaway safety; the SCIP node limit is the real,
-    // deterministic bound (see scipNodeLimit). Generous so the node limit always binds first.
-    private static final long DEFAULT_TIME_LIMIT_MS = 120000L;
-    // Deterministic B&B node budget (default ON): fixed node count → reproducible incumbent
-    // regardless of machine speed, even on rich enriched pools. This is what makes the LNS
-    // deterministic without CP-SAT. Set to -1 to fall back to wall-clock (non-deterministic).
-    private static final long DEFAULT_SCIP_NODE_LIMIT = 15000L;
     private static final long DEFAULT_POST_TIME_BUDGET_MS = 0L;
-    private static final int DEFAULT_MAX_SEED_COUNT = 4;
-    private static final int DEFAULT_SHARED_WIDTH_DEPTH = 1;
-    private static final int DEFAULT_COLUMN_ENUMERATION_GUARD = 50000;
-    private static final int DEFAULT_MAX_SLICE_NEIGHBORHOODS = 20;
-    private static final int DEFAULT_MAX_SLICE_CARS_PER_CONFIG = 8;
-    private static final String SCIP_DETERMINISTIC_PARAMS =
-            "randomization/randomseedshift = 0\n"
-          + "randomization/permutationseed = 0\n"
-          + "randomization/lpseed = 0\n";
 
-    private static boolean orToolsLoaded;
-    private final SolverParameters params;
-    /**
-     * Canonicalises an instruction list the same way the production candidate path does
-     * (compact rolls + cluster identical-content instructions) before group counting.
-     * Without it the search measures un-reordered candidates against a reordered baseline.
-     */
-    private final java.util.function.Consumer<List<CuttingInstruction>> arranger;
+    private final LnsNeighborhoodBuilder neighborhoodBuilder;
+    private final LnsSubproblemSolver subproblemSolver;
+    private final Consumer<List<CuttingInstruction>> arranger;
 
     public LocalNeighborhoodSequenceOptimizer(SolverParameters params) {
         this(params, instructions -> { });
     }
 
     public LocalNeighborhoodSequenceOptimizer(SolverParameters params,
-            java.util.function.Consumer<List<CuttingInstruction>> arranger) {
-        this.params = params;
+            Consumer<List<CuttingInstruction>> arranger) {
+        this.neighborhoodBuilder = new LnsNeighborhoodBuilder(params);
+        this.subproblemSolver = new LnsSubproblemSolver();
         this.arranger = arranger != null ? arranger : instructions -> { };
     }
 
     public static boolean isEnabled() {
-        return booleanProperty("cutting.lns.enabled", false);
+        return SolverRuntimeProperties.getBoolean("cutting.lns.enabled", false);
     }
 
     public static boolean isEnabledExplicitlyConfigured() {
-        String value = configuredProperty("cutting.lns.enabled");
+        String value = SolverRuntimeProperties.get("cutting.lns.enabled");
         return value != null && !value.isBlank();
     }
 
     public static <T> T withPropertyOverrides(Map<String, String> overrides, Supplier<T> supplier) {
         return SolverRuntimeProperties.withOverrides(overrides, supplier);
-    }
-
-    private static boolean booleanProperty(String key, boolean defaultValue) {
-        String value = configuredProperty(key);
-        return value == null ? defaultValue : Boolean.parseBoolean(value);
-    }
-
-    private static int intProperty(String key, int defaultValue) {
-        String value = configuredProperty(key);
-        if (value == null || value.isBlank()) {
-            return defaultValue;
-        }
-        try {
-            return Integer.parseInt(value);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    private static long longProperty(String key, long defaultValue) {
-        String value = configuredProperty(key);
-        if (value == null || value.isBlank()) {
-            return defaultValue;
-        }
-        try {
-            return Long.parseLong(value);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    private static String configuredProperty(String key) {
-        return SolverRuntimeProperties.get(key);
     }
 
     public LnsResult improve(List<CuttingInstruction> originalInstructions,
@@ -136,56 +75,45 @@ public class LocalNeighborhoodSequenceOptimizer {
                 || groupItems == null || groupItems.isEmpty()) {
             return LnsResult.notImproved(originalInstructions, "empty-input");
         }
-        if (!loadOrTools()) {
+        if (!OrToolsNativeLoader.ensureLoaded("LNS")) {
             return LnsResult.notImproved(originalInstructions, "ortools-unavailable");
         }
 
-        List<CuttingInstruction> current = cloneInstructions(originalInstructions);
+        List<CuttingInstruction> current =
+                LnsModelAndInstructionSupport.cloneInstructions(originalInstructions);
         arranger.accept(current);
         SequenceGroupPostProcessor.GroupStats originalStats =
                 SequenceGroupPostProcessor.computeGroupStats(current);
         int originalGroups = originalStats.groups();
-        int originalCars = totalCars(current);
-        int originalWaste = totalWaste(current);
-        Map<String, Integer> originalDemand = countAssignmentsByDemandKey(current);
+        int originalCars = LnsModelAndInstructionSupport.totalCars(current);
+        int originalWaste = LnsModelAndInstructionSupport.totalWaste(current);
+        Map<String, Integer> originalDemand =
+                LnsModelAndInstructionSupport.countAssignmentsByDemandKey(current);
 
-        int maxIterations = intProperty("cutting.lns.maxIterations", DEFAULT_MAX_ITERATIONS);
-        int maxNeighborhoods = intProperty("cutting.lns.maxNeighborhoods", DEFAULT_MAX_NEIGHBORHOODS);
-        boolean allowPlateau = booleanProperty("cutting.lns.allowPlateau", true);
-        // Iterated-local-search escape: when no improving/plateau move exists, take the
-        // least-worsening feasible move (bounded relative to best-ever) to climb out of the
-        // local optimum. best-ever is the safety net, so a returned plan is never worse than start.
-        boolean escape = booleanProperty("cutting.lns.escape", true);
-        int worseningTolerance = intProperty("cutting.lns.worseningTolerance", 2);
-        // Deterministic stopping: bound the search by ITERATION COUNT, not wall-clock. A
-        // wall-clock budget makes the result depend on machine load (different #iterations
-        // completed → different floor) — that was the run-to-run swing (49 vs 51). Stop after
-        // maxIterations, or early after maxNoImprove consecutive iterations with no new best.
-        long budgetMs = longProperty("cutting.lns.budgetMs", 0L);
+        int maxIterations = SolverRuntimeProperties.getInt(
+                "cutting.lns.maxIterations", DEFAULT_MAX_ITERATIONS);
+        int maxNeighborhoods = SolverRuntimeProperties.getInt(
+                "cutting.lns.maxNeighborhoods", DEFAULT_MAX_NEIGHBORHOODS);
+        boolean allowPlateau = SolverRuntimeProperties.getBoolean("cutting.lns.allowPlateau", true);
+        boolean escape = SolverRuntimeProperties.getBoolean("cutting.lns.escape", true);
+        int worseningTolerance = SolverRuntimeProperties.getInt(
+                "cutting.lns.worseningTolerance", 2);
+        long budgetMs = SolverRuntimeProperties.getLong("cutting.lns.budgetMs", 0L);
         long deadlineMs = budgetMs > 0L ? System.currentTimeMillis() + budgetMs : Long.MAX_VALUE;
-        int maxNoImprove = intProperty("cutting.lns.maxNoImprove", 12);
+        int maxNoImprove = SolverRuntimeProperties.getInt("cutting.lns.maxNoImprove", 12);
         int noImproveStreak = 0;
         boolean improved = false;
         String lastReason = "no-improving-neighborhood";
         Diagnostics diagnostics = Diagnostics.create();
 
-        List<CuttingInstruction> bestEver = cloneInstructions(current);
+        List<CuttingInstruction> bestEver = LnsModelAndInstructionSupport.cloneInstructions(current);
         SequenceGroupPostProcessor.GroupStats bestEverStats = originalStats;
-        // Visited-solution tabu: forbids moves that return to an already-seen assignment.
-        // Without it the escape step oscillates in a 2-cycle (escape up, best move undoes it).
         Set<String> visited = new HashSet<>();
-        visited.add(solutionSignature(current));
-        // 单次 improve() 局部的确定性邻域求解缓存：每轮只修改极少数车，未受波及的邻域输入完全一致，
-        // 直接复用确定性 SCIP 求解结果，避免每轮重复枚举列与重解相同子 MIP。
+        visited.add(LnsModelAndInstructionSupport.solutionSignature(current));
         Map<String, SolveAttempt> solveCache = new HashMap<>();
 
-        // Parallelize the independent neighborhood solves (the LNS hot path, ~94% of LNS time). Each
-        // solveNeighborhood builds its own MPSolver and reads only the (immutable) neighborhood, so
-        // it is thread-safe; results are consumed by index in the serial reduction below → identical,
-        // deterministic output to the serial path, just faster. Cross-validated byte-identical on
-        // sixian (49) and t9est188 (69); ON by default — set -Dcutting.lns.parallel=false for serial.
-        boolean parallel = booleanProperty("cutting.lns.parallel", true);
-        int requestedParallelism = intProperty(
+        boolean parallel = SolverRuntimeProperties.getBoolean("cutting.lns.parallel", true);
+        int requestedParallelism = SolverRuntimeProperties.getInt(
                 "cutting.lns.parallelism", BoundedSolverTaskExecutor.globalParallelism());
         BoundedSolverTaskExecutor executor = (parallel
                 && requestedParallelism > 1
@@ -198,279 +126,220 @@ public class LocalNeighborhoodSequenceOptimizer {
         }
         try {
             for (int iteration = 0; iteration < maxIterations; iteration++) {
-            if (System.currentTimeMillis() >= deadlineMs) {
-                lastReason = "budget-reached";
-                break;
-            }
-            long iterStartMs = System.currentTimeMillis();
-            SequenceGroupPostProcessor.GroupStats beforeStats =
-                    SequenceGroupPostProcessor.computeGroupStats(current);
-            int beforeGroups = beforeStats.groups();
-            int beforeFragmentation = fragmentationScore(current);
-            List<RollRecord> rolls = decompose(current);
-            List<Neighborhood> neighborhoods = buildNeighborhoods(rolls, maxNeighborhoods);
-            long buildNbDoneMs = System.currentTimeMillis();
-            MoveCandidate bestImprovement = null;
-            MoveCandidate bestPlateau = null;
-            MoveCandidate bestWorsening = null;
-
-            List<String> cacheKeys = new ArrayList<>(neighborhoods.size());
-            SolveAttempt[] resolvedAttempts = new SolveAttempt[neighborhoods.size()];
-            List<Integer> uncachedIndexes = new ArrayList<>();
-            List<Neighborhood> uncachedNeighborhoods = new ArrayList<>();
-            for (int ni = 0; ni < neighborhoods.size(); ni++) {
-                Neighborhood neighborhood = neighborhoods.get(ni);
-                String cacheKey = neighborhoodCacheKey(neighborhood);
-                cacheKeys.add(cacheKey);
-                SolveAttempt cached = solveCache.get(cacheKey);
-                if (cached != null) {
-                    resolvedAttempts[ni] = cached;
-                } else {
-                    uncachedIndexes.add(ni);
-                    uncachedNeighborhoods.add(neighborhood);
-                }
-            }
-
-            // Solve only cache-miss neighborhoods up front in parallel (each solve is independent + thread-safe);
-            // the reduction below consumes them by index, so the chosen move is identical to serial.
-            if (executor != null && !uncachedNeighborhoods.isEmpty()) {
-                final long iterDeadlineMs = deadlineMs;
-                List<SolveAttempt> solvedMisses =
-                        executor.mapOrdered(uncachedNeighborhoods, n -> solveNeighborhood(n, iterDeadlineMs));
-                for (int i = 0; i < uncachedIndexes.size(); i++) {
-                    int ni = uncachedIndexes.get(i);
-                    SolveAttempt attempt = solvedMisses.get(i);
-                    resolvedAttempts[ni] = attempt;
-                    if (!"budget-reached".equals(attempt.reason())) {
-                        solveCache.put(cacheKeys.get(ni), attempt);
-                    }
-                }
-            }
-            long solveDoneMs = System.currentTimeMillis();
-            long maxSingleNbMs = 0L;
-            int maxSingleNbCols = 0;
-            int noOpSkipped = 0;
-            for (SolveAttempt a : resolvedAttempts) {
-                if (a != null && a.elapsedMs() > maxSingleNbMs) {
-                    maxSingleNbMs = a.elapsedMs();
-                    maxSingleNbCols = a.columns().size();
-                }
-            }
-
-            for (int ni = 0; ni < neighborhoods.size(); ni++) {
-                Neighborhood neighborhood = neighborhoods.get(ni);
-                SolveAttempt attempt = resolvedAttempts[ni];
-                if (attempt == null) {
-                    if (System.currentTimeMillis() >= deadlineMs) {
-                        lastReason = "budget-reached";
-                        break;
-                    }
-                    attempt = solveNeighborhood(neighborhood, deadlineMs);
-                    if (!"budget-reached".equals(attempt.reason())) {
-                        solveCache.put(cacheKeys.get(ni), attempt);
-                    }
-                }
-                lastReason = attempt.reason();
-                int beforeProxy = currentActiveColumns(neighborhood);
-                if (!attempt.feasible()) {
-                    diagnostics.record(new DiagnosticRow(
-                            iteration,
-                            ni,
-                            neighborhood.seedKeys(),
-                            neighborhood.freeDemand().size(),
-                            neighborhood.patterns().size(),
-                            neighborhood.cars(),
-                            attempt.columns().size(),
-                            beforeProxy,
-                            0,
-                            beforeStats.groups(),
-                            beforeStats.oddCarGroups(),
-                            beforeStats.smallCarGroups(),
-                            beforeFragmentation,
-                            beforeStats.groups(),
-                            beforeStats.oddCarGroups(),
-                            beforeStats.smallCarGroups(),
-                            beforeFragmentation,
-                            false,
-                            false,
-                            false,
-                            false,
-                            false,
-                            attempt.status()));
-                    continue;
-                }
-
-                // 若子 MIP 返回的列配置多重集与当前邻域完全一致，重排后必然与当前解相同（必命中 visited），
-                // 直接跳过全车队重建、排序与统计，零质量损失。
-                if (!diagnostics.enabled && isNoOpAttempt(neighborhood, attempt)) {
-                    noOpSkipped++;
-                    continue;
-                }
-
-                List<CuttingInstruction> candidate = rebuildWithNeighborhoodSolution(rolls, neighborhood, attempt);
-                arranger.accept(candidate);
-                int candidateCars = totalCars(candidate);
-                int candidateWaste = totalWaste(candidate);
-                Map<String, Integer> candidateDemand = countAssignmentsByDemandKey(candidate);
-                SequenceGroupPostProcessor.GroupStats afterStats =
-                        SequenceGroupPostProcessor.computeGroupStats(candidate);
-                int afterFragmentation = fragmentationScore(candidate);
-
-                if (candidateCars == originalCars
-                        && candidateWaste == originalWaste
-                        && originalDemand.equals(candidateDemand)) {
-                    boolean promisingRaw = afterStats.oneCarGroups() < beforeStats.oneCarGroups()
-                            || afterStats.groups() <= beforeGroups
-                            || afterFragmentation < beforeFragmentation;
-                    long postTimeBudgetMs = longProperty(
-                            "cutting.lns.postTimeBudgetMs", DEFAULT_POST_TIME_BUDGET_MS);
-                    if (promisingRaw && postTimeBudgetMs > 0L) {
-                        SequenceGroupPostProcessor.optimize(candidate,
-                                postTimeBudgetMs, false);
-                        afterStats = SequenceGroupPostProcessor.computeGroupStats(candidate);
-                        afterFragmentation = fragmentationScore(candidate);
-                    }
-                    boolean visitedSolution = visited.contains(solutionSignature(candidate));
-                    boolean guardOk = groupGainRegressionAllowed(beforeStats, afterStats)
-                            && groupGainRegressionAllowed(originalStats, afterStats);
-                    diagnostics.record(new DiagnosticRow(
-                            iteration,
-                            ni,
-                            neighborhood.seedKeys(),
-                            neighborhood.freeDemand().size(),
-                            neighborhood.patterns().size(),
-                            neighborhood.cars(),
-                            attempt.columns().size(),
-                            beforeProxy,
-                            attempt.activeColumns(),
-                            beforeStats.groups(),
-                            beforeStats.oddCarGroups(),
-                            beforeStats.smallCarGroups(),
-                            beforeFragmentation,
-                            afterStats.groups(),
-                            afterStats.oddCarGroups(),
-                            afterStats.smallCarGroups(),
-                            afterFragmentation,
-                            true,
-                            true,
-                            !visitedSolution,
-                            visitedSolution,
-                            guardOk,
-                            attempt.status()));
-                    if (!visitedSolution && guardOk) {
-                        MoveCandidate move = new MoveCandidate(candidate, neighborhood, attempt,
-                                afterStats, afterFragmentation);
-                        if (afterStats.groups() < beforeGroups) {
-                            bestImprovement = betterMove(bestImprovement, move);
-                        } else if (afterStats.groups() == beforeGroups) {
-                            if (allowPlateau && improvesPlateau(beforeStats, beforeFragmentation,
-                                    afterStats, afterFragmentation)) {
-                                bestPlateau = betterMove(bestPlateau, move);
-                            }
-                        } else {
-                            bestWorsening = betterMove(bestWorsening, move);
-                        }
-                    }
-                } else {
-                    diagnostics.record(new DiagnosticRow(
-                            iteration,
-                            ni,
-                            neighborhood.seedKeys(),
-                            neighborhood.freeDemand().size(),
-                            neighborhood.patterns().size(),
-                            neighborhood.cars(),
-                            attempt.columns().size(),
-                            beforeProxy,
-                            attempt.activeColumns(),
-                            beforeStats.groups(),
-                            beforeStats.oddCarGroups(),
-                            beforeStats.smallCarGroups(),
-                            beforeFragmentation,
-                            afterStats.groups(),
-                            afterStats.oddCarGroups(),
-                            afterStats.smallCarGroups(),
-                            afterFragmentation,
-                            true,
-                            false,
-                            false,
-                            false,
-                            false,
-                            attempt.status()));
-                }
-
-                log.debug("LNS rejected: groups {} -> {}, odd {}->{}, small {}->{}, frag {}->{}, cars {}->{}, waste {}->{}, demandOk={}, seeds={}, columns={}, status={}",
-                        beforeGroups,
-                        afterStats.groups(),
-                        beforeStats.oddCarGroups(),
-                        afterStats.oddCarGroups(),
-                        beforeStats.smallCarGroups(),
-                        afterStats.smallCarGroups(),
-                        beforeFragmentation,
-                        afterFragmentation,
-                        originalCars,
-                        candidateCars,
-                        originalWaste,
-                        candidateWaste,
-                        originalDemand.equals(candidateDemand),
-                        neighborhood.seedKeys(),
-                        attempt.columns().size(),
-                        attempt.status());
-            }
-
-            log.debug("LNS iter {}: nbs={}, cacheHits={}, uncached={}, buildMs={}, solveMs={}, evalMs={}, maxNbMs={} (cols={}), noOpSkipped={}",
-                    iteration,
-                    neighborhoods.size(),
-                    neighborhoods.size() - uncachedNeighborhoods.size(),
-                    uncachedNeighborhoods.size(),
-                    buildNbDoneMs - iterStartMs,
-                    solveDoneMs - buildNbDoneMs,
-                    System.currentTimeMillis() - solveDoneMs,
-                    maxSingleNbMs,
-                    maxSingleNbCols,
-                    noOpSkipped);
-
-            MoveCandidate accepted = bestImprovement != null ? bestImprovement : bestPlateau;
-            boolean escapeStep = false;
-            if (accepted == null) {
-                // No descending/plateau move. Try a bounded escape step to leave the local optimum.
-                if (escape && bestWorsening != null
-                        && bestWorsening.afterGroups() <= bestEverStats.groups() + worseningTolerance) {
-                    accepted = bestWorsening;
-                    escapeStep = true;
-                } else {
+                if (System.currentTimeMillis() >= deadlineMs) {
+                    lastReason = "budget-reached";
                     break;
                 }
-            }
+                long iterStartMs = System.currentTimeMillis();
+                SequenceGroupPostProcessor.GroupStats beforeStats =
+                        SequenceGroupPostProcessor.computeGroupStats(current);
+                int beforeGroups = beforeStats.groups();
+                int beforeFragmentation = LnsModelAndInstructionSupport.fragmentationScore(current);
+                List<RollRecord> rolls = LnsModelAndInstructionSupport.decompose(current);
+                List<Neighborhood> neighborhoods =
+                        neighborhoodBuilder.buildNeighborhoods(rolls, maxNeighborhoods);
+                long buildNbDoneMs = System.currentTimeMillis();
+                MoveCandidate bestImprovement = null;
+                MoveCandidate bestPlateau = null;
+                MoveCandidate bestWorsening = null;
 
-            log.info("LNS {}: groups {} -> {}, odd {}->{}, small {}->{}, frag {}->{}, waste={} cars={}, seeds={}, orders={}, patterns={}, columns={}, status={}, elapsed={}ms",
-                    escapeStep ? "escape" : "accepted",
-                    beforeGroups,
-                    accepted.afterGroups(),
-                    beforeStats.oddCarGroups(),
-                    accepted.afterOddCarGroups(),
-                    beforeStats.smallCarGroups(),
-                    accepted.afterSmallCarGroups(),
-                    beforeFragmentation,
-                    accepted.afterFragmentation(),
-                    totalWaste(accepted.instructions()),
-                    totalCars(accepted.instructions()),
-                    accepted.neighborhood().seedKeys(),
-                    accepted.neighborhood().freeDemand().keySet(),
-                    accepted.neighborhood().patterns().size(),
-                    accepted.attempt().columns().size(),
-                    accepted.attempt().status(),
-                    accepted.attempt().elapsedMs());
-            current = accepted.instructions();
-            visited.add(solutionSignature(current));
-            if (betterStats(accepted.afterStats(), bestEverStats)) {
-                bestEver = cloneInstructions(current);
-                bestEverStats = accepted.afterStats();
-                improved = true;
-                noImproveStreak = 0;
-            } else if (++noImproveStreak >= maxNoImprove) {
-                lastReason = "no-improve-streak";
-                break;
-            }
+                List<String> cacheKeys = new ArrayList<>(neighborhoods.size());
+                SolveAttempt[] resolvedAttempts = new SolveAttempt[neighborhoods.size()];
+                List<Integer> uncachedIndexes = new ArrayList<>();
+                List<Neighborhood> uncachedNeighborhoods = new ArrayList<>();
+                for (int ni = 0; ni < neighborhoods.size(); ni++) {
+                    Neighborhood neighborhood = neighborhoods.get(ni);
+                    String cacheKey = neighborhoodCacheKey(neighborhood);
+                    cacheKeys.add(cacheKey);
+                    SolveAttempt cached = solveCache.get(cacheKey);
+                    if (cached != null) {
+                        resolvedAttempts[ni] = cached;
+                    } else {
+                        uncachedIndexes.add(ni);
+                        uncachedNeighborhoods.add(neighborhood);
+                    }
+                }
+
+                if (executor != null && !uncachedNeighborhoods.isEmpty()) {
+                    final long iterDeadlineMs = deadlineMs;
+                    List<SolveAttempt> solvedMisses = executor.mapOrdered(
+                            uncachedNeighborhoods,
+                            n -> subproblemSolver.solveNeighborhood(n, iterDeadlineMs));
+                    for (int i = 0; i < uncachedIndexes.size(); i++) {
+                        int ni = uncachedIndexes.get(i);
+                        SolveAttempt attempt = solvedMisses.get(i);
+                        resolvedAttempts[ni] = attempt;
+                        if (!"budget-reached".equals(attempt.reason())) {
+                            solveCache.put(cacheKeys.get(ni), attempt);
+                        }
+                    }
+                }
+                long solveDoneMs = System.currentTimeMillis();
+                long maxSingleNbMs = 0L;
+                int maxSingleNbCols = 0;
+                int noOpSkipped = 0;
+                for (SolveAttempt a : resolvedAttempts) {
+                    if (a != null && a.elapsedMs() > maxSingleNbMs) {
+                        maxSingleNbMs = a.elapsedMs();
+                        maxSingleNbCols = a.columns().size();
+                    }
+                }
+
+                for (int ni = 0; ni < neighborhoods.size(); ni++) {
+                    Neighborhood neighborhood = neighborhoods.get(ni);
+                    SolveAttempt attempt = resolvedAttempts[ni];
+                    if (attempt == null) {
+                        if (System.currentTimeMillis() >= deadlineMs) {
+                            lastReason = "budget-reached";
+                            break;
+                        }
+                        attempt = subproblemSolver.solveNeighborhood(neighborhood, deadlineMs);
+                        if (!"budget-reached".equals(attempt.reason())) {
+                            solveCache.put(cacheKeys.get(ni), attempt);
+                        }
+                    }
+                    lastReason = attempt.reason();
+                    int beforeProxy = subproblemSolver.currentActiveColumns(neighborhood);
+                    if (!attempt.feasible()) {
+                        diagnostics.record(new DiagnosticRow(
+                                iteration, ni, neighborhood.seedKeys(),
+                                neighborhood.freeDemand().size(), neighborhood.patterns().size(),
+                                neighborhood.cars(), attempt.columns().size(),
+                                beforeProxy, 0,
+                                beforeStats.groups(), beforeStats.oddCarGroups(),
+                                beforeStats.smallCarGroups(), beforeFragmentation,
+                                beforeStats.groups(), beforeStats.oddCarGroups(),
+                                beforeStats.smallCarGroups(), beforeFragmentation,
+                                false, false, false, false, false, attempt.status()));
+                        continue;
+                    }
+
+                    if (!diagnostics.enabled && isNoOpAttempt(neighborhood, attempt)) {
+                        noOpSkipped++;
+                        continue;
+                    }
+
+                    List<CuttingInstruction> candidate =
+                            LnsModelAndInstructionSupport.rebuildWithNeighborhoodSolution(
+                                    rolls, neighborhood, attempt);
+                    arranger.accept(candidate);
+                    int candidateCars = LnsModelAndInstructionSupport.totalCars(candidate);
+                    int candidateWaste = LnsModelAndInstructionSupport.totalWaste(candidate);
+                    Map<String, Integer> candidateDemand =
+                            LnsModelAndInstructionSupport.countAssignmentsByDemandKey(candidate);
+                    SequenceGroupPostProcessor.GroupStats afterStats =
+                            SequenceGroupPostProcessor.computeGroupStats(candidate);
+                    int afterFragmentation = LnsModelAndInstructionSupport.fragmentationScore(candidate);
+
+                    if (candidateCars == originalCars
+                            && candidateWaste == originalWaste
+                            && originalDemand.equals(candidateDemand)) {
+                        boolean promisingRaw = afterStats.oneCarGroups() < beforeStats.oneCarGroups()
+                                || afterStats.groups() <= beforeGroups
+                                || afterFragmentation < beforeFragmentation;
+                        long postTimeBudgetMs = SolverRuntimeProperties.getLong(
+                                "cutting.lns.postTimeBudgetMs", DEFAULT_POST_TIME_BUDGET_MS);
+                        if (promisingRaw && postTimeBudgetMs > 0L) {
+                            SequenceGroupPostProcessor.optimize(candidate, postTimeBudgetMs, false);
+                            afterStats = SequenceGroupPostProcessor.computeGroupStats(candidate);
+                            afterFragmentation = LnsModelAndInstructionSupport.fragmentationScore(candidate);
+                        }
+                        boolean visitedSolution = visited.contains(
+                                LnsModelAndInstructionSupport.solutionSignature(candidate));
+                        boolean guardOk = groupGainRegressionAllowed(beforeStats, afterStats)
+                                && groupGainRegressionAllowed(originalStats, afterStats);
+                        diagnostics.record(new DiagnosticRow(
+                                iteration, ni, neighborhood.seedKeys(),
+                                neighborhood.freeDemand().size(), neighborhood.patterns().size(),
+                                neighborhood.cars(), attempt.columns().size(),
+                                beforeProxy, attempt.activeColumns(),
+                                beforeStats.groups(), beforeStats.oddCarGroups(),
+                                beforeStats.smallCarGroups(), beforeFragmentation,
+                                afterStats.groups(), afterStats.oddCarGroups(),
+                                afterStats.smallCarGroups(), afterFragmentation,
+                                true, true, !visitedSolution, visitedSolution, guardOk, attempt.status()));
+                        if (!visitedSolution && guardOk) {
+                            MoveCandidate move = new MoveCandidate(candidate, neighborhood, attempt,
+                                    afterStats, afterFragmentation);
+                            if (afterStats.groups() < beforeGroups) {
+                                bestImprovement = betterMove(bestImprovement, move);
+                            } else if (afterStats.groups() == beforeGroups) {
+                                if (allowPlateau && improvesPlateau(beforeStats, beforeFragmentation,
+                                        afterStats, afterFragmentation)) {
+                                    bestPlateau = betterMove(bestPlateau, move);
+                                }
+                            } else {
+                                bestWorsening = betterMove(bestWorsening, move);
+                            }
+                        }
+                    } else {
+                        diagnostics.record(new DiagnosticRow(
+                                iteration, ni, neighborhood.seedKeys(),
+                                neighborhood.freeDemand().size(), neighborhood.patterns().size(),
+                                neighborhood.cars(), attempt.columns().size(),
+                                beforeProxy, attempt.activeColumns(),
+                                beforeStats.groups(), beforeStats.oddCarGroups(),
+                                beforeStats.smallCarGroups(), beforeFragmentation,
+                                afterStats.groups(), afterStats.oddCarGroups(),
+                                afterStats.smallCarGroups(), afterFragmentation,
+                                true, false, false, false, false, attempt.status()));
+                    }
+
+                    log.debug("LNS rejected: groups {} -> {}, odd {}->{}, small {}->{}, frag {}->{}, cars {}->{}, waste {}->{}, demandOk={}, seeds={}, columns={}, status={}",
+                            beforeGroups, afterStats.groups(),
+                            beforeStats.oddCarGroups(), afterStats.oddCarGroups(),
+                            beforeStats.smallCarGroups(), afterStats.smallCarGroups(),
+                            beforeFragmentation, afterFragmentation,
+                            originalCars, candidateCars, originalWaste, candidateWaste,
+                            originalDemand.equals(candidateDemand),
+                            neighborhood.seedKeys(), attempt.columns().size(), attempt.status());
+                }
+
+                log.debug("LNS iter {}: nbs={}, cacheHits={}, uncached={}, buildMs={}, solveMs={}, evalMs={}, maxNbMs={} (cols={}), noOpSkipped={}",
+                        iteration, neighborhoods.size(),
+                        neighborhoods.size() - uncachedNeighborhoods.size(),
+                        uncachedNeighborhoods.size(),
+                        buildNbDoneMs - iterStartMs, solveDoneMs - buildNbDoneMs,
+                        System.currentTimeMillis() - solveDoneMs,
+                        maxSingleNbMs, maxSingleNbCols, noOpSkipped);
+
+                MoveCandidate accepted = bestImprovement != null ? bestImprovement : bestPlateau;
+                boolean escapeStep = false;
+                if (accepted == null) {
+                    if (escape && bestWorsening != null
+                            && bestWorsening.afterGroups() <= bestEverStats.groups() + worseningTolerance) {
+                        accepted = bestWorsening;
+                        escapeStep = true;
+                    } else {
+                        break;
+                    }
+                }
+
+                log.info("LNS {}: groups {} -> {}, odd {}->{}, small {}->{}, frag {}->{}, waste={} cars={}, seeds={}, orders={}, patterns={}, columns={}, status={}, elapsed={}ms",
+                        escapeStep ? "escape" : "accepted",
+                        beforeGroups, accepted.afterGroups(),
+                        beforeStats.oddCarGroups(), accepted.afterOddCarGroups(),
+                        beforeStats.smallCarGroups(), accepted.afterSmallCarGroups(),
+                        beforeFragmentation, accepted.afterFragmentation(),
+                        LnsModelAndInstructionSupport.totalWaste(accepted.instructions()),
+                        LnsModelAndInstructionSupport.totalCars(accepted.instructions()),
+                        accepted.neighborhood().seedKeys(),
+                        accepted.neighborhood().freeDemand().keySet(),
+                        accepted.neighborhood().patterns().size(),
+                        accepted.attempt().columns().size(),
+                        accepted.attempt().status(),
+                        accepted.attempt().elapsedMs());
+                current = accepted.instructions();
+                visited.add(LnsModelAndInstructionSupport.solutionSignature(current));
+                if (betterStats(accepted.afterStats(), bestEverStats)) {
+                    bestEver = LnsModelAndInstructionSupport.cloneInstructions(current);
+                    bestEverStats = accepted.afterStats();
+                    improved = true;
+                    noImproveStreak = 0;
+                } else if (++noImproveStreak >= maxNoImprove) {
+                    lastReason = "no-improve-streak";
+                    break;
+                }
             }
         } finally {
             if (executor != null) {
@@ -483,414 +352,6 @@ public class LocalNeighborhoodSequenceOptimizer {
             return new LnsResult(true, bestEver, originalGroups, bestEverStats.groups(), "improved");
         }
         return LnsResult.notImproved(originalInstructions, lastReason);
-    }
-
-    private int currentActiveColumns(Neighborhood neighborhood) {
-        return (int) neighborhood.selectedRolls().stream()
-                .map(roll -> new Column(roll.pattern(), roll.config(), roll.demandCounts(), true).signature())
-                .distinct()
-                .count();
-    }
-
-    private static synchronized boolean loadOrTools() {
-        if (orToolsLoaded) {
-            return true;
-        }
-        try {
-            Loader.loadNativeLibraries();
-            orToolsLoaded = true;
-            return true;
-        } catch (Exception e) {
-            log.warn("OR-Tools load failed for LNS", e);
-            return false;
-        }
-    }
-
-    private List<Neighborhood> buildNeighborhoods(List<RollRecord> rolls, int maxNeighborhoods) {
-        Map<String, Set<String>> configsByKey = new LinkedHashMap<>();
-        for (RollRecord roll : rolls) {
-            for (String key : roll.demandCounts().keySet()) {
-                configsByKey.computeIfAbsent(key, ignored -> new LinkedHashSet<>())
-                        .add(roll.configSignature());
-            }
-        }
-
-        List<String> fragmentedKeys = configsByKey.entrySet().stream()
-                .filter(entry -> entry.getValue().size() > 1)
-                .sorted(Comparator
-                        .<Map.Entry<String, Set<String>>>comparingInt(entry -> entry.getValue().size()).reversed()
-                        .thenComparing(Map.Entry::getKey))
-                .map(Map.Entry::getKey)
-                .toList();
-
-        // Heavy-family targeting (speed): only seed neighborhoods from widths carrying enough
-        // cars — the heavy families (1100/1000/1240/850/840/970/980/1110) where consolidation
-        // actually pays off. Light-tail widths (a few cars) can't merge, so optimising them just
-        // burns time. 0 = no filter (default, full behaviour). Set e.g. 50 for the fast profile.
-        int heavyWidthMinCars = intProperty("cutting.lns.heavyWidthMinCars", 0);
-        if (heavyWidthMinCars > 0) {
-            Map<Integer, Integer> carsByWidth = new HashMap<>();
-            for (RollRecord roll : rolls) {
-                for (Map.Entry<String, Integer> entry : roll.demandCounts().entrySet()) {
-                    carsByWidth.merge(DemandKey.parse(entry.getKey()).width(), entry.getValue(), Integer::sum);
-                }
-            }
-            List<String> heavyOnly = fragmentedKeys.stream()
-                    .filter(key -> carsByWidth.getOrDefault(DemandKey.parse(key).width(), 0) >= heavyWidthMinCars)
-                    .toList();
-            if (!heavyOnly.isEmpty()) {
-                fragmentedKeys = heavyOnly;
-            }
-        }
-
-        List<Neighborhood> neighborhoods = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
-        addSlicedNeighborhoods(rolls, fragmentedKeys, neighborhoods, seen, maxNeighborhoods);
-        int maxSeedCount = intProperty("cutting.lns.maxSeedCount", DEFAULT_MAX_SEED_COUNT);
-        for (int start = 0; start < fragmentedKeys.size() && neighborhoods.size() < maxNeighborhoods; start++) {
-            for (int seedCount = 1; seedCount <= maxSeedCount
-                    && start + seedCount <= fragmentedKeys.size()
-                    && neighborhoods.size() < maxNeighborhoods; seedCount++) {
-                List<String> seeds = fragmentedKeys.subList(start, start + seedCount);
-                for (boolean expandSharedWidths : List.of(false, true)) {
-                    Neighborhood neighborhood = buildNeighborhood(rolls, seeds, expandSharedWidths);
-                    if (neighborhood == null) {
-                        continue;
-                    }
-                    addNeighborhood(neighborhoods, seen, neighborhood, maxNeighborhoods);
-                }
-            }
-        }
-        return neighborhoods;
-    }
-
-    private void addSlicedNeighborhoods(List<RollRecord> rolls,
-            List<String> fragmentedKeys,
-            List<Neighborhood> neighborhoods,
-            Set<String> seen,
-            int maxNeighborhoods) {
-        int sliceBudget = Math.min(
-                intProperty("cutting.lns.maxSliceNeighborhoods", DEFAULT_MAX_SLICE_NEIGHBORHOODS),
-                maxNeighborhoods);
-        int maxSliceCars = intProperty(
-                "cutting.lns.maxSliceCarsPerConfig", DEFAULT_MAX_SLICE_CARS_PER_CONFIG);
-
-        for (String key : fragmentedKeys) {
-            if (neighborhoods.size() >= sliceBudget || neighborhoods.size() >= maxNeighborhoods) {
-                return;
-            }
-
-            Map<String, List<Integer>> indexesByConfig = new LinkedHashMap<>();
-            for (RollRecord roll : rolls) {
-                if (roll.demandCounts().containsKey(key)) {
-                    indexesByConfig.computeIfAbsent(roll.configSignature(), ignored -> new ArrayList<>())
-                            .add(roll.index());
-                }
-            }
-
-            List<List<Integer>> configSlices = indexesByConfig.values().stream()
-                    .filter(indexes -> !indexes.isEmpty())
-                    .sorted(Comparator
-                            .<List<Integer>>comparingInt(List::size).reversed()
-                            .thenComparing(indexes -> indexes.get(0)))
-                    .toList();
-            if (configSlices.size() < 2) {
-                continue;
-            }
-
-            for (int left = 0; left < configSlices.size(); left++) {
-                for (int right = left + 1; right < configSlices.size(); right++) {
-                    if (neighborhoods.size() >= sliceBudget || neighborhoods.size() >= maxNeighborhoods) {
-                        return;
-                    }
-                    Set<Integer> selectedIndexes = new LinkedHashSet<>();
-                    addLimitedIndexes(selectedIndexes, configSlices.get(left), maxSliceCars);
-                    addLimitedIndexes(selectedIndexes, configSlices.get(right), maxSliceCars);
-                    Neighborhood neighborhood = createNeighborhood(rolls, List.of(key), selectedIndexes);
-                    if (neighborhood != null) {
-                        addNeighborhood(neighborhoods, seen, neighborhood, maxNeighborhoods);
-                    }
-                }
-            }
-        }
-    }
-
-    private void addLimitedIndexes(Set<Integer> selectedIndexes, List<Integer> indexes, int limit) {
-        for (int i = 0; i < indexes.size() && i < limit; i++) {
-            selectedIndexes.add(indexes.get(i));
-        }
-    }
-
-    private void addNeighborhood(List<Neighborhood> neighborhoods,
-            Set<String> seen,
-            Neighborhood neighborhood,
-            int maxNeighborhoods) {
-        if (neighborhoods.size() >= maxNeighborhoods) {
-            return;
-        }
-        String signature = neighborhood.selectedRollIndexes().stream()
-                .map(String::valueOf)
-                .collect(Collectors.joining(","));
-        if (seen.add(signature)) {
-            neighborhoods.add(neighborhood);
-        }
-    }
-
-    private Neighborhood buildNeighborhood(List<RollRecord> rolls, List<String> seedKeys,
-            boolean expandSharedWidths) {
-        Set<Integer> selectedIndexes = new LinkedHashSet<>();
-        Set<String> seedSet = new HashSet<>(seedKeys);
-        for (RollRecord roll : rolls) {
-            if (roll.demandCounts().keySet().stream().anyMatch(seedSet::contains)) {
-                selectedIndexes.add(roll.index());
-            }
-        }
-        if (selectedIndexes.isEmpty()) {
-            return null;
-        }
-        if (expandSharedWidths) {
-            selectedIndexes = expandBySharedWidths(rolls, selectedIndexes);
-        }
-
-        return createNeighborhood(rolls, seedKeys, selectedIndexes);
-    }
-
-    private Neighborhood createNeighborhood(List<RollRecord> rolls, List<String> seedKeys,
-            Set<Integer> selectedIndexes) {
-
-        Map<String, Integer> freeDemand = new TreeMap<>();
-        Map<String, PatternKey> patterns = new LinkedHashMap<>();
-        List<RollRecord> selectedRolls = new ArrayList<>();
-        int cars = 0;
-        int waste = 0;
-        for (int index : selectedIndexes) {
-            RollRecord roll = rolls.get(index);
-            selectedRolls.add(roll);
-            cars++;
-            waste += roll.pattern().waste();
-            patterns.putIfAbsent(roll.pattern().signature(), roll.pattern());
-            for (Map.Entry<String, Integer> entry : roll.demandCounts().entrySet()) {
-                freeDemand.merge(entry.getKey(), entry.getValue(), Integer::sum);
-            }
-        }
-
-        if (freeDemand.size() > maxFreeOrders()
-                || patterns.size() > maxFreePatterns()
-                || cars > maxFreeCars()) {
-            return null;
-        }
-        addCompatiblePatterns(rolls, freeDemand, patterns);
-        // Enrich the pool with 花型 generated from this neighbourhood's own freeWidths, at
-        // diverse patternWidths. The waste constraint (Σ waste = B_waste with cars fixed)
-        // preserves total patternWidth exactly, so swapping a concentrated combo for a balanced
-        // one is waste/yield-neutral. Gives the min-Σy MIP intermediate 花型 to consolidate with
-        // — the lever behind the human's balanced distribution reaching fewer groups. Default off.
-        if (booleanProperty("cutting.lns.enrichPatterns", false)) {
-            for (PatternKey pk : generateBalancingPatterns(freeDemand, selectedRolls)) {
-                patterns.putIfAbsent(pk.signature(), pk);
-            }
-        }
-        return new Neighborhood(List.copyOf(seedKeys), selectedIndexes, freeDemand,
-                new ArrayList<>(patterns.values()), List.copyOf(selectedRolls), cars, waste);
-    }
-
-    private Set<Integer> expandBySharedWidths(List<RollRecord> rolls, Set<Integer> selectedIndexes) {
-        Set<Integer> expanded = new LinkedHashSet<>(selectedIndexes);
-        int maxDepth = intProperty("cutting.lns.sharedWidthDepth", DEFAULT_SHARED_WIDTH_DEPTH);
-        int freeCarsCap = maxFreeCars();
-        // 识别“已纯单订单满整车的超大固定块”（车数 >= maxFreeCars，单次邻域不可能整体重排），
-        // 避免扩展时将其撕碎挤占 maxFreeCars 配额并膨胀子 MIP 列规模。
-        Map<String, Integer> rollCountByConfig = new HashMap<>();
-        for (RollRecord roll : rolls) {
-            rollCountByConfig.merge(roll.configSignature(), 1, Integer::sum);
-        }
-        for (int depth = 0; depth < maxDepth; depth++) {
-            Set<Integer> activeWidths = widthsInSelectedRolls(rolls, expanded);
-            List<RollRecord> candidates = rolls.stream()
-                    .filter(roll -> !expanded.contains(roll.index()))
-                    .filter(roll -> !(roll.demandCounts().size() == 1
-                            && rollCountByConfig.getOrDefault(roll.configSignature(), 0) >= freeCarsCap))
-                    .filter(roll -> overlapScore(roll, activeWidths) > 0)
-                    .sorted(Comparator
-                            .comparingInt((RollRecord roll) -> overlapScore(roll, activeWidths)).reversed()
-                            .thenComparingInt(roll -> roll.demandCounts().size())
-                            .thenComparingInt(RollRecord::index))
-                    .toList();
-
-            int freeOrdersCap = maxFreeOrders();
-            int freePatternsCap = maxFreePatterns();
-            Set<String> currentOrders = new HashSet<>();
-            Set<String> currentPatterns = new HashSet<>();
-            for (int index : expanded) {
-                RollRecord existing = rolls.get(index);
-                currentOrders.addAll(existing.demandCounts().keySet());
-                currentPatterns.add(existing.pattern().signature());
-            }
-
-            boolean added = false;
-            for (RollRecord roll : candidates) {
-                if (expanded.size() >= freeCarsCap) {
-                    break;
-                }
-                int newPatterns = currentPatterns.contains(roll.pattern().signature()) ? 0 : 1;
-                if (currentPatterns.size() + newPatterns > freePatternsCap) {
-                    continue;
-                }
-                int newOrders = 0;
-                for (String key : roll.demandCounts().keySet()) {
-                    if (!currentOrders.contains(key)) {
-                        newOrders++;
-                    }
-                }
-                if (currentOrders.size() + newOrders <= freeOrdersCap) {
-                    expanded.add(roll.index());
-                    currentOrders.addAll(roll.demandCounts().keySet());
-                    currentPatterns.add(roll.pattern().signature());
-                    added = true;
-                }
-            }
-            if (!added) {
-                break;
-            }
-        }
-        return expanded;
-    }
-
-    private Set<Integer> widthsInSelectedRolls(List<RollRecord> rolls, Set<Integer> selectedIndexes) {
-        Set<Integer> widths = new LinkedHashSet<>();
-        for (int index : selectedIndexes) {
-            widths.addAll(rolls.get(index).pattern().subRolls().keySet());
-        }
-        return widths;
-    }
-
-    private int overlapScore(RollRecord roll, Set<Integer> widths) {
-        int score = 0;
-        for (Integer width : roll.pattern().subRolls().keySet()) {
-            if (widths.contains(width)) {
-                score++;
-            }
-        }
-        return score;
-    }
-
-    private NeighborhoodSize neighborhoodSize(List<RollRecord> rolls, Set<Integer> selectedIndexes) {
-        Set<String> freeDemand = new HashSet<>();
-        Set<String> patterns = new HashSet<>();
-        for (int index : selectedIndexes) {
-            RollRecord roll = rolls.get(index);
-            freeDemand.addAll(roll.demandCounts().keySet());
-            patterns.add(roll.pattern().signature());
-        }
-        return new NeighborhoodSize(freeDemand.size(), patterns.size(), selectedIndexes.size());
-    }
-
-    private void addCompatiblePatterns(List<RollRecord> rolls,
-            Map<String, Integer> freeDemand,
-            Map<String, PatternKey> patterns) {
-        if (patterns.size() >= maxFreePatterns()) {
-            return;
-        }
-        Set<Integer> freeWidths = freeDemand.keySet().stream()
-                .map(DemandKey::parse)
-                .map(DemandKey::width)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-        List<PatternKey> candidates = rolls.stream()
-                .map(RollRecord::pattern)
-                .filter(pattern -> !patterns.containsKey(pattern.signature()))
-                .filter(pattern -> freeWidths.containsAll(pattern.subRolls().keySet()))
-                .collect(Collectors.toMap(
-                        PatternKey::signature,
-                        pattern -> pattern,
-                        (left, right) -> left,
-                        LinkedHashMap::new))
-                .values()
-                .stream()
-                .sorted(Comparator
-                        .comparingInt((PatternKey pattern) -> pattern.subRolls().size()).reversed()
-                        .thenComparingInt(PatternKey::waste)
-                        .thenComparing(PatternKey::signature))
-                .toList();
-        for (PatternKey pattern : candidates) {
-            if (patterns.size() >= maxFreePatterns()) {
-                break;
-            }
-            patterns.put(pattern.signature(), pattern);
-        }
-    }
-
-    /**
-     * Enumerate valid 花型 (slot multisets) over the neighbourhood's own freeWidths whose
-     * patternWidth lands in [minRollWidth, maxRollWidth]. These give the MIP intermediate
-     * patternWidths so it can swap a concentrated combo for a balanced one at the SAME total
-     * waste (waste = totalWidth - patternWidth, consistent with the production convention).
-     */
-    private List<PatternKey> generateBalancingPatterns(Map<String, Integer> freeDemand,
-            List<RollRecord> selectedRolls) {
-        if (selectedRolls.isEmpty()) {
-            return List.of();
-        }
-        int totalWidth = params.getTotalWidth();
-        // Restrict generated 花型 to a patternWidth band (default = full valid range). Narrowing it
-        // to the underrepresented middle (e.g. 4340-4389, the "hole" a concentrated distribution
-        // lacks) yields far fewer, targeted 花型 — exactly the intermediate widths the waste-neutral
-        // rebalance needs — so pools stay small enough to solve fast even in big neighbourhoods.
-        int minRw = intProperty("cutting.lns.enrichMinPw", params.getMinRollWidth());
-        int maxRw = intProperty("cutting.lns.enrichMaxPw", params.getMaxRollWidth());
-        int maxDistinct = params.getMaxDistinctWidths();
-        int cap = intProperty("cutting.lns.enrichCap", 60);
-        int guard = Math.max(cap, intProperty("cutting.lns.enrichGuard", 1500));
-        PatternKey sample = selectedRolls.get(0).pattern();
-        List<Integer> widths = freeDemand.keySet().stream()
-                .map(DemandKey::parse)
-                .map(DemandKey::width)
-                .distinct()
-                .sorted()
-                .toList();
-        List<PatternKey> all = new ArrayList<>();
-        enumerateBalancingPatterns(widths, 0, new LinkedHashMap<>(), 0,
-                minRw, maxRw, maxDistinct, totalWidth, sample, all, guard);
-        if (all.size() <= cap) {
-            return all;
-        }
-        // Sample evenly across patternWidth so a small cap still spans the intermediate widths
-        // the rebalance needs (vs. enumeration order, which clusters similar 花型 and explodes
-        // columns without adding the missing patternWidths).
-        all.sort(Comparator.comparingInt(PatternKey::patternWidth).thenComparing(PatternKey::signature));
-        List<PatternKey> sampled = new ArrayList<>(cap);
-        for (int i = 0; i < cap; i++) {
-            sampled.add(all.get((int) ((long) i * all.size() / cap)));
-        }
-        return sampled;
-    }
-
-    private void enumerateBalancingPatterns(List<Integer> widths, int idx,
-            Map<Integer, Integer> current, int sum, int minRw, int maxRw, int maxDistinct,
-            int totalWidth, PatternKey sample, List<PatternKey> result, int cap) {
-        if (result.size() >= cap) {
-            return;
-        }
-        if (idx == widths.size()) {
-            if (sum >= minRw && sum <= maxRw && !current.isEmpty()) {
-                result.add(new PatternKey(sample.groupKey(), sum, sample.length(),
-                        sample.surfaceTreatment(), sample.thickness(),
-                        new LinkedHashMap<>(current), sum, totalWidth - sum));
-            }
-            return;
-        }
-        int w = widths.get(idx);
-        int maxC = (maxRw - sum) / w;
-        for (int c = 0; c <= maxC && result.size() < cap; c++) {
-            if (c > 0) {
-                if (!current.containsKey(w) && current.size() >= maxDistinct) {
-                    break;
-                }
-                current.put(w, c);
-            }
-            enumerateBalancingPatterns(widths, idx + 1, current, sum + c * w,
-                    minRw, maxRw, maxDistinct, totalWidth, sample, result, cap);
-        }
-        current.remove(w);
     }
 
     private String neighborhoodCacheKey(Neighborhood neighborhood) {
@@ -931,39 +392,6 @@ public class LocalNeighborhoodSequenceOptimizer {
         return beforeCounts.equals(afterCounts);
     }
 
-    private SolveAttempt solveNeighborhood(Neighborhood neighborhood, long deadlineMs) {
-        long start = System.currentTimeMillis();
-        if (start >= deadlineMs) {
-            return SolveAttempt.infeasible("budget-reached", List.of(), 0L);
-        }
-        // 纯数学下界短路：当前邻域内所有车已完全同配置（活跃列数 <= 1），min Σy 理论下界为 1，无压缩空间。
-        if (currentActiveColumns(neighborhood) <= 1) {
-            return SolveAttempt.infeasible("already-single-column", List.of(), 0L);
-        }
-        List<Column> columns = buildColumns(neighborhood);
-        if (columns.isEmpty()) {
-            return SolveAttempt.infeasible("no-columns", columns, 0L);
-        }
-
-        SolveSolution stage1 = solveColumns(neighborhood, columns, null, false, deadlineMs);
-        if (stage1 == null || stage1.counts().isEmpty()) {
-            return SolveAttempt.infeasible("stage1-infeasible", columns, System.currentTimeMillis() - start);
-        }
-
-        // Stage2 only refines the secondary shape (odd/small/split) under Σy ≤ stage1; the
-        // primary group count is fixed by stage1. Its extra binary machinery makes it the slow,
-        // FEASIBLE-not-OPTIMAL (non-deterministic) solve, so it can be disabled to keep every
-        // solve OPTIMAL/deterministic without changing the group floor.
-        SolveSolution best = stage1;
-        if (booleanProperty("cutting.lns.secondary", false) && System.currentTimeMillis() < deadlineMs) {
-            SolveSolution stage2 = solveColumns(neighborhood, columns, stage1.activeColumns(), true, deadlineMs);
-            if (stage2 != null && !stage2.counts().isEmpty()) {
-                best = stage2;
-            }
-        }
-        return new SolveAttempt(true, best.status(), columns, best.counts(), System.currentTimeMillis() - start);
-    }
-
     private MoveCandidate betterMove(MoveCandidate current, MoveCandidate candidate) {
         if (current == null) {
             return candidate;
@@ -1000,7 +428,7 @@ public class LocalNeighborhoodSequenceOptimizer {
     }
 
     private boolean balanceTiebreakEnabled() {
-        return booleanProperty("cutting.lns.balanceTiebreak", false);
+        return SolverRuntimeProperties.getBoolean("cutting.lns.balanceTiebreak", false);
     }
 
     private boolean improvesPlateau(
@@ -1029,8 +457,9 @@ public class LocalNeighborhoodSequenceOptimizer {
         if (candidate.groups() >= reference.groups()) {
             return true;
         }
-        int maxOddRegression = intProperty("cutting.lns.maxOddRegressionOnGroupGain", 0);
-        int maxSmallRegression = intProperty(
+        int maxOddRegression = SolverRuntimeProperties.getInt(
+                "cutting.lns.maxOddRegressionOnGroupGain", 0);
+        int maxSmallRegression = SolverRuntimeProperties.getInt(
                 "cutting.lns.maxSmallRegressionOnGroupGain", Integer.MAX_VALUE);
         return candidate.oddCarGroups() <= (long) reference.oddCarGroups() + maxOddRegression
                 && candidate.smallCarGroups() <= (long) reference.smallCarGroups() + maxSmallRegression;
@@ -1060,593 +489,6 @@ public class LocalNeighborhoodSequenceOptimizer {
         return false;
     }
 
-    /**
-     * Canonical signature of a full assignment: the sorted multiset of every roll's
-     * content signature. Two solutions with the same signature have identical sequence-group
-     * structure, so the tabu set uses it to forbid revisiting (prevents escape-step oscillation).
-     */
-    private String solutionSignature(List<CuttingInstruction> instructions) {
-        List<String> rollSignatures = new ArrayList<>();
-        for (RollRecord roll : decompose(instructions)) {
-            rollSignatures.add(roll.configSignature());
-        }
-        rollSignatures.sort(Comparator.naturalOrder());
-        return String.join(";", rollSignatures);
-    }
-
-    private int fragmentationScore(List<CuttingInstruction> instructions) {
-        Map<String, Set<String>> configsByDemand = new HashMap<>();
-        for (RollRecord roll : decompose(instructions)) {
-            for (String demand : roll.demandCounts().keySet()) {
-                configsByDemand.computeIfAbsent(demand, ignored -> new HashSet<>())
-                        .add(roll.configSignature());
-            }
-        }
-        int score = 0;
-        for (Set<String> configs : configsByDemand.values()) {
-            score += Math.max(0, configs.size() - 1);
-        }
-        return score;
-    }
-
-    private SolveSolution solveColumns(Neighborhood neighborhood, List<Column> columns,
-            Integer activeCap, boolean secondaryObjective, long deadlineMs) {
-        MPSolver solver = null;
-        try {
-            long remainingMs = deadlineMs == Long.MAX_VALUE
-                    ? Long.MAX_VALUE
-                    : deadlineMs - System.currentTimeMillis();
-            if (remainingMs <= 0L) {
-                return null;
-            }
-            solver = MPSolver.createSolver("SCIP");
-            if (solver != null) {
-                // Deterministic node limit: bound the B&B by a fixed NODE count, not wall-clock.
-                // A wall-clock limit returns whatever incumbent the machine reached in N seconds
-                // (non-deterministic on rich pools); a node limit explores the same nodes every
-                // run → reproducible incumbent even when optimality isn't proven. This is what
-                // makes enriched (large) neighbourhoods deterministic on SCIP 9.10.
-                String scipParams = SCIP_DETERMINISTIC_PARAMS;
-                long nodeLimit = longProperty("cutting.lns.scipNodeLimit", DEFAULT_SCIP_NODE_LIMIT);
-                if (nodeLimit > 0) {
-                    scipParams = scipParams + "limits/nodes = " + nodeLimit + "\n";
-                }
-                solver.setSolverSpecificParametersAsString(scipParams);
-                try {
-                    solver.setNumThreads(1);
-                } catch (Exception ignored) {
-                }
-            } else {
-                solver = MPSolver.createSolver("CBC");
-            }
-            if (solver == null) {
-                return null;
-            }
-
-            int columnCount = columns.size();
-            MPVariable[] nVars = new MPVariable[columnCount];
-            MPVariable[] yVars = new MPVariable[columnCount];
-            MPVariable[] oddVars = new MPVariable[columnCount];
-            MPVariable[] largeVars = new MPVariable[columnCount];
-            MPVariable[] halfVars = new MPVariable[columnCount];
-
-            for (int i = 0; i < columnCount; i++) {
-                nVars[i] = solver.makeIntVar(0, neighborhood.cars(), "n_" + i);
-                yVars[i] = solver.makeBoolVar("y_" + i);
-
-                MPConstraint upper = solver.makeConstraint(-MPSolver.infinity(), 0, "link_upper_" + i);
-                upper.setCoefficient(nVars[i], 1);
-                upper.setCoefficient(yVars[i], -neighborhood.cars());
-
-                MPConstraint lower = solver.makeConstraint(0, MPSolver.infinity(), "link_lower_" + i);
-                lower.setCoefficient(nVars[i], 1);
-                lower.setCoefficient(yVars[i], -1);
-
-                if (secondaryObjective) {
-                    oddVars[i] = solver.makeBoolVar("odd_" + i);
-                    largeVars[i] = solver.makeBoolVar("large_" + i);
-                    halfVars[i] = solver.makeIntVar(0, neighborhood.cars(), "half_" + i);
-
-                    MPConstraint parity = solver.makeConstraint(0, 0, "parity_" + i);
-                    parity.setCoefficient(nVars[i], 1);
-                    parity.setCoefficient(halfVars[i], -2);
-                    parity.setCoefficient(oddVars[i], -1);
-
-                    MPConstraint oddActive = solver.makeConstraint(-MPSolver.infinity(), 0, "odd_active_" + i);
-                    oddActive.setCoefficient(oddVars[i], 1);
-                    oddActive.setCoefficient(yVars[i], -1);
-
-                    MPConstraint largeActive = solver.makeConstraint(-MPSolver.infinity(), 0, "large_active_" + i);
-                    largeActive.setCoefficient(largeVars[i], 1);
-                    largeActive.setCoefficient(yVars[i], -1);
-
-                    MPConstraint largeLower = solver.makeConstraint(0, MPSolver.infinity(), "large_lower_" + i);
-                    largeLower.setCoefficient(nVars[i], 1);
-                    largeLower.setCoefficient(largeVars[i], -6);
-
-                    MPConstraint largeUpper = solver.makeConstraint(-MPSolver.infinity(), 0, "large_upper_" + i);
-                    largeUpper.setCoefficient(nVars[i], 1);
-                    largeUpper.setCoefficient(yVars[i], -5);
-                    largeUpper.setCoefficient(largeVars[i], -neighborhood.cars());
-                }
-            }
-
-            for (Map.Entry<String, Integer> demand : neighborhood.freeDemand().entrySet()) {
-                MPConstraint constraint = solver.makeConstraint(demand.getValue(), demand.getValue(),
-                        "demand_" + Math.abs(demand.getKey().hashCode()));
-                for (int i = 0; i < columnCount; i++) {
-                    int contribution = columns.get(i).demandCounts().getOrDefault(demand.getKey(), 0);
-                    if (contribution > 0) {
-                        constraint.setCoefficient(nVars[i], contribution);
-                    }
-                }
-            }
-
-            MPConstraint cars = solver.makeConstraint(neighborhood.cars(), neighborhood.cars(), "cars");
-            MPConstraint waste = solver.makeConstraint(neighborhood.waste(), neighborhood.waste(), "waste");
-            MPConstraint active = activeCap == null
-                    ? null
-                    : solver.makeConstraint(0, activeCap, "active_cap");
-            for (int i = 0; i < columnCount; i++) {
-                cars.setCoefficient(nVars[i], 1);
-                waste.setCoefficient(nVars[i], columns.get(i).pattern().waste());
-                if (active != null) {
-                    active.setCoefficient(yVars[i], 1);
-                }
-            }
-
-            MPObjective objective = solver.objective();
-            for (int i = 0; i < columnCount; i++) {
-                if (secondaryObjective) {
-                    int splitCost = columns.get(i).demandCounts().size();
-                    objective.setCoefficient(yVars[i], 100.0 + splitCost);
-                    objective.setCoefficient(largeVars[i], -100.0);
-                    objective.setCoefficient(oddVars[i], 10.0);
-                } else {
-                    objective.setCoefficient(yVars[i], 1.0);
-                }
-            }
-            objective.setMinimization();
-
-            long configuredLimitMs = longProperty("cutting.lns.timeLimitMs", DEFAULT_TIME_LIMIT_MS);
-            long effectiveTimeLimitMs = deadlineMs == Long.MAX_VALUE
-                    ? configuredLimitMs
-                    : Math.min(configuredLimitMs, Math.max(200L, deadlineMs - System.currentTimeMillis()));
-            solver.setTimeLimit(effectiveTimeLimitMs);
-            MPSolver.ResultStatus status = solver.solve();
-            if (status != MPSolver.ResultStatus.OPTIMAL && status != MPSolver.ResultStatus.FEASIBLE) {
-                return null;
-            }
-            if (status == MPSolver.ResultStatus.FEASIBLE) {
-                // Hit the time limit before proving optimality → incumbent depends on wall-clock,
-                // i.e. a non-determinism source. Flag it so we know the column pool is too big.
-                log.warn("LNS neighbourhood solve FEASIBLE not OPTIMAL (columns={}, secondary={}) — "
-                        + "determinism risk; shrink neighbourhood/columns", columnCount, secondaryObjective);
-            }
-
-            Map<Integer, Integer> counts = new LinkedHashMap<>();
-            int activeColumns = 0;
-            for (int i = 0; i < columnCount; i++) {
-                int count = (int) Math.round(nVars[i].solutionValue());
-                if (count > 0) {
-                    counts.put(i, count);
-                    activeColumns++;
-                }
-            }
-            return new SolveSolution(status.name(), counts, activeColumns);
-        } catch (Exception e) {
-            log.warn("LNS neighbourhood solve failed", e);
-            return null;
-        } finally {
-            if (solver != null) {
-                solver.delete();
-            }
-        }
-    }
-
-    private List<Column> buildColumns(Neighborhood neighborhood) {
-        Map<String, Column> required = new LinkedHashMap<>();
-        for (RollRecord roll : neighborhood.selectedRolls()) {
-            Column column = new Column(roll.pattern(), roll.config(), roll.demandCounts(), true);
-            required.putIfAbsent(column.signature(), column);
-        }
-
-        // Cap configs PER 花型 (not just globally), so adding many enriched 花型 keeps the column
-        // pool bounded (≈ patternCount × cap) and the set-partition MIP stays small enough to solve
-        // to OPTIMAL (deterministic) — instead of a few 花型 with many configs blowing past maxColumns.
-        // Default high so the non-enriched path is unchanged; enrichment runs set it low to
-        // bound the pool across the many generated 花型.
-        int perPatternCap = intProperty("cutting.lns.maxColumnsPerPattern", 1000);
-        List<Column> enumerated = new ArrayList<>();
-        for (PatternKey pattern : neighborhood.patterns()) {
-            List<Column> patternColumns = enumerateColumns(pattern, neighborhood.freeDemand());
-            if (patternColumns.size() > perPatternCap) {
-                patternColumns = patternColumns.stream()
-                        .sorted(Comparator
-                                .comparingInt((Column column) -> maxSupport(column, neighborhood.freeDemand())).reversed()
-                                .thenComparing(Comparator.comparingInt((Column column) -> column.demandCounts().size()).reversed())
-                                .thenComparing(Column::signature))
-                        .limit(perPatternCap)
-                        .toList();
-            }
-            enumerated.addAll(patternColumns);
-            if (enumerated.size() > columnEnumerationGuard()) {
-                break;
-            }
-        }
-        enumerated.sort(Comparator
-                .comparingInt((Column column) -> maxSupport(column, neighborhood.freeDemand())).reversed()
-                .thenComparing(Comparator.comparingInt((Column column) -> column.demandCounts().size()).reversed())
-                .thenComparing(Column::signature));
-
-        List<Column> columns = new ArrayList<>(required.values());
-        Set<String> seen = required.keySet().stream().collect(Collectors.toCollection(HashSet::new));
-        int discarded = 0;
-        int maxColumns = maxColumns();
-        for (Column column : enumerated) {
-            if (!seen.add(column.signature())) {
-                continue;
-            }
-            if (columns.size() >= maxColumns) {
-                discarded++;
-                continue;
-            }
-            columns.add(column);
-        }
-
-        log.debug("LNS column pool: required={} enumerated={} kept={} discarded={}",
-                required.size(), enumerated.size(), columns.size(), discarded);
-        return columns;
-    }
-
-    private int maxFreeOrders() {
-        return intProperty("cutting.lns.maxFreeOrders", DEFAULT_MAX_FREE_ORDERS);
-    }
-
-    private int maxFreePatterns() {
-        return intProperty("cutting.lns.maxFreePatterns", DEFAULT_MAX_FREE_PATTERNS);
-    }
-
-    private int maxFreeCars() {
-        return intProperty("cutting.lns.maxFreeCars", DEFAULT_MAX_FREE_CARS);
-    }
-
-    private int maxColumns() {
-        return intProperty("cutting.lns.maxColumns", DEFAULT_MAX_COLUMNS);
-    }
-
-    private int columnEnumerationGuard() {
-        return intProperty("cutting.lns.columnEnumerationGuard", DEFAULT_COLUMN_ENUMERATION_GUARD);
-    }
-
-    private List<Column> enumerateColumns(PatternKey pattern, Map<String, Integer> freeDemand) {
-        Map<Integer, List<String>> messagesByWidth = new LinkedHashMap<>();
-        for (String key : freeDemand.keySet()) {
-            DemandKey demandKey = DemandKey.parse(key);
-            messagesByWidth.computeIfAbsent(demandKey.width(), ignored -> new ArrayList<>())
-                    .add(demandKey.message());
-        }
-        for (List<String> messages : messagesByWidth.values()) {
-            messages.sort(Comparator
-                    .comparingInt((String message) -> demandForMessage(messagesByWidth, freeDemand, message)).reversed()
-                    .thenComparing(message -> message));
-        }
-
-        List<Map.Entry<Integer, Integer>> widths = new ArrayList<>(pattern.subRolls().entrySet());
-        List<List<WidthOption>> optionsByWidth = new ArrayList<>();
-        for (Map.Entry<Integer, Integer> width : widths) {
-            List<String> messages = messagesByWidth.getOrDefault(width.getKey(), List.of());
-            if (messages.isEmpty()) {
-                return List.of();
-            }
-            List<WidthOption> options = new ArrayList<>();
-            buildWidthOptions(width.getKey(), width.getValue(), messages, freeDemand, 0,
-                    new ArrayList<>(), options);
-            if (options.isEmpty()) {
-                return List.of();
-            }
-            optionsByWidth.add(options);
-        }
-
-        List<Column> columns = new ArrayList<>();
-        buildColumnsForPattern(pattern, widths, optionsByWidth, 0, new LinkedHashMap<>(), columns, freeDemand);
-        return columns;
-    }
-
-    private int demandForMessage(Map<Integer, List<String>> messagesByWidth,
-            Map<String, Integer> freeDemand,
-            String message) {
-        int total = 0;
-        for (Integer width : messagesByWidth.keySet()) {
-            total += freeDemand.getOrDefault(demandKey(width, message), 0);
-        }
-        return total;
-    }
-
-    private void buildWidthOptions(int width, int slots, List<String> messages,
-            Map<String, Integer> freeDemand, int start, List<String> current,
-            List<WidthOption> result) {
-        if (current.size() == slots) {
-            Map<String, Integer> counts = new LinkedHashMap<>();
-            for (String message : current) {
-                counts.merge(demandKey(width, message), 1, Integer::sum);
-            }
-            for (Map.Entry<String, Integer> entry : counts.entrySet()) {
-                if (entry.getValue() > freeDemand.getOrDefault(entry.getKey(), 0)) {
-                    return;
-                }
-            }
-            result.add(new WidthOption(width, List.copyOf(current), counts));
-            return;
-        }
-        for (int i = start; i < messages.size(); i++) {
-            current.add(messages.get(i));
-            buildWidthOptions(width, slots, messages, freeDemand, i, current, result);
-            current.remove(current.size() - 1);
-        }
-    }
-
-    private void buildColumnsForPattern(PatternKey pattern,
-            List<Map.Entry<Integer, Integer>> widths,
-            List<List<WidthOption>> optionsByWidth,
-            int offset,
-            Map<Integer, List<String>> config,
-            List<Column> columns,
-            Map<String, Integer> freeDemand) {
-        if (columns.size() >= columnEnumerationGuard()) {
-            return;
-        }
-        if (offset == widths.size()) {
-            Map<String, Integer> counts = new LinkedHashMap<>();
-            for (Map.Entry<Integer, List<String>> configEntry : config.entrySet()) {
-                int width = configEntry.getKey();
-                List<String> messages = configEntry.getValue();
-                for (String message : messages) {
-                    counts.merge(demandKey(width, message), 1, Integer::sum);
-                }
-            }
-            for (Map.Entry<String, Integer> entry : counts.entrySet()) {
-                if (entry.getValue() > freeDemand.getOrDefault(entry.getKey(), 0)) {
-                    return;
-                }
-            }
-            columns.add(new Column(pattern, copyConfig(config), counts, false));
-            return;
-        }
-
-        int width = widths.get(offset).getKey();
-        for (WidthOption option : optionsByWidth.get(offset)) {
-            config.put(width, option.messages());
-            buildColumnsForPattern(pattern, widths, optionsByWidth, offset + 1, config, columns, freeDemand);
-            config.remove(width);
-            if (columns.size() >= columnEnumerationGuard()) {
-                return;
-            }
-        }
-    }
-
-    private int maxSupport(Column column, Map<String, Integer> freeDemand) {
-        int support = Integer.MAX_VALUE;
-        for (Map.Entry<String, Integer> entry : column.demandCounts().entrySet()) {
-            if (entry.getValue() > 0) {
-                support = Math.min(support, freeDemand.getOrDefault(entry.getKey(), 0) / entry.getValue());
-            }
-        }
-        return support == Integer.MAX_VALUE ? 0 : support;
-    }
-
-    private List<CuttingInstruction> rebuildWithNeighborhoodSolution(
-            List<RollRecord> rolls,
-            Neighborhood neighborhood,
-            SolveAttempt attempt) {
-        Set<Integer> selected = neighborhood.selectedRollIndexes();
-        int insertAt = selected.stream().mapToInt(Integer::intValue).min().orElse(0);
-        List<CuttingInstruction> result = new ArrayList<>();
-        List<RollRecord> run = new ArrayList<>();
-        PatternKey runPattern = null;
-        boolean inserted = false;
-
-        for (RollRecord roll : rolls) {
-            if (roll.index() == insertAt && !inserted) {
-                flushRun(result, run, runPattern);
-                run = new ArrayList<>();
-                runPattern = null;
-                result.addAll(buildInstructionsFromColumns(attempt));
-                inserted = true;
-            }
-            if (selected.contains(roll.index())) {
-                continue;
-            }
-            if (runPattern == null || !runPattern.equals(roll.pattern())) {
-                flushRun(result, run, runPattern);
-                run = new ArrayList<>();
-                runPattern = roll.pattern();
-            }
-            run.add(roll);
-        }
-        flushRun(result, run, runPattern);
-        if (!inserted) {
-            result.addAll(buildInstructionsFromColumns(attempt));
-        }
-        return result;
-    }
-
-    private List<CuttingInstruction> buildInstructionsFromColumns(SolveAttempt attempt) {
-        List<CuttingInstruction> result = new ArrayList<>();
-        for (Map.Entry<Integer, Integer> entry : attempt.counts().entrySet()) {
-            Column column = attempt.columns().get(entry.getKey());
-            CuttingInstruction instruction = createInstruction(column.pattern(), entry.getValue());
-            List<StationAssignment> assignments = new ArrayList<>();
-            for (int i = 0; i < entry.getValue(); i++) {
-                for (Map.Entry<Integer, Integer> subRoll : column.pattern().subRolls().entrySet()) {
-                    List<String> messages = column.config().getOrDefault(subRoll.getKey(), List.of());
-                    for (String message : messages) {
-                        assignments.add(new StationAssignment(subRoll.getKey(), message));
-                    }
-                }
-            }
-            instruction.setStationAssignments(assignments);
-            result.add(instruction);
-        }
-        result.sort(Comparator.comparing(this::instructionRollSignature)
-                .thenComparing(CuttingInstruction::getUsageCount, Comparator.reverseOrder()));
-        return result;
-    }
-
-    private String instructionRollSignature(CuttingInstruction instruction) {
-        List<List<StationAssignment>> rolls = simulateRolls(instruction);
-        if (rolls.isEmpty()) {
-            return "";
-        }
-        return rollContentSignature(rolls.get(0));
-    }
-
-    private void flushRun(List<CuttingInstruction> result, List<RollRecord> run, PatternKey pattern) {
-        if (run == null || run.isEmpty() || pattern == null) {
-            return;
-        }
-        CuttingInstruction instruction = createInstruction(pattern, run.size());
-        List<StationAssignment> assignments = new ArrayList<>();
-        for (RollRecord roll : run) {
-            for (StationAssignment assignment : roll.assignments()) {
-                assignments.add(new StationAssignment(assignment.getWidth(), assignment.getMessageText()));
-            }
-        }
-        instruction.setStationAssignments(assignments);
-        result.add(instruction);
-    }
-
-    private CuttingInstruction createInstruction(PatternKey pattern, int usageCount) {
-        CuttingInstruction instruction = new CuttingInstruction();
-        instruction.setGroupKey(pattern.groupKey());
-        instruction.setRollWidth(pattern.rollWidth());
-        instruction.setLength(pattern.length());
-        instruction.setSurfaceTreatment(pattern.surfaceTreatment());
-        instruction.setThickness(pattern.thickness());
-        instruction.setSubRolls(new LinkedHashMap<>(pattern.subRolls()));
-        instruction.setUsageCount(usageCount);
-        instruction.setPatternWidth(pattern.patternWidth());
-        instruction.setWaste(pattern.waste());
-        return instruction;
-    }
-
-    private List<RollRecord> decompose(List<CuttingInstruction> instructions) {
-        List<RollRecord> rolls = new ArrayList<>();
-        int index = 0;
-        for (CuttingInstruction instruction : instructions) {
-            PatternKey pattern = PatternKey.from(instruction);
-            for (List<StationAssignment> roll : simulateRolls(instruction)) {
-                Map<Integer, List<String>> config = configFromRoll(pattern, roll);
-                Map<String, Integer> demandCounts = demandCounts(roll);
-                rolls.add(new RollRecord(index++, pattern, roll, config, demandCounts,
-                        rollContentSignature(roll)));
-            }
-        }
-        return rolls;
-    }
-
-    private List<List<StationAssignment>> simulateRolls(CuttingInstruction instruction) {
-        List<List<StationAssignment>> rolls = new ArrayList<>();
-        Map<Integer, Queue<StationAssignment>> buckets = new LinkedHashMap<>();
-        for (StationAssignment assignment : instruction.getStationAssignments()) {
-            buckets.computeIfAbsent(assignment.getWidth(), ignored -> new ArrayDeque<>())
-                    .add(assignment);
-        }
-
-        for (int i = 0; i < instruction.getUsageCount(); i++) {
-            List<StationAssignment> roll = new ArrayList<>();
-            for (Map.Entry<Integer, Integer> subRoll : instruction.getSubRolls().entrySet()) {
-                Queue<StationAssignment> bucket = buckets.get(subRoll.getKey());
-                for (int slot = 0; slot < subRoll.getValue(); slot++) {
-                    if (bucket != null && !bucket.isEmpty()) {
-                        StationAssignment assignment = bucket.poll();
-                        roll.add(new StationAssignment(assignment.getWidth(), assignment.getMessageText()));
-                    }
-                }
-            }
-            if (!roll.isEmpty()) {
-                rolls.add(roll);
-            }
-        }
-        return rolls;
-    }
-
-    private Map<Integer, List<String>> configFromRoll(PatternKey pattern, List<StationAssignment> roll) {
-        Map<Integer, List<String>> config = new LinkedHashMap<>();
-        for (Integer width : pattern.subRolls().keySet()) {
-            config.put(width, new ArrayList<>());
-        }
-        for (StationAssignment assignment : roll) {
-            config.computeIfAbsent(assignment.getWidth(), ignored -> new ArrayList<>())
-                    .add(Objects.toString(assignment.getMessageText(), ""));
-        }
-        for (List<String> messages : config.values()) {
-            messages.sort(Comparator.naturalOrder());
-        }
-        return config;
-    }
-
-    private Map<String, Integer> demandCounts(List<StationAssignment> roll) {
-        Map<String, Integer> counts = new LinkedHashMap<>();
-        for (StationAssignment assignment : roll) {
-            counts.merge(demandKey(assignment.getWidth(), assignment.getMessageText()), 1, Integer::sum);
-        }
-        return counts;
-    }
-
-    private Map<String, Integer> countAssignmentsByDemandKey(List<CuttingInstruction> instructions) {
-        Map<String, Integer> counts = new TreeMap<>();
-        for (CuttingInstruction instruction : instructions) {
-            for (StationAssignment assignment : instruction.getStationAssignments()) {
-                counts.merge(demandKey(assignment.getWidth(), assignment.getMessageText()), 1, Integer::sum);
-            }
-        }
-        return counts;
-    }
-
-    private int totalCars(List<CuttingInstruction> instructions) {
-        return instructions.stream().mapToInt(CuttingInstruction::getUsageCount).sum();
-    }
-
-    private int totalWaste(List<CuttingInstruction> instructions) {
-        return instructions.stream()
-                .mapToInt(instruction -> instruction.getWaste() * instruction.getUsageCount())
-                .sum();
-    }
-
-    private List<CuttingInstruction> cloneInstructions(List<CuttingInstruction> source) {
-        List<CuttingInstruction> clones = new ArrayList<>();
-        for (CuttingInstruction instruction : source) {
-            CuttingInstruction clone = createInstruction(PatternKey.from(instruction), instruction.getUsageCount());
-            List<StationAssignment> assignments = new ArrayList<>();
-            for (StationAssignment assignment : instruction.getStationAssignments()) {
-                assignments.add(new StationAssignment(assignment.getWidth(), assignment.getMessageText()));
-            }
-            clone.setStationAssignments(assignments);
-            clones.add(clone);
-        }
-        return clones;
-    }
-
-    private String rollContentSignature(List<StationAssignment> roll) {
-        return roll.stream()
-                .map(assignment -> demandKey(assignment.getWidth(), assignment.getMessageText()))
-                .sorted()
-                .collect(Collectors.joining(","));
-    }
-
-    private Map<Integer, List<String>> copyConfig(Map<Integer, List<String>> config) {
-        Map<Integer, List<String>> copy = new LinkedHashMap<>();
-        for (Map.Entry<Integer, List<String>> entry : config.entrySet()) {
-            copy.put(entry.getKey(), List.copyOf(entry.getValue()));
-        }
-        return copy;
-    }
-
-    private static String demandKey(int width, String messageText) {
-        return width + "|" + Objects.toString(messageText, "");
-    }
-
     public record LnsResult(
             boolean improved,
             List<CuttingInstruction> instructions,
@@ -1657,19 +499,6 @@ public class LocalNeighborhoodSequenceOptimizer {
         static LnsResult notImproved(List<CuttingInstruction> instructions, String reason) {
             return new LnsResult(false, instructions, 0, 0, reason);
         }
-    }
-
-    private record Neighborhood(
-            List<String> seedKeys,
-            Set<Integer> selectedRollIndexes,
-            Map<String, Integer> freeDemand,
-            List<PatternKey> patterns,
-            List<RollRecord> selectedRolls,
-            int cars,
-            int waste) {
-    }
-
-    private record NeighborhoodSize(int freeOrders, int patterns, int cars) {
     }
 
     private record MoveCandidate(
@@ -1690,266 +519,5 @@ public class LocalNeighborhoodSequenceOptimizer {
         int afterSmallCarGroups() {
             return afterStats.smallCarGroups();
         }
-    }
-
-    private record SolveAttempt(
-            boolean feasible,
-            String status,
-            List<Column> columns,
-            Map<Integer, Integer> counts,
-            long elapsedMs) {
-
-        static SolveAttempt infeasible(String reason, List<Column> columns, long elapsedMs) {
-            return new SolveAttempt(false, reason, columns, Map.of(), elapsedMs);
-        }
-
-        String reason() {
-            return status;
-        }
-
-        int activeColumns() {
-            return counts.size();
-        }
-    }
-
-    private record SolveSolution(String status, Map<Integer, Integer> counts, int activeColumns) {
-    }
-
-    private record DiagnosticRow(
-            int iteration,
-            int neighborhoodIndex,
-            List<String> seeds,
-            int freeOrders,
-            int patterns,
-            int cars,
-            int columns,
-            int beforeProxy,
-            int afterProxy,
-            int beforeGroups,
-            int beforeOddCarGroups,
-            int beforeSmallCarGroups,
-            int beforeFragmentation,
-            int afterGroups,
-            int afterOddCarGroups,
-            int afterSmallCarGroups,
-            int afterFragmentation,
-            boolean feasible,
-            boolean valid,
-            boolean unique,
-            boolean visited,
-            boolean guardOk,
-            String status) {
-
-        int proxyDelta() {
-            return beforeProxy - afterProxy;
-        }
-
-        int groupDelta() {
-            return beforeGroups - afterGroups;
-        }
-
-        int fragmentationDelta() {
-            return beforeFragmentation - afterFragmentation;
-        }
-
-        int oddDelta() {
-            return beforeOddCarGroups - afterOddCarGroups;
-        }
-
-        int smallDelta() {
-            return beforeSmallCarGroups - afterSmallCarGroups;
-        }
-    }
-
-    private static final class Diagnostics {
-        private final boolean enabled;
-        private final List<DiagnosticRow> rows = new ArrayList<>();
-
-        private Diagnostics(boolean enabled) {
-            this.enabled = enabled;
-        }
-
-        static Diagnostics create() {
-            return new Diagnostics(booleanProperty("cutting.lns.diagnostics", false));
-        }
-
-        void record(DiagnosticRow row) {
-            if (enabled) {
-                rows.add(row);
-            }
-        }
-
-        void logSummary(SequenceGroupPostProcessor.GroupStats originalStats) {
-            if (!enabled || rows.isEmpty()) {
-                return;
-            }
-            long feasible = rows.stream().filter(DiagnosticRow::feasible).count();
-            long valid = rows.stream().filter(DiagnosticRow::valid).count();
-            long unique = rows.stream().filter(DiagnosticRow::unique).count();
-            long guardBlocked = rows.stream()
-                    .filter(row -> row.valid() && row.unique() && !row.guardOk())
-                    .count();
-            long proxyImproved = rows.stream()
-                    .filter(row -> row.valid() && row.proxyDelta() > 0)
-                    .count();
-            long trueImproved = rows.stream()
-                    .filter(row -> row.valid() && row.groupDelta() > 0)
-                    .count();
-            long proxyOnly = rows.stream()
-                    .filter(row -> row.valid() && row.proxyDelta() > 0 && row.groupDelta() <= 0)
-                    .count();
-            int bestGroups = rows.stream()
-                    .filter(DiagnosticRow::valid)
-                    .mapToInt(DiagnosticRow::afterGroups)
-                    .min()
-                    .orElse(originalStats.groups());
-            int bestOdd = rows.stream()
-                    .filter(row -> row.valid() && row.afterGroups() == bestGroups)
-                    .mapToInt(DiagnosticRow::afterOddCarGroups)
-                    .min()
-                    .orElse(Integer.MAX_VALUE);
-            int bestSmall = rows.stream()
-                    .filter(row -> row.valid()
-                            && row.afterGroups() == bestGroups
-                            && row.afterOddCarGroups() == bestOdd)
-                    .mapToInt(DiagnosticRow::afterSmallCarGroups)
-                    .min()
-                    .orElse(Integer.MAX_VALUE);
-            int bestFragmentation = rows.stream()
-                    .filter(row -> row.valid()
-                            && row.afterGroups() == bestGroups
-                            && row.afterOddCarGroups() == bestOdd
-                            && row.afterSmallCarGroups() == bestSmall)
-                    .mapToInt(DiagnosticRow::afterFragmentation)
-                    .min()
-                    .orElse(Integer.MAX_VALUE);
-
-            log.info("LNS diagnostics: rows={}, feasible={}, valid={}, unique={}, guardBlocked={}, proxyImproved={}, trueImproved={}, proxyOnly={}, bestGroups={}, bestOdd={}, bestSmall={}, bestFrag={}",
-                    rows.size(), feasible, valid, unique, guardBlocked, proxyImproved, trueImproved, proxyOnly,
-                    bestGroups, bestOdd, bestSmall, bestFragmentation);
-            logTop("LNS diagnostics best true moves", rows.stream()
-                    .filter(row -> row.valid() && row.unique() && row.guardOk())
-                    .sorted(Comparator
-                            .comparingInt(DiagnosticRow::afterGroups)
-                            .thenComparingInt(DiagnosticRow::afterOddCarGroups)
-                            .thenComparingInt(DiagnosticRow::afterSmallCarGroups)
-                            .thenComparingInt(DiagnosticRow::afterFragmentation)
-                            .thenComparing(Comparator.comparingInt(DiagnosticRow::proxyDelta).reversed()))
-                    .limit(intProperty("cutting.lns.diagnosticsTop", 8))
-                    .toList());
-            logTop("LNS diagnostics guard-blocked moves", rows.stream()
-                    .filter(row -> row.valid() && row.unique() && !row.guardOk())
-                    .sorted(Comparator
-                            .comparingInt(DiagnosticRow::afterGroups)
-                            .thenComparingInt(DiagnosticRow::afterOddCarGroups)
-                            .thenComparingInt(DiagnosticRow::afterSmallCarGroups)
-                            .thenComparingInt(DiagnosticRow::afterFragmentation))
-                    .limit(intProperty("cutting.lns.diagnosticsTop", 8))
-                    .toList());
-            logTop("LNS diagnostics proxy-only moves", rows.stream()
-                    .filter(row -> row.valid() && row.guardOk() && row.proxyDelta() > 0 && row.groupDelta() <= 0)
-                    .sorted(Comparator
-                            .comparingInt(DiagnosticRow::groupDelta)
-                            .thenComparing(Comparator.comparingInt(DiagnosticRow::proxyDelta).reversed())
-                            .thenComparingInt(DiagnosticRow::afterOddCarGroups)
-                            .thenComparingInt(DiagnosticRow::afterSmallCarGroups)
-                            .thenComparingInt(DiagnosticRow::afterFragmentation))
-                    .limit(intProperty("cutting.lns.diagnosticsTop", 8))
-                    .toList());
-        }
-
-        private void logTop(String title, List<DiagnosticRow> selected) {
-            if (selected.isEmpty()) {
-                log.info("{}: none", title);
-                return;
-            }
-            log.info("{}:", title);
-            for (DiagnosticRow row : selected) {
-                log.info("  iter={} n={} seeds={} groups {}->{} odd {}->{} small {}->{} frag {}->{} proxy {}->{} freeOrders={} patterns={} cars={} columns={} status={} unique={} visited={} guardOk={}",
-                        row.iteration(),
-                        row.neighborhoodIndex(),
-                        row.seeds(),
-                        row.beforeGroups(),
-                        row.afterGroups(),
-                        row.beforeOddCarGroups(),
-                        row.afterOddCarGroups(),
-                        row.beforeSmallCarGroups(),
-                        row.afterSmallCarGroups(),
-                        row.beforeFragmentation(),
-                        row.afterFragmentation(),
-                        row.beforeProxy(),
-                        row.afterProxy(),
-                        row.freeOrders(),
-                        row.patterns(),
-                        row.cars(),
-                        row.columns(),
-                        row.status(),
-                        row.unique(),
-                        row.visited(),
-                        row.guardOk());
-            }
-        }
-    }
-
-    private record RollRecord(
-            int index,
-            PatternKey pattern,
-            List<StationAssignment> assignments,
-            Map<Integer, List<String>> config,
-            Map<String, Integer> demandCounts,
-            String configSignature) {
-    }
-
-    private record Column(
-            PatternKey pattern,
-            Map<Integer, List<String>> config,
-            Map<String, Integer> demandCounts,
-            boolean required) {
-
-        String signature() {
-            return pattern.signature() + "@@" + config.entrySet().stream()
-                    .map(entry -> entry.getKey() + "=" + String.join("/", entry.getValue()))
-                    .collect(Collectors.joining("|"));
-        }
-    }
-
-    private record PatternKey(
-            String groupKey,
-            int rollWidth,
-            int length,
-            String surfaceTreatment,
-            int thickness,
-            Map<Integer, Integer> subRolls,
-            int patternWidth,
-            int waste) {
-
-        static PatternKey from(CuttingInstruction instruction) {
-            return new PatternKey(
-                    instruction.getGroupKey(),
-                    instruction.getRollWidth(),
-                    instruction.getLength(),
-                    instruction.getSurfaceTreatment(),
-                    instruction.getThickness(),
-                    new LinkedHashMap<>(instruction.getSubRolls()),
-                    instruction.getPatternWidth(),
-                    instruction.getWaste());
-        }
-
-        String signature() {
-            return rollWidth + "|" + subRolls.entrySet().stream()
-                    .map(entry -> entry.getKey() + "x" + entry.getValue())
-                    .collect(Collectors.joining(","));
-        }
-    }
-
-    private record DemandKey(int width, String message) {
-
-        static DemandKey parse(String key) {
-            String[] parts = key.split("\\|", 2);
-            return new DemandKey(Integer.parseInt(parts[0]), parts.length > 1 ? parts[1] : "");
-        }
-    }
-
-    private record WidthOption(int width, List<String> messages, Map<String, Integer> demandCounts) {
     }
 }

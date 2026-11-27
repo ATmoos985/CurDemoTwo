@@ -208,14 +208,14 @@ class FactoryDocumentApiTests {
         String schemeId = json.readTree(schResp.body()).path("scheme").path("id").asString();
         String planId = json.readTree(schResp.body()).path("scheme").path("linkedPlanIds").get(0).asString();
 
-        // 验证 /api/v2/schemes?summary=true 与 /api/cutting/tasks/{id}/plans?summary=true 省略大体积坐标数组
+        // 验证 /api/v2/schemes?summary=true 与 /api/v2/cutting/tasks/{id}/plans?summary=true 省略大体积坐标数组
         var schFull = json.readTree(get("/api/v2/schemes?taskId=" + taskId).body());
         assertEquals(2, schFull.get(0).path("scheme").path("layout2D").path("placements").size());
         var schSlim = json.readTree(get("/api/v2/schemes?taskId=" + taskId + "&summary=true&limit=1&offset=0").body());
         assertEquals(1, schSlim.size());
         assertTrue(schSlim.get(0).path("scheme").path("layout2D").isMissingNode() || schSlim.get(0).path("scheme").path("layout2D").isNull());
 
-        var plansSlim = json.readTree(get("/api/cutting/tasks/" + taskId + "/plans?summary=true").body());
+        var plansSlim = json.readTree(get("/api/v2/cutting/tasks/" + taskId + "/plans?summary=true").body());
         assertEquals(1, plansSlim.size());
         assertEquals(0, plansSlim.get(0).path("result").path("cuts").size());
         assertEquals(0, plansSlim.get(0).path("result").path("pieces").size());
@@ -236,7 +236,7 @@ class FactoryDocumentApiTests {
                   "recovery": { "x": 0, "y": 0, "width": 400, "length": 400, "location": "隔离架 Q-01", "quality": "QUARANTINED" }
                 }
                 """;
-        var dispResp = post("/api/cutting/reports/" + planId + "/quality-dispositions", dispReq);
+        var dispResp = post("/api/v2/cutting/reports/" + planId + "/quality-dispositions", dispReq);
         assertEquals(200, dispResp.statusCode(), dispResp.body());
         JsonNode dispJson = json.readTree(dispResp.body());
         String dispositionId1 = dispJson.path("id").asString();
@@ -254,7 +254,7 @@ class FactoryDocumentApiTests {
                   "recovery": null
                 }
                 """;
-        var dispResp2 = post("/api/cutting/reports/" + planId + "/quality-dispositions", dispReq2);
+        var dispResp2 = post("/api/v2/cutting/reports/" + planId + "/quality-dispositions", dispReq2);
         assertEquals(200, dispResp2.statusCode(), dispResp2.body());
         String dispositionId2 = json.readTree(dispResp2.body()).path("id").asString();
 
@@ -276,7 +276,7 @@ class FactoryDocumentApiTests {
         String revokeReq = """
                 { "idempotencyKey": "HTTP-REVOKE-002", "operator": "主管张强", "reason": "复核合格撤销误判" }
                 """;
-        var revokeResp = post("/api/cutting/reports/" + planId + "/dispositions/" + dispositionId2 + "/revoke", revokeReq);
+        var revokeResp = post("/api/v2/cutting/reports/" + planId + "/dispositions/" + dispositionId2 + "/revoke", revokeReq);
         assertEquals(200, revokeResp.statusCode(), revokeResp.body());
         JsonNode revokeJson = json.readTree(revokeResp.body());
         assertEquals(1, revokeJson.path("report").path("netFinishedPieceCount").asInt());
@@ -293,7 +293,7 @@ class FactoryDocumentApiTests {
         assertEquals("AVAILABLE", json.readTree(relResp.body()).path("remnant").path("status").asString());
         assertEquals(1, json.readTree(get("/api/v2/quality/releases").body()).size());
 
-        var blockedRevoke = post("/api/cutting/reports/" + planId + "/dispositions/" + dispositionId1 + "/revoke",
+        var blockedRevoke = post("/api/v2/cutting/reports/" + planId + "/dispositions/" + dispositionId1 + "/revoke",
                 "{\"idempotencyKey\":\"HTTP-REVOKE-BLOCKED\",\"operator\":\"主管\",\"reason\":\"尝试撤销已放行料头\"}");
         assertEquals(409, blockedRevoke.statusCode(), blockedRevoke.body());
 
@@ -319,8 +319,8 @@ class FactoryDocumentApiTests {
         assertEquals("SCRAPPED", json.readTree(scrapResp.body()).path("roll").path("inspectionStatus").asString());
         assertEquals(0.0, json.readTree(scrapResp.body()).path("roll").path("currentRemainingLength").asDouble(), 1e-6);
 
-        assertEquals(2, json.readTree(get("/api/rolls?limit=2&offset=0").body()).size());
-        assertEquals(2, json.readTree(get("/api/remnants?limit=2&offset=0").body()).size());
+        assertEquals(2, json.readTree(get("/api/v2/rolls?limit=2&offset=0").body()).size());
+        assertEquals(2, json.readTree(get("/api/v2/remnants?limit=2&offset=0").body()).size());
         assertEquals(1, json.readTree(get("/api/v2/demand-pool?limit=1&offset=0").body()).size());
 
         // 最终账本全局对账必须 100% BALANCED！

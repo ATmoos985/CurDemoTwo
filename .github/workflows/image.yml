@@ -73,6 +73,7 @@ jobs:
       - name: Run workflow closure, architecture & outbox worker gates
         run: |
           node --test integrations/inventory/test/sync-worker.test.mjs
+          node --test benchmark/*.test.mjs
           node --test scripts/arch-coupling-audit.test.mjs
           node scripts/arch-coupling-audit.mjs --fail-on-cycle
           node --test scripts/workflow-closure-audit.test.mjs

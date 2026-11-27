@@ -1,11 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { SETS, problem, problemNames, expectedEngine, hash, prepare } from './problems.mjs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { SETS, problem, problemNames, expectedEngine, hash, prepare, polygonWithHoles, netShapeArea } from './problems.mjs';
 import {
     parseBase, schedule, measure, summarize, evaluateThresholds,
     formatTable, formatProblems, formatHeader, formatRun, formatThresholdReport, formatReport
 } from './lib.mjs';
+import { buildAuthHeaders, parseRunArgs } from './run.mjs';
+import { assertSafePort, parseGateArgs, buildJavaArgs, captureDataFingerprint, verifyDataFingerprint } from './gate.mjs';
 
 // Hashes of the exact request bodies sent in the earlier ad-hoc runs (02 and 05 notes), so results stay comparable.
 test('synthetic problems reproduce the request bodies of the earlier COPIES and -e runs', () => {
@@ -41,11 +45,15 @@ test('presets come from the front-end scenario data and keep their engine', () =
     assert.equal(expectedEngine(problem('guillotine-java').body), 'javaguillotine');
     assert.equal(expectedEngine(problem('scenario4-java').body), 'javaguillotine');
     assert.equal(expectedEngine({ ...scenario4, engine: 'javaguillotine' }), 'javaguillotine');
+    assert.equal(expectedEngine(problem('slitting-basic').body), 'ortools-1d');
+    assert.equal(expectedEngine(problem('nesting-2d-job').body), 'javaguillotine');
+    assert.equal(expectedEngine(problem('multi-material-relay').body), 'javaguillotine');
 });
 
 test('sets only name catalogue problems and all is demo plus large', () => {
     assert.deepEqual(SETS.all, [...SETS.demo, ...SETS.large]);
     for (const name of Object.values(SETS).flat()) assert.ok(problemNames().includes(name), name);
+    assert.equal(SETS['v2-gate'].length, 8);
 });
 
 test('base arguments accept an optional label', () => {
@@ -102,6 +110,9 @@ test('fallback, an unexpected engine, duplicate ids and failed requests are not 
     assert.equal(failed.placed, 0);
     assert.match(failed.issues.join(), /HTTP 503.*UNAVAILABLE/);
     assert.equal(measure({ ...continuous, process: { mode: 'GUILLOTINE', feedMode: 'SHEET' } }, 200, result(), 1).usedLengthMm, null);
+    const allowedFallback = measure(continuous, 200, result({ engine: 'javaguillotine', fallbackReason: '原生缺失' }), 1, { allowFallback: true });
+    assert.equal(allowedFallback.ok, true);
+    assert.equal(allowedFallback.fallbackReason, '原生缺失');
 });
 
 const row = (side, placed, utilization, elapsedMs, ok = true) =>
@@ -147,10 +158,11 @@ test('the problem list shows each body hash and the engine it should run on', ()
 test('the header names each service, its engine status and the suite checkout', () => {
     const text = formatHeader({ suiteCheckout: { commit: 'abc1234', dirty: true }, startedAt: '2026-10-18T06:00:00.000Z',
         options: { rounds: 4, warmup: 1, timeLimitSeconds: null }, host: { os: 'win32 10.0.26200', cpu: 'i9', logicalCpus: 20, node: 'v24.15.0' },
-        services: [{ side: 'A', label: 'before', base: 'http://127.0.0.1:18310', health: { packingsolverAvailable: true, packingsolverFallback: null } }] });
+        services: [{ side: 'A', label: 'before', base: 'http://127.0.0.1:18310',
+            health: { packingsolverAvailable: true, packingsolverFallback: null, slittingAvailable: true }, authStatus: 'auth=enabled(admin)' }] });
     assert.match(text, /abc1234（有未提交改动）/);
     assert.match(text, /4 轮/);
-    assert.match(text, /A before：http:\/\/127\.0\.0\.1:18310 · packingsolverAvailable=true · packingsolverFallback=null/);
+    assert.match(text, /A before：http:\/\/127\.0\.0\.1:18310 · packingsolverAvailable=true · packingsolverFallback=null · slittingAvailable=true · auth=enabled\(admin\)/);
 });
 
 test('a prepared problem hashes the body it sends, including a time-limit override', () => {
@@ -188,12 +200,15 @@ test('one run per side is not reported as separated ranges', () => {
     assert.equal(same.comparisons[0].utilization.verdict, 'same');
 });
 
-test('thresholds.json 仅声明题库内有效题目并具备合法数值红线', () => {
+test('thresholds.json 覆盖 demo 全 10 题与 v2-gate 全 8 题并具备合法红线字段', () => {
     const config = JSON.parse(readFileSync(new URL('./thresholds.json', import.meta.url), 'utf8'));
     assert.equal(config.schemaVersion, 1);
     const catalogue = new Set(problemNames());
     const entries = Object.entries(config.problems);
-    assert.ok(entries.length >= 6);
+    assert.ok(entries.length >= 20);
+    for (const name of [...SETS.demo, ...SETS['v2-gate']]) {
+        assert.ok(config.problems[name], `thresholds.json 缺少必测题目：${name}`);
+    }
     for (const [name, rule] of entries) {
         assert.ok(catalogue.has(name), `未知红线题目：${name}`);
         assert.ok(typeof rule.minUtilization === 'number' && rule.minUtilization > 0 && rule.minUtilization <= 100);
@@ -201,6 +216,9 @@ test('thresholds.json 仅声明题库内有效题目并具备合法数值红线'
         if (rule.minPlacedRatio != null) {
             assert.ok(typeof rule.minPlacedRatio === 'number' && rule.minPlacedRatio > 0 && rule.minPlacedRatio <= 1);
         }
+        if (rule.minRemnantPlaced != null) assert.ok(rule.minRemnantPlaced >= 1);
+        if (rule.minRelayRolls != null) assert.ok(rule.minRelayRolls >= 1);
+        if (rule.maxOverproduced != null) assert.ok(rule.maxOverproduced >= 0);
     }
 });
 
@@ -209,8 +227,8 @@ test('evaluateThresholds 校验利用率、耗时、排入比例与无有效运�
     const okSummary = summarize([
         row('A', 1106, 92.5, 20300),
         { ...row('A', 1, 56.25, 450), problem: 'guillotine-java', requested: 1, engine: 'javaguillotine' },
-        { ...row('A', 14, 52.0, 1200), problem: 'contour14', requested: 14, engine: 'deepnest' },
-        { ...row('A', 5, 80.0, 500), problem: 'scenario1', requested: 5, engine: 'crosscut' },
+        { ...row('A', 14, 82.24, 300), problem: 'contour14', requested: 14, engine: 'deepnest' },
+        { ...row('A', 2000, 90.0, 12000), problem: 'distinct2000', requested: 2000, engine: 'packingsolver' },
     ]);
     const passed = evaluateThresholds(okSummary, config);
     assert.equal(passed.passed, true);
@@ -244,4 +262,199 @@ test('evaluateThresholds 校验利用率、耗时、排入比例与无有效运�
         rows: [row('A', 1106, 92.5, 20300)],
     }, config);
     assert.match(reportText, /质量红线：全部通过/);
+});
+
+test('polygonWithHoles 与 netShapeArea 精确扣除内孔面积且 contour-holes-16 覆盖完整', () => {
+    const holePoly = polygonWithHoles(
+        [{ x: 0, y: 0 }, { x: 400, y: 0 }, { x: 400, y: 400 }, { x: 0, y: 400 }],
+        [[{ x: 100, y: 100 }, { x: 300, y: 100 }, { x: 300, y: 300 }, { x: 100, y: 300 }]]
+    );
+    assert.equal(netShapeArea(holePoly), 400 * 400 - 200 * 200);
+    const p = prepare('contour-holes-16');
+    assert.equal(p.pieces, 16);
+    assert.equal(p.expectedEngine, 'deepnest');
+    assert.equal(p.demandRatio, 0.43);
+
+    // 模拟内孔净面积校验拦截未扣孔虚高结果
+    const badHoles = measure(p, 200, {
+        status: 'FEASIBLE',
+        engine: 'deepnest',
+        elapsedMs: 300,
+        placements: Array.from({ length: 16 }, (_, idx) => ({ id: idx + 1, x: 0, y: 0, shape: { width: 100, height: 100 } })),
+        cuts: [],
+        metrics: { processingAreaMm2: 5280000, pieceAreaMm2: 3000000 }
+    }, 310);
+    assert.equal(badHoles.ok, false);
+    assert.match(badHoles.issues.join(), /内孔净面积校验异常/);
+});
+
+test('measure 准确度量 SLITTING_1D、NESTING_2D 异步作业与 multi-material 接力结果', () => {
+    const slit = prepare('slitting-basic');
+    const slitMeasured = measure(slit, 202, {
+        job: { state: 'SUCCEEDED', startedAt: '2026-11-27T16:00:00.000Z', finishedAt: '2026-11-27T16:00:00.250Z' },
+        result: {
+            validationStatus: 'PASSED',
+            metrics: [
+                { name: 'motherAreaUtilization', value: 91.65 },
+                { name: 'usableAreaUtilization', value: 92.81 }
+            ],
+            slitting: {
+                status: 'FEASIBLE',
+                engine: 'ortools-1d',
+                patterns: [{}, {}, {}],
+                fulfillment: [{ requested: 34, produced: 38 }],
+                pieceAreaMm2: 110e6,
+                motherAreaMm2: 120e6,
+                usableAreaMm2: 118.5e6,
+                totalOverproduced: 4,
+                estimatedKnifeChanges: 6
+            }
+        }
+    }, 300);
+    assert.equal(slitMeasured.ok, true);
+    assert.equal(slitMeasured.kind, 'SLITTING_1D');
+    assert.equal(slitMeasured.placed, 38);
+    assert.equal(slitMeasured.requested, 34);
+    assert.equal(slitMeasured.overproduced, 4);
+    assert.equal(slitMeasured.patternsCount, 3);
+    assert.equal(slitMeasured.utilization, 91.65);
+    assert.equal(slitMeasured.usableUtilization, 92.81);
+    assert.equal(slitMeasured.elapsedMs, 250);
+
+    const slitBad = measure(slit, 202, {
+        job: { state: 'FAILED', message: '子进程超时' },
+        result: null
+    }, 5100);
+    assert.equal(slitBad.ok, false);
+    assert.match(slitBad.issues.join(), /FAILED/);
+
+    const job2d = prepare('nesting-2d-job');
+    const job2dMeasured = measure(job2d, 202, {
+        job: { state: 'SUCCEEDED', startedAt: '2026-11-27T16:00:00.000Z', finishedAt: '2026-11-27T16:00:00.020Z' },
+        result: {
+            validationStatus: 'PASSED',
+            layout: {
+                status: 'FEASIBLE',
+                engine: 'javaguillotine',
+                elapsedMs: 5,
+                placements: [{ id: 1, x: 0, y: 0, shape: { width: 1500, height: 3000 } }],
+                cuts: [{ airDistanceMm: 500 }],
+                metrics: { processingAreaMm2: 8e6, pieceAreaMm2: 4.5e6 }
+            }
+        }
+    }, 40);
+    assert.equal(job2dMeasured.ok, true);
+    assert.equal(job2dMeasured.kind, 'NESTING_2D_JOB');
+    assert.equal(job2dMeasured.utilization, 56.25);
+
+    const relay = prepare('multi-material-relay');
+    const relayMeasured = measure(relay, 200, {
+        totalRequestedPieces: 29,
+        placedByRemnants: 7,
+        placedByRoll: 22,
+        unplacedPieces: 0,
+        remnantAllocations: [{ widthMm: 2000, lengthMm: 1600, piecesAreaM2: 2.5 }],
+        rollOptions: [
+            { rollId: 'R1', widthMm: 2000, estimatedCutLengthMm: 50000, utilizationPct: 80, recommended: true, relayOrder: 1 },
+            { rollId: 'R2', widthMm: 1800, estimatedCutLengthMm: 10000, utilizationPct: 70, recommended: false, relayOrder: 2 }
+        ],
+        totalSavedAreaM2: 5.22,
+        elapsedMs: 66
+    }, 80);
+    assert.equal(relayMeasured.ok, true);
+    assert.equal(relayMeasured.placedByRemnants, 7);
+    assert.equal(relayMeasured.relayRollCount, 2);
+    assert.equal(relayMeasured.totalSavedAreaM2, 5.22);
+
+    const relayBad = measure(relay, 200, {
+        totalRequestedPieces: 29,
+        placedByRemnants: 0,
+        placedByRoll: 10,
+        unplacedPieces: 10,
+        remnantAllocations: [],
+        rollOptions: []
+    }, 50);
+    assert.equal(relayBad.ok, false);
+    assert.match(relayBad.issues.join(), /件数不守恒/);
+});
+
+test('evaluateThresholds 校验 1D 超产上限、多料料头/接力红线、漏题拦截与扩展表渲染', () => {
+    const config = JSON.parse(readFileSync(new URL('./thresholds.json', import.meta.url), 'utf8'));
+    const summary = summarize([
+        {
+            problem: 'slitting-basic', kind: 'SLITTING_1D', side: 'A', label: 'gate', ok: true, issues: [],
+            engine: 'ortools-1d', requested: 34, placed: 38, overproduced: 8, patternsCount: 3,
+            utilization: 91.65, usableUtilization: 92.81, elapsedMs: 250, overrunMs: -4750
+        },
+        {
+            problem: 'multi-material-relay', kind: 'multi-material', side: 'A', label: 'gate', ok: true, issues: [],
+            engine: 'javaguillotine', requested: 29, placed: 29, placedByRemnants: 2, remnantCount: 1,
+            relayRollCount: 1, totalSavedAreaM2: 2.1, utilization: 78.0, elapsedMs: 80, overrunMs: -11920
+        }
+    ]);
+    const tableText = formatTable(summary);
+    assert.match(tableText, /1D 分切扩展明细/);
+    assert.match(tableText, /多料联排扩展明细/);
+
+    const evalRes = evaluateThresholds(summary, config, {
+        requiredProblems: ['slitting-basic', 'multi-material-relay', 'guillotine-java']
+    });
+    assert.equal(evalRes.passed, false);
+    assert.deepEqual(evalRes.violations.map(v => `${v.problem}:${v.metric}`), [
+        'guillotine-java:missingProblem',
+        'slitting-basic:maxOverproduced',
+        'multi-material-relay:minRemnantPlaced',
+        'multi-material-relay:minRelayRolls'
+    ]);
+});
+
+test('run.mjs 鉴权参数解析、Bearer 头构建与 gate.mjs 隔离护栏及指纹校验', () => {
+    assert.deepEqual(buildAuthHeaders('Bearer abc.def'), { authorization: 'Bearer abc.def' });
+    assert.deepEqual(buildAuthHeaders('xyz'), { authorization: 'Bearer xyz' });
+    assert.deepEqual(buildAuthHeaders(null), {});
+
+    const runOpts = parseRunArgs(['--set', 'v2-gate', '--auth', '--username', 'planner', '--password', 'secret', '--allow-fallback', 'http://127.0.0.1:18391']);
+    assert.equal(runOpts.auth, true);
+    assert.equal(runOpts.username, 'planner');
+    assert.equal(runOpts.allowFallback, true);
+    assert.equal(runOpts.set, 'v2-gate');
+
+    assert.throws(() => assertSafePort(8080, false), /8080/);
+    assert.equal(assertSafePort(8080, true), 8080);
+    assert.throws(() => parseGateArgs(['--port', '8080']), /8080/);
+    assert.throws(() => parseGateArgs(['--base', 'http://127.0.0.1:8080']), /8080/);
+
+    const gateOpts = parseGateArgs(['--auth', '--port', '18399']);
+    assert.equal(gateOpts.set, 'v2-gate');
+    assert.equal(gateOpts.auth, true);
+    assert.equal(gateOpts.port, 18399);
+
+    const javaArgs = buildJavaArgs({
+        jarPath: 'app.jar',
+        port: 18399,
+        statePath: '/tmp/cutdemo-state.json',
+        auth: true,
+        allowFallback: false
+    });
+    assert.ok(javaArgs.includes('--server.port=18399'));
+    assert.ok(javaArgs.includes('--cutdemo.state.path=/tmp/cutdemo-state.json'));
+    assert.ok(javaArgs.includes('--cutdemo.security.path=/tmp/cutdemo-state.json.security'));
+    assert.ok(javaArgs.includes('--cutdemo.audit.path=/tmp/cutdemo-state.json.audit'));
+    assert.ok(javaArgs.includes('--cutdemo.seed-demo-data=true'));
+    assert.ok(javaArgs.includes('--cutdemo.auth.enabled=true'));
+    assert.ok(javaArgs.includes('--packingsolver.fallback.enabled=false'));
+
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'bench-fp-test-'));
+    try {
+        mkdirSync(path.join(tmp, 'data', 'cutdemo-state.json.drafts'), { recursive: true });
+        writeFileSync(path.join(tmp, 'data', 'cutdemo-state.json'), '{"rolls":[]}');
+        const before = captureDataFingerprint(tmp);
+        assert.equal(verifyDataFingerprint(before, captureDataFingerprint(tmp)).clean, true);
+        writeFileSync(path.join(tmp, 'data', 'cutdemo-state.json'), '{"rolls":[1]}');
+        const after = verifyDataFingerprint(before, captureDataFingerprint(tmp));
+        assert.equal(after.clean, false);
+        assert.match(after.mismatches[0], /stateSha256/);
+    } finally {
+        rmSync(tmp, { recursive: true, force: true });
+    }
 });

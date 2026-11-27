@@ -6,9 +6,9 @@
  * A. 测试覆盖同步：JDBC/Flyway JUnit 测试类 @Tag("mysql-integration") 全覆盖、严禁硬编码 jdbc:h2:mem:、
  *    CI image.yml 与 Dockerfile 门禁同步（消除静态白名单漏测风险）。
  * B. 接口契约同步：全仓 Controller 端点提取（平衡括号+顶层逗号词法解析），/api/v2/* 100% 对齐 openapi.json，
- *    禁止新增未登记的非 /api/v2/* 端点（存量 36 条单向递减基线）。
+ *    全仓业务接口须全部收敛至 /api/v2/*（唯一基础设施探针 GET /api/health 豁免且强制入 openapi.json）。
  * C. 架构与巨石文件红线同步：复用 arch-coupling-audit.mjs 校验 0 SCC 与通用画布零越界，
- *    严禁在存量 30 个 >1000 行生产源码文件基线外新增超千行文件（单向递减）。
+ *    全仓 >1000 行生产源码文件基线已清零（M4-5 归 0 锁定），严禁任何超千行生产源码文件回流。
  * D. 验收地图同步：frontend/src/utils/routeUtils.ts 的 KNOWN_MODERN_ROUTES 全量覆盖于
  *    .agents/skills/verify-cutdemotwo/features/*.md（排除 README.md），并核验 SKILL.md 脚本路径真实存在。
  */
@@ -23,79 +23,14 @@ import {
   toPosixPath
 } from './arch-coupling-audit.mjs';
 
-/** 存量非 /api/v2/* 端点单向递减基线（共 36 条，严禁基线外新增，鼓励路线 C 逐项迁移消减）。 */
-export const LEGACY_NON_V2_ENDPOINTS_BASELINE = Object.freeze([
-  'GET /api/cutting/tasks',
-  'GET /api/cutting/task-summaries',
-  'GET /api/cutting/tasks/{id}',
-  'POST /api/cutting/tasks',
-  'POST /api/cutting/material-candidates',
-  'GET /api/cutting/plans/{id}',
-  'GET /api/cutting/tasks/{id}/plans',
-  'GET /api/cutting/tasks/{id}/plan-checks',
-  'POST /api/cutting/plans/{id}/cancel',
-  'POST /api/cutting/plans/{id}/restore',
-  'POST /api/cutting/plans/{id}/adjust',
-  'POST /api/cutting/report-confirm',
-  'GET /api/cutting/reports/{id}/quality-dispositions',
-  'POST /api/cutting/reports/{id}/quality-dispositions',
-  'POST /api/cutting/reports/{reportId}/dispositions/{dispositionId}/revoke',
-  'POST /api/cutting/reports/{id}/reverse',
-  'POST /api/cutting/report-batch',
-  'POST /api/demo/inventory',
-  'GET /api/rolls',
-  'GET /api/rolls/{rollId}',
-  'POST /api/rolls',
-  'POST /api/rolls/{rollId}/defects',
-  'POST /api/rolls/{rollId}/inspection-defects',
-  'POST /api/rolls/{rollId}/defects/{defectId}/void',
-  'POST /api/inspection/rolls',
-  'POST /api/rolls/{rollId}/reset',
-  'POST /api/remnants/{id}/scrap',
-  'GET /api/remnants',
-  'POST /api/remnants/scan',
-  'POST /api/remnants/match',
-  'POST /api/remnants/register',
-  'GET /api/health',
-  'GET /api/v1/nesting/engines',
-  'POST /api/v1/nesting/solve',
-  'POST /api/cutting/remnant-recommendations',
-  'GET /api/rolls/{rollId}/spatial-map'
-]);
+/** 存量非 /api/v2/* 业务端点基线（M4-1 已全部收敛清零，严禁出现任何非 /api/v2/* 业务接口）。 */
+export const LEGACY_NON_V2_ENDPOINTS_BASELINE = Object.freeze([]);
 
-/** 存量 >1000 行生产源码文件单向递减基线（共 30 个，严禁基线外新增超千行文件）。 */
-export const LARGE_SOURCE_FILES_BASELINE = Object.freeze([
-  'frontend/src/components/WorkbenchBoardCanvas.tsx',
-  'frontend/src/pages/InventoryPage.tsx',
-  'frontend/src/pages/ShowcasePage.tsx',
-  'frontend/src/pages/DocumentsPage.tsx',
-  'src/main/java/com/example/cutdemotwo/algorithm/nesting/DeepnestSolverEngine.java',
-  'frontend/src/pages/ResultsCenterPage.tsx',
-  'frontend/src/lib/nesting/scenarios.js',
-  'frontend/src/components/SettingsModal.tsx',
-  'src/main/java/changyang/cut/apsmodule/generator/NewSolver/output/InstructionConverter.java',
-  'frontend/src/pages/CuttingWorkbenchPage.tsx',
-  'src/main/java/changyang/cut/apsmodule/generator/NewSolver/output/LocalNeighborhoodSequenceOptimizer.java',
-  'frontend/src/pages/InspectionPage.tsx',
-  'frontend/src/pages/DemandCreatePage.tsx',
-  'src/main/java/com/example/cutdemotwo/business/cutting/SchedulingStudioService.java',
-  'src/main/java/com/example/cutdemotwo/algorithm/nesting/GuillotineSearchKernel.java',
-  'frontend/src/pages/workbench/useWorkbenchSolver.ts',
-  'src/main/java/com/example/cutdemotwo/algorithm/nesting/DeepnestNfpGeometry.java',
-  'src/main/java/com/example/cutdemotwo/business/cutting/GlobalPlanningService.java',
-  'src/main/java/changyang/cut/apsmodule/generator/NewSolver/mip/UnifiedSetPartitionSolver.java',
-  'frontend/src/pages/ReconciliationPage.tsx',
-  'src/main/java/changyang/cut/apsmodule/generator/NewSolver/output/SetPartitionRefiner.java',
-  'src/main/java/com/example/cutdemotwo/business/cutting/StudioMaterializer.java',
-  'src/main/java/changyang/cut/apsmodule/generator/NewSolver/CuttingSolver.java',
-  'frontend/src/pages/workbench/workbenchDeeplinkUtils.ts',
-  'frontend/src/pages/GarmentWidthPage.tsx',
-  'src/main/java/com/example/cutdemotwo/algorithm/toolpath/ToolpathOptimizerService.java',
-  'src/main/java/com/example/cutdemotwo/business/optimization/OptimizationService.java',
-  'src/main/java/changyang/cut/apsmodule/generator/NewSolver/mip/LegacyOrderPatternSelectionSolver.java',
-  'src/main/java/com/example/cutdemotwo/business/cutting/CuttingExecutionAndReportService.java',
-  'src/main/java/com/example/cutdemotwo/business/cutting/ProductionCostAndProcurementService.java'
-]);
+/** 唯一豁免非 /api/v2/* 业务禁令的基础设施健康探针（仍须纳入 openapi.json）。 */
+export const INFRA_HEALTH_PROBE_ENDPOINTS = Object.freeze(['GET /api/health']);
+
+/** 存量 >1000 行生产源码文件基线（M4-3B/M4-4 已全部拆解清零，M4-5 正式归 0 锁定，严禁新增超千行生产源码文件）。 */
+export const LARGE_SOURCE_FILES_BASELINE = Object.freeze([]);
 
 function readUtf8NoBom(filePath) {
   return fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '');
@@ -871,9 +806,16 @@ export function checkApiContractClosure(rootDir, options = {}) {
   const javaMainRoot = path.join(rootDir, 'src', 'main', 'java');
   const javaFiles = walkFilesSync(javaMainRoot, (name) => name.endsWith('.java'));
   const legacyBaselineList = options.legacyBaseline || LEGACY_NON_V2_ENDPOINTS_BASELINE;
+  const infraProbeList = options.infraProbes || INFRA_HEALTH_PROBE_ENDPOINTS;
 
   const legacyBaselineSet = new Set(
     legacyBaselineList.map((entry) => {
+      const [method, rawPath] = entry.trim().split(/\s+/, 2);
+      return `${method.toUpperCase()} ${canonicalizeHttpPath(normalizeHttpPath(rawPath))}`;
+    })
+  );
+  const infraProbeSet = new Set(
+    infraProbeList.map((entry) => {
       const [method, rawPath] = entry.trim().split(/\s+/, 2);
       return `${method.toUpperCase()} ${canonicalizeHttpPath(normalizeHttpPath(rawPath))}`;
     })
@@ -935,6 +877,7 @@ export function checkApiContractClosure(rootDir, options = {}) {
 
   const controllerOpKeys = new Set();
   const v2Endpoints = [];
+  const infraEndpoints = [];
   const legacyEndpoints = [];
 
   for (const ep of allEndpoints) {
@@ -958,13 +901,31 @@ export function checkApiContractClosure(rootDir, options = {}) {
           message: `路径参数名不一致：控制器 ${ep.method} ${ep.path} vs OpenAPI ${specOp.path}`
         });
       }
+    } else if (infraProbeSet.has(canonKey)) {
+      infraEndpoints.push(ep);
+      const specOp = openapiOps.get(canonKey);
+      if (!specOp) {
+        violations.push({
+          rule: 'infra-endpoint-missing-in-openapi',
+          file: ep.file,
+          message: `基础设施健康探针未写入 openapi.json：${ep.method} ${ep.path}`
+        });
+      } else if (JSON.stringify(ep.paramNames) !== JSON.stringify(specOp.paramNames)) {
+        violations.push({
+          rule: 'openapi-param-name-mismatch',
+          file: ep.file,
+          message: `路径参数名不一致：控制器 ${ep.method} ${ep.path} vs OpenAPI ${specOp.path}`
+        });
+      }
     } else {
       legacyEndpoints.push(ep);
       if (!legacyBaselineSet.has(canonKey)) {
         violations.push({
           rule: 'unregistered-legacy-endpoint',
           file: ep.file,
-          message: `禁止新增未在存量基线登记的非 /api/v2/* 接口：${ep.method} ${ep.path}`
+          message: legacyBaselineList.length === 0
+            ? `非 /api/v2/* 存量已清零，禁止新增非 /api/v2/* 业务接口：${ep.method} ${ep.path}`
+            : `禁止新增未在存量基线登记的非 /api/v2/* 接口：${ep.method} ${ep.path}`
         });
       }
     }
@@ -986,6 +947,7 @@ export function checkApiContractClosure(rootDir, options = {}) {
     controllerCount,
     totalControllerEndpoints: allEndpoints.length,
     v2EndpointCount: v2Endpoints.length,
+    infraEndpointCount: infraEndpoints.length,
     legacyEndpointCount: legacyEndpoints.length,
     legacyBaselineCount: legacyBaselineList.length,
     openapiOperationCount: openapiOps.size,
@@ -1027,7 +989,9 @@ export function checkArchAndLargeFilesClosure(rootDir, options = {}) {
       violations.push({
         rule: 'new-large-source-file',
         file: item.file,
-        message: `严禁在存量 30 个基线外新增超 1000 行生产源码文件（当前 ${item.lines} 行）`
+        message: largeBaselineList.length === 0
+          ? `超千行基线已归零，严禁新增超 1000 行生产源码文件（当前 ${item.lines} 行）`
+          : `严禁在存量 ${largeBaselineList.length} 个基线外新增超 1000 行生产源码文件（当前 ${item.lines} 行）`
       });
     }
   }
@@ -1291,11 +1255,17 @@ export function formatMarkdownReport(report) {
   lines.push(
     `| A. 测试覆盖同步 | ${d.testCoverage.passed ? 'PASS' : 'FAIL'} | 扫描测试文件 ${d.testCoverage.scannedJavaTestFiles} 个；@Tag("mysql-integration") 测试类 ${d.testCoverage.taggedTestClassCount} 个；image.yml=${d.testCoverage.imageYmlPassed ? 'OK' : 'FAIL'}；Dockerfile=${d.testCoverage.dockerfilePassed ? 'OK' : 'FAIL'} |`
   );
+  const legacySummary = d.apiContract.legacyBaselineCount === 0
+    ? `非 v2 业务存量 ${d.apiContract.legacyEndpointCount}/0（已清零锁定）`
+    : `非 v2 业务存量 ${d.apiContract.legacyEndpointCount}/${d.apiContract.legacyBaselineCount}（已消减 ${d.apiContract.resolvedLegacyCount}）`;
+  const largeFileSummary = d.archAndLargeFiles.largeFileBaselineCount === 0
+    ? `超千行文件 ${d.archAndLargeFiles.currentLargeFileCount}/0（已清零锁定）`
+    : `超千行文件 ${d.archAndLargeFiles.currentLargeFileCount}/${d.archAndLargeFiles.largeFileBaselineCount}（已消减 ${d.archAndLargeFiles.resolvedBaselineLargeFiles.length}）`;
   lines.push(
-    `| B. 接口契约同步 | ${d.apiContract.passed ? 'PASS' : 'FAIL'} | 控制器 ${d.apiContract.controllerCount} 个；/api/v2/* ${d.apiContract.v2EndpointCount} 条 vs OpenAPI ${d.apiContract.openapiOperationCount} 操作；非 v2 存量 ${d.apiContract.legacyEndpointCount}/${d.apiContract.legacyBaselineCount}（已消减 ${d.apiContract.resolvedLegacyCount}） |`
+    `| B. 接口契约同步 | ${d.apiContract.passed ? 'PASS' : 'FAIL'} | 控制器 ${d.apiContract.controllerCount} 个；/api/v2/* ${d.apiContract.v2EndpointCount} 条 + 基础设施探针 ${d.apiContract.infraEndpointCount ?? 0} 条 vs OpenAPI ${d.apiContract.openapiOperationCount} 操作；${legacySummary} |`
   );
   lines.push(
-    `| C. 架构与巨石文件同步 | ${d.archAndLargeFiles.passed ? 'PASS' : 'FAIL'} | 循环依赖 ${d.archAndLargeFiles.totalCycles}；画布边界=${d.archAndLargeFiles.canvasBoundaryPassed ? 'PASS' : 'FAIL'}；超千行文件 ${d.archAndLargeFiles.currentLargeFileCount}/${d.archAndLargeFiles.largeFileBaselineCount}（已消减 ${d.archAndLargeFiles.resolvedBaselineLargeFiles.length}） |`
+    `| C. 架构与巨石文件同步 | ${d.archAndLargeFiles.passed ? 'PASS' : 'FAIL'} | 循环依赖 ${d.archAndLargeFiles.totalCycles}；画布边界=${d.archAndLargeFiles.canvasBoundaryPassed ? 'PASS' : 'FAIL'}；${largeFileSummary} |`
   );
   lines.push(
     `| D. 验收地图同步 | ${d.verifyMap.passed ? 'PASS' : 'FAIL'} | 现代路由 ${d.verifyMap.knownModernRouteCount} 个；特征地图 ${d.verifyMap.featureFileCount} 份；SKILL 路径核查 ${d.verifyMap.checkedSkillPaths} 项 |`

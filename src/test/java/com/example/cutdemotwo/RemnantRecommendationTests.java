@@ -148,10 +148,10 @@ class RemnantRecommendationTests {
         var mvc=MockMvcBuilders.standaloneSetup(new RemnantRecommendationController(service)).build();
         var payload=new tools.jackson.databind.ObjectMapper().writeValueAsString(new RemnantRecommendationService.Request(input(false,demand(1,600,500,1)),Map.of()));
         byte[] before=Files.readAllBytes(temp.resolve("inventory.json"));
-        mvc.perform(post("/api/cutting/remnant-recommendations").contentType("application/json").content(payload)).andExpect(status().isOk());
-        mvc.perform(post("/api/cutting/remnant-recommendations").contentType("application/json").content("{}")).andExpect(status().isBadRequest());
-        mvc.perform(post("/api/cutting/remnant-recommendations").contentType("application/json").content(payload.replace("\"demand\":1", "\"demand\":1.5"))).andExpect(status().isBadRequest());
-        mvc.perform(post("/api/cutting/remnant-recommendations").contentType("application/json").content(payload.substring(0,payload.length()-1)+",\"unknown\":true}")).andExpect(status().isBadRequest());
+        mvc.perform(post("/api/v2/cutting/remnant-recommendations").contentType("application/json").content(payload)).andExpect(status().isOk());
+        mvc.perform(post("/api/v2/cutting/remnant-recommendations").contentType("application/json").content("{}")).andExpect(status().isBadRequest());
+        mvc.perform(post("/api/v2/cutting/remnant-recommendations").contentType("application/json").content(payload.replace("\"demand\":1", "\"demand\":1.5"))).andExpect(status().isBadRequest());
+        mvc.perform(post("/api/v2/cutting/remnant-recommendations").contentType("application/json").content(payload.substring(0,payload.length()-1)+",\"unknown\":true}")).andExpect(status().isBadRequest());
         assertArrayEquals(before,Files.readAllBytes(temp.resolve("inventory.json")));
     }
 

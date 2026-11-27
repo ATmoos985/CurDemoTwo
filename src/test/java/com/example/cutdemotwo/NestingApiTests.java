@@ -32,7 +32,7 @@ class NestingApiTests {
     private final HttpClient http = HttpClient.newHttpClient();
 
     private HttpResponse<String> post(String body) throws Exception {
-        return http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/v1/nesting/solve"))
+        return http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/v2/nesting/solve"))
                 .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build(),
                 HttpResponse.BodyHandlers.ofString());
     }
@@ -60,7 +60,7 @@ class NestingApiTests {
     }
 
     @Test void engineDiscoveryListsCapabilitiesAndExcludesPresetAnswers() throws Exception {
-        var response = http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/v1/nesting/engines")).GET().build(), HttpResponse.BodyHandlers.ofString());
+        var response = http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/v2/nesting/engines")).GET().build(), HttpResponse.BodyHandlers.ofString());
         assertEquals(200, response.statusCode());
         assertTrue(response.body().contains("crosscut"));
         assertTrue(response.body().contains("packingsolver"));

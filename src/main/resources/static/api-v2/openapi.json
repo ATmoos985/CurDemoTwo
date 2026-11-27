@@ -3379,7 +3379,7 @@
         }
       }
     },
-    "/api/rolls/{rollId}/spatial-map": {
+    "/api/v2/rolls/{rollId}/spatial-map": {
       "parameters": [
         {
           "in": "path",
@@ -4141,7 +4141,7 @@
         }
       }
     },
-    "/api/cutting/reports/{reportId}/dispositions/{dispositionId}/revoke": {
+    "/api/v2/cutting/reports/{reportId}/dispositions/{dispositionId}/revoke": {
       "parameters": [
         {
           "in": "path",
@@ -5743,6 +5743,1721 @@
               }
             }
           }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "summary": "基础设施健康探针（兼容 Docker HEALTHCHECK 与既有探针）",
+        "responses": {
+          "200": {
+            "description": "服务与存储健康（UP）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "存储异常（DOWN）或二维求解器不可用（DEGRADED）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/health": {
+      "get": {
+        "summary": "查询系统健康状态（存储、版本及 2D/1D 求解引擎可用性）",
+        "responses": {
+          "200": {
+            "description": "服务与存储健康（UP）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "存储异常（DOWN）或二维求解器不可用（DEGRADED）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/nesting/engines": {
+      "get": {
+        "summary": "查询二维套料求解引擎列表与能力声明",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "引擎能力列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Engine"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/nesting/solve": {
+      "post": {
+        "summary": "同步二维套料纯计算求解（绝不写库或修改库存）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NestingProblem"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "求解成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestingResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入格式或参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestingResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "不支持的约束或参数",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestingResult"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "求解失败或结果校验异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestingResult"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "求解器不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestingResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/cutting/tasks": {
+      "post": {
+        "summary": "新建或更新裁剪任务定义",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CuttingTask"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "保存后的任务",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuttingTask"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "库存或任务版本冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/cutting/tasks/{id}": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "description": "裁剪任务编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "summary": "查询裁剪任务详情、需求履约进度及关联方案",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "任务详情视图",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "任务不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/cutting/tasks/{id}/plans": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "description": "裁剪任务编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "summary": "查询任务关联的裁剪方案列表",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "summary",
+            "required": false,
+            "description": "是否返回摘要模式",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "裁剪方案列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CuttingPlan"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/cutting/report-confirm": {
+      "post": {
+        "summary": "确认裁剪报工并扣减材料长度、登记回收料头",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CutReport"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "报工结果与更新后库存状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "报工格式或参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/cutting/reports/{id}/quality-dispositions": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "description": "报工或方案编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "summary": "查询报工对应的质检复检处置记录",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "质检复检详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "提交质检复检处置（判废或部分挽回入库料头，不恢复已消耗母卷）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QualityDispositionCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "已落库的质检处置记录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityDisposition"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "复检格式或参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/cutting/reports/{id}/reverse": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "description": "报工或方案编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "冲销裁剪报工单（受控退回履约与料头状态）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "冲销结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "存在未撤销复检或状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/cutting/remnant-recommendations": {
+      "post": {
+        "summary": "针对剩余未满足需求试算推荐可用料头方案",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemnantRecommendationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "推荐料头试算分析结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemnantRecommendationAnalysis"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "已有推荐计算正在进行中",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/demo/inventory": {
+      "post": {
+        "summary": "初始化演示库存数据（需开启演示开关与管理员确认）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DemoInventoryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "创建的示例母卷与料头数量统计",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "未确认创建演示数据",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权操作或演示端点已关闭",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/rolls": {
+      "get": {
+        "summary": "分页查询母卷库存台账",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "母卷库存列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MotherRollInfo"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "登记或更新母卷库存档案",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MotherRollInfo"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "保存后的母卷档案",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MotherRollInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数或长度守恒校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/rolls/{rollId}": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "rollId",
+          "required": true,
+          "description": "母卷编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "summary": "查询单个母卷详情与疵点列表",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "母卷详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MotherRollInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "母卷不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/rolls/{rollId}/inspection-defects": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "rollId",
+          "required": true,
+          "description": "母卷编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "保存母卷验布标定宽高与疵点清单",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InspectionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "更新后的母卷信息",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MotherRollInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "验布输入无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/rolls/{rollId}/defects/{defectId}/void": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "rollId",
+          "required": true,
+          "description": "母卷编号",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "in": "path",
+          "name": "defectId",
+          "required": true,
+          "description": "疵点编号",
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "post": {
+        "summary": "受控作废母卷已登记疵点（保留作废留痕）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "更新后的母卷信息",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MotherRollInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "作废参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/rolls/{rollId}/reset": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "rollId",
+          "required": true,
+          "description": "母卷编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "重置示例母卷长度与状态（需开启演示开关与管理员确认）",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "重置操作结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权操作或演示端点已关闭",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/inspection/rolls": {
+      "post": {
+        "summary": "创建待验布建档母卷",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MotherRollInfo"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "新建的待验母卷信息",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MotherRollInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/remnants": {
+      "get": {
+        "summary": "分页查询可用及可选隔离料头库存",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "rollId",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "includeQuarantined",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "料头库存列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RemnantStock"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/remnants/register": {
+      "post": {
+        "summary": "手工登记新料头入库",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemnantStock"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "登记后的料头信息",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemnantStock"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "料头参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/remnants/{id}/scrap": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "description": "料头编号",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "报废指定料头库存",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "报废结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或访问令牌失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "当前主体无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "库存状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/exports/schemes/{schemeId}/cam": {
+      "get": {
+        "summary": "导出 2D 排程方案生产级 CAM 裁切程序（DXF R12 / LWPOLYLINE / AAMA / HPGL PLT / CNC G-Code）",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "schemeId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "format", "in": "query", "required": false, "schema": { "type": "string", "enum": ["dxf_r12", "dxf_lwpolyline", "dxf_aama", "plt", "nc"], "default": "dxf_lwpolyline" } },
+          { "name": "overcutMm", "in": "query", "required": false, "schema": { "type": "number", "minimum": 0, "maximum": 20, "default": 0 } },
+          { "name": "leadInMm", "in": "query", "required": false, "schema": { "type": "number", "minimum": 0, "maximum": 100, "default": 0 } },
+          { "name": "microJointWidthMm", "in": "query", "required": false, "schema": { "type": "number", "minimum": 0, "maximum": 50, "default": 0 } },
+          { "name": "deduplicateCommonEdges", "in": "query", "required": false, "schema": { "type": "boolean", "default": false } },
+          { "name": "cutTool", "in": "query", "required": false, "schema": { "type": "string", "default": "T01" } },
+          { "name": "punchTool", "in": "query", "required": false, "schema": { "type": "string", "default": "T02" } },
+          { "name": "creaseTool", "in": "query", "required": false, "schema": { "type": "string", "default": "T03" } }
+        ],
+        "responses": {
+          "200": { "description": "CAM 裁切文件流", "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } } },
+          "400": { "description": "参数非法或非 2D 方案", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "401": { "description": "未认证", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "403": { "description": "无权访问", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "404": { "description": "方案不存在", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
+        }
+      }
+    },
+    "/api/v2/exports/schemes/{schemeId}/slitting": {
+      "get": {
+        "summary": "导出 1D 分切方案机台配方（JSON / CSV / XLSX）",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "schemeId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "format", "in": "query", "required": false, "schema": { "type": "string", "enum": ["json", "csv", "xlsx"], "default": "json" } }
+        ],
+        "responses": {
+          "200": { "description": "分切配方数据", "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } } },
+          "400": { "description": "非 1D 方案或格式非法", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "401": { "description": "未认证", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "403": { "description": "无权访问", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "404": { "description": "方案不存在", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
+        }
+      }
+    },
+    "/api/v2/exports/schemes/{schemeId}/ticket.pdf": {
+      "get": {
+        "summary": "导出方案 A4 生产裁切随工单 PDF",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "schemeId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "随工单 PDF 文档", "content": { "application/pdf": { "schema": { "type": "string", "format": "binary" } } } },
+          "401": { "description": "未认证", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "403": { "description": "无权访问", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "404": { "description": "方案不存在", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
+        }
+      }
+    },
+    "/api/v2/exports/production-summary": {
+      "get": {
+        "summary": "导出多维生产排程、实绩与成本汇总报表（PDF / 5-Sheet XLSX）",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "format", "in": "query", "required": false, "schema": { "type": "string", "enum": ["pdf", "xlsx"], "default": "xlsx" } },
+          { "name": "taskId", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "state", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "from", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "to", "in": "query", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "生产汇总报表文件", "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } } },
+          "400": { "description": "查询参数或日期格式无效", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "401": { "description": "未认证", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "403": { "description": "无权访问", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
+        }
+      }
+    },
+    "/api/v2/exports/batch-zip": {
+      "post": {
+        "summary": "流式批量打包导出多方案 CAM 与工单文件（最多 50 个方案，含 manifest.json）",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BatchZipExportRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "流式 ZIP 归档包", "content": { "application/zip": { "schema": { "type": "string", "format": "binary" } } } },
+          "400": { "description": "参数非法或超过 50 个方案上限", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "401": { "description": "未认证", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "403": { "description": "无权访问（禁止 AI Agent 调用）", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "404": { "description": "包含不存在的方案编号", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
+        }
+      }
+    },
+    "/api/v2/inventory/import/rolls/preview": {
+      "post": {
+        "summary": "批量母卷导入只读预检（零落库，返回全量逐行校验错误）",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchRollImportRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "预检结果", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchImportResult" } } } },
+          "400": { "description": "请求格式无效", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "401": { "description": "未认证", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "403": { "description": "仅 WAREHOUSE 与 ADMIN 允许", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
+        }
+      }
+    },
+    "/api/v2/inventory/import/rolls": {
+      "post": {
+        "summary": "批量母卷单事务原子提交（需 Idempotency-Key，任一行出错全批回滚）",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "Idempotency-Key", "in": "header", "required": false, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchRollImportRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "提交成功或幂等重放", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchImportResult" } } } },
+          "400": { "description": "缺少幂等键或行校验失败（全批已回滚）", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchImportValidationError" } } } },
+          "401": { "description": "未认证", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "403": { "description": "仅 WAREHOUSE 与 ADMIN 允许", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "409": { "description": "同一幂等键用于不同导入载荷", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
+        }
+      }
+    },
+    "/api/v2/inventory/import/remnants/preview": {
+      "post": {
+        "summary": "批量料头导入只读预检",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchRemnantImportRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "预检结果", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchImportResult" } } } },
+          "400": { "description": "请求格式无效", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "401": { "description": "未认证", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "403": { "description": "仅 WAREHOUSE 与 ADMIN 允许", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
+        }
+      }
+    },
+    "/api/v2/inventory/import/remnants": {
+      "post": {
+        "summary": "批量料头单事务原子提交",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "Idempotency-Key", "in": "header", "required": false, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchRemnantImportRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "提交成功或幂等重放", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchImportResult" } } } },
+          "400": { "description": "缺少幂等键或行校验失败（全批已回滚）", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchImportValidationError" } } } },
+          "401": { "description": "未认证", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "403": { "description": "仅 WAREHOUSE 与 ADMIN 允许", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "409": { "description": "同一幂等键用于不同导入载荷", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
+        }
+      }
+    },
+    "/api/v2/inventory/import/defects/preview": {
+      "post": {
+        "summary": "批量瑕疵导入只读预检（含 0.1 mm 精度与母卷边界校验）",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchDefectImportRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "预检结果", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchImportResult" } } } },
+          "400": { "description": "请求格式无效", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "401": { "description": "未认证", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "403": { "description": "仅 INSPECTOR 与 ADMIN 允许", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
+        }
+      }
+    },
+    "/api/v2/inventory/import/defects": {
+      "post": {
+        "summary": "批量瑕疵单事务原子提交",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "Idempotency-Key", "in": "header", "required": false, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchDefectImportRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "提交成功或幂等重放", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchImportResult" } } } },
+          "400": { "description": "缺少幂等键或行校验失败（全批已回滚）", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchImportValidationError" } } } },
+          "401": { "description": "未认证", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "403": { "description": "仅 INSPECTOR 与 ADMIN 允许", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "409": { "description": "同一幂等键用于不同导入载荷或母卷锁定冲突", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
         }
       }
     }
@@ -12239,6 +13954,1470 @@
               "type": "string"
             }
           }
+        }
+      },
+      "HealthStatus": {
+        "type": "object",
+        "required": [
+          "status",
+          "storageStatus",
+          "packingsolverAvailable",
+          "packingsolverIrregularAvailable",
+          "slittingAvailable"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "UP",
+              "DOWN",
+              "DEGRADED"
+            ]
+          },
+          "storageStatus": {
+            "type": "string",
+            "enum": [
+              "UP",
+              "DOWN"
+            ]
+          },
+          "storageError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "remnantsInStock": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "packingsolverAvailable": {
+            "type": "boolean"
+          },
+          "packingsolverFallback": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "packingsolverIrregularAvailable": {
+            "type": "boolean"
+          },
+          "packingsolverIrregularFallback": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "slittingAvailable": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Defect": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "captureId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "w": {
+            "type": "number"
+          },
+          "h": {
+            "type": "number"
+          },
+          "margin": {
+            "type": "number"
+          },
+          "defectType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "typeName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "severity": {
+            "type": "integer"
+          },
+          "points": {
+            "type": "integer"
+          },
+          "detectionSource": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "avoidanceStrategy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "VoidedDefect": {
+        "type": "object",
+        "properties": {
+          "defect": {
+            "$ref": "#/components/schemas/Defect"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "voidedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "actor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "MotherRollInfo": {
+        "type": "object",
+        "properties": {
+          "rollId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rollModel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "batchNo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "supplier": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "materialName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "grammage": {
+            "type": "number"
+          },
+          "composition": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shrinkageRate": {
+            "type": "number"
+          },
+          "width": {
+            "type": "number"
+          },
+          "rawWidth": {
+            "type": "number"
+          },
+          "totalLength": {
+            "type": "number"
+          },
+          "currentRemainingLength": {
+            "type": "number"
+          },
+          "usedLength": {
+            "type": "number"
+          },
+          "storageLocation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inspectionStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inspector": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inspectionDate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "defects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Defect"
+            }
+          },
+          "voidedDefects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoidedDefect"
+            }
+          },
+          "remnantCount": {
+            "type": "integer"
+          },
+          "remnantTotalArea": {
+            "type": "number"
+          },
+          "issuedMachineId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "issuedShiftTeam": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scrappedLengthMm": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "scrapReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scrappedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scrappedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scrapIdempotencyKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unitPricePerMeter": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "unitPricePerSqm": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        }
+      },
+      "RemnantStock": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "width": {
+            "type": "number"
+          },
+          "length": {
+            "type": "number"
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "materialBatch": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parentRemnantId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourceRollId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "generation": {
+            "type": "integer"
+          },
+          "qualityGrade": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hasDefect": {
+            "type": "boolean"
+          },
+          "defectDesc": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "defects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Defect"
+            }
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "consumedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "consumedByOrder": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourceReportId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourcePieceId": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "qualityDispositionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "batchNo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "RemnantPiece": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "w": {
+            "type": "number"
+          },
+          "l": {
+            "type": "number"
+          },
+          "area": {
+            "type": "number"
+          },
+          "hasDefect": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CuttingTaskLine": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "width": {
+            "type": "number"
+          },
+          "length": {
+            "type": "number"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "allowRotation": {
+            "type": "boolean"
+          },
+          "shape": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "allowHalfTurn": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "sizeLabel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourceTemplateId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "surfaceTreatment": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "CuttingTaskProcess": {
+        "type": "object",
+        "properties": {
+          "bedLength": {
+            "type": "number"
+          },
+          "trimStart": {
+            "type": "number"
+          },
+          "cutOrigin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "firstStageOrientation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "allowRotation": {
+            "type": "boolean"
+          },
+          "allowLongitudinal": {
+            "type": "boolean"
+          },
+          "pieceGap": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        }
+      },
+      "CuttingTaskSlitting": {
+        "type": "object",
+        "properties": {
+          "leftTrim": {
+            "type": "integer"
+          },
+          "rightTrim": {
+            "type": "integer"
+          },
+          "minWidth": {
+            "type": "integer"
+          },
+          "maxWidth": {
+            "type": "integer"
+          },
+          "widthStep": {
+            "type": "integer"
+          },
+          "totalOverCap": {
+            "type": "integer"
+          }
+        }
+      },
+      "CuttingTask": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "materialModel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "externalRef": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "demands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CuttingTaskLine"
+            }
+          },
+          "process": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "problemType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "slitting": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "dueDate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "priority": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "customerName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kittingGroup": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requiredBatchNo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requiredColor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "strictBatchMatch": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "machineId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shiftTeam": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourceSchemeId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "replenishIdempotencyKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "SolveRequest": {
+        "type": "object",
+        "properties": {
+          "rollW": {
+            "type": "number"
+          },
+          "rollL": {
+            "type": "number"
+          },
+          "allowLongitudinal": {
+            "type": "boolean"
+          },
+          "allowRotation": {
+            "type": "boolean"
+          },
+          "solver": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "defects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Defect"
+            }
+          },
+          "demands": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "firstStageOrientation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trimStart": {
+            "type": "number"
+          },
+          "pieceGap": {
+            "type": "number"
+          },
+          "cutOrigin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "totalRollL": {
+            "type": "number"
+          },
+          "windowStartY": {
+            "type": "number"
+          },
+          "rollId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rollModel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "feedPortType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourceRemnantId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "minRemnantWidth": {
+            "type": "number"
+          },
+          "minRemnantLength": {
+            "type": "number"
+          },
+          "timeLimitSeconds": {
+            "type": "integer"
+          },
+          "taskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "taskRevision": {
+            "type": "integer"
+          }
+        }
+      },
+      "SolveResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "engine": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requestedEngine": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fallbackReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rollW": {
+            "type": "number"
+          },
+          "rollL": {
+            "type": "number"
+          },
+          "pieces": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "remnants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RemnantPiece"
+            }
+          },
+          "cuts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "defects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Defect"
+            }
+          },
+          "deductLen": {
+            "type": "number"
+          },
+          "pieceArea": {
+            "type": "number"
+          },
+          "remArea": {
+            "type": "number"
+          },
+          "wasteArea": {
+            "type": "number"
+          },
+          "totalArea": {
+            "type": "number"
+          },
+          "feedPortType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourceRemnantId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "planId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "derivedRemnants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RemnantStock"
+            }
+          }
+        }
+      },
+      "CuttingPlan": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "request": {
+            "$ref": "#/components/schemas/SolveRequest"
+          },
+          "result": {
+            "$ref": "#/components/schemas/SolveResponse"
+          },
+          "baseline": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parentPlanId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": "integer"
+          }
+        }
+      },
+      "CutReportPieceResult": {
+        "type": "object",
+        "properties": {
+          "pieceId": {
+            "type": "integer"
+          },
+          "outcome": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "CutReport": {
+        "type": "object",
+        "required": [
+          "planId",
+          "actualCutLen",
+          "finishedPieceCount"
+        ],
+        "properties": {
+          "planId": {
+            "type": "string"
+          },
+          "actualCutLen": {
+            "type": "number"
+          },
+          "finishedPieceCount": {
+            "type": "integer"
+          },
+          "actualRemnants": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/RemnantPiece"
+            }
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pieceResults": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/CutReportPieceResult"
+            }
+          }
+        }
+      },
+      "QualityDispositionRecovery": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "width": {
+            "type": "number"
+          },
+          "length": {
+            "type": "number"
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quality": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "QualityDispositionCommand": {
+        "type": "object",
+        "required": [
+          "operationId",
+          "expectedRevision",
+          "pieceId",
+          "disposition"
+        ],
+        "properties": {
+          "operationId": {
+            "type": "string"
+          },
+          "expectedRevision": {
+            "type": "integer"
+          },
+          "pieceId": {
+            "type": "integer"
+          },
+          "disposition": {
+            "type": "string"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inspector": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recovery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualityDispositionRecovery"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "QualityDispositionRevocation": {
+        "type": "object",
+        "properties": {
+          "idempotencyKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operator": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revokedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "QualityDisposition": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "planId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "command": {
+            "$ref": "#/components/schemas/QualityDispositionCommand"
+          },
+          "demandId": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "originalOutcome": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pieceAreaMm2": {
+            "type": "number"
+          },
+          "recoveredAreaMm2": {
+            "type": "number"
+          },
+          "scrapAreaMm2": {
+            "type": "number"
+          },
+          "remnantId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revocation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualityDispositionRevocation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "InspectionInput": {
+        "type": "object",
+        "properties": {
+          "width": {
+            "type": "number"
+          },
+          "totalLength": {
+            "type": "number"
+          },
+          "defects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Defect"
+            }
+          }
+        }
+      },
+      "DemoInventoryRequest": {
+        "type": "object",
+        "required": [
+          "confirmed"
+        ],
+        "properties": {
+          "confirmed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ReasonCommand": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "RemnantRecommendationRequest": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "$ref": "#/components/schemas/SolveRequest"
+          },
+          "completedBaseline": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "sourceRollId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "RemnantRecommendationLine": {
+        "type": "object",
+        "properties": {
+          "demandId": {
+            "type": "integer"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "width": {
+            "type": "number"
+          },
+          "length": {
+            "type": "number"
+          },
+          "requested": {
+            "type": "integer"
+          },
+          "placed": {
+            "type": "integer"
+          },
+          "remaining": {
+            "type": "integer"
+          }
+        }
+      },
+      "RemnantRecommendationItem": {
+        "type": "object",
+        "properties": {
+          "stock": {
+            "$ref": "#/components/schemas/RemnantStock"
+          },
+          "pieceCount": {
+            "type": "integer"
+          },
+          "pieceArea": {
+            "type": "number"
+          },
+          "utilization": {
+            "type": "number"
+          },
+          "cutCount": {
+            "type": "integer"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RemnantRecommendationLine"
+            }
+          }
+        }
+      },
+      "RemnantRecommendationUnavailable": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "RemnantRecommendationAnalysis": {
+        "type": "object",
+        "properties": {
+          "candidateCount": {
+            "type": "integer"
+          },
+          "evaluatedCount": {
+            "type": "integer"
+          },
+          "deferredCount": {
+            "type": "integer"
+          },
+          "inventoryVersion": {
+            "type": "integer"
+          },
+          "recommendations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RemnantRecommendationItem"
+            }
+          },
+          "unavailable": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RemnantRecommendationUnavailable"
+            }
+          }
+        }
+      },
+      "BatchZipExportRequest": {
+        "type": "object",
+        "required": ["schemeIds"],
+        "properties": {
+          "schemeIds": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 50 },
+          "formats": { "type": "array", "items": { "type": "string" } },
+          "camOptions": {
+            "type": "object",
+            "properties": {
+              "overcutMm": { "type": "number" },
+              "leadInMm": { "type": "number" },
+              "microJointWidthMm": { "type": "number" },
+              "deduplicateCommonEdges": { "type": "boolean" },
+              "cutTool": { "type": "string" },
+              "punchTool": { "type": "string" },
+              "creaseTool": { "type": "string" }
+            }
+          }
+        }
+      },
+      "BatchImportRowError": {
+        "type": "object",
+        "properties": {
+          "rowIndex": { "type": "integer" },
+          "field": { "type": "string" },
+          "code": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      },
+      "BatchImportResult": {
+        "type": "object",
+        "properties": {
+          "importType": { "type": "string" },
+          "dryRun": { "type": "boolean" },
+          "valid": { "type": "boolean" },
+          "idempotencyKey": { "type": ["string", "null"] },
+          "idempotentReplay": { "type": "boolean" },
+          "documentId": { "type": "string" },
+          "revision": { "type": "integer" },
+          "totalRows": { "type": "integer" },
+          "validRows": { "type": "integer" },
+          "errorRows": { "type": "integer" },
+          "importedCount": { "type": "integer" },
+          "skippedCount": { "type": "integer" },
+          "errors": { "type": "array", "items": { "$ref": "#/components/schemas/BatchImportRowError" } },
+          "createdIds": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "BatchImportValidationError": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string" },
+          "message": { "type": "string" },
+          "errors": { "type": "array", "items": { "$ref": "#/components/schemas/BatchImportRowError" } },
+          "traceId": { "type": "string" },
+          "retryable": { "type": "boolean" }
+        }
+      },
+      "BatchRollImportRequest": {
+        "type": "object",
+        "required": ["rows"],
+        "properties": {
+          "idempotencyKey": { "type": ["string", "null"] },
+          "operator": { "type": ["string", "null"] },
+          "rows": { "type": "array", "items": { "type": "object" } }
+        }
+      },
+      "BatchRemnantImportRequest": {
+        "type": "object",
+        "required": ["rows"],
+        "properties": {
+          "idempotencyKey": { "type": ["string", "null"] },
+          "operator": { "type": ["string", "null"] },
+          "rows": { "type": "array", "items": { "type": "object" } }
+        }
+      },
+      "BatchDefectImportRequest": {
+        "type": "object",
+        "required": ["rows"],
+        "properties": {
+          "idempotencyKey": { "type": ["string", "null"] },
+          "operator": { "type": ["string", "null"] },
+          "rows": { "type": "array", "items": { "type": "object" } }
         }
       }
     },

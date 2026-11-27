@@ -1,74 +1,69 @@
-# 排料基准套件
+# 排料基准套件与求解质量门禁
 
-在一个或两个**已经启动**的 CutDemoTwo 服务上，按交替顺序重复求解一组由代码生成的题目。每题、每个服务输出排入数、利用率、耗时和实际引擎的均值与区间；给两个服务时再输出 B − A。
+基于代码生成的确定性题集，支持对单个或两个 CutDemoTwo 服务执行 2D 直刀/横切/异形（含内孔）、1D 分切异步作业及多料接力联排对比；并提供一键非 `8080` 端口隔离真机门禁 `gate.mjs`。
 
-- 不属于 `mvn verify`：Maven 只跑 `src/test`，镜像构建只复制 `src`，CI 不会执行本目录。
-- 自检（题目哈希、运行顺序、统计与表格，不需要服务）：`node --test benchmark/*.test.mjs`
-- 需要 Node 22 或更新：与 `src/test/js` 一样，直接加载前端的 ES 模块取预设案例。
+- 不属于 `mvn verify`：Maven 只跑 `src/test`，镜像构建只复制 `src`。
+- **构建期纯单测（毫秒级，不启动服务）**：`node --test benchmark/*.test.mjs`（校验题目哈希、调度、多类型度量与 `thresholds.json` 红线判定逻辑；已接入 `Dockerfile` 与 `.github/workflows/image.yml`）。
+- **真机求解质量门禁（隔离端口，自动启停 JAR）**：`node benchmark/gate.mjs --set v2-gate --auth`。
+- 需要 Node 22 或更新：与 `src/test/js` 一样，直接加载前端 ES 模块取预设案例与几何定义。
 
-## 1. 启动被测服务
+## 1. 一键隔离门禁（推荐）
 
-改前、改后各构建一个 jar，分别起在空闲端口上。旧提交用 `git archive` 导出到临时目录再构建，不动当前工作区：
-
-```bash
-T=/c/Users/Ami/AppData/Local/Temp/cutdemo-bench/suite
-mkdir -p $T/src-30e3d4b && git archive 30e3d4b | tar -x -C $T/src-30e3d4b
-mvn -B -q -DskipTests -f $T/src-30e3d4b/pom.xml package && cp $T/src-30e3d4b/target/CutDemoTwo-*.jar $T/30e3d4b.jar
-```
+`benchmark/gate.mjs` 自动在独立非 `8080` 端口（默认 `18391`，严禁 `8080`）启动隔离实例（将 `state` / `jobs` / `integrations` / `drafts` / `security` / `audit` 全部挂载到系统临时目录，并注入 `--cutdemo.seed-demo-data=true`），跑完指定题集与红线校验后按 PID 树精准停止子进程、清理临时目录，并比对 `data/cutdemo-state.json` SHA-256 确认正式库存零变动。
 
 ```bash
-java -jar $T/30e3d4b.jar --server.port=18310 --cutdemo.state.path=$T/state-30e3d4b.json --packingsolver.fallback.enabled=false --packingsolver.executable.path=D:/GitHub/CutDemoTwo/data/solver/packingsolver_rectangleguillotine.exe --packingsolver.irregular.executable.path=D:/GitHub/CutDemoTwo/data/solver/packingsolver_irregular.exe > $T/server-30e3d4b.log 2>&1 &
+# 1. 构建最新可执行 JAR
+.\mvnw.cmd -DskipTests package
+
+# 2. 免登模式跑全平台自主引擎闭环门禁（v2-gate 共 8 题）
+node benchmark/gate.mjs --set v2-gate
+
+# 3. 企业认证模式跑门禁（注入 --cutdemo.auth.enabled=true 并自动调用 /api/v2/auth/login）
+node benchmark/gate.mjs --set v2-gate --auth
+
+# 4. 在装有原生 C++ solver（data/solver/*.exe）的环境中跑 demo/all 全集
+node benchmark/gate.mjs --set demo --auth
 ```
 
-另一个服务同样启动，换成 `18311` 和它自己的状态文件。每个参数都不能省：
+常用参数：
+- `--set <smoke|demo|v2-gate|large|all>`：默认 `v2-gate`；`--problems <a,b>` 可点名题目。
+- `--rounds <n>` / `--warmup <n>`：默认 `1` 轮、`0` 次预热（对比基准可设为 `--rounds 2 --warmup 1`）。
+- `--auth` / `--username <u >` / `--password <p>` / `--token <jwt>`：支持自动登录 `POST /api/v2/auth/login` 或直接传入 `Bearer` Token（亦支持环境变量 `CUTDEMO_BENCH_USER`、`CUTDEMO_BENCH_PASS`、`CUTDEMO_BENCH_TOKEN`）。**日志与结果 JSON 中绝不落盘密码或 Token**。
+- `--port <18391>`：指定隔离端口（严禁 `8080`，除非显式 `--allow-8080`）。
+- `--base <http://127.0.0.1:18391>`：连接已运行的隔离服务并跳过启停 JAR。
+- `--allow-fallback`：允许原生 C++ 引擎缺失时回退至自主引擎（门禁默认 `false`，严格零降级）。
+- `--thresholds <path>`：默认读取 `benchmark/thresholds.json`。
 
-| 参数 | 原因 |
-|---|---|
-| `--server.port=18310` | 8080 留给日常预览，不要为基准重启它 |
-| `--cutdemo.state.path=<临时目录>/state-x.json` | 服务一启动就写库存状态，默认写到当前目录下的 `data/cutdemo-state.json`；两个服务也不能共用一个文件 |
-| `--packingsolver.fallback.enabled=false` | 原生引擎缺失时直接返回 UNAVAILABLE，不悄悄改用 javaguillotine |
-| `--packingsolver.executable.path=…`<br>`--packingsolver.irregular.executable.path=…` | 默认路径是相对的 `data/solver/…`，在 worktree 或临时目录里不存在 |
+## 2. 双服务对比运行（`run.mjs`）
 
-启动后 `curl http://127.0.0.1:18310/api/health` 应看到 `packingsolverAvailable: true`、`packingsolverFallback: null`。跑完只结束自己启动的 java 进程（`netstat -ano | grep :18310` 查 PID）。
-
-## 2. 运行
+改前、改后各构建一个 JAR，分别起在独立隔离端口与独立状态文件上后运行：
 
 ```bash
-node benchmark/run.mjs --smoke http://127.0.0.1:18311
+node benchmark/run.mjs --set v2-gate --rounds 4 --auth 30e3d4b=http://127.0.0.1:18310 HEAD=http://127.0.0.1:18311 > benchmark/results/report.md
 ```
 
-```bash
-node benchmark/run.mjs --set all 30e3d4b=http://127.0.0.1:18310 05022f8=http://127.0.0.1:18311 > benchmark/results/report.md
-```
+- 服务写作 `[标签=]地址`，第一个是 A，第二个是 B，输出 B − A。
+- 进度逐行写到 stderr，最终报告（Markdown）写到 stdout；`node benchmark/report.mjs <结果 JSON>` 可从已落盘 JSON 重建报告。
+- `--list` 列出题目、预期引擎与请求体哈希；`--help` 列出全部选项。
+- 退出码：`0` 全部有效且红线通过；`1` 有无效运行、红线违约或库存污染；`2` 参数错误、服务不可用、鉴权失败或请求中断。
 
-- 服务写作 `[标签=]地址`，标签建议用提交号；第一个是 A，第二个是 B。
-- 进度逐行写到 stderr，最终报告（Markdown）写到 stdout。
-- 每次求解后都重写结果 JSON（默认 `benchmark/results/<开始时间>.json`，已被 git 忽略），中断也不丢已完成的部分；`node benchmark/report.mjs <结果 JSON>` 重新出报告。
-- `--list` 列出题目、预期引擎和请求体哈希；`--help` 列出全部选项。
-- 退出码：0 全部有效；1 有无效运行；2 参数错误、服务不可用或请求中断。
+## 3. 题集与 `/api/v2/*` 覆盖
 
-## 3. 题目
+题目全部由 `problems.mjs` 生成，每题记录请求体 SHA-256 前 12 位作为指纹。
 
-题目全部由 `problems.mjs` 生成，不存 JSON。每行结果都记录请求体哈希（`JSON.stringify` 的 SHA-256 前 12 位）：哈希相同，请求就逐字节相同，可以跨次比较。
-
-| 题集 | 题目 | 两个服务时实测约需 |
+| 题集 | 题目 | 对接端点与核心覆盖 |
 |---|---|---|
-| `smoke` | guillotine、contour14、scenario4、synthetic2000（`--smoke` 统一限时 2 s、1 轮、不预热） | 15 s（1 轮） |
-| `demo`（默认） | 试验台两个示例 + 前端预设案例 1–8，限时 3 s，多数提前结束 | 1.5 min（4 轮） |
-| `large` | synthetic2000、synthetic10000、contour200，限时 20 s | 8 min（4 轮） |
-| `all` | demo + large | 10 min（4 轮） |
+| `v2-gate`（门禁默认） | `guillotine-java`、`scenario1`、`scenario4-java`、`contour14`、`contour-holes-16`、`nesting-2d-job`、`slitting-basic`、`multi-material-relay` | 全平台自主引擎零降级闭环：2D 直刀/横切/异形/带内孔扣面积、`POST/GET /api/v2/optimization-jobs`（2D + 1D `OR-Tools QUALITY`）、`POST /api/v2/planning/multi-material`（3 料头 + 2 母卷连续接力） |
+| `smoke` | `guillotine`、`guillotine-java`、`contour14`、`scenario4`、`synthetic2000` | 快速冒烟（2s/1 轮） |
+| `demo` | `guillotine`、`contour14`、`scenario1`–`scenario8` | 试验台示例 + 全部前端预设场景（含原生 C++ 题目） |
+| `large` | `synthetic2000`、`synthetic10000`、`contour200` | 大规模连续卷与异形上限压测（20s） |
+| `compare` | `guillotine-java`、`scenario4-java`、`contour14`、`contour14-native` | 自主引擎 vs 原生引擎对照 |
+| `all` | `demo` + `large` | 全量 2D 基准 |
 
-另可用 `--problems` 点名：
+## 4. 测量口径与红线纪律
 
-- `scenario<N>`：前端预设案例，经 `scenario-examples.js` 转成请求，改了预设哈希就会变。
-- `synthetic<N>`：10 种规格各 N/10 件，2000 × 30N mm 连续卷，需求是材料面积的 1.75 倍，两处避让；N 为 10 的倍数且不超过 10000。synthetic2000、synthetic10000 与之前 COPIES、`-e` 两次对比的请求相同（`e6227b8cb038`、`1869b4e841ef`）。
-- `distinct<N>`：N 种不同规格各 1 件（mulberry32 种子 20261018），原生求解器要处理 N 种物品，是 COPIES 的最坏情况；不在任何题集里。
-
-## 4. 测量口径
-
-- **交替**：轮次在外层、题目在内层。两个服务时奇数轮 A 先、偶数轮 B 先，同一题前后紧挨着跑，机器状态的漂移对两边一样。不要先跑完改前再跑改后：大题受文件读写波动影响大，顺序运行会把这种波动误当成改动的效果。
-- **预热**：每个服务、每个引擎先以 1 s 限时求解一次，不计入结果。
-- **有效运行**：HTTP 200、`FEASIBLE`、实际引擎等于按工艺推断的引擎、没有 `fallbackReason`、裁片编号不重复。均值与区间只统计有效运行，其余计入"异常"列。
-- **字段**：排入/需求、利用率（裁片面积 ÷ 加工面积）、耗时（服务返回的 `elapsedMs`）、越限（耗时 − 限时）、实际引擎。结果 JSON 另有连续卷用长、刀数、空走距离和客户端往返时间。
-- **对比**：B − A 是均值之差；"利用率区间"为"区间分离"表示两边各次结果互不重叠，"区间重叠"表示这几轮还分不出高下，应加轮数或单独复现，"单次"表示某一边只有一次有效运行，没有区间可比。
-- **噪声**：两个服务在同一台机器上轮流求解，另有其他负载或大小核调度时耗时会抖动；结论以区间是否分离为准，不看单次。
+- **交替与预热**：轮次在外层、题目在内层；双服务时奇偶轮交替先后，消除环境漂移。
+- **2D（含带内孔）**：通过 `/api/v2/nesting/solve` 或 `/api/v2/optimization-jobs` (`NESTING_2D`) 求解，校验 `FEASIBLE`、`validationStatus=PASSED`、无重复裁片、默认无降级，以及带 `holes` 裁片扣孔净面积一致。
+- **1D 分切（`SLITTING_1D`）**：轮询 `/api/v2/optimization-jobs` 至终态并拉取 `/api/v2/optimization-results/{id}`，提取 `motherAreaUtilization`（母卷总面积利用率）、`usableAreaUtilization`（扣切边可用幅宽利用率）、排刀方案数与超产卷数，校验 `maxOverproduced`。
+- **多料接力（`multi-material`）**：调用 `/api/v2/planning/multi-material`，校验件数守恒（`totalRequestedPieces === placedByRemnants + placedByRoll + unplacedPieces`），统计料头排入件数 `placedByRemnants`、接力母卷数 `relayRollCount`、节省面积与综合利用率，并强制校验 `minRemnantPlaced` 与 `minRelayRolls`。
+- **红线反作弊纪律**：`benchmark/thresholds.json` 中的红线基于真机实测稳态数据设定，严禁为凑通过而无依据下调 `minUtilization`、`minPlacedRatio`、`minRemnantPlaced` 或 `minRelayRolls`。

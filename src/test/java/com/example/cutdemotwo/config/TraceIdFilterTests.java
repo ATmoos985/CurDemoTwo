@@ -54,7 +54,7 @@ class TraceIdFilterTests {
     @Test
     void rejectsUnsafeOrOverlongRequestIdToPreventLogInjection() throws Exception {
         for (String unsafe : new String[]{"", "   ", "bad\r\ninjected", "has space", "a".repeat(65)}) {
-            var request = new MockHttpServletRequest("GET", "/api/health");
+            var request = new MockHttpServletRequest("GET", "/api/v2/health");
             request.addHeader(TraceIdFilter.HEADER_NAME, unsafe);
             var response = new MockHttpServletResponse();
             var observed = new AtomicReference<String>();

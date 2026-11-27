@@ -122,7 +122,7 @@ class InventoryCountApiTests {
             assertEquals(expected,row,"找回必须保留来源、疵点、库位与原始几何");
         }
         assertEquals(before.path("receipts"),after.path("receipts"));assertEquals(before.path("tasks"),after.path("tasks"));
-        var available=call("/api/remnants?rollId=ALL",null,null);assertEquals(200,available.statusCode());
+        var available=call("/api/v2/remnants?rollId=ALL",null,null);assertEquals(200,available.statusCode());
         for(var row:json.readTree(available.body()))assertNotEquals(id,row.path("id").asString(),"找回待检料头不能进入可用库存");
         byte[] recovered=saved();
         var foundReplay=post(command(json.readTree(found.body()).path("command").path("expectedRevision").asLong(),"remnant",id,true,2000,1600),"http-count-found-001");

@@ -52,10 +52,10 @@ describe('authClient 企业认证助手与双通道幂等提交', () => {
   });
 
   it('仅对同源 /api/ 且非登录接口附加 Bearer 认证令牌，避免外域泄露', () => {
-    expect(shouldAttachAuthToken('/api/rolls', 'http://localhost:8080')).toBe(true);
+    expect(shouldAttachAuthToken('/api/v2/rolls', 'http://localhost:8080')).toBe(true);
     expect(shouldAttachAuthToken('http://localhost:8080/api/v2/schemes?limit=20', 'http://localhost:8080')).toBe(true);
     expect(shouldAttachAuthToken('/api/v2/auth/login', 'http://localhost:8080')).toBe(false);
-    expect(shouldAttachAuthToken('https://other-host.example/api/rolls', 'http://localhost:8080')).toBe(false);
+    expect(shouldAttachAuthToken('https://other-host.example/api/v2/rolls', 'http://localhost:8080')).toBe(false);
     expect(shouldAttachAuthToken('/app/index.html', 'http://localhost:8080')).toBe(false);
 
     const h1 = buildAuthHeaders({ 'X-Test': '1' }, 'tok-abc');
@@ -85,7 +85,7 @@ describe('authClient 企业认证助手与双通道幂等提交', () => {
     const uninstall = installAuthFetchInterceptor({ onUnauthorized });
 
     try {
-      await globalThis.fetch('/api/rolls');
+      await globalThis.fetch('/api/v2/rolls');
       expect(seenAuth[0]).toBe('Bearer jwt-demo-token');
       expect(onUnauthorized).not.toHaveBeenCalled();
 
