@@ -12,7 +12,7 @@
  *      CSV/XLSX 公式注入中和与 PDF 控制字符/代理对防护、导出越界/跨维错配/404/日期倒挂/51方案上限、
  *      --auth 导出与批导 RBAC/Agent 防火墙(401/403+UI告警)、SCRAPPED/RESERVED 母卷保护与 >2MB 413 拦截；
  *  - F14（5 正 + 5 负）：
- *    T1-F14-01..05：benchmark/gate.mjs (--base + 动态空闲端口 --auth) 8/8 PASS、benchmark单测(25/25)+闭环/架构门禁 0 违规、
+ *    T1-F14-01..05：benchmark/gate.mjs (--base + 动态空闲端口 --auth) 8/8 PASS、benchmark单测(27/27)+闭环/架构门禁 0 违规、
  *      OpenAPI 3.1.0 104/116 一致、/api/v2/* 关键端点联通与无死链浏览、MCP 25/25 契约全绿；
  *    T2-F14-01..05：人工 99.9% 红线触发退出码 1、不可达/8080 护栏触发退出码 2、--auth 无令牌拦截(退出码 2 + 401)、
  *      已下线 /api/* 与 /api/v1/* 返回 404、防遗漏闭环沙盒捕获 v2-missing-in-openapi/unregistered-legacy-endpoint/new-large-source-file；
@@ -2497,8 +2497,8 @@ try {
     });
     assert.equal(resBenchTest.status, 0, `benchmark 单测失败:\n${resBenchTest.stdout}\n${resBenchTest.stderr}`);
     const tap = parseTapOutput(resBenchTest.stdout);
-    assert.equal(tap.tests, 25, `benchmark 单测总数应为 25，实际 ${tap.tests}`);
-    assert.equal(tap.pass, 25);
+    assert.equal(tap.tests, 27, `benchmark 单测总数应为 27，实际 ${tap.tests}`);
+    assert.equal(tap.pass, 27);
     assert.equal(tap.fail, 0);
     assert.equal(tap.skipped, 0);
 

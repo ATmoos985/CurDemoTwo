@@ -179,13 +179,24 @@ export function buildJavaArgs({
     return args;
 }
 
-function sha256File(filePath) {
-    if (!existsSync(filePath)) return 'MISSING';
-    return createHash('sha256').update(readFileSync(filePath)).digest('hex');
+const LOCK_ERR_CODES = new Set(['EBUSY', 'EACCES', 'EPERM']);
+
+export function sha256File(filePath, st = null, readFile = readFileSync) {
+    try {
+        return createHash('sha256').update(readFile(filePath)).digest('hex');
+    } catch (error) {
+        if (error?.code === 'ENOENT') return 'MISSING';
+        if (LOCK_ERR_CODES.has(error?.code)) {
+            const meta = st ?? (existsSync(filePath) ? statSync(filePath) : null);
+            return meta ? `LOCKED:${meta.size}:${Math.round(meta.mtimeMs)}` : 'MISSING';
+        }
+        throw error;
+    }
 }
 
-function directoryFingerprint(dirPath) {
+export function directoryFingerprint(dirPath, options = {}) {
     if (!existsSync(dirPath)) return 'MISSING';
+    const readFile = options.readFile ?? readFileSync;
     const items = [];
     const walk = cur => {
         const entries = readdirSync(cur, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
@@ -195,9 +206,12 @@ function directoryFingerprint(dirPath) {
             if (entry.isDirectory()) {
                 items.push(`D:${rel}`);
                 walk(full);
+            } else if (entry.name.toLowerCase().endsWith('.lock')) {
+                const st = statSync(full);
+                items.push(`L:${rel}:${st.size}`);
             } else {
                 const st = statSync(full);
-                items.push(`F:${rel}:${st.size}:${sha256File(full)}`);
+                items.push(`F:${rel}:${st.size}:${sha256File(full, st, readFile)}`);
             }
         }
     };
@@ -205,14 +219,15 @@ function directoryFingerprint(dirPath) {
     return createHash('sha256').update(items.join('\n')).digest('hex');
 }
 
-export function captureDataFingerprint(rootDir = REPO_ROOT) {
+export function captureDataFingerprint(rootDir = REPO_ROOT, options = {}) {
+    const readFile = options.readFile ?? readFileSync;
     const stateFile = path.join(rootDir, 'data', 'cutdemo-state.json');
     return {
-        stateSha256: sha256File(stateFile),
-        draftsFingerprint: directoryFingerprint(`${stateFile}.drafts`),
-        jobsFingerprint: directoryFingerprint(`${stateFile}.jobs`),
-        securityFingerprint: directoryFingerprint(`${stateFile}.security`),
-        auditFingerprint: directoryFingerprint(`${stateFile}.audit`)
+        stateSha256: sha256File(stateFile, null, readFile),
+        draftsFingerprint: directoryFingerprint(`${stateFile}.drafts`, { readFile }),
+        jobsFingerprint: directoryFingerprint(`${stateFile}.jobs`, { readFile }),
+        securityFingerprint: directoryFingerprint(`${stateFile}.security`, { readFile }),
+        auditFingerprint: directoryFingerprint(`${stateFile}.audit`, { readFile })
     };
 }
 

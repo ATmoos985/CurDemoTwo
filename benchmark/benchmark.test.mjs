@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,7 +10,7 @@ import {
     formatTable, formatProblems, formatHeader, formatRun, formatThresholdReport, formatReport
 } from './lib.mjs';
 import { buildAuthHeaders, parseRunArgs } from './run.mjs';
-import { assertSafePort, parseGateArgs, buildJavaArgs, captureDataFingerprint, verifyDataFingerprint } from './gate.mjs';
+import { assertSafePort, parseGateArgs, buildJavaArgs, captureDataFingerprint, directoryFingerprint, sha256File, verifyDataFingerprint } from './gate.mjs';
 
 // Hashes of the exact request bodies sent in the earlier ad-hoc runs (02 and 05 notes), so results stay comparable.
 test('synthetic problems reproduce the request bodies of the earlier COPIES and -e runs', () => {
@@ -454,6 +455,178 @@ test('run.mjs 鉴权参数解析、Bearer 头构建与 gate.mjs 隔离护栏及�
         const after = verifyDataFingerprint(before, captureDataFingerprint(tmp));
         assert.equal(after.clean, false);
         assert.match(after.mismatches[0], /stateSha256/);
+    } finally {
+        rmSync(tmp, { recursive: true, force: true });
+    }
+});
+
+test('captureDataFingerprint 跳过 *.lock 锁文件并捕获 EBUSY/EACCES 安全回退', () => {
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'bench-lock-hook-'));
+    try {
+        const dataDir = path.join(tmp, 'data');
+        const draftsDir = path.join(dataDir, 'cutdemo-state.json.drafts');
+        const jobsDir = path.join(dataDir, 'cutdemo-state.json.jobs');
+        const secDir = path.join(dataDir, 'cutdemo-state.json.security');
+        const auditDir = path.join(dataDir, 'cutdemo-state.json.audit');
+        for (const dir of [draftsDir, jobsDir, secDir, auditDir]) {
+            mkdirSync(dir, { recursive: true });
+        }
+        writeFileSync(path.join(dataDir, 'cutdemo-state.json'), '{"rolls":[]}');
+        writeFileSync(path.join(draftsDir, 'drafts.lock'), '');
+        writeFileSync(path.join(draftsDir, 'd1.json'), '{"id":"d1"}');
+        writeFileSync(path.join(jobsDir, 'dispatcher.lock'), '');
+        writeFileSync(path.join(secDir, 'users.json'), '{"users":["admin"]}');
+        writeFileSync(path.join(auditDir, 'events.jsonl'), '{"event":"boot"}\n');
+
+        const readPaths = [];
+        const noLockReadFile = filePath => {
+            readPaths.push(filePath);
+            if (filePath.toLowerCase().endsWith('.lock')) {
+                throw new Error(`should not read .lock file: ${filePath}`);
+            }
+            return readFileSync(filePath);
+        };
+
+        const fp1 = captureDataFingerprint(tmp, { readFile: noLockReadFile });
+        assert.equal(readPaths.some(p => p.toLowerCase().endsWith('.lock')), false);
+        assert.equal(verifyDataFingerprint(fp1, captureDataFingerprint(tmp, { readFile: noLockReadFile })).clean, true);
+
+        writeFileSync(path.join(draftsDir, 'd1.json'), '{"id":"d1","status":"CONFIRMED"}');
+        const fpDraftChanged = verifyDataFingerprint(fp1, captureDataFingerprint(tmp, { readFile: noLockReadFile }));
+        assert.equal(fpDraftChanged.clean, false);
+        assert.match(fpDraftChanged.mismatches.join('\n'), /draftsFingerprint/);
+
+        const busyTarget = path.join(secDir, 'users.json');
+        const makeBusyHook = code => filePath => {
+            if (filePath.toLowerCase().endsWith('.lock')) {
+                throw new Error(`should not read .lock file: ${filePath}`);
+            }
+            if (path.resolve(filePath) === path.resolve(busyTarget)) {
+                const err = new Error(`${code}: locked`);
+                err.code = code;
+                throw err;
+            }
+            return readFileSync(filePath);
+        };
+
+        const busyHash = sha256File(busyTarget, null, makeBusyHook('EBUSY'));
+        assert.match(busyHash, /^LOCKED:\d+:\d+$/);
+        assert.equal(sha256File(path.join(tmp, 'data', 'missing.json')), 'MISSING');
+
+        const fpBusyBefore = captureDataFingerprint(tmp, { readFile: makeBusyHook('EBUSY') });
+        const fpAccessSame = captureDataFingerprint(tmp, { readFile: makeBusyHook('EACCES') });
+        assert.equal(verifyDataFingerprint(fpBusyBefore, fpAccessSame).clean, true);
+
+        writeFileSync(busyTarget, '{"users":["admin","planner"],"extra":true}');
+        const fpBusyResized = captureDataFingerprint(tmp, { readFile: makeBusyHook('EBUSY') });
+        const resizedCheck = verifyDataFingerprint(fpBusyBefore, fpBusyResized);
+        assert.equal(resizedCheck.clean, false);
+        assert.match(resizedCheck.mismatches.join('\n'), /securityFingerprint/);
+    } finally {
+        rmSync(tmp, { recursive: true, force: true });
+    }
+});
+
+test('Windows OS 真实 FileStream.Lock 字节锁冲突下 captureDataFingerprint 仍稳定通过', async () => {
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'bench-os-lock-'));
+    try {
+        const dataDir = path.join(tmp, 'data');
+        const draftsDir = path.join(dataDir, 'cutdemo-state.json.drafts');
+        const jobsDir = path.join(dataDir, 'cutdemo-state.json.jobs');
+        const auditDir = path.join(dataDir, 'cutdemo-state.json.audit');
+        for (const dir of [draftsDir, jobsDir, auditDir]) {
+            mkdirSync(dir, { recursive: true });
+        }
+        writeFileSync(path.join(dataDir, 'cutdemo-state.json'), '{"rolls":[]}');
+        const draftsLock = path.join(draftsDir, 'drafts.lock');
+        const jobsLock = path.join(jobsDir, 'dispatcher.lock');
+        const auditLive = path.join(auditDir, 'live.jsonl');
+        writeFileSync(draftsLock, 'L');
+        writeFileSync(jobsLock, '');
+        writeFileSync(auditLive, 'ok\n');
+
+        if (process.platform === 'win32') {
+            const psScript = [
+                '$ErrorActionPreference = "Stop"',
+                '$streams = @()',
+                'try {',
+                '  foreach ($p in ($env:BENCH_LOCK_TARGETS -split ";")) {',
+                '    $fs = [System.IO.File]::Open($p, "Open", "ReadWrite", "ReadWrite")',
+                '    $fs.Lock(0, 1024)',
+                '    $streams += $fs',
+                '  }',
+                '  [Console]::Out.WriteLine("LOCKED")',
+                '  [Console]::Out.Flush()',
+                '  [void][Console]::In.ReadLine()',
+                '} finally {',
+                '  foreach ($fs in $streams) { try { $fs.Dispose() } catch {} }',
+                '}'
+            ].join('; ');
+
+            const child = spawn('powershell', ['-NoProfile', '-Command', psScript], {
+                env: {
+                    ...process.env,
+                    BENCH_LOCK_TARGETS: [draftsLock, jobsLock, auditLive].join(';')
+                },
+                stdio: ['pipe', 'pipe', 'pipe']
+            });
+
+            try {
+                await new Promise((resolve, reject) => {
+                    const timer = setTimeout(() => reject(new Error('等待 PowerShell 加锁超时')), 10000);
+                    let buf = '';
+                    let errBuf = '';
+                    child.stderr.on('data', chunk => { errBuf += chunk.toString(); });
+                    child.stdout.on('data', chunk => {
+                        buf += chunk.toString();
+                        if (buf.includes('LOCKED')) {
+                            clearTimeout(timer);
+                            resolve();
+                        }
+                    });
+                    child.once('exit', code => {
+                        clearTimeout(timer);
+                        reject(new Error(`PowerShell 提前退出 (code=${code}): ${errBuf}`));
+                    });
+                });
+
+                assert.throws(() => readFileSync(auditLive), err => err?.code === 'EBUSY');
+                const before = captureDataFingerprint(tmp);
+                const after = captureDataFingerprint(tmp);
+                assert.equal(verifyDataFingerprint(before, after).clean, true);
+                assert.notEqual(before.draftsFingerprint, 'MISSING');
+                assert.notEqual(before.jobsFingerprint, 'MISSING');
+                assert.notEqual(before.auditFingerprint, 'MISSING');
+            } finally {
+                if (child.exitCode == null) {
+                    try { child.stdin.write('\n'); child.stdin.end(); } catch {}
+                    await new Promise(resolve => {
+                        const timer = setTimeout(() => {
+                            try { child.kill(); } catch {}
+                            resolve();
+                        }, 5000);
+                        child.once('exit', () => {
+                            clearTimeout(timer);
+                            resolve();
+                        });
+                    });
+                }
+            }
+        } else {
+            const fp1 = captureDataFingerprint(tmp);
+            const permHook = filePath => {
+                if (path.resolve(filePath) === path.resolve(auditLive)) {
+                    const err = new Error('EPERM: locked');
+                    err.code = 'EPERM';
+                    throw err;
+                }
+                return readFileSync(filePath);
+            };
+            const fp2 = captureDataFingerprint(tmp, { readFile: permHook });
+            assert.notEqual(fp1.draftsFingerprint, 'MISSING');
+            assert.notEqual(fp2.auditFingerprint, 'MISSING');
+            assert.notEqual(directoryFingerprint(draftsDir), 'MISSING');
+        }
     } finally {
         rmSync(tmp, { recursive: true, force: true });
     }
