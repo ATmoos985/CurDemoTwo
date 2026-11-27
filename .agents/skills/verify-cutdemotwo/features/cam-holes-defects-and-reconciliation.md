@@ -34,6 +34,6 @@ Preconditions: 已通过 `verify-ctl.mjs launch` 启动隔离实例且 `doctor` 
 ## Gotchas
 
 - 本机负载高或 CPU 节流时，Konva 帧耗时 P95 可能波动；默认脚本预算为 `500ms`，严格回归建议传 `--perf-budget-ms 120` 并在实测报告中贴出真实 P50/P95 数值（不要只写“通过”）。
-- 复检判废绝不可恢复已消耗的母卷长度，该业务不变量与报工冲销（`POST /api/cutting/reports/{planId}/reverse`）语义完全不同，验收时注意区分。
+- 复检判废绝不可恢复已消耗的母卷长度，该业务不变量与报工冲销（`POST /api/v2/cutting/reports/{planId}/reverse`）语义完全不同，验收时注意区分。
 - 本脚本会创建带随机 UUID 标签的隔离测试母卷与双任务订单，务必仅运行在独立非 `8080` 隔离实例上。
-- **已知待修产品问题（2026-11-27 巡检实证）**：`closure-perf` 场景 1 经 `POST /api/rolls` 新建 `totalLength=10000, usedLength=1000` 母卷时，因后端 `RollAndRemnantDomainService.saveOrUpdateMotherRollInternal` 未按 `totalLength - usedLength` 初始化 `currentRemainingLength`，导致跑完 `closure-perf` 后执行 `doctor` 会触发 `ROLL_LENGTH_MISMATCH`（`MISMATCH`）。该问题属产品层待修缺陷，切勿跳过 `doctor` 掩盖。
+- **历史缺陷归档（已于 M3 修复并持续回归守卫）**：此前 `closure-perf` 场景 1 经 `POST /api/v2/rolls` 新建 `totalLength=10000, usedLength=1000` 母卷时，曾因后端 `RollAndRemnantDomainService.saveOrUpdateMotherRollInternal` 未按 `totalLength - usedLength` 初始化 `currentRemainingLength` 而导致跑完 `closure-perf` 后 `doctor` 触发 `ROLL_LENGTH_MISMATCH`（`MISMATCH`）；该缺陷已在 M3 修复（自动按 `totalLength - usedLength` 初始化），跑完 `closure-perf` 后仍必须执行 `doctor` 确认总账与卷长零不平衡。

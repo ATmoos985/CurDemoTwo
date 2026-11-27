@@ -73,7 +73,7 @@ const apiPost = async (path, body) => {
       const catLabels = await page
         .locator('#nav .nav-group-label')
         .evaluateAll((els) => els.map((e) => e.textContent.trim()));
-      assert.deepEqual(catLabels, ['订单需求', '排料工作台', '产出与核算', '材料库存', '工艺试验']);
+      assert.deepEqual(catLabels, ['订单需求', '排料工作台', '产出与核算', '材料库存', '工艺试验', '系统安全']);
 
       // Ensure "服装唛架" is inside "工艺试验" (moved out of workbench domain)
       await page.locator('#nav .nav-group-trigger', { hasText: '工艺试验' }).click();
@@ -306,12 +306,12 @@ const apiPost = async (path, body) => {
       const pendingDetail = await api('/api/v2/schemes/' + encodeURIComponent(confirmedSchemeId));
       assert.equal(pendingDetail.scheme.state, 'AWAITING_ROLL', 'Auto-created roll must not bypass inspection into READY_TO_CUT');
       assert.ok(!pendingDetail.scheme.rollId, 'Uninspected roll must not be locked onto scheme');
-      const createdRoll = await api('/api/rolls/' + encodeURIComponent(createdPendingRollId));
+      const createdRoll = await api('/api/v2/rolls/' + encodeURIComponent(createdPendingRollId));
       assert.equal(createdRoll.inspectionStatus, 'PENDING', 'Auto-created roll must default to PENDING');
       assert.equal(createdRoll.inspector || '', '', 'Auto-created roll must not forge an inspector');
 
       // Complete real inspection release on the pending roll, refresh Results Center, then bind it
-      await apiPost('/api/rolls', {
+      await apiPost('/api/v2/rolls', {
         ...createdRoll,
         inspectionStatus: 'PASSED',
         inspector: 'E2E验布员'
@@ -347,7 +347,7 @@ const apiPost = async (path, body) => {
     });
 
     await runStep('Inventory Management: view mother roll spatial cut-zone map ("看已切割区域")', async () => {
-      const spatial = await api('/api/rolls/' + encodeURIComponent(autoBoundRollId) + '/spatial-map');
+      const spatial = await api('/api/v2/rolls/' + encodeURIComponent(autoBoundRollId) + '/spatial-map');
       assert.ok(spatial.cutZones.length >= 1, 'Spatial map contains cut zone');
       assert.ok(spatial.cutZones[0].lengthMm > 0, 'Cut zone has positive length');
 

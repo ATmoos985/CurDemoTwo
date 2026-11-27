@@ -4,10 +4,10 @@
  *
  * 子命令：
  *   launch  [--port 18091] [--run-id <id>] [--jar <path>] [--evidence-dir <dir>]
- *           [--auth] [--auth-secret <secret>] [--auth-users <users>] [--timeout-sec 45]
- *   doctor  --session <session.json>
- *   drive   --session <session.json> --script <ui-preview|unified-workflow|closure-perf|garment-width|mcp-live-smoke|deeplink-and-cutplan>
- *           [--perf-budget-ms 120]
+ *           [--jvm-opts "<opts>"] [--auth] [--auth-secret <secret>] [--auth-users <users>] [--timeout-sec 45]
+ *   doctor  --session <session.json> [--auth-user <user>] [--auth-pass <pass>] [--auth-token <token>]
+ *   drive   --session <session.json> --script <ui-preview|unified-workflow|closure-perf|garment-width|mcp-live-smoke|deeplink-and-cutplan|workflow-gate-smoke|drafts-inbox-and-relay|inspection-and-slitting|auth-rbac-agent-audit|import-export-and-benchmark>
+ *           [--perf-budget-ms 120] [--api-token <token>] [--agent-token <token>] [--revoke-agent-id <id>]
  *   cleanup --session <session.json>
  *
  * 安全红线：
@@ -72,8 +72,117 @@ const SCRIPTS = {
     runner: 'node',
     needsBrowser: true,
     needsTestRunner: false
+  },
+  'workflow-gate-smoke': {
+    file: path.join(__dirname, 'verify-workflow-gate.mjs'),
+    runner: 'node',
+    needsBrowser: false,
+    needsTestRunner: false,
+    supportsResultFile: true
+  },
+  'drafts-inbox-and-relay': {
+    file: path.join(__dirname, 'verify-drafts-inbox-and-relay.mjs'),
+    runner: 'node',
+    needsBrowser: true,
+    needsTestRunner: false,
+    supportsResultFile: true
+  },
+  'inspection-and-slitting': {
+    file: path.join(__dirname, 'verify-inspection-and-slitting.mjs'),
+    runner: 'node',
+    needsBrowser: true,
+    needsTestRunner: false,
+    supportsResultFile: true
+  },
+  'auth-rbac-agent-audit': {
+    file: path.join(__dirname, 'verify-auth-rbac-agent-audit.mjs'),
+    runner: 'node',
+    needsBrowser: true,
+    needsTestRunner: false,
+    supportsResultFile: true,
+    passAuthEnv: true
+  },
+  'import-export-and-benchmark': {
+    file: path.join(__dirname, 'verify-import-export-and-benchmark.mjs'),
+    runner: 'node',
+    needsBrowser: true,
+    needsTestRunner: false,
+    supportsResultFile: true,
+    passAuthEnv: true
   }
 };
+
+const FORBIDDEN_JVM_PROP_PREFIXES = [
+  '-Dserver.port',
+  '-Dserver.address',
+  '-Dcutdemo.state.path',
+  '-Dcutdemo.jobs.path',
+  '-Dcutdemo.integration.path',
+  '-Dcutdemo.workbench.drafts.path',
+  '-Dcutdemo.auth',
+  '-Dcutdemo.seed-demo-data'
+];
+
+const ALLOWED_JVM_OPT_RE =
+  /^-(X(ms|mx|ss|mn)[0-9]+[kmgKMG]?|X(log|share|showSettings)(:.*)?|XX:[+-]?[A-Za-z0-9_]+(=.*)?|D[A-Za-z0-9_.-]+(=.*)?|server|ea|da|esa|dsa)$/;
+
+function parseJvmOpts(raw) {
+  if (raw === undefined || raw === null) return [];
+  const text = String(raw).trim();
+  if (!text) return [];
+  const tokens = [];
+  let current = '';
+  let quote = null;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === quote) {
+        quote = null;
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (current) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+    current += ch;
+  }
+  if (quote) {
+    throw new Error(`--jvm-opts 引号未闭合: ${raw}`);
+  }
+  if (current) {
+    tokens.push(current);
+  }
+  for (const opt of tokens) {
+    if (!opt.startsWith('-')) {
+      throw new Error(`--jvm-opts 每个参数必须以 '-' 开头: ${opt}`);
+    }
+    const baseFlag = opt.split('=')[0].toLowerCase();
+    if (['-jar', '-cp', '-classpath', '-p', '--module-path', '-m', '--module'].includes(baseFlag)) {
+      throw new Error(`--jvm-opts 禁止指定启动/类路径参数: ${opt}`);
+    }
+    const lower = opt.toLowerCase();
+    for (const prefix of FORBIDDEN_JVM_PROP_PREFIXES) {
+      const pLower = prefix.toLowerCase();
+      if (lower === pLower || lower.startsWith(`${pLower}=`) || lower.startsWith(`${pLower}.`)) {
+        throw new Error(`--jvm-opts 禁止覆盖隔离路径或认证开关: ${opt}`);
+      }
+    }
+    if (!ALLOWED_JVM_OPT_RE.test(opt)) {
+      throw new Error(`--jvm-opts 包含不在白名单内的 JVM 参数: ${opt}`);
+    }
+  }
+  return tokens;
+}
 
 function parseCli(argv) {
   const [command, ...rest] = argv;
@@ -82,6 +191,20 @@ function parseCli(argv) {
     const token = rest[i];
     if (!token.startsWith('--')) {
       throw new Error(`无法识别的位置参数: ${token}`);
+    }
+    const eqIdx = token.indexOf('=');
+    if (eqIdx !== -1) {
+      const key = token.slice(2, eqIdx);
+      const val = token.slice(eqIdx + 1);
+      if (!key) {
+        throw new Error(`无效参数: ${token}`);
+      }
+      if (key === 'auth') {
+        flags.auth = val !== 'false' && val !== '0';
+      } else {
+        flags[key] = val;
+      }
+      continue;
     }
     const key = token.slice(2);
     if (key === 'auth') {
@@ -161,11 +284,34 @@ function checkPortFree(port, host = '127.0.0.1') {
   });
 }
 
-async function fetchJsonOrText(url, timeoutMs = 4000) {
+async function fetchJsonOrText(url, timeoutMs = 4000, headers = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, { signal: controller.signal, headers });
+    const text = await res.text();
+    let json = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {}
+    return { ok: res.ok, status: res.status, text, json };
+  } catch (err) {
+    return { ok: false, status: 0, text: '', json: null, error: String(err?.message || err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function postJsonOrText(url, body, timeoutMs = 4000, headers = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(body)
+    });
     const text = await res.text();
     let json = null;
     try {
@@ -297,7 +443,10 @@ async function cmdLaunch(flags) {
   const prodHashBefore = sha256File(PROD_STATE_FILE);
   const prodDraftsBefore = fingerprintDir(PROD_DRAFTS_DIR);
 
+  const jvmOpts = parseJvmOpts(flags['jvm-opts']);
+
   const javaArgs = [
+    ...jvmOpts,
     '-jar',
     jarPath,
     `--server.port=${port}`,
@@ -379,6 +528,7 @@ async function cmdLaunch(flags) {
     port,
     baseUrl,
     authEnabled: Boolean(flags.auth),
+    jvmOpts,
     jarPath,
     jarMtimeMs: jarStat.mtimeMs,
     jarSize: jarStat.size,
@@ -402,6 +552,7 @@ async function cmdLaunch(flags) {
         pid: session.pid,
         baseUrl: session.baseUrl,
         authEnabled: session.authEnabled,
+        jvmOpts: session.jvmOpts,
         evidenceDir: session.evidenceDir,
         prodStateSha256Before: session.prodStateSha256Before,
         readyInfo
@@ -436,41 +587,85 @@ async function cmdDoctor(flags) {
   checks.push({ name: 'app_entry_http_200', pass: appRes.status === 200, detail: `HTTP ${appRes.status}` });
   if (appRes.status !== 200) healthy = false;
 
+  let authHeaders = {};
   if (s.authEnabled) {
     const meRes = await fetchJsonOrText(`${s.baseUrl}/api/v2/auth/me`, 3000);
     const ok = meRes.ok && meRes.json?.enabled === true;
     checks.push({ name: 'auth_endpoint_enabled', pass: ok, detail: JSON.stringify(meRes.json || meRes.status) });
     if (!ok) healthy = false;
-  } else {
-    const healthRes = await fetchJsonOrText(`${s.baseUrl}/api/health`, 3000);
-    const hOk = healthRes.ok && healthRes.json?.status === 'UP' && healthRes.json?.storageStatus === 'UP';
-    checks.push({
-      name: 'api_health_up',
-      pass: hOk,
-      detail: hOk
-        ? `revision=${healthRes.json.revision}, remnants=${healthRes.json.remnantsInStock}`
-        : `HTTP ${healthRes.status}`
-    });
-    if (!hOk) healthy = false;
 
-    const reconRes = await fetchJsonOrText(`${s.baseUrl}/api/v2/inventory-ledger/reconciliation`, 3000);
-    const rOk = reconRes.ok && (reconRes.json?.status === 'BALANCED' || reconRes.json?.balanced === true);
-    const reconSummary = reconRes.ok
-      ? JSON.stringify({
-          status: reconRes.json?.status,
-          revision: reconRes.json?.revision,
-          entryCount: reconRes.json?.entryCount,
-          issueCount: Array.isArray(reconRes.json?.issues) ? reconRes.json.issues.length : null,
-          issues: Array.isArray(reconRes.json?.issues) ? reconRes.json.issues.slice(0, 5) : reconRes.json?.issues
-        })
-      : `HTTP ${reconRes.status}`;
-    checks.push({
-      name: 'ledger_reconciliation_balanced',
-      pass: rOk,
-      detail: reconSummary
-    });
-    if (!rOk) healthy = false;
+    let bearerToken = flags['auth-token'] ? String(flags['auth-token']).trim() : '';
+    if (bearerToken) {
+      const tokenMeRes = await fetchJsonOrText(`${s.baseUrl}/api/v2/auth/me`, 3000, {
+        Authorization: `Bearer ${bearerToken}`
+      });
+      const tokenOk = tokenMeRes.ok && tokenMeRes.json?.authenticated === true;
+      checks.push({
+        name: 'auth_doctor_login',
+        pass: tokenOk,
+        detail: tokenOk
+          ? `token(${tokenMeRes.json.username || ''}, role=${tokenMeRes.json.role || ''})`
+          : `HTTP ${tokenMeRes.status}`
+      });
+      if (!tokenOk) {
+        healthy = false;
+        bearerToken = '';
+      }
+    } else {
+      const authUser = flags['auth-user'] || 'admin';
+      const authPass = flags['auth-pass'] || 'admin123';
+      const loginRes = await postJsonOrText(
+        `${s.baseUrl}/api/v2/auth/login`,
+        { username: authUser, password: authPass },
+        3000
+      );
+      const loginOk = loginRes.ok && Boolean(loginRes.json?.token);
+      checks.push({
+        name: 'auth_doctor_login',
+        pass: loginOk,
+        detail: loginOk
+          ? `user=${loginRes.json.username || authUser}, role=${loginRes.json.role || ''}`
+          : `HTTP ${loginRes.status}: ${loginRes.text || loginRes.error || ''}`
+      });
+      if (loginOk) {
+        bearerToken = loginRes.json.token;
+      } else {
+        healthy = false;
+      }
+    }
+    if (bearerToken) {
+      authHeaders = { Authorization: `Bearer ${bearerToken}` };
+    }
   }
+
+  const healthRes = await fetchJsonOrText(`${s.baseUrl}/api/health`, 3000, authHeaders);
+  const hOk = healthRes.ok && healthRes.json?.status === 'UP' && healthRes.json?.storageStatus === 'UP';
+  checks.push({
+    name: 'api_health_up',
+    pass: hOk,
+    detail: hOk
+      ? `revision=${healthRes.json.revision}, remnants=${healthRes.json.remnantsInStock}`
+      : `HTTP ${healthRes.status}`
+  });
+  if (!hOk) healthy = false;
+
+  const reconRes = await fetchJsonOrText(`${s.baseUrl}/api/v2/inventory-ledger/reconciliation`, 3000, authHeaders);
+  const rOk = reconRes.ok && (reconRes.json?.status === 'BALANCED' || reconRes.json?.balanced === true);
+  const reconSummary = reconRes.ok
+    ? JSON.stringify({
+        status: reconRes.json?.status,
+        revision: reconRes.json?.revision,
+        entryCount: reconRes.json?.entryCount,
+        issueCount: Array.isArray(reconRes.json?.issues) ? reconRes.json.issues.length : null,
+        issues: Array.isArray(reconRes.json?.issues) ? reconRes.json.issues.slice(0, 5) : reconRes.json?.issues
+      })
+    : `HTTP ${reconRes.status}`;
+  checks.push({
+    name: 'ledger_reconciliation_balanced',
+    pass: rOk,
+    detail: reconSummary
+  });
+  if (!rOk) healthy = false;
 
   const prodHashNow = sha256File(s.prodStateFile);
   const prodUntouched = prodHashNow === s.prodStateSha256Before;
@@ -538,10 +733,38 @@ async function cmdDrive(flags) {
   const env = {
     ...process.env,
     BASE_URL: s.baseUrl,
-    ...(spec.mcpSmokeEnv ? { CUTTING_TEST_API_URL: s.baseUrl } : {}),
+    ...(spec.passAuthEnv
+      ? {
+          JAR_PATH: s.jarPath,
+          AUTH_ADMIN_USER: flags['auth-user'] || 'admin',
+          AUTH_ADMIN_PASS: flags['auth-pass'] || 'admin123'
+        }
+      : {}),
     ...(pwModule ? { PLAYWRIGHT_MODULE: pwModule } : {}),
     ...(browserExe ? { CHROME_PATH: browserExe } : {})
   };
+  if (spec.mcpSmokeEnv) {
+    env.CUTTING_TEST_API_URL = s.baseUrl;
+    const effectiveApiToken = flags['api-token'] || (s.authEnabled ? process.env.CUTTING_API_TOKEN : '');
+    const effectiveAgentToken = flags['agent-token'] || (s.authEnabled ? process.env.CUTTING_AGENT_TOKEN : '');
+    const effectiveRevokeAgentId =
+      flags['revoke-agent-id'] || (s.authEnabled ? process.env.CUTTING_TEST_REVOKE_AGENT_ID : '');
+    if (effectiveApiToken) {
+      env.CUTTING_API_TOKEN = effectiveApiToken;
+    } else {
+      delete env.CUTTING_API_TOKEN;
+    }
+    if (effectiveAgentToken) {
+      env.CUTTING_AGENT_TOKEN = effectiveAgentToken;
+    } else {
+      delete env.CUTTING_AGENT_TOKEN;
+    }
+    if (effectiveRevokeAgentId) {
+      env.CUTTING_TEST_REVOKE_AGENT_ID = effectiveRevokeAgentId;
+    } else {
+      delete env.CUTTING_TEST_REVOKE_AGENT_ID;
+    }
+  }
 
   fs.mkdirSync(s.evidenceDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);

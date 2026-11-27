@@ -343,7 +343,7 @@ async function measureCanvasInteraction(page, cdp, name, prepare, steps, stepFn)
         const expectedBoundaryExclusionHeight = 15; // y=985, h=10, margin=20 => 扩边至 [965, 1015]，裁切到 startY=1000 后局部为 [0, 15]
 
         // 1.1 创建母卷，在工位起切线外沿 5mm 处录入带 20mm 安全边距的通幅疵点，并执行正式质检放行
-        await apiPost('/api/rolls', {
+        await apiPost('/api/v2/rolls', {
           rollId,
           rollModel: model,
           width: rollWidth,
@@ -352,7 +352,7 @@ async function measureCanvasInteraction(page, cdp, name, prepare, steps, stepFn)
           storageLocation: 'E2E隔离库位-A1',
           inspectionStatus: 'PENDING'
         });
-        await apiPost(`/api/rolls/${encodeURIComponent(rollId)}/inspection-defects`, {
+        await apiPost(`/api/v2/rolls/${encodeURIComponent(rollId)}/inspection-defects`, {
           width: rollWidth,
           totalLength: 10000,
           defects: [
@@ -374,7 +374,7 @@ async function measureCanvasInteraction(page, cdp, name, prepare, steps, stepFn)
           remarks: '边界20mm疵点验收合格放行'
         });
 
-        const rollAfterPass = await apiGet(`/api/rolls/${encodeURIComponent(rollId)}`);
+        const rollAfterPass = await apiGet(`/api/v2/rolls/${encodeURIComponent(rollId)}`);
         assert.equal(rollAfterPass.inspectionStatus, 'PASSED', '母卷必须处于 PASSED 状态');
         assert.ok(
           Array.isArray(rollAfterPass.defects) && rollAfterPass.defects.length === 1,
@@ -564,7 +564,7 @@ async function measureCanvasInteraction(page, cdp, name, prepare, steps, stepFn)
         const model = `MOD-${tag}`;
 
         // 2.1 建立隔离 PASSED 母卷（明确设置单价便于成本核算精确验真）
-        await apiPost('/api/rolls', {
+        await apiPost('/api/v2/rolls', {
           rollId,
           rollModel: model,
           width: 1600,
@@ -724,7 +724,7 @@ async function measureCanvasInteraction(page, cdp, name, prepare, steps, stepFn)
           operator: 'E2E报工员'
         });
 
-        const rollBeforeDisp = await apiGet(`/api/rolls/${encodeURIComponent(rollId)}`);
+        const rollBeforeDisp = await apiGet(`/api/v2/rolls/${encodeURIComponent(rollId)}`);
         const usedLenBeforeDisp = Number(rollBeforeDisp.usedLength);
         assert.ok(usedLenBeforeDisp >= 800 - 0.1, '完工报工后母卷已用长度应推进至 >= 800mm');
 
@@ -747,7 +747,7 @@ async function measureCanvasInteraction(page, cdp, name, prepare, steps, stepFn)
         );
         assert.ok(taskAPiece, '未在报工明细中找到属于任务 A 的可复检合格裁片');
 
-        await apiPost(`/api/cutting/reports/${encodeURIComponent(planId)}/quality-dispositions`, {
+        await apiPost(`/api/v2/cutting/reports/${encodeURIComponent(planId)}/quality-dispositions`, {
           operationId: randomUUID(),
           expectedRevision: reportObj.qualityRevision ?? 0,
           pieceId: Number(taskAPiece.pieceId),
@@ -758,7 +758,7 @@ async function measureCanvasInteraction(page, cdp, name, prepare, steps, stepFn)
         });
 
         // 校验铁律：复检判废不恢复已消耗母卷长度
-        const rollAfterDisp = await apiGet(`/api/rolls/${encodeURIComponent(rollId)}`);
+        const rollAfterDisp = await apiGet(`/api/v2/rolls/${encodeURIComponent(rollId)}`);
         assert.equal(
           Number(rollAfterDisp.usedLength),
           usedLenBeforeDisp,

@@ -10,6 +10,7 @@ const MODERN_ROUTES = [
   ['demand-library', '需求库'],
   ['clusters', '需求模板库'],
   ['workbench', '搭切工作台'],
+  ['slitting', '搭切工作台'],
   ['results', '结果管理'],
   ['reconciliation', '复检补排与对账'],
   ['cost-analytics', '成本与备料'],
@@ -18,7 +19,10 @@ const MODERN_ROUTES = [
   ['documents', '库存单据'],
   ['garment', '唛架幅宽试算'],
   ['showcase', '能力展示'],
-  ['settings', '设置']
+  ['settings', '设置'],
+  ['profile', '个人中心'],
+  ['users', '用户与 AI Agent 管理'],
+  ['audit-logs', '全站操作审计']
 ];
 
 const LEGACY_REDIRECTS = [
@@ -52,6 +56,15 @@ const LEGACY_REDIRECTS = [
     }
   }
   try {
+    const authRes = await fetch(base + '/api/v2/auth/me');
+    assert.equal(authRes.status, 200, 'auth/me 探针必须返回 200');
+    const authMe = await authRes.json();
+    assert.equal(
+      authMe.enabled,
+      false,
+      'app-ui-preview 仅用于免登模式（auth.enabled=false）；认证模式请运行 auth-rbac-agent-audit'
+    );
+
     for (const [route, heading] of MODERN_ROUTES) {
       await check('route loads: ' + route, async () => {
         await page.goto(base + '/app/#/' + route);
@@ -92,6 +105,18 @@ const LEGACY_REDIRECTS = [
       await page.getByRole('link', { name: '前往搭切工作台 →', exact: true }).click();
       await page.getByRole('heading', { name: '搭切工作台', exact: true, level: 1 }).waitFor();
       await page.unroute('**/api/v2/schemes*');
+    });
+
+    await check('login route renders local-mode prompt without nav and jumps to workbench', async () => {
+      await page.goto(base + '/app/#/login');
+      await page.getByRole('heading', { name: 'CutPlan 工业排产与裁切工作台', exact: true, level: 1 }).waitFor();
+      await page.getByRole('heading', { name: '企业认证登录', exact: true, level: 2 }).waitFor();
+      assert.equal(await page.locator('nav').count(), 0);
+      await page.getByText('当前节点未启用强制认证（cutdemo.auth.enabled=false）', { exact: true }).waitFor();
+      await page.getByRole('button', { name: '进入工作台', exact: true }).click();
+      await page.waitForFunction(() => location.hash === '#/workbench');
+      await page.getByRole('heading', { name: '搭切工作台', exact: true, level: 1 }).waitFor();
+      assert.deepEqual(errors, []);
     });
 
     await check('browsing has no business writes or script errors', async () => {

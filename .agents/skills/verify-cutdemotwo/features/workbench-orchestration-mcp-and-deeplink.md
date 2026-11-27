@@ -1,9 +1,10 @@
 ---
 routes:
   - workbench
+  - slitting
 ---
 
-# 工作台编排求解、25 工具工业 MCP、草案收件箱与深链闭环
+# 工作台编排求解、1D 分条排产、25 工具工业 MCP 与草案收件箱闭环
 
 验证阶段一（`542fa5c..c6c5a94`）与路线 A 阶段二新增的外部 Harness 协同与工作台闭环：后端 `/api/v2/workbench/**` 9 端点无环编排求解、多母卷连续接力批量草案、草案列表/确认/作废与滚动清理（File `.drafts/` 与 MySQL V12）→ `integrations/mcp` 25 工具四开关权限隔离、零依赖 PNG 蓝图预览与显式故障回报 → 浏览器打开 `#/workbench?taskId=...&resultId=...` / `&draftId=...` 深链或在工作台「待审草案」收件箱抽屉按批组浏览、预览、作废与「选定此方案」联动确认落库。
 
@@ -20,6 +21,10 @@ routes:
 - `DEEP-01`：打开 `#/workbench?taskId=...&resultId=...` 渲染 `[data-testid="external-plan-banner"]`（「外部试排方案预览（尚未锁库）」）与四层 Konva 蓝图，零写库请求。
 - `DEEP-02`：打开 `#/workbench?taskId=...&draftId=...` 展示持久化草案号、有效期、同批组切换条（`[data-testid="banner-sibling-*"]`）与风险预检列表。
 - `DEEP-03`：关联任务或库存版本变更后重新打开草案深链，触发 `[data-testid="external-plan-stale-alert"]` 醒目版本漂移告警条；已作废草案展示 `[data-testid="external-plan-discarded-alert"]` 并禁用「选定此方案」。
+- `DEEP-04`：打开有效待确认草案深链 `#/workbench?taskId=...&draftId=...` 并点击工作台「选定此方案」，触发 `POST /api/v2/schemes/confirm` 携带 `draftId` 联动落库回写 `CONFIRMED`（按钮转为 `查看结果 · <schemeId>`），且二次作废该草案返回 `409 DRAFT_ALREADY_CONFIRMED`。
+- `SLIT-01`：访问 `#/slitting`（`CuttingWorkbenchPage` 强制 `1D` 模式，`一维分切` 激活），支持加载/新增 `SLITTING_1D` 需求规格、`VIRTUAL_ROLL` 与 `STOCK_ROLL` 选材及刀架物理约束配置。
+- `SLIT-02`：1D 边界拦截：切边之和超母卷幅宽、条宽小于机台最小物理刀距、危险细边丝禁区仅填下限缺上限时前端零请求拦截提示，且后端 `POST /api/v2/optimization-jobs`（`SLITTING_1D`）对切边越界、单边禁区与超产超限（`> 10000`）返回 `400 INVALID_INPUT`。
+- `SLIT-03`：1D 选用已放行含疵点实卷求解并选定落库，待排量 `openTotal → plannedTotal` 精准扣减，并在 `#/results/<schemeId>` 导出 `分切机PLC排刀配方-<schemeId>.csv`（UTF-8 BOM 与 9 列中文表头）。
 - `INBOX-01`：工作台顶栏「待审草案」计数微标按钮（`[data-testid="draft-inbox-trigger"]`）打开滑出抽屉（`[data-testid="draft-inbox-drawer"]`），支持状态过滤、批组聚合与一键跳转工作台画布预览。
 - `INBOX-02`：抽屉与顶部横幅支持打开原生 `<dialog>` 作废弹窗（`DraftDiscardDialog`），必填/快捷选择 `discardReason` 后原子作废且零扣库存。
 - `INBOX-03`：工作台「多料联排」总览卡提供「生成联排草案组」次级按钮（`[data-testid="generate-multi-drafts-btn"]`）触发跨卷接力批量草案并在预览后通过「选定此方案」携带 `draftId` 自动闭环回写 `CONFIRMED`。
@@ -33,14 +38,20 @@ routes:
 
 Preconditions: 已通过 `verify-ctl.mjs launch` 启动非 `8080` 免登隔离实例且 `doctor` 返回 `HEALTHY`（同一次 shell 会话内串行执行）。
 
-- **驱动 MCP 22 工具真机闭环（17 项，零浏览器依赖）**：
+- **驱动 MCP 25 工具真机闭环（22 项，零浏览器依赖）**：
   - 命令：`node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs drive --session "<sessionFile>" --script mcp-live-smoke`
-  - 可观测结果：退出码 `0`；输出 JSON 为 `executed: 17, passed: 17, failed: 0, skipped: 0`，`plan1PngBytes > 0`、`previewPngBytes > 0` 且 `inventoryUnchanged: true`。
-- **驱动深链预览、风险横幅、版本漂移与服装自动分床（4 项 Playwright 断言）**：
+  - 可观测结果：退出码 `0`；输出 JSON 为 `executed: 22, passed: 22, failed: 0, skipped: 0`，涵盖 25 工具发现、`list_draft_schemes`、`plan_multi_material_drafts`（批量草案 + PNG 预览）、`discard_draft_scheme` 正向作废与 `409` 冲突透传，且 `inventoryUnchanged: true`。
+- **驱动深链预览、联动落库、版本漂移与服装自动分床（6 项 Playwright 断言）**：
   - 命令：`node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs drive --session "<sessionFile>" --script deeplink-and-cutplan`
-  - 可观测结果：退出码 `0`；输出 JSON 为 `executed: 4, passed: 4, failed: 0, skipped: 0`，零未捕获页面异常、零原生弹窗。
+  - 可观测结果：退出码 `0`；输出 JSON 为 `executed: 6, passed: 6, failed: 0, skipped: 0`（覆盖 `GARM-06..07` 与 `DEEP-01..04`），零未捕获页面异常、零原生弹窗。
+- **驱动工作台待确认草案收件箱与多料联排批量草案闭环（21 项 Playwright 断言）**：
+  - 命令：`node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs drive --session "<sessionFile>" --script drafts-inbox-and-relay`
+  - 可观测结果：退出码 `0`；结果 JSON 输出 `executed: 21, passed: 21, failed: 0, skipped: 0`，覆盖收件箱 40 条分页与加载更多、状态过滤、`CONFIRMED`/`DISCARDED`/`EXPIRED`、`<dialog>` 原因必填与 `409` 冲突、多料头+多母卷接力 `batchGroupId` 批量草案与 `Idempotency-Key` 幂等/冲突，且未确认前物理库存零变动。
+- **驱动 `#/slitting` 1D 分条排产与 `#/inspection` 质检库存闭环（20 项 Playwright 断言）**：
+  - 命令：`node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs drive --session "<sessionFile>" --script inspection-and-slitting`
+  - 可观测结果：退出码 `0`；结果 JSON 输出 `executed: 20, passed: 20, failed: 0, skipped: 0`（其中 F07 10 项覆盖 `#/slitting` 路由、1D 规格录入、`VIRTUAL_ROLL`/`STOCK_ROLL` 求解、物理刀距/切边/禁区/超产拦截、选定落库及 `#/results/<schemeId>` PLC 配方 CSV 导出）。
 - **离线 MCP 契约与 PNG 单测**：
-  - 命令：`npm test --prefix integrations/mcp`（21/21 全绿）。
+  - 命令：`npm test --prefix integrations/mcp`（25/25 全绿）。
 
 ## Gotchas
 

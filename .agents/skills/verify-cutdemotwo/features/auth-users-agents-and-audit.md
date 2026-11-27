@@ -25,18 +25,20 @@ routes:
 
 ## Driving it with HTTP / `verify-ctl.mjs`
 
-Preconditions: 使用独立非 `8080` 端口并附加 `--auth` 启动隔离实例：`node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs launch --port 18092 --auth`，并用 `doctor` 确认 `auth_endpoint_enabled` 为 `true`。
+Preconditions: 使用独立非 `8080` 端口并附加 `--auth`（以及按需传 `--jvm-opts "-Xms64m -Xmx256m"`）启动隔离实例：
+`node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs launch --port 18092 --auth --jvm-opts "-Xms64m -Xmx256m"`
+并用 `doctor` 带着管理员凭据确认 `auth_endpoint_enabled`、`auth_doctor_login`、`api_health_up` 与 `ledger_reconciliation_balanced` 全通过：
+`node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs doctor --session "<authSessionFile>" --auth-user admin --auth-pass admin123`
 
-- **验证独立登录与 RBAC 界面隔离**：
-  - 使用 `admin` / `admin123` 登录 `POST /api/v2/auth/login` 获取管理员令牌；
-  - 请求 `GET /api/v2/users`、`GET /api/v2/agents`、`GET /api/v2/audit-logs?page=0&size=20` → 期望均返回 `200`；
-  - 使用 `planner` / `planner123` 登录后请求上述 3 个端点 → 期望均返回 `403 FORBIDDEN`，并在审计日志中生成 `action="ACCESS_DENIED"` 记录。
-- **验证 Agent 凭证签发、作用域拦截与吊销**：
-  - 管理员调用 `POST /api/v2/agents`（携带 `{"name":"verify-agent","scopes":["DEMAND_READ","PLAN_COMPUTE"],"ttlHours":24}`）→ 返回 `201` 及一次性 `token`；
-  - 使用该 Agent Token 调用 `GET /api/v2/demand-pool` → `200`；调用 `POST /api/v2/schemes/confirm` 或 `POST /api/v2/inventory-receipts` → `403 FORBIDDEN`；
-  - 调用 `POST /api/v2/agents/{agentId}/revoke` 吊销后再持原 Token 请求 `GET /api/v2/demand-pool` → `401 UNAUTHORIZED`。
-- **验证主动登出与改密令牌失效**：
-  - 持有效用户 Token 调用 `POST /api/v2/auth/logout` 返回 `{"revoked":true}`，再持同 Token 请求 `GET /api/rolls` → `401 UNAUTHORIZED`。
+- **一键驱动全链路 Playwright + MCP + `-Xmx256m` 黑盒端到端验收（`auth-rbac-agent-audit`，34 项全真实用例，零跳过）**：
+  - 命令：`node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs drive --session "<authSessionFile>" --script auth-rbac-agent-audit`
+  - 可观测结果：退出码 `0`；输出 `.result.json` 为 `executed: 34, passed: 34, failed: 0, skipped: 0`（`prodInventoryUntouched: true`、`prodDraftsUntouched: true`），覆盖：
+    - **F10（5 正 + 5 负）**：`#/login` 重定向回跳与开放重定向清洗、`#/profile` 信息与自主改密重登、`#/users` 新建/编辑/重置/启停、401 防枚举、改密校验、登出/改密/禁用后旧 Token 立即 401、最后 `ADMIN` 防禁用 409、非 `ADMIN` 双层 403；
+    - **F11（5 正 + 5 负）**：5 角色各自职责写放行、`#/users` 签发受限 Agent（`[data-testid="agent-once-token"]`）、Agent REST + MCP stdio 读写与生成草案、Bearer SSE `200 text/event-stream`、`#/audit-logs` 多维检索与脱敏详情、无/篡改 Token 401、跨职能与矩阵/编码路径绕过 403、Agent REST+MCP 越权 403、吊销 Agent 后 REST/SSE/MCP 立即 401、普通角色直访 `#/audit-logs` 403 与 `ACCESS_DENIED` 审计留痕；
+    - **F12（5 正 + 5 负）**：独立临时目录与动态空闲端口构造批量单据与 >=2,500 条审计后以 `-Xms64m -Xmx256m -XX:+ExitOnOutOfMemoryError` 冷启动 `<=30s`、总账 `BALANCED`、多页低延迟遍历、12 路并发读写无 OOM、`/actuator/prometheus` 核实 `jvm_memory_max_bytes <= 268435456`、恶意极大 `size/limit` 截断与 `400` 拦截、高页码/负游标、空筛选 UI/API、非 `ADMIN`/未登录访问 `/actuator/prometheus` `403`/`401`、重启持久化一致性；
+    - **Tier 3（4 组跨特性组合）**：`T3-F10×F11-01`（账号禁用实时踢下线与审计）、`T3-F11×F08-01`（Agent MCP 提案 × 人类确认落库责任链）、`T3-F12×F11-01`（`-Xmx256m` 历史积压下多角色协同审计）与 `T3-F10×F02-01`（13 vs 15 导航权限可见性差异）。
+- **协同驱动 MCP `--auth` 作用域验收（`mcp-live-smoke`）**：
+  - 传入控制面令牌 `CUTTING_API_TOKEN` 与受限 Agent 令牌 `CUTTING_AGENT_TOKEN` 驱动 `verify-ctl.mjs drive --session "<authSessionFile>" --script mcp-live-smoke`，验证受限 Agent 正常试排与 `403` 防火墙拦截。
 
 ## Gotchas
 

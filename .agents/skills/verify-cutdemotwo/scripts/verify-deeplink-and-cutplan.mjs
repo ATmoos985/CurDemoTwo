@@ -1,23 +1,102 @@
 #!/usr/bin/env node
 /**
- * 技能自有真机补充驱动：覆盖服装第二 Tab 订单自动分床（GARM-06）
- * 以及工作台 URL 深链（resultId 只读预览、draftId 风险预检、任务变更触发 stale 红框告警，DEEP-01..03）。
+ * 技能自有真机补充驱动：覆盖服装第二 Tab 订单自动分床（GARM-06）与转需求池联动（GARM-07）
+ * 以及工作台 URL 深链（resultId 只读预览、draftId 风险预检、任务变更触发 stale 红框告警、
+ * 有效草案点击「选定此方案」联动 CONFIRMED + 409 冲突阻断，DEEP-01..04）。
  * 严禁连接正式 8080 端口。
  */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const require = createRequire(import.meta.url);
-const baseUrl = String(process.env.BASE_URL || '').trim().replace(/\/$/, '');
-if (!baseUrl) throw new Error('必须提供非 8080 隔离实例环境变量 BASE_URL');
+
+function parseCliArgs(argv) {
+  const out = {};
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i];
+    if (!token.startsWith('--')) continue;
+    const key = token.slice(2);
+    const val = argv[i + 1];
+    if (val !== undefined && !val.startsWith('--')) {
+      out[key] = val;
+      i++;
+    } else {
+      out[key] = 'true';
+    }
+  }
+  return out;
+}
+
+const cli = parseCliArgs(process.argv.slice(2));
+const baseUrl = String(cli['base-url'] || process.env.BASE_URL || '').trim().replace(/\/$/, '');
+if (!baseUrl) throw new Error('必须提供非 8080 隔离实例环境变量 BASE_URL 或参数 --base-url');
 const parsed = new URL(baseUrl);
 if (!['127.0.0.1', 'localhost'].includes(parsed.hostname) || parsed.port === '8080' || parsed.port === '') {
   throw new Error(`严禁连接正式服务或非本机地址: ${baseUrl}`);
 }
+const resultFile = String(cli['result-file'] || process.env.RESULT_FILE || '').trim();
 
-const pwMod = process.env.PLAYWRIGHT_MODULE || 'playwright';
-const { chromium } = require(pwMod);
+function resolvePlaywrightModule() {
+  if (process.env.PLAYWRIGHT_MODULE) return process.env.PLAYWRIGHT_MODULE;
+  const home = os.homedir();
+  for (const name of ['playwright', 'playwright-core']) {
+    try {
+      return require.resolve(name, { paths: [REPO_ROOT, path.join(REPO_ROOT, 'frontend')] });
+    } catch {}
+  }
+  const candidates = [
+    path.join(home, '.cache', 'codex-runtimes', 'codex-primary-runtime', 'dependencies', 'node', 'node_modules', 'playwright'),
+    path.join(home, '.cache', 'codex-runtimes', 'codex-primary-runtime', 'dependencies', 'node', 'node_modules', 'playwright-core'),
+    path.join(home, 'AppData', 'Roaming', 'npm', 'node_modules', 'openclaw', 'node_modules', 'playwright-core'),
+    path.join(home, 'AppData', 'Roaming', 'npm', 'node_modules', 'playwright'),
+    path.join(home, 'AppData', 'Roaming', 'npm', 'node_modules', 'playwright-core')
+  ];
+  for (const cand of candidates) {
+    if (fs.existsSync(cand)) {
+      try {
+        return require.resolve(cand);
+      } catch {
+        return cand;
+      }
+    }
+  }
+  return 'playwright';
+}
+
+function resolveChromePath() {
+  if (process.env.CHROME_PATH && fs.existsSync(process.env.CHROME_PATH)) {
+    return process.env.CHROME_PATH;
+  }
+  const candidates =
+    process.platform === 'win32'
+      ? [
+          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+          'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+          'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
+        ]
+      : process.platform === 'darwin'
+        ? [
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'
+          ]
+        : ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return undefined;
+}
+
+const { chromium } = require(resolvePlaywrightModule());
+const executablePath = resolveChromePath();
 
 async function apiJson(path, init = {}) {
   const res = await fetch(`${baseUrl}${path}`, {
@@ -46,7 +125,7 @@ async function waitJobSucceeded(jobId) {
 
 const browser = await chromium.launch({
   headless: true,
-  ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {})
+  ...(executablePath ? { executablePath } : {})
 });
 
 const results = [];
@@ -85,6 +164,36 @@ try {
     const keptStyle = await page.locator('select').first().inputValue();
     assert.equal(keptStyle, 'shirt-three', '切回第一 Tab 必须保留原已选服装示例');
     return { keptStyle, auditText: auditText.slice(0, 80) };
+  });
+
+  // 1.5 GARM-07: 服装分床点击「生成待排需求族并转工作台 →」写需求池并跳转工作台
+  await runStep('GARM-07: 服装自动分床生成待排需求族写库并跳转工作台加载', async () => {
+    const toggle = page.locator('[aria-label="服装唛架功能切换"]');
+    await toggle.getByRole('button', { name: /订单自动分床/ }).click();
+    const sendBtn = page.getByRole('button', { name: /生成待排需求族并转工作台/ });
+    await sendBtn.waitFor({ state: 'visible', timeout: 10000 });
+
+    const [demandRes] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.url().includes('/api/v2/demand-pool') &&
+          res.request().method() === 'POST'
+      ),
+      sendBtn.click()
+    ]);
+    assert.equal(demandRes.status(), 200, '点击转工作台必须成功调用 POST /api/v2/demand-pool 返回 200');
+    const createdFamily = await demandRes.json();
+    assert.ok(createdFamily?.id, '创建的需求族必须包含 id');
+    assert.ok(Array.isArray(createdFamily?.lines) && createdFamily.lines.length > 0, '创建的需求族必须包含有效裁片明细 lines');
+
+    await page.waitForFunction(() => window.location.hash.startsWith('#/workbench'), null, { timeout: 15000 });
+    await page.waitForSelector('h1', { timeout: 15000 });
+    const wbBody = await page.locator('body').innerText();
+    assert.ok(
+      wbBody.includes(createdFamily.name) || wbBody.includes(createdFamily.id),
+      `工作台应加载新生成的服装需求族: ${createdFamily.name} (${createdFamily.id})`
+    );
+    return { createdTaskId: createdFamily.id, name: createdFamily.name, lineCount: createdFamily.lines.length, orderedTotal: createdFamily.orderedTotal };
   });
 
   // 准备隔离 2D 需求任务 + 后端编排试排 + 持久化草案
@@ -203,22 +312,139 @@ try {
     return { draftId, staleReasons: liveDraft.data.staleReasons, staleAlert: alertText.slice(0, 100) };
   });
 
+  // 5. DEEP-04: 有效草案深链在工作台点击「选定此方案」联动回写 CONFIRMED + 二次作废 409
+  await runStep('DEEP-04: 有效草案深链选定此方案联动回写 CONFIRMED 与二次作废 409 冲突', async () => {
+    const created2 = await apiJson('/api/v2/demand-pool', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: `深链确认闭环-${tag}`,
+        materialModel: `MOD-DEEP2-${tag}`,
+        dimension: 'RECT_2D',
+        bedLengthMm: 3000,
+        trimStartMm: 0,
+        pieceGapMm: 10,
+        demands: [
+          { id: 1, name: '主片', width: 800, length: 1000, quantity: 2, allowRotation: true }
+        ]
+      })
+    });
+    assert.equal(created2.status, 200, '创建 DEEP-04 独立任务必须成功');
+    const taskId2 = created2.data.id;
+
+    const sub2 = await apiJson(`/api/v2/workbench/tasks/${encodeURIComponent(taskId2)}/plan-jobs`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': `deeplink-confirm-${tag}` },
+      body: JSON.stringify({
+        materialType: 'FREE_CANVAS',
+        widthMm: 2000,
+        windowLengthMm: 3500,
+        processMode: 'GUILLOTINE',
+        objective: 'MAXIMIZE_PIECE_AREA',
+        pieceGapMm: 10,
+        timeLimitSeconds: 5
+      })
+    });
+    assert.equal(sub2.status, 202, '提交 DEEP-04 试排作业必须返回 202');
+    const job2 = await waitJobSucceeded(sub2.data.job.id);
+    assert.equal(job2.state, 'SUCCEEDED', `DEEP-04 试排未成功: ${JSON.stringify(job2)}`);
+    const resultId2 = String(job2.resultRef || job2.id).replace(/^\/api\/v2\/optimization-results\//, '');
+
+    const draft2Res = await apiJson('/api/v2/workbench/drafts', {
+      method: 'POST',
+      body: JSON.stringify({
+        resultId: resultId2,
+        taskId: taskId2,
+        materialType: 'FREE_CANVAS',
+        note: 'DEEP-04 正式确认联动验证',
+        ttlSeconds: 600
+      })
+    });
+    assert.equal(draft2Res.status, 201, '创建 DEEP-04 持久化草案必须返回 201');
+    const draftConfirmId = draft2Res.data.draftId;
+
+    await page.goto(
+      `${baseUrl}/app/#/workbench?taskId=${encodeURIComponent(taskId2)}&draftId=${encodeURIComponent(draftConfirmId)}`,
+      { waitUntil: 'networkidle' }
+    );
+    const banner = page.locator('[data-testid="external-plan-banner"]');
+    await banner.waitFor({ state: 'visible', timeout: 15000 });
+    assert.equal(
+      await page.locator('[data-testid="external-plan-stale-alert"]').count(),
+      0,
+      '有效未修改任务草案不得显示 stale 告警'
+    );
+
+    const ctaBtn = page.locator('button.value-primary-cta');
+    await ctaBtn.waitFor({ state: 'visible', timeout: 15000 });
+    assert.equal(await ctaBtn.isDisabled(), false, '有效草案选定此方案按钮必须可用');
+
+    const [confirmReq, confirmResp] = await Promise.all([
+      page.waitForRequest(
+        (req) => req.url().includes('/api/v2/schemes/confirm') && req.method() === 'POST'
+      ),
+      page.waitForResponse(
+        (res) => res.url().includes('/api/v2/schemes/confirm') && res.request().method() === 'POST'
+      ),
+      ctaBtn.click()
+    ]);
+
+    const reqBody = confirmReq.postDataJSON();
+    assert.equal(reqBody?.draftId, draftConfirmId, 'confirm 请求体必须携带 draftId');
+    assert.equal(confirmResp.status(), 200, 'confirm 必须返回 200');
+    const respJson = await confirmResp.json();
+    const schemeId = respJson?.scheme?.id;
+    assert.ok(schemeId, 'confirm 必须返回 scheme.id');
+    assert.equal(respJson?.draft?.status, 'CONFIRMED', '响应 draft.status 必须为 CONFIRMED');
+    assert.equal(respJson?.draft?.confirmedSchemeId, schemeId, 'draft.confirmedSchemeId 必须等于 scheme.id');
+
+    await page.waitForFunction(
+      (sid) => {
+        const b = document.querySelector('[data-testid="external-plan-banner"]');
+        const btn = document.querySelector('button.value-primary-cta');
+        return (
+          b &&
+          b.textContent?.includes('外部试排方案已正式落库') &&
+          btn &&
+          btn.textContent?.includes(`查看结果 · ${sid}`)
+        );
+      },
+      schemeId,
+      { timeout: 15000 }
+    );
+
+    const liveDraft = await apiJson(`/api/v2/workbench/drafts/${encodeURIComponent(draftConfirmId)}`);
+    assert.equal(liveDraft.status, 200);
+    assert.equal(liveDraft.data?.status, 'CONFIRMED');
+    assert.equal(liveDraft.data?.confirmedSchemeId, schemeId);
+
+    const discardAfterConfirm = await apiJson(
+      `/api/v2/workbench/drafts/${encodeURIComponent(draftConfirmId)}/discard`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ reason: '已确认草案禁止作废验证' })
+      }
+    );
+    assert.equal(discardAfterConfirm.status, 409, '对已 CONFIRMED 草案作废必须返回 409');
+    assert.equal(discardAfterConfirm.data?.code, 'DRAFT_ALREADY_CONFIRMED');
+
+    return { taskId2, draftConfirmId, confirmedSchemeId: schemeId, discardConflictCode: discardAfterConfirm.data?.code };
+  });
+
   assert.equal(pageErrors.length, 0, `页面出现未捕获脚本异常: ${pageErrors.join(' | ')}`);
   assert.equal(nativeDialogs.length, 0, `页面触发原生弹窗: ${nativeDialogs.join(' | ')}`);
 
-  console.log(
-    JSON.stringify(
-      {
-        executed: results.length,
-        passed: results.length,
-        failed: 0,
-        skipped: 0,
-        results
-      },
-      null,
-      2
-    )
-  );
+  const summary = {
+    executed: results.length,
+    passed: results.length,
+    failed: 0,
+    skipped: 0,
+    results
+  };
+  if (resultFile) {
+    fs.mkdirSync(path.dirname(resultFile), { recursive: true });
+    fs.writeFileSync(resultFile, JSON.stringify(summary, null, 2), 'utf8');
+  }
+  console.log(JSON.stringify(summary, null, 2));
 } finally {
   await browser.close();
 }
