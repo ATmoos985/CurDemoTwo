@@ -481,13 +481,13 @@ test('CLI 参数校验、JSON/MD 输出写文件与真实仓库全量闭环门�
     assert.equal(res.status, 0, res.stdout + res.stderr);
     const parsed = JSON.parse(fs.readFileSync(jsonOut, 'utf8'));
     assert.equal(parsed.summary.passed, true, JSON.stringify(parsed.violations));
-    assert.equal(parsed.dimensions.testCoverage.taggedTestClassCount, 19);
-    assert.equal(parsed.dimensions.apiContract.v2EndpointCount, 69);
+    assert.equal(parsed.dimensions.testCoverage.taggedTestClassCount, 21);
+    assert.equal(parsed.dimensions.apiContract.v2EndpointCount, 80);
     assert.equal(parsed.dimensions.apiContract.legacyEndpointCount, 36);
-    assert.equal(parsed.dimensions.apiContract.openapiOperationCount, 71);
+    assert.equal(parsed.dimensions.apiContract.openapiOperationCount, 82);
     assert.equal(parsed.dimensions.archAndLargeFiles.totalCycles, 0);
-    assert.equal(parsed.dimensions.archAndLargeFiles.currentLargeFileCount, 30);
-    assert.equal(parsed.dimensions.verifyMap.knownModernRouteCount, 14);
+    assert.equal(parsed.dimensions.archAndLargeFiles.currentLargeFileCount, 28);
+    assert.equal(parsed.dimensions.verifyMap.knownModernRouteCount, 18);
     assert.match(formatMarkdownReport(parsed), /四大防遗漏工作流闭环维度全部通过/);
   } finally {
     fs.rmSync(outTmp, { recursive: true, force: true });

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { parseHashRoute, resolveLegacyHashRedirect } from '../routeUtils';
+import {
+  KNOWN_MODERN_ROUTES,
+  buildLoginHash,
+  parseHashRoute,
+  resolveLegacyHashRedirect,
+  sanitizeRedirectHash
+} from '../routeUtils';
 
 describe('现代路由解析与已下线旧兼容路由自动重定向', () => {
   it('将 6 个已下线旧路由收敛重定向至对应现代主路由并保留可用上下文', () => {
@@ -130,5 +136,33 @@ describe('现代路由解析与已下线旧兼容路由自动重定向', () => {
       draftIdQuery: ''
     });
     expect(resolveLegacyHashRedirect('#/workbench?taskId=T-1&resultId=R-1')).toBeNull();
+  });
+
+  it('注册 4 个安全路由并支持 redirect 解析与防死循环清洗', () => {
+    expect(KNOWN_MODERN_ROUTES).toEqual(
+      expect.arrayContaining(['login', 'profile', 'users', 'audit-logs'])
+    );
+    expect(KNOWN_MODERN_ROUTES).toHaveLength(18);
+
+    expect(
+      parseHashRoute('#/login?redirect=%23%2Fworkbench%3FtaskId%3DT-8')
+    ).toMatchObject({
+      page: 'login',
+      redirectQuery: '#/workbench?taskId=T-8'
+    });
+    expect(parseHashRoute('#/profile').page).toBe('profile');
+    expect(parseHashRoute('#/users').page).toBe('users');
+    expect(parseHashRoute('#/audit-logs').page).toBe('audit-logs');
+
+    expect(sanitizeRedirectHash('#/results?taskId=T-1')).toBe('#/results?taskId=T-1');
+    expect(sanitizeRedirectHash('#/login')).toBe('#/workbench');
+    expect(sanitizeRedirectHash('#/login?redirect=%23%2Fusers')).toBe('#/workbench');
+    expect(sanitizeRedirectHash('https://evil.example/phish')).toBe('#/workbench');
+    expect(sanitizeRedirectHash('#//evil.example')).toBe('#/workbench');
+    expect(sanitizeRedirectHash('')).toBe('#/workbench');
+
+    expect(buildLoginHash('#/users')).toBe('#/login?redirect=%23%2Fusers');
+    expect(buildLoginHash('#/login')).toBe('#/login');
+    expect(buildLoginHash('')).toBe('#/login');
   });
 });

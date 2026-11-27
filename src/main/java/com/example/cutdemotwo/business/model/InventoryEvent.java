@@ -19,6 +19,24 @@ public record InventoryEvent(String id, long sequence, String schemaVersion, Str
                 action,businessId,now,revision,entries)));
         return List.copyOf(result);
     }
+    public static List<InventoryEvent> appendDelta(long priorOutboxSize, List<InventoryLedgerEntry> appendedLedger,
+            String action, String businessId, long now, long revision) {
+        if (appendedLedger == null || appendedLedger.isEmpty()) {
+            return List.of();
+        }
+        var result = new ArrayList<InventoryEvent>();
+        var transactions = new LinkedHashMap<String, List<InventoryLedgerEntry>>();
+        for (var entry : appendedLedger) {
+            if ("MIGRATION_OPENING".equals(entry.eventType()) || "SYSTEM_DEMO".equals(entry.actor())) continue;
+            transactions.computeIfAbsent(entry.transactionId(), id -> new ArrayList<>()).add(entry);
+        }
+        long seq = priorOutboxSize;
+        for (var e : transactions.entrySet()) {
+            result.add(new InventoryEvent(e.getKey(), ++seq, "1", "INTERNAL",
+                    action, businessId, now, revision, e.getValue()));
+        }
+        return List.copyOf(result);
+    }
     public static void requireAppendOnly(List<InventoryEvent> previous,List<InventoryEvent> next) {
         if(next.size()<previous.size() || !next.subList(0,previous.size()).equals(previous))
             throw new IllegalStateException("集成事件不可修改或删除");

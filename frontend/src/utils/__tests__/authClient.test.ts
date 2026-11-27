@@ -8,6 +8,7 @@ import {
   idempotentJsonPost,
   installAuthFetchInterceptor,
   loginWithCredentials,
+  logoutServer,
   setAuthToken,
   shouldAttachAuthToken
 } from '../authClient';
@@ -108,17 +109,48 @@ describe('authClient 企业认证助手与双通道幂等提交', () => {
         JSON.stringify({
           enabled: true,
           authenticated: true,
-          username: 'planner01',
-          displayName: '排产李工',
-          role: 'PLANNER',
-          roles: ['PLANNER']
+          username: 'agent:AGT-001',
+          displayName: '排产助手',
+          role: 'AGENT',
+          roles: ['AGENT'],
+          actorType: 'AGENT',
+          agentId: 'AGT-001',
+          scopes: ['DEMAND_READ', 'PLAN_COMPUTE'],
+          expiresAt: '2026-11-28T00:00:00Z'
         }),
         { status: 200 }
       )) as any);
     expect(meEnabled.enabled).toBe(true);
     expect(meEnabled.authenticated).toBe(true);
-    expect(meEnabled.displayName).toBe('排产李工');
-    expect(meEnabled.role).toBe('PLANNER');
+    expect(meEnabled.displayName).toBe('排产助手');
+    expect(meEnabled.role).toBe('AGENT');
+    expect(meEnabled.actorType).toBe('AGENT');
+    expect(meEnabled.agentId).toBe('AGT-001');
+    expect(meEnabled.scopes).toEqual(['DEMAND_READ', 'PLAN_COMPUTE']);
+    expect(meEnabled.expiresAt).toBe('2026-11-28T00:00:00Z');
+  });
+
+  it('logoutServer 调用 /api/v2/auth/logout 吊销服务端令牌并在异常时仍清空本地存储', async () => {
+    setAuthToken('tok-to-revoke');
+    const calls: { url: string; method?: string; auth?: string | null }[] = [];
+    await logoutServer((async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({
+        url: String(input),
+        method: init?.method,
+        auth: new Headers(init?.headers).get('Authorization')
+      });
+      return new Response(JSON.stringify({ revoked: true }), { status: 200 });
+    }) as any);
+    expect(calls).toEqual([
+      { url: '/api/v2/auth/logout', method: 'POST', auth: 'Bearer tok-to-revoke' }
+    ]);
+    expect(getAuthToken()).toBeNull();
+
+    setAuthToken('tok-net-fail');
+    await logoutServer((async () => {
+      throw new Error('network offline');
+    }) as any);
+    expect(getAuthToken()).toBeNull();
   });
 
   it('loginWithCredentials 成功后落盘令牌，失败抛出清晰中文错误', async () => {

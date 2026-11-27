@@ -350,6 +350,8 @@ class WorkbenchOrchestrationTests {
         // 2. 已报废母卷 SCRAPPED -> 422 MATERIAL_NOT_READY
         MotherRollInfo scrappedRoll = new MotherRollInfo("ROLL-SCRAP-" + UUID.randomUUID().toString().substring(0, 6), "TC-2026", 1800, 5000, 0, 0);
         scrappedRoll.setInspectionStatus("SCRAPPED");
+        scrappedRoll.setCurrentRemainingLength(0.0);
+        scrappedRoll.setScrappedLengthMm(5000.0);
         inventory.saveOrUpdateMotherRoll(scrappedRoll);
 
         // 3. 已耗尽母卷 -> 422 MATERIAL_NOT_READY

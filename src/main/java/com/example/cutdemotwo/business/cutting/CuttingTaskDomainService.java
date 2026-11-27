@@ -38,8 +38,8 @@ final class CuttingTaskDomainService {
         return kernel.read(() -> {
             boolean remnant = "remnant".equalsIgnoreCase(request.getFeedPortType());
             List<Defect> source = remnant
-                    ? Optional.ofNullable(kernel.remnantPool.get(request.getSourceRemnantId())).map(RemnantStock::getDefects).orElse(null)
-                    : Optional.ofNullable(kernel.motherRolls.get(request.getRollId())).map(MotherRollInfo::getDefects).orElse(null);
+                    ? Optional.ofNullable(kernel.findOrLoadRemnant(request.getSourceRemnantId())).map(RemnantStock::getDefects).orElse(null)
+                    : Optional.ofNullable(kernel.findOrLoadRoll(request.getRollId())).map(MotherRollInfo::getDefects).orElse(null);
             if (source == null) throw new IllegalArgumentException("所选材料已不可用，请重新选料");
             return kernel.json.readValue(kernel.json.writeValueAsBytes(source),
                     new tools.jackson.core.type.TypeReference<List<Defect>>() {});
@@ -52,78 +52,92 @@ final class CuttingTaskDomainService {
 
     CuttingTask getTask(String id) {
         return kernel.read(() -> {
-            CuttingTask task = kernel.tasks.get(id);
+            CuttingTask task = kernel.findOrLoadTask(id);
             if (task == null) throw new IllegalArgumentException("切割任务不存在");
             return task;
         });
     }
 
     List<CuttingTask> listTasks() {
-        return kernel.read(() -> new ArrayList<>(kernel.tasks.values()));
+        return kernel.read(() -> kernel.store.supportsHotColdLoading()
+                ? kernel.store.listAllTasks()
+                : new ArrayList<>(kernel.tasks.values()));
     }
 
     List<Map<String, Object>> taskSummaries() {
-        return kernel.read(() -> kernel.tasks.values().stream().map(task -> {
-            Map<String, Integer> completedMap = kernel.completedQuantitiesInternal(task.id());
-            int total = task.demands().stream().mapToInt(CuttingTask.Line::quantity).sum();
-            int completed = task.demands().stream().mapToInt(line -> completedMap.getOrDefault(String.valueOf(line.id()), 0)).sum();
-            long pending = kernel.plans.values().stream().filter(plan -> Objects.equals(task.id(), plan.request().getTaskId())
-                    && task.revision() == plan.request().getTaskRevision() && "PENDING".equals(plan.status())).count();
-            Map<String, Object> item = new LinkedHashMap<>();
-            item.put("task", task);
-            item.put("total", total);
-            item.put("completed", completed);
-            item.put("remaining", Math.max(0, total - completed));
-            item.put("pendingCount", pending);
-            item.put("reportCount", kernel.taskReportsInternal(task.id()).stream().filter(r -> !"REVERSED".equals(r.get("status"))).count());
-            long now = kernel.currentOperationTime();
-            var taskExecutions = kernel.executions.values().stream().filter(e -> e.taskId().equals(task.id())).toList();
-            var active = taskExecutions.stream().filter(e -> e.reserves(now)).toList();
-            var reserved = kernel.reservedQuantities(task.id(), null);
-            int reservedCount = reserved.values().stream().mapToInt(Integer::intValue).sum();
-            int available = task.demands().stream().mapToInt(line -> Math.max(0, line.quantity()
-                    - completedMap.getOrDefault(String.valueOf(line.id()), 0)
-                    - reserved.getOrDefault(String.valueOf(line.id()), 0))).sum();
-            long running = active.stream().filter(e -> "RUNNING".equals(e.state())).count();
-            long expired = total == completed ? 0 : taskExecutions.stream().filter(e -> "EXPIRED".equals(e.effectiveState(now)))
-                    .filter(e -> kernel.plans.containsKey(e.planId()) && "PENDING".equals(kernel.plans.get(e.planId()).status())
-                            && kernel.plans.get(e.planId()).request().getTaskRevision() == task.revision())
-                    .filter(e -> taskExecutions.stream().noneMatch(a -> a.planId().equals(e.planId())
-                            && !Set.of("EXPIRED", "CANCELLED").contains(a.effectiveState(now))))
-                    .map(ExecutionOrder::planId).distinct().count();
-            var activeSchemes = kernel.schemes.values().stream().filter(s -> s.occupiesDemand() && s.involvesTask(task.id())).toList();
-            String status = running > 0 ? "REPORT_PENDING" : total == completed ? "COMPLETED" : expired > 0 ? "ATTENTION" :
-                    !active.isEmpty() || pending > 0 || !activeSchemes.isEmpty() ? "EXECUTION_PENDING" : "PLAN_PENDING";
-            item.put("status", status);
-            item.put("reserved", reservedCount);
-            item.put("availableToPlan", available);
-            item.put("runningCount", running);
-            item.put("releasedCount", active.size() - running);
-            item.put("expiredCount", expired);
-            var matReservations = new ArrayList<Map<String, Object>>();
-            active.forEach(e -> matReservations.add(Map.of("executionId", e.id(), "materialId", e.materialId(),
-                    "materialType", e.materialType(), "station", e.station(), "state", e.effectiveState(now))));
-            for (var s : activeSchemes) {
-                if (s.isMaterialLockActive() && ("STOCK_ROLL".equals(s.materialMode()) || "REMNANT".equals(s.materialMode()))) {
-                    boolean rem = "REMNANT".equals(s.materialMode());
-                    matReservations.add(Map.of("schemeId", s.id(),
-                            "materialId", Objects.toString(rem ? s.remnantId() : s.rollId(), ""),
-                            "materialType", rem ? "remnant" : "roll", "state", s.state()));
+        return kernel.read(() -> {
+            List<CuttingTask> allTasks = kernel.store.supportsHotColdLoading()
+                    ? kernel.store.listAllTasks()
+                    : new ArrayList<>(kernel.tasks.values());
+            return allTasks.stream().map(task -> {
+                Map<String, Integer> completedMap = kernel.completedQuantitiesInternal(task.id());
+                int total = task.demands().stream().mapToInt(CuttingTask.Line::quantity).sum();
+                int completed = task.demands().stream().mapToInt(line -> completedMap.getOrDefault(String.valueOf(line.id()), 0)).sum();
+                List<CuttingPlan> taskPlanList = kernel.store.supportsHotColdLoading()
+                        ? kernel.store.listTaskPlans(task.id())
+                        : kernel.plans.values().stream().filter(p -> Objects.equals(task.id(), p.request().getTaskId())).toList();
+                long pending = taskPlanList.stream().filter(plan -> Objects.equals(task.id(), plan.request().getTaskId())
+                        && task.revision() == plan.request().getTaskRevision() && "PENDING".equals(plan.status())).count();
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("task", task);
+                item.put("total", total);
+                item.put("completed", completed);
+                item.put("remaining", Math.max(0, total - completed));
+                item.put("pendingCount", pending);
+                item.put("reportCount", kernel.taskReportsInternal(task.id()).stream().filter(r -> !"REVERSED".equals(r.get("status"))).count());
+                long now = kernel.currentOperationTime();
+                var taskExecutions = (kernel.store.supportsHotColdLoading()
+                        ? kernel.store.listTaskExecutions(task.id())
+                        : kernel.executions.values().stream().filter(e -> e.taskId().equals(task.id())).toList());
+                var active = taskExecutions.stream().filter(e -> e.reserves(now)).toList();
+                var reserved = kernel.reservedQuantities(task.id(), null);
+                int reservedCount = reserved.values().stream().mapToInt(Integer::intValue).sum();
+                int available = task.demands().stream().mapToInt(line -> Math.max(0, line.quantity()
+                        - completedMap.getOrDefault(String.valueOf(line.id()), 0)
+                        - reserved.getOrDefault(String.valueOf(line.id()), 0))).sum();
+                long running = active.stream().filter(e -> "RUNNING".equals(e.state())).count();
+                Map<String, CuttingPlan> planMap = new LinkedHashMap<>();
+                taskPlanList.forEach(p -> planMap.put(p.id(), p));
+                long expired = total == completed ? 0 : taskExecutions.stream().filter(e -> "EXPIRED".equals(e.effectiveState(now)))
+                        .filter(e -> planMap.containsKey(e.planId()) && "PENDING".equals(planMap.get(e.planId()).status())
+                                && planMap.get(e.planId()).request().getTaskRevision() == task.revision())
+                        .filter(e -> taskExecutions.stream().noneMatch(a -> a.planId().equals(e.planId())
+                                && !Set.of("EXPIRED", "CANCELLED").contains(a.effectiveState(now))))
+                        .map(ExecutionOrder::planId).distinct().count();
+                var activeSchemes = kernel.schemes.values().stream().filter(s -> s.occupiesDemand() && s.involvesTask(task.id())).toList();
+                String status = running > 0 ? "REPORT_PENDING" : total == completed ? "COMPLETED" : expired > 0 ? "ATTENTION" :
+                        !active.isEmpty() || pending > 0 || !activeSchemes.isEmpty() ? "EXECUTION_PENDING" : "PLAN_PENDING";
+                item.put("status", status);
+                item.put("reserved", reservedCount);
+                item.put("availableToPlan", available);
+                item.put("runningCount", running);
+                item.put("releasedCount", active.size() - running);
+                item.put("expiredCount", expired);
+                var matReservations = new ArrayList<Map<String, Object>>();
+                active.forEach(e -> matReservations.add(Map.of("executionId", e.id(), "materialId", e.materialId(),
+                        "materialType", e.materialType(), "station", e.station(), "state", e.effectiveState(now))));
+                for (var s : activeSchemes) {
+                    if (s.isMaterialLockActive() && ("STOCK_ROLL".equals(s.materialMode()) || "REMNANT".equals(s.materialMode()))) {
+                        boolean rem = "REMNANT".equals(s.materialMode());
+                        matReservations.add(Map.of("schemeId", s.id(),
+                                "materialId", Objects.toString(rem ? s.remnantId() : s.rollId(), ""),
+                                "materialType", rem ? "remnant" : "roll", "state", s.state()));
+                    }
                 }
-            }
-            item.put("materialReservations", matReservations);
-            item.put("nextAction", switch (status) {
-                case "REPORT_PENDING", "ATTENTION" -> "executions";
-                case "COMPLETED" -> "reports";
-                case "EXECUTION_PENDING" -> active.isEmpty() ? "plans" : "executions";
-                default -> "workspace";
-            });
-            return item;
-        }).toList());
+                item.put("materialReservations", matReservations);
+                item.put("nextAction", switch (status) {
+                    case "REPORT_PENDING", "ATTENTION" -> "executions";
+                    case "COMPLETED" -> "reports";
+                    case "EXECUTION_PENDING" -> active.isEmpty() ? "plans" : "executions";
+                    default -> "workspace";
+                });
+                return item;
+            }).toList();
+        });
     }
 
     Map<String, Object> buildTaskDetail(String id, List<Map<String, Object>> executionViews) {
-        CuttingTask task = kernel.tasks.get(id);
+        CuttingTask task = kernel.findOrLoadTask(id);
         if (task == null) throw new IllegalArgumentException("切割任务不存在");
         return Map.of(
                 "task", task,
@@ -144,7 +158,7 @@ final class CuttingTaskDomainService {
                 input.materialModel().isBlank() || input.demands() == null || input.demands().isEmpty() || input.demands().size() > 200)
             throw new IllegalArgumentException("请填写任务名称、材料型号和 1 至 200 项需求");
         String id = input.id() == null || input.id().isBlank() ? UUID.randomUUID().toString() : input.id();
-        CuttingTask previous = kernel.tasks.get(id);
+        CuttingTask previous = kernel.findOrLoadTask(id);
         if (previous == null && input.id() != null && !input.id().isBlank()) throw new IllegalArgumentException("切割任务不存在");
         if (previous != null && previous.revision() != input.revision()) throw new IllegalArgumentException("任务已更新，请重新打开后编辑");
         Set<Integer> ids = new HashSet<>();
@@ -242,11 +256,11 @@ final class CuttingTaskDomainService {
     private List<Map<String, Object>> materialCandidatesInternal(SolveRequest request) {
         if (request == null || request.getRollModel() == null || request.getDemands() == null)
             throw new IllegalArgumentException("请先填写材料型号和需求");
-        CuttingTask task = request.getTaskId() != null ? kernel.tasks.get(request.getTaskId()) : null;
+        CuttingTask task = request.getTaskId() != null ? kernel.findOrLoadTask(request.getTaskId()) : null;
         List<Map<String, Object>> result = new ArrayList<>();
         for (RemnantStock stock : kernel.getAvailableRemnantsInternal()) {
             if (!request.getRollModel().equals(stock.getMaterialBatch())) continue;
-            if (task != null && !kernel.matchesBatchAndColor(task, kernel.motherRolls.get(stock.getSourceRollId()), stock)) continue;
+            if (task != null && !kernel.matchesBatchAndColor(task, kernel.findOrLoadRoll(stock.getSourceRollId()), stock)) continue;
             addCandidate(result, request, "remnant", stock.getId(), stock.getSourceRollId(),
                     stock.getWidth(), stock.getLength(), stock.getLocation(), stock.isHasDefect());
         }
@@ -264,7 +278,7 @@ final class CuttingTaskDomainService {
     DetachedRecommendation recommendationSnapshot(SolveRequest request, Map<String, Integer> completedBaseline) {
         return kernel.read(() -> {
             if (request.getTaskId() != null) {
-                var task = kernel.tasks.get(request.getTaskId());
+                var task = kernel.findOrLoadTask(request.getTaskId());
                 if (task == null || task.revision() != request.getTaskRevision()
                         || !kernel.completedQuantitiesInternal(task.id()).equals(completedBaseline))
                     throw new InventoryConflictException("任务版本或已报工数量已变化，请重新打开任务后匹配料头");

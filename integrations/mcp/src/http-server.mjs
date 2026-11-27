@@ -263,7 +263,8 @@ export function createMcpHttpServer(config, options = {}) {
       });
     }
 
-    const headerBackendToken = String(req.headers['x-cutting-api-token'] || '').trim();
+    const headerAgentToken = String(req.headers['x-cutting-agent-token'] || '').trim();
+    const headerBackendToken = headerAgentToken || String(req.headers['x-cutting-api-token'] || '').trim();
     const backendToken = headerBackendToken || config.apiToken || '';
     const requestedSid = String(req.headers['mcp-session-id'] || '').trim();
     const tokenKey = createHash('sha256').update(backendToken).digest('hex').slice(0, 12);

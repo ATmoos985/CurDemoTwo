@@ -52,8 +52,11 @@ public class IntegrationService {
     public Page list(long after,int limit) {
         if(after<0 || limit<1 || limit>100)throw invalid("after 必须非负，limit 必须为 1–100");
         // Read progress before inventory: a concurrently appended event cannot make this snapshot appear truncated.
-        var progress=store.read(consumer);var events=inventory.integrationEvents();validateStream(progress,events);
-        var page=events.stream().filter(e->e.sequence()>after).limit(limit).toList();
+        var progress=store.read(consumer);
+        long total=inventory.outboxCount();
+        String headId=inventory.outboxFirstEventId().orElse(null);
+        validateStreamSummary(progress,headId,total);
+        var page=inventory.outboxPage(after,limit);
         var items=page.stream().map(e->{var a=last(progress,e.id());
             String state=a==null?"PENDING":"LEASED".equals(a.state())&&a.expiresAt()<=store.now()?"RETRYABLE":a.state();
             // 仅在 REJECTED 态暴露被拒尝试令牌供 Worker 重启后显式 retryOf 自愈，绝不暴露活跃 LEASED 租约令牌
@@ -61,20 +64,24 @@ public class IntegrationService {
             return new Delivery(e.id(),e.sequence(),state,
                 a==null?0:a.number(),a==null?0:a.expiresAt(),a==null?null:a.externalReceipt(),a==null?null:a.reason(),rejectedToken);}).toList();
         long next=page.isEmpty()?after:page.get(page.size()-1).sequence();
-        return new Page(consumer,progress.acknowledgedThrough(),items,next,events.stream().anyMatch(e->e.sequence()>next));
+        return new Page(consumer,progress.acknowledgedThrough(),items,next,next<total);
     }
     public Lease claim(Claim command) {
         if(command==null || command.requestId()==null || !command.requestId().matches("[A-Za-z0-9_-]{1,128}"))
             throw invalid("requestId 必须为 1–128 位字母、数字、下划线或短横线");
         if(command.retryOf()!=null && !command.retryOf().matches("[0-9a-f-]{36}"))throw invalid("retryOf 必须是被拒绝尝试的令牌");
         return store.update(consumer,progress->{
-            var events=inventory.integrationEvents();validateStream(progress,events);
+            long total=inventory.outboxCount();
+            String headId=inventory.outboxFirstEventId().orElse(null);
+            validateStreamSummary(progress,headId,total);
             for(var old:progress.attempts())if(old.requestId().equals(command.requestId())) {
                 if(!Objects.equals(old.retryOf(),command.retryOf()))throw conflict("IDEMPOTENCY_CONFLICT","同一 requestId 不能更改重试内容");
-                return unchanged(progress,lease(old,events));
+                return unchanged(progress,lease(old));
             }
-            if(progress.acknowledgedThrough()>=events.size())return unchanged(progress,new Lease(consumer,"EMPTY",null,null));
-            var event=events.get((int)progress.acknowledgedThrough());var previous=last(progress,event.id());long now=store.now();
+            if(progress.acknowledgedThrough()>=total)return unchanged(progress,new Lease(consumer,"EMPTY",null,null));
+            var event=inventory.outboxBySequence(progress.acknowledgedThrough()+1)
+                    .orElseThrow(()->conflict("STREAM_MISMATCH","库存事件与外部确认记录不一致，需对账后恢复，不能自动跳过或重发历史"));
+            var previous=last(progress,event.id());long now=store.now();
             if(previous!=null && "LEASED".equals(previous.state()) && previous.expiresAt()>now)
                 throw conflict("DELIVERY_BUSY","该事件已被领取；未知响应请使用原 requestId 重试");
             if(previous!=null && "REJECTED".equals(previous.state())) {
@@ -83,7 +90,7 @@ public class IntegrationService {
             var attempt=new Attempt(command.requestId(),command.retryOf(),event.id(),event.sequence(),previous==null?1:previous.number()+1,
                     UUID.randomUUID().toString(),now+leaseMillis,"LEASED",null,null);
             var attempts=new ArrayList<>(progress.attempts());attempts.add(attempt);
-            var updated=new IntegrationProgress(progress.version(),events.get(0).id(),progress.acknowledgedThrough(),attempts);
+            var updated=new IntegrationProgress(progress.version(),headId==null?event.id():headId,progress.acknowledgedThrough(),attempts);
             return new IntegrationDeliveryStore.Change<>(updated,new Lease(consumer,"LEASED",attempt,event));
         });
     }
@@ -94,7 +101,9 @@ public class IntegrationService {
         if(accepted){requireText(command.externalReceipt(),200,"外部凭证");if(command.reason()!=null)throw invalid("接受回执不能包含拒绝原因");}
         else {requireText(command.reason(),1000,"拒绝原因");if(command.externalReceipt()!=null)throw invalid("拒绝回执不能包含成功凭证");}
         return store.update(consumer,progress->{
-            var events=inventory.integrationEvents();validateStream(progress,events);
+            long total=inventory.outboxCount();
+            String headId=inventory.outboxFirstEventId().orElse(null);
+            validateStreamSummary(progress,headId,total);
             var found=progress.attempts().stream().filter(a->a.token().equals(command.token())&&a.eventId().equals(eventId)).findFirst()
                     .orElseThrow(()->conflict("STALE_ATTEMPT","领取令牌与事件不匹配"));
             String state=accepted?"ACKNOWLEDGED":"REJECTED";
@@ -113,9 +122,12 @@ public class IntegrationService {
             return new IntegrationDeliveryStore.Change<>(next,delivery(updated));
         });
     }
-    private Lease lease(Attempt attempt,List<InventoryEvent> events){
+    private Lease lease(Attempt attempt){
         String state="LEASED".equals(attempt.state())&&attempt.expiresAt()<=store.now()?"EXPIRED":attempt.state();
-        return new Lease(consumer,state,attempt,events.get((int)attempt.eventSequence()-1));
+        var event=inventory.outboxBySequence(attempt.eventSequence())
+                .filter(e->e.id().equals(attempt.eventId()))
+                .orElseThrow(()->conflict("STREAM_MISMATCH","库存事件与外部确认记录不一致，需对账后恢复，不能自动跳过或重发历史"));
+        return new Lease(consumer,state,attempt,event);
     }
     private static Delivery delivery(Attempt a){
         return new Delivery(a.eventId(),a.eventSequence(),a.state(),a.number(),a.expiresAt(),a.externalReceipt(),a.reason(),
@@ -125,12 +137,17 @@ public class IntegrationService {
         for(int i=state.attempts().size()-1;i>=0;i--)if(state.attempts().get(i).eventId().equals(eventId))return state.attempts().get(i);
         return null;
     }
-    private static void validateStream(IntegrationProgress state,List<InventoryEvent> events){
+    private void validateStreamSummary(IntegrationProgress state,String headId,long totalEvents){
         if(state.streamId().isEmpty() && state.attempts().isEmpty() && state.acknowledgedThrough()==0)return;
-        if(events.isEmpty() || !events.get(0).id().equals(state.streamId()) || state.acknowledgedThrough()>events.size()
-                || state.attempts().stream().anyMatch(a->a.eventSequence()<1 || a.eventSequence()>events.size()
-                    || !events.get((int)a.eventSequence()-1).id().equals(a.eventId())))
+        if(totalEvents<=0 || !Objects.equals(headId,state.streamId()) || state.acknowledgedThrough()>totalEvents)
             throw conflict("STREAM_MISMATCH","库存事件与外部确认记录不一致，需对账后恢复，不能自动跳过或重发历史");
+        for(var a:state.attempts()) {
+            if(a.eventSequence()<1 || a.eventSequence()>totalEvents)
+                throw conflict("STREAM_MISMATCH","库存事件与外部确认记录不一致，需对账后恢复，不能自动跳过或重发历史");
+            var ev=inventory.outboxBySequence(a.eventSequence());
+            if(ev.isEmpty() || !ev.get().id().equals(a.eventId()))
+                throw conflict("STREAM_MISMATCH","库存事件与外部确认记录不一致，需对账后恢复，不能自动跳过或重发历史");
+        }
     }
     private static void requireText(String s,int max,String field){if(s==null || s.isBlank() || s.length()>max)throw invalid(field+"不能为空且最多 "+max+" 字符");}
     private static <T> IntegrationDeliveryStore.Change<T> unchanged(IntegrationProgress state,T result){return new IntegrationDeliveryStore.Change<>(state,result);}

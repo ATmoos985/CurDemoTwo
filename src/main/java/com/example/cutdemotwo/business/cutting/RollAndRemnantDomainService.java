@@ -9,7 +9,9 @@ import com.example.cutdemotwo.persistence.InventoryConflictException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -40,6 +42,7 @@ final class RollAndRemnantDomainService {
                     || !kernel.plans.isEmpty() || !kernel.receipts.isEmpty() || !kernel.executions.isEmpty()
                     || !kernel.transfers.isEmpty() || !kernel.counts.isEmpty()
                     || !kernel.templates.isEmpty() || !kernel.schemes.isEmpty()
+                    || (kernel.store.supportsHotColdLoading() && (kernel.revision > 0 || kernel.store.countLedgerEntries() > 0))
                     || (kernel.store.supportsIndependentTemplates() && !kernel.store.loadTemplates().isEmpty())
                     || !kernel.qualityReleases.isEmpty() || !kernel.inventoryReceipts.isEmpty() || !kernel.materialIssues.isEmpty()) {
                 throw new IllegalArgumentException("当前库已有业务数据，不能创建整套示例材料；请使用已有库存或单独准备演示库");
@@ -273,35 +276,51 @@ final class RollAndRemnantDomainService {
 
     private boolean resetRollInternal(String rollId) {
         kernel.ensureMaterialNotReserved("roll", rollId, null);
-        if (kernel.remnantPool.values().stream().anyMatch(rm -> rollId.equals(rm.getSourceRollId())
-                && (kernel.isMaterialReservedByExecution("remnant", rm.getId(), null)
-                || kernel.isMaterialReservedByScheme("remnant", rm.getId(), null))))
+        List<RemnantStock> derivedRemnants = kernel.store.supportsHotColdLoading()
+                ? kernel.store.listRemnantsBySourceRoll(rollId)
+                : kernel.remnantPool.values().stream().filter(rm -> rollId.equals(rm.getSourceRollId())).toList();
+        if (derivedRemnants.stream().anyMatch(rm -> kernel.isMaterialReservedByExecution("remnant", rm.getId(), null)
+                || kernel.isMaterialReservedByScheme("remnant", rm.getId(), null)))
             throw new InventoryConflictException("母卷派生料头已被执行单或排程方案占用，禁止演示重置");
-        if (kernel.counts.values().stream().flatMap(c -> c.lines().stream()).anyMatch(line ->
-                "roll".equals(line.type()) && rollId.equals(line.id()) || "remnant".equals(line.type())
-                        && kernel.remnantPool.containsKey(line.id()) && rollId.equals(kernel.remnantPool.get(line.id()).getSourceRollId())))
+        if (kernel.countRevision("roll", rollId) > 0 || derivedRemnants.stream().anyMatch(rm -> kernel.countRevision("remnant", rm.getId()) > 0))
             throw new InventoryConflictException("材料已有盘点单追溯，禁止演示重置；请新建盘点单更正");
-        if (kernel.transfers.values().stream().flatMap(t -> t.lines().stream()).anyMatch(line ->
-                "roll".equals(line.type()) && rollId.equals(line.id()) || "remnant".equals(line.type())
-                        && kernel.remnantPool.containsKey(line.id()) && rollId.equals(kernel.remnantPool.get(line.id()).getSourceRollId())))
+        boolean hasTransfer = kernel.store.supportsHotColdLoading()
+                ? (kernel.store.hasTransferForMaterial("roll", rollId)
+                    || derivedRemnants.stream().anyMatch(rm -> kernel.store.hasTransferForMaterial("remnant", rm.getId())))
+                : kernel.transfers.values().stream().flatMap(t -> t.lines().stream()).anyMatch(line ->
+                    "roll".equals(line.type()) && rollId.equals(line.id()) || "remnant".equals(line.type())
+                    && kernel.remnantPool.containsKey(line.id()) && rollId.equals(kernel.remnantPool.get(line.id()).getSourceRollId()));
+        if (hasTransfer)
             throw new InventoryConflictException("材料已有移库单追溯，禁止演示重置；请新建移库单更正库位");
         if (kernel.executions.values().stream().anyMatch(e -> Objects.equals(e.materialId(), rollId)
                 || kernel.plans.containsKey(e.planId()) && Objects.equals(kernel.plans.get(e.planId()).request().getRollId(), rollId)))
             throw new InventoryConflictException("材料已有执行单追溯，禁止演示重置");
         if (kernel.schemes.values().stream().anyMatch(s -> rollId.equals(s.rollId())))
             throw new InventoryConflictException("材料已有排程方案追溯，禁止演示重置");
-        if (kernel.qualityReleases.values().stream().anyMatch(q -> kernel.remnantPool.containsKey(q.remnantId())
-                && rollId.equals(kernel.remnantPool.get(q.remnantId()).getSourceRollId())))
+        boolean hasQualityRelease = kernel.store.supportsHotColdLoading()
+                ? derivedRemnants.stream().anyMatch(rm -> kernel.store.hasQualityReleaseForRemnant(rm.getId()))
+                : kernel.qualityReleases.values().stream().anyMatch(q -> kernel.remnantPool.containsKey(q.remnantId())
+                    && rollId.equals(kernel.remnantPool.get(q.remnantId()).getSourceRollId()));
+        if (hasQualityRelease)
             throw new InventoryConflictException("材料已有质量放行单追溯，禁止演示重置");
-        if (kernel.inventoryReceipts.values().stream().flatMap(r -> r.lines().stream()).anyMatch(l -> rollId.equals(l.rollId())))
+        boolean hasReceiptIn = kernel.store.supportsHotColdLoading()
+                ? kernel.store.hasInventoryReceiptForRoll(rollId)
+                : kernel.inventoryReceipts.values().stream().flatMap(r -> r.lines().stream()).anyMatch(l -> rollId.equals(l.rollId()));
+        if (hasReceiptIn)
             throw new InventoryConflictException("母卷已有采购入库单追溯，禁止演示重置");
-        if (kernel.materialIssues.values().stream().anyMatch(m -> rollId.equals(m.rollId())))
+        boolean hasIssue = kernel.store.supportsHotColdLoading()
+                ? kernel.store.hasMaterialIssueForRoll(rollId)
+                : kernel.materialIssues.values().stream().anyMatch(m -> rollId.equals(m.rollId()));
+        if (hasIssue)
             throw new InventoryConflictException("母卷已有车间领退料单追溯，禁止演示重置");
-        MotherRollInfo roll = kernel.motherRolls.get(rollId);
+        MotherRollInfo roll = kernel.findOrLoadRoll(rollId);
         if (roll == null) return false;
-        if (kernel.receipts.values().stream().anyMatch(r -> rollId.equals(r.get("rollId")) && !kernel.qualityEvents(r).isEmpty()))
+        Collection<Map<String, Object>> rollReports = kernel.store.supportsHotColdLoading()
+                ? kernel.store.findCutReportsByRollId(rollId)
+                : kernel.receipts.values().stream().filter(r -> rollId.equals(r.get("rollId"))).toList();
+        if (rollReports.stream().anyMatch(r -> !kernel.qualityEvents(r).isEmpty()))
             throw new IllegalArgumentException("母卷已有复检处置，不能通过演示重置清除产出追溯");
-        if (kernel.receipts.values().stream().anyMatch(r -> rollId.equals(r.get("rollId"))))
+        if (!rollReports.isEmpty())
             throw new IllegalArgumentException("该母卷已有报工记录，不能通过演示重置清除；请保留原记录并按实际情况冲销");
         roll.setCurrentRemainingLength(roll.getTotalLength());
         roll.setUsedLength(0.0);
@@ -336,11 +355,28 @@ final class RollAndRemnantDomainService {
 
     List<MotherRollInfo> getMotherRolls() {
         return kernel.read(() -> {
-            List<MotherRollInfo> list = new ArrayList<>();
-            for (MotherRollInfo info : kernel.motherRolls.values()) {
-                List<RemnantStock> rollRemnants = kernel.getRemnantsByRollIdInternal(info.getRollId());
-                double totalArea = rollRemnants.stream().mapToDouble(RemnantStock::getArea).sum();
-                list.add(info.copyWithRemnantStats(rollRemnants.size(), totalArea));
+            List<MotherRollInfo> sourceRolls = kernel.store.supportsHotColdLoading()
+                    ? kernel.store.listAllMotherRolls()
+                    : new ArrayList<>(kernel.motherRolls.values());
+            List<MotherRollInfo> list = new ArrayList<>(sourceRolls.size());
+            if (kernel.store.supportsHotColdLoading()) {
+                Map<String, List<RemnantStock>> byRoll = new HashMap<>();
+                for (RemnantStock rm : kernel.remnantPool.values()) {
+                    if ("AVAILABLE".equalsIgnoreCase(rm.getStatus()) && rm.getSourceRollId() != null) {
+                        byRoll.computeIfAbsent(rm.getSourceRollId(), k -> new ArrayList<>()).add(rm);
+                    }
+                }
+                for (MotherRollInfo info : sourceRolls) {
+                    List<RemnantStock> rollRemnants = byRoll.getOrDefault(info.getRollId(), List.of());
+                    double totalArea = rollRemnants.stream().mapToDouble(RemnantStock::getArea).sum();
+                    list.add(info.copyWithRemnantStats(rollRemnants.size(), totalArea));
+                }
+            } else {
+                for (MotherRollInfo info : sourceRolls) {
+                    List<RemnantStock> rollRemnants = kernel.getRemnantsByRollIdInternal(info.getRollId());
+                    double totalArea = rollRemnants.stream().mapToDouble(RemnantStock::getArea).sum();
+                    list.add(info.copyWithRemnantStats(rollRemnants.size(), totalArea));
+                }
             }
             return list;
         });
@@ -373,7 +409,7 @@ final class RollAndRemnantDomainService {
             throw new IllegalArgumentException("母卷每平方米采购单价必须为非负有限数值");
         }
         kernel.ensureMaterialNotReserved("roll", roll.getRollId(), null);
-        MotherRollInfo existing = kernel.motherRolls.get(roll.getRollId());
+        MotherRollInfo existing = kernel.findOrLoadRoll(roll.getRollId());
         if (existing != null) {
             if ("SCRAPPED".equalsIgnoreCase(existing.getInspectionStatus())) {
                 throw new InventoryConflictException("已报废母卷不可修改档案");
@@ -397,17 +433,45 @@ final class RollAndRemnantDomainService {
             existing.setTotalLength(roll.getTotalLength());
             if (!Objects.equals(Objects.toString(existing.getStorageLocation(), ""), Objects.toString(roll.getStorageLocation(), "")))
                 throw new IllegalArgumentException("已登记材料请通过移库单变更库位");
+            String requestedStatus = roll.getInspectionStatus() == null ? null : roll.getInspectionStatus().trim();
+            if ("SCRAPPED".equalsIgnoreCase(requestedStatus)) {
+                throw new IllegalArgumentException("在库母卷请通过专用报废接口办理报废，禁止直接将质检状态修改为 SCRAPPED");
+            }
             existing.setInspectionStatus(roll.getInspectionStatus());
             if (roll.getDefects() != null && !roll.getDefects().isEmpty()
                     && !kernel.json.writeValueAsString(roll.getDefects()).equals(kernel.json.writeValueAsString(existing.getDefects())))
                 throw new IllegalArgumentException("已登记母卷的疵点请在跑布验疵中追加或作废（留痕），档案保存不能覆盖疵点");
             return existing;
         } else {
+            if (!Double.isFinite(roll.getUsedLength()) || roll.getUsedLength() < 0) {
+                throw new IllegalArgumentException("母卷已用长度必须为非负有限数值");
+            }
+            if (!Double.isFinite(roll.getCurrentRemainingLength()) || roll.getCurrentRemainingLength() < 0) {
+                throw new IllegalArgumentException("母卷剩余长度必须为非负有限数值");
+            }
+            if (roll.getUsedLength() > roll.getTotalLength() + 0.001) {
+                throw new IllegalArgumentException("母卷已用长度不能大于入库总长度");
+            }
             if (roll.getCreatedAt() == null) {
                 roll.setCreatedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
             }
-            if (roll.getCurrentRemainingLength() <= 0) {
-                roll.setCurrentRemainingLength(roll.getTotalLength());
+            String requestedStatus = roll.getInspectionStatus() == null ? "" : roll.getInspectionStatus().trim();
+            boolean isScrapped = "SCRAPPED".equalsIgnoreCase(requestedStatus);
+            if (!isScrapped && roll.getCurrentRemainingLength() <= 0) {
+                double computedRemaining = Math.max(0.0, roll.getTotalLength() - roll.getUsedLength());
+                roll.setCurrentRemainingLength(computedRemaining);
+            }
+            if (isScrapped) {
+                roll.setInspectionStatus("SCRAPPED");
+            }
+            double scrapped = roll.getScrappedLengthMm() != null ? roll.getScrappedLengthMm() : 0.0;
+            if (!Double.isFinite(scrapped) || scrapped < 0
+                    || (isScrapped && roll.getCurrentRemainingLength() > 0.001)
+                    || (!isScrapped && scrapped > 0.001)) {
+                throw new IllegalArgumentException("母卷质检状态与剩余/报废长度不守恒：报废母卷剩余长度必须为 0，非报废母卷报废长度必须为 0");
+            }
+            if (Math.abs(roll.getTotalLength() - roll.getUsedLength() - roll.getCurrentRemainingLength() - scrapped) > 0.001) {
+                throw new IllegalArgumentException("母卷总长度、已用长度与剩余长度不守恒，请核对输入");
             }
             kernel.motherRolls.put(roll.getRollId(), roll);
             return roll;
@@ -420,7 +484,7 @@ final class RollAndRemnantDomainService {
 
     MotherRollInfo voidDefect(String rollId, int defectId, String reason) {
         return kernel.mutate("DEFECT_VOID", rollId, "UNAUTHENTICATED_LOCAL", () -> {
-            MotherRollInfo roll = kernel.motherRolls.get(rollId);
+            MotherRollInfo roll = kernel.findOrLoadRoll(rollId);
             if (roll == null) throw new IllegalArgumentException("未找到母卷，请重新选择");
             String why = reason == null ? "" : reason.trim();
             if (why.isEmpty() || why.length() > 200) throw new IllegalArgumentException("请填写作废原因（200 字以内）");
@@ -443,7 +507,7 @@ final class RollAndRemnantDomainService {
         return kernel.mutate("ROLL_RECEIPT", input == null ? null : input.getRollId(), "UNAUTHENTICATED_LOCAL", () -> {
             if (input == null || input.getRollId() == null || input.getRollId().isBlank())
                 throw new IllegalArgumentException("请输入母卷编号");
-            if (kernel.motherRolls.containsKey(input.getRollId())) throw new IllegalArgumentException("此母卷编号已存在，请选择已有母卷");
+            if (kernel.findOrLoadRoll(input.getRollId()) != null) throw new IllegalArgumentException("此母卷编号已存在，请选择已有母卷");
             var roll = new MotherRollInfo();
             roll.setRollId(input.getRollId());
             roll.setRollModel(input.getRollModel());
@@ -460,7 +524,7 @@ final class RollAndRemnantDomainService {
 
     MotherRollInfo saveInspection(String rollId, double inputWidth, double inputTotalLength, List<Defect> inputDefects) {
         return kernel.mutate("INSPECTION", rollId, "UNAUTHENTICATED_LOCAL", () -> {
-            var roll = kernel.motherRolls.get(rollId);
+            var roll = kernel.findOrLoadRoll(rollId);
             if (roll == null) throw new IllegalArgumentException("未找到母卷，请重新选择");
             if (inputWidth != roll.getWidth() || inputTotalLength != roll.getTotalLength())
                 throw new IllegalArgumentException("母卷尺寸已变化，请重新载入后核对标记");
@@ -493,7 +557,7 @@ final class RollAndRemnantDomainService {
 
     private Defect addDefectToRollInternal(String rollId, Defect defect) {
         kernel.ensureMaterialNotReserved("roll", rollId, null);
-        MotherRollInfo roll = kernel.motherRolls.get(rollId);
+        MotherRollInfo roll = kernel.findOrLoadRoll(rollId);
         if (roll == null) {
             throw new IllegalArgumentException("未找到母卷: " + rollId);
         }
@@ -522,19 +586,21 @@ final class RollAndRemnantDomainService {
         String targetRollId = rollId.trim();
 
         MotherRollInfo scrapped = kernel.mutate("ROLL_SCRAP", targetRollId, "DECLARED:" + operator, () -> {
-            for (MotherRollInfo existing : kernel.motherRolls.values()) {
-                if (key.equals(existing.getScrapIdempotencyKey())) {
-                    if (!targetRollId.equals(existing.getRollId())
-                            || !operator.equals(existing.getScrappedBy())
-                            || !reason.equals(existing.getScrapReason())) {
-                        throw new InventoryConflictException("同一幂等键已用于其他母卷报废内容");
-                    }
-                    return existing;
+            MotherRollInfo existing = kernel.motherRolls.values().stream()
+                    .filter(r -> key.equals(r.getScrapIdempotencyKey())).findFirst()
+                    .orElseGet(() -> kernel.store.supportsHotColdLoading()
+                            ? kernel.store.findMotherRollByScrapKey(key).orElse(null) : null);
+            if (existing != null) {
+                if (!targetRollId.equals(existing.getRollId())
+                        || !operator.equals(existing.getScrappedBy())
+                        || !reason.equals(existing.getScrapReason())) {
+                    throw new InventoryConflictException("同一幂等键已用于其他母卷报废内容");
                 }
+                return existing;
             }
             return null;
         }, () -> {
-            MotherRollInfo roll = kernel.motherRolls.get(targetRollId);
+            MotherRollInfo roll = kernel.findOrLoadRoll(targetRollId);
             if (roll == null) throw new IllegalArgumentException("母卷不存在: " + targetRollId);
             if ("SCRAPPED".equalsIgnoreCase(roll.getInspectionStatus())) {
                 throw new InventoryConflictException("母卷 " + targetRollId + " 已报废，不能重复报废");
@@ -570,7 +636,7 @@ final class RollAndRemnantDomainService {
         String eventType = "PASSED".equals(status) ? "ROLL_INSPECTION_PASS" : "ROLL_INSPECTION_FAIL";
 
         MotherRollInfo updated = kernel.mutate(eventType, targetRollId, "DECLARED:" + inspector, () -> {
-            MotherRollInfo roll = kernel.motherRolls.get(targetRollId);
+            MotherRollInfo roll = kernel.findOrLoadRoll(targetRollId);
             if (roll == null) throw new IllegalArgumentException("母卷不存在: " + targetRollId);
             if ("SCRAPPED".equalsIgnoreCase(roll.getInspectionStatus())) {
                 throw new InventoryConflictException("母卷 " + targetRollId + " 已报废，不能执行质检判定");
@@ -599,7 +665,7 @@ final class RollAndRemnantDomainService {
 
     private boolean scrapRemnantInternal(String id, String reason) {
         kernel.ensureMaterialNotReserved("remnant", id, null);
-        RemnantStock item = kernel.remnantPool.get(id);
+        RemnantStock item = kernel.findOrLoadRemnant(id);
         if (item == null) return false;
         if ("LOST".equals(item.getStatus())) throw new InventoryConflictException("盘亏料头未见实物，不能报废；找回请登记盘点单");
         item.setStatus("SCRAPPED");
@@ -616,7 +682,9 @@ final class RollAndRemnantDomainService {
     }
 
     List<RemnantStock> getAllRemnants() {
-        return kernel.read(() -> new ArrayList<>(kernel.remnantPool.values()));
+        return kernel.read(() -> kernel.store.supportsHotColdLoading()
+                ? kernel.store.listAllRemnants()
+                : new ArrayList<>(kernel.remnantPool.values()));
     }
 
     RemnantStock scanOrGetById(String id) {
@@ -668,15 +736,15 @@ final class RollAndRemnantDomainService {
             String dateStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMM"));
             item.setId("REM-" + dateStr + "-" + String.format("%03d", kernel.remnantSeq.incrementAndGet()));
         }
-        if (kernel.remnantPool.containsKey(item.getId())) throw new IllegalArgumentException("料头编号已存在: " + item.getId());
+        if (kernel.findOrLoadRemnant(item.getId()) != null) throw new IllegalArgumentException("料头编号已存在: " + item.getId());
         if (item.getCreatedAt() == null) {
             item.setCreatedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
         }
         if (item.getStatus() == null) {
             item.setStatus("AVAILABLE");
         }
-        kernel.inheritLineageMetadata(item, item.getSourceRollId() != null ? kernel.motherRolls.get(item.getSourceRollId()) : null,
-                item.getParentRemnantId() != null ? kernel.remnantPool.get(item.getParentRemnantId()) : null);
+        kernel.inheritLineageMetadata(item, item.getSourceRollId() != null ? kernel.findOrLoadRoll(item.getSourceRollId()) : null,
+                item.getParentRemnantId() != null ? kernel.findOrLoadRemnant(item.getParentRemnantId()) : null);
         kernel.remnantPool.put(item.getId(), item);
         return item;
     }
@@ -692,8 +760,8 @@ final class RollAndRemnantDomainService {
             rs.setParentRemnantId(parentRemnantId);
             rs.setGeneration(parentRemnantId != null ? 2 : 1);
             rs.setQualityGrade(hasDefect ? "GRADE_DEFECT" : "GRADE_A");
-            kernel.inheritLineageMetadata(rs, rollId != null ? kernel.motherRolls.get(rollId) : null,
-                    parentRemnantId != null ? kernel.remnantPool.get(parentRemnantId) : null);
+            kernel.inheritLineageMetadata(rs, rollId != null ? kernel.findOrLoadRoll(rollId) : null,
+                    parentRemnantId != null ? kernel.findOrLoadRemnant(parentRemnantId) : null);
             rs.setCreatedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
             kernel.remnantPool.put(rs.getId(), rs);
             return rs;
@@ -704,7 +772,7 @@ final class RollAndRemnantDomainService {
         return kernel.mutate("REMNANT_ISSUE", id, "UNAUTHENTICATED_LOCAL", () -> {
             kernel.ensureMaterialNotReserved("remnant", id, null);
             if (id == null) return false;
-            RemnantStock item = kernel.remnantPool.get(id);
+            RemnantStock item = kernel.findOrLoadRemnant(id);
             if (item != null) {
                 if ("CONSUMED".equals(item.getStatus())) return true;
                 if (!"AVAILABLE".equals(item.getStatus())) throw new InventoryConflictException("只有可用料头可以领用；盘亏找回后须先完成质量检验");
@@ -720,7 +788,7 @@ final class RollAndRemnantDomainService {
         return kernel.mutate("REMNANT_STATUS_ADJUSTMENT", id, "UNAUTHENTICATED_LOCAL", () -> {
             kernel.ensureMaterialNotReserved("remnant", id, null);
             if (id == null) return false;
-            RemnantStock item = kernel.remnantPool.get(id);
+            RemnantStock item = kernel.findOrLoadRemnant(id);
             if (item != null) {
                 if ("LOST".equals(item.getStatus()) || "LOST".equals(status)) throw new InventoryConflictException("盘亏与找回必须通过盘点单登记");
                 if (status == null || !Set.of("AVAILABLE", "QUARANTINED", "SCRAPPED").contains(status))

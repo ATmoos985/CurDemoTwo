@@ -20,12 +20,15 @@ routes:
 ## How to get to it (user POV)
 
 - 库存与质检界面：左侧 `材料库存` 分组下的 `卷料台账`（`#/inventory`）、`验布打标`（`#/inspection`）、`出入库单`（`#/documents`，含采购入库、领/退料、移库与盘点单）。
-- 企业认证门控：以 `--auth` 启动隔离服后访问 `http://127.0.0.1:<PORT>/app/`，页面弹出原生 `<dialog>` 登录门控弹窗（`AuthGateModal`，禁用 Esc 关闭），登录后**左侧导航栏底部** `.mp-auth-foot-card` 显示当前操作员/角色并支持登出。
+- 企业认证门控：以 `--auth` 启动隔离服后访问 `http://127.0.0.1:<PORT>/app/`，系统自动跳转至独立登录页 `#/login?redirect=...`（不挂载业务侧栏避免并发 401），登录后回跳原路由；**左侧导航栏底部** `.mp-auth-foot-card` 显示当前操作员/角色，点击账号可进入 `#/profile` 个人中心并支持调用服务端登出吊销令牌（详细交互与 Agent/审计验收见 [auth-users-agents-and-audit.md](./auth-users-agents-and-audit.md)）。
 
 ## Driving it with HTTP / `verify-ctl.mjs`
 
 Preconditions: 验收企业认证时，使用独立端口并附加 `--auth` 启动隔离实例：`node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs launch --port 18092 --auth`，并用 `doctor` 确认 `auth_endpoint_enabled` 通过。
 
+- **驱动 UI 质检与库存流转闭环（`INV-01~03`，兼含 `#/slitting` 1D 分条共 20 项）**：
+  - 命令：`node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs drive --session "<localSessionFile>" --script inspection-and-slitting`
+  - 可观测结果：退出码 `0`；输出 JSON 为 `executed: 20, passed: 20, failed: 0, skipped: 0`，覆盖 `#/documents` 采购入库 `PENDING` 卷与领料弹窗禁选、`POST /api/v2/material-issues` `409 INVENTORY_CONFLICT` 拦截、`#/inspection` 跑布步进录入 `HOLE` 疵点并刷新恢复草稿入档、非法 `REJECTED`/空白质检员 `400 INVALID_INPUT` 拦截、完检 `PASSED` 放行与发料/退料流转、`#/inventory` 登记并判 `FAILED` 复核禁领，以及 `GET /api/v2/inventory-ledger/reconciliation` 保持 `status="BALANCED"`。
 - **验证免登态库存与对账健康（免登实例）**：
   - 命令：`node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs doctor --session "<localSessionFile>"`
   - 可观测结果：`api_health_up` 与 `ledger_reconciliation_balanced` 均为 `true`（`issues: []`）。
@@ -34,7 +37,7 @@ Preconditions: 验收企业认证时，使用独立端口并附加 `--auth` 启�
   - 使用 `inspector` / `inspector123` 登录 `POST /api/v2/auth/login` 获取 `token`，携带 `Authorization: Bearer <token>` 请求 `GET /api/v2/auth/me` → 期望 `200` 且 `role="INSPECTOR"`。
   - 使用 `operator` / `operator123` 调 `POST /api/v2/workbench/drafts` → 期望 `403`；使用 `planner` / `planner123` 调 `POST /api/v2/workbench/drafts` → 放行进入业务校验（非 401/403）。
   - 使用 `planner` / `planner123` 登录，提交合法 `POST /api/v2/optimization-jobs`（可使用 `integrations/mcp/test/fixture.json`）后带 Bearer 读取 `GET /api/v2/optimization-jobs/{jobId}/events` → 期望 `200` 且 `Content-Type` 含 `text/event-stream`。
-- **补充 UI 交互验真**：需要肉眼核对 `AuthGateModal`、`InspectionPage` 跑布验疵或 `DocumentsPage` 表单联动时，通过 Antigravity `browser` 子代理打开 `http://127.0.0.1:18092/app/` 并按角色走查。
+- **补充 UI 交互验真**：需要肉眼核对 `#/login`、`#/profile`、`#/users`、`#/audit-logs`、`InspectionPage` 跑布验疵或 `DocumentsPage` 表单联动时，通过 Antigravity `browser` 子代理打开 `http://127.0.0.1:18092/app/` 并按角色走查。
 
 ## Gotchas
 

@@ -16,7 +16,9 @@ public class InventoryImport implements ApplicationRunner {
     @Override public void run(ApplicationArguments arguments) {
         if (source.isBlank()) return;
         if (!store.shared()) throw new IllegalStateException("库存导入仅用于空 MySQL 数据库");
-        if (store.load() != null || (store.supportsIndependentTemplates() && !store.loadTemplates().isEmpty()))
+        Long existingRevision = store.currentRevision();
+        boolean populated = existingRevision != null ? existingRevision > 0 : store.load() != null;
+        if (populated || (store.supportsIndependentTemplates() && !store.loadTemplates().isEmpty()))
             throw new IllegalStateException("目标数据库已有数据，拒绝覆盖导入；完成导入后请移除 cutdemo.import-file");
         InventorySnapshot snapshot = new FileInventoryStore(source).load();
         if (snapshot == null) throw new IllegalStateException("导入文件不存在");

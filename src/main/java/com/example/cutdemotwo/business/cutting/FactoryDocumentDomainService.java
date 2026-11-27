@@ -13,6 +13,7 @@ import com.example.cutdemotwo.persistence.InventoryConflictException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -72,12 +73,12 @@ final class FactoryDocumentDomainService {
 
     private String transferBlock(String type, String id) {
         if ("roll".equals(type)) {
-            var roll = kernel.motherRolls.get(id);
+            var roll = kernel.findOrLoadRoll(id);
             if (roll == null) return "母卷不存在";
             if ("SCRAPPED".equalsIgnoreCase(roll.getInspectionStatus())) return "母卷已报废";
             if (roll.getCurrentRemainingLength() <= 0) return "母卷已用尽";
         } else if ("remnant".equals(type)) {
-            var remnant = kernel.remnantPool.get(id);
+            var remnant = kernel.findOrLoadRemnant(id);
             if (remnant == null) return "料头不存在";
             if (!Set.of("AVAILABLE", "QUARANTINED").contains(remnant.getStatus())) return "料头已不在库";
         } else return "材料类型必须为 roll 或 remnant";
@@ -89,8 +90,15 @@ final class FactoryDocumentDomainService {
     }
 
     List<InventoryTransfer> inventoryTransfers() {
-        return kernel.read(() -> kernel.transfers.values().stream()
-                .sorted(Comparator.comparingLong(InventoryTransfer::inventoryRevision).reversed()).toList());
+        return inventoryTransfers(500, 0);
+    }
+
+    List<InventoryTransfer> inventoryTransfers(int limit, int offset) {
+        return kernel.read(() -> kernel.store.supportsHotColdLoading()
+                ? kernel.store.listTransfers(limit, offset)
+                : kernel.transfers.values().stream()
+                .sorted(Comparator.comparingLong(InventoryTransfer::inventoryRevision).reversed())
+                .skip(offset).limit(limit).toList());
     }
 
     InventoryTransfer transferInventory(String key, InventoryTransfer.Command command) {
@@ -102,11 +110,13 @@ final class FactoryDocumentDomainService {
             throw new IllegalArgumentException("请填写有效库存版本、目标库位、移库原因、经办人和 1–100 项材料");
         String documentId = UUID.randomUUID().toString();
         return kernel.mutate("INVENTORY_TRANSFER", documentId, "DECLARED:" + command.operator(), () -> {
-            for (var previous : kernel.transfers.values()) {
-                if (previous.idempotencyKey().equals(key)) {
-                    if (!previous.command().equals(command)) throw new InventoryConflictException("同一幂等键已用于其他移库内容");
-                    return previous;
-                }
+            InventoryTransfer previous = kernel.transfers.values().stream()
+                    .filter(t -> t.idempotencyKey().equals(key)).findFirst()
+                    .orElseGet(() -> kernel.store.supportsHotColdLoading()
+                            ? kernel.store.findTransferByIdempotencyKey(key).orElse(null) : null);
+            if (previous != null) {
+                if (!previous.command().equals(command)) throw new InventoryConflictException("同一幂等键已用于其他移库内容");
+                return previous;
             }
             if (command.expectedRevision() != kernel.revision) throw new InventoryConflictException("库存版本已变化，请刷新材料后重新核对移库单");
             var identities = new HashSet<String>();
@@ -117,13 +127,15 @@ final class FactoryDocumentDomainService {
                 if (!identities.add(material.type() + "/" + material.id())) throw new IllegalArgumentException("同一材料不能重复移库");
                 String blocked = transferBlock(material.type(), material.id());
                 if (!blocked.isEmpty()) throw new InventoryConflictException(material.id() + "：" + blocked);
-                String old = "roll".equals(material.type()) ? kernel.motherRolls.get(material.id()).getStorageLocation() : kernel.remnantPool.get(material.id()).getLocation();
+                String old = "roll".equals(material.type())
+                        ? kernel.findOrLoadRoll(material.id()).getStorageLocation()
+                        : kernel.findOrLoadRemnant(material.id()).getLocation();
                 if (command.destination().equals(Objects.toString(old, ""))) throw new IllegalArgumentException("目标库位与当前库位相同：" + material.id());
                 lines.add(new InventoryTransfer.Line(material.type(), material.id(), Objects.toString(old, ""), command.destination()));
             }
             for (var line : lines) {
-                if ("roll".equals(line.type())) kernel.motherRolls.get(line.id()).setStorageLocation(line.toLocation());
-                else kernel.remnantPool.get(line.id()).setLocation(line.toLocation());
+                if ("roll".equals(line.type())) kernel.findOrLoadRoll(line.id()).setStorageLocation(line.toLocation());
+                else kernel.findOrLoadRemnant(line.id()).setLocation(line.toLocation());
             }
             var document = new InventoryTransfer(documentId, key, command, kernel.currentOperationTime(), kernel.revision + 1, lines);
             kernel.transfers.put(document.id(), document);
@@ -134,17 +146,24 @@ final class FactoryDocumentDomainService {
     // ==================== 盘点单 ====================
 
     List<InventoryCount> inventoryCounts() {
-        return kernel.read(() -> kernel.counts.values().stream()
-                .sorted(Comparator.comparingLong(InventoryCount::inventoryRevision).reversed()).toList());
+        return inventoryCounts(500, 0);
+    }
+
+    List<InventoryCount> inventoryCounts(int limit, int offset) {
+        return kernel.read(() -> kernel.store.supportsHotColdLoading()
+                ? kernel.store.listCounts(limit, offset)
+                : kernel.counts.values().stream()
+                .sorted(Comparator.comparingLong(InventoryCount::inventoryRevision).reversed())
+                .skip(offset).limit(limit).toList());
     }
 
     private String countBlock(String type, String id) {
         if ("roll".equals(type)) {
-            var r = kernel.motherRolls.get(id);
+            var r = kernel.findOrLoadRoll(id);
             if (r == null) return "母卷不存在";
             if ("SCRAPPED".equalsIgnoreCase(r.getInspectionStatus())) return "母卷已报废，不能盘点";
         } else if ("remnant".equals(type)) {
-            var r = kernel.remnantPool.get(id);
+            var r = kernel.findOrLoadRemnant(id);
             if (r == null) return "料头不存在";
             if (!Set.of("AVAILABLE", "QUARANTINED", "LOST").contains(r.getStatus())) return "仅在库、隔离或盘亏料头可盘点";
         } else return "材料类型必须为 roll 或 remnant";
@@ -182,11 +201,13 @@ final class FactoryDocumentDomainService {
             throw new IllegalArgumentException("请填写有效版本、原因、经办人和 1–100 项实测材料");
         String id = UUID.randomUUID().toString();
         return kernel.mutate("INVENTORY_COUNT", id, "DECLARED:" + command.operator(), () -> {
-            for (var previous : kernel.counts.values()) {
-                if (previous.idempotencyKey().equals(key)) {
-                    if (!previous.command().equals(command)) throw new InventoryConflictException("同一幂等键不能修改盘点内容");
-                    return previous;
-                }
+            InventoryCount previous = kernel.counts.values().stream()
+                    .filter(c -> c.idempotencyKey().equals(key)).findFirst()
+                    .orElseGet(() -> kernel.store.supportsHotColdLoading()
+                            ? kernel.store.findCountByIdempotencyKey(key).orElse(null) : null);
+            if (previous != null) {
+                if (!previous.command().equals(command)) throw new InventoryConflictException("同一幂等键不能修改盘点内容");
+                return previous;
             }
             return null;
         }, () -> {
@@ -204,11 +225,13 @@ final class FactoryDocumentDomainService {
                         || (observation.present() ? l <= 0 : l != 0))
                     throw new IllegalArgumentException("实测宽度必须为正数，在场长度为正数，未见实物长度为零；尺寸不超过 10 亿 mm");
                 if ("roll".equals(observation.type())) {
-                    var r = kernel.motherRolls.get(observation.id());
+                    var r = kernel.findOrLoadRoll(observation.id());
                     double total = r.getUsedLength() + l;
                     if (w != r.getWidth()) throw new IllegalArgumentException("母卷盘点只校正未切余长，不能更改幅宽");
                     if (!Double.isFinite(total) || total > 1e9 || r.getUsedLength() < 0) throw new IllegalArgumentException("母卷累计长度无效");
-                    for (var report : kernel.receipts.values())
+                    Collection<Map<String, Object>> rollReports = kernel.store.supportsHotColdLoading()
+                            ? kernel.store.findCutReportsByRollId(r.getRollId()) : kernel.receipts.values();
+                    for (var report : rollReports)
                         if (!"REVERSED".equals(report.get("status")) && "roll".equals(report.get("feedPortType")) && r.getRollId().equals(report.get("rollId"))
                                 && report.get("windowStartY") instanceof Number start && report.get("actualCutLen") instanceof Number used
                                 && start.doubleValue() + used.doubleValue() > total + .001)
@@ -217,7 +240,7 @@ final class FactoryDocumentDomainService {
                     lines.add(new InventoryCount.Line("roll", r.getRollId(), w, r.getCurrentRemainingLength(), r.getInspectionStatus(), w, l,
                             r.getInspectionStatus(), w * (l - r.getCurrentRemainingLength()) / 1e6, r.getUsedLength(), r.getTotalLength(), total));
                 } else {
-                    var r = kernel.remnantPool.get(observation.id());
+                    var r = kernel.findOrLoadRemnant(observation.id());
                     if (observation.present()) checkCountDefects(r.getDefects(), w, l);
                     else if (w != r.getWidth()) throw new IllegalArgumentException("未见实物时保留原幅宽，不能凭空修改几何");
                     String next = !observation.present() ? "LOST" : "LOST".equals(r.getStatus()) ? "QUARANTINED" : r.getStatus();
@@ -228,11 +251,11 @@ final class FactoryDocumentDomainService {
             }
             for (var line : lines) {
                 if ("roll".equals(line.type())) {
-                    var r = kernel.motherRolls.get(line.id());
+                    var r = kernel.findOrLoadRoll(line.id());
                     r.setCurrentRemainingLength(line.measuredLength());
                     r.setTotalLength(line.afterTotalLength());
                 } else {
-                    var r = kernel.remnantPool.get(line.id());
+                    var r = kernel.findOrLoadRemnant(line.id());
                     if (!"LOST".equals(line.afterStatus())) {
                         r.setWidth(line.measuredWidth());
                         r.setLength(line.measuredLength());
@@ -254,10 +277,16 @@ final class FactoryDocumentDomainService {
     // ==================== 隔离料头质量放行单 ====================
 
     List<QualityReleaseDocument> listQualityReleases() {
-        return kernel.read(() -> kernel.qualityReleases.values().stream()
+        return listQualityReleases(500, 0);
+    }
+
+    List<QualityReleaseDocument> listQualityReleases(int limit, int offset) {
+        return kernel.read(() -> kernel.store.supportsHotColdLoading()
+                ? kernel.store.listQualityReleases(limit, offset)
+                : kernel.qualityReleases.values().stream()
                 .sorted(Comparator.comparingLong(QualityReleaseDocument::inventoryRevision).reversed()
                         .thenComparing(QualityReleaseDocument::id))
-                .toList());
+                .skip(offset).limit(limit).toList());
     }
 
     Map<String, Object> releaseQuarantinedRemnant(String remnantId, String idempotencyKey, String decisionInput,
@@ -274,18 +303,20 @@ final class FactoryDocumentDomainService {
         String docId = "QREL-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
 
         QualityReleaseDocument doc = kernel.mutate("QUALITY_RELEASE", docId, "DECLARED:" + inspector, () -> {
-            for (QualityReleaseDocument prev : kernel.qualityReleases.values()) {
-                if (prev.idempotencyKey().equals(key)) {
-                    if (!prev.remnantId().equals(targetRemnantId) || !prev.decision().equals(decision)
-                            || !prev.inspector().equals(inspector) || !prev.reason().equals(reason)) {
-                        throw new InventoryConflictException("同一幂等键已用于其他质量放行内容");
-                    }
-                    return prev;
+            QualityReleaseDocument prev = kernel.qualityReleases.values().stream()
+                    .filter(q -> q.idempotencyKey().equals(key)).findFirst()
+                    .orElseGet(() -> kernel.store.supportsHotColdLoading()
+                            ? kernel.store.findQualityReleaseByIdempotencyKey(key).orElse(null) : null);
+            if (prev != null) {
+                if (!prev.remnantId().equals(targetRemnantId) || !prev.decision().equals(decision)
+                        || !prev.inspector().equals(inspector) || !prev.reason().equals(reason)) {
+                    throw new InventoryConflictException("同一幂等键已用于其他质量放行内容");
                 }
+                return prev;
             }
             return null;
         }, () -> {
-            RemnantStock stock = kernel.remnantPool.get(targetRemnantId);
+            RemnantStock stock = kernel.findOrLoadRemnant(targetRemnantId);
             if (stock == null) throw new IllegalArgumentException("料头不存在: " + targetRemnantId);
             if (!"QUARANTINED".equals(stock.getStatus())) {
                 throw new InventoryConflictException("仅处于隔离状态(QUARANTINED)的料头可执行复验放行，当前状态：" + stock.getStatus());
@@ -315,7 +346,7 @@ final class FactoryDocumentDomainService {
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("document", doc);
-        out.put("remnant", kernel.read(() -> kernel.remnantPool.get(doc.remnantId())));
+        out.put("remnant", kernel.read(() -> kernel.findOrLoadRemnant(doc.remnantId())));
         out.put("revision", kernel.revision);
         return out;
     }
@@ -323,10 +354,16 @@ final class FactoryDocumentDomainService {
     // ==================== 采购批量入库单 ====================
 
     List<InventoryReceiptDocument> listInventoryReceipts() {
-        return kernel.read(() -> kernel.inventoryReceipts.values().stream()
+        return listInventoryReceipts(500, 0);
+    }
+
+    List<InventoryReceiptDocument> listInventoryReceipts(int limit, int offset) {
+        return kernel.read(() -> kernel.store.supportsHotColdLoading()
+                ? kernel.store.listInventoryReceipts(limit, offset)
+                : kernel.inventoryReceipts.values().stream()
                 .sorted(Comparator.comparingLong(InventoryReceiptDocument::inventoryRevision).reversed()
                         .thenComparing(InventoryReceiptDocument::id))
-                .toList());
+                .skip(offset).limit(limit).toList());
     }
 
     Map<String, Object> receiveInventoryBatch(
@@ -387,13 +424,15 @@ final class FactoryDocumentDomainService {
 
         String docId = "RCV-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
         InventoryReceiptDocument doc = kernel.mutate("RECEIPT_IN", docId, "DECLARED:" + operator, () -> {
-            for (InventoryReceiptDocument prev : kernel.inventoryReceipts.values()) {
-                if (prev.idempotencyKey().equals(key)) {
-                    if (!matchesReceiptDocument(prev, supplier, deliveryNo, operator, remarks, normalizedLines)) {
-                        throw new InventoryConflictException("同一幂等键已用于其他采购入库单内容");
-                    }
-                    return prev;
+            InventoryReceiptDocument prev = kernel.inventoryReceipts.values().stream()
+                    .filter(r -> r.idempotencyKey().equals(key)).findFirst()
+                    .orElseGet(() -> kernel.store.supportsHotColdLoading()
+                            ? kernel.store.findInventoryReceiptByIdempotencyKey(key).orElse(null) : null);
+            if (prev != null) {
+                if (!matchesReceiptDocument(prev, supplier, deliveryNo, operator, remarks, normalizedLines)) {
+                    throw new InventoryConflictException("同一幂等键已用于其他采购入库单内容");
                 }
+                return prev;
             }
             return null;
         }, () -> {
@@ -407,9 +446,9 @@ final class FactoryDocumentDomainService {
                     String prefix = "ROLL-RCV-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")) + "-";
                     do {
                         rollId = prefix + UUID.randomUUID().toString().substring(0, 4).toUpperCase(Locale.ROOT);
-                    } while (kernel.motherRolls.containsKey(rollId) || !batchIds.add(rollId));
+                    } while (kernel.findOrLoadRoll(rollId) != null || !batchIds.add(rollId));
                 } else {
-                    if (kernel.motherRolls.containsKey(rollId)) {
+                    if (kernel.findOrLoadRoll(rollId) != null) {
                         throw new InventoryConflictException("母卷编号已存在，不能重复入库: " + rollId);
                     }
                     if (!batchIds.add(rollId)) {
@@ -488,10 +527,16 @@ final class FactoryDocumentDomainService {
     // ==================== 车间领退料单 ====================
 
     List<MaterialIssueDocument> listMaterialIssues() {
-        return kernel.read(() -> kernel.materialIssues.values().stream()
+        return listMaterialIssues(500, 0);
+    }
+
+    List<MaterialIssueDocument> listMaterialIssues(int limit, int offset) {
+        return kernel.read(() -> kernel.store.supportsHotColdLoading()
+                ? kernel.store.listMaterialIssues(limit, offset)
+                : kernel.materialIssues.values().stream()
                 .sorted(Comparator.comparingLong(MaterialIssueDocument::inventoryRevision).reversed()
                         .thenComparing(MaterialIssueDocument::id))
-                .toList());
+                .skip(offset).limit(limit).toList());
     }
 
     Map<String, Object> postMaterialIssue(
@@ -529,21 +574,23 @@ final class FactoryDocumentDomainService {
                 + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
 
         MaterialIssueDocument doc = kernel.mutate(eventType, docId, "DECLARED:" + operator, () -> {
-            for (MaterialIssueDocument prev : kernel.materialIssues.values()) {
-                if (prev.idempotencyKey().equals(key)) {
-                    boolean sameMachine = machineId == null || Objects.equals(prev.machineId(), machineId);
-                    boolean sameShift = shiftTeam == null || Objects.equals(prev.shiftTeam(), shiftTeam);
-                    if (!prev.direction().equals(direction) || !prev.rollId().equals(rollId)
-                            || !prev.operator().equals(operator) || !prev.toLocation().equals(finalTargetLocation)
-                            || !prev.reason().equals(reason) || !sameMachine || !sameShift) {
-                        throw new InventoryConflictException("同一幂等键已用于其他领退料单内容");
-                    }
-                    return prev;
+            MaterialIssueDocument prev = kernel.materialIssues.values().stream()
+                    .filter(m -> m.idempotencyKey().equals(key)).findFirst()
+                    .orElseGet(() -> kernel.store.supportsHotColdLoading()
+                            ? kernel.store.findMaterialIssueByIdempotencyKey(key).orElse(null) : null);
+            if (prev != null) {
+                boolean sameMachine = machineId == null || Objects.equals(prev.machineId(), machineId);
+                boolean sameShift = shiftTeam == null || Objects.equals(prev.shiftTeam(), shiftTeam);
+                if (!prev.direction().equals(direction) || !prev.rollId().equals(rollId)
+                        || !prev.operator().equals(operator) || !prev.toLocation().equals(finalTargetLocation)
+                        || !prev.reason().equals(reason) || !sameMachine || !sameShift) {
+                    throw new InventoryConflictException("同一幂等键已用于其他领退料单内容");
                 }
+                return prev;
             }
             return null;
         }, () -> {
-            MotherRollInfo roll = kernel.motherRolls.get(rollId);
+            MotherRollInfo roll = kernel.findOrLoadRoll(rollId);
             if (roll == null) throw new IllegalArgumentException("母卷不存在: " + rollId);
             if ("SCRAPPED".equalsIgnoreCase(roll.getInspectionStatus())) {
                 throw new InventoryConflictException("母卷 " + rollId + " 已报废，禁止办理领退料");

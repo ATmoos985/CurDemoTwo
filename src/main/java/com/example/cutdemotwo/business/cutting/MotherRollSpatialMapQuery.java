@@ -35,9 +35,9 @@ final class MotherRollSpatialMapQuery {
                 }
             }
 
-            // 1. 已切割区域 (Cut Zones) — 来自所有有效实切回执
+            // 1. 已切割区域 (Cut Zones) — 来自所有有效实切回执（按母卷索引按需读取）
             List<Map<String, Object>> cutZones = new ArrayList<>();
-            for (Map<String, Object> rawReceipt : tx.listReceipts()) {
+            for (Map<String, Object> rawReceipt : tx.findCutReportsByRollId(rollId)) {
                 if ("REVERSED".equals(rawReceipt.get("status"))) continue;
                 if (!"roll".equals(rawReceipt.get("feedPortType")) || !rollId.equals(rawReceipt.get("rollId"))) continue;
                 Map<String, Object> projected = tx.projectQuality(rawReceipt);

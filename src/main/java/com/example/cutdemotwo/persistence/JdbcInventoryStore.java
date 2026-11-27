@@ -1,15 +1,15 @@
 package com.example.cutdemotwo.persistence;
 
 import com.example.cutdemotwo.business.model.CuttingPlan;
-import com.example.cutdemotwo.business.model.ExecutionOrder;
-import com.example.cutdemotwo.business.model.InventoryTransfer;
-import com.example.cutdemotwo.business.model.InventoryEvent;
-import com.example.cutdemotwo.business.model.InventoryCount;
-import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
-import com.example.cutdemotwo.business.model.InventoryReceiptDocument;
-import com.example.cutdemotwo.business.model.MaterialIssueDocument;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.DemandTemplate;
+import com.example.cutdemotwo.business.model.ExecutionOrder;
+import com.example.cutdemotwo.business.model.InventoryCount;
+import com.example.cutdemotwo.business.model.InventoryEvent;
+import com.example.cutdemotwo.business.model.InventoryLedgerEntry;
+import com.example.cutdemotwo.business.model.InventoryReceiptDocument;
+import com.example.cutdemotwo.business.model.InventoryTransfer;
+import com.example.cutdemotwo.business.model.MaterialIssueDocument;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
 import com.example.cutdemotwo.business.model.QualityReleaseDocument;
 import com.example.cutdemotwo.business.model.RemnantStock;
@@ -19,8 +19,10 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
+
 import javax.sql.DataSource;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 /** A revision CAS and all changed aggregate rows commit in the same database transaction. */
@@ -30,6 +32,8 @@ public class JdbcInventoryStore implements InventoryStore {
     private final TransactionTemplate readOnlyTransaction;
     private final boolean mysql;
     private final ObjectMapper json = new ObjectMapper();
+    private final JdbcColdArchiveQueries coldQueries;
+
     public JdbcInventoryStore(DataSource dataSource) {
         jdbc = new JdbcTemplate(dataSource);
         mysql = "MySQL".equals(jdbc.execute((org.springframework.jdbc.core.ConnectionCallback<String>)
@@ -38,20 +42,23 @@ public class JdbcInventoryStore implements InventoryStore {
         transaction = new TransactionTemplate(txManager);
         readOnlyTransaction = new TransactionTemplate(txManager);
         readOnlyTransaction.setReadOnly(true);
+        this.coldQueries = new JdbcColdArchiveQueries(jdbc, readOnlyTransaction, json);
     }
+
     @Override public long now() {
         if (mysql) return Objects.requireNonNull(jdbc.queryForObject("SELECT UNIX_TIMESTAMP(CURRENT_TIMESTAMP(3))*1000", Long.class));
         return Objects.requireNonNull(jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(3)", java.sql.Timestamp.class)).getTime();
     }
+
     @Override public boolean shared() { return true; }
 
-    /** 轻量无锁查询当前版本号，避免只读请求与健康检查触发 FOR UPDATE 行锁。 */
+    @Override public boolean supportsHotColdLoading() { return true; }
+
     @Override public Long currentRevision() {
         List<Long> rows = jdbc.query("SELECT revision FROM cutdemo_revision WHERE id = 1", (rs, idx) -> rs.getLong(1));
         return rows.isEmpty() ? 0L : rows.get(0);
     }
 
-    /** 轻量无锁数据库连通性与版本行探针。 */
     @Override public String healthCheckError() {
         try {
             jdbc.queryForObject("SELECT 1", Integer.class);
@@ -61,7 +68,6 @@ public class JdbcInventoryStore implements InventoryStore {
         }
     }
 
-    /** 需求模板与库存账本正交，独立直写 demand_template 表，不竞争 cutdemo_revision 行锁。 */
     @Override public boolean supportsIndependentTemplates() { return true; }
 
     @Override public List<DemandTemplate> loadTemplates() {
@@ -98,10 +104,14 @@ public class JdbcInventoryStore implements InventoryStore {
         return deleted != null && deleted > 0;
     }
 
+    @Override public HotColdModels.HotInventoryBootstrap loadHotSnapshot() {
+        return coldQueries.loadHotSnapshot();
+    }
+
     @Override public InventorySnapshot load() {
         return readOnlyTransaction.execute(status -> {
             Map<String, Object> meta = jdbc.queryForMap("SELECT revision, remnant_seq, defect_seq FROM cutdemo_revision WHERE id = 1");
-            long revision = ((Number)meta.get("revision")).longValue();
+            long revision = ((Number) meta.get("revision")).longValue();
             if (revision == 0) return null;
             List<MotherRollInfo> rolls = rows("mother_roll", MotherRollInfo.class);
             List<RemnantStock> remnants = rows("remnant_stock", RemnantStock.class);
@@ -113,63 +123,72 @@ public class JdbcInventoryStore implements InventoryStore {
             jdbc.query("SELECT id, data_json FROM cut_report ORDER BY sort_order", rs -> {
                 receipts.put(rs.getString("id"), json.readValue(rs.getString("data_json"), new TypeReference<Map<String, Object>>() {}));
             });
-            Map<String,ExecutionOrder> executions=new LinkedHashMap<>();
-            rows("execution_order",ExecutionOrder.class).forEach(e->executions.put(e.id(),e));
-            Map<String,DemandTemplate> templates=new LinkedHashMap<>();
-            rows("demand_template",DemandTemplate.class).forEach(t->templates.put(t.id(),t));
-            Map<String,SchedulingScheme> schemes=new LinkedHashMap<>();
-            rows("scheduling_scheme",SchedulingScheme.class).forEach(s->schemes.put(s.id(),s));
-            return new InventorySnapshot(rolls, remnants, receipts, ((Number)meta.get("remnant_seq")).intValue(),
-                    ((Number)meta.get("defect_seq")).intValue(), tasks, plans, revision, executions, ledger(), transfers(),
+            Map<String, ExecutionOrder> executions = new LinkedHashMap<>();
+            rows("execution_order", ExecutionOrder.class).forEach(e -> executions.put(e.id(), e));
+            Map<String, DemandTemplate> templates = new LinkedHashMap<>();
+            rows("demand_template", DemandTemplate.class).forEach(t -> templates.put(t.id(), t));
+            Map<String, SchedulingScheme> schemes = new LinkedHashMap<>();
+            rows("scheduling_scheme", SchedulingScheme.class).forEach(s -> schemes.put(s.id(), s));
+            return new InventorySnapshot(rolls, remnants, receipts, ((Number) meta.get("remnant_seq")).intValue(),
+                    ((Number) meta.get("defect_seq")).intValue(), tasks, plans, revision, executions, ledger(), transfers(),
                     outbox(), counts(), templates, schemes, qualityReleases(), inventoryReceipts(), materialIssues());
         });
     }
-    private Map<String,QualityReleaseDocument> qualityReleases() {
-        var result=new LinkedHashMap<String,QualityReleaseDocument>();
+
+    private Map<String, QualityReleaseDocument> qualityReleases() {
+        var result = new LinkedHashMap<String, QualityReleaseDocument>();
         jdbc.query("SELECT id,data_json FROM quality_release_document ORDER BY inventory_revision,id", rs -> {
-            result.put(rs.getString(1),json.readValue(rs.getString(2),QualityReleaseDocument.class));
+            result.put(rs.getString(1), json.readValue(rs.getString(2), QualityReleaseDocument.class));
         });
         return result;
     }
-    private Map<String,InventoryReceiptDocument> inventoryReceipts() {
-        var result=new LinkedHashMap<String,InventoryReceiptDocument>();
+
+    private Map<String, InventoryReceiptDocument> inventoryReceipts() {
+        var result = new LinkedHashMap<String, InventoryReceiptDocument>();
         jdbc.query("SELECT id,data_json FROM inventory_receipt_document ORDER BY inventory_revision,id", rs -> {
-            result.put(rs.getString(1),json.readValue(rs.getString(2),InventoryReceiptDocument.class));
+            result.put(rs.getString(1), json.readValue(rs.getString(2), InventoryReceiptDocument.class));
         });
         return result;
     }
-    private Map<String,MaterialIssueDocument> materialIssues() {
-        var result=new LinkedHashMap<String,MaterialIssueDocument>();
+
+    private Map<String, MaterialIssueDocument> materialIssues() {
+        var result = new LinkedHashMap<String, MaterialIssueDocument>();
         jdbc.query("SELECT id,data_json FROM material_issue_document ORDER BY inventory_revision,id", rs -> {
-            result.put(rs.getString(1),json.readValue(rs.getString(2),MaterialIssueDocument.class));
+            result.put(rs.getString(1), json.readValue(rs.getString(2), MaterialIssueDocument.class));
         });
         return result;
     }
-    private Map<String,InventoryCount> counts() {
-        var result=new LinkedHashMap<String,InventoryCount>();
+
+    private Map<String, InventoryCount> counts() {
+        var result = new LinkedHashMap<String, InventoryCount>();
         jdbc.query("SELECT id,data_json FROM inventory_count ORDER BY inventory_revision,id", rs -> {
-            result.put(rs.getString(1),json.readValue(rs.getString(2),InventoryCount.class));
+            result.put(rs.getString(1), json.readValue(rs.getString(2), InventoryCount.class));
         });
         return result;
     }
+
     private List<InventoryEvent> outbox() {
         return jdbc.query("SELECT data_json FROM inventory_outbox ORDER BY event_sequence",
-                (rs,index)->json.readValue(rs.getString(1),InventoryEvent.class));
+                (rs, index) -> json.readValue(rs.getString(1), InventoryEvent.class));
     }
-    private Map<String,InventoryTransfer> transfers() {
-        var result=new LinkedHashMap<String,InventoryTransfer>();
+
+    private Map<String, InventoryTransfer> transfers() {
+        var result = new LinkedHashMap<String, InventoryTransfer>();
         jdbc.query("SELECT id,data_json FROM inventory_transfer ORDER BY inventory_revision,id", rs -> {
-            result.put(rs.getString(1),json.readValue(rs.getString(2),InventoryTransfer.class));
+            result.put(rs.getString(1), json.readValue(rs.getString(2), InventoryTransfer.class));
         });
         return result;
     }
+
     private List<InventoryLedgerEntry> ledger() {
         return jdbc.query("SELECT data_json FROM inventory_ledger ORDER BY entry_sequence",
-                (rs,index) -> json.readValue(rs.getString(1),InventoryLedgerEntry.class));
+                (rs, index) -> json.readValue(rs.getString(1), InventoryLedgerEntry.class));
     }
+
     private <T> List<T> rows(String table, Class<T> type) {
         return jdbc.query("SELECT data_json FROM " + table + " ORDER BY sort_order", (rs, index) -> json.readValue(rs.getString(1), type));
     }
+
     @Override public long save(InventorySnapshot snapshot) {
         return Objects.requireNonNull(transaction.execute(status -> {
             int changed = jdbc.update("UPDATE cutdemo_revision SET revision = revision + 1, remnant_seq = ?, defect_seq = ? WHERE id = 1 AND revision = ?",
@@ -185,65 +204,79 @@ public class JdbcInventoryStore implements InventoryStore {
                     p -> Arrays.asList(p.request().getTaskId(), p.status()));
             sync("cut_report", List.of("task_id", "roll_id", "source_remnant_id", "status"), values(snapshot.receipts()), r -> r.get("planId").toString(),
                     r -> Arrays.asList(r.get("taskId"), r.get("rollId"), r.get("sourceRemnantId"), r.getOrDefault("status", "CONFIRMED")));
-            sync("execution_order", List.of("idempotency_key","plan_id","task_id","material_type","material_id","state","version","expires_at"),
-                    values(snapshot.executions()),ExecutionOrder::id,
-                    e->Arrays.asList(e.idempotencyKey(),e.planId(),e.taskId(),e.materialType(),e.materialId(),e.state(),e.version(),e.expiresAt()));
-            // 仅在冷库/全量导入（revision == 0）时携带模板落库；常规库存提交不覆盖独立管理的 demand_template 表
+            for (var receipt : values(snapshot.receipts())) {
+                coldQueries.maintainCutReportLinks(receipt.get("planId").toString(), receipt);
+            }
+            sync("execution_order", List.of("idempotency_key", "plan_id", "task_id", "material_type", "material_id", "state", "version", "expires_at"),
+                    values(snapshot.executions()), ExecutionOrder::id,
+                    e -> Arrays.asList(e.idempotencyKey(), e.planId(), e.taskId(), e.materialType(), e.materialId(), e.state(), e.version(), e.expiresAt()));
             if (snapshot.revision() == 0 && snapshot.templates() != null && !snapshot.templates().isEmpty()) {
-                sync("demand_template", List.of("dimension","material_model"),
-                        values(snapshot.templates()),DemandTemplate::id,
-                        t->Arrays.asList(t.dimension(),t.materialModel()));
+                sync("demand_template", List.of("dimension", "material_model"),
+                        values(snapshot.templates()), DemandTemplate::id,
+                        t -> Arrays.asList(t.dimension(), t.materialModel()));
             }
-            sync("scheduling_scheme", List.of("task_id","roll_id","state","dimension"),
-                    values(snapshot.schemes()),SchedulingScheme::id,
-                    s->Arrays.asList(s.taskId(),s.rollId(),s.state(),s.dimension()));
-            var posted=transfers();
-            InventoryTransfer.requireAppendOnly(posted,snapshot.transfers());
-            for(var document:snapshot.transfers().values())if(!posted.containsKey(document.id()))
-                jdbc.update("INSERT INTO inventory_transfer (id,idempotency_key,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?)",
-                        document.id(),document.idempotencyKey(),document.postedAt(),document.inventoryRevision(),json.writeValueAsString(document));
-            var counted=counts();
-            InventoryCount.requireAppendOnly(counted,snapshot.counts());
-            for(var document:snapshot.counts().values())if(!counted.containsKey(document.id()))
-                jdbc.update("INSERT INTO inventory_count (id,idempotency_key,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?)",
-                        document.id(),document.idempotencyKey(),document.postedAt(),document.inventoryRevision(),json.writeValueAsString(document));
-            var released=qualityReleases();
-            QualityReleaseDocument.requireAppendOnly(released,snapshot.qualityReleases());
-            for(var document:snapshot.qualityReleases().values())if(!released.containsKey(document.id()))
-                jdbc.update("INSERT INTO quality_release_document (id,idempotency_key,remnant_id,decision,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?)",
-                        document.id(),document.idempotencyKey(),document.remnantId(),document.decision(),document.postedAt(),document.inventoryRevision(),json.writeValueAsString(document));
-            var invReceipts=inventoryReceipts();
-            InventoryReceiptDocument.requireAppendOnly(invReceipts,snapshot.inventoryReceipts());
-            for(var document:snapshot.inventoryReceipts().values())if(!invReceipts.containsKey(document.id()))
-                jdbc.update("INSERT INTO inventory_receipt_document (id,idempotency_key,supplier_name,delivery_note_no,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?)",
-                        document.id(),document.idempotencyKey(),document.supplierName(),document.deliveryNoteNo(),document.postedAt(),document.inventoryRevision(),json.writeValueAsString(document));
-            var matIssues=materialIssues();
-            MaterialIssueDocument.requireAppendOnly(matIssues,snapshot.materialIssues());
-            for(var document:snapshot.materialIssues().values())if(!matIssues.containsKey(document.id()))
-                jdbc.update("INSERT INTO material_issue_document (id,idempotency_key,direction,roll_id,machine_id,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?,?)",
-                        document.id(),document.idempotencyKey(),document.direction(),document.rollId(),document.machineId(),document.postedAt(),document.inventoryRevision(),json.writeValueAsString(document));
+            sync("scheduling_scheme", List.of("task_id", "roll_id", "state", "dimension"),
+                    values(snapshot.schemes()), SchedulingScheme::id,
+                    s -> Arrays.asList(s.taskId(), s.rollId(), s.state(), s.dimension()));
+            var posted = transfers();
+            InventoryTransfer.requireAppendOnly(posted, snapshot.transfers());
+            for (var document : snapshot.transfers().values()) {
+                if (!posted.containsKey(document.id())) {
+                    jdbc.update("INSERT INTO inventory_transfer (id,idempotency_key,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?)",
+                            document.id(), document.idempotencyKey(), document.postedAt(), document.inventoryRevision(), json.writeValueAsString(document));
+                    coldQueries.maintainTransferLinks(document);
+                }
+            }
+            var counted = counts();
+            InventoryCount.requireAppendOnly(counted, snapshot.counts());
+            for (var document : snapshot.counts().values()) {
+                if (!counted.containsKey(document.id())) {
+                    jdbc.update("INSERT INTO inventory_count (id,idempotency_key,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?)",
+                            document.id(), document.idempotencyKey(), document.postedAt(), document.inventoryRevision(), json.writeValueAsString(document));
+                    coldQueries.maintainCountLinks(document);
+                }
+            }
+            var released = qualityReleases();
+            QualityReleaseDocument.requireAppendOnly(released, snapshot.qualityReleases());
+            for (var document : snapshot.qualityReleases().values()) {
+                if (!released.containsKey(document.id()))
+                    jdbc.update("INSERT INTO quality_release_document (id,idempotency_key,remnant_id,decision,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?)",
+                            document.id(), document.idempotencyKey(), document.remnantId(), document.decision(), document.postedAt(), document.inventoryRevision(), json.writeValueAsString(document));
+            }
+            var invReceipts = inventoryReceipts();
+            InventoryReceiptDocument.requireAppendOnly(invReceipts, snapshot.inventoryReceipts());
+            for (var document : snapshot.inventoryReceipts().values()) {
+                if (!invReceipts.containsKey(document.id())) {
+                    jdbc.update("INSERT INTO inventory_receipt_document (id,idempotency_key,supplier_name,delivery_note_no,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?)",
+                            document.id(), document.idempotencyKey(), document.supplierName(), document.deliveryNoteNo(), document.postedAt(), document.inventoryRevision(), json.writeValueAsString(document));
+                    coldQueries.maintainReceiptLinks(document);
+                }
+            }
+            var matIssues = materialIssues();
+            MaterialIssueDocument.requireAppendOnly(matIssues, snapshot.materialIssues());
+            for (var document : snapshot.materialIssues().values()) {
+                if (!matIssues.containsKey(document.id()))
+                    jdbc.update("INSERT INTO material_issue_document (id,idempotency_key,direction,roll_id,machine_id,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?,?)",
+                            document.id(), document.idempotencyKey(), document.direction(), document.rollId(), document.machineId(), document.postedAt(), document.inventoryRevision(), json.writeValueAsString(document));
+            }
             var previous = ledger();
-            InventoryLedgerEntry.requireAppendOnly(previous,snapshot.ledger());
-            for (var entry : snapshot.ledger().subList(previous.size(),snapshot.ledger().size())) {
+            InventoryLedgerEntry.requireAppendOnly(previous, snapshot.ledger());
+            for (var entry : snapshot.ledger().subList(previous.size(), snapshot.ledger().size())) {
                 jdbc.update("INSERT INTO inventory_ledger (id,entry_sequence,transaction_id,event_type,aggregate_type,aggregate_id,occurred_at,data_json) VALUES (?,?,?,?,?,?,?,?)",
-                        entry.id(),entry.sequence(),entry.transactionId(),entry.eventType(),entry.aggregateType(),entry.aggregateId(),
-                        entry.occurredAt(),json.writeValueAsString(entry));
+                        entry.id(), entry.sequence(), entry.transactionId(), entry.eventType(), entry.aggregateType(), entry.aggregateId(),
+                        entry.occurredAt(), json.writeValueAsString(entry));
             }
-            var events=outbox();
-            InventoryEvent.requireAppendOnly(events,snapshot.outbox());
-            for(var event:snapshot.outbox().subList(events.size(),snapshot.outbox().size()))
+            var events = outbox();
+            InventoryEvent.requireAppendOnly(events, snapshot.outbox());
+            for (var event : snapshot.outbox().subList(events.size(), snapshot.outbox().size()))
                 jdbc.update("INSERT INTO inventory_outbox (id,event_sequence,inventory_revision,data_json) VALUES (?,?,?,?)",
-                        event.id(),event.sequence(),event.inventoryRevision(),json.writeValueAsString(event));
+                        event.id(), event.sequence(), event.inventoryRevision(), json.writeValueAsString(event));
             return snapshot.revision() + 1;
         }));
     }
+
     private static <T> Collection<T> values(Map<String, T> map) { return map == null ? List.of() : map.values(); }
 
-    /**
-     * 定点增量落库：
-     * 在同一数据库事务内完成全局 revision CAS、脏聚合行定点 UPSERT/DELETE 以及只增表尾行 INSERT，
-     * 对未修改的主表和追加表零 SQL、零全表扫描、零历史反序列化。
-     */
     @Override public long saveDelta(InventoryDelta delta, java.util.function.Supplier<InventorySnapshot> fullSnapshotSupplier) {
         if (delta == null || delta.expectedRevision() == 0) {
             return save(fullSnapshotSupplier.get());
@@ -269,20 +302,32 @@ public class JdbcInventoryStore implements InventoryStore {
             applyTableDelta("cut_report", List.of("task_id", "roll_id", "source_remnant_id", "status"),
                     delta.upsertedReceipts(), delta.deletedReceiptIds(),
                     r -> Arrays.asList(r.get("taskId"), r.get("rollId"), r.get("sourceRemnantId"), r.getOrDefault("status", "CONFIRMED")));
-            applyTableDelta("execution_order", List.of("idempotency_key","plan_id","task_id","material_type","material_id","state","version","expires_at"),
+            if (delta.upsertedReceipts() != null) {
+                for (var item : delta.upsertedReceipts()) {
+                    coldQueries.maintainCutReportLinks(item.id(), item.value());
+                }
+            }
+            if (delta.deletedReceiptIds() != null) {
+                for (String deletedId : delta.deletedReceiptIds()) {
+                    jdbc.update("DELETE FROM cut_report_task_link WHERE report_id = ?", deletedId);
+                }
+            }
+            applyTableDelta("execution_order", List.of("idempotency_key", "plan_id", "task_id", "material_type", "material_id", "state", "version", "expires_at"),
                     delta.upsertedExecutions(), delta.deletedExecutionIds(),
                     e -> Arrays.asList(e.idempotencyKey(), e.planId(), e.taskId(), e.materialType(), e.materialId(), e.state(), e.version(), e.expiresAt()));
-            applyTableDelta("scheduling_scheme", List.of("task_id","roll_id","state","dimension"),
+            applyTableDelta("scheduling_scheme", List.of("task_id", "roll_id", "state", "dimension"),
                     delta.upsertedSchemes(), delta.deletedSchemeIds(),
                     s -> Arrays.asList(s.taskId(), s.rollId(), s.state(), s.dimension()));
 
             for (var document : delta.appendedTransfers()) {
                 jdbc.update("INSERT INTO inventory_transfer (id,idempotency_key,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?)",
                         document.id(), document.idempotencyKey(), document.postedAt(), document.inventoryRevision(), json.writeValueAsString(document));
+                coldQueries.maintainTransferLinks(document);
             }
             for (var document : delta.appendedCounts()) {
                 jdbc.update("INSERT INTO inventory_count (id,idempotency_key,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?)",
                         document.id(), document.idempotencyKey(), document.postedAt(), document.inventoryRevision(), json.writeValueAsString(document));
+                coldQueries.maintainCountLinks(document);
             }
             for (var document : delta.appendedQualityReleases()) {
                 jdbc.update("INSERT INTO quality_release_document (id,idempotency_key,remnant_id,decision,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?)",
@@ -291,6 +336,7 @@ public class JdbcInventoryStore implements InventoryStore {
             for (var document : delta.appendedInventoryReceipts()) {
                 jdbc.update("INSERT INTO inventory_receipt_document (id,idempotency_key,supplier_name,delivery_note_no,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?)",
                         document.id(), document.idempotencyKey(), document.supplierName(), document.deliveryNoteNo(), document.postedAt(), document.inventoryRevision(), json.writeValueAsString(document));
+                coldQueries.maintainReceiptLinks(document);
             }
             for (var document : delta.appendedMaterialIssues()) {
                 jdbc.update("INSERT INTO material_issue_document (id,idempotency_key,direction,roll_id,machine_id,posted_at,inventory_revision,data_json) VALUES (?,?,?,?,?,?,?,?)",
@@ -334,11 +380,8 @@ public class JdbcInventoryStore implements InventoryStore {
     }
 
     private <T> void applyTableDelta(
-            String table,
-            List<String> columns,
-            List<InventoryDelta.IndexedItem<T>> upserts,
-            List<String> deletedIds,
-            Function<T, List<Object>> fields
+            String table, List<String> columns, List<InventoryDelta.IndexedItem<T>> upserts,
+            List<String> deletedIds, Function<T, List<Object>> fields
     ) {
         if ((upserts == null || upserts.isEmpty()) && (deletedIds == null || deletedIds.isEmpty())) {
             return;
@@ -370,7 +413,6 @@ public class JdbcInventoryStore implements InventoryStore {
         }
     }
 
-    // Table/column names come only from the constants above; all business values are bound parameters.
     private <T> void sync(String table, List<String> columns, Collection<T> items, Function<T, String> key, Function<T, List<Object>> fields) {
         Map<String, String> existing = new HashMap<>();
         Map<String, Long> order = new HashMap<>();
@@ -390,4 +432,66 @@ public class JdbcInventoryStore implements InventoryStore {
         }
         for (String removed : existing.keySet()) jdbc.update("DELETE FROM " + table + " WHERE id = ?", removed);
     }
+
+    // ==================== 热冷按需分页/点查/流式端口实现 ====================
+
+    @Override public long countLedgerEntries() { return coldQueries.countLedgerEntries(); }
+    @Override public Optional<String> findLatestAggregateAfterJson(String aggregateType, String aggregateId) { return coldQueries.findLatestAggregateAfterJson(aggregateType, aggregateId); }
+    @Override public List<String> findReversalLedgerIds(String aggregateType, String aggregateId, String businessId, boolean dispositionRevoke) { return coldQueries.findReversalLedgerIds(aggregateType, aggregateId, businessId, dispositionRevoke); }
+    @Override public Map<String, Object> queryLedgerPage(String aggregateType, String aggregateId, long after, int limit) { return coldQueries.queryLedgerPage(aggregateType, aggregateId, after, limit); }
+    @Override public void streamLedgerEntries(int batchSize, Consumer<List<InventoryLedgerEntry>> consumer) { coldQueries.streamLedgerEntries(batchSize, consumer); }
+    @Override public long countOutboxEvents() { return coldQueries.countOutboxEvents(); }
+    @Override public Optional<String> findOutboxFirstEventId() { return coldQueries.findOutboxFirstEventId(); }
+    @Override public Optional<InventoryEvent> findOutboxBySequence(long sequence) { return coldQueries.findOutboxBySequence(sequence); }
+    @Override public List<InventoryEvent> queryOutboxPage(long after, int limit) { return coldQueries.queryOutboxPage(after, limit); }
+    @Override public List<InventoryTransfer> listTransfers(int limit, int offset) { return coldQueries.listDocumentPage("inventory_transfer", InventoryTransfer.class, limit, offset); }
+    @Override public Optional<InventoryTransfer> findTransferByIdempotencyKey(String key) { return coldQueries.findByIdempotencyKey("inventory_transfer", InventoryTransfer.class, key); }
+    @Override public boolean hasTransferForMaterial(String type, String id) { return coldQueries.hasTransferForMaterial(type, id); }
+    @Override public void streamTransfers(int batchSize, Consumer<List<InventoryTransfer>> consumer) { coldQueries.streamOrderedTable("inventory_transfer", "inventory_revision", InventoryTransfer.class, batchSize, consumer); }
+    @Override public List<InventoryCount> listCounts(int limit, int offset) { return coldQueries.listDocumentPage("inventory_count", InventoryCount.class, limit, offset); }
+    @Override public Optional<InventoryCount> findCountByIdempotencyKey(String key) { return coldQueries.findByIdempotencyKey("inventory_count", InventoryCount.class, key); }
+    @Override public long findMaxCountRevision(String type, String id) { return coldQueries.findMaxCountRevision(type, id); }
+    @Override public void streamCounts(int batchSize, Consumer<List<InventoryCount>> consumer) { coldQueries.streamOrderedTable("inventory_count", "inventory_revision", InventoryCount.class, batchSize, consumer); }
+    @Override public List<QualityReleaseDocument> listQualityReleases(int limit, int offset) { return coldQueries.listDocumentPage("quality_release_document", QualityReleaseDocument.class, limit, offset); }
+    @Override public Optional<QualityReleaseDocument> findQualityReleaseByIdempotencyKey(String key) { return coldQueries.findByIdempotencyKey("quality_release_document", QualityReleaseDocument.class, key); }
+    @Override public boolean hasQualityReleaseForRemnant(String remnantId) { return coldQueries.hasQualityReleaseForRemnant(remnantId); }
+    @Override public void streamQualityReleases(int batchSize, Consumer<List<QualityReleaseDocument>> consumer) { coldQueries.streamOrderedTable("quality_release_document", "inventory_revision", QualityReleaseDocument.class, batchSize, consumer); }
+    @Override public List<InventoryReceiptDocument> listInventoryReceipts(int limit, int offset) { return coldQueries.listDocumentPage("inventory_receipt_document", InventoryReceiptDocument.class, limit, offset); }
+    @Override public Optional<InventoryReceiptDocument> findInventoryReceiptByIdempotencyKey(String key) { return coldQueries.findByIdempotencyKey("inventory_receipt_document", InventoryReceiptDocument.class, key); }
+    @Override public boolean hasInventoryReceiptForRoll(String rollId) { return coldQueries.hasInventoryReceiptForRoll(rollId); }
+    @Override public void streamInventoryReceipts(int batchSize, Consumer<List<InventoryReceiptDocument>> consumer) { coldQueries.streamOrderedTable("inventory_receipt_document", "inventory_revision", InventoryReceiptDocument.class, batchSize, consumer); }
+    @Override public List<MaterialIssueDocument> listMaterialIssues(int limit, int offset) { return coldQueries.listDocumentPage("material_issue_document", MaterialIssueDocument.class, limit, offset); }
+    @Override public Optional<MaterialIssueDocument> findMaterialIssueByIdempotencyKey(String key) { return coldQueries.findByIdempotencyKey("material_issue_document", MaterialIssueDocument.class, key); }
+    @Override public boolean hasMaterialIssueForRoll(String rollId) { return coldQueries.hasMaterialIssueForRoll(rollId); }
+    @Override public void streamMaterialIssues(int batchSize, Consumer<List<MaterialIssueDocument>> consumer) { coldQueries.streamOrderedTable("material_issue_document", "inventory_revision", MaterialIssueDocument.class, batchSize, consumer); }
+    @Override public Optional<HotColdModels.OrderedEntry<Map<String, Object>>> findCutReport(String planId) { return coldQueries.findCutReport(planId); }
+    @Override public List<Map<String, Object>> findCutReportsByRollId(String rollId) { return coldQueries.findCutReportsByRollId(rollId); }
+    @Override public List<Map<String, Object>> findCutReportsByTaskId(String taskId) { return coldQueries.findCutReportsByTaskId(taskId); }
+    @Override public HotColdModels.PagedSlice<Map<String, Object>> queryCutReportsPage(int limit, int offset, String statusFilter, String taskIdFilter) { return coldQueries.queryCutReportsPage(limit, offset, statusFilter, taskIdFilter); }
+    @Override public void streamActiveCutReports(int batchSize, Consumer<List<Map<String, Object>>> consumer) { coldQueries.streamCutReports(true, batchSize, consumer); }
+    @Override public void streamAllCutReports(int batchSize, Consumer<List<Map<String, Object>>> consumer) { coldQueries.streamCutReports(false, batchSize, consumer); }
+    @Override public Optional<Map<String, Object>> findLatestActiveCutReportForRoll(String rollId) { return coldQueries.findLatestActiveCutReportForRoll(rollId); }
+    @Override public boolean hasAnyCutReportForRoll(String rollId) { return coldQueries.hasAnyCutReportForRoll(rollId); }
+    @Override public Optional<Map<String, Object>> findCutReportByDispositionRevokeKey(String idempotencyKey) { return coldQueries.findCutReportByDispositionRevokeKey(idempotencyKey); }
+    @Override public Optional<HotColdModels.OrderedEntry<CuttingTask>> findCuttingTask(String id) { return coldQueries.findOrderedById("cutting_task", id, CuttingTask.class); }
+    @Override public Optional<HotColdModels.OrderedEntry<CuttingTask>> findTaskByExternalRef(String externalRef) { return coldQueries.findFirstMatching("cutting_task", externalRef, CuttingTask.class, t -> Objects.equals(externalRef, t.externalRef())); }
+    @Override public Optional<HotColdModels.OrderedEntry<CuttingTask>> findTaskByReplenishKey(String key) { return coldQueries.findFirstMatching("cutting_task", key, CuttingTask.class, t -> Objects.equals(key, t.replenishIdempotencyKey())); }
+    @Override public List<CuttingTask> listAllTasks() { return coldQueries.listAllOrdered("cutting_task", CuttingTask.class); }
+    @Override public void streamCuttingTasks(int batchSize, Consumer<List<CuttingTask>> consumer) { coldQueries.streamBySortOrder("cutting_task", CuttingTask.class, batchSize, consumer); }
+    @Override public Optional<HotColdModels.OrderedEntry<CuttingPlan>> findCuttingPlan(String id) { return coldQueries.findOrderedById("cutting_plan", id, CuttingPlan.class); }
+    @Override public List<CuttingPlan> listTaskPlans(String taskId) { return coldQueries.findByColumn("cutting_plan", "task_id", taskId, CuttingPlan.class); }
+    @Override public Optional<HotColdModels.OrderedEntry<ExecutionOrder>> findExecutionOrder(String id) { return coldQueries.findOrderedById("execution_order", id, ExecutionOrder.class); }
+    @Override public List<ExecutionOrder> listTaskExecutions(String taskId) { return coldQueries.findByColumn("execution_order", "task_id", taskId, ExecutionOrder.class); }
+    @Override public Optional<HotColdModels.OrderedEntry<SchedulingScheme>> findSchedulingScheme(String id) { return coldQueries.findOrderedById("scheduling_scheme", id, SchedulingScheme.class); }
+    @Override public Optional<SchedulingScheme> findSchemeByIdempotencyKey(String key) { return coldQueries.findFirstMatching("scheduling_scheme", key, SchedulingScheme.class, s -> Objects.equals(key, s.idempotencyKey())).map(HotColdModels.OrderedEntry::value); }
+    @Override public Optional<SchedulingScheme> findSchemeByMesReceiptNo(String receiptNo) { return coldQueries.findFirstMatching("scheduling_scheme", receiptNo, SchedulingScheme.class, s -> Objects.equals(receiptNo, s.mesReceiptNo())).map(HotColdModels.OrderedEntry::value); }
+    @Override public List<SchedulingScheme> listAllSchemes() { return coldQueries.listAllOrdered("scheduling_scheme", SchedulingScheme.class); }
+    @Override public Optional<HotColdModels.OrderedEntry<MotherRollInfo>> findMotherRoll(String rollId) { return coldQueries.findOrderedById("mother_roll", rollId, MotherRollInfo.class); }
+    @Override public Optional<MotherRollInfo> findMotherRollByScrapKey(String key) { return coldQueries.findFirstMatching("mother_roll", key, MotherRollInfo.class, r -> Objects.equals(key, r.getScrapIdempotencyKey())).map(HotColdModels.OrderedEntry::value); }
+    @Override public List<MotherRollInfo> listAllMotherRolls() { return coldQueries.listAllOrdered("mother_roll", MotherRollInfo.class); }
+    @Override public void streamMotherRolls(int batchSize, Consumer<List<MotherRollInfo>> consumer) { coldQueries.streamBySortOrder("mother_roll", MotherRollInfo.class, batchSize, consumer); }
+    @Override public Optional<HotColdModels.OrderedEntry<RemnantStock>> findRemnant(String id) { return coldQueries.findOrderedById("remnant_stock", id, RemnantStock.class); }
+    @Override public List<RemnantStock> listAllRemnants() { return coldQueries.listAllOrdered("remnant_stock", RemnantStock.class); }
+    @Override public List<RemnantStock> listRemnantsBySourceRoll(String rollId) { return coldQueries.findByColumn("remnant_stock", "source_roll_id", rollId, RemnantStock.class); }
+    @Override public void streamRemnants(int batchSize, Consumer<List<RemnantStock>> consumer) { coldQueries.streamBySortOrder("remnant_stock", RemnantStock.class, batchSize, consumer); }
 }

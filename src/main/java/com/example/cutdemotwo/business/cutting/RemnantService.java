@@ -69,9 +69,15 @@ public class RemnantService implements CuttingStatePort {
         this.factoryDocumentService = new FactoryDocumentDomainService(kernel);
         this.taskService = new CuttingTaskDomainService(kernel);
         this.executionAndReportService = new CuttingExecutionAndReportService(kernel, () -> this.measurementToleranceMm);
-        InventorySnapshot loaded = store.load();
-        if (loaded != null) kernel.restore(loaded);
-        else if (seedDemo) rollAndRemnantService.seedDefaultDemoData();
+        if (store.supportsHotColdLoading()) {
+            var hot = store.loadHotSnapshot();
+            if (hot != null) kernel.restoreHot(hot);
+            else if (seedDemo) rollAndRemnantService.seedDefaultDemoData();
+        } else {
+            InventorySnapshot loaded = store.load();
+            if (loaded != null) kernel.restore(loaded);
+            else if (seedDemo) rollAndRemnantService.seedDefaultDemoData();
+        }
     }
 
     // ==================== 公开命令与快照契约（保持向后兼容） ====================
@@ -135,6 +141,32 @@ public class RemnantService implements CuttingStatePort {
     // ==================== 1. 内核健康、账本、对账与 Outbox ====================
 
     public List<InventoryEvent> integrationEvents() { return kernel.integrationEvents(); }
+
+    public long outboxCount() {
+        return kernel.read(() -> kernel.store.supportsHotColdLoading() ? kernel.outboxSize : kernel.outbox.size());
+    }
+
+    public Optional<String> outboxFirstEventId() {
+        return kernel.read(() -> kernel.store.supportsHotColdLoading()
+                ? (kernel.outboxStreamHeadId != null ? Optional.of(kernel.outboxStreamHeadId) : kernel.store.findOutboxFirstEventId())
+                : (kernel.outbox.isEmpty() ? Optional.empty() : Optional.of(kernel.outbox.get(0).id())));
+    }
+
+    public Optional<InventoryEvent> outboxBySequence(long sequence) {
+        if (sequence < 1) return Optional.empty();
+        return kernel.read(() -> {
+            if (kernel.store.supportsHotColdLoading()) return kernel.store.findOutboxBySequence(sequence);
+            int idx = (int) sequence - 1;
+            return idx < kernel.outbox.size() ? Optional.of(kernel.outbox.get(idx)) : Optional.empty();
+        });
+    }
+
+    public List<InventoryEvent> outboxPage(long after, int limit) {
+        return kernel.read(() -> {
+            if (kernel.store.supportsHotColdLoading()) return kernel.store.queryOutboxPage(after, limit);
+            return kernel.outbox.stream().filter(e -> e.sequence() > after).limit(limit).toList();
+        });
+    }
 
     public Map<String, Object> healthStatus() { return kernel.healthStatus(); }
 
@@ -464,12 +496,18 @@ public class RemnantService implements CuttingStatePort {
             return List.copyOf(kernel.templates.values());
         }
 
-        @Override public List<SchedulingScheme> listSchemes() { ensureActive(); return List.copyOf(kernel.schemes.values()); }
+        @Override public List<SchedulingScheme> listSchemes() {
+            ensureActive();
+            if (kernel.store.supportsHotColdLoading() && !writable) {
+                return kernel.store.listAllSchemes();
+            }
+            return List.copyOf(kernel.schemes.values());
+        }
 
         @Override
         public Optional<SchedulingScheme> findScheme(String id) {
             ensureActive();
-            return id == null ? Optional.empty() : Optional.ofNullable(kernel.schemes.get(id));
+            return Optional.ofNullable(kernel.findOrLoadScheme(id));
         }
 
         @Override
@@ -479,7 +517,9 @@ public class RemnantService implements CuttingStatePort {
             for (SchedulingScheme existing : kernel.schemes.values()) {
                 if (idempotencyKey.equals(existing.idempotencyKey())) return Optional.of(existing);
             }
-            return Optional.empty();
+            return kernel.store.supportsHotColdLoading()
+                    ? kernel.store.findSchemeByIdempotencyKey(idempotencyKey)
+                    : Optional.empty();
         }
 
         @Override
@@ -490,7 +530,9 @@ public class RemnantService implements CuttingStatePort {
             for (SchedulingScheme existing : kernel.schemes.values()) {
                 if (target.equals(existing.mesReceiptNo())) return Optional.of(existing);
             }
-            return Optional.empty();
+            return kernel.store.supportsHotColdLoading()
+                    ? kernel.store.findSchemeByMesReceiptNo(target)
+                    : Optional.empty();
         }
 
         @Override public List<CuttingTask> listTasks() { ensureActive(); return List.copyOf(kernel.tasks.values()); }
@@ -498,14 +540,16 @@ public class RemnantService implements CuttingStatePort {
         @Override
         public Optional<CuttingTask> findTask(String id) {
             ensureActive();
-            return id == null ? Optional.empty() : Optional.ofNullable(kernel.tasks.get(id));
+            return Optional.ofNullable(kernel.findOrLoadTask(id));
         }
 
         @Override
         public Optional<CuttingTask> findTaskByExternalRef(String externalRef) {
             ensureActive();
             if (externalRef == null) return Optional.empty();
-            return kernel.tasks.values().stream().filter(t -> externalRef.equals(t.externalRef())).findFirst();
+            Optional<CuttingTask> hot = kernel.tasks.values().stream().filter(t -> externalRef.equals(t.externalRef())).findFirst();
+            if (hot.isPresent() || !kernel.store.supportsHotColdLoading()) return hot;
+            return kernel.store.findTaskByExternalRef(externalRef).map(e -> e.value());
         }
 
         @Override
@@ -513,7 +557,9 @@ public class RemnantService implements CuttingStatePort {
             ensureActive();
             if (idempotencyKey == null || idempotencyKey.isBlank()) return Optional.empty();
             String clean = idempotencyKey.trim();
-            return kernel.tasks.values().stream().filter(t -> clean.equals(t.replenishIdempotencyKey())).findFirst();
+            Optional<CuttingTask> hot = kernel.tasks.values().stream().filter(t -> clean.equals(t.replenishIdempotencyKey())).findFirst();
+            if (hot.isPresent() || !kernel.store.supportsHotColdLoading()) return hot;
+            return kernel.store.findTaskByReplenishKey(clean).map(e -> e.value());
         }
 
         @Override
@@ -527,7 +573,7 @@ public class RemnantService implements CuttingStatePort {
         @Override
         public Optional<CuttingPlan> findPlan(String id) {
             ensureActive();
-            return id == null ? Optional.empty() : Optional.ofNullable(kernel.plans.get(id));
+            return Optional.ofNullable(kernel.findOrLoadPlan(id));
         }
 
         @Override public List<ExecutionOrder> listExecutions() { ensureActive(); return List.copyOf(kernel.executions.values()); }
@@ -535,19 +581,20 @@ public class RemnantService implements CuttingStatePort {
         @Override
         public Optional<MotherRollInfo> findRoll(String id) {
             ensureActive();
-            return id == null ? Optional.empty() : Optional.ofNullable(kernel.motherRolls.get(id));
+            return Optional.ofNullable(kernel.findOrLoadRoll(id));
         }
 
         @Override
         public Optional<RemnantStock> findRemnant(String id) {
             ensureActive();
-            return id == null ? Optional.empty() : Optional.ofNullable(kernel.remnantPool.get(id));
+            return Optional.ofNullable(kernel.findOrLoadRemnant(id));
         }
 
         @Override
         public List<RemnantStock> listRemnantsBySourceRoll(String rollId) {
             ensureActive();
             if (rollId == null) return List.of();
+            if (kernel.store.supportsHotColdLoading()) return kernel.store.listRemnantsBySourceRoll(rollId);
             return kernel.remnantPool.values().stream()
                     .filter(rm -> rollId.equalsIgnoreCase(rm.getSourceRollId()))
                     .toList();
@@ -556,10 +603,30 @@ public class RemnantService implements CuttingStatePort {
         @Override
         public Optional<Map<String, Object>> findReceipt(String planId) {
             ensureActive();
-            return planId == null ? Optional.empty() : Optional.ofNullable(kernel.receipts.get(planId));
+            return Optional.ofNullable(kernel.findOrLoadReceipt(planId));
         }
 
         @Override public List<Map<String, Object>> listReceipts() { ensureActive(); return List.copyOf(kernel.receipts.values()); }
+
+        @Override
+        public List<Map<String, Object>> findCutReportsByRollId(String rollId) {
+            ensureActive();
+            if (rollId == null) return List.of();
+            if (kernel.store.supportsHotColdLoading()) return kernel.store.findCutReportsByRollId(rollId);
+            return kernel.receipts.values().stream()
+                    .filter(r -> rollId.equals(r.get("rollId")))
+                    .toList();
+        }
+
+        @Override
+        public void streamActiveCutReports(int batchSize, java.util.function.Consumer<List<Map<String, Object>>> consumer) {
+            ensureActive();
+            if (kernel.store.supportsHotColdLoading()) {
+                kernel.store.streamActiveCutReports(batchSize, consumer);
+                return;
+            }
+            consumer.accept(List.copyOf(kernel.receipts.values()));
+        }
 
         @Override public Map<String, Integer> completedQuantities(String taskId) { ensureActive(); return kernel.completedQuantitiesInternal(taskId); }
 

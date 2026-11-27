@@ -9,6 +9,9 @@ export interface AuthSession {
   displayName: string;
   role: string;
   roles: string[];
+  actorType?: string;
+  agentId?: string | null;
+  scopes?: string[];
   expiresAt?: string;
 }
 
@@ -34,7 +37,10 @@ export const LOCAL_FALLBACK_SESSION: AuthSession = {
   username: 'LOCAL',
   displayName: '本机免登',
   role: 'ADMIN',
-  roles: ['ADMIN']
+  roles: ['ADMIN'],
+  actorType: 'USER',
+  agentId: null,
+  scopes: []
 };
 
 export function roleDisplayName(role?: string): string {
@@ -157,7 +163,13 @@ export function installAuthFetchInterceptor(options?: {
       const res = await rawFetch(nextInput, nextInit);
       if (res.status === 401) {
         const path = resolveRequestPath(input);
-        if (path && path.startsWith('/api/') && path !== '/api/v2/auth/login' && path !== '/api/v2/auth/me') {
+        if (
+          path &&
+          path.startsWith('/api/') &&
+          path !== '/api/v2/auth/login' &&
+          path !== '/api/v2/auth/me' &&
+          path !== '/api/v2/auth/logout'
+        ) {
           resetToken();
           unauthorizedListeners.forEach((fn) => {
             try {
@@ -209,6 +221,9 @@ export async function fetchAuthMe(fetchImpl: FetchFn = globalThis.fetch): Promis
       displayName: String(data?.displayName || data?.username || (enabled ? '未登录' : '本机免登')),
       role,
       roles,
+      actorType: data?.actorType ? String(data.actorType) : 'USER',
+      agentId: data?.agentId ? String(data.agentId) : null,
+      scopes: Array.isArray(data?.scopes) ? data.scopes.map(String) : [],
       expiresAt: data?.expiresAt ? String(data.expiresAt) : undefined
     };
   } catch {
@@ -256,6 +271,26 @@ export async function loginWithCredentials(
 
 export function logoutAuth(): void {
   clearAuthToken();
+}
+
+/**
+ * 向服务端请求吊销当前 Bearer 令牌（写入 sys_token_revocation）并清理本地持久化令牌。
+ * 即使网络超时或令牌已失效，本地存储仍会被安全清除。
+ */
+export async function logoutServer(fetchImpl: FetchFn = globalThis.fetch): Promise<void> {
+  const token = getAuthToken();
+  try {
+    if (token) {
+      await fetchImpl('/api/v2/auth/logout', {
+        method: 'POST',
+        headers: buildAuthHeaders(undefined, token)
+      });
+    }
+  } catch {
+    // 忽略登出网络异常，确保本地会话必然退出
+  } finally {
+    clearAuthToken();
+  }
 }
 
 /**

@@ -17,6 +17,7 @@ import com.example.cutdemotwo.persistence.InventoryConflictException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -58,7 +59,7 @@ final class CuttingExecutionAndReportService {
                     return e;
                 }
             }
-            var plan = kernel.plans.get(input.planId());
+            var plan = kernel.findOrLoadPlan(input.planId());
             if (plan == null || !"PENDING".equals(plan.status()) || plan.request().getTaskId() == null || plan.result().getPieces().isEmpty())
                 throw new IllegalArgumentException("执行单必须关联有裁片且尚未报工的任务方案");
             if (kernel.executions.values().stream().anyMatch(e -> e.planId().equals(plan.id())
@@ -84,7 +85,10 @@ final class CuttingExecutionAndReportService {
     }
 
     List<Map<String, Object>> executionOrdersInternal(String taskId) {
-        return kernel.executions.values().stream().filter(e -> taskId == null || taskId.equals(e.taskId()))
+        Collection<ExecutionOrder> source = (taskId != null && kernel.store.supportsHotColdLoading())
+                ? kernel.store.listTaskExecutions(taskId)
+                : kernel.executions.values();
+        return source.stream().filter(e -> taskId == null || taskId.equals(e.taskId()))
                 .sorted(Comparator.comparingLong(ExecutionOrder::createdAt).thenComparing(ExecutionOrder::id))
                 .map(this::executionView).toList();
     }
@@ -94,32 +98,11 @@ final class CuttingExecutionAndReportService {
     }
 
     private Map<String, Object> executionView(ExecutionOrder e) {
-        String effective = e.effectiveState(kernel.currentOperationTime());
-        var actions = new LinkedHashMap<String, Object>();
-        for (String action : List.of("release", "start", "cancel", "report")) {
-            boolean allowed = switch (action) {
-                case "release" -> Set.of("DRAFT", "EXPIRED").contains(effective);
-                case "start" -> "RELEASED".equals(effective);
-                case "cancel" -> Set.of("DRAFT", "RELEASED", "EXPIRED").contains(effective);
-                default -> "RUNNING".equals(effective);
-            };
-            String reason = allowed ? "" : "当前执行状态不支持此操作";
-            if (allowed && Set.of("release", "start").contains(action)) {
-                try {
-                    validateExecutionRelease(e);
-                } catch (IllegalArgumentException | InventoryConflictException error) {
-                    allowed = false;
-                    reason = error.getMessage();
-                }
-            }
-            actions.put(action, Map.of("allowed", allowed, "reason", reason));
-        }
-        return Map.of("execution", e, "effectiveState", effective,
-                "reservationActive", e.reserves(kernel.currentOperationTime()), "allowedActions", actions);
+        return CuttingExecutionProjectionHelper.buildExecutionView(e, kernel.currentOperationTime(), this::validateExecutionRelease);
     }
 
     private ExecutionOrder requiredExecution(String id) {
-        var e = kernel.executions.get(id);
+        var e = kernel.findOrLoadExecution(id);
         if (e == null) throw new IllegalArgumentException("执行单不存在");
         return e;
     }
@@ -171,17 +154,17 @@ final class CuttingExecutionAndReportService {
     private void validateExecutionRelease(ExecutionOrder execution) {
         if (kernel.executions.values().stream().anyMatch(e -> !e.id().equals(execution.id()) && e.planId().equals(execution.planId()) && e.reserves(kernel.currentOperationTime())))
             throw new InventoryConflictException("同一方案已有其他有效执行单");
-        var plan = kernel.plans.get(execution.planId());
+        var plan = kernel.findOrLoadPlan(execution.planId());
         if (plan == null || !"PENDING".equals(plan.status())) throw new InventoryConflictException("方案已失效或报工");
         kernel.prepareTaskSolveInternal(kernel.json.readValue(kernel.json.writeValueAsBytes(plan.request()), SolveRequest.class));
         if (!Objects.equals(plan.baseline(), kernel.materialFingerprintInternal(plan.request())))
             throw new InventoryConflictException("方案材料快照已变化，请重新排料");
         kernel.ensureMaterialNotReserved(execution.materialType(), execution.materialId(), execution.planId());
-        if ("roll".equals(execution.materialType()) && !"PASSED".equals(kernel.motherRolls.get(execution.materialId()).getInspectionStatus()))
+        if ("roll".equals(execution.materialType()) && !"PASSED".equals(kernel.findOrLoadRoll(execution.materialId()).getInspectionStatus()))
             throw new InventoryConflictException("母卷尚未检验合格，不能下达");
         var completed = kernel.completedQuantitiesInternal(execution.taskId());
         var reserved = kernel.reservedQuantities(execution.taskId(), execution.planId());
-        var task = kernel.tasks.get(execution.taskId());
+        var task = kernel.findOrLoadTask(execution.taskId());
         for (var entry : execution.demandQuantities().entrySet()) {
             var line = task.demands().stream().filter(d -> String.valueOf(d.id()).equals(entry.getKey())).findFirst()
                     .orElseThrow(() -> new InventoryConflictException("执行单需求已失效"));
@@ -219,7 +202,7 @@ final class CuttingExecutionAndReportService {
         if (execution.isPresent()) {
             var e = execution.get();
             if (!"RUNNING".equals(e.state())) throw new InventoryConflictException("请通过已下达执行单开工后报工");
-            var original = kernel.plans.get(e.planId());
+            var original = kernel.findOrLoadPlan(e.planId());
             if (original == null || !kernel.json.writeValueAsString(request).equals(kernel.json.writeValueAsString(original.request()))
                     || !kernel.json.writeValueAsString(result).equals(kernel.json.writeValueAsString(original.result())))
                 throw new InventoryConflictException("执行报工不得替换已下达方案内容");
@@ -235,7 +218,9 @@ final class CuttingExecutionAndReportService {
 
     private double skippedCoverage(String rollId, double from, double to) {
         double covered = 0;
-        for (Map<String, Object> receipt : kernel.receipts.values()) {
+        Collection<Map<String, Object>> source = kernel.store.supportsHotColdLoading()
+                ? kernel.store.findCutReportsByRollId(rollId) : kernel.receipts.values();
+        for (Map<String, Object> receipt : source) {
             if ("REVERSED".equals(receipt.get("status")) || !"roll".equals(receipt.get("feedPortType")) || !Objects.equals(rollId, receipt.get("rollId"))) continue;
             if (!(receipt.get("undo") instanceof Map<?, ?> undo) || !(undo.get("skippedFrom") instanceof Number a) || !(undo.get("skipped") instanceof Number n)) continue;
             covered += Math.max(0, Math.min(to, a.doubleValue() + n.doubleValue()) - Math.max(from, a.doubleValue()));
@@ -256,7 +241,7 @@ final class CuttingExecutionAndReportService {
 
     CuttingPlan getPlan(String id) {
         return kernel.read(() -> {
-            CuttingPlan plan = kernel.plans.get(id);
+            CuttingPlan plan = kernel.findOrLoadPlan(id);
             if (plan == null) throw new IllegalArgumentException("方案不存在");
             return plan;
         });
@@ -264,7 +249,7 @@ final class CuttingExecutionAndReportService {
 
     CuttingPlan rememberAdjustment(String parentId, String id, SolveResponse result) {
         return kernel.mutate(() -> {
-            CuttingPlan existing = kernel.plans.get(id);
+            CuttingPlan existing = kernel.findOrLoadPlan(id);
             if (existing != null) {
                 if (!Objects.equals(existing.parentPlanId(), parentId)
                         || !kernel.json.writeValueAsString(existing.result()).equals(kernel.json.writeValueAsString(result)))
@@ -272,7 +257,7 @@ final class CuttingExecutionAndReportService {
                 return existing;
             }
             kernel.ensurePlanNotExecuting(parentId);
-            CuttingPlan parent = kernel.plans.get(parentId);
+            CuttingPlan parent = kernel.findOrLoadPlan(parentId);
             if (parent == null || !"PENDING".equals(parent.status())) throw new IllegalArgumentException("原方案已报工或取消，不能保存调整版");
             kernel.prepareTaskSolveInternal(parent.request());
             if (!Objects.equals(parent.baseline(), kernel.materialFingerprintInternal(parent.request())))
@@ -287,50 +272,28 @@ final class CuttingExecutionAndReportService {
     }
 
     List<CuttingPlan> taskPlans(String taskId) {
-        return kernel.read(() -> kernel.plans.values().stream()
-                .filter(p -> Objects.equals(taskId, p.request().getTaskId())).toList());
+        return taskPlans(taskId, false);
     }
 
     List<CuttingPlan> taskPlans(String taskId, boolean summary) {
-        return kernel.read(() -> kernel.plans.values().stream()
-                .filter(p -> Objects.equals(taskId, p.request().getTaskId()))
-                .map(p -> summary ? summarizePlan(p) : p)
-                .toList());
+        return kernel.read(() -> {
+            Collection<CuttingPlan> source = (taskId != null && kernel.store.supportsHotColdLoading())
+                    ? kernel.store.listTaskPlans(taskId)
+                    : kernel.plans.values().stream().filter(p -> Objects.equals(taskId, p.request().getTaskId())).toList();
+            return source.stream()
+                    .filter(p -> Objects.equals(taskId, p.request().getTaskId()))
+                    .map(p -> summary ? summarizePlan(p) : p)
+                    .toList();
+        });
     }
 
     private CuttingPlan summarizePlan(CuttingPlan plan) {
-        SolveResponse orig = plan.result();
-        if (orig == null) return plan;
-        SolveResponse slim = new SolveResponse();
-        slim.setSuccess(orig.isSuccess());
-        slim.setMessage(orig.getMessage());
-        slim.setStatus(orig.getStatus());
-        slim.setFulfillment(orig.getFulfillment() == null ? List.of() : List.copyOf(orig.getFulfillment()));
-        slim.setPlanId(orig.getPlanId());
-        slim.setEngine(orig.getEngine());
-        slim.setRequestedEngine(orig.getRequestedEngine());
-        slim.setFallbackReason(orig.getFallbackReason());
-        slim.setRollW(orig.getRollW());
-        slim.setRollL(orig.getRollL());
-        slim.setFeedPortType(orig.getFeedPortType());
-        slim.setSourceRemnantId(orig.getSourceRemnantId());
-        slim.setDeductLen(orig.getDeductLen());
-        slim.setTotalArea(orig.getTotalArea());
-        slim.setPieceArea(orig.getPieceArea());
-        slim.setRemArea(orig.getRemArea());
-        slim.setWasteArea(orig.getWasteArea());
-        slim.setCuts(List.of());
-        slim.setPieces(List.of());
-        slim.setRemnants(List.of());
-        slim.setDefects(List.of());
-        slim.setDerivedRemnants(List.of());
-        return new CuttingPlan(plan.id(), plan.request(), slim, plan.baseline(), plan.status(),
-                plan.createdAt(), plan.parentPlanId(), plan.version());
+        return CuttingExecutionProjectionHelper.summarizePlan(plan);
     }
 
     Map<String, String> planChecks(String taskId) {
         return kernel.read(() -> {
-            CuttingTask task = kernel.tasks.get(taskId);
+            CuttingTask task = kernel.findOrLoadTask(taskId);
             if (task == null) throw new IllegalArgumentException("切割任务不存在");
             Map<String, String> result = new LinkedHashMap<>();
             for (CuttingPlan plan : kernel.plans.values()) {
@@ -352,7 +315,7 @@ final class CuttingExecutionAndReportService {
     CuttingPlan changePlanStatus(String id, boolean restore) {
         return kernel.mutate(() -> {
             kernel.ensurePlanNotExecuting(id);
-            CuttingPlan plan = kernel.plans.get(id);
+            CuttingPlan plan = kernel.findOrLoadPlan(id);
             if (plan == null || !Set.of("PENDING", "CANCELLED").contains(plan.status()))
                 throw new IllegalArgumentException("已报工方案不能取消或恢复，请通过报工记录冲销");
             if (restore) {
@@ -367,28 +330,15 @@ final class CuttingExecutionAndReportService {
     }
 
     Map<String, Object> planDetail(String id) {
-        return kernel.read(() -> {
-            CuttingPlan plan = getPlan(id);
-            Map<String, Object> detail = new LinkedHashMap<>();
-            detail.put("id", plan.id());
-            detail.put("unit", "mm");
-            detail.put("coordinateSystem", "source-local-top-left");
-            detail.put("request", plan.request());
-            detail.put("result", plan.result());
-            detail.put("status", plan.status());
-            detail.put("createdAt", plan.createdAt());
-            detail.put("version", plan.version());
-            detail.put("parentPlanId", plan.parentPlanId());
-            detail.put("receipt", kernel.qualityProjection(kernel.receipts.get(id)));
-            return detail;
-        });
+        return kernel.read(() -> CuttingExecutionProjectionHelper.buildPlanDetail(
+                getPlan(id), kernel.qualityProjection(kernel.findOrLoadReceipt(id))));
     }
 
     // ==================== 裁切报工、批次报工与冲销 ====================
 
     Map<String, Object> confirmPlan(CutReport report) {
         if (report == null || report.planId() == null) throw new IllegalArgumentException("请先取得方案编号");
-        Map<String, Object> existing = kernel.read(() -> kernel.receipts.get(report.planId()));
+        Map<String, Object> existing = kernel.read(() -> kernel.findOrLoadReceipt(report.planId()));
         if (existing != null) {
             if ("REVERSED".equals(existing.get("status"))) throw new IllegalArgumentException("该报工已冲销，请重新排料");
             kernel.verifyReportReplay(existing, report);
@@ -411,13 +361,13 @@ final class CuttingExecutionAndReportService {
             Map<String, Map<String, Integer>> taskDemandQuantities,
             Map<Integer, SchedulingScheme.TaskDemandAllocation> pieceSources
     ) {
-        Map<String, Object> receipt = kernel.receipts.get(report.planId());
+        Map<String, Object> receipt = kernel.findOrLoadReceipt(report.planId());
         if (receipt != null) {
             if ("REVERSED".equals(receipt.get("status"))) throw new IllegalArgumentException("该报工已冲销，请重新排料");
             kernel.verifyReportReplay(receipt, report);
             return kernel.qualityProjection(receipt);
         }
-        CuttingPlan plan = kernel.plans.get(report.planId());
+        CuttingPlan plan = kernel.findOrLoadPlan(report.planId());
         if (plan == null || !"PENDING".equals(plan.status())) throw new IllegalArgumentException("方案不存在或已取消，请重新排料");
         if (!Objects.equals(plan.baseline(), kernel.materialFingerprintInternal(plan.request())))
             throw new IllegalArgumentException("材料或疵点已更新，请重新装载并排料");
@@ -441,11 +391,11 @@ final class CuttingExecutionAndReportService {
 
     private void validateTaskReport(SolveRequest request, SolveResponse plan, ReportOutput result) {
         if (request.getTaskId() == null) return;
-        CuttingTask task = kernel.tasks.get(request.getTaskId());
+        CuttingTask task = kernel.findOrLoadTask(request.getTaskId());
         if (task == null || task.revision() != request.getTaskRevision()) throw new IllegalArgumentException("任务已更新，请重新载入需求");
         boolean remnant = "remnant".equals(request.getFeedPortType());
-        var roll = kernel.motherRolls.get(request.getRollId());
-        var stock = kernel.remnantPool.get(request.getSourceRemnantId() == null ? "" : request.getSourceRemnantId());
+        var roll = kernel.findOrLoadRoll(request.getRollId());
+        var stock = remnant ? kernel.findOrLoadRemnant(request.getSourceRemnantId()) : null;
         String model = remnant ? (stock == null ? null : stock.getMaterialBatch()) : (roll == null ? null : roll.getRollModel());
         if (!Objects.equals(task.materialModel(), model)) throw new IllegalArgumentException("材料型号与任务需求不一致");
         if (remnant && !Objects.equals(stock.getSourceRollId(), request.getRollId())) throw new IllegalArgumentException("料头来源母卷不一致");
@@ -469,7 +419,7 @@ final class CuttingExecutionAndReportService {
                                                 Set<String> pendingBatchPlans,
                                                 Map<String, Map<String, Integer>> taskDemandQuantities,
                                                 Map<Integer, SchedulingScheme.TaskDemandAllocation> pieceSources) {
-        Map<String, Object> old = kernel.receipts.get(report.planId());
+        Map<String, Object> old = kernel.findOrLoadReceipt(report.planId());
         if (old != null) {
             if ("REVERSED".equals(old.get("status"))) throw new IllegalArgumentException("该报工已撤回，请重新排料");
             kernel.verifyReportReplay(old, report);
@@ -479,8 +429,8 @@ final class CuttingExecutionAndReportService {
         ReportOutput output = ReportOutput.resolve(plan, report);
         validateTaskReport(request, plan, output);
         boolean remnantFeed = "remnant".equalsIgnoreCase(request.getFeedPortType());
-        MotherRollInfo roll = kernel.motherRolls.get(request.getRollId());
-        RemnantStock parent = remnantFeed ? kernel.remnantPool.get(request.getSourceRemnantId()) : null;
+        MotherRollInfo roll = kernel.findOrLoadRoll(request.getRollId());
+        RemnantStock parent = remnantFeed ? kernel.findOrLoadRemnant(request.getSourceRemnantId()) : null;
         if (remnantFeed && (parent == null || !"AVAILABLE".equals(parent.getStatus()))) {
             throw new IllegalArgumentException("原料头已不可用，请重新装载");
         }
@@ -504,7 +454,14 @@ final class CuttingExecutionAndReportService {
             if (!Double.isFinite(start) || start < 0 || start + len > roll.getTotalLength()) {
                 throw new IllegalArgumentException("红框实切区间超出母卷范围");
             }
-            for (Map<String, Object> receipt : kernel.receipts.values()) {
+            Map<String, Map<String, Object>> rollReports = new LinkedHashMap<>();
+            if (kernel.store.supportsHotColdLoading()) {
+                for (Map<String, Object> dbRec : kernel.store.findCutReportsByRollId(request.getRollId())) {
+                    if (dbRec.get("planId") != null) rollReports.put(dbRec.get("planId").toString(), dbRec);
+                }
+            }
+            rollReports.putAll(kernel.receipts);
+            for (Map<String, Object> receipt : rollReports.values()) {
                 if ("REVERSED".equals(receipt.get("status"))) continue;
                 if (!request.getRollId().equals(receipt.get("rollId")) || !"roll".equals(receipt.get("feedPortType"))) continue;
                 double oldStart = ((Number) receipt.get("windowStartY")).doubleValue();
@@ -662,7 +619,7 @@ final class CuttingExecutionAndReportService {
 
     private static boolean overlaps(double x, double y, double w, double l,
                                     double otherX, double otherY, double otherW, double otherL) {
-        return x < otherX + otherW && x + w > otherX && y < otherY + otherL && y + l > otherY;
+        return CuttingExecutionProjectionHelper.overlaps(x, y, w, l, otherX, otherY, otherW, otherL);
     }
 
     List<Map<String, Object>> reportBatch(List<CutReport> reports, boolean preview) {
@@ -676,12 +633,12 @@ final class CuttingExecutionAndReportService {
             for (CutReport report : reports) {
                 if (report == null || report.planId() == null || !seen.add(report.planId()))
                     throw new IllegalArgumentException("待报工方案编号为空或重复");
-                CuttingPlan plan = kernel.plans.get(report.planId());
+                CuttingPlan plan = kernel.findOrLoadPlan(report.planId());
                 if (plan == null || plan.request().getTaskId() == null)
                     throw new IllegalArgumentException("待报工方案不存在或未关联任务");
                 if (taskId == null) taskId = plan.request().getTaskId();
                 if (!taskId.equals(plan.request().getTaskId())) throw new IllegalArgumentException("集中报工必须属于同一任务");
-                boolean alreadyReported = kernel.receipts.containsKey(report.planId());
+                boolean alreadyReported = kernel.findOrLoadReceipt(report.planId()) != null;
                 result.add(confirmPlanInternal(report, pendingBatchPlans));
                 if (!alreadyReported) pendingBatchPlans.add(report.planId());
             }
@@ -689,7 +646,7 @@ final class CuttingExecutionAndReportService {
         };
         if (!preview) return kernel.mutate("CUT_REPORT_BATCH", null, "UNAUTHENTICATED_LOCAL", command);
         return kernel.withWriteLock(() -> {
-            InventoryStateKernel.TxBackup backup = kernel.captureBackup();
+            var backup = kernel.captureBackup();
             try {
                 return command.get();
             } finally {
@@ -702,7 +659,7 @@ final class CuttingExecutionAndReportService {
         if (reason == null || reason.isBlank() || reason.length() > 500)
             throw new IllegalArgumentException("请填写 1 至 500 字的撤回原因");
         return kernel.mutate("REPORT_REVERSE", planId, "UNAUTHENTICATED_LOCAL", () -> {
-            Map<String, Object> receipt = kernel.receipts.get(planId);
+            Map<String, Object> receipt = kernel.findOrLoadReceipt(planId);
             if (receipt == null) throw new IllegalArgumentException("报工记录不存在");
             if ("REVERSED".equals(receipt.get("status"))) return receipt;
             String countedType = "remnant".equals(receipt.get("feedPortType")) ? "remnant" : "roll";
@@ -720,7 +677,7 @@ final class CuttingExecutionAndReportService {
                 kernel.ensureMaterialNotReserved("remnant", original.getId(), null);
                 if (kernel.countRevision("remnant", original.getId()) > 0)
                     throw new InventoryConflictException("派生料头已有盘点追溯，不能撤回原报工");
-                RemnantStock current = kernel.remnantPool.get(original.getId());
+                RemnantStock current = kernel.findOrLoadRemnant(original.getId());
                 if (current == null || !kernel.json.writeValueAsString(original).equals(kernel.json.writeValueAsString(current)))
                     throw new IllegalArgumentException("派生料头 " + original.getId() + " 已流转或修改，请先撤回后续操作");
                 children.add(current);
@@ -729,18 +686,26 @@ final class CuttingExecutionAndReportService {
             kernel.ensureMaterialNotReserved(remnant ? "remnant" : "roll",
                     String.valueOf(receipt.get(remnant ? "sourceRemnantId" : "rollId")), null);
             if (remnant) {
-                RemnantStock parent = kernel.remnantPool.get(receipt.get("sourceRemnantId"));
+                RemnantStock parent = kernel.findOrLoadRemnant(Objects.toString(receipt.get("sourceRemnantId"), null));
                 if (parent == null || !kernel.json.writeValueAsString(parent).equals(undo.get("parentAfter")))
                     throw new IllegalArgumentException("原料头状态已变化，不能撤回此报工");
                 RemnantStock original = kernel.json.readValue(undo.get("parentBefore").toString(), RemnantStock.class);
                 kernel.remnantPool.put(original.getId(), original);
             } else {
-                Map<String, Object> latest = null;
-                for (var candidate : kernel.receipts.values())
-                    if (!"REVERSED".equals(candidate.get("status")) && "roll".equals(candidate.get("feedPortType"))
-                            && Objects.equals(receipt.get("rollId"), candidate.get("rollId"))) latest = candidate;
-                MotherRollInfo roll = kernel.motherRolls.get(receipt.get("rollId"));
-                if (latest != receipt || roll == null ||
+                String targetRollId = Objects.toString(receipt.get("rollId"), "");
+                boolean isLatest;
+                if (kernel.store.supportsHotColdLoading()) {
+                    var latestOpt = kernel.store.findLatestActiveCutReportForRoll(targetRollId);
+                    isLatest = latestOpt.isPresent() && Objects.equals(planId, latestOpt.get().get("planId"));
+                } else {
+                    Map<String, Object> latest = null;
+                    for (var candidate : kernel.receipts.values())
+                        if (!"REVERSED".equals(candidate.get("status")) && "roll".equals(candidate.get("feedPortType"))
+                                && Objects.equals(targetRollId, candidate.get("rollId"))) latest = candidate;
+                    isLatest = (latest == receipt);
+                }
+                MotherRollInfo roll = kernel.findOrLoadRoll(targetRollId);
+                if (!isLatest || roll == null ||
                         Math.abs(roll.getUsedLength() - ((Number) undo.get("usedAfter")).doubleValue()) > .001 ||
                         Math.abs(roll.getCurrentRemainingLength() - ((Number) undo.get("remainingAfter")).doubleValue()) > .001)
                     throw new IllegalArgumentException("母卷已有后续报工或库存变更，请从最近一次报工开始撤回");
@@ -755,8 +720,17 @@ final class CuttingExecutionAndReportService {
             updatedReceipt.put("reversalReason", reason.trim());
             kernel.receipts.put(planId, updatedReceipt);
             finishExecution(planId, "REVERSED");
-            CuttingPlan plan = kernel.plans.get(planId);
+            CuttingPlan plan = kernel.findOrLoadPlan(planId);
             if (plan != null) kernel.plans.put(planId, plan.withStatus("REVERSED"));
+            if (kernel.store.supportsHotColdLoading()) {
+                for (SchedulingScheme sc : kernel.store.listAllSchemes()) {
+                    if (sc.linkedPlanIds().contains(planId)
+                            && !SchedulingScheme.STATE_CANCELLED.equals(sc.state())
+                            && !SchedulingScheme.STATE_REVERSED.equals(sc.state())) {
+                        kernel.findOrLoadScheme(sc.id());
+                    }
+                }
+            }
             kernel.schemes.replaceAll((sid, sc) -> sc.linkedPlanIds().contains(planId)
                     && !SchedulingScheme.STATE_CANCELLED.equals(sc.state())
                     && !SchedulingScheme.STATE_REVERSED.equals(sc.state())
@@ -769,12 +743,12 @@ final class CuttingExecutionAndReportService {
     // ==================== 复检处置、受控撤销与聚合对账 ====================
 
     Map<String, Object> getReceipt(String planId) {
-        return kernel.read(() -> kernel.qualityProjection(kernel.receipts.get(planId)));
+        return kernel.read(() -> kernel.qualityProjection(kernel.findOrLoadReceipt(planId)));
     }
 
     Map<String, Object> qualityReview(String planId) {
         return kernel.read(() -> {
-            var receipt = kernel.receipts.get(planId);
+            var receipt = kernel.findOrLoadReceipt(planId);
             if (receipt == null) throw new IllegalArgumentException("报工记录不存在");
             return kernel.qualityProjection(receipt);
         });
@@ -783,7 +757,7 @@ final class CuttingExecutionAndReportService {
     QualityDisposition disposeQuality(String planId, QualityDisposition.Command command) {
         QualityDispositionRules.validateCommand(command);
         return kernel.mutate("QUALITY_DISPOSITION", planId, "DECLARED:" + command.inspector(), () -> {
-            var receipt = kernel.receipts.get(planId);
+            var receipt = kernel.findOrLoadReceipt(planId);
             if (receipt == null) throw new IllegalArgumentException("报工记录不存在");
             var events = new ArrayList<>(kernel.qualityEvents(receipt));
             for (var event : events) {
@@ -812,10 +786,10 @@ final class CuttingExecutionAndReportService {
                 boolean isolated = "QUARANTINED".equals(region.quality());
                 var child = new RemnantStock(remnantId, region.width(), region.length(), region.location().trim(), request.getRollModel(),
                         isolated ? "QUARANTINED" : "AVAILABLE", request.getRollId(), isolated, command.reason().trim());
-                var parent = kernel.remnantPool.get(request.getSourceRemnantId() == null ? "" : request.getSourceRemnantId());
+                var parent = kernel.findOrLoadRemnant(request.getSourceRemnantId());
                 child.setParentRemnantId(parent == null ? null : parent.getId());
                 child.setGeneration(parent == null ? 1 : parent.getGeneration() + 1);
-                kernel.inheritLineageMetadata(child, kernel.motherRolls.get(request.getRollId()), parent);
+                kernel.inheritLineageMetadata(child, kernel.findOrLoadRoll(request.getRollId()), parent);
                 child.setCreatedAt(now);
                 child.setSourceReportId(planId);
                 child.setSourcePieceId(piece.pieceId());
@@ -844,20 +818,35 @@ final class CuttingExecutionAndReportService {
         String cleanDispositionId = dispositionId.trim();
 
         Map<String, Object> result = kernel.mutate("QUALITY_DISPOSITION_REVOKE", cleanReportId, "DECLARED:" + operator, () -> {
-            for (var entry : kernel.receipts.entrySet()) {
-                for (QualityDisposition ev : kernel.qualityEvents(entry.getValue())) {
+            Map<String, Object> targetReceipt = kernel.findOrLoadReceipt(cleanReportId);
+            if (targetReceipt != null) {
+                for (QualityDisposition ev : kernel.qualityEvents(targetReceipt)) {
                     if (ev.hasRevocation() && key.equals(ev.revocation().idempotencyKey())) {
-                        if (cleanReportId.equals(entry.getKey()) && cleanDispositionId.equals(ev.id())
+                        if (cleanDispositionId.equals(ev.id())
                                 && operator.equals(ev.revocation().operator()) && reason.equals(ev.revocation().reason())) {
-                            return buildRevokeDispositionPayload(entry.getValue());
+                            return buildRevokeDispositionPayload(targetReceipt);
                         }
                         throw new InventoryConflictException("同一幂等键已用于其他复检处置撤销内容");
                     }
                 }
             }
+            if (kernel.store.supportsHotColdLoading()) {
+                var matchedOther = kernel.store.findCutReportByDispositionRevokeKey(key);
+                if (matchedOther.isPresent()) {
+                    throw new InventoryConflictException("同一幂等键已用于其他复检处置撤销内容");
+                }
+            } else {
+                for (var entry : kernel.receipts.entrySet()) {
+                    for (QualityDisposition ev : kernel.qualityEvents(entry.getValue())) {
+                        if (ev.hasRevocation() && key.equals(ev.revocation().idempotencyKey())) {
+                            throw new InventoryConflictException("同一幂等键已用于其他复检处置撤销内容");
+                        }
+                    }
+                }
+            }
             return null;
         }, () -> {
-            Map<String, Object> receipt = kernel.receipts.get(cleanReportId);
+            Map<String, Object> receipt = kernel.findOrLoadReceipt(cleanReportId);
             if (receipt == null) throw new IllegalArgumentException("报工记录不存在: " + cleanReportId);
             if (!"CONFIRMED".equals(receipt.get("status"))) {
                 throw new InventoryConflictException("仅已确认报工的复检处置允许撤销");
@@ -878,7 +867,7 @@ final class CuttingExecutionAndReportService {
 
             RemnantStock derived = null;
             if (target.remnantId() != null && !target.remnantId().isBlank()) {
-                derived = kernel.remnantPool.get(target.remnantId());
+                derived = kernel.findOrLoadRemnant(target.remnantId());
                 if (derived == null) {
                     throw new InventoryConflictException("派生回收料头缺失，无法撤销原复检处置");
                 }
@@ -892,11 +881,17 @@ final class CuttingExecutionAndReportService {
                 if (kernel.countRevision("remnant", derivedId) > 0) {
                     throw new InventoryConflictException("派生回收料头 " + derivedId + " 已有盘点单追溯，无法撤销原复检处置");
                 }
-                if (kernel.transfers.values().stream().flatMap(t -> t.lines().stream())
-                        .anyMatch(l -> "remnant".equals(l.type()) && derivedId.equals(l.id()))) {
+                boolean hasTransfer = kernel.store.supportsHotColdLoading()
+                        ? kernel.store.hasTransferForMaterial("remnant", derivedId)
+                        : kernel.transfers.values().stream().flatMap(t -> t.lines().stream())
+                        .anyMatch(l -> "remnant".equals(l.type()) && derivedId.equals(l.id()));
+                if (hasTransfer) {
                     throw new InventoryConflictException("派生回收料头 " + derivedId + " 已发生移库变更，无法撤销原复检处置");
                 }
-                if (kernel.qualityReleases.values().stream().anyMatch(q -> derivedId.equals(q.remnantId()))) {
+                boolean hasRelease = kernel.store.supportsHotColdLoading()
+                        ? kernel.store.hasQualityReleaseForRemnant(derivedId)
+                        : kernel.qualityReleases.values().stream().anyMatch(q -> derivedId.equals(q.remnantId()));
+                if (hasRelease) {
                     throw new InventoryConflictException("派生回收料头 " + derivedId + " 已完成质量放行或判废，无法撤销原复检处置");
                 }
                 String expectedLoc = target.command().recovery() != null ? Objects.toString(target.command().recovery().location(), "").trim() : "";
@@ -929,55 +924,14 @@ final class CuttingExecutionAndReportService {
     }
 
     private void validateTaskCapacityForDispositionRevoke(Map<String, Object> receipt, QualityDisposition target) {
-        String affectedTaskId = null;
-        Integer affectedLineId = target.demandId();
-        if (receipt.get("taskDemandQuantities") instanceof Map<?, ?> && receipt.get("pieceSources") instanceof Map<?, ?> ps) {
-            Object srcObj = ps.get(String.valueOf(target.command().pieceId()));
-            if (srcObj == null) srcObj = ps.get(target.command().pieceId());
-            if (srcObj instanceof Map<?, ?> srcMap && srcMap.get("taskId") != null && srcMap.get("lineId") instanceof Number ln) {
-                affectedTaskId = srcMap.get("taskId").toString();
-                affectedLineId = ln.intValue();
-            }
-        } else if (receipt.get("taskId") != null) {
-            affectedTaskId = receipt.get("taskId").toString();
-        }
-        if (affectedTaskId == null || affectedLineId == null) return;
-        CuttingTask task = kernel.tasks.get(affectedTaskId);
-        if (task == null) return;
-        int targetLineId = affectedLineId;
-        CuttingTask.Line line = task.demands().stream().filter(d -> d.id() == targetLineId).findFirst().orElse(null);
-        if (line == null) return;
-        int currentCompleted = kernel.completedQuantitiesInternal(affectedTaskId).getOrDefault(String.valueOf(targetLineId), 0);
-        if (currentCompleted + 1 > line.quantity()) {
-            throw new InventoryConflictException("撤销后任务「" + task.name() + "」需求「" + line.name()
-                    + "」合格完成量将超过订单总数(" + line.quantity() + ")，请先核对补排或任务数量");
-        }
+        CuttingExecutionProjectionHelper.validateTaskCapacityForDispositionRevoke(
+                receipt, target, kernel::findOrLoadTask, kernel::completedQuantitiesInternal);
     }
 
     private Map<String, Object> buildRevokeDispositionPayload(Map<String, Object> receipt) {
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("report", kernel.qualityProjection(receipt));
-        Object tidObj = receipt.get("taskId");
-        Map<String, Object> taskView = null;
-        if (tidObj != null && kernel.tasks.containsKey(tidObj.toString())) {
-            CuttingTask t = kernel.tasks.get(tidObj.toString());
-            Map<String, Integer> completed = kernel.completedQuantitiesInternal(t.id());
-            int orderedTotal = t.demands().stream().mapToInt(CuttingTask.Line::quantity).sum();
-            int completedTotal = t.demands().stream().mapToInt(l -> completed.getOrDefault(String.valueOf(l.id()), 0)).sum();
-            taskView = new LinkedHashMap<>();
-            taskView.put("id", t.id());
-            taskView.put("name", t.name());
-            taskView.put("materialModel", t.materialModel());
-            taskView.put("externalRef", t.externalRef());
-            taskView.put("revision", t.revision());
-            taskView.put("demands", t.demands());
-            taskView.put("completed", completed);
-            taskView.put("orderedTotal", orderedTotal);
-            taskView.put("completedTotal", completedTotal);
-            taskView.put("remaining", Math.max(0, orderedTotal - completedTotal));
-        }
-        out.put("task", taskView);
-        return out;
+        return CuttingExecutionProjectionHelper.buildRevokeDispositionPayload(
+                kernel.qualityProjection(receipt), receipt.get("taskId"),
+                kernel::findOrLoadTask, kernel::completedQuantitiesInternal);
     }
 
     List<Map<String, Object>> taskReports(String taskId) {
@@ -992,97 +946,16 @@ final class CuttingExecutionAndReportService {
         if (limit < 1 || limit > 200 || offset < 0) {
             throw new IllegalArgumentException("分页参数无效：limit 需在 1–200 之间，offset 不得为负");
         }
-        return kernel.read(() -> {
-            Map<String, String> planToSchemeId = new HashMap<>();
-            for (SchedulingScheme sc : kernel.schemes.values()) {
-                for (String pid : sc.linkedPlanIds()) {
-                    planToSchemeId.put(pid, sc.id());
-                }
-            }
-
-            List<Map<String, Object>> all = new ArrayList<>();
-            for (Map<String, Object> raw : kernel.receipts.values()) {
-                String status = Objects.toString(raw.get("status"), "CONFIRMED");
-                if (statusFilter != null && !statusFilter.isBlank() && !"ALL".equalsIgnoreCase(statusFilter)
-                        && !statusFilter.equalsIgnoreCase(status)) {
-                    continue;
-                }
-                String taskId = raw.get("taskId") != null ? raw.get("taskId").toString() : null;
-                if (taskIdFilter != null && !taskIdFilter.isBlank()) {
-                    boolean matchesTask = taskIdFilter.equals(taskId)
-                            || (raw.get("taskDemandQuantities") instanceof Map<?, ?> multi && multi.containsKey(taskIdFilter));
-                    if (!matchesTask) continue;
-                }
-
-                Map<String, Object> projected = kernel.qualityProjection(raw);
-                String planId = Objects.toString(raw.get("planId"), "");
-                CuttingTask task = taskId != null ? kernel.tasks.get(taskId) : null;
-                CuttingPlan plan = kernel.plans.get(planId);
-                String rollId = raw.get("rollId") != null ? raw.get("rollId").toString() : null;
-                MotherRollInfo roll = rollId != null ? kernel.motherRolls.get(rollId) : null;
-                String sourceRemnantId = raw.get("sourceRemnantId") != null ? raw.get("sourceRemnantId").toString() : null;
-                RemnantStock sourceRemnant = sourceRemnantId != null ? kernel.remnantPool.get(sourceRemnantId) : null;
-
-                String materialModel = task != null ? task.materialModel()
-                        : (plan != null && plan.request() != null && InventoryStateKernel.blankToNull(plan.request().getRollModel()) != null
-                        ? plan.request().getRollModel()
-                        : (roll != null ? roll.getRollModel() : (sourceRemnant != null ? sourceRemnant.getMaterialBatch() : "")));
-                String batchNo = sourceRemnant != null && InventoryStateKernel.blankToNull(sourceRemnant.getBatchNo()) != null
-                        ? sourceRemnant.getBatchNo()
-                        : (roll != null ? roll.getBatchNo() : null);
-                String color = sourceRemnant != null && InventoryStateKernel.blankToNull(sourceRemnant.getColor()) != null
-                        ? sourceRemnant.getColor()
-                        : (roll != null ? roll.getColor() : null);
-
-                List<QualityDisposition> dispositions = kernel.qualityEvents(raw);
-                Set<Integer> activeDisposedPieceIds = dispositions.stream()
-                        .filter(d -> !d.hasRevocation())
-                        .map(d -> d.command().pieceId())
-                        .collect(Collectors.toSet());
-                int activeDispCount = activeDisposedPieceIds.size();
-                int revokedDispCount = dispositions.size() - activeDispCount;
-                int reinspectionRemaining = 0;
-                if (!"REVERSED".equals(status) && raw.get("pieceResults") instanceof List<?> pieceList) {
-                    for (Object pObj : pieceList) {
-                        var piece = kernel.json.convertValue(pObj, ReportOutput.ReportedPiece.class);
-                        if (Set.of("QUALIFIED", "REJECTED").contains(piece.outcome())
-                                && !activeDisposedPieceIds.contains(piece.pieceId())) {
-                            reinspectionRemaining++;
-                        }
-                    }
-                }
-
-                Map<String, Object> item = new LinkedHashMap<>(projected);
-                item.put("reportId", planId);
-                item.put("schemeId", planToSchemeId.get(planId));
-                item.put("taskId", taskId);
-                item.put("taskName", task != null ? task.name() : "独立裁切");
-                item.put("externalRef", task != null ? task.externalRef() : null);
-                item.put("materialModel", materialModel);
-                item.put("batchNo", batchNo);
-                item.put("color", color);
-                item.put("dispositions", dispositions);
-                item.put("activeDispositionCount", activeDispCount);
-                item.put("revokedDispositionCount", revokedDispCount);
-                item.put("reinspectionRemainingCount", reinspectionRemaining);
-                item.put("availableForReinspection", reinspectionRemaining);
-                all.add(item);
-            }
-
-            all.sort((a, b) -> Objects.toString(b.get("confirmedAt"), "")
-                    .compareTo(Objects.toString(a.get("confirmedAt"), "")));
-            int total = all.size();
-            int from = Math.min(offset, total);
-            int to = Math.min(from + limit, total);
-            List<Map<String, Object>> page = List.copyOf(all.subList(from, to));
-
-            Map<String, Object> res = new LinkedHashMap<>();
-            res.put("items", page);
-            res.put("total", total);
-            res.put("limit", limit);
-            res.put("offset", offset);
-            res.put("hasMore", to < total);
-            return res;
-        });
+        return kernel.read(() -> ColdStateQueryBridge.buildReconciliationReportsPage(
+                kernel.json,
+                kernel.store,
+                kernel.receipts,
+                kernel.schemes,
+                id -> java.util.Optional.ofNullable(kernel.findOrLoadTask(id)),
+                id -> java.util.Optional.ofNullable(kernel.findOrLoadPlan(id)),
+                id -> java.util.Optional.ofNullable(kernel.findOrLoadRoll(id)),
+                id -> java.util.Optional.ofNullable(kernel.findOrLoadRemnant(id)),
+                limit, offset, statusFilter, taskIdFilter
+        ));
     }
 }

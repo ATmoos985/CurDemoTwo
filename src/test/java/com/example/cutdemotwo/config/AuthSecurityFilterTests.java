@@ -342,6 +342,107 @@ class AuthSecurityFilterTests {
         assertEquals(200, invoke(filter, "POST", "/api/v2/schemes/confirm", null).getStatus());
     }
 
+    @Test
+    void rejectsMatrixParametersEncodedSemicolonsDoubleSlashesAndTraversalPaths() throws Exception {
+        AuthService service = new AuthService(true, TEST_SECRET, "", 12, Clock.systemUTC());
+        InMemoryOperationAuditStore auditStore = new InMemoryOperationAuditStore();
+        OperationAuditService auditService = new OperationAuditService(auditStore);
+        AuthSecurityFilter authFilter = new AuthSecurityFilter(service, 2_097_152L, 600, Clock.systemUTC(), auditService);
+        OperationAuditFilter auditFilter = new OperationAuditFilter(auditService);
+
+        assertEquals("/api/v2/users", AuthSecurityFilter.normalizePathString("/api/v2/users;foo=bar", ""));
+        assertEquals("/api/v2/users/", AuthSecurityFilter.normalizePathString("/api/v2/users;foo=bar/", ""));
+        assertEquals("/api/v2/users/", AuthSecurityFilter.normalizePathString("/api/v2/users/;foo=bar", ""));
+        assertEquals("/api/v2/users", AuthSecurityFilter.normalizePathString("/api/v2/;x=1/users", ""));
+        assertEquals("/api/v2/users", AuthSecurityFilter.normalizePathString("/api/v2/users%3Bfoo=bar", ""));
+        assertEquals("/api/v2/users/", AuthSecurityFilter.normalizePathString("/api/v2/users%3bfoo=bar/", ""));
+        assertEquals("/api/v2/users", AuthSecurityFilter.normalizePathString("//api//v2///users;x=1", ""));
+        assertEquals("/api/v2/users", AuthSecurityFilter.normalizePathString("/app/../api/v2/users", ""));
+        assertEquals("/api/v2/users", AuthSecurityFilter.normalizePathString("/api/v2/foo/..;/users", ""));
+        assertEquals("/api/v2/users", AuthSecurityFilter.normalizePathString("/api/v2/./users", ""));
+        assertEquals("/api/rolls/ROLL 01/scrap", AuthSecurityFilter.normalizePathString("/api/rolls/ROLL%2001/scrap", ""));
+        assertEquals("/api/rolls/ROLL+01/scrap", AuthSecurityFilter.normalizePathString("/api/rolls/ROLL+01/scrap", ""));
+        assertEquals("/api/rolls/ROLL+01/scrap", AuthSecurityFilter.normalizePathString("/api/rolls/ROLL%2B01/scrap", ""));
+        assertEquals("/api/rolls/ROLL-布料", AuthSecurityFilter.normalizePathString("/api/rolls/ROLL-%E5%B8%83%E6%96%99", ""));
+        assertTrue(AuthSecurityFilter.tryNormalizePathString("/api/v2/%2fusers", "").isEmpty());
+        assertTrue(AuthSecurityFilter.tryNormalizePathString("/api/v2/%5cusers", "").isEmpty());
+        assertTrue(AuthSecurityFilter.tryNormalizePathString("/api/v2/users%00", "").isEmpty());
+        assertTrue(AuthSecurityFilter.tryNormalizePathString("/api/v2/users%zz", "").isEmpty());
+        assertTrue(AuthSecurityFilter.tryNormalizePathString("/api/v2/users%2", "").isEmpty());
+        assertTrue(AuthSecurityFilter.tryNormalizePathString("/api/v2/users%FF", "").isEmpty());
+
+        String adminToken = "Bearer " + service.authenticate("admin", "admin123").orElseThrow().token();
+        String plannerToken = "Bearer " + service.authenticate("planner", "planner123").orElseThrow().token();
+        String operatorToken = "Bearer " + service.authenticate("operator", "operator123").orElseThrow().token();
+        String warehouseToken = "Bearer " + service.authenticate("warehouse", "warehouse123").orElseThrow().token();
+
+        List<String> bypassedVariants = List.of(
+                "/api/v2/users;foo=bar",
+                "/api/v2/agents;foo=bar",
+                "/api/v2/audit-logs;foo=bar",
+                "/api/v2/users;x=1/",
+                "/api/v2/users/;x=1",
+                "/api/v2/;x=1/users",
+                "/api/v2/users%3Bfoo=bar",
+                "/api/v2/users%3bfoo=bar",
+                "//api/v2/users;x=1",
+                "/app/../api/v2/users",
+                "/api/v2/./users",
+                "/api/v2/foo/..;/users",
+                "/api/v2/%75sers",
+                "/api/v2/u%73ers",
+                "/api/v2/%55sers",
+                "/api/v2/%61gents",
+                "/api/v2/audit%2dlogs",
+                "/api/v2/%75sers;foo=bar"
+        );
+        for (String variant : bypassedVariants) {
+            assertEquals(403, invoke(authFilter, "GET", variant, plannerToken).getStatus(), "PLANNER 必须被拒绝: " + variant);
+            assertEquals(403, invoke(authFilter, "GET", variant, operatorToken).getStatus(), "OPERATOR 必须被拒绝: " + variant);
+            assertEquals(401, invoke(authFilter, "GET", variant, null).getStatus(), "未登录请求绝不可绕过白名单: " + variant);
+            assertEquals(200, invoke(authFilter, "GET", variant, adminToken).getStatus(), "ADMIN 正常访问应当放行: " + variant);
+        }
+
+        // 非法百分比编码或解码出路径分隔/控制字符的路径必须 fail-closed 返回 400
+        for (String malformedUri : List.of(
+                "/api/v2/%2fusers",
+                "/api/v2/users%5Ctest",
+                "/api/v2/users%00",
+                "/api/v2/users%zz",
+                "/api/v2/users%2",
+                "/api/v2/users%FF"
+        )) {
+            assertEquals(400, invoke(authFilter, "GET", malformedUri, plannerToken).getStatus(), "非法路径编码必须返回 400: " + malformedUri);
+            assertEquals(400, invoke(authFilter, "GET", malformedUri, null).getStatus(), "匿名非法路径编码必须返回 400: " + malformedUri);
+        }
+
+        // 含 URL 编码空格、+ 与中文 UTF-8 编码等合法路径段不被破坏
+        assertEquals(200, invoke(authFilter, "POST", "/api/v2/rolls/ROLL%2001/scrap", warehouseToken).getStatus());
+        assertEquals(200, invoke(authFilter, "POST", "/api/v2/rolls/ROLL+01/scrap", warehouseToken).getStatus());
+        assertEquals(200, invoke(authFilter, "POST", "/api/v2/rolls/ROLL-%E5%B8%83%E6%96%99/scrap", warehouseToken).getStatus());
+
+        // 携带矩阵参数或百分比编码的写请求通过 OperationAuditFilter 时仍准确匹配并落盘审计
+        for (String confirmUri : List.of("/api/v2/schemes/confirm;trace=1", "/api/v2/schemes/%63onfirm")) {
+            String schemeId = confirmUri.contains("%63") ? "SCH-PCT-1" : "SCH-MATRIX-1";
+            var auditReq = new MockHttpServletRequest("POST", confirmUri);
+            auditReq.addHeader("Authorization", plannerToken);
+            var auditRes = new MockHttpServletResponse();
+            authFilter.doFilter(auditReq, auditRes, (r1, s1) ->
+                    auditFilter.doFilter(r1, s1, (r2, s2) -> {
+                        var httpRes = (jakarta.servlet.http.HttpServletResponse) s2;
+                        httpRes.setStatus(200);
+                        httpRes.getWriter().write("{\"id\":\"" + schemeId + "\"}");
+                    })
+            );
+            assertEquals(200, auditRes.getStatus());
+            var page = auditStore.query(new OperationAuditStore.AuditQuery(
+                    "planner", null, "SCHEME_CONFIRM", null, schemeId, null, null, null, 0, 10
+            ));
+            assertEquals(1L, page.total(), "路径变形写请求绝不可逃逸 OperationAuditFilter 审计: " + confirmUri);
+            assertEquals("/api/v2/schemes/confirm", page.items().get(0).requestPath());
+        }
+    }
+
     private MockHttpServletResponse invoke(AuthSecurityFilter filter, String method, String uri, String authHeader) throws Exception {
         var req = new MockHttpServletRequest(method, uri);
         if (authHeader != null) {

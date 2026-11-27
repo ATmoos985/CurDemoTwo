@@ -6,6 +6,7 @@ export interface ParsedRoute {
   resultIdQuery: string;
   draftIdQuery: string;
   appendQuery: string;
+  redirectQuery: string;
   rawKey: string;
   redirectTo?: string;
 }
@@ -37,7 +38,11 @@ export const KNOWN_MODERN_ROUTES: readonly string[] = [
   'documents',
   'garment',
   'showcase',
-  'settings'
+  'settings',
+  'login',
+  'profile',
+  'users',
+  'audit-logs'
 ];
 
 export const WORKBENCH_DEFAULT_ROUTE: ParsedRoute = {
@@ -48,6 +53,7 @@ export const WORKBENCH_DEFAULT_ROUTE: ParsedRoute = {
   resultIdQuery: '',
   draftIdQuery: '',
   appendQuery: '',
+  redirectQuery: '',
   rawKey: 'workbench'
 };
 
@@ -118,6 +124,7 @@ export function parseHashRoute(hash: string): ParsedRoute {
   const resultIdQuery = sp.get('resultId') || '';
   const draftIdQuery = sp.get('draftId') || '';
   const appendQuery = sp.get('append') || '';
+  const redirectQuery = sp.get('redirect') || '';
   const rollQuery = sp.get('roll') || '';
   if (intent && params.length < 3) {
     while (params.length < 2) params.push('');
@@ -135,7 +142,45 @@ export function parseHashRoute(hash: string): ParsedRoute {
     resultIdQuery,
     draftIdQuery,
     appendQuery,
+    redirectQuery,
     rawKey: clean || 'workbench',
     ...(redirectTo ? { redirectTo } : {})
   };
+}
+
+/**
+ * 清洗登录成功后的回跳 Hash：
+ * - 仅允许应用内 `#/` 相对路由，拒绝外链、协议前缀及控制字符；
+ * - 避免跳回 `#/login` 造成重定向死循环，兜底回 `#/workbench`。
+ */
+export function sanitizeRedirectHash(raw?: string | null): string {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed || !trimmed.startsWith('#/')) {
+    return '#/workbench';
+  }
+  if (/[\r\n\0]/.test(trimmed) || trimmed.startsWith('#//')) {
+    return '#/workbench';
+  }
+  const clean = trimmed.replace(/^#\/?/, '');
+  const [rawPath = ''] = clean.split('?');
+  const [pageRaw = ''] = rawPath.split('/').filter(Boolean);
+  if (!pageRaw || pageRaw === 'login') {
+    return '#/workbench';
+  }
+  return trimmed;
+}
+
+/** 构造独立登录页 Hash，合法的站内目标会编码写入 `redirect` 参数 */
+export function buildLoginHash(targetHash?: string | null): string {
+  const trimmed = String(targetHash || '').trim();
+  if (!trimmed || !trimmed.startsWith('#/')) {
+    return '#/login';
+  }
+  const clean = trimmed.replace(/^#\/?/, '');
+  const [rawPath = ''] = clean.split('?');
+  const [pageRaw = ''] = rawPath.split('/').filter(Boolean);
+  if (!pageRaw || pageRaw === 'login') {
+    return '#/login';
+  }
+  return `#/login?redirect=${encodeURIComponent(sanitizeRedirectHash(trimmed))}`;
 }

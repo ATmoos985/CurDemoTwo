@@ -17,8 +17,12 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.util.LinkedHashMap;
@@ -31,11 +35,11 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 企业级轻量安全网关过滤器：
+ * 企业级安全网关过滤器：
  * <ol>
- *   <li>全局请求体字节上限保护（{@code cutdemo.security.max-request-body-bytes}，默认 2MB，超限返回 413）；</li>
- *   <li>可选企业认证与 5 角色 RBAC 鉴权（{@code cutdemo.auth.enabled}，默认关闭，开启后白名单放行、未登录 401、越权 403）；</li>
- *   <li>轻量写操作速率防刷保护（默认每分钟 600 次，不影响正常批量操作与自动化测试）；</li>
+ *   <li>全局请求体字节上限保护（默认 2MB，超限返回 413）；</li>
+ *   <li>支持 USER（5 角色 RBAC + 管理员专属用户/Agent/审计端点）与 AI AGENT（作用域严格隔离 + 禁确认/落库/仓储/质检）双主体鉴权；</li>
+ *   <li>已认证主体越权（403）同步写入持久化操作审计；</li>
  *   <li>写入 {@link AuthContext} 并在 {@code finally} 中严格清理。</li>
  * </ol>
  */
@@ -54,6 +58,7 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     private final AuthService authService;
+    private final OperationAuditService auditService;
     private final long maxRequestBodyBytes;
     private final int writeRateLimitPerMinute;
     private final Clock clock;
@@ -63,13 +68,25 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
     public AuthSecurityFilter(
             AuthService authService,
             @Value("${cutdemo.security.max-request-body-bytes:2097152}") long maxRequestBodyBytes,
-            @Value("${cutdemo.security.write-rate-limit-per-minute:600}") int writeRateLimitPerMinute
+            @Value("${cutdemo.security.write-rate-limit-per-minute:600}") int writeRateLimitPerMinute,
+            OperationAuditService auditService
     ) {
-        this(authService, maxRequestBodyBytes, writeRateLimitPerMinute, Clock.systemUTC());
+        this(authService, maxRequestBodyBytes, writeRateLimitPerMinute, Clock.systemUTC(), auditService);
     }
 
     public AuthSecurityFilter(AuthService authService, long maxRequestBodyBytes, int writeRateLimitPerMinute, Clock clock) {
+        this(authService, maxRequestBodyBytes, writeRateLimitPerMinute, clock, null);
+    }
+
+    public AuthSecurityFilter(
+            AuthService authService,
+            long maxRequestBodyBytes,
+            int writeRateLimitPerMinute,
+            Clock clock,
+            OperationAuditService auditService
+    ) {
         this.authService = authService;
+        this.auditService = auditService;
         this.maxRequestBodyBytes = maxRequestBodyBytes > 0 ? maxRequestBodyBytes : DEFAULT_MAX_REQUEST_BODY_BYTES;
         this.writeRateLimitPerMinute = writeRateLimitPerMinute;
         this.clock = clock == null ? Clock.systemUTC() : clock;
@@ -80,17 +97,20 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
         String method = request.getMethod() == null ? "GET" : request.getMethod().toUpperCase(Locale.ROOT);
-        String path = normalizePath(request);
+        Optional<String> normalizedPath = tryNormalizePath(request);
+        if (normalizedPath.isEmpty()) {
+            writeError(response, 400, "INVALID_REQUEST_PATH", "非法的请求路径编码", false);
+            return;
+        }
+        String path = normalizedPath.get();
         boolean writeRequest = WRITE_METHODS.contains(method);
 
-        // 1. 全局请求体字节上限预检（无论认证是否开启均生效）
         if (writeRequest && request.getContentLengthLong() > maxRequestBodyBytes) {
             writeError(response, 413, "PAYLOAD_TOO_LARGE",
                     "请求正文超过服务端限制（最大 " + maxRequestBodyBytes + " 字节）", false);
             return;
         }
 
-        // 2. 认证与 RBAC 鉴权
         AuthContext.Principal principal;
         if (!authService.isEnabled()) {
             principal = AuthContext.LOCAL_PRINCIPAL;
@@ -104,14 +124,30 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
                 return;
             }
             principal = verified.get();
-            if (!isAuthorized(principal.role(), method, path)) {
+            if (!isAuthorized(principal, method, path)) {
+                if (auditService != null) {
+                    auditService.record(
+                            principal,
+                            "ACCESS_DENIED",
+                            "ENDPOINT",
+                            path,
+                            method,
+                            path,
+                            "DENIED",
+                            403,
+                            request.getRemoteAddr(),
+                            Map.of("reason", principal.isAgent() ? "AGENT_SCOPE_FORBIDDEN" : "ROLE_FORBIDDEN")
+                    );
+                }
+                String subjectLabel = principal.isAgent()
+                        ? "Agent(" + principal.agentId() + ")"
+                        : "角色 " + principal.role();
                 writeError(response, 403, "FORBIDDEN",
-                        "角色 " + principal.role() + " 无权执行该操作：" + method + " " + path, false);
+                        subjectLabel + " 无权执行该操作：" + method + " " + path, false);
                 return;
             }
         }
 
-        // 3. 轻量写操作防刷保护（仅作用于业务写接口，阈值宽松避免影响正常批量）
         if (writeRequest && writeRateLimitPerMinute > 0 && path.startsWith("/api/") && !"/api/health".equals(path)) {
             String rateKey = (principal != null && principal.authenticated())
                     ? "user:" + principal.username()
@@ -181,24 +217,38 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
     }
 
     static boolean isAuthorized(String role, String method, String path) {
+        return isAuthorized(new AuthContext.Principal("test", "test", role, List.of(role), true), method, path);
+    }
+
+    static boolean isAuthorized(AuthContext.Principal principal, String method, String path) {
+        if (principal == null) {
+            return false;
+        }
+        if (principal.isAgent()) {
+            return isAgentAuthorized(principal.scopes(), method, path);
+        }
+        String role = principal.role();
         if (AuthContext.ROLE_ADMIN.equals(role)) {
             return true;
         }
-        // 非健康类运维端点（如 /actuator/prometheus）仅允许 ADMIN
-        if (path.startsWith("/actuator/")) {
+        if (path.toLowerCase(Locale.ROOT).startsWith("/actuator/")) {
             return false;
         }
-        // 业务只读接口：5 个已认证角色均可查阅台账、需求、方案、库存与报表
+        if (isAdminOnlySecurityPath(path)) {
+            return false;
+        }
+        if (("/api/v2/auth/logout".equals(path) && "POST".equals(method))
+                || ("/api/v2/auth/password".equals(path) && "PUT".equals(method))) {
+            return AuthContext.ALL_ROLES.contains(role);
+        }
         if ("GET".equals(method) || "HEAD".equals(method)) {
             return true;
         }
 
-        // 1. 演示重置与母卷强制重置：仅 ADMIN
         if (path.startsWith("/api/demo/") || path.matches("^/api/rolls/[^/]+/reset$")) {
             return false;
         }
 
-        // 2. 质检、跑布验疵、隔离料头放行、复检处置与撤销：ADMIN / INSPECTOR
         if (path.startsWith("/api/v2/quality/")
                 || path.startsWith("/api/inspection/")
                 || path.matches("^/api/rolls/[^/]+/defects(?:/.*)?$")
@@ -208,7 +258,6 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
             return AuthContext.ROLE_INSPECTOR.equals(role);
         }
 
-        // 3. 仓储入出库、移库、盘点、母卷建档与报废、料头登记与报废：ADMIN / WAREHOUSE
         if (path.equals("/api/v2/inventory-receipts") || path.startsWith("/api/v2/inventory-receipts/")
                 || path.equals("/api/v2/material-issues") || path.startsWith("/api/v2/material-issues/")
                 || path.equals("/api/v2/inventory-transfers") || path.startsWith("/api/v2/inventory-transfers/")
@@ -221,7 +270,6 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
             return AuthContext.ROLE_WAREHOUSE.equals(role);
         }
 
-        // 4. 车间现场执行、方案完工与裁切报工：ADMIN / OPERATOR / PLANNER
         if (path.equals("/api/v2/execution-orders") || path.startsWith("/api/v2/execution-orders/")
                 || path.matches("^/api/v2/schemes/[^/]+/complete$")
                 || path.equals("/api/cutting/report-confirm")
@@ -229,7 +277,6 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
             return AuthContext.ROLE_OPERATOR.equals(role) || AuthContext.ROLE_PLANNER.equals(role);
         }
 
-        // 5. 排程计划、需求池、模板、联合排产/自动分床、工作台编排与草案、方案确认/绑卷/手调/取消/补片与算法求解作业：ADMIN / PLANNER
         if (path.equals("/api/v2/demand-templates") || path.startsWith("/api/v2/demand-templates/")
                 || path.equals("/api/v2/demand-pool") || path.startsWith("/api/v2/demand-pool/")
                 || path.equals("/api/v2/planning") || path.startsWith("/api/v2/planning/")
@@ -247,8 +294,89 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
             return AuthContext.ROLE_PLANNER.equals(role);
         }
 
-        // 未显式授权的其余写路径默认仅允许 ADMIN（最小权限原则）
         return false;
+    }
+
+    private static boolean isAdminOnlySecurityPath(String path) {
+        String lower = path.toLowerCase(Locale.ROOT);
+        return lower.equals("/api/v2/users") || lower.startsWith("/api/v2/users/")
+                || lower.equals("/api/v2/agents") || lower.startsWith("/api/v2/agents/")
+                || lower.equals("/api/v2/audit-logs") || lower.startsWith("/api/v2/audit-logs/");
+    }
+
+    private static boolean isAgentAuthorized(List<String> scopes, String method, String path) {
+        if (scopes == null || scopes.isEmpty()) {
+            return false;
+        }
+        String requiredScope = resolveAgentRequiredScope(method, path);
+        return requiredScope != null && scopes.contains(requiredScope);
+    }
+
+    private static String resolveAgentRequiredScope(String method, String path) {
+        boolean read = "GET".equals(method) || "HEAD".equals(method);
+        boolean post = "POST".equals(method);
+
+        if (read) {
+            if (path.equals("/api/v2/demand-pool") || path.startsWith("/api/v2/demand-pool/")
+                    || path.equals("/api/v2/demand-templates") || path.startsWith("/api/v2/demand-templates/")
+                    || path.equals("/api/cutting/tasks") || path.startsWith("/api/cutting/tasks/")
+                    || path.equals("/api/cutting/task-summaries")) {
+                return AuthContext.SCOPE_DEMAND_READ;
+            }
+            if (path.equals("/api/rolls") || path.startsWith("/api/rolls/")
+                    || path.equals("/api/remnants") || path.startsWith("/api/remnants/")
+                    || path.startsWith("/api/v2/inventory-ledger/")
+                    || path.startsWith("/api/v2/analytics/")
+                    || path.startsWith("/api/v2/reconciliation/")
+                    || path.equals("/api/v2/schemes") || path.startsWith("/api/v2/schemes/")
+                    || path.equals("/api/v2/execution-orders") || path.startsWith("/api/v2/execution-orders/")
+                    || path.equals("/api/v2/quality/releases")
+                    || path.equals("/api/v2/inventory-receipts")
+                    || path.equals("/api/v2/material-issues")
+                    || path.equals("/api/v2/inventory-transfers")
+                    || path.equals("/api/v2/inventory-counts")
+                    || path.startsWith("/api/cutting/plans/")
+                    || path.startsWith("/api/cutting/reports/")) {
+                return AuthContext.SCOPE_INVENTORY_READ;
+            }
+            if (path.equals("/api/v2/capabilities")
+                    || path.equals("/api/v1/nesting/engines")
+                    || path.startsWith("/api/v2/optimization-jobs/")
+                    || path.startsWith("/api/v2/optimization-results/")
+                    || path.equals("/api/v2/result-comparisons")
+                    || path.matches("^/api/v2/workbench/tasks/[^/]+/result-comparison$")
+                    || path.matches("^/api/v2/workbench/results/[^/]+/context$")) {
+                return AuthContext.SCOPE_PLAN_COMPUTE;
+            }
+            if (path.equals("/api/v2/workbench/drafts") || path.startsWith("/api/v2/workbench/drafts/")) {
+                return AuthContext.SCOPE_DRAFT_WRITE;
+            }
+            return null;
+        }
+
+        if (post) {
+            if (path.equals("/api/v2/demand-pool")) {
+                return AuthContext.SCOPE_DEMAND_WRITE;
+            }
+            if (path.equals("/api/v2/problem-validations")
+                    || path.equals("/api/v2/optimization-jobs")
+                    || path.matches("^/api/v2/optimization-jobs/[^/]+/cancellations$")
+                    || path.startsWith("/api/v1/nesting/")
+                    || path.startsWith("/api/v2/planning/")
+                    || path.equals("/api/cutting/material-candidates")
+                    || path.equals("/api/cutting/remnant-recommendations")
+                    || path.equals("/api/remnants/match")
+                    || path.equals("/api/v2/schemes/validate-layout")
+                    || path.matches("^/api/v2/workbench/tasks/[^/]+/plan-jobs$")) {
+                return AuthContext.SCOPE_PLAN_COMPUTE;
+            }
+            if (path.equals("/api/v2/workbench/drafts")
+                    || path.matches("^/api/v2/workbench/drafts/[^/]+/discard$")
+                    || path.equals("/api/v2/workbench/multi-material-drafts")) {
+                return AuthContext.SCOPE_DRAFT_WRITE;
+            }
+        }
+        return null;
     }
 
     private boolean tryAcquireWritePermit(String key) {
@@ -265,16 +393,164 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
         return window.count <= writeRateLimitPerMinute;
     }
 
-    private static String normalizePath(HttpServletRequest request) {
-        String uri = request.getRequestURI();
-        if (uri == null || uri.isEmpty()) {
-            return "/";
+    private static final String INVALID_PATH_SENTINEL = "/__invalid_path__";
+
+    static String normalizePath(HttpServletRequest request) {
+        return tryNormalizePath(request).orElse(INVALID_PATH_SENTINEL);
+    }
+
+    static Optional<String> tryNormalizePath(HttpServletRequest request) {
+        if (request == null) {
+            return Optional.of("/");
         }
-        String contextPath = request.getContextPath();
+        return tryNormalizePathString(request.getRequestURI(), request.getContextPath());
+    }
+
+    static String normalizePathString(String rawUri, String contextPath) {
+        return tryNormalizePathString(rawUri, contextPath).orElse(INVALID_PATH_SENTINEL);
+    }
+
+    static Optional<String> tryNormalizePathString(String rawUri, String contextPath) {
+        if (rawUri == null || rawUri.isEmpty()) {
+            return Optional.of("/");
+        }
+        String uri = rawUri;
+        int queryIdx = uri.indexOf('?');
+        if (queryIdx >= 0) {
+            uri = uri.substring(0, queryIdx);
+        }
         if (contextPath != null && !contextPath.isEmpty() && uri.startsWith(contextPath)) {
             uri = uri.substring(contextPath.length());
         }
-        return uri.isEmpty() ? "/" : uri;
+        if (uri.isEmpty()) {
+            return Optional.of("/");
+        }
+        uri = uri.replace('\\', '/');
+        String[] rawSegments = uri.split("/", -1);
+        java.util.ArrayDeque<String> segments = new java.util.ArrayDeque<>(rawSegments.length);
+        boolean preserveTrailingSlash = false;
+        for (int i = 0; i < rawSegments.length; i++) {
+            String stripped = stripMatrixParameters(rawSegments[i]);
+            String segment = decodePercentEncodedSegment(stripped);
+            if (segment == null) {
+                return Optional.empty();
+            }
+            boolean isLast = (i == rawSegments.length - 1);
+            if (segment.isEmpty()) {
+                if (isLast && i > 0) {
+                    preserveTrailingSlash = true;
+                }
+                continue;
+            }
+            if (".".equals(segment)) {
+                preserveTrailingSlash = false;
+                continue;
+            }
+            if ("..".equals(segment)) {
+                if (!segments.isEmpty()) {
+                    segments.removeLast();
+                }
+                preserveTrailingSlash = false;
+                continue;
+            }
+            segments.addLast(segment);
+            preserveTrailingSlash = false;
+        }
+        if (segments.isEmpty()) {
+            return Optional.of("/");
+        }
+        StringBuilder normalized = new StringBuilder();
+        for (String segment : segments) {
+            normalized.append('/').append(segment);
+        }
+        if (preserveTrailingSlash) {
+            normalized.append('/');
+        }
+        return Optional.of(normalized.toString());
+    }
+
+    private static String stripMatrixParameters(String segment) {
+        if (segment == null || segment.isEmpty()) {
+            return "";
+        }
+        int cut = segment.indexOf(';');
+        String lower = segment.toLowerCase(Locale.ROOT);
+        int encodedCut = lower.indexOf("%3b");
+        if (encodedCut >= 0 && (cut < 0 || encodedCut < cut)) {
+            cut = encodedCut;
+        }
+        return cut >= 0 ? segment.substring(0, cut) : segment;
+    }
+
+    private static String decodePercentEncodedSegment(String segment) {
+        if (segment == null || segment.isEmpty()) {
+            return "";
+        }
+        if (segment.indexOf('%') < 0) {
+            for (int i = 0; i < segment.length(); i++) {
+                if (isForbiddenDecodedChar(segment.charAt(i))) {
+                    return null;
+                }
+            }
+            return segment;
+        }
+        StringBuilder out = new StringBuilder(segment.length());
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        for (int i = 0; i < segment.length(); i++) {
+            char ch = segment.charAt(i);
+            if (ch == '%') {
+                if (i + 2 >= segment.length()) {
+                    return null;
+                }
+                int hi = Character.digit(segment.charAt(i + 1), 16);
+                int lo = Character.digit(segment.charAt(i + 2), 16);
+                if (hi < 0 || lo < 0) {
+                    return null;
+                }
+                bytes.write((hi << 4) | lo);
+                i += 2;
+            } else {
+                if (!flushDecodedUtf8Bytes(bytes, out)) {
+                    return null;
+                }
+                if (isForbiddenDecodedChar(ch)) {
+                    return null;
+                }
+                out.append(ch);
+            }
+        }
+        if (!flushDecodedUtf8Bytes(bytes, out)) {
+            return null;
+        }
+        return out.toString();
+    }
+
+    private static boolean flushDecodedUtf8Bytes(ByteArrayOutputStream bytes, StringBuilder out) {
+        if (bytes.size() == 0) {
+            return true;
+        }
+        byte[] raw = bytes.toByteArray();
+        bytes.reset();
+        try {
+            String decoded = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(raw))
+                    .toString();
+            for (int i = 0; i < decoded.length(); i++) {
+                if (isForbiddenDecodedChar(decoded.charAt(i))) {
+                    return false;
+                }
+            }
+            out.append(decoded);
+            return true;
+        } catch (CharacterCodingException e) {
+            return false;
+        }
+    }
+
+    private static boolean isForbiddenDecodedChar(char ch) {
+        return ch == '/' || ch == '\\' || ch == ';' || ch <= 0x1F || ch == 0x7F;
     }
 
     private static void writeError(HttpServletResponse response,
@@ -308,7 +584,6 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
         return false;
     }
 
-    /** 流式读取请求体超过全局字节上限时抛出的受检边界异常。 */
     public static final class PayloadTooLargeException extends IOException {
         public PayloadTooLargeException(long maxBytes) {
             super("请求正文超过服务端限制（最大 " + maxBytes + " 字节）");

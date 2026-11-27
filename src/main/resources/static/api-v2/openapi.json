@@ -1715,6 +1715,321 @@
         }
       }
     },
+    "/api/v2/auth/logout": {
+      "post": {
+        "summary": "主动登出并吊销当前 Bearer 访问令牌（jti）",
+        "responses": {
+          "200": {
+            "description": "登出吊销成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthLogoutResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/auth/password": {
+      "put": {
+        "summary": "当前登录用户修改个人口令并使旧令牌失效",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthPasswordChangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "修改成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthPasswordChangeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "原密码错误或新密码不符合规范",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/users": {
+      "get": {
+        "summary": "管理员查询用户账户台账",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserAccountListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "管理员创建新用户账户（PBKDF2WithHmacSHA256 加盐存储）",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "创建成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserAccountView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/users/{username}": {
+      "put": {
+        "summary": "管理员更新用户显示名与角色",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "更新成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserAccountView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/users/{username}/status": {
+      "post": {
+        "summary": "管理员启用或禁用用户账户并递增 tokenVersion 吊销存量令牌",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserStatusRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "更新成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserAccountView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/users/{username}/reset-password": {
+      "post": {
+        "summary": "管理员重置指定用户密码并递增 tokenVersion 失效既有令牌",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "重置成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetPasswordResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/agents": {
+      "get": {
+        "summary": "管理员查询 AI Agent 凭证台账",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentCredentialListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "管理员签发受限作用域 AI Agent 凭证（仅返回一次明文令牌）",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAgentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "签发成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateAgentResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/agents/{agentId}/revoke": {
+      "post": {
+        "summary": "管理员吊销 AI Agent 凭证并立即失效其全部令牌",
+        "parameters": [
+          {
+            "name": "agentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeAgentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "吊销成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentCredentialView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/audit-logs": {
+      "get": {
+        "summary": "管理员分页检索全站持久化操作审计日志",
+        "parameters": [
+          { "name": "actor", "in": "query", "schema": { "type": "string" } },
+          { "name": "actorType", "in": "query", "schema": { "type": "string" } },
+          { "name": "action", "in": "query", "schema": { "type": "string" } },
+          { "name": "targetType", "in": "query", "schema": { "type": "string" } },
+          { "name": "targetId", "in": "query", "schema": { "type": "string" } },
+          { "name": "outcome", "in": "query", "schema": { "type": "string" } },
+          { "name": "from", "in": "query", "schema": { "type": "integer", "format": "int64" } },
+          { "name": "to", "in": "query", "schema": { "type": "integer", "format": "int64" } },
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 0 } },
+          { "name": "size", "in": "query", "schema": { "type": "integer", "default": 20 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAuditLogPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/demand-templates": {
       "get": {
         "summary": "查询需求模板库列表",
@@ -8938,6 +9253,27 @@
             "items": {
               "type": "string"
             }
+          },
+          "actorType": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -8993,6 +9329,192 @@
             "type": "string",
             "format": "date-time"
           }
+        }
+      },
+      "AuthLogoutResponse": {
+        "type": "object",
+        "required": ["revoked"],
+        "properties": {
+          "revoked": { "type": "boolean" }
+        }
+      },
+      "AuthPasswordChangeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["currentPassword", "newPassword"],
+        "properties": {
+          "currentPassword": { "type": "string", "minLength": 1 },
+          "newPassword": { "type": "string", "minLength": 6 }
+        }
+      },
+      "AuthPasswordChangeResponse": {
+        "type": "object",
+        "required": ["updated"],
+        "properties": {
+          "updated": { "type": "boolean" }
+        }
+      },
+      "UserAccountView": {
+        "type": "object",
+        "required": ["username", "displayName", "role", "enabled", "tokenVersion", "createdAt", "updatedAt"],
+        "properties": {
+          "username": { "type": "string" },
+          "displayName": { "type": "string" },
+          "role": { "type": "string", "enum": ["ADMIN", "PLANNER", "OPERATOR", "INSPECTOR", "WAREHOUSE"] },
+          "enabled": { "type": "boolean" },
+          "tokenVersion": { "type": "integer", "format": "int64" },
+          "createdAt": { "type": "integer", "format": "int64" },
+          "updatedAt": { "type": "integer", "format": "int64" },
+          "lastLoginAt": { "type": ["integer", "null"], "format": "int64" },
+          "passwordUpdatedAt": { "type": ["integer", "null"], "format": "int64" }
+        }
+      },
+      "UserAccountListResponse": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/UserAccountView" }
+          }
+        }
+      },
+      "CreateUserRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["username", "role", "password"],
+        "properties": {
+          "username": { "type": "string" },
+          "displayName": { "type": "string" },
+          "role": { "type": "string", "enum": ["ADMIN", "PLANNER", "OPERATOR", "INSPECTOR", "WAREHOUSE"] },
+          "password": { "type": "string", "minLength": 6 }
+        }
+      },
+      "UpdateUserRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role"],
+        "properties": {
+          "displayName": { "type": "string" },
+          "role": { "type": "string", "enum": ["ADMIN", "PLANNER", "OPERATOR", "INSPECTOR", "WAREHOUSE"] }
+        }
+      },
+      "UserStatusRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["enabled"],
+        "properties": {
+          "enabled": { "type": "boolean" }
+        }
+      },
+      "ResetPasswordRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["newPassword"],
+        "properties": {
+          "newPassword": { "type": "string", "minLength": 6 }
+        }
+      },
+      "ResetPasswordResponse": {
+        "type": "object",
+        "required": ["updated", "tokenVersion"],
+        "properties": {
+          "updated": { "type": "boolean" },
+          "tokenVersion": { "type": "integer", "format": "int64" }
+        }
+      },
+      "AgentCredentialView": {
+        "type": "object",
+        "required": ["agentId", "name", "ownerUsername", "scopes", "enabled", "tokenVersion", "createdAt", "updatedAt"],
+        "properties": {
+          "agentId": { "type": "string" },
+          "name": { "type": "string" },
+          "ownerUsername": { "type": "string" },
+          "scopes": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "enabled": { "type": "boolean" },
+          "tokenVersion": { "type": "integer", "format": "int64" },
+          "description": { "type": ["string", "null"] },
+          "createdAt": { "type": "integer", "format": "int64" },
+          "updatedAt": { "type": "integer", "format": "int64" },
+          "expiresAt": { "type": ["integer", "null"], "format": "int64" },
+          "revokedAt": { "type": ["integer", "null"], "format": "int64" },
+          "lastUsedAt": { "type": ["integer", "null"], "format": "int64" }
+        }
+      },
+      "AgentCredentialListResponse": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AgentCredentialView" }
+          }
+        }
+      },
+      "CreateAgentRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "scopes"],
+        "properties": {
+          "name": { "type": "string" },
+          "scopes": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "description": { "type": "string" },
+          "ttlHours": { "type": "integer", "format": "int64" }
+        }
+      },
+      "CreateAgentResponse": {
+        "type": "object",
+        "required": ["agent", "token"],
+        "properties": {
+          "agent": { "$ref": "#/components/schemas/AgentCredentialView" },
+          "token": { "type": "string" }
+        }
+      },
+      "RevokeAgentRequest": {
+        "type": "object",
+        "properties": {
+          "reason": { "type": "string" }
+        }
+      },
+      "OperationAuditLogItem": {
+        "type": "object",
+        "required": ["id", "occurredAt", "actor", "actorType", "action", "outcome"],
+        "properties": {
+          "id": { "type": "string" },
+          "occurredAt": { "type": "integer", "format": "int64" },
+          "actor": { "type": "string" },
+          "actorType": { "type": "string" },
+          "actorRole": { "type": ["string", "null"] },
+          "agentId": { "type": ["string", "null"] },
+          "action": { "type": "string" },
+          "targetType": { "type": ["string", "null"] },
+          "targetId": { "type": ["string", "null"] },
+          "httpMethod": { "type": ["string", "null"] },
+          "requestPath": { "type": ["string", "null"] },
+          "outcome": { "type": "string" },
+          "httpStatus": { "type": ["integer", "null"] },
+          "traceId": { "type": ["string", "null"] },
+          "clientIp": { "type": ["string", "null"] },
+          "detailJson": { "type": ["string", "null"] }
+        }
+      },
+      "OperationAuditLogPage": {
+        "type": "object",
+        "required": ["items", "total", "page", "size"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/OperationAuditLogItem" }
+          },
+          "total": { "type": "integer", "format": "int64" },
+          "page": { "type": "integer" },
+          "size": { "type": "integer" }
         }
       },
       "DemandTemplate": {

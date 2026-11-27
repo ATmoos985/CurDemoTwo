@@ -7,6 +7,7 @@ import './styles/theme-magpie.css';
 import './styles/theme-magpie-results.css';
 import './styles/theme-magpie-inventory.css';
 import './styles/theme-magpie-showcase.css';
+import './styles/security-views.css';
 import './styles/tokens-dark.css';
 import { applyThemeToDocument, loadStudioSettings } from './store/studioSettings';
 

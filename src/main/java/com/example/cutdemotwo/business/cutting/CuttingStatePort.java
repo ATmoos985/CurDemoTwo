@@ -95,6 +95,16 @@ public interface CuttingStatePort {
 
         List<Map<String, Object>> listReceipts();
 
+        default List<Map<String, Object>> findCutReportsByRollId(String rollId) {
+            return listReceipts().stream()
+                    .filter(r -> rollId != null && rollId.equals(r.get("rollId")))
+                    .toList();
+        }
+
+        default void streamActiveCutReports(int batchSize, java.util.function.Consumer<List<Map<String, Object>>> consumer) {
+            consumer.accept(listReceipts());
+        }
+
         Map<String, Integer> completedQuantities(String taskId);
 
         Map<String, Object> projectQuality(Map<String, Object> receipt);

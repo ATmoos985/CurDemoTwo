@@ -1530,3 +1530,142 @@ test('discard_draft_scheme propagates 409 conflict and audit log omits sensitive
     await session.close();
   }
 });
+
+test('CUTTING_AGENT_TOKEN 与 X-Cutting-Agent-Token 透传、会话隔离及 401/403 越权拦截（脱敏日志不泄密）', async () => {
+  const cfg = configuration({
+    CUTTING_API_URL: 'http://127.0.0.1:8080',
+    CUTTING_AGENT_TOKEN: 'agent-secret-token-stdio-001',
+    CUTTING_API_TOKEN: 'fallback-user-token-002'
+  });
+  assert.equal(cfg.apiToken, 'agent-secret-token-stdio-001');
+  assert.equal(cfg.hasAgentToken, true);
+
+  const tempDir = mkdtempSync(join(tmpdir(), 'mcp-agent-token-'));
+  const auditFile = join(tempDir, 'agent-audit.jsonl');
+  const seenAuthByPath = [];
+
+  const backend = httpServer((req, res) => {
+    seenAuthByPath.push({ method: req.method, url: req.url, auth: req.headers.authorization || '' });
+    if (req.headers.authorization === 'Bearer agent-revoked-401') {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ code: 'UNAUTHORIZED', message: 'Agent 凭证已吊销', retryable: false }));
+    }
+    if (req.url === '/api/v2/demand-pool' && req.method === 'POST') {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ code: 'FORBIDDEN', message: 'Agent 缺少 DEMAND_WRITE 作用域', retryable: false }));
+    }
+    if (req.url.startsWith('/api/v2/demand-pool')) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ items: [{ id: 'T-AGENT-1', name: '沙发订单' }], total: 1 }));
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ code: 'NOT_FOUND', message: 'not found' }));
+  });
+  await new Promise((r) => backend.listen(0, '127.0.0.1', r));
+
+  const mcpToken = 'mcp-http-agent-secret-token-2026';
+  const agentReadToken = 'agent-scoped-read-token-001';
+  const agentRevokedToken = 'agent-revoked-401';
+  const httpMcp = await startMcpHttpServer(
+    {
+      origin: `http://127.0.0.1:${backend.address().port}`,
+      compute: true,
+      businessRead: true,
+      allowDraftScheme: true,
+      allowDemandWrite: true,
+      apiToken: '',
+      transport: 'http',
+      httpHost: '127.0.0.1',
+      httpPort: 0,
+      httpToken: mcpToken,
+      auditLogPath: auditFile
+    },
+    { audit: createAuditLogger({ auditLogPath: auditFile, transport: 'streamable-http', stderrWrite: () => {} }) }
+  );
+
+  try {
+    // 1. 通过 X-Cutting-Agent-Token 透传合法只读 Agent Token
+    const listRes = await fetch(httpMcp.endpointUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${mcpToken}`,
+        'X-Cutting-Agent-Token': agentReadToken
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'list_demand_pool', arguments: {} }
+      })
+    });
+    assert.equal(listRes.status, 200);
+    const listBody = await listRes.json();
+    assert.equal(listBody.result.isError, undefined);
+    const sid1 = listRes.headers.get('mcp-session-id');
+    assert.ok(sid1);
+
+    // 2. 越权写操作被后端 403 拦截，MCP 原样保留 FORBIDDEN 错误码
+    const forbiddenRes = await fetch(httpMcp.endpointUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${mcpToken}`,
+        'X-Cutting-Agent-Token': agentReadToken,
+        'Mcp-Session-Id': sid1
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: {
+          name: 'create_demand_task',
+          arguments: {
+            name: 'Agent 越权建单测试',
+            materialModel: 'M-1',
+            dimension: 'RECT_2D',
+            demands: [{ name: 'A', width: 200, length: 300, quantity: 1 }]
+          }
+        }
+      })
+    });
+    assert.equal(forbiddenRes.status, 200);
+    const forbiddenBody = await forbiddenRes.json();
+    assert.equal(forbiddenBody.result.isError, true);
+    assert.equal(JSON.parse(forbiddenBody.result.content[0].text).code, 'FORBIDDEN');
+
+    // 3. 相同 Mcp-Session-Id 但更换为已吊销 Agent Token，会话按 Token 隔离并返回 401 UNAUTHORIZED
+    const revokedRes = await fetch(httpMcp.endpointUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${mcpToken}`,
+        'X-Cutting-Agent-Token': agentRevokedToken,
+        'Mcp-Session-Id': sid1
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: { name: 'list_demand_pool', arguments: {} }
+      })
+    });
+    assert.equal(revokedRes.status, 200);
+    const revokedBody = await revokedRes.json();
+    assert.equal(revokedBody.result.isError, true);
+    assert.equal(JSON.parse(revokedBody.result.content[0].text).code, 'UNAUTHORIZED');
+
+    assert.equal(seenAuthByPath[0].auth, `Bearer ${agentReadToken}`);
+    assert.equal(seenAuthByPath[1].auth, `Bearer ${agentReadToken}`);
+    assert.equal(seenAuthByPath[2].auth, `Bearer ${agentRevokedToken}`);
+
+    const auditContent = readFileSync(auditFile, 'utf8');
+    assert.ok(!auditContent.includes(agentReadToken));
+    assert.ok(!auditContent.includes(agentRevokedToken));
+    assert.ok(!auditContent.includes(mcpToken));
+  } finally {
+    await httpMcp.close();
+    await new Promise((r) => backend.close(r));
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});

@@ -74,7 +74,8 @@ export function configuration(env = process.env) {
     throw new Error('MCP_TRANSPORT=http 必须配置至少 16 位字符的 MCP_API_TOKEN，禁止无鉴权暴露远程端点');
   }
 
-  const apiToken = String(env.CUTTING_API_TOKEN || '').trim();
+  const agentToken = String(env.CUTTING_AGENT_TOKEN || '').trim();
+  const apiToken = agentToken || String(env.CUTTING_API_TOKEN || '').trim();
   const auditLogPath = String(env.MCP_AUDIT_LOG_PATH || '').trim();
 
   return {
@@ -84,6 +85,7 @@ export function configuration(env = process.env) {
     allowDraftScheme: env.CUTTING_MCP_ALLOW_DRAFT_SCHEME === 'true',
     allowDemandWrite: env.CUTTING_MCP_ALLOW_DEMAND_WRITE === 'true',
     apiToken,
+    hasAgentToken: Boolean(agentToken),
     transport,
     httpHost,
     httpPort: rawPort,
