@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
+@Tag("mysql-integration")
 @Timeout(20)
 class SlittingOptimizationTests {
     @TempDir Path temp;

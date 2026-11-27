@@ -13,6 +13,7 @@ import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static com.example.cutdemotwo.business.optimization.OptimizationServiceTests.*;
 
+@Tag("mysql-integration")
 @Timeout(15)
 class JdbcOptimizationTests {
     DataSource source;

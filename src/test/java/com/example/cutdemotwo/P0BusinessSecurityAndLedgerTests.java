@@ -26,12 +26,14 @@ import com.example.cutdemotwo.persistence.InventoryConflictException;
 import com.example.cutdemotwo.persistence.InventorySnapshot;
 import com.example.cutdemotwo.persistence.InventoryStore;
 import com.example.cutdemotwo.persistence.JdbcInventoryStore;
+import com.example.cutdemotwo.persistence.OptimizationTestDatabase;
 import org.flywaydb.core.Flyway;
-import org.h2.jdbcx.JdbcDataSource;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.HttpStatus;
 
+import javax.sql.DataSource;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,6 +47,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * 覆盖 P0-2 / P0-5 / P0-6 / P0-7 / P0-8 全量业务账本、锁机制、持久化优化与四重物化校验回归测试。
  */
+@Tag("mysql-integration")
 class P0BusinessSecurityAndLedgerTests {
     @TempDir
     Path temp;
@@ -57,10 +60,9 @@ class P0BusinessSecurityAndLedgerTests {
 
     @Test
     void refreshSkipsFullLoadWhenRemoteRevisionUnchangedAndHealthReportsStorageFailure() {
-        JdbcDataSource h2 = new JdbcDataSource();
-        h2.setURL("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1");
-        Flyway.configure().dataSource(h2).load().migrate();
-        JdbcInventoryStore delegate = new JdbcInventoryStore(h2);
+        DataSource ds = OptimizationTestDatabase.create();
+        Flyway.configure().dataSource(ds).load().migrate();
+        JdbcInventoryStore delegate = new JdbcInventoryStore(ds);
 
         AtomicInteger loadCount = new AtomicInteger();
         AtomicReference<String> injectedHealthErr = new AtomicReference<>(null);

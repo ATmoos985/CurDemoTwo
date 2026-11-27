@@ -19,7 +19,12 @@ WORKDIR /workspace
 COPY src ./src
 COPY frontend ./frontend
 COPY integrations/mcp ./integrations/mcp
+COPY integrations/inventory ./integrations/inventory
 COPY benchmark ./benchmark
+COPY scripts ./scripts
+COPY .github/workflows/image.yml ./.github/workflows/image.yml
+COPY .agents/skills/verify-cutdemotwo ./.agents/skills/verify-cutdemotwo
+COPY Dockerfile ./Dockerfile
 RUN npm ci --ignore-scripts --prefix frontend \
     && npm run typecheck --prefix frontend \
     && npm test --prefix frontend \
@@ -28,6 +33,11 @@ RUN npm ci --ignore-scripts --prefix frontend \
     && node --test benchmark/*.test.mjs \
     && npm ci --ignore-scripts --prefix integrations/mcp \
     && npm test --prefix integrations/mcp \
+    && node --test integrations/inventory/test/sync-worker.test.mjs \
+    && node --test scripts/arch-coupling-audit.test.mjs \
+    && node scripts/arch-coupling-audit.mjs --fail-on-cycle \
+    && node --test scripts/workflow-closure-audit.test.mjs \
+    && node scripts/workflow-closure-audit.mjs --fail \
     && touch /frontend-tests-passed
 
 FROM maven:3.9-eclipse-temurin-17-noble AS build

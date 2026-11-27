@@ -1,3 +1,21 @@
+---
+routes:
+  - demands
+  - demand-library
+  - clusters
+  - workbench
+  - slitting
+  - results
+  - reconciliation
+  - cost-analytics
+  - inventory
+  - inspection
+  - documents
+  - garment
+  - showcase
+  - settings
+---
+
 # 导航壳层、主路由渲染与旧书签重定向
 
 用户打开 `/app/` 后，应能通过左侧 5 组 12 项主导航（以及左侧导航栏底部的引擎状态胶囊 `#engine-status` / 设置入口）无报错访问全部 14 个现代业务路由（含 `#/slitting` 及 `#/workbench?taskId=&resultId=&draftId=` 深链），历史旧书签 Hash 自动跳转至对应现代路由，且纯浏览过程不产生任何非 GET 写请求或脚本异常。

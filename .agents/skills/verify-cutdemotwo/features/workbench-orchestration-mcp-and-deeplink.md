@@ -1,3 +1,8 @@
+---
+routes:
+  - workbench
+---
+
 # 工作台编排求解、22 工具工业 MCP 与深链预览闭环
 
 验证阶段一（`542fa5c..c6c5a94`）新增的外部 Harness 协同闭环：后端 `/api/v2/workbench/**` 5 端点无环编排求解、同口径双方案比较与持久化待确认草案（File `.drafts/` 与 MySQL V11）→ `integrations/mcp` 22 工具四开关权限隔离、零依赖 PNG 蓝图预览与显式故障回报 → 浏览器打开 `#/workbench?taskId=...&resultId=...` / `&draftId=...` 深链直接在四层 Konva 画布核对方案与版本漂移告警（预览零写库，最终由人工点击「选定此方案」确认落库）。

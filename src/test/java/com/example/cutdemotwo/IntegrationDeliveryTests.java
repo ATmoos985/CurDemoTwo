@@ -13,6 +13,7 @@ import java.util.concurrent.*;
 import java.util.function.Function;
 import static org.junit.jupiter.api.Assertions.*;
 
+@Tag("mysql-integration")
 class IntegrationDeliveryTests {
     @TempDir Path temp;
     static final String TOKEN="test-only-integration-token-0123456789";

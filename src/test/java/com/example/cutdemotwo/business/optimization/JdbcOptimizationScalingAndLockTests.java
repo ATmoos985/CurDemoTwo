@@ -7,6 +7,7 @@ import com.example.cutdemotwo.persistence.LeasedOptimizationJobStore;
 import com.example.cutdemotwo.persistence.OptimizationTestDatabase;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * JDBC 调度存储锁外校验防雪崩与多节点水平扩容专项测试。
  */
+@Tag("mysql-integration")
 @Timeout(15)
 class JdbcOptimizationScalingAndLockTests {
 

@@ -90,8 +90,9 @@ node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs drive --session "<s
 | 前端 Vitest 单元测试 | `npm test --prefix frontend` |
 | JS 模块与架构无环门禁 | `node --test src/test/js/*.test.mjs` |
 | 全仓架构耦合只读体检 | `node scripts/arch-coupling-audit.mjs --fail-on-cycle` |
+| 防遗漏工作流闭环门禁 | `node scripts/workflow-closure-audit.mjs --fail` |
 | MCP 企业级契约测试 | `npm test --prefix integrations/mcp` |
-| Outbox 同步 Worker 测试 | `node --test integrations/inventory/sync-worker.test.mjs` |
+| Outbox 同步 Worker 测试 | `node --test integrations/inventory/test/sync-worker.test.mjs` |
 
 ---
 

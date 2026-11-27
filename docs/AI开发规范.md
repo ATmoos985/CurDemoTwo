@@ -53,6 +53,7 @@
 - 验证不应污染运行库存；HTTP 试算使用纯计算接口，写入测试使用临时存储。
 - 本地缺少原生引擎时，记录跳过数量及原因；Java 降级通过不等于原生引擎已验证。
 - 运行过程中保持简短进度说明。报告中区分“发现测试数、实际执行数、成功、失败、跳过”。
+- **防遗漏工作流闭环门禁**：合入任何功能变更前必须执行 `node scripts/workflow-closure-audit.mjs --fail`，确保新增或修改的 JDBC/Flyway 测试类已标注 `@Tag("mysql-integration")` 且无硬编码 `jdbc:h2:mem:`、Controller 暴露接口与 `src/main/resources/static/api-v2/openapi.json` 保持同步（禁止新增未登记非 `/api/v2/*` 端点）、新增代码零循环且不突破超千行生产源码基线、新增前端路由均在 `.agents/skills/verify-cutdemotwo/features/*.md` 登记验收地图。
 
 ## 6. 交付
 

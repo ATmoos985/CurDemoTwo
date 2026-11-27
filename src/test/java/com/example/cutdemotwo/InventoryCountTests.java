@@ -11,6 +11,7 @@ import java.nio.file.*;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
+@Tag("mysql-integration")
 class InventoryCountTests {
     @TempDir Path temp;
     FileInventoryStore store;RemnantService service;

@@ -10,21 +10,19 @@ import com.example.cutdemotwo.business.cutting.CuttingWorkflowService;
 import com.example.cutdemotwo.business.cutting.RemnantService;
 import com.example.cutdemotwo.algorithm.nesting.SolverFactory;
 import org.flywaydb.core.Flyway;
-import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.*;
 import javax.sql.DataSource;
 import java.util.*;
 import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 
+@Tag("mysql-integration")
 class JdbcInventoryTests {
     @org.junit.jupiter.api.io.TempDir java.nio.file.Path temp;
     private DataSource dataSource;
     private JdbcInventoryStore store;
     @BeforeEach void database() {
-        JdbcDataSource h2 = new JdbcDataSource();
-        h2.setURL("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1");
-        dataSource = h2;
+        dataSource = OptimizationTestDatabase.create();
         Flyway.configure().dataSource(dataSource).load().migrate();
         store = new JdbcInventoryStore(dataSource);
     }

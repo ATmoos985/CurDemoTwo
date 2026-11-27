@@ -1,3 +1,10 @@
+---
+routes:
+  - inventory
+  - inspection
+  - documents
+---
+
 # 库存台账、验布质检放行、单据过账与企业认证接口
 
 验证工厂库存流转与企业级安全底线：来料采购入库生成待检卷 → 验布打标录入疵点并执行质检放行（`PENDING → PASSED/FAILED`）→ 未放行卷严禁领料出库（前端禁用 + 后端 409）→ 库存总账对账严格平衡（`status="BALANCED"` 且 `issues: []`）→ 开启企业认证（`--auth`）后未登录拦截 401、5 角色 RBAC 权限隔离（含 `/api/v2/workbench/**`）及 Bearer 流式 SSE 推送返回 HTTP 200。

@@ -13,6 +13,7 @@ import com.example.cutdemotwo.persistence.OptimizationJobStore;
 import com.example.cutdemotwo.persistence.OptimizationTestDatabase;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -34,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * 2D/1D 独立算力隔离线程池、细粒度锁与 SSE 监听器生命周期无泄漏专项测试。
  */
+@Tag("mysql-integration")
 @Timeout(25)
 class OptimizationIsolationAndSseTests {
 

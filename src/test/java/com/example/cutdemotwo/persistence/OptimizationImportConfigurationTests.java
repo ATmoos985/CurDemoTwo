@@ -16,6 +16,7 @@ import javax.sql.DataSource;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Runs the actual configuration bean before the application worker is allowed to start. */
+@Tag("mysql-integration")
 class OptimizationImportConfigurationTests {
     @TempDir Path temp;
     @Test void explicitImportCompletesBeforeServiceConstructionAndRestartDoesNotRecompute()throws Exception {

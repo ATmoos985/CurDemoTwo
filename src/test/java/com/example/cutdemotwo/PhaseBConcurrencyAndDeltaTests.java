@@ -9,16 +9,17 @@ import com.example.cutdemotwo.business.model.MotherRollInfo;
 import com.example.cutdemotwo.persistence.FileInventoryStore;
 import com.example.cutdemotwo.persistence.InventoryImport;
 import com.example.cutdemotwo.persistence.JdbcInventoryStore;
+import com.example.cutdemotwo.persistence.OptimizationTestDatabase;
 import org.flywaydb.core.Flyway;
-import org.h2.jdbcx.JdbcDataSource;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.sql.DataSource;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -30,16 +31,16 @@ import static org.junit.jupiter.api.Assertions.*;
  * 阶段 B 专项验收测试：
  * 验证模板域脱离库存全局锁（B1）、读写并行锁（B2）、Delta 定点增量持久化与增量账本（B3）及垂直拆解（B4）。
  */
+@Tag("mysql-integration")
 class PhaseBConcurrencyAndDeltaTests {
 
     @TempDir
     Path temp;
 
-    private static JdbcDataSource newH2Database() {
-        JdbcDataSource h2 = new JdbcDataSource();
-        h2.setURL("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1");
-        Flyway.configure().dataSource(h2).load().migrate();
-        return h2;
+    private static DataSource newDatabase() {
+        DataSource ds = OptimizationTestDatabase.create();
+        Flyway.configure().dataSource(ds).load().migrate();
+        return ds;
     }
 
     private static SolverFactory testSolver() {
@@ -60,7 +61,7 @@ class PhaseBConcurrencyAndDeltaTests {
 
     @Test
     void templateWritesDoNotBumpInventoryRevisionOrConflictWithStockWritesInJdbcMode() throws Exception {
-        JdbcDataSource ds = newH2Database();
+        DataSource ds = newDatabase();
         JdbcInventoryStore storeA = new JdbcInventoryStore(ds);
         JdbcInventoryStore storeB = new JdbcInventoryStore(ds);
         RemnantService invA = new RemnantService(storeA, true);
@@ -123,7 +124,7 @@ class PhaseBConcurrencyAndDeltaTests {
 
     @Test
     void jdbcDemoInitAndImportRespectIndependentTemplates() {
-        JdbcDataSource ds = newH2Database();
+        DataSource ds = newDatabase();
         JdbcInventoryStore store = new JdbcInventoryStore(ds);
         RemnantService inv = new RemnantService(store, false);
         SchedulingStudioService studio = new SchedulingStudioService(inv, testSolver());
@@ -138,7 +139,7 @@ class PhaseBConcurrencyAndDeltaTests {
         assertThrows(IllegalStateException.class, () -> new InventoryImport(store, srcFile.toString()).run(null));
 
         // 空库导入旧 JSON 时完整保留历史模板，且后续库存修改不会抹除该模板
-        JdbcDataSource emptyDs = newH2Database();
+        DataSource emptyDs = newDatabase();
         JdbcInventoryStore emptyStore = new JdbcInventoryStore(emptyDs);
         new InventoryImport(emptyStore, srcFile.toString()).run(null);
         RemnantService importedInv = new RemnantService(emptyStore, false);
@@ -151,7 +152,7 @@ class PhaseBConcurrencyAndDeltaTests {
 
     @Test
     void concurrentReadsRunInParallelAndCrossNodeRefreshDowngradesLockSafely() throws Exception {
-        JdbcDataSource ds = newH2Database();
+        DataSource ds = newDatabase();
         JdbcInventoryStore delegateA = new JdbcInventoryStore(ds);
         JdbcInventoryStore storeB = new JdbcInventoryStore(ds);
 
@@ -228,7 +229,7 @@ class PhaseBConcurrencyAndDeltaTests {
 
     @Test
     void jdbcDeltaCommitAvoidsFullTableScansAndKeepsIncrementalLedgerBalanced() {
-        JdbcDataSource rawDs = newH2Database();
+        DataSource rawDs = newDatabase();
         List<String> capturedSql = java.util.Collections.synchronizedList(new ArrayList<>());
         javax.sql.DataSource spyDs = sqlRecordingDataSource(rawDs, capturedSql);
 

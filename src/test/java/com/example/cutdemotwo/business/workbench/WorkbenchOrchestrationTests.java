@@ -18,9 +18,9 @@ import com.example.cutdemotwo.persistence.FileOptimizationJobStore;
 import com.example.cutdemotwo.persistence.FileWorkbenchDraftStore;
 import com.example.cutdemotwo.persistence.JdbcOptimizationJobStore;
 import com.example.cutdemotwo.persistence.JdbcWorkbenchDraftStore;
-import com.zaxxer.hikari.HikariConfig;
-import com.zaxxer.hikari.HikariDataSource;
+import com.example.cutdemotwo.persistence.OptimizationTestDatabase;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,6 +31,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import javax.sql.DataSource;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -49,8 +50,9 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * 工作台编排试排、同口径双方案对比、结果上下文与持久化待确认草案全链路测试：
  * 覆盖 2D 矩形（含直刀外扩与避疵）/ 2D 异形带孔 / 1D 分切、422 状态与无待排拦截、
- * 同口径比较与不可比原因、草案 SHA-256 持久化/TTL 过期/库存与任务版本漂移探测，以及 File + JDBC H2 双存储兼容性。
+ * 同口径比较与不可比原因、草案 SHA-256 持久化/TTL 过期/库存与任务版本漂移探测，以及 File + JDBC(H2/MySQL) 双存储兼容性。
  */
+@Tag("mysql-integration")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class WorkbenchOrchestrationTests {
     @TempDir
@@ -582,101 +584,95 @@ class WorkbenchOrchestrationTests {
     }
 
     @Test
-    void fileAndJdbcH2StoresPersistDraftsAndBackwardCompatibleOptimizationJobs() throws Exception {
-        HikariConfig cfg = new HikariConfig();
-        cfg.setJdbcUrl("jdbc:h2:mem:wb_orch_" + UUID.randomUUID().toString().replace("-", "") + ";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1");
-        cfg.setUsername("sa");
-        cfg.setPassword("");
+    void fileAndJdbcStoresPersistDraftsAndBackwardCompatibleOptimizationJobs() throws Exception {
+        DataSource ds = OptimizationTestDatabase.create();
+        Flyway.configure().dataSource(ds).load().migrate();
 
-        try (HikariDataSource ds = new HikariDataSource(cfg)) {
-            Flyway.configure().dataSource(ds).load().migrate();
+        // 1. 验证 JDBC(H2/MySQL) + File 双草案存储读写一致
+        WorkbenchSchemeDraft sample = new WorkbenchSchemeDraft(
+                "DFT-STORAGE-01",
+                "DFT-STORAGE-01",
+                WorkbenchSchemeDraft.STATUS_PENDING_CONFIRMATION,
+                "APR-1234567890ABCDEF",
+                "0".repeat(64),
+                "2026-11-26T01:00:00Z",
+                "2026-11-26T01:30:00Z",
+                1800L,
+                true,
+                false,
+                false,
+                List.of(),
+                new WorkbenchSchemeDraft.Target("RES-1", "TASK-1", "ROLL-1", "STOCK_ROLL"),
+                List.of(new WorkbenchSchemeDraft.RiskCheck("RESULT_VALIDATED", true, "已通过校验")),
+                "/app/#/workbench?taskId=TASK-1&resultId=RES-1&draftId=DFT-STORAGE-01",
+                "请人工确认",
+                "双存储测试",
+                1L,
+                5L
+        );
 
-            // 1. 验证 JDBC H2 + File 双草案存储读写一致
-            WorkbenchSchemeDraft sample = new WorkbenchSchemeDraft(
-                    "DFT-STORAGE-01",
-                    "DFT-STORAGE-01",
-                    WorkbenchSchemeDraft.STATUS_PENDING_CONFIRMATION,
-                    "APR-1234567890ABCDEF",
-                    "0".repeat(64),
-                    "2026-11-26T01:00:00Z",
-                    "2026-11-26T01:30:00Z",
-                    1800L,
-                    true,
-                    false,
-                    false,
-                    List.of(),
-                    new WorkbenchSchemeDraft.Target("RES-1", "TASK-1", "ROLL-1", "STOCK_ROLL"),
-                    List.of(new WorkbenchSchemeDraft.RiskCheck("RESULT_VALIDATED", true, "已通过校验")),
-                    "/app/#/workbench?taskId=TASK-1&resultId=RES-1&draftId=DFT-STORAGE-01",
-                    "请人工确认",
-                    "双存储测试",
-                    1L,
-                    5L
+        JdbcWorkbenchDraftStore jdbcDraftStore = new JdbcWorkbenchDraftStore(ds);
+        jdbcDraftStore.save(sample);
+        var loadedJdbc = jdbcDraftStore.find(sample.draftId()).orElseThrow();
+        assertEquals(sample, loadedJdbc);
+        assertEquals(1, jdbcDraftStore.listByTask("TASK-1").size());
+
+        Path fileDraftDir = temp.resolve("unit-drafts-" + UUID.randomUUID());
+        try (var fileDraftStore = new FileWorkbenchDraftStore(fileDraftDir)) {
+            fileDraftStore.save(sample);
+            assertEquals(sample, fileDraftStore.find(sample.draftId()).orElseThrow());
+            assertEquals(1, fileDraftStore.listByTask("TASK-1").size());
+        }
+
+        // 2. 验证 StoredOptimizationJob 带 workbenchSource 与历史 4 字段 JSON 双向兼容（File + JDBC）
+        OptimizationRequest req = new OptimizationRequest(
+                "2.0", "NESTING_2D", "COMPAT-001",
+                new NestingProblem("1", "mm",
+                        new NestingProblem.Material("M1", NestingProblem.Shape.rectangle(1000, 1000), List.of(), false),
+                        List.of(new NestingProblem.Part(1, "P1", NestingProblem.Shape.rectangle(500, 500), 1, false)),
+                        new NestingProblem.Process("GUILLOTINE", "SHEET", "left-top", "horizontal", 0, 200, 300, 0, "MAXIMIZE_PIECE_AREA"),
+                        "auto", 3),
+                true, false
+        );
+        String legacyJobId = UUID.randomUUID().toString();
+        OptimizationJob legacyJob = new OptimizationJob(
+                legacyJobId, "2.0", "COMPAT-001", StoredOptimizationJob.inputHash(req),
+                "SUCCEEDED", "STOPPED", "2026-11-26T00:00:00Z", "2026-11-26T00:00:01Z",
+                "2026-11-26T00:00:02Z", 3, null, null, "ok"
+        );
+        String legacyJson = json.writeValueAsString(Map.of(
+                "idempotencyKey", "legacy-key-001",
+                "input", req,
+                "job", legacyJob
+        ));
+
+        Path jobDir = temp.resolve("compat-jobs-" + UUID.randomUUID());
+        Files.createDirectories(jobDir);
+        Files.writeString(jobDir.resolve(legacyJobId + ".json"), legacyJson);
+        try (var fileJobStore = new FileOptimizationJobStore(jobDir)) {
+            List<StoredOptimizationJob> loaded = fileJobStore.load();
+            assertEquals(1, loaded.size());
+            assertNull(loaded.get(0).workbenchSource(), "旧 4 字段 JSON 应平滑反序列化且 workbenchSource 为 null");
+
+            String sourcedJobId = UUID.randomUUID().toString();
+            OptimizationJob sourcedJob = new OptimizationJob(
+                    sourcedJobId, "2.0", "COMPAT-002", StoredOptimizationJob.inputHash(req),
+                    "QUEUED", "QUEUED", "2026-11-26T00:00:00Z", null, null, 3, null, null, "queued"
             );
-
-            JdbcWorkbenchDraftStore jdbcDraftStore = new JdbcWorkbenchDraftStore(ds);
-            jdbcDraftStore.save(sample);
-            var loadedJdbc = jdbcDraftStore.find(sample.draftId()).orElseThrow();
-            assertEquals(sample, loadedJdbc);
-            assertEquals(1, jdbcDraftStore.listByTask("TASK-1").size());
-
-            Path fileDraftDir = temp.resolve("unit-drafts-" + UUID.randomUUID());
-            try (var fileDraftStore = new FileWorkbenchDraftStore(fileDraftDir)) {
-                fileDraftStore.save(sample);
-                assertEquals(sample, fileDraftStore.find(sample.draftId()).orElseThrow());
-                assertEquals(1, fileDraftStore.listByTask("TASK-1").size());
-            }
-
-            // 2. 验证 StoredOptimizationJob 带 workbenchSource 与历史 4 字段 JSON 双向兼容（File + JDBC H2）
-            OptimizationRequest req = new OptimizationRequest(
-                    "2.0", "NESTING_2D", "COMPAT-001",
-                    new NestingProblem("1", "mm",
-                            new NestingProblem.Material("M1", NestingProblem.Shape.rectangle(1000, 1000), List.of(), false),
-                            List.of(new NestingProblem.Part(1, "P1", NestingProblem.Shape.rectangle(500, 500), 1, false)),
-                            new NestingProblem.Process("GUILLOTINE", "SHEET", "left-top", "horizontal", 0, 200, 300, 0, "MAXIMIZE_PIECE_AREA"),
-                            "auto", 3),
-                    true, false
+            WorkbenchJobSource src = new WorkbenchJobSource(
+                    "TASK-9", "planner", 2L, "STOCK_ROLL", "ROLL-9", 7L,
+                    1000, 0, 1000, 5.0, Map.of(1, 1), "RECT_2D", "ROLL-9", true, 0.0, 5.0
             );
-            String legacyJobId = UUID.randomUUID().toString();
-            OptimizationJob legacyJob = new OptimizationJob(
-                    legacyJobId, "2.0", "COMPAT-001", StoredOptimizationJob.inputHash(req),
-                    "SUCCEEDED", "STOPPED", "2026-11-26T00:00:00Z", "2026-11-26T00:00:01Z",
-                    "2026-11-26T00:00:02Z", 3, null, null, "ok"
-            );
-            String legacyJson = json.writeValueAsString(Map.of(
-                    "idempotencyKey", "legacy-key-001",
-                    "input", req,
-                    "job", legacyJob
-            ));
+            StoredOptimizationJob withSource = new StoredOptimizationJob("sourced-key-001", req, sourcedJob, null, src);
+            fileJobStore.save(withSource);
+            StoredOptimizationJob reloaded = fileJobStore.load().stream()
+                    .filter(d -> sourcedJobId.equals(d.job().id())).findFirst().orElseThrow();
+            assertEquals(src, reloaded.workbenchSource());
 
-            Path jobDir = temp.resolve("compat-jobs-" + UUID.randomUUID());
-            Files.createDirectories(jobDir);
-            Files.writeString(jobDir.resolve(legacyJobId + ".json"), legacyJson);
-            try (var fileJobStore = new FileOptimizationJobStore(jobDir)) {
-                List<StoredOptimizationJob> loaded = fileJobStore.load();
-                assertEquals(1, loaded.size());
-                assertNull(loaded.get(0).workbenchSource(), "旧 4 字段 JSON 应平滑反序列化且 workbenchSource 为 null");
-
-                String sourcedJobId = UUID.randomUUID().toString();
-                OptimizationJob sourcedJob = new OptimizationJob(
-                        sourcedJobId, "2.0", "COMPAT-002", StoredOptimizationJob.inputHash(req),
-                        "QUEUED", "QUEUED", "2026-11-26T00:00:00Z", null, null, 3, null, null, "queued"
-                );
-                WorkbenchJobSource src = new WorkbenchJobSource(
-                        "TASK-9", "planner", 2L, "STOCK_ROLL", "ROLL-9", 7L,
-                        1000, 0, 1000, 5.0, Map.of(1, 1), "RECT_2D", "ROLL-9", true, 0.0, 5.0
-                );
-                StoredOptimizationJob withSource = new StoredOptimizationJob("sourced-key-001", req, sourcedJob, null, src);
-                fileJobStore.save(withSource);
-                StoredOptimizationJob reloaded = fileJobStore.load().stream()
-                        .filter(d -> sourcedJobId.equals(d.job().id())).findFirst().orElseThrow();
-                assertEquals(src, reloaded.workbenchSource());
-
-                JdbcOptimizationJobStore jdbcJobStore = new JdbcOptimizationJobStore(ds);
-                jdbcJobStore.configure(1, 4, 100);
-                jdbcJobStore.submitOrGet(withSource);
-                assertEquals(src, jdbcJobStore.find(sourcedJobId).workbenchSource());
-            }
+            JdbcOptimizationJobStore jdbcJobStore = new JdbcOptimizationJobStore(ds);
+            jdbcJobStore.configure(1, 4, 100);
+            jdbcJobStore.submitOrGet(withSource);
+            assertEquals(src, jdbcJobStore.find(sourcedJobId).workbenchSource());
         }
     }
 }

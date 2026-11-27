@@ -12,6 +12,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 
+@Tag("mysql-integration")
 class ExecutionOrderTests {
     @TempDir Path temp;
     RemnantService inventory;

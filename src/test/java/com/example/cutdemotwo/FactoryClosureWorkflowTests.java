@@ -23,12 +23,14 @@ import com.example.cutdemotwo.persistence.FileInventoryStore;
 import com.example.cutdemotwo.persistence.InventoryConflictException;
 import com.example.cutdemotwo.persistence.InventorySnapshot;
 import com.example.cutdemotwo.persistence.JdbcInventoryStore;
+import com.example.cutdemotwo.persistence.OptimizationTestDatabase;
 import org.flywaydb.core.Flyway;
-import org.h2.jdbcx.JdbcDataSource;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import javax.sql.DataSource;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * 工厂生产闭环核心工作流与 File / Flyway V10 JDBC 持久化全链路测试：
  * 覆盖隔离料头放行、复检处置撤销、采购批量入库、车间领退料、母卷报废、缸号色号防呆、缩水率修复、生产主数据与同缸加急补片。
  */
+@Tag("mysql-integration")
 class FactoryClosureWorkflowTests {
     @TempDir
     Path temp;
@@ -48,11 +51,10 @@ class FactoryClosureWorkflowTests {
         return new SolverFactory(List.of(new CrossCutSolverService(), new JavaGuillotineSolverEngine()));
     }
 
-    private JdbcDataSource createJdbcDatabase() {
-        JdbcDataSource h2 = new JdbcDataSource();
-        h2.setURL("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1");
-        Flyway.configure().dataSource(h2).load().migrate();
-        return h2;
+    private DataSource createJdbcDatabase() {
+        DataSource ds = OptimizationTestDatabase.create();
+        Flyway.configure().dataSource(ds).load().migrate();
+        return ds;
     }
 
     // ==================== 1. 隔离料头质量复验放行（File + JDBC + 不可变校验） ====================
@@ -211,7 +213,7 @@ class FactoryClosureWorkflowTests {
     @Test
     @SuppressWarnings("unchecked")
     void receiptsIssuesAndRollScrapWorkAcrossJdbcV10WithRollbackAndAppendOnlyGuards() {
-        JdbcDataSource ds = createJdbcDatabase();
+        DataSource ds = createJdbcDatabase();
         JdbcInventoryStore jdbcStore = new JdbcInventoryStore(ds);
         RemnantService inv = new RemnantService(jdbcStore, true);
         SchedulingStudioService studio = new SchedulingStudioService(inv, solver());

@@ -46,7 +46,7 @@ jobs:
             -Dcutdemo.test.mysql.url=jdbc:mysql://127.0.0.1:13306/ \
             -Dcutdemo.test.mysql.user=root \
             -Dcutdemo.test.mysql.password=cutdemo_ci_root_pw \
-            -Dtest="JdbcInventoryTests,OptimizationJdbcApiTests,JdbcOptimizationTests,OptimizationArchiveImportTests,OptimizationImportConfigurationTests,ExecutionOrderTests,InventoryLedgerTests,InventoryTransferTests,InventoryCountTests,InventoryOutboxTests,IntegrationDeliveryTests,SchedulingStudioWorkflowTests,SlittingOptimizationTests"
+            -Dgroups=mysql-integration
       - name: Cleanup MySQL 8.4 container
         if: always()
         run: |
@@ -67,6 +67,16 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Verify restricted deployment command
         run: bash src/test/deploy/actions-ssh-command.test.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run workflow closure, architecture & outbox worker gates
+        run: |
+          node --test integrations/inventory/test/sync-worker.test.mjs
+          node --test scripts/arch-coupling-audit.test.mjs
+          node scripts/arch-coupling-audit.mjs --fail-on-cycle
+          node --test scripts/workflow-closure-audit.test.mjs
+          node scripts/workflow-closure-audit.mjs --fail
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Login to GitHub Container Registry

@@ -1,6 +1,7 @@
 package com.example.cutdemotwo;
 
 import com.example.cutdemotwo.persistence.*;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.*;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -14,6 +15,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Exercises the actual Spring bean wiring and migrations, using isolated H2 in MySQL mode. */
+@Tag("mysql-integration")
 @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties={
         "cutdemo.storage=mysql","cutdemo.jobs.storage=mysql","cutdemo.seed-demo-data=false"})
 class OptimizationJdbcApiTests {

@@ -5,8 +5,9 @@ import com.example.cutdemotwo.business.model.DemandTemplate;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
 import com.example.cutdemotwo.business.model.SchedulingScheme;
 import com.example.cutdemotwo.contracts.nesting.NestingProblem;
+import com.example.cutdemotwo.persistence.OptimizationTestDatabase;
 import org.flywaydb.core.Flyway;
-import org.h2.jdbcx.JdbcDataSource;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,6 +27,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@Tag("mysql-integration")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class SchedulingStudioWorkflowTests {
     @TempDir
@@ -397,8 +399,7 @@ class SchedulingStudioWorkflowTests {
     @Test
     @SuppressWarnings("unchecked")
     void jdbcFlywayV9PersistsTemplatesAndSchemesIncludingMultiTaskAllocationsCleanly() {
-        JdbcDataSource h2 = new JdbcDataSource();
-        h2.setURL("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1");
+        var h2 = OptimizationTestDatabase.create();
         Flyway.configure().dataSource(h2).load().migrate();
         var store = new com.example.cutdemotwo.persistence.JdbcInventoryStore(h2);
         var remSvc = new com.example.cutdemotwo.business.cutting.RemnantService(store, true);

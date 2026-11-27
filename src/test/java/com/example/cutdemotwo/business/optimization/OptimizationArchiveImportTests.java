@@ -15,6 +15,7 @@ import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static com.example.cutdemotwo.business.optimization.OptimizationServiceTests.*;
 
+@Tag("mysql-integration")
 class OptimizationArchiveImportTests {
     @TempDir Path temp;
     JdbcOptimizationJobStore target;
