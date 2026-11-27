@@ -67,10 +67,10 @@ final class GlobalPlanningSnapshotSupport {
                 // 异形模式下 trimStart 以排斥区表达，保持合法
             }
 
-            // 读取在库所有母卷、料头与活跃方案（均在同一个 inRead 锁内）
-            List<MotherRollInfo> allRolls = remnantService.getMotherRolls();
-            List<RemnantStock> allRemnants = remnantService.getAllRemnants();
-            List<SchedulingScheme> allSchemes = tx.listSchemes();
+            // 读取在库所有活跃母卷、可用料头与活跃方案（均在同一个 inRead 锁内，避免冷全表扫）
+            List<MotherRollInfo> allRolls = remnantService.getActiveMotherRolls();
+            List<RemnantStock> allRemnants = remnantService.getAvailableRemnants();
+            List<SchedulingScheme> allSchemes = tx.listActiveSchemes();
             long now = tx.operationTime();
             List<ExecutionOrder> allExecutions = tx.listExecutions();
 
@@ -110,7 +110,9 @@ final class GlobalPlanningSnapshotSupport {
                 for (RemnantStock rem : allRemnants) {
                     if (!"AVAILABLE".equalsIgnoreCase(rem.getStatus())) continue;
                     if (lockedRemnants.contains(rem.getId())) continue;
-                    MotherRollInfo sourceRoll = rem.getSourceRollId() != null ? rollMap.get(rem.getSourceRollId()) : null;
+                    MotherRollInfo sourceRoll = rem.getSourceRollId() != null
+                            ? rollMap.computeIfAbsent(rem.getSourceRollId(), id -> tx.findRoll(id).orElse(null))
+                            : null;
                     String remModel = GlobalPlanningModels.firstNonBlank(rem.getMaterialBatch(), sourceRoll != null ? sourceRoll.getRollModel() : null);
                     if (targetModel != null && (remModel == null || !targetModel.equalsIgnoreCase(remModel))) {
                         continue;
@@ -386,7 +388,7 @@ final class GlobalPlanningSnapshotSupport {
     static Map<String, Integer> computePlannedQuantities(CuttingStatePort.ReadView tx, String taskId) {
         Map<String, Integer> counts = new LinkedHashMap<>();
         Set<String> coveredPlans = new HashSet<>();
-        for (SchedulingScheme s : tx.listSchemes()) {
+        for (SchedulingScheme s : tx.listActiveSchemes()) {
             if (!s.occupiesDemand() || !s.involvesTask(taskId)) continue;
             coveredPlans.addAll(s.linkedPlanIds());
             Map<String, Integer> reported = new HashMap<>();

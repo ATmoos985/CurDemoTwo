@@ -2,7 +2,7 @@
 /**
  * E2E-M3 路线 B（F10 认证/用户管理 + F11 RBAC/Agent/审计 + F12 热冷数据分离与 -Xmx256m）真机端到端黑盒验收脚本。
  *
- * 覆盖全部 34 项真实黑盒校验（skipped = 0）：
+ * 覆盖全部 35 项真实黑盒校验（skipped = 0）：
  *  - F10（5 正 + 5 负）：#/login 重定向与开放重定向防御、#/profile 信息与自主改密、#/users 新建/编辑/重置/启停、
  *    401 统一防枚举、改密校验拦截、登出/改密/禁用后旧 Token 立即 401、最后 ADMIN 防禁用 409、非 ADMIN 403 双层拦截；
  *  - F11（5 正 + 5 负）：5 角色各自职责写放行、#/users 签发受限 Agent 凭证（[data-testid="agent-once-token"]）、
@@ -264,7 +264,7 @@ async function findFreeLoopbackPort(forbiddenSet) {
   throw new Error('未能探测到可用的非冲突回环端口');
 }
 
-async function startIsolatedJava({ jarPath, port, statePath, logFile, jvmOpts = [] }) {
+async function startIsolatedJava({ jarPath, port, statePath, logFile, jvmOpts = [], extraArgs = [] }) {
   const javaArgs = [
     ...jvmOpts,
     '-jar',
@@ -277,7 +277,8 @@ async function startIsolatedJava({ jarPath, port, statePath, logFile, jvmOpts = 
     `--cutdemo.workbench.drafts.path=${statePath}.drafts`,
     '--cutdemo.seed-demo-data=true',
     '--cutdemo.auth.enabled=true',
-    '--cutdemo.auth.secret=verify-f12-isolated-secret-32bytes-min'
+    '--cutdemo.auth.secret=verify-f12-isolated-secret-32bytes-min',
+    ...extraArgs
   ];
   const outFd = fs.openSync(logFile, 'w');
   const startMs = Date.now();
@@ -1140,9 +1141,23 @@ try {
 
   // ==================== Tier 2: F11 (5 项) ====================
   await runCheck('T2-F11-01', 'Tier2', 'F11', async () => {
-    const tampered =
-      plannerToken.slice(0, -1) + (plannerToken.slice(-1) === 'a' ? 'b' : 'a');
-    for (const badToken of [null, 'not.a.jwt', tampered]) {
+    const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const sig = plannerToken.split('.')[2];
+    const midPos = Math.floor(sig.length / 2);
+    const sigStart = plannerToken.length - sig.length;
+    const midTampered =
+      plannerToken.slice(0, sigStart + midPos) +
+      (sig[midPos] === 'A' ? 'B' : 'A') +
+      plannerToken.slice(sigStart + midPos + 1);
+    const lastIdx = B64URL.indexOf(sig.slice(-1));
+    assert.ok(lastIdx >= 0, '签名末位应属于 Base64URL 字符集');
+    const groupBase = lastIdx & ~3;
+    const paddingVariants = [0, 1, 2, 3]
+      .map((offset) => groupBase + offset)
+      .filter((i) => i !== lastIdx)
+      .map((i) => plannerToken.slice(0, -1) + B64URL[i]);
+
+    for (const badToken of [null, 'not.a.jwt', midTampered, ...paddingVariants]) {
       const r1 = await apiJson('/api/v2/rolls', {}, badToken);
       const r2 = await apiJson('/api/v2/demand-pool', {}, badToken);
       const r3 = await apiJson(`/api/v2/optimization-jobs/${encodeURIComponent(sseJobId)}/events`, {}, badToken);
@@ -1150,7 +1165,7 @@ try {
       assert.equal(r2.status, 401, `badToken=${badToken} GET /api/v2/demand-pool 应 401`);
       assert.equal(r3.status, 401, `badToken=${badToken} GET SSE 应 401`);
     }
-    return { unauthenticatedAndTampered401: true };
+    return { unauthenticatedAndTampered401: true, paddingVariantsChecked: paddingVariants.length };
   });
 
   await runCheck('T2-F11-02', 'Tier2', 'F11', async () => {
@@ -1280,6 +1295,154 @@ try {
     assert.ok(agentDenied && agentDenied.requestPath, '审计日志必须记录 Agent 越权路径与 403');
     assert.ok(userDenied && userDenied.requestPath, '审计日志必须记录普通角色越权路径与 403');
     return { deniedTotal: deniedPage.data.total, agentDeniedPath: agentDenied.requestPath };
+  });
+
+  await runCheck('T2-F11-06', 'Tier2', 'F11', async () => {
+    // 1. 当前 auth.enabled=true 默认未开 mesToken 实例：匿名请求 /api/v2/mes/* 全部返回 401
+    const mesOrderPayload = {
+      mesWorkOrderNo: `MES-E2E-WO-${tagUpper}`,
+      taskName: `MES鉴权回归-${tagUpper}`,
+      materialModel: modelRbac,
+      dimension: 'RECT_2D',
+      bedLengthMm: 2000,
+      demands: [{ id: 1, name: '面板', width: 400, length: 500, quantity: 2 }]
+    };
+    for (const [m, p, b] of [
+      ['POST', '/api/v2/mes/orders', mesOrderPayload],
+      ['POST', '/api/v2/mes/execution-feedback', { schemeId: schemeRbacId, mesReceiptNo: 'REC-ANON' }],
+      ['POST', `/api/v2/mes/schemes/${encodeURIComponent(schemeRbacId)}/dispatch`, { mesWorkOrderNo: 'ANON' }],
+      ['GET', `/api/v2/mes/dispatch-packages/${encodeURIComponent(schemeRbacId)}`, null]
+    ]) {
+      const r = await apiJson(p, { method: m, ...(b ? { body: JSON.stringify(b) } : {}) });
+      assert.equal(r.status, 401, `匿名请求 ${m} ${p} 必须返回 401，实际: ${r.status}`);
+    }
+
+    // 2. 仅 DEMAND_READ 的 Agent 调用 dispatch / dispatch-packages 必须返回 403；WAREHOUSE 调用 dispatch 返回 403
+    const mesAgentIssue = await apiJson(
+      '/api/v2/agents',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          name: `mes-demand-only-${tag}`,
+          scopes: ['DEMAND_READ'],
+          description: '验证 MES 403 隔离'
+        })
+      },
+      adminToken
+    );
+    assert.equal(mesAgentIssue.status, 201);
+    const mesAgentId = mesAgentIssue.data.agent.agentId;
+    const mesAgentTok = mesAgentIssue.data.token;
+    try {
+      const agDispatch = await apiJson(
+        `/api/v2/mes/schemes/${encodeURIComponent(schemeRbacId)}/dispatch`,
+        { method: 'POST', body: JSON.stringify({ mesWorkOrderNo: 'AG-FAIL' }) },
+        mesAgentTok
+      );
+      assert.equal(agDispatch.status, 403, `DEMAND_READ Agent 调 dispatch 必须返回 403，实际: ${agDispatch.status}`);
+      const agPkg = await apiJson(
+        `/api/v2/mes/dispatch-packages/${encodeURIComponent(schemeRbacId)}`,
+        {},
+        mesAgentTok
+      );
+      assert.equal(agPkg.status, 403, `DEMAND_READ Agent 调 dispatch-packages 必须返回 403，实际: ${agPkg.status}`);
+    } finally {
+      await apiJson(`/api/v2/agents/${encodeURIComponent(mesAgentId)}/revoke`, { method: 'POST', body: '{}' }, adminToken);
+    }
+
+    const whDispatch = await apiJson(
+      `/api/v2/mes/schemes/${encodeURIComponent(schemeRbacId)}/dispatch`,
+      { method: 'POST', body: JSON.stringify({ mesWorkOrderNo: 'WH-FAIL' }) },
+      warehouseToken
+    );
+    assert.equal(whDispatch.status, 403, `WAREHOUSE 调 dispatch 必须返回 403，实际: ${whDispatch.status}`);
+
+    // 3. 隔离双认证实例（cutdemo.auth.enabled=true + cutdemo.mes.auth-required=true + cutdemo.mes.token）
+    const mesPort = await findFreeLoopbackPort(new Set([8080, 18094, 18095, 18096, Number(new URL(baseUrl).port)]));
+    const mesTmpDir = path.join(os.tmpdir(), 'cutdemo-verify', `mes-dual-${tag}`);
+    fs.mkdirSync(mesTmpDir, { recursive: true });
+    const mesTokenSecret = 'e2e-mes-secret-2026';
+    let mesPid = null;
+    try {
+      const mesProc = await startIsolatedJava({
+        jarPath,
+        port: mesPort,
+        statePath: path.join(mesTmpDir, 'cutdemo-state.json'),
+        logFile: path.join(mesTmpDir, 'mes-dual.log'),
+        jvmOpts: ['-Xms64m', '-Xmx256m'],
+        extraArgs: ['--cutdemo.mes.auth-required=true', `--cutdemo.mes.token=${mesTokenSecret}`]
+      });
+      mesPid = mesProc.pid;
+      const mesBase = mesProc.baseUrl;
+
+      const badTokRes = await apiJsonOn(
+        mesBase,
+        '/api/v2/mes/orders',
+        { method: 'POST', body: JSON.stringify(mesOrderPayload) },
+        'wrong-mes-token'
+      );
+      assert.equal(badTokRes.status, 401, `错误 mesToken 必须返回 401，实际: ${badTokRes.status}`);
+
+      const okTokRes = await apiJsonOn(
+        mesBase,
+        '/api/v2/mes/orders',
+        { method: 'POST', body: JSON.stringify(mesOrderPayload) },
+        mesTokenSecret
+      );
+      assert.equal(okTokRes.status, 200, `正确 mesToken 应返回 200: ${okTokRes.raw}`);
+      const dualTaskId = okTokRes.data.id;
+
+      const dualPlannerTok = (await loginAs(mesBase, 'planner', 'planner123')).token;
+      const dualConfirm = await apiJsonOn(
+        mesBase,
+        '/api/v2/schemes/confirm',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            idempotencyKey: `IDEM-MES-DUAL-${tagUpper}`,
+            title: '双认证派工方案',
+            dimension: 'RECT_2D',
+            strategyId: 'SHORTEN',
+            strategyName: '测试',
+            taskId: dualTaskId,
+            materialMode: 'VIRTUAL_ROLL',
+            materialModel: modelRbac,
+            widthMm: 1500,
+            canvasLengthMm: 1000,
+            occupiedLengthMm: 520,
+            utilizationPct: 40,
+            pieceAreaM2: 0.4,
+            placedCount: 2,
+            requestedCount: 2,
+            complete: true,
+            layout2D: {
+              placements: [
+                { id: 1, demandId: 1, name: '面板', x: 0, y: 0, w: 400, l: 500, rotationDegrees: 0 },
+                { id: 2, demandId: 1, name: '面板', x: 410, y: 0, w: 400, l: 500, rotationDegrees: 0 }
+              ],
+              remnants: [],
+              cuts: []
+            }
+          })
+        },
+        dualPlannerTok
+      );
+      assert.equal(dualConfirm.status, 200, `双认证确认方案失败: ${dualConfirm.raw}`);
+      const dualSchemeId = dualConfirm.data.scheme.id;
+
+      const plannerDispatch = await apiJsonOn(
+        mesBase,
+        `/api/v2/mes/schemes/${encodeURIComponent(dualSchemeId)}/dispatch`,
+        { method: 'POST', body: JSON.stringify({ mesWorkOrderNo: `DUAL-WO-${tagUpper}` }) },
+        dualPlannerTok
+      );
+      assert.equal(plannerDispatch.status, 200, `双认证下已登录 PLANNER 必须可成功派发 MES: ${plannerDispatch.raw}`);
+      assert.equal(plannerDispatch.data.state, 'DISPATCHED_MES');
+      return { anonBlocked401: true, agentBlocked403: true, dualAuthPlanner200: true, mesToken200: true };
+    } finally {
+      if (mesPid) await stopIsolatedJava(mesPid);
+      if (fs.existsSync(mesTmpDir)) fs.rmSync(mesTmpDir, { recursive: true, force: true });
+    }
   });
 
   // ==================== F12 独立 -Xmx256m 热冷分离隔离验证（10 项 + T3-F12×F11-01） ====================
@@ -2067,7 +2230,7 @@ if (resultFile) {
 
 console.log(JSON.stringify(summary, null, 2));
 
-if (failedError || failedCount > 0 || checks.length !== 34) {
+if (failedError || failedCount > 0 || checks.length !== 35) {
   if (failedError) {
     console.error(failedError);
   }

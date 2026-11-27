@@ -136,6 +136,106 @@ class SchedulingStudioWorkflowTests {
 
     @Test
     @SuppressWarnings("unchecked")
+    void demandTemplatePreservesAndValidatesHolesRoundTripWithLegacyCompatibility() throws Exception {
+        // 1. 含合法 CCW 外环 + CW 内孔的模板通过 HTTP API 持久化与查询往返保留 holes
+        List<List<Double>> outer = List.of(
+                List.of(0.0, 0.0), List.of(400.0, 0.0), List.of(400.0, 300.0), List.of(0.0, 300.0)
+        );
+        List<List<List<Double>>> holes = List.of(List.of(
+                List.of(60.0, 60.0), List.of(60.0, 140.0), List.of(140.0, 140.0), List.of(140.0, 60.0)
+        ));
+        DemandTemplate withHole = new DemandTemplate(
+                "TPL-HOLE-01",
+                "HOLE-01",
+                "带内孔纸样模板",
+                "DXF_GARMENT",
+                "CONTOUR_2D",
+                "含 1 个内孔",
+                1650,
+                2000,
+                "DXF-HOLE",
+                List.of("M"),
+                Map.of("M", 1),
+                true,
+                List.of(new DemandTemplate.PieceSpec(
+                        "带孔前片", "面布", 2, true, "STRICT_0",
+                        Map.of("M", new DemandTemplate.SizeGeometry(400.0, 300.0, outer, holes))
+                )),
+                null
+        );
+        DemandTemplate saved = post("/api/v2/demand-templates", withHole, DemandTemplate.class);
+        assertEquals("TPL-HOLE-01", saved.id());
+        DemandTemplate.SizeGeometry savedGeom = saved.pieces().get(0).sizes().get("M");
+        assertNotNull(savedGeom.holes());
+        assertEquals(1, savedGeom.holes().size());
+        assertEquals(4, savedGeom.holes().get(0).size());
+
+        List<Map<String, Object>> listed = get("/api/v2/demand-templates", List.class);
+        Map<String, Object> fetched = listed.stream()
+                .map(x -> (Map<String, Object>) x)
+                .filter(x -> "TPL-HOLE-01".equals(x.get("id")))
+                .findFirst()
+                .orElseThrow();
+        List<Map<String, Object>> fetchedPieces = (List<Map<String, Object>>) fetched.get("pieces");
+        Map<String, Object> fetchedSizes = (Map<String, Object>) fetchedPieces.get(0).get("sizes");
+        Map<String, Object> fetchedM = (Map<String, Object>) fetchedSizes.get("M");
+        assertEquals(1, ((List<?>) fetchedM.get("holes")).size());
+
+        // 2. 穿刺外轮廓的非法 holes 在保存模板阶段被明确拒绝 (400)
+        DemandTemplate piercingHole = new DemandTemplate(
+                "TPL-HOLE-BAD",
+                "HOLE-BAD",
+                "穿刺非法模板",
+                "DXF_GARMENT",
+                "CONTOUR_2D",
+                "非法穿刺孔",
+                1650,
+                2000,
+                "DXF-HOLE",
+                List.of("M"),
+                Map.of("M", 1),
+                true,
+                List.of(new DemandTemplate.PieceSpec(
+                        "穿刺前片", "面布", 1, false, "STRICT_0",
+                        Map.of("M", new DemandTemplate.SizeGeometry(
+                                400.0, 300.0, outer,
+                                List.of(List.of(
+                                        List.of(350.0, 60.0), List.of(350.0, 140.0),
+                                        List.of(450.0, 140.0), List.of(450.0, 60.0)
+                                ))
+                        ))
+                )),
+                null
+        );
+        HttpResponse<String> badRes = send("POST", "/api/v2/demand-templates", piercingHole);
+        assertEquals(400, badRes.statusCode(), badRes.body());
+
+        // 3. JDBC Flyway V9 持久化往返保留 holes + 老无孔模板 JSON 反序列化兼容
+        var h2 = OptimizationTestDatabase.create();
+        Flyway.configure().dataSource(h2).load().migrate();
+        var store = new com.example.cutdemotwo.persistence.JdbcInventoryStore(h2);
+        var svc = new SchedulingStudioService(new com.example.cutdemotwo.business.cutting.RemnantService(store, true), null);
+        svc.saveTemplate(withHole);
+        var reopenedSvc = new SchedulingStudioService(
+                new com.example.cutdemotwo.business.cutting.RemnantService(new com.example.cutdemotwo.persistence.JdbcInventoryStore(h2), false),
+                null
+        );
+        DemandTemplate jdbcRestored = reopenedSvc.listTemplates().stream()
+                .filter(t -> "TPL-HOLE-01".equals(t.id()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(1, jdbcRestored.pieces().get(0).sizes().get("M").holes().size());
+
+        String legacyJson = "{\"w\":500.0,\"h\":400.0,\"v\":[[0.0,0.0],[500.0,0.0],[500.0,400.0],[0.0,400.0]]}";
+        DemandTemplate.SizeGeometry legacy = json.readValue(legacyJson, DemandTemplate.SizeGeometry.class);
+        assertNull(legacy.holes());
+        assertFalse(json.writeValueAsString(legacy).contains("\"holes\""));
+
+        send("DELETE", "/api/v2/demand-templates/TPL-HOLE-01", null);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void virtualMotherRollSchemeAutoCreatesPendingRollRequiresInspectionThenBindsCompletesAndReverses() throws Exception {
         // 1. 创建异形 2D 需求族（4 件，显式允许 180° 掉头）
         NestingProblem.Shape poly = new NestingProblem.Shape("POLYGON", 600, 800, List.of(

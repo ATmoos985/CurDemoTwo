@@ -37,7 +37,10 @@ export interface ClusterTemplatePiece {
   quantityPerUnit: number;
   pairMirror?: boolean;
   grainRule?: 'STRICT_0' | 'HALF_TURN_180' | 'FREE_90';
-  sizes: Record<string, { w: number; h: number; v?: [number, number][] }>;
+  sizes: Record<
+    string,
+    { w: number; h: number; v?: [number, number][]; holes?: [number, number][][] }
+  >;
 }
 
 export interface DemandCluster {

@@ -3,6 +3,14 @@
  * 对齐后端 PolygonGeometry 契约：3-128 顶点/环、最多 64 孔、0.1 mm 分辨率、外环 CCW / 内孔 CW、左上角归零。
  */
 
+export const DEFAULT_HOLE_LAYER_KEYWORDS = Object.freeze([
+    'HOLE', 'INNER', 'CUTOUT', 'DRILL', '内孔', '开孔', '孔', '窗口', '11'
+]);
+export const DEFAULT_OUTER_LAYER_KEYWORDS = Object.freeze([
+    'OUTER', 'CUT', 'PROFILE', 'BOUNDARY', '外框', '裁切', '1'
+]);
+const WEAK_OUTER_LAYER_KEYWORDS = new Set(['CUT', '裁切', 'PROFILE']);
+
 export function quantize01(value, fallback = 0) {
     const n = Number(value);
     if (!Number.isFinite(n)) return fallback;
@@ -519,14 +527,141 @@ export function cleanPolygonVertices(points, eps = 1e-6) {
     return pts;
 }
 
-function matchesLayerKeywords(layerName, keywords) {
-    if (!layerName || !Array.isArray(keywords) || keywords.length === 0) return false;
+function escapeRegExp(text) {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function tokenizeAsciiLayer(upper) {
+    const rawTokens = upper.split(/[^A-Z0-9]+/).filter(Boolean);
+    const alphaNumTokens = [];
+    for (const tok of rawTokens) {
+        const parts = tok.match(/[A-Z]+|\d+/g);
+        if (parts) {
+            for (const part of parts) alphaNumTokens.push(part);
+        }
+    }
+    return {
+        rawTokenSet: new Set(rawTokens),
+        alphaNumTokenSet: new Set(alphaNumTokens)
+    };
+}
+
+function findMatchedLayerKeywords(layerName, keywords) {
+    if (!layerName || !Array.isArray(keywords) || keywords.length === 0) return [];
     const upper = String(layerName).trim().toUpperCase();
-    return keywords.some(kw => {
-        const k = String(kw).trim().toUpperCase();
-        if (!k) return false;
-        return upper === k || upper.includes(k);
-    });
+    if (!upper) return [];
+    const { rawTokenSet, alphaNumTokenSet } = tokenizeAsciiLayer(upper);
+    const matches = [];
+
+    for (const kw of keywords) {
+        const k = String(kw ?? '').trim().toUpperCase();
+        if (!k) continue;
+
+        if (/^\d+$/.test(k)) {
+            // 纯数字图层关键词（如 AAMA '1'、'11'）仅允许整串精确匹配，禁止命中 '11' / 'HOLE_1' / 'DRILL_1'
+            if (upper === k) {
+                matches.push({ keyword: k, exact: true, length: k.length });
+            }
+            continue;
+        }
+
+        if (/[^\x00-\x7F]/.test(k)) {
+            // 中文/非 ASCII 关键词保留子串匹配
+            if (upper === k || upper.includes(k)) {
+                matches.push({ keyword: k, exact: upper === k, length: k.length });
+            }
+            continue;
+        }
+
+        if (/^[A-Z]+$/.test(k)) {
+            // 纯 ASCII 字母词：仅允许整串匹配或分隔符/字母数字边界独立词匹配（禁止 'CUTOUT' 命中 'CUT'）
+            if (upper === k || rawTokenSet.has(k) || alphaNumTokenSet.has(k)) {
+                matches.push({ keyword: k, exact: upper === k, length: k.length });
+            }
+            continue;
+        }
+
+        // 含分隔符或字母数字混合的自定义 ASCII 关键词：整串或独立词边界匹配
+        if (upper === k || new RegExp(`(?<![A-Z0-9])${escapeRegExp(k)}(?![A-Z0-9])`).test(upper)) {
+            matches.push({ keyword: k, exact: upper === k, length: k.length });
+        }
+    }
+    return matches;
+}
+
+export function matchesLayerKeywords(layerName, keywords) {
+    return findMatchedLayerKeywords(layerName, keywords).length > 0;
+}
+
+export function classifyLayerRole(
+    layerName,
+    holeLayerKeywords = DEFAULT_HOLE_LAYER_KEYWORDS,
+    outerLayerKeywords = DEFAULT_OUTER_LAYER_KEYWORDS
+) {
+    const holeMatches = findMatchedLayerKeywords(layerName, holeLayerKeywords);
+    const outerMatches = findMatchedLayerKeywords(layerName, outerLayerKeywords);
+    const hasHole = holeMatches.length > 0;
+    const hasOuter = outerMatches.length > 0;
+    if (!hasHole || !hasOuter) {
+        return { isHoleLayer: hasHole, isOuterLayer: hasOuter };
+    }
+
+    // 显式优先级仲裁：整串精确匹配优先；通用弱外框词（如 CUT/裁切/PROFILE）不压过具体内孔词
+    const holeExact = holeMatches.some(m => m.exact);
+    const outerExact = outerMatches.some(m => m.exact);
+    if (holeExact !== outerExact) {
+        return { isHoleLayer: holeExact, isOuterLayer: outerExact };
+    }
+
+    const outerOnlyWeak = outerMatches.every(m => WEAK_OUTER_LAYER_KEYWORDS.has(m.keyword));
+    if (outerOnlyWeak) {
+        return { isHoleLayer: true, isOuterLayer: false };
+    }
+
+    const maxHoleLen = Math.max(...holeMatches.map(m => m.length));
+    const maxOuterLen = Math.max(...outerMatches.map(m => m.length));
+    if (maxHoleLen > maxOuterLen) {
+        return { isHoleLayer: true, isOuterLayer: false };
+    }
+    return { isHoleLayer: false, isOuterLayer: true };
+}
+
+function boxesOverlap(a, b, tol = 1e-4) {
+    return !(
+        a.maxX < b.minX - tol ||
+        b.maxX < a.minX - tol ||
+        a.maxY < b.minY - tol ||
+        b.maxY < a.minY - tol
+    );
+}
+
+/** 判定内孔环是否与外轮廓发生穿刺/越出交叠（边交叉、贴边或存在部分点/中点落在外轮廓内） */
+function ringPiercesOuter(holeRing, outerRing, holeBbox, outerBbox, minEdgeDist = 1e-4, holeProbe = null) {
+    if (!boxesOverlap(holeBbox, outerBbox, minEdgeDist)) return false;
+    if (isRingStrictlyInsideRing(holeRing, outerRing, minEdgeDist, holeProbe)) return false;
+    const minDist2 = minEdgeDist * minEdgeDist;
+    for (let i = 0; i < holeRing.length; i++) {
+        const a = holeRing[i];
+        const b = holeRing[(i + 1) % holeRing.length];
+        for (let j = 0; j < outerRing.length; j++) {
+            const c = outerRing[j];
+            const d = outerRing[(j + 1) % outerRing.length];
+            if (segmentsCrossOrTouch(a, b, c, d, minDist2)) {
+                return true;
+            }
+        }
+    }
+    if (holeProbe && pointStrictlyInsideRing(holeProbe, outerRing, minEdgeDist)) {
+        return true;
+    }
+    for (let i = 0; i < holeRing.length; i++) {
+        const a = holeRing[i];
+        const b = holeRing[(i + 1) % holeRing.length];
+        if (pointStrictlyInsideRing(a, outerRing, minEdgeDist)) return true;
+        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        if (pointStrictlyInsideRing(mid, outerRing, minEdgeDist)) return true;
+    }
+    return false;
 }
 
 /**
@@ -537,8 +672,8 @@ function matchesLayerKeywords(layerName, keywords) {
  */
 export function buildContourShapesWithHoles(rawRings, options = {}) {
     const maxVerticesPerRing = Math.max(3, Math.min(128, Number(options.maxVerticesPerRing) || 128));
-    const holeLayerKeywords = options.holeLayerKeywords || ['HOLE', 'INNER', 'CUTOUT', 'DRILL', '内孔', '开孔', '孔', '窗口', '11'];
-    const outerLayerKeywords = options.outerLayerKeywords || ['OUTER', 'CUT', 'PROFILE', 'BOUNDARY', '外框', '裁切', '1'];
+    const holeLayerKeywords = options.holeLayerKeywords || DEFAULT_HOLE_LAYER_KEYWORDS;
+    const outerLayerKeywords = options.outerLayerKeywords || DEFAULT_OUTER_LAYER_KEYWORDS;
     const warnings = [];
 
     const validRings = [];
@@ -548,14 +683,15 @@ export function buildContourShapesWithHoles(rawRings, options = {}) {
         const area = ringArea(cleaned);
         if (area < 0.05) continue;
         const layer = item.layer || '0';
+        const { isHoleLayer, isOuterLayer } = classifyLayerRole(layer, holeLayerKeywords, outerLayerKeywords);
         validRings.push({
             layer,
             vertices: cleaned,
             area,
             bbox: getBoundingBox(cleaned),
             probe: findInteriorPoint(cleaned),
-            isHoleLayer: matchesLayerKeywords(layer, holeLayerKeywords),
-            isOuterLayer: matchesLayerKeywords(layer, outerLayerKeywords),
+            isHoleLayer,
+            isOuterLayer,
             parentIndex: -1,
             depth: 0
         });
@@ -587,12 +723,38 @@ export function buildContourShapesWithHoles(rawRings, options = {}) {
         }
     }
 
+    for (let i = 0; i < validRings.length; i++) {
+        const ring = validRings[i];
+        if (ring.piercesOuter) continue;
+        if (!ring.isHoleLayer || ring.isOuterLayer) continue;
+        for (let k = 0; k < validRings.length; k++) {
+            if (k === i) continue;
+            const cand = validRings[k];
+            if (cand.isHoleLayer && !cand.isOuterLayer) continue;
+            if (!cand.isOuterLayer && cand.parentIndex >= 0 && cand.depth % 2 === 1) continue;
+            // 若 cand 严格位于 ring 内部（如外层大内孔 H1 内嵌的合法岛屿 B），属合法岛中岛结构而非穿刺
+            if (
+                cand.area < ring.area &&
+                isRingStrictlyInsideRing(cand.vertices, ring.vertices, 1e-4, cand.probe)
+            ) {
+                continue;
+            }
+            if (ringPiercesOuter(ring.vertices, cand.vertices, ring.bbox, cand.bbox, 1e-4, ring.probe)) {
+                ring.piercesOuter = true;
+                break;
+            }
+        }
+    }
+
     const shapesMap = new Map();
     const role = new Array(validRings.length).fill('outer');
 
     for (let i = 0; i < validRings.length; i++) {
         const ring = validRings[i];
-        if (ring.parentIndex >= 0) {
+        if (ring.piercesOuter) {
+            role[i] = 'ignored';
+            warnings.push(`内孔图层 "${ring.layer}" 轮廓穿刺或越出外轮廓边界，已跳过`);
+        } else if (ring.parentIndex >= 0) {
             if (ring.isHoleLayer && !ring.isOuterLayer) {
                 role[i] = 'hole';
             } else if (!ring.isOuterLayer && ring.depth % 2 === 1) {
@@ -600,9 +762,6 @@ export function buildContourShapesWithHoles(rawRings, options = {}) {
             } else {
                 role[i] = 'outer';
             }
-        } else if (ring.piercesOuter) {
-            role[i] = 'ignored';
-            warnings.push(`内孔图层 "${ring.layer}" 轮廓穿刺或越出外轮廓边界，已跳过`);
         } else if (ring.isHoleLayer && !ring.isOuterLayer) {
             warnings.push(`内孔图层 "${ring.layer}" 轮廓未找到包含它的外轮廓，已按独立外轮廓处理`);
         }

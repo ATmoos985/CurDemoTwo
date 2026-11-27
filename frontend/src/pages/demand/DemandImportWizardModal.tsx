@@ -36,7 +36,7 @@ export const DemandImportWizardModal: React.FC<DemandImportWizardModalProps> = (
   const [defaultUnit, setDefaultUnit] = useState<'mm' | 'cm' | 'm' | 'inch' | 'ft'>('mm');
   const [delimiter, setDelimiter] = useState<'AUTO' | ',' | ';' | '\t'>('AUTO');
   const [productTypeOverride, setProductTypeOverride] = useState<'AUTO' | 'RECT_2D' | 'SLITTING_1D'>('AUTO');
-  const [bomRootQty, setBomRootQty] = useState<number>(1);
+  const [bomRootQty, setBomRootQty] = useState<string>('1');
   const [bomRootCode, setBomRootCode] = useState<string>('');
   const [columnOverrides, setColumnOverrides] = useState<Record<string, string>>({});
   const [parseError, setParseError] = useState('');
@@ -92,7 +92,7 @@ export const DemandImportWizardModal: React.FC<DemandImportWizardModalProps> = (
       const options: Record<string, any> = {
         defaultUnit,
         productTypeOverride,
-        bomRootQty: Math.max(1, Number(bomRootQty) || 1),
+        ...(bomRootQty.trim() !== '' ? { bomRootQty: bomRootQty.trim() } : {}),
         ...(bomRootCode.trim() ? { bomRootCode: bomRootCode.trim() } : {}),
         ...(Object.keys(cleanOverrides).length ? { columnOverrides: cleanOverrides } : {})
       };
@@ -259,11 +259,10 @@ export const DemandImportWizardModal: React.FC<DemandImportWizardModalProps> = (
                 <label>BOM 根套件数量</label>
                 <input
                   type="number"
-                  min={1}
                   className="field num"
                   data-testid="demand-import-bom-root-qty"
                   value={bomRootQty}
-                  onChange={(e) => setBomRootQty(Math.max(1, Number(e.target.value) || 1))}
+                  onChange={(e) => setBomRootQty(e.target.value)}
                 />
               </div>
               <div className="field-group">

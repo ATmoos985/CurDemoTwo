@@ -24,15 +24,12 @@ export function ringArea(points) {
 
 /** 构造带内孔的多边形形状（兼容 NestingProblem.Shape 协议）。 */
 export function polygonWithHoles(vertices, holes = []) {
-    return { ...polygon(vertices), holes };
+    return polygon(vertices, holes);
 }
 
 /** 计算形状净面积（外环面积扣除所有内孔面积）。 */
 export function netShapeArea(value) {
-    if (!value) return 0;
-    const outer = value.type === 'RECTANGLE' ? value.width * value.height : shapeArea(value);
-    const holeArea = Array.isArray(value.holes) ? value.holes.reduce((sum, hole) => sum + ringArea(hole), 0) : 0;
-    return Math.max(0, outer - holeArea);
+    return shapeArea(value);
 }
 
 /** Small 32-bit generator: the same seed gives the same sequence on every platform. */

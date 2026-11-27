@@ -275,7 +275,7 @@ final class StudioSchemeConfirmSupport {
             if (tx.isMaterialReservedByExecution("remnant", rem.getId(), null)) {
                 throw new InventoryConflictException("料头 " + rem.getId() + " 已被执行单预约或正在加工，禁止重复绑定");
             }
-            if (tx.listSchemes().stream().anyMatch(s -> s.occupiesRemnant(rem.getId()))) {
+            if (tx.listActiveSchemes().stream().anyMatch(s -> s.occupiesRemnant(rem.getId()))) {
                 throw new InventoryConflictException("料头 " + rem.getId() + " 已被其他活跃排程方案锁定，禁止重复绑定");
             }
             StudioMaterializer.MaterializationResult mat = materializer.materialize2DPlanOnMaterial(

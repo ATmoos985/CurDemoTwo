@@ -28,7 +28,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -191,6 +193,10 @@ public class RemnantService implements CuttingStatePort {
 
     public List<MotherRollInfo> getMotherRolls() { return rollAndRemnantService.getMotherRolls(); }
 
+    public List<MotherRollInfo> getActiveMotherRolls() { return rollAndRemnantService.getActiveMotherRolls(); }
+
+    public List<MotherRollInfo> getMotherRollsPage(int limit, int offset) { return rollAndRemnantService.getMotherRollsPage(limit, offset); }
+
     public MotherRollInfo getMotherRoll(String rollId) { return rollAndRemnantService.getMotherRoll(rollId); }
 
     public MotherRollInfo saveOrUpdateMotherRoll(MotherRollInfo roll) { return rollAndRemnantService.saveOrUpdateMotherRoll(roll); }
@@ -225,6 +231,8 @@ public class RemnantService implements CuttingStatePort {
     public List<RemnantStock> getRemnantsByRollId(String rollId) { return rollAndRemnantService.getRemnantsByRollId(rollId); }
 
     public List<RemnantStock> getAllRemnants() { return rollAndRemnantService.getAllRemnants(); }
+
+    public List<RemnantStock> getActiveAndQuarantinedRemnants() { return rollAndRemnantService.getActiveAndQuarantinedRemnants(); }
 
     public RemnantStock scanOrGetById(String id) { return rollAndRemnantService.scanOrGetById(id); }
 
@@ -503,6 +511,67 @@ public class RemnantService implements CuttingStatePort {
                 return kernel.store.listAllSchemes();
             }
             return List.copyOf(kernel.schemes.values());
+        }
+
+        @Override public List<SchedulingScheme> listActiveSchemes() {
+            ensureActive();
+            return List.copyOf(kernel.schemes.values());
+        }
+
+        @Override public List<SchedulingScheme> querySchemes(String stateFilter, String taskIdFilter) {
+            ensureActive();
+            if (kernel.store.supportsHotColdLoading() && !writable) {
+                String cleanState = (stateFilter == null || stateFilter.isBlank() || "ALL".equalsIgnoreCase(stateFilter))
+                        ? null : stateFilter.trim().toUpperCase(Locale.ROOT);
+                String cleanTask = (taskIdFilter == null || taskIdFilter.isBlank()) ? null : taskIdFilter.trim();
+                if (cleanState != null && Set.of(
+                        SchedulingScheme.STATE_AWAITING_ROLL,
+                        SchedulingScheme.STATE_READY_TO_CUT,
+                        SchedulingScheme.STATE_DISPATCHED_MES
+                ).contains(cleanState)) {
+                    return kernel.schemes.values().stream()
+                            .filter(s -> cleanState.equalsIgnoreCase(s.state()))
+                            .filter(s -> cleanTask == null || s.involvesTask(cleanTask))
+                            .toList();
+                }
+                return kernel.store.querySchemes(cleanState, cleanTask);
+            }
+            return kernel.schemes.values().stream()
+                    .filter(s -> stateFilter == null || stateFilter.isBlank() || "ALL".equalsIgnoreCase(stateFilter)
+                            || stateFilter.equalsIgnoreCase(s.state()))
+                    .filter(s -> taskIdFilter == null || taskIdFilter.isBlank() || s.involvesTask(taskIdFilter.trim()))
+                    .toList();
+        }
+
+        @Override public List<SchedulingScheme> findSchemesByRollId(String rollId) {
+            ensureActive();
+            if (rollId == null || rollId.isBlank()) return List.of();
+            if (kernel.store.supportsHotColdLoading() && !writable) {
+                Map<String, SchedulingScheme> byId = new LinkedHashMap<>();
+                for (SchedulingScheme sc : kernel.store.findSchemesByRollId(rollId)) {
+                    byId.put(sc.id(), sc);
+                }
+                for (SchedulingScheme sc : kernel.schemes.values()) {
+                    if (rollId.equals(sc.rollId())) {
+                        byId.putIfAbsent(sc.id(), sc);
+                    }
+                }
+                return List.copyOf(byId.values());
+            }
+            return kernel.schemes.values().stream().filter(s -> rollId.equals(s.rollId())).toList();
+        }
+
+        @Override public long countActiveSchemesForTask(String taskId) {
+            ensureActive();
+            if (taskId == null || taskId.isBlank()) return 0L;
+            if (kernel.store.supportsHotColdLoading() && !writable) {
+                return kernel.store.countActiveSchemesForTask(taskId);
+            }
+            return kernel.schemes.values().stream()
+                    .filter(s -> s.involvesTask(taskId)
+                            && !SchedulingScheme.STATE_CANCELLED.equals(s.state())
+                            && !SchedulingScheme.STATE_REVERSED.equals(s.state()))
+                    .count();
         }
 
         @Override

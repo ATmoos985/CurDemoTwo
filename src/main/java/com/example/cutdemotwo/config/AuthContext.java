@@ -41,6 +41,11 @@ public final class AuthContext {
             ACTOR_USER, null, List.of(), null, 0L
     );
 
+    public static final Principal MES_INTEGRATION_PRINCIPAL = new Principal(
+            "mes-integration", "MES 集成系统", ROLE_ADMIN, List.of(ROLE_ADMIN), true,
+            ACTOR_USER, null, List.of(), null, 0L
+    );
+
     public record Principal(
             String username,
             String displayName,

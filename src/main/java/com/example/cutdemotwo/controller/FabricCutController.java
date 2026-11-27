@@ -134,7 +134,15 @@ public class FabricCutController {
     public java.util.List<com.example.cutdemotwo.business.model.MotherRollInfo> listRolls(
             @RequestParam(required = false) Integer limit,
             @RequestParam(required = false) Integer offset) {
-        return FactoryDocumentController.slicePage(remnantService.getMotherRolls(), limit, offset);
+        if (limit == null && offset == null) {
+            return remnantService.getMotherRolls();
+        }
+        int off = offset == null ? 0 : offset;
+        int lim = limit == null ? 50 : limit;
+        if (off < 0 || lim < 1 || lim > 1000) {
+            throw new IllegalArgumentException("分页参数无效：limit 需在 1–1000 之间，offset 不得为负");
+        }
+        return remnantService.getMotherRollsPage(lim, off);
     }
 
     @GetMapping("/v2/rolls/{rollId}")
@@ -196,7 +204,7 @@ public class FabricCutController {
         if (!includeQuarantined) {
             all = remnantService.getRemnantsByRollId(rollId);
         } else {
-            all = remnantService.getAllRemnants().stream()
+            all = remnantService.getActiveAndQuarantinedRemnants().stream()
                     .filter(r -> "AVAILABLE".equals(r.getStatus()) || "QUARANTINED".equals(r.getStatus()) || "LOST".equals(r.getStatus()))
                     .filter(r -> rollId == null || rollId.isBlank() || "ALL".equalsIgnoreCase(rollId) || rollId.trim().equalsIgnoreCase(r.getSourceRollId()))
                     .sorted(java.util.Comparator.comparing(com.example.cutdemotwo.business.model.RemnantStock::getId)).toList();

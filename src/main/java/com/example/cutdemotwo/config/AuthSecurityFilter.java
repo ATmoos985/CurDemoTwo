@@ -62,6 +62,7 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
     private final long maxRequestBodyBytes;
     private final int writeRateLimitPerMinute;
     private final Clock clock;
+    private final String mesToken;
     private final ConcurrentHashMap<String, RateWindow> writeRateWindows = new ConcurrentHashMap<>();
 
     @Autowired
@@ -69,13 +70,14 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
             AuthService authService,
             @Value("${cutdemo.security.max-request-body-bytes:2097152}") long maxRequestBodyBytes,
             @Value("${cutdemo.security.write-rate-limit-per-minute:600}") int writeRateLimitPerMinute,
-            OperationAuditService auditService
+            OperationAuditService auditService,
+            @Value("${cutdemo.mes.token:}") String mesToken
     ) {
-        this(authService, maxRequestBodyBytes, writeRateLimitPerMinute, Clock.systemUTC(), auditService);
+        this(authService, maxRequestBodyBytes, writeRateLimitPerMinute, Clock.systemUTC(), auditService, mesToken);
     }
 
     public AuthSecurityFilter(AuthService authService, long maxRequestBodyBytes, int writeRateLimitPerMinute, Clock clock) {
-        this(authService, maxRequestBodyBytes, writeRateLimitPerMinute, clock, null);
+        this(authService, maxRequestBodyBytes, writeRateLimitPerMinute, clock, null, "");
     }
 
     public AuthSecurityFilter(
@@ -85,11 +87,23 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
             Clock clock,
             OperationAuditService auditService
     ) {
+        this(authService, maxRequestBodyBytes, writeRateLimitPerMinute, clock, auditService, "");
+    }
+
+    public AuthSecurityFilter(
+            AuthService authService,
+            long maxRequestBodyBytes,
+            int writeRateLimitPerMinute,
+            Clock clock,
+            OperationAuditService auditService,
+            String mesToken
+    ) {
         this.authService = authService;
         this.auditService = auditService;
         this.maxRequestBodyBytes = maxRequestBodyBytes > 0 ? maxRequestBodyBytes : DEFAULT_MAX_REQUEST_BODY_BYTES;
         this.writeRateLimitPerMinute = writeRateLimitPerMinute;
         this.clock = clock == null ? Clock.systemUTC() : clock;
+        this.mesToken = mesToken == null ? "" : mesToken.trim();
     }
 
     @Override
@@ -112,12 +126,15 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
         }
 
         AuthContext.Principal principal;
+        String authHeader = request.getHeader("Authorization");
         if (!authService.isEnabled()) {
             principal = AuthContext.LOCAL_PRINCIPAL;
         } else if (isWhitelisted(method, path)) {
-            principal = authService.verifyAuthorizationHeader(request.getHeader("Authorization")).orElse(null);
+            principal = authService.verifyAuthorizationHeader(authHeader).orElse(null);
+        } else if (isMesEndpoint(path) && matchesMesToken(authHeader)) {
+            principal = AuthContext.MES_INTEGRATION_PRINCIPAL;
         } else {
-            Optional<AuthContext.Principal> verified = authService.verifyAuthorizationHeader(request.getHeader("Authorization"));
+            Optional<AuthContext.Principal> verified = authService.verifyAuthorizationHeader(authHeader);
             if (verified.isEmpty()) {
                 response.setHeader("WWW-Authenticate", "Bearer realm=\"cutdemo\"");
                 writeError(response, 401, "UNAUTHORIZED", "未登录或访问令牌已失效，请先登录", false);
@@ -201,9 +218,6 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
         if ("/api/v2/integration-deliveries".equals(path) || path.startsWith("/api/v2/integration-deliveries/")) {
             return true;
         }
-        if (path.startsWith("/api/v2/mes/")) {
-            return true;
-        }
         if (path.startsWith("/api-v2/")) {
             return true;
         }
@@ -281,7 +295,9 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
 
         if (path.equals("/api/v2/execution-orders") || path.startsWith("/api/v2/execution-orders/")
                 || path.matches("^/api/v2/schemes/[^/]+/complete$")
-                || path.equals("/api/v2/cutting/report-confirm")) {
+                || path.equals("/api/v2/cutting/report-confirm")
+                || path.matches("^/api/v2/mes/schemes/[^/]+/dispatch$")
+                || path.equals("/api/v2/mes/execution-feedback")) {
             return AuthContext.ROLE_OPERATOR.equals(role) || AuthContext.ROLE_PLANNER.equals(role);
         }
 
@@ -295,7 +311,8 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
                 || path.equals("/api/v2/nesting/solve")
                 || path.equals("/api/v2/cutting/tasks")
                 || path.matches("^/api/v2/cutting/reports/[^/]+/reverse$")
-                || path.equals("/api/v2/cutting/remnant-recommendations")) {
+                || path.equals("/api/v2/cutting/remnant-recommendations")
+                || path.equals("/api/v2/mes/orders")) {
             return AuthContext.ROLE_PLANNER.equals(role);
         }
 
@@ -340,7 +357,8 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
                     || path.equals("/api/v2/inventory-transfers") || path.equals("/api/v2/inventory-transfers/options")
                     || path.equals("/api/v2/inventory-counts") || path.equals("/api/v2/inventory-counts/options")
                     || path.startsWith("/api/v2/exports/")
-                    || path.matches("^/api/v2/cutting/reports/[^/]+/quality-dispositions$")) {
+                    || path.matches("^/api/v2/cutting/reports/[^/]+/quality-dispositions$")
+                    || path.matches("^/api/v2/mes/dispatch-packages/[^/]+$")) {
                 return AuthContext.SCOPE_INVENTORY_READ;
             }
             if (path.equals("/api/v2/capabilities")
@@ -379,6 +397,25 @@ public class AuthSecurityFilter extends OncePerRequestFilter {
             }
         }
         return null;
+    }
+
+    static boolean isMesEndpoint(String path) {
+        return "/api/v2/mes".equals(path) || path.startsWith("/api/v2/mes/");
+    }
+
+    private boolean matchesMesToken(String authorization) {
+        if (mesToken.isEmpty() || authorization == null || authorization.length() <= 7
+                || !authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            return false;
+        }
+        String supplied = authorization.substring(7).trim();
+        if (supplied.isEmpty()) {
+            return false;
+        }
+        return java.security.MessageDigest.isEqual(
+                mesToken.getBytes(StandardCharsets.UTF_8),
+                supplied.getBytes(StandardCharsets.UTF_8)
+        );
     }
 
     private boolean tryAcquireWritePermit(String key) {

@@ -259,22 +259,25 @@ public class AuthService {
             return Optional.empty();
         }
         String token = rawToken.trim();
-        String[] parts = token.split("\\.");
-        if (parts.length != 3 || !JWT_HEADER_B64.equals(parts[0])) {
+        String[] parts = token.split("\\.", -1);
+        if (parts.length != 3 || !JWT_HEADER_B64.equals(parts[0]) || parts[1].isEmpty() || parts[2].isEmpty()) {
             return Optional.empty();
         }
         byte[] expectedSig = hmacSha256(parts[0] + "." + parts[1]);
-        byte[] suppliedSig;
-        try {
-            suppliedSig = Base64.getUrlDecoder().decode(parts[2]);
-        } catch (IllegalArgumentException invalidBase64) {
-            return Optional.empty();
-        }
-        if (!MessageDigest.isEqual(expectedSig, suppliedSig)) {
+        String expectedSigB64 = Base64.getUrlEncoder().withoutPadding().encodeToString(expectedSig);
+        if (!MessageDigest.isEqual(
+                expectedSigB64.getBytes(StandardCharsets.UTF_8),
+                parts[2].getBytes(StandardCharsets.UTF_8))) {
             return Optional.empty();
         }
         try {
+            if (parts[1].indexOf('=') >= 0) {
+                return Optional.empty();
+            }
             byte[] payloadBytes = Base64.getUrlDecoder().decode(parts[1]);
+            if (!Base64.getUrlEncoder().withoutPadding().encodeToString(payloadBytes).equals(parts[1])) {
+                return Optional.empty();
+            }
             JsonNode payload = JSON.readTree(payloadBytes);
             if (payload == null || !payload.isObject()) {
                 return Optional.empty();

@@ -49,7 +49,7 @@ final class StudioRollSlotAllocator {
                         + "mm] 与已报工切割区 [" + round1(s) + ", " + round1(e) + "mm] 重叠");
             }
         }
-        for (SchedulingScheme sc : tx.listSchemes()) {
+        for (SchedulingScheme sc : tx.listActiveSchemes()) {
             if (Objects.equals(exceptSchemeId, sc.id()) || !sc.occupiesRoll(roll.getRollId())) {
                 continue;
             }
@@ -116,7 +116,7 @@ final class StudioRollSlotAllocator {
                 intervals.add(new double[]{s, s + l});
             }
         }
-        for (SchedulingScheme sc : tx.listSchemes()) {
+        for (SchedulingScheme sc : tx.listActiveSchemes()) {
             if (!Objects.equals(exceptSchemeId, sc.id()) && sc.occupiesRoll(roll.getRollId())) {
                 intervals.add(new double[]{sc.windowStartY(), sc.windowStartY() + sc.occupiedLengthMm()});
             }

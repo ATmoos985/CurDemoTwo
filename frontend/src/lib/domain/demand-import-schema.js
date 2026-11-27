@@ -351,6 +351,21 @@ export function expandBomRows({
     productTypeOverride = 'AUTO'
 }) {
     const issues = [];
+    const rootQtyProvided =
+        bomRootQty !== undefined && bomRootQty !== null && textVal(bomRootQty) !== '';
+    if (rootQtyProvided && !isPositiveNum(bomRootQty)) {
+        issues.push(createImportIssue({
+            rowIndex: Math.max(1, headerRowIndex),
+            sheetName,
+            column: 'BOM 根套件数量',
+            field: 'bomRootQty',
+            model: textVal(bomRootCode) || 'BOM_ROOT',
+            reason: `BOM 根套件数量必须大于 0（当前值: "${textVal(bomRootQty)}"）`,
+            code: 'INVALID_BOM_ROOT_QTY',
+            line: { bomRootQty }
+        }));
+        return { demands: [], issues };
+    }
     const nodes = new Map();
     const edgesByParent = new Map();
     const childSet = new Set();
@@ -567,7 +582,7 @@ export function expandBomRows({
         : [...edgesByParent.keys()].filter(p => !childSet.has(p));
 
     const demands = [];
-    const rootMult = isPositiveNum(bomRootQty) ? Number(bomRootQty) : 1;
+    const rootMult = rootQtyProvided ? Number(bomRootQty) : 1;
 
     function traverse(node, accQty, path, activeTrail) {
         const outEdges = (edgesByParent.get(node) || []).filter(e => !cycleEdgeRows.has(e.rowIndex));

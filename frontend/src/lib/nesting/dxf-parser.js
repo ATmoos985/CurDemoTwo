@@ -13,7 +13,10 @@ import {
     sampleArcPoints,
     sampleSplinePoints,
     stitchOpenSegments,
-    buildContourShapesWithHoles
+    buildContourShapesWithHoles,
+    DEFAULT_HOLE_LAYER_KEYWORDS,
+    DEFAULT_OUTER_LAYER_KEYWORDS,
+    matchesLayerKeywords
 } from './dxf-geometry.js';
 
 export const DXF_INSUNITS_TO_MM = Object.freeze({
@@ -47,8 +50,8 @@ const UNIT_MM_TO_LABEL = new Map([
 ]);
 
 const DEFAULT_EXCLUDE_LAYERS = ['DIM', 'TEXT', 'DEFPOINTS', 'FRAME', '7'];
-const DEFAULT_HOLE_KEYWORDS = ['HOLE', 'INNER', 'CUTOUT', 'DRILL', '内孔', '开孔', '孔', '窗口', '11'];
-const DEFAULT_OUTER_KEYWORDS = ['OUTER', 'CUT', 'PROFILE', 'BOUNDARY', '外框', '裁切', '1'];
+const DEFAULT_HOLE_KEYWORDS = DEFAULT_HOLE_LAYER_KEYWORDS;
+const DEFAULT_OUTER_KEYWORDS = DEFAULT_OUTER_LAYER_KEYWORDS;
 const AAMA_PREFIX_RE = /^(F1CRH1226 大货版_|FH20148D 二套版 排料_|F2FCG3129 套装_F2FCG3129 套装_|F2FCG3129 套装_|F2FCG3129 )/;
 
 function resolveRotationFlags(rotationMode = 'FIXED') {
@@ -421,10 +424,14 @@ function applyTransform(pt, mat) {
     };
 }
 
-function isLayerAllowed(layer, includeSet, excludeSet) {
+function isLayerAllowed(layer, includeSet, excludeSet, includeMatcher = null) {
     const key = String(layer || '0').trim().toUpperCase();
-    if (includeSet && !includeSet.has(key)) return false;
     if (excludeSet && excludeSet.has(key)) return false;
+    if (includeSet || includeMatcher) {
+        const inSet = includeSet ? includeSet.has(key) : false;
+        const matched = includeMatcher ? includeMatcher(key) : false;
+        if (!inSet && !matched) return false;
+    }
     return true;
 }
 
@@ -436,6 +443,7 @@ function collectGeometryFromEntities({
     endpointToleranceMm,
     includeSet,
     excludeSet,
+    includeMatcher = null,
     warnings,
     depth = 0,
     stack = new Set()
@@ -495,6 +503,7 @@ function collectGeometryFromEntities({
                         endpointToleranceMm,
                         includeSet,
                         excludeSet,
+                        includeMatcher,
                         warnings,
                         depth: depth + 1,
                         stack
@@ -507,7 +516,7 @@ function collectGeometryFromEntities({
             continue;
         }
 
-        if (!isLayerAllowed(ent.layer, includeSet, excludeSet)) continue;
+        if (!isLayerAllowed(ent.layer, includeSet, excludeSet, includeMatcher)) continue;
 
         if (ent.type === 'LWPOLYLINE' || ent.type === 'POLYLINE') {
             const pts = expandBulgePolyline(ent.vertices, ent.closed, localChordTol).map(p => applyTransform(p, matrix));
@@ -654,8 +663,12 @@ export function parseDxfText(input, options = {}) {
             const isPair = qtyRaw === '1,1' || texts.some(t => t.includes('L:1-R:1'));
             const qty = isPair ? 2 : Math.max(1, parseInt(qtyRaw, 10) || 1);
 
-            // AAMA 块仅抽取外轮廓层 '1' 与内孔层（如 '11'/HOLE），屏蔽缝份层 '14'/内部线 '8' 等
-            const aamaAllowed = new Set(['1', ...holeLayerKeywords.map(k => String(k).toUpperCase())]);
+            // AAMA 块仅抽取外轮廓层 '1' 与内孔层（如 '11'/HOLE/CUTOUT/HOLE_1），屏蔽缝份层 '14'/内部线 '8' 等
+            const aamaAllowed = new Set([
+                '1',
+                ...holeLayerKeywords.map(k => String(k).trim().toUpperCase()).filter(Boolean)
+            ]);
+            const aamaHoleMatcher = layerKey => matchesLayerKeywords(layerKey, holeLayerKeywords);
             const blkGeo = collectGeometryFromEntities({
                 entities: blk.entities,
                 blocksMap: blocks,
@@ -664,6 +677,7 @@ export function parseDxfText(input, options = {}) {
                 endpointToleranceMm,
                 includeSet: aamaAllowed,
                 excludeSet,
+                includeMatcher: aamaHoleMatcher,
                 warnings
             });
             const stitched = stitchByLayerAndGlobal(blkGeo.openChains, endpointToleranceMm, warnings);

@@ -28,8 +28,8 @@ final class MotherRollSpatialMapQuery {
                     .orElseThrow(() -> new IllegalArgumentException("母卷不存在: " + rollId));
 
             Map<String, SchedulingScheme> planToScheme = new HashMap<>();
-            List<SchedulingScheme> allSchemes = tx.listSchemes();
-            for (SchedulingScheme s : allSchemes) {
+            List<SchedulingScheme> rollSchemes = tx.findSchemesByRollId(rollId);
+            for (SchedulingScheme s : rollSchemes) {
                 for (String pid : s.linkedPlanIds()) {
                     planToScheme.put(pid, s);
                 }
@@ -101,7 +101,7 @@ final class MotherRollSpatialMapQuery {
             // 2. 排程预占区域 (Planned Zones)
             List<Map<String, Object>> plannedZones = new ArrayList<>();
             Set<String> coveredPlanIds = new HashSet<>();
-            for (SchedulingScheme s : allSchemes) {
+            for (SchedulingScheme s : rollSchemes) {
                 if (!s.occupiesRoll(rollId)) continue;
                 coveredPlanIds.addAll(s.linkedPlanIds());
                 List<PlacedPiece> previewPieces = new ArrayList<>();

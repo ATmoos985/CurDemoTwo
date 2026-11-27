@@ -526,7 +526,7 @@ public class InventoryImportService {
                     skip = true;
                 }
                 if (!skip && (view.isMaterialReservedByExecution("roll", rollId, null)
-                        || view.listSchemes().stream().anyMatch(s -> s.occupiesRoll(rollId)))) {
+                        || view.listActiveSchemes().stream().anyMatch(s -> s.occupiesRoll(rollId)))) {
                     errors.add(new RowError(i, "rollId", "ROLL_RESERVED",
                             "母卷 " + rollId + " 已被执行单或活跃排程方案预约锁定，暂不可导入新瑕疵"));
                     continue;

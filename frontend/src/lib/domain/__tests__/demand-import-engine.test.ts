@@ -526,4 +526,29 @@ describe('demand-import-engine', () => {
       surfaceTreatment: '烤漆'
     });
   });
+
+  it('拦截非法的 bomRootQty（-5 / 0 / "abc"）并阻断静默放行，未传或空串维持默认 1', () => {
+    const validBom = [
+      ['父件编码', '子件编码', '单耗', '材料型号', '裁片名称', '宽度(mm)', '长度(mm)'],
+      ['SOFA-SET', 'CUSHION', 3, 'FABRIC-A', '座垫布', 600, 650]
+    ];
+
+    for (const badQty of [-5, 0, '0', '-3', 'abc']) {
+      const badRes = parseDemandSheet(validBom, { sheetName: 'BOM非法套数', bomRootQty: badQty });
+      expect(badRes.groups).toHaveLength(0);
+      expect(badRes.issues.length).toBeGreaterThan(0);
+      expect(badRes.issues[0]).toMatchObject({
+        code: 'INVALID_BOM_ROOT_QTY',
+        field: 'bomRootQty',
+        sheetName: 'BOM非法套数'
+      });
+    }
+
+    for (const defaultQty of [undefined, null, '', '   ']) {
+      const okRes = parseDemandSheet(validBom, { sheetName: 'BOM默认套数', bomRootQty: defaultQty });
+      expect(okRes.issues).toHaveLength(0);
+      expect(okRes.groups).toHaveLength(1);
+      expect(okRes.groups[0].demands[0].quantity).toBe(3);
+    }
+  });
 });

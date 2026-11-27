@@ -24,16 +24,37 @@ function PieceMiniSvg({ piece, sizeKey }: { piece: ClusterTemplatePiece; sizeKey
   if (!geom) return null;
   const w = geom.w || 100;
   const h = geom.h || 100;
-  const pts =
+  const pad = Math.max(8, Math.max(w, h) * 0.06);
+  const outerRing =
     geom.v && geom.v.length >= 3
-      ? geom.v.map(([x, y]) => `${x},${y}`).join(' ')
-      : `0,0 ${w},0 ${w},${h} 0,${h}`;
+      ? geom.v
+      : [
+          [0, 0],
+          [w, 0],
+          [w, h],
+          [0, h]
+        ];
+  const holes = Array.isArray(geom.holes)
+    ? geom.holes.filter((ring) => Array.isArray(ring) && ring.length >= 3)
+    : [];
+  const ringToPath = (ring: number[][]) =>
+    ring.map(([x, y], idx) => `${idx === 0 ? 'M' : 'L'}${x},${y}`).join(' ') + ' Z';
+  const pathD = [ringToPath(outerRing), ...holes.map(ringToPath)].join(' ');
   return (
-    <div className="mp-tpl-piece-chip" title={`${piece.name} (${sizeKey}: ${w}×${h}mm)`}>
-      <svg viewBox={`-8 -8 ${w + 16} ${h + 16}`} width="34" height="34" aria-hidden="true">
-        <polygon
-          points={pts}
+    <div
+      className="mp-tpl-piece-chip"
+      title={`${piece.name} (${sizeKey}: ${w}×${h}mm${holes.length ? ` · ${holes.length} 内孔` : ''})`}
+    >
+      <svg
+        viewBox={`${-pad} ${-pad} ${w + pad * 2} ${h + pad * 2}`}
+        width="34"
+        height="34"
+        aria-hidden="true"
+      >
+        <path
+          d={pathD}
           fill="rgba(91, 97, 246, 0.11)"
+          fillRule="evenodd"
           stroke="#5b61f6"
           strokeWidth={Math.max(w, h) * 0.045}
         />
@@ -45,6 +66,7 @@ function PieceMiniSvg({ piece, sizeKey }: { piece: ClusterTemplatePiece; sizeKey
         </b>
         <span className="num">
           {Math.round(w)}×{Math.round(h)} · ×{piece.quantityPerUnit}
+          {holes.length > 0 ? ` · ${holes.length}孔` : ''}
         </span>
       </div>
     </div>
@@ -138,10 +160,14 @@ export const ClusterCenterPage: React.FC<{ auth?: AuthSession }> = ({ auth: _aut
             sizes: {}
           });
         }
+        const holes = d.shape?.holes?.length
+          ? d.shape.holes.map((ring) => ring.map((pt): [number, number] => [pt.x, pt.y]))
+          : undefined;
         pieceMap.get(cleanName)!.sizes[sz] = {
           w: d.width,
           h: d.length,
-          v: d.shape?.vertices?.map((pt) => [pt.x, pt.y])
+          v: d.shape?.vertices?.map((pt) => [pt.x, pt.y]),
+          ...(holes ? { holes } : {})
         };
       }
     }

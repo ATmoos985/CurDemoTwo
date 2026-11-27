@@ -354,32 +354,51 @@ final class RollAndRemnantDomainService {
     }
 
     List<MotherRollInfo> getMotherRolls() {
+        return kernel.read(() -> attachRemnantStats(
+                kernel.store.supportsHotColdLoading()
+                        ? kernel.store.listAllMotherRolls()
+                        : new ArrayList<>(kernel.motherRolls.values())
+        ));
+    }
+
+    List<MotherRollInfo> getActiveMotherRolls() {
+        return kernel.read(() -> attachRemnantStats(new ArrayList<>(kernel.motherRolls.values())));
+    }
+
+    List<MotherRollInfo> getMotherRollsPage(int limit, int offset) {
         return kernel.read(() -> {
-            List<MotherRollInfo> sourceRolls = kernel.store.supportsHotColdLoading()
-                    ? kernel.store.listAllMotherRolls()
-                    : new ArrayList<>(kernel.motherRolls.values());
-            List<MotherRollInfo> list = new ArrayList<>(sourceRolls.size());
             if (kernel.store.supportsHotColdLoading()) {
-                Map<String, List<RemnantStock>> byRoll = new HashMap<>();
-                for (RemnantStock rm : kernel.remnantPool.values()) {
-                    if ("AVAILABLE".equalsIgnoreCase(rm.getStatus()) && rm.getSourceRollId() != null) {
-                        byRoll.computeIfAbsent(rm.getSourceRollId(), k -> new ArrayList<>()).add(rm);
-                    }
-                }
-                for (MotherRollInfo info : sourceRolls) {
-                    List<RemnantStock> rollRemnants = byRoll.getOrDefault(info.getRollId(), List.of());
-                    double totalArea = rollRemnants.stream().mapToDouble(RemnantStock::getArea).sum();
-                    list.add(info.copyWithRemnantStats(rollRemnants.size(), totalArea));
-                }
-            } else {
-                for (MotherRollInfo info : sourceRolls) {
-                    List<RemnantStock> rollRemnants = kernel.getRemnantsByRollIdInternal(info.getRollId());
-                    double totalArea = rollRemnants.stream().mapToDouble(RemnantStock::getArea).sum();
-                    list.add(info.copyWithRemnantStats(rollRemnants.size(), totalArea));
+                return attachRemnantStats(kernel.store.listMotherRollsPage(limit, offset));
+            }
+            List<MotherRollInfo> all = attachRemnantStats(new ArrayList<>(kernel.motherRolls.values()));
+            int from = Math.min(offset, all.size());
+            int to = Math.min(from + limit, all.size());
+            return List.copyOf(all.subList(from, to));
+        });
+    }
+
+    private List<MotherRollInfo> attachRemnantStats(List<MotherRollInfo> sourceRolls) {
+        List<MotherRollInfo> list = new ArrayList<>(sourceRolls.size());
+        if (kernel.store.supportsHotColdLoading()) {
+            Map<String, List<RemnantStock>> byRoll = new HashMap<>();
+            for (RemnantStock rm : kernel.remnantPool.values()) {
+                if ("AVAILABLE".equalsIgnoreCase(rm.getStatus()) && rm.getSourceRollId() != null) {
+                    byRoll.computeIfAbsent(rm.getSourceRollId(), k -> new ArrayList<>()).add(rm);
                 }
             }
-            return list;
-        });
+            for (MotherRollInfo info : sourceRolls) {
+                List<RemnantStock> rollRemnants = byRoll.getOrDefault(info.getRollId(), List.of());
+                double totalArea = rollRemnants.stream().mapToDouble(RemnantStock::getArea).sum();
+                list.add(info.copyWithRemnantStats(rollRemnants.size(), totalArea));
+            }
+        } else {
+            for (MotherRollInfo info : sourceRolls) {
+                List<RemnantStock> rollRemnants = kernel.getRemnantsByRollIdInternal(info.getRollId());
+                double totalArea = rollRemnants.stream().mapToDouble(RemnantStock::getArea).sum();
+                list.add(info.copyWithRemnantStats(rollRemnants.size(), totalArea));
+            }
+        }
+        return list;
     }
 
     MotherRollInfo getMotherRoll(String rollId) {
@@ -685,6 +704,10 @@ final class RollAndRemnantDomainService {
         return kernel.read(() -> kernel.store.supportsHotColdLoading()
                 ? kernel.store.listAllRemnants()
                 : new ArrayList<>(kernel.remnantPool.values()));
+    }
+
+    List<RemnantStock> getActiveAndQuarantinedRemnants() {
+        return kernel.read(() -> new ArrayList<>(kernel.remnantPool.values()));
     }
 
     RemnantStock scanOrGetById(String id) {

@@ -508,9 +508,15 @@ public class JdbcInventoryStore implements InventoryStore {
     @Override public Optional<SchedulingScheme> findSchemeByIdempotencyKey(String key) { return coldQueries.findFirstMatching("scheduling_scheme", key, SchedulingScheme.class, s -> Objects.equals(key, s.idempotencyKey())).map(HotColdModels.OrderedEntry::value); }
     @Override public Optional<SchedulingScheme> findSchemeByMesReceiptNo(String receiptNo) { return coldQueries.findFirstMatching("scheduling_scheme", receiptNo, SchedulingScheme.class, s -> Objects.equals(receiptNo, s.mesReceiptNo())).map(HotColdModels.OrderedEntry::value); }
     @Override public List<SchedulingScheme> listAllSchemes() { return coldQueries.listAllOrdered("scheduling_scheme", SchedulingScheme.class); }
+    @Override public List<SchedulingScheme> findSchemesForPlanIds(Set<String> planIds, Set<String> taskIds) { return coldQueries.findSchemesForPlanIds(planIds, taskIds); }
+    @Override public List<SchedulingScheme> findActiveSchemesByPlanId(String planId) { return coldQueries.findActiveSchemesByPlanId(planId); }
+    @Override public List<SchedulingScheme> findSchemesByRollId(String rollId) { return coldQueries.findSchemesByRollId(rollId); }
+    @Override public List<SchedulingScheme> querySchemes(String stateFilter, String taskIdFilter) { return coldQueries.querySchemes(stateFilter, taskIdFilter); }
+    @Override public long countActiveSchemesForTask(String taskId) { return coldQueries.countActiveSchemesForTask(taskId); }
     @Override public Optional<HotColdModels.OrderedEntry<MotherRollInfo>> findMotherRoll(String rollId) { return coldQueries.findOrderedById("mother_roll", rollId, MotherRollInfo.class); }
     @Override public Optional<MotherRollInfo> findMotherRollByScrapKey(String key) { return coldQueries.findFirstMatching("mother_roll", key, MotherRollInfo.class, r -> Objects.equals(key, r.getScrapIdempotencyKey())).map(HotColdModels.OrderedEntry::value); }
     @Override public List<MotherRollInfo> listAllMotherRolls() { return coldQueries.listAllOrdered("mother_roll", MotherRollInfo.class); }
+    @Override public List<MotherRollInfo> listMotherRollsPage(int limit, int offset) { return coldQueries.listMotherRollsPage(limit, offset); }
     @Override public void streamMotherRolls(int batchSize, Consumer<List<MotherRollInfo>> consumer) { coldQueries.streamBySortOrder("mother_roll", MotherRollInfo.class, batchSize, consumer); }
     @Override public Optional<HotColdModels.OrderedEntry<RemnantStock>> findRemnant(String id) { return coldQueries.findOrderedById("remnant_stock", id, RemnantStock.class); }
     @Override public List<RemnantStock> listAllRemnants() { return coldQueries.listAllOrdered("remnant_stock", RemnantStock.class); }

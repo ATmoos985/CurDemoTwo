@@ -19,6 +19,7 @@ import com.example.cutdemotwo.business.model.SchedulingScheme;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 
 public interface InventoryStore {
@@ -186,11 +187,23 @@ public interface InventoryStore {
 
     default List<SchedulingScheme> listAllSchemes() { return List.of(); }
 
+    default List<SchedulingScheme> findSchemesForPlanIds(Set<String> planIds, Set<String> taskIds) { return List.of(); }
+
+    default List<SchedulingScheme> findActiveSchemesByPlanId(String planId) { return List.of(); }
+
+    default List<SchedulingScheme> findSchemesByRollId(String rollId) { return List.of(); }
+
+    default List<SchedulingScheme> querySchemes(String stateFilter, String taskIdFilter) { return List.of(); }
+
+    default long countActiveSchemesForTask(String taskId) { return 0L; }
+
     default Optional<HotColdModels.OrderedEntry<MotherRollInfo>> findMotherRoll(String rollId) { return Optional.empty(); }
 
     default Optional<MotherRollInfo> findMotherRollByScrapKey(String key) { return Optional.empty(); }
 
     default List<MotherRollInfo> listAllMotherRolls() { return List.of(); }
+
+    default List<MotherRollInfo> listMotherRollsPage(int limit, int offset) { return List.of(); }
 
     default void streamMotherRolls(int batchSize, Consumer<List<MotherRollInfo>> consumer) {}
 

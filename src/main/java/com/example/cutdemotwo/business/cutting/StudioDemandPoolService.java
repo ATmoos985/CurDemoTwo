@@ -1,5 +1,6 @@
 package com.example.cutdemotwo.business.cutting;
 
+import com.example.cutdemotwo.algorithm.geometry.PolygonGeometry;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.DemandTemplate;
 import com.example.cutdemotwo.business.model.ExecutionOrder;
@@ -41,6 +42,7 @@ final class StudioDemandPoolService {
         if (!Double.isFinite(input.defaultWidthMm()) || input.defaultWidthMm() <= 0) {
             throw new IllegalArgumentException("预设标准门幅必须为正数");
         }
+        validateTemplatePieces(input.pieces());
         String dim = normalizeDimension(input.dimension(), input.category());
         String id = (input.id() == null || input.id().isBlank())
                 ? "TPL-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase()
@@ -312,11 +314,7 @@ final class StudioDemandPoolService {
             lineViews.add(lv);
         }
 
-        long activeSchemes = tx.listSchemes().stream()
-                .filter(s -> s.involvesTask(task.id())
-                        && !SchedulingScheme.STATE_CANCELLED.equals(s.state())
-                        && !SchedulingScheme.STATE_REVERSED.equals(s.state()))
-                .count();
+        long activeSchemes = tx.countActiveSchemesForTask(task.id());
 
         String status = completedTotal >= orderedTotal && orderedTotal > 0
                 ? "COMPLETED"
@@ -366,7 +364,7 @@ final class StudioDemandPoolService {
         Map<String, Integer> counts = new LinkedHashMap<>();
         Set<String> coveredPlans = new HashSet<>();
 
-        for (SchedulingScheme s : tx.listSchemes()) {
+        for (SchedulingScheme s : tx.listActiveSchemes()) {
             if (Objects.equals(exceptSchemeId, s.id()) || !s.occupiesDemand() || !s.involvesTask(taskId)) {
                 continue;
             }
@@ -510,6 +508,49 @@ final class StudioDemandPoolService {
 
     private static String blankToNull(String s) {
         return (s == null || s.isBlank()) ? null : s.trim();
+    }
+
+    private static void validateTemplatePieces(List<DemandTemplate.PieceSpec> pieces) {
+        for (DemandTemplate.PieceSpec piece : pieces) {
+            if (piece == null || piece.sizes() == null) continue;
+            for (Map.Entry<String, DemandTemplate.SizeGeometry> entry : piece.sizes().entrySet()) {
+                DemandTemplate.SizeGeometry geom = entry.getValue();
+                if (geom == null || geom.holes() == null || geom.holes().isEmpty()) {
+                    continue;
+                }
+                if (!Double.isFinite(geom.w()) || geom.w() <= 0 || !Double.isFinite(geom.h()) || geom.h() <= 0) {
+                    throw new IllegalArgumentException("模板部件 [" + piece.name() + "] 尺寸宽高必须为正数");
+                }
+                List<List<NestingProblem.Point>> holeRings = new ArrayList<>(geom.holes().size());
+                for (List<List<Double>> rawRing : geom.holes()) {
+                    holeRings.add(toGeometryPoints(rawRing, "模板部件 [" + piece.name() + "] 内孔坐标无效"));
+                }
+                NestingProblem.Shape shape;
+                if (geom.v() != null && !geom.v().isEmpty()) {
+                    List<NestingProblem.Point> outerPts = toGeometryPoints(
+                            geom.v(), "模板部件 [" + piece.name() + "] 外轮廓坐标无效");
+                    shape = new NestingProblem.Shape("POLYGON", geom.w(), geom.h(), outerPts, holeRings);
+                } else {
+                    shape = new NestingProblem.Shape("RECTANGLE", geom.w(), geom.h(), List.of(), holeRings);
+                }
+                PolygonGeometry.validate(shape);
+            }
+        }
+    }
+
+    private static List<NestingProblem.Point> toGeometryPoints(List<List<Double>> rawRing, String errMsg) {
+        if (rawRing == null || rawRing.size() < 3) {
+            throw new IllegalArgumentException(errMsg);
+        }
+        List<NestingProblem.Point> pts = new ArrayList<>(rawRing.size());
+        for (List<Double> pt : rawRing) {
+            if (pt == null || pt.size() < 2 || pt.get(0) == null || pt.get(1) == null
+                    || !Double.isFinite(pt.get(0)) || !Double.isFinite(pt.get(1))) {
+                throw new IllegalArgumentException(errMsg);
+            }
+            pts.add(new NestingProblem.Point(pt.get(0), pt.get(1)));
+        }
+        return pts;
     }
 
     private static double round1(double v) {

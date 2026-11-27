@@ -723,12 +723,8 @@ final class CuttingExecutionAndReportService {
             CuttingPlan plan = kernel.findOrLoadPlan(planId);
             if (plan != null) kernel.plans.put(planId, plan.withStatus("REVERSED"));
             if (kernel.store.supportsHotColdLoading()) {
-                for (SchedulingScheme sc : kernel.store.listAllSchemes()) {
-                    if (sc.linkedPlanIds().contains(planId)
-                            && !SchedulingScheme.STATE_CANCELLED.equals(sc.state())
-                            && !SchedulingScheme.STATE_REVERSED.equals(sc.state())) {
-                        kernel.findOrLoadScheme(sc.id());
-                    }
+                for (SchedulingScheme sc : kernel.store.findActiveSchemesByPlanId(planId)) {
+                    kernel.findOrLoadScheme(sc.id());
                 }
             }
             kernel.schemes.replaceAll((sid, sc) -> sc.linkedPlanIds().contains(planId)

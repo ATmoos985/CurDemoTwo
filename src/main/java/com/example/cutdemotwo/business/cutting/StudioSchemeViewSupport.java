@@ -20,7 +20,7 @@ final class StudioSchemeViewSupport {
 
     List<Map<String, Object>> listSchemes(String stateFilter, String taskIdFilter, boolean summary) {
         return statePort.inRead(tx -> {
-            List<SchedulingScheme> list = new ArrayList<>(tx.listSchemes());
+            List<SchedulingScheme> list = new ArrayList<>(tx.querySchemes(stateFilter, taskIdFilter));
             Collections.reverse(list);
             List<Map<String, Object>> out = new ArrayList<>();
             for (SchedulingScheme s : list) {

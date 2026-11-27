@@ -64,6 +64,36 @@ public interface CuttingStatePort {
 
         List<SchedulingScheme> listSchemes();
 
+        default List<SchedulingScheme> listActiveSchemes() {
+            return listSchemes().stream()
+                    .filter(s -> !SchedulingScheme.STATE_CANCELLED.equals(s.state())
+                            && !SchedulingScheme.STATE_REVERSED.equals(s.state())
+                            && !SchedulingScheme.STATE_COMPLETED.equals(s.state()))
+                    .toList();
+        }
+
+        default List<SchedulingScheme> querySchemes(String stateFilter, String taskIdFilter) {
+            return listSchemes().stream()
+                    .filter(s -> stateFilter == null || stateFilter.isBlank() || "ALL".equalsIgnoreCase(stateFilter)
+                            || stateFilter.equalsIgnoreCase(s.state()))
+                    .filter(s -> taskIdFilter == null || taskIdFilter.isBlank() || s.involvesTask(taskIdFilter.trim()))
+                    .toList();
+        }
+
+        default List<SchedulingScheme> findSchemesByRollId(String rollId) {
+            return listSchemes().stream()
+                    .filter(s -> rollId != null && rollId.equals(s.rollId()))
+                    .toList();
+        }
+
+        default long countActiveSchemesForTask(String taskId) {
+            return listSchemes().stream()
+                    .filter(s -> s.involvesTask(taskId)
+                            && !SchedulingScheme.STATE_CANCELLED.equals(s.state())
+                            && !SchedulingScheme.STATE_REVERSED.equals(s.state()))
+                    .count();
+        }
+
         Optional<SchedulingScheme> findScheme(String id);
 
         Optional<SchedulingScheme> findSchemeByIdempotencyKey(String idempotencyKey);

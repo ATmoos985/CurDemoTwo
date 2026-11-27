@@ -168,16 +168,6 @@ final class ColdStateQueryBridge {
             String statusFilter,
             String taskIdFilter
     ) {
-        List<SchedulingScheme> schemesForMap = store.supportsHotColdLoading()
-                ? store.listAllSchemes()
-                : new ArrayList<>(hotSchemes.values());
-        Map<String, String> planToSchemeId = new HashMap<>();
-        for (SchedulingScheme sc : schemesForMap) {
-            for (String pid : sc.linkedPlanIds()) {
-                planToSchemeId.put(pid, sc.id());
-            }
-        }
-
         List<Map<String, Object>> selectedRaw;
         long total;
         boolean hasMore;
@@ -206,6 +196,39 @@ final class ColdStateQueryBridge {
             int to = Math.min(from + limit, filtered.size());
             selectedRaw = filtered.subList(from, to);
             hasMore = to < filtered.size();
+        }
+
+        Map<String, String> planToSchemeId = new HashMap<>();
+        if (!selectedRaw.isEmpty()) {
+            Set<String> neededPlanIds = new LinkedHashSet<>();
+            Set<String> neededTaskIds = new LinkedHashSet<>();
+            for (Map<String, Object> raw : selectedRaw) {
+                Object pid = raw.get("planId");
+                if (pid != null && !pid.toString().isBlank()) neededPlanIds.add(pid.toString());
+                neededTaskIds.addAll(InventoryJournal.receiptTaskIds(raw));
+            }
+            for (SchedulingScheme sc : hotSchemes.values()) {
+                for (String pid : sc.linkedPlanIds()) {
+                    if (neededPlanIds.contains(pid)) {
+                        planToSchemeId.put(pid, sc.id());
+                    }
+                }
+            }
+            if (store.supportsHotColdLoading()) {
+                Set<String> missingPlanIds = new LinkedHashSet<>();
+                for (String pid : neededPlanIds) {
+                    if (!planToSchemeId.containsKey(pid)) missingPlanIds.add(pid);
+                }
+                if (!missingPlanIds.isEmpty()) {
+                    for (SchedulingScheme sc : store.findSchemesForPlanIds(missingPlanIds, neededTaskIds)) {
+                        for (String pid : sc.linkedPlanIds()) {
+                            if (neededPlanIds.contains(pid)) {
+                                planToSchemeId.putIfAbsent(pid, sc.id());
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         Map<String, CuttingTask> taskCache = new HashMap<>();

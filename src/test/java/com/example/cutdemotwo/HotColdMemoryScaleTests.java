@@ -2,9 +2,11 @@ package com.example.cutdemotwo;
 
 import com.example.cutdemotwo.business.cutting.RemnantService;
 import com.example.cutdemotwo.business.cutting.ScaleArchiveFixture;
+import com.example.cutdemotwo.business.workbench.WorkbenchTaskViewSupport;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.InventoryTransfer;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
+import com.example.cutdemotwo.business.model.SchedulingScheme;
 import com.example.cutdemotwo.persistence.InventoryConflictException;
 import com.example.cutdemotwo.persistence.JdbcInventoryStore;
 import com.example.cutdemotwo.persistence.OptimizationTestDatabase;
@@ -12,7 +14,9 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import tools.jackson.databind.json.JsonMapper;
 
 import javax.sql.DataSource;
 import java.io.BufferedReader;
@@ -21,7 +25,11 @@ import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.Statement;
+import java.util.LinkedHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -342,7 +350,183 @@ class HotColdMemoryScaleTests {
         }
     }
 
+    @Test
+    void likeWildcardAndReconciliationPaginationDoNotScanFullColdSchemes() {
+        DataSource rawDs = OptimizationTestDatabase.create();
+        Flyway.configure().dataSource(rawDs).cleanDisabled(true).load().migrate();
+
+        JdbcTemplate jdbc = new JdbcTemplate(rawDs);
+        JsonMapper mapper = JsonMapper.builder().build();
+
+        // 1. 预置 220 条冷 COMPLETED 排程方案与 3 条关联的 cut_report
+        jdbc.update("UPDATE cutdemo_revision SET revision = 1 WHERE id = 1");
+        int coldSchemeCount = 220;
+        for (int i = 1; i <= coldSchemeCount; i++) {
+            String sid = String.format("COLD-SCH-%04d", i);
+            String tid = String.format("COLD-TASK-%04d", i);
+            String pid = String.format("COLD-PLAN-%04d", i);
+            SchedulingScheme sc = new SchedulingScheme(
+                    sid, "IDEM-COLD-" + i, "冷方案-" + i, "RECT_2D", "SHORTEN", "S1", "策略",
+                    tid, "冷任务-" + i, null, "VIRTUAL_ROLL", "COLD-ROLL-1", null, "MAT-COLD",
+                    1500.0, 1000.0, 0.0, 500.0, 0.0, 0.0, 60.0, 0.45,
+                    2, 2, 0, true, Map.of("1", 2), List.of(pid), null,
+                    SchedulingScheme.STATE_COMPLETED, null, null, null, null,
+                    "2026-01-01T00:00:00", null, "2026-01-02T00:00:00", null, null
+            );
+            jdbc.update(
+                    "INSERT INTO scheduling_scheme (id, sort_order, task_id, roll_id, state, dimension, data_json) VALUES (?,?,?,?,?,?,?)",
+                    sid, (long) i, tid, "COLD-ROLL-1", SchedulingScheme.STATE_COMPLETED, "RECT_2D", mapper.writeValueAsString(sc)
+            );
+            if (i <= 3) {
+                Map<String, Object> receipt = new LinkedHashMap<>();
+                receipt.put("planId", pid);
+                receipt.put("taskId", tid);
+                receipt.put("taskRevision", 1L);
+                receipt.put("feedPortType", "roll");
+                receipt.put("rollId", "COLD-ROLL-1");
+                receipt.put("rollModel", "MAT-COLD");
+                receipt.put("status", "CONFIRMED");
+                receipt.put("confirmedAt", "2026-01-02T00:00:0" + i);
+                receipt.put("usedArea", 2.0);
+                receipt.put("pieceArea", 1.5);
+                receipt.put("remArea", 0.3);
+                receipt.put("wasteArea", 0.2);
+                receipt.put("rejectedArea", 0.0);
+                receipt.put("finishedPieceCount", 2);
+                receipt.put("demandQuantities", Map.of("1", 2));
+                jdbc.update(
+                        "INSERT INTO cut_report (id, sort_order, task_id, roll_id, source_remnant_id, status, data_json) VALUES (?,?,?,?,?,?,?)",
+                        pid, (long) i, tid, "COLD-ROLL-1", null, "CONFIRMED", mapper.writeValueAsString(receipt)
+                );
+                jdbc.update("INSERT INTO cut_report_task_link (report_id, task_id) VALUES (?,?)", pid, tid);
+            }
+        }
+
+        List<String> capturedSql = Collections.synchronizedList(new ArrayList<>());
+        AtomicInteger schemeRowsFetched = new AtomicInteger(0);
+        DataSource spyDs = sqlAndRowCountingDataSource(rawDs, capturedSql, "scheduling_scheme", schemeRowsFetched);
+
+        JdbcInventoryStore spyStore = new JdbcInventoryStore(spyDs);
+        RemnantService service = new RemnantService(spyStore, false);
+
+        // 2. 通配符 % 与 _ 幂等键查询：必须转义 ESCAPE '!' 且从 scheduling_scheme 拉取 0 行
+        capturedSql.clear();
+        schemeRowsFetched.set(0);
+        assertTrue(spyStore.findSchemeByIdempotencyKey("%").isEmpty());
+        assertTrue(spyStore.findSchemeByIdempotencyKey("IDEM_COLD%").isEmpty());
+        assertEquals(0, schemeRowsFetched.get(), "通配符 %/_ 查询不得拉取并反序列化任何冷方案行");
+        assertTrue(capturedSql.stream().anyMatch(s -> s.toUpperCase(Locale.ROOT).contains("ESCAPE '!'")),
+                "LIKE 查询必须包含 ESCAPE '!' 转义");
+
+        // 正常精确查询可命中单条（早停不拉 220 行）
+        schemeRowsFetched.set(0);
+        var exactHit = spyStore.findSchemeByIdempotencyKey("IDEM-COLD-15");
+        assertTrue(exactHit.isPresent());
+        assertEquals("COLD-SCH-0015", exactHit.get().id());
+        assertTrue(schemeRowsFetched.get() <= 2, "精确幂等键查询应受控早停，实际读取行数: " + schemeRowsFetched.get());
+
+        // 3. reconciliationReports(10, 0)：只应拉取当前页相关的极少数方案（<= 3 行），绝非全表 220 行
+        capturedSql.clear();
+        schemeRowsFetched.set(0);
+        var page = service.reconciliationReports(10, 0, "ALL", null);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> items = (List<Map<String, Object>>) page.get("items");
+        assertEquals(3, items.size());
+        assertTrue(items.stream().allMatch(it -> it.get("schemeId") != null));
+        assertTrue(schemeRowsFetched.get() <= 10,
+                "reconciliationReports(10, 0) 拉取 scheduling_scheme 行数应 <= 10，实际: " + schemeRowsFetched.get());
+        assertTrue(capturedSql.stream().noneMatch(s -> {
+            String lower = s.toLowerCase(Locale.ROOT).trim();
+            return lower.contains("from scheduling_scheme") && !lower.contains(" where ");
+        }), "reconciliationReports 不得执行无 WHERE 的 scheduling_scheme 全表查询");
+    }
+
+    @Test
+    void workbenchTaskSummaryAndPlannedQuantitiesDoNotScanFullColdSchemes() {
+        DataSource rawDs = OptimizationTestDatabase.create();
+        Flyway.configure().dataSource(rawDs).cleanDisabled(true).load().migrate();
+
+        JdbcTemplate jdbc = new JdbcTemplate(rawDs);
+        JsonMapper mapper = JsonMapper.builder().build();
+        jdbc.update("UPDATE cutdemo_revision SET revision = 1 WHERE id = 1");
+
+        // 1. 预置 220 条冷 COMPLETED 方案
+        for (int i = 1; i <= 220; i++) {
+            String sid = String.format("WB-COLD-SCH-%04d", i);
+            String tid = String.format("WB-COLD-TASK-%04d", i);
+            SchedulingScheme sc = new SchedulingScheme(
+                    sid, "IDEM-WB-COLD-" + i, "冷方案-" + i, "RECT_2D", "SHORTEN", "S1", "策略",
+                    tid, "冷任务-" + i, null, "VIRTUAL_ROLL", "WB-COLD-ROLL-1", null, "MAT-WB",
+                    1500.0, 1000.0, 0.0, 500.0, 0.0, 0.0, 60.0, 0.45,
+                    2, 2, 0, true, Map.of("1", 2), List.of("WB-COLD-PLAN-" + i), null,
+                    SchedulingScheme.STATE_COMPLETED, null, null, null, null,
+                    "2026-01-01T00:00:00", null, "2026-01-02T00:00:00", null, null
+            );
+            jdbc.update(
+                    "INSERT INTO scheduling_scheme (id, sort_order, task_id, roll_id, state, dimension, data_json) VALUES (?,?,?,?,?,?,?)",
+                    sid, (long) i, tid, "WB-COLD-ROLL-1", SchedulingScheme.STATE_COMPLETED, "RECT_2D", mapper.writeValueAsString(sc)
+            );
+        }
+
+        // 2. 预置 1 个活跃任务（需求 10 件）和 1 个未完结活跃方案（预占 4 件）
+        CuttingTask newTask = new CuttingTask(
+                null, "工作台活跃测试任务", "MAT-WB", "EXT-WB-1", 0L,
+                List.of(new CuttingTask.Line(1, "主片", 300.0, 400.0, 10, true))
+        );
+        RemnantService setup = new RemnantService(new JdbcInventoryStore(rawDs), false);
+        String activeTaskId = setup.inWrite("ADD_TASK", "WB-ACT-TASK-1", "tester", tx -> {
+            CuttingTask savedTask = tx.saveTask(newTask);
+            SchedulingScheme activeScheme = new SchedulingScheme(
+                    "WB-ACT-SCH-1", "IDEM-WB-ACT-1", "活跃方案", "RECT_2D", "SHORTEN", "S1", "策略",
+                    savedTask.id(), "工作台活跃测试任务", "EXT-WB-1", "STOCK_ROLL", "WB-ACT-ROLL-1", null, "MAT-WB",
+                    1500.0, 1000.0, 0.0, 400.0, 0.0, 0.0, 72.0, 0.48,
+                    4, 10, 0, false, Map.of("1", 4), List.of(), null,
+                    SchedulingScheme.STATE_READY_TO_CUT, null, null, null, null,
+                    "2026-11-27T00:00:00", null, null, null, null
+            );
+            tx.putScheme(activeScheme);
+            return savedTask.id();
+        });
+
+        List<String> capturedSql = Collections.synchronizedList(new ArrayList<>());
+        AtomicInteger schemeRowsFetched = new AtomicInteger(0);
+        DataSource spyDs = sqlAndRowCountingDataSource(rawDs, capturedSql, "scheduling_scheme", schemeRowsFetched);
+
+        // 3. 热冷启动仅加载活跃方案（1 行）及 1 行 nextSortOrder 聚合行，绝不拉取 220 条冷方案
+        RemnantService service = new RemnantService(new JdbcInventoryStore(spyDs), false);
+        assertTrue(schemeRowsFetched.get() <= 2, "冷启动仅应加载活跃方案与 max(sort_order)，实际读取行数: " + schemeRowsFetched.get());
+
+        // 4. 查询工作台任务预占量与任务摘要时，scheduling_scheme 必须读取 0 行且无全表查询
+        capturedSql.clear();
+        schemeRowsFetched.set(0);
+
+        Map<String, Integer> planned = service.inRead(tx ->
+                WorkbenchTaskViewSupport.plannedQuantitiesForTask(tx, activeTaskId));
+        assertEquals(Map.of("1", 4), planned, "活跃方案预占量必须准确统计");
+
+        Map<String, Object> summary = service.inRead(tx -> {
+            CuttingTask task = tx.findTask(activeTaskId).orElseThrow();
+            return WorkbenchTaskViewSupport.buildTaskSummary(tx, task);
+        });
+        assertEquals(10, summary.get("orderedTotal"));
+        assertEquals(4, summary.get("plannedTotal"));
+        assertEquals(6, summary.get("openTotal"));
+        assertEquals(0, schemeRowsFetched.get(),
+                "工作台任务视图计算 plannedQuantitiesForTask 时不得扫描任何 scheduling_scheme 行");
+        assertTrue(capturedSql.stream().noneMatch(s -> s.toLowerCase(Locale.ROOT).contains("scheduling_scheme")),
+                "工作台任务视图计算不应触发任何 scheduling_scheme SQL 查询: " + capturedSql);
+    }
+
     private static DataSource sqlRecordingDataSource(DataSource target, List<String> sqlLog) {
+        return sqlAndRowCountingDataSource(target, sqlLog, null, null);
+    }
+
+    private static DataSource sqlAndRowCountingDataSource(
+            DataSource target,
+            List<String> sqlLog,
+            String watchedTable,
+            AtomicInteger watchedTableRowCounter
+    ) {
         return (DataSource) Proxy.newProxyInstance(
                 DataSource.class.getClassLoader(),
                 new Class<?>[]{DataSource.class},
@@ -353,25 +537,60 @@ class HotColdMemoryScaleTests {
                                 Connection.class.getClassLoader(),
                                 new Class<?>[]{Connection.class},
                                 (cProxy, cMethod, cArgs) -> {
-                                    if (("prepareStatement".equals(cMethod.getName()) || "prepareCall".equals(cMethod.getName()))
-                                            && cArgs != null && cArgs.length > 0 && cArgs[0] instanceof String sql) {
-                                        sqlLog.add(sql);
+                                    boolean isPrepare = "prepareStatement".equals(cMethod.getName()) || "prepareCall".equals(cMethod.getName());
+                                    String prepSql = (isPrepare && cArgs != null && cArgs.length > 0 && cArgs[0] instanceof String s) ? s : null;
+                                    if (prepSql != null) {
+                                        sqlLog.add(prepSql);
                                     }
                                     Object cRes = cMethod.invoke(conn, cArgs);
+                                    if (isPrepare && cRes instanceof PreparedStatement ps && prepSql != null
+                                            && watchedTable != null && watchedTableRowCounter != null
+                                            && prepSql.toLowerCase(Locale.ROOT).contains("from " + watchedTable)) {
+                                        return Proxy.newProxyInstance(
+                                                PreparedStatement.class.getClassLoader(),
+                                                new Class<?>[]{PreparedStatement.class},
+                                                (pProxy, pMethod, pArgs) -> {
+                                                    Object pRes = pMethod.invoke(ps, pArgs);
+                                                    if ("executeQuery".equals(pMethod.getName()) && pRes instanceof ResultSet rs) {
+                                                        return countingResultSet(rs, watchedTableRowCounter);
+                                                    }
+                                                    return pRes;
+                                                });
+                                    }
                                     if ("createStatement".equals(cMethod.getName()) && cRes instanceof Statement stmt) {
                                         return Proxy.newProxyInstance(
                                                 Statement.class.getClassLoader(),
                                                 new Class<?>[]{Statement.class},
                                                 (sProxy, sMethod, sArgs) -> {
-                                                    if (sMethod.getName().startsWith("execute") && sArgs != null
-                                                            && sArgs.length > 0 && sArgs[0] instanceof String sql) {
-                                                        sqlLog.add(sql);
+                                                    String execSql = (sMethod.getName().startsWith("execute") && sArgs != null
+                                                            && sArgs.length > 0 && sArgs[0] instanceof String sql) ? sql : null;
+                                                    if (execSql != null) {
+                                                        sqlLog.add(execSql);
                                                     }
-                                                    return sMethod.invoke(stmt, sArgs);
+                                                    Object sRes = sMethod.invoke(stmt, sArgs);
+                                                    if ("executeQuery".equals(sMethod.getName()) && sRes instanceof ResultSet rs
+                                                            && execSql != null && watchedTable != null && watchedTableRowCounter != null
+                                                            && execSql.toLowerCase(Locale.ROOT).contains("from " + watchedTable)) {
+                                                        return countingResultSet(rs, watchedTableRowCounter);
+                                                    }
+                                                    return sRes;
                                                 });
                                     }
                                     return cRes;
                                 });
+                    }
+                    return res;
+                });
+    }
+
+    private static ResultSet countingResultSet(ResultSet target, AtomicInteger counter) {
+        return (ResultSet) Proxy.newProxyInstance(
+                ResultSet.class.getClassLoader(),
+                new Class<?>[]{ResultSet.class},
+                (proxy, method, args) -> {
+                    Object res = method.invoke(target, args);
+                    if ("next".equals(method.getName()) && Boolean.TRUE.equals(res)) {
+                        counter.incrementAndGet();
                     }
                     return res;
                 });

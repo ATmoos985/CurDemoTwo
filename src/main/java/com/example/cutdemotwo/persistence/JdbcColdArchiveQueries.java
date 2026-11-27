@@ -423,8 +423,8 @@ final class JdbcColdArchiveQueries {
                 Integer.class, type, id);
         if (cnt != null && cnt > 0) return true;
         List<InventoryTransfer> rows = jdbc.query(
-                "SELECT data_json FROM inventory_transfer WHERE data_json LIKE ? LIMIT 20",
-                (rs, i) -> json.readValue(rs.getString(1), InventoryTransfer.class), "%" + id + "%");
+                "SELECT data_json FROM inventory_transfer WHERE data_json LIKE ? ESCAPE '!' LIMIT 20",
+                (rs, i) -> json.readValue(rs.getString(1), InventoryTransfer.class), escapeLikePattern(id));
         return rows.stream().flatMap(t -> t.lines().stream())
                 .anyMatch(l -> type.equals(l.type()) && id.equals(l.id()));
     }
@@ -435,8 +435,8 @@ final class JdbcColdArchiveQueries {
                 Long.class, type, id);
         if (maxRev != null && maxRev > 0) return maxRev;
         List<InventoryCount> rows = jdbc.query(
-                "SELECT data_json FROM inventory_count WHERE data_json LIKE ? ORDER BY inventory_revision DESC LIMIT 20",
-                (rs, i) -> json.readValue(rs.getString(1), InventoryCount.class), "%" + id + "%");
+                "SELECT data_json FROM inventory_count WHERE data_json LIKE ? ESCAPE '!' ORDER BY inventory_revision DESC LIMIT 20",
+                (rs, i) -> json.readValue(rs.getString(1), InventoryCount.class), escapeLikePattern(id));
         return rows.stream().filter(c -> c.lines().stream().anyMatch(l -> type.equals(l.type()) && id.equals(l.id())))
                 .mapToLong(InventoryCount::inventoryRevision).max().orElse(0L);
     }
@@ -450,8 +450,8 @@ final class JdbcColdArchiveQueries {
         Integer cnt = jdbc.queryForObject("SELECT COUNT(*) FROM inventory_receipt_roll_link WHERE roll_id = ?", Integer.class, rollId);
         if (cnt != null && cnt > 0) return true;
         List<InventoryReceiptDocument> rows = jdbc.query(
-                "SELECT data_json FROM inventory_receipt_document WHERE data_json LIKE ? LIMIT 20",
-                (rs, i) -> json.readValue(rs.getString(1), InventoryReceiptDocument.class), "%" + rollId + "%");
+                "SELECT data_json FROM inventory_receipt_document WHERE data_json LIKE ? ESCAPE '!' LIMIT 20",
+                (rs, i) -> json.readValue(rs.getString(1), InventoryReceiptDocument.class), escapeLikePattern(rollId));
         return rows.stream().flatMap(r -> r.lines().stream()).anyMatch(l -> rollId.equals(l.rollId()));
     }
 
@@ -586,15 +586,19 @@ final class JdbcColdArchiveQueries {
             String table, String needle, Class<T> type, java.util.function.Predicate<T> predicate
     ) {
         if (needle == null || needle.isBlank()) return Optional.empty();
-        List<HotColdModels.OrderedEntry<T>> rows = jdbc.query(
-                "SELECT id, sort_order, data_json FROM " + table + " WHERE data_json LIKE ? ORDER BY sort_order ASC",
-                (rs, i) -> new HotColdModels.OrderedEntry<>(rs.getString(1), rs.getLong(2), json.readValue(rs.getString(3), type)),
-                "%" + needle + "%"
+        return jdbc.query(
+                "SELECT id, sort_order, data_json FROM " + table + " WHERE data_json LIKE ? ESCAPE '!' ORDER BY sort_order ASC",
+                (org.springframework.jdbc.core.ResultSetExtractor<Optional<HotColdModels.OrderedEntry<T>>>) rs -> {
+                    while (rs.next()) {
+                        T val = json.readValue(rs.getString(3), type);
+                        if (predicate.test(val)) {
+                            return Optional.of(new HotColdModels.OrderedEntry<>(rs.getString(1), rs.getLong(2), val));
+                        }
+                    }
+                    return Optional.empty();
+                },
+                escapeLikePattern(needle)
         );
-        for (var row : rows) {
-            if (predicate.test(row.value())) return Optional.of(row);
-        }
-        return Optional.empty();
     }
 
     <T> void streamBySortOrder(String table, Class<T> type, int batchSize, Consumer<List<T>> consumer) {
@@ -612,10 +616,136 @@ final class JdbcColdArchiveQueries {
     List<Map<String, Object>> findCutReportsLike(String needle) {
         if (needle == null || needle.isBlank()) return List.of();
         return jdbc.query(
-                "SELECT data_json FROM cut_report WHERE data_json LIKE ? ORDER BY sort_order DESC",
+                "SELECT data_json FROM cut_report WHERE data_json LIKE ? ESCAPE '!' ORDER BY sort_order DESC",
                 (rs, i) -> json.readValue(rs.getString(1), MAP_TYPE),
-                "%" + needle + "%"
+                escapeLikePattern(needle)
         );
+    }
+
+    List<SchedulingScheme> findSchemesForPlanIds(Set<String> planIds, Set<String> taskIds) {
+        if (planIds == null || planIds.isEmpty()) return List.of();
+        return readOnlyTransaction.execute(status -> {
+            Map<String, SchedulingScheme> byId = new LinkedHashMap<>();
+            Set<String> remaining = new LinkedHashSet<>(planIds);
+            if (taskIds != null && !taskIds.isEmpty()) {
+                List<String> taskList = new ArrayList<>(taskIds);
+                for (int i = 0; i < taskList.size(); i += 100) {
+                    List<String> chunk = taskList.subList(i, Math.min(taskList.size(), i + 100));
+                    String placeholders = String.join(",", Collections.nCopies(chunk.size(), "?"));
+                    List<SchedulingScheme> found = jdbc.query(
+                            "SELECT data_json FROM scheduling_scheme WHERE task_id IN (" + placeholders + ") ORDER BY sort_order ASC",
+                            (rs, idx) -> json.readValue(rs.getString(1), SchedulingScheme.class),
+                            chunk.toArray()
+                    );
+                    for (SchedulingScheme sc : found) {
+                        byId.put(sc.id(), sc);
+                        remaining.removeAll(sc.linkedPlanIds());
+                    }
+                }
+            }
+            for (String pid : new ArrayList<>(remaining)) {
+                if (!remaining.contains(pid)) continue;
+                SchedulingScheme matched = jdbc.query(
+                        "SELECT data_json FROM scheduling_scheme WHERE data_json LIKE ? ESCAPE '!' ORDER BY sort_order ASC",
+                        (org.springframework.jdbc.core.ResultSetExtractor<SchedulingScheme>) rs -> {
+                            while (rs.next()) {
+                                SchedulingScheme sc = json.readValue(rs.getString(1), SchedulingScheme.class);
+                                if (sc.linkedPlanIds().contains(pid)) return sc;
+                            }
+                            return null;
+                        },
+                        escapeLikeJsonQuoted(pid)
+                );
+                if (matched != null) {
+                    byId.put(matched.id(), matched);
+                    remaining.removeAll(matched.linkedPlanIds());
+                }
+            }
+            return List.copyOf(byId.values());
+        });
+    }
+
+    List<SchedulingScheme> findActiveSchemesByPlanId(String planId) {
+        if (planId == null || planId.isBlank()) return List.of();
+        List<SchedulingScheme> rows = jdbc.query(
+                "SELECT data_json FROM scheduling_scheme WHERE state NOT IN ('CANCELLED','REVERSED') AND data_json LIKE ? ESCAPE '!' ORDER BY sort_order ASC",
+                (rs, i) -> json.readValue(rs.getString(1), SchedulingScheme.class),
+                escapeLikeJsonQuoted(planId)
+        );
+        return rows.stream().filter(sc -> sc.linkedPlanIds().contains(planId)).toList();
+    }
+
+    List<SchedulingScheme> findSchemesByRollId(String rollId) {
+        if (rollId == null || rollId.isBlank()) return List.of();
+        return jdbc.query(
+                "SELECT data_json FROM scheduling_scheme WHERE roll_id = ? ORDER BY sort_order ASC",
+                (rs, i) -> json.readValue(rs.getString(1), SchedulingScheme.class),
+                rollId
+        );
+    }
+
+    List<SchedulingScheme> querySchemes(String stateFilter, String taskIdFilter) {
+        StringBuilder sql = new StringBuilder("SELECT data_json FROM scheduling_scheme WHERE 1=1");
+        List<Object> args = new ArrayList<>();
+        if (stateFilter != null && !stateFilter.isBlank() && !"ALL".equalsIgnoreCase(stateFilter)) {
+            sql.append(" AND state = ?");
+            args.add(stateFilter.trim().toUpperCase(java.util.Locale.ROOT));
+        }
+        String cleanTaskId = (taskIdFilter == null || taskIdFilter.isBlank()) ? null : taskIdFilter.trim();
+        if (cleanTaskId != null) {
+            sql.append(" AND (task_id = ? OR data_json LIKE ? ESCAPE '!')");
+            args.add(cleanTaskId);
+            args.add(escapeLikeJsonQuoted(cleanTaskId));
+        }
+        sql.append(" ORDER BY sort_order ASC");
+        List<SchedulingScheme> rows = jdbc.query(sql.toString(),
+                (rs, i) -> json.readValue(rs.getString(1), SchedulingScheme.class),
+                args.toArray());
+        if (cleanTaskId != null) {
+            return rows.stream().filter(s -> s.involvesTask(cleanTaskId)).toList();
+        }
+        return rows;
+    }
+
+    long countActiveSchemesForTask(String taskId) {
+        if (taskId == null || taskId.isBlank()) return 0L;
+        String clean = taskId.trim();
+        Long cnt = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM scheduling_scheme WHERE state NOT IN ('CANCELLED','REVERSED') AND (task_id = ? OR data_json LIKE ? ESCAPE '!')",
+                Long.class,
+                clean,
+                escapeLikeJsonQuoted(clean)
+        );
+        return cnt == null ? 0L : cnt;
+    }
+
+    List<MotherRollInfo> listMotherRollsPage(int limit, int offset) {
+        return jdbc.query(
+                "SELECT data_json FROM mother_roll ORDER BY sort_order ASC LIMIT ? OFFSET ?",
+                (rs, i) -> json.readValue(rs.getString(1), MotherRollInfo.class),
+                limit, offset
+        );
+    }
+
+    static String escapeLikePattern(String needle) {
+        if (needle == null || needle.isEmpty()) return "%%";
+        return "%" + escapeLikeBody(needle) + "%";
+    }
+
+    private static String escapeLikeJsonQuoted(String literal) {
+        return "%\"" + escapeLikeBody(literal) + "\"%";
+    }
+
+    private static String escapeLikeBody(String value) {
+        StringBuilder sb = new StringBuilder(value.length() + 8);
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '!' || c == '%' || c == '_') {
+                sb.append('!');
+            }
+            sb.append(c);
+        }
+        return sb.toString();
     }
 
     private <T> List<HotColdModels.OrderedEntry<T>> orderedRows(String sql, Class<T> type) {

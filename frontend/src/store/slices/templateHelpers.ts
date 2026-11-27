@@ -3,6 +3,7 @@ import {
   parseDxfGarmentText,
   mirrorVerticesX
 } from '../../lib/nesting/dxf-garment-samples.js';
+import { ensureCw } from '../../lib/nesting/dxf-geometry.js';
 import { polygon, rectangle } from '../../lib/canvas/nesting-scene.js';
 import { LINEAR_SCENARIOS } from '../../lib/domain/linear-scenarios.js';
 import type {
@@ -338,11 +339,33 @@ export function expandClusterToDemands(
       const allowFreeRot = piece.grainRule === 'FREE_90';
       const allowHalf = piece.grainRule === 'HALF_TURN_180';
 
-      if (geom.v && geom.v.length >= 3) {
-        const baseVerts = geom.v.map(([x, y]) => ({ x, y }));
-        const baseShape = polygon(baseVerts) as ShapeGeometry;
+      const hasHoles =
+        Array.isArray(geom.holes) && geom.holes.some((r) => Array.isArray(r) && r.length >= 3);
+      if ((geom.v && geom.v.length >= 3) || hasHoles) {
+        const baseVerts =
+          geom.v && geom.v.length >= 3
+            ? geom.v.map(([x, y]) => ({ x, y }))
+            : [
+                { x: 0, y: 0 },
+                { x: geom.w, y: 0 },
+                { x: geom.w, y: geom.h },
+                { x: 0, y: geom.h }
+              ];
+        const baseHoles = hasHoles
+          ? geom.holes!
+              .filter((ring) => Array.isArray(ring) && ring.length >= 3)
+              .map((ring) => ensureCw(ring.map(([x, y]) => ({ x, y }))))
+          : [];
+        const baseShape = polygon(baseVerts, baseHoles) as ShapeGeometry;
         if (piece.pairMirror && piece.quantityPerUnit === 2) {
-          const rightShape = polygon(mirrorVerticesX(baseVerts, geom.w)) as ShapeGeometry;
+          const mirrorW = geom.w || baseShape.width;
+          const mirroredHoles = baseHoles.map((ring) =>
+            ensureCw(mirrorVerticesX(ring, mirrorW))
+          );
+          const rightShape = polygon(
+            mirrorVerticesX(baseVerts, mirrorW),
+            mirroredHoles
+          ) as ShapeGeometry;
           items.push({
             id: nextId++,
             name: `${sizeKey}码 · ${piece.name}(左)`,
@@ -462,10 +485,14 @@ export function parseDxfToDemandCluster(text: string, fileName: string): DemandC
           sizes: {}
         });
       }
+      const holes = d.shape?.holes?.length
+        ? d.shape.holes.map((ring: any[]) => ring.map((pt: any): [number, number] => [pt.x, pt.y]))
+        : undefined;
       pieceMap.get(cleanName)!.sizes[sz] = {
         w: d.width,
         h: d.length,
-        v: d.shape?.vertices?.map((pt: any) => [pt.x, pt.y])
+        v: d.shape?.vertices?.map((pt: any) => [pt.x, pt.y]),
+        ...(holes ? { holes } : {})
       };
     }
   }

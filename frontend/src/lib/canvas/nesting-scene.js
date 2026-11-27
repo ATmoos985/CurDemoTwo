@@ -5,12 +5,43 @@ export function shapeVertices(value) {
     return value.type === 'RECTANGLE' ? [{ x: 0, y: 0 }, { x: value.width, y: 0 },
         { x: value.width, y: value.height }, { x: 0, y: value.height }] : value.vertices;
 }
-export function shapeArea(value) {
-    const points = shapeVertices(value);
-    return Math.abs(points.reduce((sum, p, i) => { const q = points[(i + 1) % points.length]; return sum + p.x * q.y - q.x * p.y; }, 0)) / 2;
+function ringAreaMm2(points) {
+    if (!Array.isArray(points) || points.length < 3) return 0;
+    let sum = 0;
+    for (let i = 0; i < points.length; i++) {
+        const a = points[i];
+        const b = points[(i + 1) % points.length];
+        sum += a.x * b.y - b.x * a.y;
+    }
+    return Math.abs(sum) / 2;
 }
-export function polygon(vertices) {
-    return { type: 'POLYGON', width: Math.max(...vertices.map(p => p.x)), height: Math.max(...vertices.map(p => p.y)), vertices };
+export function shapeArea(value) {
+    if (!value) return 0;
+    const outer = value.type === 'RECTANGLE'
+        ? Math.max(0, Number(value.width) || 0) * Math.max(0, Number(value.height) || 0)
+        : ringAreaMm2(shapeVertices(value));
+    if (!Array.isArray(value.holes) || value.holes.length === 0) {
+        return outer;
+    }
+    let holesArea = 0;
+    for (const hole of value.holes) {
+        holesArea += ringAreaMm2(hole);
+    }
+    return Math.max(0, outer - holesArea);
+}
+export function polygon(vertices, holes = []) {
+    const normalizedHoles = Array.isArray(holes)
+        ? holes
+            .filter(h => Array.isArray(h) && h.length >= 3)
+            .map(h => h.map(p => ({ x: p.x, y: p.y })))
+        : [];
+    return {
+        type: 'POLYGON',
+        width: Math.max(...vertices.map(p => p.x)),
+        height: Math.max(...vertices.map(p => p.y)),
+        vertices,
+        ...(normalizedHoles.length > 0 ? { holes: normalizedHoles } : {})
+    };
 }
 function shape(value) {
     if (!['RECTANGLE', 'POLYGON'].includes(value?.type)) throw new Error('画布仅支持矩形和简单多边形轮廓');
@@ -22,7 +53,23 @@ function shape(value) {
         if (Math.abs(Math.min(...points.map(p => p.x))) > 1e-7 || Math.abs(Math.min(...points.map(p => p.y))) > 1e-7
             || Math.abs(Math.max(...points.map(p => p.x)) - value.width) > 1e-7 || Math.abs(Math.max(...points.map(p => p.y)) - value.height) > 1e-7)
             throw new Error('多边形须按外接框左上角归零，宽高与轮廓一致');
-        return { type: 'POLYGON', width: value.width, height: value.height, vertices: points };
+        const holes = Array.isArray(value.holes) && value.holes.length > 0
+            ? value.holes
+                .filter(ring => Array.isArray(ring) && ring.length >= 3)
+                .map(ring => ring.map(p => {
+                    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x < 0 || p.y < 0) {
+                        throw new Error('多边形内孔顶点坐标无效');
+                    }
+                    return { x: p.x, y: p.y };
+                }))
+            : [];
+        return {
+            type: 'POLYGON',
+            width: value.width,
+            height: value.height,
+            vertices: points,
+            ...(holes.length > 0 ? { holes } : {})
+        };
     }
     return rectangle(value.width, value.height);
 }

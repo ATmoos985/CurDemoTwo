@@ -202,6 +202,10 @@ public class StudioWorkflowController {
     }
 
     private void verifyMesAuth(String authorization) {
+        AuthContext.Principal current = AuthContext.current();
+        if (current != null && current.authenticated()) {
+            return;
+        }
         String expected = mesToken == null ? "" : mesToken.trim();
         boolean enforced = mesAuthRequired || !expected.isEmpty();
         if (!enforced) return;

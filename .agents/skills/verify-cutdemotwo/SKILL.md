@@ -93,7 +93,7 @@ node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs drive --session "<s
 # I. F06 #/inspection UI 质检与总账闭环（INV-01~03）+ F07 #/slitting 1D 分条排产与配方 CSV 导出（20 项）
 node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs drive --session "<sessionFile>" --script inspection-and-slitting
 
-# J. F10 独立登录/Profile/用户管理 + F11 5 角色 RBAC/Agent 作用域(REST+MCP+SSE)/审计检索 + F12 -Xmx256m 热冷分离冷启动与分页（34 项，需 --auth）
+# J. F10 独立登录/Profile/用户管理 + F11 5 角色 RBAC/Agent 作用域(REST+MCP+SSE)/审计检索 + F12 -Xmx256m 热冷分离冷启动与分页（35 项，需 --auth）
 node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs drive --session "<authSessionFile>" --script auth-rbac-agent-audit
 
 # K. F13 多格式导入与服务端 CAM/报表/ZIP 导出 + F14 Benchmark 门禁与 /api/v2/* 全契约收敛（27 项）
@@ -151,5 +151,5 @@ node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs cleanup --session "
 - [`scripts/verify-workflow-gate.mjs`](./scripts/verify-workflow-gate.mjs)：技能真机/离线双模驱动（`workflow-gate-smoke`），覆盖 F01 工作流闭环门禁正负向 CLI、架构无环、Outbox 同步与隔离实例健康校验（13 项）。
 - [`scripts/verify-drafts-inbox-and-relay.mjs`](./scripts/verify-drafts-inbox-and-relay.mjs)：技能真机驱动（`drafts-inbox-and-relay`），覆盖 F08 工作台待确认草案收件箱（分页/过滤/状态闭环/TTL 过期）与 F09 多料头+多母卷联排批量草案闭环（21 项）。
 - [`scripts/verify-inspection-and-slitting.mjs`](./scripts/verify-inspection-and-slitting.mjs)：技能真机驱动（`inspection-and-slitting`），覆盖 F06 `#/inspection` UI 跑布验疵放行与总账平衡（`INV-01~03`）及 F07 `#/slitting` 1D 分条排产、物理约束拦截与配方 CSV 导出（20 项）。
-- [`scripts/verify-auth-rbac-agent-audit.mjs`](./scripts/verify-auth-rbac-agent-audit.mjs)：技能真机驱动（`auth-rbac-agent-audit`），覆盖 F10 独立登录/Profile/用户管理、F11 5 角色 RBAC/Agent 作用域(REST+MCP+SSE)/全站操作审计检索、以及 F12 `-Xmx256m` 批量历史数据冷启动与分页稳态验收（34 项）。
+- [`scripts/verify-auth-rbac-agent-audit.mjs`](./scripts/verify-auth-rbac-agent-audit.mjs)：技能真机驱动（`auth-rbac-agent-audit`），覆盖 F10 独立登录/Profile/用户管理、F11 5 角色 RBAC/Agent 作用域(REST+MCP+SSE)/全站操作审计检索、以及 F12 `-Xmx256m` 批量历史数据冷启动与分页稳态验收（35 项）。
 - [`scripts/verify-import-export-and-benchmark.mjs`](./scripts/verify-import-export-and-benchmark.mjs)：技能真机驱动（`import-export-and-benchmark`），覆盖 F13 生产级多格式导入（GB18030/BOM/DXF/批量母卷料头瑕疵）与服务端多格式导出（CAM/1D分切/PDF/5-Sheet XLSX/流式 ZIP）、以及 F14 `benchmark/gate.mjs` 求解质量门禁与 `/api/v2/*` 全契约收敛（27 项）。

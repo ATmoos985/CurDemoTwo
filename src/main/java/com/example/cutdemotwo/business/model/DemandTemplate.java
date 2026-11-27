@@ -50,7 +50,29 @@ public record DemandTemplate(
     public record SizeGeometry(
             double w,
             double h,
-            List<List<Double>> v
+            List<List<Double>> v,
+            List<List<List<Double>>> holes
     ) {
+        public SizeGeometry {
+            if (v != null) {
+                v = v.stream()
+                        .map(pt -> pt == null ? List.<Double>of() : List.copyOf(pt))
+                        .toList();
+            }
+            if (holes == null || holes.isEmpty()) {
+                holes = null;
+            } else {
+                holes = holes.stream()
+                        .map(ring -> ring == null ? List.<List<Double>>of()
+                                : ring.stream()
+                                .map(pt -> pt == null ? List.<Double>of() : List.copyOf(pt))
+                                .toList())
+                        .toList();
+            }
+        }
+
+        public SizeGeometry(double w, double h, List<List<Double>> v) {
+            this(w, h, v, null);
+        }
     }
 }

@@ -30,9 +30,9 @@ Preconditions: 使用独立非 `8080` 端口并附加 `--auth`（以及按需传
 并用 `doctor` 带着管理员凭据确认 `auth_endpoint_enabled`、`auth_doctor_login`、`api_health_up` 与 `ledger_reconciliation_balanced` 全通过：
 `node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs doctor --session "<authSessionFile>" --auth-user admin --auth-pass admin123`
 
-- **一键驱动全链路 Playwright + MCP + `-Xmx256m` 黑盒端到端验收（`auth-rbac-agent-audit`，34 项全真实用例，零跳过）**：
+- **一键驱动全链路 Playwright + MCP + `-Xmx256m` 黑盒端到端验收（`auth-rbac-agent-audit`，35 项全真实用例，零跳过）**：
   - 命令：`node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs drive --session "<authSessionFile>" --script auth-rbac-agent-audit`
-  - 可观测结果：退出码 `0`；输出 `.result.json` 为 `executed: 34, passed: 34, failed: 0, skipped: 0`（`prodInventoryUntouched: true`、`prodDraftsUntouched: true`），覆盖：
+  - 可观测结果：退出码 `0`；输出 `.result.json` 为 `executed: 35, passed: 35, failed: 0, skipped: 0`（`prodInventoryUntouched: true`、`prodDraftsUntouched: true`），覆盖：
     - **F10（5 正 + 5 负）**：`#/login` 重定向回跳与开放重定向清洗、`#/profile` 信息与自主改密重登、`#/users` 新建/编辑/重置/启停、401 防枚举、改密校验、登出/改密/禁用后旧 Token 立即 401、最后 `ADMIN` 防禁用 409、非 `ADMIN` 双层 403；
     - **F11（5 正 + 5 负）**：5 角色各自职责写放行、`#/users` 签发受限 Agent（`[data-testid="agent-once-token"]`）、Agent REST + MCP stdio 读写与生成草案、Bearer SSE `200 text/event-stream`、`#/audit-logs` 多维检索与脱敏详情、无/篡改 Token 401、跨职能与矩阵/编码路径绕过 403、Agent REST+MCP 越权 403、吊销 Agent 后 REST/SSE/MCP 立即 401、普通角色直访 `#/audit-logs` 403 与 `ACCESS_DENIED` 审计留痕；
     - **F12（5 正 + 5 负）**：独立临时目录与动态空闲端口构造批量单据与 >=2,500 条审计后以 `-Xms64m -Xmx256m -XX:+ExitOnOutOfMemoryError` 冷启动 `<=30s`、总账 `BALANCED`、多页低延迟遍历、12 路并发读写无 OOM、`/actuator/prometheus` 核实 `jvm_memory_max_bytes <= 268435456`、恶意极大 `size/limit` 截断与 `400` 拦截、高页码/负游标、空筛选 UI/API、非 `ADMIN`/未登录访问 `/actuator/prometheus` `403`/`401`、重启持久化一致性；

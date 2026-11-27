@@ -102,9 +102,7 @@ public class ProductionReportService {
         }
 
         String finalState = cleanState;
-        List<SchedulingScheme> filteredSchemes = statePort.inRead(view -> view.listSchemes().stream()
-                .filter(s -> cleanTaskId == null || s.involvesTask(cleanTaskId))
-                .filter(s -> finalState == null || finalState.equalsIgnoreCase(s.state()))
+        List<SchedulingScheme> filteredSchemes = statePort.inRead(view -> view.querySchemes(finalState, cleanTaskId).stream()
                 .filter(s -> matchesDateWindow(s.createdAt(), fromTs, toTs))
                 .sorted(Comparator.comparing(s -> Objects.toString(s.createdAt(), ""), Comparator.reverseOrder()))
                 .toList());

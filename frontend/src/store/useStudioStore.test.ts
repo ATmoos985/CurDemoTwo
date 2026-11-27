@@ -7,7 +7,13 @@ import {
 } from './useStudioStore';
 import { getStudioSettingsSnapshot } from './selectors';
 import { mergeAndSelectBestSchemes2D } from './slices/workbench2DHelpers';
+import {
+  mapServerTemplateToCluster,
+  parseDxfToDemandCluster
+} from './slices/templateHelpers';
 import { DEFAULT_STUDIO_SETTINGS } from './studioSettings';
+import { shapeArea } from '../lib/canvas/nesting-scene.js';
+import { signedArea2 } from '../lib/nesting/dxf-geometry.js';
 
 const makeFamily2D = (id: string, name: string, open1: number, open2: number): DemandFamilySummary => ({
   id,
@@ -282,5 +288,65 @@ describe('正交域切片联动与纯辅助逻辑回归验证', () => {
       }
     ]);
     expect(useStudioStore.getState().activeSlitSchemeId).toBe('FAST-1');
+  });
+
+  it('含内孔 DXF 转需求模板、服务端往返与 pairMirror 展开全链路保留 CW 内孔并扣除净面积', () => {
+    const aamaHoleDxf = [
+      '0', 'SECTION', '2', 'HEADER', '0', 'ENDSEC',
+      '0', 'SECTION', '2', 'BLOCKS',
+      '0', 'BLOCK', '2', 'WingPanel', '10', '0', '20', '0',
+      '0', 'TEXT', '8', '0', '1', 'Piece Name: WingPanel',
+      '0', 'TEXT', '8', '0', '1', 'Fabric: 面布',
+      '0', 'TEXT', '8', '0', '1', 'Size: M',
+      '0', 'TEXT', '8', '0', '1', 'Quantity: 1,1',
+      // 外框 400x300 (Layer 1)
+      '0', 'LWPOLYLINE', '8', '1', '70', '1',
+      '10', '0', '20', '0',
+      '10', '400', '20', '0',
+      '10', '400', '20', '300',
+      '10', '0', '20', '300',
+      // 偏心内孔 [40,60]~[120,140] (Layer 11)
+      '0', 'LWPOLYLINE', '8', '11', '70', '1',
+      '10', '40', '20', '60',
+      '10', '120', '20', '60',
+      '10', '120', '20', '140',
+      '10', '40', '20', '140',
+      '0', 'ENDBLK',
+      '0', 'ENDSEC',
+      '0', 'SECTION', '2', 'ENTITIES',
+      '0', 'INSERT', '8', '1', '2', 'WingPanel', '10', '0', '20', '0',
+      '0', 'ENDSEC', '0', 'EOF'
+    ].join('\n');
+
+    const cluster = parseDxfToDemandCluster(aamaHoleDxf, 'wing-hole.dxf');
+    expect(cluster.pieces).toHaveLength(1);
+    const savedGeom = cluster.pieces[0].sizes['M'];
+    expect(savedGeom.holes).toHaveLength(1);
+
+    // 模拟经由服务端 /api/v2/demand-templates JSON 序列化往返
+    const serverRoundTrip = mapServerTemplateToCluster(JSON.parse(JSON.stringify(cluster)));
+    expect(serverRoundTrip.pieces[0].sizes['M'].holes).toHaveLength(1);
+
+    const expanded = expandClusterToDemands(serverRoundTrip, { M: 1 }, 100);
+    expect(expanded).toHaveLength(2);
+    const left = expanded.find((d) => d.name.endsWith('(左)'))!;
+    const right = expanded.find((d) => d.name.endsWith('(右)'))!;
+    expect(left?.shape?.holes).toHaveLength(1);
+    expect(right?.shape?.holes).toHaveLength(1);
+
+    // 外环 CCW (>0)，内孔 CW (<0)
+    expect(signedArea2(left.shape!.vertices!)).toBeGreaterThan(0);
+    expect(signedArea2(left.shape!.holes![0])).toBeLessThan(0);
+    expect(signedArea2(right.shape!.vertices!)).toBeGreaterThan(0);
+    expect(signedArea2(right.shape!.holes![0])).toBeLessThan(0);
+
+    // 右片内孔 X 坐标正确镜像为 [280, 360]
+    const rightHoleXs = right.shape!.holes![0].map((p) => p.x);
+    expect(Math.min(...rightHoleXs)).toBe(280);
+    expect(Math.max(...rightHoleXs)).toBe(360);
+
+    // shapeArea 正确扣除 80x80 内孔面积：400*300 - 80*80 = 113600
+    expect(shapeArea(left.shape)).toBe(113600);
+    expect(shapeArea(right.shape)).toBe(113600);
   });
 });

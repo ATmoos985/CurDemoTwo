@@ -21,15 +21,15 @@ import java.util.Set;
  * 按与需求池完全一致的三态守恒口径计算 {@code orderedQty = openQty + plannedQty + completedQty}，
  * 并统一生成前端工作台深链地址。严禁在本类中执行任何写操作。
  */
-final class WorkbenchTaskViewSupport {
+public final class WorkbenchTaskViewSupport {
     private WorkbenchTaskViewSupport() {}
 
     /** 按与 StudioDemandPoolService 完全一致的口径计算任务各需求行已排预占量（plannedQty）。 */
-    static Map<String, Integer> plannedQuantitiesForTask(CuttingStatePort.ReadView tx, String taskId) {
+    public static Map<String, Integer> plannedQuantitiesForTask(CuttingStatePort.ReadView tx, String taskId) {
         Map<String, Integer> counts = new LinkedHashMap<>();
         Set<String> coveredPlans = new HashSet<>();
 
-        for (SchedulingScheme s : tx.listSchemes()) {
+        for (SchedulingScheme s : tx.listActiveSchemes()) {
             if (!s.occupiesDemand() || !s.involvesTask(taskId)) {
                 continue;
             }
@@ -93,7 +93,7 @@ final class WorkbenchTaskViewSupport {
     }
 
     /** 构建与需求池一致的任务只读摘要视图，供上下文接口与前端工作台直接消费。 */
-    static Map<String, Object> buildTaskSummary(CuttingStatePort.ReadView tx, CuttingTask task) {
+    public static Map<String, Object> buildTaskSummary(CuttingStatePort.ReadView tx, CuttingTask task) {
         Map<String, Integer> completedMap = tx.completedQuantities(task.id());
         Map<String, Integer> plannedMap = plannedQuantitiesForTask(tx, task.id());
         String dimension = inferTaskDimension(task);

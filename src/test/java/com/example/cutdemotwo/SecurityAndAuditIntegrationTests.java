@@ -66,6 +66,8 @@ class SecurityAndAuditIntegrationTests {
         registry.add("cutdemo.auth.enabled", () -> true);
         registry.add("cutdemo.auth.secret", () -> TEST_SECRET);
         registry.add("cutdemo.auth.token-ttl-hours", () -> 4);
+        registry.add("cutdemo.mes.auth-required", () -> true);
+        registry.add("cutdemo.mes.token", () -> "m3-mes-integration-token-2026");
     }
 
     @Value("${local.server.port}")
@@ -555,5 +557,97 @@ class SecurityAndAuditIntegrationTests {
                 // ignore cleanup failure
             }
         }
+    }
+
+    @Test
+    void mesEndpointsEnforceAuthRbacAgentAndAllowDualAuthWithPlanner() throws Exception {
+        String adminToken = loginToken("admin", "admin123");
+        String plannerToken = loginToken("planner", "planner123");
+        String warehouseToken = loginToken("warehouse", "warehouse123");
+
+        var mesOrderBody = Map.of(
+                "mesWorkOrderNo", "MES-SEC-WO-1",
+                "taskName", "MES鉴权验证工单",
+                "materialModel", "MAT-MES-SEC",
+                "dimension", "RECT_2D",
+                "bedLengthMm", 2000.0,
+                "demands", List.of(Map.of("id", 1, "name", "面板", "width", 500, "length", 600, "quantity", 2))
+        );
+
+        // 1. 匿名未认证访问全部返回 401；错误 mesToken 返回 401
+        assertEquals(401, send("POST", "/api/v2/mes/orders", mesOrderBody, null).statusCode());
+        assertEquals(401, send("POST", "/api/v2/mes/execution-feedback",
+                Map.of("schemeId", "SCH-NONE", "mesReceiptNo", "REC-NONE"), null).statusCode());
+        assertEquals(401, send("GET", "/api/v2/mes/dispatch-packages/SCH-NONE", null, null).statusCode());
+        assertEquals(401, send("POST", "/api/v2/mes/schemes/SCH-NONE/dispatch", Map.of(), null).statusCode());
+        assertEquals(401, send("POST", "/api/v2/mes/orders", mesOrderBody, "wrong-mes-token").statusCode());
+
+        // 2. 正确外部 MES Token 可进行机器调用
+        var mesCreateRes = send("POST", "/api/v2/mes/orders", mesOrderBody, "m3-mes-integration-token-2026");
+        assertEquals(200, mesCreateRes.statusCode(), mesCreateRes.body());
+        String taskId = json.readTree(mesCreateRes.body()).get("id").asString();
+
+        // 3. PLANNER 确认虚拟卷方案并在同时配置 mes.auth-required=true + mes.token 下成功派发到 MES（200）
+        var confirmRes = send("POST", "/api/v2/schemes/confirm", Map.ofEntries(
+                Map.entry("idempotencyKey", "IDEM-MES-DUAL-AUTH-1"),
+                Map.entry("title", "双认证派工测试方案"),
+                Map.entry("dimension", "RECT_2D"),
+                Map.entry("strategyId", "SHORTEN"),
+                Map.entry("strategyName", "测试"),
+                Map.entry("taskId", taskId),
+                Map.entry("materialMode", "VIRTUAL_ROLL"),
+                Map.entry("materialModel", "MAT-MES-SEC"),
+                Map.entry("widthMm", 1500.0),
+                Map.entry("canvasLengthMm", 1000.0),
+                Map.entry("occupiedLengthMm", 650.0),
+                Map.entry("utilizationPct", 40.0),
+                Map.entry("pieceAreaM2", 0.6),
+                Map.entry("placedCount", 2),
+                Map.entry("requestedCount", 2),
+                Map.entry("complete", true),
+                Map.entry("layout2D", Map.of(
+                        "placements", List.of(
+                                Map.of("id", 1, "demandId", 1, "name", "面板", "x", 0.0, "y", 0.0, "w", 500.0, "l", 600.0, "rotationDegrees", 0),
+                                Map.of("id", 2, "demandId", 1, "name", "面板", "x", 510.0, "y", 0.0, "w", 500.0, "l", 600.0, "rotationDegrees", 0)
+                        ),
+                        "remnants", List.of(),
+                        "cuts", List.of()
+                ))
+        ), plannerToken);
+        assertEquals(200, confirmRes.statusCode(), confirmRes.body());
+        String schemeId = json.readTree(confirmRes.body()).get("scheme").get("id").asString();
+
+        // 4. 仅 DEMAND_READ 的 Agent 调用 dispatch / orders / feedback / dispatch-packages 必须全部返回 403
+        var issueAgentRes = send("POST", "/api/v2/agents", Map.of(
+                "name", "仅需求只读MES测试Agent",
+                "scopes", List.of("DEMAND_READ"),
+                "description", "验证MES隔离"
+        ), adminToken);
+        assertEquals(201, issueAgentRes.statusCode(), issueAgentRes.body());
+        String agentId = json.readTree(issueAgentRes.body()).get("agent").get("agentId").asString();
+        String demandOnlyAgentToken = json.readTree(issueAgentRes.body()).get("token").asString();
+        try {
+            assertEquals(403, send("POST", "/api/v2/mes/schemes/" + schemeId + "/dispatch",
+                    Map.of("mesWorkOrderNo", "AGENT-SHOULD-FAIL"), demandOnlyAgentToken).statusCode());
+            assertEquals(403, send("GET", "/api/v2/mes/dispatch-packages/" + schemeId, null, demandOnlyAgentToken).statusCode());
+            assertEquals(403, send("POST", "/api/v2/mes/orders", mesOrderBody, demandOnlyAgentToken).statusCode());
+            assertEquals(403, send("POST", "/api/v2/mes/execution-feedback",
+                    Map.of("schemeId", schemeId, "mesReceiptNo", "REC-AGENT-FAIL"), demandOnlyAgentToken).statusCode());
+        } finally {
+            send("POST", "/api/v2/agents/" + agentId + "/revoke", Map.of("reason", "测试结束"), adminToken);
+        }
+
+        // 5. WAREHOUSE 禁止派发到 MES（403）；PLANNER 带自身 JWT 可正常派发（200）并拉取派工包（200）
+        assertEquals(403, send("POST", "/api/v2/mes/schemes/" + schemeId + "/dispatch",
+                Map.of("mesWorkOrderNo", "WH-FAIL"), warehouseToken).statusCode());
+
+        var dispatchRes = send("POST", "/api/v2/mes/schemes/" + schemeId + "/dispatch",
+                Map.of("mesWorkOrderNo", "MES-PLANNER-OK-1"), plannerToken);
+        assertEquals(200, dispatchRes.statusCode(), dispatchRes.body());
+        assertEquals("DISPATCHED_MES", json.readTree(dispatchRes.body()).get("state").asString());
+
+        var pkgRes = send("GET", "/api/v2/mes/dispatch-packages/" + schemeId, null, plannerToken);
+        assertEquals(200, pkgRes.statusCode(), pkgRes.body());
+        assertEquals("MES-PLANNER-OK-1", json.readTree(pkgRes.body()).get("mesWorkOrderNo").asString());
     }
 }

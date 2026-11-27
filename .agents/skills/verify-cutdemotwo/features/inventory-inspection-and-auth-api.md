@@ -14,7 +14,7 @@ routes:
 - `INV-01`：采购入库单（`#/documents`）新增待检母卷默认 `PENDING`，领料下拉框与后端接口（`409 INVENTORY_CONFLICT`）双层拦截非 `PASSED` 母卷领料。
 - `INV-02`：验布打标（`#/inspection`）保存未入档本机疵点草稿（`/api/v2/rolls/{rollId}/inspection-defects`）并完成质检合格放行或判不合格（`POST /api/v2/quality/rolls/{rollId}/inspect-complete`，仅接受 `PASSED` 或 `FAILED`，传 `REJECTED` 返回 `400 INVALID_INPUT`），更新卷料台账状态。
 - `INV-03`：库存账本对账接口（`GET /api/v2/inventory-ledger/reconciliation`）返回 `status="BALANCED"` 且 `issues` 为空数组 `[]`（`issues.length === 0`）。
-- `AUTH-01`：开启 `cutdemo.auth.enabled=true` 后，白名单端点（`/api/health`、`/actuator/health/**`、`/api/v2/auth/{login,me}`、`/api/v2/integration-deliveries/**`、`/api/v2/mes/**`、`/api-v2/**`）按规则放行；`/api/v2/auth/me` 返回 `enabled=true, authenticated=false`，未带令牌访问业务接口返回 `401`（另全局具备 2MB 请求体 `413` 与写接口 600 次/分 `429` 保护）。
+- `AUTH-01`：开启 `cutdemo.auth.enabled=true` 后，公开白名单端点（`/api/health`、`/actuator/health/**`、`/api/v2/auth/{login,me}`、`/api/v2/integration-deliveries/**`、`/api-v2/**`）按规则放行；`/api/v2/mes/**` 纳入统一鉴权（仅合法 `mesToken` 或已认证用户/具备对应权限主体放行，匿名请求返回 `401`，`DEMAND_READ` 受限 Agent 返回 `403`）；`/api/v2/auth/me` 返回 `enabled=true, authenticated=false`，未带令牌访问业务接口返回 `401`（另全局具备 2MB 请求体 `413` 与写接口 600 次/分 `429` 保护）。
 - `AUTH-02`：使用内置 5 角色账户（`admin`/`planner`/`operator`/`inspector`/`warehouse`）登录后获取 HS256 Bearer 令牌，业务 `GET/HEAD` 放行 5 角色，写接口按角色隔离（如仅 `ADMIN`/`INSPECTOR` 可质检放行与隔离料头放行；仅 `ADMIN`/`PLANNER` 可调 `POST /api/v2/workbench/**`，`OPERATOR`/`WAREHOUSE`/`INSPECTOR` 返回 `403`），且带 Bearer 的 `GET /api/v2/optimization-jobs/{jobId}/events` 返回 `200 text/event-stream`。
 
 ## How to get to it (user POV)
@@ -29,9 +29,9 @@ Preconditions: 验收企业认证时，使用独立端口并附加 `--auth` 启�
 - **驱动 UI 质检与库存流转闭环（`INV-01~03`，兼含 `#/slitting` 1D 分条共 20 项）**：
   - 命令：`node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs drive --session "<localSessionFile>" --script inspection-and-slitting`
   - 可观测结果：退出码 `0`；输出 JSON 为 `executed: 20, passed: 20, failed: 0, skipped: 0`，覆盖 `#/documents` 采购入库 `PENDING` 卷与领料弹窗禁选、`POST /api/v2/material-issues` `409 INVENTORY_CONFLICT` 拦截、`#/inspection` 跑布步进录入 `HOLE` 疵点并刷新恢复草稿入档、非法 `REJECTED`/空白质检员 `400 INVALID_INPUT` 拦截、完检 `PASSED` 放行与发料/退料流转、`#/inventory` 登记并判 `FAILED` 复核禁领，以及 `GET /api/v2/inventory-ledger/reconciliation` 保持 `status="BALANCED"`。
-- **驱动企业认证、RBAC 与 `-Xmx256m` 隔离全链路（`AUTH-01~02` + F10/F11/F12，34 项）**：
+- **驱动企业认证、RBAC 与 `-Xmx256m` 隔离全链路（`AUTH-01~02` + F10/F11/F12，35 项）**：
   - 命令：`node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs drive --session "<authSessionFile>" --script auth-rbac-agent-audit`
-  - 可观测结果：退出码 `0`；输出 JSON 为 `executed: 34, passed: 34, failed: 0, skipped: 0`，自动完成 5 角色 RBAC、Agent 作用域隔离（REST + MCP + SSE）、操作审计检索与 `-Xmx256m` 冷启动对账平衡校验。
+  - 可观测结果：退出码 `0`；输出 JSON 为 `executed: 35, passed: 35, failed: 0, skipped: 0`，自动完成 5 角色 RBAC（含 `/api/v2/mes/**` 防旁路与双认证共存）、Agent 作用域隔离（REST + MCP + SSE）、操作审计检索与 `-Xmx256m` 冷启动对账平衡校验。
 - **验证免登态库存与对账健康（免登实例）**：
   - 命令：`node .agents/skills/verify-cutdemotwo/scripts/verify-ctl.mjs doctor --session "<localSessionFile>"`
   - 可观测结果：`api_health_up` 与 `ledger_reconciliation_balanced` 均为 `true`（`issues: []`）。

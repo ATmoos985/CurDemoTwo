@@ -61,3 +61,19 @@ test('same bounding box does not make a foreign material outline acceptable', ()
     output.processingRegion = polygon([{x:0,y:0},{x:200,y:0},{x:0,y:200}]);
     assert.throws(() => createNestingScene(p,output), /不匹配/);
 });
+
+test('polygon holes are preserved, deep-cloned, and subtracted from shapeArea', () => {
+    const outer = [{x:0,y:0},{x:400,y:0},{x:400,y:300},{x:0,y:300}];
+    const hole = [{x:50,y:50},{x:50,y:150},{x:150,y:150},{x:150,y:50}];
+    const withHole = polygon(outer, [hole]);
+    assert.equal(withHole.holes.length, 1);
+    assert.equal(shapeArea(withHole), 400 * 300 - 100 * 100);
+
+    const p = structuredClone(input);
+    p.parts[0].shape = withHole;
+    const scene = createNestingScene(p);
+    assert.equal(scene.parts[0].shape.holes.length, 1);
+    assert.equal(shapeArea(scene.parts[0].shape), 110000);
+    scene.parts[0].shape.holes[0][0].x = 99;
+    assert.equal(p.parts[0].shape.holes[0][0].x, 50);
+});

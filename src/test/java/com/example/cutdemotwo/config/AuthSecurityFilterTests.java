@@ -110,9 +110,7 @@ class AuthSecurityFilterTests {
                 new String[]{"GET", "/api/v2/auth/me"},
                 new String[]{"POST", "/api/v2/auth/login"},
                 new String[]{"GET", "/api/v2/integration-deliveries"},
-                new String[]{"POST", "/api/v2/integration-deliveries/claims"},
-                new String[]{"POST", "/api/v2/mes/orders"},
-                new String[]{"POST", "/api/v2/mes/execution-feedback"}
+                new String[]{"POST", "/api/v2/integration-deliveries/claims"}
         );
 
         for (String[] pair : whitelisted) {
@@ -592,6 +590,131 @@ class AuthSecurityFilterTests {
         assertEquals(403, invoke(filter, "GET", "/api/v2/exports/schemes/SCH-1/cam", demandOnlyToken).getStatus());
         assertEquals(200, invoke(filter, "GET", "/api/v2/exports/schemes/SCH-1/cam", fullToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/v2/exports/batch-zip", fullToken).getStatus());
+    }
+
+    @Test
+    void mesEndpointsRequireAuthenticationRespectRbacAgentAndMesToken() throws Exception {
+        InMemorySecurityCredentialStore store = new InMemorySecurityCredentialStore();
+        AuthService service = new AuthService(true, TEST_SECRET, "", 12, Clock.systemUTC(), store);
+        AuthSecurityFilter filterNoMesToken = new AuthSecurityFilter(service, 2_097_152L, 600, Clock.systemUTC(), null, "");
+        AuthSecurityFilter filterWithMesToken = new AuthSecurityFilter(service, 2_097_152L, 600, Clock.systemUTC(), null, "mes-secret-2026");
+
+        String adminToken = "Bearer " + service.authenticate("admin", "admin123").orElseThrow().token();
+        String plannerToken = "Bearer " + service.authenticate("planner", "planner123").orElseThrow().token();
+        String operatorToken = "Bearer " + service.authenticate("operator", "operator123").orElseThrow().token();
+        String warehouseToken = "Bearer " + service.authenticate("warehouse", "warehouse123").orElseThrow().token();
+        String inspectorToken = "Bearer " + service.authenticate("inspector", "inspector123").orElseThrow().token();
+
+        long now = System.currentTimeMillis();
+        var demandOnlyAgent = store.createAgent(new SecurityCredentialStore.AgentRecord(
+                "ag-mes-demand", "仅需求可读", "admin",
+                List.of(AuthContext.SCOPE_DEMAND_READ),
+                true, 1L, "MES越权阻断", now, now, now + 3_600_000L, null, null
+        ));
+        var fullAgent = store.createAgent(new SecurityCredentialStore.AgentRecord(
+                "ag-mes-full", "全业务可读", "admin",
+                List.of(AuthContext.SCOPE_DEMAND_READ, AuthContext.SCOPE_INVENTORY_READ, AuthContext.SCOPE_PLAN_COMPUTE),
+                true, 1L, "MES写拦截", now, now + 3_600_000L, now + 3_600_000L, null, null
+        ));
+        String demandOnlyToken = "Bearer " + service.issueAgentToken(demandOnlyAgent, 3600L);
+        String fullAgentToken = "Bearer " + service.issueAgentToken(fullAgent, 3600L);
+
+        // 1. 开启 auth.enabled=true 后（无论是否配置 mes.token），匿名请求一律 401
+        for (AuthSecurityFilter f : List.of(filterNoMesToken, filterWithMesToken)) {
+            assertEquals(401, invoke(f, "POST", "/api/v2/mes/orders", null).getStatus());
+            assertEquals(401, invoke(f, "POST", "/api/v2/mes/execution-feedback", null).getStatus());
+            assertEquals(401, invoke(f, "POST", "/api/v2/mes/schemes/SCH-1/dispatch", null).getStatus());
+            assertEquals(401, invoke(f, "GET", "/api/v2/mes/dispatch-packages/SCH-1", null).getStatus());
+            assertEquals(401, invoke(f, "POST", "/api/v2/mes/orders", "Bearer wrong-mes-token").getStatus());
+        }
+
+        // 2. 仅 DEMAND_READ Agent 全部拒绝（403）；全 scope Agent 仅允许 GET，绝不允许 POST 写 MES
+        for (AuthSecurityFilter f : List.of(filterNoMesToken, filterWithMesToken)) {
+            assertEquals(403, invoke(f, "GET", "/api/v2/mes/dispatch-packages/SCH-1", demandOnlyToken).getStatus());
+            assertEquals(403, invoke(f, "POST", "/api/v2/mes/schemes/SCH-1/dispatch", demandOnlyToken).getStatus());
+            assertEquals(403, invoke(f, "POST", "/api/v2/mes/orders", demandOnlyToken).getStatus());
+            assertEquals(403, invoke(f, "POST", "/api/v2/mes/execution-feedback", demandOnlyToken).getStatus());
+
+            assertEquals(200, invoke(f, "GET", "/api/v2/mes/dispatch-packages/SCH-1", fullAgentToken).getStatus());
+            assertEquals(403, invoke(f, "POST", "/api/v2/mes/schemes/SCH-1/dispatch", fullAgentToken).getStatus());
+            assertEquals(403, invoke(f, "POST", "/api/v2/mes/orders", fullAgentToken).getStatus());
+            assertEquals(403, invoke(f, "POST", "/api/v2/mes/execution-feedback", fullAgentToken).getStatus());
+        }
+
+        // 3. 用户 RBAC 隔离与双认证共存
+        assertEquals(200, invoke(filterWithMesToken, "POST", "/api/v2/mes/orders", plannerToken).getStatus());
+        assertEquals(200, invoke(filterWithMesToken, "POST", "/api/v2/mes/schemes/SCH-1/dispatch", plannerToken).getStatus());
+        assertEquals(200, invoke(filterWithMesToken, "POST", "/api/v2/mes/execution-feedback", operatorToken).getStatus());
+        assertEquals(200, invoke(filterWithMesToken, "POST", "/api/v2/mes/schemes/SCH-1/dispatch", operatorToken).getStatus());
+        assertEquals(403, invoke(filterWithMesToken, "POST", "/api/v2/mes/orders", operatorToken).getStatus());
+        assertEquals(403, invoke(filterWithMesToken, "POST", "/api/v2/mes/schemes/SCH-1/dispatch", warehouseToken).getStatus());
+        assertEquals(403, invoke(filterWithMesToken, "POST", "/api/v2/mes/execution-feedback", inspectorToken).getStatus());
+        assertEquals(200, invoke(filterWithMesToken, "GET", "/api/v2/mes/dispatch-packages/SCH-1", warehouseToken).getStatus());
+        assertEquals(200, invoke(filterWithMesToken, "POST", "/api/v2/mes/orders", adminToken).getStatus());
+
+        // 4. 正确配置的外部 MES Bearer Token 机器调用放行，且错误 Token 返回 401
+        assertEquals(200, invoke(filterWithMesToken, "POST", "/api/v2/mes/orders", "Bearer mes-secret-2026").getStatus());
+        assertEquals(200, invoke(filterWithMesToken, "POST", "/api/v2/mes/execution-feedback", "Bearer mes-secret-2026").getStatus());
+        assertEquals(200, invoke(filterWithMesToken, "GET", "/api/v2/mes/dispatch-packages/SCH-1", "Bearer mes-secret-2026").getStatus());
+        assertEquals(401, invoke(filterWithMesToken, "POST", "/api/v2/mes/orders", "Bearer wrong-token").getStatus());
+    }
+
+    @Test
+    void rejectsNonCanonicalBase64UrlJwtVariantsAndPaddingTampering() throws Exception {
+        MutableClock clock = new MutableClock(Instant.parse("2026-11-27T19:00:00Z"));
+        AuthService service = new AuthService(true, TEST_SECRET, "", 12, clock);
+        AuthSecurityFilter filter = new AuthSecurityFilter(service, 2_097_152L, 600, clock);
+        String b64Url = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+        // 1. 寻找一个签名末位为 'Y' 的真实令牌，明确复现并拦截 'Y' -> 'a' padding-bit 碰撞
+        String yEndedToken = null;
+        for (int i = 0; i < 512; i++) {
+            String candidate = service.authenticate("planner", "planner123").orElseThrow().token();
+            if (candidate.endsWith("Y")) {
+                yEndedToken = candidate;
+                break;
+            }
+            clock.advanceSeconds(1);
+        }
+        assertNotNull(yEndedToken, "512 次签发内应可命中末位为 'Y' 的 JWT 样本");
+        String yToA = yEndedToken.substring(0, yEndedToken.length() - 1) + "a";
+        assertEquals(401, invoke(filter, "GET", "/api/v2/rolls", "Bearer " + yToA).getStatus(),
+                "末位 padding-bit 篡改 'Y'->'a' 必须被严格拒收 (401)");
+
+        // 2. 对任意合法 JWT，遍历其第 43 位同高 4-bit 组的全部 3 个非规范低 2-bit 变体，均须返回 401
+        String validToken = service.authenticate("planner", "planner123").orElseThrow().token();
+        String[] parts = validToken.split("\\.", -1);
+        assertEquals(3, parts.length);
+        assertEquals(43, parts[2].length());
+        int lastIdx = b64Url.indexOf(parts[2].charAt(parts[2].length() - 1));
+        assertTrue(lastIdx >= 0);
+        assertEquals(0, lastIdx & 3, "合法 32 字节 HMAC-SHA256 无填充签名末位低 2 bit 必为 0");
+        int groupBase = lastIdx & ~3;
+        for (int offset = 0; offset < 4; offset++) {
+            int variantIdx = groupBase + offset;
+            if (variantIdx == lastIdx) continue;
+            String variantToken = validToken.substring(0, validToken.length() - 1) + b64Url.charAt(variantIdx);
+            assertEquals(401, invoke(filter, "GET", "/api/v2/rolls", "Bearer " + variantToken).getStatus(),
+                    "非规范末位变体必须返回 401: " + b64Url.charAt(variantIdx));
+        }
+
+        // 3. 带 '=' 填充的签名、带 '=' 填充/非规范的 header 或 payload、多余点分段均须返回 401
+        assertEquals(401, invoke(filter, "GET", "/api/v2/rolls", "Bearer " + validToken + "=").getStatus());
+        assertEquals(401, invoke(filter, "GET", "/api/v2/rolls", "Bearer " + parts[0] + "=." + parts[1] + "." + parts[2]).getStatus());
+        assertEquals(401, invoke(filter, "GET", "/api/v2/rolls", "Bearer " + parts[0] + "." + parts[1] + "=." + parts[2]).getStatus());
+        assertEquals(401, invoke(filter, "GET", "/api/v2/rolls", "Bearer " + validToken + ".").getStatus());
+
+        // 4. 使用相同密钥对含非规范低 2 bit payload 签名构造出的 Token，验签也必须拒收
+        javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+        mac.init(new javax.crypto.spec.SecretKeySpec(TEST_SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        int pLastIdx = b64Url.indexOf(parts[1].charAt(parts[1].length() - 1));
+        int pAltIdx = (pLastIdx & ~3) + (((pLastIdx & 3) + 1) & 3);
+        String nonCanonicalPayload = parts[1].substring(0, parts[1].length() - 1) + b64Url.charAt(pAltIdx);
+        String forgedSigningInput = parts[0] + "." + nonCanonicalPayload;
+        String forgedSig = java.util.Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(mac.doFinal(forgedSigningInput.getBytes(StandardCharsets.UTF_8)));
+        assertEquals(401, invoke(filter, "GET", "/api/v2/rolls", "Bearer " + forgedSigningInput + "." + forgedSig).getStatus(),
+                "非规范 Base64URL payload 即使签名匹配密钥也必须被拒收 (401)");
     }
 
     private MockHttpServletResponse invoke(AuthSecurityFilter filter, String method, String uri, String authHeader) throws Exception {

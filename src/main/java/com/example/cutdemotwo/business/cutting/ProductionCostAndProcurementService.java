@@ -374,8 +374,8 @@ public class ProductionCostAndProcurementService {
 
         return statePort.inRead(tx -> {
             List<MotherRollInfo> allRolls = remnantService.getMotherRolls();
-            List<RemnantStock> allRemnants = remnantService.getAllRemnants();
-            List<SchedulingScheme> allSchemes = tx.listSchemes();
+            List<RemnantStock> allRemnants = remnantService.getAvailableRemnants();
+            List<SchedulingScheme> allSchemes = tx.listActiveSchemes();
             List<CuttingTask> allTasks = tx.listTasks();
             List<ExecutionOrder> allExecutions = tx.listExecutions();
             long now = tx.operationTime();
